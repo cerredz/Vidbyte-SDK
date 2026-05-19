@@ -30,7 +30,7 @@ class BudgetForcingStrategy(BaseStrategy):
         ]
         current = calls[0].text
         for round_index in range(1, self.max_rounds):
-            if "final answer:" in current.lower() and _looks_substantial(current):
+            if "final answer:" in current.lower():
                 break
             response = runner.run(
                 "\n".join(
@@ -57,7 +57,3 @@ class BudgetForcingStrategy(BaseStrategy):
             calls=tuple(calls),
             metadata={"rounds": len(calls), "max_rounds": self.max_rounds},
         )
-
-
-def _looks_substantial(text: str) -> bool:
-    return len(text.split()) >= 40
