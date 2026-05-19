@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vidbyte-sdk"
+version = "0.1.0"
+description = "Python SDK boilerplate for Vidbyte harness integrations."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "UNLICENSED" }
+authors = [
+  { name = "Vidbyte" }
+]
+dependencies = []
+
+[project.urls]
+Homepage = "https://vidbyte.ai"
+
+[tool.setuptools.packages.find]
+include = ["vidbyte_sdk*"]
