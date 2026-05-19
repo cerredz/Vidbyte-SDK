@@ -2,7 +2,7 @@
 
 `vidbyte-sdk` is the root-level home for Vidbyte's Python SDK surface.
 
-This package is intentionally minimal right now. It establishes the SDK package identity, Python import path, and first harness helpers without including private Vidbyte service logic.
+This package is intentionally minimal right now. It establishes the SDK package identity and namespace layout without including private Vidbyte service logic.
 
 ## Status
 
@@ -11,34 +11,39 @@ This package is not published. It is marked `UNLICENSED` until Vidbyte's release
 ## Usage
 
 ```python
-from vidbyte_sdk import define_harness, run_harness
+from vidbyte import VidbyteSDK
 
+sdk = VidbyteSDK()
+sdk.harnesses
+sdk.tools
+sdk.providers
+```
 
-def run_example(input, context):
-    return {
-        "ok": True,
-        "input": input,
-        "context": context,
-    }
+## Package Structure
 
-
-harness = define_harness(
-    name="example-harness",
-    run=run_example,
-)
-
-result = await run_harness(harness, {"topic": "limits"})
+```text
+vidbyte/
+|-- client.py
+|-- harnesses/
+|   `-- client.py
+|-- providers/
+|   `-- client.py
+|-- tools/
+|   `-- client.py
+|-- shared/
+`-- lib/
+    `-- errors/
 ```
 
 ## Public Boundary
 
-The SDK should contain reusable harness contracts, helpers, and developer-facing abstractions.
+The SDK should contain reusable public namespace scaffolding and developer-facing abstractions.
 
 Private Vidbyte service implementations, proprietary learning evaluations, prompts, scoring logic, adaptive sequencing, and database access should stay outside this package.
 
 ## Local Verification
 
 ```bash
-python -m compileall vidbyte_sdk
-python -c "from vidbyte_sdk import define_harness, run_harness; print(define_harness(name='smoke', run=lambda input, context: input).name)"
+python -m compileall vidbyte
+python -c "from vidbyte import VidbyteSDK; sdk = VidbyteSDK(); print(type(sdk.harnesses).__name__)"
 ```
