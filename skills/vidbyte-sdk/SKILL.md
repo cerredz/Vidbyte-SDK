@@ -55,4 +55,5 @@ vidbyte/
 - Budget Forcing: continuation calls until a final answer marker or round cap.
 - Answer Convergence: repeated samples until a recent answer window converges.
 - Plan-and-Execute: plan first, execute each step, then synthesize.
+- Self-Refinement: create an initial draft, generate specific feedback, then refine over a configured loop count.
 - Paradigm Routing: selects a strategy with heuristics or a model-scored routing prompt.

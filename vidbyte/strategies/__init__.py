@@ -1,6 +1,10 @@
 from __future__ import annotations
 
-from vidbyte.strategies.agent_loops import PlanAndExecuteStrategy
+from vidbyte.strategies.agent_loops import (
+    PlanAndExecuteStrategy,
+    SelfRefinementStep,
+    SelfRefinementStrategy,
+)
 from vidbyte.strategies.base import BaseStrategy
 from vidbyte.strategies.client import StrategyClient
 from vidbyte.strategies.reasoning import (
@@ -26,6 +30,8 @@ __all__ = [
     "ParadigmRouterStrategy",
     "PlanAndExecuteStrategy",
     "SelfConsistencyStrategy",
+    "SelfRefinementStep",
+    "SelfRefinementStrategy",
     "SkeletonOfThoughtStrategy",
     "StepBackStrategy",
     "StrategyClient",

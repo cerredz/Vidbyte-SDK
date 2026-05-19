@@ -68,7 +68,21 @@ Implemented first-batch strategies:
 - Budget Forcing
 - Answer Convergence
 - Plan-and-Execute
+- Self-Refinement
 - Paradigm Routing
+
+```python
+self_refine = sdk.strategies.self_refinement(
+    create_system_prompt="Create a strong first draft.",
+    refine_system_prompt="Revise the draft using the feedback.",
+    iterations=2,
+)
+
+result = self_refine.run(
+    "Write a short explanation of retrieval practice.",
+    runner=runner,
+)
+```
 
 ## Filesystem Tools
 

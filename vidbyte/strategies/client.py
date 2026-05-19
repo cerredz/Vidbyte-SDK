@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from vidbyte.strategies.agent_loops import PlanAndExecuteStrategy
+from vidbyte.strategies.agent_loops import PlanAndExecuteStrategy, SelfRefinementStrategy
 from vidbyte.strategies.reasoning import (
     ChainOfDraftStrategy,
     ChainOfThoughtStrategy,
@@ -51,6 +51,21 @@ class StrategyClient:
 
     def plan_and_execute(self) -> PlanAndExecuteStrategy:
         return PlanAndExecuteStrategy()
+
+    def self_refinement(
+        self,
+        *,
+        create_system_prompt: str,
+        refine_system_prompt: str,
+        iterations: int,
+        feedback_system_prompt: str | None = None,
+    ) -> SelfRefinementStrategy:
+        return SelfRefinementStrategy(
+            create_system_prompt=create_system_prompt,
+            refine_system_prompt=refine_system_prompt,
+            iterations=iterations,
+            feedback_system_prompt=feedback_system_prompt,
+        )
 
     def paradigm_router(self) -> ParadigmRouterStrategy:
         return ParadigmRouterStrategy()
