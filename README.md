@@ -17,6 +17,68 @@ sdk = VidbyteSDK()
 sdk.harnesses
 sdk.tools
 sdk.providers
+sdk.strategies
+```
+
+## Model Runners
+
+Semantic runners live under `vidbyte.lib.runners` and normalize provider-specific APIs.
+
+```python
+from vidbyte.lib.config import ModelProvider, TextModelConfig
+from vidbyte.lib.runners import TextModelRunner
+
+runner = TextModelRunner(
+    TextModelConfig(
+        provider=ModelProvider.OPENAI,
+        model="gpt-4.1-mini",
+    )
+)
+
+response = runner.run("Summarize retrieval practice in one paragraph.")
+print(response.text)
+```
+
+Supported first-pass providers:
+
+- Text: OpenAI, Anthropic, Gemini, xAI
+- Image: OpenAI, xAI
+- Video jobs: OpenAI
+
+## Strategies
+
+Prompt/API strategies live under `vidbyte.strategies` and call `TextModelRunner.run()`.
+
+```python
+result = sdk.strategies.step_back().run(
+    "Explain why spaced repetition works.",
+    runner=runner,
+)
+
+print(result.output)
+```
+
+Implemented first-batch strategies:
+
+- Chain of Thought
+- Step-Back Prompting
+- Chain of Draft
+- Skeleton of Thought
+- Self-Consistency
+- Budget Forcing
+- Answer Convergence
+- Plan-and-Execute
+- Paradigm Routing
+
+## Filesystem Tools
+
+Filesystem tools are root-scoped and reject paths outside the configured root.
+
+```python
+from vidbyte.tools.filesystem import FileSystemToolConfig, ReadTextTool
+
+tool = ReadTextTool(FileSystemToolConfig(root="./workspace"))
+content = tool.run("notes.md").value
 ```
 
 ## Package Structure
@@ -27,12 +89,24 @@ vidbyte/
 |-- harnesses/
 |   `-- client.py
 |-- providers/
-|   `-- client.py
+|   |-- client.py
+|   |-- openai.py
+|   |-- anthropic.py
+|   |-- gemini.py
+|   `-- xai.py
+|-- strategies/
+|   |-- reasoning/
+|   |-- sampling/
+|   |-- agent_loops/
+|   `-- routing/
 |-- tools/
-|   `-- client.py
+|   |-- client.py
+|   `-- filesystem/
 |-- shared/
 `-- lib/
-    `-- errors/
+    |-- config/
+    |-- errors/
+    `-- runners/
 ```
 
 ## Public Boundary
@@ -45,5 +119,6 @@ Private Vidbyte service implementations, proprietary learning evaluations, promp
 
 ```bash
 python -m compileall vidbyte
-python -c "from vidbyte import VidbyteSDK; sdk = VidbyteSDK(); print(type(sdk.harnesses).__name__)"
+python -m unittest discover -s tests
+python -c "from vidbyte import VidbyteSDK; sdk = VidbyteSDK(); print(type(sdk.strategies).__name__)"
 ```
