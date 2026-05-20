@@ -6,5 +6,4 @@ from vidbyte.harnesses.base import BaseHarness
 class HarnessClient:
     """Namespace client for harness operations."""
 
-    def base(self) -> BaseHarness:
-        return BaseHarness()
+    base_type = BaseHarness

@@ -1,25 +1,28 @@
 from __future__ import annotations
 
-from typing import Self
+from collections.abc import Sequence
+from typing import Any
 
 from vidbyte.strategies.base import BaseStrategy
 
 
 class StrategyMixin:
-    """Mixin for objects that attach a strategy by composition."""
+    """Composition helpers for SDK classes that delegate to strategies."""
 
-    _strategy: BaseStrategy | None = None
+    def __init__(self) -> None:
+        self._strategy: BaseStrategy | None = None
 
-    def with_strategy(self, strategy: BaseStrategy) -> Self:
+    def with_strategy(self, strategy: BaseStrategy) -> "StrategyMixin":
         self._strategy = strategy
         return self
 
-    @property
-    def strategy(self) -> BaseStrategy | None:
-        return self._strategy
+    def with_strategies(self, strategies: Sequence[BaseStrategy], *, evaluator_agent: object | None = None, evaluator_strategy: BaseStrategy | None = None, **options: Any) -> "StrategyMixin":
+        from vidbyte.strategies.multi_agent.consensus import MultiAgentConsensusStrategy
 
-    def _require_strategy(self) -> BaseStrategy:
-        if self._strategy is None:
-            raise ValueError("A strategy must be attached before execution.")
-        return self._strategy
-
+        self._strategy = MultiAgentConsensusStrategy(
+            strategies=strategies,
+            evaluator_agent=evaluator_agent,
+            evaluator_strategy=evaluator_strategy,
+            **options,
+        )
+        return self
