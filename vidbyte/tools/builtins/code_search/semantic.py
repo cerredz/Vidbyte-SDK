@@ -71,6 +71,7 @@ class SemanticSearchTool(BaseCodeSearchTool):
                 ToolParameter("subdir", "string", "Subdirectory to index/search.", required=False),
                 ToolParameter("max_results", "integer", "Maximum chunks to return.", required=False),
                 ToolParameter("max_chars_per_result", "integer", "Maximum text per chunk.", required=False),
+                ToolParameter("max_chars", "integer", "Maximum total output characters.", required=False),
             ),
         )
 
@@ -80,6 +81,7 @@ class SemanticSearchTool(BaseCodeSearchTool):
         subdir = str(call.arguments.get("subdir", "."))
         max_results = max(1, min(int(call.arguments.get("max_results", 5)), 25))
         max_chars = max(200, min(int(call.arguments.get("max_chars_per_result", 1200)), 5000))
+        total_max_chars = max(500, min(int(call.arguments.get("max_chars", 12000)), 50000))
         try:
             self.rebuild_index(subdir=subdir)
         except ValueError as exc:
@@ -96,10 +98,15 @@ class SemanticSearchTool(BaseCodeSearchTool):
             blocks.append(
                 f"{chunk.path}:{chunk.start_line}-{chunk.end_line} score={score:.3f}\n```text\n{text}\n```"
             )
+        output = "\n\n".join(blocks)
+        truncated = False
+        if len(output) > total_max_chars:
+            output = output[:total_max_chars] + "\n...[truncated]"
+            truncated = True
         return ToolResult.success(
             self.name,
-            "\n\n".join(blocks),
-            metadata={"count": len(blocks), "indexed_chunks": len(self._chunks)},
+            output,
+            metadata={"count": len(blocks), "indexed_chunks": len(self._chunks), "truncated": truncated},
         )
 
     def rebuild_index(self, *, subdir: str = ".") -> None:
