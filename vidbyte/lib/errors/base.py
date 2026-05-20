@@ -14,6 +14,12 @@ Architecture:
     - StrategyExecutionError: Raised when a strategy cannot produce a result.
     - AgentExecutionError: Raised when an agent cannot generate a reply.
     - AgentRegistryError: Raised when local agent discovery fails.
+    - McpError: Base exception for all developer attachment and execution failures.
+    - McpConnectionError: Raised when an MCP server subprocess fails to start.
+    - McpInitializeError: Raised when an MCP connection handshake fails or times out.
+    - McpToolDiscoveryError: Raised when remote tools/list discovery returns an invalid response.
+    - McpToolExecutionError: Raised when a remote MCP tool execution returns an error result.
+    - McpAttachmentError: Composite error tracking failures from concurrent server startup.
 Relations:
     Related to vidbyte.tools.executor, vidbyte.tools.registry, and vidbyte.tools.mcp.client.
 """
@@ -60,3 +66,32 @@ class AgentExecutionError(VidbyteSdkError):
 
 class AgentRegistryError(VidbyteSdkError):
     """Raised when local agent discovery fails."""
+
+
+class McpError(VidbyteSdkError):
+    """Base class for all MCP errors."""
+
+
+class McpConnectionError(McpError):
+    """Raised when an MCP subprocess fails to start."""
+
+
+class McpInitializeError(McpError):
+    """Raised when an MCP handshake fails or times out."""
+
+
+class McpToolDiscoveryError(McpError):
+    """Raised when remote MCP tools/list returns an unexpected response."""
+
+
+class McpToolExecutionError(McpError):
+    """Raised when a remote MCP tool execution returns an error result."""
+
+
+class McpAttachmentError(McpError):
+    """Tracks composite attachment errors in batch connections."""
+
+    def __init__(self, message: str, *, causes: list[Exception], details: Mapping[str, Any] | None = None) -> None:
+        """Store the message, list of cause exceptions, and optional details."""
+        super().__init__(message, details=details)
+        self.causes = causes

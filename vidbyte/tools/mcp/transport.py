@@ -36,11 +36,12 @@ class McpTransport(Protocol):
 class McpStdioTransport:
     """Newline-delimited JSON-RPC transport backed by a subprocess."""
 
-    def __init__(self, command: Sequence[str]) -> None:
+    def __init__(self, command: Sequence[str], *, env: Mapping[str, str] | None = None) -> None:
         """Store the command used to start the MCP server process."""
         if not command:
             raise ValueError("MCP stdio command cannot be empty")
         self.command = tuple(command)
+        self.env = env
         self._process: asyncio.subprocess.Process | None = None
         self._next_id = 1
 
@@ -48,11 +49,16 @@ class McpStdioTransport:
         """Start the subprocess if it is not already running."""
         if self._process is not None:
             return
+        import os
+        sub_env = dict(os.environ)
+        if self.env:
+            sub_env.update(self.env)
         self._process = await asyncio.create_subprocess_exec(
             *self.command,
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            env=sub_env,
         )
 
     async def request(
