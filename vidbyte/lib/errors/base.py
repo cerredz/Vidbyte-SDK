@@ -95,3 +95,51 @@ class McpAttachmentError(McpError):
         """Store the message, list of cause exceptions, and optional details."""
         super().__init__(message, details=details)
         self.causes = causes
+
+
+# Provider / configuration error family (from PR12)
+
+class ConfigurationError(VidbyteSdkError):
+    """Raised when runner or provider configuration is invalid."""
+
+
+class UnsupportedProviderError(VidbyteSdkError):
+    """Raised when a provider does not support a requested capability."""
+
+
+class ProviderSelectionError(VidbyteSdkError):
+    """Raised when no SDK provider adapter matches a requested capability."""
+
+
+class ProviderRequestError(VidbyteSdkError):
+    """Raised when a provider request fails or returns an invalid response."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        provider: str,
+        status_code: int | None = None,
+        response_excerpt: str | None = None,
+    ) -> None:
+        details: dict[str, Any] = {"provider": provider}
+        if status_code is not None:
+            details["status_code"] = status_code
+        if response_excerpt:
+            details["response_excerpt"] = response_excerpt[:500]
+        super().__init__(message, details=details)
+        self.provider = provider
+        self.status_code = status_code
+        self.response_excerpt = response_excerpt
+
+
+class ProviderConfigurationError(ProviderRequestError):
+    """Raised when a provider adapter is missing required configuration."""
+
+
+class ProviderResponseError(ProviderRequestError):
+    """Raised when a provider response cannot be normalized."""
+
+
+class StrategyConfigurationError(StrategyExecutionError):
+    """Raised when a prompt strategy is missing runner/model configuration."""

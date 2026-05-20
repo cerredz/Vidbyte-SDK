@@ -28,7 +28,9 @@ from vidbyte.lib.dataclasses.context import (
     StrategyContext,
     VMAOContext,
 )
+from vidbyte.lib.dataclasses.filesystem import FileSystemToolConfig
 from vidbyte.lib.dataclasses.mcp import McpToolDefinition
+from vidbyte.lib.dataclasses.model_configs import TextModelConfig
 from vidbyte.lib.dataclasses.multi_agent import CandidateFailure, CandidateResult, DagNode, EvaluationDecision, NodeState, Verification
 from vidbyte.lib.dataclasses.sandbox import SandboxRequest, SandboxResult, SandboxTransport
 from vidbyte.lib.dataclasses.security import PermissionDecision, PermissionPolicy
@@ -60,6 +62,7 @@ __all__ = [
     "ContextToolCall",
     "DagNode",
     "EvaluationDecision",
+    "FileSystemToolConfig",
     "McpToolDefinition",
     "NodeState",
     "PermissionDecision",
@@ -70,6 +73,7 @@ __all__ = [
     "SandboxTransport",
     "StrategyContext",
     "StrategyResult",
+    "TextModelConfig",
     "ToolCall",
     "ToolParameter",
     "ToolPermission",
