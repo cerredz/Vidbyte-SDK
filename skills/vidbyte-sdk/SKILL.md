@@ -25,4 +25,8 @@ vidbyte/
 - Keep internal library helpers under `vidbyte/lib/`.
 - Keep SDK error modules under `vidbyte/lib/errors/`.
 - Keep shared SDK scaffolding under `vidbyte/shared/`.
-- Do not add concrete harness, tool, provider, or error implementations until the structure is approved.
+- Custom function tools are approved under `vidbyte/tools/`:
+  - Use `vidbyte.tools.decorators.vidbyte_tool` for the public decorator.
+  - Use `vidbyte.tools.function_tool.FunctionTool` to adapt Python callables to `BaseTool`.
+  - Use `ToolRegistry` and `ToolMixin.with_tools()` as the attachment boundary for clients, harnesses, and strategies.
+- Keep provider-specific tool schema translation behind provider modules; local execution stays in `ToolExecutor`.

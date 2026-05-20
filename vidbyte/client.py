@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from vidbyte.harnesses.client import HarnessClient
 from vidbyte.providers.client import ProvidersClient
+from vidbyte.strategies.client import StrategyClient
 from vidbyte.tools.client import ToolsClient
 
 
@@ -12,3 +13,4 @@ class VidbyteSDK:
         self.harnesses = HarnessClient()
         self.tools = ToolsClient()
         self.providers = ProvidersClient()
+        self.strategies = StrategyClient()
