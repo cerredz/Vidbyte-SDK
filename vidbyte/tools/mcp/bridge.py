@@ -7,7 +7,7 @@ Purpose:
     permission, validation, and execution pipeline as local tools.
 Architecture:
     - McpBridgedTool: Converts one McpToolDefinition into a BaseTool.
-    - bridge_mcp_tools: Discovers all remote tools and registers wrappers.
+    - _bridge_mcp_tools: Discovers all remote tools and registers wrappers.
 Relations:
     Related to vidbyte.tools.mcp.client, vidbyte.tools.registry, and tool types.
 """
@@ -80,7 +80,7 @@ class McpBridgedTool(BaseTool):
         return tuple(parameters)
 
 
-async def bridge_mcp_tools(
+async def _bridge_mcp_tools(
     registry: ToolRegistry,
     client: McpClient,
     *,

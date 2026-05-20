@@ -1,27 +1,20 @@
 """Context Protocol Header
 
 Description:
-    Defines small MCP protocol data types used by the SDK bridge.
+    Re-exports MCP data contracts from the SDK dataclass namespace.
 Purpose:
-    Keeps MCP discovery data separate from the native ToolSpec contract while
-    allowing deterministic conversion into SDK tools.
+    Preserves `vidbyte.tools.mcp.types` imports while keeping dataclass
+    definitions under `vidbyte.lib.dataclasses`.
 Architecture:
-    - McpToolDefinition: Name, description, and JSON Schema for a remote tool.
+    - Compatibility shim for McpToolDefinition.
 Relations:
-    Related to vidbyte.tools.mcp.client and vidbyte.tools.mcp.bridge.
+    Related to vidbyte.lib.dataclasses.mcp.
 """
 
 from __future__ import annotations
 
-from collections.abc import Mapping
-from dataclasses import dataclass, field
-from typing import Any
+from vidbyte.lib.dataclasses.mcp import McpToolDefinition
 
-
-@dataclass(frozen=True, slots=True)
-class McpToolDefinition:
-    """Remote MCP tool metadata returned by tools/list."""
-
-    name: str
-    description: str
-    input_schema: Mapping[str, Any] = field(default_factory=dict)
+__all__ = [
+    "McpToolDefinition",
+]

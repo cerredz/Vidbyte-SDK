@@ -19,7 +19,7 @@ from typing import Any
 
 from vidbyte.tools import ToolCall, ToolPermission, ToolRegistry
 from vidbyte.tools.executor import ToolExecutor
-from vidbyte.tools.mcp import McpClient, bridge_mcp_tools
+from vidbyte.tools.mcp import McpBridgedTool, McpClient
 from vidbyte.tools.security import PermissionPolicy
 
 
@@ -68,11 +68,12 @@ class McpBridgeTests(unittest.IsolatedAsyncioTestCase):
         """Remote tools are exposed as native registry entries."""
         registry = ToolRegistry()
         client = McpClient(FakeTransport())
-        tools = await bridge_mcp_tools(
-            registry,
-            client,
-            permission=ToolPermission.READ,
+        tools = tuple(
+            McpBridgedTool(client, remote_tool, permission=ToolPermission.READ)
+            for remote_tool in await client.list_tools()
         )
+        for tool in tools:
+            registry.register(tool)
         self.assertEqual(len(tools), 1)
         self.assertEqual(registry.get("remote_echo").spec().parameters[0].name, "text")
         result = await ToolExecutor(

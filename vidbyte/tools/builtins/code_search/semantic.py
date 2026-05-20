@@ -17,9 +17,9 @@ from __future__ import annotations
 import math
 import re
 from collections.abc import Sequence
-from dataclasses import dataclass
 from typing import Protocol
 
+from vidbyte.lib.dataclasses.code_search import _CodeChunk
 from vidbyte.tools.builtins.code_search.base import BaseCodeSearchTool
 from vidbyte.tools.types import ToolCall, ToolParameter, ToolPermission, ToolResult, ToolSpec
 
@@ -29,17 +29,6 @@ class EmbeddingProvider(Protocol):
 
     def embed(self, texts: Sequence[str]) -> Sequence[Sequence[float]]:
         """Return one vector for each input text."""
-
-
-@dataclass(frozen=True, slots=True)
-class _CodeChunk:
-    """Internal representation of an indexed code chunk."""
-
-    path: str
-    start_line: int
-    end_line: int
-    text: str
-    vector: tuple[float, ...] = ()
 
 
 class SemanticSearchTool(BaseCodeSearchTool):

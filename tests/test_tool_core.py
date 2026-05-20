@@ -16,7 +16,15 @@ from __future__ import annotations
 import unittest
 
 from vidbyte.lib.errors import ToolRegistryError
-from vidbyte.tools import BaseTool, ToolCall, ToolParameter, ToolRegistry, ToolResult, ToolSpec
+from vidbyte.tools import (
+    BaseTool,
+    ToolCall,
+    ToolParameter,
+    ToolRegistry,
+    ToolResult,
+    ToolSpec,
+    ToolsFormatter,
+)
 
 
 class EchoTool(BaseTool):
@@ -69,5 +77,36 @@ class ToolCoreTests(unittest.IsolatedAsyncioTestCase):
     def test_spec_prompt_rendering(self) -> None:
         """Tool specs render prompt-safe metadata."""
         rendered = EchoTool().spec().to_prompt_str()
+        self.assertTrue(rendered.startswith("<tool>"))
         self.assertIn("Tool: echo", rendered)
         self.assertIn("text", rendered)
+        self.assertTrue(rendered.endswith("</tool>"))
+
+    def test_tools_formatter_converts_provider_tool_shapes(self) -> None:
+        """Tool specs convert into supported provider declaration formats."""
+        spec = EchoTool().spec()
+        openai_tool = ToolsFormatter.to_openai_tool(spec)
+        anthropic_tool = ToolsFormatter.to_anthropic_tool(spec)
+        grok_tool = ToolsFormatter.to_grok_tool(spec)
+        gemini_tool = ToolsFormatter.to_gemini_tool(spec)
+
+        self.assertEqual(openai_tool["function"]["name"], "echo")
+        self.assertEqual(anthropic_tool["name"], "echo")
+        self.assertEqual(grok_tool["function"]["parameters"]["required"], ["text"])
+        self.assertEqual(gemini_tool["function_declarations"][0]["name"], "echo")
+
+    def test_tools_formatter_parses_provider_tool_calls(self) -> None:
+        """Provider tool-call payloads normalize into ToolCall objects."""
+        openai_call = ToolsFormatter.parse_openai_tool_call(
+            {"function": {"name": "echo", "arguments": '{"text": "hello"}'}}
+        )
+        anthropic_call = ToolsFormatter.parse_anthropic_tool_call(
+            {"type": "tool_use", "name": "echo", "input": {"text": "hello"}}
+        )
+        gemini_call = ToolsFormatter.parse_gemini_tool_call(
+            {"functionCall": {"name": "echo", "args": {"text": "hello"}}}
+        )
+
+        self.assertEqual(openai_call, ToolCall("echo", {"text": "hello"}))
+        self.assertEqual(anthropic_call, ToolCall("echo", {"text": "hello"}))
+        self.assertEqual(gemini_call, ToolCall("echo", {"text": "hello"}))

@@ -48,6 +48,15 @@ sdk = VidbyteSDK()
 sdk.tools.executor.permission_policy = PermissionPolicy.allow_all()
 ```
 
+Provider integrations can format the same `ToolSpec` contract for model-native tool APIs:
+
+```python
+from vidbyte import ToolsFormatter
+
+openai_tool = ToolsFormatter.to_openai_tool(sdk.tools.registry.specs()[0])
+anthropic_tool = ToolsFormatter.to_anthropic_tool(sdk.tools.registry.specs()[0])
+```
+
 ## Package Structure
 
 ```text
@@ -67,6 +76,8 @@ vidbyte/
 |   `-- security/
 |-- shared/
 `-- lib/
+    |-- dataclasses/
+    |-- tools/
     `-- errors/
 ```
 

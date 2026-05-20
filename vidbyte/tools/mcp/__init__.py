@@ -8,14 +8,14 @@ Purpose:
 Architecture:
     - McpClient: JSON-RPC operations.
     - McpStdioTransport: Subprocess stdio transport.
-    - McpBridgedTool and bridge_mcp_tools: Native wrapper registration.
+    - McpBridgedTool: Native wrapper for remote tools.
 Relations:
     Related to vidbyte.tools.registry and vidbyte.tools.executor.
 """
 
 from __future__ import annotations
 
-from vidbyte.tools.mcp.bridge import McpBridgedTool, bridge_mcp_tools
+from vidbyte.tools.mcp.bridge import McpBridgedTool
 from vidbyte.tools.mcp.client import McpClient
 from vidbyte.tools.mcp.transport import McpStdioTransport, McpTransport
 from vidbyte.tools.mcp.types import McpToolDefinition
@@ -26,5 +26,4 @@ __all__ = [
     "McpStdioTransport",
     "McpToolDefinition",
     "McpTransport",
-    "bridge_mcp_tools",
 ]

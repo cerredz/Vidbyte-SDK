@@ -8,6 +8,7 @@ Purpose:
 Architecture:
     - VidbyteSDK: Root namespace client.
     - Tool contract exports: BaseTool, ToolSpec, ToolCall, ToolResult, ToolRegistry, ToolExecutor.
+    - ToolsFormatter: Provider-specific schema formatting helper.
 Relations:
     Related to vidbyte.client and vidbyte.tools.
 """
@@ -25,6 +26,7 @@ from vidbyte.tools import (
     ToolResult,
     ToolSpec,
     ToolStatus,
+    ToolsFormatter,
 )
 
 __all__ = [
@@ -37,5 +39,6 @@ __all__ = [
     "ToolResult",
     "ToolSpec",
     "ToolStatus",
+    "ToolsFormatter",
     "VidbyteSDK",
 ]

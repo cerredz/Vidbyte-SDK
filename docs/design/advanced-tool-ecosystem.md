@@ -127,12 +127,12 @@ Code search tools share root-scoped path resolution and truncation helpers. MCP 
 
 ### 6.1 Tool Core Types
 
-**File(s):** `vidbyte/tools/types.py`, `vidbyte/tools/base.py`
+**File(s):** `vidbyte/lib/dataclasses/tools.py`, `vidbyte/tools/types.py`, `vidbyte/tools/base.py`
 **Type:** New file
 
 #### What it does
 
-Defines the public contract all native and bridged tools use.
+Defines the public contract all native and bridged tools use. Dataclass definitions live under `vidbyte/lib/dataclasses/`, while `vidbyte/tools/types.py` remains a compatibility re-export surface.
 
 #### Interface / API
 
@@ -740,6 +740,7 @@ from vidbyte.tools.builtins.code_search import GlobTool, GrepTool, SemanticSearc
 from vidbyte.tools.builtins.editing import PatchTool
 from vidbyte.tools.builtins.context import ContextCompactionTool, CompactionMode
 from vidbyte.tools.mcp import McpClient, McpStdioTransport, McpBridgedTool
+from vidbyte.lib.tools import ToolsFormatter
 ```
 
 Modified SDK client:
@@ -767,7 +768,16 @@ Complete list of every file that will be created, modified, or deleted:
 | MODIFY | `vidbyte/tools/client.py` | Add registry, executor, and registration helpers |
 | MODIFY | `vidbyte/lib/errors/__init__.py` | Export tool/MCP/security errors |
 | CREATE | `vidbyte/lib/errors/base.py` | SDK error hierarchy for tools and transports |
-| CREATE | `vidbyte/tools/types.py` | Tool dataclasses and permission/status enums |
+| CREATE | `vidbyte/lib/dataclasses/__init__.py` | Central dataclass exports |
+| CREATE | `vidbyte/lib/dataclasses/tools.py` | Tool dataclasses and permission/status enums |
+| CREATE | `vidbyte/lib/dataclasses/context.py` | Context message and progress-log dataclasses |
+| CREATE | `vidbyte/lib/dataclasses/mcp.py` | MCP protocol dataclasses |
+| CREATE | `vidbyte/lib/dataclasses/security.py` | Permission policy dataclass |
+| CREATE | `vidbyte/lib/dataclasses/sandbox.py` | Sandbox request and result dataclasses |
+| CREATE | `vidbyte/lib/dataclasses/code_search.py` | Internal code-search chunk dataclass |
+| CREATE | `vidbyte/lib/tools/__init__.py` | Shared tool helper exports |
+| CREATE | `vidbyte/lib/tools/formatter.py` | Provider-specific tool schema formatter and parser |
+| CREATE | `vidbyte/tools/types.py` | Tool type compatibility re-exports |
 | CREATE | `vidbyte/tools/base.py` | Abstract `BaseTool` contract |
 | CREATE | `vidbyte/tools/registry.py` | Tool registry |
 | CREATE | `vidbyte/tools/executor.py` | Tool execution pipeline |
@@ -780,10 +790,10 @@ Complete list of every file that will be created, modified, or deleted:
 | CREATE | `vidbyte/tools/builtins/editing/__init__.py` | Editing tool exports |
 | CREATE | `vidbyte/tools/builtins/editing/patch.py` | Exact-match patch tool |
 | CREATE | `vidbyte/tools/builtins/context/__init__.py` | Context tool exports |
-| CREATE | `vidbyte/tools/builtins/context/types.py` | Context message, state, and progress log types |
+| CREATE | `vidbyte/tools/builtins/context/types.py` | Context type compatibility re-exports |
 | CREATE | `vidbyte/tools/builtins/context/compaction.py` | Context compaction tool and strategies |
 | CREATE | `vidbyte/tools/mcp/__init__.py` | MCP exports |
-| CREATE | `vidbyte/tools/mcp/types.py` | MCP protocol dataclasses |
+| CREATE | `vidbyte/tools/mcp/types.py` | MCP type compatibility re-exports |
 | CREATE | `vidbyte/tools/mcp/transport.py` | MCP transport protocol and stdio transport |
 | CREATE | `vidbyte/tools/mcp/client.py` | MCP JSON-RPC client |
 | CREATE | `vidbyte/tools/mcp/bridge.py` | Native wrapper for remote MCP tools |
@@ -797,7 +807,7 @@ Complete list of every file that will be created, modified, or deleted:
 | CREATE | `tests/test_mcp_bridge.py` | Fake MCP transport and bridged tool tests |
 | CREATE | `tests/test_context_compaction_tools.py` | Compaction strategy tests |
 
-Summary: 31 files created, 7 files modified, 0 files deleted.
+Summary: 40 files created, 7 files modified, 0 files deleted.
 
 ---
 
@@ -805,7 +815,7 @@ Summary: 31 files created, 7 files modified, 0 files deleted.
 
 ### Unit Tests
 
-- `tests/test_tool_core.py` -> verifies `ToolSpec` rendering, required parameter validation, duplicate registry rejection, unknown tool errors, and successful async execution.
+- `tests/test_tool_core.py` -> verifies `ToolSpec` XML rendering, provider tool formatting/parsing, required parameter validation, duplicate registry rejection, unknown tool errors, and successful async execution.
 - `tests/test_code_search_tools.py` -> verifies path traversal rejection, ignored directories, `max_results` truncation, invalid regex handling, glob matching, grep snippets, and semantic fallback ranking.
 - `tests/test_patch_tool.py` -> verifies exact replacement, no-match errors, multi-match ambiguity errors, traversal rejection, empty search rejection, and unified diff output.
 - `tests/test_security_executor.py` -> verifies default policy allows `SAFE`/`READ`, denies `WRITE`/`EXECUTE`, does not call denied tools, and allow-all policy enables patch tests.
