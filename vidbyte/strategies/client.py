@@ -9,14 +9,7 @@ from vidbyte.strategies.base import BaseStrategy
 class StrategyClient:
     """Namespace client for strategy factories."""
 
-    def consensus(
-        self,
-        strategies: Sequence[BaseStrategy],
-        *,
-        evaluator_agent: object | None = None,
-        evaluator_strategy: BaseStrategy | None = None,
-        **options: Any,
-    ) -> BaseStrategy:
+    def consensus(self, strategies: Sequence[BaseStrategy], *, evaluator_agent: object | None = None, evaluator_strategy: BaseStrategy | None = None, **options: Any) -> BaseStrategy:
         from vidbyte.strategies.multi_agent.consensus import MultiAgentConsensusStrategy
 
         return MultiAgentConsensusStrategy(

@@ -10,7 +10,7 @@ from vidbyte.strategies.multi_agent.evolving import (
     OrchestrationPolicy,
 )
 from vidbyte.strategies.multi_agent.types import CandidateFailure, CandidateResult, EvaluationDecision
-from vidbyte.strategies.multi_agent.vmao import VerifiedMultiAgentOrchestrationStrategy
+from vidbyte.strategies.multi_agent.vmao import DagNode, NodeState, Verification, VerifiedMultiAgentOrchestrationStrategy
 
 __all__ = [
     "AutoGenConversationStrategy",
@@ -22,6 +22,9 @@ __all__ = [
     "EvolvingOrchestrationStrategy",
     "HeuristicPolicy",
     "MultiAgentConsensusStrategy",
+    "DagNode",
+    "NodeState",
     "OrchestrationPolicy",
+    "Verification",
     "VerifiedMultiAgentOrchestrationStrategy",
 ]

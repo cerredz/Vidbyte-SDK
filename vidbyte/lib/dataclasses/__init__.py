@@ -1,29 +1,19 @@
 from __future__ import annotations
 
-from vidbyte.lib.dataclasses import (
-    AgentCard,
-    AgentMessage,
-    AgentRole,
-    AgentRunnerConfig,
-    AgentSpec,
+from vidbyte.lib.dataclasses.agents import AgentCard, AgentMessage, AgentRunnerConfig, AgentSpec, AgentRole
+from vidbyte.lib.dataclasses.context import (
     BaseContext,
-    CandidateFailure,
-    CandidateResult,
     ContextArtifact,
     ContextBudget,
     ContextPermissions,
     ContextResponse,
     ContextToolCall,
-    DagNode,
-    EvaluationDecision,
-    NodeState,
     StrategyContext,
-    StrategyResult,
-    ToolSpec,
-    Verification,
     VMAOContext,
 )
-from vidbyte.lib.enums import BudgetPreset, PermissionPreset
+from vidbyte.lib.dataclasses.multi_agent import CandidateFailure, CandidateResult, DagNode, EvaluationDecision, NodeState, Verification
+from vidbyte.lib.dataclasses.strategies import StrategyResult
+from vidbyte.lib.dataclasses.tools import ToolSpec
 
 __all__ = [
     "AgentCard",
@@ -32,7 +22,6 @@ __all__ = [
     "AgentRunnerConfig",
     "AgentSpec",
     "BaseContext",
-    "BudgetPreset",
     "CandidateFailure",
     "CandidateResult",
     "ContextArtifact",
@@ -43,7 +32,6 @@ __all__ = [
     "DagNode",
     "EvaluationDecision",
     "NodeState",
-    "PermissionPreset",
     "StrategyContext",
     "StrategyResult",
     "ToolSpec",

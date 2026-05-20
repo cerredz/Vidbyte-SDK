@@ -11,6 +11,15 @@
 
 Add first-class multi-agent orchestration to the Vidbyte SDK without pushing orchestration concerns into harness APIs. The SDK will introduce an `agents` package for reusable actor definitions, a minimal strategy framework for composable execution, and `vidbyte/strategies/multi_agent/` for orchestration topologies including consensus judging, AutoGen-style conversation, VMAO-style plan-execute-verify-replan, economic routing, and evolving orchestration. Harnesses remain business boundaries and gain only a `with_strategies()` composition helper that runs multiple strategies, routes their outputs through an evaluator agent, and returns the selected best answer.
 
+Review-driven implementation adjustments:
+
+- Dataclass definitions live under `vidbyte/lib/dataclasses/`; public package modules re-export them for compatibility.
+- Context objects are exposed through `vidbyte/context/`, with `BaseContext.build_context()` and optional file paths, strategy metadata, separated tool calls/responses, budget, artifacts, memory, and permissions.
+- Budget and permission presets live under `vidbyte/lib/enums/`.
+- Agent roles are user-defined strings. Default role prompt templates live in `vidbyte/prompts/prompts/` and are registered in the prompt registry.
+- VMAO prompt templates live in `vidbyte/prompts/prompts/vmao.py`; the strategy imports those templates instead of owning long inline prompts.
+- Multi-agent DAG and evaluation dataclasses are centralized under `vidbyte/lib/dataclasses/multi_agent.py`; `vidbyte/strategies/multi_agent/types.py` remains a re-export surface.
+
 ---
 
 ## 2. Goals & Non-Goals

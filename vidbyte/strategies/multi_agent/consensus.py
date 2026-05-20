@@ -19,15 +19,7 @@ class MultiAgentConsensusStrategy(BaseMultiAgentStrategy):
 
     name = "multi_agent.consensus"
 
-    def __init__(
-        self,
-        *,
-        strategies: Sequence[BaseStrategy],
-        evaluator_agent: BaseAgent | None = None,
-        evaluator_strategy: BaseStrategy | None = None,
-        require_json_decision: bool = False,
-        max_calls: int = 20,
-    ) -> None:
+    def __init__(self, *, strategies: Sequence[BaseStrategy], evaluator_agent: BaseAgent | None = None, evaluator_strategy: BaseStrategy | None = None, require_json_decision: bool = False, max_calls: int = 20) -> None:
         super().__init__(max_calls=max_calls)
         if not strategies:
             raise ValueError("At least one strategy is required.")
@@ -36,15 +28,7 @@ class MultiAgentConsensusStrategy(BaseMultiAgentStrategy):
         self.evaluator_strategy = evaluator_strategy
         self.require_json_decision = require_json_decision
 
-    async def arun(
-        self,
-        prompt: str,
-        *,
-        runner: object | None = None,
-        context: StrategyContext | None = None,
-        tools: Sequence[object] = (),
-        **options: Any,
-    ) -> StrategyResult:
+    async def arun(self, prompt: str, *, runner: object | None = None, context: StrategyContext | None = None, tools: Sequence[object] = (), **options: Any) -> StrategyResult:
         self._reset_calls()
         tasks = [
             self._run_candidate(index, strategy, prompt, runner, context, tools, options)
@@ -87,20 +71,21 @@ class MultiAgentConsensusStrategy(BaseMultiAgentStrategy):
             },
         )
 
-    async def _run_candidate(
-        self,
-        index: int,
-        strategy: BaseStrategy,
-        prompt: str,
-        runner: object | None,
-        context: StrategyContext | None,
-        tools: Sequence[object],
-        options: dict[str, Any],
-    ) -> CandidateResult:
+    async def _run_candidate(self, index: int, strategy: BaseStrategy, prompt: str, runner: object | None, context: StrategyContext | None, tools: Sequence[object], options: dict[str, Any]) -> CandidateResult:
         self._count_call()
         isolated_context = StrategyContext(
             system_prompt=context.system_prompt if context else None,
+            agent_name=context.agent_name if context else None,
+            role=context.role if context else None,
             history=tuple(context.history) if context else (),
+            file_paths=tuple(context.file_paths) if context else (),
+            strategy_metadata={**dict(context.strategy_metadata if context else {}), "candidate_index": index},
+            tool_calls=tuple(context.tool_calls) if context else (),
+            responses=tuple(context.responses) if context else (),
+            budget=context.budget if context else None,
+            artifacts=tuple(context.artifacts) if context else (),
+            memory=context.memory if context else None,
+            permissions=context.permissions if context else None,
             metadata={**dict(context.metadata if context else {}), "candidate_index": index},
         )
         result = await strategy.arun(
@@ -117,13 +102,7 @@ class MultiAgentConsensusStrategy(BaseMultiAgentStrategy):
             metadata=dict(result.metadata),
         )
 
-    async def _evaluate(
-        self,
-        evaluator_prompt: str,
-        runner: object | None,
-        context: StrategyContext | None,
-        tools: Sequence[object],
-    ) -> str:
+    async def _evaluate(self, evaluator_prompt: str, runner: object | None, context: StrategyContext | None, tools: Sequence[object]) -> str:
         self._count_call()
         if self.evaluator_agent is not None:
             reply = await self.evaluator_agent.generate_reply(
@@ -150,7 +129,7 @@ class MultiAgentConsensusStrategy(BaseMultiAgentStrategy):
                     "rationale": "No evaluator agent, evaluator strategy, or runner was supplied.",
                 }
             )
-        return await _call_runner(runner, evaluator_prompt)
+        return await self._call_runner(runner, evaluator_prompt)
 
     def _parse_decision(self, evaluator_output: str, candidates: Sequence[CandidateResult]) -> EvaluationDecision:
         try:
@@ -173,14 +152,8 @@ class MultiAgentConsensusStrategy(BaseMultiAgentStrategy):
             rationale=str(parsed.get("rationale", "")),
         )
 
-    def _render_evaluator_prompt(
-        self,
-        original_prompt: str,
-        candidates: Sequence[CandidateResult],
-        failures: Sequence[CandidateFailure],
-        context: StrategyContext | None,
-    ) -> str:
-        system = context.system_prompt if context and context.system_prompt else ""
+    def _render_evaluator_prompt(self, original_prompt: str, candidates: Sequence[CandidateResult], failures: Sequence[CandidateFailure], context: StrategyContext | None) -> str:
+        system = context.build_context() if context else ""
         candidate_text = "\n\n".join(
             f"Candidate {candidate.index} ({candidate.strategy_name}):\n{candidate.output}"
             for candidate in candidates
@@ -202,33 +175,33 @@ class MultiAgentConsensusStrategy(BaseMultiAgentStrategy):
     def _strategy_name(self, strategy: BaseStrategy) -> str:
         return getattr(strategy, "strategy_name", strategy.__class__.__name__)
 
+    @classmethod
+    async def _call_runner(cls, runner: object, prompt: str) -> str:
+        method = getattr(runner, "arun", None)
+        if callable(method):
+            response = method(prompt)
+            if inspect.isawaitable(response):
+                response = await response
+            return cls._response_text(response)
+        method = getattr(runner, "run", None)
+        if callable(method):
+            response = method(prompt)
+            if inspect.isawaitable(response):
+                response = await response
+            return cls._response_text(response)
+        if callable(runner):
+            response = runner(prompt)
+            if inspect.isawaitable(response):
+                response = await response
+            return cls._response_text(response)
+        raise StrategyExecutionError("Runner does not expose arun(), run(), or callable execution.")
 
-async def _call_runner(runner: object, prompt: str) -> str:
-    method = getattr(runner, "arun", None)
-    if callable(method):
-        response = method(prompt)
-        if inspect.isawaitable(response):
-            response = await response
-        return _response_text(response)
-    method = getattr(runner, "run", None)
-    if callable(method):
-        response = method(prompt)
-        if inspect.isawaitable(response):
-            response = await response
-        return _response_text(response)
-    if callable(runner):
-        response = runner(prompt)
-        if inspect.isawaitable(response):
-            response = await response
-        return _response_text(response)
-    raise StrategyExecutionError("Runner does not expose arun(), run(), or callable execution.")
-
-
-def _response_text(response: object) -> str:
-    if isinstance(response, str):
-        return response
-    for attr in ("output", "text", "content"):
-        value = getattr(response, attr, None)
-        if isinstance(value, str):
-            return value
-    return str(response)
+    @staticmethod
+    def _response_text(response: object) -> str:
+        if isinstance(response, str):
+            return response
+        for attr in ("output", "text", "content"):
+            value = getattr(response, attr, None)
+            if isinstance(value, str):
+                return value
+        return str(response)

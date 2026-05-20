@@ -16,15 +16,7 @@ class AutoGenConversationStrategy(BaseMultiAgentStrategy):
 
     name = "multi_agent.autogen"
 
-    def __init__(
-        self,
-        *,
-        agents: Sequence[BaseAgent],
-        initial_agent: str,
-        transition_policy: Callable[[Sequence[AgentMessage], AgentRegistry], str | None],
-        max_turns: int = 8,
-        termination_predicate: Callable[[AgentMessage], bool] | None = None,
-    ) -> None:
+    def __init__(self, *, agents: Sequence[BaseAgent], initial_agent: str, transition_policy: Callable[[Sequence[AgentMessage], AgentRegistry], str | None], max_turns: int = 8, termination_predicate: Callable[[AgentMessage], bool] | None = None) -> None:
         super().__init__(max_calls=max_turns)
         if max_turns < 1:
             raise ValueError("max_turns must be at least 1.")
@@ -36,15 +28,7 @@ class AutoGenConversationStrategy(BaseMultiAgentStrategy):
         self.max_turns = max_turns
         self.termination_predicate = termination_predicate
 
-    async def arun(
-        self,
-        prompt: str,
-        *,
-        runner: object | None = None,
-        context: StrategyContext | None = None,
-        tools: Sequence[object] = (),
-        **options: Any,
-    ) -> StrategyResult:
+    async def arun(self, prompt: str, *, runner: object | None = None, context: StrategyContext | None = None, tools: Sequence[object] = (), **options: Any) -> StrategyResult:
         self._reset_calls()
         transcript: list[AgentMessage] = []
         next_agent_name: str | None = self.initial_agent
@@ -77,15 +61,16 @@ class AutoGenConversationStrategy(BaseMultiAgentStrategy):
             metadata={
                 "stopped_by": stopped_by,
                 "turns": len(transcript),
-                "transcript": [_message_dict(message) for message in transcript],
+                "transcript": [self._message_dict(message) for message in transcript],
             },
         )
 
-
-def _message_dict(message: AgentMessage) -> dict[str, object]:
-    return {
-        "sender": message.sender,
-        "recipient": message.recipient,
-        "content": message.content,
-        "metadata": dict(message.metadata),
-    }
+    @staticmethod
+    def _message_dict(message: AgentMessage) -> dict[str, object]:
+        return {
+            "sender": message.sender,
+            "recipient": message.recipient,
+            "content": message.content,
+            "message_type": message.message_type,
+            "metadata": dict(message.metadata),
+        }

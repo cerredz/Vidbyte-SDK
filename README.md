@@ -48,6 +48,24 @@ result = await harness.arun("Solve this task", runner=my_runner)
 ```
 
 For custom agents, inject the model runner, reasoning strategy, and tools into `BaseAgent`; then pass those agents into multi-agent strategies.
+Agents can also be initialized from primitive runner settings such as `model_name`, `temperature`, and `run_id`. Agent roles are user-defined strings; built-in role prompts are registered as reusable prompt templates, but callers may pass their own `system_prompt`.
+
+## Context Objects
+
+Context dataclasses are exposed through `vidbyte.context` and centralized internally under `vidbyte.lib.dataclasses`.
+
+```python
+from vidbyte.context import ContextBudget, ContextPermissions, StrategyContext
+from vidbyte.lib.enums import BudgetPreset, PermissionPreset
+
+context = StrategyContext(
+    file_paths=["README.md"],
+    strategy_metadata={"phase": "draft"},
+    budget=ContextBudget.from_preset(BudgetPreset.BALANCED),
+    permissions=ContextPermissions.from_preset(PermissionPreset.READ_ONLY),
+)
+context.build_context()
+```
 
 ## Package Structure
 
@@ -55,8 +73,11 @@ For custom agents, inject the model runner, reasoning strategy, and tools into `
 vidbyte/
 |-- client.py
 |-- agents/
+|-- context/
 |-- harnesses/
 |   `-- client.py
+|-- prompts/
+|   `-- prompts/
 |-- providers/
 |   `-- client.py
 |-- strategies/
@@ -65,6 +86,8 @@ vidbyte/
 |   `-- client.py
 |-- shared/
 `-- lib/
+    |-- dataclasses/
+    |-- enums/
     `-- errors/
 ```
 

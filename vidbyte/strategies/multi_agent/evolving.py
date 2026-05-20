@@ -12,26 +12,14 @@ from vidbyte.strategies.types import StrategyContext, StrategyResult
 
 
 class OrchestrationPolicy(Protocol):
-    def select_next(
-        self,
-        *,
-        prompt: str,
-        transcript: Sequence[AgentMessage],
-        registry: AgentRegistry,
-    ) -> str | None:
+    def select_next(self, *, prompt: str, transcript: Sequence[AgentMessage], registry: AgentRegistry) -> str | None:
         """Select the next agent name, or None to stop."""
 
 
 class HeuristicPolicy:
     """Deterministic policy that cycles workers once, then evaluator/service agents."""
 
-    def select_next(
-        self,
-        *,
-        prompt: str,
-        transcript: Sequence[AgentMessage],
-        registry: AgentRegistry,
-    ) -> str | None:
+    def select_next(self, *, prompt: str, transcript: Sequence[AgentMessage], registry: AgentRegistry) -> str | None:
         used = {message.sender for message in transcript}
         for agent in registry.find(role="worker"):
             if agent.name not in used:
@@ -48,14 +36,7 @@ class EvolvingOrchestrationStrategy(BaseMultiAgentStrategy):
 
     name = "multi_agent.evolving"
 
-    def __init__(
-        self,
-        *,
-        agents: Sequence[BaseAgent],
-        policy: OrchestrationPolicy | None = None,
-        max_turns: int = 8,
-        exploration_width: int = 1,
-    ) -> None:
+    def __init__(self, *, agents: Sequence[BaseAgent], policy: OrchestrationPolicy | None = None, max_turns: int = 8, exploration_width: int = 1) -> None:
         super().__init__(max_calls=max_turns)
         if max_turns < 1:
             raise ValueError("max_turns must be at least 1.")
@@ -68,15 +49,7 @@ class EvolvingOrchestrationStrategy(BaseMultiAgentStrategy):
         self.max_turns = max_turns
         self.exploration_width = exploration_width
 
-    async def arun(
-        self,
-        prompt: str,
-        *,
-        runner: object | None = None,
-        context: StrategyContext | None = None,
-        tools: Sequence[object] = (),
-        **options: object,
-    ) -> StrategyResult:
+    async def arun(self, prompt: str, *, runner: object | None = None, context: StrategyContext | None = None, tools: Sequence[object] = (), **options: object) -> StrategyResult:
         self._reset_calls()
         transcript: list[AgentMessage] = []
         current_prompt = prompt
@@ -116,6 +89,7 @@ class EvolvingOrchestrationStrategy(BaseMultiAgentStrategy):
                         "sender": message.sender,
                         "recipient": message.recipient,
                         "content": message.content,
+                        "message_type": message.message_type,
                         "metadata": dict(message.metadata),
                     }
                     for message in transcript

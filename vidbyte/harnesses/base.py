@@ -13,15 +13,7 @@ class BaseHarness(StrategyMixin):
     def __init__(self) -> None:
         super().__init__()
 
-    async def arun(
-        self,
-        prompt: str,
-        *,
-        runner: object | None = None,
-        context: StrategyContext | None = None,
-        tools: Sequence[object] = (),
-        **options: Any,
-    ) -> StrategyResult:
+    async def arun(self, prompt: str, *, runner: object | None = None, context: StrategyContext | None = None, tools: Sequence[object] = (), **options: Any) -> StrategyResult:
         if self._strategy is None:
             raise StrategyExecutionError("No strategy has been attached to this harness.")
         return await self._strategy.arun(

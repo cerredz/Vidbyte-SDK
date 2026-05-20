@@ -12,15 +12,7 @@ class BaseStrategy:
 
     name: ClassVar[str] = "base"
 
-    async def arun(
-        self,
-        prompt: str,
-        *,
-        runner: object | None = None,
-        context: StrategyContext | None = None,
-        tools: Sequence[object] = (),
-        **options: Any,
-    ) -> StrategyResult:
+    async def arun(self, prompt: str, *, runner: object | None = None, context: StrategyContext | None = None, tools: Sequence[object] = (), **options: Any) -> StrategyResult:
         raise NotImplementedError(f"{self.__class__.__name__}.arun() is not implemented")
 
     def run(self, prompt: str, **kwargs: Any) -> StrategyResult:

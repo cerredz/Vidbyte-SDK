@@ -28,13 +28,7 @@ class AgentRegistry:
     def cards(self) -> tuple[AgentCard, ...]:
         return tuple(agent.card() for agent in self._agents.values())
 
-    def find(
-        self,
-        *,
-        role: AgentRole | None = None,
-        capability: str | None = None,
-        tool_name: str | None = None,
-    ) -> tuple[BaseAgent, ...]:
+    def find(self, *, role: AgentRole | None = None, capability: str | None = None, tool_name: str | None = None) -> tuple[BaseAgent, ...]:
         matches: list[BaseAgent] = []
         for agent in self._agents.values():
             card = agent.card()

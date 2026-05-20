@@ -16,14 +16,7 @@ class StrategyMixin:
         self._strategy = strategy
         return self
 
-    def with_strategies(
-        self,
-        strategies: Sequence[BaseStrategy],
-        *,
-        evaluator_agent: object | None = None,
-        evaluator_strategy: BaseStrategy | None = None,
-        **options: Any,
-    ) -> "StrategyMixin":
+    def with_strategies(self, strategies: Sequence[BaseStrategy], *, evaluator_agent: object | None = None, evaluator_strategy: BaseStrategy | None = None, **options: Any) -> "StrategyMixin":
         from vidbyte.strategies.multi_agent.consensus import MultiAgentConsensusStrategy
 
         self._strategy = MultiAgentConsensusStrategy(

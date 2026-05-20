@@ -13,8 +13,10 @@ class QueueStrategy(BaseStrategy):
     def __init__(self, name: str, outputs: list[str]) -> None:
         self.name = name
         self.outputs = outputs
+        self.last_context = None
 
     async def arun(self, prompt: str, **kwargs: object) -> StrategyResult:
+        self.last_context = kwargs.get("context")
         if self.outputs:
             output = self.outputs.pop(0)
         else:
@@ -58,6 +60,7 @@ class VmaoTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("answer-a", result.output)
         self.assertIn("answer-b", result.output)
         self.assertEqual(result.metadata["rounds"], 1)
+        self.assertIn("vmao_round", verifier.strategy.last_context.strategy_metadata)
 
     async def test_rejects_cycle(self) -> None:
         planner = BaseAgent(
