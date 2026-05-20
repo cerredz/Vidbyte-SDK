@@ -13,6 +13,9 @@ Relations:
 
 from __future__ import annotations
 
+import json
+import re
+
 from vidbyte.lib.errors import ToolRegistryError
 from vidbyte.tools.registry import ToolRegistry
 from vidbyte.tools.security import PermissionDecision, PermissionPolicy
@@ -64,3 +67,18 @@ class ToolExecutor:
                 f"Tool execution failed: {exc}",
                 metadata={"error": "execution_error", "error_type": type(exc).__name__},
             )
+
+    async def execute(self, text: str) -> ToolResult:
+        """Parse an Action/Action Input block from text and execute the named tool."""
+        action_match = re.search(r"Action:\s*(\S+)", text)
+        if not action_match:
+            return ToolResult.error("unknown", "No Action block found in text.")
+        tool_name = action_match.group(1).strip()
+
+        input_match = re.search(r"Action Input:\s*(\{.*?\})", text, re.DOTALL)
+        try:
+            arguments = json.loads(input_match.group(1).strip()) if input_match else {}
+        except json.JSONDecodeError:
+            arguments = {}
+
+        return await self.execute_call(ToolCall(tool_name=tool_name, arguments=arguments))

@@ -143,3 +143,7 @@ class ProviderResponseError(ProviderRequestError):
 
 class StrategyConfigurationError(StrategyExecutionError):
     """Raised when a prompt strategy is missing runner/model configuration."""
+
+
+class ToolRegistrationError(ToolRegistryError):
+    """Raised when a tool cannot be registered due to validation or conflict."""

@@ -45,7 +45,6 @@ from vidbyte.strategies import (
     BaseStrategyUtils,
     ChainOfDraftStrategy,
     ChainOfThoughtStrategy,
-    MultiAgentConsensusStrategy,
     PlanAndExecuteStrategy,
     ReActStrategy,
     ReflexionStrategy,
@@ -57,10 +56,13 @@ from vidbyte.strategies import (
     StrategyResult,
     TreeOfThoughtsStrategy,
 )
+from vidbyte.strategies.multi_agent import MultiAgentConsensusStrategy
 from vidbyte.tools import (
     BaseTool,
+    FunctionTool,
     ToolCall,
     ToolExecutor,
+    ToolMixin,
     ToolParameter,
     ToolPermission,
     ToolRegistry,
@@ -68,6 +70,7 @@ from vidbyte.tools import (
     ToolSpec,
     ToolStatus,
     ToolsFormatter,
+    vidbyte_tool,
 )
 from vidbyte.tools.mcp import (
     McpServerConfig,

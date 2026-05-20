@@ -59,6 +59,12 @@ class BaseHarness(McpAttachableMixin, StrategyMixin):
             **options,
         )
 
+    def with_tools(self, tools: Sequence[Any]) -> "BaseHarness":
+        for tool in tools:
+            if tool not in self.tools:
+                self.tools.append(tool)
+        return self
+
     def run(self, prompt: str, **options: Any) -> StrategyResult:
         if self._strategy is None:
             raise StrategyExecutionError("No strategy has been attached to this harness.")

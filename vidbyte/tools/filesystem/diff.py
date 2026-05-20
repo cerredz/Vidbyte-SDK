@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from vidbyte.lib.dataclasses import ToolResult
+from vidbyte.lib.dataclasses.tool_types import ToolResult
 from vidbyte.lib.errors import ToolExecutionError
 from vidbyte.lib.tools.filesystem import FileSystemPermissions
 from vidbyte.tools.filesystem._base_tool import FileSystemTool

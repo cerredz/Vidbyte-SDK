@@ -55,7 +55,7 @@ class PromptRegistry:
     """
 
     _instance: PromptRegistry | None = None
-    _lock: threading.Lock = threading.Lock()
+    _lock: threading.RLock = threading.RLock()
 
     def __new__(cls) -> PromptRegistry:
         if cls._instance is None:
@@ -75,10 +75,18 @@ class PromptRegistry:
             self._prompts[key_str] = prompt
         return self
 
-    def override(self, prompt: BasePrompt) -> PromptRegistry:
-        key_str = str(prompt.key())
+    def override(self, prompt_or_key: "BasePrompt | PromptKey", template: str | None = None) -> "PromptRegistry":
+        """Override a prompt. Accepts either a BasePrompt, or (PromptKey, template_str)."""
+        if template is not None:
+            key = prompt_or_key  # type: ignore[assignment]
+            key_str = str(key)
+            from vidbyte.prompts._inline import InlinePrompt
+            prompt_obj = InlinePrompt(key, template)
+        else:
+            prompt_obj = prompt_or_key  # type: ignore[assignment]
+            key_str = str(prompt_obj.key())
         with self._lock:
-            self._overrides[key_str] = prompt
+            self._overrides[key_str] = prompt_obj
         return self
 
     def get(self, key: PromptKey, **kwargs: Any) -> RenderedPrompt:

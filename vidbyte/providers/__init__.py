@@ -8,6 +8,7 @@ from vidbyte.providers.client import ProvidersClient
 from vidbyte.providers.compatible import DeepSeekProvider, GLMProvider, MiniMaxProvider
 from vidbyte.providers.gemini import GeminiProvider
 from vidbyte.providers.openai import OpenAIProvider
+from vidbyte.providers.base import tool_spec_to_provider_schema
 from vidbyte.providers.xai import XAIProvider
 
 
@@ -89,4 +90,5 @@ __all__ = [
     "get_image_provider",
     "get_text_provider",
     "get_video_provider",
+    "tool_spec_to_provider_schema",
 ]

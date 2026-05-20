@@ -48,6 +48,7 @@ class ToolParameter:
     type: str
     description: str
     required: bool = True
+    default: Any = None
 
     def __post_init__(self) -> None:
         """Validate parameter metadata when the dataclass is created."""
@@ -66,6 +67,7 @@ class ToolSpec:
     parameters: tuple[ToolParameter, ...] = ()
     permission: ToolPermission = ToolPermission.SAFE
     metadata: Mapping[str, Any] = field(default_factory=dict)
+    input_schema: Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
         """Validate the tool name and description."""
@@ -147,3 +149,15 @@ class ToolResult:
             output=output,
             metadata=dict(metadata or {}),
         )
+
+    @classmethod
+    def failure(
+        cls,
+        tool_name: str,
+        output: str,
+        *,
+        metadata: Mapping[str, Any] | None = None,
+    ) -> "ToolResult":
+        """Alias for error() — build a failed result."""
+        return cls.error(tool_name, output, metadata=metadata)
+

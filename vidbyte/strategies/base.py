@@ -13,6 +13,9 @@ class BaseStrategy:
 
     name: ClassVar[str] = "base"
 
+    def __init__(self, *, runner: object | None = None, **kwargs: Any) -> None:
+        self._runner = runner
+
     async def arun(self, prompt: str, *, runner: object | None = None, context: StrategyContext | None = None, tools: Sequence[object] = (), **options: Any) -> StrategyResult:
         raise NotImplementedError(f"{self.__class__.__name__}.arun() is not implemented")
 
@@ -30,6 +33,17 @@ class BaseStrategy:
     @property
     def strategy_name(self) -> str:
         return getattr(self, "name", self.__class__.__name__)
+
+    def _resolve_runner(self, runner: object | None) -> object:
+        resolved = runner or self._runner
+        if resolved is None:
+            raise StrategyExecutionError(
+                f"{self.__class__.__name__} requires a runner. Pass one to run() or set it in __init__."
+            )
+        return resolved
+
+    def _run_model(self, runner: object, prompt: str, **kwargs: Any) -> Any:
+        return runner.run(prompt, **kwargs)  # type: ignore[union-attr]
 
 
 class BaseStrategyUtils:

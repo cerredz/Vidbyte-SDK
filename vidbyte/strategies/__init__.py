@@ -4,14 +4,6 @@ from vidbyte.strategies.agent_loops import PlanAndExecuteStrategy, SelfRefinemen
 from vidbyte.strategies.base import BaseStrategy, BaseStrategyUtils
 from vidbyte.strategies.client import StrategyClient
 from vidbyte.strategies.mixins import StrategyMixin
-from vidbyte.strategies.multi_agent import (
-    AutoGenConversationStrategy,
-    BaseMultiAgentStrategy,
-    EconomicGateStrategy,
-    EvolvingOrchestrationStrategy,
-    MultiAgentConsensusStrategy,
-    VerifiedMultiAgentOrchestrationStrategy,
-)
 from vidbyte.strategies.react import ReActStrategy
 from vidbyte.strategies.reasoning import (
     ChainOfDraftStrategy,
@@ -29,18 +21,17 @@ from vidbyte.strategies.sampling import (
 from vidbyte.strategies.tree_of_thoughts import TreeOfThoughtsStrategy
 from vidbyte.strategies.types import StrategyContext, StrategyResult
 
+# Multi-agent strategies import vidbyte.agents, which imports vidbyte.strategies.
+# To avoid circular imports, multi_agent strategies are not re-exported here.
+# Import them directly: from vidbyte.strategies.multi_agent import MultiAgentConsensusStrategy
+
 __all__ = [
     "AnswerConvergenceStrategy",
-    "AutoGenConversationStrategy",
-    "BaseMultiAgentStrategy",
     "BaseStrategy",
     "BaseStrategyUtils",
     "BudgetForcingStrategy",
     "ChainOfDraftStrategy",
     "ChainOfThoughtStrategy",
-    "EconomicGateStrategy",
-    "EvolvingOrchestrationStrategy",
-    "MultiAgentConsensusStrategy",
     "ParadigmRouterStrategy",
     "PlanAndExecuteStrategy",
     "ReActStrategy",
@@ -54,5 +45,4 @@ __all__ = [
     "StrategyResult",
     "StepBackStrategy",
     "TreeOfThoughtsStrategy",
-    "VerifiedMultiAgentOrchestrationStrategy",
 ]

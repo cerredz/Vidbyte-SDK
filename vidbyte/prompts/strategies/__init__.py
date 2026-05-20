@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+from vidbyte.prompts.strategies.self_refinement import (
+    SelfRefinementCreatePrompt,
+    SelfRefinementFeedbackPrompt,
+    SelfRefinementRefinePrompt,
+)
 from vidbyte.prompts.strategies.strategy_prompts import (
     AgenticRagPrompts,
     AnswerConvergencePrompts,
@@ -29,6 +34,9 @@ __all__ = [
     "ParadigmRouterPrompts",
     "PlanAndExecutePrompts",
     "SelfConsistencyPrompts",
+    "SelfRefinementCreatePrompt",
+    "SelfRefinementFeedbackPrompt",
+    "SelfRefinementRefinePrompt",
     "SkeletonOfThoughtPrompts",
     "StepBackPrompts",
     "TreeOfThoughtsPrompts",

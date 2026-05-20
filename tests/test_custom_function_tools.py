@@ -49,7 +49,7 @@ class CustomFunctionToolTests(unittest.IsolatedAsyncioTestCase):
         result = await double.execute(ToolCall("double", {"value": "not-an-int"}))
 
         self.assertEqual(result.status, ToolStatus.ERROR)
-        self.assertIn("value", result.error or "")
+        self.assertIn("value", result.output)
         self.assertEqual(calls, [])
 
     def test_bad_varargs_signature_is_rejected(self) -> None:

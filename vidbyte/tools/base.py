@@ -45,7 +45,7 @@ class BaseTool(ABC):
             if name not in call.arguments or call.arguments[name] is None
         ]
         if missing:
-            return f"Missing required parameter(s): {', '.join(missing)}"
+            return f"Missing required parameters: {', '.join(missing)}"
         return None
 
 

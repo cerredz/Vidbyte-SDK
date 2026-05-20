@@ -1,66 +1,61 @@
-# ==============================================================================
-# CONTEXT PROTOCOL HEADER
-# Description: Defines the ReAct reasoning strategy for the Vidbyte SDK.
-# Purpose: Orchestrates Thought-Action-Observation iterative agent loops.
-# Architecture & Functions:
-#   - ReActStrategy (subclass of BaseStrategy): Solves tasks using tools and PromptRegistry.
-#   - ReActStrategy._build_system_prompt(): Fetches and renders system prompt with registered tools.
-#   - ReActStrategy._build_iteration_prompt(): Fetches and renders current loop state.
-# Codebase Relation:
-#   - Integrates ToolRegistry and PromptRegistry to drive multi-turn agent logic.
-# Similar Files:
-#   - vidbyte/strategies/tree_of_thoughts.py (other strategy logic)
-# ==============================================================================
-
 from __future__ import annotations
 
-from typing import Any
+import json
+import re
+from typing import Any, Sequence
 
-from vidbyte.prompts import PromptRegistry, PromptKey
 from vidbyte.strategies.base import BaseStrategy
-from vidbyte.tools import ToolRegistry
+from vidbyte.strategies.types import StrategyContext, StrategyResult
+from vidbyte.tools.registry import ToolRegistry
 
 
 class ReActStrategy(BaseStrategy):
-    """
-    Implements the Reasoning and Acting (ReAct) strategy.
-    Decouples reasoning prompts and tool availability using centralized registries.
-    """
+    """Reasoning and Acting (ReAct) strategy with optional tool registry."""
 
-    def __init__(self, tool_registry: ToolRegistry) -> None:
-        self.tool_registry = tool_registry
-        self.prompt_registry = PromptRegistry()  # Singleton
+    name = "react"
 
-    async def _build_system_prompt(self) -> str:
-        """Retrieves and renders the ReAct system prompt with active tool specifications."""
-        rendered = self.prompt_registry.get(
-            PromptKey("strategies.react", "system"),
-            tools=self.tool_registry.specs_as_prompt_str()
-        )
-        return rendered.text
+    def __init__(self, tool_registry: ToolRegistry | None = None, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self.tool_registry: ToolRegistry = tool_registry or ToolRegistry()
 
-    async def _build_iteration_prompt(self, task: str, history: str) -> str:
-        """Retrieves and renders the ReAct turn-level prompt."""
-        rendered = self.prompt_registry.get(
-            PromptKey("strategies.react", "iteration"),
-            task=task,
-            history=history
-        )
-        return rendered.text
+    async def arun(
+        self,
+        prompt: str,
+        *,
+        runner: object | None = None,
+        context: StrategyContext | None = None,
+        tools: Sequence[object] = (),
+        **options: Any,
+    ) -> StrategyResult:
+        for tool in tools:
+            if hasattr(tool, "name") and tool.name not in self.tool_registry:
+                self.tool_registry.register(tool)
 
-    async def run(self, input_text: str, **kwargs: Any) -> Any:
-        """
-        Executes a mock representation of the ReAct multi-turn loop.
-        In a full implementation, this drives the ModelRunner and ToolExecutor loop.
-        """
-        system_prompt = await self._build_system_prompt()
-        iteration_prompt = await self._build_iteration_prompt(input_text, history="(No history yet)")
+        model_output: str = options.get("model_output", "")
+        output = await self._execute_react_step(prompt, model_output)
+        return StrategyResult(output=output, strategy_name=self.name)
 
-        # Returns a structure indicating successful prompt compilation and mock execution planning
-        return {
-            "strategy": "react",
-            "system_prompt": system_prompt,
-            "iteration_prompt": iteration_prompt,
-            "status": "ready",
-            "tools_loaded": [t.name for t in self.tool_registry.all()],
-        }
+    async def _execute_react_step(self, prompt: str, model_output: str) -> str:
+        action_match = re.search(r"Action:\s*(\w+)", model_output)
+        input_match = re.search(r"Action Input:\s*(\{.*\})", model_output, re.DOTALL)
+
+        if not action_match:
+            return model_output.strip() or prompt
+
+        tool_name = action_match.group(1).strip()
+        raw_input = input_match.group(1).strip() if input_match else "{}"
+
+        try:
+            tool = self.tool_registry.get(tool_name)
+        except Exception:
+            return f"Error: tool '{tool_name}' not found."
+
+        try:
+            arguments = json.loads(raw_input)
+        except json.JSONDecodeError:
+            arguments = {}
+
+        from vidbyte.tools.types import ToolCall
+        call = ToolCall(tool_name=tool_name, arguments=arguments)
+        result = await tool.execute(call)
+        return result.output

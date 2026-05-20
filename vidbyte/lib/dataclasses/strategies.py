@@ -10,4 +10,5 @@ class StrategyResult:
 
     output: str
     strategy_name: str
+    calls: tuple[Any, ...] = field(default_factory=tuple)
     metadata: Mapping[str, Any] = field(default_factory=dict)
