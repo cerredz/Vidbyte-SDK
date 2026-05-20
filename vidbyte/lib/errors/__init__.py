@@ -1,3 +1,15 @@
 from __future__ import annotations
 
-__all__: list[str] = []
+from vidbyte.lib.errors.base import (
+    ConfigurationError,
+    HarnessExecutionError,
+    ValidationError,
+    VidbyteSdkError,
+)
+
+__all__ = [
+    "ConfigurationError",
+    "HarnessExecutionError",
+    "ValidationError",
+    "VidbyteSdkError",
+]

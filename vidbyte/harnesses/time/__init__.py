@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-from vidbyte.harnesses.client import HarnessClient
-from vidbyte.harnesses.time import (
-    MinimumTimeHarness,
+from vidbyte.harnesses.time.minimum_time import MinimumTimeHarness
+from vidbyte.harnesses.time.types import (
     MinimumTimeHarnessConfig,
     TimeHarnessIterationResult,
     TimeHarnessState,
@@ -10,10 +9,10 @@ from vidbyte.harnesses.time import (
 )
 
 __all__ = [
-    "HarnessClient",
     "MinimumTimeHarness",
     "MinimumTimeHarnessConfig",
     "TimeHarnessIterationResult",
     "TimeHarnessState",
     "TimeHarnessStatus",
 ]
+

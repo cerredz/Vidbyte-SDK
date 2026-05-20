@@ -19,16 +19,60 @@ sdk.tools
 sdk.providers
 ```
 
+## Minimum Time Harness
+
+`MinimumTimeHarness` is the SDK's first time-based harness. It runs an
+async, developer-defined time slice until a clock deadline is reached. Inner
+iteration results can signal completion, but the harness does not stop early;
+normal completion is based only on the supplied date tool reaching the target
+time.
+
+```python
+from datetime import timedelta
+
+from vidbyte.harnesses.time import (
+    MinimumTimeHarness,
+    MinimumTimeHarnessConfig,
+    TimeHarnessIterationResult,
+)
+from vidbyte.tools.builtins import BaseCompactionTool, SystemDateTool
+
+
+class SummaryCompactionTool(BaseCompactionTool):
+    async def compact_history(self, state):
+        return f"iterations={state.iteration}; last={state.last_output}"
+
+
+class MonitorHarness(MinimumTimeHarness[str, str]):
+    async def execute_time_slice(self, state):
+        return TimeHarnessIterationResult(
+            output=f"processed {state.iteration}",
+            signals_completion=True,
+        )
+
+
+harness = MonitorHarness(
+    date_tool=SystemDateTool(),
+    compaction_tool=SummaryCompactionTool(),
+    config=MinimumTimeHarnessConfig(minimum_duration=timedelta(minutes=30)),
+)
+```
+
+Use fake `BaseDateTool` implementations in tests so time can advance without
+real sleeps.
+
 ## Package Structure
 
 ```text
 vidbyte/
 |-- client.py
 |-- harnesses/
-|   `-- client.py
+|   |-- client.py
+|   `-- time/
 |-- providers/
 |   `-- client.py
 |-- tools/
+|   |-- builtins/
 |   `-- client.py
 |-- shared/
 `-- lib/
@@ -45,5 +89,6 @@ Private Vidbyte service implementations, proprietary learning evaluations, promp
 
 ```bash
 python -m compileall vidbyte
-python -c "from vidbyte import VidbyteSDK; sdk = VidbyteSDK(); print(type(sdk.harnesses).__name__)"
+python -m unittest discover -s tests
+python -c "from vidbyte import VidbyteSDK; sdk = VidbyteSDK(); print(type(sdk.harnesses.minimum_time).__name__)"
 ```
