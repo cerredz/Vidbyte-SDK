@@ -1,12 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Any, Mapping
+from vidbyte.lib.dataclasses import ToolResult
 
-
-@dataclass(frozen=True, slots=True)
-class ToolResult:
-    """Normalized result for SDK tool calls."""
-
-    value: object
-    metadata: Mapping[str, Any]
+__all__ = [
+    "ToolResult",
+]

@@ -4,7 +4,7 @@ from typing import Any, Mapping
 
 from vidbyte.lib.config import TextModelConfig
 from vidbyte.lib.enums import ModelProvider
-from vidbyte.lib.errors import ProviderRequestError
+from vidbyte.lib.errors import ProviderConfigurationError, ProviderResponseError
 from vidbyte.lib.http import HttpResponseParser, HttpTransport
 from vidbyte.lib.runners.types import TextModelResponse
 
@@ -14,15 +14,28 @@ class OpenAICompatibleProvider:
 
     provider: ModelProvider
 
-    def __init__(self, *, response_parser: HttpResponseParser | None = None) -> None:
+    def __init__(self, *, text_config: TextModelConfig | None = None, model: str | None = None, response_parser: HttpResponseParser | None = None, **config_options: Any) -> None:
         # Keep response parsing injectable for tests and alternate transports.
+        self._text_config = text_config or self._build_text_config(model=model, config_options=config_options)
         self._parser = response_parser or HttpResponseParser()
 
-    def run_text(self, *, config: TextModelConfig, prompt: str, system: str | None, metadata: Mapping[str, object] | None, transport: HttpTransport) -> TextModelResponse:
+    def run_text(self, *, prompt: str, system: str | None, metadata: Mapping[str, object] | None, transport: HttpTransport, config: TextModelConfig | None = None) -> TextModelResponse:
         # Execute an OpenAI-compatible chat completion request.
+        config = self._config(config)
         response = transport.request(method="POST", url=f"{config.resolved_endpoint()}/chat/completions", headers=self._parser.bearer_headers(config.resolved_api_key()), json_body=self._create_payload(config, prompt, system, metadata), timeout_seconds=config.timeout_seconds)
         parsed = self._parser.parse_json_response(response, provider=self.provider.value)
         return TextModelResponse(provider=self.provider, model=config.model, text=self._extract_chat_text(parsed), raw=parsed, usage=parsed.get("usage") if isinstance(parsed.get("usage"), dict) else None)
+
+    def _config(self, config: TextModelConfig | None) -> TextModelConfig:
+        resolved = config or self._text_config
+        if resolved is None:
+            raise ProviderConfigurationError(f"{self.__class__.__name__} requires a TextModelConfig.", provider=self.provider.value)
+        return resolved
+
+    def _build_text_config(self, *, model: str | None, config_options: Mapping[str, Any]) -> TextModelConfig | None:
+        if model is None:
+            return None
+        return TextModelConfig(provider=self.provider, model=model, **dict(config_options))
 
     def _create_payload(self, config: TextModelConfig, prompt: str, system: str | None, metadata: Mapping[str, object] | None) -> dict[str, Any]:
         # Build chat payloads while preserving caller-supplied history.
@@ -83,12 +96,12 @@ class OpenAICompatibleProvider:
         # Normalize the first assistant message text from chat completion responses.
         choices = parsed.get("choices")
         if not isinstance(choices, list) or not choices:
-            raise ProviderRequestError(f"{self.provider.value} response did not include choices.", provider=self.provider.value, response_excerpt=str(parsed))
+            raise ProviderResponseError(f"{self.provider.value} response did not include choices.", provider=self.provider.value, response_excerpt=str(parsed))
         first = choices[0]
         message = first.get("message") if isinstance(first, dict) else None
         content = message.get("content") if isinstance(message, dict) else None
         if not isinstance(content, str):
-            raise ProviderRequestError(f"{self.provider.value} response did not include message content.", provider=self.provider.value, response_excerpt=str(parsed))
+            raise ProviderResponseError(f"{self.provider.value} response did not include message content.", provider=self.provider.value, response_excerpt=str(parsed))
         return content
 
 

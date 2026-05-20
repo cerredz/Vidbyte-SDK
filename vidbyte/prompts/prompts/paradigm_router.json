@@ -1,0 +1,8 @@
+{
+  "name": "Paradigm Router",
+  "description": "Prompt for selecting the best available reasoning strategy.",
+  "key": "paradigm_router",
+  "prompts": {
+    "route_prompt": "Select the best reasoning strategy for this task. Available strategies are {options}. Choose the strategy that best matches the task shape and failure mode. Prefer decomposition for broad writing tasks. Prefer voting for math, logic, or fragile factual answers. Return only the exact strategy name."
+  }
+}

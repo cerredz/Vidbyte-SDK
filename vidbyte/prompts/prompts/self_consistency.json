@@ -1,0 +1,8 @@
+{
+  "name": "Self-Consistency",
+  "description": "Prompt for independent samples used in majority voting.",
+  "key": "self_consistency",
+  "prompts": {
+    "sample_prompt": "Solve independently as sample {index} of {samples}. Do not assume the prior samples are correct. Work through the task from first principles. Keep the reasoning focused on reaching a defensible answer. Make the answer easy to normalize for voting. Avoid unnecessary stylistic variation. End with Final answer:"
+  }
+}

@@ -52,3 +52,15 @@ class ToolExecutionError(VidbyteSdkError):
 
 class StrategyExecutionError(VidbyteSdkError):
     """Raised when a prompt strategy cannot complete."""
+
+
+class ProviderConfigurationError(ProviderRequestError):
+    """Raised when a provider adapter is missing required configuration."""
+
+
+class ProviderResponseError(ProviderRequestError):
+    """Raised when a provider response cannot be normalized."""
+
+
+class StrategyConfigurationError(StrategyExecutionError):
+    """Raised when a prompt strategy is missing runner/model configuration."""

@@ -1,0 +1,9 @@
+{
+  "name": "Agentic RAG",
+  "description": "Prompts for deciding retrieval needs and answering from retrieved context.",
+  "key": "agentic_rag",
+  "prompts": {
+    "retrieve_prompt": "Decide what information must be retrieved before answering. Return concise retrieval queries. Separate must-have evidence from optional background. Do not answer the task yet. Prefer queries that would verify the highest-risk claims. Keep the query list short and targeted.",
+    "answer_prompt": "Answer using the retrieved context. Ground important claims in the provided material. If context is insufficient, state the gap explicitly. Do not fabricate facts to fill missing evidence. Preserve the original task constraints. End with a concise final answer."
+  }
+}

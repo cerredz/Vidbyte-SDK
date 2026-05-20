@@ -4,7 +4,7 @@ from typing import Any, Mapping
 
 from vidbyte.lib.config import ImageModelConfig, TextModelConfig, VideoModelConfig
 from vidbyte.lib.enums import ModelProvider
-from vidbyte.lib.errors import ProviderRequestError
+from vidbyte.lib.errors import ProviderConfigurationError, ProviderResponseError
 from vidbyte.lib.http import HttpResponseParser, HttpTransport
 from vidbyte.lib.runners.types import GeneratedImage, ImageModelResponse, TextModelResponse, VideoModelJob
 
@@ -12,33 +12,72 @@ from vidbyte.lib.runners.types import GeneratedImage, ImageModelResponse, TextMo
 class OpenAIProvider:
     provider = ModelProvider.OPENAI
 
-    def __init__(self, *, response_parser: HttpResponseParser | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        text_config: TextModelConfig | None = None,
+        image_config: ImageModelConfig | None = None,
+        video_config: VideoModelConfig | None = None,
+        model: str | None = None,
+        response_parser: HttpResponseParser | None = None,
+        **config_options: Any,
+    ) -> None:
         # Keep response parsing injectable for tests and alternate transports.
+        self._text_config = text_config or self._build_text_config(model=model, config_options=config_options)
+        self._image_config = image_config
+        self._video_config = video_config
         self._parser = response_parser or HttpResponseParser()
 
-    def run_text(self, *, config: TextModelConfig, prompt: str, system: str | None, metadata: Mapping[str, object] | None, transport: HttpTransport) -> TextModelResponse:
+    def run_text(self, *, prompt: str, system: str | None, metadata: Mapping[str, object] | None, transport: HttpTransport, config: TextModelConfig | None = None) -> TextModelResponse:
         # Execute OpenAI Responses API with tools, metadata, and structured output support.
+        config = self._text_config_for(config)
         response = transport.request(method="POST", url=f"{config.resolved_endpoint()}/responses", headers=self._parser.bearer_headers(config.resolved_api_key()), json_body=self._create_text_payload(config, prompt, system, metadata), timeout_seconds=config.timeout_seconds)
         parsed = self._parser.parse_json_response(response, provider=self.provider.value)
         return TextModelResponse(provider=self.provider, model=config.model, text=self._extract_response_text(parsed), raw=parsed, usage=parsed.get("usage") if isinstance(parsed.get("usage"), dict) else None)
 
-    def run_image(self, *, config: ImageModelConfig, prompt: str, transport: HttpTransport) -> ImageModelResponse:
+    def run_image(self, *, prompt: str, transport: HttpTransport, config: ImageModelConfig | None = None) -> ImageModelResponse:
         # Execute OpenAI image generation endpoint with generation controls.
+        config = self._image_config_for(config)
         response = transport.request(method="POST", url=f"{config.resolved_endpoint()}/images/generations", headers=self._parser.bearer_headers(config.resolved_api_key()), json_body=self._create_image_payload(config, prompt), timeout_seconds=config.timeout_seconds)
         parsed = self._parser.parse_json_response(response, provider=self.provider.value)
         return ImageModelResponse(provider=self.provider, model=config.model, images=self._extract_images(parsed), raw=parsed)
 
-    def create_video(self, *, config: VideoModelConfig, prompt: str, transport: HttpTransport) -> VideoModelJob:
+    def create_video(self, *, prompt: str, transport: HttpTransport, config: VideoModelConfig | None = None) -> VideoModelJob:
         # Create an asynchronous OpenAI video job without hiding polling behavior.
+        config = self._video_config_for(config)
         response = transport.request(method="POST", url=f"{config.resolved_endpoint()}/videos", headers=self._parser.bearer_headers(config.resolved_api_key()), json_body=self._create_video_payload(config, prompt), timeout_seconds=config.timeout_seconds)
         parsed = self._parser.parse_json_response(response, provider=self.provider.value)
         return self._video_job_from_response(parsed, model=config.model)
 
-    def get_video_status(self, *, config: VideoModelConfig, job_id: str, transport: HttpTransport) -> VideoModelJob:
+    def get_video_status(self, *, job_id: str, transport: HttpTransport, config: VideoModelConfig | None = None) -> VideoModelJob:
         # Retrieve the latest status for an existing OpenAI video job.
+        config = self._video_config_for(config)
         response = transport.request(method="GET", url=f"{config.resolved_endpoint()}/videos/{job_id}", headers=self._parser.bearer_headers(config.resolved_api_key()), timeout_seconds=config.timeout_seconds)
         parsed = self._parser.parse_json_response(response, provider=self.provider.value)
         return self._video_job_from_response(parsed, model=config.model)
+
+    def _text_config_for(self, config: TextModelConfig | None) -> TextModelConfig:
+        resolved = config or self._text_config
+        if resolved is None:
+            raise ProviderConfigurationError("OpenAIProvider requires a TextModelConfig.", provider=self.provider.value)
+        return resolved
+
+    def _image_config_for(self, config: ImageModelConfig | None) -> ImageModelConfig:
+        resolved = config or self._image_config
+        if resolved is None:
+            raise ProviderConfigurationError("OpenAIProvider requires an ImageModelConfig.", provider=self.provider.value)
+        return resolved
+
+    def _video_config_for(self, config: VideoModelConfig | None) -> VideoModelConfig:
+        resolved = config or self._video_config
+        if resolved is None:
+            raise ProviderConfigurationError("OpenAIProvider requires a VideoModelConfig.", provider=self.provider.value)
+        return resolved
+
+    def _build_text_config(self, *, model: str | None, config_options: Mapping[str, Any]) -> TextModelConfig | None:
+        if model is None:
+            return None
+        return TextModelConfig(provider=self.provider, model=model, **dict(config_options))
 
     def _create_text_payload(self, config: TextModelConfig, prompt: str, system: str | None, metadata: Mapping[str, object] | None) -> dict[str, Any]:
         # Build a Responses API payload with prompt, instructions, tools, and controls.
@@ -129,7 +168,7 @@ class OpenAIProvider:
                 self._collect_output_text(chunks, item)
         if chunks:
             return "\n".join(chunks)
-        raise ProviderRequestError("OpenAI response did not include output text.", provider=self.provider.value, response_excerpt=str(parsed))
+        raise ProviderResponseError("OpenAI response did not include output text.", provider=self.provider.value, response_excerpt=str(parsed))
 
     def _collect_output_text(self, chunks: list[str], item: object) -> None:
         # Collect text leaves from one Responses API output item.
@@ -146,7 +185,7 @@ class OpenAIProvider:
         # Normalize OpenAI image data entries into SDK image objects.
         data = parsed.get("data")
         if not isinstance(data, list):
-            raise ProviderRequestError("OpenAI image response did not include image data.", provider=self.provider.value, response_excerpt=str(parsed))
+            raise ProviderResponseError("OpenAI image response did not include image data.", provider=self.provider.value, response_excerpt=str(parsed))
         return tuple(self._image_from_item(item) for item in data if isinstance(item, dict))
 
     def _image_from_item(self, item: Mapping[str, Any]) -> GeneratedImage:
@@ -158,7 +197,7 @@ class OpenAIProvider:
         job_id = parsed.get("id")
         status = parsed.get("status")
         if not isinstance(job_id, str) or not isinstance(status, str):
-            raise ProviderRequestError("OpenAI video response did not include job id and status.", provider=self.provider.value, response_excerpt=str(parsed))
+            raise ProviderResponseError("OpenAI video response did not include job id and status.", provider=self.provider.value, response_excerpt=str(parsed))
         return VideoModelJob(provider=self.provider, model=model, job_id=job_id, status=status, raw=parsed)
 
 

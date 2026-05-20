@@ -26,8 +26,11 @@ vidbyte/
 |-- shared/
 `-- lib/
     |-- config/
+    |-- dataclasses/
     |-- errors/
-    |-- http.py
+    |-- prompts/
+    |-- tools/
+    |-- http/
     `-- runners/
 ```
 
@@ -40,9 +43,12 @@ vidbyte/
 - Keep shared SDK scaffolding under `vidbyte/shared/`.
 - Keep provider-specific HTTP adapters in `vidbyte/providers/`; strategy code must call runners, not provider adapters directly.
 - Keep semantic runner classes in `vidbyte/lib/runners/`; `TextModelRunner.run()` is the required execution path for prompt/API strategies.
-- Keep provider config dataclasses in `vidbyte/lib/config/`; never hardcode API keys or secrets.
-- Keep filesystem tools under `vidbyte/tools/filesystem/`; every filesystem tool must resolve paths against an explicit root and reject traversal outside that root.
+- Keep dataclass definitions in `vidbyte/lib/dataclasses/`; public feature packages may re-export them for compatibility.
+- Keep provider config dataclasses re-exported from `vidbyte/lib/config/`; never hardcode API keys or secrets.
+- Keep prompt JSON assets under `vidbyte/prompts/prompts/` and load them through `vidbyte/lib/prompts/PromptRegistry`.
+- Keep filesystem tools under `vidbyte/tools/filesystem/`; every filesystem tool must use `vidbyte/lib/tools/filesystem/FileSystemPermissions` and a backend from `vidbyte/lib/tools/filesystem/backends/`.
 - Keep prompt/API strategies under `vidbyte/strategies/`, grouped by category.
+- Configure strategy runners at construction time, then call `run(prompt)` without passing a runner for each call.
 - Do not implement model-internal, training-time, or arbitrary-code strategies without an explicit design for hidden-state access, fine-tuning, or sandboxing.
 
 ## Implemented Strategy Batch

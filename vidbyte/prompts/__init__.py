@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from vidbyte.lib.prompts import PrompRegistry, PromptRegistry
 from vidbyte.prompts.strategies import (
     AgenticRagPrompts,
     AnswerConvergencePrompts,
@@ -28,6 +29,8 @@ __all__ = [
     "MultiAgentReflexionPrompts",
     "ParadigmRouterPrompts",
     "PlanAndExecutePrompts",
+    "PrompRegistry",
+    "PromptRegistry",
     "SelfConsistencyPrompts",
     "SkeletonOfThoughtPrompts",
     "StepBackPrompts",

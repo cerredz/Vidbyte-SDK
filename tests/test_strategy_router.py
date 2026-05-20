@@ -24,14 +24,14 @@ class StrategyRouterTests(unittest.TestCase):
     def test_heuristic_router_selects_skeleton_for_report_prompt(self) -> None:
         runner = FakeRunner()
 
-        result = ParadigmRouterStrategy().run("Write a report with sections", runner=runner)
+        result = ParadigmRouterStrategy(runner=runner).run("Write a report with sections")
 
         self.assertEqual(result.metadata["selected_strategy"], "skeleton_of_thought")
 
     def test_model_router_selects_reported_strategy(self) -> None:
         runner = FakeRunner()
 
-        result = ParadigmRouterStrategy().run("task", runner=runner, use_model_router=True)
+        result = ParadigmRouterStrategy(runner=runner).run("task", use_model_router=True)
 
         self.assertEqual(result.metadata["selected_strategy"], "step_back")
         self.assertIn("Return only the exact strategy name", runner.prompts[0])

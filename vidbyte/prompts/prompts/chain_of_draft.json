@@ -1,0 +1,8 @@
+{
+  "name": "Chain of Draft",
+  "description": "Concise reasoning prompt with an explicit word budget.",
+  "key": "chain_of_draft",
+  "prompts": {
+    "draft_prompt": "Solve the task using concise draft reasoning. Each intermediate reasoning step must be at most {max_words_per_step} words. Keep only the details needed to preserve correctness. Do not hide uncertainty when the task is ambiguous. After the terse draft, provide a clear final answer. Make the final answer complete enough to stand alone."
+  }
+}

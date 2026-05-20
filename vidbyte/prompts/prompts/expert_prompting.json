@@ -1,0 +1,8 @@
+{
+  "name": "Expert Prompting",
+  "description": "Prompt for field-specific expert framing.",
+  "key": "expert_prompting",
+  "prompts": {
+    "expert_prompt": "Answer as a domain expert in {domain}. Use expert-level concepts, constraints, and edge cases. Avoid generic explanation that would apply to any field. State assumptions when domain details are missing. Keep the answer useful to a practitioner. Include edge cases a practitioner would notice. End with Final answer:"
+  }
+}

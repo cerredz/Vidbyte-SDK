@@ -25,14 +25,12 @@ sdk.strategies
 Semantic runners live under `vidbyte.lib.runners` and normalize provider-specific APIs.
 
 ```python
-from vidbyte.lib.config import ModelProvider, TextModelConfig
+from vidbyte.lib.config import ModelProvider
 from vidbyte.lib.runners import TextModelRunner
 
 runner = TextModelRunner(
-    TextModelConfig(
-        provider=ModelProvider.OPENAI,
-        model="gpt-4.1-mini",
-    )
+    provider=ModelProvider.OPENAI,
+    model="gpt-4.1-mini",
 )
 
 response = runner.run("Summarize retrieval practice in one paragraph.")
@@ -47,16 +45,18 @@ Supported first-pass providers:
 
 ## Strategies
 
-Prompt/API strategies live under `vidbyte.strategies` and call `TextModelRunner.run()`.
+Prompt/API strategies live under `vidbyte.strategies` and own their runner configuration at construction time.
 
 ```python
-result = sdk.strategies.step_back().run(
-    "Explain why spaced repetition works.",
+strategy = sdk.strategies.step_back(
     runner=runner,
 )
+result = strategy.run("Explain why spaced repetition works.")
 
 print(result.output)
 ```
+
+Prompt templates are JSON assets under `vidbyte/prompts/prompts` and are loaded through `vidbyte.lib.prompts.PromptRegistry`.
 
 Implemented first-batch strategies:
 
@@ -75,10 +75,11 @@ Implemented first-batch strategies:
 Filesystem tools are root-scoped and reject paths outside the configured root.
 
 ```python
-from vidbyte.tools.filesystem import FileSystemToolConfig, ReadTextTool
+from vidbyte.tools.filesystem import FileSystemToolConfig, ReadTextTool, StatTool
 
 tool = ReadTextTool(FileSystemToolConfig(root="./workspace"))
 content = tool.run("notes.md").value
+metadata = StatTool(FileSystemToolConfig(root="./workspace")).run("notes.md").value
 ```
 
 ## Package Structure
@@ -99,13 +100,19 @@ vidbyte/
 |   |-- sampling/
 |   |-- agent_loops/
 |   `-- routing/
+|-- prompts/
+|   |-- prompts/
+|   `-- strategies/
 |-- tools/
 |   |-- client.py
 |   `-- filesystem/
 |-- shared/
 `-- lib/
     |-- config/
+    |-- dataclasses/
     |-- errors/
+    |-- prompts/
+    |-- tools/
     `-- runners/
 ```
 
@@ -113,7 +120,7 @@ vidbyte/
 
 The SDK should contain reusable public namespace scaffolding and developer-facing abstractions.
 
-Private Vidbyte service implementations, proprietary learning evaluations, prompts, scoring logic, adaptive sequencing, and database access should stay outside this package.
+Private Vidbyte service implementations, proprietary learning evaluations, product-private prompts, scoring logic, adaptive sequencing, and database access should stay outside this package.
 
 ## Local Verification
 

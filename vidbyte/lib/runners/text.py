@@ -1,11 +1,13 @@
 from __future__ import annotations
 
-from typing import Mapping
+from typing import Any, Mapping
 
 from vidbyte.lib.config import TextModelConfig
+from vidbyte.lib.enums import ModelProvider
+from vidbyte.lib.errors import ConfigurationError
 from vidbyte.lib.http import HttpTransport
 from vidbyte.lib.runners.types import TextModelResponse
-from vidbyte.providers import get_text_provider
+from vidbyte.providers import ModelProviders
 
 
 class TextModelRunner:
@@ -13,14 +15,18 @@ class TextModelRunner:
 
     def __init__(
         self,
-        config: TextModelConfig,
+        config: TextModelConfig | None = None,
         *,
+        provider: ModelProvider | str | None = None,
+        model: str | None = None,
         transport: HttpTransport | None = None,
+        **config_options: Any,
     ) -> None:
+        config = self._coerce_config(config, provider=provider, model=model, config_options=config_options)
         config.validate()
         self._config = config
         self._transport = transport or HttpTransport()
-        self._provider = get_text_provider(config.normalized_provider())
+        self._provider = ModelProviders.text(config)
 
     def run(
         self,
@@ -30,7 +36,6 @@ class TextModelRunner:
         metadata: Mapping[str, object] | None = None,
     ) -> TextModelResponse:
         return self._provider.run_text(
-            config=self._config,
             prompt=prompt,
             system=system,
             metadata=metadata,
@@ -42,3 +47,17 @@ class TextModelRunner:
 
     def print(self, response: TextModelResponse) -> None:
         print(response.text)
+
+    def _coerce_config(
+        self,
+        config: TextModelConfig | None,
+        *,
+        provider: ModelProvider | str | None,
+        model: str | None,
+        config_options: Mapping[str, Any],
+    ) -> TextModelConfig:
+        if config is not None:
+            return config
+        if provider is None or model is None:
+            raise ConfigurationError("TextModelRunner requires either config or provider and model.")
+        return TextModelConfig(provider=provider, model=model, **dict(config_options))

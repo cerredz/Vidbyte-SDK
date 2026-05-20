@@ -32,7 +32,7 @@ class SamplingStrategyTests(unittest.TestCase):
             ]
         )
 
-        result = SelfConsistencyStrategy(samples=3).run("task", runner=runner)
+        result = SelfConsistencyStrategy(samples=3, runner=runner).run("task")
 
         self.assertEqual(result.metadata["winner"], "a")
         self.assertEqual(result.metadata["votes"], 2)
@@ -46,7 +46,7 @@ class SamplingStrategyTests(unittest.TestCase):
             ]
         )
 
-        result = BudgetForcingStrategy(max_rounds=3).run("task", runner=runner)
+        result = BudgetForcingStrategy(max_rounds=3, runner=runner).run("task")
 
         self.assertEqual(len(result.calls), 2)
         self.assertIn("done", result.output)
@@ -62,7 +62,7 @@ class SamplingStrategyTests(unittest.TestCase):
             ]
         )
 
-        result = AnswerConvergenceStrategy(max_samples=5, window=3).run("task", runner=runner)
+        result = AnswerConvergenceStrategy(max_samples=5, window=3, runner=runner).run("task")
 
         self.assertEqual(len(result.calls), 4)
         self.assertEqual(result.metadata["winner"], "b")

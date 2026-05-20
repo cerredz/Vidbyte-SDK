@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import re
 from abc import ABC, abstractmethod
-from typing import ClassVar
+from typing import Any, ClassVar
 
-from vidbyte.lib.errors import StrategyExecutionError
+from vidbyte.lib.config import TextModelConfig
+from vidbyte.lib.enums import ModelProvider
+from vidbyte.lib.errors import StrategyConfigurationError, StrategyExecutionError, VidbyteSdkError
+from vidbyte.lib.http import HttpTransport
 from vidbyte.lib.runners import TextModelRunner
 from vidbyte.strategies.types import StrategyResult
 
@@ -14,9 +17,54 @@ class BaseStrategy(ABC):
 
     name: ClassVar[str]
 
+    def __init__(
+        self,
+        *,
+        runner: TextModelRunner | None = None,
+        text_config: TextModelConfig | None = None,
+        provider: ModelProvider | str | None = None,
+        model: str | None = None,
+        transport: HttpTransport | None = None,
+        **runner_options: Any,
+    ) -> None:
+        self._runner = runner or self._build_runner(
+            text_config=text_config,
+            provider=provider,
+            model=model,
+            transport=transport,
+            runner_options=runner_options,
+        )
+
     @abstractmethod
-    def run(self, prompt: str, *, runner: TextModelRunner, **options: object) -> StrategyResult:
+    def run(self, prompt: str, **options: object) -> StrategyResult:
         """Run the strategy using a text model runner."""
+
+    def _resolve_runner(self, runner: TextModelRunner | None = None) -> TextModelRunner:
+        resolved = runner or self._runner
+        if resolved is None:
+            raise StrategyConfigurationError("Strategy requires a runner or provider/model constructor arguments.")
+        return resolved
+
+    def _run_model(self, runner: TextModelRunner, prompt: str) -> object:
+        try:
+            return runner.run(prompt)
+        except VidbyteSdkError:
+            raise
+        except Exception as exc:
+            raise StrategyExecutionError(f"{self.name} strategy failed while running the model.") from exc
+
+    def _build_runner(
+        self,
+        *,
+        text_config: TextModelConfig | None,
+        provider: ModelProvider | str | None,
+        model: str | None,
+        transport: HttpTransport | None,
+        runner_options: dict[str, Any],
+    ) -> TextModelRunner | None:
+        if text_config is None and provider is None and model is None:
+            return None
+        return TextModelRunner(text_config, provider=provider, model=model, transport=transport, **runner_options)
 
 
 class BaseStrategyUtils:
@@ -62,31 +110,7 @@ class BaseStrategyUtils:
             raise StrategyExecutionError(f"{field_name} must be greater than zero.")
 
 
-def extract_final_answer(text: str) -> str:
-    # Back-compatible wrapper around BaseStrategyUtils.
-    return BaseStrategyUtils.extract_final_answer(text)
-
-
-def normalize_answer(text: str) -> str:
-    # Back-compatible wrapper around BaseStrategyUtils.
-    return BaseStrategyUtils.normalize_answer(text)
-
-
-def parse_numbered_lines(text: str) -> tuple[str, ...]:
-    # Back-compatible wrapper around BaseStrategyUtils.
-    return BaseStrategyUtils.parse_numbered_lines(text)
-
-
-def require_positive(value: int, *, field_name: str) -> None:
-    # Back-compatible wrapper around BaseStrategyUtils.
-    BaseStrategyUtils.require_positive(value, field_name=field_name)
-
-
 __all__ = [
     "BaseStrategy",
     "BaseStrategyUtils",
-    "extract_final_answer",
-    "normalize_answer",
-    "parse_numbered_lines",
-    "require_positive",
 ]

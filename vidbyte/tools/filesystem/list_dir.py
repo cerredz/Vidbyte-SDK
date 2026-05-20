@@ -1,25 +1,15 @@
 from __future__ import annotations
 
-from vidbyte.lib.errors import ToolExecutionError
-from vidbyte.tools.base import ToolResult
-from vidbyte.tools.filesystem.base import FileSystemToolConfig, resolve_scoped_path
+from vidbyte.lib.dataclasses import ToolResult
+from vidbyte.lib.tools.filesystem import FileSystemPermissions
+from vidbyte.tools.filesystem._base_tool import FileSystemTool
 
 
-class ListDirTool:
+class ListDirTool(FileSystemTool):
     """List files and folders inside a configured root."""
 
-    def __init__(self, config: FileSystemToolConfig) -> None:
-        self._config = config
-
     def run(self, path: str = ".") -> ToolResult:
-        target = resolve_scoped_path(self._config, path)
-        if not target.exists():
-            raise ToolExecutionError("Directory does not exist.", details={"path": str(target)})
-        if not target.is_dir():
-            raise ToolExecutionError("Path is not a directory.", details={"path": str(target)})
-
-        entries = tuple(
-            f"{entry.name}/" if entry.is_dir() else entry.name
-            for entry in sorted(target.iterdir(), key=lambda item: item.name.lower())
-        )
+        target = self._path(path)
+        FileSystemPermissions.require_existing_directory(target)
+        entries = self.backend.list_dir(target)
         return ToolResult(value=entries, metadata={"path": str(target)})

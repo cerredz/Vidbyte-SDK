@@ -5,7 +5,7 @@ from urllib.parse import quote
 
 from vidbyte.lib.config import TextModelConfig
 from vidbyte.lib.enums import ModelProvider
-from vidbyte.lib.errors import ProviderRequestError
+from vidbyte.lib.errors import ProviderConfigurationError, ProviderResponseError
 from vidbyte.lib.http import HttpResponseParser, HttpTransport
 from vidbyte.lib.runners.types import TextModelResponse
 
@@ -13,16 +13,29 @@ from vidbyte.lib.runners.types import TextModelResponse
 class GeminiProvider:
     provider = ModelProvider.GEMINI
 
-    def __init__(self, *, response_parser: HttpResponseParser | None = None) -> None:
+    def __init__(self, *, text_config: TextModelConfig | None = None, model: str | None = None, response_parser: HttpResponseParser | None = None, **config_options: Any) -> None:
         # Keep response parsing injectable for tests and alternate transports.
+        self._text_config = text_config or self._build_text_config(model=model, config_options=config_options)
         self._parser = response_parser or HttpResponseParser()
 
-    def run_text(self, *, config: TextModelConfig, prompt: str, system: str | None, metadata: Mapping[str, object] | None, transport: HttpTransport) -> TextModelResponse:
+    def run_text(self, *, prompt: str, system: str | None, metadata: Mapping[str, object] | None, transport: HttpTransport, config: TextModelConfig | None = None) -> TextModelResponse:
         # Execute Gemini generateContent with contents, tools, safety, and cache options.
+        config = self._config(config)
         model = quote(config.model, safe="")
         response = transport.request(method="POST", url=f"{config.resolved_endpoint()}/models/{model}:generateContent", headers=self._create_headers(config), json_body=self._create_payload(config, prompt, system, metadata), timeout_seconds=config.timeout_seconds)
         parsed = self._parser.parse_json_response(response, provider=self.provider.value)
         return TextModelResponse(provider=self.provider, model=config.model, text=self._extract_text(parsed), raw=parsed, usage=parsed.get("usageMetadata") if isinstance(parsed.get("usageMetadata"), dict) else None)
+
+    def _config(self, config: TextModelConfig | None) -> TextModelConfig:
+        resolved = config or self._text_config
+        if resolved is None:
+            raise ProviderConfigurationError("GeminiProvider requires a TextModelConfig.", provider=self.provider.value)
+        return resolved
+
+    def _build_text_config(self, *, model: str | None, config_options: Mapping[str, Any]) -> TextModelConfig | None:
+        if model is None:
+            return None
+        return TextModelConfig(provider=self.provider, model=model, **dict(config_options))
 
     def _create_headers(self, config: TextModelConfig) -> dict[str, str]:
         # Prefer the x-goog-api-key header so the key is not embedded in URLs.
@@ -96,15 +109,15 @@ class GeminiProvider:
         # Normalize text parts from the first Gemini candidate.
         candidates = parsed.get("candidates")
         if not isinstance(candidates, list) or not candidates:
-            raise ProviderRequestError("Gemini response did not include candidates.", provider=self.provider.value, response_excerpt=str(parsed))
+            raise ProviderResponseError("Gemini response did not include candidates.", provider=self.provider.value, response_excerpt=str(parsed))
         first = candidates[0]
         content = first.get("content") if isinstance(first, dict) else None
         parts = content.get("parts") if isinstance(content, dict) else None
         if not isinstance(parts, list):
-            raise ProviderRequestError("Gemini response did not include text parts.", provider=self.provider.value, response_excerpt=str(parsed))
+            raise ProviderResponseError("Gemini response did not include text parts.", provider=self.provider.value, response_excerpt=str(parsed))
         chunks = [part["text"] for part in parts if isinstance(part, dict) and isinstance(part.get("text"), str)]
         if not chunks:
-            raise ProviderRequestError("Gemini response did not include text.", provider=self.provider.value, response_excerpt=str(parsed))
+            raise ProviderResponseError("Gemini response did not include text.", provider=self.provider.value, response_excerpt=str(parsed))
         return "\n".join(chunks)
 
 

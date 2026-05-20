@@ -29,15 +29,15 @@ class ReasoningStrategyTests(unittest.TestCase):
     def test_chain_of_thought_uses_single_runner_call(self) -> None:
         runner = FakeRunner()
 
-        result = ChainOfThoughtStrategy().run("task", runner=runner)
+        result = ChainOfThoughtStrategy(runner=runner).run("task")
 
         self.assertEqual(len(result.calls), 1)
-        self.assertIn("Reason step by step", runner.prompts[0])
+        self.assertIn("reason step by step", runner.prompts[0])
 
     def test_step_back_uses_principles_then_answer(self) -> None:
         runner = FakeRunner()
 
-        result = StepBackStrategy().run("task", runner=runner)
+        result = StepBackStrategy(runner=runner).run("task")
 
         self.assertEqual(len(result.calls), 2)
         self.assertIn("Step back", runner.prompts[0])
@@ -46,14 +46,14 @@ class ReasoningStrategyTests(unittest.TestCase):
     def test_chain_of_draft_includes_word_budget(self) -> None:
         runner = FakeRunner()
 
-        ChainOfDraftStrategy(max_words_per_step=4).run("task", runner=runner)
+        ChainOfDraftStrategy(max_words_per_step=4, runner=runner).run("task")
 
         self.assertIn("at most 4 words", runner.prompts[0])
 
     def test_skeleton_of_thought_expands_points(self) -> None:
         runner = FakeRunner()
 
-        result = SkeletonOfThoughtStrategy(max_workers=1).run("task", runner=runner)
+        result = SkeletonOfThoughtStrategy(max_workers=1, runner=runner).run("task")
 
         self.assertEqual(len(result.calls), 3)
         self.assertEqual(result.metadata["points"], ("Alpha", "Beta"))

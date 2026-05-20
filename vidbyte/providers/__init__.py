@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from vidbyte.lib.config import ImageModelConfig, TextModelConfig, VideoModelConfig
 from vidbyte.lib.enums import ModelProvider
 from vidbyte.lib.errors import ProviderSelectionError
 from vidbyte.providers.anthropic import AnthropicProvider
@@ -14,7 +15,7 @@ class ModelProviders:
     """Central factory for SDK provider adapters."""
 
     @staticmethod
-    def text(provider: ModelProvider) -> OpenAIProvider | AnthropicProvider | GeminiProvider | XAIProvider | DeepSeekProvider | GLMProvider | MiniMaxProvider:
+    def text(config: TextModelConfig) -> OpenAIProvider | AnthropicProvider | GeminiProvider | XAIProvider | DeepSeekProvider | GLMProvider | MiniMaxProvider:
         # Return a text-capable adapter for the requested model provider.
         providers = {
             ModelProvider.OPENAI: OpenAIProvider,
@@ -25,42 +26,54 @@ class ModelProviders:
             ModelProvider.GLM: GLMProvider,
             ModelProvider.MINIMAX: MiniMaxProvider,
         }
-        return ModelProviders._build_provider(provider, providers, capability="text")
+        return ModelProviders._build_text_provider(config, providers)
 
     @staticmethod
-    def image(provider: ModelProvider) -> OpenAIProvider | XAIProvider:
+    def image(config: ImageModelConfig) -> OpenAIProvider | XAIProvider:
         # Return an image-capable adapter for providers with public image APIs.
         providers = {ModelProvider.OPENAI: OpenAIProvider, ModelProvider.XAI: XAIProvider}
-        return ModelProviders._build_provider(provider, providers, capability="image")
+        return ModelProviders._build_image_provider(config, providers)
 
     @staticmethod
-    def video(provider: ModelProvider) -> OpenAIProvider:
+    def video(config: VideoModelConfig) -> OpenAIProvider:
         # Return a video-capable adapter for providers with public video job APIs.
         providers = {ModelProvider.OPENAI: OpenAIProvider}
-        return ModelProviders._build_provider(provider, providers, capability="video")
+        return ModelProviders._build_video_provider(config, providers)
 
     @staticmethod
-    def _build_provider(provider: ModelProvider, providers: dict[ModelProvider, type], *, capability: str):
+    def _build_text_provider(config: TextModelConfig, providers: dict[ModelProvider, type]):
+        return ModelProviders._build_provider(config.normalized_provider(), providers, capability="text", text_config=config)
+
+    @staticmethod
+    def _build_image_provider(config: ImageModelConfig, providers: dict[ModelProvider, type]):
+        return ModelProviders._build_provider(config.normalized_provider(), providers, capability="image", image_config=config)
+
+    @staticmethod
+    def _build_video_provider(config: VideoModelConfig, providers: dict[ModelProvider, type]):
+        return ModelProviders._build_provider(config.normalized_provider(), providers, capability="video", video_config=config)
+
+    @staticmethod
+    def _build_provider(provider: ModelProvider, providers: dict[ModelProvider, type], *, capability: str, **kwargs: object):
         # Instantiate provider adapters through one audited selection path.
         provider_class = providers.get(provider)
         if provider_class is None:
             raise ProviderSelectionError(f"Unsupported {capability} provider: {provider.value}", details={"provider": provider.value, "capability": capability})
-        return provider_class()
+        return provider_class(**kwargs)
 
 
-def get_text_provider(provider: ModelProvider):
+def get_text_provider(config: TextModelConfig):
     # Back-compatible wrapper around the central provider registry.
-    return ModelProviders.text(provider)
+    return ModelProviders.text(config)
 
 
-def get_image_provider(provider: ModelProvider):
+def get_image_provider(config: ImageModelConfig):
     # Back-compatible wrapper around the central provider registry.
-    return ModelProviders.image(provider)
+    return ModelProviders.image(config)
 
 
-def get_video_provider(provider: ModelProvider):
+def get_video_provider(config: VideoModelConfig):
     # Back-compatible wrapper around the central provider registry.
-    return ModelProviders.video(provider)
+    return ModelProviders.video(config)
 
 
 __all__ = [

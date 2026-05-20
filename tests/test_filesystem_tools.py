@@ -4,7 +4,23 @@ import unittest
 from tempfile import TemporaryDirectory
 
 from vidbyte.lib.errors import ToolExecutionError
-from vidbyte.tools.filesystem import FileSystemToolConfig, ListDirTool, MakeDirTool, ReadTextTool, WriteTextTool
+from vidbyte.tools.filesystem import (
+    AppendTool,
+    CopyTool,
+    DeleteTool,
+    DiffTool,
+    FileSystemToolConfig,
+    FindTool,
+    ListDirTool,
+    MakeDirTool,
+    MoveTool,
+    ReadBinaryTool,
+    ReadTextTool,
+    StatTool,
+    UnzipTool,
+    WriteTextTool,
+    ZipTool,
+)
 
 
 class FileSystemToolTests(unittest.TestCase):
@@ -33,6 +49,29 @@ class FileSystemToolTests(unittest.TestCase):
 
             with self.assertRaises(ToolExecutionError):
                 WriteTextTool(config).run("file.txt", "blocked")
+
+    def test_expanded_filesystem_tools_use_scoped_backend(self) -> None:
+        with TemporaryDirectory() as tmp:
+            config = FileSystemToolConfig(root=tmp, allow_write=True)
+
+            WriteTextTool(config).run("a.txt", "one")
+            AppendTool(config).run("a.txt", "\ntwo")
+            CopyTool(config).run("a.txt", "b.txt")
+            MoveTool(config).run("b.txt", "nested/c.txt")
+            WriteTextTool(config).run("binary.bin", "data")
+            archive = ZipTool(config).run("nested", "nested.zip")
+            extracted = UnzipTool(config).run("nested.zip", "unzipped")
+
+            self.assertIn("two", ReadTextTool(config).run("a.txt").value)
+            self.assertEqual(ReadBinaryTool(config).run("binary.bin").value, b"data")
+            self.assertTrue(StatTool(config).run("nested/c.txt").value.is_file)
+            self.assertEqual(FindTool(config).run("*.txt", root="nested").value, ("c.txt",))
+            self.assertIn("+three", DiffTool(config).run("a.txt", content="one\ntwo\nthree").value)
+            self.assertTrue(str(archive.value).endswith("nested.zip"))
+            self.assertIn("nested/c.txt", extracted.value)
+
+            DeleteTool(config).run("nested/c.txt")
+            self.assertFalse(StatTool(config).run("nested/c.txt").value.exists)
 
 
 if __name__ == "__main__":

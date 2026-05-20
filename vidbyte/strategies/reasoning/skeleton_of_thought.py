@@ -5,7 +5,7 @@ from typing import ClassVar
 
 from vidbyte.lib.runners import TextModelResponse, TextModelRunner
 from vidbyte.prompts.strategies import SkeletonOfThoughtPrompts
-from vidbyte.strategies.base import BaseStrategy, parse_numbered_lines, require_positive
+from vidbyte.strategies.base import BaseStrategy, BaseStrategyUtils
 from vidbyte.strategies.types import StrategyResult
 
 
@@ -13,13 +13,15 @@ class SkeletonOfThoughtStrategy(BaseStrategy):
     name: ClassVar[str] = "skeleton_of_thought"
     prompts: ClassVar[dict[str, str]] = SkeletonOfThoughtPrompts().export()
 
-    def __init__(self, *, max_points: int = 8, max_workers: int = 4) -> None:
-        require_positive(max_points, field_name="max_points")
-        require_positive(max_workers, field_name="max_workers")
+    def __init__(self, *, max_points: int = 8, max_workers: int = 4, **runner_options: object) -> None:
+        super().__init__(**runner_options)
+        BaseStrategyUtils.require_positive(max_points, field_name="max_points")
+        BaseStrategyUtils.require_positive(max_workers, field_name="max_workers")
         self.max_points = max_points
         self.max_workers = max_workers
 
-    def run(self, prompt: str, *, runner: TextModelRunner, **options: object) -> StrategyResult:
+    def run(self, prompt: str, *, runner: TextModelRunner | None = None, **options: object) -> StrategyResult:
+        runner = self._resolve_runner(runner)
         skeleton_response = self._build_skeleton(prompt, runner=runner)
         points = self._parse_points(skeleton_response.text)
         completion_responses = self._expand_points(prompt, skeleton_response.text, points, runner=runner)
@@ -30,11 +32,11 @@ class SkeletonOfThoughtStrategy(BaseStrategy):
     def _build_skeleton(self, prompt: str, *, runner: TextModelRunner) -> TextModelResponse:
         # Request a concise numbered skeleton before expanding into detail.
         instruction = self.prompts["skeleton_prompt"].format(max_points=self.max_points)
-        return runner.run(f"{instruction}\n\n{prompt}")
+        return self._run_model(runner, f"{instruction}\n\n{prompt}")
 
     def _parse_points(self, skeleton_text: str) -> tuple[str, ...]:
         # Extract numbered lines up to max_points; fall back to the full text.
-        points = parse_numbered_lines(skeleton_text)[: self.max_points]
+        points = BaseStrategyUtils.parse_numbered_lines(skeleton_text)[: self.max_points]
         return points if points else (skeleton_text.strip(),)
 
     def _expand_points(self, prompt: str, skeleton_text: str, points: tuple[str, ...], *, runner: TextModelRunner) -> tuple[TextModelResponse, ...]:
@@ -42,7 +44,7 @@ class SkeletonOfThoughtStrategy(BaseStrategy):
         expand_prompt = self.prompts["expand_prompt"]
 
         def complete_point(point: str) -> TextModelResponse:
-            return runner.run(f"{expand_prompt}\n\nOriginal task:\n{prompt}\n\nSkeleton:\n{skeleton_text}\n\nPoint:\n{point}")
+            return self._run_model(runner, f"{expand_prompt}\n\nOriginal task:\n{prompt}\n\nSkeleton:\n{skeleton_text}\n\nPoint:\n{point}")
 
         with ThreadPoolExecutor(max_workers=min(self.max_workers, len(points))) as executor:
             return tuple(executor.map(complete_point, points))

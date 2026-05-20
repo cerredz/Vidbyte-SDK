@@ -1,23 +1,17 @@
 from __future__ import annotations
 
-from vidbyte.lib.errors import ToolExecutionError
-from vidbyte.tools.base import ToolResult
-from vidbyte.tools.filesystem.base import FileSystemToolConfig, resolve_scoped_path
+from vidbyte.lib.dataclasses import ToolResult
+from vidbyte.lib.tools.filesystem import FileSystemPermissions
+from vidbyte.tools.filesystem._base_tool import FileSystemTool
 
 
-class ReadTextTool:
+class ReadTextTool(FileSystemTool):
     """Read a text file inside a configured root."""
 
-    def __init__(self, config: FileSystemToolConfig) -> None:
-        self._config = config
-
     def run(self, path: str) -> ToolResult:
-        target = resolve_scoped_path(self._config, path)
-        if not target.exists():
-            raise ToolExecutionError("File does not exist.", details={"path": str(target)})
-        if not target.is_file():
-            raise ToolExecutionError("Path is not a file.", details={"path": str(target)})
+        target = self._path(path)
+        FileSystemPermissions.require_existing_file(target)
         return ToolResult(
-            value=target.read_text(encoding=self._config.encoding),
+            value=self.backend.read_text(target, encoding=self._config.encoding),
             metadata={"path": str(target), "encoding": self._config.encoding},
         )

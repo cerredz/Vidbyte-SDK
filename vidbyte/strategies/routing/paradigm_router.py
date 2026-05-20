@@ -19,7 +19,8 @@ class ParadigmRouterStrategy(BaseStrategy):
     name: ClassVar[str] = "paradigm_router"
     prompts: ClassVar[dict[str, str]] = ParadigmRouterPrompts().export()
 
-    def __init__(self, strategies: Iterable[BaseStrategy] | None = None) -> None:
+    def __init__(self, strategies: Iterable[BaseStrategy] | None = None, **runner_options: object) -> None:
+        super().__init__(**runner_options)
         selected = strategies or (
             ChainOfThoughtStrategy(),
             StepBackStrategy(),
@@ -29,7 +30,8 @@ class ParadigmRouterStrategy(BaseStrategy):
         )
         self._strategies = {strategy.name: strategy for strategy in selected}
 
-    def run(self, prompt: str, *, runner: TextModelRunner, **options: object) -> StrategyResult:
+    def run(self, prompt: str, *, runner: TextModelRunner | None = None, **options: object) -> StrategyResult:
+        runner = self._resolve_runner(runner)
         use_model_router = bool(options.get("use_model_router", False))
         selected_name = self._route_with_model(prompt, runner=runner) if use_model_router else self._route_with_heuristics(prompt)
         selected = self._strategies.get(selected_name) or self._strategies["chain_of_thought"]
@@ -53,7 +55,7 @@ class ParadigmRouterStrategy(BaseStrategy):
         # Let the model select a strategy then verify it against the known registry.
         options_str = ", ".join(self._strategies)
         instruction = self.prompts["route_prompt"].format(options=options_str)
-        response = runner.run(f"{instruction}\n\n{prompt}")
+        response = self._run_model(runner, f"{instruction}\n\n{prompt}")
         normalized = response.text.strip().lower()
         for name in self._strategies:
             if name in normalized:
