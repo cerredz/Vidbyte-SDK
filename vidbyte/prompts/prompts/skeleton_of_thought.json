@@ -1,0 +1,9 @@
+{
+  "name": "Skeleton of Thought",
+  "description": "Prompts for outline-first generation and point expansion.",
+  "key": "skeleton_of_thought",
+  "prompts": {
+    "skeleton_prompt": "Create a concise numbered skeleton for answering the task. Use no more than {max_points} points. Make each point distinct and ordered logically. Do not fill in the details yet. Keep every point short enough to guide a later expansion. Return only the numbered skeleton.",
+    "expand_prompt": "Complete this one skeleton point for the original task. Stay focused on the provided point. Add the facts, reasoning, and examples needed for that point to stand alone. Do not rewrite unrelated skeleton points. Keep the expansion coherent with the full task. Return polished prose for this point only."
+  }
+}

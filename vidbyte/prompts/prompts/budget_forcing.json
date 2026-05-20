@@ -1,0 +1,9 @@
+{
+  "name": "Budget Forcing",
+  "description": "Prompts for continuing reasoning until a final answer marker appears.",
+  "key": "budget_forcing",
+  "prompts": {
+    "initial_prompt": "Solve the task carefully with enough reasoning budget. Check assumptions before finalizing. Continue looking for mistakes while the answer still feels premature. Keep the reasoning grounded in the prompt. Avoid unnecessary repetition. End with Final answer: when the answer is ready.",
+    "continue_prompt": "Continue from the previous attempt. Double-check assumptions, missing cases, and weak inferences. Correct any mistake you find. Do not restart from scratch unless the prior attempt is unusable. Preserve useful work from the previous answer. Provide a final answer when the reasoning is complete."
+  }
+}
