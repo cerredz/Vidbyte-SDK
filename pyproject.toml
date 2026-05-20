@@ -12,7 +12,9 @@ license = { text = "UNLICENSED" }
 authors = [
   { name = "Vidbyte" }
 ]
-dependencies = []
+dependencies = [
+  "pydantic>=2,<3",
+]
 
 [project.urls]
 Homepage = "https://vidbyte.ai"
