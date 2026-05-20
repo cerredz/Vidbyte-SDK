@@ -25,4 +25,8 @@ vidbyte/
 - Keep internal library helpers under `vidbyte/lib/`.
 - Keep SDK error modules under `vidbyte/lib/errors/`.
 - Keep shared SDK scaffolding under `vidbyte/shared/`.
-- Do not add concrete harness, tool, provider, or error implementations until the structure is approved.
+- Advanced tools are approved under `vidbyte/tools/` when they follow the shared `BaseTool`, `ToolSpec`, `ToolRegistry`, and `ToolExecutor` contracts.
+- Keep built-in tool categories under `vidbyte/tools/builtins/`; current approved categories are `code_search`, `editing`, and `context`.
+- Keep MCP bridge code under `vidbyte/tools/mcp/`.
+- Keep permission and sandbox abstractions under `vidbyte/tools/security/`.
+- Mutating or executable tools must declare `WRITE` or `EXECUTE` permissions and be guarded by the executor permission policy.
