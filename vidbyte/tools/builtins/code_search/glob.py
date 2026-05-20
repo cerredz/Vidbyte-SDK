@@ -32,6 +32,7 @@ class GlobTool(BaseCodeSearchTool):
                 ToolParameter("pattern", "string", "Glob pattern such as '**/*.py'."),
                 ToolParameter("subdir", "string", "Subdirectory to search from.", required=False),
                 ToolParameter("max_results", "integer", "Maximum paths to return.", required=False),
+                ToolParameter("max_chars", "integer", "Maximum output characters.", required=False),
             ),
         )
 
@@ -40,6 +41,7 @@ class GlobTool(BaseCodeSearchTool):
         pattern = str(call.arguments["pattern"])
         subdir = str(call.arguments.get("subdir", "."))
         max_results = max(1, min(int(call.arguments.get("max_results", 50)), 500))
+        max_chars = max(200, min(int(call.arguments.get("max_chars", 10000)), 50000))
         try:
             start = self.resolve_under_root(subdir)
         except ValueError as exc:
@@ -62,8 +64,12 @@ class GlobTool(BaseCodeSearchTool):
             return ToolResult.success(self.name, "No files matched.", metadata={"count": 0})
         truncated = len(matches) >= max_results
         suffix = "\nResults truncated; narrow the pattern." if truncated else ""
+        output = "\n".join(matches) + suffix
+        if len(output) > max_chars:
+            output = output[:max_chars] + "\n...[truncated]"
+            truncated = True
         return ToolResult.success(
             self.name,
-            "\n".join(matches) + suffix,
+            output,
             metadata={"count": len(matches), "truncated": truncated},
         )

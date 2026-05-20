@@ -36,6 +36,7 @@ class GrepTool(BaseCodeSearchTool):
                 ToolParameter("extensions", "array", "File extensions to include.", required=False),
                 ToolParameter("context_lines", "integer", "Lines before and after each match.", required=False),
                 ToolParameter("max_results", "integer", "Maximum matches to return.", required=False),
+                ToolParameter("max_chars", "integer", "Maximum output characters.", required=False),
             ),
         )
 
@@ -47,6 +48,7 @@ class GrepTool(BaseCodeSearchTool):
         extensions = self._extensions(call.arguments.get("extensions", ()))
         context_lines = max(0, min(int(call.arguments.get("context_lines", 2)), 5))
         max_results = max(1, min(int(call.arguments.get("max_results", 50)), 500))
+        max_chars = max(200, min(int(call.arguments.get("max_chars", 12000)), 50000))
         try:
             compiled = re.compile(pattern if use_regex else re.escape(pattern))
             files = tuple(self.iter_files(subdir, extensions=extensions))
@@ -71,6 +73,8 @@ class GrepTool(BaseCodeSearchTool):
                 snippets.append(f"{rel}:{index + 1}\n{body}")
                 if len(snippets) >= max_results:
                     output = "\n\n".join(snippets) + "\n\nResults truncated; narrow the pattern."
+                    if len(output) > max_chars:
+                        output = output[:max_chars] + "\n...[truncated]"
                     return ToolResult.success(
                         self.name,
                         output,
@@ -80,8 +84,8 @@ class GrepTool(BaseCodeSearchTool):
             return ToolResult.success(self.name, "No matches found.", metadata={"count": 0})
         return ToolResult.success(
             self.name,
-            "\n\n".join(snippets),
-            metadata={"count": len(snippets), "truncated": False},
+            self._bounded_output("\n\n".join(snippets), max_chars),
+            metadata={"count": len(snippets), "truncated": len("\n\n".join(snippets)) > max_chars},
         )
 
     def _extensions(self, value: object) -> Sequence[str]:
@@ -91,3 +95,9 @@ class GrepTool(BaseCodeSearchTool):
         if isinstance(value, Sequence):
             return tuple(str(part) for part in value)
         return ()
+
+    def _bounded_output(self, output: str, max_chars: int) -> str:
+        """Truncate grep output to the requested character budget."""
+        if len(output) <= max_chars:
+            return output
+        return output[:max_chars] + "\n...[truncated]"
