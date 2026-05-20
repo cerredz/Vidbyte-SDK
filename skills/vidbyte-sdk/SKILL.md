@@ -15,6 +15,8 @@ vidbyte/
 |   |-- anthropic.py
 |   |-- gemini.py
 |   `-- xai.py
+|-- prompts/
+|   `-- strategies/
 |-- strategies/
 |   |-- reasoning/
 |   |-- sampling/
@@ -42,6 +44,7 @@ vidbyte/
 - Keep semantic runner classes in `vidbyte/lib/runners/`; `TextModelRunner.run()` is the required execution path for prompt/API strategies.
 - Keep provider config dataclasses in `vidbyte/lib/config/`; never hardcode API keys or secrets.
 - Keep filesystem tools under `vidbyte/tools/filesystem/`; every filesystem tool must resolve paths against an explicit root and reject traversal outside that root.
+- Keep reusable prompt templates under `vidbyte/prompts/`; each prompt class should expose `export()` so users can inspect or reuse strategy prompts.
 - Keep prompt/API strategies under `vidbyte/strategies/`, grouped by category.
 - Do not implement model-internal, training-time, or arbitrary-code strategies without an explicit design for hidden-state access, fine-tuning, or sandboxing.
 
@@ -55,4 +58,5 @@ vidbyte/
 - Budget Forcing: continuation calls until a final answer marker or round cap.
 - Answer Convergence: repeated samples until a recent answer window converges.
 - Plan-and-Execute: plan first, execute each step, then synthesize.
+- Self-Refinement: create an initial draft, generate specific feedback, then refine over a configured loop count.
 - Paradigm Routing: selects a strategy with heuristics or a model-scored routing prompt.

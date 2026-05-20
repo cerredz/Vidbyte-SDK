@@ -68,7 +68,32 @@ Implemented first-batch strategies:
 - Budget Forcing
 - Answer Convergence
 - Plan-and-Execute
+- Self-Refinement
 - Paradigm Routing
+
+```python
+self_refine = sdk.strategies.self_refinement(
+    create_system_prompt="Create a strong first draft.",
+    refine_system_prompt="Revise the draft using the feedback.",
+    iterations=2,
+)
+
+result = self_refine.run(
+    "Write a short explanation of retrieval practice.",
+    runner=runner,
+)
+```
+
+Strategy prompt templates are reusable through `vidbyte.prompts.strategies`.
+
+```python
+from vidbyte.prompts.strategies import SelfRefinementFeedbackPrompt
+
+prompt = SelfRefinementFeedbackPrompt(
+    original_task="Write a short explanation of retrieval practice.",
+    current_draft="Retrieval practice means recalling information.",
+).export()
+```
 
 ## Filesystem Tools
 
@@ -94,6 +119,8 @@ vidbyte/
 |   |-- anthropic.py
 |   |-- gemini.py
 |   `-- xai.py
+|-- prompts/
+|   `-- strategies/
 |-- strategies/
 |   |-- reasoning/
 |   |-- sampling/
