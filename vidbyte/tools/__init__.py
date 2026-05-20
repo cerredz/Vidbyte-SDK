@@ -7,6 +7,7 @@ Purpose:
     native or bridged tools.
 Architecture:
     - BaseTool: Abstract tool contract.
+    - ToolLike: Structural protocol for developer-provided tools.
     - ToolRegistry and ToolExecutor: Registration and execution pipeline.
     - Tool dataclasses and enums from vidbyte.tools.types.
     - ToolsFormatter: Provider-specific schema formatting helper.
@@ -17,7 +18,7 @@ Relations:
 
 from __future__ import annotations
 
-from vidbyte.tools.base import BaseTool
+from vidbyte.tools.base import BaseTool, ToolLike
 from vidbyte.tools.client import ToolsClient
 from vidbyte.tools.executor import ToolExecutor
 from vidbyte.lib.tools import ToolsFormatter
@@ -35,6 +36,7 @@ __all__ = [
     "BaseTool",
     "ToolCall",
     "ToolExecutor",
+    "ToolLike",
     "ToolParameter",
     "ToolPermission",
     "ToolRegistry",

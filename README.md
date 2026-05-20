@@ -17,6 +17,54 @@ sdk = VidbyteSDK()
 sdk.harnesses
 sdk.tools
 sdk.providers
+sdk.strategies
+```
+
+## Multi-Agent Orchestration
+
+Multi-agent execution is modeled as composition:
+
+- `vidbyte.agents` contains actor objects such as `BaseAgent` and `AgentRegistry`.
+- `vidbyte.strategies.multi_agent` contains orchestration topologies such as consensus routing, AutoGen-style message passing, VMAO, economic gating, and evolving policy routing.
+- Harnesses stay clean business boundaries. They attach strategies through `with_strategy()` or `with_strategies()` and do not need a single-agent/multi-agent flag.
+
+```python
+from vidbyte.harnesses import BaseHarness
+from vidbyte.strategies import BaseStrategy, StrategyResult
+
+
+class FastStrategy(BaseStrategy):
+    async def arun(self, prompt, **kwargs):
+        return StrategyResult(output="fast answer", strategy_name="fast")
+
+
+class DeepStrategy(BaseStrategy):
+    async def arun(self, prompt, **kwargs):
+        return StrategyResult(output="deep answer", strategy_name="deep")
+
+
+harness = BaseHarness().with_strategies([FastStrategy(), DeepStrategy()])
+result = await harness.arun("Solve this task", runner=my_runner)
+```
+
+For custom agents, inject the model runner, reasoning strategy, and tools into `BaseAgent`; then pass those agents into multi-agent strategies.
+Agents can also be initialized from primitive runner settings such as `model_name`, `temperature`, and `run_id`. Agent roles are user-defined strings; built-in role prompts are registered as reusable prompt templates, but callers may pass their own `system_prompt`.
+
+## Context Objects
+
+Context dataclasses are exposed through `vidbyte.context` and centralized internally under `vidbyte.lib.dataclasses`.
+
+```python
+from vidbyte.context import ContextBudget, ContextPermissions, StrategyContext
+from vidbyte.lib.enums import BudgetPreset, PermissionPreset
+
+context = StrategyContext(
+    file_paths=["README.md"],
+    strategy_metadata={"phase": "draft"},
+    budget=ContextBudget.from_preset(BudgetPreset.BALANCED),
+    permissions=ContextPermissions.from_preset(PermissionPreset.READ_ONLY),
+)
+context.build_context()
 ```
 
 ### Tools
@@ -62,10 +110,16 @@ anthropic_tool = ToolsFormatter.to_anthropic_tool(sdk.tools.registry.specs()[0])
 ```text
 vidbyte/
 |-- client.py
+|-- agents/
+|-- context/
 |-- harnesses/
 |   `-- client.py
+|-- prompts/
+|   `-- prompts/
 |-- providers/
 |   `-- client.py
+|-- strategies/
+|   `-- multi_agent/
 |-- tools/
 |   |-- client.py
 |   |-- base.py
@@ -78,6 +132,7 @@ vidbyte/
 `-- lib/
     |-- dataclasses/
     |-- tools/
+    |-- enums/
     `-- errors/
 ```
 
@@ -91,5 +146,6 @@ Private Vidbyte service implementations, proprietary learning evaluations, promp
 
 ```bash
 python -m compileall vidbyte
-python -c "from vidbyte import VidbyteSDK; sdk = VidbyteSDK(); print(type(sdk.harnesses).__name__)"
+python -m unittest discover -s tests
+python -c "from vidbyte import VidbyteSDK; sdk = VidbyteSDK(); print(type(sdk.strategies).__name__)"
 ```

@@ -11,6 +11,9 @@ Architecture:
     - ToolExecutionError: Raised for tool execution pipeline failures.
     - PermissionDeniedError: Raised when a policy refuses a tool call.
     - McpProtocolError: Raised when an MCP transport returns malformed data.
+    - StrategyExecutionError: Raised when a strategy cannot produce a result.
+    - AgentExecutionError: Raised when an agent cannot generate a reply.
+    - AgentRegistryError: Raised when local agent discovery fails.
 Relations:
     Related to vidbyte.tools.executor, vidbyte.tools.registry, and vidbyte.tools.mcp.client.
 """
@@ -45,3 +48,15 @@ class PermissionDeniedError(VidbyteSdkError):
 
 class McpProtocolError(VidbyteSdkError):
     """Signals malformed JSON-RPC/MCP messages or remote protocol errors."""
+
+
+class StrategyExecutionError(VidbyteSdkError):
+    """Raised when a strategy cannot produce a result."""
+
+
+class AgentExecutionError(VidbyteSdkError):
+    """Raised when an agent cannot generate a reply."""
+
+
+class AgentRegistryError(VidbyteSdkError):
+    """Raised when local agent discovery fails."""

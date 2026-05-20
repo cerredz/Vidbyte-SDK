@@ -1,12 +1,13 @@
 """Context Protocol Header
 
 Description:
-    Defines the abstract base class for all Vidbyte SDK tools.
+    Defines the abstract base class and structural protocol for all Vidbyte SDK tools.
 Purpose:
-    Provides shared call validation and a small async execution contract without
-    owning registry, permission, or concrete tool behavior.
+    Provides shared call validation and a small async execution contract while supporting
+    both class-based and protocol-based developer tools.
 Architecture:
     - BaseTool: Abstract contract requiring spec() and execute().
+    - ToolLike: Structural protocol for developer-provided tools.
 Relations:
     Related to vidbyte.tools.types, vidbyte.tools.registry, and built-in tool modules.
 """
@@ -14,6 +15,7 @@ Relations:
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from typing import Any, Protocol
 
 from vidbyte.tools.types import ToolCall, ToolResult, ToolSpec
 
@@ -45,3 +47,13 @@ class BaseTool(ABC):
         if missing:
             return f"Missing required parameter(s): {', '.join(missing)}"
         return None
+
+
+class ToolLike(Protocol):
+    """Structural protocol for developer-provided tools."""
+
+    def spec(self) -> ToolSpec:
+        """Return model-facing tool metadata."""
+
+    async def arun(self, **kwargs: Any) -> Any:
+        """Execute the tool asynchronously."""

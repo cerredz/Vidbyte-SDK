@@ -14,16 +14,22 @@ Relations:
 from __future__ import annotations
 
 from vidbyte.lib.errors.base import (
+    AgentExecutionError,
+    AgentRegistryError,
     McpProtocolError,
     PermissionDeniedError,
+    StrategyExecutionError,
     ToolExecutionError,
     ToolRegistryError,
     VidbyteSdkError,
 )
 
 __all__ = [
+    "AgentExecutionError",
+    "AgentRegistryError",
     "McpProtocolError",
     "PermissionDeniedError",
+    "StrategyExecutionError",
     "ToolExecutionError",
     "ToolRegistryError",
     "VidbyteSdkError",

@@ -17,10 +17,13 @@ from vidbyte.tools.base import BaseTool
 from vidbyte.tools.executor import ToolExecutor
 from vidbyte.tools.registry import ToolRegistry
 from vidbyte.tools.security import PermissionPolicy
+from vidbyte.tools.types import ToolSpec
 
 
 class ToolsClient:
     """Namespace client for tool registration and execution."""
+
+    tool_spec_type = ToolSpec
 
     def __init__(self, *, permission_policy: PermissionPolicy | None = None) -> None:
         """Create a registry and executor for tool operations."""
