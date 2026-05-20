@@ -19,6 +19,35 @@ sdk.tools
 sdk.providers
 ```
 
+### Tools
+
+The SDK includes a small, explicit tool registry and executor:
+
+```python
+from vidbyte import VidbyteSDK
+from vidbyte.tools.builtins.code_search import GrepTool
+
+sdk = VidbyteSDK()
+sdk.tools.register(GrepTool(root_dir="."))
+```
+
+Advanced built-ins are grouped by category:
+
+- `vidbyte.tools.builtins.code_search`: `GlobTool`, `GrepTool`, `SemanticSearchTool`
+- `vidbyte.tools.builtins.editing`: `PatchTool`
+- `vidbyte.tools.builtins.context`: `ContextCompactionTool`
+- `vidbyte.tools.mcp`: `McpClient`, `McpStdioTransport`, `McpBridgedTool`
+- `vidbyte.tools.security`: `PermissionPolicy`, `ToolPermission`, sandbox transport protocols
+
+The default executor allows `SAFE` and `READ` tools. Mutating or executable tools require an explicit permission policy:
+
+```python
+from vidbyte.tools.security import PermissionPolicy
+
+sdk = VidbyteSDK()
+sdk.tools.executor.permission_policy = PermissionPolicy.allow_all()
+```
+
 ## Package Structure
 
 ```text
@@ -29,7 +58,13 @@ vidbyte/
 |-- providers/
 |   `-- client.py
 |-- tools/
-|   `-- client.py
+|   |-- client.py
+|   |-- base.py
+|   |-- registry.py
+|   |-- executor.py
+|   |-- builtins/
+|   |-- mcp/
+|   `-- security/
 |-- shared/
 `-- lib/
     `-- errors/
