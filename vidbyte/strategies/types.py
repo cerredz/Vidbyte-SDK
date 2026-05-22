@@ -1,14 +1,10 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Any, Mapping
+from vidbyte.lib.dataclasses.context import BaseAgentContext, StrategyContext
+from vidbyte.lib.dataclasses.strategies import StrategyResult
 
-
-@dataclass(frozen=True, slots=True)
-class StrategyResult:
-    """Minimal normalized strategy result."""
-
-    output: str
-    strategy_name: str
-    metadata: Mapping[str, Any] = field(default_factory=dict)
-
+__all__ = [
+    "StrategyContext",
+    "BaseAgentContext",
+    "StrategyResult",
+]

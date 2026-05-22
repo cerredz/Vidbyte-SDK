@@ -1,20 +1,39 @@
+"""Context Protocol Header
+
+Description:
+    Provides the SDK namespace client for tool operations.
+Purpose:
+    Owns the default registry and executor exposed from VidbyteSDK().tools
+    without auto-registering potentially environment-specific tools.
+Architecture:
+    - ToolsClient: Holds ToolRegistry and ToolExecutor instances.
+Relations:
+    Related to vidbyte.client, vidbyte.tools.registry, and vidbyte.tools.executor.
+"""
+
 from __future__ import annotations
 
-from collections.abc import Iterable
-
-from vidbyte.tools.adapters import ToolInput
+from vidbyte.tools.base import BaseTool
 from vidbyte.tools.executor import ToolExecutor
-from vidbyte.tools.mixins import ToolMixin
 from vidbyte.tools.registry import ToolRegistry
+from vidbyte.tools.security import PermissionPolicy
+from vidbyte.tools.types import ToolSpec
 
 
-class ToolsClient(ToolMixin):
-    """Namespace client for tool operations."""
+class ToolsClient:
+    """Namespace client for tool registration and execution."""
 
-    def __init__(self, tools: Iterable[ToolInput] | None = None) -> None:
-        self._tool_registry = ToolRegistry(tools)
-        self._tool_executor = ToolExecutor(self._tool_registry)
+    tool_spec_type = ToolSpec
 
-    def register(self, tool: ToolInput) -> "ToolsClient":
-        self.tool_registry.register(tool)
-        return self
+    def __init__(self, *, permission_policy: PermissionPolicy | None = None) -> None:
+        """Create a registry and executor for tool operations."""
+        self.registry = ToolRegistry()
+        self.executor = ToolExecutor(
+            self.registry,
+            permission_policy=permission_policy,
+        )
+
+    def register(self, tool: BaseTool) -> BaseTool:
+        """Register a tool and return it for fluent setup in scripts."""
+        self.registry.register(tool)
+        return tool

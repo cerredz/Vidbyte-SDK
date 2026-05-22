@@ -1,0 +1,10 @@
+{
+  "name": "Tree of Thoughts",
+  "description": "Prompts for generating, evaluating, and finalizing reasoning branches.",
+  "key": "tree_of_thoughts",
+  "prompts": {
+    "branch_prompt": "Generate {branches} diverse candidate reasoning branches for the task. Number each branch clearly. Make the branches meaningfully different rather than superficial rewrites. Keep each branch plausible and relevant. Do not select a winner yet. Return only the numbered branches.",
+    "evaluate_prompt": "Score each candidate branch from 1 to 10. Judge correctness, feasibility, completeness, and fit to the task. Explain the strongest reason for the winning branch. Mention any branch that fails a critical constraint. Return the best branch number and a concise rationale. Avoid inventing new branches during evaluation.",
+    "final_prompt": "Use the best evaluated branch to produce the final answer. Preserve the useful reasoning from that branch. Correct any small gap discovered during evaluation. Do not include the full branch analysis unless needed. Make the final answer direct and complete. Keep the answer aligned with the original task. End with Final answer:"
+  }
+}

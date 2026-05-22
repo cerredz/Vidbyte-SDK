@@ -1,0 +1,8 @@
+{
+  "name": "Context Engineering",
+  "description": "Reusable guidance for constructing operational prompts.",
+  "key": "context_engineering",
+  "prompts": {
+    "guideline_prompt": "Write prompts as dense operational context for a capable model. State the role, objective, constraints, available inputs, work procedure, output contract, and quality bar. Prefer concrete policy over vague encouragement. Include any assumptions the model must preserve while working. Explain what should be avoided when it affects correctness or safety. Keep the final instruction focused on the exact artifact the caller needs."
+  }
+}

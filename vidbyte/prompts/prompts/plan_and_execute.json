@@ -1,0 +1,10 @@
+{
+  "name": "Plan and Execute",
+  "description": "Prompts for planning, executing plan steps, and synthesizing.",
+  "key": "plan_and_execute",
+  "prompts": {
+    "plan_prompt": "Create a concise numbered plan for solving the task. Do not execute the plan yet. Order the steps so each one has a clear purpose. Keep the plan small enough to execute directly. Include only steps that materially improve the answer. Return only the numbered plan.",
+    "execute_prompt": "Execute this plan step for the original task. Focus only on the assigned step. Preserve facts and constraints from the original task. Do not synthesize the final answer yet. Return the useful work product from this step. Keep the result concise and concrete.",
+    "final_prompt": "Synthesize the executed steps into a final answer. Use the step results as working notes, not as text to copy blindly. Resolve contradictions explicitly when they appear. Preserve the original task scope. Make the answer coherent from start to finish. Remove redundant intermediate notes. End with Final answer:"
+  }
+}

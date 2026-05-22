@@ -11,39 +11,97 @@ This package is not published. It is marked `UNLICENSED` until Vidbyte's release
 ## Usage
 
 ```python
-from vidbyte import VidbyteSDK, vidbyte_tool
+from vidbyte import VidbyteSDK
 
 sdk = VidbyteSDK()
 sdk.harnesses
 sdk.tools
 sdk.providers
+sdk.strategies
 ```
 
-## Custom Function Tools
+## Multi-Agent Orchestration
 
-Any typed Python function can become a Vidbyte tool with `@vidbyte_tool`.
-The SDK reads the function signature and docstring, generates JSON Schema,
-validates runtime arguments with Pydantic, and returns a normalized tool result.
+Multi-agent execution is modeled as composition:
+
+- `vidbyte.agents` contains actor objects such as `BaseAgent` and `AgentRegistry`.
+- `vidbyte.strategies.multi_agent` contains orchestration topologies such as consensus routing, AutoGen-style message passing, VMAO, economic gating, and evolving policy routing.
+- Custom harnesses stay outside the base SDK until their public contracts are explicitly defined.
 
 ```python
-from vidbyte import vidbyte_tool
-from vidbyte.strategies import ReActStrategy
+from vidbyte.strategies import BaseStrategy, StrategyResult
 
 
-@vidbyte_tool
-async def fetch_user_metrics(user_id: int, metric_type: str = "engagement") -> str:
-    """Fetches real-time performance metrics for a specific user ID."""
-    return f"Metrics for {user_id}: 94%"
+class FastStrategy(BaseStrategy):
+    async def arun(self, prompt, **kwargs):
+        return StrategyResult(output="fast answer", strategy_name="fast")
 
 
-registry = sdk.tools.with_tools([fetch_user_metrics]).tool_registry
-print(registry.specs_as_prompt_str())
+class DeepStrategy(BaseStrategy):
+    async def arun(self, prompt, **kwargs):
+        return StrategyResult(output="deep answer", strategy_name="deep")
 
-harness = (
-    sdk.harnesses.base()
-    .with_strategy(ReActStrategy())
-    .with_tools([fetch_user_metrics])
+
+strategy = FastStrategy()
+result = await strategy.arun("Solve this task", runner=my_runner)
+```
+
+For custom agents, pass an explicit `system_prompt`, optional reasoning strategy, runner, and tools into `BaseAgent`; then pass those agents into multi-agent strategies.
+Semantic labels such as roles belong in agent metadata when callers need them.
+
+## Context Objects
+
+Context dataclasses are exposed through `vidbyte.context` and centralized internally under `vidbyte.lib.dataclasses`.
+
+```python
+from vidbyte.context import ContextBudget, ContextPermissions, StrategyContext
+from vidbyte.lib.enums import BudgetPreset, PermissionPreset
+
+context = StrategyContext(
+    file_paths=["README.md"],
+    strategy_metadata={"phase": "draft"},
+    budget=ContextBudget.from_preset(BudgetPreset.BALANCED),
+    permissions=ContextPermissions.from_preset(PermissionPreset.READ_ONLY),
 )
+context.build_context()
+```
+
+### Tools
+
+The SDK includes a small, explicit tool registry and executor:
+
+```python
+from vidbyte import VidbyteSDK
+from vidbyte.tools.builtins.code_search import GrepTool
+
+sdk = VidbyteSDK()
+sdk.tools.register(GrepTool(root_dir="."))
+```
+
+Advanced built-ins are grouped by category:
+
+- `vidbyte.tools.builtins.code_search`: `GlobTool`, `GrepTool`, `SemanticSearchTool`
+- `vidbyte.tools.builtins.editing`: `PatchTool`
+- `vidbyte.tools.builtins.context`: `ContextCompactionTool`
+- `vidbyte.tools.mcp`: `McpClient`, `McpStdioTransport`, `McpBridgedTool`
+- `vidbyte.tools.security`: `PermissionPolicy`, `ToolPermission`, sandbox transport protocols
+
+The default executor allows `SAFE` and `READ` tools. Mutating or executable tools require an explicit permission policy:
+
+```python
+from vidbyte.tools.security import PermissionPolicy
+
+sdk = VidbyteSDK()
+sdk.tools.executor.permission_policy = PermissionPolicy.allow_all()
+```
+
+Provider integrations can format the same `ToolSpec` contract for model-native tool APIs:
+
+```python
+from vidbyte import ToolsFormatter
+
+openai_tool = ToolsFormatter.to_openai_tool(sdk.tools.registry.specs()[0])
+anthropic_tool = ToolsFormatter.to_anthropic_tool(sdk.tools.registry.specs()[0])
 ```
 
 ## Package Structure
@@ -51,20 +109,29 @@ harness = (
 ```text
 vidbyte/
 |-- client.py
+|-- agents/
+|-- context/
 |-- harnesses/
 |   `-- client.py
+|-- prompts/
+|   `-- prompts/
 |-- providers/
 |   `-- client.py
+|-- strategies/
+|   `-- multi_agent/
 |-- tools/
 |   |-- client.py
-|   |-- decorators.py
-|   |-- function_tool.py
+|   |-- base.py
 |   |-- registry.py
-|   `-- executor.py
-|-- strategies/
-|   `-- react.py
+|   |-- executor.py
+|   |-- builtins/
+|   |-- mcp/
+|   `-- security/
 |-- shared/
 `-- lib/
+    |-- dataclasses/
+    |-- tools/
+    |-- enums/
     `-- errors/
 ```
 
@@ -79,5 +146,5 @@ Private Vidbyte service implementations, proprietary learning evaluations, promp
 ```bash
 python -m compileall vidbyte
 python -m unittest discover -s tests
-python -c "from vidbyte import VidbyteSDK; sdk = VidbyteSDK(); print(type(sdk.harnesses).__name__)"
+python -c "from vidbyte import VidbyteSDK; sdk = VidbyteSDK(); print(type(sdk.strategies).__name__)"
 ```

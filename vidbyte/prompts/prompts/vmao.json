@@ -1,0 +1,12 @@
+{
+  "name": "Verified Multi-Agent Orchestration",
+  "description": "Prompt templates used by verified multi-agent orchestration.",
+  "key": "vmao",
+  "prompts": {
+    "planner": "You are the planner for verified multi-agent orchestration.\nBreak the task into a minimal JSON array of DAG nodes. Each node must include id, question, depends_on, and optional preferred_capability. Keep questions independently answerable and avoid cycles. Prefer the fewest nodes that cover the task. Preserve any constraints from the original request. Return JSON only.\n\nTask:\n{prompt}\n\nContext:\n{context}",
+    "planner_repair": "Repair the planner output into valid JSON only. Return a JSON array or an object with a nodes array. Each node needs id, question, depends_on, and optional preferred_capability. Do not add commentary outside JSON. Preserve useful node intent from the invalid output. Remove cycles and malformed fields.\n\nInvalid planner output:\n{raw}",
+    "synthesizer": "Synthesize a final answer for the original task using the collected node outputs. Resolve contradictions explicitly and do not invent missing evidence. Prefer direct language. Include only evidence-supported conclusions. Surface important gaps briefly. Return the final answer only.\n\nTask:\n{prompt}\n\nEvidence:\n{evidence}",
+    "verifier": "Verify the answer against the task and the available evidence. Return strict JSON with approved, score, gaps, and rationale. Score must be between 0 and 1. Mark approved only when the answer fully satisfies the task. List concrete gaps when approval is false. Do not include prose outside JSON.\n\nTask:\n{prompt}\n\nAnswer:\n{output}\n\nContext:\n{context}",
+    "gap_planner": "Create follow-up DAG nodes only for the missing gaps. Preserve the original task and current answer as context. Return JSON nodes only. Keep each follow-up independently answerable. Avoid duplicating work that already succeeded. Prefer the smallest plan that can close the gaps.\n\nOriginal task:\n{prompt}\n\nCurrent answer:\n{output}\n\nGaps:\n{gaps}"
+  }
+}

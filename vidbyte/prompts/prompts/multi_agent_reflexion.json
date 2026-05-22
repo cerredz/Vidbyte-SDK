@@ -1,0 +1,10 @@
+{
+  "name": "Multi-Agent Reflexion",
+  "description": "Prompts for drafting, critique, and revision with critic roles.",
+  "key": "multi_agent_reflexion",
+  "prompts": {
+    "draft_prompt": "Produce an initial answer to the task. Make the answer specific enough for a critic to evaluate. Preserve all visible constraints. Do not over-optimize for style yet. Include the core reasoning needed for correctness. End with a complete draft.",
+    "critic_prompt": "Review the draft from the perspective of {critic_role}. Identify concrete weaknesses and corrections. Focus on accuracy, missing constraints, unclear reasoning, and unsupported claims. Do not rewrite the whole answer. Give actionable feedback that a reviser can apply. Keep the critique direct and specific.",
+    "final_prompt": "Revise the draft using the structured critique. Keep the parts that are already correct. Apply every correction that improves accuracy or clarity. Resolve conflicts between critics by prioritizing the original task. Do not mention the critique process unless it matters. Make the revision read as one coherent answer. End with Final answer:"
+  }
+}
