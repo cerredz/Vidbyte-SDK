@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import fields
 from typing import Any, Mapping
 
+from vidbyte.lib.agents import ModalityDetector
 from vidbyte.lib.config import ImageModelConfig, TextModelConfig, VideoModelConfig
 from vidbyte.lib.enums import ModelModality, ModelProvider
 from vidbyte.lib.errors import ConfigurationError
@@ -31,7 +32,7 @@ def resolve_modality(
         modality = coerce_modality(candidate)
         if modality is not ModelModality.AUTO:
             return modality
-    return ModelModality.TEXT
+    return ModelModality.AUTO
 
 
 def create_runner_for_modality(
@@ -47,7 +48,8 @@ def create_runner_for_modality(
     """Create the internal concrete runner for a resolved modality."""
     resolved = coerce_modality(modality)
     if resolved is ModelModality.AUTO:
-        resolved = ModelModality.TEXT
+        detected = ModalityDetector.detect_modality(model)
+        resolved = detected if detected is not ModelModality.AUTO else ModelModality.TEXT
     common_options = dict(options)
     if api_key is not None:
         common_options["api_key"] = api_key

@@ -6,7 +6,7 @@ import vidbyte
 from vidbyte import ModelModality, VidbyteSDK
 from vidbyte.agents import AgentInput, BaseAgent
 from vidbyte.lib.config import ModelProvider
-from vidbyte.lib.runners import GeneratedImage, ImageModelResponse, VideoModelJob
+from vidbyte.lib.runners import GeneratedImage, ImageModelResponse, ModalityDetector, VideoModelJob
 from vidbyte.strategies import BaseStrategy, StrategyResult
 
 
@@ -157,6 +157,111 @@ class AgentModalityRoutingTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("TextModelRunner", vidbyte.__all__)
         self.assertNotIn("ImageModelRunner", vidbyte.__all__)
         self.assertNotIn("VideoModelRunner", vidbyte.__all__)
+
+    async def test_model_name_auto_detection_routes_to_image(self) -> None:
+        image_runner = RecordingRunner(
+            ImageModelResponse(
+                provider=ModelProvider.OPENAI,
+                model="gpt-image-1",
+                images=(GeneratedImage(url="https://example.test/icon.png"),),
+                raw={},
+            )
+        )
+        agent = BaseAgent(
+            name="auto-detector",
+            system_prompt="Detect modality from model name.",
+            runners={"image": image_runner},
+            provider=ModelProvider.OPENAI,
+            model_name="gpt-image-1",
+        )
+
+        reply = await agent.generate_reply("create an icon")
+
+        self.assertEqual(reply.content, "https://example.test/icon.png")
+        self.assertEqual(reply.metadata["modality"], "image")
+        self.assertEqual(len(image_runner.calls), 1)
+
+    async def test_model_name_auto_detection_defaults_to_text_for_unknown(self) -> None:
+        text_runner = RecordingRunner("text")
+        image_runner = RecordingRunner("image")
+        agent = BaseAgent(
+            name="unknown-model-agent",
+            system_prompt="Default to text.",
+            runners={"text": text_runner, "image": image_runner},
+            provider=ModelProvider.OPENAI,
+            model_name="some-future-gpt-model",
+        )
+
+        reply = await agent.generate_reply("hello")
+
+        self.assertEqual(reply.content, "text")
+        self.assertEqual(reply.metadata["modality"], "text")
+        self.assertEqual(len(text_runner.calls), 1)
+        self.assertEqual(len(image_runner.calls), 0)
+
+    async def test_auto_detection_with_provider_and_model_creates_runner(self) -> None:
+        agent = BaseAgent(
+            name="lazy-agent",
+            system_prompt="Auto-detect from model name and create runner.",
+            provider=ModelProvider.OPENAI,
+            model_name="gpt-image-1",
+        )
+
+        self.assertFalse(agent.runners)
+        self.assertEqual(agent.modality, ModelModality.AUTO)
+
+
+class ModalityDetectorTests(unittest.TestCase):
+    def test_is_text_for_known_text_models(self) -> None:
+        self.assertTrue(ModalityDetector.is_text("gpt-4o"))
+        self.assertTrue(ModalityDetector.is_text("claude-3-5-sonnet-20241022"))
+        self.assertTrue(ModalityDetector.is_text("gemini-2.5-pro"))
+        self.assertTrue(ModalityDetector.is_text("grok-3"))
+        self.assertTrue(ModalityDetector.is_text("deepseek-chat"))
+        self.assertTrue(ModalityDetector.is_text("glm-4"))
+
+    def test_is_image_for_known_image_models(self) -> None:
+        self.assertTrue(ModalityDetector.is_image("dall-e-3"))
+        self.assertTrue(ModalityDetector.is_image("gpt-image-1"))
+        self.assertTrue(ModalityDetector.is_image("imagen-3.0-generate-001"))
+
+    def test_is_video_for_known_video_models(self) -> None:
+        self.assertTrue(ModalityDetector.is_video("sora"))
+        self.assertTrue(ModalityDetector.is_video("sora-turbo"))
+
+    def test_detect_modality_exact_match(self) -> None:
+        self.assertEqual(ModalityDetector.detect_modality("gpt-4o-mini"), ModelModality.TEXT)
+        self.assertEqual(ModalityDetector.detect_modality("dall-e-3"), ModelModality.IMAGE)
+        self.assertEqual(ModalityDetector.detect_modality("sora"), ModelModality.VIDEO)
+
+    def test_detect_modality_pattern_fallback(self) -> None:
+        self.assertEqual(ModalityDetector.detect_modality("dall-e-4-future"), ModelModality.IMAGE)
+        self.assertEqual(ModalityDetector.detect_modality("imagen-v5"), ModelModality.IMAGE)
+        self.assertEqual(ModalityDetector.detect_modality("kling-v2"), ModelModality.VIDEO)
+
+    def test_detect_modality_unknown_returns_auto(self) -> None:
+        self.assertEqual(ModalityDetector.detect_modality("completely-unknown-model"), ModelModality.AUTO)
+
+    def test_detect_modality_empty_string_returns_auto(self) -> None:
+        self.assertEqual(ModalityDetector.detect_modality(""), ModelModality.AUTO)
+        self.assertEqual(ModalityDetector.detect_modality("   "), ModelModality.AUTO)
+
+    def test_detect_modality_from_model_alias(self) -> None:
+        self.assertEqual(ModalityDetector.detect_modality_from_model("gpt-4o"), ModelModality.TEXT)
+        self.assertEqual(ModalityDetector.detect_modality_from_model("dall-e-3"), ModelModality.IMAGE)
+
+    def test_false_positives_not_reported(self) -> None:
+        self.assertFalse(ModalityDetector.is_image("gpt-4o"))
+        self.assertFalse(ModalityDetector.is_video("gpt-4o"))
+        self.assertFalse(ModalityDetector.is_text("dall-e-3"))
+        self.assertFalse(ModalityDetector.is_video("dall-e-3"))
+        self.assertFalse(ModalityDetector.is_text("sora"))
+        self.assertFalse(ModalityDetector.is_image("sora"))
+
+    def test_case_insensitive_detection(self) -> None:
+        self.assertEqual(ModalityDetector.detect_modality("GPT-4O"), ModelModality.TEXT)
+        self.assertEqual(ModalityDetector.detect_modality("Dall-E-3"), ModelModality.IMAGE)
+        self.assertEqual(ModalityDetector.detect_modality("SORA"), ModelModality.VIDEO)
 
 
 if __name__ == "__main__":

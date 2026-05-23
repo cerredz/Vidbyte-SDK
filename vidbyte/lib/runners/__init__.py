@@ -7,11 +7,13 @@ from vidbyte.lib.runners.types import (
     VideoModelJob,
 )
 from vidbyte.lib.runners.router import coerce_modality, create_runner_for_modality, resolve_modality
+from vidbyte.lib.agents import ModalityDetector
 
 __all__ = [
     "GeneratedImage",
     "ImageModelResponse",
     "ImageModelRunner",
+    "ModalityDetector",
     "TextModelResponse",
     "TextModelRunner",
     "VideoModelJob",

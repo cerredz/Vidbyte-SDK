@@ -25,6 +25,7 @@ from vidbyte.lib.dataclasses.agents import AgentRunnerConfig
 from vidbyte.lib.enums import ModelModality, ModelProvider
 from vidbyte.lib.errors import AgentExecutionError
 from vidbyte.lib.runners import coerce_modality, create_runner_for_modality, resolve_modality
+from vidbyte.lib.agents import ModalityDetector
 from vidbyte.strategies.base import BaseStrategy
 from vidbyte.strategies.types import BaseAgentContext, StrategyContext, StrategyResult
 from vidbyte.tools import ToolSpec
@@ -198,6 +199,10 @@ class BaseAgent(McpAttachableMixin):
                 input_modality=input_modality,
                 default=self.modality,
             )
+            if selected_modality is ModelModality.AUTO and self.runner_config.model_name:
+                selected_modality = ModalityDetector.detect_modality(self.runner_config.model_name)
+            if selected_modality is ModelModality.AUTO:
+                selected_modality = ModelModality.TEXT
             runner = self._runner_for_modality(selected_modality)
             agent_context = self._build_context(
                 prompt,
@@ -413,6 +418,9 @@ class BaseAgent(McpAttachableMixin):
         modalities = set(self.runners)
         if self.modality is not ModelModality.AUTO:
             modalities.add(self.modality)
+        elif self.runner_config.provider and self.runner_config.model_name:
+            detected = ModalityDetector.detect_modality(self.runner_config.model_name)
+            modalities.add(detected if detected is not ModelModality.AUTO else ModelModality.TEXT)
         elif self.runner is not None or self.runner_config.provider or self.runner_config.model_name:
             modalities.add(ModelModality.TEXT)
         return tuple(sorted(modalities, key=lambda item: item.value))
