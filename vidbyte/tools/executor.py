@@ -17,6 +17,7 @@ import json
 import re
 
 from vidbyte.lib.errors import ToolRegistryError
+from vidbyte.tools.catalog import Tools
 from vidbyte.tools.registry import ToolRegistry
 from vidbyte.tools.security import PermissionDecision, PermissionPolicy
 from vidbyte.tools.types import ToolCall, ToolResult
@@ -27,7 +28,7 @@ class ToolExecutor:
 
     def __init__(
         self,
-        registry: ToolRegistry,
+        registry: ToolRegistry | Tools,
         *,
         permission_policy: PermissionPolicy | None = None,
     ) -> None:
@@ -38,7 +39,8 @@ class ToolExecutor:
     async def execute_call(self, call: ToolCall) -> ToolResult:
         """Resolve, authorize, validate, and run one tool call."""
         try:
-            tool = self.registry.get(call.tool_name)
+            get_tool = getattr(self.registry, "get", None)
+            tool = get_tool(call.tool_name) if callable(get_tool) else self.registry._get(call.tool_name)
         except ToolRegistryError as exc:
             return ToolResult.error(call.tool_name, str(exc), metadata={"error": "unknown_tool"})
 

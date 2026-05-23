@@ -38,6 +38,8 @@ from vidbyte.lib.dataclasses.security import PermissionDecision, PermissionPolic
 from vidbyte.lib.dataclasses.strategies import StrategyResult
 from vidbyte.lib.dataclasses.tools import (
     ToolCall,
+    ToolCallContext,
+    ToolCallState,
     ToolParameter,
     ToolPermission,
     ToolResult,
@@ -76,6 +78,8 @@ __all__ = [
     "StrategyContext",
     "StrategyResult",
     "ToolCall",
+    "ToolCallContext",
+    "ToolCallState",
     "ToolParameter",
     "ToolPermission",
     "ToolResult",

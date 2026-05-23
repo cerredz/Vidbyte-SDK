@@ -14,6 +14,7 @@ Relations:
 
 from __future__ import annotations
 
+import asyncio
 import inspect
 from collections.abc import Sequence
 from typing import Any
@@ -22,9 +23,12 @@ from vidbyte.agents.mixins import McpAttachableMixin
 from vidbyte.agents.types import AgentCard, AgentMessage
 from vidbyte.lib.dataclasses.agents import AgentRunnerConfig
 from vidbyte.lib.errors import AgentExecutionError
+from vidbyte.lib.tools import ToolsFormatter
 from vidbyte.strategies.base import BaseStrategy
 from vidbyte.strategies.types import BaseAgentContext, StrategyContext, StrategyResult
-from vidbyte.tools import ToolSpec
+from vidbyte.tools.catalog import Tools
+from vidbyte.tools.security import PermissionDecision, PermissionPolicy
+from vidbyte.tools.types import ToolCall, ToolCallContext, ToolCallState, ToolResult, ToolSpec
 
 
 class ConfiguredAgentRunner:
@@ -44,7 +48,9 @@ class BaseAgent(McpAttachableMixin):
         system_prompt: str,
         strategy: BaseStrategy | None = None,
         runner: object | None = None,
-        tools: Sequence[object] = (),
+        tools: Sequence[object] | Tools = (),
+        permission_policy: PermissionPolicy | None = None,
+        max_tool_rounds: int = 3,
         api_key: str | None = None,
         model_name: str | None = None,
         temperature: float | None = None,
@@ -68,12 +74,16 @@ class BaseAgent(McpAttachableMixin):
         self.name = name
         self.strategy = strategy
         self.runner = runner if runner is not None else self._create_runner()
-        self.tools = list(tools)
+        self._agent_tool_items = tools.all() if isinstance(tools, Tools) else tuple(tools)
+        self.tools = tools if isinstance(tools, Tools) else self._catalog_from_agent_tools(self._agent_tool_items)
+        self.permission_policy = permission_policy or PermissionPolicy()
+        self.max_tool_rounds = max(0, max_tool_rounds)
         self.system_prompt = system_prompt
         self.description = description or "General purpose agent."
         self.capabilities = tuple(capabilities)
         self.metadata = dict(metadata or {})
         self.history: list[AgentMessage] = []
+        self._tool_call_contexts: list[ToolCallContext] = []
         
         # MCP Attachable State
         self._mcp_handles = []
@@ -97,36 +107,22 @@ class BaseAgent(McpAttachableMixin):
             description=self.description,
             system_prompt=self.system_prompt,
             capabilities=self.capabilities,
-            tool_names=tuple(self._tool_name(tool) for tool in self.tools),
+            tool_names=tuple(self._tool_name(tool) for tool in self._agent_tool_items),
             mcp_tool_names=self.mcp_tool_names(),
             mcp_server_names=tuple(handle.name for handle in self.mcp_servers()),
             metadata=dict(self.metadata),
         )
 
     def add_tool(self, tool: object) -> BaseAgent:
-        self.tools = [*self.tools, tool]
+        self._agent_tool_items = (*self._agent_tool_items, tool)
+        try:
+            self.tools = self.tools.add(tool)
+        except TypeError:
+            pass
         return self
 
     def tool_specs(self) -> tuple[ToolSpec, ...]:
-        specs: list[ToolSpec] = []
-        for tool in self.tools:
-            spec = getattr(tool, "spec", None)
-            if callable(spec):
-                try:
-                    tool_spec = spec()
-                except Exception:
-                    tool_spec = ToolSpec(name=tool.__class__.__name__, description="")
-            else:
-                tool_spec = ToolSpec(name=tool.__class__.__name__, description="")
-            specs.append(
-                tool_spec
-                if isinstance(tool_spec, ToolSpec)
-                else ToolSpec(
-                    name=str(getattr(tool_spec, "name", tool.__class__.__name__)),
-                    description=str(getattr(tool_spec, "description", "")),
-                )
-            )
-        return tuple(specs)
+        return self.tools.specs()
 
     def fork(
         self,
@@ -143,7 +139,9 @@ class BaseAgent(McpAttachableMixin):
             name=name or self.name,
             strategy=strategy or self.strategy,
             runner=runner if runner is not None else self.runner,
-            tools=self.tools if tools is None else tools,
+            tools=self._agent_tool_items if tools is None else tools,
+            permission_policy=self.permission_policy,
+            max_tool_rounds=self.max_tool_rounds,
             system_prompt=self.system_prompt if system_prompt is None else system_prompt,
             api_key=self.runner_config.api_key,
             model_name=self.runner_config.model_name,
@@ -180,7 +178,7 @@ class BaseAgent(McpAttachableMixin):
                     message,
                     runner=self.runner,
                     context=agent_context,
-                    tools=self.tools,
+                    tools=self._agent_tool_items,
                     **options,
                 )
         except Exception as exc:
@@ -219,7 +217,7 @@ class BaseAgent(McpAttachableMixin):
             history=merged_history,
             file_paths=tuple(context.file_paths) if context else (),
             strategy_metadata=strategy_metadata,
-            tool_calls=tuple(context.tool_calls) if context else (),
+            tool_calls=tuple(context.tool_calls) + tuple(self._tool_call_contexts) if context else tuple(self._tool_call_contexts),
             responses=responses,
             budget=context.budget if context else None,
             artifacts=tuple(context.artifacts) if context else (),
@@ -254,8 +252,172 @@ class BaseAgent(McpAttachableMixin):
             raise AgentExecutionError(
                 "ConfiguredAgentRunner stores primitive settings only; pass an executable runner when no strategy is set."
             )
+        if len(self.tools):
+            return await self._run_with_tools(runner, message, context=context, **options)
         output = await self._call_runner_once(runner, message, context=context, **options)
         return StrategyResult(output=output, strategy_name="direct_runner")
+
+    async def arun(self, message: str, **options: Any) -> AgentMessage:
+        """Async ergonomic alias for generate_reply()."""
+        return await self.generate_reply(message, **options)
+
+    def run(self, message: str, **options: Any) -> AgentMessage:
+        """Run the agent from synchronous code."""
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return asyncio.run(self.generate_reply(message, **options))
+        raise AgentExecutionError("BaseAgent.run() cannot be called from an active event loop; use await arun().")
+
+    async def _run_with_tools(
+        self,
+        runner: object,
+        message: str,
+        *,
+        context: BaseAgentContext,
+        **options: Any,
+    ) -> StrategyResult:
+        provider = str(options.pop("provider", None) or self._runner_provider(runner))
+        tool_schemas = self.tools.provider_schemas(provider)
+        messages: list[dict[str, Any]] = [dict(item) for item in options.pop("messages", ())]
+        call_contexts: list[ToolCallContext] = []
+
+        for round_index in range(self.max_tool_rounds + 1):
+            call_options = dict(options)
+            call_options.setdefault("system", context.system_prompt)
+            if tool_schemas:
+                call_options.setdefault("tools", tool_schemas)
+            if messages:
+                call_options.setdefault("messages", tuple(messages))
+
+            raw_result = await self._invoke_runner(runner, message, **call_options)
+            tool_calls = ToolsFormatter.parse_tool_calls(raw_result, provider)
+            if not tool_calls:
+                self._tool_call_contexts.extend(call_contexts)
+                return StrategyResult(
+                    output=self._runner_output_text(raw_result),
+                    strategy_name="direct_runner",
+                    metadata=self._tool_metadata(call_contexts),
+                )
+
+            if round_index >= self.max_tool_rounds:
+                self._tool_call_contexts.extend(call_contexts)
+                return StrategyResult(
+                    output="Tool call limit reached before a final response.",
+                    strategy_name="direct_runner",
+                    metadata={**self._tool_metadata(call_contexts), "tool_round_limit_reached": True},
+                )
+
+            for call in tool_calls:
+                context_record, result = await self._execute_agent_tool_call(call, provider=provider)
+                call_contexts.append(context_record)
+                messages.append(dict(ToolsFormatter.format_tool_result(call, result, provider)))
+
+        self._tool_call_contexts.extend(call_contexts)
+        return StrategyResult(
+            output="Tool call limit reached before a final response.",
+            strategy_name="direct_runner",
+            metadata={**self._tool_metadata(call_contexts), "tool_round_limit_reached": True},
+        )
+
+    async def _execute_agent_tool_call(
+        self,
+        call: ToolCall,
+        *,
+        provider: str,
+    ) -> tuple[ToolCallContext, ToolResult]:
+        try:
+            tool = self.tools._get(call.tool_name)
+        except Exception as exc:
+            result = ToolResult.error(call.tool_name, str(exc), metadata={"error": "unknown_tool"})
+            return (
+                ToolCallContext(
+                    tool_name=call.tool_name,
+                    arguments=call.arguments,
+                    state=ToolCallState.FAILED,
+                    call_id=call.call_id,
+                    result=result,
+                    provider=provider,
+                    metadata=dict(call.metadata),
+                ),
+                result,
+            )
+
+        spec = tool.spec()
+        decision = self.permission_policy.check(spec, call)
+        if decision is PermissionDecision.DENY:
+            result = ToolResult.error(
+                spec.name,
+                f"Permission denied for tool '{spec.name}' requiring {spec.permission.value}",
+                metadata={"error": "permission_denied", "permission": spec.permission.value},
+            )
+            return (
+                ToolCallContext(
+                    tool_name=spec.name,
+                    arguments=call.arguments,
+                    state=ToolCallState.DENIED,
+                    call_id=call.call_id,
+                    result=result,
+                    provider=provider,
+                    metadata=dict(call.metadata),
+                ),
+                result,
+            )
+
+        validation_error = tool.validate_call(call)
+        if validation_error:
+            result = ToolResult.error(spec.name, validation_error, metadata={"error": "validation_error"})
+            return (
+                ToolCallContext(
+                    tool_name=spec.name,
+                    arguments=call.arguments,
+                    state=ToolCallState.FAILED,
+                    call_id=call.call_id,
+                    result=result,
+                    provider=provider,
+                    metadata=dict(call.metadata),
+                ),
+                result,
+            )
+
+        try:
+            result = await tool.execute(call)
+            state = ToolCallState.SUCCEEDED if result.status.value == "success" else ToolCallState.FAILED
+        except Exception as exc:
+            result = ToolResult.error(
+                spec.name,
+                f"Tool execution failed: {exc}",
+                metadata={"error": "execution_error", "error_type": type(exc).__name__},
+            )
+            state = ToolCallState.FAILED
+        return (
+            ToolCallContext(
+                tool_name=spec.name,
+                arguments=call.arguments,
+                state=state,
+                call_id=call.call_id,
+                result=result,
+                provider=provider,
+                metadata=dict(call.metadata),
+            ),
+            result,
+        )
+
+    def _tool_metadata(self, contexts: Sequence[ToolCallContext]) -> dict[str, Any]:
+        return {
+            "tool_call_count": len(contexts),
+            "tool_call_states": tuple(context.state.value for context in contexts),
+            "tool_calls": tuple(contexts),
+        }
+
+    def _catalog_from_agent_tools(self, tools: Sequence[object]) -> Tools:
+        catalog = Tools()
+        for tool in tools:
+            try:
+                catalog = catalog.add(tool)
+            except TypeError:
+                continue
+        return catalog
 
     async def _call_runner_once(
         self,
@@ -267,6 +429,10 @@ class BaseAgent(McpAttachableMixin):
     ) -> str:
         call_options = dict(options)
         call_options.setdefault("system", context.system_prompt)
+        result = await self._invoke_runner(runner, message, **call_options)
+        return self._runner_output_text(result)
+
+    async def _invoke_runner(self, runner: object, message: str, **call_options: Any) -> object:
         arun = getattr(runner, "arun", None)
         if callable(arun):
             result = arun(message, **call_options)
@@ -280,7 +446,7 @@ class BaseAgent(McpAttachableMixin):
                 raise AgentExecutionError("Runner must define run(), arun(), or be callable.")
         if inspect.isawaitable(result):
             result = await result
-        return self._runner_output_text(result)
+        return result
 
     @staticmethod
     def _runner_output_text(result: object) -> str:
@@ -291,6 +457,20 @@ class BaseAgent(McpAttachableMixin):
         if output is not None:
             return str(output)
         return str(result)
+
+    @staticmethod
+    def _runner_provider(runner: object) -> str:
+        config = getattr(runner, "_config", None)
+        provider = getattr(config, "provider", None)
+        if provider is not None:
+            return str(getattr(provider, "value", provider))
+        model_name = getattr(runner, "model_name", None)
+        if callable(model_name):
+            try:
+                return str(model_name())
+            except Exception:
+                return "openai"
+        return "openai"
 
     @staticmethod
     def _tool_name(tool: object) -> str:

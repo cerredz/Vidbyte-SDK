@@ -56,9 +56,7 @@ class McpAttachableMixin:
         handle = await attach_mcp_server(config)
         self._mcp_handles.append(handle)
         
-        if not isinstance(self.tools, list):
-            self.tools = list(self.tools)
-        self.tools.extend(handle.bridged_tools)
+        self._attach_tools(handle.bridged_tools)
         return self
 
     async def attach_mcp_servers(
@@ -99,9 +97,7 @@ class McpAttachableMixin:
 
         for handle in handles:
             self._mcp_handles.append(handle)
-            if not isinstance(self.tools, list):
-                self.tools = list(self.tools)
-            self.tools.extend(handle.bridged_tools)
+            self._attach_tools(handle.bridged_tools)
 
         return self
 
@@ -175,7 +171,21 @@ class McpAttachableMixin:
             bridged_tool_set.update(h.bridged_tools)
 
         if bridged_tool_set:
-            self.tools = [t for t in self.tools if t not in bridged_tool_set]
+            without = getattr(self.tools, "without", None)
+            if callable(without):
+                self.tools = without(bridged_tool_set)
+            else:
+                self.tools = [t for t in self.tools if t not in bridged_tool_set]
+
+    def _attach_tools(self, tools: Sequence[BaseTool]) -> None:
+        add_tool = getattr(self, "add_tool", None)
+        if callable(add_tool):
+            for tool in tools:
+                add_tool(tool)
+            return
+        if not isinstance(self.tools, list):
+            self.tools = list(self.tools)
+        self.tools.extend(tools)
 
     async def __aenter__(self) -> McpAttachableMixin:
         return self

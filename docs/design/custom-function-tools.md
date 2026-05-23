@@ -11,6 +11,8 @@
 
 Add a decorator-first custom tool API that lets SDK users turn ordinary Python functions into Vidbyte tools with `@vidbyte_tool`. The decorator will inspect a function's signature, docstring, and type hints, generate a tool spec and JSON Schema, validate runtime arguments through Pydantic, execute sync or async functions safely, and make the wrapped tool attachable to registries, strategies, agents, providers, and harnesses through a shared `ToolMixin.with_tools()` composition pattern.
 
+Supersession note: `docs/design/agent-tool-api-consolidation.md` renames the preferred public decorator to `@tool` and shifts public examples to `Agent(..., tools=[...])` plus `Tools(...)`. `@vidbyte_tool`, `ToolRegistry`, and `ToolExecutor` remain compatibility surfaces.
+
 ---
 
 ## 2. Goals & Non-Goals
@@ -23,7 +25,7 @@ Add a decorator-first custom tool API that lets SDK users turn ordinary Python f
 - Generate JSON Schema for model/provider function-calling APIs.
 - Validate incoming tool-call arguments before user code receives them.
 - Normalize return values into native `ToolResult` objects.
-- Allow `ToolRegistry.register()` and `ToolRegistry(tools=[...])` to accept `BaseTool` instances, decorated functions, and undecorated callables.
+- Allow compatibility registry helpers and the newer `Tools([...])` catalog to accept `BaseTool` instances, decorated functions, and undecorated callables.
 - Add `ToolMixin.with_tools()` as a chainable way to attach tools to harnesses, strategies, agents, and provider-facing runners.
 - Cascade harness-level tools into the active strategy at execution time.
 - Preserve compatibility with the existing and planned `BaseTool`, `ToolRegistry`, `ToolExecutor`, `StrategyMixin`, ReAct, and CodeAct architecture.
@@ -539,8 +541,7 @@ Python SDK public API additions:
 from vidbyte import vidbyte_tool
 from vidbyte.tools import FunctionTool, ToolMixin, ToolRegistry, ensure_tool
 
-registry = ToolRegistry(tools=[fetch_user_metrics])
-registry.register(fetch_user_metrics)
+catalog = Tools([fetch_user_metrics])
 
 harness.with_tools([fetch_user_metrics])
 strategy.with_tools([fetch_user_metrics])
@@ -611,7 +612,7 @@ Summary: 11 files created, 24 files modified, 0 files deleted.
 ### Unit Tests
 
 - `tests/test_custom_function_tools.py` -> verifies `@vidbyte_tool` with async functions, sync functions, docstrings, defaults, optional parameters, missing type hints, bad signatures, Pydantic validation errors, JSON Schema output, and return normalization.
-- `tests/test_tool_registry_custom_inputs.py` -> verifies `ToolRegistry(tools=[...])`, `register()` with decorated functions, `register()` with raw callables, duplicate name rejection, and invalid object errors.
+- `tests/test_tool_registry_custom_inputs.py` -> verifies compatibility registry construction, `register()` with decorated functions, `register()` with raw callables, duplicate name rejection, and invalid object errors.
 - `tests/test_tool_mixin.py` -> verifies `.with_tools()` chaining, single-tool and list inputs, local registry isolation between instances, executor binding, and duplicate handling.
 - `tests/test_harness_tool_cascade.py` -> verifies a tool-aware harness passes tools into a ReAct-style fake strategy immediately before execution and does not duplicate tools across repeated runs.
 - `tests/test_provider_tool_schema_translation.py` -> verifies generated schemas convert to OpenAI, Anthropic, Gemini, and xAI-compatible shapes through fake provider adapters.
@@ -626,7 +627,7 @@ Summary: 11 files created, 24 files modified, 0 files deleted.
 
 1. Run `python -m compileall vidbyte`.
 2. Run `python -m unittest discover -s tests`.
-3. Define a local decorated async function, register it in `ToolRegistry(tools=[func])`, and confirm `registry.specs_as_prompt_str()` includes the docstring description.
+3. Define a local decorated async function, place it in `Tools([func])`, and confirm `catalog.describe()` includes the docstring description.
 4. Execute `Action: fetch_user_metrics` with `{"user_id": 42}` and confirm the wrapped function receives an integer.
 5. Execute the same action with `{"user_id": "bad"}` and confirm the validation error is returned before function invocation.
 6. Chain `MyEvaluator().with_strategy(ReActStrategy()).with_tools([fetch_user_metrics])` and confirm the strategy sees the tool spec.
