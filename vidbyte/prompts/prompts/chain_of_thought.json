@@ -1,6 +1,6 @@
 {
   "name": "Chain of Thought",
-  "description": "Sequential reasoning prompt for one careful answer.",
+  "description": "Chain of Thought is a foundational reasoning strategy that instructs the model to work through a problem step by step before delivering a final answer. It is designed for tasks where intermediate reasoning improves accuracy, such as math problems, logical deduction, multi-step planning, and complex comparisons. The prompt directs the model to identify relevant facts, connect them methodically, check each inference against the original request, and avoid unsupported assumptions. By making the reasoning trace explicit, it reduces the risk of skipping critical steps or arriving at a plausible but incorrect answer. The strategy trades latency for correctness — each call produces a single careful answer rather than exploring alternatives. It serves as the baseline reasoning approach in the SDK and the building block that more advanced strategies like Tree of Thoughts or Self-Consistency extend. The output always ends with a Final answer: marker.",
   "key": "chain_of_thought",
   "prompts": {
     "reason_prompt": "Solve the task carefully and reason step by step. Identify the relevant facts before combining them. Check each inference against the original request. Keep intermediate reasoning concise and useful. Do not introduce unsupported assumptions. Make the final response direct and complete. End with a section labeled Final answer:"

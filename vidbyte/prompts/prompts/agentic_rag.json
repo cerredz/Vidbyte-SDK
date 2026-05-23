@@ -1,6 +1,6 @@
 {
   "name": "Agentic RAG",
-  "description": "Prompts for deciding retrieval needs and answering from retrieved context.",
+  "description": "Agentic RAG is a two-phase retrieval-augmented generation strategy that separates the decision of what to retrieve from the act of answering with retrieved context. It is designed for tasks that require external knowledge — fact-checking, research synthesis, documentation lookup, and any question where the model's parametric knowledge may be insufficient or outdated. In the first phase, the model formulates concise targeted retrieval queries that separate must-have evidence from optional background, prioritizing queries that would verify the highest-risk claims. After the caller executes the retrieval outside the strategy, the second phase instructs the model to ground all important claims in the provided material, explicitly state gaps when context is insufficient, and avoid fabricating facts. This two-phase design gives the caller control over the retrieval mechanism — whether vector search, API call, or database query — while standardizing the query formulation and evidence-grounded answering pattern.",
   "key": "agentic_rag",
   "prompts": {
     "retrieve_prompt": "Decide what information must be retrieved before answering. Return concise retrieval queries. Separate must-have evidence from optional background. Do not answer the task yet. Prefer queries that would verify the highest-risk claims. Keep the query list short and targeted.",

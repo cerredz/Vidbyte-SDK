@@ -1,6 +1,6 @@
 {
   "name": "Skeleton of Thought",
-  "description": "Prompts for outline-first generation and point expansion.",
+  "description": "Skeleton of Thought is a two-phase generation strategy that separates structural planning from detailed writing. In the first phase, the model produces a concise numbered skeleton of up to max_points distinct logically ordered points without filling in details, serving as a scaffold that guarantees coverage of all required topics before any prose is written. In the second phase, the model expands each skeleton point independently into polished self-contained prose, focusing only on the assigned point. This decomposition makes the strategy ideal for long-form content generation — reports, articles, documentation, and educational material — where structural coherence across sections is critical. Because each point is expanded in isolation, the approach also enables parallel execution across multiple model calls. The final output is assembled from the individually expanded points to produce a complete document with clear logical flow.",
   "key": "skeleton_of_thought",
   "prompts": {
     "skeleton_prompt": "Create a concise numbered skeleton for answering the task. Use no more than {max_points} points. Make each point distinct and ordered logically. Do not fill in the details yet. Keep every point short enough to guide a later expansion. Return only the numbered skeleton.",

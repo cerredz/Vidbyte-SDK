@@ -1,6 +1,6 @@
 {
   "name": "Answer Convergence",
-  "description": "Prompt for repeated independent attempts until answers converge.",
+  "description": "Answer Convergence is a stability-testing strategy that generates repeated independent answers until a consistent result emerges across attempts. It is designed for tasks where answer stability indicates correctness — classification, structured data extraction, factual verification, and any task where the model should produce the same answer every time given the same input. Each attempt uses the same prompt template, which identifies itself by attempt index and instructs the model to work from the original task as the sole source of truth without relying on any other attempt. The prompts are written to produce answers that are explicit and easy to compare across samples, avoiding decorative wording that would obscure convergence. The strategy continues generating attempts until a configurable number of consecutive matching answers is reached. This approach catches sampling variance and provides a confidence signal: if answers diverge, the task may be genuinely ambiguous or beyond the model's reliable capability.",
   "key": "answer_convergence",
   "prompts": {
     "attempt_prompt": "Solve independently and end with Final answer:. This is attempt {index}. Do not rely on any other attempt. Use the original task as the only source of truth. Keep the answer explicit enough to compare with other samples. Avoid decorative wording that would obscure the final answer."

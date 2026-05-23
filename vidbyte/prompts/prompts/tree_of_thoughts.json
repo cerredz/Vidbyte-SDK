@@ -1,6 +1,6 @@
 {
   "name": "Tree of Thoughts",
-  "description": "Prompts for generating, evaluating, and finalizing reasoning branches.",
+  "description": "Tree of Thoughts is a multi-step reasoning strategy that generates multiple candidate reasoning branches, evaluates them, and synthesizes the best result. It is designed for complex open-ended problems where a single reasoning path may be suboptimal — such as creative writing, strategy formulation, puzzle solving, and ambiguous analysis tasks. The first phase generates branches diverse meaningfully distinct candidate approaches, each exploring the problem from a different angle. The second phase scores each branch from 1 to 10 on correctness, feasibility, completeness, and task fit, selecting the best candidate and explaining the rationale. The third phase takes the winning branch and produces a polished final answer, correcting any small gaps identified during evaluation. This explore-then-commit pattern significantly improves answer quality at the cost of higher token consumption. It is an effective choice when the task has no single obviously correct solution path.",
   "key": "tree_of_thoughts",
   "prompts": {
     "branch_prompt": "Generate {branches} diverse candidate reasoning branches for the task. Number each branch clearly. Make the branches meaningfully different rather than superficial rewrites. Keep each branch plausible and relevant. Do not select a winner yet. Return only the numbered branches.",

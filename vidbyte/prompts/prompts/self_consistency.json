@@ -1,6 +1,6 @@
 {
   "name": "Self-Consistency",
-  "description": "Prompt for independent samples used in majority voting.",
+  "description": "Self-Consistency is a robustness strategy that generates multiple independent reasoning samples and selects the most common answer through majority voting. It is designed for tasks where a single model call may be unreliable — particularly math problems, logical reasoning, factual questions with a definitive correct answer, and any domain where errors are stochastic rather than systematic. Each sample is generated independently using the same prompt, which instructs the model to work from first principles without relying on prior samples. The per-sample prompt identifies itself with index of samples to enable tracking and normalization. After all samples are collected, the strategy normalizes answers and selects the majority result. This approach reduces variance due to sampling temperature and catches errors that a single Chain of Thought run might miss. It is most effective when answer correctness is binary or easily comparable rather than open-ended.",
   "key": "self_consistency",
   "prompts": {
     "sample_prompt": "Solve independently as sample {index} of {samples}. Do not assume the prior samples are correct. Work through the task from first principles. Keep the reasoning focused on reaching a defensible answer. Make the answer easy to normalize for voting. Avoid unnecessary stylistic variation. End with Final answer:"
