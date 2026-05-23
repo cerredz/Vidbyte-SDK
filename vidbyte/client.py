@@ -14,6 +14,7 @@ Relations:
 
 from __future__ import annotations
 
+from vidbyte.agents.client import AgentClient
 from vidbyte.harnesses.client import HarnessClient
 from vidbyte.providers.client import ProvidersClient
 from vidbyte.strategies.client import StrategyClient
@@ -24,6 +25,7 @@ class VidbyteSDK:
     """Root client for Vidbyte SDK namespace clients."""
 
     def __init__(self) -> None:
+        self.agents = AgentClient()
         self.harnesses = HarnessClient()
         self.tools = ToolsClient()
         self.providers = ProvidersClient()

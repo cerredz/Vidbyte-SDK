@@ -34,7 +34,7 @@ Review-driven implementation adjustments:
 - Preserve tool injection at the agent layer so each agent can carry a different tool set.
 - Support async-first orchestration with conservative sync wrappers for simple scripts.
 - Keep the first implementation dependency-free and Python 3.11 standard-library only.
-- Add focused stdlib `unittest` coverage with fake runners and fake agents.
+- Add focused stdlib `unittest` coverage with fake agent-selected runners and fake agents.
 
 ### Non-Goals
 
@@ -102,7 +102,7 @@ Review-driven implementation adjustments:
 - Compatibility: Python `>=3.11`, standard library only.
 - Observability: strategy results must preserve structured metadata for candidate outputs, selected strategy, verifier decisions, failed candidates, and call counts.
 - Maintainability: public packages must use explicit `__all__`.
-- Testability: tests must use fake runners, fake strategies, and fake agents, with no network calls.
+- Testability: tests must use fake agent-selected runners, fake strategies, and fake agents, with no network calls.
 - Backward compatibility: existing `VidbyteSDK().harnesses`, `.tools`, and `.providers` construction must continue to work.
 
 ---
@@ -823,7 +823,7 @@ harness = BaseHarness().with_strategies(
 
 #### Edge Cases & Error Handling
 
-- Documentation examples should use fake runners or placeholders, not real API keys.
+- Documentation examples should use agents with fake runner mappings or placeholders, not real API keys or direct concrete runner construction.
 
 ---
 
@@ -951,7 +951,7 @@ Summary: 30 files created, 9 files modified, 0 files deleted.
 ### Integration Tests
 
 - N/A - no live provider integrations or remote protocols in this PR.
-- Use fake runners and fake agents to exercise end-to-end harness composition locally.
+- Use fake agent runner mappings and fake agents to exercise end-to-end harness composition locally.
 
 ### Manual / QA Test Cases
 

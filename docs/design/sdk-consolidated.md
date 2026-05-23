@@ -453,8 +453,8 @@ from vidbyte.tools.filesystem import ReadTextTool, WriteTextTool, AppendTextTool
 # Providers (new)
 from vidbyte.providers import AnthropicProvider, OpenAIProvider, GeminiProvider, XAIProvider
 
-# Runners (new)
-from vidbyte.lib.runners import TextModelRunner, ImageModelRunner, VideoModelRunner
+# Agent-first model execution (new)
+from vidbyte import AgentInput, BaseAgent, ModelModality
 ```
 
 ---
