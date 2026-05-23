@@ -147,3 +147,7 @@ class StrategyConfigurationError(StrategyExecutionError):
 
 class ToolRegistrationError(ToolRegistryError):
     """Raised when a tool cannot be registered due to validation or conflict."""
+
+
+class PipelineExecutionError(VidbyteSdkError):
+    """Raised when a pipeline cannot complete execution."""

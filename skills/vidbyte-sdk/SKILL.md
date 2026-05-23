@@ -15,6 +15,12 @@ vidbyte/
 |   `-- prompts/
 |-- providers/
 |   `-- client.py
+|-- pipelines/
+|   |-- base.py
+|   |-- conditional.py
+|   |-- parallel.py
+|   |-- sequential.py
+|   `-- types.py
 |-- strategies/
 |   `-- multi_agent/
 |-- tools/
@@ -35,6 +41,7 @@ vidbyte/
 - Keep agent actor abstractions in `vidbyte/agents/`.
 - Keep reasoning and orchestration topologies in `vidbyte/strategies/`.
 - Keep multi-agent orchestration implementations in `vidbyte/strategies/multi_agent/`.
+- Keep agent-to-agent wiring topologies (pipeline compositions) in `vidbyte/pipelines/`. Pipelines move strings between agents; they do not manage context, budget, or artifacts. Follow `skills/vidbyte-sdk/pipelines.md` when adding new pipeline topology types.
 - Keep public context objects in `vidbyte/context/`, but define dataclasses centrally under `vidbyte/lib/dataclasses/`.
 - Keep prompt templates in `vidbyte/prompts/prompts/` and expose them through `vidbyte.prompts.Prompts` plus `vidbyte.lib.enums.prompts.Prompt`.
 - Follow `skills/vidbyte-sdk/adding-prompts.md` whenever adding or changing prompt assets.
