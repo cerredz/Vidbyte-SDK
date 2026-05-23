@@ -13,9 +13,10 @@ Architecture:
     - Context exports: BaseAgentContext, BaseContext, ContextBudget, ContextPermissions.
     - Preset exports: BudgetPreset, PermissionPreset.
     - Strategy exports: BaseStrategy, StrategyContext, StrategyResult.
-    - Error exports: McpError, McpConnectionError, McpInitializeError, McpToolDiscoveryError, McpToolExecutionError, McpAttachmentError.
+    - Pipeline exports: BasePipeline, ConditionalPipeline, ParallelPipeline, PipelineNode, SequentialPipeline.
+    - Error exports: McpError, McpConnectionError, McpInitializeError, McpToolDiscoveryError, McpToolExecutionError, McpAttachmentError, PipelineExecutionError.
 Relations:
-    Related to vidbyte.client, vidbyte.agents, vidbyte.tools, vidbyte.context, and vidbyte.strategies.
+    Related to vidbyte.client, vidbyte.agents, vidbyte.tools, vidbyte.context, vidbyte.strategies, and vidbyte.pipelines.
 """
 
 from __future__ import annotations
@@ -38,6 +39,14 @@ from vidbyte.lib.errors import (
     McpInitializeError,
     McpToolDiscoveryError,
     McpToolExecutionError,
+    PipelineExecutionError,
+)
+from vidbyte.pipelines import (
+    BasePipeline,
+    ConditionalPipeline,
+    ParallelPipeline,
+    PipelineNode,
+    SequentialPipeline,
 )
 from vidbyte.prompts import Prompts
 from vidbyte.strategies import (
@@ -87,6 +96,7 @@ __all__ = [
     "BaseAgent",
     "BaseAgentContext",
     "BaseContext",
+    "BasePipeline",
     "BaseStrategy",
     "BaseStrategyUtils",
     "BaseTool",
@@ -105,7 +115,11 @@ __all__ = [
     "McpToolExecutionError",
     "McpToolPermission",
     "MultiAgentConsensusStrategy",
+    "ConditionalPipeline",
+    "ParallelPipeline",
     "PermissionPreset",
+    "PipelineExecutionError",
+    "PipelineNode",
     "PlanAndExecuteStrategy",
     "Prompt",
     "Prompts",
@@ -116,6 +130,7 @@ __all__ = [
     "SkeletonOfThoughtStrategy",
     "StepBackStrategy",
     "StrategyContext",
+    "SequentialPipeline",
     "StrategyResult",
     "ToolCall",
     "ToolExecutor",
