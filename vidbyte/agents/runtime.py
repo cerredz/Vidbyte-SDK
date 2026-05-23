@@ -23,6 +23,7 @@ from vidbyte.lib.enums import ModelModality
 from vidbyte.lib.errors import PermissionDeniedError, ToolExecutionError, ToolRegistryError
 from vidbyte.lib.token_usage import token_usage_from_response
 from vidbyte.lib.tools import ToolsFormatter
+from vidbyte.lib.tracing import NullTracer, SpanContext, TracerBase
 from vidbyte.prompts.agentic_loop import append_agentic_loop_prompt
 from vidbyte.strategies.types import BaseAgentContext, StrategyContext, StrategyResult
 from vidbyte.tools._internal import IS_DONE_TOOL_NAME, with_internal_agent_tools
@@ -42,12 +43,14 @@ class AgentRuntime:
         tools: Tools,
         permission_policy: PermissionPolicy,
         config: AgentRuntimeConfig | None = None,
+        tracer: TracerBase | None = None,
     ) -> None:
         self.agent_name = agent_name
         self.system_prompt = system_prompt
         self.tools = with_internal_agent_tools(tools)
         self.permission_policy = permission_policy
         self.config = config or AgentRuntimeConfig()
+        self._tracer: TracerBase = tracer or NullTracer()
 
     def build_context(
         self,
@@ -83,6 +86,7 @@ class AgentRuntime:
         runner_output_text: Callable[[object], str],
         runner_output_metadata: Callable[[object], Mapping[str, Any]],
         options: Mapping[str, Any] | None = None,
+        trace_context: SpanContext | None = None,
     ) -> StrategyResult:
         """Run the direct model/tool loop until isDone or a budget stop."""
         run_options = dict(options or {})
@@ -102,18 +106,30 @@ class AgentRuntime:
                 return stop_result
 
             call_options = self._build_iteration_call_options(run_options, context, tool_schemas, messages)
-            raw_result = await invoke_runner(runner, message, **call_options)
+            llm_span = self._tracer.start_span(
+                "llm.call",
+                parent=trace_context,
+                provider=provider,
+                iteration=iteration_count,
+            )
+            try:
+                raw_result = await invoke_runner(runner, message, **call_options)
+                output_text = runner_output_text(raw_result)
+                self._tracer.end_span(llm_span, output=output_text)
+            except Exception as exc:
+                self._tracer.end_span(llm_span, error=exc)
+                raise
             iteration_count += 1
             runner_metadata = dict(runner_output_metadata(raw_result))
             tokens_used = self._add_token_usage(tokens_used, token_usage_from_response(raw_result, runner_metadata))
 
             tool_calls = ToolsFormatter.parse_tool_calls(raw_result, provider)
             if not tool_calls:
-                messages.append(self._assistant_message(runner_output_text(raw_result)))
+                messages.append(self._assistant_message(output_text))
                 continue
 
             for call in tool_calls:
-                _, result = await self._process_tool_call(call, provider, messages, call_contexts)
+                _, result = await self._process_tool_call(call, provider, messages, call_contexts, trace_context=trace_context)
                 if call.tool_name == IS_DONE_TOOL_NAME:
                     return self._final_result(
                         output=result.output,
@@ -124,8 +140,19 @@ class AgentRuntime:
                         stop_reason=AgentStopReason.IS_DONE,
                     )
 
-    async def execute_tool_call(self, call: ToolCall, *, provider: str) -> tuple[ToolCallContext, ToolResult]:
+    async def execute_tool_call(
+        self,
+        call: ToolCall,
+        *,
+        provider: str,
+        trace_context: SpanContext | None = None,
+    ) -> tuple[ToolCallContext, ToolResult]:
         """Resolve, authorize, validate, execute, and record one tool call."""
+        tool_span = self._tracer.start_span(
+            "tool.call",
+            parent=trace_context,
+            tool_name=call.tool_name,
+        )
         try:
             tool = self._get_tool(call)
             spec = tool.spec()
@@ -133,9 +160,11 @@ class AgentRuntime:
             self._validate_tool_call(tool, call)
             result = await self._execute_tool(tool, call)
             state = ToolCallState.SUCCEEDED if result.status.value == "success" else ToolCallState.FAILED
+            self._tracer.end_span(tool_span, output=result.output)
         except ToolRegistryError as exc:
             result = ToolResult.error(call.tool_name, str(exc), metadata={"error": "unknown_tool", "detail": str(exc)})
             state = ToolCallState.FAILED
+            self._tracer.end_span(tool_span, error=exc)
         except PermissionDeniedError as exc:
             permission = exc.details.get("permission", "")
             result = ToolResult.error(
@@ -144,6 +173,7 @@ class AgentRuntime:
                 metadata={"error": "permission_denied", "permission": permission},
             )
             state = ToolCallState.DENIED
+            self._tracer.end_span(tool_span, error=exc)
         except ToolExecutionError as exc:
             error_type = exc.details.get("error_type", type(exc).__name__)
             result = ToolResult.error(
@@ -152,6 +182,7 @@ class AgentRuntime:
                 metadata={"error": "execution_error", "error_type": error_type},
             )
             state = ToolCallState.FAILED
+            self._tracer.end_span(tool_span, error=exc)
         except Exception as exc:
             result = ToolResult.error(
                 call.tool_name,
@@ -159,6 +190,7 @@ class AgentRuntime:
                 metadata={"error": "execution_error", "error_type": type(exc).__name__},
             )
             state = ToolCallState.FAILED
+            self._tracer.end_span(tool_span, error=exc)
 
         return (
             ToolCallContext(
@@ -267,9 +299,10 @@ class AgentRuntime:
         provider: str,
         messages: list[dict[str, Any]],
         call_contexts: list[ToolCallContext],
+        trace_context: SpanContext | None = None,
     ) -> tuple[ToolCallContext, ToolResult]:
         """Execute one tool call, record its context, and append it to messages."""
-        context_record, result = await self.execute_tool_call(call, provider=provider)
+        context_record, result = await self.execute_tool_call(call, provider=provider, trace_context=trace_context)
         call_contexts.append(context_record)
         if call.tool_name != IS_DONE_TOOL_NAME:
             messages.append(dict(ToolsFormatter.format_tool_result(call, result, provider)))

@@ -26,6 +26,7 @@ from vidbyte.lib.agents import ModalityDetector
 from vidbyte.lib.dataclasses.agents import AgentRunnerConfig, AgentRuntimeConfig
 from vidbyte.lib.enums import ModelModality, ModelProvider
 from vidbyte.lib.errors import AgentExecutionError
+from vidbyte.lib.tracing import NullTracer, TracerBase
 from vidbyte.strategies.base import BaseStrategy
 from vidbyte.strategies.types import BaseAgentContext, StrategyContext, StrategyResult
 from vidbyte.tools.catalog import Tools
@@ -68,6 +69,7 @@ class BaseAgent(McpAttachableMixin):
         description: str = "",
         capabilities: Sequence[str] = (),
         metadata: dict[str, Any] | None = None,
+        tracer: type[TracerBase] | TracerBase | None = None,
     ) -> None:
         if not name:
             raise AgentExecutionError("Agent name cannot be empty.")
@@ -107,6 +109,13 @@ class BaseAgent(McpAttachableMixin):
         self.metadata = dict(metadata or {})
         self.history: list[AgentMessage] = []
         self._tool_call_contexts: list[ToolCallContext] = []
+
+        if tracer is None:
+            self._tracer: TracerBase = NullTracer()
+        elif isinstance(tracer, type):
+            self._tracer = tracer()
+        else:
+            self._tracer = tracer
 
         # MCP Attachable State
         self._mcp_handles = []
@@ -183,6 +192,7 @@ class BaseAgent(McpAttachableMixin):
             description=self.description,
             capabilities=self.capabilities,
             metadata={**self.metadata, **dict(metadata or {})},
+            tracer=self._tracer,
         )
         if include_history:
             child.history = list(self.history)
@@ -202,6 +212,11 @@ class BaseAgent(McpAttachableMixin):
         **options: Any,
     ) -> AgentMessage:
         await self._ensure_mcp_connected()
+        trace_ctx = self._tracer.start_trace(
+            "agent.run",
+            agent_name=self.name,
+            strategy=type(self.strategy).__name__ if self.strategy else "direct",
+        )
         try:
             prompt, input_modality, input_metadata = self._normalize_input(message)
             selected_modality = ModalityDetector.resolve(
@@ -227,6 +242,7 @@ class BaseAgent(McpAttachableMixin):
                     agent_context,
                     runner=runner,
                     modality=selected_modality,
+                    trace_context=trace_ctx,
                     **options,
                 )
             else:
@@ -237,7 +253,9 @@ class BaseAgent(McpAttachableMixin):
                     tools=self._agent_tool_items,
                     **options,
                 )
+            self._tracer.end_trace(trace_ctx, output=result.output)
         except Exception as exc:
+            self._tracer.end_trace(trace_ctx, error=exc)
             raise AgentExecutionError(
                 f"Agent '{self.name}' failed to generate a reply.",
                 details={"agent": self.name, "error_type": type(exc).__name__},
@@ -309,6 +327,7 @@ class BaseAgent(McpAttachableMixin):
         *,
         runner: object | None = None,
         modality: ModelModality = ModelModality.TEXT,
+        trace_context: object | None = None,
         **options: Any,
     ) -> StrategyResult:
         if runner is None:
@@ -334,6 +353,7 @@ class BaseAgent(McpAttachableMixin):
             runner_output_text=self._runner_output_text,
             runner_output_metadata=self._runner_output_metadata,
             options=options,
+            trace_context=trace_context,
         )
         self._record_tool_contexts(result)
         return result
@@ -375,6 +395,7 @@ class BaseAgent(McpAttachableMixin):
             tools=self.tools,
             permission_policy=self.permission_policy,
             config=self.runtime_config,
+            tracer=self._tracer,
         )
 
     def _catalog_from_agent_tools(self, tools: Sequence[object]) -> Tools:
