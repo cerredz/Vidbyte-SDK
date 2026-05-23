@@ -26,6 +26,7 @@ class AgentStopReason(str, Enum):
     """Machine-readable reason an agent runtime stopped."""
 
     FINAL_RESPONSE = "final_response"
+    IS_DONE = "is_done"
     MAX_ITERATIONS = "max_iterations"
     MAX_TOKENS = "max_tokens"
     TOOL_LOOP_LIMIT = "tool_loop_limit"
@@ -59,7 +60,7 @@ class AgentRuntimeStats:
     """Summary accounting for one agent runtime execution."""
 
     iteration_count: int = 0
-    estimated_tokens: int = 0
+    tokens_used: int | None = None
     tool_call_count: int = 0
     stop_reason: AgentStopReason = AgentStopReason.FINAL_RESPONSE
 

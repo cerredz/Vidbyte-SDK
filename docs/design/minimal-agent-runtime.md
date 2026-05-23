@@ -9,7 +9,7 @@
 
 ## 1. Overview
 
-This feature adds a minimal internal `AgentRuntime` class under `vidbyte/agents/` and moves direct agent loop responsibilities out of `BaseAgent`. The runtime will build the agent context window, enforce optional max-iteration and max-token budgets, execute agent-local tools through the existing `Tools` catalog and `PermissionPolicy`, append tool results back into the provider message context, and continue running until the model produces a final non-tool response or a configured budget stops execution.
+This feature adds a minimal internal `AgentRuntime` class under `vidbyte/agents/` and moves direct agent loop responsibilities out of `BaseAgent`. The runtime will build the agent context window, enforce optional max-iteration and provider-reported max-token budgets, execute agent-local tools through the existing `Tools` catalog and `PermissionPolicy`, append tool results and assistant text back into the provider message context, and continue running until the model calls the internal `isDone` tool or a configured budget stops execution.
 
 ---
 
@@ -21,11 +21,11 @@ This feature adds a minimal internal `AgentRuntime` class under `vidbyte/agents/
 - Keep the developer-facing `Agent` / `BaseAgent` surface simple; developers do not directly instantiate or manage `AgentRuntime`.
 - Move direct runner loop logic, tool-call execution, permission checks, and context-building orchestration out of `BaseAgent`.
 - Support optional runtime budgets for `max_iterations` and `max_tokens`.
-- If `max_iterations` and `max_tokens` are not provided, continue until a final model response is produced.
+- If `max_iterations` and `max_tokens` are not provided, continue until the model calls the internal `isDone` tool.
 - Preserve existing agent-local tool support from PR #23: `Tools`, `ToolCall`, `ToolCallContext`, `ToolCallState`, `ToolsFormatter`, and `PermissionPolicy`.
 - Keep tool execution generic for any `BaseTool`, `@tool` function, raw callable normalized by `Tools`, or MCP-bridged tool.
 - Add tool results back into the ordered provider message context so the next model call can reason from observations.
-- Return structured runtime metadata to `AgentMessage.metadata`, including iteration count, token estimate, tool-call count, tool-call states, and stop reason.
+- Return structured runtime metadata to `AgentMessage.metadata`, including iteration count, provider-reported token usage when available, tool-call count, tool-call states, and stop reason.
 - Keep strategies compatible: strategy-backed agents still receive tools and a built `BaseAgentContext`.
 - Use the existing `vidbyte/agents/` package, not a new singular `vidbyte/agent/` package, because the repo convention is plural.
 
@@ -50,7 +50,7 @@ This feature adds a minimal internal `AgentRuntime` class under `vidbyte/agents/
 - The source layout centralizes public SDK modules under `vidbyte/`, shared dataclasses under `vidbyte/lib/dataclasses/`, provider helpers under `vidbyte/lib/`, and agent actor code under `vidbyte/agents/`.
 - Current `origin/main` `BaseAgent` owns too many responsibilities: agent identity, runner configuration, modality routing, MCP attachment, tool catalog normalization, permission policy, context building, direct runner invocation, provider-native tool loop execution, tool-call lifecycle context, result wrapping, and sync/async convenience APIs.
 - PR #23 already placed provider-native direct tool execution in `BaseAgent._run_with_tools()` and `_execute_agent_tool_call()`. This feature extracts that logic into a focused runtime class while keeping the behavior minimal.
-- Existing context contracts live in `vidbyte/lib/dataclasses/context.py`. `BaseContext.build_context()` already renders system prompt, metadata, budget, permissions, artifacts, responses, tool calls, and optional file context.
+- Existing context contracts live in `vidbyte/lib/dataclasses/context.py`. `BaseAgentContext` is kept intentionally narrow for agent execution: system prompt, tools, history, budget, and file paths.
 - Existing tool contracts live in `vidbyte/lib/dataclasses/tools.py`, including `ToolCall`, `ToolResult`, `ToolCallContext`, and `ToolCallState`.
 - Existing permissions use `PermissionPolicy.check(spec, call)` and deny `WRITE` / `EXECUTE` by default unless the agent receives a more permissive policy.
 - Existing provider tool formatting and parsing live in `vidbyte/lib/tools/formatter.py` through `ToolsFormatter.format_tools(...)`, `parse_tool_calls(...)`, and `format_tool_result(...)`.
@@ -67,7 +67,7 @@ This feature adds a minimal internal `AgentRuntime` class under `vidbyte/agents/
 4. `AgentRuntime` must build the `BaseAgentContext` used by direct model execution.
 5. `AgentRuntime` must preserve existing context merge behavior: explicit per-call history first, then `agent.history`; caller context metadata merged with agent metadata; tool-call contexts included in `BaseAgentContext.tool_calls`.
 6. `AgentRuntime` must format agent tools into provider schemas using `Tools.provider_schemas(provider)`.
-7. `AgentRuntime` must invoke the selected model runner repeatedly until a final response has no provider-native tool calls.
+7. `AgentRuntime` must invoke the selected model runner repeatedly until the model calls the internal `isDone` tool.
 8. `AgentRuntime` must execute every parsed tool call through the agent-local `Tools` catalog.
 9. `AgentRuntime` must check `PermissionPolicy` before validation and execution.
 10. Permission-denied tool calls must not call the tool body.
@@ -76,9 +76,9 @@ This feature adds a minimal internal `AgentRuntime` class under `vidbyte/agents/
 13. Failed tool calls must use `ToolCallState.FAILED`; denied calls must use `ToolCallState.DENIED`.
 14. Every local tool result must be formatted through `ToolsFormatter.format_tool_result(...)` and appended to the ordered provider message list for the next model call.
 15. If `max_iterations` is provided, the runtime must stop before exceeding that number of model-call iterations.
-16. If `max_tokens` is provided, the runtime must stop when the estimated run token usage is greater than or equal to that limit.
-17. If neither `max_iterations` nor `max_tokens` is provided, the runtime must not apply artificial hard iteration/token limits and should continue until a final non-tool response is produced.
-18. Token usage must be estimated without adding dependencies. The first implementation may use provider usage metadata when available and a deterministic character-count fallback otherwise.
+16. If `max_tokens` is provided, the runtime must stop when provider-reported token usage is greater than or equal to that limit.
+17. If neither `max_iterations` nor `max_tokens` is provided, the runtime must not apply artificial hard iteration/token limits and should continue until `isDone` is called.
+18. Token usage must come from provider response metadata or raw usage payloads; the runtime must not invent local cost estimates.
 19. The runtime must expose a machine-readable stop reason in result metadata.
 20. `BaseAgent.generate_reply()` must delegate direct no-strategy execution to `AgentRuntime`.
 21. Strategy-backed execution must remain compatible and continue to call `strategy.arun(..., runner=runner, context=agent_context, tools=agent_tools, ...)`.
@@ -94,8 +94,8 @@ This feature adds a minimal internal `AgentRuntime` class under `vidbyte/agents/
 - Security: default permission policy continues to deny `WRITE` and `EXECUTE` tools.
 - Reliability: runtime budget stops should return a controlled `StrategyResult` rather than raising for normal budget exhaustion.
 - Reliability: malformed provider tool-call payloads should follow existing `ToolsFormatter` behavior; this feature does not broaden parsing.
-- Observability: final reply metadata must include at least `stop_reason`, `iteration_count`, `estimated_tokens`, `tool_call_count`, and `tool_call_states`.
-- Performance: tool lookup remains dictionary-backed through `Tools._get(...)`; token estimation must be O(size of current prompt/messages/results).
+- Observability: final reply metadata must include at least `stop_reason`, `iteration_count`, `tokens_used`, `tool_call_count`, and `tool_call_states`.
+- Performance: tool lookup remains dictionary-backed through `Tools._get(...)`; token usage extraction must be O(size of provider metadata/raw usage payloads).
 - Testability: all runtime behavior must be tested with fake runners and fake tools; no live provider calls.
 - Dependency control: no new third-party packages.
 
@@ -167,7 +167,7 @@ class AgentRuntimeConfig:
 @dataclass(frozen=True, slots=True)
 class AgentRuntimeStats:
     iteration_count: int = 0
-    estimated_tokens: int = 0
+    tokens_used: int | None = None
     tool_call_count: int = 0
     stop_reason: AgentStopReason = AgentStopReason.FINAL_RESPONSE
 ```
@@ -251,16 +251,16 @@ The exact callable signature can be adjusted during implementation to match exis
    - Preserve file paths, responses, budget, artifacts, memory, and permissions from incoming context.
 3. `arun(...)` prepares provider-native tool schemas with `self.tools.provider_schemas(provider)`.
 4. It initializes ordered provider messages from `options.get("messages", ())`.
-5. It starts `iteration_count` at zero and `estimated_tokens` from the prompt, system prompt, context rendering, and incoming messages.
+5. It starts `iteration_count` at zero and `tokens_used` as unknown until provider usage is available.
 6. Before every model call, it checks whether `max_iterations` or `max_tokens` has already been reached.
 7. It invokes the selected runner through the supplied `invoke_runner` helper.
 8. It increments iteration count after every model call.
-9. It updates estimated token usage from response metadata when possible, otherwise uses deterministic text/raw payload estimation.
+9. It updates token usage from response metadata or raw provider usage payloads when present.
 10. It parses provider-native tool calls through `ToolsFormatter.parse_tool_calls(raw_result, provider)`.
-11. If no tool calls are returned, it returns `StrategyResult(output=runner_output_text(raw_result), strategy_name="direct_runner", metadata=runtime_metadata)`.
+11. If no tool calls are returned, it appends the model text as assistant history and continues the loop.
 12. If tool calls are returned, it executes each call through `_execute_tool_call(...)`.
 13. It appends every formatted tool result to ordered provider messages using `ToolsFormatter.format_tool_result(...)`.
-14. It repeats until final response or budget stop.
+14. It repeats until `isDone` or budget stop.
 15. Budget stops return a `StrategyResult` with a concise output such as `"Agent runtime stopped after reaching max_iterations."` or `"Agent runtime stopped after reaching max_tokens."`.
 
 #### Edge Cases & Error Handling
@@ -270,8 +270,8 @@ The exact callable signature can be adjusted during implementation to match exis
 - Validation failure: create failed context and error result; do not execute the tool body.
 - Tool exception: catch and convert to failed context and `ToolResult.error(...)`.
 - Empty tools catalog: no provider schemas are sent; runtime performs one or more model calls only if the model somehow returns tool calls, which will become unknown-tool errors.
-- Unbounded config: if both `max_iterations` and `max_tokens` are `None`, the runtime does not enforce hard loop limits. The model must eventually return a final response. This matches the user requirement but leaves infinite-loop risk as an explicit known risk.
-- Token estimation cannot be exact across all providers; the first implementation must be deterministic and testable.
+- Unbounded config: if both `max_iterations` and `max_tokens` are `None`, the runtime does not enforce hard loop limits. The model must eventually call `isDone`. This matches the user requirement but leaves infinite-loop risk as an explicit known risk.
+- Token usage is unknown when providers do not return usage metadata; in that case `max_tokens` cannot be enforced for that response.
 
 ---
 
@@ -422,7 +422,7 @@ class AgentRuntimeTests(unittest.IsolatedAsyncioTestCase):
 2. Use decorated `@tool` functions and small `BaseTool` subclasses.
 3. Assert tool results are appended to the second runner call's `messages`.
 4. Assert permission-denied tools are not executed.
-5. Assert runtime metadata includes stop reason, iteration count, estimated tokens, and tool states.
+5. Assert runtime metadata includes stop reason, iteration count, provider-reported token usage, and tool states.
 6. Keep existing PR #23 `tests/test_agent_tool_loop.py` behavior green.
 
 #### Edge Cases & Error Handling
@@ -458,7 +458,7 @@ agent = Agent(
 
 1. Update agent/tool section to say direct agents run in an internal loop when tools are present.
 2. Mention optional `max_iterations` and `max_tokens`.
-3. State that omitted budgets allow the agent to continue until it produces a final response.
+3. State that omitted budgets allow the agent to continue until it calls `isDone`.
 4. Avoid documenting `AgentRuntime` construction.
 
 #### Edge Cases & Error Handling
@@ -514,7 +514,7 @@ class AgentRuntimeConfig:
 @dataclass(frozen=True, slots=True)
 class AgentRuntimeStats:
     iteration_count: int = 0
-    estimated_tokens: int = 0
+    tokens_used: int | None = None
     tool_call_count: int = 0
     stop_reason: AgentStopReason = AgentStopReason.FINAL_RESPONSE
 ```
@@ -565,7 +565,7 @@ AgentMessage(
         "strategy": "direct_runner",
         "stop_reason": "final_response",
         "iteration_count": 2,
-        "estimated_tokens": 1234,
+        "tokens_used": 1234,
         "tool_call_count": 1,
         "tool_call_states": ("succeeded",),
     },
@@ -614,8 +614,8 @@ Summary: 3 files created, 8 files modified, 0 files deleted.
 - `tests/test_agent_runtime.py` -> `test_runtime_denies_write_tool_by_default`: WRITE tool is requested, permission policy denies it, tool body is not called, and denied context is returned.
 - `tests/test_agent_runtime.py` -> `test_runtime_records_unknown_tool_as_failed_context`: model requests missing tool; runtime creates failed context and sends error result back to model.
 - `tests/test_agent_runtime.py` -> `test_runtime_stops_at_max_iterations`: repeated tool-call responses stop with `stop_reason=max_iterations`.
-- `tests/test_agent_runtime.py` -> `test_runtime_stops_at_max_tokens`: long prompt or response crosses token estimate limit and stops with `stop_reason=max_tokens`.
-- `tests/test_agent_runtime.py` -> `test_runtime_without_limits_continues_until_final_response`: no max iteration/token config; fake runner returns multiple tool calls then final response.
+- `tests/test_agent_runtime.py` -> `test_runtime_stops_at_max_tokens_from_provider_usage`: provider usage metadata crosses the token limit and stops with `stop_reason=max_tokens`.
+- `tests/test_agent_runtime.py` -> `test_runtime_without_limits_continues_until_is_done`: no max iteration/token config; fake runner returns multiple tool calls then calls `isDone`.
 - `tests/test_agent_tool_loop.py` -> preserve existing PR #23 tests for agent-owned tool execution, permission denial, unknown tools, and strategy path tool passing.
 - `tests/test_agent_base.py` -> preserve card, fork, direct no-tool runner, and strategy context behavior.
 
@@ -629,7 +629,7 @@ Summary: 3 files created, 8 files modified, 0 files deleted.
 
 1. Create an `Agent` with a fake runner and one `@tool`, no runtime budgets, and verify it loops through two tool calls before final answer.
 2. Create an `Agent` with `max_iterations=1` and a fake runner that keeps requesting tools; verify reply metadata reports `max_iterations`.
-3. Create an `Agent` with `max_tokens` lower than the prompt estimate; verify the runtime stops before unbounded looping.
+3. Create an `Agent` with `max_tokens` lower than provider-reported usage; verify the runtime stops before unbounded looping.
 4. Create a WRITE-permission tool with default permissions; verify it is denied and not executed.
 5. Run `python -c "from vidbyte import Agent, tool; print(Agent, callable(tool))"` after implementation.
 
@@ -673,8 +673,8 @@ No new dependencies or external services are introduced.
 
 - [ ] Should `max_tool_rounds` remain as a deprecated public alias for `max_iterations`, or should it stay independent for one release?
 - [ ] Should `AgentRuntimeConfig` be exported from `vidbyte.agents`, or stay under `vidbyte.lib.dataclasses.agents` only?
-- [ ] Should `max_tokens` count only context-window tokens or total estimated prompt + response + tool-result tokens across the whole run?
-- [ ] Should a no-limit runtime have any hidden emergency guard against infinite loops, or should it strictly follow the user's requirement to continue until final response?
+- [ ] Should `max_tokens` count cumulative provider-reported total tokens or only the most recent response usage when providers differ?
+- [ ] Should a no-limit runtime have any hidden emergency guard against infinite loops, or should it strictly follow the user's requirement to continue until `isDone`?
 - [ ] Should compaction threshold fields be added now as inert config, or deferred until the first real compaction implementation?
 
 ---

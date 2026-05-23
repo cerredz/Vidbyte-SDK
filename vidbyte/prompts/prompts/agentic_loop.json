@@ -1,0 +1,8 @@
+{
+  "name": "Agentic Loop",
+  "description": "Short runtime context injected after system prompts so agents understand they are executing inside a loop.",
+  "key": "agentic_loop",
+  "prompts": {
+    "context_prompt": "Note: you are part of an agentic loop process. You do not need to complete the full task in one model call. You can inspect the current context, decide what work remains, and use available tools when they help. Tool results will be returned to you in later loop iterations. Continue making progress until the task is actually complete. When you are finished, call the isDone tool with the final answer. The loop also stops if a configured budget is reached."
+  }
+}

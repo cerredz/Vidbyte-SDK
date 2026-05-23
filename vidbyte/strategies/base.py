@@ -5,6 +5,7 @@ import re
 from typing import Any, ClassVar, Sequence
 
 from vidbyte.lib.errors import StrategyExecutionError
+from vidbyte.prompts.agentic_loop import append_agentic_loop_prompt
 from vidbyte.strategies.types import StrategyContext, StrategyResult
 
 
@@ -43,7 +44,11 @@ class BaseStrategy:
         return resolved
 
     def _run_model(self, runner: object, prompt: str, **kwargs: Any) -> Any:
-        return runner.run(prompt, **kwargs)  # type: ignore[union-attr]
+        call_options = dict(kwargs)
+        call_options["system"] = append_agentic_loop_prompt(
+            str(call_options["system"]) if call_options.get("system") is not None else None
+        )
+        return runner.run(prompt, **call_options)  # type: ignore[union-attr]
 
 
 class BaseStrategyUtils:

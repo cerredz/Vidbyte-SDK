@@ -121,7 +121,7 @@ agent = Agent(
 reply = await agent.arun("Find where tools are formatted.")
 ```
 
-Agents run direct tool use through an internal runtime loop. The runtime builds the context window, sends tool schemas to the model, executes permitted tool calls, appends tool results back into the ordered message context, and repeats until the model returns a final response. `max_iterations` and `max_tokens` are optional safeguards; when omitted, the runtime continues until a final non-tool response is produced.
+Agents run direct tool use through an internal runtime loop. The runtime builds the context window, appends a short agentic-loop prompt after the system prompt, sends tool schemas to the model, executes permitted tool calls, appends tool results back into the ordered message context, and repeats until the model calls the internal `isDone` tool. If the model returns ordinary text without a tool call, that text is preserved as assistant history and the loop continues. `max_iterations` and `max_tokens` are optional safeguards; `max_tokens` uses provider-reported usage when available.
 
 Advanced built-ins are grouped by category:
 

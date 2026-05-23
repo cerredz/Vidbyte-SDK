@@ -222,7 +222,13 @@ class BaseAgent(McpAttachableMixin):
                 modality=selected_modality,
             )
             if self.strategy is None:
-                result = await self._run_without_strategy(prompt, agent_context, runner=runner, **options)
+                result = await self._run_without_strategy(
+                    prompt,
+                    agent_context,
+                    runner=runner,
+                    modality=selected_modality,
+                    **options,
+                )
             else:
                 result = await self.strategy.arun(
                     prompt,
@@ -302,6 +308,7 @@ class BaseAgent(McpAttachableMixin):
         context: BaseAgentContext,
         *,
         runner: object | None = None,
+        modality: ModelModality = ModelModality.TEXT,
         **options: Any,
     ) -> StrategyResult:
         if runner is None:
@@ -309,6 +316,13 @@ class BaseAgent(McpAttachableMixin):
         if isinstance(runner, ConfiguredAgentRunner):
             raise AgentExecutionError(
                 "ConfiguredAgentRunner stores primitive settings only; pass an executable runner when no strategy is set."
+            )
+        if modality is not ModelModality.TEXT:
+            raw_result = await self._call_runner_once(runner, message, context=context, **options)
+            return StrategyResult(
+                output=self._runner_output_text(raw_result),
+                strategy_name="direct_runner",
+                metadata=self._runner_output_metadata(raw_result),
             )
         provider = str(options.pop("provider", None) or self._runner_provider(runner))
         result = await self._runtime().arun(
@@ -441,6 +455,12 @@ class BaseAgent(McpAttachableMixin):
     @staticmethod
     def _runner_output_metadata(result: object) -> dict[str, Any]:
         metadata: dict[str, Any] = {}
+        response_metadata = getattr(result, "metadata", None)
+        if isinstance(response_metadata, Mapping):
+            metadata.update(dict(response_metadata))
+        raw = getattr(result, "raw", None)
+        if isinstance(raw, Mapping) and "usage" in raw and "usage" not in metadata:
+            metadata["usage"] = raw["usage"]
         images = getattr(result, "images", None)
         if images is not None:
             metadata["image_count"] = len(tuple(images))

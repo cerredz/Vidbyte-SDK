@@ -30,9 +30,18 @@ class EchoRunner:
     def __init__(self) -> None:
         self.system = None
 
-    def run(self, prompt: str, *, system: str | None = None, **_: object) -> str:
+    def run(self, prompt: str, *, system: str | None = None, **_: object) -> object:
         self.system = system
-        return f"direct:{prompt}"
+        return FakeResponse(
+            "",
+            {"output": [{"type": "function_call", "name": "isDone", "arguments": f'{{"final_answer": "direct:{prompt}"}}'}]},
+        )
+
+
+class FakeResponse:
+    def __init__(self, text: str, raw: dict) -> None:
+        self.text = text
+        self.raw = raw
 
 
 class AgentBaseTests(unittest.IsolatedAsyncioTestCase):
@@ -59,8 +68,9 @@ class AgentBaseTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(strategy.last_tools, (tool,))
         self.assertIsNotNone(strategy.last_context)
         self.assertIsInstance(strategy.last_context, BaseAgentContext)
-        self.assertEqual(strategy.last_context.agent_name, "worker")
-        self.assertIn("current_agent", strategy.last_context.strategy_metadata)
+        self.assertEqual(strategy.last_context.agent_name, None)
+        self.assertEqual(strategy.last_context.strategy_metadata, {})
+        self.assertEqual(tuple(tool.name for tool in strategy.last_context.tools), ("lookup", "isDone"))
 
     async def test_runner_config_tool_helpers_and_fork(self) -> None:
         strategy = EchoStrategy()
@@ -96,6 +106,7 @@ class AgentBaseTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(reply.metadata["strategy"], "direct_runner")
         self.assertEqual(reply.metadata["modality"], "text")
         self.assertIn("Direct system.", runner.system)
+        self.assertIn("agentic loop", runner.system)
 
 
 if __name__ == "__main__":

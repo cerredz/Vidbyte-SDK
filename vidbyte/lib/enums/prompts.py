@@ -6,6 +6,7 @@ from enum import Enum
 class Prompt(str, Enum):
     """Prompt keys for Vidbyte SDK prompt assets."""
 
+    AGENTIC_LOOP_CONTEXT_PROMPT = "agentic_loop.context_prompt"
     AGENTIC_RAG_RETRIEVE_PROMPT = "agentic_rag.retrieve_prompt"
     AGENTIC_RAG_ANSWER_PROMPT = "agentic_rag.answer_prompt"
     ANSWER_CONVERGENCE_ATTEMPT_PROMPT = "answer_convergence.attempt_prompt"

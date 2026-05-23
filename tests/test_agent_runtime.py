@@ -74,15 +74,13 @@ class AgentRuntimeTests(unittest.IsolatedAsyncioTestCase):
             modality=ModelModality.TEXT,
         )
 
-        self.assertEqual(context.system_prompt, "Agent system.")
+        self.assertIn("Agent system.", context.system_prompt)
+        self.assertIn("agentic loop", context.system_prompt)
         self.assertEqual([message.content for message in context.history], ["external", "prior"])
-        self.assertEqual(context.metadata["caller"], "yes")
-        self.assertEqual(context.metadata["agent"], "meta")
-        self.assertEqual(context.metadata["input"], "meta")
-        self.assertEqual(context.metadata["modality"], "text")
-        self.assertEqual(context.strategy_metadata["current_agent"], "worker")
-        self.assertEqual(context.strategy_metadata["current_message"], "task")
-        self.assertEqual(context.tool_calls, (existing_call,))
+        self.assertEqual(context.metadata, {})
+        self.assertEqual(context.strategy_metadata, {})
+        self.assertEqual(context.tool_calls, ())
+        self.assertEqual(tuple(tool.name for tool in context.tools), ("isDone",))
 
     async def test_runtime_executes_tool_call_and_continues_to_final_response(self) -> None:
         @tool
@@ -105,7 +103,19 @@ class AgentRuntimeTests(unittest.IsolatedAsyncioTestCase):
                         ]
                     },
                 ),
-                FakeResponse("final answer", {"output_text": "final answer"}),
+                FakeResponse(
+                    "",
+                    {
+                        "output": [
+                            {
+                                "type": "function_call",
+                                "name": "isDone",
+                                "arguments": '{"final_answer": "final answer"}',
+                                "call_id": "call_2",
+                            }
+                        ]
+                    },
+                ),
             ]
         )
         runtime = AgentRuntime(
@@ -134,10 +144,10 @@ class AgentRuntimeTests(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertEqual(result.output, "final answer")
-        self.assertEqual(result.metadata["stop_reason"], "final_response")
+        self.assertEqual(result.metadata["stop_reason"], "is_done")
         self.assertEqual(result.metadata["iteration_count"], 2)
-        self.assertEqual(result.metadata["tool_call_count"], 1)
-        self.assertEqual(result.metadata["tool_call_states"], ("succeeded",))
+        self.assertEqual(result.metadata["tool_call_count"], 2)
+        self.assertEqual(result.metadata["tool_call_states"], ("succeeded", "succeeded"))
         self.assertIn("tools", runner.calls[0]["kwargs"])
         self.assertIn("messages", runner.calls[1]["kwargs"])
 
@@ -149,7 +159,10 @@ class AgentRuntimeTests(unittest.IsolatedAsyncioTestCase):
                     "",
                     {"output": [{"type": "function_call", "name": "write", "arguments": "{}"}]},
                 ),
-                FakeResponse("handled", {"output_text": "handled"}),
+                FakeResponse(
+                    "",
+                    {"output": [{"type": "function_call", "name": "isDone", "arguments": '{"final_answer": "handled"}'}]},
+                ),
             ]
         )
         runtime = AgentRuntime(
@@ -178,7 +191,7 @@ class AgentRuntimeTests(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertFalse(write_tool.executed)
-        self.assertEqual(result.metadata["tool_call_states"], ("denied",))
+        self.assertEqual(result.metadata["tool_call_states"], ("denied", "succeeded"))
 
     async def test_runtime_records_unknown_tool_as_failed_context(self) -> None:
         runner = FakeRunner(
@@ -187,7 +200,10 @@ class AgentRuntimeTests(unittest.IsolatedAsyncioTestCase):
                     "",
                     {"output": [{"type": "function_call", "name": "missing", "arguments": "{}"}]},
                 ),
-                FakeResponse("handled", {"output_text": "handled"}),
+                FakeResponse(
+                    "",
+                    {"output": [{"type": "function_call", "name": "isDone", "arguments": '{"final_answer": "handled"}'}]},
+                ),
             ]
         )
         runtime = AgentRuntime(
@@ -215,7 +231,7 @@ class AgentRuntimeTests(unittest.IsolatedAsyncioTestCase):
             runner_output_metadata=runner_output_metadata,
         )
 
-        self.assertEqual(result.metadata["tool_call_states"], ("failed",))
+        self.assertEqual(result.metadata["tool_call_states"], ("failed", "succeeded"))
 
     async def test_runtime_stops_at_max_iterations(self) -> None:
         @tool
@@ -258,8 +274,8 @@ class AgentRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.metadata["iteration_count"], 1)
         self.assertEqual(len(runner.calls), 1)
 
-    async def test_runtime_stops_at_max_tokens_before_model_call(self) -> None:
-        runner = FakeRunner([FakeResponse("should not be used", {})])
+    async def test_runtime_stops_at_max_tokens_from_provider_usage(self) -> None:
+        runner = FakeRunner([FakeResponse("working", {"usage": {"total_tokens": 4}})])
         runtime = AgentRuntime(
             agent_name="worker",
             system_prompt="Work.",
@@ -287,8 +303,9 @@ class AgentRuntimeTests(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertEqual(result.metadata["stop_reason"], "max_tokens")
-        self.assertEqual(result.metadata["iteration_count"], 0)
-        self.assertEqual(runner.calls, [])
+        self.assertEqual(result.metadata["iteration_count"], 1)
+        self.assertEqual(result.metadata["tokens_used"], 4)
+        self.assertEqual(len(runner.calls), 1)
 
     async def test_runtime_without_limits_continues_until_final_response(self) -> None:
         @tool
@@ -299,7 +316,10 @@ class AgentRuntimeTests(unittest.IsolatedAsyncioTestCase):
             [
                 FakeResponse("", {"output": [{"type": "function_call", "name": "lookup", "arguments": "{}"}]}),
                 FakeResponse("", {"output": [{"type": "function_call", "name": "lookup", "arguments": "{}"}]}),
-                FakeResponse("done", {"output_text": "done"}),
+                FakeResponse(
+                    "",
+                    {"output": [{"type": "function_call", "name": "isDone", "arguments": '{"final_answer": "done"}'}]},
+                ),
             ]
         )
         runtime = AgentRuntime(
@@ -329,7 +349,46 @@ class AgentRuntimeTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result.output, "done")
         self.assertEqual(result.metadata["iteration_count"], 3)
-        self.assertEqual(result.metadata["tool_call_count"], 2)
+        self.assertEqual(result.metadata["tool_call_count"], 3)
+
+    async def test_runtime_continues_when_response_has_no_tool_calls(self) -> None:
+        runner = FakeRunner(
+            [
+                FakeResponse("partial work", {"output_text": "partial work"}),
+                FakeResponse(
+                    "",
+                    {"output": [{"type": "function_call", "name": "isDone", "arguments": '{"final_answer": "done"}'}]},
+                ),
+            ]
+        )
+        runtime = AgentRuntime(
+            agent_name="worker",
+            system_prompt="Work.",
+            tools=Tools(),
+            permission_policy=PermissionPolicy(),
+        )
+        context = runtime.build_context(
+            "task",
+            base_context=None,
+            history=(),
+            agent_history=(),
+            agent_metadata={},
+            existing_tool_calls=(),
+        )
+
+        result = await runtime.arun(
+            "task",
+            runner=runner,
+            context=context,
+            provider="openai",
+            invoke_runner=invoke_runner,
+            runner_output_text=runner_output_text,
+            runner_output_metadata=runner_output_metadata,
+        )
+
+        self.assertEqual(result.output, "done")
+        self.assertEqual(result.metadata["iteration_count"], 2)
+        self.assertEqual(runner.calls[1]["kwargs"]["messages"][0]["content"], "partial work")
 
 
 if __name__ == "__main__":

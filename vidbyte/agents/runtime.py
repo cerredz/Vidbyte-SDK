@@ -4,7 +4,7 @@ Description:
     Defines the internal direct execution runtime for Vidbyte agents.
 Purpose:
     Keeps agent loop execution, context-window construction, tool execution,
-    permission checks, and minimal budget tracking out of BaseAgent.
+    permission checks, and provider-reported token accounting out of BaseAgent.
 Architecture:
     - AgentRuntime: Builds BaseAgentContext and runs direct model/tool loops.
 Relations:
@@ -20,13 +20,12 @@ from typing import Any
 from vidbyte.agents.types import AgentMessage
 from vidbyte.lib.dataclasses.agents import AgentRuntimeConfig, AgentStopReason
 from vidbyte.lib.enums import ModelModality
-from vidbyte.lib.errors import (
-    PermissionDeniedError,
-    ToolExecutionError,
-    ToolRegistryError,
-)
+from vidbyte.lib.errors import PermissionDeniedError, ToolExecutionError, ToolRegistryError
+from vidbyte.lib.token_usage import token_usage_from_response
 from vidbyte.lib.tools import ToolsFormatter
+from vidbyte.prompts.agentic_loop import append_agentic_loop_prompt
 from vidbyte.strategies.types import BaseAgentContext, StrategyContext, StrategyResult
+from vidbyte.tools._internal import IS_DONE_TOOL_NAME, with_internal_agent_tools
 from vidbyte.tools.catalog import Tools
 from vidbyte.tools.security import PermissionDecision, PermissionPolicy
 from vidbyte.tools.types import ToolCall, ToolCallContext, ToolCallState, ToolResult
@@ -46,7 +45,7 @@ class AgentRuntime:
     ) -> None:
         self.agent_name = agent_name
         self.system_prompt = system_prompt
-        self.tools = tools
+        self.tools = with_internal_agent_tools(tools)
         self.permission_policy = permission_policy
         self.config = config or AgentRuntimeConfig()
 
@@ -62,41 +61,15 @@ class AgentRuntime:
         input_metadata: Mapping[str, Any] | None = None,
         modality: ModelModality | None = None,
     ) -> BaseAgentContext:
-        """Build the context window passed into direct runners and strategies."""
-        merged_history = tuple(history) + tuple(agent_history)
-        metadata = dict(base_context.metadata if base_context else {})
-        metadata.update(dict(agent_metadata))
-        metadata.update(dict(input_metadata or {}))
-        if modality is not None:
-            metadata["modality"] = modality.value
-
-        strategy_metadata = dict(base_context.strategy_metadata if base_context else {})
-        strategy_metadata.update({"current_agent": self.agent_name, "current_message": message})
-        if modality is not None:
-            strategy_metadata["modality"] = modality.value
-
-        tool_calls = (
-            tuple(base_context.tool_calls) + tuple(existing_tool_calls)
-            if base_context
-            else tuple(existing_tool_calls)
-        )
-
+        """Build the minimal context window passed into direct runners and strategies."""
+        del message, agent_metadata, existing_tool_calls, input_metadata, modality
+        system_prompt = base_context.system_prompt if base_context and base_context.system_prompt else self.system_prompt
         return BaseAgentContext(
-            system_prompt=base_context.system_prompt
-            if base_context and base_context.system_prompt
-            else self.system_prompt,
-            agent_name=self.agent_name,
-            role=base_context.role if base_context else None,
-            history=merged_history,
+            system_prompt=append_agentic_loop_prompt(system_prompt),
+            history=tuple(history) + tuple(agent_history),
             file_paths=tuple(base_context.file_paths) if base_context else (),
-            strategy_metadata=strategy_metadata,
-            tool_calls=tool_calls,
-            responses=tuple(base_context.responses) if base_context else (),
+            tools=self.tools.specs(),
             budget=base_context.budget if base_context else None,
-            artifacts=tuple(base_context.artifacts) if base_context else (),
-            memory=base_context.memory if base_context else None,
-            permissions=base_context.permissions if base_context else None,
-            metadata=metadata,
         )
 
     async def arun(
@@ -111,69 +84,48 @@ class AgentRuntime:
         runner_output_metadata: Callable[[object], Mapping[str, Any]],
         options: Mapping[str, Any] | None = None,
     ) -> StrategyResult:
-        """Run the direct model/tool loop until final response or budget stop."""
+        """Run the direct model/tool loop until isDone or a budget stop."""
         run_options = dict(options or {})
         tool_schemas = self._resolve_tool_schemas(provider)
         messages = self._extract_initial_messages(run_options)
         call_contexts: list[ToolCallContext] = []
         iteration_count = 0
-        estimated_tokens = self._estimate_tokens(message, context.build_context(), messages)
-
-        stop_result = self._budget_stop(
-            iteration_count=iteration_count,
-            estimated_tokens=estimated_tokens,
-            contexts=call_contexts,
-        )
-        if stop_result is not None:
-            return stop_result
+        tokens_used: int | None = None
 
         while True:
-            # Prepare per-iteration call options (system prompt, tools, message history)
-            call_options = self._build_iteration_call_options(run_options, context, tool_schemas, messages)
-
-            # Invoke the model runner and update token accounting
-            raw_result = await invoke_runner(runner, message, **call_options)
-            iteration_count += 1
-            runner_metadata = dict(runner_output_metadata(raw_result))
-            estimated_tokens += self._estimate_response_tokens(raw_result, runner_metadata)
-
-            # Parse tool calls from the raw response
-            tool_calls = ToolsFormatter.parse_tool_calls(raw_result, provider)
-            if not tool_calls:
-                return self._final_result(
-                    output=runner_output_text(raw_result),
-                    runner_metadata=runner_metadata,
-                    contexts=call_contexts,
-                    iteration_count=iteration_count,
-                    estimated_tokens=estimated_tokens,
-                )
-
-            # Execute each tool call, record the result, and feed it back as a message
-            for call in tool_calls:
-                estimated_tokens += await self._process_tool_call(
-                    call, provider, messages, call_contexts
-                )
-
             stop_result = self._budget_stop(
                 iteration_count=iteration_count,
-                estimated_tokens=estimated_tokens,
+                tokens_used=tokens_used,
                 contexts=call_contexts,
             )
             if stop_result is not None:
                 return stop_result
 
-    async def execute_tool_call(
-        self,
-        call: ToolCall,
-        *,
-        provider: str,
-    ) -> tuple[ToolCallContext, ToolResult]:
-        """Resolve, authorize, validate, execute, and record one tool call.
+            call_options = self._build_iteration_call_options(run_options, context, tool_schemas, messages)
+            raw_result = await invoke_runner(runner, message, **call_options)
+            iteration_count += 1
+            runner_metadata = dict(runner_output_metadata(raw_result))
+            tokens_used = self._add_token_usage(tokens_used, token_usage_from_response(raw_result, runner_metadata))
 
-        Errors raised by inner helpers are caught here and converted to
-        safe ToolCallContext / ToolResult tuples so the runtime loop never
-        terminates on a single tool failure.
-        """
+            tool_calls = ToolsFormatter.parse_tool_calls(raw_result, provider)
+            if not tool_calls:
+                messages.append(self._assistant_message(runner_output_text(raw_result)))
+                continue
+
+            for call in tool_calls:
+                _, result = await self._process_tool_call(call, provider, messages, call_contexts)
+                if call.tool_name == IS_DONE_TOOL_NAME:
+                    return self._final_result(
+                        output=result.output,
+                        runner_metadata=runner_metadata,
+                        contexts=call_contexts,
+                        iteration_count=iteration_count,
+                        tokens_used=tokens_used,
+                        stop_reason=AgentStopReason.IS_DONE,
+                    )
+
+    async def execute_tool_call(self, call: ToolCall, *, provider: str) -> tuple[ToolCallContext, ToolResult]:
+        """Resolve, authorize, validate, execute, and record one tool call."""
         try:
             tool = self._get_tool(call)
             spec = tool.spec()
@@ -201,7 +153,11 @@ class AgentRuntime:
             )
             state = ToolCallState.FAILED
         except Exception as exc:
-            result = ToolResult.error(call.tool_name, f"Tool execution failed: {exc}", metadata={"error": "execution_error", "error_type": type(exc).__name__})
+            result = ToolResult.error(
+                call.tool_name,
+                f"Tool execution failed: {exc}",
+                metadata={"error": "execution_error", "error_type": type(exc).__name__},
+            )
             state = ToolCallState.FAILED
 
         return (
@@ -216,8 +172,6 @@ class AgentRuntime:
             ),
             result,
         )
-
-    # ── tool-call helper methods ───────────────────────────────────────
 
     def _get_tool(self, call: ToolCall) -> object:
         """Resolve a tool from the catalog by name, raising ToolRegistryError if missing."""
@@ -254,13 +208,8 @@ class AgentRuntime:
         except Exception as exc:
             raise ToolExecutionError(
                 f"Tool execution failed: {exc}",
-                details={
-                    "tool_name": call.tool_name,
-                    "error_type": type(exc).__name__,
-                },
+                details={"tool_name": call.tool_name, "error_type": type(exc).__name__},
             ) from exc
-
-    # ── loop helper methods ────────────────────────────────────────────
 
     def _resolve_tool_schemas(self, provider: str) -> Sequence[dict[str, Any]]:
         """Return provider-native tool schemas when the toolkit is non-empty."""
@@ -294,9 +243,10 @@ class AgentRuntime:
         runner_metadata: dict[str, Any],
         contexts: Sequence[ToolCallContext],
         iteration_count: int,
-        estimated_tokens: int,
+        tokens_used: int | None,
+        stop_reason: AgentStopReason,
     ) -> StrategyResult:
-        """Build the final StrategyResult from a model text response."""
+        """Build the final StrategyResult from an explicit runtime stop."""
         return StrategyResult(
             output=output,
             strategy_name="direct_runner",
@@ -304,8 +254,8 @@ class AgentRuntime:
                 **self._runtime_metadata(
                     contexts=contexts,
                     iteration_count=iteration_count,
-                    estimated_tokens=estimated_tokens,
-                    stop_reason=AgentStopReason.FINAL_RESPONSE,
+                    tokens_used=tokens_used,
+                    stop_reason=stop_reason,
                 ),
                 **runner_metadata,
             },
@@ -317,20 +267,19 @@ class AgentRuntime:
         provider: str,
         messages: list[dict[str, Any]],
         call_contexts: list[ToolCallContext],
-    ) -> int:
-        """Execute one tool call, record its context, append to messages, return token delta."""
+    ) -> tuple[ToolCallContext, ToolResult]:
+        """Execute one tool call, record its context, and append it to messages."""
         context_record, result = await self.execute_tool_call(call, provider=provider)
         call_contexts.append(context_record)
-        messages.append(dict(ToolsFormatter.format_tool_result(call, result, provider)))
-        return self._estimate_tokens(result.output)
-
-    # ── budget methods ─────────────────────────────────────────────────
+        if call.tool_name != IS_DONE_TOOL_NAME:
+            messages.append(dict(ToolsFormatter.format_tool_result(call, result, provider)))
+        return context_record, result
 
     def _budget_stop(
         self,
         *,
         iteration_count: int,
-        estimated_tokens: int,
+        tokens_used: int | None,
         contexts: Sequence[ToolCallContext],
     ) -> StrategyResult | None:
         if self.config.max_iterations is not None and iteration_count >= self.config.max_iterations:
@@ -338,15 +287,15 @@ class AgentRuntime:
                 "Agent runtime stopped after reaching max_iterations.",
                 stop_reason=AgentStopReason.MAX_ITERATIONS,
                 iteration_count=iteration_count,
-                estimated_tokens=estimated_tokens,
+                tokens_used=tokens_used,
                 contexts=contexts,
             )
-        if self.config.max_tokens is not None and estimated_tokens >= self.config.max_tokens:
+        if self.config.max_tokens is not None and tokens_used is not None and tokens_used >= self.config.max_tokens:
             return self._stopped_result(
                 "Agent runtime stopped after reaching max_tokens.",
                 stop_reason=AgentStopReason.MAX_TOKENS,
                 iteration_count=iteration_count,
-                estimated_tokens=estimated_tokens,
+                tokens_used=tokens_used,
                 contexts=contexts,
             )
         return None
@@ -357,7 +306,7 @@ class AgentRuntime:
         *,
         stop_reason: AgentStopReason,
         iteration_count: int,
-        estimated_tokens: int,
+        tokens_used: int | None,
         contexts: Sequence[ToolCallContext],
     ) -> StrategyResult:
         return StrategyResult(
@@ -366,7 +315,7 @@ class AgentRuntime:
             metadata=self._runtime_metadata(
                 contexts=contexts,
                 iteration_count=iteration_count,
-                estimated_tokens=estimated_tokens,
+                tokens_used=tokens_used,
                 stop_reason=stop_reason,
             ),
         )
@@ -376,60 +325,27 @@ class AgentRuntime:
         *,
         contexts: Sequence[ToolCallContext],
         iteration_count: int,
-        estimated_tokens: int,
+        tokens_used: int | None,
         stop_reason: AgentStopReason,
     ) -> dict[str, Any]:
         return {
             "stop_reason": stop_reason.value,
             "iteration_count": iteration_count,
-            "estimated_tokens": estimated_tokens,
+            "tokens_used": tokens_used,
             "tool_call_count": len(contexts),
             "tool_call_states": tuple(context.state.value for context in contexts),
             "tool_calls": tuple(contexts),
         }
 
-    # ── token estimation ───────────────────────────────────────────────
-
-    def _estimate_response_tokens(self, result: object, metadata: Mapping[str, Any]) -> int:
-        usage_tokens = self._usage_total_tokens(metadata)
-        if usage_tokens is not None:
-            return usage_tokens
-        raw_payload = getattr(result, "raw", None)
-        return self._estimate_tokens(self._safe_runner_text(result), raw_payload)
+    @staticmethod
+    def _assistant_message(output: str) -> dict[str, Any]:
+        return {"role": "assistant", "content": output}
 
     @staticmethod
-    def _usage_total_tokens(metadata: Mapping[str, Any]) -> int | None:
-        usage = metadata.get("usage")
-        if isinstance(usage, Mapping):
-            total = usage.get("total_tokens") or usage.get("input_tokens")
-            if isinstance(total, int):
-                return total
-        total_tokens = metadata.get("total_tokens")
-        return total_tokens if isinstance(total_tokens, int) else None
-
-    @staticmethod
-    def _estimate_tokens(*items: object) -> int:
-        total_chars = 0
-        for item in items:
-            if item is None:
-                continue
-            if isinstance(item, str):
-                total_chars += len(item)
-            else:
-                total_chars += len(str(item))
-        if total_chars <= 0:
-            return 0
-        return max(1, (total_chars + 3) // 4)
-
-    @staticmethod
-    def _safe_runner_text(result: object) -> str:
-        text = getattr(result, "text", None)
-        if text is not None:
-            return str(text)
-        output = getattr(result, "output", None)
-        if output is not None:
-            return str(output)
-        return str(result)
+    def _add_token_usage(current: int | None, delta: int | None) -> int | None:
+        if delta is None:
+            return current
+        return (current or 0) + delta
 
 
 __all__ = ["AgentRuntime"]
