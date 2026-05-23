@@ -21,6 +21,7 @@ Relations:
 from __future__ import annotations
 
 from vidbyte.agents import (
+    Agent,
     AgentCard,
     AgentMessage,
     AgentRegistry,
@@ -61,6 +62,8 @@ from vidbyte.tools import (
     BaseTool,
     FunctionTool,
     ToolCall,
+    ToolCallContext,
+    ToolCallState,
     ToolExecutor,
     ToolMixin,
     ToolParameter,
@@ -69,7 +72,9 @@ from vidbyte.tools import (
     ToolResult,
     ToolSpec,
     ToolStatus,
+    Tools,
     ToolsFormatter,
+    tool,
     vidbyte_tool,
 )
 from vidbyte.tools.mcp import (
@@ -79,6 +84,7 @@ from vidbyte.tools.mcp import (
 )
 
 __all__ = [
+    "Agent",
     "AgentCard",
     "AgentMessage",
     "AgentRegistry",
@@ -118,6 +124,8 @@ __all__ = [
     "StrategyContext",
     "StrategyResult",
     "ToolCall",
+    "ToolCallContext",
+    "ToolCallState",
     "ToolExecutor",
     "ToolParameter",
     "ToolPermission",
@@ -125,7 +133,10 @@ __all__ = [
     "ToolResult",
     "ToolSpec",
     "ToolStatus",
+    "Tools",
     "ToolsFormatter",
     "TreeOfThoughtsStrategy",
     "VidbyteSDK",
+    "tool",
+    "vidbyte_tool",
 ]

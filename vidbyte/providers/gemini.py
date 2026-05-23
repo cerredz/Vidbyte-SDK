@@ -117,6 +117,8 @@ class GeminiProvider:
             raise ProviderResponseError("Gemini response did not include text parts.", provider=self.provider.value, response_excerpt=str(parsed))
         chunks = [part["text"] for part in parts if isinstance(part, dict) and isinstance(part.get("text"), str)]
         if not chunks:
+            if any(isinstance(part, dict) and ("functionCall" in part or "function_call" in part) for part in parts):
+                return ""
             raise ProviderResponseError("Gemini response did not include text.", provider=self.provider.value, response_excerpt=str(parsed))
         return "\n".join(chunks)
 

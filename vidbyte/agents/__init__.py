@@ -5,7 +5,10 @@ from vidbyte.agents.registry import AgentRegistry
 from vidbyte.lib.dataclasses.agents import AgentRunnerConfig
 from vidbyte.agents.types import AgentCard, AgentMessage, AgentSpec
 
+Agent = BaseAgent
+
 __all__ = [
+    "Agent",
     "AgentCard",
     "AgentMessage",
     "AgentRunnerConfig",

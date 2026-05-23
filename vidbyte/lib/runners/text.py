@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
+from dataclasses import replace
 from typing import Any, Mapping
 
 from vidbyte.lib.config import TextModelConfig
@@ -34,12 +36,22 @@ class TextModelRunner:
         *,
         system: str | None = None,
         metadata: Mapping[str, object] | None = None,
+        tools: Iterable[Mapping[str, Any]] = (),
+        tool_choice: str | Mapping[str, Any] | None = None,
+        messages: Iterable[Mapping[str, Any]] = (),
     ) -> TextModelResponse:
+        call_config = replace(
+            self._config,
+            tools=tuple(dict(tool) for tool in tools),
+            tool_choice=tool_choice,
+            messages=tuple(dict(message) for message in messages),
+        )
         return self._provider.run_text(
             prompt=prompt,
             system=system,
             metadata=metadata,
             transport=self._transport,
+            config=call_config,
         )
 
     def model_name(self) -> str:

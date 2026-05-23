@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 
 from vidbyte.providers import tool_spec_to_provider_schema
-from vidbyte.tools import vidbyte_tool
+from vidbyte.tools import ToolsFormatter, tool, vidbyte_tool
 
 
 class ProviderToolSchemaTranslationTests(unittest.TestCase):
@@ -40,6 +40,39 @@ class ProviderToolSchemaTranslationTests(unittest.TestCase):
 
         self.assertEqual(schema["name"], "clear_cache")
         self.assertIn("cache_key", schema["parameters"]["properties"])
+
+    def test_parse_provider_tool_call_payloads(self) -> None:
+        openai_calls = ToolsFormatter.parse_tool_calls(
+            {"output": [{"type": "function_call", "name": "lookup", "arguments": '{"topic": "sdk"}', "call_id": "call-1"}]},
+            "openai",
+        )
+        chat_calls = ToolsFormatter.parse_tool_calls(
+            {"choices": [{"message": {"tool_calls": [{"id": "call-2", "function": {"name": "lookup", "arguments": '{"topic": "chat"}'}}]}}]},
+            "openai",
+        )
+        anthropic_calls = ToolsFormatter.parse_tool_calls(
+            {"content": [{"type": "tool_use", "id": "call-3", "name": "lookup", "input": {"topic": "claude"}}]},
+            "anthropic",
+        )
+        gemini_calls = ToolsFormatter.parse_tool_calls(
+            {"candidates": [{"content": {"parts": [{"functionCall": {"name": "lookup", "args": {"topic": "gemini"}}}]}}]},
+            "gemini",
+        )
+
+        self.assertEqual(openai_calls[0].tool_name, "lookup")
+        self.assertEqual(chat_calls[0].call_id, "call-2")
+        self.assertEqual(anthropic_calls[0].arguments["topic"], "claude")
+        self.assertEqual(gemini_calls[0].arguments["topic"], "gemini")
+
+    def test_tool_alias_schema_shape(self) -> None:
+        @tool
+        def fetch_user_metrics(user_id: int) -> str:
+            """Fetches user metrics."""
+            return str(user_id)
+
+        schema = tool_spec_to_provider_schema(fetch_user_metrics.spec(), "xai")
+
+        self.assertEqual(schema["function"]["name"], "fetch_user_metrics")
 
 
 if __name__ == "__main__":

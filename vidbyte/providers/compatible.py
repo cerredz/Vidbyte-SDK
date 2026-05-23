@@ -100,6 +100,8 @@ class OpenAICompatibleProvider:
         first = choices[0]
         message = first.get("message") if isinstance(first, dict) else None
         content = message.get("content") if isinstance(message, dict) else None
+        if isinstance(message, dict) and isinstance(message.get("tool_calls"), list):
+            return ""
         if not isinstance(content, str):
             raise ProviderResponseError(f"{self.provider.value} response did not include message content.", provider=self.provider.value, response_excerpt=str(parsed))
         return content

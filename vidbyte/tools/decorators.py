@@ -8,11 +8,11 @@ from vidbyte.tools.types import ToolPermission
 
 
 @overload
-def vidbyte_tool(func: Callable[..., Any]) -> FunctionTool: ...
+def tool(func: Callable[..., Any]) -> FunctionTool: ...
 
 
 @overload
-def vidbyte_tool(
+def tool(
     *,
     name: str | None = None,
     description: str | None = None,
@@ -20,7 +20,7 @@ def vidbyte_tool(
 ) -> Callable[[Callable[..., Any]], FunctionTool]: ...
 
 
-def vidbyte_tool(
+def tool(
     func: Callable[..., Any] | None = None,
     *,
     name: str | None = None,
@@ -35,4 +35,10 @@ def vidbyte_tool(
     if func is None:
         return wrap
     return wrap(func)
+
+
+vidbyte_tool = tool
+
+
+__all__ = ["tool", "vidbyte_tool"]
 

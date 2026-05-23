@@ -11,6 +11,8 @@
 
 Add a concrete, dependency-free tool foundation to `vidbyte-sdk` and implement the first advanced tool categories: code search, MCP bridging, permissions and sandbox abstractions, exact patch/edit tools, and context compaction tools. The implementation will preserve the previously designed `BaseTool` direction while making these tools usable in the current minimal SDK scaffold.
 
+Supersession note: `docs/design/agent-tool-api-consolidation.md` updates the public tool mental model after this foundation. `ToolRegistry` and `ToolExecutor` remain compatibility/lower-level infrastructure, while new user-facing examples should prefer `Tools`, `@tool`, and agent-local `tools=[...]`.
+
 ---
 
 ## 2. Goals & Non-Goals
