@@ -14,7 +14,15 @@ Relations:
 
 from __future__ import annotations
 
-from vidbyte.lib.dataclasses.agents import AgentCard, AgentMessage, AgentRunnerConfig, AgentSpec
+from vidbyte.lib.dataclasses.agents import (
+    AgentCard,
+    AgentMessage,
+    AgentRunnerConfig,
+    AgentRuntimeConfig,
+    AgentRuntimeStats,
+    AgentSpec,
+    AgentStopReason,
+)
 from vidbyte.lib.dataclasses.context import (
     BaseAgentContext,
     BaseContext,
@@ -51,7 +59,10 @@ __all__ = [
     "AgentCard",
     "AgentMessage",
     "AgentRunnerConfig",
+    "AgentRuntimeConfig",
+    "AgentRuntimeStats",
     "AgentSpec",
+    "AgentStopReason",
     "BaseAgentContext",
     "BaseContext",
     "CandidateFailure",

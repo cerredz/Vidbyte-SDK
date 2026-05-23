@@ -78,6 +78,8 @@ class AgentToolLoopTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(reply.content, "final answer")
         self.assertEqual(reply.metadata["tool_call_count"], 1)
         self.assertEqual(reply.metadata["tool_call_states"], ("succeeded",))
+        self.assertEqual(reply.metadata["stop_reason"], "final_response")
+        self.assertEqual(reply.metadata["iteration_count"], 2)
         self.assertIn("tools", runner.calls[0]["kwargs"])
         self.assertIn("messages", runner.calls[1]["kwargs"])
 
@@ -132,8 +134,9 @@ class AgentToolLoopTests(unittest.IsolatedAsyncioTestCase):
 
         reply = await agent.arun("task")
 
-        self.assertEqual(reply.content, "Tool call limit reached before a final response.")
-        self.assertTrue(reply.metadata["tool_round_limit_reached"])
+        self.assertEqual(reply.content, "Agent runtime stopped after reaching max_iterations.")
+        self.assertEqual(reply.metadata["stop_reason"], "max_iterations")
+        self.assertEqual(reply.metadata["iteration_count"], 1)
 
     async def test_strategy_path_still_receives_tools(self) -> None:
         @tool
