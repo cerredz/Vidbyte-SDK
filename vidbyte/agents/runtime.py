@@ -20,6 +20,11 @@ from typing import Any
 from vidbyte.agents.types import AgentMessage
 from vidbyte.lib.dataclasses.agents import AgentRuntimeConfig, AgentStopReason
 from vidbyte.lib.enums import ModelModality
+from vidbyte.lib.errors import (
+    PermissionDeniedError,
+    ToolExecutionError,
+    ToolRegistryError,
+)
 from vidbyte.lib.tools import ToolsFormatter
 from vidbyte.strategies.types import BaseAgentContext, StrategyContext, StrategyResult
 from vidbyte.tools.catalog import Tools
@@ -108,8 +113,8 @@ class AgentRuntime:
     ) -> StrategyResult:
         """Run the direct model/tool loop until final response or budget stop."""
         run_options = dict(options or {})
-        tool_schemas = self.tools.provider_schemas(provider) if len(self.tools) else ()
-        messages: list[dict[str, Any]] = [dict(item) for item in run_options.pop("messages", ())]
+        tool_schemas = self._resolve_tool_schemas(provider)
+        messages = self._extract_initial_messages(run_options)
         call_contexts: list[ToolCallContext] = []
         iteration_count = 0
         estimated_tokens = self._estimate_tokens(message, context.build_context(), messages)
@@ -123,39 +128,31 @@ class AgentRuntime:
             return stop_result
 
         while True:
-            call_options = dict(run_options)
-            call_options.setdefault("system", context.system_prompt)
-            if tool_schemas:
-                call_options.setdefault("tools", tool_schemas)
-            if messages:
-                call_options.setdefault("messages", tuple(messages))
+            # Prepare per-iteration call options (system prompt, tools, message history)
+            call_options = self._build_iteration_call_options(run_options, context, tool_schemas, messages)
 
+            # Invoke the model runner and update token accounting
             raw_result = await invoke_runner(runner, message, **call_options)
             iteration_count += 1
             runner_metadata = dict(runner_output_metadata(raw_result))
             estimated_tokens += self._estimate_response_tokens(raw_result, runner_metadata)
 
+            # Parse tool calls from the raw response
             tool_calls = ToolsFormatter.parse_tool_calls(raw_result, provider)
             if not tool_calls:
-                return StrategyResult(
+                return self._final_result(
                     output=runner_output_text(raw_result),
-                    strategy_name="direct_runner",
-                    metadata={
-                        **self._runtime_metadata(
-                            contexts=call_contexts,
-                            iteration_count=iteration_count,
-                            estimated_tokens=estimated_tokens,
-                            stop_reason=AgentStopReason.FINAL_RESPONSE,
-                        ),
-                        **runner_metadata,
-                    },
+                    runner_metadata=runner_metadata,
+                    contexts=call_contexts,
+                    iteration_count=iteration_count,
+                    estimated_tokens=estimated_tokens,
                 )
 
+            # Execute each tool call, record the result, and feed it back as a message
             for call in tool_calls:
-                context_record, result = await self.execute_tool_call(call, provider=provider)
-                call_contexts.append(context_record)
-                messages.append(dict(ToolsFormatter.format_tool_result(call, result, provider)))
-                estimated_tokens += self._estimate_tokens(result.output)
+                estimated_tokens += await self._process_tool_call(
+                    call, provider, messages, call_contexts
+                )
 
             stop_result = self._budget_stop(
                 iteration_count=iteration_count,
@@ -171,75 +168,45 @@ class AgentRuntime:
         *,
         provider: str,
     ) -> tuple[ToolCallContext, ToolResult]:
-        """Resolve, authorize, validate, execute, and record one tool call."""
+        """Resolve, authorize, validate, execute, and record one tool call.
+
+        Errors raised by inner helpers are caught here and converted to
+        safe ToolCallContext / ToolResult tuples so the runtime loop never
+        terminates on a single tool failure.
+        """
         try:
-            tool = self.tools._get(call.tool_name)
-        except Exception as exc:
-            result = ToolResult.error(call.tool_name, str(exc), metadata={"error": "unknown_tool"})
-            return (
-                ToolCallContext(
-                    tool_name=call.tool_name,
-                    arguments=call.arguments,
-                    state=ToolCallState.FAILED,
-                    call_id=call.call_id,
-                    result=result,
-                    provider=provider,
-                    metadata=dict(call.metadata),
-                ),
-                result,
-            )
-
-        spec = tool.spec()
-        decision = self.permission_policy.check(spec, call)
-        if decision is PermissionDecision.DENY:
-            result = ToolResult.error(
-                spec.name,
-                f"Permission denied for tool '{spec.name}' requiring {spec.permission.value}",
-                metadata={"error": "permission_denied", "permission": spec.permission.value},
-            )
-            return (
-                ToolCallContext(
-                    tool_name=spec.name,
-                    arguments=call.arguments,
-                    state=ToolCallState.DENIED,
-                    call_id=call.call_id,
-                    result=result,
-                    provider=provider,
-                    metadata=dict(call.metadata),
-                ),
-                result,
-            )
-
-        validation_error = tool.validate_call(call)
-        if validation_error:
-            result = ToolResult.error(spec.name, validation_error, metadata={"error": "validation_error"})
-            return (
-                ToolCallContext(
-                    tool_name=spec.name,
-                    arguments=call.arguments,
-                    state=ToolCallState.FAILED,
-                    call_id=call.call_id,
-                    result=result,
-                    provider=provider,
-                    metadata=dict(call.metadata),
-                ),
-                result,
-            )
-
-        try:
-            result = await tool.execute(call)
+            tool = self._get_tool(call)
+            spec = tool.spec()
+            self._check_permission(spec, call)
+            self._validate_tool_call(tool, call)
+            result = await self._execute_tool(tool, call)
             state = ToolCallState.SUCCEEDED if result.status.value == "success" else ToolCallState.FAILED
-        except Exception as exc:
+        except ToolRegistryError as exc:
+            result = ToolResult.error(call.tool_name, str(exc), metadata={"error": "unknown_tool", "detail": str(exc)})
+            state = ToolCallState.FAILED
+        except PermissionDeniedError as exc:
+            permission = exc.details.get("permission", "")
             result = ToolResult.error(
-                spec.name,
-                f"Tool execution failed: {exc}",
-                metadata={"error": "execution_error", "error_type": type(exc).__name__},
+                call.tool_name,
+                str(exc),
+                metadata={"error": "permission_denied", "permission": permission},
             )
+            state = ToolCallState.DENIED
+        except ToolExecutionError as exc:
+            error_type = exc.details.get("error_type", type(exc).__name__)
+            result = ToolResult.error(
+                call.tool_name,
+                str(exc),
+                metadata={"error": "execution_error", "error_type": error_type},
+            )
+            state = ToolCallState.FAILED
+        except Exception as exc:
+            result = ToolResult.error(call.tool_name, f"Tool execution failed: {exc}", metadata={"error": "execution_error", "error_type": type(exc).__name__})
             state = ToolCallState.FAILED
 
         return (
             ToolCallContext(
-                tool_name=spec.name,
+                tool_name=call.tool_name,
                 arguments=call.arguments,
                 state=state,
                 call_id=call.call_id,
@@ -249,6 +216,115 @@ class AgentRuntime:
             ),
             result,
         )
+
+    # ── tool-call helper methods ───────────────────────────────────────
+
+    def _get_tool(self, call: ToolCall) -> object:
+        """Resolve a tool from the catalog by name, raising ToolRegistryError if missing."""
+        try:
+            return self.tools._get(call.tool_name)
+        except Exception as exc:
+            raise ToolRegistryError(
+                f"Tool '{call.tool_name}' is not registered.",
+                details={"tool_name": call.tool_name, "error": str(exc)},
+            ) from exc
+
+    def _check_permission(self, spec: object, call: ToolCall) -> None:
+        """Raise PermissionDeniedError when the policy rejects the call."""
+        decision = self.permission_policy.check(spec, call)
+        if decision is PermissionDecision.DENY:
+            raise PermissionDeniedError(
+                f"Permission denied for tool '{spec.name}' requiring {spec.permission.value}",
+                details={"tool_name": spec.name, "permission": spec.permission.value},
+            )
+
+    def _validate_tool_call(self, tool: object, call: ToolCall) -> None:
+        """Validate tool call arguments, raising ToolExecutionError on failure."""
+        validation_error = tool.validate_call(call)
+        if validation_error:
+            raise ToolExecutionError(
+                validation_error,
+                details={"tool_name": call.tool_name, "error": "validation_error"},
+            )
+
+    async def _execute_tool(self, tool: object, call: ToolCall) -> ToolResult:
+        """Execute the tool and return its result, raising ToolExecutionError on failure."""
+        try:
+            return await tool.execute(call)
+        except Exception as exc:
+            raise ToolExecutionError(
+                f"Tool execution failed: {exc}",
+                details={
+                    "tool_name": call.tool_name,
+                    "error_type": type(exc).__name__,
+                },
+            ) from exc
+
+    # ── loop helper methods ────────────────────────────────────────────
+
+    def _resolve_tool_schemas(self, provider: str) -> Sequence[dict[str, Any]]:
+        """Return provider-native tool schemas when the toolkit is non-empty."""
+        return self.tools.provider_schemas(provider) if len(self.tools) else ()
+
+    @staticmethod
+    def _extract_initial_messages(run_options: dict[str, Any]) -> list[dict[str, Any]]:
+        """Pop and normalize the initial messages list from run options."""
+        return [dict(item) for item in run_options.pop("messages", ())]
+
+    def _build_iteration_call_options(
+        self,
+        run_options: dict[str, Any],
+        context: BaseAgentContext,
+        tool_schemas: Sequence[dict[str, Any]],
+        messages: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """Assemble per-iteration call options with system prompt, tools, and messages."""
+        call_options = dict(run_options)
+        call_options.setdefault("system", context.build_context())
+        if tool_schemas:
+            call_options.setdefault("tools", tool_schemas)
+        if messages:
+            call_options.setdefault("messages", tuple(messages))
+        return call_options
+
+    def _final_result(
+        self,
+        output: str,
+        *,
+        runner_metadata: dict[str, Any],
+        contexts: Sequence[ToolCallContext],
+        iteration_count: int,
+        estimated_tokens: int,
+    ) -> StrategyResult:
+        """Build the final StrategyResult from a model text response."""
+        return StrategyResult(
+            output=output,
+            strategy_name="direct_runner",
+            metadata={
+                **self._runtime_metadata(
+                    contexts=contexts,
+                    iteration_count=iteration_count,
+                    estimated_tokens=estimated_tokens,
+                    stop_reason=AgentStopReason.FINAL_RESPONSE,
+                ),
+                **runner_metadata,
+            },
+        )
+
+    async def _process_tool_call(
+        self,
+        call: ToolCall,
+        provider: str,
+        messages: list[dict[str, Any]],
+        call_contexts: list[ToolCallContext],
+    ) -> int:
+        """Execute one tool call, record its context, append to messages, return token delta."""
+        context_record, result = await self.execute_tool_call(call, provider=provider)
+        call_contexts.append(context_record)
+        messages.append(dict(ToolsFormatter.format_tool_result(call, result, provider)))
+        return self._estimate_tokens(result.output)
+
+    # ── budget methods ─────────────────────────────────────────────────
 
     def _budget_stop(
         self,
@@ -311,6 +387,8 @@ class AgentRuntime:
             "tool_call_states": tuple(context.state.value for context in contexts),
             "tool_calls": tuple(contexts),
         }
+
+    # ── token estimation ───────────────────────────────────────────────
 
     def _estimate_response_tokens(self, result: object, metadata: Mapping[str, Any]) -> int:
         usage_tokens = self._usage_total_tokens(metadata)

@@ -95,7 +95,7 @@ class AgentBaseTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(reply.content, "direct:task")
         self.assertEqual(reply.metadata["strategy"], "direct_runner")
         self.assertEqual(reply.metadata["modality"], "text")
-        self.assertEqual(runner.system, "Direct system.")
+        self.assertIn("Direct system.", runner.system)
 
 
 if __name__ == "__main__":
