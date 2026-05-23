@@ -33,6 +33,7 @@ class ContextDataclassTests(unittest.TestCase):
                 budget=ContextBudget.from_preset(BudgetPreset.TIGHT),
                 permissions=ContextPermissions.from_preset(PermissionPreset.READ_ONLY),
                 memory="prior summary",
+                metadata={"run_env": "test"},
             )
 
             built = context.build_context()
@@ -40,7 +41,8 @@ class ContextDataclassTests(unittest.TestCase):
         self.assertIn("file body", built)
         self.assertIn("Tool calls:", built)
         self.assertIn("Responses:", built)
-        self.assertIn("Strategy progress metadata", built)
+        self.assertIn("Memory summary", built)
+        self.assertIn("Run metadata", built)
 
     def test_prompt_catalog_contains_vmao_prompts(self) -> None:
         prompts = Prompts().family("vmao")

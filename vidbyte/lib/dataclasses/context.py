@@ -182,16 +182,14 @@ class BaseContext:
         parts: list[str] = []
         if self.system_prompt:
             parts.append(f"System prompt:\n{self.system_prompt}")
-        if self.agent_name or self.role:
-            parts.append(f"Agent:\nname={self.agent_name or ''}\nrole={self.role or ''}")
         if self.memory:
             parts.append(f"Memory summary:\n{self.memory}")
-        if self.strategy_metadata:
-            parts.append(f"Strategy progress metadata:\n{dict(self.strategy_metadata)}")
+        if self.history:
+            parts.append("History:\n" + "\n".join(str(item) for item in self.history))
+        if self.metadata:
+            parts.append(f"Run metadata:\n{self.metadata}")
         if self.budget:
             parts.append(f"Budget:\n{self.budget}")
-        if self.permissions:
-            parts.append(f"Permissions:\n{self.permissions}")
         if self.artifacts:
             parts.append("Artifacts:\n" + "\n\n".join(f"{artifact.name} ({artifact.artifact_type}):\n{artifact.content}" for artifact in self.artifacts))
         if self.responses:
