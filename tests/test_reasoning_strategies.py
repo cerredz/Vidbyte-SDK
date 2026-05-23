@@ -32,7 +32,7 @@ class ReasoningStrategyTests(unittest.TestCase):
         result = ChainOfThoughtStrategy(runner=runner).run("task")
 
         self.assertEqual(len(result.calls), 1)
-        self.assertIn("reason step by step", runner.prompts[0])
+        self.assertIn("reasoning step by step", runner.prompts[0])
 
     def test_step_back_uses_principles_then_answer(self) -> None:
         runner = FakeRunner()
