@@ -6,6 +6,7 @@ from vidbyte.lib.runners.types import (
     TextModelResponse,
     VideoModelJob,
 )
+from vidbyte.lib.runners.router import coerce_modality, create_runner_for_modality, resolve_modality
 
 __all__ = [
     "GeneratedImage",
@@ -15,6 +16,9 @@ __all__ = [
     "TextModelRunner",
     "VideoModelJob",
     "VideoModelRunner",
+    "coerce_modality",
+    "create_runner_for_modality",
+    "resolve_modality",
 ]
 
 

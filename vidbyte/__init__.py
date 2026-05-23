@@ -21,7 +21,9 @@ Relations:
 from __future__ import annotations
 
 from vidbyte.agents import (
+    AgentClient,
     AgentCard,
+    AgentInput,
     AgentMessage,
     AgentRegistry,
     AgentRunnerConfig,
@@ -30,7 +32,7 @@ from vidbyte.agents import (
 )
 from vidbyte.client import VidbyteSDK
 from vidbyte.context import BaseAgentContext, BaseContext, ContextBudget, ContextPermissions
-from vidbyte.lib.enums import BudgetPreset, PermissionPreset
+from vidbyte.lib.enums import BudgetPreset, ModelModality, PermissionPreset
 from vidbyte.lib.errors import (
     McpAttachmentError,
     McpConnectionError,
@@ -80,6 +82,8 @@ from vidbyte.tools.mcp import (
 
 __all__ = [
     "AgentCard",
+    "AgentClient",
+    "AgentInput",
     "AgentMessage",
     "AgentRegistry",
     "AgentRunnerConfig",
@@ -106,6 +110,7 @@ __all__ = [
     "McpToolExecutionError",
     "McpToolPermission",
     "MultiAgentConsensusStrategy",
+    "ModelModality",
     "PermissionPreset",
     "PlanAndExecuteStrategy",
     "PromptKey",

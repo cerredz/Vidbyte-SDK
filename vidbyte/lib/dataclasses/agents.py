@@ -18,16 +18,29 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
+from vidbyte.lib.enums import ModelModality
+
 
 @dataclass(frozen=True, slots=True)
 class AgentRunnerConfig:
     """Primitive runner settings captured by an SDK agent."""
 
     api_key: str | None = None
+    provider: str | None = None
     model_name: str | None = None
+    modality: ModelModality | str = ModelModality.AUTO
     temperature: float | None = None
     run_id: str | None = None
     options: Mapping[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
+class AgentInput:
+    """Typed agent input for reliable modality routing."""
+
+    prompt: str
+    modality: ModelModality | str = ModelModality.AUTO
+    metadata: Mapping[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -41,6 +54,7 @@ class AgentCard:
     tool_names: tuple[str, ...] = ()
     mcp_tool_names: tuple[str, ...] = ()
     mcp_server_names: tuple[str, ...] = ()
+    modalities: tuple[ModelModality, ...] = ()
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
 

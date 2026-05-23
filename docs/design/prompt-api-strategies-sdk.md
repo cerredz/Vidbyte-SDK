@@ -9,7 +9,7 @@
 
 ## 1. Overview
 
-Build the next Vidbyte SDK layer for model-provider execution, filesystem tools, and prompt/API-implementable reasoning strategies. The SDK will gain typed provider configs, semantic model runners for text/image/video calls, a minimal safe filesystem toolset, and a `strategies` root namespace whose first batch implements prompt-level strategies such as Chain-of-Thought, Step-Back, Chain-of-Draft, Skeleton-of-Thought, self-consistency, budget forcing, answer convergence, Plan-and-Execute, and paradigm routing through `TextModelRunner.run()`.
+Build the next Vidbyte SDK layer for model-provider execution, filesystem tools, and prompt/API-implementable reasoning strategies. The SDK will gain typed provider configs, internal semantic model runners for text/image/video calls, a minimal safe filesystem toolset, and a `strategies` root namespace whose first batch implements prompt-level strategies such as Chain-of-Thought, Step-Back, Chain-of-Draft, Skeleton-of-Thought, self-consistency, budget forcing, answer convergence, Plan-and-Execute, and paradigm routing through runners supplied by agents.
 
 ---
 
@@ -18,7 +18,7 @@ Build the next Vidbyte SDK layer for model-provider execution, filesystem tools,
 ### Goals
 
 - Add typed SDK config classes under `vidbyte/lib/config`.
-- Add semantic runners under `vidbyte/lib/runners`: `TextModelRunner`, `ImageModelRunner`, and `VideoModelRunner`.
+- Add semantic runners under `vidbyte/lib/runners` as internal/advanced execution primitives used by agents and strategies.
 - Fill `vidbyte/providers` with first-party HTTP adapters for OpenAI, Anthropic, Gemini, and xAI, using official API docs as the source of truth.
 - Keep provider credentials explicit and environment-resolvable without hardcoding secrets.
 - Add a minimal, root-scoped filesystem tool subset under `vidbyte/tools/filesystem`.
@@ -64,7 +64,7 @@ Implementability classification:
 
 | Category | Strategy Families | SDK Treatment |
 |----------|-------------------|---------------|
-| Prompt/API implementable now | CoT, Step-Back, Chain-of-Draft, Skeleton-of-Thought, Least-to-Most, contrastive prompting, self-consistency, budget forcing, answer convergence, Plan-and-Execute, ReAct-style loops, Reflexion-style critique, paradigm routing, expert persona routing | Implement as `BaseStrategy` subclasses that call `TextModelRunner.run()` |
+| Prompt/API implementable now | CoT, Step-Back, Chain-of-Draft, Skeleton-of-Thought, Least-to-Most, contrastive prompting, self-consistency, budget forcing, answer convergence, Plan-and-Execute, ReAct-style loops, Reflexion-style critique, paradigm routing, expert persona routing | Implement as `BaseStrategy` subclasses that receive their runner from `BaseAgent` |
 | Prompt/API implementable later with tools/memory | ReAct with arbitrary tools, Agentic RAG, Self-RAG approximation, episodic/structured memory, sleep-time compute, self-notes, ACE playbooks, multi-agent debate, mixture-of-agents | Add after filesystem tools, retrievers, memory stores, and tool-loop safety contracts mature |
 | Requires sandbox design | CodeAct, ReCode, Program-of-Thoughts with execution, dynamic tool creation | Do not execute code until a sandbox boundary is designed |
 | Requires model internals or training | Latent communication, COCONUT, Quiet-STaR, role vectors, RLVR/STaR, PRMs, recurrent latent depth, activation steering | Document only; not implementable through public prompt/API calls |
@@ -83,7 +83,7 @@ Implementability classification:
 6. Provider configs must validate required parameters, including provider name, model, API key resolution, max token/output bounds, temperature bounds, and endpoint URL defaults.
 7. Provider adapters must use injectable HTTP transport so tests can mock responses without network calls.
 8. Filesystem tools must operate only inside an explicit root directory and must reject path traversal outside that root.
-9. Strategy classes must call `TextModelRunner.run()` rather than direct provider APIs.
+9. Strategy classes must call the runner supplied by `BaseAgent` rather than direct provider APIs.
 10. Each strategy must expose a stable `run(input, *, runner, **options)` API and return `StrategyResult`.
 11. Skeleton-of-Thought must generate a skeleton first, then complete skeleton points through separate runner calls, allowing parallel execution with a configurable concurrency limit.
 12. Self-Consistency must sample N candidate outputs and select a winner by normalized answer voting.
@@ -122,7 +122,7 @@ VidbyteSDK
               `-- BaseStrategy subclasses
                          |
                          v
-                  TextModelRunner.run()
+                  BaseAgent-selected runner
                          |
                          v
               OpenAI / Anthropic / Gemini / xAI adapters
@@ -315,7 +315,7 @@ Provider mapping:
 
 #### What it does
 
-Defines user-facing semantic classes for model execution. Strategies use these runners instead of provider APIs.
+Defines internal semantic classes for model execution. Agents and strategies use these runners instead of provider APIs, but public examples should start from `BaseAgent` or harness composition.
 
 #### Interface / API
 
@@ -404,7 +404,7 @@ class StrategyResult:
 
 class BaseStrategy(ABC):
     name: ClassVar[str]
-    def run(self, prompt: str, *, runner: TextModelRunner, **options: object) -> StrategyResult: ...
+    def run(self, prompt: str, *, runner: object, **options: object) -> StrategyResult: ...
 
 class StrategyClient:
     def chain_of_thought(self) -> ChainOfThoughtStrategy: ...
@@ -475,7 +475,7 @@ ParadigmRouterStrategy(strategies=[...]).run(prompt, runner=runner)
 
 #### What it does
 
-Documents how to use runners, tools, and strategies, and records strategy implementation notes in Obsidian.
+Documents how to use agents, tools, and strategies, and records strategy implementation notes in Obsidian.
 
 #### Interface / API
 
@@ -484,7 +484,7 @@ N/A - documentation and Obsidian note updates only.
 #### Logic / Algorithm
 
 1. README gets short install-free usage examples.
-2. SDK skill gets structure rules for providers, runners, tools, and strategies.
+2. SDK skill gets structure rules for providers, internal runners, tools, agents, and strategies.
 3. Obsidian note gets a section per implemented strategy with:
    - source paper/doc
    - SDK class
@@ -540,7 +540,7 @@ External API usage through provider adapters:
 | Action | File Path | Reason |
 |--------|-----------|--------|
 | CREATE | `docs/design/prompt-api-strategies-sdk.md` | Design doc for this feature |
-| MODIFY | `README.md` | Document runners, filesystem tools, and strategies |
+| MODIFY | `README.md` | Document agent-first model execution, filesystem tools, and strategies |
 | MODIFY | `pyproject.toml` | Add optional test metadata if needed; keep zero runtime dependencies |
 | MODIFY | `skills/vidbyte-sdk/SKILL.md` | Update SDK structure guidance |
 | MODIFY | `vidbyte/__init__.py` | Export strategy and runner public types |
@@ -615,7 +615,7 @@ External non-repo artifact:
 - `test_text_model_runner.py` -> verifies OpenAI, Anthropic, Gemini, and xAI request payloads and normalized text responses using fake transport.
 - `test_image_video_runners.py` -> verifies OpenAI/xAI image response normalization and OpenAI video job normalization.
 - `test_filesystem_tools.py` -> verifies read/list/write/mkdir inside root and rejects `..` traversal.
-- `test_reasoning_strategies.py` -> verifies each reasoning strategy calls `TextModelRunner.run()` with expected staged prompts.
+- `test_reasoning_strategies.py` -> verifies each reasoning strategy calls its supplied runner with expected staged prompts.
 - `test_sampling_strategies.py` -> verifies self-consistency voting, budget call limits, and answer-convergence stopping.
 - `test_strategy_router.py` -> verifies heuristic and model-scored router paths.
 
@@ -626,7 +626,7 @@ External non-repo artifact:
 
 ### Manual / QA Test Cases
 
-1. Create an OpenAI text config with `OPENAI_API_KEY`, run `TextModelRunner.run("Say OK")`, confirm normalized response.
+1. Create an OpenAI-backed text agent with `OPENAI_API_KEY`, run `agent.run("Say OK")`, confirm normalized response text.
 2. Create an Anthropic text config with `ANTHROPIC_API_KEY`, run a short prompt, confirm normalized response.
 3. Create a Gemini text config with `GEMINI_API_KEY`, run a short prompt, confirm normalized response.
 4. Create an xAI text config with `XAI_API_KEY`, run a short prompt, confirm normalized response.

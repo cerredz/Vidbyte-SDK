@@ -55,6 +55,7 @@ class AgentBaseTests(unittest.IsolatedAsyncioTestCase):
 
         reply = await agent.generate_reply("task")
         self.assertEqual(reply.content, "reply:task")
+        self.assertEqual(reply.metadata["modality"], "text")
         self.assertEqual(strategy.last_tools, (tool,))
         self.assertIsNotNone(strategy.last_context)
         self.assertIsInstance(strategy.last_context, BaseAgentContext)
@@ -93,6 +94,7 @@ class AgentBaseTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(reply.content, "direct:task")
         self.assertEqual(reply.metadata["strategy"], "direct_runner")
+        self.assertEqual(reply.metadata["modality"], "text")
         self.assertEqual(runner.system, "Direct system.")
 
 
