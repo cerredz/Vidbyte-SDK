@@ -1,6 +1,6 @@
 {
   "name": "Step-Back Prompting",
-  "description": "Prompts for abstracting principles before solving a task.",
+  "description": "Step-Back Prompting is a two-phase strategy that first abstracts general principles from the task domain, then applies those principles to produce the final answer. It is designed for tasks where understanding the underlying rules or concepts yields better results than attacking the specific question directly — such as science problems, policy analysis, legal reasoning, and technical troubleshooting. In the first phase, the model identifies the durable rules, abstractions, and concepts that govern the answer domain, deliberately avoiding the original question to prevent premature conclusions. In the second phase, the model uses those principles as a lens to solve the original task, connecting each important conclusion back to the governing rules. This separation of principle extraction from application produces answers that are more principled and easier to audit. It is especially valuable when the task requires consistency with established frameworks or when surface-level answers risk violating deeper constraints.",
   "key": "step_back",
   "prompts": {
     "principle_prompt": "Step back from the specific task before solving it. Identify the general principles, abstractions, or concepts that govern the answer. Separate durable rules from incidental details. Do not answer the original task yet. Keep the principles actionable for the next model call. Use coherent sentences rather than a loose keyword list.",

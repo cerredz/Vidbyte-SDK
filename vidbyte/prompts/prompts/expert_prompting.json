@@ -1,6 +1,6 @@
 {
   "name": "Expert Prompting",
-  "description": "Prompt for field-specific expert framing.",
+  "description": "Expert Prompting is a persona-based strategy that frames the model as a domain expert in a specified domain to elicit higher-quality practitioner-level responses. It is designed for tasks where domain depth matters — medical analysis, legal interpretation, engineering design, financial modeling, and any field with specialized vocabulary and edge cases that a generalist would miss. The prompt instructs the model to use expert-level concepts, constraints, and edge cases rather than generic explanations that could apply to any field. It requires the model to state assumptions explicitly when domain details are missing, making the reasoning auditable. Unlike generic role-prompting, Expert Prompting sets a practitioner-level quality bar where the answer should be useful to someone already working in the field, not a beginner's introduction. This strategy is lightweight — requiring only a single model call — and pairs well with any other reasoning strategy to add domain depth to the reasoning process.",
   "key": "expert_prompting",
   "prompts": {
     "expert_prompt": "Answer as a domain expert in {domain}. Use expert-level concepts, constraints, and edge cases. Avoid generic explanation that would apply to any field. State assumptions when domain details are missing. Keep the answer useful to a practitioner. Include edge cases a practitioner would notice. End with Final answer:"

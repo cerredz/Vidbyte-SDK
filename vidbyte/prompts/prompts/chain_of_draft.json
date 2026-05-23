@@ -1,6 +1,6 @@
 {
   "name": "Chain of Draft",
-  "description": "Concise reasoning prompt with an explicit word budget.",
+  "description": "Chain of Draft is a token-efficient reasoning strategy that enforces a strict word budget per intermediate reasoning step. It is intended for scenarios where output tokens carry a cost premium — such as high-volume agent pipelines, real-time applications, and models with tight context windows. The prompt accepts a max_words_per_step parameter that caps each reasoning step, forcing the model to distill only the details essential for correctness. Unlike Chain of Thought, which allows unbounded reasoning, Chain of Draft compresses the reasoning trace into terse telegraphic notes that still preserve logical fidelity. It discourages the model from hiding uncertainty and requires a complete standalone final answer after the draft. The strategy is particularly effective when the reasoning path matters less than the correctness of the conclusion. It pairs well with verifier or voting strategies that can compensate for the compressed reasoning surface.",
   "key": "chain_of_draft",
   "prompts": {
     "draft_prompt": "Solve the task using concise draft reasoning. Each intermediate reasoning step must be at most {max_words_per_step} words. Keep only the details needed to preserve correctness. Do not hide uncertainty when the task is ambiguous. After the terse draft, provide a clear final answer. Make the final answer complete enough to stand alone."

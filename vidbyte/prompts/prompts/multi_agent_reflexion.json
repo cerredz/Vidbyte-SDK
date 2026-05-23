@@ -1,6 +1,6 @@
 {
   "name": "Multi-Agent Reflexion",
-  "description": "Prompts for drafting, critique, and revision with critic roles.",
+  "description": "Multi-Agent Reflexion is a three-phase iterative improvement strategy that uses distinct agent roles — drafter, critic, and reviser — to produce higher-quality outputs through structured feedback. It is designed for tasks where quality matters more than speed and where a second-pass critique can catch errors invisible to the original drafter, such as policy documents, technical specifications, public communications, and safety-critical content. The drafter produces an initial answer specific enough for critique, preserving all visible constraints. One or more critic agents then review the draft from specific critic_role perspectives like fact-checker, legal reviewer, or accessibility auditor, identifying concrete weaknesses and actionable corrections. The reviser applies every correction that improves accuracy or clarity, resolves conflicts between critics by prioritizing the original task, and produces a final coherent answer that reads as one seamless document. This role-separated critique loop catches errors that self-review misses by forcing distinct evaluative perspectives.",
   "key": "multi_agent_reflexion",
   "prompts": {
     "draft_prompt": "Produce an initial answer to the task. Make the answer specific enough for a critic to evaluate. Preserve all visible constraints. Do not over-optimize for style yet. Include the core reasoning needed for correctness. End with a complete draft.",
