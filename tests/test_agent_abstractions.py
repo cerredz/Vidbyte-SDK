@@ -8,8 +8,9 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 import unittest
 
 from vidbyte.client import VidbyteSDK
+from vidbyte.lib.enums.prompts import Prompt
 from vidbyte.lib.errors import ToolRegistryError
-from vidbyte.lib.prompts import PromptRegistry
+from vidbyte.prompts import Prompts
 from vidbyte.tools.builtins.calculator import CalculatorTool
 from vidbyte.tools.builtins.code_execution import CodeExecutionTool
 from vidbyte.tools.builtins.document_retrieval import DocumentRetrievalTool
@@ -105,14 +106,14 @@ class TestPrompts(unittest.TestCase):
     """Verifies JSON-backed prompt loading."""
 
     def setUp(self) -> None:
-        self.registry = PromptRegistry.default()
+        self.prompts = Prompts()
 
     def test_default_prompt_loading(self) -> None:
-        prompts = self.registry.get("vmao")
+        prompts = self.prompts.family("vmao")
         self.assertIn("planner", prompts)
 
     def test_prompt_keys_include_strategy_assets(self) -> None:
-        self.assertIn("chain_of_thought", self.registry.keys())
+        self.assertIn(Prompt.CHAIN_OF_THOUGHT_REASON_PROMPT, self.prompts.keys())
 
 
 class TestSdkClient(unittest.TestCase):

@@ -2,13 +2,14 @@ from __future__ import annotations
 
 from typing import ClassVar
 
-from vidbyte.lib.prompts import PromptRegistry
+from vidbyte.prompts.catalog import Prompts
+
 
 class _PromptBundle:
     key: ClassVar[str]
 
     def export(self) -> dict[str, str]:
-        return PromptRegistry.default().get(self.key)
+        return dict(Prompts().family(self.key))
 
 
 class ContextEngineeringPrompts(_PromptBundle):

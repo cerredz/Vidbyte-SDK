@@ -7,7 +7,7 @@ from pathlib import Path
 from vidbyte.context import ContextBudget, ContextPermissions, ContextResponse, ContextToolCall, StrategyContext
 from vidbyte.lib.dataclasses import AgentCard, CandidateResult, ToolSpec
 from vidbyte.lib.enums import BudgetPreset, PermissionPreset
-from vidbyte.lib.prompts import PromptRegistry
+from vidbyte.prompts import Prompts
 
 
 class ContextDataclassTests(unittest.TestCase):
@@ -42,8 +42,8 @@ class ContextDataclassTests(unittest.TestCase):
         self.assertIn("Responses:", built)
         self.assertIn("Strategy progress metadata", built)
 
-    def test_json_prompt_registry_contains_vmao_prompts(self) -> None:
-        prompts = PromptRegistry.default().get("vmao")
+    def test_prompt_catalog_contains_vmao_prompts(self) -> None:
+        prompts = Prompts().family("vmao")
         self.assertIn("planner", prompts)
 
 

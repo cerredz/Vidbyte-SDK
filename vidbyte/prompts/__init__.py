@@ -1,16 +1,8 @@
 from __future__ import annotations
 
-# Class-based prompt system (PR10): BasePrompt, PromptKey, PromptVersion, RenderedPrompt
-from vidbyte.prompts.base import BasePrompt, PromptError, PromptNotFoundError, PromptRenderError
-from vidbyte.prompts.types import PromptKey, PromptVersion, RenderedPrompt
-
-# Central registries (merged PR10 + PR15)
-from vidbyte.prompts.registry import PromptLike, PromptRegistry, prompt_registry
-
-# Strategy prompts
+from vidbyte.lib.enums.prompts import Prompt
+from vidbyte.prompts.catalog import PromptRecord, Prompts
 from vidbyte.prompts.prompts import VMAOPrompts
-
-# JSON-backed strategy prompts (PR12)
 from vidbyte.prompts.strategies import (
     AgenticRagPrompts,
     AnswerConvergencePrompts,
@@ -28,35 +20,30 @@ from vidbyte.prompts.strategies import (
     TreeOfThoughtsPrompts,
 )
 
-# JSON-backed library registry (PR12)
-from vidbyte.lib.prompts import PromptRegistry as LibPromptRegistry, PrompRegistry
+_prompts = Prompts()
+
+for _prompt_key, _import_name in _prompts.import_names().items():
+    globals()[_import_name] = _prompts.get(_prompt_key)
+
+_direct_prompt_exports = tuple(sorted(_prompts.import_names().values()))
 
 __all__ = [
     "AgenticRagPrompts",
     "AnswerConvergencePrompts",
-    "BasePrompt",
     "BudgetForcingPrompts",
     "ChainOfDraftPrompts",
     "ChainOfThoughtPrompts",
     "ContextEngineeringPrompts",
     "ExpertPromptingPrompts",
-    "LibPromptRegistry",
     "MultiAgentReflexionPrompts",
     "ParadigmRouterPrompts",
     "PlanAndExecutePrompts",
-    "PrompRegistry",
-    "PromptError",
-    "PromptKey",
-    "PromptLike",
-    "PromptNotFoundError",
-    "PromptRegistry",
-    "PromptRenderError",
-    "PromptVersion",
-    "RenderedPrompt",
+    "Prompt",
+    "PromptRecord",
+    "Prompts",
     "SelfConsistencyPrompts",
     "SkeletonOfThoughtPrompts",
     "StepBackPrompts",
     "TreeOfThoughtsPrompts",
     "VMAOPrompts",
-    "prompt_registry",
-]
+] + list(_direct_prompt_exports)

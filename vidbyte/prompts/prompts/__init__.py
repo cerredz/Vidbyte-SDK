@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from vidbyte.lib.prompts import PromptRegistry
+from vidbyte.prompts.catalog import Prompts
 
 
 class VMAOPrompts:
@@ -10,7 +10,7 @@ class VMAOPrompts:
         self.name = name
 
     def export(self, **kwargs: object) -> str:
-        template = PromptRegistry.default().get("vmao")[self.name]
+        template = Prompts().family("vmao")[self.name]
         return template.format(**kwargs)
 
 

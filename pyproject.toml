@@ -21,3 +21,6 @@ Homepage = "https://vidbyte.ai"
 
 [tool.setuptools.packages.find]
 include = ["vidbyte*"]
+
+[tool.setuptools.package-data]
+"vidbyte.prompts.prompts" = ["*.json"]

@@ -104,6 +104,21 @@ openai_tool = ToolsFormatter.to_openai_tool(sdk.tools.registry.specs()[0])
 anthropic_tool = ToolsFormatter.to_anthropic_tool(sdk.tools.registry.specs()[0])
 ```
 
+## Prompts
+
+Prompts are plain text assets exposed through an enum-keyed accessor:
+
+```python
+from vidbyte.prompts import Prompts, chain_of_thought_reason_prompt
+from vidbyte.lib.enums.prompts import Prompt
+
+prompts = Prompts()
+prompt_text = prompts.get(Prompt.CHAIN_OF_THOUGHT_REASON_PROMPT)
+assert prompt_text == chain_of_thought_reason_prompt
+```
+
+`Prompts().keys()` returns all prompt enum keys, and `Prompts().descriptions()` returns descriptions for each key. Prompt lookup does not accept raw strings and the SDK does not expose runtime prompt overrides.
+
 ## Package Structure
 
 ```text
