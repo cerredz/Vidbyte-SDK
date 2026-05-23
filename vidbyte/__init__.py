@@ -30,7 +30,7 @@ from vidbyte.agents import (
 )
 from vidbyte.client import VidbyteSDK
 from vidbyte.context import BaseAgentContext, BaseContext, ContextBudget, ContextPermissions
-from vidbyte.lib.enums import BudgetPreset, PermissionPreset
+from vidbyte.lib.enums import BudgetPreset, PermissionPreset, Prompt
 from vidbyte.lib.errors import (
     McpAttachmentError,
     McpConnectionError,
@@ -39,7 +39,7 @@ from vidbyte.lib.errors import (
     McpToolDiscoveryError,
     McpToolExecutionError,
 )
-from vidbyte.prompts import BasePrompt, PromptKey, PromptRegistry, RenderedPrompt
+from vidbyte.prompts import Prompts
 from vidbyte.strategies import (
     BaseStrategy,
     BaseStrategyUtils,
@@ -87,7 +87,6 @@ __all__ = [
     "BaseAgent",
     "BaseAgentContext",
     "BaseContext",
-    "BasePrompt",
     "BaseStrategy",
     "BaseStrategyUtils",
     "BaseTool",
@@ -108,11 +107,10 @@ __all__ = [
     "MultiAgentConsensusStrategy",
     "PermissionPreset",
     "PlanAndExecuteStrategy",
-    "PromptKey",
-    "PromptRegistry",
+    "Prompt",
+    "Prompts",
     "ReActStrategy",
     "ReflexionStrategy",
-    "RenderedPrompt",
     "SelfConsistencyStrategy",
     "SelfRefinementStrategy",
     "SkeletonOfThoughtStrategy",

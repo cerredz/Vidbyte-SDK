@@ -35,7 +35,8 @@ vidbyte/
 - Keep reasoning and orchestration topologies in `vidbyte/strategies/`.
 - Keep multi-agent orchestration implementations in `vidbyte/strategies/multi_agent/`.
 - Keep public context objects in `vidbyte/context/`, but define dataclasses centrally under `vidbyte/lib/dataclasses/`.
-- Keep prompt templates in `vidbyte/prompts/prompts/` and register reusable prompts in the prompt registry.
+- Keep prompt templates in `vidbyte/prompts/prompts/` and expose them through `vidbyte.prompts.Prompts` plus `vidbyte.lib.enums.prompts.Prompt`.
+- Follow `skills/vidbyte-sdk/adding-prompts.md` whenever adding or changing prompt assets.
 - Keep enum presets under `vidbyte/lib/enums/`.
 - Keep internal library helpers under `vidbyte/lib/`.
 - Keep SDK dataclass definitions under `vidbyte/lib/dataclasses/`; package-local type modules should re-export those contracts when stable imports are needed.

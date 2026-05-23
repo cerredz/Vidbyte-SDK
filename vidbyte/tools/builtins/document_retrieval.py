@@ -54,7 +54,7 @@ class DocumentRetrievalTool(BaseTool):
             {
                 "id": "doc_001",
                 "title": "Vidbyte SDK System Prompts v1",
-                "content": "All default strategy system prompts must reside inside the internal service layers. The client SDK ships with standard overridable classes mapped by PromptKey."
+                "content": "All default strategy system prompts are plain repository prompt assets. The client SDK exposes them through the Prompt enum and Prompts accessor."
             },
             {
                 "id": "doc_002",

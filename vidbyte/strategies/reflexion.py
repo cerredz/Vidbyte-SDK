@@ -5,7 +5,7 @@
 # Architecture & Functions:
 #   - ReflexionStrategy (subclass of BaseStrategy): Orchestrates actor, evaluator, and reflector.
 # Codebase Relation:
-#   - Pulls prompts from PromptRegistry.
+#   - Pulls prompt text from Prompts.
 # Similar Files:
 #   - vidbyte/strategies/react.py (other strategy logic)
 # ==============================================================================
@@ -14,7 +14,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from vidbyte.prompts import PromptRegistry, PromptKey
+from vidbyte.lib.enums.prompts import Prompt
+from vidbyte.prompts import Prompts
 from vidbyte.strategies.base import BaseStrategy
 
 
@@ -25,35 +26,22 @@ class ReflexionStrategy(BaseStrategy):
     """
 
     def __init__(self) -> None:
-        self.prompt_registry = PromptRegistry()  # Singleton
+        self.prompts = Prompts()
 
     async def run(self, input_text: str, **kwargs: Any) -> Any:
         # Build actor prompt
-        actor_prompt = self.prompt_registry.get(
-            PromptKey("strategies.reflexion", "actor"),
-            task=input_text,
-            reflections="Attempt 1: Make sure to check the negative values constraints."
-        )
+        actor_prompt = self.prompts.get(Prompt.MULTI_AGENT_REFLEXION_DRAFT_PROMPT)
 
         # Build evaluator prompt
-        evaluator_prompt = self.prompt_registry.get(
-            PromptKey("strategies.reflexion", "evaluator"),
-            problem=input_text,
-            output="Proposed solution text."
-        )
+        evaluator_prompt = self.prompts.get(Prompt.MULTI_AGENT_REFLEXION_CRITIC_PROMPT).format(critic_role="evaluator")
 
         # Build reflector prompt
-        reflector_prompt = self.prompt_registry.get(
-            PromptKey("strategies.reflexion", "reflector"),
-            problem=input_text,
-            failed_output="Proposed solution text.",
-            feedback="The solver missed the bounds check."
-        )
+        reflector_prompt = self.prompts.get(Prompt.MULTI_AGENT_REFLEXION_FINAL_PROMPT)
 
         return {
             "strategy": "reflexion",
-            "actor_prompt": actor_prompt.text,
-            "evaluator_prompt": evaluator_prompt.text,
-            "reflector_prompt": reflector_prompt.text,
+            "actor_prompt": actor_prompt,
+            "evaluator_prompt": evaluator_prompt,
+            "reflector_prompt": reflector_prompt,
             "status": "ready"
         }

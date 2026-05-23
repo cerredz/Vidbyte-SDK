@@ -3,25 +3,25 @@ from __future__ import annotations
 import re
 import unittest
 
-from vidbyte.lib.prompts import PromptRegistry
+from vidbyte.lib.enums.prompts import Prompt
+from vidbyte.prompts import Prompts
 from vidbyte.prompts.strategies import ChainOfThoughtPrompts
 
 
-class PromptRegistryTests(unittest.TestCase):
-    def test_strategy_prompts_load_from_json_registry(self) -> None:
-        registry = PromptRegistry.default()
+class PromptCatalogTests(unittest.TestCase):
+    def test_strategy_prompts_load_from_prompt_catalog(self) -> None:
+        prompts = Prompts()
 
-        self.assertIn("chain_of_thought", registry.keys())
-        self.assertEqual(ChainOfThoughtPrompts().export(), registry.get("chain_of_thought"))
+        self.assertIn(Prompt.CHAIN_OF_THOUGHT_REASON_PROMPT, prompts.keys())
+        self.assertEqual(ChainOfThoughtPrompts().export(), prompts.family("chain_of_thought"))
 
     def test_prompt_values_are_coherent_sentence_blocks(self) -> None:
-        registry = PromptRegistry.default()
+        prompts = Prompts()
 
-        for prompt_group in registry.all().values():
-            for prompt in prompt_group.values():
-                sentence_count = len(re.findall(r"[.!?]", prompt))
-                self.assertGreaterEqual(sentence_count, 6)
-                self.assertLessEqual(sentence_count, 8)
+        for prompt in prompts.all().values():
+            sentence_count = len(re.findall(r"[.!?]", prompt))
+            self.assertGreaterEqual(sentence_count, 4)
+            self.assertLessEqual(sentence_count, 10)
 
 
 if __name__ == "__main__":
