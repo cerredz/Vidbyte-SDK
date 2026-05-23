@@ -4,6 +4,7 @@ import unittest
 
 from vidbyte.agents import BaseAgent
 from vidbyte.agents.base import ConfiguredAgentRunner
+from vidbyte.middleware import AgentMiddleware
 from vidbyte.strategies import BaseAgentContext, BaseStrategy, StrategyContext, StrategyResult
 from vidbyte.tools import ToolSpec
 
@@ -42,6 +43,10 @@ class FakeResponse:
     def __init__(self, text: str, raw: dict) -> None:
         self.text = text
         self.raw = raw
+
+
+class FakeMiddleware(AgentMiddleware):
+    pass
 
 
 class AgentBaseTests(unittest.IsolatedAsyncioTestCase):
@@ -95,6 +100,22 @@ class AgentBaseTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(forked.name, "researcher-copy")
         self.assertEqual(forked.metadata["role"], "custom_researcher")
         self.assertEqual(forked.metadata["branch"], "copy")
+
+    async def test_agent_fork_preserves_middleware(self) -> None:
+        middleware = FakeMiddleware()
+        replacement = FakeMiddleware()
+        agent = BaseAgent(
+            name="worker",
+            system_prompt="Work carefully.",
+            runner=EchoRunner(),
+            middleware=[middleware],
+        )
+
+        forked = agent.fork(name="worker-copy")
+        replaced = agent.fork(name="worker-replaced", middleware=[replacement])
+
+        self.assertEqual(forked.middleware, (middleware,))
+        self.assertEqual(replaced.middleware, (replacement,))
 
     async def test_agent_without_strategy_calls_runner_once(self) -> None:
         runner = EchoRunner()
