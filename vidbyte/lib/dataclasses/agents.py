@@ -29,6 +29,7 @@ class AgentStopReason(str, Enum):
     IS_DONE = "is_done"
     MAX_ITERATIONS = "max_iterations"
     MAX_TOKENS = "max_tokens"
+    MIDDLEWARE_ABORT = "middleware_abort"
     TOOL_LOOP_LIMIT = "tool_loop_limit"
     ERROR = "error"
 

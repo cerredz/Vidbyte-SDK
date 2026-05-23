@@ -123,6 +123,42 @@ reply = await agent.arun("Find where tools are formatted.")
 
 Agents run direct tool use through an internal runtime loop. The runtime builds the context window, appends a short agentic-loop prompt after the system prompt, sends tool schemas to the model, executes permitted tool calls, appends tool results back into the ordered message context, and repeats until the model calls the internal `isDone` tool. If the model returns ordinary text without a tool call, that text is preserved as assistant history and the loop continues. `max_iterations` and `max_tokens` are optional safeguards; `max_tokens` uses provider-reported usage when available.
 
+### Middleware
+
+Middleware gives direct text agents deterministic runtime hooks for authorization, rate limiting, retry, audit logging, and other policies. Middleware is not model-visible and does not appear in tool specs or agent cards.
+
+```python
+from vidbyte import Agent, AgentMiddleware, MiddlewareDecision
+from vidbyte.middleware.builtins import ToolPolicyMiddleware
+
+class TenantPermissionMiddleware(AgentMiddleware):
+    def __init__(self, db):
+        self.db = db
+
+    async def before_run(self, ctx):
+        if not await self.db.can_start_agent(ctx.metadata["tenant_id"], ctx.agent_name):
+            return MiddlewareDecision.abort("tenant_cannot_start_agent")
+        return MiddlewareDecision.continue_()
+
+    async def before_tool_call(self, ctx):
+        if not await self.db.can_call_tool(ctx.metadata["tenant_id"], ctx.tool_call.tool_name):
+            return MiddlewareDecision.deny_tool("tenant_cannot_call_tool")
+        return MiddlewareDecision.continue_()
+
+agent = Agent(
+    name="repo-analyst",
+    system_prompt="Use tools when they help answer precisely.",
+    runner=my_runner,
+    tools=[lookup_metric],
+    middleware=[
+        TenantPermissionMiddleware(db),
+        ToolPolicyMiddleware(allow_tools={"lookup_metric"}),
+    ],
+)
+```
+
+Subclass `AgentMiddleware` and override only the hooks you need, such as `before_run`, `before_iteration`, `before_model_call`, `after_model_response`, `on_model_error`, `before_tool_call`, `after_tool_call`, `after_iteration`, or `after_run`. Built-ins are available from `vidbyte.middleware.builtins`, including `TokenRateLimitMiddleware`, `RuntimeLimitMiddleware`, `ToolPolicyMiddleware`, `AuditLogMiddleware`, and `ModelRetryMiddleware`.
+
 Advanced built-ins are grouped by category:
 
 - `vidbyte.tools.builtins.code_search`: `GlobTool`, `GrepTool`, `SemanticSearchTool`
@@ -186,6 +222,8 @@ vidbyte/
 |   `-- prompts/
 |-- providers/
 |   `-- client.py
+|-- middleware/
+|   `-- builtins/
 |-- strategies/
 |   `-- multi_agent/
 |-- tools/

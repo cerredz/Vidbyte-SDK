@@ -26,6 +26,7 @@ from vidbyte.lib.agents import ModalityDetector
 from vidbyte.lib.dataclasses.agents import AgentMetadata, AgentRunnerConfig, AgentRuntimeConfig
 from vidbyte.lib.enums import ModelModality, ModelProvider
 from vidbyte.lib.errors import AgentExecutionError, ConfigurationError
+from vidbyte.middleware import AgentMiddleware
 from vidbyte.strategies.base import BaseStrategy
 from vidbyte.strategies.types import BaseAgentContext, StrategyContext, StrategyResult
 from vidbyte.tools.catalog import Tools
@@ -58,6 +59,7 @@ class BaseAgent(McpAttachableMixin):
         max_tokens: int | None = None,
         compaction_trigger_tokens: int | None = None,
         compaction_target_tokens: int | None = None,
+        middleware: Sequence[AgentMiddleware] = (),
         api_key: str | None = None,
         provider: ModelProvider | str | None = None,
         model_name: str | None = None,
@@ -103,6 +105,7 @@ class BaseAgent(McpAttachableMixin):
         )
         self.max_tool_rounds = effective_max_iterations
         self.system_prompt = system_prompt
+        self.middleware = tuple(middleware)
         self.description = description or "General purpose agent."
         self.capabilities = tuple(capabilities)
         self.agent_metadata = agent_metadata or AgentMetadata()
@@ -194,6 +197,7 @@ class BaseAgent(McpAttachableMixin):
         system_prompt: str | None = None,
         modality: ModelModality | str | None = None,
         metadata: dict[str, Any] | None = None,
+        middleware: Sequence[AgentMiddleware] | None = None,
         include_history: bool = False,
     ) -> BaseAgent:
         child = BaseAgent(
@@ -207,6 +211,7 @@ class BaseAgent(McpAttachableMixin):
             max_tokens=self.runtime_config.max_tokens,
             compaction_trigger_tokens=self.runtime_config.compaction_trigger_tokens,
             compaction_target_tokens=self.runtime_config.compaction_target_tokens,
+            middleware=self.middleware if middleware is None else middleware,
             system_prompt=self.system_prompt if system_prompt is None else system_prompt,
             api_key=self.runner_config.api_key,
             provider=self.runner_config.provider,
@@ -264,6 +269,7 @@ class BaseAgent(McpAttachableMixin):
                     agent_context,
                     runner=runner,
                     modality=selected_modality,
+                    runtime_metadata={**self.metadata, **dict(input_metadata)},
                     **options,
                 )
             else:
@@ -348,6 +354,7 @@ class BaseAgent(McpAttachableMixin):
         *,
         runner: object | None = None,
         modality: ModelModality = ModelModality.TEXT,
+        runtime_metadata: Mapping[str, Any] | None = None,
         **options: Any,
     ) -> StrategyResult:
         if runner is None:
@@ -372,6 +379,7 @@ class BaseAgent(McpAttachableMixin):
             invoke_runner=self._invoke_runner,
             runner_output_text=self._runner_output_text,
             runner_output_metadata=self._runner_output_metadata,
+            metadata=runtime_metadata,
             options=options,
         )
         self._record_tool_contexts(result)
@@ -394,6 +402,7 @@ class BaseAgent(McpAttachableMixin):
             invoke_runner=self._invoke_runner,
             runner_output_text=self._runner_output_text,
             runner_output_metadata=self._runner_output_metadata,
+            metadata=self.metadata,
             options=options,
         )
         self._record_tool_contexts(result)
@@ -414,6 +423,8 @@ class BaseAgent(McpAttachableMixin):
             tools=self.tools,
             permission_policy=self.permission_policy,
             config=self.runtime_config,
+            middleware=self.middleware,
+            run_id=self.runner_config.run_id,
         )
 
     def _catalog_from_agent_tools(self, tools: Sequence[object]) -> Tools:
