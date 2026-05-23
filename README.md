@@ -15,38 +15,68 @@ from vidbyte import VidbyteSDK
 
 sdk = VidbyteSDK()
 sdk.harnesses
+sdk.agents
 sdk.tools
 sdk.providers
 sdk.strategies
+```
+
+## Agents and Modalities
+
+Use agents as the public entry point for model execution. Pick a modality explicitly when the request is not ordinary text; plain string prompts default to text.
+
+```python
+from vidbyte import ModelModality, VidbyteSDK
+
+sdk = VidbyteSDK()
+
+image_agent = sdk.agents.base(
+    name="asset-generator",
+    system_prompt="Create useful product assets.",
+    provider="openai",
+    model_name="gpt-image-1",
+    modality=ModelModality.IMAGE,
+)
+
+reply = image_agent.run("A clean product mockup on a white desk")
+print(reply.content)
+```
+
+Typed inputs can carry modality at call time:
+
+```python
+from vidbyte import AgentInput, ModelModality
+
+reply = await image_agent.arun(
+    AgentInput("A launch graphic with a simple product silhouette", modality=ModelModality.IMAGE)
+)
 ```
 
 ## Multi-Agent Orchestration
 
 Multi-agent execution is modeled as composition:
 
-- `vidbyte.agents` contains actor objects such as `BaseAgent` and `AgentRegistry`.
+- `vidbyte.agents` contains actor objects such as `BaseAgent`, `AgentInput`, and `AgentRegistry`.
 - `vidbyte.strategies.multi_agent` contains orchestration topologies such as consensus routing, AutoGen-style message passing, VMAO, economic gating, and evolving policy routing.
 - Custom harnesses stay outside the base SDK until their public contracts are explicitly defined.
 
 ```python
-from vidbyte.strategies import BaseStrategy, StrategyResult
+from vidbyte import BaseAgent, ModelModality
+from vidbyte.strategies import ReActStrategy
 
+agent = BaseAgent(
+    name="researcher",
+    system_prompt="Answer directly and cite uncertainty.",
+    strategy=ReActStrategy(),
+    provider="openai",
+    model_name="gpt-4.1",
+    modality=ModelModality.TEXT,
+)
 
-class FastStrategy(BaseStrategy):
-    async def arun(self, prompt, **kwargs):
-        return StrategyResult(output="fast answer", strategy_name="fast")
-
-
-class DeepStrategy(BaseStrategy):
-    async def arun(self, prompt, **kwargs):
-        return StrategyResult(output="deep answer", strategy_name="deep")
-
-
-strategy = FastStrategy()
-result = await strategy.arun("Solve this task", runner=my_runner)
+reply = await agent.arun("Draft a concise release note")
 ```
 
-For custom agents, pass an explicit `system_prompt`, optional reasoning strategy, runner, and tools into `Agent` or `BaseAgent`; then pass those agents into multi-agent strategies.
+For custom agents, pass an explicit `system_prompt`, optional reasoning strategy, modality, model config, runner, and tools into `Agent` or `BaseAgent`; then pass those agents into multi-agent strategies.
 Semantic labels such as roles belong in agent metadata when callers need them.
 
 ## Context Objects
@@ -166,6 +196,7 @@ vidbyte/
 |-- shared/
 `-- lib/
     |-- dataclasses/
+    |-- runners/
     |-- tools/
     |-- enums/
     `-- errors/
@@ -182,5 +213,5 @@ Private Vidbyte service implementations, proprietary learning evaluations, promp
 ```bash
 python -m compileall vidbyte
 python -m unittest discover -s tests
-python -c "from vidbyte import Agent, Tools, tool; print(Agent.__name__, Tools.__name__, callable(tool))"
+python -c "from vidbyte import Agent, Tools, VidbyteSDK, tool; sdk = VidbyteSDK(); print(Agent.__name__, Tools.__name__, type(sdk.agents).__name__, callable(tool))"
 ```
