@@ -20,17 +20,17 @@ from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
 from vidbyte.agents.mixins import McpAttachableMixin
+from vidbyte.agents.runtime import AgentRuntime
 from vidbyte.agents.types import AgentCard, AgentInput, AgentMessage
 from vidbyte.lib.agents import ModalityDetector
-from vidbyte.lib.dataclasses.agents import AgentRunnerConfig
+from vidbyte.lib.dataclasses.agents import AgentRunnerConfig, AgentRuntimeConfig
 from vidbyte.lib.enums import ModelModality, ModelProvider
 from vidbyte.lib.errors import AgentExecutionError
-from vidbyte.lib.tools import ToolsFormatter
 from vidbyte.strategies.base import BaseStrategy
 from vidbyte.strategies.types import BaseAgentContext, StrategyContext, StrategyResult
 from vidbyte.tools.catalog import Tools
-from vidbyte.tools.security import PermissionDecision, PermissionPolicy
-from vidbyte.tools.types import ToolCall, ToolCallContext, ToolCallState, ToolResult, ToolSpec
+from vidbyte.tools.security import PermissionPolicy
+from vidbyte.tools.types import ToolCallContext, ToolSpec
 
 
 class ConfiguredAgentRunner:
@@ -53,7 +53,11 @@ class BaseAgent(McpAttachableMixin):
         runners: Mapping[ModelModality | str, object] | None = None,
         tools: Sequence[object] | Tools = (),
         permission_policy: PermissionPolicy | None = None,
-        max_tool_rounds: int = 3,
+        max_tool_rounds: int | None = None,
+        max_iterations: int | None = None,
+        max_tokens: int | None = None,
+        compaction_trigger_tokens: int | None = None,
+        compaction_target_tokens: int | None = None,
         api_key: str | None = None,
         provider: ModelProvider | str | None = None,
         model_name: str | None = None,
@@ -89,7 +93,14 @@ class BaseAgent(McpAttachableMixin):
         self._agent_tool_items = tools.all() if isinstance(tools, Tools) else tuple(tools)
         self.tools = tools if isinstance(tools, Tools) else self._catalog_from_agent_tools(self._agent_tool_items)
         self.permission_policy = permission_policy or PermissionPolicy()
-        self.max_tool_rounds = max(0, max_tool_rounds)
+        effective_max_iterations = max_iterations if max_iterations is not None else max_tool_rounds
+        self.runtime_config = AgentRuntimeConfig(
+            max_iterations=effective_max_iterations,
+            max_tokens=max_tokens,
+            compaction_trigger_tokens=compaction_trigger_tokens,
+            compaction_target_tokens=compaction_target_tokens,
+        )
+        self.max_tool_rounds = effective_max_iterations
         self.system_prompt = system_prompt
         self.description = description or "General purpose agent."
         self.capabilities = tuple(capabilities)
@@ -158,6 +169,9 @@ class BaseAgent(McpAttachableMixin):
             tools=self._agent_tool_items if tools is None else tools,
             permission_policy=self.permission_policy,
             max_tool_rounds=self.max_tool_rounds,
+            max_tokens=self.runtime_config.max_tokens,
+            compaction_trigger_tokens=self.runtime_config.compaction_trigger_tokens,
+            compaction_target_tokens=self.runtime_config.compaction_target_tokens,
             system_prompt=self.system_prompt if system_prompt is None else system_prompt,
             api_key=self.runner_config.api_key,
             provider=self.runner_config.provider,
@@ -208,7 +222,13 @@ class BaseAgent(McpAttachableMixin):
                 modality=selected_modality,
             )
             if self.strategy is None:
-                result = await self._run_without_strategy(prompt, agent_context, runner=runner, **options)
+                result = await self._run_without_strategy(
+                    prompt,
+                    agent_context,
+                    runner=runner,
+                    modality=selected_modality,
+                    **options,
+                )
             else:
                 result = await self.strategy.arun(
                     prompt,
@@ -257,33 +277,15 @@ class BaseAgent(McpAttachableMixin):
         input_metadata: Mapping[str, Any] | None = None,
         modality: ModelModality | None = None,
     ) -> BaseAgentContext:
-        merged_history = tuple(history) + tuple(self.history)
-        metadata = dict(context.metadata if context else {})
-        metadata.update(self.metadata)
-        metadata.update(dict(input_metadata or {}))
-        if modality is not None:
-            metadata["modality"] = modality.value
-        strategy_metadata = dict(context.strategy_metadata if context else {})
-        strategy_metadata.update({"current_agent": self.name, "current_message": message})
-        if modality is not None:
-            strategy_metadata["modality"] = modality.value
-        responses = tuple(context.responses) if context else ()
-        return BaseAgentContext(
-            system_prompt=context.system_prompt
-            if context and context.system_prompt
-            else self.system_prompt,
-            agent_name=self.name,
-            role=context.role if context else None,
-            history=merged_history,
-            file_paths=tuple(context.file_paths) if context else (),
-            strategy_metadata=strategy_metadata,
-            tool_calls=tuple(context.tool_calls) + tuple(self._tool_call_contexts) if context else tuple(self._tool_call_contexts),
-            responses=responses,
-            budget=context.budget if context else None,
-            artifacts=tuple(context.artifacts) if context else (),
-            memory=context.memory if context else None,
-            permissions=context.permissions if context else None,
-            metadata=metadata,
+        return self._runtime().build_context(
+            message,
+            base_context=context,
+            history=history,
+            agent_history=self.history,
+            agent_metadata=self.metadata,
+            existing_tool_calls=self._tool_call_contexts,
+            input_metadata=input_metadata,
+            modality=modality,
         )
 
     def _create_runner(self) -> object | None:
@@ -306,6 +308,7 @@ class BaseAgent(McpAttachableMixin):
         context: BaseAgentContext,
         *,
         runner: object | None = None,
+        modality: ModelModality = ModelModality.TEXT,
         **options: Any,
     ) -> StrategyResult:
         if runner is None:
@@ -314,14 +317,26 @@ class BaseAgent(McpAttachableMixin):
             raise AgentExecutionError(
                 "ConfiguredAgentRunner stores primitive settings only; pass an executable runner when no strategy is set."
             )
-        if len(self.tools):
-            return await self._run_with_tools(runner, message, context=context, **options)
-        response = await self._call_runner_once(runner, message, context=context, **options)
-        return StrategyResult(
-            output=self._runner_output_text(response),
-            strategy_name="direct_runner",
-            metadata=self._runner_output_metadata(response),
+        if modality is not ModelModality.TEXT:
+            raw_result = await self._call_runner_once(runner, message, context=context, **options)
+            return StrategyResult(
+                output=self._runner_output_text(raw_result),
+                strategy_name="direct_runner",
+                metadata=self._runner_output_metadata(raw_result),
+            )
+        provider = str(options.pop("provider", None) or self._runner_provider(runner))
+        result = await self._runtime().arun(
+            message,
+            runner=runner,
+            context=context,
+            provider=provider,
+            invoke_runner=self._invoke_runner,
+            runner_output_text=self._runner_output_text,
+            runner_output_metadata=self._runner_output_metadata,
+            options=options,
         )
+        self._record_tool_contexts(result)
+        return result
 
     async def _run_with_tools(
         self,
@@ -332,137 +347,35 @@ class BaseAgent(McpAttachableMixin):
         **options: Any,
     ) -> StrategyResult:
         provider = str(options.pop("provider", None) or self._runner_provider(runner))
-        tool_schemas = self.tools.provider_schemas(provider)
-        messages: list[dict[str, Any]] = [dict(item) for item in options.pop("messages", ())]
-        call_contexts: list[ToolCallContext] = []
+        result = await self._runtime().arun(
+            message,
+            runner=runner,
+            context=context,
+            provider=provider,
+            invoke_runner=self._invoke_runner,
+            runner_output_text=self._runner_output_text,
+            runner_output_metadata=self._runner_output_metadata,
+            options=options,
+        )
+        self._record_tool_contexts(result)
+        return result
 
-        for round_index in range(self.max_tool_rounds + 1):
-            call_options = dict(options)
-            call_options.setdefault("system", context.system_prompt)
-            if tool_schemas:
-                call_options.setdefault("tools", tool_schemas)
-            if messages:
-                call_options.setdefault("messages", tuple(messages))
-
-            raw_result = await self._invoke_runner(runner, message, **call_options)
-            tool_calls = ToolsFormatter.parse_tool_calls(raw_result, provider)
-            if not tool_calls:
-                self._tool_call_contexts.extend(call_contexts)
-                return StrategyResult(
-                    output=self._runner_output_text(raw_result),
-                    strategy_name="direct_runner",
-                    metadata={**self._tool_metadata(call_contexts), **self._runner_output_metadata(raw_result)},
-                )
-
-            if round_index >= self.max_tool_rounds:
-                self._tool_call_contexts.extend(call_contexts)
-                return StrategyResult(
-                    output="Tool call limit reached before a final response.",
-                    strategy_name="direct_runner",
-                    metadata={**self._tool_metadata(call_contexts), "tool_round_limit_reached": True},
-                )
-
-            for call in tool_calls:
-                context_record, result = await self._execute_agent_tool_call(call, provider=provider)
-                call_contexts.append(context_record)
-                messages.append(dict(ToolsFormatter.format_tool_result(call, result, provider)))
-
-        self._tool_call_contexts.extend(call_contexts)
-        return StrategyResult(
-            output="Tool call limit reached before a final response.",
-            strategy_name="direct_runner",
-            metadata={**self._tool_metadata(call_contexts), "tool_round_limit_reached": True},
+    def _record_tool_contexts(self, result: StrategyResult) -> None:
+        contexts = result.metadata.get("tool_calls", ())
+        self._tool_call_contexts.extend(
+            context
+            for context in tuple(contexts)
+            if isinstance(context, ToolCallContext)
         )
 
-    async def _execute_agent_tool_call(
-        self,
-        call: ToolCall,
-        *,
-        provider: str,
-    ) -> tuple[ToolCallContext, ToolResult]:
-        try:
-            tool = self.tools._get(call.tool_name)
-        except Exception as exc:
-            result = ToolResult.error(call.tool_name, str(exc), metadata={"error": "unknown_tool"})
-            return (
-                ToolCallContext(
-                    tool_name=call.tool_name,
-                    arguments=call.arguments,
-                    state=ToolCallState.FAILED,
-                    call_id=call.call_id,
-                    result=result,
-                    provider=provider,
-                    metadata=dict(call.metadata),
-                ),
-                result,
-            )
-
-        spec = tool.spec()
-        decision = self.permission_policy.check(spec, call)
-        if decision is PermissionDecision.DENY:
-            result = ToolResult.error(
-                spec.name,
-                f"Permission denied for tool '{spec.name}' requiring {spec.permission.value}",
-                metadata={"error": "permission_denied", "permission": spec.permission.value},
-            )
-            return (
-                ToolCallContext(
-                    tool_name=spec.name,
-                    arguments=call.arguments,
-                    state=ToolCallState.DENIED,
-                    call_id=call.call_id,
-                    result=result,
-                    provider=provider,
-                    metadata=dict(call.metadata),
-                ),
-                result,
-            )
-
-        validation_error = tool.validate_call(call)
-        if validation_error:
-            result = ToolResult.error(spec.name, validation_error, metadata={"error": "validation_error"})
-            return (
-                ToolCallContext(
-                    tool_name=spec.name,
-                    arguments=call.arguments,
-                    state=ToolCallState.FAILED,
-                    call_id=call.call_id,
-                    result=result,
-                    provider=provider,
-                    metadata=dict(call.metadata),
-                ),
-                result,
-            )
-
-        try:
-            result = await tool.execute(call)
-            state = ToolCallState.SUCCEEDED if result.status.value == "success" else ToolCallState.FAILED
-        except Exception as exc:
-            result = ToolResult.error(
-                spec.name,
-                f"Tool execution failed: {exc}",
-                metadata={"error": "execution_error", "error_type": type(exc).__name__},
-            )
-            state = ToolCallState.FAILED
-        return (
-            ToolCallContext(
-                tool_name=spec.name,
-                arguments=call.arguments,
-                state=state,
-                call_id=call.call_id,
-                result=result,
-                provider=provider,
-                metadata=dict(call.metadata),
-            ),
-            result,
+    def _runtime(self) -> AgentRuntime:
+        return AgentRuntime(
+            agent_name=self.name,
+            system_prompt=self.system_prompt,
+            tools=self.tools,
+            permission_policy=self.permission_policy,
+            config=self.runtime_config,
         )
-
-    def _tool_metadata(self, contexts: Sequence[ToolCallContext]) -> dict[str, Any]:
-        return {
-            "tool_call_count": len(contexts),
-            "tool_call_states": tuple(context.state.value for context in contexts),
-            "tool_calls": tuple(contexts),
-        }
 
     def _catalog_from_agent_tools(self, tools: Sequence[object]) -> Tools:
         catalog = Tools()
@@ -542,6 +455,12 @@ class BaseAgent(McpAttachableMixin):
     @staticmethod
     def _runner_output_metadata(result: object) -> dict[str, Any]:
         metadata: dict[str, Any] = {}
+        response_metadata = getattr(result, "metadata", None)
+        if isinstance(response_metadata, Mapping):
+            metadata.update(dict(response_metadata))
+        raw = getattr(result, "raw", None)
+        if isinstance(raw, Mapping) and "usage" in raw and "usage" not in metadata:
+            metadata["usage"] = raw["usage"]
         images = getattr(result, "images", None)
         if images is not None:
             metadata["image_count"] = len(tuple(images))

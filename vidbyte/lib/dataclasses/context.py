@@ -169,6 +169,7 @@ class BaseContext:
     role: str | None = None
     history: Sequence[object] = ()
     file_paths: Sequence[str] = ()
+    tools: Sequence[object] = ()
     strategy_metadata: Mapping[str, Any] = field(default_factory=dict)
     tool_calls: Sequence[ContextToolCall] = ()
     responses: Sequence[ContextResponse] = ()
@@ -182,16 +183,16 @@ class BaseContext:
         parts: list[str] = []
         if self.system_prompt:
             parts.append(f"System prompt:\n{self.system_prompt}")
-        if self.agent_name or self.role:
-            parts.append(f"Agent:\nname={self.agent_name or ''}\nrole={self.role or ''}")
         if self.memory:
             parts.append(f"Memory summary:\n{self.memory}")
-        if self.strategy_metadata:
-            parts.append(f"Strategy progress metadata:\n{dict(self.strategy_metadata)}")
+        if self.history:
+            parts.append("History:\n" + "\n".join(str(item) for item in self.history))
+        if self.tools:
+            parts.append("Tools:\n" + "\n\n".join(_format_context_tool(tool) for tool in self.tools))
+        if self.metadata:
+            parts.append(f"Run metadata:\n{self.metadata}")
         if self.budget:
             parts.append(f"Budget:\n{self.budget}")
-        if self.permissions:
-            parts.append(f"Permissions:\n{self.permissions}")
         if self.artifacts:
             parts.append("Artifacts:\n" + "\n\n".join(f"{artifact.name} ({artifact.artifact_type}):\n{artifact.content}" for artifact in self.artifacts))
         if self.responses:
@@ -237,3 +238,14 @@ class VMAOContext(StrategyContext):
     round_index: int | None = None
     planner_notes: str | None = None
     verifier_notes: str | None = None
+
+
+def _format_context_tool(tool: object) -> str:
+    if hasattr(tool, "to_prompt_str"):
+        return str(tool.to_prompt_str())  # type: ignore[attr-defined]
+    spec = getattr(tool, "spec", None)
+    if callable(spec):
+        raw_spec = spec()
+        if hasattr(raw_spec, "to_prompt_str"):
+            return str(raw_spec.to_prompt_str())
+    return str(tool)

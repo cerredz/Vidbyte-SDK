@@ -68,7 +68,19 @@ class AgentToolLoopTests(unittest.IsolatedAsyncioTestCase):
                         ]
                     },
                 ),
-                FakeResponse("final answer", {"output_text": "final answer"}),
+                FakeResponse(
+                    "",
+                    {
+                        "output": [
+                            {
+                                "type": "function_call",
+                                "name": "isDone",
+                                "arguments": '{"final_answer": "final answer"}',
+                                "call_id": "call_2",
+                            }
+                        ]
+                    },
+                ),
             ]
         )
         agent = Agent(name="worker", system_prompt="Work.", runner=runner, tools=[lookup])
@@ -76,8 +88,10 @@ class AgentToolLoopTests(unittest.IsolatedAsyncioTestCase):
         reply = await agent.arun("task")
 
         self.assertEqual(reply.content, "final answer")
-        self.assertEqual(reply.metadata["tool_call_count"], 1)
-        self.assertEqual(reply.metadata["tool_call_states"], ("succeeded",))
+        self.assertEqual(reply.metadata["tool_call_count"], 2)
+        self.assertEqual(reply.metadata["tool_call_states"], ("succeeded", "succeeded"))
+        self.assertEqual(reply.metadata["stop_reason"], "is_done")
+        self.assertEqual(reply.metadata["iteration_count"], 2)
         self.assertIn("tools", runner.calls[0]["kwargs"])
         self.assertIn("messages", runner.calls[1]["kwargs"])
 
@@ -88,7 +102,10 @@ class AgentToolLoopTests(unittest.IsolatedAsyncioTestCase):
                     "",
                     {"output": [{"type": "function_call", "name": "missing", "arguments": "{}"}]},
                 ),
-                FakeResponse("handled", {"output_text": "handled"}),
+                FakeResponse(
+                    "",
+                    {"output": [{"type": "function_call", "name": "isDone", "arguments": '{"final_answer": "handled"}'}]},
+                ),
             ]
         )
         agent = Agent(name="worker", system_prompt="Work.", runner=runner, tools=[])
@@ -97,7 +114,7 @@ class AgentToolLoopTests(unittest.IsolatedAsyncioTestCase):
         reply = await agent.arun("task")
 
         self.assertEqual(reply.content, "handled")
-        self.assertEqual(reply.metadata["tool_call_states"], ("failed",))
+        self.assertEqual(reply.metadata["tool_call_states"], ("failed", "succeeded"))
 
     async def test_agent_denies_write_tool_by_default(self) -> None:
         tool_instance = WriteTool()
@@ -107,14 +124,17 @@ class AgentToolLoopTests(unittest.IsolatedAsyncioTestCase):
                     "",
                     {"output": [{"type": "function_call", "name": "write", "arguments": "{}"}]},
                 ),
-                FakeResponse("denied handled", {"output_text": "denied handled"}),
+                FakeResponse(
+                    "",
+                    {"output": [{"type": "function_call", "name": "isDone", "arguments": '{"final_answer": "denied handled"}'}]},
+                ),
             ]
         )
         agent = Agent(name="worker", system_prompt="Work.", runner=runner, tools=[tool_instance])
 
         reply = await agent.arun("task")
 
-        self.assertEqual(reply.metadata["tool_call_states"], ("denied",))
+        self.assertEqual(reply.metadata["tool_call_states"], ("denied", "succeeded"))
         self.assertFalse(tool_instance.executed)
 
     async def test_agent_stops_at_max_tool_rounds(self) -> None:
@@ -132,8 +152,9 @@ class AgentToolLoopTests(unittest.IsolatedAsyncioTestCase):
 
         reply = await agent.arun("task")
 
-        self.assertEqual(reply.content, "Tool call limit reached before a final response.")
-        self.assertTrue(reply.metadata["tool_round_limit_reached"])
+        self.assertEqual(reply.content, "Agent runtime stopped after reaching max_iterations.")
+        self.assertEqual(reply.metadata["stop_reason"], "max_iterations")
+        self.assertEqual(reply.metadata["iteration_count"], 1)
 
     async def test_strategy_path_still_receives_tools(self) -> None:
         @tool

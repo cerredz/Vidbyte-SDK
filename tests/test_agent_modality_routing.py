@@ -20,6 +20,20 @@ class RecordingRunner:
         return self.response
 
 
+class DoneResponse:
+    def __init__(self, answer: str) -> None:
+        self.text = ""
+        self.raw = {
+            "output": [
+                {
+                    "type": "function_call",
+                    "name": "isDone",
+                    "arguments": f'{{"final_answer": "{answer}"}}',
+                }
+            ]
+        }
+
+
 class RunnerCapturingStrategy(BaseStrategy):
     name = "capture"
 
@@ -41,7 +55,7 @@ class AgentModalityRoutingTests(unittest.IsolatedAsyncioTestCase):
                 raw={},
             )
         )
-        text_runner = RecordingRunner("text")
+        text_runner = RecordingRunner(DoneResponse("text"))
         agent = BaseAgent(
             name="asset-agent",
             system_prompt="Create assets.",
@@ -58,7 +72,7 @@ class AgentModalityRoutingTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_call_modality_override_wins(self) -> None:
         image_runner = RecordingRunner("image")
-        text_runner = RecordingRunner("text")
+        text_runner = RecordingRunner(DoneResponse("text"))
         agent = BaseAgent(
             name="writer",
             system_prompt="Write clearly.",
@@ -83,7 +97,7 @@ class AgentModalityRoutingTests(unittest.IsolatedAsyncioTestCase):
                 raw={},
             )
         )
-        text_runner = RecordingRunner("text")
+        text_runner = RecordingRunner(DoneResponse("text"))
         agent = BaseAgent(
             name="video-agent",
             system_prompt="Create videos.",
@@ -101,7 +115,7 @@ class AgentModalityRoutingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(text_runner.calls), 0)
 
     async def test_plain_string_defaults_to_text_runner(self) -> None:
-        text_runner = RecordingRunner("text")
+        text_runner = RecordingRunner(DoneResponse("text"))
         image_runner = RecordingRunner("image")
         agent = BaseAgent(
             name="auto-agent",
@@ -182,7 +196,7 @@ class AgentModalityRoutingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(image_runner.calls), 1)
 
     async def test_model_name_auto_detection_defaults_to_text_for_unknown(self) -> None:
-        text_runner = RecordingRunner("text")
+        text_runner = RecordingRunner(DoneResponse("text"))
         image_runner = RecordingRunner("image")
         agent = BaseAgent(
             name="unknown-model-agent",

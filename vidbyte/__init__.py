@@ -29,7 +29,10 @@ from vidbyte.agents import (
     AgentMessage,
     AgentRegistry,
     AgentRunnerConfig,
+    AgentRuntimeConfig,
+    AgentRuntimeStats,
     AgentSpec,
+    AgentStopReason,
     BaseAgent,
 )
 from vidbyte.client import VidbyteSDK
@@ -102,7 +105,10 @@ __all__ = [
     "AgentMessage",
     "AgentRegistry",
     "AgentRunnerConfig",
+    "AgentRuntimeConfig",
+    "AgentRuntimeStats",
     "AgentSpec",
+    "AgentStopReason",
     "BaseAgent",
     "BaseAgentContext",
     "BaseContext",
