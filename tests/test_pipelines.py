@@ -7,6 +7,7 @@ from vidbyte.lib.errors import PipelineExecutionError
 from vidbyte.pipelines import (
     BasePipeline,
     ConditionalPipeline,
+    MapReducePipeline,
     ParallelPipeline,
     SequentialPipeline,
 )
@@ -208,6 +209,100 @@ class ConditionalPipelineTests(unittest.IsolatedAsyncioTestCase):
 
 
 # ---------------------------------------------------------------------------
+# MapReducePipeline
+# ---------------------------------------------------------------------------
+
+class MapReducePipelineTests(unittest.IsolatedAsyncioTestCase):
+    async def test_single_map_stage_produces_reduced_output(self) -> None:
+        pipeline = MapReducePipeline(
+            map_stages=[PrefixAgent("map:")],
+            reduce_stage=PrefixAgent("reduce:"),
+        )
+        result = await pipeline.run("x")
+        self.assertEqual(result, "reduce:map:x")
+
+    async def test_multiple_map_stages_converge_to_reducer(self) -> None:
+        pipeline = MapReducePipeline(
+            map_stages=[PrefixAgent("A:"), PrefixAgent("B:")],
+            reduce_stage=PrefixAgent("reduce:"),
+        )
+        result = await pipeline.run("x")
+        self.assertIn("A:x", result)
+        self.assertIn("B:x", result)
+        self.assertTrue(result.startswith("reduce:"))
+
+    async def test_map_stages_receive_same_input(self) -> None:
+        received: list[str] = []
+
+        class RecordingAgent:
+            name = "recorder"
+
+            async def generate_reply(self, message: str, **_: object) -> AgentMessage:
+                received.append(message)
+                return AgentMessage(sender="recorder", recipient="pipeline", content=message)
+
+        pipeline = MapReducePipeline(
+            map_stages=[RecordingAgent(), RecordingAgent(), RecordingAgent()],
+            reduce_stage=EchoAgent(),
+        )
+        await pipeline.run("shared")
+        self.assertEqual(received, ["shared", "shared", "shared"])
+
+    def test_empty_map_stages_raises_at_construction(self) -> None:
+        with self.assertRaises(PipelineExecutionError):
+            MapReducePipeline(map_stages=[], reduce_stage=EchoAgent())
+
+    async def test_map_stage_failure_propagates(self) -> None:
+        pipeline = MapReducePipeline(
+            map_stages=[PrefixAgent("ok:"), FailingAgent()],
+            reduce_stage=EchoAgent(),
+        )
+        with self.assertRaises(RuntimeError):
+            await pipeline.run("prompt")
+
+    async def test_reduce_stage_failure_propagates(self) -> None:
+        pipeline = MapReducePipeline(
+            map_stages=[PrefixAgent("A:")],
+            reduce_stage=FailingAgent(),
+        )
+        with self.assertRaises(RuntimeError):
+            await pipeline.run("prompt")
+
+    async def test_custom_separator(self) -> None:
+        pipeline = MapReducePipeline(
+            map_stages=[PrefixAgent("A:"), PrefixAgent("B:")],
+            reduce_stage=EchoAgent(),
+            separator=" | ",
+        )
+        result = await pipeline.run("x")
+        self.assertIn(" | ", result)
+
+    async def test_nested_pipeline_as_map_stage(self) -> None:
+        inner = SequentialPipeline([PrefixAgent("inner:")])
+        pipeline = MapReducePipeline(
+            map_stages=[inner, PrefixAgent("direct:")],
+            reduce_stage=EchoAgent(),
+        )
+        result = await pipeline.run("x")
+        self.assertIn("inner:x", result)
+        self.assertIn("direct:x", result)
+
+    async def test_nested_pipeline_as_reduce_stage(self) -> None:
+        reduce_stage = ParallelPipeline([PrefixAgent("X:"), PrefixAgent("Y:")], separator="|")
+        pipeline = MapReducePipeline(
+            map_stages=[PrefixAgent("map:")],
+            reduce_stage=reduce_stage,
+        )
+        result = await pipeline.run("x")
+        self.assertIn("X:map:x", result)
+        self.assertIn("Y:map:x", result)
+
+    async def test_is_base_pipeline_instance(self) -> None:
+        pipeline = MapReducePipeline(map_stages=[EchoAgent()], reduce_stage=EchoAgent())
+        self.assertIsInstance(pipeline, BasePipeline)
+
+
+# ---------------------------------------------------------------------------
 # run_sync
 # ---------------------------------------------------------------------------
 
@@ -222,6 +317,14 @@ class RunSyncTests(unittest.TestCase):
         result = pipeline.run_sync("x")
         self.assertIn("A:x", result)
         self.assertIn("B:x", result)
+
+    def test_run_sync_map_reduce(self) -> None:
+        pipeline = MapReducePipeline(
+            map_stages=[PrefixAgent("map:")],
+            reduce_stage=PrefixAgent("reduce:"),
+        )
+        result = pipeline.run_sync("x")
+        self.assertEqual(result, "reduce:map:x")
 
 
 # ---------------------------------------------------------------------------
