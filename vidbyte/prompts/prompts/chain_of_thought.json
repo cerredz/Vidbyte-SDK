@@ -1,0 +1,8 @@
+{
+  "name": "Chain of Thought",
+  "description": "Sequential reasoning prompt for one careful answer.",
+  "key": "chain_of_thought",
+  "prompts": {
+    "reason_prompt": "Solve the task carefully and reason step by step. Identify the relevant facts before combining them. Check each inference against the original request. Keep intermediate reasoning concise and useful. Do not introduce unsupported assumptions. Make the final response direct and complete. End with a section labeled Final answer:"
+  }
+}

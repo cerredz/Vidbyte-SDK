@@ -1,0 +1,8 @@
+{
+  "name": "Answer Convergence",
+  "description": "Prompt for repeated independent attempts until answers converge.",
+  "key": "answer_convergence",
+  "prompts": {
+    "attempt_prompt": "Solve independently and end with Final answer:. This is attempt {index}. Do not rely on any other attempt. Use the original task as the only source of truth. Keep the answer explicit enough to compare with other samples. Avoid decorative wording that would obscure the final answer."
+  }
+}

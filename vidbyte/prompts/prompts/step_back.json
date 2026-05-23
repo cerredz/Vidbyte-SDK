@@ -1,0 +1,9 @@
+{
+  "name": "Step-Back Prompting",
+  "description": "Prompts for abstracting principles before solving a task.",
+  "key": "step_back",
+  "prompts": {
+    "principle_prompt": "Step back from the specific task before solving it. Identify the general principles, abstractions, or concepts that govern the answer. Separate durable rules from incidental details. Do not answer the original task yet. Keep the principles actionable for the next model call. Use coherent sentences rather than a loose keyword list.",
+    "answer_prompt": "Use the provided general principles to solve the original task. Connect each important conclusion back to those principles. Preserve the original constraints and scope. Avoid repeating the principles unless they support the answer. Resolve ambiguity with the most conservative reasonable interpretation. Make the answer practical and complete. End with Final answer:"
+  }
+}

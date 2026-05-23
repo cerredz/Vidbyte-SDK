@@ -1,3 +1,17 @@
+"""Context Protocol Header
+
+Description:
+    Defines the root Vidbyte SDK namespace client.
+Purpose:
+    Owns construction of public namespace clients while keeping feature-specific
+    logic inside their packages.
+Architecture:
+    - VidbyteSDK: Instantiates harnesses, tools, and providers namespace clients.
+Relations:
+    Related to vidbyte.__init__, vidbyte.tools.client, vidbyte.harnesses.client,
+    and vidbyte.providers.client.
+"""
+
 from __future__ import annotations
 
 from vidbyte.harnesses.client import HarnessClient
