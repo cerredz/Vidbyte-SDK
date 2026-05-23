@@ -107,6 +107,9 @@ class BaseAgent(McpAttachableMixin):
         self.metadata = dict(metadata or {})
         self.history: list[AgentMessage] = []
         self._tool_call_contexts: list[ToolCallContext] = []
+        self._active_prompt: str = ""
+        for _tool in self._agent_tool_items:
+            self._bind_agent_tool_context(_tool)
 
         # MCP Attachable State
         self._mcp_handles = []
@@ -143,7 +146,27 @@ class BaseAgent(McpAttachableMixin):
             self.tools = self.tools.add(tool)
         except TypeError:
             pass
+        self._bind_agent_tool_context(tool)
         return self
+
+    def as_tool(
+        self,
+        *,
+        name: str | None = None,
+        description: str | None = None,
+    ) -> object:
+        """Return an AgentTool wrapping this agent for use by a parent agent."""
+        from vidbyte.tools.agent_tool import AgentTool
+
+        return AgentTool(self, name=name, description=description)
+
+    def _bind_agent_tool_context(self, tool: object) -> None:
+        """Bind this agent's live context getter to AgentTool or StrategyTool instances."""
+        from vidbyte.tools.agent_tool import AgentTool
+        from vidbyte.tools.strategy_tool import StrategyTool
+
+        if isinstance(tool, (AgentTool, StrategyTool)):
+            tool.bind_context_getter(lambda: (self._active_prompt, list(self.history)))
 
     def tool_specs(self) -> tuple[ToolSpec, ...]:
         return self.tools.specs()
@@ -204,6 +227,7 @@ class BaseAgent(McpAttachableMixin):
         await self._ensure_mcp_connected()
         try:
             prompt, input_modality, input_metadata = self._normalize_input(message)
+            self._active_prompt = prompt
             selected_modality = ModalityDetector.resolve(
                 requested=modality,
                 input_modality=input_modality,
@@ -238,10 +262,12 @@ class BaseAgent(McpAttachableMixin):
                     **options,
                 )
         except Exception as exc:
+            self._active_prompt = ""
             raise AgentExecutionError(
                 f"Agent '{self.name}' failed to generate a reply.",
                 details={"agent": self.name, "error_type": type(exc).__name__},
             ) from exc
+        self._active_prompt = ""
         reply = AgentMessage(
             sender=self.name,
             recipient=recipient,
