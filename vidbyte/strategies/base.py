@@ -2,16 +2,21 @@ from __future__ import annotations
 
 import asyncio
 import re
-from typing import Any, ClassVar, Sequence
+from typing import TYPE_CHECKING, Any, ClassVar, Sequence
 
 from vidbyte.lib.errors import StrategyExecutionError
 from vidbyte.strategies.types import StrategyContext, StrategyResult
+
+if TYPE_CHECKING:
+    from vidbyte.agents.base import BaseAgent
+    from vidbyte.tools.strategy_tool import StrategyTool
 
 
 class BaseStrategy:
     """Async-first strategy contract."""
 
     name: ClassVar[str] = "base"
+    description: ClassVar[str] = ""
 
     def __init__(self, *, runner: object | None = None, **kwargs: Any) -> None:
         self._runner = runner
@@ -33,6 +38,18 @@ class BaseStrategy:
     @property
     def strategy_name(self) -> str:
         return getattr(self, "name", self.__class__.__name__)
+
+    def as_tool(
+        self,
+        agent: BaseAgent,
+        *,
+        name: str | None = None,
+        description: str | None = None,
+    ) -> StrategyTool:
+        """Expose this strategy (via agent) as a BaseTool for use in another agent's Tools catalog."""
+        from vidbyte.tools.strategy_tool import StrategyTool
+
+        return StrategyTool(agent, name=name, description=description)
 
     def _resolve_runner(self, runner: object | None) -> object:
         resolved = runner or self._runner

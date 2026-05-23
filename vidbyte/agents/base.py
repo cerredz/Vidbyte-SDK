@@ -17,7 +17,10 @@ from __future__ import annotations
 import asyncio
 import inspect
 from collections.abc import Callable, Mapping, Sequence
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from vidbyte.tools.agent_tool import AgentTool
 
 from vidbyte.agents.mixins import McpAttachableMixin
 from vidbyte.agents.types import AgentCard, AgentInput, AgentMessage
@@ -133,6 +136,17 @@ class BaseAgent(McpAttachableMixin):
         except TypeError:
             pass
         return self
+
+    def as_tool(
+        self,
+        *,
+        name: str | None = None,
+        description: str | None = None,
+    ) -> AgentTool:
+        """Expose this agent as a BaseTool for registration in another agent's Tools catalog."""
+        from vidbyte.tools.agent_tool import AgentTool
+
+        return AgentTool(self, name=name, description=description)
 
     def tool_specs(self) -> tuple[ToolSpec, ...]:
         return self.tools.specs()
