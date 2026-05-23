@@ -2,11 +2,22 @@ from __future__ import annotations
 
 import unittest
 
-from vidbyte import vidbyte_tool
+from vidbyte import tool, vidbyte_tool
 from vidbyte.tools import ToolCall, ToolRegistry, ToolStatus
 
 
 class CustomFunctionToolTests(unittest.IsolatedAsyncioTestCase):
+    async def test_tool_alias_generates_schema_and_executes(self) -> None:
+        @tool
+        def echo(value: str) -> str:
+            """Echo a value."""
+            return value
+
+        result = await echo.execute(ToolCall("echo", {"value": "ok"}))
+
+        self.assertEqual(echo.spec().name, "echo")
+        self.assertEqual(result.output, "ok")
+
     async def test_async_decorated_function_generates_schema_and_executes(self) -> None:
         @vidbyte_tool
         async def fetch_user_metrics(user_id: int, metric_type: str = "engagement") -> str:

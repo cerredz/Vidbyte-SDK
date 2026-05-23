@@ -22,7 +22,10 @@ Relations:
 from __future__ import annotations
 
 from vidbyte.agents import (
+    Agent,
+    AgentClient,
     AgentCard,
+    AgentInput,
     AgentMessage,
     AgentRegistry,
     AgentRunnerConfig,
@@ -31,7 +34,7 @@ from vidbyte.agents import (
 )
 from vidbyte.client import VidbyteSDK
 from vidbyte.context import BaseAgentContext, BaseContext, ContextBudget, ContextPermissions
-from vidbyte.lib.enums import BudgetPreset, PermissionPreset, Prompt
+from vidbyte.lib.enums import BudgetPreset, ModelModality, PermissionPreset, Prompt
 from vidbyte.lib.errors import (
     McpAttachmentError,
     McpConnectionError,
@@ -70,6 +73,8 @@ from vidbyte.tools import (
     BaseTool,
     FunctionTool,
     ToolCall,
+    ToolCallContext,
+    ToolCallState,
     ToolExecutor,
     ToolMixin,
     ToolParameter,
@@ -78,7 +83,9 @@ from vidbyte.tools import (
     ToolResult,
     ToolSpec,
     ToolStatus,
+    Tools,
     ToolsFormatter,
+    tool,
     vidbyte_tool,
 )
 from vidbyte.tools.mcp import (
@@ -88,7 +95,10 @@ from vidbyte.tools.mcp import (
 )
 
 __all__ = [
+    "Agent",
     "AgentCard",
+    "AgentClient",
+    "AgentInput",
     "AgentMessage",
     "AgentRegistry",
     "AgentRunnerConfig",
@@ -116,6 +126,7 @@ __all__ = [
     "McpToolPermission",
     "MultiAgentConsensusStrategy",
     "ConditionalPipeline",
+    "ModelModality",
     "ParallelPipeline",
     "PermissionPreset",
     "PipelineExecutionError",
@@ -133,6 +144,8 @@ __all__ = [
     "SequentialPipeline",
     "StrategyResult",
     "ToolCall",
+    "ToolCallContext",
+    "ToolCallState",
     "ToolExecutor",
     "ToolParameter",
     "ToolPermission",
@@ -140,7 +153,10 @@ __all__ = [
     "ToolResult",
     "ToolSpec",
     "ToolStatus",
+    "Tools",
     "ToolsFormatter",
     "TreeOfThoughtsStrategy",
     "VidbyteSDK",
+    "tool",
+    "vidbyte_tool",
 ]

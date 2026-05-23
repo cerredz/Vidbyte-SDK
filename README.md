@@ -15,38 +15,68 @@ from vidbyte import VidbyteSDK
 
 sdk = VidbyteSDK()
 sdk.harnesses
+sdk.agents
 sdk.tools
 sdk.providers
 sdk.strategies
+```
+
+## Agents and Modalities
+
+Use agents as the public entry point for model execution. Pick a modality explicitly when the request is not ordinary text; plain string prompts default to text.
+
+```python
+from vidbyte import ModelModality, VidbyteSDK
+
+sdk = VidbyteSDK()
+
+image_agent = sdk.agents.base(
+    name="asset-generator",
+    system_prompt="Create useful product assets.",
+    provider="openai",
+    model_name="gpt-image-1",
+    modality=ModelModality.IMAGE,
+)
+
+reply = image_agent.run("A clean product mockup on a white desk")
+print(reply.content)
+```
+
+Typed inputs can carry modality at call time:
+
+```python
+from vidbyte import AgentInput, ModelModality
+
+reply = await image_agent.arun(
+    AgentInput("A launch graphic with a simple product silhouette", modality=ModelModality.IMAGE)
+)
 ```
 
 ## Multi-Agent Orchestration
 
 Multi-agent execution is modeled as composition:
 
-- `vidbyte.agents` contains actor objects such as `BaseAgent` and `AgentRegistry`.
+- `vidbyte.agents` contains actor objects such as `BaseAgent`, `AgentInput`, and `AgentRegistry`.
 - `vidbyte.strategies.multi_agent` contains orchestration topologies such as consensus routing, AutoGen-style message passing, VMAO, economic gating, and evolving policy routing.
 - Custom harnesses stay outside the base SDK until their public contracts are explicitly defined.
 
 ```python
-from vidbyte.strategies import BaseStrategy, StrategyResult
+from vidbyte import BaseAgent, ModelModality
+from vidbyte.strategies import ReActStrategy
 
+agent = BaseAgent(
+    name="researcher",
+    system_prompt="Answer directly and cite uncertainty.",
+    strategy=ReActStrategy(),
+    provider="openai",
+    model_name="gpt-4.1",
+    modality=ModelModality.TEXT,
+)
 
-class FastStrategy(BaseStrategy):
-    async def arun(self, prompt, **kwargs):
-        return StrategyResult(output="fast answer", strategy_name="fast")
-
-
-class DeepStrategy(BaseStrategy):
-    async def arun(self, prompt, **kwargs):
-        return StrategyResult(output="deep answer", strategy_name="deep")
-
-
-strategy = FastStrategy()
-result = await strategy.arun("Solve this task", runner=my_runner)
+reply = await agent.arun("Draft a concise release note")
 ```
 
-For custom agents, pass an explicit `system_prompt`, optional reasoning strategy, runner, and tools into `BaseAgent`; then pass those agents into multi-agent strategies.
+For custom agents, pass an explicit `system_prompt`, optional reasoning strategy, modality, model config, runner, and tools into `Agent` or `BaseAgent`; then pass those agents into multi-agent strategies.
 Semantic labels such as roles belong in agent metadata when callers need them.
 
 ## Context Objects
@@ -68,14 +98,25 @@ context.build_context()
 
 ### Tools
 
-The SDK includes a small, explicit tool registry and executor:
+The SDK tool path is agent-local: create or import tools, pass them into an agent, and let the agent describe, format, and execute them when the model asks for a tool call.
 
 ```python
-from vidbyte import VidbyteSDK
+from vidbyte import Agent, tool
 from vidbyte.tools.builtins.code_search import GrepTool
 
-sdk = VidbyteSDK()
-sdk.tools.register(GrepTool(root_dir="."))
+@tool
+def lookup_metric(user_id: int) -> dict[str, int]:
+    """Look up one user's metric."""
+    return {"user_id": user_id, "score": 94}
+
+agent = Agent(
+    name="repo-analyst",
+    system_prompt="Use tools when they help answer precisely.",
+    runner=my_runner,
+    tools=[GrepTool(root_dir="."), lookup_metric],
+)
+
+reply = await agent.arun("Find where tools are formatted.")
 ```
 
 Advanced built-ins are grouped by category:
@@ -86,23 +127,32 @@ Advanced built-ins are grouped by category:
 - `vidbyte.tools.mcp`: `McpClient`, `McpStdioTransport`, `McpBridgedTool`
 - `vidbyte.tools.security`: `PermissionPolicy`, `ToolPermission`, sandbox transport protocols
 
-The default executor allows `SAFE` and `READ` tools. Mutating or executable tools require an explicit permission policy:
+`Tools` is the catalog/inspection helper for showing the model or a developer which tools are available:
 
 ```python
+from vidbyte.tools import Tools
+
+catalog = Tools([lookup_metric])
+print(catalog.describe())
+openai_tools = catalog.provider_schemas("openai")
+```
+
+The default permission policy allows `SAFE` and `READ` tools. Mutating or executable tools require an explicit permission policy on the agent:
+
+```python
+from vidbyte import Agent
 from vidbyte.tools.security import PermissionPolicy
 
-sdk = VidbyteSDK()
-sdk.tools.executor.permission_policy = PermissionPolicy.allow_all()
+agent = Agent(
+    name="trusted-worker",
+    system_prompt="Work inside the configured sandbox.",
+    runner=my_runner,
+    tools=[write_tool],
+    permission_policy=PermissionPolicy.allow_all(),
+)
 ```
 
-Provider integrations can format the same `ToolSpec` contract for model-native tool APIs:
-
-```python
-from vidbyte import ToolsFormatter
-
-openai_tool = ToolsFormatter.to_openai_tool(sdk.tools.registry.specs()[0])
-anthropic_tool = ToolsFormatter.to_anthropic_tool(sdk.tools.registry.specs()[0])
-```
+`ToolRegistry`, `ToolExecutor`, and `vidbyte_tool` remain available for compatibility with older examples and lower-level strategy code. New user-facing code should prefer `Tools`, `@tool`, and agent-local `tools=[...]`.
 
 ## Prompts
 
@@ -136,6 +186,7 @@ vidbyte/
 |   `-- multi_agent/
 |-- tools/
 |   |-- client.py
+|   |-- catalog.py
 |   |-- base.py
 |   |-- registry.py
 |   |-- executor.py
@@ -145,6 +196,7 @@ vidbyte/
 |-- shared/
 `-- lib/
     |-- dataclasses/
+    |-- runners/
     |-- tools/
     |-- enums/
     `-- errors/
@@ -161,5 +213,5 @@ Private Vidbyte service implementations, proprietary learning evaluations, promp
 ```bash
 python -m compileall vidbyte
 python -m unittest discover -s tests
-python -c "from vidbyte import VidbyteSDK; sdk = VidbyteSDK(); print(type(sdk.strategies).__name__)"
+python -c "from vidbyte import Agent, Tools, VidbyteSDK, tool; sdk = VidbyteSDK(); print(Agent.__name__, Tools.__name__, type(sdk.agents).__name__, callable(tool))"
 ```

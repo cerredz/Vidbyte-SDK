@@ -12,6 +12,7 @@ Architecture:
     - ToolSpec: Tool metadata plus compact prompt rendering.
     - ToolCall: Runtime invocation payload.
     - ToolResult: Runtime response payload with success/error helpers.
+    - ToolCallContext: Agent-local lifecycle context for tool calls.
 Relations:
     Re-exported by vidbyte.tools.types for existing SDK imports.
 """
@@ -38,6 +39,15 @@ class ToolPermission(str, Enum):
     READ = "read"
     WRITE = "write"
     EXECUTE = "execute"
+
+
+class ToolCallState(str, Enum):
+    """Lifecycle state for an agent-managed tool call."""
+
+    REQUESTED = "requested"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+    DENIED = "denied"
 
 
 @dataclass(frozen=True, slots=True)
@@ -102,6 +112,8 @@ class ToolCall:
 
     tool_name: str
     arguments: Mapping[str, Any] = field(default_factory=dict)
+    call_id: str | None = None
+    metadata: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         """Validate that the call names a tool."""
@@ -160,4 +172,28 @@ class ToolResult:
     ) -> "ToolResult":
         """Alias for error() — build a failed result."""
         return cls.error(tool_name, output, metadata=metadata)
+
+
+@dataclass(frozen=True, slots=True)
+class ToolCallContext:
+    """Structured context for one agent-managed tool call attempt."""
+
+    tool_name: str
+    arguments: Mapping[str, Any] = field(default_factory=dict)
+    state: ToolCallState = ToolCallState.REQUESTED
+    call_id: str | None = None
+    result: ToolResult | None = None
+    provider: str | None = None
+    model: str | None = None
+    metadata: Mapping[str, Any] = field(default_factory=dict)
+
+    @property
+    def name(self) -> str:
+        """Compatibility alias for context rendering."""
+        return self.tool_name
+
+    @property
+    def output(self) -> str | None:
+        """Compatibility alias for context rendering."""
+        return self.result.output if self.result else None
 

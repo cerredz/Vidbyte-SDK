@@ -95,6 +95,8 @@ class AnthropicProvider:
             raise ProviderResponseError("Anthropic response did not include content.", provider=self.provider.value, response_excerpt=str(parsed))
         chunks = [item["text"] for item in content if isinstance(item, dict) and item.get("type") == "text" and isinstance(item.get("text"), str)]
         if not chunks:
+            if any(isinstance(item, dict) and item.get("type") == "tool_use" for item in content):
+                return ""
             raise ProviderResponseError("Anthropic response did not include text content.", provider=self.provider.value, response_excerpt=str(parsed))
         return "\n".join(chunks)
 

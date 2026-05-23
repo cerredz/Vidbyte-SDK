@@ -168,6 +168,8 @@ class OpenAIProvider:
                 self._collect_output_text(chunks, item)
         if chunks:
             return "\n".join(chunks)
+        if self._has_tool_calls(parsed):
+            return ""
         raise ProviderResponseError("OpenAI response did not include output text.", provider=self.provider.value, response_excerpt=str(parsed))
 
     def _collect_output_text(self, chunks: list[str], item: object) -> None:
@@ -180,6 +182,19 @@ class OpenAIProvider:
         for content_item in content:
             if isinstance(content_item, dict) and isinstance(content_item.get("text"), str):
                 chunks.append(content_item["text"])
+
+    def _has_tool_calls(self, parsed: Mapping[str, Any]) -> bool:
+        output = parsed.get("output")
+        if isinstance(output, list) and any(isinstance(item, dict) and item.get("type") in {"function_call", "tool_call"} for item in output):
+            return True
+        choices = parsed.get("choices")
+        if not isinstance(choices, list):
+            return False
+        for choice in choices:
+            message = choice.get("message") if isinstance(choice, dict) else None
+            if isinstance(message, dict) and isinstance(message.get("tool_calls"), list):
+                return True
+        return False
 
     def _extract_images(self, parsed: Mapping[str, Any]) -> tuple[GeneratedImage, ...]:
         # Normalize OpenAI image data entries into SDK image objects.

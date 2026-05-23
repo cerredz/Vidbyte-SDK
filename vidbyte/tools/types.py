@@ -16,6 +16,8 @@ from __future__ import annotations
 
 from vidbyte.lib.dataclasses.tools import (
     ToolCall,
+    ToolCallContext,
+    ToolCallState,
     ToolParameter,
     ToolPermission,
     ToolResult,
@@ -25,6 +27,8 @@ from vidbyte.lib.dataclasses.tools import (
 
 __all__ = [
     "ToolCall",
+    "ToolCallContext",
+    "ToolCallState",
     "ToolParameter",
     "ToolPermission",
     "ToolResult",
