@@ -20,6 +20,7 @@ Relations:
 from __future__ import annotations
 
 from vidbyte.tools.adapters import ToolInput, ensure_tool, ensure_tools
+from vidbyte.tools.agent_tool import AgentTool
 from vidbyte.tools.base import BaseTool, ToolLike
 from vidbyte.tools.catalog import Tools
 from vidbyte.tools.client import ToolsClient
@@ -27,6 +28,7 @@ from vidbyte.tools.decorators import tool, vidbyte_tool
 from vidbyte.tools.executor import ToolExecutor
 from vidbyte.tools.function_tool import FunctionTool
 from vidbyte.lib.tools import ToolsFormatter
+from vidbyte.tools.strategy_tool import StrategyTool
 from vidbyte.tools.mixins import ToolMixin
 from vidbyte.tools.registry import ToolRegistry
 from vidbyte.tools.types import (
@@ -41,6 +43,7 @@ from vidbyte.tools.types import (
 )
 
 __all__ = [
+    "AgentTool",
     "BaseTool",
     "FunctionTool",
     "ToolCall",
@@ -56,6 +59,7 @@ __all__ = [
     "ToolResult",
     "ToolSpec",
     "ToolStatus",
+    "StrategyTool",
     "ToolsClient",
     "ToolsFormatter",
     "Tools",
