@@ -115,6 +115,15 @@ class AgentMessage:
 
 
 @dataclass(frozen=True, slots=True)
+class AgentMetadata:
+    """Metadata for exposing an agent as a tool."""
+
+    name: str = ""
+    description: str = ""
+    use_cases: str = ""
+
+
+@dataclass(frozen=True, slots=True)
 class AgentSpec:
     """Construction-friendly agent description."""
 
