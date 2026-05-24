@@ -133,6 +133,47 @@ context = StrategyContext(
 context.build_context()
 ```
 
+## Context Management
+
+Use `ContextManager` and context items when you want reusable, structured context
+instead of assembling raw prompt strings yourself. This first layer standardizes
+how common context units are stored and passed through agents; richer renderers
+and compaction policies are intentionally deferred.
+
+```python
+from vidbyte import Agent, ContextManager, FileContextItem, TaskContextItem
+
+context = ContextManager([
+    TaskContextItem(
+        goal="Fix failing tests",
+        progress="Reviewed the runtime context builder.",
+        deterministic_checks=("python -m unittest discover -s tests",),
+    ),
+    FileContextItem.from_path("README.md", include_content=True),
+])
+
+agent = Agent(
+    name="repo-analyst",
+    system_prompt="Use the supplied context before answering.",
+    runner=my_runner,
+    context_manager=context,
+)
+```
+
+Per-call context can be supplied with `AgentInput` without mutating the agent's
+default context:
+
+```python
+from vidbyte import AgentInput, TextContextItem
+
+reply = await agent.arun(
+    AgentInput(
+        "Review the current task.",
+        context_items=(TextContextItem(title="Reviewer note", content="Focus on public API compatibility."),),
+    )
+)
+```
+
 ### Tools
 
 The SDK tool path is agent-local: create or import tools, pass them into an agent, and let the agent describe, format, and execute them when the model asks for a tool call.

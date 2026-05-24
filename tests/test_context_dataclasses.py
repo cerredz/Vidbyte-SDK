@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from vidbyte.context import ContextBudget, ContextPermissions, ContextResponse, ContextToolCall, StrategyContext
+from vidbyte.context import ContextBudget, ContextPermissions, ContextResponse, ContextToolCall, StrategyContext, TaskContextItem
 from vidbyte.lib.dataclasses import AgentCard, CandidateResult, ToolSpec
 from vidbyte.lib.enums import BudgetPreset, PermissionPreset
 from vidbyte.prompts import Prompts
@@ -43,6 +43,14 @@ class ContextDataclassTests(unittest.TestCase):
         self.assertIn("Responses:", built)
         self.assertIn("Memory summary", built)
         self.assertIn("Run metadata", built)
+
+    def test_context_items_are_included_in_compatibility_context_build(self) -> None:
+        context = StrategyContext(context_items=[TaskContextItem(goal="document the public API")])
+
+        built = context.build_context()
+
+        self.assertIn("Context items:", built)
+        self.assertIn("document the public API", built)
 
     def test_prompt_catalog_contains_vmao_prompts(self) -> None:
         prompts = Prompts().family("vmao")

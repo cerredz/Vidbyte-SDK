@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import unittest
 
-from vidbyte.agents import BaseAgent
+from vidbyte.agents import AgentInput, BaseAgent
 from vidbyte.agents.base import ConfiguredAgentRunner
+from vidbyte.context import ContextManager, TaskContextItem, TextContextItem
 from vidbyte.lib.config import ModelProvider
 from vidbyte.middleware import AgentMiddleware
 from vidbyte.lib.errors import AgentExecutionError, ConfigurationError
@@ -141,6 +142,59 @@ class AgentBaseTests(unittest.IsolatedAsyncioTestCase):
     async def test_agent_rejects_empty_strategies(self) -> None:
         with self.assertRaises(ConfigurationError):
             BaseAgent(name="worker", system_prompt="Work.", strategies=[])
+
+    async def test_agent_default_context_items_reach_strategy_context(self) -> None:
+        strategy = EchoStrategy()
+        task = TaskContextItem(goal="Fix failing tests")
+        agent = BaseAgent(
+            name="worker",
+            system_prompt="Work carefully.",
+            strategy=strategy,
+            runner=object(),
+            context_items=[task],
+        )
+
+        await agent.generate_reply("task")
+
+        self.assertIsNotNone(strategy.last_context)
+        self.assertEqual(strategy.last_context.context_items, (task,))
+        self.assertTrue(any(artifact.artifact_type == "task" for artifact in strategy.last_context.artifacts))
+
+    async def test_agent_input_context_items_are_per_call_only(self) -> None:
+        strategy = EchoStrategy()
+        default_item = TaskContextItem(goal="Default")
+        call_item = TextContextItem(title="Call", content="call body")
+        agent = BaseAgent(
+            name="worker",
+            system_prompt="Work carefully.",
+            strategy=strategy,
+            runner=object(),
+            context_items=[default_item],
+        )
+
+        await agent.generate_reply(AgentInput("task", context_items=(call_item,)))
+
+        self.assertIsNotNone(strategy.last_context)
+        self.assertEqual(strategy.last_context.context_items, (default_item, call_item))
+        self.assertEqual(agent.context_items, (default_item,))
+
+    async def test_agent_context_managers_merge_without_mutating_defaults(self) -> None:
+        strategy = EchoStrategy()
+        default_manager = ContextManager([TaskContextItem(goal="Default")])
+        call_manager = ContextManager([TextContextItem(title="Call", content="body")])
+        agent = BaseAgent(
+            name="worker",
+            system_prompt="Work carefully.",
+            strategy=strategy,
+            runner=object(),
+            context_manager=default_manager,
+        )
+
+        await agent.generate_reply(AgentInput("task", context_manager=call_manager))
+
+        self.assertIsNotNone(strategy.last_context)
+        self.assertEqual(len(strategy.last_context.context_items), 2)
+        self.assertEqual(len(default_manager.items()), 1)
 
     async def test_runner_config_tool_helpers_and_fork(self) -> None:
         strategy = EchoStrategy()
