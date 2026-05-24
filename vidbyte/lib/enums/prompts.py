@@ -21,6 +21,7 @@ class Prompt(str, Enum):
     MULTI_AGENT_REFLEXION_FINAL_PROMPT = "multi_agent_reflexion.final_prompt"
     PARADIGM_ROUTER_ROUTE_PROMPT = "paradigm_router.route_prompt"
     PLAN_AND_EXECUTE_PLAN_PROMPT = "plan_and_execute.plan_prompt"
+    PROMPT_ENGINEERING_MASTER_PROMPT = "prompt_engineering.master_prompt"
     PLAN_AND_EXECUTE_EXECUTE_PROMPT = "plan_and_execute.execute_prompt"
     PLAN_AND_EXECUTE_FINAL_PROMPT = "plan_and_execute.final_prompt"
     SELF_CONSISTENCY_SAMPLE_PROMPT = "self_consistency.sample_prompt"

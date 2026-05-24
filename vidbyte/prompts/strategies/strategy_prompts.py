@@ -67,3 +67,7 @@ class AgenticRagPrompts(_PromptBundle):
 class ExpertPromptingPrompts(_PromptBundle):
     key = "expert_prompting"
 
+
+class PromptEngineeringPrompts(_PromptBundle):
+    key = "prompt_engineering"
+
