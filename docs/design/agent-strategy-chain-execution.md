@@ -457,6 +457,7 @@ Complete list of every file that will be created, modified, or deleted:
 | MODIFY | `tests/test_agent_base.py` | Cover constructor validation, strategy context without `isDone`, and no-strategy loop preservation |
 | MODIFY | `tests/test_agent_tool_loop.py` | Update strategy path expectations for user tools only |
 | MODIFY | `tests/test_agent_runtime.py` | Cover new `agentic_loop=False` context behavior while preserving default loop behavior |
+| MODIFY | `tests/test_vmao.py` | Update VMAO verifier strategy context expectation to exclude internal `isDone` |
 | MODIFY | `README.md` | Document strategy-backed no-loop execution and output-only chains |
 
 No files will be deleted.
@@ -477,6 +478,7 @@ No files will be deleted.
 - `tests/test_agent_base.py` -> preserve existing `test_agent_without_strategy_calls_runner_once`
 - `tests/test_agent_runtime.py` -> `test_runtime_builds_non_agentic_context_without_internal_tools`
 - `tests/test_agent_tool_loop.py` -> update `test_strategy_path_still_receives_tools` to verify only user tools are visible.
+- `tests/test_vmao.py` -> update verifier strategy context assertion to expect no internal `isDone` tool.
 - `tests/test_reasoning_strategies.py` or new agent test -> verify a sync concrete strategy can run through `await Agent(..., strategy=ChainOfThoughtStrategy()).arun(...)`.
 
 ### Integration Tests
