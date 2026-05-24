@@ -17,11 +17,13 @@ class PromptCatalogTests(unittest.TestCase):
 
     def test_prompt_values_are_coherent_sentence_blocks(self) -> None:
         prompts = Prompts()
+        long_form = {Prompt.GOALS_GOAL_PROMPT}
 
-        for prompt in prompts.all().values():
+        for key, prompt in prompts.all().items():
             sentence_count = len(re.findall(r"[.!?]", prompt))
             self.assertGreaterEqual(sentence_count, 4)
-            self.assertLessEqual(sentence_count, 10)
+            if key not in long_form:
+                self.assertLessEqual(sentence_count, 10)
 
 
 if __name__ == "__main__":

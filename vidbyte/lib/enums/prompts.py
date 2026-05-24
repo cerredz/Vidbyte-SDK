@@ -16,6 +16,7 @@ class Prompt(str, Enum):
     CHAIN_OF_THOUGHT_REASON_PROMPT = "chain_of_thought.reason_prompt"
     CONTEXT_ENGINEERING_GUIDELINE_PROMPT = "context_engineering.guideline_prompt"
     EXPERT_PROMPTING_EXPERT_PROMPT = "expert_prompting.expert_prompt"
+    GOALS_GOAL_PROMPT = "goals.goal_prompt"
     MULTI_AGENT_REFLEXION_DRAFT_PROMPT = "multi_agent_reflexion.draft_prompt"
     MULTI_AGENT_REFLEXION_CRITIC_PROMPT = "multi_agent_reflexion.critic_prompt"
     MULTI_AGENT_REFLEXION_FINAL_PROMPT = "multi_agent_reflexion.final_prompt"
