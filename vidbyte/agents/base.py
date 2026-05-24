@@ -28,6 +28,7 @@ from vidbyte.lib.enums import ModelModality, ModelProvider
 from vidbyte.lib.errors import AgentExecutionError, ConfigurationError
 from vidbyte.middleware import AgentMiddleware
 from vidbyte.strategies.base import BaseStrategy
+from vidbyte.strategies.chain import StrategyChain
 from vidbyte.strategies.types import BaseAgentContext, StrategyContext, StrategyResult
 from vidbyte.tools.catalog import Tools
 from vidbyte.tools.security import PermissionPolicy
@@ -50,6 +51,7 @@ class BaseAgent(McpAttachableMixin):
         name: str,
         system_prompt: str,
         strategy: BaseStrategy | None = None,
+        strategies: Sequence[BaseStrategy] | None = None,
         runner: object | None = None,
         runners: Mapping[ModelModality | str, object] | None = None,
         tools: Sequence[object] | Tools = (),
@@ -86,7 +88,7 @@ class BaseAgent(McpAttachableMixin):
             options=dict(runner_options or {}),
         )
         self.name = name
-        self.strategy = strategy
+        self.strategy = self._normalize_strategy(strategy, strategies)
         self.runner = runner if runner is not None else self._create_runner()
         self.runners = {
             ModalityDetector.coerce(runner_modality): runner_item
@@ -128,9 +130,17 @@ class BaseAgent(McpAttachableMixin):
         name: str,
         system_prompt: str,
         strategy: BaseStrategy | None = None,
+        strategies: Sequence[BaseStrategy] | None = None,
         **kwargs: Any,
     ) -> BaseAgent:
-        return cls(name=name, system_prompt=system_prompt, strategy=strategy, run_id=run_id, **kwargs)
+        return cls(
+            name=name,
+            system_prompt=system_prompt,
+            strategy=strategy,
+            strategies=strategies,
+            run_id=run_id,
+            **kwargs,
+        )
 
     def card(self) -> AgentCard:
         return AgentCard(
@@ -191,6 +201,7 @@ class BaseAgent(McpAttachableMixin):
         *,
         name: str | None = None,
         strategy: BaseStrategy | None = None,
+        strategies: Sequence[BaseStrategy] | None = None,
         runner: object | None = None,
         runners: Mapping[ModelModality | str, object] | None = None,
         tools: Sequence[object] | Tools | None = None,
@@ -202,7 +213,8 @@ class BaseAgent(McpAttachableMixin):
     ) -> BaseAgent:
         child = BaseAgent(
             name=name or self.name,
-            strategy=strategy or self.strategy,
+            strategy=self.strategy if strategy is None and strategies is None else strategy,
+            strategies=strategies,
             runner=runner if runner is not None else self.runner,
             runners=runners if runners is not None else self.runners,
             tools=self._agent_tool_items if tools is None else tools,
@@ -262,6 +274,7 @@ class BaseAgent(McpAttachableMixin):
                 history=history,
                 input_metadata=input_metadata,
                 modality=selected_modality,
+                agentic_loop=self.strategy is None,
             )
             if self.strategy is None:
                 result = await self._run_without_strategy(
@@ -321,6 +334,7 @@ class BaseAgent(McpAttachableMixin):
         history: Sequence[AgentMessage],
         input_metadata: Mapping[str, Any] | None = None,
         modality: ModelModality | None = None,
+        agentic_loop: bool = True,
     ) -> BaseAgentContext:
         return self._runtime().build_context(
             message,
@@ -331,7 +345,24 @@ class BaseAgent(McpAttachableMixin):
             existing_tool_calls=self._tool_call_contexts,
             input_metadata=input_metadata,
             modality=modality,
+            agentic_loop=agentic_loop,
         )
+
+    @staticmethod
+    def _normalize_strategy(
+        strategy: BaseStrategy | None,
+        strategies: Sequence[BaseStrategy] | None,
+    ) -> BaseStrategy | None:
+        if strategy is not None and strategies is not None:
+            raise ConfigurationError("Pass either strategy or strategies, not both.")
+        if strategies is None:
+            return strategy
+        normalized = tuple(strategies)
+        if not normalized:
+            raise ConfigurationError("Agent strategies cannot be empty.")
+        if len(normalized) == 1:
+            return normalized[0]
+        return StrategyChain(normalized)
 
     def _create_runner(self) -> object | None:
         if any(

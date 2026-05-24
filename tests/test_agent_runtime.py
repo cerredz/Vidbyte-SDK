@@ -82,6 +82,31 @@ class AgentRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(context.tool_calls, ())
         self.assertEqual(tuple(tool.name for tool in context.tools), ("isDone",))
 
+    def test_runtime_builds_non_agentic_context_without_internal_tools(self) -> None:
+        @tool
+        def lookup() -> str:
+            return "ok"
+
+        runtime = AgentRuntime(
+            agent_name="worker",
+            system_prompt="Agent system.",
+            tools=Tools([lookup]),
+            permission_policy=PermissionPolicy(),
+        )
+        context = runtime.build_context(
+            "task",
+            base_context=None,
+            history=(),
+            agent_history=(),
+            agent_metadata={},
+            existing_tool_calls=(),
+            agentic_loop=False,
+        )
+
+        self.assertEqual(context.system_prompt, "Agent system.")
+        self.assertNotIn("agentic loop", context.system_prompt)
+        self.assertEqual(tuple(tool.name for tool in context.tools), ("lookup",))
+
     async def test_runtime_executes_tool_call_and_continues_to_final_response(self) -> None:
         @tool
         def lookup(topic: str) -> str:

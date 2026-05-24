@@ -49,6 +49,7 @@ class AgentRuntime:
     ) -> None:
         self.agent_name = agent_name
         self.system_prompt = system_prompt
+        self.user_tools = tools
         self.tools = with_internal_agent_tools(tools)
         self.permission_policy = permission_policy
         self.config = config or AgentRuntimeConfig()
@@ -66,15 +67,16 @@ class AgentRuntime:
         existing_tool_calls: Sequence[ToolCallContext],
         input_metadata: Mapping[str, Any] | None = None,
         modality: ModelModality | None = None,
+        agentic_loop: bool = True,
     ) -> BaseAgentContext:
         """Build the minimal context window passed into direct runners and strategies."""
         del message, agent_metadata, existing_tool_calls, input_metadata, modality
         system_prompt = base_context.system_prompt if base_context and base_context.system_prompt else self.system_prompt
         return BaseAgentContext(
-            system_prompt=append_agentic_loop_prompt(system_prompt),
+            system_prompt=append_agentic_loop_prompt(system_prompt) if agentic_loop else system_prompt,
             history=tuple(history) + tuple(agent_history),
             file_paths=tuple(base_context.file_paths) if base_context else (),
-            tools=self.tools.specs(),
+            tools=(self.tools if agentic_loop else self.user_tools).specs(),
             budget=base_context.budget if base_context else None,
         )
 

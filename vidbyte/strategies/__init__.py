@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from vidbyte.strategies.agent_loops import PlanAndExecuteStrategy, SelfRefinementStrategy
 from vidbyte.strategies.base import BaseStrategy, BaseStrategyUtils
+from vidbyte.strategies.chain import StrategyChain
 from vidbyte.strategies.client import StrategyClient
 from vidbyte.strategies.mixins import StrategyMixin
 from vidbyte.strategies.react import ReActStrategy
@@ -41,6 +42,7 @@ __all__ = [
     "SelfRefinementStrategy",
     "SkeletonOfThoughtStrategy",
     "StrategyClient",
+    "StrategyChain",
     "StrategyContext",
     "StrategyMixin",
     "StrategyResult",
