@@ -64,6 +64,7 @@ from vidbyte.middleware import (
 from vidbyte.pipelines import (
     BasePipeline,
     ConditionalPipeline,
+    MapReducePipeline,
     ParallelPipeline,
     PipelineNode,
     SequentialPipeline,
@@ -155,6 +156,7 @@ __all__ = [
     "ModelRetryMiddleware",
     "MultiAgentConsensusStrategy",
     "ConditionalPipeline",
+    "MapReducePipeline",
     "ModelModality",
     "ParallelPipeline",
     "PermissionPreset",
