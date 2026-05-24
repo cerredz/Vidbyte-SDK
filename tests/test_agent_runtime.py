@@ -4,6 +4,7 @@ import unittest
 
 from vidbyte.agents.runtime import AgentRuntime
 from vidbyte.agents.types import AgentMessage
+from vidbyte.context import ContextArtifact, ContextPermissions, ContextResponse, ContextToolCall, TaskContextItem
 from vidbyte.lib.dataclasses.agents import AgentRuntimeConfig
 from vidbyte.lib.enums import ModelModality
 from vidbyte.strategies import StrategyContext
@@ -65,6 +66,12 @@ class AgentRuntimeTests(unittest.IsolatedAsyncioTestCase):
             base_context=StrategyContext(
                 metadata={"caller": "yes"},
                 strategy_metadata={"phase": "draft"},
+                tool_calls=[ContextToolCall(name="base_tool", output="base")],
+                responses=[ContextResponse(content="response body")],
+                artifacts=[ContextArtifact(name="artifact", content="artifact body")],
+                memory="prior summary",
+                permissions=ContextPermissions(can_read_files=True),
+                context_items=[TaskContextItem(goal="preserve context")],
             ),
             history=[AgentMessage(sender="user", recipient="worker", content="external")],
             agent_history=[AgentMessage(sender="worker", recipient="user", content="prior")],
@@ -77,9 +84,17 @@ class AgentRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Agent system.", context.system_prompt)
         self.assertIn("agentic loop", context.system_prompt)
         self.assertEqual([message.content for message in context.history], ["external", "prior"])
-        self.assertEqual(context.metadata, {})
-        self.assertEqual(context.strategy_metadata, {})
-        self.assertEqual(context.tool_calls, ())
+        self.assertEqual(context.metadata["caller"], "yes")
+        self.assertEqual(context.metadata["agent"], "meta")
+        self.assertEqual(context.metadata["input"], "meta")
+        self.assertEqual(context.metadata["modality"], "text")
+        self.assertEqual(context.strategy_metadata, {"phase": "draft"})
+        self.assertEqual(tuple(call.name for call in context.tool_calls), ("base_tool", "lookup"))
+        self.assertEqual(context.responses[0].content, "response body")
+        self.assertEqual(context.artifacts[0].content, "artifact body")
+        self.assertEqual(context.memory, "prior summary")
+        self.assertTrue(context.permissions.can_read_files)
+        self.assertEqual(context.context_items[0].goal, "preserve context")
         self.assertEqual(tuple(tool.name for tool in context.tools), ("isDone",))
 
     async def test_runtime_executes_tool_call_and_continues_to_final_response(self) -> None:

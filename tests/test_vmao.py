@@ -66,7 +66,7 @@ class VmaoTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("answer-a", result.output)
         self.assertIn("answer-b", result.output)
         self.assertEqual(result.metadata["rounds"], 1)
-        self.assertEqual(verifier.strategy.last_context.strategy_metadata, {})
+        self.assertEqual(verifier.strategy.last_context.strategy_metadata, {"vmao_round": 1})
         self.assertEqual(tuple(tool.name for tool in verifier.strategy.last_context.tools), ("isDone",))
 
     async def test_rejects_cycle(self) -> None:

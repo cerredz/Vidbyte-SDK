@@ -18,7 +18,9 @@ from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
 from vidbyte.agents.types import AgentMessage
+from vidbyte.context.manager import ContextManager
 from vidbyte.lib.dataclasses.agents import AgentRuntimeConfig, AgentStopReason
+from vidbyte.lib.dataclasses.context_items import ContextItem
 from vidbyte.lib.dataclasses.middleware import MiddlewareAction, MiddlewareContext, MiddlewareDecision, MiddlewareHook
 from vidbyte.lib.enums import ModelModality
 from vidbyte.lib.errors import PermissionDeniedError, ToolExecutionError, ToolRegistryError
@@ -66,16 +68,38 @@ class AgentRuntime:
         existing_tool_calls: Sequence[ToolCallContext],
         input_metadata: Mapping[str, Any] | None = None,
         modality: ModelModality | None = None,
+        context_items: Sequence[ContextItem] = (),
+        context_manager: ContextManager | None = None,
     ) -> BaseAgentContext:
         """Build the minimal context window passed into direct runners and strategies."""
-        del message, agent_metadata, existing_tool_calls, input_metadata, modality
+        del message
         system_prompt = base_context.system_prompt if base_context and base_context.system_prompt else self.system_prompt
+        manager = ContextManager()
+        if context_manager is not None:
+            manager.extend(context_manager.items())
+        manager.extend(context_items)
+        managed_context = manager.to_context(base_context)
+        metadata = {
+            **(dict(base_context.metadata) if base_context else {}),
+            **dict(agent_metadata),
+            **dict(input_metadata or {}),
+        }
+        if modality is not None:
+            metadata["modality"] = modality.value
         return BaseAgentContext(
             system_prompt=append_agentic_loop_prompt(system_prompt),
             history=tuple(history) + tuple(agent_history),
-            file_paths=tuple(base_context.file_paths) if base_context else (),
+            file_paths=tuple(managed_context.file_paths),
             tools=self.tools.specs(),
-            budget=base_context.budget if base_context else None,
+            strategy_metadata=dict(managed_context.strategy_metadata),
+            tool_calls=(*tuple(managed_context.tool_calls), *tuple(existing_tool_calls)),
+            responses=tuple(managed_context.responses),
+            budget=managed_context.budget,
+            artifacts=tuple(managed_context.artifacts),
+            memory=managed_context.memory,
+            permissions=managed_context.permissions,
+            metadata=metadata,
+            context_items=tuple(managed_context.context_items),
         )
 
     async def arun(

@@ -46,7 +46,7 @@ vidbyte/
 |-- __init__.py          Root public exports.
 |-- client.py            VidbyteSDK namespace client.
 |-- agents/              Agent actors, registry, modality-facing input types, MCP attach mixin.
-|-- context/             Public context re-exports from central dataclasses.
+|-- context/             Public context manager and re-exports from central dataclasses.
 |-- harnesses/           Minimal namespace for future/custom harness integrations.
 |-- prompts/             JSON-backed prompt catalog and strategy prompt bundles.
 |-- providers/           Provider adapters and provider selection helpers.
@@ -64,7 +64,7 @@ Keep central contracts under `vidbyte/lib/` when they are shared by multiple pac
 
 - Root client: `VidbyteSDK`.
 - Agents: `Agent`, `BaseAgent`, `AgentClient`, `AgentInput`, `AgentCard`, `AgentMessage`, `AgentRegistry`, `AgentRunnerConfig`, `AgentSpec`.
-- Contexts: `BaseContext`, `BaseAgentContext`, `ContextBudget`, `ContextPermissions`, `StrategyContext`.
+- Contexts: `BaseContext`, `BaseAgentContext`, `ContextBudget`, `ContextPermissions`, `ContextManager`, `ContextItem`, `TextContextItem`, `FileContextItem`, `GitDiffContextItem`, `TaskContextItem`, `DocumentContextItem`, `EnvironmentContextItem`, `MemoryContextItem`, `ProgressContextItem`, `ArtifactContextItem`, `ResponseContextItem`, `ToolCallContextItem`, `StrategyContext`.
 - Enums: `BudgetPreset`, `PermissionPreset`, `Prompt`, `ModelModality`.
 - Prompts: `Prompts`.
 - Strategies: `BaseStrategy`, `BaseStrategyUtils`, `StrategyResult`, `ChainOfThoughtStrategy`, `ChainOfDraftStrategy`, `StepBackStrategy`, `SkeletonOfThoughtStrategy`, `SelfConsistencyStrategy`, `PlanAndExecuteStrategy`, `SelfRefinementStrategy`, `TreeOfThoughtsStrategy`, `ReActStrategy`, `ReflexionStrategy`, `MultiAgentConsensusStrategy`.
@@ -102,7 +102,7 @@ Primary concepts:
 
 - `Agent = BaseAgent` is the ergonomic alias.
 - `BaseAgent` is the executable actor. It owns name, system prompt, strategy, runner settings, explicit runners by modality, tools, permission policy, MCP attachment state, history, metadata, and capabilities.
-- `AgentInput` is a typed input wrapper with `prompt`, `modality`, and `metadata`.
+- `AgentInput` is a typed input wrapper with `prompt`, `modality`, `metadata`, optional `context_items`, and optional `context_manager`.
 - `AgentMessage` is the in-process message payload passed between agents.
 - `AgentCard` exposes local capability metadata: description, system prompt, capabilities, tool names, MCP server/tool names, modalities, and metadata.
 - `AgentSpec` is a construction-friendly description block.
@@ -504,6 +504,7 @@ When adding prompts:
 Primary files:
 
 - `vidbyte/context/__init__.py`
+- `vidbyte/context/manager.py`
 - `vidbyte/lib/dataclasses/`
 - `vidbyte/strategies/types.py`
 - `vidbyte/tools/types.py`
@@ -525,10 +526,20 @@ Context dataclasses:
 - `ContextState`: mutable conversation-state protocol.
 - `ContextResponse`: model or agent response record.
 - `ContextArtifact`: text/file artifact record.
-- `BaseContext`: baseline context with `build_context()` and optional file content rendering.
+- `ContextItem`: structural protocol for standardized context items.
+- `ContextManager`: ordered collection and compatibility bridge for context items.
+- `BaseContext`: baseline context with `build_context()`, context items, and optional file content rendering.
 - `StrategyContext`: per-run strategy context.
 - `BaseAgentContext`: context built by agents.
 - `VMAOContext`: VMAO-specific context with round and notes fields.
+- Standard context item dataclasses: `TextContextItem`, `FileContextItem`, `GitDiffContextItem`, `TaskContextItem`, `DocumentContextItem`, `EnvironmentContextItem`, `MemoryContextItem`, `ProgressContextItem`, `ArtifactContextItem`, `ResponseContextItem`, and `ToolCallContextItem`.
+
+Context management rules:
+
+- Context items store structured meaning; the current compatibility path renders through existing `BaseContext.build_context()`.
+- `ContextManager` owns item collection, ordered utilities, and conversion into existing context dataclass fields.
+- Agents may receive default `context_items`/`context_manager`; per-call context belongs on `AgentInput`.
+- Rich renderers, ranking, redaction, summarization, and compaction policies are not part of the foundation layer and require a separate approved design.
 
 Budget and permission presets:
 
@@ -538,7 +549,7 @@ Budget and permission presets:
 
 Other dataclass groups:
 
-- Agents: `AgentRunnerConfig`, `AgentInput`, `AgentCard`, `AgentMessage`, `AgentSpec`.
+- Agents: `AgentRunnerConfig`, `AgentInput`, `AgentCard`, `AgentMessage`, `AgentSpec`; `AgentInput` and `AgentSpec` can carry context items/managers.
 - Tools: `ToolParameter`, `ToolSpec`, `ToolCall`, `ToolResult`, `ToolCallContext`.
 - Multi-agent: `CandidateResult`, `CandidateFailure`, `EvaluationDecision`, `DagNode`, `Verification`, `NodeState`.
 - Model configs: `TextModelConfig`, `ImageModelConfig`, `VideoModelConfig`.
@@ -609,6 +620,7 @@ Use tests as executable examples for expected behavior:
 - `test_config_validation.py`: config validation and API key resolution.
 - `test_context_compaction_tools.py`: context compaction behavior.
 - `test_context_dataclasses.py`: context and preset dataclasses.
+- `test_context_management.py`: context item dataclasses, `ContextManager`, compatibility bridging, and public imports.
 - `test_custom_function_tools.py`: function decorators, validation, sync/async execution.
 - `test_economic_gate.py`: economic gate strategy.
 - `test_evolving_orchestration.py`: evolving orchestration.

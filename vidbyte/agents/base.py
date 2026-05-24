@@ -22,8 +22,10 @@ from typing import Any
 from vidbyte.agents.mixins import McpAttachableMixin
 from vidbyte.agents.runtime import AgentRuntime
 from vidbyte.agents.types import AgentCard, AgentInput, AgentMessage
+from vidbyte.context.manager import ContextManager
 from vidbyte.lib.agents import ModalityDetector
 from vidbyte.lib.dataclasses.agents import AgentMetadata, AgentRunnerConfig, AgentRuntimeConfig
+from vidbyte.lib.dataclasses.context_items import ContextItem
 from vidbyte.lib.enums import ModelModality, ModelProvider
 from vidbyte.lib.errors import AgentExecutionError, ConfigurationError
 from vidbyte.middleware import AgentMiddleware
@@ -70,6 +72,8 @@ class BaseAgent(McpAttachableMixin):
         description: str = "",
         capabilities: Sequence[str] = (),
         agent_metadata: AgentMetadata | None = None,
+        context_items: Sequence[ContextItem] = (),
+        context_manager: ContextManager | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> None:
         if not name:
@@ -109,6 +113,8 @@ class BaseAgent(McpAttachableMixin):
         self.description = description or "General purpose agent."
         self.capabilities = tuple(capabilities)
         self.agent_metadata = agent_metadata or AgentMetadata()
+        self.context_items = tuple(context_items)
+        self.context_manager = context_manager
         self.metadata = dict(metadata or {})
         self.history: list[AgentMessage] = []
         self._tool_call_contexts: list[ToolCallContext] = []
@@ -198,6 +204,8 @@ class BaseAgent(McpAttachableMixin):
         modality: ModelModality | str | None = None,
         metadata: dict[str, Any] | None = None,
         middleware: Sequence[AgentMiddleware] | None = None,
+        context_items: Sequence[ContextItem] | None = None,
+        context_manager: ContextManager | None = None,
         include_history: bool = False,
     ) -> BaseAgent:
         child = BaseAgent(
@@ -223,6 +231,8 @@ class BaseAgent(McpAttachableMixin):
             description=self.description,
             capabilities=self.capabilities,
             agent_metadata=self.agent_metadata,
+            context_items=self.context_items if context_items is None else context_items,
+            context_manager=self.context_manager if context_manager is None else context_manager,
             metadata={**self.metadata, **dict(metadata or {})},
         )
         if include_history:
@@ -245,6 +255,7 @@ class BaseAgent(McpAttachableMixin):
         await self._ensure_mcp_connected()
         try:
             prompt, input_modality, input_metadata = self._normalize_input(message)
+            input_context_items, input_context_manager = self._normalize_input_context(message)
             self._active_prompt = prompt
             selected_modality = ModalityDetector.resolve(
                 requested=modality,
@@ -262,6 +273,8 @@ class BaseAgent(McpAttachableMixin):
                 history=history,
                 input_metadata=input_metadata,
                 modality=selected_modality,
+                input_context_items=input_context_items,
+                input_context_manager=input_context_manager,
             )
             if self.strategy is None:
                 result = await self._run_without_strategy(
@@ -321,6 +334,8 @@ class BaseAgent(McpAttachableMixin):
         history: Sequence[AgentMessage],
         input_metadata: Mapping[str, Any] | None = None,
         modality: ModelModality | None = None,
+        input_context_items: Sequence[ContextItem] = (),
+        input_context_manager: ContextManager | None = None,
     ) -> BaseAgentContext:
         return self._runtime().build_context(
             message,
@@ -331,6 +346,8 @@ class BaseAgent(McpAttachableMixin):
             existing_tool_calls=self._tool_call_contexts,
             input_metadata=input_metadata,
             modality=modality,
+            context_items=self._merged_context_items(input_context_items),
+            context_manager=self._merged_context_manager(input_context_manager),
         )
 
     def _create_runner(self) -> object | None:
@@ -529,6 +546,27 @@ class BaseAgent(McpAttachableMixin):
         if isinstance(message, AgentInput):
             return message.prompt, message.modality, message.metadata
         return message, None, {}
+
+    def _normalize_input_context(
+        self,
+        message: str | AgentInput,
+    ) -> tuple[tuple[ContextItem, ...], ContextManager | None]:
+        if isinstance(message, AgentInput):
+            return tuple(message.context_items), message.context_manager
+        return (), None
+
+    def _merged_context_items(self, input_context_items: Sequence[ContextItem]) -> tuple[ContextItem, ...]:
+        return (*self.context_items, *tuple(input_context_items))
+
+    def _merged_context_manager(self, input_context_manager: ContextManager | None) -> ContextManager | None:
+        if self.context_manager is None and input_context_manager is None:
+            return None
+        manager = ContextManager()
+        if self.context_manager is not None:
+            manager.extend(self.context_manager.items())
+        if input_context_manager is not None:
+            manager.extend(input_context_manager.items())
+        return manager
 
     def _runner_for_modality(self, modality: ModelModality) -> object | None:
         if modality in self.runners:

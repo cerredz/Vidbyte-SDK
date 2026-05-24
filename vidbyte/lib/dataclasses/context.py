@@ -14,6 +14,7 @@ Architecture:
     - ContextToolCall: Structured record of a tool call.
     - ContextResponse: Structured model/agent response.
     - ContextArtifact: File or text intermediate product for strategies.
+    - ContextItem: Standardized structured context units managed by ContextManager.
     - BaseContext: Baseline context with formatting capabilities.
     - StrategyContext: Pipeline strategy execution context.
     - VMAOContext: Context for verified multi-agent orchestration.
@@ -28,6 +29,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
 
+from vidbyte.lib.dataclasses.context_items import ContextItem
 from vidbyte.lib.enums import BudgetPreset, PermissionPreset
 
 
@@ -178,6 +180,7 @@ class BaseContext:
     memory: str | None = None
     permissions: ContextPermissions | None = None
     metadata: Mapping[str, Any] = field(default_factory=dict)
+    context_items: Sequence[ContextItem] = ()
 
     def build_context(self) -> str:
         parts: list[str] = []
@@ -199,6 +202,8 @@ class BaseContext:
             parts.append("Responses:\n" + "\n\n".join(response.content for response in self.responses))
         if self.tool_calls:
             parts.append("Tool calls:\n" + "\n".join(f"{call.name}: args={dict(call.arguments)} output={call.output}" for call in self.tool_calls))
+        if self.context_items:
+            parts.append("Context items:\n" + "\n\n".join(item.to_context_text() for item in self.context_items))
         file_context = self._build_file_context()
         if file_context:
             parts.append(file_context)
