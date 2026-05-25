@@ -17,11 +17,28 @@ class PromptCatalogTests(unittest.TestCase):
 
     def test_prompt_values_are_coherent_sentence_blocks(self) -> None:
         prompts = Prompts()
+        long_form_prompts = {
+            Prompt.GOALS_GOAL_PROMPT,
+            Prompt.MIMIC_BEHAVIOR_MIMIC_PROMPT,
+            Prompt.PROMPT_ENGINEERING_MASTER_PROMPT,
+        }
 
-        for prompt in prompts.all().values():
+        for key, prompt in prompts.all().items():
             sentence_count = len(re.findall(r"[.!?]", prompt))
             self.assertGreaterEqual(sentence_count, 4)
-            self.assertLessEqual(sentence_count, 300)
+            if key not in long_form_prompts:
+                self.assertLessEqual(sentence_count, 10)
+
+    def test_markdown_backed_prompts_load_as_text(self) -> None:
+        prompts = Prompts()
+
+        goal_prompt = prompts.get(Prompt.GOALS_GOAL_PROMPT)
+        mimic_prompt = prompts.get(Prompt.MIMIC_BEHAVIOR_MIMIC_PROMPT)
+
+        self.assertIn("You emulate a goal-driven work loop.", goal_prompt)
+        self.assertIn("You create prompts that mimic the observable behavior", mimic_prompt)
+        self.assertIn("goal_prompt", prompts.family("goals"))
+        self.assertIn("mimic_prompt", prompts.family("mimic_behavior"))
 
 
 if __name__ == "__main__":

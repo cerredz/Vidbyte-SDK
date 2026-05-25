@@ -45,7 +45,7 @@ vidbyte/
 - Keep multi-agent orchestration implementations in `vidbyte/strategies/multi_agent/`.
 - Keep agent-to-agent wiring topologies (pipeline compositions) in `vidbyte/pipelines/`. Pipelines move strings between agents; they do not manage context, budget, or artifacts. Follow `skills/vidbyte-sdk/pipelines.md` when adding new pipeline topology types.
 - Keep public context objects in `vidbyte/context/`, but define dataclasses centrally under `vidbyte/lib/dataclasses/`.
-- Keep prompt templates in `vidbyte/prompts/prompts/` and expose them through `vidbyte.prompts.Prompts` plus `vidbyte.lib.enums.prompts.Prompt`.
+- Keep prompt templates in `vidbyte/prompts/prompts/` and expose them through `vidbyte.prompts.Prompts` plus `vidbyte.lib.enums.prompts.Prompt`; follow the JSON-descriptor-plus-Markdown format in `skills/vidbyte-sdk/adding-prompts.md` for new large prompt assets.
 - Follow `skills/vidbyte-sdk/adding-prompts.md` whenever adding or changing prompt assets.
 - Keep enum presets under `vidbyte/lib/enums/`.
 - Keep internal library helpers under `vidbyte/lib/`.

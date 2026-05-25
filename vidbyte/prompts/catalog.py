@@ -87,23 +87,22 @@ class Prompts:
         families: dict[str, dict[str, str]] = {}
         prompt_dir = resources.files("vidbyte.prompts.prompts")
 
-        for asset in sorted(prompt_dir.iterdir(), key=lambda item: item.name):
-            if not asset.name.endswith(".json"):
-                continue
+        for asset in cls._json_assets(prompt_dir):
+            filename = cls._asset_label(asset)
             try:
                 with asset.open("r", encoding="utf-8") as file:
                     raw = json.load(file)
             except json.JSONDecodeError as exc:
-                raise ConfigurationError(f"Prompt file {asset.name} is not valid JSON.") from exc
+                raise ConfigurationError(f"Prompt file {filename} is not valid JSON.") from exc
 
-            record = cls._validate_record(raw, asset.name)
-            family_key = cls._required_text(record, "key", asset.name)
-            family_description = cls._required_text(record, "description", asset.name)
+            record = cls._validate_record(raw, filename)
+            family_key = cls._required_text(record, "key", filename)
+            family_description = cls._required_text(record, "description", filename)
             prompts = record["prompts"]
             families[family_key] = {}
 
-            for prompt_name, prompt_text in prompts.items():
-                text = cls._validate_prompt_text(prompt_text, asset.name)
+            for prompt_name, prompt_value in prompts.items():
+                text = cls._resolve_prompt_text(prompt_value, asset, filename)
                 prompt_id = f"{family_key}.{prompt_name}"
                 try:
                     prompt_key = Prompt(prompt_id)
@@ -126,6 +125,25 @@ class Prompts:
         return records, families
 
     @classmethod
+    def _json_assets(cls, prompt_dir: Any) -> tuple[Any, ...]:
+        assets: list[Any] = []
+        for asset in prompt_dir.iterdir():
+            if asset.is_file() and asset.name.endswith(".json"):
+                assets.append(asset)
+            elif asset.is_dir():
+                assets.extend(
+                    child for child in asset.iterdir() if child.is_file() and child.name.endswith(".json")
+                )
+        return tuple(sorted(assets, key=cls._asset_label))
+
+    @staticmethod
+    def _asset_label(asset: Any) -> str:
+        parent_name = getattr(getattr(asset, "parent", None), "name", "")
+        if parent_name and parent_name != "prompts":
+            return f"{parent_name}/{asset.name}"
+        return asset.name
+
+    @classmethod
     def _validate_record(cls, raw: object, filename: str) -> Mapping[str, Any]:
         if not isinstance(raw, dict):
             raise ConfigurationError(f"Prompt file {filename} must contain a JSON object.")
@@ -143,6 +161,23 @@ class Prompts:
         if not isinstance(value, str) or not value.strip():
             raise ConfigurationError(f"Prompt file {filename} must contain a non-empty {field_name}.")
         return value
+
+    @classmethod
+    def _resolve_prompt_text(cls, value: object, asset: Any, filename: str) -> str:
+        if isinstance(value, str):
+            return cls._validate_prompt_text(value, filename)
+        if not isinstance(value, dict):
+            raise ConfigurationError(f"Prompt file {filename} contains an invalid prompt value.")
+
+        markdown_path = cls._required_text(value, "path", filename)
+        cls._required_text(value, "source_url", filename)
+        if not markdown_path.endswith(".md"):
+            raise ConfigurationError(f"Prompt file {filename} references a non-Markdown prompt asset.")
+        markdown_asset = asset.parent.joinpath(markdown_path)
+        if not markdown_asset.is_file():
+            raise ConfigurationError(f"Prompt file {filename} references missing Markdown asset: {markdown_path}.")
+        with markdown_asset.open("r", encoding="utf-8") as file:
+            return cls._validate_prompt_text(file.read(), markdown_path)
 
     @staticmethod
     def _validate_prompt_text(value: object, filename: str) -> str:

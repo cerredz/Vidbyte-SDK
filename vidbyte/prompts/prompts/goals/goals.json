@@ -1,0 +1,11 @@
+{
+  "name": "Goal Behavior",
+  "description": "A system prompt for emulating Codex-style goal behavior in models that do not have the native Codex /goal tool. It teaches persistent objective tracking, evidence-based completion, iteration policy, blockers, and budget-aware stopping without claiming that the model is running inside Codex.",
+  "key": "goals",
+  "prompts": {
+    "goal_prompt": {
+      "path": "goal_prompt.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/goals/goal_prompt.md"
+    }
+  }
+}
