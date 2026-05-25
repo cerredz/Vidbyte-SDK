@@ -4,6 +4,7 @@ import unittest
 
 from vidbyte.agents.runtime import AgentRuntime
 from vidbyte.agents.types import AgentMessage
+from vidbyte.context import ContextArtifact, ContextPermissions, ContextResponse, ContextToolCall, ContextWindow, TaskContextItem
 from vidbyte.lib.dataclasses.agents import AgentRuntimeConfig
 from vidbyte.lib.enums import ModelModality
 from vidbyte.strategies import StrategyContext
@@ -65,6 +66,12 @@ class AgentRuntimeTests(unittest.IsolatedAsyncioTestCase):
             base_context=StrategyContext(
                 metadata={"caller": "yes"},
                 strategy_metadata={"phase": "draft"},
+                tool_calls=[ContextToolCall(name="base_tool", output="base")],
+                responses=[ContextResponse(content="response body")],
+                artifacts=[ContextArtifact(name="artifact", content="artifact body")],
+                memory="prior summary",
+                permissions=ContextPermissions(can_read_files=True),
+                context_items=[TaskContextItem(goal="preserve context")],
             ),
             history=[AgentMessage(sender="user", recipient="worker", content="external")],
             agent_history=[AgentMessage(sender="worker", recipient="user", content="prior")],
@@ -77,9 +84,17 @@ class AgentRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Agent system.", context.system_prompt)
         self.assertIn("agentic loop", context.system_prompt)
         self.assertEqual([message.content for message in context.history], ["external", "prior"])
-        self.assertEqual(context.metadata, {})
-        self.assertEqual(context.strategy_metadata, {})
-        self.assertEqual(context.tool_calls, ())
+        self.assertEqual(context.metadata["caller"], "yes")
+        self.assertEqual(context.metadata["agent"], "meta")
+        self.assertEqual(context.metadata["input"], "meta")
+        self.assertEqual(context.metadata["modality"], "text")
+        self.assertEqual(context.strategy_metadata, {"phase": "draft"})
+        self.assertEqual(tuple(call.name for call in context.tool_calls), ("base_tool", "lookup"))
+        self.assertEqual(context.responses[0].content, "response body")
+        self.assertEqual(context.artifacts[0].content, "artifact body")
+        self.assertEqual(context.memory, "prior summary")
+        self.assertTrue(context.permissions.can_read_files)
+        self.assertEqual(context.context_items[0].goal, "preserve context")
         self.assertEqual(tuple(tool.name for tool in context.tools), ("isDone",))
 
     def test_runtime_builds_non_agentic_context_without_internal_tools(self) -> None:
@@ -176,6 +191,74 @@ class AgentRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("middleware", result.metadata)
         self.assertIn("tools", runner.calls[0]["kwargs"])
         self.assertIn("messages", runner.calls[1]["kwargs"])
+
+    async def test_runtime_context_algorithm_hides_raw_tool_output_from_messages(self) -> None:
+        @tool
+        def lookup(topic: str) -> str:
+            """Look up a topic."""
+            return f"raw secret result for {topic}"
+
+        runner = FakeRunner(
+            [
+                FakeResponse(
+                    "",
+                    {
+                        "output": [
+                            {
+                                "type": "function_call",
+                                "name": "lookup",
+                                "arguments": '{"topic": "sdk"}',
+                                "call_id": "call_1",
+                            }
+                        ]
+                    },
+                ),
+                FakeResponse(
+                    "",
+                    {
+                        "output": [
+                            {
+                                "type": "function_call",
+                                "name": "isDone",
+                                "arguments": '{"final_answer": "final answer"}',
+                                "call_id": "call_2",
+                            }
+                        ]
+                    },
+                ),
+            ]
+        )
+        runtime = AgentRuntime(
+            agent_name="worker",
+            system_prompt="Work.",
+            tools=Tools([lookup]),
+            permission_policy=PermissionPolicy(),
+            algorithm=ContextWindow.preset.no_raw_tool_outputs,
+        )
+        context = runtime.build_context(
+            "task",
+            base_context=None,
+            history=(),
+            agent_history=(),
+            agent_metadata={},
+            existing_tool_calls=(),
+        )
+
+        result = await runtime.arun(
+            "task",
+            runner=runner,
+            context=context,
+            provider="openai",
+            invoke_runner=invoke_runner,
+            runner_output_text=runner_output_text,
+            runner_output_metadata=runner_output_metadata,
+        )
+
+        visible_tool_message = runner.calls[1]["kwargs"]["messages"][0]
+        self.assertNotIn("raw secret result", visible_tool_message["content"])
+        self.assertIn("Raw tool output was withheld", visible_tool_message["content"])
+        raw_context = result.metadata["tool_calls"][0]
+        self.assertEqual(raw_context.result.output, "raw secret result for sdk")
 
     async def test_runtime_denies_write_tool_by_default(self) -> None:
         write_tool = WriteTool()

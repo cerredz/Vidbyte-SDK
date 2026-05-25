@@ -18,6 +18,10 @@ from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
 from vidbyte.agents.types import AgentMessage
+from vidbyte.context.algorithms import ContextWindowAlgorithm
+from vidbyte.context.manager import ContextManager
+from vidbyte.context.primitives import ContextItem
+from vidbyte.context.window import ContextWindow
 from vidbyte.lib.dataclasses.agents import AgentRuntimeConfig, AgentStopReason
 from vidbyte.lib.dataclasses.middleware import MiddlewareAction, MiddlewareContext, MiddlewareDecision, MiddlewareHook
 from vidbyte.lib.enums import ModelModality
@@ -46,6 +50,7 @@ class AgentRuntime:
         config: AgentRuntimeConfig | None = None,
         middleware: Sequence[AgentMiddleware] = (),
         run_id: str | None = None,
+        algorithm: ContextWindowAlgorithm | str | None = None,
     ) -> None:
         self.agent_name = agent_name
         self.system_prompt = system_prompt
@@ -55,6 +60,7 @@ class AgentRuntime:
         self.config = config or AgentRuntimeConfig()
         self.middleware = MiddlewarePipeline(middleware)
         self.run_id = run_id
+        self.algorithm = ContextWindow.resolve_algorithm(algorithm)
 
     def build_context(
         self,
@@ -68,16 +74,38 @@ class AgentRuntime:
         input_metadata: Mapping[str, Any] | None = None,
         modality: ModelModality | None = None,
         agentic_loop: bool = True,
+        context_items: Sequence[ContextItem] = (),
+        context_manager: ContextManager | None = None,
     ) -> BaseAgentContext:
         """Build the minimal context window passed into direct runners and strategies."""
-        del message, agent_metadata, existing_tool_calls, input_metadata, modality
+        del message
         system_prompt = base_context.system_prompt if base_context and base_context.system_prompt else self.system_prompt
+        manager = ContextManager()
+        if context_manager is not None:
+            manager.extend(context_manager.items())
+        manager.extend(context_items)
+        managed_context = manager.to_context(base_context)
+        metadata = {
+            **(dict(base_context.metadata) if base_context else {}),
+            **dict(agent_metadata),
+            **dict(input_metadata or {}),
+        }
+        if modality is not None:
+            metadata["modality"] = modality.value
         return BaseAgentContext(
             system_prompt=append_agentic_loop_prompt(system_prompt) if agentic_loop else system_prompt,
             history=tuple(history) + tuple(agent_history),
-            file_paths=tuple(base_context.file_paths) if base_context else (),
             tools=(self.tools if agentic_loop else self.user_tools).specs(),
-            budget=base_context.budget if base_context else None,
+            file_paths=tuple(managed_context.file_paths),
+            strategy_metadata=dict(managed_context.strategy_metadata),
+            tool_calls=(*tuple(managed_context.tool_calls), *tuple(existing_tool_calls)),
+            responses=tuple(managed_context.responses),
+            budget=managed_context.budget,
+            artifacts=tuple(managed_context.artifacts),
+            memory=managed_context.memory,
+            permissions=managed_context.permissions,
+            metadata=metadata,
+            context_items=tuple(managed_context.context_items),
         )
 
     async def arun(
@@ -866,7 +894,8 @@ class AgentRuntime:
                 contexts=call_contexts,
             )
         if call.tool_name != IS_DONE_TOOL_NAME:
-            messages.append(dict(ToolsFormatter.format_tool_result(call, result, provider)))
+            visible_result = self.algorithm.model_visible_tool_result(call, result)
+            messages.append(dict(ToolsFormatter.format_tool_result(call, visible_result, provider)))
         return context_record, result
 
     def _budget_stop(

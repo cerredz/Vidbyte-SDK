@@ -17,9 +17,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Mapping
+from typing import TYPE_CHECKING, Any, Mapping
 
 from vidbyte.lib.enums import ModelModality
+
+if TYPE_CHECKING:
+    from vidbyte.context.manager import ContextManager
+    from vidbyte.context.primitives import ContextItem
+    from vidbyte.context.window import ContextWindowAlgorithm
 
 
 class AgentStopReason(str, Enum):
@@ -86,6 +91,8 @@ class AgentInput:
     prompt: str
     modality: ModelModality | str = ModelModality.AUTO
     metadata: Mapping[str, Any] = field(default_factory=dict)
+    context_items: tuple[ContextItem, ...] = ()
+    context_manager: ContextManager | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -132,3 +139,6 @@ class AgentSpec:
     description: str = ""
     capabilities: tuple[str, ...] = ()
     metadata: Mapping[str, Any] = field(default_factory=dict)
+    context_items: tuple[ContextItem, ...] = ()
+    context_manager: ContextManager | None = None
+    algorithm: ContextWindowAlgorithm | str | None = None
