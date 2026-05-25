@@ -48,6 +48,10 @@ class PlanAndExecutePrompts(_PromptBundle):
     key = "plan_and_execute"
 
 
+class PlanThenImplementPrompts(_PromptBundle):
+    key = "plan_then_implement"
+
+
 class ParadigmRouterPrompts(_PromptBundle):
     key = "paradigm_router"
 
@@ -58,6 +62,10 @@ class TreeOfThoughtsPrompts(_PromptBundle):
 
 class MultiAgentReflexionPrompts(_PromptBundle):
     key = "multi_agent_reflexion"
+
+
+class ReflexionPrompts(_PromptBundle):
+    key = "reflexion"
 
 
 class AgenticRagPrompts(_PromptBundle):

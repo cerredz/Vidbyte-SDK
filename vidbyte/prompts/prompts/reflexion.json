@@ -1,0 +1,9 @@
+{
+  "name": "Reflexion",
+  "description": "Reflexion (Noah Shinn et al., NeurIPS 2023) is a verbal reinforcement learning technique where an agent learns from its own mistakes through self-reflection. After each failed attempt, the agent diagnoses what went wrong and devises a new high-level plan to avoid repeating the failure. These accumulated reflections are injected into the agents context on subsequent attempts, creating a feedback loop that improves performance over multiple trials. The algorithm supports four admission strategies: none (baseline, no prior trial data), last_attempt (previous scratchpad only), reflexion (accumulated self-reflections), and last_attempt_and_reflexion (both previous scratchpad and reflections).",
+  "key": "reflexion",
+  "prompts": {
+    "reflect_prompt": "You are an advanced reasoning agent that can improve through self-reflection. You will be given a previous trial where you attempted a task and were unsuccessful. The failure may have occurred because you guessed the wrong answer, used up your available reasoning steps, or produced an output that did not match the expected format. In a few sentences, diagnose a possible reason for the failure and devise a new, concise, high-level plan that aims to mitigate the same failure in your next attempt. Use complete sentences and be specific about what should change.\n\nPrevious trial:\nTask: {question}\n{scratchpad}\n\nReflection:",
+    "agent_prompt": "Solve the following task using available tools and reasoning steps. You may have attempted this task before and failed. If reflections from previous failed attempts are provided below, study them carefully and use the insights to improve your strategy. Avoid repeating the same mistakes that led to earlier failures. Focus your reasoning on the specific gaps identified in the reflections and adapt your approach accordingly.\n\n{reflections}\n\nTask: {question}\n{scratchpad}"
+  }
+}
