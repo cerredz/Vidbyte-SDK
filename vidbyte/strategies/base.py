@@ -13,6 +13,7 @@ class BaseStrategy:
     """Async-first strategy contract."""
 
     name: ClassVar[str] = "base"
+    description: ClassVar[str] = ""
 
     def __init__(self, *, runner: object | None = None, **kwargs: Any) -> None:
         self._runner = runner
@@ -42,6 +43,18 @@ class BaseStrategy:
                 f"{self.__class__.__name__} requires a runner. Pass one to run() or set it in __init__."
             )
         return resolved
+
+    def as_tool(
+        self,
+        agent: object,
+        *,
+        name: str | None = None,
+        description: str | None = None,
+    ) -> object:
+        """Return a StrategyTool wrapping this strategy bound to *agent*."""
+        from vidbyte.tools.strategy_tool import StrategyTool
+
+        return StrategyTool(agent, name=name, description=description)  # type: ignore[arg-type]
 
     def _run_model(self, runner: object, prompt: str, **kwargs: Any) -> Any:
         call_options = dict(kwargs)

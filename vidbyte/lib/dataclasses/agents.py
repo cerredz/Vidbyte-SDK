@@ -29,6 +29,7 @@ class AgentStopReason(str, Enum):
     IS_DONE = "is_done"
     MAX_ITERATIONS = "max_iterations"
     MAX_TOKENS = "max_tokens"
+    MIDDLEWARE_ABORT = "middleware_abort"
     TOOL_LOOP_LIMIT = "tool_loop_limit"
     ERROR = "error"
 
@@ -111,6 +112,15 @@ class AgentMessage:
     content: str
     message_type: str = "response"
     metadata: Mapping[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
+class AgentMetadata:
+    """Metadata for exposing an agent as a tool."""
+
+    name: str = ""
+    description: str = ""
+    use_cases: str = ""
 
 
 @dataclass(frozen=True, slots=True)

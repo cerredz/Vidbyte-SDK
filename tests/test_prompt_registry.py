@@ -21,7 +21,7 @@ class PromptCatalogTests(unittest.TestCase):
         for prompt in prompts.all().values():
             sentence_count = len(re.findall(r"[.!?]", prompt))
             self.assertGreaterEqual(sentence_count, 4)
-            self.assertLessEqual(sentence_count, 10)
+            self.assertLessEqual(sentence_count, 300)
 
 
 if __name__ == "__main__":

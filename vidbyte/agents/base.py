@@ -23,10 +23,11 @@ from vidbyte.agents.mixins import McpAttachableMixin
 from vidbyte.agents.runtime import AgentRuntime
 from vidbyte.agents.types import AgentCard, AgentInput, AgentMessage
 from vidbyte.lib.agents import ModalityDetector
-from vidbyte.lib.dataclasses.agents import AgentRunnerConfig, AgentRuntimeConfig
+from vidbyte.lib.dataclasses.agents import AgentMetadata, AgentRunnerConfig, AgentRuntimeConfig
 from vidbyte.lib.enums import ModelModality, ModelProvider
-from vidbyte.lib.errors import AgentExecutionError
+from vidbyte.lib.errors import AgentExecutionError, ConfigurationError
 from vidbyte.lib.tracing import NullTracer, TracerBase
+from vidbyte.middleware import AgentMiddleware
 from vidbyte.strategies.base import BaseStrategy
 from vidbyte.strategies.types import BaseAgentContext, StrategyContext, StrategyResult
 from vidbyte.tools.catalog import Tools
@@ -59,6 +60,7 @@ class BaseAgent(McpAttachableMixin):
         max_tokens: int | None = None,
         compaction_trigger_tokens: int | None = None,
         compaction_target_tokens: int | None = None,
+        middleware: Sequence[AgentMiddleware] = (),
         api_key: str | None = None,
         provider: ModelProvider | str | None = None,
         model_name: str | None = None,
@@ -68,6 +70,7 @@ class BaseAgent(McpAttachableMixin):
         runner_options: dict[str, Any] | None = None,
         description: str = "",
         capabilities: Sequence[str] = (),
+        agent_metadata: AgentMetadata | None = None,
         metadata: dict[str, Any] | None = None,
         tracer: type[TracerBase] | TracerBase | None = None,
     ) -> None:
@@ -104,11 +107,16 @@ class BaseAgent(McpAttachableMixin):
         )
         self.max_tool_rounds = effective_max_iterations
         self.system_prompt = system_prompt
+        self.middleware = tuple(middleware)
         self.description = description or "General purpose agent."
         self.capabilities = tuple(capabilities)
+        self.agent_metadata = agent_metadata or AgentMetadata()
         self.metadata = dict(metadata or {})
         self.history: list[AgentMessage] = []
         self._tool_call_contexts: list[ToolCallContext] = []
+        self._active_prompt: str = ""
+        for _tool in self._agent_tool_items:
+            self._bind_agent_tool_context(_tool)
 
         if tracer is None:
             self._tracer: TracerBase = NullTracer()
@@ -152,7 +160,37 @@ class BaseAgent(McpAttachableMixin):
             self.tools = self.tools.add(tool)
         except TypeError:
             pass
+        self._bind_agent_tool_context(tool)
         return self
+
+    def as_tool(self) -> object:
+        """Return an AgentTool wrapping this agent for use by a parent agent.
+
+        Raises ConfigurationError if agent_metadata fields are not filled in.
+        """
+        meta = self.agent_metadata
+        if not meta.name or not meta.description or not meta.use_cases:
+            raise ConfigurationError(
+                "You need to fill in agent metadata (name, description, use_cases) "
+                "if you want to use the agent as a tool.",
+                details={
+                    "agent": self.name,
+                    "missing_name": not meta.name,
+                    "missing_description": not meta.description,
+                    "missing_use_cases": not meta.use_cases,
+                },
+            )
+        from vidbyte.tools.agent_tool import AgentTool
+
+        return AgentTool(self)
+
+    def _bind_agent_tool_context(self, tool: object) -> None:
+        """Bind this agent's live context getter to AgentTool or StrategyTool instances."""
+        from vidbyte.tools.agent_tool import AgentTool
+        from vidbyte.tools.strategy_tool import StrategyTool
+
+        if isinstance(tool, (AgentTool, StrategyTool)):
+            tool.bind_context_getter(lambda: (self._active_prompt, list(self.history)))
 
     def tool_specs(self) -> tuple[ToolSpec, ...]:
         return self.tools.specs()
@@ -168,6 +206,7 @@ class BaseAgent(McpAttachableMixin):
         system_prompt: str | None = None,
         modality: ModelModality | str | None = None,
         metadata: dict[str, Any] | None = None,
+        middleware: Sequence[AgentMiddleware] | None = None,
         include_history: bool = False,
     ) -> BaseAgent:
         child = BaseAgent(
@@ -181,6 +220,7 @@ class BaseAgent(McpAttachableMixin):
             max_tokens=self.runtime_config.max_tokens,
             compaction_trigger_tokens=self.runtime_config.compaction_trigger_tokens,
             compaction_target_tokens=self.runtime_config.compaction_target_tokens,
+            middleware=self.middleware if middleware is None else middleware,
             system_prompt=self.system_prompt if system_prompt is None else system_prompt,
             api_key=self.runner_config.api_key,
             provider=self.runner_config.provider,
@@ -191,6 +231,7 @@ class BaseAgent(McpAttachableMixin):
             runner_options=dict(self.runner_config.options),
             description=self.description,
             capabilities=self.capabilities,
+            agent_metadata=self.agent_metadata,
             metadata={**self.metadata, **dict(metadata or {})},
             tracer=self._tracer,
         )
@@ -219,6 +260,7 @@ class BaseAgent(McpAttachableMixin):
         )
         try:
             prompt, input_modality, input_metadata = self._normalize_input(message)
+            self._active_prompt = prompt
             selected_modality = ModalityDetector.resolve(
                 requested=modality,
                 input_modality=input_modality,
@@ -243,6 +285,7 @@ class BaseAgent(McpAttachableMixin):
                     runner=runner,
                     modality=selected_modality,
                     trace_context=trace_ctx,
+                    runtime_metadata={**self.metadata, **dict(input_metadata)},
                     **options,
                 )
             else:
@@ -256,10 +299,12 @@ class BaseAgent(McpAttachableMixin):
             self._tracer.end_trace(trace_ctx, output=result.output)
         except Exception as exc:
             self._tracer.end_trace(trace_ctx, error=exc)
+            self._active_prompt = ""
             raise AgentExecutionError(
                 f"Agent '{self.name}' failed to generate a reply.",
                 details={"agent": self.name, "error_type": type(exc).__name__},
             ) from exc
+        self._active_prompt = ""
         reply = AgentMessage(
             sender=self.name,
             recipient=recipient,
@@ -328,6 +373,7 @@ class BaseAgent(McpAttachableMixin):
         runner: object | None = None,
         modality: ModelModality = ModelModality.TEXT,
         trace_context: object | None = None,
+        runtime_metadata: Mapping[str, Any] | None = None,
         **options: Any,
     ) -> StrategyResult:
         if runner is None:
@@ -352,6 +398,7 @@ class BaseAgent(McpAttachableMixin):
             invoke_runner=self._invoke_runner,
             runner_output_text=self._runner_output_text,
             runner_output_metadata=self._runner_output_metadata,
+            metadata=runtime_metadata,
             options=options,
             trace_context=trace_context,
         )
@@ -375,6 +422,7 @@ class BaseAgent(McpAttachableMixin):
             invoke_runner=self._invoke_runner,
             runner_output_text=self._runner_output_text,
             runner_output_metadata=self._runner_output_metadata,
+            metadata=self.metadata,
             options=options,
         )
         self._record_tool_contexts(result)
@@ -396,6 +444,8 @@ class BaseAgent(McpAttachableMixin):
             permission_policy=self.permission_policy,
             config=self.runtime_config,
             tracer=self._tracer,
+            middleware=self.middleware,
+            run_id=self.runner_config.run_id,
         )
 
     def _catalog_from_agent_tools(self, tools: Sequence[object]) -> Tools:

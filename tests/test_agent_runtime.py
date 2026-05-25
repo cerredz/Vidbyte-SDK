@@ -148,6 +148,7 @@ class AgentRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.metadata["iteration_count"], 2)
         self.assertEqual(result.metadata["tool_call_count"], 2)
         self.assertEqual(result.metadata["tool_call_states"], ("succeeded", "succeeded"))
+        self.assertIn("middleware", result.metadata)
         self.assertIn("tools", runner.calls[0]["kwargs"])
         self.assertIn("messages", runner.calls[1]["kwargs"])
 
