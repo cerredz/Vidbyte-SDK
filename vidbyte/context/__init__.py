@@ -1,6 +1,11 @@
 from __future__ import annotations
 
-from vidbyte.context.algorithms import ContextWindowAlgorithm, ToolResultAdmission
+from vidbyte.context.algorithms import (
+    ContextWindowAlgorithm,
+    ReflexionAdmission,
+    ReflexionConfig,
+    ToolResultAdmission,
+)
 from vidbyte.context.primitives import (
     ArtifactContextItem,
     ContextItem,
@@ -50,6 +55,8 @@ __all__ = [
     "GitDiffContextItem",
     "MemoryContextItem",
     "ProgressContextItem",
+    "ReflexionAdmission",
+    "ReflexionConfig",
     "ResponseContextItem",
     "StrategyContext",
     "TaskContextItem",

@@ -14,7 +14,12 @@ Relations:
 
 from __future__ import annotations
 
-from vidbyte.context.algorithms import ContextWindowAlgorithm, ToolResultAdmission
+from vidbyte.context.algorithms import (
+    ContextWindowAlgorithm,
+    ReflexionAdmission,
+    ReflexionConfig,
+    ToolResultAdmission,
+)
 
 
 class ContextWindowPresets:
@@ -50,6 +55,30 @@ class ContextWindowPresets:
     def no_raw_tool_outputs(self) -> ContextWindowAlgorithm:
         """Alias for hiding raw tool output from the model context window."""
         return self.hide_tool_outputs
+
+    @property
+    def reflexion(self) -> ContextWindowAlgorithm:
+        """Inject accumulated self-reflections from prior failed trials."""
+        return ContextWindowAlgorithm(
+            name="reflexion",
+            reflexion=ReflexionConfig(admission=ReflexionAdmission.REFLEXION),
+        )
+
+    @property
+    def reflexion_last_attempt(self) -> ContextWindowAlgorithm:
+        """Inject the previous trial scratchpad without self-reflection."""
+        return ContextWindowAlgorithm(
+            name="reflexion_last_attempt",
+            reflexion=ReflexionConfig(admission=ReflexionAdmission.LAST_ATTEMPT),
+        )
+
+    @property
+    def reflexion_last_attempt_and_reflexion(self) -> ContextWindowAlgorithm:
+        """Inject both the previous trial scratchpad and accumulated self-reflections."""
+        return ContextWindowAlgorithm(
+            name="reflexion_last_attempt_and_reflexion",
+            reflexion=ReflexionConfig(admission=ReflexionAdmission.LAST_ATTEMPT_AND_REFLEXION),
+        )
 
 
 def resolve_context_window_algorithm(

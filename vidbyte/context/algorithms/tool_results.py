@@ -19,6 +19,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
+from vidbyte.context.algorithms.reflexion import ReflexionConfig
 from vidbyte.lib.dataclasses.tools import ToolCall, ToolResult
 
 
@@ -37,6 +38,7 @@ class ContextWindowAlgorithm:
     name: str
     tool_result_admission: ToolResultAdmission = ToolResultAdmission.RAW
     max_tool_result_chars: int = 600
+    reflexion: ReflexionConfig | None = None
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
     def model_visible_tool_result(self, call: ToolCall, result: ToolResult) -> ToolResult:
