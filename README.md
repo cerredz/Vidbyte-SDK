@@ -136,9 +136,8 @@ context.build_context()
 ## Context Management
 
 Use `ContextManager` and context items when you want reusable, structured context
-instead of assembling raw prompt strings yourself. This first layer standardizes
-how common context units are stored and passed through agents; richer renderers
-and compaction policies are intentionally deferred.
+instead of assembling raw prompt strings yourself. Use `ContextWindow` presets
+when you want an agent to run with an SDK-provided context-window algorithm.
 
 ```python
 from vidbyte import Agent, ContextManager, FileContextItem, TaskContextItem
@@ -157,6 +156,22 @@ agent = Agent(
     system_prompt="Use the supplied context before answering.",
     runner=my_runner,
     context_manager=context,
+)
+```
+
+Context-window algorithms are attached as a single agent option. The default
+keeps existing behavior; presets can change how runtime context grows between
+model calls.
+
+```python
+from vidbyte import ContextWindow
+
+agent = Agent(
+    name="repo-analyst",
+    system_prompt="Use tools when they help answer precisely.",
+    runner=my_runner,
+    tools=[lookup_metric],
+    algorithm=ContextWindow.preset.no_raw_tool_outputs,
 )
 ```
 

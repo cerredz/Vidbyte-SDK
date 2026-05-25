@@ -4,7 +4,7 @@ import unittest
 
 from vidbyte.agents import AgentInput, BaseAgent
 from vidbyte.agents.base import ConfiguredAgentRunner
-from vidbyte.context import ContextManager, TaskContextItem, TextContextItem
+from vidbyte.context import ContextManager, ContextWindow, TaskContextItem, TextContextItem
 from vidbyte.lib.config import ModelProvider
 from vidbyte.middleware import AgentMiddleware
 from vidbyte.lib.errors import AgentExecutionError, ConfigurationError
@@ -235,6 +235,21 @@ class AgentBaseTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(forked.middleware, (middleware,))
         self.assertEqual(replaced.middleware, (replacement,))
+
+    async def test_agent_accepts_context_window_algorithm_preset(self) -> None:
+        agent = BaseAgent(
+            name="worker",
+            system_prompt="Work carefully.",
+            runner=EchoRunner(),
+            algorithm=ContextWindow.preset.no_raw_tool_outputs,
+        )
+
+        forked = agent.fork(name="worker-copy")
+        replaced = agent.fork(name="worker-compact", algorithm="compact_tool_outputs")
+
+        self.assertEqual(agent.algorithm.name, "hide_tool_outputs")
+        self.assertEqual(forked.algorithm.name, "hide_tool_outputs")
+        self.assertEqual(replaced.algorithm.name, "compact_tool_outputs")
 
     async def test_agent_without_strategy_calls_runner_once(self) -> None:
         runner = EchoRunner()

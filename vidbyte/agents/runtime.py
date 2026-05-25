@@ -19,6 +19,7 @@ from typing import Any
 
 from vidbyte.agents.types import AgentMessage
 from vidbyte.context.manager import ContextManager
+from vidbyte.context.window import ContextWindow, ContextWindowAlgorithm
 from vidbyte.lib.dataclasses.agents import AgentRuntimeConfig, AgentStopReason
 from vidbyte.lib.dataclasses.context_items import ContextItem
 from vidbyte.lib.dataclasses.middleware import MiddlewareAction, MiddlewareContext, MiddlewareDecision, MiddlewareHook
@@ -48,6 +49,7 @@ class AgentRuntime:
         config: AgentRuntimeConfig | None = None,
         middleware: Sequence[AgentMiddleware] = (),
         run_id: str | None = None,
+        algorithm: ContextWindowAlgorithm | str | None = None,
     ) -> None:
         self.agent_name = agent_name
         self.system_prompt = system_prompt
@@ -57,6 +59,7 @@ class AgentRuntime:
         self.config = config or AgentRuntimeConfig()
         self.middleware = MiddlewarePipeline(middleware)
         self.run_id = run_id
+        self.algorithm = ContextWindow.resolve_algorithm(algorithm)
 
     def build_context(
         self,
@@ -890,7 +893,8 @@ class AgentRuntime:
                 contexts=call_contexts,
             )
         if call.tool_name != IS_DONE_TOOL_NAME:
-            messages.append(dict(ToolsFormatter.format_tool_result(call, result, provider)))
+            visible_result = self.algorithm.model_visible_tool_result(call, result)
+            messages.append(dict(ToolsFormatter.format_tool_result(call, visible_result, provider)))
         return context_record, result
 
     def _budget_stop(

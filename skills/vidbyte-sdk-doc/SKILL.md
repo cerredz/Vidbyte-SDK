@@ -64,7 +64,7 @@ Keep central contracts under `vidbyte/lib/` when they are shared by multiple pac
 
 - Root client: `VidbyteSDK`.
 - Agents: `Agent`, `BaseAgent`, `AgentClient`, `AgentInput`, `AgentCard`, `AgentMessage`, `AgentRegistry`, `AgentRunnerConfig`, `AgentSpec`.
-- Contexts: `BaseContext`, `BaseAgentContext`, `ContextBudget`, `ContextPermissions`, `ContextManager`, `ContextItem`, `TextContextItem`, `FileContextItem`, `GitDiffContextItem`, `TaskContextItem`, `DocumentContextItem`, `EnvironmentContextItem`, `MemoryContextItem`, `ProgressContextItem`, `ArtifactContextItem`, `ResponseContextItem`, `ToolCallContextItem`, `StrategyContext`.
+- Contexts: `BaseContext`, `BaseAgentContext`, `ContextBudget`, `ContextPermissions`, `ContextManager`, `ContextWindow`, `ContextWindowAlgorithm`, `ToolResultAdmission`, `ContextItem`, `TextContextItem`, `FileContextItem`, `GitDiffContextItem`, `TaskContextItem`, `DocumentContextItem`, `EnvironmentContextItem`, `MemoryContextItem`, `ProgressContextItem`, `ArtifactContextItem`, `ResponseContextItem`, `ToolCallContextItem`, `StrategyContext`.
 - Enums: `BudgetPreset`, `PermissionPreset`, `Prompt`, `ModelModality`.
 - Prompts: `Prompts`.
 - Strategies: `BaseStrategy`, `BaseStrategyUtils`, `StrategyResult`, `ChainOfThoughtStrategy`, `ChainOfDraftStrategy`, `StepBackStrategy`, `SkeletonOfThoughtStrategy`, `SelfConsistencyStrategy`, `PlanAndExecuteStrategy`, `SelfRefinementStrategy`, `TreeOfThoughtsStrategy`, `ReActStrategy`, `ReflexionStrategy`, `MultiAgentConsensusStrategy`.
@@ -505,6 +505,7 @@ Primary files:
 
 - `vidbyte/context/__init__.py`
 - `vidbyte/context/manager.py`
+- `vidbyte/context/window.py`
 - `vidbyte/lib/dataclasses/`
 - `vidbyte/strategies/types.py`
 - `vidbyte/tools/types.py`
@@ -528,6 +529,9 @@ Context dataclasses:
 - `ContextArtifact`: text/file artifact record.
 - `ContextItem`: structural protocol for standardized context items.
 - `ContextManager`: ordered collection and compatibility bridge for context items.
+- `ContextWindow`: public namespace for context-window algorithm presets.
+- `ContextWindowAlgorithm`: named runtime admission behavior attached to an agent with `algorithm=...`.
+- `ToolResultAdmission`: enum for how tool results are admitted into model-visible context.
 - `BaseContext`: baseline context with `build_context()`, context items, and optional file content rendering.
 - `StrategyContext`: per-run strategy context.
 - `BaseAgentContext`: context built by agents.
@@ -539,7 +543,8 @@ Context management rules:
 - Context items store structured meaning; the current compatibility path renders through existing `BaseContext.build_context()`.
 - `ContextManager` owns item collection, ordered utilities, and conversion into existing context dataclass fields.
 - Agents may receive default `context_items`/`context_manager`; per-call context belongs on `AgentInput`.
-- Rich renderers, ranking, redaction, summarization, and compaction policies are not part of the foundation layer and require a separate approved design.
+- Agents may receive `algorithm=ContextWindow.preset.<name>` to opt into SDK-provided context-window behavior. Initial presets focus on tool-result admission between model calls, including raw, compacted, and hidden raw tool outputs.
+- Rich custom renderers, ranking, redaction, summarization, and open-ended compaction policies are not part of the foundation layer and require a separate approved design.
 
 Budget and permission presets:
 
@@ -549,7 +554,7 @@ Budget and permission presets:
 
 Other dataclass groups:
 
-- Agents: `AgentRunnerConfig`, `AgentInput`, `AgentCard`, `AgentMessage`, `AgentSpec`; `AgentInput` and `AgentSpec` can carry context items/managers.
+- Agents: `AgentRunnerConfig`, `AgentInput`, `AgentCard`, `AgentMessage`, `AgentSpec`; `AgentInput` can carry context items/managers and `AgentSpec` can carry context items/managers plus an algorithm preset.
 - Tools: `ToolParameter`, `ToolSpec`, `ToolCall`, `ToolResult`, `ToolCallContext`.
 - Multi-agent: `CandidateResult`, `CandidateFailure`, `EvaluationDecision`, `DagNode`, `Verification`, `NodeState`.
 - Model configs: `TextModelConfig`, `ImageModelConfig`, `VideoModelConfig`.

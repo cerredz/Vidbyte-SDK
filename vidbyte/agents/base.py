@@ -23,6 +23,7 @@ from vidbyte.agents.mixins import McpAttachableMixin
 from vidbyte.agents.runtime import AgentRuntime
 from vidbyte.agents.types import AgentCard, AgentInput, AgentMessage
 from vidbyte.context.manager import ContextManager
+from vidbyte.context.window import ContextWindow, ContextWindowAlgorithm
 from vidbyte.lib.agents import ModalityDetector
 from vidbyte.lib.dataclasses.agents import AgentMetadata, AgentRunnerConfig, AgentRuntimeConfig
 from vidbyte.lib.dataclasses.context_items import ContextItem
@@ -76,6 +77,7 @@ class BaseAgent(McpAttachableMixin):
         agent_metadata: AgentMetadata | None = None,
         context_items: Sequence[ContextItem] = (),
         context_manager: ContextManager | None = None,
+        algorithm: ContextWindowAlgorithm | str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> None:
         if not name:
@@ -117,6 +119,7 @@ class BaseAgent(McpAttachableMixin):
         self.agent_metadata = agent_metadata or AgentMetadata()
         self.context_items = tuple(context_items)
         self.context_manager = context_manager
+        self.algorithm = ContextWindow.resolve_algorithm(algorithm)
         self.metadata = dict(metadata or {})
         self.history: list[AgentMessage] = []
         self._tool_call_contexts: list[ToolCallContext] = []
@@ -217,6 +220,7 @@ class BaseAgent(McpAttachableMixin):
         middleware: Sequence[AgentMiddleware] | None = None,
         context_items: Sequence[ContextItem] | None = None,
         context_manager: ContextManager | None = None,
+        algorithm: ContextWindowAlgorithm | str | None = None,
         include_history: bool = False,
     ) -> BaseAgent:
         child = BaseAgent(
@@ -245,6 +249,7 @@ class BaseAgent(McpAttachableMixin):
             agent_metadata=self.agent_metadata,
             context_items=self.context_items if context_items is None else context_items,
             context_manager=self.context_manager if context_manager is None else context_manager,
+            algorithm=self.algorithm if algorithm is None else algorithm,
             metadata={**self.metadata, **dict(metadata or {})},
         )
         if include_history:
@@ -473,6 +478,7 @@ class BaseAgent(McpAttachableMixin):
             config=self.runtime_config,
             middleware=self.middleware,
             run_id=self.runner_config.run_id,
+            algorithm=self.algorithm,
         )
 
     def _catalog_from_agent_tools(self, tools: Sequence[object]) -> Tools:
