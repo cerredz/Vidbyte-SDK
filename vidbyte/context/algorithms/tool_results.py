@@ -7,7 +7,8 @@ Purpose:
     messages while preserving full tool results in runtime metadata.
 Architecture:
     - ToolResultAdmission: Supported admission modes.
-    - ContextWindowAlgorithm: Immutable runtime algorithm object.
+    - ContextWindowAlgorithm: Immutable runtime algorithm object with optional
+      lifecycle config for reasoning traces and plan-then-implement behavior.
 Relations:
     Used by vidbyte.context.presets and AgentRuntime.
 """
@@ -19,6 +20,10 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
+from vidbyte.context.algorithms.types import (
+    PlanThenImplementConfig,
+    ReasoningTraceConfig,
+)
 from vidbyte.lib.dataclasses.tools import ToolCall, ToolResult
 
 
@@ -37,6 +42,8 @@ class ContextWindowAlgorithm:
     name: str
     tool_result_admission: ToolResultAdmission = ToolResultAdmission.RAW
     max_tool_result_chars: int = 600
+    reasoning_trace: ReasoningTraceConfig | None = None
+    plan_then_implement: PlanThenImplementConfig | None = None
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
     def model_visible_tool_result(self, call: ToolCall, result: ToolResult) -> ToolResult:

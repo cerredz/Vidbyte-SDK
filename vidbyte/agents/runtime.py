@@ -14,11 +14,22 @@ Relations:
 
 from __future__ import annotations
 
+import dataclasses
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
 from vidbyte.agents.types import AgentMessage
 from vidbyte.context.algorithms import ContextWindowAlgorithm
+from vidbyte.context.algorithms.plan_then_implement import (
+    build_plan_prompt,
+    fallback_plan,
+    plan_artifact_from_text,
+)
+from vidbyte.context.algorithms.reasoning_trace import render_reasoning_trace
+from vidbyte.context.algorithms.types import (
+    ContextWindowIterationEvent,
+    ReasoningTraceConfig,
+)
 from vidbyte.context.manager import ContextManager
 from vidbyte.context.primitives import ContextItem
 from vidbyte.context.window import ContextWindow
@@ -132,6 +143,8 @@ class AgentRuntime:
         tokens_used: int | None = None
         started_at = self.middleware.clock()
         last_response: object | None = None
+        trace_count = 0
+        runtime_metadata["context_window_reasoning_trace_count"] = trace_count
 
         decision = await self.middleware.before_run(
             self._middleware_context(
@@ -165,6 +178,36 @@ class AgentRuntime:
                 started_at=started_at,
                 metadata=runtime_metadata,
             )
+
+        context, plan_metadata = await self._prepare_algorithm_context(
+            message=message,
+            context=context,
+            runner=runner,
+            provider=provider,
+            invoke_runner=invoke_runner,
+            runner_output_text=runner_output_text,
+            runner_output_metadata=runner_output_metadata,
+            model_call_count=model_call_count,
+            call_contexts=call_contexts,
+            iteration_count=iteration_count,
+            tokens_used=tokens_used,
+            started_at=started_at,
+            metadata=runtime_metadata,
+        )
+        if isinstance(context, StrategyResult):
+            return await self._finish_result(
+                context,
+                message=message,
+                context=context,
+                provider=provider,
+                iteration_count=iteration_count,
+                model_call_count=model_call_count,
+                tokens_used=tokens_used,
+                started_at=started_at,
+                metadata=runtime_metadata,
+            )
+        if plan_metadata:
+            runtime_metadata.update(plan_metadata)
 
         while True:
             stop_result = self._budget_stop(
@@ -291,7 +334,8 @@ class AgentRuntime:
 
             tool_calls = ToolsFormatter.parse_tool_calls(raw_result, provider)
             if not tool_calls:
-                messages.append(self._assistant_message(runner_output_text(raw_result)))
+                assistant_output = runner_output_text(raw_result)
+                messages.append(self._assistant_message(assistant_output))
                 decision = await self.middleware.after_iteration(
                     self._middleware_context(
                         MiddlewareHook.AFTER_ITERATION,
@@ -326,8 +370,17 @@ class AgentRuntime:
                         metadata=runtime_metadata,
                         model_response=raw_result,
                     )
+                trace_count += self._append_reasoning_trace_if_needed(
+                    messages,
+                    request=message,
+                    iteration_count=iteration_count,
+                    assistant_output=assistant_output,
+                    current_iteration_contexts=(),
+                )
+                runtime_metadata["context_window_reasoning_trace_count"] = trace_count
                 continue
 
+            min_contexts = len(call_contexts)
             for call in tool_calls:
                 processed = await self._process_tool_call(
                     call,
@@ -413,6 +466,7 @@ class AgentRuntime:
                         model_response=raw_result,
                     )
 
+            iteration_contexts = tuple(call_contexts[min_contexts:])
             decision = await self.middleware.after_iteration(
                 self._middleware_context(
                     MiddlewareHook.AFTER_ITERATION,
@@ -447,6 +501,14 @@ class AgentRuntime:
                     metadata=runtime_metadata,
                     model_response=raw_result,
                 )
+            trace_count += self._append_reasoning_trace_if_needed(
+                messages,
+                request=message,
+                iteration_count=iteration_count,
+                assistant_output=None,
+                current_iteration_contexts=iteration_contexts,
+            )
+            runtime_metadata["context_window_reasoning_trace_count"] = trace_count
 
     async def _invoke_with_middleware(
         self,
@@ -562,7 +624,15 @@ class AgentRuntime:
                 tokens_used=tokens_used,
                 contexts=tuple(dict(result.metadata).get("tool_calls", ())),
             )
-        return self._with_middleware_metadata(result)
+        result = self._with_middleware_metadata(result)
+        merged_meta = {**dict(result.metadata), **dict(metadata)}
+        result = StrategyResult(
+            output=result.output,
+            strategy_name=result.strategy_name,
+            calls=result.calls,
+            metadata=merged_meta,
+        )
+        return result
 
     def _middleware_context(
         self,
@@ -969,6 +1039,122 @@ class AgentRuntime:
         if delta is None:
             return current
         return (current or 0) + delta
+
+    async def _prepare_algorithm_context(
+        self,
+        *,
+        message: str,
+        context: BaseAgentContext,
+        runner: object,
+        provider: str,
+        invoke_runner: Callable[..., Any],
+        runner_output_text: Callable[[object], str],
+        runner_output_metadata: Callable[[object], Mapping[str, Any]],
+        model_call_count: int,
+        call_contexts: list[ToolCallContext],
+        iteration_count: int,
+        tokens_used: int | None,
+        started_at: float,
+        metadata: Mapping[str, Any],
+    ) -> tuple[BaseAgentContext | StrategyResult, dict[str, Any] | None]:
+        """Optionally create a plan artifact before the main execution loop."""
+        if self.algorithm.plan_then_implement is None:
+            return context, None
+        plan_config = self.algorithm.plan_then_implement
+        context_text = context.build_context()
+        planner_prompt = build_plan_prompt(message, context_text, plan_config)
+        try:
+            raw_result, _ = await self._invoke_with_middleware(
+                runner,
+                message,
+                {"system": planner_prompt},
+                context=context,
+                provider=provider,
+                invoke_runner=invoke_runner,
+                iteration_count=iteration_count,
+                model_call_count=model_call_count,
+                call_contexts=call_contexts,
+                tokens_used=tokens_used,
+                started_at=started_at,
+                metadata=metadata,
+            )
+        except Exception:
+            if plan_config.fallback_on_empty:
+                return self._plan_context_from_text(
+                    fallback_plan(message),
+                    message,
+                    plan_config,
+                    context,
+                    fallback_used=True,
+                ), {"context_window_plan_artifact": plan_config.artifact_name, "context_window_plan_fallback_used": True}
+            raise
+        if isinstance(raw_result, StrategyResult):
+            return raw_result, None
+        plan_text = runner_output_text(raw_result)
+        fallback_used = False
+        if not plan_text.strip():
+            if not plan_config.fallback_on_empty:
+                return context, {
+                    "context_window_plan_artifact": plan_config.artifact_name,
+                    "context_window_plan_fallback_used": False,
+                }
+            plan_text = fallback_plan(message)
+            fallback_used = True
+        return self._plan_context_from_text(
+            plan_text,
+            message,
+            plan_config,
+            context,
+            fallback_used=fallback_used,
+        ), {
+            "context_window_plan_artifact": plan_config.artifact_name,
+            "context_window_plan_fallback_used": fallback_used,
+        }
+
+    @staticmethod
+    def _plan_context_from_text(
+        plan_text: str,
+        request: str,
+        config: object,
+        context: BaseAgentContext,
+        *,
+        fallback_used: bool = False,
+    ) -> BaseAgentContext:
+        """Attach a plan artifact to the context without adding a runner call."""
+        artifact = plan_artifact_from_text(plan_text, request, config, fallback_used=fallback_used)
+        return dataclasses.replace(context, artifacts=(*context.artifacts, artifact))
+
+    def _append_reasoning_trace_if_needed(
+        self,
+        messages: list[dict[str, Any]],
+        *,
+        request: str,
+        iteration_count: int,
+        assistant_output: str | None,
+        current_iteration_contexts: Sequence[ToolCallContext],
+    ) -> int:
+        """Append a reasoning trace message for the next model call if configured. Returns 1 if appended, 0 otherwise."""
+        if self.algorithm.reasoning_trace is None:
+            return 0
+        trace_config = self.algorithm.reasoning_trace
+        event = ContextWindowIterationEvent(
+            request=request,
+            iteration_count=iteration_count,
+            assistant_output=assistant_output,
+            tool_contexts=tuple(current_iteration_contexts),
+        )
+        trace_message = render_reasoning_trace(trace_config, event)
+        messages.append({"role": trace_message.role, "content": trace_message.content})
+        return 1
+        event = ContextWindowIterationEvent(
+            request=request,
+            iteration_count=iteration_count,
+            assistant_output=assistant_output,
+            tool_contexts=tuple(current_iteration_contexts),
+        )
+        trace_message = render_reasoning_trace(trace_config, event)
+        messages.append({"role": trace_message.role, "content": trace_message.content})
+        return 1
 
 
 __all__ = ["AgentRuntime"]
