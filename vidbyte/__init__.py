@@ -44,6 +44,8 @@ from vidbyte.context import (
     ContextItem,
     ContextManager,
     ContextPermissions,
+    ContextWindow,
+    ContextWindowAlgorithm,
     DocumentContextItem,
     EnvironmentContextItem,
     FileContextItem,
@@ -54,6 +56,7 @@ from vidbyte.context import (
     TaskContextItem,
     TextContextItem,
     ToolCallContextItem,
+    ToolResultAdmission,
 )
 from vidbyte.lib.enums import BudgetPreset, ModelModality, PermissionPreset, Prompt
 from vidbyte.lib.errors import (
@@ -159,6 +162,8 @@ __all__ = [
     "ContextItem",
     "ContextManager",
     "ContextPermissions",
+    "ContextWindow",
+    "ContextWindowAlgorithm",
     "DocumentContextItem",
     "EnvironmentContextItem",
     "FileContextItem",
@@ -209,6 +214,7 @@ __all__ = [
     "ToolCallContext",
     "ToolCallContextItem",
     "ToolCallState",
+    "ToolResultAdmission",
     "ToolExecutor",
     "ToolParameter",
     "ToolPermission",

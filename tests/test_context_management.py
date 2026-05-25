@@ -5,9 +5,11 @@ import unittest
 from pathlib import Path
 
 from vidbyte import ContextManager as RootContextManager
+from vidbyte import ContextWindow as RootContextWindow
 from vidbyte import FileContextItem as RootFileContextItem
 from vidbyte.context import (
     ContextManager,
+    ContextWindow,
     DocumentContextItem,
     FileContextItem,
     MemoryContextItem,
@@ -109,8 +111,14 @@ class ContextManagementTests(unittest.TestCase):
 
     def test_public_imports(self) -> None:
         self.assertIs(RootContextManager, ContextManager)
+        self.assertIs(RootContextWindow, ContextWindow)
         self.assertIs(RootFileContextItem, FileContextItem)
         self.assertTrue(isinstance(TextContextItem(title="x", content="y"), ContextItem))
+
+    def test_context_window_presets_are_named_algorithms(self) -> None:
+        self.assertEqual(ContextWindow.preset.default.name, "default")
+        self.assertEqual(ContextWindow.preset.no_raw_tool_outputs.name, "hide_tool_outputs")
+        self.assertEqual(ContextWindow.resolve_algorithm("compact_tool_outputs").name, "compact_tool_outputs")
 
 
 if __name__ == "__main__":

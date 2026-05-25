@@ -9,7 +9,8 @@ vidbyte/
 |-- client.py
 |-- agents/
 |-- context/
-|   `-- manager.py
+|   |-- manager.py
+|   `-- window.py
 |-- harnesses/
 |   `-- client.py
 |-- prompts/
@@ -46,7 +47,7 @@ vidbyte/
 - Keep multi-agent orchestration implementations in `vidbyte/strategies/multi_agent/`.
 - Keep agent-to-agent wiring topologies (pipeline compositions) in `vidbyte/pipelines/`. Pipelines move strings between agents; they do not manage context, budget, or artifacts. Follow `skills/vidbyte-sdk/pipelines.md` when adding new pipeline topology types.
 - Keep public context objects in `vidbyte/context/`, but define dataclasses centrally under `vidbyte/lib/dataclasses/`.
-- Keep standardized context item dataclasses under `vidbyte/lib/dataclasses/context_items.py` and expose the central `ContextManager` from `vidbyte/context/manager.py`.
+- Keep standardized context item dataclasses under `vidbyte/lib/dataclasses/context_items.py`, expose the central `ContextManager` from `vidbyte/context/manager.py`, and keep agent-level context-window algorithm presets in `vidbyte/context/window.py`.
 - Keep prompt templates in `vidbyte/prompts/prompts/` and expose them through `vidbyte.prompts.Prompts` plus `vidbyte.lib.enums.prompts.Prompt`.
 - Follow `skills/vidbyte-sdk/adding-prompts.md` whenever adding or changing prompt assets.
 - Keep enum presets under `vidbyte/lib/enums/`.
@@ -67,7 +68,7 @@ vidbyte/
 - Agents package modality routing, model runners, model configuration, strategies, user-defined role/capability metadata, system prompts, and tools. User-facing examples should pass tools directly into `Agent`/`BaseAgent` with `tools=[...]`.
 - User-facing examples should prefer `Agent`/`BaseAgent`, `AgentInput`, `ModelModality`, `VidbyteSDK().agents`, or harness composition instead of direct `TextModelRunner`, `ImageModelRunner`, or `VideoModelRunner` construction.
 - Base contexts should expose `build_context()` and keep file content, context items, tool calls, model responses, memory, permissions, artifacts, budget, and strategy progress metadata distinct.
-- Context items store structured meaning; `ContextManager` owns collection and compatibility conversion into existing context dataclasses. Do not add dedicated renderers, ranking, redaction, or compaction policies without a separate approved design.
+- Context items store structured meaning; `ContextManager` owns collection and compatibility conversion into existing context dataclasses. Agent-level context-window algorithms are selected with `algorithm=ContextWindow.preset.<name>` and should remain coarse SDK presets, not low-level custom compiler APIs.
 - Agents may accept default `context_items` or a `context_manager`; per-call context belongs on `AgentInput`. Call-level context must not mutate agent defaults.
 - Tools are injected into agents or strategies; avoid global mutable tool state for orchestration. Prefer `@tool` and `Tools(...)` for new public examples; keep `@vidbyte_tool`, `ToolRegistry`, and `ToolExecutor` references for compatibility notes only.
 - Middleware is injected into direct text agents with `middleware=[...]`; it is deterministic runtime policy code and must not be model-visible or included in tool specs/cards.

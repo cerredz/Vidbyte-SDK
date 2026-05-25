@@ -24,6 +24,7 @@ from vidbyte.lib.enums import ModelModality
 
 if TYPE_CHECKING:
     from vidbyte.context.manager import ContextManager
+    from vidbyte.context.window import ContextWindowAlgorithm
 
 
 class AgentStopReason(str, Enum):
@@ -140,3 +141,4 @@ class AgentSpec:
     metadata: Mapping[str, Any] = field(default_factory=dict)
     context_items: tuple[ContextItem, ...] = ()
     context_manager: ContextManager | None = None
+    algorithm: ContextWindowAlgorithm | str | None = None

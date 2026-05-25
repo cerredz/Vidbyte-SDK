@@ -12,6 +12,7 @@ from vidbyte.lib.dataclasses.context import (
     VMAOContext,
 )
 from vidbyte.context.manager import ContextManager
+from vidbyte.context.window import ContextWindow, ContextWindowAlgorithm, ToolResultAdmission
 from vidbyte.lib.dataclasses.context_items import (
     ArtifactContextItem,
     ContextItem,
@@ -38,6 +39,8 @@ __all__ = [
     "ContextPermissions",
     "ContextResponse",
     "ContextToolCall",
+    "ContextWindow",
+    "ContextWindowAlgorithm",
     "DocumentContextItem",
     "EnvironmentContextItem",
     "FileContextItem",
@@ -49,5 +52,6 @@ __all__ = [
     "TaskContextItem",
     "TextContextItem",
     "ToolCallContextItem",
+    "ToolResultAdmission",
     "VMAOContext",
 ]

@@ -9,7 +9,7 @@
 
 ## 1. Overview
 
-This feature adds the foundation for a central context management abstraction in `vidbyte-sdk`: standardized context item dataclasses, a developer-facing `ContextManager` that stores and organizes those items, and integration points so agents and harness-facing code can receive managed context without each subsystem inventing its own shape. The first PR intentionally does not add dedicated renderer classes or compaction policies; it focuses on durable context storage, collection utilities, compatibility with existing `BaseContext.build_context()`, and public imports.
+This feature adds the foundation for a central context management abstraction in `vidbyte-sdk`: standardized context item dataclasses, a developer-facing `ContextManager` that stores and organizes those items, and simple agent-level `ContextWindow` algorithm presets for common runtime context-window behavior. The first PR intentionally does not add dedicated renderer classes or custom compaction policies; it focuses on durable context storage, collection utilities, compatibility with existing `BaseContext.build_context()`, preset tool-result admission, and public imports.
 
 ---
 
@@ -19,6 +19,7 @@ This feature adds the foundation for a central context management abstraction in
 
 - Add standardized out-of-the-box context item dataclasses for common model-visible context units: files, git diffs, tasks, documents, environment state, memory, progress, artifacts, responses, and tool calls.
 - Add a central `ContextManager` abstraction that stores context items, supports simple item utilities, preserves insertion order, and can produce a compatible `StrategyContext` / `BaseAgentContext` using the existing context dataclass layer.
+- Add a minimal `ContextWindow` preset namespace so agents can opt into SDK-provided context-window algorithms through `algorithm=ContextWindow.preset.<name>`.
 - Let developers create custom context items easily through a generic `TextContextItem` and a small `ContextItem` protocol.
 - Integrate context items and context managers into `BaseContext`, `StrategyContext`, `BaseAgent`, `AgentInput`, `AgentSpec`, and `AgentRuntime` without breaking existing callers.
 - Add public re-exports through `vidbyte.context`, `vidbyte.lib.dataclasses`, and root `vidbyte` for common context management types.
@@ -28,7 +29,7 @@ This feature adds the foundation for a central context management abstraction in
 ### Non-Goals
 
 - No dedicated renderer abstraction in this PR. Existing `BaseContext.build_context()` remains the only prompt-text formatting path.
-- No context compaction rules, ranking algorithms, token-budget pruning, summarization, redaction policies, or relevance scoring in this PR.
+- No custom context compaction rules, ranking algorithms, token-budget pruning, summarization, redaction policies, or relevance scoring in this PR.
 - No model/provider-specific message rendering.
 - No file tree crawling, git subprocess invocation, workspace scanning, or live environment source collection in this PR.
 - No changes to `vidbyte.pipelines`; pipelines remain string-in/string-out and must not manage context, budget, artifacts, or item objects.
@@ -66,19 +67,20 @@ This feature therefore adds a structural foundation, not the full context-window
 12. `BaseContext` must gain a `context_items` field while preserving all existing constructor call sites.
 13. `BaseContext.build_context()` must include `context_items` through the compatibility bridge, without introducing a new renderer class.
 14. `AgentInput` must accept `context_items` and `context_manager` as explicit fields rather than requiring metadata-only plumbing.
-15. `AgentSpec` must accept default `context_items` and `context_manager` construction metadata.
-16. `BaseAgent.__init__` must accept default `context_items` and `context_manager`.
-17. `BaseAgent.fork(...)` must preserve default context items and context manager unless explicitly overridden.
+15. `AgentSpec` must accept default `context_items`, `context_manager`, and `algorithm` construction metadata.
+16. `BaseAgent.__init__` must accept default `context_items`, `context_manager`, and `algorithm`.
+17. `BaseAgent.fork(...)` must preserve default context items, context manager, and algorithm unless explicitly overridden.
 18. `BaseAgent.generate_reply(...)` must merge agent-level context items, input-level context items, and base context items into the runtime-built context.
 19. `AgentRuntime.build_context(...)` must preserve richer base context fields while adding managed context items.
-20. `Strategy` APIs must remain source compatible: strategies continue to receive `context=BaseAgentContext`.
-21. Root exports and package-local exports must include the new stable context management types.
-22. README and skill docs must document the approved foundation and explicitly state that rendering/compaction are deferred.
+20. Direct agent runtime must apply the selected context-window algorithm when admitting tool results back into model-visible provider messages.
+21. `Strategy` APIs must remain source compatible: strategies continue to receive `context=BaseAgentContext`.
+22. Root exports and package-local exports must include the new stable context management types.
+23. README and skill docs must document the approved foundation and distinguish first-party context-window presets from deferred custom rendering/compaction work.
 
 ### Non-Functional Requirements
 
 - Performance: item management must be in-memory and linear over the number of explicitly provided items; no implicit filesystem walking or git subprocess calls.
-- Scalability: large item content can exist, but this PR does not prune or summarize it. Callers remain responsible for input size until future compaction.
+- Scalability: large item content can exist, but this PR does not rank or summarize arbitrary context items. Callers remain responsible for input size until future compaction, except for the explicit `compact_tool_outputs` preset for tool-result admission.
 - Security: file content is only read when the developer explicitly calls `FileContextItem.from_path(include_content=True)` or passes content directly. No automatic secret scanning or redaction is implemented in this PR.
 - Reliability: missing files in `FileContextItem.from_path(...)` must raise ordinary filesystem exceptions at construction time rather than silently producing incomplete items.
 - Observability: `ContextManager.to_context(...)` must preserve manager metadata so callers can inspect where context came from.
@@ -368,6 +370,48 @@ class ContextManager:
 
 ---
 
+### 6.2.1 Context Window Presets
+
+**File(s):** `vidbyte/context/window.py`
+**Type:** New file
+
+#### What it does
+
+Defines the public `ContextWindow.preset.<name>` surface for SDK-provided context-window algorithms. This is intentionally a small preset API, not a custom renderer/compiler abstraction.
+
+#### Interface / API
+
+```python
+from vidbyte import Agent, ContextWindow
+
+agent = Agent(
+    name="coder",
+    system_prompt="Work carefully.",
+    tools=[lookup],
+    algorithm=ContextWindow.preset.no_raw_tool_outputs,
+)
+```
+
+Initial presets:
+
+- `ContextWindow.preset.default` / `raw_tool_outputs`: preserve existing raw tool-result admission.
+- `ContextWindow.preset.compact_tool_outputs`: admit bounded tool-result text into provider messages.
+- `ContextWindow.preset.hide_tool_outputs` / `no_raw_tool_outputs`: keep raw tool output in runtime metadata while admitting only a completion notice into provider messages.
+
+#### Logic / Algorithm
+
+1. `ContextWindow.resolve_algorithm(...)` normalizes `None`, preset objects, or preset-name strings.
+2. `BaseAgent` stores the selected algorithm and preserves it across `fork(...)`.
+3. `AgentRuntime` applies the selected algorithm when formatting non-internal tool results for the next model call.
+4. Tool-call metadata remains raw and auditable; only model-visible provider messages are transformed.
+
+#### Edge Cases & Error Handling
+
+- Unknown preset names raise `ValueError` at agent construction/runtime normalization.
+- The default preset is backward compatible and admits raw tool output exactly as before.
+
+---
+
 ### 6.3 Existing Context Dataclasses
 
 **File(s):** `vidbyte/lib/dataclasses/context.py`
@@ -416,14 +460,14 @@ Makes stable context management types importable from the public context package
 ```python
 from vidbyte.context import ContextManager, FileContextItem, TaskContextItem
 from vidbyte.lib.dataclasses import ContextItem, TextContextItem
-from vidbyte import ContextManager, DocumentContextItem
+from vidbyte import ContextManager, ContextWindow, DocumentContextItem
 ```
 
 #### Logic / Algorithm
 
-1. Re-export all new dataclasses and `ContextManager`.
+1. Re-export all new dataclasses, `ContextManager`, and `ContextWindow` algorithm preset types.
 2. Keep `__all__` sorted consistently with existing style.
-3. Avoid exporting future renderer/compaction names.
+3. Avoid exporting future custom renderer/compaction names.
 
 #### Edge Cases & Error Handling
 
@@ -461,13 +505,15 @@ class AgentSpec:
     metadata: Mapping[str, Any] = field(default_factory=dict)
     context_items: tuple[ContextItem, ...] = ()
     context_manager: ContextManager | None = None
+    algorithm: ContextWindowAlgorithm | str | None = None
 ```
 
 #### Logic / Algorithm
 
 1. Add optional fields with defaults at the end of each dataclass to preserve positional compatibility.
 2. Use tuple defaults for item sequences.
-3. Re-export unchanged from `vidbyte.agents.types`.
+3. Allow `AgentSpec.algorithm` to carry a `ContextWindow.preset.<name>` value or a preset-name string.
+4. Re-export unchanged from `vidbyte.agents.types`.
 
 #### Edge Cases & Error Handling
 
@@ -497,6 +543,7 @@ class BaseAgent:
         ...
         context_items: Sequence[ContextItem] = (),
         context_manager: ContextManager | None = None,
+        algorithm: ContextWindowAlgorithm | str | None = None,
         ...
     ) -> None: ...
 
@@ -506,6 +553,7 @@ class BaseAgent:
         ...
         context_items: Sequence[ContextItem] | None = None,
         context_manager: ContextManager | None = None,
+        algorithm: ContextWindowAlgorithm | str | None = None,
     ) -> BaseAgent: ...
 ```
 
@@ -513,10 +561,11 @@ class BaseAgent:
 
 1. Store `self.context_items` as a tuple.
 2. Store `self.context_manager` as provided or create a manager from `context_items` only when needed.
-3. `_normalize_input(...)` returns prompt, modality, metadata, input context items, and input context manager.
-4. `_build_context(...)` receives input-level items/managers and passes them to `AgentRuntime.build_context(...)`.
-5. `fork(...)` preserves or overrides context settings.
-6. `card()` may include a lightweight `context_item_count` metadata value, but must not expose full context item content.
+3. Store `self.algorithm` as a normalized `ContextWindowAlgorithm`.
+4. `_normalize_input(...)` returns prompt, modality, metadata, input context items, and input context manager.
+5. `_build_context(...)` receives input-level items/managers and passes them to `AgentRuntime.build_context(...)`.
+6. `fork(...)` preserves or overrides context settings and algorithm.
+7. `card()` may include a lightweight `context_item_count` metadata value, but must not expose full context item content.
 
 #### Edge Cases & Error Handling
 
@@ -533,7 +582,7 @@ class BaseAgent:
 
 #### What it does
 
-Uses `ContextManager` as the central assembly path when building `BaseAgentContext`.
+Uses `ContextManager` as the central assembly path when building `BaseAgentContext` and applies the selected context-window algorithm when admitting runtime tool results into provider messages.
 
 #### Interface / API
 
@@ -563,6 +612,7 @@ def build_context(
 5. Preserve base context fields: file paths, strategy metadata, tool calls, responses, budget, artifacts, memory, permissions, metadata, and context items.
 6. Merge metadata in deterministic order: base context metadata, agent metadata, input metadata, runtime-derived metadata.
 7. Return `BaseAgentContext`, not a new context class.
+8. During the direct tool loop, transform only the model-visible tool-result message through `self.algorithm.model_visible_tool_result(...)`; keep raw `ToolCallContext` metadata intact.
 
 #### Edge Cases & Error Handling
 
@@ -794,13 +844,14 @@ Complete list of every file that will be created, modified, or deleted:
 | CREATE | `docs/design/context-management-foundation.md` | Approved design doc for this feature |
 | CREATE | `vidbyte/lib/dataclasses/context_items.py` | Standardized context item dataclasses and protocol |
 | CREATE | `vidbyte/context/manager.py` | Central `ContextManager` abstraction |
+| CREATE | `vidbyte/context/window.py` | Public `ContextWindow.preset.<name>` algorithm surface |
 | CREATE | `tests/test_context_management.py` | Unit tests for items, manager, exports, and context bridging |
 | MODIFY | `vidbyte/lib/dataclasses/context.py` | Add `context_items` to `BaseContext` and compatibility rendering through existing `build_context()` |
 | MODIFY | `vidbyte/lib/dataclasses/agents.py` | Add context item/manager fields to `AgentInput` and `AgentSpec` |
 | MODIFY | `vidbyte/lib/dataclasses/__init__.py` | Re-export new context item dataclasses |
-| MODIFY | `vidbyte/context/__init__.py` | Re-export `ContextManager` and context item dataclasses |
-| MODIFY | `vidbyte/agents/base.py` | Accept default context items/manager and merge per-call context |
-| MODIFY | `vidbyte/agents/runtime.py` | Build `BaseAgentContext` through the new context manager foundation |
+| MODIFY | `vidbyte/context/__init__.py` | Re-export `ContextManager`, `ContextWindow`, and context item dataclasses |
+| MODIFY | `vidbyte/agents/base.py` | Accept default context items/manager/algorithm and merge per-call context |
+| MODIFY | `vidbyte/agents/runtime.py` | Build `BaseAgentContext` through the new context manager foundation and apply context-window algorithms to tool-result admission |
 | MODIFY | `vidbyte/__init__.py` | Add root convenience exports |
 | MODIFY | `tests/test_context_dataclasses.py` | Cover `context_items` compatibility in existing context build behavior |
 | MODIFY | `tests/test_agent_base.py` | Cover agent default and per-call context propagation |
@@ -823,10 +874,13 @@ Complete list of every file that will be created, modified, or deleted:
 - `tests/test_context_management.py` -> `test_context_manager_to_context_bridges_standard_items`: verifies tasks/documents/files/memory/responses/tool calls become compatible `StrategyContext` fields.
 - `tests/test_context_management.py` -> `test_context_manager_merges_base_context`: verifies base context fields are preserved and item-derived fields are appended.
 - `tests/test_context_management.py` -> `test_public_imports`: verifies imports from `vidbyte`, `vidbyte.context`, and `vidbyte.lib.dataclasses`.
+- `tests/test_context_management.py` -> `test_context_window_presets_are_named_algorithms`: verifies `ContextWindow.preset.<name>` and string resolution.
 - `tests/test_context_dataclasses.py` -> add coverage that `BaseContext(context_items=[...]).build_context()` includes item text through the compatibility path.
 - `tests/test_agent_base.py` -> add coverage that `BaseAgent(context_items=[...])` passes items into strategy context.
 - `tests/test_agent_base.py` -> add coverage that `AgentInput(context_items=[...])` passes per-call items without mutating agent defaults.
+- `tests/test_agent_base.py` -> add coverage that `BaseAgent(algorithm=ContextWindow.preset.no_raw_tool_outputs)` stores and preserves the selected preset across forks.
 - `tests/test_agent_runtime.py` -> update context construction test to expect metadata, strategy metadata, existing tool calls, memory/artifacts/responses/permissions, and context items to be preserved.
+- `tests/test_agent_runtime.py` -> add coverage that the no-raw-tool-output algorithm hides raw output from provider messages while preserving raw output in runtime metadata.
 
 ### Integration Tests
 
@@ -840,6 +894,7 @@ Complete list of every file that will be created, modified, or deleted:
 2. Create an `Agent` with default `TaskContextItem`, run it with a fake strategy, and verify the strategy receives a `BaseAgentContext` containing the item.
 3. Create an `AgentInput` with a `FileContextItem`, run it with a fake strategy, and verify the agent default items are unchanged after the call.
 4. Import `ContextManager`, `FileContextItem`, and `TaskContextItem` from root `vidbyte`.
+5. Create an agent with `algorithm=ContextWindow.preset.no_raw_tool_outputs`, run one tool call, and verify the second provider request does not contain raw tool output.
 
 ---
 
