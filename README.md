@@ -176,6 +176,43 @@ agent = Agent(
 )
 ```
 
+Reasoning traces insert a deterministic operational note after each non-terminal runtime iteration. Choose a size preset:
+
+```python
+from vidbyte import ContextWindow
+
+agent = Agent(
+    name="trace-worker",
+    system_prompt="Use tools when they help.",
+    runner=my_runner,
+    tools=[lookup_metric],
+    algorithm=ContextWindow.preset.reasoning_trace_medium,
+)
+
+# Custom trace size
+agent = Agent(
+    name="detailed-worker",
+    system_prompt="Use tools when they help.",
+    runner=my_runner,
+    tools=[lookup_metric],
+    algorithm=ContextWindow.preset.reasoning_trace(size="large"),
+)
+```
+
+Plan-then-implement creates a plan artifact before normal execution begins:
+
+```python
+from vidbyte import ContextWindow
+
+agent = Agent(
+    name="planner",
+    system_prompt="Plan before acting.",
+    runner=my_runner,
+    tools=[edit_tool],
+    algorithm=ContextWindow.preset.plan_then_implement,
+)
+```
+
 Per-call context can be supplied with `AgentInput` without mutating the agent's
 default context:
 

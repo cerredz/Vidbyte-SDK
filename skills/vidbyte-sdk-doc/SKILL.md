@@ -548,8 +548,9 @@ Context management rules:
 - `ContextManager` owns item collection, ordered utilities, and conversion into existing context dataclass fields.
 - Keep context-window presets in `vidbyte/context/presets.py`, algorithm implementations under `vidbyte/context/algorithms/`, and `vidbyte/context/window.py` as the thin `ContextWindow.preset.<name>` namespace.
 - Agents may receive default `context_items`/`context_manager`; per-call context belongs on `AgentInput`.
-- Agents may receive `algorithm=ContextWindow.preset.<name>` to opt into SDK-provided context-window behavior. Initial presets focus on tool-result admission between model calls, including raw, compacted, and hidden raw tool outputs.
+- Agents may receive `algorithm=ContextWindow.preset.<name>` to opt into SDK-provided context-window behavior. Initial presets focus on tool-result admission between model calls, including raw, compacted, and hidden raw tool outputs. Lifecycle presets include `reasoning_trace_small`, `reasoning_trace_medium`, `reasoning_trace_large`, and `plan_then_implement`.
 - Rich custom renderers, ranking, redaction, summarization, and open-ended compaction policies are not part of the foundation layer and require a separate approved design.
+- Follow `skills/vidbyte-sdk/context-management.md` and `skills/vidbyte-sdk/context-window-algorithms.md` when adding or modifying context-window algorithms.
 
 Budget and permission presets:
 
