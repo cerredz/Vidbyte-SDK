@@ -123,7 +123,7 @@ The main design decision is to keep context items data-shaped and manager-owned.
 
 ### 6.1 Context Item Dataclasses
 
-**File(s):** `vidbyte/lib/dataclasses/context_items.py`
+**File(s):** `vidbyte/context/primitives.py`
 **Type:** New file
 
 #### What it does
@@ -335,7 +335,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from vidbyte.lib.dataclasses.context import BaseContext, StrategyContext
-from vidbyte.lib.dataclasses.context_items import ContextItem
+from vidbyte.context.primitives import ContextItem
 
 
 @dataclass(slots=True)
@@ -842,9 +842,12 @@ Complete list of every file that will be created, modified, or deleted:
 | Action | File Path | Reason |
 |--------|-----------|--------|
 | CREATE | `docs/design/context-management-foundation.md` | Approved design doc for this feature |
-| CREATE | `vidbyte/lib/dataclasses/context_items.py` | Standardized context item dataclasses and protocol |
+| CREATE | `vidbyte/context/primitives.py` | Standardized context item dataclasses and protocol |
+| CREATE | `vidbyte/lib/dataclasses/context_items.py` | Compatibility re-export for older imports |
 | CREATE | `vidbyte/context/manager.py` | Central `ContextManager` abstraction |
 | CREATE | `vidbyte/context/window.py` | Public `ContextWindow.preset.<name>` algorithm surface |
+| CREATE | `vidbyte/context/presets.py` | SDK-provided context-window preset registry |
+| CREATE | `vidbyte/context/algorithms/` | Runtime context-window algorithm implementations |
 | CREATE | `tests/test_context_management.py` | Unit tests for items, manager, exports, and context bridging |
 | MODIFY | `vidbyte/lib/dataclasses/context.py` | Add `context_items` to `BaseContext` and compatibility rendering through existing `build_context()` |
 | MODIFY | `vidbyte/lib/dataclasses/agents.py` | Add context item/manager fields to `AgentInput` and `AgentSpec` |

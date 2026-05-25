@@ -1,19 +1,7 @@
 from __future__ import annotations
 
-from vidbyte.lib.dataclasses.context import (
-    BaseAgentContext,
-    BaseContext,
-    ContextArtifact,
-    ContextBudget,
-    ContextPermissions,
-    ContextResponse,
-    ContextToolCall,
-    StrategyContext,
-    VMAOContext,
-)
-from vidbyte.context.manager import ContextManager
-from vidbyte.context.window import ContextWindow, ContextWindowAlgorithm, ToolResultAdmission
-from vidbyte.lib.dataclasses.context_items import (
+from vidbyte.context.algorithms import ContextWindowAlgorithm, ToolResultAdmission
+from vidbyte.context.primitives import (
     ArtifactContextItem,
     ContextItem,
     DocumentContextItem,
@@ -27,6 +15,20 @@ from vidbyte.lib.dataclasses.context_items import (
     TextContextItem,
     ToolCallContextItem,
 )
+from vidbyte.lib.dataclasses.context import (
+    BaseAgentContext,
+    BaseContext,
+    ContextArtifact,
+    ContextBudget,
+    ContextPermissions,
+    ContextResponse,
+    ContextToolCall,
+    StrategyContext,
+    VMAOContext,
+)
+from vidbyte.context.manager import ContextManager
+from vidbyte.context.presets import ContextWindowPresets
+from vidbyte.context.window import ContextWindow
 
 __all__ = [
     "ArtifactContextItem",
@@ -41,6 +43,7 @@ __all__ = [
     "ContextToolCall",
     "ContextWindow",
     "ContextWindowAlgorithm",
+    "ContextWindowPresets",
     "DocumentContextItem",
     "EnvironmentContextItem",
     "FileContextItem",

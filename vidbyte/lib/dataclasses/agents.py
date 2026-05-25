@@ -19,11 +19,11 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Mapping
 
-from vidbyte.lib.dataclasses.context_items import ContextItem
 from vidbyte.lib.enums import ModelModality
 
 if TYPE_CHECKING:
     from vidbyte.context.manager import ContextManager
+    from vidbyte.context.primitives import ContextItem
     from vidbyte.context.window import ContextWindowAlgorithm
 
 

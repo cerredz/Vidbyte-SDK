@@ -27,10 +27,12 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
-from vidbyte.lib.dataclasses.context_items import ContextItem
 from vidbyte.lib.enums import BudgetPreset, PermissionPreset
+
+if TYPE_CHECKING:
+    from vidbyte.context.primitives import ContextItem
 
 
 @dataclass(frozen=True, slots=True)

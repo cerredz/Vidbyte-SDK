@@ -37,7 +37,7 @@ from vidbyte.lib.dataclasses.context import (
     StrategyContext,
     VMAOContext,
 )
-from vidbyte.lib.dataclasses.context_items import (
+from vidbyte.context.primitives import (
     ArtifactContextItem,
     ContextItem,
     DocumentContextItem,

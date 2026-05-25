@@ -18,7 +18,9 @@ from vidbyte.context import (
     TextContextItem,
     ToolCallContextItem,
 )
+from vidbyte.context.primitives import TextContextItem as PrimitiveTextContextItem
 from vidbyte.lib.dataclasses import ContextItem, ContextResponse, StrategyContext
+from vidbyte.lib.dataclasses.context_items import TextContextItem as LegacyTextContextItem
 
 
 class ContextManagementTests(unittest.TestCase):
@@ -113,6 +115,8 @@ class ContextManagementTests(unittest.TestCase):
         self.assertIs(RootContextManager, ContextManager)
         self.assertIs(RootContextWindow, ContextWindow)
         self.assertIs(RootFileContextItem, FileContextItem)
+        self.assertIs(PrimitiveTextContextItem, TextContextItem)
+        self.assertIs(LegacyTextContextItem, TextContextItem)
         self.assertTrue(isinstance(TextContextItem(title="x", content="y"), ContextItem))
 
     def test_context_window_presets_are_named_algorithms(self) -> None:

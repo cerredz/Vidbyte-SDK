@@ -140,7 +140,8 @@ instead of assembling raw prompt strings yourself. Use `ContextWindow` presets
 when you want an agent to run with an SDK-provided context-window algorithm.
 
 ```python
-from vidbyte import Agent, ContextManager, FileContextItem, TaskContextItem
+from vidbyte import Agent, ContextManager
+from vidbyte.context.primitives import FileContextItem, TaskContextItem
 
 context = ContextManager([
     TaskContextItem(
@@ -179,7 +180,8 @@ Per-call context can be supplied with `AgentInput` without mutating the agent's
 default context:
 
 ```python
-from vidbyte import AgentInput, TextContextItem
+from vidbyte import AgentInput
+from vidbyte.context.primitives import TextContextItem
 
 reply = await agent.arun(
     AgentInput(

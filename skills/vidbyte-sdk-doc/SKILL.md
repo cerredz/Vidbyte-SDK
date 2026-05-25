@@ -46,7 +46,7 @@ vidbyte/
 |-- __init__.py          Root public exports.
 |-- client.py            VidbyteSDK namespace client.
 |-- agents/              Agent actors, registry, modality-facing input types, MCP attach mixin.
-|-- context/             Public context manager and re-exports from central dataclasses.
+|-- context/             Public context primitives, manager, presets, and context-window algorithms.
 |-- harnesses/           Minimal namespace for future/custom harness integrations.
 |-- prompts/             JSON-backed prompt catalog and strategy prompt bundles.
 |-- providers/           Provider adapters and provider selection helpers.
@@ -505,7 +505,10 @@ Primary files:
 
 - `vidbyte/context/__init__.py`
 - `vidbyte/context/manager.py`
+- `vidbyte/context/primitives.py`
+- `vidbyte/context/presets.py`
 - `vidbyte/context/window.py`
+- `vidbyte/context/algorithms/`
 - `vidbyte/lib/dataclasses/`
 - `vidbyte/strategies/types.py`
 - `vidbyte/tools/types.py`
@@ -513,7 +516,7 @@ Primary files:
 
 Central rule:
 
-- Dataclass definitions live under `vidbyte/lib/dataclasses/`.
+- Shared infrastructure dataclasses live under `vidbyte/lib/dataclasses/`; public context item primitives live under `vidbyte/context/primitives.py`.
 - Package-local `types.py` modules and package `__init__` files re-export stable contracts.
 - Prefer extending central dataclasses rather than duplicating type definitions in feature packages.
 
@@ -541,7 +544,9 @@ Context dataclasses:
 Context management rules:
 
 - Context items store structured meaning; the current compatibility path renders through existing `BaseContext.build_context()`.
+- Import context item primitives from `vidbyte.context.primitives`; `vidbyte.lib.dataclasses.context_items` is a compatibility re-export only.
 - `ContextManager` owns item collection, ordered utilities, and conversion into existing context dataclass fields.
+- Keep context-window presets in `vidbyte/context/presets.py`, algorithm implementations under `vidbyte/context/algorithms/`, and `vidbyte/context/window.py` as the thin `ContextWindow.preset.<name>` namespace.
 - Agents may receive default `context_items`/`context_manager`; per-call context belongs on `AgentInput`.
 - Agents may receive `algorithm=ContextWindow.preset.<name>` to opt into SDK-provided context-window behavior. Initial presets focus on tool-result admission between model calls, including raw, compacted, and hidden raw tool outputs.
 - Rich custom renderers, ranking, redaction, summarization, and open-ended compaction policies are not part of the foundation layer and require a separate approved design.

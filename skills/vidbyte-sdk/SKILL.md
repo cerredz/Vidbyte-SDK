@@ -10,6 +10,9 @@ vidbyte/
 |-- agents/
 |-- context/
 |   |-- manager.py
+|   |-- primitives.py
+|   |-- presets.py
+|   |-- algorithms/
 |   `-- window.py
 |-- harnesses/
 |   `-- client.py
