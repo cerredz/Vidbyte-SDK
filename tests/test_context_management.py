@@ -124,6 +124,36 @@ class ContextManagementTests(unittest.TestCase):
         self.assertEqual(ContextWindow.preset.no_raw_tool_outputs.name, "hide_tool_outputs")
         self.assertEqual(ContextWindow.resolve_algorithm("compact_tool_outputs").name, "compact_tool_outputs")
 
+    def test_lifecycle_context_window_presets_are_named_algorithms(self) -> None:
+        self.assertEqual(ContextWindow.preset.reasoning_trace_small.name, "reasoning_trace_small")
+        self.assertEqual(ContextWindow.preset.reasoning_trace_medium.name, "reasoning_trace_medium")
+        self.assertEqual(ContextWindow.preset.reasoning_trace_large.name, "reasoning_trace_large")
+        self.assertEqual(ContextWindow.preset.plan_then_implement.name, "plan_then_implement")
+
+    def test_reasoning_trace_factory_returns_algorithm(self) -> None:
+        from vidbyte.context.algorithms import ContextWindowAlgorithm
+
+        algo = ContextWindow.preset.reasoning_trace(size="large")
+        self.assertIsInstance(algo, ContextWindowAlgorithm)
+        self.assertEqual(algo.reasoning_trace.size.value, "large")
+
+    def test_plan_then_implement_factory_returns_algorithm(self) -> None:
+        from vidbyte.context.algorithms import ContextWindowAlgorithm
+
+        algo = ContextWindow.preset.plan_then_implement_with(artifact_name="Strategy")
+        self.assertIsInstance(algo, ContextWindowAlgorithm)
+        self.assertEqual(algo.plan_then_implement.artifact_name, "Strategy")
+
+    def test_resolve_reasoning_trace_preset_by_string(self) -> None:
+        algo = ContextWindow.resolve_algorithm("reasoning_trace_small")
+        self.assertEqual(algo.name, "reasoning_trace_small")
+        self.assertIsNotNone(algo.reasoning_trace)
+
+    def test_resolve_plan_then_implement_preset_by_string(self) -> None:
+        algo = ContextWindow.resolve_algorithm("plan_then_implement")
+        self.assertEqual(algo.name, "plan_then_implement")
+        self.assertIsNotNone(algo.plan_then_implement)
+
 
 if __name__ == "__main__":
     unittest.main()

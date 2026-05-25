@@ -499,6 +499,220 @@ class AgentRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.metadata["iteration_count"], 2)
         self.assertEqual(runner.calls[1]["kwargs"]["messages"][0]["content"], "partial work")
 
+    async def test_runtime_appends_reasoning_trace_after_non_terminal_assistant_iteration(self) -> None:
+        runner = FakeRunner(
+            [
+                FakeResponse("partial work", {}),
+                FakeResponse(
+                    "",
+                    {"output": [{"type": "function_call", "name": "isDone", "arguments": '{"final_answer": "done"}'}]},
+                ),
+            ]
+        )
+        runtime = AgentRuntime(
+            agent_name="worker",
+            system_prompt="Work.",
+            tools=Tools(),
+            permission_policy=PermissionPolicy(),
+            algorithm="reasoning_trace_small",
+        )
+        context = runtime.build_context(
+            "task",
+            base_context=None,
+            history=(),
+            agent_history=(),
+            agent_metadata={},
+            existing_tool_calls=(),
+        )
+
+        result = await runtime.arun(
+            "task",
+            runner=runner,
+            context=context,
+            provider="openai",
+            invoke_runner=invoke_runner,
+            runner_output_text=runner_output_text,
+            runner_output_metadata=runner_output_metadata,
+        )
+
+        self.assertEqual(result.output, "done")
+        self.assertEqual(result.metadata["context_window_reasoning_trace_count"], 1)
+        messages = runner.calls[1]["kwargs"]["messages"]
+        self.assertEqual(len(messages), 2)
+        self.assertEqual(messages[0]["content"], "partial work")
+        self.assertIn("Context window reasoning trace", messages[1]["content"])
+
+    async def test_runtime_appends_reasoning_trace_after_tool_iteration(self) -> None:
+        @tool
+        def lookup() -> str:
+            return "result"
+
+        runner = FakeRunner(
+            [
+                FakeResponse(
+                    "",
+                    {"output": [{"type": "function_call", "name": "lookup", "arguments": "{}"}]},
+                ),
+                FakeResponse(
+                    "",
+                    {"output": [{"type": "function_call", "name": "isDone", "arguments": '{"final_answer": "done"}'}]},
+                ),
+            ]
+        )
+        runtime = AgentRuntime(
+            agent_name="worker",
+            system_prompt="Work.",
+            tools=Tools([lookup]),
+            permission_policy=PermissionPolicy(),
+            algorithm="reasoning_trace_medium",
+        )
+        context = runtime.build_context(
+            "task",
+            base_context=None,
+            history=(),
+            agent_history=(),
+            agent_metadata={},
+            existing_tool_calls=(),
+        )
+
+        result = await runtime.arun(
+            "task",
+            runner=runner,
+            context=context,
+            provider="openai",
+            invoke_runner=invoke_runner,
+            runner_output_text=runner_output_text,
+            runner_output_metadata=runner_output_metadata,
+        )
+
+        self.assertEqual(result.output, "done")
+        self.assertEqual(result.metadata["context_window_reasoning_trace_count"], 1)
+        messages = runner.calls[1]["kwargs"]["messages"]
+        trace_messages = [m for m in messages if "Context window reasoning trace" in str(m.get("content", ""))]
+        self.assertEqual(len(trace_messages), 1)
+
+    async def test_runtime_plan_then_implement_attaches_plan_artifact(self) -> None:
+        runner = FakeRunner(
+            [
+                FakeResponse("Plan: step 1, step 2", {}),
+                FakeResponse(
+                    "",
+                    {"output": [{"type": "function_call", "name": "isDone", "arguments": '{"final_answer": "done"}'}]},
+                ),
+            ]
+        )
+        runtime = AgentRuntime(
+            agent_name="planner",
+            system_prompt="Plan then implement.",
+            tools=Tools(),
+            permission_policy=PermissionPolicy(),
+            algorithm="plan_then_implement",
+        )
+        context = runtime.build_context(
+            "task",
+            base_context=None,
+            history=(),
+            agent_history=(),
+            agent_metadata={},
+            existing_tool_calls=(),
+        )
+
+        result = await runtime.arun(
+            "task",
+            runner=runner,
+            context=context,
+            provider="openai",
+            invoke_runner=invoke_runner,
+            runner_output_text=runner_output_text,
+            runner_output_metadata=runner_output_metadata,
+        )
+
+        self.assertEqual(result.output, "done")
+        self.assertIn("context_window_plan_artifact", result.metadata)
+        self.assertEqual(result.metadata["context_window_plan_artifact"], "Plan")
+        self.assertFalse(result.metadata["context_window_plan_fallback_used"])
+        self.assertIn("Plan: step 1", runner.calls[1]["kwargs"]["system"])
+
+    async def test_plan_then_implement_fallback_on_empty_output(self) -> None:
+        runner = FakeRunner(
+            [
+                FakeResponse("", {}),
+                FakeResponse(
+                    "",
+                    {"output": [{"type": "function_call", "name": "isDone", "arguments": '{"final_answer": "done"}'}]},
+                ),
+            ]
+        )
+        runtime = AgentRuntime(
+            agent_name="planner",
+            system_prompt="Plan then implement.",
+            tools=Tools(),
+            permission_policy=PermissionPolicy(),
+            algorithm="plan_then_implement",
+        )
+        context = runtime.build_context(
+            "task",
+            base_context=None,
+            history=(),
+            agent_history=(),
+            agent_metadata={},
+            existing_tool_calls=(),
+        )
+
+        result = await runtime.arun(
+            "task",
+            runner=runner,
+            context=context,
+            provider="openai",
+            invoke_runner=invoke_runner,
+            runner_output_text=runner_output_text,
+            runner_output_metadata=runner_output_metadata,
+        )
+
+        self.assertEqual(result.output, "done")
+        self.assertTrue(result.metadata["context_window_plan_fallback_used"])
+
+    async def test_default_algorithm_does_not_insert_lifecycle_messages(self) -> None:
+        runner = FakeRunner(
+            [
+                FakeResponse("partial", {}),
+                FakeResponse(
+                    "",
+                    {"output": [{"type": "function_call", "name": "isDone", "arguments": '{"final_answer": "done"}'}]},
+                ),
+            ]
+        )
+        runtime = AgentRuntime(
+            agent_name="worker",
+            system_prompt="Work.",
+            tools=Tools(),
+            permission_policy=PermissionPolicy(),
+        )
+        context = runtime.build_context(
+            "task",
+            base_context=None,
+            history=(),
+            agent_history=(),
+            agent_metadata={},
+            existing_tool_calls=(),
+        )
+
+        result = await runtime.arun(
+            "task",
+            runner=runner,
+            context=context,
+            provider="openai",
+            invoke_runner=invoke_runner,
+            runner_output_text=runner_output_text,
+            runner_output_metadata=runner_output_metadata,
+        )
+
+        self.assertEqual(result.output, "done")
+        self.assertEqual(result.metadata["context_window_reasoning_trace_count"], 0)
+        messages = runner.calls[1]["kwargs"]["messages"]
+        trace_messages = [m for m in messages if "Context window reasoning trace" in str(m.get("content", ""))]
+        self.assertEqual(len(trace_messages), 0)
+
 
 if __name__ == "__main__":
     unittest.main()
