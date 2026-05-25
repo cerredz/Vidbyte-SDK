@@ -40,9 +40,12 @@ class CaptureStrategy(BaseStrategy):
 
     def __init__(self) -> None:
         self.tools = ()
+        self.context_tool_names = ()
 
     async def arun(self, prompt: str, **kwargs: object) -> StrategyResult:
         self.tools = tuple(kwargs.get("tools", ()))
+        context = kwargs.get("context")
+        self.context_tool_names = tuple(tool.name for tool in getattr(context, "tools", ()))
         return StrategyResult(output=prompt, strategy_name=self.name)
 
 
@@ -167,6 +170,7 @@ class AgentToolLoopTests(unittest.IsolatedAsyncioTestCase):
         await agent.arun("task")
 
         self.assertEqual(tuple(tool.name for tool in strategy.tools), ("lookup",))
+        self.assertEqual(strategy.context_tool_names, ("lookup",))
 
 
 if __name__ == "__main__":

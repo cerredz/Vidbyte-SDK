@@ -4,8 +4,11 @@ import unittest
 
 from vidbyte.agents import BaseAgent
 from vidbyte.agents.base import ConfiguredAgentRunner
+from vidbyte.lib.config import ModelProvider
 from vidbyte.middleware import AgentMiddleware
-from vidbyte.strategies import BaseAgentContext, BaseStrategy, StrategyContext, StrategyResult
+from vidbyte.lib.errors import AgentExecutionError, ConfigurationError
+from vidbyte.lib.runners import TextModelResponse
+from vidbyte.strategies import BaseAgentContext, BaseStrategy, ChainOfThoughtStrategy, StrategyChain, StrategyContext, StrategyResult
 from vidbyte.tools import ToolSpec
 
 
@@ -49,6 +52,30 @@ class FakeMiddleware(AgentMiddleware):
     pass
 
 
+class AppendStrategy(BaseStrategy):
+    def __init__(self, name: str, suffix: str) -> None:
+        self.name = name
+        self.suffix = suffix
+        self.seen_prompts: list[str] = []
+
+    async def arun(self, prompt: str, **kwargs: object) -> StrategyResult:
+        self.seen_prompts.append(prompt)
+        context = kwargs.get("context")
+        self.last_context = context
+        return StrategyResult(output=f"{prompt}{self.suffix}", strategy_name=self.name)
+
+
+class TextRunner:
+    def __init__(self) -> None:
+        self.prompts: list[str] = []
+        self.systems: list[str | None] = []
+
+    def run(self, prompt: str, *, system: str | None = None, **_: object) -> TextModelResponse:
+        self.prompts.append(prompt)
+        self.systems.append(system)
+        return TextModelResponse(provider=ModelProvider.OPENAI, model="fake", text="Final answer: OK", raw={})
+
+
 class AgentBaseTests(unittest.IsolatedAsyncioTestCase):
     async def test_card_and_generate_reply_pass_tools_and_context(self) -> None:
         strategy = EchoStrategy()
@@ -75,7 +102,45 @@ class AgentBaseTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(strategy.last_context, BaseAgentContext)
         self.assertEqual(strategy.last_context.agent_name, None)
         self.assertEqual(strategy.last_context.strategy_metadata, {})
-        self.assertEqual(tuple(tool.name for tool in strategy.last_context.tools), ("lookup", "isDone"))
+        self.assertEqual(tuple(tool.name for tool in strategy.last_context.tools), ("lookup",))
+        self.assertIn("Work carefully.", strategy.last_context.system_prompt)
+        self.assertNotIn("agentic loop", strategy.last_context.system_prompt)
+
+    async def test_agent_accepts_strategies_sequence_and_returns_chain_result(self) -> None:
+        first = AppendStrategy("first", "-a")
+        second = AppendStrategy("second", "-b")
+        agent = BaseAgent(name="worker", system_prompt="Work.", strategies=[first, second])
+
+        reply = await agent.arun("task")
+
+        self.assertIsInstance(agent.strategy, StrategyChain)
+        self.assertEqual(reply.content, "task-a-b")
+        self.assertEqual(reply.metadata["strategy"], "strategy_chain")
+        self.assertEqual(reply.metadata["stage_names"], ("first", "second"))
+        self.assertEqual(first.seen_prompts, ["task"])
+        self.assertEqual(second.seen_prompts, ["task-a"])
+
+    async def test_agent_uses_single_strategy_from_strategies_sequence(self) -> None:
+        strategy = EchoStrategy()
+        agent = BaseAgent(name="worker", system_prompt="Work.", strategies=[strategy])
+
+        reply = await agent.arun("task")
+
+        self.assertIs(agent.strategy, strategy)
+        self.assertEqual(reply.content, "reply:task")
+
+    async def test_agent_rejects_strategy_and_strategies_together(self) -> None:
+        with self.assertRaises(ConfigurationError):
+            BaseAgent(
+                name="worker",
+                system_prompt="Work.",
+                strategy=EchoStrategy(),
+                strategies=[EchoStrategy()],
+            )
+
+    async def test_agent_rejects_empty_strategies(self) -> None:
+        with self.assertRaises(ConfigurationError):
+            BaseAgent(name="worker", system_prompt="Work.", strategies=[])
 
     async def test_runner_config_tool_helpers_and_fork(self) -> None:
         strategy = EchoStrategy()
@@ -128,6 +193,29 @@ class AgentBaseTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(reply.metadata["modality"], "text")
         self.assertIn("Direct system.", runner.system)
         self.assertIn("agentic loop", runner.system)
+
+    async def test_sync_strategy_runs_through_agent_async_path_without_agentic_prompt(self) -> None:
+        runner = TextRunner()
+        agent = BaseAgent(
+            name="reasoner",
+            system_prompt="Reason directly.",
+            strategy=ChainOfThoughtStrategy(),
+            runner=runner,
+        )
+
+        reply = await agent.arun("task")
+
+        self.assertEqual(reply.metadata["strategy"], "chain_of_thought")
+        self.assertEqual(reply.content, "Final answer: OK")
+        self.assertEqual(len(runner.prompts), 1)
+        self.assertTrue(runner.systems)
+        self.assertIsNone(runner.systems[0])
+
+    async def test_no_strategy_still_requires_executable_runner(self) -> None:
+        agent = BaseAgent(name="direct", system_prompt="Direct system.")
+
+        with self.assertRaises(AgentExecutionError):
+            await agent.generate_reply("task")
 
 
 if __name__ == "__main__":

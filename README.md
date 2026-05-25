@@ -79,6 +79,43 @@ reply = await agent.arun("Draft a concise release note")
 For custom agents, pass an explicit `system_prompt`, optional reasoning strategy, modality, model config, runner, and tools into `Agent` or `BaseAgent`; then pass those agents into multi-agent strategies.
 Semantic labels such as roles belong in agent metadata when callers need them.
 
+## Strategy Chains
+
+Agents without a strategy run the default agentic tool loop. Agents with `strategy=` or `strategies=[...]` bypass that loop and execute the configured prompt-engineering recipe directly.
+
+Use `strategy=` for one technique:
+
+```python
+from vidbyte import Agent
+from vidbyte.strategies import StepBackStrategy
+
+agent = Agent(
+    name="explainer",
+    system_prompt="Explain from first principles.",
+    runner=my_runner,
+    strategy=StepBackStrategy(),
+)
+```
+
+Use `strategies=[...]` to run techniques sequentially. Only the previous strategy's output text is passed to the next strategy.
+
+```python
+from vidbyte import Agent
+from vidbyte.strategies import ChainOfDraftStrategy, StepBackStrategy
+
+agent = Agent(
+    name="writer",
+    system_prompt="Write precise release notes.",
+    runner=my_runner,
+    strategies=[
+        StepBackStrategy(),
+        ChainOfDraftStrategy(),
+    ],
+)
+```
+
+For consensus, voting, or multi-agent orchestration, use explicit multi-agent strategies such as `MultiAgentConsensusStrategy`; a plain `strategies=[...]` list means output-only sequential chaining.
+
 ## Context Objects
 
 Context dataclasses are exposed through `vidbyte.context` and centralized internally under `vidbyte.lib.dataclasses`.
@@ -121,7 +158,7 @@ agent = Agent(
 reply = await agent.arun("Find where tools are formatted.")
 ```
 
-Agents run direct tool use through an internal runtime loop. The runtime builds the context window, appends a short agentic-loop prompt after the system prompt, sends tool schemas to the model, executes permitted tool calls, appends tool results back into the ordered message context, and repeats until the model calls the internal `isDone` tool. If the model returns ordinary text without a tool call, that text is preserved as assistant history and the loop continues. `max_iterations` and `max_tokens` are optional safeguards; `max_tokens` uses provider-reported usage when available.
+Agents without a configured strategy run direct tool use through an internal runtime loop. The runtime builds the context window, appends a short agentic-loop prompt after the system prompt, sends tool schemas to the model, executes permitted tool calls, appends tool results back into the ordered message context, and repeats until the model calls the internal `isDone` tool. If the model returns ordinary text without a tool call, that text is preserved as assistant history and the loop continues. `max_iterations` and `max_tokens` are optional safeguards; `max_tokens` uses provider-reported usage when available.
 
 ### Middleware
 

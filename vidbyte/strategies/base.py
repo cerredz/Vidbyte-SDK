@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import re
 from typing import Any, ClassVar, Sequence
 
 from vidbyte.lib.errors import StrategyExecutionError
-from vidbyte.prompts.agentic_loop import append_agentic_loop_prompt
 from vidbyte.strategies.types import StrategyContext, StrategyResult
 
 
@@ -19,7 +19,20 @@ class BaseStrategy:
         self._runner = runner
 
     async def arun(self, prompt: str, *, runner: object | None = None, context: StrategyContext | None = None, tools: Sequence[object] = (), **options: Any) -> StrategyResult:
-        raise NotImplementedError(f"{self.__class__.__name__}.arun() is not implemented")
+        if type(self).run is BaseStrategy.run:
+            raise NotImplementedError(f"{self.__class__.__name__}.arun() is not implemented")
+        result = self._call_run_from_async(
+            prompt,
+            {
+                "runner": runner,
+                "context": context,
+                "tools": tools,
+                **options,
+            },
+        )
+        if inspect.isawaitable(result):
+            result = await result
+        return result
 
     def run(self, prompt: str, **kwargs: Any) -> StrategyResult:
         """Run a strategy from synchronous code."""
@@ -57,11 +70,23 @@ class BaseStrategy:
         return StrategyTool(agent, name=name, description=description)  # type: ignore[arg-type]
 
     def _run_model(self, runner: object, prompt: str, **kwargs: Any) -> Any:
-        call_options = dict(kwargs)
-        call_options["system"] = append_agentic_loop_prompt(
-            str(call_options["system"]) if call_options.get("system") is not None else None
-        )
-        return runner.run(prompt, **call_options)  # type: ignore[union-attr]
+        return runner.run(prompt, **dict(kwargs))  # type: ignore[union-attr]
+
+    def _call_run_from_async(self, prompt: str, call_options: dict[str, Any]) -> Any:
+        run = self.run
+        try:
+            signature = inspect.signature(run)
+        except (TypeError, ValueError):
+            return run(prompt, **call_options)
+        if any(param.kind is inspect.Parameter.VAR_KEYWORD for param in signature.parameters.values()):
+            return run(prompt, **call_options)
+        accepted = {
+            name
+            for name, param in signature.parameters.items()
+            if param.kind in {inspect.Parameter.KEYWORD_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD}
+        }
+        filtered = {key: value for key, value in call_options.items() if key in accepted}
+        return run(prompt, **filtered)
 
 
 class BaseStrategyUtils:
