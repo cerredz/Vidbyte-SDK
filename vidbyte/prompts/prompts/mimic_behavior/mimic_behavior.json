@@ -1,0 +1,11 @@
+{
+  "name": "Mimic Behavior",
+  "description": "A system prompt that turns uploaded source material such as a blog post, paper, transcript, tweet thread, specification, or example output into an immensely detailed behavior-mimicking prompt optimized to reproduce the source's observable patterns without copying private or unnecessary source text.",
+  "key": "mimic_behavior",
+  "prompts": {
+    "mimic_prompt": {
+      "path": "mimic_prompt.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/mimic_behavior/mimic_prompt.md"
+    }
+  }
+}

@@ -4,7 +4,12 @@ import importlib
 import unittest
 
 from vidbyte.lib.enums.prompts import Prompt
-from vidbyte.prompts import Prompts, chain_of_thought_reason_prompt
+from vidbyte.prompts import (
+    Prompts,
+    chain_of_thought_reason_prompt,
+    goals_goal_prompt,
+    mimic_behavior_mimic_prompt,
+)
 
 
 class PromptsInterfaceTests(unittest.TestCase):
@@ -13,6 +18,8 @@ class PromptsInterfaceTests(unittest.TestCase):
 
         self.assertEqual(prompts.get(Prompt.CHAIN_OF_THOUGHT_REASON_PROMPT), chain_of_thought_reason_prompt)
         self.assertIsInstance(chain_of_thought_reason_prompt, str)
+        self.assertEqual(prompts.get(Prompt.GOALS_GOAL_PROMPT), goals_goal_prompt)
+        self.assertEqual(prompts.get(Prompt.MIMIC_BEHAVIOR_MIMIC_PROMPT), mimic_behavior_mimic_prompt)
 
     def test_get_rejects_string_keys(self) -> None:
         with self.assertRaises(TypeError):
