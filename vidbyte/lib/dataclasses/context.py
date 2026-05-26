@@ -188,6 +188,9 @@ class BaseContext:
         parts: list[str] = []
         if self.system_prompt:
             parts.append(f"System prompt:\n{self.system_prompt}")
+        primitive_context = _format_context_primitives(self.context_items)
+        if primitive_context:
+            parts.append(primitive_context)
         if self.memory:
             parts.append(f"Memory summary:\n{self.memory}")
         if self.history:
@@ -198,14 +201,21 @@ class BaseContext:
             parts.append(f"Run metadata:\n{self.metadata}")
         if self.budget:
             parts.append(f"Budget:\n{self.budget}")
-        if self.artifacts:
-            parts.append("Artifacts:\n" + "\n\n".join(f"{artifact.name} ({artifact.artifact_type}):\n{artifact.content}" for artifact in self.artifacts))
-        if self.responses:
-            parts.append("Responses:\n" + "\n\n".join(response.content for response in self.responses))
-        if self.tool_calls:
-            parts.append("Tool calls:\n" + "\n".join(f"{call.name}: args={dict(call.arguments)} output={call.output}" for call in self.tool_calls))
-        if self.context_items:
-            parts.append("Context items:\n" + "\n\n".join(item.to_context_text() for item in self.context_items))
+        visible_artifacts = tuple(
+            artifact for artifact in self.artifacts if not artifact.metadata.get("context_primitive_id")
+        )
+        if visible_artifacts:
+            parts.append("Artifacts:\n" + "\n\n".join(f"{artifact.name} ({artifact.artifact_type}):\n{artifact.content}" for artifact in visible_artifacts))
+        visible_responses = tuple(
+            response for response in self.responses if not response.metadata.get("context_primitive_id")
+        )
+        if visible_responses:
+            parts.append("Responses:\n" + "\n\n".join(response.content for response in visible_responses))
+        visible_tool_calls = tuple(
+            call for call in self.tool_calls if not call.metadata.get("context_primitive_id")
+        )
+        if visible_tool_calls:
+            parts.append("Tool calls:\n" + "\n".join(f"{call.name}: args={dict(call.arguments)} output={call.output}" for call in visible_tool_calls))
         file_context = self._build_file_context()
         if file_context:
             parts.append(file_context)
@@ -256,3 +266,22 @@ def _format_context_tool(tool: object) -> str:
         if hasattr(raw_spec, "to_prompt_str"):
             return str(raw_spec.to_prompt_str())
     return str(tool)
+
+
+def _format_context_primitives(items: Sequence[ContextItem]) -> str:
+    if not items:
+        return ""
+    from vidbyte.context.primitives import (
+        ContextPrimitiveVisibility,
+        context_primitive_visibility,
+        sort_context_primitives,
+    )
+
+    visible_items = tuple(
+        item for item in items if context_primitive_visibility(item) is ContextPrimitiveVisibility.MODEL
+    )
+    if not visible_items:
+        return ""
+    return "Context primitives:\n" + "\n\n".join(
+        item.to_context_text() for item in sort_context_primitives(visible_items)
+    )

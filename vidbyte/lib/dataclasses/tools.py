@@ -19,10 +19,12 @@ Relations:
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
+
+from vidbyte.context.updates import ContextPrimitiveUpdate
 
 
 class ToolStatus(str, Enum):
@@ -129,6 +131,7 @@ class ToolResult:
     status: ToolStatus
     output: str
     metadata: Mapping[str, Any] = field(default_factory=dict)
+    context_updates: tuple[ContextPrimitiveUpdate, ...] = ()
 
     @classmethod
     def success(
@@ -137,6 +140,7 @@ class ToolResult:
         output: str,
         *,
         metadata: Mapping[str, Any] | None = None,
+        context_updates: Sequence[ContextPrimitiveUpdate] = (),
     ) -> "ToolResult":
         """Build a successful result with optional safe metadata."""
         return cls(
@@ -144,6 +148,7 @@ class ToolResult:
             status=ToolStatus.SUCCESS,
             output=output,
             metadata=dict(metadata or {}),
+            context_updates=tuple(context_updates),
         )
 
     @classmethod
@@ -153,6 +158,7 @@ class ToolResult:
         output: str,
         *,
         metadata: Mapping[str, Any] | None = None,
+        context_updates: Sequence[ContextPrimitiveUpdate] = (),
     ) -> "ToolResult":
         """Build a failed result with optional safe metadata."""
         return cls(
@@ -160,6 +166,7 @@ class ToolResult:
             status=ToolStatus.ERROR,
             output=output,
             metadata=dict(metadata or {}),
+            context_updates=tuple(context_updates),
         )
 
     @classmethod
@@ -169,9 +176,10 @@ class ToolResult:
         output: str,
         *,
         metadata: Mapping[str, Any] | None = None,
+        context_updates: Sequence[ContextPrimitiveUpdate] = (),
     ) -> "ToolResult":
         """Alias for error() — build a failed result."""
-        return cls.error(tool_name, output, metadata=metadata)
+        return cls.error(tool_name, output, metadata=metadata, context_updates=context_updates)
 
 
 @dataclass(frozen=True, slots=True)

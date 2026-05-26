@@ -92,6 +92,7 @@ class AgentInput:
     modality: ModelModality | str = ModelModality.AUTO
     metadata: Mapping[str, Any] = field(default_factory=dict)
     context_items: tuple[ContextItem, ...] = ()
+    context_primitives: tuple[ContextItem, ...] = ()
     context_manager: ContextManager | None = None
 
 
@@ -140,5 +141,6 @@ class AgentSpec:
     capabilities: tuple[str, ...] = ()
     metadata: Mapping[str, Any] = field(default_factory=dict)
     context_items: tuple[ContextItem, ...] = ()
+    context_primitives: tuple[ContextItem, ...] = ()
     context_manager: ContextManager | None = None
     algorithm: ContextWindowAlgorithm | str | None = None

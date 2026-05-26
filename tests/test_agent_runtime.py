@@ -4,7 +4,16 @@ import unittest
 
 from vidbyte.agents.runtime import AgentRuntime
 from vidbyte.agents.types import AgentMessage
-from vidbyte.context import ContextArtifact, ContextPermissions, ContextResponse, ContextToolCall, ContextWindow, TaskContextItem
+from vidbyte.context import (
+    ContextArtifact,
+    ContextPermissions,
+    ContextPrimitiveUpdate,
+    ContextResponse,
+    ContextToolCall,
+    ContextWindow,
+    TaskContextItem,
+    TextContextItem,
+)
 from vidbyte.lib.dataclasses.agents import AgentRuntimeConfig
 from vidbyte.lib.enums import ModelModality
 from vidbyte.strategies import StrategyContext
@@ -34,6 +43,17 @@ class WriteTool(BaseTool):
     async def execute(self, call: ToolCall) -> ToolResult:
         self.executed = True
         return ToolResult.success("write", "wrote")
+
+
+class PrimitiveUpdateTool(BaseTool):
+    def __init__(self, result: ToolResult) -> None:
+        self.result = result
+
+    def spec(self) -> ToolSpec:
+        return ToolSpec(name="sync_context", description="Sync context.")
+
+    async def execute(self, call: ToolCall) -> ToolResult:
+        return self.result
 
 
 async def invoke_runner(runner: FakeRunner, prompt: str, **kwargs: object) -> FakeResponse:
@@ -259,6 +279,120 @@ class AgentRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Raw tool output was withheld", visible_tool_message["content"])
         raw_context = result.metadata["tool_calls"][0]
         self.assertEqual(raw_context.result.output, "raw secret result for sdk")
+
+    async def test_runtime_applies_tool_result_context_updates_before_next_model_call(self) -> None:
+        runner = FakeRunner(
+            [
+                FakeResponse(
+                    "",
+                    {
+                        "output": [
+                            {
+                                "type": "function_call",
+                                "name": "sync_context",
+                                "arguments": "{}",
+                                "call_id": "call_1",
+                            }
+                        ]
+                    },
+                ),
+                FakeResponse(
+                    "",
+                    {
+                        "output": [
+                            {
+                                "type": "function_call",
+                                "name": "isDone",
+                                "arguments": '{"final_answer": "final answer"}',
+                                "call_id": "call_2",
+                            }
+                        ]
+                    },
+                ),
+            ]
+        )
+        update = ContextPrimitiveUpdate.upsert(TaskContextItem(id="task:tool", goal="Tool synced task"))
+        tool_item = PrimitiveUpdateTool(ToolResult.success("sync_context", "updated", context_updates=[update]))
+        runtime = AgentRuntime(
+            agent_name="worker",
+            system_prompt="Work.",
+            tools=Tools([tool_item]),
+            permission_policy=PermissionPolicy(),
+        )
+        context = runtime.build_context(
+            "task",
+            base_context=None,
+            history=(),
+            agent_history=(),
+            agent_metadata={},
+            existing_tool_calls=(),
+        )
+
+        result = await runtime.arun(
+            "task",
+            runner=runner,
+            context=context,
+            provider="openai",
+            invoke_runner=invoke_runner,
+            runner_output_text=runner_output_text,
+            runner_output_metadata=runner_output_metadata,
+        )
+
+        second_system = runner.calls[1]["kwargs"]["system"]
+        self.assertIn("Context primitives:", second_system)
+        self.assertIn("Tool synced task", second_system)
+        self.assertEqual(result.metadata["context_primitive_update_count"], 1)
+        self.assertEqual(result.metadata["context_primitive_ids"], ("task:tool",))
+
+    async def test_runtime_does_not_render_hidden_tool_returned_primitive(self) -> None:
+        runner = FakeRunner(
+            [
+                FakeResponse(
+                    "",
+                    {"output": [{"type": "function_call", "name": "sync_context", "arguments": "{}"}]},
+                ),
+                FakeResponse(
+                    "",
+                    {"output": [{"type": "function_call", "name": "isDone", "arguments": '{"final_answer": "done"}'}]},
+                ),
+            ]
+        )
+        hidden = TextContextItem(id="secret", title="Secret", content="raw secret", visibility="hidden")
+        tool_item = PrimitiveUpdateTool(
+            ToolResult.success(
+                "sync_context",
+                "updated",
+                context_updates=[ContextPrimitiveUpdate.upsert(hidden)],
+            )
+        )
+        runtime = AgentRuntime(
+            agent_name="worker",
+            system_prompt="Work.",
+            tools=Tools([tool_item]),
+            permission_policy=PermissionPolicy(),
+        )
+        context = runtime.build_context(
+            "task",
+            base_context=None,
+            history=(),
+            agent_history=(),
+            agent_metadata={},
+            existing_tool_calls=(),
+        )
+
+        result = await runtime.arun(
+            "task",
+            runner=runner,
+            context=context,
+            provider="openai",
+            invoke_runner=invoke_runner,
+            runner_output_text=runner_output_text,
+            runner_output_metadata=runner_output_metadata,
+        )
+
+        self.assertNotIn("raw secret", runner.calls[1]["kwargs"]["system"])
+        self.assertEqual(result.metadata["context_primitive_ids"], ("secret",))
+        self.assertEqual(result.metadata["context_primitives"][0].content, "raw secret")
 
     async def test_runtime_denies_write_tool_by_default(self) -> None:
         write_tool = WriteTool()

@@ -28,16 +28,23 @@ from vidbyte.lib.dataclasses.context import (
 from vidbyte.context.primitives import (
     ArtifactContextItem,
     ContextItem,
+    ContextPrimitiveVisibility,
     DocumentContextItem,
     EnvironmentContextItem,
     FileContextItem,
     GitDiffContextItem,
+    IdentityContextItem,
     MemoryContextItem,
+    PlanContextItem,
     ProgressContextItem,
     ResponseContextItem,
     TaskContextItem,
     ToolCallContextItem,
+    context_primitive_id,
+    context_primitive_visibility,
+    sort_context_primitives,
 )
+from vidbyte.context.updates import ContextPrimitiveUpdate, ContextPrimitiveUpdateAction
 
 
 @dataclass(slots=True)
@@ -68,6 +75,47 @@ class ContextManager:
         self.context_items = tuple(items)
         return self
 
+    def upsert(self, item: ContextItem) -> "ContextManager":
+        """Insert or replace one context primitive by stable ID."""
+        item_id = context_primitive_id(item)
+        replaced = False
+        items: list[ContextItem] = []
+        for existing in self.context_items:
+            if context_primitive_id(existing) == item_id:
+                if not replaced:
+                    items.append(item)
+                    replaced = True
+                continue
+            items.append(existing)
+        if not replaced:
+            items.append(item)
+        self.context_items = tuple(items)
+        return self
+
+    def remove_by_id(self, item_id: str) -> "ContextManager":
+        """Remove any context primitive matching a stable ID."""
+        self.context_items = tuple(
+            item for item in self.context_items if context_primitive_id(item) != item_id
+        )
+        return self
+
+    def apply_update(self, update: ContextPrimitiveUpdate) -> "ContextManager":
+        """Apply one primitive update and return this manager."""
+        action = ContextPrimitiveUpdateAction(update.action)
+        if action is ContextPrimitiveUpdateAction.UPSERT:
+            if update.item is None:
+                raise ValueError("UPSERT context primitive update requires an item")
+            return self.upsert(update.item)
+        if not update.item_id:
+            raise ValueError("REMOVE context primitive update requires an item_id")
+        return self.remove_by_id(update.item_id)
+
+    def apply_updates(self, updates: Iterable[ContextPrimitiveUpdate]) -> "ContextManager":
+        """Apply primitive updates in order and return this manager."""
+        for update in updates:
+            self.apply_update(update)
+        return self
+
     def clear(self) -> "ContextManager":
         """Remove all context items and return this manager."""
         self.context_items = ()
@@ -80,6 +128,18 @@ class ContextManager:
     def by_kind(self, kind: str) -> tuple[ContextItem, ...]:
         """Return all context items matching a kind."""
         return tuple(item for item in self.context_items if item.kind == kind)
+
+    def visible_items(self, algorithm: Any | None = None) -> tuple[ContextItem, ...]:
+        """Return model-visible primitives using an optional algorithm admission policy."""
+        if algorithm is not None and hasattr(algorithm, "model_visible_context_primitives"):
+            return tuple(algorithm.model_visible_context_primitives(self.items()))
+        return sort_context_primitives(
+            tuple(
+                item
+                for item in self.context_items
+                if context_primitive_visibility(item) is ContextPrimitiveVisibility.MODEL
+            )
+        )
 
     def to_context(self, base_context: BaseContext | None = None, **overrides: Any) -> StrategyContext:
         """Convert managed items into an existing StrategyContext-compatible shape."""
@@ -101,6 +161,12 @@ class ContextManager:
             memory_parts.append(str(fields["memory"]))
 
         for item in self.items():
+            if context_primitive_visibility(item) is not ContextPrimitiveVisibility.MODEL:
+                continue
+            primitive_metadata = {
+                **dict(item.metadata),
+                "context_primitive_id": context_primitive_id(item),
+            }
             if isinstance(item, FileContextItem):
                 file_paths.append(item.absolute_path)
                 if item.content is not None or item.excerpt is not None:
@@ -109,29 +175,29 @@ class ContextManager:
                             name=item.path,
                             content=item.content if item.content is not None else str(item.excerpt),
                             artifact_type="file",
-                            metadata={**dict(item.metadata), "absolute_path": item.absolute_path},
+                            metadata={**primitive_metadata, "absolute_path": item.absolute_path},
                         )
                     )
             elif isinstance(item, GitDiffContextItem):
-                artifacts.append(ContextArtifact(item.title, item.to_context_text(), "git_diff", item.metadata))
-            elif isinstance(item, TaskContextItem):
-                artifacts.append(ContextArtifact(item.title, item.to_context_text(), "task", item.metadata))
+                artifacts.append(ContextArtifact(item.title, item.to_context_text(), "git_diff", primitive_metadata))
+            elif isinstance(item, (IdentityContextItem, PlanContextItem, TaskContextItem)):
+                artifacts.append(ContextArtifact(item.title, item.to_context_text(), item.kind, primitive_metadata))
             elif isinstance(item, DocumentContextItem):
-                artifacts.append(ContextArtifact(item.title, item.to_context_text(), "document", item.metadata))
+                artifacts.append(ContextArtifact(item.title, item.to_context_text(), "document", primitive_metadata))
             elif isinstance(item, EnvironmentContextItem):
-                artifacts.append(ContextArtifact(item.title, item.to_context_text(), "environment", item.metadata))
+                artifacts.append(ContextArtifact(item.title, item.to_context_text(), "environment", primitive_metadata))
             elif isinstance(item, MemoryContextItem):
                 memory_parts.append(item.to_context_text())
             elif isinstance(item, ProgressContextItem):
-                artifacts.append(ContextArtifact(item.title, item.to_context_text(), "progress", item.metadata))
+                artifacts.append(ContextArtifact(item.title, item.to_context_text(), "progress", primitive_metadata))
             elif isinstance(item, ArtifactContextItem):
-                artifacts.append(ContextArtifact(item.name, item.content, item.artifact_type, item.metadata))
+                artifacts.append(ContextArtifact(item.name, item.content, item.artifact_type, primitive_metadata))
             elif isinstance(item, ResponseContextItem):
-                responses.append(ContextResponse(item.content, item.sender, item.metadata))
+                responses.append(ContextResponse(item.content, item.sender, primitive_metadata))
             elif isinstance(item, ToolCallContextItem):
-                tool_calls.append(ContextToolCall(item.name, item.arguments, item.output, item.metadata))
+                tool_calls.append(ContextToolCall(item.name, item.arguments, item.output, primitive_metadata))
             else:
-                artifacts.append(ContextArtifact(item.title, item.to_context_text(), item.kind, item.metadata))
+                artifacts.append(ContextArtifact(item.title, item.to_context_text(), item.kind, primitive_metadata))
 
         fields["file_paths"] = tuple(file_paths)
         fields["artifacts"] = tuple(artifacts)

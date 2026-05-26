@@ -49,7 +49,7 @@ class ContextDataclassTests(unittest.TestCase):
 
         built = context.build_context()
 
-        self.assertIn("Context items:", built)
+        self.assertIn("Context primitives:", built)
         self.assertIn("document the public API", built)
 
     def test_prompt_catalog_contains_vmao_prompts(self) -> None:

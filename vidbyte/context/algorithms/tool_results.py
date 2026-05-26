@@ -14,11 +14,17 @@ Relations:
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
+from vidbyte.context.primitives import (
+    ContextItem,
+    ContextPrimitiveVisibility,
+    context_primitive_visibility,
+    sort_context_primitives,
+)
 from vidbyte.lib.dataclasses.tools import ToolCall, ToolResult
 
 
@@ -68,6 +74,15 @@ class ContextWindowAlgorithm:
             },
         )
 
+    def model_visible_context_primitives(self, items: Sequence[ContextItem]) -> tuple[ContextItem, ...]:
+        """Return context primitives admitted into model-visible context."""
+        visible = tuple(
+            item
+            for item in items
+            if context_primitive_visibility(item) is ContextPrimitiveVisibility.MODEL
+        )
+        return sort_context_primitives(visible)
+
 
 def _replace_tool_result(
     result: ToolResult,
@@ -80,6 +95,7 @@ def _replace_tool_result(
         status=result.status,
         output=output,
         metadata=result_metadata,
+        context_updates=result.context_updates,
     )
 
 

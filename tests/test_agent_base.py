@@ -4,7 +4,7 @@ import unittest
 
 from vidbyte.agents import AgentInput, BaseAgent
 from vidbyte.agents.base import ConfiguredAgentRunner
-from vidbyte.context import ContextManager, ContextWindow, TaskContextItem, TextContextItem
+from vidbyte.context import ContextManager, ContextWindow, IdentityContextItem, TaskContextItem, TextContextItem
 from vidbyte.lib.config import ModelProvider
 from vidbyte.middleware import AgentMiddleware
 from vidbyte.lib.errors import AgentExecutionError, ConfigurationError
@@ -250,6 +250,42 @@ class AgentBaseTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(agent.algorithm.name, "hide_tool_outputs")
         self.assertEqual(forked.algorithm.name, "hide_tool_outputs")
         self.assertEqual(replaced.algorithm.name, "compact_tool_outputs")
+
+    async def test_agent_accepts_context_primitives_alias(self) -> None:
+        strategy = EchoStrategy()
+        agent = BaseAgent(
+            name="worker",
+            system_prompt="Work carefully.",
+            strategy=strategy,
+            context_primitives=[IdentityContextItem(role="SDK engineer")],
+        )
+
+        await agent.generate_reply("task")
+
+        self.assertIsNotNone(strategy.last_context)
+        self.assertEqual(strategy.last_context.context_items[0].id, "identity:agent")
+
+    async def test_agent_input_context_primitives_merge_after_agent_defaults(self) -> None:
+        strategy = EchoStrategy()
+        agent = BaseAgent(
+            name="worker",
+            system_prompt="Work carefully.",
+            strategy=strategy,
+            context_primitives=[TaskContextItem(id="task:default", goal="Default")],
+        )
+
+        await agent.generate_reply(
+            AgentInput(
+                "task",
+                context_primitives=(TaskContextItem(id="task:call", goal="Call"),),
+            )
+        )
+
+        self.assertIsNotNone(strategy.last_context)
+        self.assertEqual(
+            tuple(item.id for item in strategy.last_context.context_items),
+            ("task:default", "task:call"),
+        )
 
     async def test_agent_without_strategy_calls_runner_once(self) -> None:
         runner = EchoRunner()

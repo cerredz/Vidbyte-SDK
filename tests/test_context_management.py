@@ -9,10 +9,13 @@ from vidbyte import ContextWindow as RootContextWindow
 from vidbyte import FileContextItem as RootFileContextItem
 from vidbyte.context import (
     ContextManager,
+    ContextPrimitiveUpdate,
     ContextWindow,
     DocumentContextItem,
     FileContextItem,
+    IdentityContextItem,
     MemoryContextItem,
+    PlanContextItem,
     ResponseContextItem,
     TaskContextItem,
     TextContextItem,
@@ -90,7 +93,8 @@ class ContextManagementTests(unittest.TestCase):
         self.assertIn("prior summary", context.memory)
         self.assertTrue(any(artifact.artifact_type == "task" for artifact in context.artifacts))
         self.assertTrue(any(artifact.artifact_type == "document" for artifact in context.artifacts))
-        self.assertEqual(context.responses, (ContextResponse("previous answer", "assistant"),))
+        self.assertEqual(context.responses[0].content, "previous answer")
+        self.assertEqual(context.responses[0].sender, "assistant")
         self.assertEqual(context.tool_calls[0].name, "lookup")
         self.assertEqual(context.metadata["manager"], "yes")
 
@@ -118,6 +122,8 @@ class ContextManagementTests(unittest.TestCase):
         self.assertIs(PrimitiveTextContextItem, TextContextItem)
         self.assertIs(LegacyTextContextItem, TextContextItem)
         self.assertTrue(isinstance(TextContextItem(title="x", content="y"), ContextItem))
+        self.assertEqual(ContextPrimitiveUpdate.upsert(IdentityContextItem(role="x")).item_id, "identity:agent")
+        self.assertEqual(PlanContextItem(objective="x").id, "plan:current")
 
     def test_context_window_presets_are_named_algorithms(self) -> None:
         self.assertEqual(ContextWindow.preset.default.name, "default")

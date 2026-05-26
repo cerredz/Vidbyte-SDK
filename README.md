@@ -160,6 +160,60 @@ agent = Agent(
 )
 ```
 
+Agents can also receive durable `context_primitives` directly. These primitives
+are rendered near the top of the model context, below the system prompt, and can
+be updated later by tool results.
+
+```python
+from vidbyte import Agent, IdentityContextItem, PlanContextItem, TaskContextItem
+
+agent = Agent(
+    name="builder",
+    system_prompt="Follow the user request.",
+    runner=my_runner,
+    context_primitives=[
+        IdentityContextItem(
+            role="SDK implementation agent",
+            behavior=("Prefer existing package patterns.",),
+        ),
+        TaskContextItem(
+            id="task:context-primitives",
+            goal="Ship context primitive sync",
+            deterministic_checks=("python -m unittest discover -s tests",),
+        ),
+        PlanContextItem(
+            objective="Add primitive seeding, tool updates, and runtime sync.",
+            steps=("Add primitive types", "Wire tool updates", "Verify runtime rendering"),
+        ),
+    ],
+)
+```
+
+Tools can sync context by returning primitive updates instead of mutating the
+agent directly:
+
+```python
+from vidbyte import ContextPrimitiveUpdate, TaskContextItem, ToolResult, tool
+
+@tool
+def inspect_diff() -> ToolResult:
+    """Inspect the current diff and update task context."""
+    return ToolResult.success(
+        "inspect_diff",
+        "Diff inspected.",
+        context_updates=[
+            ContextPrimitiveUpdate.upsert(
+                TaskContextItem(
+                    id="task:context-primitives",
+                    goal="Ship context primitive sync",
+                    status="in_progress",
+                    progress="Diff inspected.",
+                )
+            )
+        ],
+    )
+```
+
 Context-window algorithms are attached as a single agent option. The default
 keeps existing behavior; presets can change how runtime context grows between
 model calls.

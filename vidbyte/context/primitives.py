@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from enum import Enum
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
@@ -34,6 +35,25 @@ class ContextItem(Protocol):
         """Return a compact compatibility rendering for BaseContext."""
 
 
+ContextPrimitive = ContextItem
+
+
+class ContextPrimitivePlacement(str, Enum):
+    """Where a context primitive should be placed in the model-visible window."""
+
+    STICKY = "sticky"
+    NORMAL = "normal"
+    EPHEMERAL = "ephemeral"
+
+
+class ContextPrimitiveVisibility(str, Enum):
+    """Whether a context primitive should be rendered into model-visible text."""
+
+    MODEL = "model"
+    METADATA_ONLY = "metadata_only"
+    HIDDEN = "hidden"
+
+
 @dataclass(frozen=True, slots=True)
 class TextContextItem:
     """Generic extension point for custom context primitives."""
@@ -43,6 +63,10 @@ class TextContextItem:
     kind: str = "text"
     source: str | None = None
     metadata: Mapping[str, Any] = field(default_factory=dict)
+    id: str | None = None
+    placement: ContextPrimitivePlacement | str = ContextPrimitivePlacement.NORMAL
+    priority: int = 100
+    visibility: ContextPrimitiveVisibility | str = ContextPrimitiveVisibility.MODEL
 
     def to_context_text(self) -> str:
         source = f"\nSource: {self.source}" if self.source else ""
@@ -62,6 +86,10 @@ class FileContextItem:
     metadata: Mapping[str, Any] = field(default_factory=dict)
     kind: str = "file"
     title: str = "File"
+    id: str | None = None
+    placement: ContextPrimitivePlacement | str = ContextPrimitivePlacement.NORMAL
+    priority: int = 100
+    visibility: ContextPrimitiveVisibility | str = ContextPrimitiveVisibility.MODEL
 
     @classmethod
     def from_path(
@@ -112,6 +140,10 @@ class GitDiffContextItem:
     metadata: Mapping[str, Any] = field(default_factory=dict)
     kind: str = "git_diff"
     title: str = "Git Diff"
+    id: str | None = None
+    placement: ContextPrimitivePlacement | str = ContextPrimitivePlacement.NORMAL
+    priority: int = 100
+    visibility: ContextPrimitiveVisibility | str = ContextPrimitiveVisibility.MODEL
 
     def to_context_text(self) -> str:
         lines = ["Git diff:"]
@@ -142,6 +174,10 @@ class TaskContextItem:
     metadata: Mapping[str, Any] = field(default_factory=dict)
     kind: str = "task"
     title: str = "Task"
+    id: str | None = None
+    placement: ContextPrimitivePlacement | str = ContextPrimitivePlacement.STICKY
+    priority: int = 10
+    visibility: ContextPrimitiveVisibility | str = ContextPrimitiveVisibility.MODEL
 
     def to_context_text(self) -> str:
         lines = [f"Task goal: {self.goal}", f"Status: {self.status}"]
@@ -163,6 +199,10 @@ class DocumentContextItem:
     document_id: str | None = None
     metadata: Mapping[str, Any] = field(default_factory=dict)
     kind: str = "document"
+    id: str | None = None
+    placement: ContextPrimitivePlacement | str = ContextPrimitivePlacement.NORMAL
+    priority: int = 100
+    visibility: ContextPrimitiveVisibility | str = ContextPrimitiveVisibility.MODEL
 
     def to_context_text(self) -> str:
         lines = [f"Document: {self.title}", f"Source: {self.source}"]
@@ -183,6 +223,10 @@ class EnvironmentContextItem:
     metadata: Mapping[str, Any] = field(default_factory=dict)
     kind: str = "environment"
     title: str = "Environment"
+    id: str | None = None
+    placement: ContextPrimitivePlacement | str = ContextPrimitivePlacement.NORMAL
+    priority: int = 100
+    visibility: ContextPrimitiveVisibility | str = ContextPrimitiveVisibility.MODEL
 
     def to_context_text(self) -> str:
         lines = ["Environment:"]
@@ -206,6 +250,10 @@ class MemoryContextItem:
     metadata: Mapping[str, Any] = field(default_factory=dict)
     kind: str = "memory"
     title: str = "Memory"
+    id: str | None = None
+    placement: ContextPrimitivePlacement | str = ContextPrimitivePlacement.STICKY
+    priority: int = 30
+    visibility: ContextPrimitiveVisibility | str = ContextPrimitiveVisibility.MODEL
 
     def to_context_text(self) -> str:
         source = f"\nSource: {self.source}" if self.source else ""
@@ -224,6 +272,10 @@ class ProgressContextItem:
     metadata: Mapping[str, Any] = field(default_factory=dict)
     kind: str = "progress"
     title: str = "Progress"
+    id: str | None = None
+    placement: ContextPrimitivePlacement | str = ContextPrimitivePlacement.STICKY
+    priority: int = 40
+    visibility: ContextPrimitiveVisibility | str = ContextPrimitiveVisibility.MODEL
 
     def to_context_text(self) -> str:
         lines: list[str] = ["Progress:"]
@@ -245,6 +297,10 @@ class ArtifactContextItem:
     metadata: Mapping[str, Any] = field(default_factory=dict)
     kind: str = "artifact"
     title: str = "Artifact"
+    id: str | None = None
+    placement: ContextPrimitivePlacement | str = ContextPrimitivePlacement.NORMAL
+    priority: int = 100
+    visibility: ContextPrimitiveVisibility | str = ContextPrimitiveVisibility.MODEL
 
     def to_context_text(self) -> str:
         return f"{self.name} ({self.artifact_type}):\n{self.content}"
@@ -259,6 +315,10 @@ class ResponseContextItem:
     metadata: Mapping[str, Any] = field(default_factory=dict)
     kind: str = "response"
     title: str = "Response"
+    id: str | None = None
+    placement: ContextPrimitivePlacement | str = ContextPrimitivePlacement.NORMAL
+    priority: int = 100
+    visibility: ContextPrimitiveVisibility | str = ContextPrimitiveVisibility.MODEL
 
     def to_context_text(self) -> str:
         prefix = f"Response from {self.sender}:" if self.sender else "Response:"
@@ -275,9 +335,122 @@ class ToolCallContextItem:
     metadata: Mapping[str, Any] = field(default_factory=dict)
     kind: str = "tool_call"
     title: str = "Tool Call"
+    id: str | None = None
+    placement: ContextPrimitivePlacement | str = ContextPrimitivePlacement.EPHEMERAL
+    priority: int = 100
+    visibility: ContextPrimitiveVisibility | str = ContextPrimitiveVisibility.MODEL
 
     def to_context_text(self) -> str:
         return f"Tool call: {self.name}\nArguments: {dict(self.arguments)}\nOutput: {self.output}"
+
+
+@dataclass(frozen=True, slots=True)
+class IdentityContextItem:
+    """Role and behavior context below the system prompt authority level."""
+
+    role: str
+    behavior: tuple[str, ...] = ()
+    constraints: tuple[str, ...] = ()
+    personality: str | None = None
+    metadata: Mapping[str, Any] = field(default_factory=dict)
+    kind: str = "identity"
+    title: str = "Identity"
+    id: str | None = "identity:agent"
+    placement: ContextPrimitivePlacement | str = ContextPrimitivePlacement.STICKY
+    priority: int = 0
+    visibility: ContextPrimitiveVisibility | str = ContextPrimitiveVisibility.MODEL
+
+    def to_context_text(self) -> str:
+        lines = [
+            "Identity context (lower authority than the system prompt):",
+            f"Role: {self.role}",
+        ]
+        _extend_section(lines, "Behavior", self.behavior)
+        _extend_section(lines, "Constraints", self.constraints)
+        if self.personality:
+            lines.append(f"Personality: {self.personality}")
+        return "\n".join(lines)
+
+
+@dataclass(frozen=True, slots=True)
+class PlanContextItem:
+    """Durable plan context made visible across agent iterations."""
+
+    objective: str
+    steps: tuple[str, ...] = ()
+    current_step: str | None = None
+    risks: tuple[str, ...] = ()
+    verification: tuple[str, ...] = ()
+    metadata: Mapping[str, Any] = field(default_factory=dict)
+    kind: str = "plan"
+    title: str = "Plan"
+    id: str | None = "plan:current"
+    placement: ContextPrimitivePlacement | str = ContextPrimitivePlacement.STICKY
+    priority: int = 20
+    visibility: ContextPrimitiveVisibility | str = ContextPrimitiveVisibility.MODEL
+
+    def to_context_text(self) -> str:
+        lines = [f"Plan objective: {self.objective}"]
+        if self.current_step:
+            lines.append(f"Current step: {self.current_step}")
+        _extend_section(lines, "Steps", self.steps)
+        _extend_section(lines, "Risks", self.risks)
+        _extend_section(lines, "Verification", self.verification)
+        return "\n".join(lines)
+
+
+def context_primitive_id(item: ContextItem) -> str:
+    """Return an explicit or derived stable ID for a context primitive."""
+    explicit = getattr(item, "id", None)
+    if explicit:
+        return str(explicit)
+    kind = str(getattr(item, "kind", type(item).__name__))
+    if isinstance(item, FileContextItem):
+        return f"file:{item.path}"
+    if isinstance(item, TaskContextItem):
+        return f"task:{item.goal}"
+    if isinstance(item, PlanContextItem):
+        return "plan:current"
+    if isinstance(item, IdentityContextItem):
+        return "identity:agent"
+    title = str(getattr(item, "title", type(item).__name__))
+    return f"{kind}:{title}"
+
+
+def context_primitive_placement(item: ContextItem) -> ContextPrimitivePlacement:
+    """Coerce an item's placement metadata into an enum value."""
+    value = getattr(item, "placement", ContextPrimitivePlacement.NORMAL)
+    return value if isinstance(value, ContextPrimitivePlacement) else ContextPrimitivePlacement(str(value))
+
+
+def context_primitive_priority(item: ContextItem) -> int:
+    """Return the numeric priority for deterministic primitive ordering."""
+    return int(getattr(item, "priority", 100))
+
+
+def context_primitive_visibility(item: ContextItem) -> ContextPrimitiveVisibility:
+    """Coerce an item's visibility metadata into an enum value."""
+    value = getattr(item, "visibility", ContextPrimitiveVisibility.MODEL)
+    return value if isinstance(value, ContextPrimitiveVisibility) else ContextPrimitiveVisibility(str(value))
+
+
+def sort_context_primitives(items: tuple[ContextItem, ...]) -> tuple[ContextItem, ...]:
+    """Sort context primitives by placement, priority, and stable ID."""
+    placement_rank = {
+        ContextPrimitivePlacement.STICKY: 0,
+        ContextPrimitivePlacement.NORMAL: 1,
+        ContextPrimitivePlacement.EPHEMERAL: 2,
+    }
+    return tuple(
+        sorted(
+            items,
+            key=lambda item: (
+                placement_rank[context_primitive_placement(item)],
+                context_primitive_priority(item),
+                context_primitive_id(item),
+            ),
+        )
+    )
 
 
 def _extend_section(lines: list[str], title: str, values: tuple[str, ...]) -> None:
@@ -295,14 +468,24 @@ def _language_from_path(path: Path) -> str | None:
 __all__ = [
     "ArtifactContextItem",
     "ContextItem",
+    "ContextPrimitive",
+    "ContextPrimitivePlacement",
+    "ContextPrimitiveVisibility",
     "DocumentContextItem",
     "EnvironmentContextItem",
     "FileContextItem",
     "GitDiffContextItem",
+    "IdentityContextItem",
     "MemoryContextItem",
+    "PlanContextItem",
     "ProgressContextItem",
     "ResponseContextItem",
     "TaskContextItem",
     "TextContextItem",
     "ToolCallContextItem",
+    "context_primitive_id",
+    "context_primitive_placement",
+    "context_primitive_priority",
+    "context_primitive_visibility",
+    "sort_context_primitives",
 ]

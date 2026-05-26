@@ -24,8 +24,11 @@ from vidbyte.lib.dataclasses.tools import (
     ToolSpec,
     ToolStatus,
 )
+from vidbyte.context.updates import ContextPrimitiveUpdate, ContextPrimitiveUpdateAction
 
 __all__ = [
+    "ContextPrimitiveUpdate",
+    "ContextPrimitiveUpdateAction",
     "ToolCall",
     "ToolCallContext",
     "ToolCallState",

@@ -14,13 +14,14 @@ Relations:
 
 from __future__ import annotations
 
+import dataclasses
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
 from vidbyte.agents.types import AgentMessage
 from vidbyte.context.algorithms import ContextWindowAlgorithm
 from vidbyte.context.manager import ContextManager
-from vidbyte.context.primitives import ContextItem
+from vidbyte.context.primitives import ContextItem, context_primitive_id
 from vidbyte.context.window import ContextWindow
 from vidbyte.lib.dataclasses.agents import AgentRuntimeConfig, AgentStopReason
 from vidbyte.lib.dataclasses.middleware import MiddlewareAction, MiddlewareContext, MiddlewareDecision, MiddlewareHook
@@ -132,6 +133,9 @@ class AgentRuntime:
         tokens_used: int | None = None
         started_at = self.middleware.clock()
         last_response: object | None = None
+        primitive_manager = ContextManager(context.context_items)
+        runtime_metadata["context_primitive_update_count"] = 0
+        runtime_metadata["context_primitive_updates"] = ()
 
         decision = await self.middleware.before_run(
             self._middleware_context(
@@ -357,6 +361,13 @@ class AgentRuntime:
                         model_response=raw_result,
                     )
                 _, result = processed
+                if call.tool_name != IS_DONE_TOOL_NAME:
+                    context = self._apply_tool_context_updates(
+                        context,
+                        primitive_manager,
+                        result,
+                        runtime_metadata,
+                    )
                 if call.tool_name == IS_DONE_TOOL_NAME:
                     decision = await self.middleware.after_iteration(
                         self._middleware_context(
@@ -540,6 +551,15 @@ class AgentRuntime:
         model_response: object | None = None,
     ) -> StrategyResult:
         """Run after_run middleware and attach final middleware metadata."""
+        result = dataclasses.replace(
+            result,
+            metadata={
+                **dict(metadata),
+                "context_primitives": tuple(context.context_items),
+                "context_primitive_ids": tuple(context_primitive_id(item) for item in context.context_items),
+                **dict(result.metadata),
+            },
+        )
         decision = await self.middleware.after_run(
             self._middleware_context(
                 MiddlewareHook.AFTER_RUN,
@@ -788,13 +808,43 @@ class AgentRuntime:
         messages: list[dict[str, Any]],
     ) -> dict[str, Any]:
         """Assemble per-iteration call options with system prompt, tools, and messages."""
+        visible_context = dataclasses.replace(
+            context,
+            context_items=self.algorithm.model_visible_context_primitives(context.context_items),
+        )
         call_options = dict(run_options)
-        call_options.setdefault("system", context.build_context())
+        call_options.setdefault("system", visible_context.build_context())
         if tool_schemas:
             call_options.setdefault("tools", tool_schemas)
         if messages:
             call_options.setdefault("messages", tuple(messages))
         return call_options
+
+    def _replace_context_primitives(
+        self,
+        context: BaseAgentContext,
+        manager: ContextManager,
+    ) -> BaseAgentContext:
+        """Return an immutable context with the manager's full primitive store."""
+        return dataclasses.replace(context, context_items=manager.items())
+
+    def _apply_tool_context_updates(
+        self,
+        context: BaseAgentContext,
+        manager: ContextManager,
+        result: ToolResult,
+        metadata: dict[str, Any],
+    ) -> BaseAgentContext:
+        """Apply tool-returned primitive updates for the next model call."""
+        updates = tuple(result.context_updates)
+        if not updates:
+            return context
+        manager.apply_updates(updates)
+        existing_updates = tuple(metadata.get("context_primitive_updates", ()))
+        metadata["context_primitive_updates"] = (*existing_updates, *updates)
+        metadata["context_primitive_update_count"] = len(metadata["context_primitive_updates"])
+        metadata["context_primitive_ids"] = tuple(context_primitive_id(item) for item in manager.items())
+        return self._replace_context_primitives(context, manager)
 
     def _final_result(
         self,

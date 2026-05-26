@@ -76,6 +76,7 @@ class BaseAgent(McpAttachableMixin):
         capabilities: Sequence[str] = (),
         agent_metadata: AgentMetadata | None = None,
         context_items: Sequence[ContextItem] = (),
+        context_primitives: Sequence[ContextItem] = (),
         context_manager: ContextManager | None = None,
         algorithm: ContextWindowAlgorithm | str | None = None,
         metadata: dict[str, Any] | None = None,
@@ -117,7 +118,7 @@ class BaseAgent(McpAttachableMixin):
         self.description = description or "General purpose agent."
         self.capabilities = tuple(capabilities)
         self.agent_metadata = agent_metadata or AgentMetadata()
-        self.context_items = tuple(context_items)
+        self.context_items = (*tuple(context_items), *tuple(context_primitives))
         self.context_manager = context_manager
         self.algorithm = ContextWindow.resolve_algorithm(algorithm)
         self.metadata = dict(metadata or {})
@@ -219,6 +220,7 @@ class BaseAgent(McpAttachableMixin):
         metadata: dict[str, Any] | None = None,
         middleware: Sequence[AgentMiddleware] | None = None,
         context_items: Sequence[ContextItem] | None = None,
+        context_primitives: Sequence[ContextItem] | None = None,
         context_manager: ContextManager | None = None,
         algorithm: ContextWindowAlgorithm | str | None = None,
         include_history: bool = False,
@@ -248,6 +250,7 @@ class BaseAgent(McpAttachableMixin):
             capabilities=self.capabilities,
             agent_metadata=self.agent_metadata,
             context_items=self.context_items if context_items is None else context_items,
+            context_primitives=() if context_primitives is None else context_primitives,
             context_manager=self.context_manager if context_manager is None else context_manager,
             algorithm=self.algorithm if algorithm is None else algorithm,
             metadata={**self.metadata, **dict(metadata or {})},
@@ -589,7 +592,7 @@ class BaseAgent(McpAttachableMixin):
         message: str | AgentInput,
     ) -> tuple[tuple[ContextItem, ...], ContextManager | None]:
         if isinstance(message, AgentInput):
-            return tuple(message.context_items), message.context_manager
+            return (*tuple(message.context_items), *tuple(message.context_primitives)), message.context_manager
         return (), None
 
     def _merged_context_items(self, input_context_items: Sequence[ContextItem]) -> tuple[ContextItem, ...]:

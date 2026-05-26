@@ -40,17 +40,23 @@ from vidbyte.lib.dataclasses.context import (
 from vidbyte.context.primitives import (
     ArtifactContextItem,
     ContextItem,
+    ContextPrimitive,
+    ContextPrimitivePlacement,
+    ContextPrimitiveVisibility,
     DocumentContextItem,
     EnvironmentContextItem,
     FileContextItem,
     GitDiffContextItem,
+    IdentityContextItem,
     MemoryContextItem,
+    PlanContextItem,
     ProgressContextItem,
     ResponseContextItem,
     TaskContextItem,
     TextContextItem,
     ToolCallContextItem,
 )
+from vidbyte.context.updates import ContextPrimitiveUpdate, ContextPrimitiveUpdateAction
 from vidbyte.lib.dataclasses.filesystem import FileSystemToolConfig
 from vidbyte.lib.dataclasses.mcp import McpToolDefinition
 from vidbyte.lib.dataclasses.middleware import (
@@ -94,6 +100,11 @@ __all__ = [
     "ContextItem",
     "ContextMessage",
     "ContextPermissions",
+    "ContextPrimitive",
+    "ContextPrimitivePlacement",
+    "ContextPrimitiveUpdate",
+    "ContextPrimitiveUpdateAction",
+    "ContextPrimitiveVisibility",
     "ContextResponse",
     "ContextState",
     "ContextToolCall",
@@ -105,6 +116,7 @@ __all__ = [
     "FileStat",
     "FileSystemToolConfig",
     "GitDiffContextItem",
+    "IdentityContextItem",
     "MemoryContextItem",
     "McpToolDefinition",
     "MiddlewareAction",
@@ -115,6 +127,7 @@ __all__ = [
     "NodeState",
     "PermissionDecision",
     "PermissionPolicy",
+    "PlanContextItem",
     "ProgressContextItem",
     "ProgressLog",
     "ResponseContextItem",
