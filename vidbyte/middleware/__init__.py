@@ -23,6 +23,7 @@ from vidbyte.lib.dataclasses.middleware import (
     MiddlewareHook,
 )
 from vidbyte.middleware.base import AgentMiddleware
+from vidbyte.middleware.approval import ApprovalMiddleware
 from vidbyte.middleware.builtins import (
     AuditLogMiddleware,
     ModelRetryMiddleware,
@@ -30,10 +31,15 @@ from vidbyte.middleware.builtins import (
     TokenRateLimitMiddleware,
     ToolPolicyMiddleware,
 )
+from vidbyte.middleware.loop_detection import StuckLoopMiddleware
+from vidbyte.middleware.orphan_repair import ToolOrphanRepairMiddleware
+from vidbyte.middleware.plan_mode import PlanModeMiddleware
 from vidbyte.middleware.pipeline import MiddlewarePipeline
+from vidbyte.middleware.secret_redaction import SecretRedactionMiddleware
 
 __all__ = [
     "AgentMiddleware",
+    "ApprovalMiddleware",
     "AuditLogMiddleware",
     "ModelRetryMiddleware",
     "MiddlewareAction",
@@ -42,7 +48,11 @@ __all__ = [
     "MiddlewareEvent",
     "MiddlewareHook",
     "MiddlewarePipeline",
+    "PlanModeMiddleware",
     "RuntimeLimitMiddleware",
+    "SecretRedactionMiddleware",
+    "StuckLoopMiddleware",
     "TokenRateLimitMiddleware",
+    "ToolOrphanRepairMiddleware",
     "ToolPolicyMiddleware",
 ]
