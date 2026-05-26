@@ -108,3 +108,87 @@ class ContextCompactionToolTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIn("summarized", state.messages()[1].content)
         self.assertEqual(state.messages()[-1].content, "answer")
+
+    async def test_keep_last_n_messages(self) -> None:
+        """System messages are preserved and only the last n non-system messages are kept."""
+        state = self._state()
+        await ContextCompactionTool(state).execute(
+            ToolCall("compact_context", {"mode": CompactionMode.KEEP_LAST_N_MESSAGES.value, "n": 2})
+        )
+        messages = state.messages()
+        self.assertEqual(messages[0].role, "system")
+        non_system = [m for m in messages if m.role != "system"]
+        self.assertEqual(len(non_system), 2)
+        self.assertEqual(non_system[-1].content, "answer")
+
+    async def test_strip_tool_result_bodies(self) -> None:
+        """Tool result content is replaced with a placeholder; call records are preserved."""
+        state = self._state()
+        await ContextCompactionTool(state).execute(
+            ToolCall("compact_context", {"mode": CompactionMode.STRIP_TOOL_RESULT_BODIES.value})
+        )
+        messages = state.messages()
+        self.assertEqual(len(messages), 5)
+        tool_results = [m for m in messages if m.kind == "tool_result"]
+        self.assertEqual(len(tool_results), 1)
+        self.assertEqual(tool_results[0].content, "[tool result stripped by compaction]")
+        self.assertIn("original_chars", tool_results[0].metadata)
+
+    async def test_deduplicate_tool_calls(self) -> None:
+        """Duplicate tool-call/result pairs are removed, keeping only the first occurrence."""
+        state = MemoryState(
+            (
+                ContextMessage("system", "rules"),
+                ContextMessage("assistant", "lookup", kind="tool_call"),
+                ContextMessage("tool", "data", kind="tool_result"),
+                ContextMessage("assistant", "lookup", kind="tool_call"),
+                ContextMessage("tool", "data", kind="tool_result"),
+                ContextMessage("assistant", "done"),
+            )
+        )
+        await ContextCompactionTool(state).execute(
+            ToolCall("compact_context", {"mode": CompactionMode.DEDUPLICATE_TOOL_CALLS.value})
+        )
+        messages = state.messages()
+        self.assertEqual(sum(m.kind == "tool_call" for m in messages), 1)
+        self.assertEqual(sum(m.kind == "tool_result" for m in messages), 1)
+
+    async def test_summarize_oldest_n(self) -> None:
+        """Oldest n non-system messages are collapsed into a summary; the rest remain."""
+        state = self._state()
+        await ContextCompactionTool(state, summarizer=FakeSummarizer()).execute(
+            ToolCall("compact_context", {"mode": CompactionMode.SUMMARIZE_OLDEST_N.value, "n": 2})
+        )
+        messages = state.messages()
+        self.assertEqual(messages[0].role, "system")
+        self.assertEqual(messages[1].kind, "summary")
+        self.assertIn("summarized 2", messages[1].content)
+        self.assertEqual(messages[-1].content, "answer")
+
+    async def test_summarize_by_topic_blocks(self) -> None:
+        """Non-system messages are split into blocks and each block is summarized."""
+        state = self._state()
+        await ContextCompactionTool(state, summarizer=FakeSummarizer()).execute(
+            ToolCall("compact_context", {"mode": CompactionMode.SUMMARIZE_BY_TOPIC_BLOCKS.value, "block_size": 2})
+        )
+        messages = state.messages()
+        self.assertEqual(messages[0].role, "system")
+        summaries = [m for m in messages if m.kind == "summary"]
+        self.assertEqual(len(summaries), 2)
+        self.assertIn("block_index", summaries[0].metadata)
+
+    async def test_summarize_oldest_n_without_summarizer_returns_error(self) -> None:
+        """summarize_oldest_n without a summarizer returns an error result."""
+        state = self._state()
+        result = await ContextCompactionTool(state).execute(
+            ToolCall("compact_context", {"mode": CompactionMode.SUMMARIZE_OLDEST_N.value, "n": 2})
+        )
+        self.assertEqual(result.status.value, "error")
+
+    async def test_summarize_by_topic_blocks_without_summarizer_returns_error(self) -> None:
+        """summarize_by_topic_blocks without a summarizer returns an error result."""
+        state = self._state()
+        result = await ContextCompactionTool(state).execute(
+            ToolCall("compact_context", {"mode": CompactionMode.SUMMARIZE_BY_TOPIC_BLOCKS.value})
+        )
+        self.assertEqual(result.status.value, "error")
