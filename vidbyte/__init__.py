@@ -128,6 +128,7 @@ from vidbyte.tools import (
     tool,
     vidbyte_tool,
 )
+from vidbyte.mcp_server import McpStudioServer
 from vidbyte.tools.mcp import (
     McpServerConfig,
     McpServerHandle,
@@ -176,6 +177,7 @@ __all__ = [
     "McpInitializeError",
     "McpServerConfig",
     "McpServerHandle",
+    "McpStudioServer",
     "McpToolDiscoveryError",
     "McpToolExecutionError",
     "McpToolPermission",
