@@ -15,6 +15,7 @@ Relations:
 
 from __future__ import annotations
 
+import dataclasses
 import math
 from collections.abc import Sequence
 from enum import Enum
@@ -33,6 +34,11 @@ class CompactionMode(str, Enum):
     REMOVE_LAST_N_TOOL_CALLS = "remove_last_n_tool_calls"
     REMOVE_TOOL_CALL_PERCENTAGE = "remove_tool_call_percentage"
     SUMMARIZE_RANGE = "summarize_range"
+    KEEP_LAST_N_MESSAGES = "keep_last_n_messages"
+    SUMMARIZE_OLDEST_N = "summarize_oldest_n"
+    STRIP_TOOL_RESULT_BODIES = "strip_tool_result_bodies"
+    DEDUPLICATE_TOOL_CALLS = "deduplicate_tool_calls"
+    SUMMARIZE_BY_TOPIC_BLOCKS = "summarize_by_topic_blocks"
 
 
 class Summarizer(Protocol):
@@ -54,14 +60,21 @@ class ContextCompactionTool(BaseTool):
         """Return the model-facing compaction tool declaration."""
         return ToolSpec(
             name="compact_context",
-            description="Compact agent context by clearing, summarizing, or removing tool traces.",
+            description=(
+                "Compact agent context by clearing, summarizing, or removing tool traces. "
+                "Modes: clear_except_system_and_log, remove_all_tool_calls, "
+                "remove_last_n_tool_calls, remove_tool_call_percentage, summarize_range, "
+                "keep_last_n_messages, summarize_oldest_n, strip_tool_result_bodies, "
+                "deduplicate_tool_calls, summarize_by_topic_blocks."
+            ),
             permission=ToolPermission.SAFE,
             parameters=(
                 ToolParameter("mode", "string", "Compaction strategy name."),
-                ToolParameter("n", "integer", "Number of tool messages to remove.", required=False),
+                ToolParameter("n", "integer", "Number of messages or tool pairs to act on.", required=False),
                 ToolParameter("percentage", "number", "Fraction of tool messages to remove.", required=False),
                 ToolParameter("order", "string", "'oldest' or 'newest' for percentage removal.", required=False),
                 ToolParameter("keep_last", "integer", "Recent messages to preserve for summarization.", required=False),
+                ToolParameter("block_size", "integer", "Messages per block for block summarization.", required=False),
                 ToolParameter("progress_log", "object", "Structured progress log fields.", required=False),
             ),
         )
@@ -86,6 +99,22 @@ class ContextCompactionTool(BaseTool):
             if not 0 <= percentage <= 1:
                 return ToolResult.error(self.name, "percentage must be between 0 and 1.")
             after = self._remove_percentage(before, percentage, order)
+        elif mode is CompactionMode.KEEP_LAST_N_MESSAGES:
+            after = self._keep_last_n_messages(before, int(call.arguments.get("n", 10)))
+        elif mode is CompactionMode.STRIP_TOOL_RESULT_BODIES:
+            after = self._strip_tool_result_bodies(before)
+        elif mode is CompactionMode.DEDUPLICATE_TOOL_CALLS:
+            after = self._deduplicate_tool_calls(before)
+        elif mode is CompactionMode.SUMMARIZE_OLDEST_N:
+            result = await self._summarize_oldest_n(before, int(call.arguments.get("n", 5)))
+            if isinstance(result, ToolResult):
+                return result
+            after = result
+        elif mode is CompactionMode.SUMMARIZE_BY_TOPIC_BLOCKS:
+            result = await self._summarize_by_topic_blocks(before, int(call.arguments.get("block_size", 10)))
+            if isinstance(result, ToolResult):
+                return result
+            after = result
         else:
             result = await self._summarize_range(before, int(call.arguments.get("keep_last", 3)))
             if isinstance(result, ToolResult):
@@ -181,6 +210,120 @@ class ContextCompactionTool(BaseTool):
             metadata={"compaction": CompactionMode.SUMMARIZE_RANGE.value},
         )
         return system + (summary,) + tuple(recent)
+
+    def _keep_last_n_messages(
+        self,
+        messages: Sequence[ContextMessage],
+        n: int,
+    ) -> tuple[ContextMessage, ...]:
+        """Keep system messages and the last n non-system messages."""
+        n = max(0, n)
+        system = tuple(message for message in messages if message.role == "system")
+        non_system = tuple(message for message in messages if message.role != "system")
+        return system + non_system[-n:] if n else system
+
+    def _strip_tool_result_bodies(
+        self,
+        messages: Sequence[ContextMessage],
+    ) -> tuple[ContextMessage, ...]:
+        """Replace tool-result content with a compact placeholder, preserving the record."""
+        placeholder = "[tool result stripped by compaction]"
+        result = []
+        for message in messages:
+            if message.kind == "tool_result":
+                result.append(
+                    dataclasses.replace(
+                        message,
+                        content=placeholder,
+                        metadata={
+                            **dict(message.metadata),
+                            "compaction": CompactionMode.STRIP_TOOL_RESULT_BODIES.value,
+                            "original_chars": len(message.content),
+                        },
+                    )
+                )
+            else:
+                result.append(message)
+        return tuple(result)
+
+    def _deduplicate_tool_calls(
+        self,
+        messages: Sequence[ContextMessage],
+    ) -> tuple[ContextMessage, ...]:
+        """Remove duplicate tool-call/result pairs, keeping the first occurrence of each."""
+        seen_call_content: set[str] = set()
+        remove_indexes: set[int] = set()
+        for index, message in enumerate(messages):
+            if message.kind == "tool_call":
+                if message.content in seen_call_content:
+                    remove_indexes.add(index)
+                    if index + 1 < len(messages) and messages[index + 1].kind == "tool_result":
+                        remove_indexes.add(index + 1)
+                else:
+                    seen_call_content.add(message.content)
+        return tuple(message for index, message in enumerate(messages) if index not in remove_indexes)
+
+    async def _summarize_oldest_n(
+        self,
+        messages: Sequence[ContextMessage],
+        n: int,
+    ) -> tuple[ContextMessage, ...] | ToolResult:
+        """Summarize the oldest n non-system messages and keep the rest verbatim."""
+        if self.summarizer is None:
+            return ToolResult.error(
+                self.name,
+                "summarize_oldest_n requires an injected summarizer.",
+                metadata={"error": "missing_summarizer"},
+            )
+        n = max(0, n)
+        system = tuple(message for message in messages if message.role == "system")
+        non_system = tuple(message for message in messages if message.role != "system")
+        to_summarize = non_system[:n]
+        rest = non_system[n:]
+        if not to_summarize:
+            return tuple(messages)
+        summary_text = await self.summarizer.summarize(to_summarize)
+        summary = ContextMessage(
+            role="assistant",
+            content=summary_text,
+            kind="summary",
+            metadata={"compaction": CompactionMode.SUMMARIZE_OLDEST_N.value},
+        )
+        return system + (summary,) + rest
+
+    async def _summarize_by_topic_blocks(
+        self,
+        messages: Sequence[ContextMessage],
+        block_size: int,
+    ) -> tuple[ContextMessage, ...] | ToolResult:
+        """Chunk non-system history into blocks and summarize each block independently."""
+        if self.summarizer is None:
+            return ToolResult.error(
+                self.name,
+                "summarize_by_topic_blocks requires an injected summarizer.",
+                metadata={"error": "missing_summarizer"},
+            )
+        block_size = max(1, block_size)
+        system = tuple(message for message in messages if message.role == "system")
+        non_system = tuple(message for message in messages if message.role != "system")
+        if not non_system:
+            return tuple(messages)
+        blocks = [non_system[i : i + block_size] for i in range(0, len(non_system), block_size)]
+        summaries: list[ContextMessage] = []
+        for block_index, block in enumerate(blocks):
+            summary_text = await self.summarizer.summarize(block)
+            summaries.append(
+                ContextMessage(
+                    role="assistant",
+                    content=summary_text,
+                    kind="summary",
+                    metadata={
+                        "compaction": CompactionMode.SUMMARIZE_BY_TOPIC_BLOCKS.value,
+                        "block_index": block_index,
+                    },
+                )
+            )
+        return system + tuple(summaries)
 
     def _progress_log(self, raw_log: object) -> ProgressLog:
         """Convert a mapping-like object into a ProgressLog."""
