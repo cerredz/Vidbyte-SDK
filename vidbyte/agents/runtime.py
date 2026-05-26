@@ -28,6 +28,7 @@ from vidbyte.lib.enums import ModelModality
 from vidbyte.lib.errors import PermissionDeniedError, ToolExecutionError, ToolRegistryError
 from vidbyte.lib.token_usage import token_usage_from_response
 from vidbyte.lib.tools import ToolsFormatter
+from vidbyte.lib.tracing import NullTracer, SpanContext, TracerBase
 from vidbyte.middleware import AgentMiddleware, MiddlewarePipeline
 from vidbyte.prompts.agentic_loop import append_agentic_loop_prompt
 from vidbyte.strategies.types import BaseAgentContext, StrategyContext, StrategyResult
@@ -48,6 +49,7 @@ class AgentRuntime:
         tools: Tools,
         permission_policy: PermissionPolicy,
         config: AgentRuntimeConfig | None = None,
+        tracer: TracerBase | None = None,
         middleware: Sequence[AgentMiddleware] = (),
         run_id: str | None = None,
         algorithm: ContextWindowAlgorithm | str | None = None,
@@ -58,6 +60,7 @@ class AgentRuntime:
         self.tools = with_internal_agent_tools(tools)
         self.permission_policy = permission_policy
         self.config = config or AgentRuntimeConfig()
+        self._tracer: TracerBase = tracer or NullTracer()
         self.middleware = MiddlewarePipeline(middleware)
         self.run_id = run_id
         self.algorithm = ContextWindow.resolve_algorithm(algorithm)
@@ -120,6 +123,7 @@ class AgentRuntime:
         runner_output_metadata: Callable[[object], Mapping[str, Any]],
         metadata: Mapping[str, Any] | None = None,
         options: Mapping[str, Any] | None = None,
+        trace_context: SpanContext | None = None,
     ) -> StrategyResult:
         """Run the direct model/tool loop until isDone or a budget stop."""
         run_options = dict(options or {})
@@ -229,12 +233,14 @@ class AgentRuntime:
                 context=context,
                 provider=provider,
                 invoke_runner=invoke_runner,
+                runner_output_text=runner_output_text,
                 iteration_count=iteration_count,
                 model_call_count=model_call_count,
                 call_contexts=call_contexts,
                 tokens_used=tokens_used,
                 started_at=started_at,
                 metadata=runtime_metadata,
+                trace_context=trace_context,
             )
             if isinstance(raw_result, StrategyResult):
                 return await self._finish_result(
@@ -342,6 +348,7 @@ class AgentRuntime:
                     started_at=started_at,
                     metadata=runtime_metadata,
                     model_response=raw_result,
+                    trace_context=trace_context,
                 )
                 if isinstance(processed, StrategyResult):
                     return await self._finish_result(
@@ -457,12 +464,14 @@ class AgentRuntime:
         context: BaseAgentContext,
         provider: str,
         invoke_runner: Callable[..., Any],
+        runner_output_text: Callable[[object], str],
         iteration_count: int,
         model_call_count: int,
         call_contexts: Sequence[ToolCallContext],
         tokens_used: int | None,
         started_at: float,
         metadata: Mapping[str, Any],
+        trace_context: SpanContext | None = None,
     ) -> tuple[object | StrategyResult, int]:
         """Invoke the runner, allowing middleware to retry model errors."""
         while True:
@@ -491,9 +500,19 @@ class AgentRuntime:
                     model_call_count,
                 )
             model_call_count += 1
+            llm_span = self._tracer.start_span(
+                "llm.call",
+                parent=trace_context,
+                provider=provider,
+                iteration=iteration_count,
+            )
             try:
-                return await invoke_runner(runner, message, **dict(call_options)), model_call_count
+                raw_result = await invoke_runner(runner, message, **dict(call_options))
+                output_text = runner_output_text(raw_result)
+                self._tracer.end_span(llm_span, output=output_text)
+                return raw_result, model_call_count
             except Exception as exc:
+                self._tracer.end_span(llm_span, error=exc)
                 decision = await self.middleware.on_model_error(
                     self._middleware_context(
                         MiddlewareHook.ON_MODEL_ERROR,
@@ -644,8 +663,19 @@ class AgentRuntime:
             metadata=metadata,
         )
 
-    async def execute_tool_call(self, call: ToolCall, *, provider: str) -> tuple[ToolCallContext, ToolResult]:
+    async def execute_tool_call(
+        self,
+        call: ToolCall,
+        *,
+        provider: str,
+        trace_context: SpanContext | None = None,
+    ) -> tuple[ToolCallContext, ToolResult]:
         """Resolve, authorize, validate, execute, and record one tool call."""
+        tool_span = self._tracer.start_span(
+            "tool.call",
+            parent=trace_context,
+            tool_name=call.tool_name,
+        )
         try:
             tool = self._get_tool(call)
             spec = tool.spec()
@@ -653,9 +683,11 @@ class AgentRuntime:
             self._validate_tool_call(tool, call)
             result = await self._execute_tool(tool, call)
             state = ToolCallState.SUCCEEDED if result.status.value == "success" else ToolCallState.FAILED
+            self._tracer.end_span(tool_span, output=result.output)
         except ToolRegistryError as exc:
             result = ToolResult.error(call.tool_name, str(exc), metadata={"error": "unknown_tool", "detail": str(exc)})
             state = ToolCallState.FAILED
+            self._tracer.end_span(tool_span, error=exc)
         except PermissionDeniedError as exc:
             permission = exc.details.get("permission", "")
             result = ToolResult.error(
@@ -664,6 +696,7 @@ class AgentRuntime:
                 metadata={"error": "permission_denied", "permission": permission},
             )
             state = ToolCallState.DENIED
+            self._tracer.end_span(tool_span, error=exc)
         except ToolExecutionError as exc:
             error_type = exc.details.get("error_type", type(exc).__name__)
             result = ToolResult.error(
@@ -672,6 +705,7 @@ class AgentRuntime:
                 metadata={"error": "execution_error", "error_type": error_type},
             )
             state = ToolCallState.FAILED
+            self._tracer.end_span(tool_span, error=exc)
         except Exception as exc:
             result = ToolResult.error(
                 call.tool_name,
@@ -679,6 +713,7 @@ class AgentRuntime:
                 metadata={"error": "execution_error", "error_type": type(exc).__name__},
             )
             state = ToolCallState.FAILED
+            self._tracer.end_span(tool_span, error=exc)
 
         return (
             ToolCallContext(
@@ -836,6 +871,7 @@ class AgentRuntime:
         started_at: float,
         metadata: Mapping[str, Any],
         model_response: object | None = None,
+        trace_context: SpanContext | None = None,
     ) -> tuple[ToolCallContext, ToolResult] | StrategyResult:
         """Execute one tool call, record its context, and append it to messages."""
         tool_is_internal = self._tool_is_internal(call)
@@ -866,7 +902,7 @@ class AgentRuntime:
         if decision.action is MiddlewareAction.DENY_TOOL:
             context_record, result = self._middleware_denied_tool(call, provider, decision)
         else:
-            context_record, result = await self.execute_tool_call(call, provider=provider)
+            context_record, result = await self.execute_tool_call(call, provider=provider, trace_context=trace_context)
         call_contexts.append(context_record)
         after_decision = await self.middleware.after_tool_call(
             self._middleware_context(

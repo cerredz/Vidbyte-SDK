@@ -35,6 +35,7 @@ from vidbyte.lib.errors.base import (
     ToolExecutionError,
     ToolRegistrationError,
     ToolRegistryError,
+    TracerConfigurationError,
     UnsupportedProviderError,
     VidbyteSdkError,
 )
@@ -61,6 +62,7 @@ __all__ = [
     "ToolExecutionError",
     "ToolRegistrationError",
     "ToolRegistryError",
+    "TracerConfigurationError",
     "UnsupportedProviderError",
     "VidbyteSdkError",
 ]

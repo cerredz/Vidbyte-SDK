@@ -67,7 +67,9 @@ from vidbyte.lib.errors import (
     McpToolDiscoveryError,
     McpToolExecutionError,
     PipelineExecutionError,
+    TracerConfigurationError,
 )
+from vidbyte.lib.tracing import NullTracer, TracerBase
 from vidbyte.middleware import (
     AgentMiddleware,
     AuditLogMiddleware,
@@ -136,6 +138,9 @@ from vidbyte.tools.mcp import (
 
 __all__ = [
     "Agent",
+    "NullTracer",
+    "TracerBase",
+    "TracerConfigurationError",
     "AgentCard",
     "AgentClient",
     "AgentInput",

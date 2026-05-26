@@ -29,6 +29,7 @@ from vidbyte.lib.agents import ModalityDetector
 from vidbyte.lib.dataclasses.agents import AgentMetadata, AgentRunnerConfig, AgentRuntimeConfig
 from vidbyte.lib.enums import ModelModality, ModelProvider
 from vidbyte.lib.errors import AgentExecutionError, ConfigurationError
+from vidbyte.lib.tracing import NullTracer, TracerBase
 from vidbyte.middleware import AgentMiddleware
 from vidbyte.strategies.base import BaseStrategy
 from vidbyte.strategies.chain import StrategyChain
@@ -79,6 +80,7 @@ class BaseAgent(McpAttachableMixin):
         context_manager: ContextManager | None = None,
         algorithm: ContextWindowAlgorithm | str | None = None,
         metadata: dict[str, Any] | None = None,
+        tracer: type[TracerBase] | TracerBase | None = None,
     ) -> None:
         if not name:
             raise AgentExecutionError("Agent name cannot be empty.")
@@ -126,6 +128,13 @@ class BaseAgent(McpAttachableMixin):
         self._active_prompt: str = ""
         for _tool in self._agent_tool_items:
             self._bind_agent_tool_context(_tool)
+
+        if tracer is None:
+            self._tracer: TracerBase = NullTracer()
+        elif isinstance(tracer, type):
+            self._tracer = tracer()
+        else:
+            self._tracer = tracer
 
         # MCP Attachable State
         self._mcp_handles = []
@@ -251,6 +260,7 @@ class BaseAgent(McpAttachableMixin):
             context_manager=self.context_manager if context_manager is None else context_manager,
             algorithm=self.algorithm if algorithm is None else algorithm,
             metadata={**self.metadata, **dict(metadata or {})},
+            tracer=self._tracer,
         )
         if include_history:
             child.history = list(self.history)
@@ -270,6 +280,11 @@ class BaseAgent(McpAttachableMixin):
         **options: Any,
     ) -> AgentMessage:
         await self._ensure_mcp_connected()
+        trace_ctx = self._tracer.start_trace(
+            "agent.run",
+            agent_name=self.name,
+            strategy=type(self.strategy).__name__ if self.strategy else "direct",
+        )
         try:
             prompt, input_modality, input_metadata = self._normalize_input(message)
             input_context_items, input_context_manager = self._normalize_input_context(message)
@@ -300,6 +315,7 @@ class BaseAgent(McpAttachableMixin):
                     agent_context,
                     runner=runner,
                     modality=selected_modality,
+                    trace_context=trace_ctx,
                     runtime_metadata={**self.metadata, **dict(input_metadata)},
                     **options,
                 )
@@ -311,7 +327,9 @@ class BaseAgent(McpAttachableMixin):
                     tools=self._agent_tool_items,
                     **options,
                 )
+            self._tracer.end_trace(trace_ctx, output=result.output)
         except Exception as exc:
+            self._tracer.end_trace(trace_ctx, error=exc)
             self._active_prompt = ""
             raise AgentExecutionError(
                 f"Agent '{self.name}' failed to generate a reply.",
@@ -407,6 +425,7 @@ class BaseAgent(McpAttachableMixin):
         *,
         runner: object | None = None,
         modality: ModelModality = ModelModality.TEXT,
+        trace_context: object | None = None,
         runtime_metadata: Mapping[str, Any] | None = None,
         **options: Any,
     ) -> StrategyResult:
@@ -434,6 +453,7 @@ class BaseAgent(McpAttachableMixin):
             runner_output_metadata=self._runner_output_metadata,
             metadata=runtime_metadata,
             options=options,
+            trace_context=trace_context,
         )
         self._record_tool_contexts(result)
         return result
@@ -476,6 +496,7 @@ class BaseAgent(McpAttachableMixin):
             tools=self.tools,
             permission_policy=self.permission_policy,
             config=self.runtime_config,
+            tracer=self._tracer,
             middleware=self.middleware,
             run_id=self.runner_config.run_id,
             algorithm=self.algorithm,

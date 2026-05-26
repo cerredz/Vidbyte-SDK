@@ -151,3 +151,7 @@ class ToolRegistrationError(ToolRegistryError):
 
 class PipelineExecutionError(VidbyteSdkError):
     """Raised when a pipeline cannot complete execution."""
+
+
+class TracerConfigurationError(VidbyteSdkError):
+    """Raised when a tracing provider cannot be configured (missing credentials or SDK)."""
