@@ -14,7 +14,7 @@ Relations:
 
 from __future__ import annotations
 
-from vidbyte.context.algorithms import ContextWindowAlgorithm, ToolResultAdmission
+from vidbyte.context.algorithms import ContextWindowAlgorithm, ReflexionAlgorithm, ToolResultAdmission
 
 
 class ContextWindowPresets:
@@ -50,6 +50,14 @@ class ContextWindowPresets:
     def no_raw_tool_outputs(self) -> ContextWindowAlgorithm:
         """Alias for hiding raw tool output from the model context window."""
         return self.hide_tool_outputs
+
+    @property
+    def reflexion(self) -> ContextWindowAlgorithm:
+        """Run failed attempts through Reflexion retry and self-reflection."""
+        return ContextWindowAlgorithm(
+            name="reflexion",
+            reflexion=ReflexionAlgorithm(),
+        )
 
 
 def resolve_context_window_algorithm(

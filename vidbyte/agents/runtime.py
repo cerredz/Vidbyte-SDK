@@ -126,6 +126,47 @@ class AgentRuntime:
         trace_context: SpanContext | None = None,
     ) -> StrategyResult:
         """Run the direct model/tool loop until isDone or a budget stop."""
+        if self.algorithm.reflexion is not None:
+            return await self._arun_with_reflexion(
+                message,
+                runner=runner,
+                context=context,
+                provider=provider,
+                invoke_runner=invoke_runner,
+                runner_output_text=runner_output_text,
+                runner_output_metadata=runner_output_metadata,
+                metadata=metadata,
+                options=options,
+                trace_context=trace_context,
+            )
+        return await self._arun_once(
+            message,
+            runner=runner,
+            context=context,
+            provider=provider,
+            invoke_runner=invoke_runner,
+            runner_output_text=runner_output_text,
+            runner_output_metadata=runner_output_metadata,
+            metadata=metadata,
+            options=options,
+            trace_context=trace_context,
+        )
+
+    async def _arun_once(
+        self,
+        message: str,
+        *,
+        runner: object,
+        context: BaseAgentContext,
+        provider: str,
+        invoke_runner: Callable[..., Any],
+        runner_output_text: Callable[[object], str],
+        runner_output_metadata: Callable[[object], Mapping[str, Any]],
+        metadata: Mapping[str, Any] | None = None,
+        options: Mapping[str, Any] | None = None,
+        trace_context: SpanContext | None = None,
+    ) -> StrategyResult:
+        """Run one direct model/tool attempt until isDone or a budget stop."""
         run_options = dict(options or {})
         runtime_metadata = dict(metadata or {})
         tool_schemas = self._resolve_tool_schemas(provider)
@@ -454,6 +495,169 @@ class AgentRuntime:
                     metadata=runtime_metadata,
                     model_response=raw_result,
                 )
+
+    async def _arun_with_reflexion(
+        self,
+        message: str,
+        *,
+        runner: object,
+        context: BaseAgentContext,
+        provider: str,
+        invoke_runner: Callable[..., Any],
+        runner_output_text: Callable[[object], str],
+        runner_output_metadata: Callable[[object], Mapping[str, Any]],
+        metadata: Mapping[str, Any] | None = None,
+        options: Mapping[str, Any] | None = None,
+        trace_context: SpanContext | None = None,
+    ) -> StrategyResult:
+        """Run Reflexion attempts, reflecting after failed trials."""
+        reflexion = self.algorithm.reflexion
+        if reflexion is None:
+            raise RuntimeError("Reflexion runtime called without a ReflexionAlgorithm.")
+        reflections: list[str] = []
+        failed_attempts: list[str] = []
+        attempt_summaries: list[dict[str, Any]] = []
+        last_result: StrategyResult | None = None
+
+        for trial_index in range(reflexion.max_trials):
+            trial_context = reflexion.context_for_trial(
+                context,
+                task=message,
+                reflections=reflections,
+                failed_attempts=failed_attempts,
+            )
+            result = await self._arun_once(
+                message,
+                runner=runner,
+                context=trial_context,
+                provider=provider,
+                invoke_runner=invoke_runner,
+                runner_output_text=runner_output_text,
+                runner_output_metadata=runner_output_metadata,
+                metadata={
+                    **dict(metadata or {}),
+                    "context_window_algorithm": "reflexion",
+                    "reflexion_trial_index": trial_index,
+                },
+                options=dict(options or {}),
+                trace_context=trace_context,
+            )
+            last_result = result
+            failed_attempt = reflexion.format_failed_attempt(result)
+            attempt_summaries.append(
+                {
+                    "trial_index": trial_index,
+                    "stop_reason": reflexion.stop_reason(result).value,
+                    "tool_call_count": dict(result.metadata).get("tool_call_count", 0),
+                }
+            )
+            if not reflexion.should_reflect(result, trial_index=trial_index):
+                return self._with_reflexion_metadata(
+                    result,
+                    reflections=reflections,
+                    attempts=attempt_summaries,
+                )
+
+            failed_attempts.append(failed_attempt)
+            reflected = await self._run_reflexion_reflection(
+                runner,
+                task=message,
+                failed_attempt=failed_attempt,
+                reflections=reflections,
+                context=context,
+                provider=provider,
+                invoke_runner=invoke_runner,
+                runner_output_text=runner_output_text,
+                metadata=metadata,
+                trial_index=trial_index,
+                trace_context=trace_context,
+            )
+            if isinstance(reflected, StrategyResult):
+                return self._with_reflexion_metadata(
+                    reflected,
+                    reflections=reflections,
+                    attempts=attempt_summaries,
+                )
+            if reflected:
+                reflections.append(reflected)
+
+        assert last_result is not None
+        return self._with_reflexion_metadata(
+            last_result,
+            reflections=reflections,
+            attempts=attempt_summaries,
+        )
+
+    async def _run_reflexion_reflection(
+        self,
+        runner: object,
+        *,
+        task: str,
+        failed_attempt: str,
+        reflections: Sequence[str],
+        context: BaseAgentContext,
+        provider: str,
+        invoke_runner: Callable[..., Any],
+        runner_output_text: Callable[[object], str],
+        metadata: Mapping[str, Any] | None,
+        trial_index: int,
+        trace_context: SpanContext | None,
+    ) -> str | StrategyResult:
+        """Invoke the reflection stage through the normal runner/middleware path."""
+        reflexion = self.algorithm.reflexion
+        if reflexion is None:
+            return ""
+        reflection_prompt = reflexion.render_reflection_prompt(
+            task=task,
+            failed_attempt=failed_attempt,
+            reflections=reflections,
+        )
+        raw_result, _ = await self._invoke_with_middleware(
+            runner,
+            reflection_prompt,
+            {"system": reflexion.reflection_system_prompt()},
+            context=context,
+            provider=provider,
+            invoke_runner=invoke_runner,
+            runner_output_text=runner_output_text,
+            iteration_count=trial_index,
+            model_call_count=0,
+            call_contexts=(),
+            tokens_used=None,
+            started_at=self.middleware.clock(),
+            metadata={
+                **dict(metadata or {}),
+                "context_window_algorithm": "reflexion",
+                "reflexion_stage": "reflect",
+                "reflexion_trial_index": trial_index,
+            },
+            trace_context=trace_context,
+        )
+        if isinstance(raw_result, StrategyResult):
+            return raw_result
+        return reflexion.capture_reflection(runner_output_text(raw_result))
+
+    @staticmethod
+    def _with_reflexion_metadata(
+        result: StrategyResult,
+        *,
+        reflections: Sequence[str],
+        attempts: Sequence[Mapping[str, Any]],
+    ) -> StrategyResult:
+        """Attach Reflexion trial metadata to a runtime result."""
+        metadata = dict(result.metadata)
+        metadata["reflexion"] = {
+            "trial_count": len(tuple(attempts)),
+            "reflection_count": len(tuple(reflections)),
+            "reflections": tuple(reflections),
+            "attempts": tuple(dict(attempt) for attempt in attempts),
+        }
+        return StrategyResult(
+            output=result.output,
+            strategy_name=result.strategy_name,
+            calls=result.calls,
+            metadata=metadata,
+        )
 
     async def _invoke_with_middleware(
         self,

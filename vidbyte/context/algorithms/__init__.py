@@ -7,12 +7,14 @@ Purpose:
     public context primitives.
 Architecture:
     - Tool-result admission algorithms from tool_results.
+    - Reflexion runtime context-window algorithm from reflexion.
 Relations:
     Used by vidbyte.context.presets and AgentRuntime.
 """
 
 from __future__ import annotations
 
+from vidbyte.context.algorithms.reflexion import ReflexionAlgorithm
 from vidbyte.context.algorithms.tool_results import (
     ContextWindowAlgorithm,
     ToolResultAdmission,
@@ -20,5 +22,6 @@ from vidbyte.context.algorithms.tool_results import (
 
 __all__ = [
     "ContextWindowAlgorithm",
+    "ReflexionAlgorithm",
     "ToolResultAdmission",
 ]
