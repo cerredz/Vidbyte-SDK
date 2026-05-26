@@ -52,6 +52,7 @@ vidbyte/
 - Keep public context objects in `vidbyte/context/`, but define shared infrastructure dataclasses centrally under `vidbyte/lib/dataclasses/`.
 - Keep standardized context item primitives under `vidbyte/context/primitives.py` and expose the central `ContextManager` from `vidbyte/context/manager.py`.
 - Keep context-window presets in `vidbyte/context/presets.py` and algorithm implementations under `vidbyte/context/algorithms/`.
+- Follow `skills/vidbyte-sdk/adding-context-window-algorithms.md` when adding or changing attached context-window algorithms.
 - Keep prompt templates in `vidbyte/prompts/prompts/` and expose them through `vidbyte.prompts.Prompts` plus `vidbyte.lib.enums.prompts.Prompt`; follow the JSON-descriptor-plus-Markdown format in `skills/vidbyte-sdk/adding-prompts.md` for new large prompt assets.
 - Follow `skills/vidbyte-sdk/adding-prompts.md` whenever adding or changing prompt assets.
 - Keep enum presets under `vidbyte/lib/enums/`.

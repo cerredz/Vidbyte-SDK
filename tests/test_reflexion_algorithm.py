@@ -12,6 +12,8 @@ from __future__ import annotations
 import unittest
 
 from vidbyte import ContextWindow, ReflexionAlgorithm
+from vidbyte.agents.algorithms import ReflexionRuntimeAlgorithm
+from vidbyte.agents.context_algorithms import AgentRuntimeContextAlgorithms
 from vidbyte.agents.runtime import AgentRuntime
 from vidbyte.lib.dataclasses.agents import AgentRuntimeConfig
 from vidbyte.strategies import StrategyResult
@@ -51,6 +53,20 @@ class ReflexionAlgorithmTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(algorithm.name, "reflexion")
         self.assertIsInstance(algorithm.reflexion, ReflexionAlgorithm)
         self.assertFalse(hasattr(ContextWindow.preset, "reflexion_last_attempt"))
+
+    def test_agent_runtime_context_algorithm_dispatcher_detects_reflexion(self) -> None:
+        runtime = AgentRuntime(
+            agent_name="worker",
+            system_prompt="Work.",
+            tools=Tools(),
+            permission_policy=PermissionPolicy(),
+            algorithm=ContextWindow.preset.reflexion,
+        )
+        dispatcher = AgentRuntimeContextAlgorithms(runtime)
+
+        self.assertEqual(dispatcher.detect_algorithm(), "reflexion")
+        self.assertTrue(dispatcher.is_algorithm("reflexion"))
+        self.assertIsInstance(dispatcher.return_algorithm(), ReflexionRuntimeAlgorithm)
 
     def test_reflexion_algorithm_allows_stage_prompt_overrides(self) -> None:
         algorithm = ReflexionAlgorithm(
