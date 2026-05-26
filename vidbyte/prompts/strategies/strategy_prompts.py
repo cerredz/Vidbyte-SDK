@@ -60,6 +60,10 @@ class MultiAgentReflexionPrompts(_PromptBundle):
     key = "multi_agent_reflexion"
 
 
+class ReflexionPrompts(_PromptBundle):
+    key = "reflexion"
+
+
 class AgenticRagPrompts(_PromptBundle):
     key = "agentic_rag"
 
