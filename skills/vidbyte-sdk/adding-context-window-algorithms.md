@@ -1,9 +1,17 @@
 # Adding Context Window Algorithms
 
-Use this guide when adding an SDK context-window algorithm that changes what an
-agent sees while it runs. Context-window algorithms are selected by users through
-`algorithm=ContextWindow.preset.<name>` and are attached to direct agent runtime
-execution through the agent-side algorithm dispatcher.
+Use this guide when adding or changing a Vidbyte SDK context-window algorithm.
+A context-window algorithm is an out-of-the-box agent behavior that changes what
+the model sees during execution. It is not just a configuration flag. When a
+developer writes `algorithm=ContextWindow.preset.<name>`, the SDK should attach
+the complete algorithm implementation to the agent runtime and run it without
+requiring the developer to manually call helper functions.
+
+This file is intentionally detailed. Context-window algorithms sit across the
+public SDK surface, prompt catalog, agent runtime, middleware, tool execution,
+and tests. Small mistakes usually still compile, but they fail silently at
+runtime by dropping context, bypassing middleware, hiding tool results from the
+wrong place, or exposing a preset that does not actually run.
 
 Related skill files:
 
@@ -11,76 +19,330 @@ Related skill files:
 - Adding prompt assets: https://github.com/cerredz/Vidbyte-SDK/blob/main/skills/vidbyte-sdk/adding-prompts.md
 - Pipeline topology guidance: https://github.com/cerredz/Vidbyte-SDK/blob/main/skills/vidbyte-sdk/pipelines.md
 
-## Architecture
+Related design docs:
 
-A complete context-window algorithm has four layers:
+- Minimal agent runtime: `docs/design/minimal-agent-runtime.md`
+- Context management foundation: `docs/design/context-management-foundation.md`
+- Strategies to context-window algorithms, when present: `docs/design/strategies-to-context-window-algorithms.md`
 
-1. Public configuration under `vidbyte/context/algorithms/`.
-2. Preset registration under `vidbyte/context/presets.py`.
-3. Runtime dispatch under `vidbyte/agents/context_algorithms.py`.
-4. Agent execution logic under `vidbyte/agents/algorithms/<algorithm_name>.py`.
+## 1. Mental Model
 
-Keep these responsibilities separate. The generic `AgentRuntime` should own the
-normal model/tool loop, middleware hooks, permissions, tracing, and result
-metadata. It should not contain algorithm-specific loops. Algorithm-specific code
-belongs in `vidbyte/agents/algorithms/`.
+Context-window algorithms are agent-attached runtime policies. They receive the
+same task, runner, context, tools, middleware, and tracing path as a normal
+direct agent run, but they may modify the context between attempts or stages.
 
-## Step 1 - Define Public Configuration
+The developer-facing shape should stay simple:
 
-Add the public configuration object under `vidbyte/context/algorithms/`.
+```python
+from vidbyte import Agent, ContextWindow
 
-Use this layer for stable user-facing configuration:
+agent = Agent(
+    name="worker",
+    system_prompt="Work carefully.",
+    runner=runner,
+    tools=[lookup],
+    algorithm=ContextWindow.preset.reflexion,
+)
+```
 
-- algorithm limits and budgets
+That line must be enough. The developer should not need to import a runtime
+adapter, call a retry loop manually, render prompt files, or wire middleware
+callbacks themselves.
+
+There are two implementation halves:
+
+1. Public context configuration under `vidbyte/context/`.
+2. Runtime execution under `vidbyte/agents/`.
+
+The public context half defines what a user can select or customize. The runtime
+half defines what actually happens when the agent runs. Both halves are required
+for a real algorithm.
+
+## 2. Goals And Non-Goals
+
+### Goals
+
+- Provide one obvious preset through `ContextWindow.preset.<name>`.
+- Support string resolution through `ContextWindow.resolve_algorithm("<name>")`.
+- Expose a typed public configuration object when users need customization.
+- Keep prompt assets readable, inspectable, and overrideable without hardcoding
+  large prompt bodies in Python runtime code.
+- Attach the real runtime behavior automatically through `AgentRuntime`.
+- Preserve tools, permissions, middleware, tracing, provider formatting, and
+  `StrategyResult` metadata.
+- Add tests before implementation for the public API, runtime behavior, prompt
+  loading, edge cases, and hidden failure modes.
+- Document the trace shape so developers and future maintainers can understand
+  what happened during a run.
+
+### Non-Goals
+
+- Do not turn pipelines into context-window algorithms. Pipelines pass strings
+  between agents and must not manage context, budgets, or artifacts.
+- Do not add a custom compiler or low-level builder API unless a design review
+  explicitly asks for it.
+- Do not add provider network calls or service-specific logic.
+- Do not hide internal failures by returning a default preset when an unknown
+  algorithm name is requested.
+- Do not make `AgentRuntime` contain every algorithm loop directly.
+
+## 3. Required Architecture
+
+A complete algorithm has these layers:
+
+| Layer | Location | Responsibility |
+|-------|----------|----------------|
+| Public config | `vidbyte/context/algorithms/<name>.py` | User-facing dataclass, validation, pure formatting helpers |
+| Preset registration | `vidbyte/context/presets.py` | One coarse SDK preset and string-resolution support |
+| Runtime dispatcher | `vidbyte/agents/context_algorithms.py` | Detect the selected algorithm and return the runtime adapter |
+| Runtime implementation | `vidbyte/agents/algorithms/<name>.py` | The actual model/tool/middleware orchestration |
+| Prompt assets | `vidbyte/prompts/prompts/<family>/` | Markdown-backed prompt bodies and JSON descriptor |
+| Prompt exports | `vidbyte/lib/enums/prompts.py`, `vidbyte/prompts/` | Enum access, direct imports, prompt bundles |
+| Tests | `tests/` | Public API, prompt catalog, runtime behavior, metadata, edge cases |
+| Docs/skills | `skills/vidbyte-sdk/` and README/design docs when needed | Maintainer and user guidance |
+
+Keep the boundaries strict. Public configuration may render text and summarize
+state, but it should not call model runners. Runtime adapters may call
+`AgentRuntime` helpers, but they should not define public preset dataclasses.
+Prompt assets should live in the prompt catalog, not inside algorithm classes as
+large inline strings.
+
+## 4. Naming And File Layout
+
+Use one stable algorithm key everywhere. For an algorithm named `example`, use:
+
+```text
+vidbyte/context/algorithms/example.py
+vidbyte/agents/algorithms/example.py
+vidbyte/prompts/prompts/example/
+ContextWindow.preset.example
+ContextWindow.resolve_algorithm("example")
+ContextWindowAlgorithm.example
+ExampleAlgorithm
+ExampleRuntimeAlgorithm
+```
+
+Names should be snake_case for files, prompt keys, metadata keys, and preset
+names. Class names should be PascalCase. Runtime adapter names should end with
+`RuntimeAlgorithm` so it is clear they are not the public config object.
+
+Avoid near-duplicate preset names. Prefer:
+
+```python
+ContextWindow.preset.reflexion
+```
+
+over:
+
+```python
+ContextWindow.preset.reflexion_last_attempt
+ContextWindow.preset.reflexion_with_memory
+ContextWindow.preset.reflexion_retry_three_times
+```
+
+Low-level behavior belongs on the public configuration dataclass:
+
+```python
+ReflexionAlgorithm(max_trials=3, max_reflection_chars=1200)
+```
+
+The preset should be the obvious default, not a catalog of every possible
+parameter combination.
+
+## 5. Tests-First Workflow
+
+Write the first tests before implementing runtime behavior. Context-window
+algorithms have too many cross-module wiring points to trust a code-only pass.
+The tests should prove that the algorithm is selectable, actually runs, and
+preserves the agent runtime contract.
+
+### 5.1 Public API Tests
+
+Add tests that assert:
+
+- `ContextWindow.preset.<name>.name == "<name>"`.
+- `ContextWindow.preset.<name>.<name>` contains the public config object.
+- `ContextWindow.resolve_algorithm("<name>").name == "<name>"`.
+- The config object can be imported from expected public surfaces when it is
+  user-facing.
+- Unrelated presets keep their existing behavior.
+
+Example:
+
+```python
+def test_context_window_preset_exposes_example_algorithm(self) -> None:
+    algorithm = ContextWindow.preset.example
+
+    self.assertEqual(algorithm.name, "example")
+    self.assertIsInstance(algorithm.example, ExampleAlgorithm)
+    self.assertEqual(ContextWindow.resolve_algorithm("example").name, "example")
+```
+
+### 5.2 Prompt Catalog Tests
+
+When prompts are added, test:
+
+- `Prompts().family("<family>")` contains every expected prompt key.
+- `Prompts().get(Prompt.EXAMPLE_PROMPT)` returns Markdown text, not the JSON
+  descriptor or path.
+- Direct imports from `vidbyte.prompts` match enum lookup.
+- Any prompt bundle class returns the same family data as `Prompts().family`.
+- Prompt templates can be formatted with all required variables.
+
+Prompt tests catch a common silent failure: the enum value points to the wrong
+family key, direct import names exist but return stale text, or a Markdown-backed
+prompt path is missing from package data.
+
+### 5.3 Dispatcher Tests
+
+Add tests for `AgentRuntimeContextAlgorithms`:
+
+- `detect_algorithm()` returns the active name.
+- `is_algorithm(name)` is true only for the active algorithm.
+- `return_algorithm()` returns the expected runtime adapter class.
+- `arun(...)` returns `None` when no runtime algorithm is configured.
+
+This prevents a preset that exists publicly but never attaches to the agent
+runtime.
+
+### 5.4 Runtime Behavior Tests
+
+Use fake runners and fake tools. Do not call real providers. Test the smallest
+complete execution trace:
+
+1. A first model attempt fails or stops for the algorithm-specific reason.
+2. The algorithm-specific stage runs, if the algorithm has one.
+3. A later attempt receives the transformed context.
+4. The final `StrategyResult` includes metadata describing the algorithm trace.
+
+For retry-style algorithms, include at least one test where the first trial
+fails and a later trial succeeds. For compaction-style algorithms, include a
+test where raw context is stored in metadata but transformed before becoming
+model-visible.
+
+### 5.5 Edge Case Tests
+
+Add focused tests for likely mistakes:
+
+- Invalid numeric config values raise at construction time.
+- `max_trials=1` or equivalent single-pass settings do not call reflection or
+  retry stages.
+- Empty reflections, empty summaries, and empty model output do not crash.
+- Unknown stop reasons use a conservative fallback.
+- Prompt override strings replace catalog defaults.
+- Metadata from normal runtime execution is preserved after algorithm metadata
+  is attached.
+- Tool calls still use permission checks and appear in result metadata.
+
+### 5.6 Regression Tests For Hidden Assumptions
+
+Before implementation, write down assumptions in test names or comments. Common
+hidden assumptions include:
+
+- The model-visible system prompt is allowed to change between trials.
+- The provider `messages` option can be copied safely per attempt.
+- Middleware hooks should run for each model call, including algorithm stages.
+- Raw tool output should remain auditable even if model-visible output is
+  compacted or hidden.
+- Token usage may be unavailable from the provider.
+- The algorithm may receive a `StrategyResult` from middleware instead of a raw
+  runner response.
+
+The test suite should make those assumptions executable.
+
+## 6. Public Configuration Layer
+
+Create the public config dataclass in `vidbyte/context/algorithms/<name>.py`.
+
+Use this layer for:
+
+- immutable algorithm settings
+- validation of limits and budgets
 - prompt override strings
-- context rendering policies
-- immutable dataclasses
-- pure formatting helpers
+- pure context transformation helpers
+- pure formatting and truncation helpers
+- metadata defaults
 
-Example shape:
+Do not use this layer for:
+
+- model runner calls
+- tool execution
+- middleware dispatch
+- tracing spans
+- provider message mutation
+- filesystem or network access
+
+Preferred shape:
+
+```python
+from __future__ import annotations
+
+from collections.abc import Mapping
+from dataclasses import dataclass, field
+from typing import Any
+
+
+@dataclass(frozen=True, slots=True)
+class ExampleAlgorithm:
+    max_attempts: int = 3
+    max_memory_chars: int = 1200
+    stage_prompt: str | None = None
+    metadata: Mapping[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if self.max_attempts <= 0:
+            raise ValueError("max_attempts must be greater than zero.")
+        if self.max_memory_chars <= 0:
+            raise ValueError("max_memory_chars must be greater than zero.")
+```
+
+### 6.1 Class-Level Instructions
+
+Each public config class should follow these rules:
+
+- Use `@dataclass(frozen=True, slots=True)`.
+- Keep constructor defaults conservative and useful out of the box.
+- Validate every numeric limit in `__post_init__`.
+- Store `metadata` as a mapping with `field(default_factory=dict)`.
+- Keep methods deterministic and side-effect free.
+- Return new context objects with `dataclasses.replace(...)` when modifying a
+  dataclass context.
+- Bound model-provided memory, summaries, or attempts by character limits.
+- Prefer explicit method names such as `context_for_trial`,
+  `render_reflection_prompt`, `capture_reflection`, or `should_reflect`.
+- Keep public and private method signatures on one line when practical, matching
+  the SDK style used in strategy and dataclass files.
+
+### 6.2 Public Config Silent Failures
+
+Watch for these issues:
+
+- A default prompt override of `""` is treated as false and silently falls back
+  to the catalog prompt. If empty override should be invalid, validate it.
+- A truncation helper appends a suffix but does not account for suffix length.
+  That may exceed documented bounds.
+- A `Mapping` is stored directly and later mutated by the caller. Prefer copying
+  into a `dict` when merging into runtime metadata.
+- A helper returns the original context even when metadata should be updated.
+- A config object validates `max_trials` but runtime code loops over a different
+  field.
+
+## 7. Preset Registration
+
+Add the algorithm field to `ContextWindowAlgorithm` only when the algorithm has
+runtime behavior beyond existing tool-result admission:
 
 ```python
 @dataclass(frozen=True, slots=True)
-class ExampleAlgorithm:
-    max_trials: int = 3
-    system_prompt: str | None = None
+class ContextWindowAlgorithm:
+    name: str
+    tool_result_admission: ToolResultAdmission = ToolResultAdmission.RAW
+    max_tool_result_chars: int = 600
+    example: ExampleAlgorithm | None = None
     metadata: Mapping[str, Any] = field(default_factory=dict)
 ```
 
-Export the new configuration from:
-
-- `vidbyte/context/algorithms/__init__.py`
-- `vidbyte/context/__init__.py`
-- `vidbyte/__init__.py` when it is user-facing
-
-## Step 2 - Add Prompt Assets
-
-If the algorithm needs static prompts, add them through the prompt catalog.
-Follow `skills/vidbyte-sdk/adding-prompts.md`.
-
-Required pattern for new prompt families:
-
-- create `vidbyte/prompts/prompts/<family_key>/`
-- add one JSON descriptor in that folder
-- add one Markdown file per prompt body
-- add matching enum values to `vidbyte/lib/enums/prompts.py`
-- expose a prompt bundle from `vidbyte/prompts/strategies/strategy_prompts.py`
-- export the bundle from `vidbyte/prompts/strategies/__init__.py`
-- export the bundle from `vidbyte/prompts/__init__.py` when useful
-
-Algorithm implementations should retrieve default prompt text with:
-
-```python
-Prompts().get(Prompt.EXAMPLE_PROMPT)
-```
-
-Do not hardcode long prompt bodies in Python runtime files. Runtime prompt
-overrides should be plain string fields on the algorithm configuration object,
-not file paths or mutable global prompt registry changes.
-
-## Step 3 - Register The Preset
-
-Add one coarse SDK preset under `vidbyte/context/presets.py`.
+Then register one preset in `vidbyte/context/presets.py`:
 
 ```python
 @property
@@ -91,128 +353,377 @@ def example(self) -> ContextWindowAlgorithm:
     )
 ```
 
-Do not add many low-level preset variants unless the user-facing API really
-needs them. Prefer one obvious preset plus a public configuration object for
-customization.
-
-If the algorithm needs storage on `ContextWindowAlgorithm`, add a nullable field
-there with a backward-compatible default:
+Also update string resolution:
 
 ```python
-example: ExampleAlgorithm | None = None
+if algorithm == "example":
+    return ContextWindow.preset.example
 ```
 
-Existing tool-result admission behavior must keep working when the new field is
-`None`.
+Do not return `ContextWindow.preset.default` for unknown strings. Unknown
+algorithm names should raise `ValueError` so mistakes fail loudly.
 
-## Step 4 - Add Agent Runtime Implementation
+## 8. Prompt Assets
 
-Create the concrete runtime implementation under:
+If the algorithm uses static prompts, follow
+`skills/vidbyte-sdk/adding-prompts.md`.
+
+The required folder pattern is:
+
+```text
+vidbyte/prompts/prompts/<family_key>/
+|-- <family_key>.json
+|-- main_stage_prompt.md
+`-- optional_stage_prompt.md
+```
+
+Update:
+
+- `vidbyte/lib/enums/prompts.py`
+- `vidbyte/prompts/strategies/strategy_prompts.py`
+- `vidbyte/prompts/strategies/__init__.py`
+- `vidbyte/prompts/__init__.py` when direct imports are user-facing
+- prompt tests
+
+Prompt construction should make context sections explicit. Prefer named sections
+like:
+
+- original task
+- previous attempt
+- tool observations
+- reflection memory
+- requested output
+
+Do not use anonymous inline strings such as:
+
+```python
+f"{task}\n{result}\nTry again."
+```
+
+That shape is hard to audit, hard to override, and easy to break when new
+context fields are added.
+
+## 9. Runtime Dispatcher
+
+`vidbyte/agents/context_algorithms.py` is the only agent-runtime file that should
+map configured public algorithms to concrete runtime adapters.
+
+Required interface:
+
+```python
+class AgentRuntimeContextAlgorithms:
+    def __init__(self, runtime: AgentRuntime) -> None: ...
+    def detect_algorithm(self) -> str | None: ...
+    def is_algorithm(self, name: str) -> bool: ...
+    def return_algorithm(self) -> ExampleRuntimeAlgorithm | None: ...
+    async def arun(...) -> StrategyResult | None: ...
+```
+
+### 9.1 Dispatcher Rules
+
+- `detect_algorithm()` should inspect `self.runtime.algorithm` and return the
+  active algorithm name or `None`.
+- `is_algorithm(name)` should be a thin readability helper.
+- `return_algorithm()` should instantiate the matching runtime adapter.
+- `arun(...)` should delegate to the adapter and return `None` when no runtime
+  algorithm is configured.
+- The dispatcher should not contain algorithm loops, prompt rendering, retry
+  policy, or stage-specific metadata construction.
+- The dispatcher should be tested directly.
+
+### 9.2 Dispatcher Silent Failures
+
+The most common dispatcher bugs are:
+
+- The preset exists, but `detect_algorithm()` does not know about it.
+- `detect_algorithm()` returns the algorithm name, but `return_algorithm()` still
+  returns `None`.
+- `return_algorithm()` imports from the public config layer instead of the
+  runtime adapter layer.
+- The dispatcher returns an adapter for any truthy metadata value instead of the
+  typed algorithm field.
+- `AgentRuntime.arun()` ignores the dispatcher result and always falls through
+  to `_arun_once()`.
+
+Write tests that would fail for each of those mistakes.
+
+## 10. Runtime Implementation
+
+Create the concrete runtime adapter under:
 
 ```text
 vidbyte/agents/algorithms/<algorithm_name>.py
 ```
 
-This file owns the real model/tool orchestration for the algorithm. Keep its
-public method small:
+This module owns the real algorithm execution. It may call generic
+`AgentRuntime` helpers, but it must keep algorithm-specific loops out of
+`vidbyte/agents/runtime.py`.
+
+Preferred shape:
 
 ```python
 class ExampleRuntimeAlgorithm:
     name = "example"
 
-    async def arun(self, message: str, *, runner: object, context: BaseAgentContext, ...) -> StrategyResult:
+    def __init__(self, runtime: AgentRuntime, algorithm: ExampleAlgorithm) -> None:
+        self.runtime = runtime
+        self.algorithm = algorithm
+
+    async def arun(self, message: str, *, runner: object, context: BaseAgentContext, provider: str, invoke_runner: Callable[..., Any], runner_output_text: Callable[[object], str], runner_output_metadata: Callable[[object], Mapping[str, Any]], metadata: Mapping[str, Any] | None = None, options: Mapping[str, Any] | None = None, trace_context: SpanContext | None = None) -> StrategyResult:
         ...
 ```
 
-Break large flows into helper methods such as:
+Long signatures are accepted when they match the runtime call boundary. Avoid
+inventing a second argument object unless the surrounding runtime already has
+one. The adapter should mirror `AgentRuntime.arun(...)` closely so delegation is
+obvious.
+
+### 10.1 Runtime Helper Methods
+
+Split algorithm execution into helpers that describe the trace:
 
 - `_run_trial`
 - `_build_trial_context`
-- `_run_reflection_stage`
-- `_build_stage_metadata`
+- `_run_stage`
+- `_reflect_after_failure`
 - `_summarize_attempt`
+- `_stage_metadata`
+- `_trial_metadata`
 - `_with_algorithm_metadata`
+- `_capture_memory`
 
-The runtime implementation may call generic `AgentRuntime` helpers such as
-`_arun_once()` or `_invoke_with_middleware()` when it needs the normal direct
-runtime behavior. This preserves tools, permissions, middleware, tracing, and
-provider formatting instead of duplicating the agent loop.
+Each helper should own one decision. For example, do not combine "run model
+call", "summarize failed attempt", "decide retry", and "attach metadata" in a
+single private method.
 
-Do not place algorithm-specific loops directly in `vidbyte/agents/runtime.py`.
+### 10.2 Preserving The Agentic Loop
 
-## Step 5 - Wire The Dispatcher
+Runtime adapters should call `self.runtime._arun_once(...)` for ordinary direct
+agent trials. This preserves:
 
-Update `vidbyte/agents/context_algorithms.py`.
+- provider tool schema formatting
+- internal `isDone` behavior
+- local tool execution
+- permission checks
+- tool-call metadata
+- budget stops
+- provider messages
+- middleware before/after hooks
+- tracing
 
-The dispatcher is the only agent-runtime place that should know how configured
-context-window algorithms map to runtime implementations. Keep the interface
-small and readable:
+If an algorithm needs an extra model call that is not a full agent trial, call
+`self.runtime._invoke_with_middleware(...)` rather than invoking the runner
+directly. That keeps middleware and tracing consistent for algorithm stages.
 
-- `detect_algorithm()` returns the configured algorithm name or `None`.
-- `is_algorithm(name)` checks the active algorithm.
-- `return_algorithm()` returns the concrete runtime implementation or `None`.
-- `arun(...)` delegates execution to the concrete implementation when present.
+Do not duplicate the tool loop in the adapter unless the algorithm is explicitly
+designed to replace the normal direct runtime. Reimplementing the loop usually
+breaks permissions, `isDone`, provider-specific parsing, or runtime metadata.
 
-Add the new algorithm branch to `detect_algorithm()` and `return_algorithm()`.
+### 10.3 Metadata Contract
 
-`AgentRuntime.arun()` should call the dispatcher first, then fall back to
-`_arun_once()` when no context-window algorithm is configured.
+Every runtime algorithm should attach one algorithm-specific metadata object to
+the final `StrategyResult.metadata`.
 
-## Step 6 - Preserve Runtime Contracts
+For example:
 
-Every context-window algorithm must preserve these contracts unless a review
-comment explicitly changes them:
+```python
+metadata["example"] = {
+    "trial_count": 2,
+    "stage_count": 1,
+    "attempts": (
+        {"trial_index": 0, "stop_reason": "max_iterations"},
+        {"trial_index": 1, "stop_reason": "is_done"},
+    ),
+}
+```
+
+Metadata should answer:
+
+- How many main attempts ran?
+- Which algorithm-specific stages ran?
+- Why did each attempt stop?
+- What bounded memory, summaries, or decisions were carried forward?
+- Did the final result come from a normal trial or an algorithm stage?
+
+Keep raw provider responses out of algorithm metadata unless already part of
+normal runtime metadata. Store bounded strings and structured counters instead.
+
+### 10.4 Runtime Silent Failures
+
+Watch for these issues:
+
+- Reusing the same mutable `options` dict across attempts, causing provider
+  messages from one attempt to leak into another.
+- Running reflection or scoring stages by calling `invoke_runner` directly,
+  bypassing middleware and tracing.
+- Attaching algorithm metadata by replacing the entire result metadata dict and
+  dropping normal runtime fields.
+- Using `result.output` as the only failure summary even when tool-call metadata
+  contains the important failure.
+- Treating every non-`isDone` result as a failure without considering configured
+  stop reasons.
+- Running an extra reflection stage after the final allowed trial.
+- Forgetting to bound model-generated reflection memory before injecting it into
+  the next context.
+- Returning the original `StrategyResult` after mutating a local metadata copy.
+
+## 11. AgentRuntime Integration
+
+`AgentRuntime.arun(...)` should stay thin:
+
+```python
+algorithm_result = await AgentRuntimeContextAlgorithms(self).arun(...)
+if algorithm_result is not None:
+    return algorithm_result
+return await self._arun_once(...)
+```
+
+Do not add algorithm-specific conditionals such as:
+
+```python
+if self.algorithm.reflexion:
+    return await self._arun_with_reflexion(...)
+```
+
+That puts runtime algorithm logic back into the generic runtime and makes every
+new algorithm expand `AgentRuntime`.
+
+`AgentRuntime` may expose generic helpers such as `_arun_once(...)` and
+`_invoke_with_middleware(...)` for adapters to reuse. Those helpers should remain
+algorithm-neutral.
+
+## 12. Runtime Contracts To Preserve
+
+Every context-window algorithm must preserve these contracts unless a reviewed
+design explicitly changes them:
 
 - Tools still come from the agent's `Tools` catalog.
-- Internal `isDone` behavior remains available for direct text agents.
+- Internal `isDone` remains available for direct text agents.
 - Permission policy checks still happen through `AgentRuntime.execute_tool_call`.
 - Middleware hooks still run through `MiddlewarePipeline`.
 - Provider tool-call parsing still uses `ToolsFormatter`.
 - Tracing still uses the runtime tracer.
 - Final output is still a `StrategyResult`.
 - Public agent replies still flow through `BaseAgent.generate_reply`.
+- Agent history is updated by `BaseAgent`, not directly by the algorithm.
+- Raw audit metadata remains available even when model-visible context is
+  transformed.
 
-If the algorithm adds extra model calls, attach clear metadata so middleware,
-audit logs, and result consumers can distinguish main attempts from algorithm
-stages.
+If a new algorithm intentionally changes any of these contracts, write a design
+doc first and add tests that prove the new behavior.
 
-## Step 7 - Add Tests
+## 13. Context Interaction
 
-Add focused tests for:
+Context-window algorithms may transform these pieces:
 
-- preset registration through `ContextWindow.preset.<name>`
-- string resolution through `ContextWindow.resolve_algorithm("<name>")`
-- public exports for user-facing configuration objects
-- dispatcher detection through `AgentRuntimeContextAlgorithms`
-- concrete runtime behavior using fake runners/tools
-- prompt catalog loading and direct prompt imports when prompts are added
-- metadata shape for algorithm traces
+- `BaseAgentContext.system_prompt`
+- model-visible provider messages for future calls
+- bounded summaries or memories injected into context metadata
+- model-visible tool-result text
 
-Prefer fake runners with deterministic responses. Do not require network calls
-or real providers in unit tests.
+They should not mutate:
 
-## Step 8 - Update Documentation And Skills
+- the agent's default context items
+- the caller's `ContextManager`
+- prior `AgentMessage` history objects
+- global prompt registry state
+- tool definitions or permission policy
 
-When adding a new context-window algorithm, update relevant SDK docs or skills:
+Use `dataclasses.replace(...)` for context dataclasses and create fresh dicts or
+tuples when attaching metadata.
 
-- add usage notes to this file when the workflow changes
-- link to prompt assets and public imports when adding prompts
-- mention any middleware, tools, or tracing caveats
-- keep examples centered on `Agent` or `BaseAgent`
+## 14. Prompt Override Rules
 
-User-facing examples should look like:
+Default prompt text should come from the prompt catalog. User overrides should
+be plain string fields on the public config dataclass:
 
 ```python
-agent = Agent(
-    name="worker",
-    system_prompt="Work carefully.",
-    runner=runner,
-    tools=[lookup],
-    algorithm=ContextWindow.preset.example,
+ExampleAlgorithm(
+    stage_system_prompt="Custom system prompt.",
+    stage_prompt="Task: {task}\nAttempt: {attempt}",
 )
 ```
 
-## Step 9 - Verification
+Do not let runtime config point at arbitrary files. File-path prompt overrides
+make packaging, security, and reproducibility worse. If a developer wants custom
+text, they can pass the text directly.
+
+Validate or test every placeholder used by a default prompt. A prompt can pass
+catalog loading tests and still fail at runtime because `.format(...)` expects a
+missing key.
+
+## 15. Edge Case Checklist
+
+Before opening a PR, confirm the algorithm handles:
+
+- no configured algorithm
+- unknown algorithm string
+- single-trial or single-pass config
+- zero or negative numeric config values
+- empty task string
+- empty runner output
+- model calls that return no tool calls
+- model calls that return malformed tool calls
+- tool execution success
+- tool execution error
+- permission denial
+- max-iteration stop
+- max-token stop when provider usage is available
+- missing provider usage
+- middleware short-circuit returning `StrategyResult`
+- prompt override fields
+- long reflection or memory text
+- long failed-attempt summaries
+- empty accumulated memory
+- final metadata preserving normal runtime fields
+
+Not every algorithm needs a separate test for every bullet, but the PR should
+explicitly cover the cases that can affect its behavior.
+
+## 16. Hidden Assumptions To Write Down
+
+Context-window algorithms often depend on assumptions that are not obvious from
+the code. Make them explicit in docs, test names, or metadata:
+
+- What counts as a failed attempt?
+- Does the algorithm retry after every non-final stop reason or only specific
+  stop reasons?
+- Are reflection/scoring stages allowed to use tools, or are they model-only?
+- Does middleware run for algorithm stages?
+- Are algorithm stages counted as normal model calls in final metadata?
+- Is algorithm memory visible to the user, the model, both, or only metadata?
+- Does the algorithm transform only model-visible context or also stored audit
+  data?
+- Can the algorithm run with strategies, or only direct no-strategy agents?
+- What happens when the provider cannot report token usage?
+
+If an assumption matters for correctness, add a test. If it matters for users,
+add documentation.
+
+## 17. Review Checklist
+
+Use this checklist before handing off a PR:
+
+- [ ] The public preset exists and is the intended default.
+- [ ] String resolution accepts the new preset name.
+- [ ] Unknown preset names still fail loudly.
+- [ ] The public config dataclass validates limits.
+- [ ] Prompt assets are Markdown-backed when prompt bodies are large.
+- [ ] Prompt enum values and direct imports resolve.
+- [ ] The dispatcher detects the algorithm.
+- [ ] The dispatcher returns the correct runtime adapter.
+- [ ] `AgentRuntime.arun(...)` stays generic and thin.
+- [ ] Runtime adapter helpers are split by responsibility.
+- [ ] The adapter uses `_arun_once(...)` for normal trials.
+- [ ] Extra model stages use `_invoke_with_middleware(...)`.
+- [ ] Final metadata includes an algorithm trace.
+- [ ] Raw audit metadata is not lost.
+- [ ] Tools, permissions, middleware, tracing, and provider formatting still run.
+- [ ] Tests use fake runners and do not call live providers.
+- [ ] README or usage docs show the simple `algorithm=ContextWindow.preset.<name>` path when user-facing.
+- [ ] The skill docs are updated when the workflow changes.
+
+## 18. Verification
 
 Run these checks from the SDK root:
 
@@ -228,5 +739,66 @@ ruff check .
 mypy .
 ```
 
-If `ruff` or `mypy` are not installed in the local environment, report that in
-the PR body instead of claiming they passed.
+If `ruff` or `mypy` are not installed locally, say so in the PR body. Do not
+claim they passed.
+
+For documentation-only changes to this file, still run at least:
+
+```powershell
+python -m compileall vidbyte
+```
+
+Then run focused tests when the existing implementation is directly referenced
+by the doc, for example:
+
+```powershell
+python -m unittest tests.test_reflexion_algorithm tests.test_reflexion_prompt tests.test_context_management
+```
+
+## 19. Example Trace Shape
+
+A retry/reflection algorithm such as Reflexion should produce a trace that can
+be understood from metadata:
+
+```python
+{
+    "stop_reason": "is_done",
+    "iteration_count": 1,
+    "tool_call_count": 1,
+    "context_window_algorithm": "reflexion",
+    "reflexion": {
+        "trial_count": 2,
+        "reflection_count": 1,
+        "reflections": (
+            "The first attempt stopped after using lookup without synthesizing the answer.",
+        ),
+        "attempts": (
+            {"trial_index": 0, "stop_reason": "max_iterations", "tool_call_count": 1},
+            {"trial_index": 1, "stop_reason": "is_done", "tool_call_count": 1},
+        ),
+    },
+}
+```
+
+The exact keys may differ by algorithm, but the trace must be structured enough
+for tests, middleware logs, and developers to understand what happened.
+
+## 20. Common Implementation Sequence
+
+Use this order for a new algorithm:
+
+1. Write public API and prompt catalog tests.
+2. Write runtime dispatcher and behavior tests with fake runners.
+3. Add the public config dataclass under `vidbyte/context/algorithms/`.
+4. Export the config object from context and root packages when user-facing.
+5. Add prompt assets and prompt exports, if needed.
+6. Add the preset and string resolution.
+7. Add the runtime adapter under `vidbyte/agents/algorithms/`.
+8. Wire the adapter through `AgentRuntimeContextAlgorithms`.
+9. Keep `AgentRuntime.arun(...)` limited to dispatcher delegation and fallback.
+10. Attach final trace metadata.
+11. Update README, design docs, and skills.
+12. Run compile, focused tests, and full tests.
+
+Do not start by putting the algorithm loop inside `AgentRuntime`. That usually
+creates a working prototype that is harder to review and must be extracted later.
