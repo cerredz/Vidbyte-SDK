@@ -21,7 +21,7 @@ from typing import Any
 
 from vidbyte.agents.base import BaseAgent
 from vidbyte.agents.types import AgentCard
-from vidbyte.mcp_server.schema import tool_spec_to_mcp_tool
+from vidbyte.mcp_server.schema import McpSchema
 from vidbyte.tools.base import BaseTool
 from vidbyte.tools.catalog import Tools
 from vidbyte.tools.types import ToolCall, ToolPermission, ToolResult, ToolSpec
@@ -154,7 +154,7 @@ class StudioToolsListTool(BaseTool):
         )
 
     async def execute(self, call: ToolCall) -> ToolResult:
-        specs = [tool_spec_to_mcp_tool(tool.spec()) for tool in self._tools]
+        specs = [McpSchema.tool_spec_to_mcp_tool(tool.spec()) for tool in self._tools]
         return ToolResult.success("studio.tools.list", json.dumps(specs, indent=2))
 
 
