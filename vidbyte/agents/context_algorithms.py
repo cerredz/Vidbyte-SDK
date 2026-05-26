@@ -1,0 +1,84 @@
+"""Context Protocol Header
+
+Description:
+    Dispatches attached context-window algorithms for AgentRuntime.
+Purpose:
+    Keeps AgentRuntime focused on the generic model/tool loop while providing a
+    clean detection and adapter surface for runtime context-window algorithms.
+Architecture:
+    - AgentRuntimeContextAlgorithms: Detects configured algorithms and returns
+      per-algorithm runtime implementations.
+Relations:
+    Used by vidbyte.agents.runtime.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Callable, Mapping
+from typing import TYPE_CHECKING, Any
+
+from vidbyte.agents.algorithms import ReflexionRuntimeAlgorithm
+from vidbyte.lib.tracing import SpanContext
+from vidbyte.strategies.types import BaseAgentContext, StrategyResult
+
+if TYPE_CHECKING:
+    from vidbyte.agents.runtime import AgentRuntime
+
+
+class AgentRuntimeContextAlgorithms:
+    """Adapter surface for context-window algorithms attached to an agent."""
+
+    def __init__(self, runtime: AgentRuntime) -> None:
+        self.runtime = runtime
+
+    def detect_algorithm(self) -> str | None:
+        """Return the configured runtime algorithm name, if any."""
+        if self.runtime.algorithm.reflexion is not None:
+            return "reflexion"
+        return None
+
+    def is_algorithm(self, name: str) -> bool:
+        """Return whether the configured runtime algorithm matches name."""
+        return self.detect_algorithm() == name
+
+    def return_algorithm(self) -> ReflexionRuntimeAlgorithm | None:
+        """Return the configured runtime algorithm implementation."""
+        if self.runtime.algorithm.reflexion is not None:
+            return ReflexionRuntimeAlgorithm(self.runtime, self.runtime.algorithm.reflexion)
+        return None
+
+    async def arun(
+        self,
+        message: str,
+        *,
+        runner: object,
+        context: BaseAgentContext,
+        provider: str,
+        invoke_runner: Callable[..., Any],
+        runner_output_text: Callable[[object], str],
+        runner_output_metadata: Callable[[object], Mapping[str, Any]],
+        metadata: Mapping[str, Any] | None = None,
+        options: Mapping[str, Any] | None = None,
+        trace_context: SpanContext | None = None,
+    ) -> StrategyResult | None:
+        """Run the configured algorithm, or return None when no algorithm exists."""
+        algorithm = self.return_algorithm()
+        if algorithm is None:
+            return None
+        return await algorithm.arun(
+            message,
+            runner=runner,
+            context=context,
+            provider=provider,
+            invoke_runner=invoke_runner,
+            runner_output_text=runner_output_text,
+            runner_output_metadata=runner_output_metadata,
+            metadata=metadata,
+            options=options,
+            trace_context=trace_context,
+        )
+
+
+__all__ = [
+    "AgentRuntimeContextAlgorithms",
+]

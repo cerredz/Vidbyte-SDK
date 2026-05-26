@@ -122,7 +122,9 @@ class ContextManagementTests(unittest.TestCase):
     def test_context_window_presets_are_named_algorithms(self) -> None:
         self.assertEqual(ContextWindow.preset.default.name, "default")
         self.assertEqual(ContextWindow.preset.no_raw_tool_outputs.name, "hide_tool_outputs")
+        self.assertEqual(ContextWindow.preset.reflexion.name, "reflexion")
         self.assertEqual(ContextWindow.resolve_algorithm("compact_tool_outputs").name, "compact_tool_outputs")
+        self.assertEqual(ContextWindow.resolve_algorithm("reflexion").name, "reflexion")
 
 
 if __name__ == "__main__":

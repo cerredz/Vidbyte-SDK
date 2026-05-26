@@ -17,6 +17,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
+from vidbyte.agents.context_algorithms import AgentRuntimeContextAlgorithms
 from vidbyte.agents.types import AgentMessage
 from vidbyte.context.algorithms import ContextWindowAlgorithm
 from vidbyte.context.manager import ContextManager
@@ -126,6 +127,48 @@ class AgentRuntime:
         trace_context: SpanContext | None = None,
     ) -> StrategyResult:
         """Run the direct model/tool loop until isDone or a budget stop."""
+        algorithm_result = await AgentRuntimeContextAlgorithms(self).arun(
+            message,
+            runner=runner,
+            context=context,
+            provider=provider,
+            invoke_runner=invoke_runner,
+            runner_output_text=runner_output_text,
+            runner_output_metadata=runner_output_metadata,
+            metadata=metadata,
+            options=options,
+            trace_context=trace_context,
+        )
+        if algorithm_result is not None:
+            return algorithm_result
+        return await self._arun_once(
+            message,
+            runner=runner,
+            context=context,
+            provider=provider,
+            invoke_runner=invoke_runner,
+            runner_output_text=runner_output_text,
+            runner_output_metadata=runner_output_metadata,
+            metadata=metadata,
+            options=options,
+            trace_context=trace_context,
+        )
+
+    async def _arun_once(
+        self,
+        message: str,
+        *,
+        runner: object,
+        context: BaseAgentContext,
+        provider: str,
+        invoke_runner: Callable[..., Any],
+        runner_output_text: Callable[[object], str],
+        runner_output_metadata: Callable[[object], Mapping[str, Any]],
+        metadata: Mapping[str, Any] | None = None,
+        options: Mapping[str, Any] | None = None,
+        trace_context: SpanContext | None = None,
+    ) -> StrategyResult:
+        """Run one direct model/tool attempt until isDone or a budget stop."""
         run_options = dict(options or {})
         runtime_metadata = dict(metadata or {})
         tool_schemas = self._resolve_tool_schemas(provider)
