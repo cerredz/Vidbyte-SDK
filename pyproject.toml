@@ -22,5 +22,8 @@ Homepage = "https://vidbyte.ai"
 [tool.setuptools.packages.find]
 include = ["vidbyte*"]
 
+[project.scripts]
+vidbyte-mcp-server = "vidbyte.mcp_server.__main__:main"
+
 [tool.setuptools.package-data]
 "vidbyte.prompts.prompts" = ["*.json", "*/*.json", "*/*.md"]
