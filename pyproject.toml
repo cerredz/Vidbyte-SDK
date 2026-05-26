@@ -16,6 +16,12 @@ dependencies = [
   "pydantic>=2,<3",
 ]
 
+[project.optional-dependencies]
+mcp = ["mcp>=1.0"]
+
+[project.scripts]
+vidbyte-prompts = "vidbyte.prompts.cli:main"
+
 [project.urls]
 Homepage = "https://vidbyte.ai"
 
