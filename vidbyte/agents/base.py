@@ -500,6 +500,7 @@ class BaseAgent(McpAttachableMixin):
             middleware=self.middleware,
             run_id=self.runner_config.run_id,
             algorithm=self.algorithm,
+            context_manager=self.context_manager,
         )
 
     def _catalog_from_agent_tools(self, tools: Sequence[object]) -> Tools:
