@@ -51,6 +51,7 @@ from vidbyte.context import (
     FileContextItem,
     GitDiffContextItem,
     MemoryContextItem,
+    PlanContextItem,
     ProgressContextItem,
     ReflexionAlgorithm,
     ResponseContextItem,
@@ -58,6 +59,11 @@ from vidbyte.context import (
     TextContextItem,
     ToolCallContextItem,
     ToolResultAdmission,
+)
+from vidbyte.tools.builtins.context_primitives import (
+    ContextListTool,
+    ContextRemoveTool,
+    ContextUpsertTool,
 )
 from vidbyte.lib.enums import BudgetPreset, ModelModality, PermissionPreset, Prompt
 from vidbyte.lib.errors import (
@@ -168,8 +174,11 @@ __all__ = [
     "ChainOfThoughtStrategy",
     "ContextBudget",
     "ContextItem",
+    "ContextListTool",
     "ContextManager",
     "ContextPermissions",
+    "ContextRemoveTool",
+    "ContextUpsertTool",
     "ContextWindow",
     "ContextWindowAlgorithm",
     "DocumentContextItem",
@@ -177,6 +186,7 @@ __all__ = [
     "FileContextItem",
     "GitDiffContextItem",
     "MemoryContextItem",
+    "PlanContextItem",
     "McpAttachmentError",
     "McpConnectionError",
     "McpError",
