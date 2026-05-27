@@ -20,6 +20,7 @@ from enum import Enum
 from typing import Any
 
 from vidbyte.context.algorithms.reflexion import ReflexionAlgorithm
+from vidbyte.context.algorithms.multi_provider_agentic_grader import MultiProviderAgenticGraderAlgorithm
 from vidbyte.lib.dataclasses.tools import ToolCall, ToolResult
 
 
@@ -39,9 +40,17 @@ class ContextWindowAlgorithm:
     tool_result_admission: ToolResultAdmission = ToolResultAdmission.RAW
     max_tool_result_chars: int = 600
     reflexion: ReflexionAlgorithm | None = None
+    multi_provider_agentic_grader: MultiProviderAgenticGraderAlgorithm | None = None
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
+    def __post_init__(self) -> None:
+        # Verifies that at most one runtime context algorithm is configured.
+        active = [x for x in (self.reflexion, self.multi_provider_agentic_grader) if x is not None]
+        if len(active) > 1:
+            raise ValueError("At most one runtime context-window algorithm can be configured.")
+
     def model_visible_tool_result(self, call: ToolCall, result: ToolResult) -> ToolResult:
+
         """Return the tool result that should be appended to provider messages."""
         admission = ToolResultAdmission(self.tool_result_admission)
         if admission is ToolResultAdmission.RAW:
@@ -93,6 +102,8 @@ def _compact_output(output: str, max_chars: int) -> str:
 
 __all__ = [
     "ContextWindowAlgorithm",
+    "MultiProviderAgenticGraderAlgorithm",
     "ReflexionAlgorithm",
     "ToolResultAdmission",
 ]
+
