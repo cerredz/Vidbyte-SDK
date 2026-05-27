@@ -25,6 +25,9 @@ from vidbyte.lib.dataclasses.middleware import (
 from vidbyte.middleware.base import AgentMiddleware
 from vidbyte.middleware.builtins import (
     AuditLogMiddleware,
+    CanaryTripwireMiddleware,
+    ConfusedDeputyGuardMiddleware,
+    HoneypotToolMiddleware,
     ModelRetryMiddleware,
     RuntimeLimitMiddleware,
     TokenRateLimitMiddleware,
@@ -35,6 +38,9 @@ from vidbyte.middleware.pipeline import MiddlewarePipeline
 __all__ = [
     "AgentMiddleware",
     "AuditLogMiddleware",
+    "CanaryTripwireMiddleware",
+    "ConfusedDeputyGuardMiddleware",
+    "HoneypotToolMiddleware",
     "ModelRetryMiddleware",
     "MiddlewareAction",
     "MiddlewareContext",
