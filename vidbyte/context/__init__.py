@@ -7,8 +7,16 @@ Purpose:
     and managers from a single public namespace.
 Architecture:
     - Namespace client for ContextWindow and ContextManager.
-Relations:
-    Top-level namespace package, re-exported by vidbyte.
+Key Functions / Exports:
+    - ContextManager: Manages loading, updating, and exporting context items.
+    - ContextWindow: Represents the sliding/compacted context window.
+    - ContextWindowAlgorithm: Base class for context window compaction/pruning.
+Relation to codebase as a whole:
+    Provides public exports for all context primitives and algorithms (including PlanContextItem, MultiProviderAgenticGraderAlgorithm, ReflexionAlgorithm, etc.) which are consumed by agents and runner engines to manage LLM context windows dynamically.
+Similar files:
+    - vidbyte/__init__.py: Root module exporting overall SDK contracts.
+    - vidbyte/context/manager.py: Contains the concrete ContextManager implementation.
+    - vidbyte/context/window.py: Contains the concrete ContextWindow implementation.
 """
 
 from __future__ import annotations
@@ -22,6 +30,7 @@ from vidbyte.context.primitives import (
     FileContextItem,
     GitDiffContextItem,
     MemoryContextItem,
+    PlanContextItem,
     ProgressContextItem,
     ResponseContextItem,
     TaskContextItem,
@@ -63,6 +72,7 @@ __all__ = [
     "GitDiffContextItem",
     "MemoryContextItem",
     "MultiProviderAgenticGraderAlgorithm",
+    "PlanContextItem",
     "ProgressContextItem",
     "ReflexionAlgorithm",
     "ResponseContextItem",

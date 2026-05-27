@@ -23,6 +23,7 @@ from vidbyte.tools.builtins.context import (
     ContextMessage,
     ProgressLog,
 )
+from vidbyte.tools.builtins.context_primitives import ContextListTool, ContextRemoveTool, ContextUpsertTool
 from vidbyte.tools.builtins.editing import PatchTool
 from vidbyte.tools.builtins.mcp import AttachMcpServerTool, SearchMcpServersTool
 
@@ -30,7 +31,10 @@ __all__ = [
     "AttachMcpServerTool",
     "CompactionMode",
     "ContextCompactionTool",
+    "ContextListTool",
     "ContextMessage",
+    "ContextRemoveTool",
+    "ContextUpsertTool",
     "GlobTool",
     "GrepTool",
     "PatchTool",
