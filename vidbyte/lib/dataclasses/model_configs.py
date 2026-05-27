@@ -1,12 +1,31 @@
+"""Context Protocol Header
+
+Description:
+    Model execution configuration dataclasses for text, image, and video models.
+Purpose:
+    Stores model configurations and delegates API key and endpoint validation and resolution to ProviderModelRegistry.
+Architecture:
+    - TextModelConfig: dataclass for text/chat completions.
+    - ImageModelConfig: dataclass for image generation.
+    - VideoModelConfig: dataclass for video generation tasks.
+Key Functions:
+    - resolved_api_key: Resolves provider key by delegating to ProviderModelRegistry.
+    - resolved_endpoint: Resolves provider endpoint by delegating to ProviderModelRegistry.
+Relations:
+    Used by runners, agents, and strategies to initialize model executions.
+Similar Files:
+    - vidbyte/lib/models/registry.py
+"""
+
 from __future__ import annotations
 
 import os
 from dataclasses import dataclass
 from typing import Any, Mapping
 
-from vidbyte.lib.config.constants import API_KEY_ENV_VARS, DEFAULT_ENDPOINTS
 from vidbyte.lib.enums import ModelProvider
 from vidbyte.lib.errors import ConfigurationError, UnsupportedProviderError
+from vidbyte.lib.models.registry import ProviderModelRegistry
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,20 +69,11 @@ class TextModelConfig:
 
     def resolved_api_key(self) -> str:
         # Resolve explicit keys before provider-specific environment variables.
-        provider = self.normalized_provider()
-        if self.api_key and self.api_key.strip():
-            return self.api_key.strip()
-        env_var = API_KEY_ENV_VARS[provider]
-        env_value = os.environ.get(env_var)
-        if env_value and env_value.strip():
-            return env_value.strip()
-        raise ConfigurationError(f"Missing API key for provider {provider.value}. Pass api_key or set {env_var}.")
+        return ProviderModelRegistry.resolve_api_key(self.normalized_provider(), self.api_key)
 
     def resolved_endpoint(self) -> str:
         # Prefer caller-provided endpoints for tests, proxies, and compatible APIs.
-        if self.endpoint and self.endpoint.strip():
-            return self.endpoint.strip().rstrip("/")
-        return DEFAULT_ENDPOINTS[self.normalized_provider()]
+        return ProviderModelRegistry.resolve_endpoint(self.normalized_provider(), self.endpoint)
 
     def _require_model(self) -> None:
         # Model names are required by every provider adapter.
@@ -128,20 +138,11 @@ class ImageModelConfig:
 
     def resolved_api_key(self) -> str:
         # Resolve explicit keys before provider-specific environment variables.
-        provider = self.normalized_provider()
-        if self.api_key and self.api_key.strip():
-            return self.api_key.strip()
-        env_var = API_KEY_ENV_VARS[provider]
-        env_value = os.environ.get(env_var)
-        if env_value and env_value.strip():
-            return env_value.strip()
-        raise ConfigurationError(f"Missing API key for provider {provider.value}. Pass api_key or set {env_var}.")
+        return ProviderModelRegistry.resolve_api_key(self.normalized_provider(), self.api_key)
 
     def resolved_endpoint(self) -> str:
         # Prefer caller-provided endpoints for tests, proxies, and compatible APIs.
-        if self.endpoint and self.endpoint.strip():
-            return self.endpoint.strip().rstrip("/")
-        return DEFAULT_ENDPOINTS[self.normalized_provider()]
+        return ProviderModelRegistry.resolve_endpoint(self.normalized_provider(), self.endpoint)
 
     def _validate_positive_int(self, value: int | None, *, field_name: str) -> None:
         # Optional integer limits must be positive when supplied.
@@ -185,20 +186,11 @@ class VideoModelConfig:
 
     def resolved_api_key(self) -> str:
         # Resolve explicit keys before provider-specific environment variables.
-        provider = self.normalized_provider()
-        if self.api_key and self.api_key.strip():
-            return self.api_key.strip()
-        env_var = API_KEY_ENV_VARS[provider]
-        env_value = os.environ.get(env_var)
-        if env_value and env_value.strip():
-            return env_value.strip()
-        raise ConfigurationError(f"Missing API key for provider {provider.value}. Pass api_key or set {env_var}.")
+        return ProviderModelRegistry.resolve_api_key(self.normalized_provider(), self.api_key)
 
     def resolved_endpoint(self) -> str:
         # Prefer caller-provided endpoints for tests, proxies, and compatible APIs.
-        if self.endpoint and self.endpoint.strip():
-            return self.endpoint.strip().rstrip("/")
-        return DEFAULT_ENDPOINTS[self.normalized_provider()]
+        return ProviderModelRegistry.resolve_endpoint(self.normalized_provider(), self.endpoint)
 
     def _validate_positive_int(self, value: int | None, *, field_name: str) -> None:
         # Optional integer limits must be positive when supplied.
