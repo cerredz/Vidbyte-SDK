@@ -75,3 +75,7 @@ class ExpertPromptingPrompts(_PromptBundle):
 class PromptEngineeringPrompts(_PromptBundle):
     key = "prompt_engineering"
 
+
+class LlmAsAJudgePrompts(_PromptBundle):
+    key = "llm_as_a_judge"
+
