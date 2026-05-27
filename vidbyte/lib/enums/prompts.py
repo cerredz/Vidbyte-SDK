@@ -42,6 +42,8 @@ class Prompt(str, Enum):
     VMAO_SYNTHESIZER = "vmao.synthesizer"
     VMAO_VERIFIER = "vmao.verifier"
     VMAO_GAP_PLANNER = "vmao.gap_planner"
+    EVALS_LLM_JUDGE = "evals.llm_judge"
+    EVALS_RUBRIC = "evals.rubric"
 
 
 __all__ = [
