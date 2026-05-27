@@ -1,6 +1,19 @@
+"""Context Protocol Header
+
+Description:
+    Exposes the public context management and context-window algorithm interfaces.
+Purpose:
+    Allows developers to import all context-window configuration models, presets,
+    and managers from a single public namespace.
+Architecture:
+    - Namespace client for ContextWindow and ContextManager.
+Relations:
+    Top-level namespace package, re-exported by vidbyte.
+"""
+
 from __future__ import annotations
 
-from vidbyte.context.algorithms import ContextWindowAlgorithm, ReflexionAlgorithm, ToolResultAdmission
+from vidbyte.context.algorithms import ContextWindowAlgorithm, MultiProviderAgenticGraderAlgorithm, ReflexionAlgorithm, ToolResultAdmission
 from vidbyte.context.primitives import (
     ArtifactContextItem,
     ContextItem,
@@ -49,6 +62,7 @@ __all__ = [
     "FileContextItem",
     "GitDiffContextItem",
     "MemoryContextItem",
+    "MultiProviderAgenticGraderAlgorithm",
     "ProgressContextItem",
     "ReflexionAlgorithm",
     "ResponseContextItem",
