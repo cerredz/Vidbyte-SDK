@@ -296,7 +296,47 @@ class ExampleAlgorithm:
             raise ValueError("max_memory_chars must be greater than zero.")
 ```
 
-### 6.1 Class-Level Instructions
+### 6.1 Comprehensive Validation In `__post_init__`
+
+Every public config class that accepts provider names, model strings, prompt overrides, character limits, or mappings must validate all fields in `__post_init__` so errors surface at construction time rather than at runtime. Define each check as a small module-level helper function and call them from `__post_init__` — one line per check.
+
+Required validation categories:
+
+- **Provider names**: validate each provider string against `ModelProvider` via `ProviderModelRegistry.validate_provider(provider)`. This raises `ConfigurationError` for unrecognized provider values.
+- **Model strings**: validate non-empty via `ProviderModelRegistry.validate_model(model)`.
+- **Provider-models mapping**: validate all entries via `ProviderModelRegistry.validate_provider_models_map(provider_models)`.
+- **Character limits**: check both a lower bound (`> 0`) and an upper safeguard (`<= MAX_LIMIT`) to prevent token exhaustion.
+- **Prompt overrides**: if a prompt override string is provided, reject empty or whitespace-only values.
+- **Prompt template placeholders**: if a custom prompt template is accepted, validate that all required `{placeholder}` keys are present using `string.Formatter().parse(...)`.
+- **Metadata keys**: reject non-string keys in any `metadata: Mapping[str, Any]` field.
+
+Errors must be `ConfigurationError` from `vidbyte.lib.errors`, not bare `ValueError` or `TypeError`. Example shape:
+
+```python
+def __post_init__(self) -> None:
+    # Validates all configuration fields at construction time to surface errors early.
+    _validate_grader_chars(self.max_grader_chars)
+    ProviderModelRegistry.validate_provider(self.grader_provider)
+    ProviderModelRegistry.validate_model(self.grader_model)
+    if self.provider_models is not None:
+        ProviderModelRegistry.validate_provider_models_map(self.provider_models)
+    _validate_prompt_override(self.agent_system_prompt, "agent_system_prompt")
+    _validate_grader_prompt_placeholders(self.grader_prompt)
+    _validate_metadata_keys(self.metadata)
+```
+
+Where each helper is a small module-level function raising `ConfigurationError`:
+
+```python
+def _validate_grader_chars(max_grader_chars: int) -> None:
+    # Raises ConfigurationError if max_grader_chars is outside the valid positive range.
+    if max_grader_chars <= 0:
+        raise ConfigurationError("max_grader_chars must be greater than zero.")
+    if max_grader_chars > _MAX_GRADER_CHARS_LIMIT:
+        raise ConfigurationError(f"max_grader_chars exceeds limit of {_MAX_GRADER_CHARS_LIMIT}.")
+```
+
+### 6.2 Class-Level Instructions
 
 Each public config class should follow these rules:
 
