@@ -1,3 +1,11 @@
+# Context Protocol Header
+# Description: Provider namespace client factory and loader.
+# Purpose: Serves as the central registry to build text, image, and video model provider adapters.
+# Architecture: Static registry pattern mapping ModelProvider enums to specific classes.
+# Key Functions: ModelProviders, get_text_provider, get_image_provider, get_video_provider.
+# Codebase Relation: Connects runners to specific REST API adapter instances.
+# Similar Files: vidbyte/lib/runners/text.py
+
 from __future__ import annotations
 
 from vidbyte.lib.config import ImageModelConfig, TextModelConfig, VideoModelConfig
@@ -10,13 +18,14 @@ from vidbyte.providers.gemini import GeminiProvider
 from vidbyte.providers.openai import OpenAIProvider
 from vidbyte.providers.base import tool_spec_to_provider_schema
 from vidbyte.providers.xai import XAIProvider
+from vidbyte.providers.openrouter import OpenRouterProvider
 
 
 class ModelProviders:
     """Central factory for SDK provider adapters."""
 
     @staticmethod
-    def text(config: TextModelConfig) -> OpenAIProvider | AnthropicProvider | GeminiProvider | XAIProvider | DeepSeekProvider | GLMProvider | MiniMaxProvider:
+    def text(config: TextModelConfig) -> OpenAIProvider | AnthropicProvider | GeminiProvider | XAIProvider | DeepSeekProvider | GLMProvider | MiniMaxProvider | OpenRouterProvider:
         # Return a text-capable adapter for the requested model provider.
         providers = {
             ModelProvider.OPENAI: OpenAIProvider,
@@ -26,6 +35,7 @@ class ModelProviders:
             ModelProvider.DEEPSEEK: DeepSeekProvider,
             ModelProvider.GLM: GLMProvider,
             ModelProvider.MINIMAX: MiniMaxProvider,
+            ModelProvider.OPENROUTER: OpenRouterProvider,
         }
         return ModelProviders._build_text_provider(config, providers)
 
@@ -86,6 +96,7 @@ __all__ = [
     "ModelProviders",
     "OpenAIProvider",
     "ProvidersClient",
+    "OpenRouterProvider",
     "XAIProvider",
     "get_image_provider",
     "get_text_provider",

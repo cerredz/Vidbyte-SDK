@@ -1,3 +1,11 @@
+# Context Protocol Header
+# Description: Execution modalities (text, image, video) for different models.
+# Purpose: Anchor model names to their proper runner strategies and validation checks.
+# Architecture: Str-based Enums and dictionary mapping known model IDs to modalities.
+# Key Functions: ModelModality, ModelNameModality, _MODEL_NAME_MODALITY_MAP.
+# Codebase Relation: Crucial for automatic routing of model inputs to correct adapters in ModalityDetector.
+# Similar Files: vidbyte/lib/agents/modality_detector.py
+
 from __future__ import annotations
 
 from enum import Enum
@@ -64,6 +72,27 @@ class ModelNameModality(str, Enum):
 
     MINIMAX_TEXT_01 = "text"
     ABAB = "text"
+
+    OPENROUTER_GPT_4O = "text"
+    OPENROUTER_GPT_4O_MINI = "text"
+    OPENROUTER_O1 = "text"
+    OPENROUTER_O1_MINI = "text"
+    OPENROUTER_O3_MINI = "text"
+    OPENROUTER_CLAUDE_3_5_SONNET = "text"
+    OPENROUTER_CLAUDE_3_OPUS = "text"
+    OPENROUTER_CLAUDE_3_5_HAIKU = "text"
+    OPENROUTER_GEMINI_2_5_PRO = "text"
+    OPENROUTER_GEMINI_2_5_FLASH = "text"
+    OPENROUTER_GEMINI_2_0_FLASH_THINKING = "text"
+    OPENROUTER_LLAMA_3_3_70B = "text"
+    OPENROUTER_LLAMA_3_1_8B_FREE = "text"
+    OPENROUTER_LLAMA_3_1_70B = "text"
+    OPENROUTER_LLAMA_3_1_405B = "text"
+    OPENROUTER_DEEPSEEK_CHAT = "text"
+    OPENROUTER_DEEPSEEK_R1 = "text"
+    OPENROUTER_MISTRAL_LARGE = "text"
+    OPENROUTER_PIXTRAL_LARGE = "text"
+    OPENROUTER_QWEN_2_5_72B = "text"
 
     DALL_E_2 = "image"
     DALL_E_3 = "image"
@@ -169,6 +198,27 @@ _MODEL_NAME_MODALITY_MAP: dict[str, ModelModality] = {
 
     "minimax-text-01": ModelModality.TEXT,
     "abab6.5s-chat": ModelModality.TEXT,
+
+    "openai/gpt-4o": ModelModality.TEXT,
+    "openai/gpt-4o-mini": ModelModality.TEXT,
+    "openai/o1": ModelModality.TEXT,
+    "openai/o1-mini": ModelModality.TEXT,
+    "openai/o3-mini": ModelModality.TEXT,
+    "anthropic/claude-3.5-sonnet": ModelModality.TEXT,
+    "anthropic/claude-3-opus": ModelModality.TEXT,
+    "anthropic/claude-3.5-haiku": ModelModality.TEXT,
+    "google/gemini-2.5-pro": ModelModality.TEXT,
+    "google/gemini-2.5-flash": ModelModality.TEXT,
+    "google/gemini-2.0-flash-thinking-exp": ModelModality.TEXT,
+    "meta-llama/llama-3.3-70b-instruct": ModelModality.TEXT,
+    "meta-llama/llama-3.1-8b-instruct:free": ModelModality.TEXT,
+    "meta-llama/llama-3.1-70b-instruct": ModelModality.TEXT,
+    "meta-llama/llama-3.1-405b-instruct": ModelModality.TEXT,
+    "deepseek/deepseek-chat": ModelModality.TEXT,
+    "deepseek/deepseek-r1": ModelModality.TEXT,
+    "mistralai/mistral-large": ModelModality.TEXT,
+    "mistralai/pixtral-large-12b": ModelModality.TEXT,
+    "qwen/qwen-2.5-72b-instruct": ModelModality.TEXT,
 
     "dall-e-2": ModelModality.IMAGE,
     "dall-e-3": ModelModality.IMAGE,
