@@ -60,7 +60,7 @@ class FakeRunner:
         return FakeResponse(self.output)
 
 
-async def test_invoke_runner(runner: Any, prompt: str, **kwargs: Any) -> Any:
+async def _invoke_runner_helper(runner: Any, prompt: str, **kwargs: Any) -> Any:
     # Awaits the fake runner's arun implementation for test execution.
     return await runner.arun(prompt, **kwargs)
 
@@ -128,7 +128,7 @@ class MultiProviderAgenticGraderTests(unittest.IsolatedAsyncioTestCase):
             runner=FakeRunner("ignored"),
             context=context,
             provider="openai",
-            invoke_runner=test_invoke_runner,
+            invoke_runner=_invoke_runner_helper,
             runner_output_text=lambda r: getattr(r, "text", str(r)),
             runner_output_metadata=lambda r: {},
         )
@@ -166,7 +166,7 @@ class MultiProviderAgenticGraderTests(unittest.IsolatedAsyncioTestCase):
                 runner=FakeRunner("ignored"),
                 context=context,
                 provider="openai",
-                invoke_runner=test_invoke_runner,
+                invoke_runner=_invoke_runner_helper,
                 runner_output_text=lambda r: getattr(r, "text", str(r)),
                 runner_output_metadata=lambda r: {},
             )
@@ -200,7 +200,7 @@ class MultiProviderAgenticGraderTests(unittest.IsolatedAsyncioTestCase):
                 runner=FakeRunner("ignored"),
                 context=context,
                 provider="openai",
-                invoke_runner=test_invoke_runner,
+                invoke_runner=_invoke_runner_helper,
                 runner_output_text=lambda r: getattr(r, "text", str(r)),
                 runner_output_metadata=lambda r: {},
             )
@@ -248,7 +248,7 @@ class MultiProviderAgenticGraderTests(unittest.IsolatedAsyncioTestCase):
             runner=FakeRunner("ignored"),
             context=context,
             provider="openai",
-            invoke_runner=test_invoke_runner,
+            invoke_runner=_invoke_runner_helper,
             runner_output_text=lambda r: getattr(r, "text", str(r)),
             runner_output_metadata=lambda r: {},
         )
@@ -288,7 +288,7 @@ class MultiProviderAgenticGraderTests(unittest.IsolatedAsyncioTestCase):
             runner=FakeRunner("ignored"),
             context=context,
             provider="openai",
-            invoke_runner=test_invoke_runner,
+            invoke_runner=_invoke_runner_helper,
             runner_output_text=lambda r: getattr(r, "text", str(r)),
             runner_output_metadata=lambda r: {},
         )
@@ -324,11 +324,60 @@ class MultiProviderAgenticGraderTests(unittest.IsolatedAsyncioTestCase):
                 runner=FakeRunner("ignored"),
                 context=context,
                 provider="openai",
-                invoke_runner=test_invoke_runner,
+                invoke_runner=_invoke_runner_helper,
                 runner_output_text=lambda r: getattr(r, "text", str(r)),
                 runner_output_metadata=lambda r: {},
             )
         self.assertIn("No model providers have API keys configured in the environment", str(ctx.exception))
+
+    def test_registry_default_model_invalid_provider(self) -> None:
+        # [Edge Case] default_model raises ConfigurationError when queried with an invalid/unregistered provider.
+        from vidbyte.lib.models.registry import ProviderModelRegistry
+        from unittest.mock import MagicMock
+
+        fake_provider = MagicMock()
+        fake_provider.value = "fake_provider_not_registered"
+
+        with self.assertRaises(ConfigurationError) as ctx:
+            ProviderModelRegistry.default_model(fake_provider)
+        self.assertIn("No default model registered for provider 'fake_provider_not_registered'", str(ctx.exception))
+
+    def test_registry_resolve_active_missing_keys(self) -> None:
+        # [Hidden Failure] resolve_active raises ConfigurationError if no API keys are set in the environment.
+        from vidbyte.lib.models.registry import ProviderModelRegistry
+
+        for env_var in API_KEY_ENV_VARS.values():
+            os.environ.pop(env_var, None)
+
+        with self.assertRaises(ConfigurationError) as ctx:
+            ProviderModelRegistry.resolve_active(provider_models=None, options=None)
+        self.assertIn("No model providers have API keys configured in the environment", str(ctx.exception))
+
+    def test_registry_all_default_models_are_valid_text_modality(self) -> None:
+        # [Silent Failure] All default provider models are valid text models that map to ModelModality.TEXT.
+        from vidbyte.lib.models.registry import ProviderModelRegistry
+        from vidbyte.lib.enums import ModelProvider, ModelModality
+        from vidbyte.lib.agents.modality_detector import ModalityDetector
+
+        for provider in ModelProvider:
+            model_name = ProviderModelRegistry.default_model(provider)
+            modality = ModalityDetector.detect_modality(model_name)
+            self.assertEqual(
+                modality,
+                ModelModality.TEXT,
+                f"Default model '{model_name}' for provider '{provider.value}' did not resolve to TEXT modality."
+            )
+
+    def test_registry_resolve_active_explicit_provider_models(self) -> None:
+        # [Hidden Assumption] resolve_active successfully returns explicit provider models, bypassing env checks when credentials supplied.
+        from vidbyte.lib.models.registry import ProviderModelRegistry
+
+        explicit_map = {"openai": "gpt-5.5", "anthropic": "claude-sonnet-4-6"}
+        os.environ["OPENAI_API_KEY"] = "fake-openai-key"
+        os.environ["ANTHROPIC_API_KEY"] = "fake-anthropic-key"
+
+        resolved = ProviderModelRegistry.resolve_active(provider_models=explicit_map, options=None)
+        self.assertEqual(resolved, explicit_map)
 
 
 if __name__ == "__main__":

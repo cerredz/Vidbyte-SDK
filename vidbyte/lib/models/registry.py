@@ -33,13 +33,13 @@ class ProviderModelRegistry:
     """Central registry for default provider-to-model mappings and validation helpers."""
 
     DEFAULT_PROVIDER_MODELS: ClassVar[dict[ModelProvider, str]] = {
-        ModelProvider.OPENAI: "gpt-4o",
-        ModelProvider.ANTHROPIC: "claude-3-5-sonnet-latest",
-        ModelProvider.GEMINI: "gemini-1.5-pro",
-        ModelProvider.XAI: "grok-beta",
-        ModelProvider.DEEPSEEK: "deepseek-chat",
-        ModelProvider.GLM: "glm-4",
-        ModelProvider.MINIMAX: "abab6.5-chat",
+        ModelProvider.OPENAI: "gpt-5.5",
+        ModelProvider.ANTHROPIC: "claude-sonnet-4-6",
+        ModelProvider.GEMINI: "gemini-2.5-pro",
+        ModelProvider.XAI: "grok-3",
+        ModelProvider.DEEPSEEK: "deepseek-v3",
+        ModelProvider.GLM: "glm-4-plus",
+        ModelProvider.MINIMAX: "minimax-text-01",
     }
 
     @classmethod
