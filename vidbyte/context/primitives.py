@@ -7,8 +7,9 @@ Purpose:
     collected by a ContextManager and converted into existing SDK context objects.
 Architecture:
     - ContextItem: Structural protocol for context primitive implementations.
-    - Text/File/Git/Task/Document/Environment/Memory/Progress primitives.
+    - Text/File/Git/Task/Document/Environment/Memory/Progress/Plan primitives.
     - Artifact/Response/ToolCall primitives for existing context records.
+    - All concrete types support primitive_id and primitive_frozen for registry management.
 Relations:
     Used by vidbyte.context.manager and re-exported by vidbyte.context and
     vidbyte.lib.dataclasses for compatibility.
@@ -43,8 +44,11 @@ class TextContextItem:
     kind: str = "text"
     source: str | None = None
     metadata: Mapping[str, Any] = field(default_factory=dict)
+    primitive_id: str | None = None
+    primitive_frozen: bool = False
 
     def to_context_text(self) -> str:
+        # Renders title, optional source, and content.
         source = f"\nSource: {self.source}" if self.source else ""
         return f"{self.title}{source}\n{self.content}"
 
@@ -62,6 +66,8 @@ class FileContextItem:
     metadata: Mapping[str, Any] = field(default_factory=dict)
     kind: str = "file"
     title: str = "File"
+    primitive_id: str | None = None
+    primitive_frozen: bool = False
 
     @classmethod
     def from_path(
@@ -73,6 +79,7 @@ class FileContextItem:
         metadata: Mapping[str, Any] | None = None,
         encoding: str = "utf-8",
     ) -> "FileContextItem":
+        # Constructs a FileContextItem by reading filesystem metadata and optionally content.
         resolved = Path(path).resolve()
         content = resolved.read_text(encoding=encoding) if include_content else None
         return cls(
@@ -85,6 +92,7 @@ class FileContextItem:
         )
 
     def to_context_text(self) -> str:
+        # Renders file path, language, and content or excerpt.
         lines = [
             f"File: {self.path}",
             f"Absolute path: {self.absolute_path}",
@@ -112,8 +120,11 @@ class GitDiffContextItem:
     metadata: Mapping[str, Any] = field(default_factory=dict)
     kind: str = "git_diff"
     title: str = "Git Diff"
+    primitive_id: str | None = None
+    primitive_frozen: bool = False
 
     def to_context_text(self) -> str:
+        # Renders repo context, range, changed files, and raw diff.
         lines = ["Git diff:"]
         if self.repo_root:
             lines.append(f"Repo root: {self.repo_root}")
@@ -142,8 +153,11 @@ class TaskContextItem:
     metadata: Mapping[str, Any] = field(default_factory=dict)
     kind: str = "task"
     title: str = "Task"
+    primitive_id: str | None = None
+    primitive_frozen: bool = False
 
     def to_context_text(self) -> str:
+        # Renders goal, status, optional progress, and bullet sections.
         lines = [f"Task goal: {self.goal}", f"Status: {self.status}"]
         if self.progress:
             lines.append(f"Progress: {self.progress}")
@@ -163,8 +177,11 @@ class DocumentContextItem:
     document_id: str | None = None
     metadata: Mapping[str, Any] = field(default_factory=dict)
     kind: str = "document"
+    primitive_id: str | None = None
+    primitive_frozen: bool = False
 
     def to_context_text(self) -> str:
+        # Renders document title, source, optional ID, and content.
         lines = [f"Document: {self.title}", f"Source: {self.source}"]
         if self.document_id:
             lines.append(f"Document ID: {self.document_id}")
@@ -183,8 +200,11 @@ class EnvironmentContextItem:
     metadata: Mapping[str, Any] = field(default_factory=dict)
     kind: str = "environment"
     title: str = "Environment"
+    primitive_id: str | None = None
+    primitive_frozen: bool = False
 
     def to_context_text(self) -> str:
+        # Renders OS, working directory, and shell if set.
         lines = ["Environment:"]
         if self.os_name:
             lines.append(f"OS: {self.os_name}")
@@ -206,8 +226,11 @@ class MemoryContextItem:
     metadata: Mapping[str, Any] = field(default_factory=dict)
     kind: str = "memory"
     title: str = "Memory"
+    primitive_id: str | None = None
+    primitive_frozen: bool = False
 
     def to_context_text(self) -> str:
+        # Renders memory summary with optional source attribution.
         source = f"\nSource: {self.source}" if self.source else ""
         return f"Memory summary:{source}\n{self.content}"
 
@@ -224,14 +247,41 @@ class ProgressContextItem:
     metadata: Mapping[str, Any] = field(default_factory=dict)
     kind: str = "progress"
     title: str = "Progress"
+    primitive_id: str | None = None
+    primitive_frozen: bool = False
 
     def to_context_text(self) -> str:
+        # Renders all progress sections as bullet lists.
         lines: list[str] = ["Progress:"]
         _extend_section(lines, "Completed tasks", self.completed_tasks)
         _extend_section(lines, "Touched files", self.touched_files)
         _extend_section(lines, "Decisions", self.decisions)
         _extend_section(lines, "Errors", self.errors)
         _extend_section(lines, "Next steps", self.next_steps)
+        return "\n".join(lines)
+
+
+@dataclass(frozen=True, slots=True)
+class PlanContextItem:
+    """Structured plan context for algorithm-owned multi-step execution plans."""
+
+    steps: tuple[str, ...] = ()
+    current_step: int = 0
+    status: str = "planning"
+    metadata: Mapping[str, Any] = field(default_factory=dict)
+    kind: str = "plan"
+    title: str = "Plan"
+    primitive_id: str | None = None
+    primitive_frozen: bool = False
+
+    def to_context_text(self) -> str:
+        # Renders numbered steps with an arrow marker on the current step.
+        lines = [f"Plan (status: {self.status}):"]
+        for i, step in enumerate(self.steps):
+            marker = "→" if i == self.current_step else " "
+            lines.append(f"{marker} {i + 1}. {step}")
+        if not self.steps:
+            lines.append("No steps defined.")
         return "\n".join(lines)
 
 
@@ -245,8 +295,11 @@ class ArtifactContextItem:
     metadata: Mapping[str, Any] = field(default_factory=dict)
     kind: str = "artifact"
     title: str = "Artifact"
+    primitive_id: str | None = None
+    primitive_frozen: bool = False
 
     def to_context_text(self) -> str:
+        # Renders artifact name, type, and content.
         return f"{self.name} ({self.artifact_type}):\n{self.content}"
 
 
@@ -259,8 +312,11 @@ class ResponseContextItem:
     metadata: Mapping[str, Any] = field(default_factory=dict)
     kind: str = "response"
     title: str = "Response"
+    primitive_id: str | None = None
+    primitive_frozen: bool = False
 
     def to_context_text(self) -> str:
+        # Renders response with optional sender attribution.
         prefix = f"Response from {self.sender}:" if self.sender else "Response:"
         return f"{prefix}\n{self.content}"
 
@@ -275,8 +331,11 @@ class ToolCallContextItem:
     metadata: Mapping[str, Any] = field(default_factory=dict)
     kind: str = "tool_call"
     title: str = "Tool Call"
+    primitive_id: str | None = None
+    primitive_frozen: bool = False
 
     def to_context_text(self) -> str:
+        # Renders tool name, arguments, and output.
         return f"Tool call: {self.name}\nArguments: {dict(self.arguments)}\nOutput: {self.output}"
 
 
@@ -300,6 +359,7 @@ __all__ = [
     "FileContextItem",
     "GitDiffContextItem",
     "MemoryContextItem",
+    "PlanContextItem",
     "ProgressContextItem",
     "ResponseContextItem",
     "TaskContextItem",
