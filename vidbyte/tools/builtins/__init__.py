@@ -22,12 +22,16 @@ from vidbyte.tools.builtins.context import (
     ContextMessage,
     ProgressLog,
 )
+from vidbyte.tools.builtins.context_primitives import ContextListTool, ContextRemoveTool, ContextUpsertTool
 from vidbyte.tools.builtins.editing import PatchTool
 
 __all__ = [
     "CompactionMode",
     "ContextCompactionTool",
+    "ContextListTool",
     "ContextMessage",
+    "ContextRemoveTool",
+    "ContextUpsertTool",
     "GlobTool",
     "GrepTool",
     "PatchTool",
