@@ -55,6 +55,7 @@ from vidbyte.context import (
     ContextPermissions,
     ContextWindow,
     ContextWindowAlgorithm,
+    CustomContextItem,
     DocumentContextItem,
     EnvironmentContextItem,
     FileContextItem,
@@ -71,6 +72,7 @@ from vidbyte.context import (
     ToolResultAdmission,
 )
 from vidbyte.tools.builtins.context_primitives import (
+    ContextDefineTool,
     ContextListTool,
     ContextRemoveTool,
     ContextUpsertTool,
@@ -183,6 +185,7 @@ __all__ = [
     "ChainOfDraftStrategy",
     "ChainOfThoughtStrategy",
     "ContextBudget",
+    "ContextDefineTool",
     "ContextItem",
     "ContextListTool",
     "ContextManager",
@@ -191,6 +194,7 @@ __all__ = [
     "ContextUpsertTool",
     "ContextWindow",
     "ContextWindowAlgorithm",
+    "CustomContextItem",
     "DocumentContextItem",
     "EnvironmentContextItem",
     "FileContextItem",

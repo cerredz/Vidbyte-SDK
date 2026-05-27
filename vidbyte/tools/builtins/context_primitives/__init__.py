@@ -6,6 +6,7 @@ Purpose:
     Provides agent-accessible tools for creating, updating, removing, and listing
     window-resident context primitives at runtime.
 Architecture:
+    - ContextDefineTool: Creates a custom-shaped primitive with user-defined fields.
     - ContextUpsertTool: Creates or updates a managed primitive by id.
     - ContextRemoveTool: Removes a managed primitive by id.
     - ContextListTool: Lists all active managed primitives.
@@ -15,11 +16,13 @@ Relations:
 
 from __future__ import annotations
 
+from vidbyte.tools.builtins.context_primitives.define import ContextDefineTool
 from vidbyte.tools.builtins.context_primitives.list_tool import ContextListTool
 from vidbyte.tools.builtins.context_primitives.remove import ContextRemoveTool
 from vidbyte.tools.builtins.context_primitives.upsert import ContextUpsertTool
 
 __all__ = [
+    "ContextDefineTool",
     "ContextListTool",
     "ContextRemoveTool",
     "ContextUpsertTool",

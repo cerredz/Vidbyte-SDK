@@ -25,6 +25,7 @@ from vidbyte.context.algorithms import ContextWindowAlgorithm, MultiProviderAgen
 from vidbyte.context.primitives import (
     ArtifactContextItem,
     ContextItem,
+    CustomContextItem,
     DocumentContextItem,
     EnvironmentContextItem,
     FileContextItem,
@@ -60,6 +61,7 @@ __all__ = [
     "ContextBudget",
     "ContextItem",
     "ContextManager",
+    "CustomContextItem",
     "ContextPermissions",
     "ContextResponse",
     "ContextToolCall",
