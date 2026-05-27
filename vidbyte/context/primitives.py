@@ -17,6 +17,7 @@ Relations:
 
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -339,6 +340,40 @@ class ToolCallContextItem:
         return f"Tool call: {self.name}\nArguments: {dict(self.arguments)}\nOutput: {self.output}"
 
 
+@dataclass(frozen=True, slots=True)
+class CustomContextItem:
+    """Agent-defined structured primitive with freeform fields and optional per-field descriptions."""
+
+    fields: Mapping[str, Any]
+    schema: Mapping[str, str] = field(default_factory=dict)
+    kind: str = "custom"
+    title: str = "Custom"
+    primitive_id: str | None = None
+    primitive_frozen: bool = False
+    metadata: Mapping[str, Any] = field(default_factory=dict)
+
+    def to_context_text(self) -> str:
+        # Renders each field with its optional description on its own line.
+        lines = [f"Custom: {self.title}"]
+        if not self.fields:
+            lines.append("  (no fields defined)")
+            return "\n".join(lines)
+        for field_name, value in self.fields.items():
+            desc = self.schema.get(field_name, "")
+            desc_suffix = f" ({desc})" if desc else ""
+            lines.append(f"  {field_name}{desc_suffix}: {_format_field_value(value)}")
+        return "\n".join(lines)
+
+
+def _format_field_value(value: Any) -> str:
+    # Renders lists as comma-separated, dicts as compact JSON, and anything else as str.
+    if isinstance(value, list):
+        return ", ".join(str(v) for v in value) if value else "[]"
+    if isinstance(value, dict):
+        return json.dumps(value, separators=(",", ":"))
+    return str(value)
+
+
 def _extend_section(lines: list[str], title: str, values: tuple[str, ...]) -> None:
     if not values:
         return
@@ -354,6 +389,7 @@ def _language_from_path(path: Path) -> str | None:
 __all__ = [
     "ArtifactContextItem",
     "ContextItem",
+    "CustomContextItem",
     "DocumentContextItem",
     "EnvironmentContextItem",
     "FileContextItem",
