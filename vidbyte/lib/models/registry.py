@@ -1,21 +1,29 @@
 """Context Protocol Header
 
 Description:
-    Central registry mapping model providers to their default text models.
+    Central registry mapping model providers to their default text models and configurations.
 Purpose:
-    Eliminates one-off provider-model dicts scattered across the SDK by providing
-    a single authoritative source for default models and active model resolution.
+    Eliminates one-off provider-model dicts and environment resolution scattered across the SDK.
 Architecture:
-    - ProviderModelRegistry: Class-level dict and helper methods for provider/model lookups.
+    - ProviderModelRegistry: Centralized model definitions, endpoints, API keys, and lookup methods.
 Key Functions:
     - default_model: Returns the default model string for a given provider enum.
+    - get_api_key_env_var: Retrieves the API key environment variable name.
+    - get_default_endpoint: Retrieves the default endpoint for a provider.
+    - resolve_api_key: Resolves explicit API key or retrieves environment variable.
+    - resolve_endpoint: Resolves explicit endpoint or defaults to standard URL.
+    - get_supported_providers: Gets list of supported provider strings.
+    - get_supported_models: Gets list of default model strings.
     - resolve_active: Returns the set of providers and models to use for a run.
     - validate_provider: Raises ConfigurationError if a provider string is unrecognized.
     - validate_model: Raises ConfigurationError if a model string is empty.
     - validate_provider_models_map: Validates all entries in a provider_models mapping.
 Relations:
-    Used by MultiProviderAgenticGraderRuntimeAlgorithm and
-    MultiProviderAgenticGraderAlgorithm for model resolution and config validation.
+    Used by MultiProviderAgenticGraderRuntimeAlgorithm, MultiProviderAgenticGraderAlgorithm,
+    and client configurations (TextModelConfig, ImageModelConfig, VideoModelConfig).
+Similar Files:
+    - vidbyte/lib/config/constants.py
+    - vidbyte/lib/dataclasses/model_configs.py
 """
 
 from __future__ import annotations
@@ -24,7 +32,6 @@ import os
 from collections.abc import Mapping
 from typing import Any, ClassVar
 
-from vidbyte.lib.config.constants import API_KEY_ENV_VARS
 from vidbyte.lib.enums import ModelProvider
 from vidbyte.lib.errors import ConfigurationError
 
@@ -40,6 +47,29 @@ class ProviderModelRegistry:
         ModelProvider.DEEPSEEK: "deepseek-v3",
         ModelProvider.GLM: "glm-4-plus",
         ModelProvider.MINIMAX: "minimax-text-01",
+        ModelProvider.OPENROUTER: "openrouter/auto",
+    }
+
+    API_KEY_ENV_VARS: ClassVar[dict[ModelProvider, str]] = {
+        ModelProvider.OPENAI: "OPENAI_API_KEY",
+        ModelProvider.ANTHROPIC: "ANTHROPIC_API_KEY",
+        ModelProvider.GEMINI: "GEMINI_API_KEY",
+        ModelProvider.XAI: "XAI_API_KEY",
+        ModelProvider.DEEPSEEK: "DEEPSEEK_API_KEY",
+        ModelProvider.GLM: "GLM_API_KEY",
+        ModelProvider.MINIMAX: "MINIMAX_API_KEY",
+        ModelProvider.OPENROUTER: "OPENROUTER_API_KEY",
+    }
+
+    DEFAULT_ENDPOINTS: ClassVar[dict[ModelProvider, str]] = {
+        ModelProvider.OPENAI: "https://api.openai.com/v1",
+        ModelProvider.ANTHROPIC: "https://api.anthropic.com/v1",
+        ModelProvider.GEMINI: "https://generativelanguage.googleapis.com/v1beta",
+        ModelProvider.XAI: "https://api.x.ai/v1",
+        ModelProvider.DEEPSEEK: "https://api.deepseek.com/v1",
+        ModelProvider.GLM: "https://open.bigmodel.cn/api/paas/v4",
+        ModelProvider.MINIMAX: "https://api.minimax.io/v1",
+        ModelProvider.OPENROUTER: "https://openrouter.ai/api/v1",
     }
 
     @classmethod
@@ -49,6 +79,59 @@ class ProviderModelRegistry:
         if model is None:
             raise ConfigurationError(f"No default model registered for provider '{provider.value}'.")
         return model
+
+    @classmethod
+    def get_api_key_env_var(cls, provider: ModelProvider | str) -> str:
+        # Returns the environment variable name configured for the given provider.
+        try:
+            p_enum = provider if isinstance(provider, ModelProvider) else ModelProvider(provider)
+        except ValueError as exc:
+            raise ConfigurationError(f"Unrecognized provider '{provider}'.") from exc
+        env_var = cls.API_KEY_ENV_VARS.get(p_enum)
+        if not env_var:
+            raise ConfigurationError(f"No API key environment variable registered for provider '{p_enum.value}'.")
+        return env_var
+
+    @classmethod
+    def get_default_endpoint(cls, provider: ModelProvider | str) -> str:
+        # Returns the default HTTP endpoint URL configured for the given provider.
+        try:
+            p_enum = provider if isinstance(provider, ModelProvider) else ModelProvider(provider)
+        except ValueError as exc:
+            raise ConfigurationError(f"Unrecognized provider '{provider}'.") from exc
+        endpoint = cls.DEFAULT_ENDPOINTS.get(p_enum)
+        if not endpoint:
+            raise ConfigurationError(f"No default endpoint registered for provider '{p_enum.value}'.")
+        return endpoint
+
+    @classmethod
+    def resolve_api_key(cls, provider: ModelProvider | str, explicit_key: str | None) -> str:
+        # Resolves and returns the explicit key or resolves the env-var key if missing.
+        if explicit_key and explicit_key.strip():
+            return explicit_key.strip()
+        env_var = cls.get_api_key_env_var(provider)
+        env_value = os.environ.get(env_var)
+        if env_value and env_value.strip():
+            return env_value.strip()
+        p_name = provider.value if isinstance(provider, ModelProvider) else provider
+        raise ConfigurationError(f"Missing API key for provider {p_name}. Pass api_key or set {env_var}.")
+
+    @classmethod
+    def resolve_endpoint(cls, provider: ModelProvider | str, explicit_endpoint: str | None) -> str:
+        # Resolves and returns the explicit endpoint or falls back to the default provider endpoint.
+        if explicit_endpoint and explicit_endpoint.strip():
+            return explicit_endpoint.strip().rstrip("/")
+        return cls.get_default_endpoint(provider)
+
+    @classmethod
+    def get_supported_providers(cls) -> list[str]:
+        # Returns the list of all supported provider string values in the registry.
+        return sorted(p.value for p in ModelProvider)
+
+    @classmethod
+    def get_supported_models(cls) -> list[str]:
+        # Returns the list of default model identifiers across all registered providers.
+        return sorted(list(cls.DEFAULT_PROVIDER_MODELS.values()))
 
     @classmethod
     def resolve_active(cls, provider_models: Mapping[str, str] | None, options: Mapping[str, Any] | None) -> dict[str, str]:
@@ -64,7 +147,7 @@ class ProviderModelRegistry:
         try:
             ModelProvider(provider)
         except ValueError as exc:
-            known = sorted(p.value for p in ModelProvider)
+            known = cls.get_supported_providers()
             raise ConfigurationError(
                 f"Unrecognized provider '{provider}'. Known providers: {known}."
             ) from exc
@@ -88,7 +171,7 @@ class ProviderModelRegistry:
         active: dict[str, str] = {}
         for provider_name, model_name in provider_models.items():
             p_enum = ModelProvider(provider_name)
-            env_var = API_KEY_ENV_VARS.get(p_enum)
+            env_var = cls.API_KEY_ENV_VARS.get(p_enum)
             if env_var and not os.environ.get(env_var) and not opts.get("api_key"):
                 raise ConfigurationError(
                     f"Missing API key for explicitly requested provider '{provider_name}'. Set {env_var}."
@@ -101,7 +184,7 @@ class ProviderModelRegistry:
         # Builds the active-models dict from all providers that have env-var API keys set.
         active: dict[str, str] = {}
         for provider_enum, model_name in cls.DEFAULT_PROVIDER_MODELS.items():
-            env_var = API_KEY_ENV_VARS.get(provider_enum)
+            env_var = cls.API_KEY_ENV_VARS.get(provider_enum)
             if env_var and os.environ.get(env_var):
                 active[provider_enum.value] = model_name
         if not active:
@@ -112,3 +195,4 @@ class ProviderModelRegistry:
 __all__ = [
     "ProviderModelRegistry",
 ]
+

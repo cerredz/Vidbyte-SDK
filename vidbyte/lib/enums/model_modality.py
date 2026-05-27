@@ -1,3 +1,21 @@
+"""Context Protocol Header
+
+Description:
+    Model execution modality definitions and maps.
+Purpose:
+    Maps model names and prefixes to their supported execution modalities (auto, text, image, video).
+Architecture:
+    - ModelModality: Supported execution modalities.
+    - ModelNameModality: Known model names.
+    - _MODEL_NAME_MODALITY_MAP: Comprehensive mapping dictionary.
+Key Functions:
+    None.
+Relations:
+    Used by ModalityDetector to automatically infer modality for any given model name.
+Similar Files:
+    - vidbyte/lib/agents/modality_detector.py
+"""
+
 from __future__ import annotations
 
 from enum import Enum
@@ -15,6 +33,7 @@ class ModelModality(str, Enum):
 class ModelNameModality(str, Enum):
     """Known model names mapped to their execution modality."""
 
+    OPENROUTER_AUTO = "text"
     GPT_4 = "text"
     GPT_4O = "text"
     GPT_4O_MINI = "text"
@@ -169,6 +188,28 @@ _MODEL_NAME_MODALITY_MAP: dict[str, ModelModality] = {
 
     "minimax-text-01": ModelModality.TEXT,
     "abab6.5s-chat": ModelModality.TEXT,
+
+    "openrouter/auto": ModelModality.TEXT,
+    "openai/gpt-4o": ModelModality.TEXT,
+    "openai/gpt-4o-mini": ModelModality.TEXT,
+    "openai/o1": ModelModality.TEXT,
+    "openai/o1-mini": ModelModality.TEXT,
+    "openai/o3-mini": ModelModality.TEXT,
+    "anthropic/claude-3.5-sonnet": ModelModality.TEXT,
+    "anthropic/claude-3-opus": ModelModality.TEXT,
+    "anthropic/claude-3.5-haiku": ModelModality.TEXT,
+    "google/gemini-2.5-pro": ModelModality.TEXT,
+    "google/gemini-2.5-flash": ModelModality.TEXT,
+    "google/gemini-2.0-flash-thinking-exp": ModelModality.TEXT,
+    "meta-llama/llama-3.3-70b-instruct": ModelModality.TEXT,
+    "meta-llama/llama-3.1-8b-instruct:free": ModelModality.TEXT,
+    "meta-llama/llama-3.1-70b-instruct": ModelModality.TEXT,
+    "meta-llama/llama-3.1-405b-instruct": ModelModality.TEXT,
+    "deepseek/deepseek-chat": ModelModality.TEXT,
+    "deepseek/deepseek-r1": ModelModality.TEXT,
+    "mistralai/mistral-large": ModelModality.TEXT,
+    "mistralai/pixtral-large-12b": ModelModality.TEXT,
+    "qwen/qwen-2.5-72b-instruct": ModelModality.TEXT,
 
     "dall-e-2": ModelModality.IMAGE,
     "dall-e-3": ModelModality.IMAGE,
