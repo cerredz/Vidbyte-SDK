@@ -1,3 +1,15 @@
+# ==============================================================================
+# CONTEXT PROTOCOL HEADER
+# Description: Unit tests for the Prompt catalog and strategy bundle public interfaces.
+# Purpose: Ensures consistency, type safety, and export compliance for prompt retrieval APIs.
+# Architecture & Functions:
+#   - PromptsInterfaceTests (unittest.TestCase): Asserts key enums map to valid strings, rejects invalid types, and checks dynamic module exports.
+# Codebase Relation:
+#   - Validates that the entire Prompts system operates cleanly and consistently.
+# Similar Files:
+#   - tests/test_prompt_registry.py (tests catalog parsing/registries)
+# ==============================================================================
+
 from __future__ import annotations
 
 import importlib
@@ -9,6 +21,9 @@ from vidbyte.prompts import (
     chain_of_thought_reason_prompt,
     goals_goal_prompt,
     mimic_behavior_mimic_prompt,
+    templates_intent_based,
+    templates_persona,
+    templates_specification,
 )
 
 
@@ -20,6 +35,9 @@ class PromptsInterfaceTests(unittest.TestCase):
         self.assertIsInstance(chain_of_thought_reason_prompt, str)
         self.assertEqual(prompts.get(Prompt.GOALS_GOAL_PROMPT), goals_goal_prompt)
         self.assertEqual(prompts.get(Prompt.MIMIC_BEHAVIOR_MIMIC_PROMPT), mimic_behavior_mimic_prompt)
+        self.assertEqual(prompts.get(Prompt.TEMPLATES_INTENT_BASED), templates_intent_based)
+        self.assertEqual(prompts.get(Prompt.TEMPLATES_PERSONA), templates_persona)
+        self.assertEqual(prompts.get(Prompt.TEMPLATES_SPECIFICATION), templates_specification)
 
     def test_get_rejects_string_keys(self) -> None:
         with self.assertRaises(TypeError):
@@ -50,3 +68,4 @@ class PromptsInterfaceTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
