@@ -20,14 +20,14 @@ from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
 from vidbyte.agents.mixins import McpAttachableMixin
-from vidbyte.agents.runtime import AgentRuntime
+from vidbyte.agents.runtimes import LinearAgentRuntime as AgentRuntime, SearchTreeRuntimeComponent, ActorRuntimeComponent
 from vidbyte.agents.types import AgentCard, AgentInput, AgentMessage
 from vidbyte.context.manager import ContextManager
 from vidbyte.context.window import ContextWindow, ContextWindowAlgorithm
 from vidbyte.context.primitives import ContextItem
 from vidbyte.lib.agents import ModalityDetector
 from vidbyte.lib.dataclasses.agents import AgentMetadata, AgentRunnerConfig, AgentRuntimeConfig
-from vidbyte.lib.enums import ModelModality, ModelProvider
+from vidbyte.lib.enums import AgentRuntimeType, ModelModality, ModelProvider
 from vidbyte.lib.errors import AgentExecutionError, ConfigurationError
 from vidbyte.lib.tracing import NullTracer, TracerBase
 from vidbyte.middleware import AgentMiddleware
@@ -49,43 +49,26 @@ class ConfiguredAgentRunner:
 class BaseAgent(McpAttachableMixin):
     """Reusable actor combining a system prompt, optional strategy, runner, and tools."""
 
-    def __init__(
-        self,
-        *,
-        name: str,
-        system_prompt: str,
-        strategy: BaseStrategy | None = None,
-        strategies: Sequence[BaseStrategy] | None = None,
-        runner: object | None = None,
-        runners: Mapping[ModelModality | str, object] | None = None,
-        tools: Sequence[object] | Tools = (),
-        permission_policy: PermissionPolicy | None = None,
-        max_tool_rounds: int | None = None,
-        max_iterations: int | None = None,
-        max_tokens: int | None = None,
-        compaction_trigger_tokens: int | None = None,
-        compaction_target_tokens: int | None = None,
-        middleware: Sequence[AgentMiddleware] = (),
-        api_key: str | None = None,
-        provider: ModelProvider | str | None = None,
-        model_name: str | None = None,
-        modality: ModelModality | str = ModelModality.AUTO,
-        temperature: float | None = None,
-        run_id: str | None = None,
-        runner_options: dict[str, Any] | None = None,
-        description: str = "",
-        capabilities: Sequence[str] = (),
-        agent_metadata: AgentMetadata | None = None,
-        context_items: Sequence[ContextItem] = (),
-        context_manager: ContextManager | None = None,
-        algorithm: ContextWindowAlgorithm | str | None = None,
-        metadata: dict[str, Any] | None = None,
-        tracer: type[TracerBase] | TracerBase | None = None,
-    ) -> None:
+    def __init__(self, *, name: str, system_prompt: str, runtime: AgentRuntimeType | str = AgentRuntimeType.LINEAR, strategy: BaseStrategy | None = None, strategies: Sequence[BaseStrategy] | None = None, runner: object | None = None, runners: Mapping[ModelModality | str, object] | None = None, tools: Sequence[object] | Tools = (), permission_policy: PermissionPolicy | None = None, max_tool_rounds: int | None = None, max_iterations: int | None = None, max_tokens: int | None = None, compaction_trigger_tokens: int | None = None, compaction_target_tokens: int | None = None, middleware: Sequence[AgentMiddleware] = (), api_key: str | None = None, provider: ModelProvider | str | None = None, model_name: str | None = None, modality: ModelModality | str = ModelModality.AUTO, temperature: float | None = None, run_id: str | None = None, runner_options: dict[str, Any] | None = None, description: str = "", capabilities: Sequence[str] = (), agent_metadata: AgentMetadata | None = None, context_items: Sequence[ContextItem] = (), context_manager: ContextManager | None = None, algorithm: ContextWindowAlgorithm | str | None = None, metadata: dict[str, Any] | None = None, tracer: type[TracerBase] | TracerBase | None = None) -> None:
+        # Initialize agent details, resolve swappable execution runtimes, and enforce fail-fast gates.
         if not name:
             raise AgentExecutionError("Agent name cannot be empty.")
         if not system_prompt:
             raise AgentExecutionError("Agent system_prompt is required.")
+        self.runtime_type = AgentRuntimeType(runtime)
+        if self.runtime_type != AgentRuntimeType.LINEAR:
+            if middleware:
+                raise ConfigurationError(
+                    f"Agent {name} uses non-linear runtime {self.runtime_type.value}, "
+                    "which does not support middleware."
+                )
+            if algorithm is not None:
+                resolved_algo = ContextWindow.resolve_algorithm(algorithm)
+                if resolved_algo.name != "default":
+                    raise ConfigurationError(
+                        f"Agent {name} uses non-linear runtime {self.runtime_type.value}, "
+                        "which does not support in-context learning algorithms."
+                    )
         self.runner_config = AgentRunnerConfig(
             api_key=api_key,
             provider=str(provider.value if isinstance(provider, ModelProvider) else provider) if provider is not None else None,
@@ -489,8 +472,17 @@ class BaseAgent(McpAttachableMixin):
             if isinstance(context, ToolCallContext)
         )
 
-    def _runtime(self) -> AgentRuntime:
-        return AgentRuntime(
+    def _runtime(self) -> Any:
+        # Dynamically selects and constructs the swappable linear or non-linear agent execution runtime.
+        runtime_classes = {
+            AgentRuntimeType.LINEAR: AgentRuntime,
+            AgentRuntimeType.MCTS_SEARCH: SearchTreeRuntimeComponent,
+            AgentRuntimeType.ACTOR_MODEL: ActorRuntimeComponent,
+        }
+        runtime_cls = runtime_classes.get(self.runtime_type)
+        if not runtime_cls:
+            raise ConfigurationError(f"Unknown runtime type: {self.runtime_type}")
+        return runtime_cls(
             agent_name=self.name,
             system_prompt=self.system_prompt,
             tools=self.tools,

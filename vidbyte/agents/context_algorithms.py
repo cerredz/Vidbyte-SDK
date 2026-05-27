@@ -22,7 +22,7 @@ from vidbyte.lib.tracing import SpanContext
 from vidbyte.strategies.types import BaseAgentContext, StrategyResult
 
 if TYPE_CHECKING:
-    from vidbyte.agents.runtime import AgentRuntime
+    from vidbyte.agents.runtimes import LinearAgentRuntime as AgentRuntime
 
 
 class AgentRuntimeContextAlgorithms:

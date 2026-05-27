@@ -1,15 +1,17 @@
 """Context Protocol Header
 
 Description:
-    Defines the internal direct execution runtime for Vidbyte agents.
+    Defines the baseline linear direct execution runtime for Vidbyte agents.
 Purpose:
     Keeps agent loop execution, context-window construction, tool execution,
     permission checks, and provider-reported token accounting out of BaseAgent.
 Architecture:
-    - AgentRuntime: Builds BaseAgentContext and runs direct model/tool loops.
+    - AgentRuntime: Builds BaseAgentContext and runs direct model/tool loops sequentially.
 Relations:
-    Used by vidbyte.agents.base. Depends on shared context, tool, security, and
-    strategy dataclasses without owning modality routing or runner construction.
+    Located in vidbyte/agents/runtimes/linear.py. Used by vidbyte.agents.base.
+Similar Files:
+    - vidbyte/agents/runtimes/search.py: Branching MCTS runtime.
+    - vidbyte/agents/runtimes/actor.py: Asynchronous Actor-Model runtime.
 """
 
 from __future__ import annotations
