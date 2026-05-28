@@ -1,3 +1,22 @@
+<!--
+Context Protocol Header
+
+Description:
+    Master directory rule file and layout reference for the Vidbyte SDK skills.
+Purpose:
+    Ensures that codebase modifications preserve the package structure,
+    design patterns, client interfaces, context manager policies, tool schemas,
+    and runtime systems.
+Architecture:
+    - Lists complete directory structure map.
+    - Specifies architectural rules for packages: agents, pipelines, prompts,
+      context, tools, and middleware.
+    - References sub-skills: pipelines.md, adding-prompts.md,
+      adding-context-window-algorithms.md, and middleware.md.
+Relations:
+    Root of skills/vidbyte-sdk/. Guides all other sdk skill instructions.
+-->
+
 # Vidbyte SDK Structure
 
 Use this reference when modifying the Vidbyte SDK package structure.
@@ -33,7 +52,7 @@ vidbyte/
 |-- tools/
 |   `-- client.py
 |-- shared/
-`-- lib/
+| `-- lib/
     |-- dataclasses/
     |-- runners/
     |-- tools/
@@ -62,6 +81,7 @@ vidbyte/
 - Keep provider-neutral tool formatting helpers under `vidbyte/lib/tools/`.
 - Keep middleware runtime policy code under `vidbyte/middleware/`; built-in middleware belongs under `vidbyte/middleware/builtins/`.
 - Keep middleware dataclass contracts under `vidbyte/lib/dataclasses/middleware.py`; public middleware modules should re-export stable contracts.
+- Follow `skills/vidbyte-sdk/middleware.md` when configuring, using, or implementing agent runtime middleware.
 - Keep concrete text/image/video model runners under `vidbyte/lib/runners/`; they are internal or advanced implementation details, not the preferred user-facing docs surface.
 - Keep shared SDK scaffolding under `vidbyte/shared/`.
 - Advanced tools are approved under `vidbyte/tools/` when they follow the shared `BaseTool`, `ToolSpec`, `Tools`, and agent-local execution contracts. `ToolRegistry` and `ToolExecutor` are compatibility/lower-level strategy infrastructure, not the preferred public workflow.
