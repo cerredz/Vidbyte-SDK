@@ -1,7 +1,7 @@
 """Context Protocol Header
 
 Description:
-    Exports MCP bridge client, transport, configuration, and state handles.
+    Exports MCP bridge client, transport, configuration, state handles, and presets.
 Purpose:
     Provides a stable public surface for connecting external MCP tools and configuring
     automatic lifecycle attachments in the Vidbyte SDK.
@@ -12,6 +12,7 @@ Architecture:
     - McpServerConfig: Immutable server configuration.
     - McpServerHandle: Live process connection wrapper.
     - McpToolPermission: Remote execution permissions.
+    - McpPresetRegistry: Preset catalog and resolution builder.
 Relations:
     Related to vidbyte.tools.registry, vidbyte.tools.executor, and agent mixins.
 """
@@ -20,6 +21,12 @@ from __future__ import annotations
 
 from vidbyte.tools.mcp.bridge import McpBridgedTool, McpToolBridge
 from vidbyte.tools.mcp.client import McpClient
+from vidbyte.tools.mcp.presets import (
+    McpPresetConfigurationError,
+    McpPresetDefinition,
+    McpPresetNotFoundError,
+    McpPresetRegistry,
+)
 from vidbyte.tools.mcp.transport import McpStdioTransport, McpTransport
 from vidbyte.tools.mcp.types import (
     McpServerConfig,
@@ -31,6 +38,10 @@ from vidbyte.tools.mcp.types import (
 __all__ = [
     "McpBridgedTool",
     "McpClient",
+    "McpPresetConfigurationError",
+    "McpPresetDefinition",
+    "McpPresetNotFoundError",
+    "McpPresetRegistry",
     "McpServerConfig",
     "McpServerHandle",
     "McpStdioTransport",
