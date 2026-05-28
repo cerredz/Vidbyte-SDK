@@ -1,4 +1,4 @@
-"""Context Protocol Header
+﻿"""Context Protocol Header
 
 Description:
     Implements the Reflexion runtime context-window algorithm.
@@ -21,7 +21,8 @@ from typing import Any
 from vidbyte.lib.dataclasses.agents import AgentStopReason
 from vidbyte.lib.enums.prompts import Prompt
 from vidbyte.prompts import Prompts
-from vidbyte.strategies.types import BaseAgentContext, StrategyResult
+from vidbyte.lib.dataclasses.context import BaseAgentContext
+from vidbyte.lib.dataclasses.strategies import AgentResult
 
 
 @dataclass(frozen=True, slots=True)
@@ -73,7 +74,7 @@ class ReflexionAlgorithm:
             },
         )
 
-    def should_reflect(self, result: StrategyResult, *, trial_index: int) -> bool:
+    def should_reflect(self, result: AgentResult, *, trial_index: int) -> bool:
         """Return whether the failed attempt should produce reflection and retry."""
         if trial_index >= self.max_trials - 1:
             return False
@@ -105,7 +106,7 @@ class ReflexionAlgorithm:
             return reflection
         return reflection[: self.max_reflection_chars].rstrip() + "\n...[reflection truncated]"
 
-    def format_failed_attempt(self, result: StrategyResult) -> str:
+    def format_failed_attempt(self, result: AgentResult) -> str:
         """Render the failed trial state as a compact scratchpad for reflection."""
         lines = [
             f"Stop reason: {self.stop_reason(result).value}",
@@ -122,8 +123,8 @@ class ReflexionAlgorithm:
         return self._truncate("\n".join(lines), self.max_attempt_chars, "attempt")
 
     @staticmethod
-    def stop_reason(result: StrategyResult) -> AgentStopReason:
-        """Read a StrategyResult stop reason with a conservative fallback."""
+    def stop_reason(result: AgentResult) -> AgentStopReason:
+        """Read a AgentResult stop reason with a conservative fallback."""
         raw = dict(result.metadata).get("stop_reason", AgentStopReason.FINAL_RESPONSE.value)
         try:
             return AgentStopReason(str(raw))
@@ -152,3 +153,5 @@ class ReflexionAlgorithm:
 __all__ = [
     "ReflexionAlgorithm",
 ]
+
+

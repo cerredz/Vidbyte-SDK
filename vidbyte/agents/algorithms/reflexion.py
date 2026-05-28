@@ -1,4 +1,4 @@
-"""Context Protocol Header
+﻿"""Context Protocol Header
 
 Description:
     Executes the Reflexion context-window algorithm for AgentRuntime.
@@ -19,7 +19,8 @@ from typing import TYPE_CHECKING, Any
 
 from vidbyte.context.algorithms import ReflexionAlgorithm
 from vidbyte.lib.tracing import SpanContext
-from vidbyte.strategies.types import BaseAgentContext, StrategyResult
+from vidbyte.lib.dataclasses.context import BaseAgentContext
+from vidbyte.lib.dataclasses.strategies import AgentResult
 
 if TYPE_CHECKING:
     from vidbyte.agents.runtime import AgentRuntime
@@ -47,12 +48,12 @@ class ReflexionRuntimeAlgorithm:
         metadata: Mapping[str, Any] | None = None,
         options: Mapping[str, Any] | None = None,
         trace_context: SpanContext | None = None,
-    ) -> StrategyResult:
+    ) -> AgentResult:
         """Run Reflexion attempts, reflecting after failed trials."""
         reflections: list[str] = []
         failed_attempts: list[str] = []
         attempt_summaries: list[dict[str, Any]] = []
-        last_result: StrategyResult | None = None
+        last_result: AgentResult | None = None
 
         for trial_index in range(self.algorithm.max_trials):
             result = await self._run_trial(
@@ -90,7 +91,7 @@ class ReflexionRuntimeAlgorithm:
                 trial_index=trial_index,
                 trace_context=trace_context,
             )
-            if isinstance(reflected, StrategyResult):
+            if isinstance(reflected, AgentResult):
                 return self._with_reflexion_metadata(reflected, reflections=reflections, attempts=attempt_summaries)
             if reflected:
                 reflections.append(reflected)
@@ -114,7 +115,7 @@ class ReflexionRuntimeAlgorithm:
         reflections: Sequence[str],
         failed_attempts: Sequence[str],
         trace_context: SpanContext | None,
-    ) -> StrategyResult:
+    ) -> AgentResult:
         """Run one main Reflexion trial through the normal runtime loop."""
         trial_context = self.algorithm.context_for_trial(
             context,
@@ -149,7 +150,7 @@ class ReflexionRuntimeAlgorithm:
         metadata: Mapping[str, Any] | None,
         trial_index: int,
         trace_context: SpanContext | None,
-    ) -> str | StrategyResult:
+    ) -> str | AgentResult:
         """Run the reflection-stage model call through runtime middleware."""
         raw_result, _ = await self.runtime._invoke_with_middleware(
             runner,
@@ -171,7 +172,7 @@ class ReflexionRuntimeAlgorithm:
             metadata=self._reflection_metadata(metadata, trial_index=trial_index),
             trace_context=trace_context,
         )
-        if isinstance(raw_result, StrategyResult):
+        if isinstance(raw_result, AgentResult):
             return raw_result
         return self.algorithm.capture_reflection(runner_output_text(raw_result))
 
@@ -203,7 +204,7 @@ class ReflexionRuntimeAlgorithm:
         }
 
     @staticmethod
-    def _attempt_summary(result: StrategyResult, *, trial_index: int) -> dict[str, Any]:
+    def _attempt_summary(result: AgentResult, *, trial_index: int) -> dict[str, Any]:
         """Return compact metadata for one Reflexion trial."""
         return {
             "trial_index": trial_index,
@@ -213,11 +214,11 @@ class ReflexionRuntimeAlgorithm:
 
     @staticmethod
     def _with_reflexion_metadata(
-        result: StrategyResult,
+        result: AgentResult,
         *,
         reflections: Sequence[str],
         attempts: Sequence[Mapping[str, Any]],
-    ) -> StrategyResult:
+    ) -> AgentResult:
         """Attach Reflexion trial metadata to a runtime result."""
         metadata = dict(result.metadata)
         metadata["reflexion"] = {
@@ -226,7 +227,7 @@ class ReflexionRuntimeAlgorithm:
             "reflections": tuple(reflections),
             "attempts": tuple(dict(attempt) for attempt in attempts),
         }
-        return StrategyResult(
+        return AgentResult(
             output=result.output,
             strategy_name=result.strategy_name,
             calls=result.calls,
@@ -237,3 +238,5 @@ class ReflexionRuntimeAlgorithm:
 __all__ = [
     "ReflexionRuntimeAlgorithm",
 ]
+
+

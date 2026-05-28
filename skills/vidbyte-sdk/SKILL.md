@@ -90,7 +90,7 @@ vidbyte/
 - Keep permission and sandbox abstractions under `vidbyte/tools/security/`.
 - Mutating or executable tools must declare `WRITE` or `EXECUTE` permissions and be guarded by the agent or compatibility executor permission policy.
 - Harnesses should compose strategies through `with_strategy()` and `with_strategies()` rather than exposing single-agent or multi-agent flags.
-- Agents package modality routing, model runners, model configuration, strategies, user-defined role/capability metadata, system prompts, and tools. User-facing examples should pass tools directly into `Agent`/`BaseAgent` with `tools=[...]`.
+- Agents package modality routing, model runners, model configuration, user-defined role/capability metadata, system prompts, and tools. User-facing examples should pass tools directly into `Agent`/`BaseAgent` with `tools=[...]`.
 - User-facing examples should prefer `Agent`/`BaseAgent`, `AgentInput`, `ModelModality`, `VidbyteSDK().agents`, or harness composition instead of direct `TextModelRunner`, `ImageModelRunner`, or `VideoModelRunner` construction.
 - Base contexts should expose `build_context()` and keep file content, context items, tool calls, model responses, memory, permissions, artifacts, budget, and strategy progress metadata distinct.
 - Context items store structured meaning; `ContextManager` owns collection and compatibility conversion into existing context dataclasses. Agent-level context-window algorithms are selected with `algorithm=ContextWindow.preset.<name>` and should remain coarse SDK presets, not low-level custom compiler APIs.

@@ -1,4 +1,4 @@
-"""Context Protocol Header
+﻿"""Context Protocol Header
 
 Description:
     Tests for the Multi-Provider Agentic Grader context-window algorithm.
@@ -35,7 +35,8 @@ from vidbyte.lib.dataclasses.agents import AgentRuntimeConfig
 from vidbyte.lib.config.constants import API_KEY_ENV_VARS
 from vidbyte.tools.catalog import Tools
 from vidbyte.tools.security import PermissionPolicy
-from vidbyte.strategies.types import BaseAgentContext, StrategyResult
+from vidbyte.lib.dataclasses.context import BaseAgentContext
+from vidbyte.lib.dataclasses.strategies import AgentResult as StrategyResult
 
 
 class FakeResponse:
@@ -382,3 +383,4 @@ class MultiProviderAgenticGraderTests(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+

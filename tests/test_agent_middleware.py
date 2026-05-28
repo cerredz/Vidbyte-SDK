@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import unittest
 
@@ -7,7 +7,7 @@ from vidbyte.lib.dataclasses.agents import AgentRuntimeConfig
 from vidbyte.lib.dataclasses.middleware import MiddlewareContext, MiddlewareDecision
 from vidbyte.middleware import AgentMiddleware
 from vidbyte.middleware.builtins import ModelRetryMiddleware, ToolPolicyMiddleware
-from vidbyte.strategies import StrategyContext
+from vidbyte.lib.dataclasses.context import BaseContext as StrategyContext
 from vidbyte.tools import BaseTool, ToolCall, ToolResult, ToolSpec, Tools, tool
 from vidbyte.tools.security import PermissionPolicy
 
@@ -325,3 +325,4 @@ class AgentMiddlewareTests(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+

@@ -18,7 +18,6 @@ sdk.harnesses
 sdk.agents
 sdk.tools
 sdk.providers
-sdk.strategies
 ```
 
 ## Agents and Modalities
@@ -57,17 +56,14 @@ reply = await image_agent.arun(
 Multi-agent execution is modeled as composition:
 
 - `vidbyte.agents` contains actor objects such as `BaseAgent`, `AgentInput`, and `AgentRegistry`.
-- `vidbyte.strategies.multi_agent` contains orchestration topologies such as consensus routing, AutoGen-style message passing, VMAO, economic gating, and evolving policy routing.
 - Custom harnesses stay outside the base SDK until their public contracts are explicitly defined.
 
 ```python
 from vidbyte import BaseAgent, ModelModality
-from vidbyte.strategies import ReActStrategy
 
 agent = BaseAgent(
     name="researcher",
     system_prompt="Answer directly and cite uncertainty.",
-    strategy=ReActStrategy(),
     provider="openai",
     model_name="gpt-4.1",
     modality=ModelModality.TEXT,
@@ -76,57 +72,20 @@ agent = BaseAgent(
 reply = await agent.arun("Draft a concise release note")
 ```
 
-For custom agents, pass an explicit `system_prompt`, optional reasoning strategy, modality, model config, runner, and tools into `Agent` or `BaseAgent`; then pass those agents into multi-agent strategies.
+For custom agents, pass an explicit `system_prompt`, modality, model config, runner, and tools into `Agent` or `BaseAgent`.
 Semantic labels such as roles belong in agent metadata when callers need them.
-
-## Strategy Chains
-
-Agents without a strategy run the default agentic tool loop. Agents with `strategy=` or `strategies=[...]` bypass that loop and execute the configured prompt-engineering recipe directly.
-
-Use `strategy=` for one technique:
-
-```python
-from vidbyte import Agent
-from vidbyte.strategies import StepBackStrategy
-
-agent = Agent(
-    name="explainer",
-    system_prompt="Explain from first principles.",
-    runner=my_runner,
-    strategy=StepBackStrategy(),
-)
-```
-
-Use `strategies=[...]` to run techniques sequentially. Only the previous strategy's output text is passed to the next strategy.
-
-```python
-from vidbyte import Agent
-from vidbyte.strategies import ChainOfDraftStrategy, StepBackStrategy
-
-agent = Agent(
-    name="writer",
-    system_prompt="Write precise release notes.",
-    runner=my_runner,
-    strategies=[
-        StepBackStrategy(),
-        ChainOfDraftStrategy(),
-    ],
-)
-```
-
-For consensus, voting, or multi-agent orchestration, use explicit multi-agent strategies such as `MultiAgentConsensusStrategy`; a plain `strategies=[...]` list means output-only sequential chaining.
 
 ## Context Objects
 
 Context dataclasses are exposed through `vidbyte.context` and centralized internally under `vidbyte.lib.dataclasses`.
 
 ```python
-from vidbyte.context import ContextBudget, ContextPermissions, StrategyContext
+from vidbyte.context import BaseContext, ContextBudget, ContextPermissions
 from vidbyte.lib.enums import BudgetPreset, PermissionPreset
 
-context = StrategyContext(
+context = BaseContext(
     file_paths=["README.md"],
-    strategy_metadata={"phase": "draft"},
+    run_metadata={"phase": "draft"},
     budget=ContextBudget.from_preset(BudgetPreset.BALANCED),
     permissions=ContextPermissions.from_preset(PermissionPreset.READ_ONLY),
 )
@@ -216,7 +175,7 @@ agent = Agent(
 reply = await agent.arun("Find where tools are formatted.")
 ```
 
-Agents without a configured strategy run direct tool use through an internal runtime loop. The runtime builds the context window, appends a short agentic-loop prompt after the system prompt, sends tool schemas to the model, executes permitted tool calls, appends tool results back into the ordered message context, and repeats until the model calls the internal `isDone` tool. If the model returns ordinary text without a tool call, that text is preserved as assistant history and the loop continues. `max_iterations` and `max_tokens` are optional safeguards; `max_tokens` uses provider-reported usage when available.
+The runtime builds the context window, appends a short agentic-loop prompt after the system prompt, sends tool schemas to the model, executes permitted tool calls, appends tool results back into the ordered message context, and repeats until the model calls the internal `isDone` tool. If the model returns ordinary text without a tool call, that text is preserved as assistant history and the loop continues. `max_iterations` and `max_tokens` are optional safeguards; `max_tokens` uses provider-reported usage when available.
 
 ### Middleware
 
@@ -287,19 +246,18 @@ agent = Agent(
 )
 ```
 
-`ToolRegistry`, `ToolExecutor`, and `vidbyte_tool` remain available for compatibility with older examples and lower-level strategy code. New user-facing code should prefer `Tools`, `@tool`, and agent-local `tools=[...]`.
+`ToolRegistry`, `ToolExecutor`, and `vidbyte_tool` remain available for compatibility with older examples. New user-facing code should prefer `Tools`, `@tool`, and agent-local `tools=[...]`.
 
 ## Prompts
 
 Prompts are plain text assets exposed through an enum-keyed accessor:
 
 ```python
-from vidbyte.prompts import Prompts, chain_of_thought_reason_prompt
+from vidbyte.prompts import Prompts
 from vidbyte.lib.enums.prompts import Prompt
 
 prompts = Prompts()
-prompt_text = prompts.get(Prompt.CHAIN_OF_THOUGHT_REASON_PROMPT)
-assert prompt_text == chain_of_thought_reason_prompt
+prompt_text = prompts.get(Prompt.REFLEXION_AGENT_SYSTEM_PROMPT)
 ```
 
 `Prompts().keys()` returns all prompt enum keys, and `Prompts().descriptions()` returns descriptions for each key. Prompt lookup does not accept raw strings and the SDK does not expose runtime prompt overrides.
@@ -319,8 +277,6 @@ vidbyte/
 |   `-- client.py
 |-- middleware/
 |   `-- builtins/
-|-- strategies/
-|   `-- multi_agent/
 |-- tools/
 |   |-- client.py
 |   |-- catalog.py

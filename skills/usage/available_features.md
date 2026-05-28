@@ -12,117 +12,9 @@ from vidbyte import VidbyteSDK
 sdk = VidbyteSDK()
 # sdk.agents       -> AgentClient        — create and manage agents
 # sdk.tools        -> ToolsClient        — access and catalog tools
-# sdk.strategies   -> StrategyClient     — browse available strategies
 # sdk.harnesses    -> HarnessClient      — compose harness integrations
 # sdk.providers    -> ProvidersClient    — manage model providers
 ```
-
-## Strategies
-
-Strategies control **how** an agent reasons through a prompt. They run inside the agent's execution loop and shape the reasoning process — from simple chain-of-thought to multi-agent consensus. You select a strategy based on the complexity of the task and the reasoning depth required.
-
-### Reasoning Strategies
-
-Reasoning strategies guide the model to think step-by-step before producing a final answer. Use them for tasks that require analysis, planning, or structured reasoning.
-
-- **ChainOfThoughtStrategy** — The model generates explicit reasoning steps before its final response. Best for analytical tasks, math, and logic.
-- **StepBackStrategy** — The model first extracts abstract principles from the question, then applies them. Best for questions that benefit from first-principles thinking.
-- **ChainOfDraftStrategy** — A compact variant that produces minimal draft reasoning steps. Best when token budget is tight.
-- **SkeletonOfThoughtStrategy** — Generates a skeletal outline first, then expands each section into a complete response. Best for long-form structured content.
-
-```python
-from vidbyte import (
-    ChainOfThoughtStrategy,
-    StepBackStrategy,
-    ChainOfDraftStrategy,
-    SkeletonOfThoughtStrategy,
-)
-```
-
-Usage:
-```python
-agent = Agent(
-    name="reasoner",
-    system_prompt="You reason carefully.",
-    strategy=ChainOfThoughtStrategy(),
-    provider="openai",
-    model_name="gpt-4.1",
-)
-```
-
-### Sampling Strategies
-
-Sampling strategies run the model multiple times and select, filter, or converge the results. Use them when you need consistency, reliability, or want to explore solution space.
-
-- **SelfConsistencyStrategy** — Runs multiple independent samples and picks the most consistent answer. Best for ambiguous problems where a single sample might be wrong.
-- **BudgetForcingStrategy** — Bounded retry attempts within a cost budget. Best when you want to try multiple times but cap spending.
-- **AnswerConvergenceStrategy** — Repeats until successive answers converge. Best when you need a stable, reliable result.
-
-```python
-from vidbyte import (
-    SelfConsistencyStrategy,
-    BudgetForcingStrategy,
-    AnswerConvergenceStrategy,
-)
-```
-
-### Agent Loop Strategies
-
-Agent loop strategies change the overall execution flow beyond single-prompt reasoning.
-
-- **PlanAndExecuteStrategy** — The agent first creates a plan, then iterates through each step executing and refining. Best for multi-step tasks like software development.
-- **SelfRefinementStrategy** — The agent creates a response, critiques it, then refines. Best for creative work that benefits from iterative improvement.
-
-```python
-from vidbyte import (
-    PlanAndExecuteStrategy,
-    SelfRefinementStrategy,
-)
-```
-
-### Routing Strategies
-
-Routing strategies dynamically select which paradigm or approach to use based on the prompt content.
-
-- **ParadigmRouterStrategy** — Prompt-guided paradigm selection. The model itself decides which reasoning style to apply.
-
-```python
-from vidbyte import ParadigmRouterStrategy
-```
-
-### Other Single-Agent Strategies
-
-- **TreeOfThoughtsStrategy** — Branches into multiple reasoning paths, evaluates each, and synthesizes the best. Best for creative problem-solving and exploration.
-- **ReActStrategy** — Interleaves reasoning and tool actions in a loop. Best when the agent needs to interact with external tools.
-- **CodeActStrategy** — An extension of ReAct that generates and executes code actions. Best for tasks requiring computation or code execution.
-- **ReflexionStrategy** — Reflective retry: the agent reflects on failures and refines its approach. Best for self-correcting workflows.
-
-```python
-from vidbyte import (
-    TreeOfThoughtsStrategy,
-    ReActStrategy,
-    CodeActStrategy,
-    ReflexionStrategy,
-)
-```
-
-## Multi-Agent Strategies
-
-Multi-agent strategies orchestrate multiple agents working together — through consensus, conversation, verification, economic gating, or evolving selection. Use them when a single agent's perspective is insufficient and you want competing or collaborating viewpoints.
-
-Import from `vidbyte.strategies.multi_agent`:
-
-```python
-from vidbyte.strategies.multi_agent import (
-    MultiAgentConsensusStrategy,              # multiple candidates propose, evaluator picks best
-    AutoGenConversationStrategy,              # AutoGen-style message passing between agents
-    VerifiedMultiAgentOrchestrationStrategy,  # VMAO: plan → execute → verify with multiple agents
-    EconomicGateStrategy,                     # cost-benefit routing: cheaper agents first, escalate if needed
-    EvolvingOrchestrationStrategy,            # policy-driven agent selection that adapts over time
-)
-```
-
-A multi-agent strategy is used the same way as any strategy — pass it to `Agent(strategy=...)`.
 
 ## Pipelines
 
@@ -369,17 +261,6 @@ agent = Agent(name="mcp-agent", system_prompt="...").with_mcp_server(
 await agent.close_mcp_servers()
 ```
 
-## Strategy Composability
-
-`StrategyMixin` allows hosts to compose multiple strategies together. Harnesses and other hosts use `with_strategy()` and `with_strategies()` to attach one or more strategies programmatically, enabling flexible strategy layering.
-
-```python
-from vidbyte import StrategyMixin
-
-# Harnesses and other hosts use with_strategy() / with_strategies()
-# to attach one or more strategies programmatically.
-```
-
 ## Error Hierarchy
 
 The SDK has a structured error hierarchy so you can catch errors at the right level of granularity:
@@ -389,7 +270,6 @@ from vidbyte import (
     VidbyteSdkError,             # base — catch-all for SDK errors
     AgentExecutionError,         # agent failures during arun/run
     PipelineExecutionError,      # pipeline construction or runtime failures
-    StrategyExecutionError,      # strategy execution failures
     ToolExecutionError,          # tool runtime errors (invalid args, execution failure)
     PermissionDeniedError,       # permission policy violations
     ConfigurationError,          # invalid agent or SDK configuration

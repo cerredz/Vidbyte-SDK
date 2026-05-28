@@ -4,13 +4,7 @@ import unittest
 
 from vidbyte.agents import AgentRegistry, BaseAgent
 from vidbyte.lib.errors import AgentRegistryError
-from vidbyte.strategies import BaseStrategy, StrategyResult
 from vidbyte.tools import ToolSpec
-
-
-class FakeStrategy(BaseStrategy):
-    async def arun(self, prompt: str, **kwargs: object) -> StrategyResult:
-        return StrategyResult(output=prompt, strategy_name="fake")
 
 
 class FakeTool:
@@ -24,7 +18,6 @@ class AgentRegistryTests(unittest.TestCase):
         worker = BaseAgent(
             name="worker",
             system_prompt="Work.",
-            strategy=FakeStrategy(),
             tools=[FakeTool()],
             capabilities=["math"],
             metadata={"role": "worker"},
@@ -32,7 +25,6 @@ class AgentRegistryTests(unittest.TestCase):
         evaluator = BaseAgent(
             name="judge",
             system_prompt="Judge.",
-            strategy=FakeStrategy(),
             metadata={"role": "evaluator"},
         )
         registry.register(worker)
@@ -46,7 +38,7 @@ class AgentRegistryTests(unittest.TestCase):
 
     def test_duplicate_and_missing_errors(self) -> None:
         registry = AgentRegistry()
-        agent = BaseAgent(name="worker", system_prompt="Work.", strategy=FakeStrategy())
+        agent = BaseAgent(name="worker", system_prompt="Work.")
         registry.register(agent)
         with self.assertRaises(AgentRegistryError):
             registry.register(agent)

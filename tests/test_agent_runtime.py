@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import unittest
 
@@ -7,7 +7,7 @@ from vidbyte.agents.types import AgentMessage
 from vidbyte.context import ContextArtifact, ContextPermissions, ContextResponse, ContextToolCall, ContextWindow, TaskContextItem
 from vidbyte.lib.dataclasses.agents import AgentRuntimeConfig
 from vidbyte.lib.enums import ModelModality
-from vidbyte.strategies import StrategyContext
+from vidbyte.lib.dataclasses.context import BaseContext as StrategyContext
 from vidbyte.tools import BaseTool, ToolCall, ToolCallContext, ToolPermission, ToolResult, ToolSpec, Tools, tool
 from vidbyte.tools.security import PermissionPolicy
 
@@ -65,7 +65,7 @@ class AgentRuntimeTests(unittest.IsolatedAsyncioTestCase):
             "task",
             base_context=StrategyContext(
                 metadata={"caller": "yes"},
-                strategy_metadata={"phase": "draft"},
+                run_metadata={"phase": "draft"},
                 tool_calls=[ContextToolCall(name="base_tool", output="base")],
                 responses=[ContextResponse(content="response body")],
                 artifacts=[ContextArtifact(name="artifact", content="artifact body")],
@@ -88,7 +88,7 @@ class AgentRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(context.metadata["agent"], "meta")
         self.assertEqual(context.metadata["input"], "meta")
         self.assertEqual(context.metadata["modality"], "text")
-        self.assertEqual(context.strategy_metadata, {"phase": "draft"})
+        self.assertEqual(context.run_metadata, {"phase": "draft"})
         self.assertEqual(tuple(call.name for call in context.tool_calls), ("base_tool", "lookup"))
         self.assertEqual(context.responses[0].content, "response body")
         self.assertEqual(context.artifacts[0].content, "artifact body")
@@ -502,3 +502,4 @@ class AgentRuntimeTests(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+

@@ -9,7 +9,7 @@ Purpose:
 Architecture:
     - ContextManager: Ordered context item collection with registry for managed primitives.
     - Registry methods: upsert, get_by_id, remove_by_id, render_primitives_zone.
-    - Compatibility conversion from context items to StrategyContext fields.
+    - Compatibility conversion from context items to BaseContext fields.
 Relations:
     Used by BaseAgent/AgentRuntime and re-exported through vidbyte.context.
 """
@@ -25,7 +25,6 @@ from vidbyte.lib.dataclasses.context import (
     ContextArtifact,
     ContextResponse,
     ContextToolCall,
-    StrategyContext,
 )
 from vidbyte.context.primitives import (
     ArtifactContextItem,
@@ -126,8 +125,8 @@ class ContextManager:
         """Return all unmanaged context items matching a kind."""
         return tuple(item for item in self.context_items if item.kind == kind)
 
-    def to_context(self, base_context: BaseContext | None = None, **overrides: Any) -> StrategyContext:
-        """Convert unmanaged items into an existing StrategyContext-compatible shape."""
+    def to_context(self, base_context: BaseContext | None = None, **overrides: Any) -> BaseContext:
+        """Convert unmanaged items into a BaseContext-compatible shape."""
         fields = _context_fields(base_context)
         fields.update(overrides)
         items = (*tuple(fields.get("context_items", ())), *self.items())
@@ -185,7 +184,7 @@ class ContextManager:
         fields["memory"] = "\n\n".join(memory_parts) if memory_parts else None
         fields["context_items"] = tuple(items)
         fields["metadata"] = metadata
-        return StrategyContext(**fields)
+        return BaseContext(**fields)
 
 
 def _context_fields(context: BaseContext | None) -> dict[str, Any]:
@@ -197,7 +196,7 @@ def _context_fields(context: BaseContext | None) -> dict[str, Any]:
             "history": (),
             "file_paths": (),
             "tools": (),
-            "strategy_metadata": {},
+            "run_metadata": {},
             "tool_calls": (),
             "responses": (),
             "budget": None,
@@ -214,7 +213,7 @@ def _context_fields(context: BaseContext | None) -> dict[str, Any]:
         "history": tuple(context.history),
         "file_paths": tuple(context.file_paths),
         "tools": tuple(context.tools),
-        "strategy_metadata": dict(context.strategy_metadata),
+        "run_metadata": dict(context.run_metadata),
         "tool_calls": tuple(context.tool_calls),
         "responses": tuple(context.responses),
         "budget": context.budget,

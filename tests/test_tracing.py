@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import unittest
 from typing import Any
@@ -223,7 +223,7 @@ class AgentRuntimeSpanTests(unittest.IsolatedAsyncioTestCase):
         runner = FakeRunner([
             FakeResponse("", {"output": [{"type": "function_call", "name": "isDone", "arguments": '{"final_answer": "ok"}'}]}),
         ])
-        from vidbyte.strategies.types import BaseAgentContext
+        from vidbyte.lib.dataclasses.context import BaseAgentContext
         context = BaseAgentContext(system_prompt="sys", history=(), file_paths=(), tools=(), budget=None)
         await runtime.arun(
             "prompt",
@@ -243,7 +243,7 @@ class AgentRuntimeSpanTests(unittest.IsolatedAsyncioTestCase):
         runner = FakeRunner([
             FakeResponse("", {"output": [{"type": "function_call", "name": "isDone", "arguments": '{"final_answer": "ok"}'}]}),
         ])
-        from vidbyte.strategies.types import BaseAgentContext
+        from vidbyte.lib.dataclasses.context import BaseAgentContext
         context = BaseAgentContext(system_prompt="sys", history=(), file_paths=(), tools=(), budget=None)
         await runtime.arun(
             "prompt",
@@ -266,7 +266,7 @@ class AgentRuntimeSpanTests(unittest.IsolatedAsyncioTestCase):
         runner = FakeRunner([
             FakeResponse("", {"output": [{"type": "function_call", "name": "isDone", "arguments": '{"final_answer": "ok"}'}]}),
         ])
-        from vidbyte.strategies.types import BaseAgentContext
+        from vidbyte.lib.dataclasses.context import BaseAgentContext
         context = BaseAgentContext(system_prompt="sys", history=(), file_paths=(), tools=(), budget=None)
         await runtime.arun(
             "prompt",
@@ -301,7 +301,7 @@ class AgentRuntimeSpanTests(unittest.IsolatedAsyncioTestCase):
                 ]},
             ),
         ])
-        from vidbyte.strategies.types import BaseAgentContext
+        from vidbyte.lib.dataclasses.context import BaseAgentContext
         context = BaseAgentContext(system_prompt="sys", history=(), file_paths=(), tools=(), budget=None)
         await runtime.arun(
             "prompt",
@@ -396,3 +396,4 @@ class TracerConfigurationErrorTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+

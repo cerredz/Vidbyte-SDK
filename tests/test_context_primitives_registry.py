@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import unittest
 
@@ -10,7 +10,7 @@ from vidbyte.context.primitives import (
     TaskContextItem,
     TextContextItem,
 )
-from vidbyte.lib.dataclasses import StrategyContext
+from vidbyte.lib.dataclasses import ContextItem, ContextResponse, ContextArtifact
 
 
 class RegistryUpsertTests(unittest.TestCase):
@@ -202,7 +202,7 @@ class PlanContextItemTests(unittest.TestCase):
 
 class SplitContextRenderingTests(unittest.TestCase):
     def test_build_context_fixed_contains_system_prompt(self) -> None:
-        from vidbyte.lib.dataclasses.context import StrategyContext
+        from vidbyte.lib.dataclasses.context import BaseContext as StrategyContext
 
         ctx = StrategyContext(system_prompt="You are an agent.", tools=())
 
@@ -211,7 +211,7 @@ class SplitContextRenderingTests(unittest.TestCase):
         self.assertIn("You are an agent.", fixed)
 
     def test_build_context_body_does_not_contain_system_prompt(self) -> None:
-        from vidbyte.lib.dataclasses.context import StrategyContext
+        from vidbyte.lib.dataclasses.context import BaseContext as StrategyContext
 
         ctx = StrategyContext(system_prompt="SECRET", memory="mem summary")
 
@@ -221,7 +221,7 @@ class SplitContextRenderingTests(unittest.TestCase):
         self.assertIn("mem summary", body)
 
     def test_build_context_combines_fixed_and_body(self) -> None:
-        from vidbyte.lib.dataclasses.context import StrategyContext
+        from vidbyte.lib.dataclasses.context import BaseContext as StrategyContext
 
         ctx = StrategyContext(system_prompt="sys", memory="agent memory")
 
@@ -233,3 +233,4 @@ class SplitContextRenderingTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+

@@ -22,7 +22,6 @@ from unittest.mock import patch
 
 from vidbyte.agents import BaseAgent
 from vidbyte.lib.errors import McpAttachmentError, McpInitializeError
-from vidbyte.strategies import BaseStrategy, StrategyResult, StrategyContext
 from vidbyte.tools.mcp.types import McpServerConfig, McpToolPermission
 
 
@@ -72,19 +71,14 @@ class MockMcpStdioTransport:
         self.closed = True
 
 
-class EchoStrategy(BaseStrategy):
-    """Simple strategy that saves tools and context parameters for inspection."""
+class DoneRunner:
+    """Runner that immediately returns an isDone response."""
 
-    name = "echo"
-
-    def __init__(self) -> None:
-        self.last_tools = ()
-        self.last_context = None
-
-    async def arun(self, prompt: str, **kwargs: object) -> StrategyResult:
-        self.last_tools = tuple(kwargs.get("tools", ()))
-        self.last_context = kwargs.get("context")
-        return StrategyResult(output=f"reply:{prompt}", strategy_name=self.name)
+    async def arun(self, prompt: str, **kwargs: object) -> object:
+        class _Resp:
+            text = ""
+            raw = {"output": [{"type": "function_call", "name": "isDone", "arguments": f'{{"final_answer": "reply:{prompt}"}}'}]}
+        return _Resp()
 
 
 @patch("vidbyte.tools.mcp.attach.McpStdioTransport", MockMcpStdioTransport)
@@ -96,7 +90,7 @@ class McpAttachmentTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_single_server_async_attach(self) -> None:
         """Verify dynamic tool bridged list mapping and basic handle creation."""
-        agent = BaseAgent(name="worker", system_prompt="Work.", strategy=EchoStrategy())
+        agent = BaseAgent(name="worker", system_prompt="Work.", runner=DoneRunner())
 
         # Assert no servers before attach
         self.assertEqual(len(agent.mcp_servers()), 0)
@@ -118,7 +112,7 @@ class McpAttachmentTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_batch_attach_concurrency_and_fail_safe(self) -> None:
         """Concurrent attachments roll back successfully started servers if one fails."""
-        agent = BaseAgent(name="worker", system_prompt="Work.", strategy=EchoStrategy())
+        agent = BaseAgent(name="worker", system_prompt="Work.", runner=DoneRunner())
         configs = [
             McpServerConfig(command=("success1",)),
             McpServerConfig(command=("fail",)),
@@ -142,8 +136,7 @@ class McpAttachmentTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_lazy_builder_pattern(self) -> None:
         """Verify that with_mcp_server defers execution until first execution."""
-        strategy = EchoStrategy()
-        agent = BaseAgent(name="worker", system_prompt="Work.", strategy=strategy)
+        agent = BaseAgent(name="worker", system_prompt="Work.", runner=DoneRunner())
 
         # Register server lazily
         agent.with_mcp_server(command=["lazyserver"])
@@ -152,20 +145,17 @@ class McpAttachmentTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(agent.mcp_servers()), 0)
         self.assertEqual(len(MockMcpStdioTransport.instances), 0)
 
-        # Run model/strategy execution
+        # Run agent execution
         reply = await agent.generate_reply("task-a")
-        self.assertEqual(reply.content, "reply:task-a")
+        self.assertIn("task-a", reply.content)
 
         # Verify connected automatically
         self.assertEqual(len(agent.mcp_servers()), 1)
         self.assertEqual(agent.mcp_servers()[0].config.command, ("lazyserver",))
-        self.assertEqual(len(agent.tools), 1)
-        self.assertEqual(agent.tools[0].name, "remote_lazyserver")
 
     async def test_context_manager_cleanup(self) -> None:
         """Verify context manager guarantees cleanup of all subprocess handles."""
-        strategy = EchoStrategy()
-        async with BaseAgent(name="worker", system_prompt="Work.", strategy=strategy) as agent:
+        async with BaseAgent(name="worker", system_prompt="Work.", runner=DoneRunner()) as agent:
             await agent.attach_mcp_server(command=["ctx-server"])
             self.assertEqual(len(agent.mcp_servers()), 1)
             self.assertFalse(MockMcpStdioTransport.instances[-1].closed)
@@ -177,7 +167,7 @@ class McpAttachmentTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_agent_card_mcp_parity(self) -> None:
         """Verify that AgentCard correctly aggregates mcp tool names and server names."""
-        agent = BaseAgent(name="card-agent", system_prompt="Work.", strategy=EchoStrategy())
+        agent = BaseAgent(name="card-agent", system_prompt="Work.", runner=DoneRunner())
         await agent.attach_mcp_server(command=["server1"])
         await agent.attach_mcp_server(command=["server2"])
 

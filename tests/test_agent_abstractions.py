@@ -109,11 +109,11 @@ class TestPrompts(unittest.TestCase):
         self.prompts = Prompts()
 
     def test_default_prompt_loading(self) -> None:
-        prompts = self.prompts.family("vmao")
-        self.assertIn("planner", prompts)
+        prompts = self.prompts.family("reflexion")
+        self.assertIn("agent_system_prompt", prompts)
 
-    def test_prompt_keys_include_strategy_assets(self) -> None:
-        self.assertIn(Prompt.CHAIN_OF_THOUGHT_REASON_PROMPT, self.prompts.keys())
+    def test_prompt_keys_include_core_assets(self) -> None:
+        self.assertIn(Prompt.REFLEXION_AGENT_SYSTEM_PROMPT, self.prompts.keys())
 
 
 class TestSdkClient(unittest.TestCase):
@@ -124,7 +124,6 @@ class TestSdkClient(unittest.TestCase):
 
     def test_sdk_namespace_bindings(self) -> None:
         self.assertIsNotNone(self.sdk.tools)
-        self.assertIsNotNone(self.sdk.strategies)
         self.assertIsNotNone(self.sdk.harnesses)
         self.assertIsNotNone(self.sdk.providers)
         self.assertIsNotNone(self.sdk.tools.registry)

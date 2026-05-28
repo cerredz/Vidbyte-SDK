@@ -17,11 +17,8 @@ from vidbyte.lib.dataclasses import (
     DagNode,
     EvaluationDecision,
     NodeState,
-    StrategyContext,
-    StrategyResult,
     ToolSpec,
     Verification,
-    VMAOContext,
 )
 from vidbyte.lib.enums import BudgetPreset, PermissionPreset
 
@@ -44,9 +41,6 @@ __all__ = [
     "EvaluationDecision",
     "NodeState",
     "PermissionPreset",
-    "StrategyContext",
-    "StrategyResult",
     "ToolSpec",
     "Verification",
-    "VMAOContext",
 ]

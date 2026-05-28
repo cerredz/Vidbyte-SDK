@@ -1,4 +1,4 @@
-"""Context Protocol Header
+﻿"""Context Protocol Header
 
 Description:
     Defines the internal direct execution runtime for Vidbyte agents.
@@ -32,7 +32,8 @@ from vidbyte.lib.tools import ToolsFormatter
 from vidbyte.lib.tracing import NullTracer, SpanContext, TracerBase
 from vidbyte.middleware import AgentMiddleware, MiddlewarePipeline
 from vidbyte.prompts.agentic_loop import append_agentic_loop_prompt
-from vidbyte.strategies.types import BaseAgentContext, StrategyContext, StrategyResult
+from vidbyte.lib.dataclasses.context import BaseAgentContext, BaseContext
+from vidbyte.lib.dataclasses.strategies import AgentResult
 from vidbyte.tools._internal import IS_DONE_TOOL_NAME, with_internal_agent_tools
 from vidbyte.tools.catalog import Tools
 from vidbyte.tools.security import PermissionDecision, PermissionPolicy
@@ -72,7 +73,7 @@ class AgentRuntime:
         self,
         message: str,
         *,
-        base_context: StrategyContext | None,
+        base_context: BaseContext | None,
         history: Sequence[AgentMessage],
         agent_history: Sequence[AgentMessage],
         agent_metadata: Mapping[str, Any],
@@ -103,7 +104,7 @@ class AgentRuntime:
             history=tuple(history) + tuple(agent_history),
             tools=(self.tools if agentic_loop else self.user_tools).specs(),
             file_paths=tuple(managed_context.file_paths),
-            strategy_metadata=dict(managed_context.strategy_metadata),
+            run_metadata=dict(managed_context.run_metadata),
             tool_calls=(*tuple(managed_context.tool_calls), *tuple(existing_tool_calls)),
             responses=tuple(managed_context.responses),
             budget=managed_context.budget,
@@ -127,7 +128,7 @@ class AgentRuntime:
         metadata: Mapping[str, Any] | None = None,
         options: Mapping[str, Any] | None = None,
         trace_context: SpanContext | None = None,
-    ) -> StrategyResult:
+    ) -> AgentResult:
         """Run the direct model/tool loop until isDone or a budget stop."""
         algorithm_result = await AgentRuntimeContextAlgorithms(self).arun(
             message,
@@ -169,7 +170,7 @@ class AgentRuntime:
         metadata: Mapping[str, Any] | None = None,
         options: Mapping[str, Any] | None = None,
         trace_context: SpanContext | None = None,
-    ) -> StrategyResult:
+    ) -> AgentResult:
         """Run one direct model/tool attempt until isDone or a budget stop."""
         run_options = dict(options or {})
         runtime_metadata = dict(metadata or {})
@@ -287,7 +288,7 @@ class AgentRuntime:
                 metadata=runtime_metadata,
                 trace_context=trace_context,
             )
-            if isinstance(raw_result, StrategyResult):
+            if isinstance(raw_result, AgentResult):
                 return await self._finish_result(
                     raw_result,
                     message=message,
@@ -395,7 +396,7 @@ class AgentRuntime:
                     model_response=raw_result,
                     trace_context=trace_context,
                 )
-                if isinstance(processed, StrategyResult):
+                if isinstance(processed, AgentResult):
                     return await self._finish_result(
                         processed,
                         message=message,
@@ -517,7 +518,7 @@ class AgentRuntime:
         started_at: float,
         metadata: Mapping[str, Any],
         trace_context: SpanContext | None = None,
-    ) -> tuple[object | StrategyResult, int]:
+    ) -> tuple[object | AgentResult, int]:
         """Invoke the runner, allowing middleware to retry model errors."""
         while True:
             decision = await self.middleware.before_model_call(
@@ -591,7 +592,7 @@ class AgentRuntime:
 
     async def _finish_result(
         self,
-        result: StrategyResult,
+        result: AgentResult,
         *,
         message: str,
         context: BaseAgentContext,
@@ -602,7 +603,7 @@ class AgentRuntime:
         started_at: float,
         metadata: Mapping[str, Any],
         model_response: object | None = None,
-    ) -> StrategyResult:
+    ) -> AgentResult:
         """Run after_run middleware and attach final middleware metadata."""
         decision = await self.middleware.after_run(
             self._middleware_context(
@@ -675,10 +676,10 @@ class AgentRuntime:
         iteration_count: int,
         tokens_used: int | None,
         contexts: Sequence[ToolCallContext],
-    ) -> StrategyResult:
-        """Return a controlled StrategyResult for middleware-aborted runs."""
+    ) -> AgentResult:
+        """Return a controlled AgentResult for middleware-aborted runs."""
         reason = decision.reason or "middleware_abort"
-        return StrategyResult(
+        return AgentResult(
             output=f"Agent runtime stopped by middleware: {reason}",
             strategy_name="direct_runner",
             metadata={
@@ -697,11 +698,11 @@ class AgentRuntime:
             },
         )
 
-    def _with_middleware_metadata(self, result: StrategyResult) -> StrategyResult:
-        """Attach latest middleware metadata to a StrategyResult."""
+    def _with_middleware_metadata(self, result: AgentResult) -> AgentResult:
+        """Attach latest middleware metadata to a AgentResult."""
         metadata = dict(result.metadata)
         metadata["middleware"] = self.middleware.metadata()
-        return StrategyResult(
+        return AgentResult(
             output=result.output,
             strategy_name=result.strategy_name,
             calls=result.calls,
@@ -894,9 +895,9 @@ class AgentRuntime:
         iteration_count: int,
         tokens_used: int | None,
         stop_reason: AgentStopReason,
-    ) -> StrategyResult:
-        """Build the final StrategyResult from an explicit runtime stop."""
-        return StrategyResult(
+    ) -> AgentResult:
+        """Build the final AgentResult from an explicit runtime stop."""
+        return AgentResult(
             output=output,
             strategy_name="direct_runner",
             metadata={
@@ -926,7 +927,7 @@ class AgentRuntime:
         metadata: Mapping[str, Any],
         model_response: object | None = None,
         trace_context: SpanContext | None = None,
-    ) -> tuple[ToolCallContext, ToolResult] | StrategyResult:
+    ) -> tuple[ToolCallContext, ToolResult] | AgentResult:
         """Execute one tool call, record its context, and append it to messages."""
         tool_is_internal = self._tool_is_internal(call)
         decision = await self.middleware.before_tool_call(
@@ -1025,7 +1026,7 @@ class AgentRuntime:
         iteration_count: int,
         tokens_used: int | None,
         contexts: Sequence[ToolCallContext],
-    ) -> StrategyResult | None:
+    ) -> AgentResult | None:
         if self.config.max_iterations is not None and iteration_count >= self.config.max_iterations:
             return self._stopped_result(
                 "Agent runtime stopped after reaching max_iterations.",
@@ -1052,8 +1053,8 @@ class AgentRuntime:
         iteration_count: int,
         tokens_used: int | None,
         contexts: Sequence[ToolCallContext],
-    ) -> StrategyResult:
-        return StrategyResult(
+    ) -> AgentResult:
+        return AgentResult(
             output=output,
             strategy_name="direct_runner",
             metadata=self._runtime_metadata(
@@ -1093,3 +1094,4 @@ class AgentRuntime:
 
 
 __all__ = ["AgentRuntime"]
+
