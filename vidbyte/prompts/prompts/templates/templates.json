@@ -1,0 +1,19 @@
+{
+  "name": "Prompt Templates",
+  "description": "Master prompts designed to generate highly optimized structural prompts for specific engineering paradigms.",
+  "key": "templates",
+  "prompts": {
+    "intent_based": {
+      "path": "intent_based.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/templates/intent_based.md"
+    },
+    "persona": {
+      "path": "persona.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/templates/persona.md"
+    },
+    "specification": {
+      "path": "specification.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/templates/specification.md"
+    }
+  }
+}
