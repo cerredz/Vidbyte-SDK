@@ -206,10 +206,13 @@ class BaseAgent(McpAttachableMixin):
     def _bind_agent_tool_context(self, tool: object) -> None:
         """Bind this agent's live context getter to AgentTool or StrategyTool instances."""
         from vidbyte.tools.agent_tool import AgentTool
+        from vidbyte.tools.builtins.mcp import AttachMcpServerTool
         from vidbyte.tools.strategy_tool import StrategyTool
 
         if isinstance(tool, (AgentTool, StrategyTool)):
             tool.bind_context_getter(lambda: (self._active_prompt, list(self.history)))
+        if isinstance(tool, AttachMcpServerTool):
+            tool.bind_agent(self)
 
     def tool_specs(self) -> tuple[ToolSpec, ...]:
         return self.tools.specs()
@@ -500,6 +503,7 @@ class BaseAgent(McpAttachableMixin):
             middleware=self.middleware,
             run_id=self.runner_config.run_id,
             algorithm=self.algorithm,
+            context_manager=self.context_manager,
         )
 
     def _catalog_from_agent_tools(self, tools: Sequence[object]) -> Tools:

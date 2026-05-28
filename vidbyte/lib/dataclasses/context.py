@@ -184,16 +184,22 @@ class BaseContext:
     metadata: Mapping[str, Any] = field(default_factory=dict)
     context_items: Sequence[ContextItem] = ()
 
-    def build_context(self) -> str:
+    def build_context_fixed(self) -> str:
+        """Render only the stable header: system prompt and tool definitions (zones 1 and 2)."""
         parts: list[str] = []
         if self.system_prompt:
             parts.append(f"System prompt:\n{self.system_prompt}")
+        if self.tools:
+            parts.append("Tools:\n" + "\n\n".join(_format_context_tool(tool) for tool in self.tools))
+        return "\n\n".join(parts)
+
+    def build_context_body(self) -> str:
+        """Render the agent loop content: everything except system prompt and tools (zone 4)."""
+        parts: list[str] = []
         if self.memory:
             parts.append(f"Memory summary:\n{self.memory}")
         if self.history:
             parts.append("History:\n" + "\n".join(str(item) for item in self.history))
-        if self.tools:
-            parts.append("Tools:\n" + "\n\n".join(_format_context_tool(tool) for tool in self.tools))
         if self.metadata:
             parts.append(f"Run metadata:\n{self.metadata}")
         if self.budget:
@@ -209,6 +215,11 @@ class BaseContext:
         file_context = self._build_file_context()
         if file_context:
             parts.append(file_context)
+        return "\n\n".join(parts)
+
+    def build_context(self) -> str:
+        """Render the full context string: fixed header concatenated with body."""
+        parts = [p for p in (self.build_context_fixed(), self.build_context_body()) if p]
         return "\n\n".join(parts)
 
     def _build_file_context(self) -> str:

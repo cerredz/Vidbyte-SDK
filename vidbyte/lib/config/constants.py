@@ -1,28 +1,33 @@
+"""Context Protocol Header
+
+Description:
+    Shared configuration constants for model providers and API endpoints.
+Purpose:
+    Exposes central configuration maps for backward compatibility by delegating to ProviderModelRegistry.
+Architecture:
+    - Exposes API_KEY_ENV_VARS and DEFAULT_ENDPOINTS dicts.
+Key Functions:
+    None.
+Relations:
+    Imported by configuration base modules, dataclasses, and tests. Delegated to ProviderModelRegistry.
+Similar Files:
+    - vidbyte/lib/models/registry.py
+"""
+
 from __future__ import annotations
 
-from vidbyte.lib.enums import ModelProvider
+from typing import TYPE_CHECKING
 
-API_KEY_ENV_VARS: dict[ModelProvider, str] = {
-    ModelProvider.OPENAI: "OPENAI_API_KEY",
-    ModelProvider.ANTHROPIC: "ANTHROPIC_API_KEY",
-    ModelProvider.GEMINI: "GEMINI_API_KEY",
-    ModelProvider.XAI: "XAI_API_KEY",
-    ModelProvider.DEEPSEEK: "DEEPSEEK_API_KEY",
-    ModelProvider.GLM: "GLM_API_KEY",
-    ModelProvider.MINIMAX: "MINIMAX_API_KEY",
-}
+if TYPE_CHECKING:
+    from vidbyte.lib.enums import ModelProvider
 
-DEFAULT_ENDPOINTS: dict[ModelProvider, str] = {
-    ModelProvider.OPENAI: "https://api.openai.com/v1",
-    ModelProvider.ANTHROPIC: "https://api.anthropic.com/v1",
-    ModelProvider.GEMINI: "https://generativelanguage.googleapis.com/v1beta",
-    ModelProvider.XAI: "https://api.x.ai/v1",
-    ModelProvider.DEEPSEEK: "https://api.deepseek.com/v1",
-    ModelProvider.GLM: "https://open.bigmodel.cn/api/paas/v4",
-    ModelProvider.MINIMAX: "https://api.minimax.io/v1",
-}
+from vidbyte.lib.models.registry import ProviderModelRegistry
+
+API_KEY_ENV_VARS: dict[ModelProvider, str] = ProviderModelRegistry.API_KEY_ENV_VARS
+DEFAULT_ENDPOINTS: dict[ModelProvider, str] = ProviderModelRegistry.DEFAULT_ENDPOINTS
 
 __all__ = [
     "API_KEY_ENV_VARS",
     "DEFAULT_ENDPOINTS",
 ]
+

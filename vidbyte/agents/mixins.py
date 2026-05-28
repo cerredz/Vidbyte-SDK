@@ -1,15 +1,18 @@
 """Context Protocol Header
 
 Description:
-    Defines mixins that equip agents and harnesses with lifecycle-managed MCP servers.
+    Defines mixins that equip agents and harnesses with lifecycle-managed and preset MCP servers.
 Purpose:
     Enforces identical APIs and automated cleanup routines for attached subprocesses
     without duplicating logic across agents and harnesses.
 Architecture:
     - McpAttachableMixin: Shared base class implementing async and sync builder APIs,
-      lazy startup, and context manager hooks.
+      lazy startup, preset lookup capabilities, and context manager hooks.
+Key Functions:
+    - attach_preset_mcp_server: Attaches a pre-configured popular MCP server in one line.
+    - with_preset_mcp_server: Defer attaching a pre-configured popular MCP server until agent execution.
 Relations:
-    Inherited by SDK classes that attach MCP servers.
+    Inherited by SDK classes that attach MCP servers. Integrates with vidbyte.tools.mcp.presets.
 """
 
 from __future__ import annotations
@@ -21,6 +24,7 @@ from typing import Any
 from vidbyte.lib.errors import McpAttachmentError
 from vidbyte.tools.base import BaseTool
 from vidbyte.tools.mcp.attach import attach_mcp_server
+from vidbyte.tools.mcp.presets import McpPresetRegistry
 from vidbyte.tools.mcp.types import McpServerConfig, McpServerHandle, McpToolPermission
 
 
@@ -56,6 +60,28 @@ class McpAttachableMixin:
         handle = await attach_mcp_server(config)
         self._mcp_handles.append(handle)
         
+        self._attach_tools(handle.bridged_tools)
+        return self
+
+    async def attach_preset_mcp_server(self, preset_name: str, *, name: str | None = None, permission: McpToolPermission = McpToolPermission.EXECUTE, env: Mapping[str, str] | None = None, timeout: float = 30.0, extra_args: Sequence[str] | None = None) -> McpAttachableMixin:
+        """Start one popular preset MCP server subprocess in a single line, discovering tools and attaching them."""
+        config = McpPresetRegistry.build_config(
+            preset_name,
+            env=env,
+            permission=permission,
+            timeout=timeout,
+            extra_args=extra_args,
+        )
+        if name:
+            config = McpServerConfig(
+                command=config.command,
+                name=name,
+                permission=config.permission,
+                env=config.env,
+                timeout=config.timeout,
+            )
+        handle = await attach_mcp_server(config)
+        self._mcp_handles.append(handle)
         self._attach_tools(handle.bridged_tools)
         return self
 
@@ -124,6 +150,26 @@ class McpAttachableMixin:
                 timeout=timeout,
             )
         )
+        return self
+
+    def with_preset_mcp_server(self, preset_name: str, *, name: str | None = None, permission: McpToolPermission = McpToolPermission.EXECUTE, env: Mapping[str, str] | None = None, timeout: float = 30.0, extra_args: Sequence[str] | None = None) -> McpAttachableMixin:
+        """Sync builder method that registers an MCP server preset configuration to connect lazily."""
+        config = McpPresetRegistry.build_config(
+            preset_name,
+            env=env,
+            permission=permission,
+            timeout=timeout,
+            extra_args=extra_args,
+        )
+        if name:
+            config = McpServerConfig(
+                command=config.command,
+                name=name,
+                permission=config.permission,
+                env=config.env,
+                timeout=config.timeout,
+            )
+        self._pending_mcp_configs.append(config)
         return self
 
     async def _ensure_mcp_connected(self) -> None:

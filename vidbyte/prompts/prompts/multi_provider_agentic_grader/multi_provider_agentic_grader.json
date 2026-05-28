@@ -1,0 +1,19 @@
+{
+  "name": "Multi-Provider Agentic Grader",
+  "description": "Prompt assets for the Multi-Provider Agentic Grader context-window algorithm. This algorithm runs the same task concurrently across multiple model providers, executes a full agentic loop for each, and then invokes a meta-grader agent to evaluate all candidate outputs and select the single best response. These prompts separate the agent execution context from the grading stage so SDK users can inspect, override, or extend either stage independently when constructing MultiProviderAgenticGraderAlgorithm.",
+  "key": "multi_provider_agentic_grader",
+  "prompts": {
+    "agent_system_prompt": {
+      "path": "agent_system_prompt.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/multi_provider_agentic_grader/agent_system_prompt.md"
+    },
+    "grader_system_prompt": {
+      "path": "grader_system_prompt.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/multi_provider_agentic_grader/grader_system_prompt.md"
+    },
+    "grader_prompt": {
+      "path": "grader_prompt.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/multi_provider_agentic_grader/grader_prompt.md"
+    }
+  }
+}
