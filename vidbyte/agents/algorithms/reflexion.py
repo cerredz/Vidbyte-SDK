@@ -53,6 +53,7 @@ class ReflexionRuntimeAlgorithm:
         failed_attempts: list[str] = []
         attempt_summaries: list[dict[str, Any]] = []
         last_result: StrategyResult | None = None
+        self.runtime.recorder.append("system_prompt")
 
         for trial_index in range(self.algorithm.max_trials):
             result = await self._run_trial(
@@ -116,6 +117,7 @@ class ReflexionRuntimeAlgorithm:
         trace_context: SpanContext | None,
     ) -> StrategyResult:
         """Run one main Reflexion trial through the normal runtime loop."""
+        self.runtime.recorder.append("reflexion_trial", iteration=trial_index)
         trial_context = self.algorithm.context_for_trial(
             context,
             task=message,
@@ -151,6 +153,7 @@ class ReflexionRuntimeAlgorithm:
         trace_context: SpanContext | None,
     ) -> str | StrategyResult:
         """Run the reflection-stage model call through runtime middleware."""
+        self.runtime.recorder.append("reflexion_reflection", iteration=trial_index)
         raw_result, _ = await self.runtime._invoke_with_middleware(
             runner,
             self.algorithm.render_reflection_prompt(
