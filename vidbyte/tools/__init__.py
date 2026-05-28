@@ -30,7 +30,6 @@ from vidbyte.tools.function_tool import FunctionTool
 from vidbyte.lib.tools import ToolsFormatter
 from vidbyte.tools.mixins import ToolMixin
 from vidbyte.tools.registry import ToolRegistry
-from vidbyte.tools.strategy_tool import StrategyTool
 from vidbyte.tools.types import (
     ToolCall,
     ToolCallContext,
@@ -46,7 +45,6 @@ __all__ = [
     "AgentTool",
     "BaseTool",
     "FunctionTool",
-    "StrategyTool",
     "ToolCall",
     "ToolCallContext",
     "ToolCallState",

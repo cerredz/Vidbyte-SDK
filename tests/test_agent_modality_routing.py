@@ -7,9 +7,6 @@ from vidbyte import ModelModality, VidbyteSDK
 from vidbyte.agents import AgentInput, BaseAgent
 from vidbyte.lib.config import ModelProvider
 from vidbyte.lib.runners import GeneratedImage, ImageModelResponse, ModalityDetector, VideoModelJob
-from vidbyte.strategies import BaseStrategy, StrategyResult
-
-
 class RecordingRunner:
     def __init__(self, response: object) -> None:
         self.response = response
@@ -32,17 +29,6 @@ class DoneResponse:
                 }
             ]
         }
-
-
-class RunnerCapturingStrategy(BaseStrategy):
-    name = "capture"
-
-    def __init__(self) -> None:
-        self.runner: object | None = None
-
-    async def arun(self, prompt: str, **kwargs: object) -> StrategyResult:
-        self.runner = kwargs["runner"]
-        return StrategyResult(output=f"strategy:{prompt}", strategy_name=self.name)
 
 
 class AgentModalityRoutingTests(unittest.IsolatedAsyncioTestCase):
@@ -129,23 +115,6 @@ class AgentModalityRoutingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(reply.metadata["modality"], "text")
         self.assertEqual(len(text_runner.calls), 1)
         self.assertEqual(len(image_runner.calls), 0)
-
-    async def test_strategy_receives_selected_runner(self) -> None:
-        strategy = RunnerCapturingStrategy()
-        image_runner = RecordingRunner("image")
-        agent = BaseAgent(
-            name="strategist",
-            system_prompt="Use the selected runner.",
-            strategy=strategy,
-            runners={"image": image_runner},
-            modality="image",
-        )
-
-        reply = await agent.generate_reply("asset brief")
-
-        self.assertEqual(reply.content, "strategy:asset brief")
-        self.assertIs(strategy.runner, image_runner)
-        self.assertEqual(reply.metadata["modality"], "image")
 
     async def test_agent_card_exposes_modalities_not_runner_classes(self) -> None:
         agent = BaseAgent(

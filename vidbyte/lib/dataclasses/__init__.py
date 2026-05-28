@@ -7,9 +7,9 @@ Purpose:
     packages provide compatibility import shims.
 Architecture:
     - Tool contracts from tools.
-    - Context, MCP, security, sandbox, multi-agent, and strategies contracts.
+    - Context, MCP, security, sandbox, and multi-agent contracts.
 Relations:
-    Related to vidbyte.tools, vidbyte.agents, and vidbyte.strategies.
+    Related to vidbyte.tools, vidbyte.agents.
 """
 
 from __future__ import annotations
@@ -34,8 +34,6 @@ from vidbyte.lib.dataclasses.context import (
     ContextState,
     ContextToolCall,
     ProgressLog,
-    StrategyContext,
-    VMAOContext,
 )
 from vidbyte.context.primitives import (
     ArtifactContextItem,
@@ -64,7 +62,7 @@ from vidbyte.lib.dataclasses.tool_types import FileStat
 from vidbyte.lib.dataclasses.multi_agent import CandidateFailure, CandidateResult, DagNode, EvaluationDecision, NodeState, Verification
 from vidbyte.lib.dataclasses.sandbox import SandboxRequest, SandboxResult, SandboxTransport
 from vidbyte.lib.dataclasses.security import PermissionDecision, PermissionPolicy
-from vidbyte.lib.dataclasses.strategies import StrategyResult
+from vidbyte.lib.dataclasses.strategies import AgentResult
 from vidbyte.lib.dataclasses.tools import (
     ToolCall,
     ToolCallContext,
@@ -79,6 +77,7 @@ from vidbyte.lib.dataclasses.tools import (
 __all__ = [
     "AgentCard",
     "AgentMessage",
+    "AgentResult",
     "AgentRunnerConfig",
     "AgentRuntimeConfig",
     "AgentRuntimeStats",
@@ -121,8 +120,6 @@ __all__ = [
     "SandboxRequest",
     "SandboxResult",
     "SandboxTransport",
-    "StrategyContext",
-    "StrategyResult",
     "TaskContextItem",
     "TextContextItem",
     "ToolCall",
@@ -135,5 +132,4 @@ __all__ = [
     "ToolSpec",
     "ToolStatus",
     "Verification",
-    "VMAOContext",
 ]

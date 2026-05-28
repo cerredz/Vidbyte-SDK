@@ -1,4 +1,4 @@
-"""Tests for AgentTool and BaseAgent.as_tool()."""
+﻿"""Tests for AgentTool and BaseAgent.as_tool()."""
 
 from __future__ import annotations
 
@@ -8,7 +8,6 @@ import unittest
 from vidbyte.agents.base import BaseAgent
 from vidbyte.lib.dataclasses.agents import AgentMetadata
 from vidbyte.lib.errors import ConfigurationError
-from vidbyte.strategies.base import BaseStrategy
 from vidbyte.tools.agent_tool import AgentTool
 from vidbyte.tools.types import ToolCall, ToolPermission
 
@@ -38,7 +37,6 @@ class FakeRunner:
 
 def _make_agent(
     name: str = "worker",
-    strategy: BaseStrategy | None = None,
     capabilities: tuple[str, ...] = (),
     agent_metadata: AgentMetadata | None = None,
 ) -> BaseAgent:
@@ -51,7 +49,6 @@ def _make_agent(
         name=name,
         system_prompt="You are a helpful assistant.",
         runner=FakeRunner(),
-        strategy=strategy,
         description="A test agent.",
         capabilities=capabilities,
         agent_metadata=meta,
@@ -273,3 +270,4 @@ class ContextGetterBindingTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+

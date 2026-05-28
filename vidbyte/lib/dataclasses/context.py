@@ -1,7 +1,7 @@
 """Context Protocol Header
 
 Description:
-    Defines structured context state data contracts for compaction tools and execution strategies.
+    Defines structured context state data contracts for compaction tools and agent execution.
 Purpose:
     Lets compaction operate on a small protocol instead of binding to a concrete
     agent loop or provider message format, and defines shared context for harnesses/agents.
@@ -13,13 +13,12 @@ Architecture:
     - ContextPermissions: Flagset for allowed tool/file system actions.
     - ContextToolCall: Structured record of a tool call.
     - ContextResponse: Structured model/agent response.
-    - ContextArtifact: File or text intermediate product for strategies.
+    - ContextArtifact: File or text intermediate product.
     - ContextItem: Standardized structured context units managed by ContextManager.
     - BaseContext: Baseline context with formatting capabilities.
-    - StrategyContext: Pipeline strategy execution context.
-    - VMAOContext: Context for verified multi-agent orchestration.
+    - BaseAgentContext: Context object built by BaseAgent before delegating to a runner.
 Relations:
-    Used by agents, strategies, harnesses, and compaction utilities.
+    Used by agents, harnesses, and compaction utilities.
 """
 
 from __future__ import annotations
@@ -47,7 +46,7 @@ class ContextMessage:
 
 @dataclass(frozen=True, slots=True)
 class ContextBudget:
-    """Optional execution budget for strategy fanout and tool usage."""
+    """Optional execution budget for agent fanout and tool usage."""
 
     preset: BudgetPreset | None = None
     max_model_calls: int | None = None
@@ -69,7 +68,7 @@ class ContextBudget:
 
 @dataclass(frozen=True, slots=True)
 class ContextPermissions:
-    """Optional permissions visible to context-building strategies."""
+    """Optional permissions visible to context-building agents."""
 
     preset: PermissionPreset | None = None
     can_read_files: bool = False
@@ -156,7 +155,7 @@ class ContextResponse:
 
 @dataclass(frozen=True, slots=True)
 class ContextArtifact:
-    """Existing output or intermediate product that a strategy should consider."""
+    """Existing output or intermediate product an agent should consider."""
 
     name: str
     content: str
@@ -166,7 +165,7 @@ class ContextArtifact:
 
 @dataclass(frozen=True, slots=True)
 class BaseContext:
-    """Default context object shared by harnesses, agents, and strategies."""
+    """Default context object shared by harnesses and agents."""
 
     system_prompt: str | None = None
     agent_name: str | None = None
@@ -174,7 +173,7 @@ class BaseContext:
     history: Sequence[object] = ()
     file_paths: Sequence[str] = ()
     tools: Sequence[object] = ()
-    strategy_metadata: Mapping[str, Any] = field(default_factory=dict)
+    run_metadata: Mapping[str, Any] = field(default_factory=dict)
     tool_calls: Sequence[ContextToolCall] = ()
     responses: Sequence[ContextResponse] = ()
     budget: ContextBudget | None = None
@@ -240,22 +239,12 @@ class BaseContext:
 
 
 @dataclass(frozen=True, slots=True)
-class StrategyContext(BaseContext):
-    """Per-run context passed through strategies and agents."""
+class BaseAgentContext(BaseContext):
+    """Context object built by BaseAgent before delegating to a runner."""
 
 
-@dataclass(frozen=True, slots=True)
-class BaseAgentContext(StrategyContext):
-    """Context object built by BaseAgent before delegating to a strategy or runner."""
-
-
-@dataclass(frozen=True, slots=True)
-class VMAOContext(StrategyContext):
-    """Context used by verified multi-agent orchestration loops."""
-
-    round_index: int | None = None
-    planner_notes: str | None = None
-    verifier_notes: str | None = None
+# Backward-compat alias — callers that imported StrategyContext can use BaseContext directly.
+StrategyContext = BaseContext
 
 
 def _format_context_tool(tool: object) -> str:

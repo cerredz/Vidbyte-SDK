@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import tempfile
 import unittest
@@ -19,7 +19,8 @@ from vidbyte.context import (
     ToolCallContextItem,
 )
 from vidbyte.context.primitives import TextContextItem as PrimitiveTextContextItem
-from vidbyte.lib.dataclasses import ContextItem, ContextResponse, StrategyContext
+from vidbyte.lib.dataclasses import ContextItem, ContextResponse
+from vidbyte.lib.dataclasses.context import BaseContext as StrategyContext
 from vidbyte.lib.dataclasses.context_items import TextContextItem as LegacyTextContextItem
 
 
@@ -129,3 +130,4 @@ class ContextManagementTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+

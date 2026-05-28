@@ -3,13 +3,13 @@
 Description:
     Defines the baseline agent implementation (BaseAgent) and configured runner wrappers.
 Purpose:
-    Combines prompting, tool registration, runtime state tracking, and strategy pipelines
+    Combines prompting, tool registration, runtime state tracking, and execution
     into a unified developer-facing executable actor (the agent).
 Architecture:
     - BaseAgent: Primary agent class inheriting MCP attachment capabilities.
     - ConfiguredAgentRunner: Simple payload carrier for backend runner parameters.
 Relations:
-    Inherits from McpAttachableMixin. Used by registries, harnesses, and strategy orchestration blocks.
+    Inherits from McpAttachableMixin. Used by registries, harnesses, and multi-agent orchestration.
 """
 
 from __future__ import annotations
@@ -27,13 +27,12 @@ from vidbyte.context.window import ContextWindow, ContextWindowAlgorithm
 from vidbyte.context.primitives import ContextItem
 from vidbyte.lib.agents import ModalityDetector
 from vidbyte.lib.dataclasses.agents import AgentMetadata, AgentRunnerConfig, AgentRuntimeConfig
+from vidbyte.lib.dataclasses.context import BaseAgentContext, BaseContext
+from vidbyte.lib.dataclasses.strategies import AgentResult
 from vidbyte.lib.enums import ModelModality, ModelProvider
 from vidbyte.lib.errors import AgentExecutionError, ConfigurationError
 from vidbyte.lib.tracing import NullTracer, TracerBase
 from vidbyte.middleware import AgentMiddleware
-from vidbyte.strategies.base import BaseStrategy
-from vidbyte.strategies.chain import StrategyChain
-from vidbyte.strategies.types import BaseAgentContext, StrategyContext, StrategyResult
 from vidbyte.tools.catalog import Tools
 from vidbyte.tools.security import PermissionPolicy
 from vidbyte.tools.types import ToolCallContext, ToolSpec
@@ -47,15 +46,13 @@ class ConfiguredAgentRunner:
 
 
 class BaseAgent(McpAttachableMixin):
-    """Reusable actor combining a system prompt, optional strategy, runner, and tools."""
+    """Reusable actor combining a system prompt, runner, and tools."""
 
     def __init__(
         self,
         *,
         name: str,
         system_prompt: str,
-        strategy: BaseStrategy | None = None,
-        strategies: Sequence[BaseStrategy] | None = None,
         runner: object | None = None,
         runners: Mapping[ModelModality | str, object] | None = None,
         tools: Sequence[object] | Tools = (),
@@ -96,7 +93,6 @@ class BaseAgent(McpAttachableMixin):
             options=dict(runner_options or {}),
         )
         self.name = name
-        self.strategy = self._normalize_strategy(strategy, strategies)
         self.runner = runner if runner is not None else self._create_runner()
         self.runners = {
             ModalityDetector.coerce(runner_modality): runner_item
@@ -141,24 +137,8 @@ class BaseAgent(McpAttachableMixin):
         self._pending_mcp_configs = []
 
     @classmethod
-    def from_run_id(
-        cls,
-        run_id: str,
-        *,
-        name: str,
-        system_prompt: str,
-        strategy: BaseStrategy | None = None,
-        strategies: Sequence[BaseStrategy] | None = None,
-        **kwargs: Any,
-    ) -> BaseAgent:
-        return cls(
-            name=name,
-            system_prompt=system_prompt,
-            strategy=strategy,
-            strategies=strategies,
-            run_id=run_id,
-            **kwargs,
-        )
+    def from_run_id(cls, run_id: str, *, name: str, system_prompt: str, **kwargs: Any) -> BaseAgent:
+        return cls(name=name, system_prompt=system_prompt, run_id=run_id, **kwargs)
 
     def card(self) -> AgentCard:
         return AgentCard(
@@ -204,12 +184,11 @@ class BaseAgent(McpAttachableMixin):
         return AgentTool(self)
 
     def _bind_agent_tool_context(self, tool: object) -> None:
-        """Bind this agent's live context getter to AgentTool or StrategyTool instances."""
+        """Bind this agent's live context getter to AgentTool instances."""
         from vidbyte.tools.agent_tool import AgentTool
         from vidbyte.tools.builtins.mcp import AttachMcpServerTool
-        from vidbyte.tools.strategy_tool import StrategyTool
 
-        if isinstance(tool, (AgentTool, StrategyTool)):
+        if isinstance(tool, AgentTool):
             tool.bind_context_getter(lambda: (self._active_prompt, list(self.history)))
         if isinstance(tool, AttachMcpServerTool):
             tool.bind_agent(self)
@@ -221,8 +200,6 @@ class BaseAgent(McpAttachableMixin):
         self,
         *,
         name: str | None = None,
-        strategy: BaseStrategy | None = None,
-        strategies: Sequence[BaseStrategy] | None = None,
         runner: object | None = None,
         runners: Mapping[ModelModality | str, object] | None = None,
         tools: Sequence[object] | Tools | None = None,
@@ -237,8 +214,6 @@ class BaseAgent(McpAttachableMixin):
     ) -> BaseAgent:
         child = BaseAgent(
             name=name or self.name,
-            strategy=self.strategy if strategy is None and strategies is None else strategy,
-            strategies=strategies,
             runner=runner if runner is not None else self.runner,
             runners=runners if runners is not None else self.runners,
             tools=self._agent_tool_items if tools is None else tools,
@@ -277,17 +252,13 @@ class BaseAgent(McpAttachableMixin):
         message: str | AgentInput,
         *,
         modality: ModelModality | str | None = None,
-        context: StrategyContext | None = None,
+        context: BaseContext | None = None,
         history: Sequence[AgentMessage] = (),
         recipient: str = "orchestrator",
         **options: Any,
     ) -> AgentMessage:
         await self._ensure_mcp_connected()
-        trace_ctx = self._tracer.start_trace(
-            "agent.run",
-            agent_name=self.name,
-            strategy=type(self.strategy).__name__ if self.strategy else "direct",
-        )
+        trace_ctx = self._tracer.start_trace("agent.run", agent_name=self.name, strategy="direct")
         try:
             prompt, input_modality, input_metadata = self._normalize_input(message)
             input_context_items, input_context_manager = self._normalize_input_context(message)
@@ -308,28 +279,19 @@ class BaseAgent(McpAttachableMixin):
                 history=history,
                 input_metadata=input_metadata,
                 modality=selected_modality,
-                agentic_loop=self.strategy is None,
+                agentic_loop=True,
                 input_context_items=input_context_items,
                 input_context_manager=input_context_manager,
             )
-            if self.strategy is None:
-                result = await self._run_without_strategy(
-                    prompt,
-                    agent_context,
-                    runner=runner,
-                    modality=selected_modality,
-                    trace_context=trace_ctx,
-                    runtime_metadata={**self.metadata, **dict(input_metadata)},
-                    **options,
-                )
-            else:
-                result = await self.strategy.arun(
-                    prompt,
-                    runner=runner,
-                    context=agent_context,
-                    tools=self._agent_tool_items,
-                    **options,
-                )
+            result = await self._run_direct(
+                prompt,
+                agent_context,
+                runner=runner,
+                modality=selected_modality,
+                trace_context=trace_ctx,
+                runtime_metadata={**self.metadata, **dict(input_metadata)},
+                **options,
+            )
             self._tracer.end_trace(trace_ctx, output=result.output)
         except Exception as exc:
             self._tracer.end_trace(trace_ctx, error=exc)
@@ -369,7 +331,7 @@ class BaseAgent(McpAttachableMixin):
         self,
         message: str,
         *,
-        context: StrategyContext | None,
+        context: BaseContext | None,
         history: Sequence[AgentMessage],
         input_metadata: Mapping[str, Any] | None = None,
         modality: ModelModality | None = None,
@@ -391,22 +353,6 @@ class BaseAgent(McpAttachableMixin):
             context_manager=self._merged_context_manager(input_context_manager),
         )
 
-    @staticmethod
-    def _normalize_strategy(
-        strategy: BaseStrategy | None,
-        strategies: Sequence[BaseStrategy] | None,
-    ) -> BaseStrategy | None:
-        if strategy is not None and strategies is not None:
-            raise ConfigurationError("Pass either strategy or strategies, not both.")
-        if strategies is None:
-            return strategy
-        normalized = tuple(strategies)
-        if not normalized:
-            raise ConfigurationError("Agent strategies cannot be empty.")
-        if len(normalized) == 1:
-            return normalized[0]
-        return StrategyChain(normalized)
-
     def _create_runner(self) -> object | None:
         if any(
             (
@@ -421,7 +367,7 @@ class BaseAgent(McpAttachableMixin):
             return ConfiguredAgentRunner(self.runner_config)
         return None
 
-    async def _run_without_strategy(
+    async def _run_direct(
         self,
         message: str,
         context: BaseAgentContext,
@@ -431,16 +377,16 @@ class BaseAgent(McpAttachableMixin):
         trace_context: object | None = None,
         runtime_metadata: Mapping[str, Any] | None = None,
         **options: Any,
-    ) -> StrategyResult:
+    ) -> AgentResult:
         if runner is None:
-            raise AgentExecutionError("Agent without a strategy requires a runner.")
+            raise AgentExecutionError("Agent requires a runner.")
         if isinstance(runner, ConfiguredAgentRunner):
             raise AgentExecutionError(
-                "ConfiguredAgentRunner stores primitive settings only; pass an executable runner when no strategy is set."
+                "ConfiguredAgentRunner stores primitive settings only; pass an executable runner."
             )
         if modality is not ModelModality.TEXT:
             raw_result = await self._call_runner_once(runner, message, context=context, **options)
-            return StrategyResult(
+            return AgentResult(
                 output=self._runner_output_text(raw_result),
                 strategy_name="direct_runner",
                 metadata=self._runner_output_metadata(raw_result),
@@ -468,7 +414,7 @@ class BaseAgent(McpAttachableMixin):
         *,
         context: BaseAgentContext,
         **options: Any,
-    ) -> StrategyResult:
+    ) -> AgentResult:
         provider = str(options.pop("provider", None) or self._runner_provider(runner))
         result = await self._runtime().arun(
             message,
@@ -484,7 +430,7 @@ class BaseAgent(McpAttachableMixin):
         self._record_tool_contexts(result)
         return result
 
-    def _record_tool_contexts(self, result: StrategyResult) -> None:
+    def _record_tool_contexts(self, result: AgentResult) -> None:
         contexts = result.metadata.get("tool_calls", ())
         self._tool_call_contexts.extend(
             context

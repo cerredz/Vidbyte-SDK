@@ -5,10 +5,13 @@ from typing import Any, Mapping
 
 
 @dataclass(frozen=True, slots=True)
-class StrategyResult:
-    """Normalized result returned by all strategies."""
+class AgentResult:
+    """Normalized result returned by agent execution."""
 
     output: str
     strategy_name: str
     calls: tuple[Any, ...] = field(default_factory=tuple)
     metadata: Mapping[str, Any] = field(default_factory=dict)
+
+
+StrategyResult = AgentResult

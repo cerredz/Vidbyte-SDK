@@ -1,12 +1,12 @@
-# Create Agents
+﻿# Create Agents
 
-Create and manage multiple agents with the `AgentRegistry`. The registry provides discovery, lookup, and capability-based search for agent collections — essential for multi-agent workflows, orchestration, and dynamic agent selection.
+Create and manage multiple agents with the `AgentRegistry`. The registry provides discovery, lookup, and capability-based search for agent collections â€” essential for multi-agent workflows, orchestration, and dynamic agent selection.
 
 Use the registry when you have multiple agents that need to discover each other, or when you need to find agents by capability or metadata at runtime.
 
 ## Creating Multiple Agents
 
-Define each agent independently with its own name, system prompt, model, tools, and strategy. Each agent is a self-contained execution unit:
+Define each agent independently with its own name, system prompt, model, tools, and tools. Each agent is a self-contained execution unit:
 
 ```python
 from vidbyte import Agent
@@ -47,7 +47,7 @@ registry.register(planner)
 registry.register(coder)
 registry.register(reviewer)
 
-# Lookup by name — raises AgentRegistryError if not found
+# Lookup by name â€” raises AgentRegistryError if not found
 agent = registry.get("planner")
 
 # Get all agents
@@ -128,36 +128,14 @@ async def plan_and_code(task: str) -> str:
 
 This pattern works well for linear, fixed-role workflows where you know the exact agents and their order at code time.
 
-## Multi-Agent with Strategies
+## Multi-Agent Orchestration
 
-For more sophisticated multi-agent orchestration — consensus, voting, debate, verification — use the built-in multi-agent strategies. They handle agent selection, message routing, and convergence logic:
-
-```python
-from vidbyte.strategies.multi_agent import MultiAgentConsensusStrategy
-
-consensus = MultiAgentConsensusStrategy(
-    candidates=[coder, reviewer],    # agents proposing solutions
-    evaluator=planner,               # agent that picks the best candidate
-    max_calls=3,                     # max consensus rounds
-)
-
-# A multi-agent strategy is used as an agent's strategy
-agent = Agent(
-    name="orchestrator",
-    system_prompt="You coordinate multiple agents to produce the best solution.",
-    strategy=consensus,
-    provider="openai",
-    model_name="gpt-4.1",
-)
-
-reply = await agent.arun("Design a caching system for high traffic.")
-```
-
-See [`skills/usage/available_features.md`](available_features.md) for the full list of multi-agent strategies.
+Wire multiple agents together using pipelines for sequential, parallel, conditional, or map-reduce workflows. See [`skills/usage/create_pipeline.md`](create_pipeline.md) for details.
 
 ## Best Practices
 
-- **Use descriptive names and capabilities** — they are the primary keys for registry lookups and orchestration selection.
-- **Register agents early** — in a single setup function before any execution, not lazily during runs.
-- **Prefer strategies over manual wiring** for complex multi-agent patterns — strategies handle error recovery, message routing, and convergence.
-- **Keep agents focused** — each agent should have a single, clear responsibility defined by its system prompt and tools.
+- **Use descriptive names and capabilities** â€” they are the primary keys for registry lookups and orchestration selection.
+- **Register agents early** â€” in a single setup function before any execution, not lazily during runs.
+- **Use pipelines for multi-step workflows** — pipelines wire agents together by output, each carrying its own configuration and tools.
+- **Keep agents focused** â€” each agent should have a single, clear responsibility defined by its system prompt and tools.
+
