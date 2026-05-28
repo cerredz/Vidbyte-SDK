@@ -55,6 +55,41 @@ from vidbyte.lib.config.mcp_presets import (
     LocalFilesystemMCP, OsCommandMCP, EnvInspectorMCP, ProcessManagerMCP,
     SystemDiagnosticsMCP, MarkdownLinterMCP, PythonSandboxMCP, SqliteSandboxMCP,
     CsvParserMCP, JsonValidatorMCP, SequentialThinkingMCP,
+    # E-Commerce & Payments
+    StripeMCP, ShopifyMCP, WoocommerceMCP, SquareMCP, PaypalMCP,
+    # Automation & Workflow
+    ZapierMCP, N8nMCP,
+    # Search & Web Research (additional)
+    PerplexityMCP, SerperMCP, YouSearchMCP, ApifyMCP, BrowserbaseMCP,
+    ZenrowsMCP, ScrapingbeeMCP, LinkupMCP,
+    # Version Control, Development & Task Tracking (additional)
+    AsanaMCP, TrelloMCP, ClickupMCP, PagerdutyMCP, DatadogMCP,
+    NewrelicMCP, TerraformMCP, GithubActionsMCP, TravisCiMCP, MondayMCP,
+    # Databases & Cache (additional)
+    DynamodbMCP, CassandraMCP, ElasticsearchMCP, CockroachdbMCP, FirebaseMCP,
+    WeaviateMCP, MilvusMCP, TimescaledbMCP, TursoMCP, FaunadbMCP,
+    # Productivity, Office & CRM (additional)
+    ObsidianVaultMCP, TodoistMCP, ConfluenceMCP, ZohoCrmMCP, IntercomMCP,
+    PipedriveMCP, FreshserviceMCP, ZendeskMCP, SmartsheetMCP, BasecampMCP,
+    # Document Parsers & Media Utilities (additional)
+    DoclingMCP, UnstructuredMCP, CamelotMCP, PptxParserMCP, DocxParserMCP,
+    LibreofficeMCP, VideoTranscriptMCP, ExifToolMCP,
+    # Communication & Chat (additional)
+    MattermostMCP, RocketchatMCP, MailgunMCP, PostmarkMCP, ResendMCP,
+    LineMessagingMCP, PushoverMCP, MandrillMCP,
+    # Cloud Platforms, Hosting & Infrastructure (additional)
+    AwsRdsMCP, AwsCloudwatchMCP, GcpBigqueryMCP, AzureDevopsMCP, DigitaloceanMCP,
+    FlyIoMCP, RailwayMCP, RenderMCP, LinodeMCP, VultrMCP,
+    # AI Platforms & Creative APIs (additional)
+    StabilityAiMCP, RunwayMCP, CohereSearchMCP, MistralMCP, TogetherAiMCP,
+    DeepgramMCP, AssemblyAiMCP, HeygenMCP, SunoMCP, LangsmithMCP,
+    # Reference & Academic (additional)
+    PubmedMCP, CrossrefMCP, SemanticScholarMCP, OpenLibraryMCP, NpmRegistryMCP,
+    PypiMCP, DockerHubMCP, OpenMeteoMCP,
+    # Native System & Utilities (additional)
+    GitMCP, HttpClientMCP, WebhookSenderMCP, YamlValidatorMCP, XmlParserMCP,
+    TomlParserMCP, Base64ToolsMCP, HashingToolsMCP, UuidGeneratorMCP,
+    RegexTesterMCP, DateTimeMCP,
 )
 from vidbyte.tools.mcp.types import McpServerConfig, McpToolPermission
 
@@ -202,6 +237,130 @@ class McpPresetRegistry:
     JsonValidator: ClassVar[McpPresetDefinition] = JsonValidatorMCP
     SequentialThinking: ClassVar[McpPresetDefinition] = SequentialThinkingMCP
 
+    # ── E-Commerce & Payments ────────────────────────────────────────────────
+    Stripe: ClassVar[McpPresetDefinition] = StripeMCP
+    Shopify: ClassVar[McpPresetDefinition] = ShopifyMCP
+    Woocommerce: ClassVar[McpPresetDefinition] = WoocommerceMCP
+    Square: ClassVar[McpPresetDefinition] = SquareMCP
+    Paypal: ClassVar[McpPresetDefinition] = PaypalMCP
+
+    # ── Automation & Workflow ─────────────────────────────────────────────────
+    Zapier: ClassVar[McpPresetDefinition] = ZapierMCP
+    N8n: ClassVar[McpPresetDefinition] = N8nMCP
+
+    # ── Search & Web Research (additional) ───────────────────────────────────
+    Perplexity: ClassVar[McpPresetDefinition] = PerplexityMCP
+    Serper: ClassVar[McpPresetDefinition] = SerperMCP
+    YouSearch: ClassVar[McpPresetDefinition] = YouSearchMCP
+    Apify: ClassVar[McpPresetDefinition] = ApifyMCP
+    Browserbase: ClassVar[McpPresetDefinition] = BrowserbaseMCP
+    Zenrows: ClassVar[McpPresetDefinition] = ZenrowsMCP
+    Scrapingbee: ClassVar[McpPresetDefinition] = ScrapingbeeMCP
+    Linkup: ClassVar[McpPresetDefinition] = LinkupMCP
+
+    # ── Version Control, Development & Task Tracking (additional) ────────────
+    Asana: ClassVar[McpPresetDefinition] = AsanaMCP
+    Trello: ClassVar[McpPresetDefinition] = TrelloMCP
+    Clickup: ClassVar[McpPresetDefinition] = ClickupMCP
+    Pagerduty: ClassVar[McpPresetDefinition] = PagerdutyMCP
+    Datadog: ClassVar[McpPresetDefinition] = DatadogMCP
+    Newrelic: ClassVar[McpPresetDefinition] = NewrelicMCP
+    Terraform: ClassVar[McpPresetDefinition] = TerraformMCP
+    GithubActions: ClassVar[McpPresetDefinition] = GithubActionsMCP
+    TravisCi: ClassVar[McpPresetDefinition] = TravisCiMCP
+    Monday: ClassVar[McpPresetDefinition] = MondayMCP
+
+    # ── Databases & Cache (additional) ───────────────────────────────────────
+    Dynamodb: ClassVar[McpPresetDefinition] = DynamodbMCP
+    Cassandra: ClassVar[McpPresetDefinition] = CassandraMCP
+    Elasticsearch: ClassVar[McpPresetDefinition] = ElasticsearchMCP
+    Cockroachdb: ClassVar[McpPresetDefinition] = CockroachdbMCP
+    Firebase: ClassVar[McpPresetDefinition] = FirebaseMCP
+    Weaviate: ClassVar[McpPresetDefinition] = WeaviateMCP
+    Milvus: ClassVar[McpPresetDefinition] = MilvusMCP
+    Timescaledb: ClassVar[McpPresetDefinition] = TimescaledbMCP
+    Turso: ClassVar[McpPresetDefinition] = TursoMCP
+    Faunadb: ClassVar[McpPresetDefinition] = FaunadbMCP
+
+    # ── Productivity, Office & CRM (additional) ──────────────────────────────
+    ObsidianVault: ClassVar[McpPresetDefinition] = ObsidianVaultMCP
+    Todoist: ClassVar[McpPresetDefinition] = TodoistMCP
+    Confluence: ClassVar[McpPresetDefinition] = ConfluenceMCP
+    ZohoCrm: ClassVar[McpPresetDefinition] = ZohoCrmMCP
+    Intercom: ClassVar[McpPresetDefinition] = IntercomMCP
+    Pipedrive: ClassVar[McpPresetDefinition] = PipedriveMCP
+    Freshservice: ClassVar[McpPresetDefinition] = FreshserviceMCP
+    Zendesk: ClassVar[McpPresetDefinition] = ZendeskMCP
+    Smartsheet: ClassVar[McpPresetDefinition] = SmartsheetMCP
+    Basecamp: ClassVar[McpPresetDefinition] = BasecampMCP
+
+    # ── Document Parsers & Media Utilities (additional) ──────────────────────
+    Docling: ClassVar[McpPresetDefinition] = DoclingMCP
+    Unstructured: ClassVar[McpPresetDefinition] = UnstructuredMCP
+    Camelot: ClassVar[McpPresetDefinition] = CamelotMCP
+    PptxParser: ClassVar[McpPresetDefinition] = PptxParserMCP
+    DocxParser: ClassVar[McpPresetDefinition] = DocxParserMCP
+    Libreoffice: ClassVar[McpPresetDefinition] = LibreofficeMCP
+    VideoTranscript: ClassVar[McpPresetDefinition] = VideoTranscriptMCP
+    ExifTool: ClassVar[McpPresetDefinition] = ExifToolMCP
+
+    # ── Communication & Chat (additional) ────────────────────────────────────
+    Mattermost: ClassVar[McpPresetDefinition] = MattermostMCP
+    Rocketchat: ClassVar[McpPresetDefinition] = RocketchatMCP
+    Mailgun: ClassVar[McpPresetDefinition] = MailgunMCP
+    Postmark: ClassVar[McpPresetDefinition] = PostmarkMCP
+    Resend: ClassVar[McpPresetDefinition] = ResendMCP
+    LineMessaging: ClassVar[McpPresetDefinition] = LineMessagingMCP
+    Pushover: ClassVar[McpPresetDefinition] = PushoverMCP
+    Mandrill: ClassVar[McpPresetDefinition] = MandrillMCP
+
+    # ── Cloud Platforms, Hosting & Infrastructure (additional) ───────────────
+    AwsRds: ClassVar[McpPresetDefinition] = AwsRdsMCP
+    AwsCloudwatch: ClassVar[McpPresetDefinition] = AwsCloudwatchMCP
+    GcpBigquery: ClassVar[McpPresetDefinition] = GcpBigqueryMCP
+    AzureDevops: ClassVar[McpPresetDefinition] = AzureDevopsMCP
+    Digitalocean: ClassVar[McpPresetDefinition] = DigitaloceanMCP
+    FlyIo: ClassVar[McpPresetDefinition] = FlyIoMCP
+    Railway: ClassVar[McpPresetDefinition] = RailwayMCP
+    Render: ClassVar[McpPresetDefinition] = RenderMCP
+    Linode: ClassVar[McpPresetDefinition] = LinodeMCP
+    Vultr: ClassVar[McpPresetDefinition] = VultrMCP
+
+    # ── AI Platforms & Creative APIs (additional) ─────────────────────────────
+    StabilityAi: ClassVar[McpPresetDefinition] = StabilityAiMCP
+    Runway: ClassVar[McpPresetDefinition] = RunwayMCP
+    CohereSearch: ClassVar[McpPresetDefinition] = CohereSearchMCP
+    Mistral: ClassVar[McpPresetDefinition] = MistralMCP
+    TogetherAi: ClassVar[McpPresetDefinition] = TogetherAiMCP
+    Deepgram: ClassVar[McpPresetDefinition] = DeepgramMCP
+    AssemblyAi: ClassVar[McpPresetDefinition] = AssemblyAiMCP
+    Heygen: ClassVar[McpPresetDefinition] = HeygenMCP
+    Suno: ClassVar[McpPresetDefinition] = SunoMCP
+    Langsmith: ClassVar[McpPresetDefinition] = LangsmithMCP
+
+    # ── Reference & Academic (additional) ────────────────────────────────────
+    Pubmed: ClassVar[McpPresetDefinition] = PubmedMCP
+    Crossref: ClassVar[McpPresetDefinition] = CrossrefMCP
+    SemanticScholar: ClassVar[McpPresetDefinition] = SemanticScholarMCP
+    OpenLibrary: ClassVar[McpPresetDefinition] = OpenLibraryMCP
+    NpmRegistry: ClassVar[McpPresetDefinition] = NpmRegistryMCP
+    Pypi: ClassVar[McpPresetDefinition] = PypiMCP
+    DockerHub: ClassVar[McpPresetDefinition] = DockerHubMCP
+    OpenMeteo: ClassVar[McpPresetDefinition] = OpenMeteoMCP
+
+    # ── Native System & Utilities (additional) ────────────────────────────────
+    Git: ClassVar[McpPresetDefinition] = GitMCP
+    HttpClient: ClassVar[McpPresetDefinition] = HttpClientMCP
+    WebhookSender: ClassVar[McpPresetDefinition] = WebhookSenderMCP
+    YamlValidator: ClassVar[McpPresetDefinition] = YamlValidatorMCP
+    XmlParser: ClassVar[McpPresetDefinition] = XmlParserMCP
+    TomlParser: ClassVar[McpPresetDefinition] = TomlParserMCP
+    Base64Tools: ClassVar[McpPresetDefinition] = Base64ToolsMCP
+    HashingTools: ClassVar[McpPresetDefinition] = HashingToolsMCP
+    UuidGenerator: ClassVar[McpPresetDefinition] = UuidGeneratorMCP
+    RegexTester: ClassVar[McpPresetDefinition] = RegexTesterMCP
+    DateTime: ClassVar[McpPresetDefinition] = DateTimeMCP
+
     @classmethod
     def register(cls, definition: McpPresetDefinition) -> None:
         # Registers a new preset definition in the global preset registry.
@@ -300,4 +459,39 @@ __all__ = [
     "LocalFilesystemMCP", "OsCommandMCP", "EnvInspectorMCP", "ProcessManagerMCP",
     "SystemDiagnosticsMCP", "MarkdownLinterMCP", "PythonSandboxMCP", "SqliteSandboxMCP",
     "CsvParserMCP", "JsonValidatorMCP", "SequentialThinkingMCP",
+    # E-Commerce & Payments
+    "StripeMCP", "ShopifyMCP", "WoocommerceMCP", "SquareMCP", "PaypalMCP",
+    # Automation & Workflow
+    "ZapierMCP", "N8nMCP",
+    # Search & Web Research (additional)
+    "PerplexityMCP", "SerperMCP", "YouSearchMCP", "ApifyMCP", "BrowserbaseMCP",
+    "ZenrowsMCP", "ScrapingbeeMCP", "LinkupMCP",
+    # Version Control, Development & Task Tracking (additional)
+    "AsanaMCP", "TrelloMCP", "ClickupMCP", "PagerdutyMCP", "DatadogMCP",
+    "NewrelicMCP", "TerraformMCP", "GithubActionsMCP", "TravisCiMCP", "MondayMCP",
+    # Databases & Cache (additional)
+    "DynamodbMCP", "CassandraMCP", "ElasticsearchMCP", "CockroachdbMCP", "FirebaseMCP",
+    "WeaviateMCP", "MilvusMCP", "TimescaledbMCP", "TursoMCP", "FaunadbMCP",
+    # Productivity, Office & CRM (additional)
+    "ObsidianVaultMCP", "TodoistMCP", "ConfluenceMCP", "ZohoCrmMCP", "IntercomMCP",
+    "PipedriveMCP", "FreshserviceMCP", "ZendeskMCP", "SmartsheetMCP", "BasecampMCP",
+    # Document Parsers & Media Utilities (additional)
+    "DoclingMCP", "UnstructuredMCP", "CamelotMCP", "PptxParserMCP", "DocxParserMCP",
+    "LibreofficeMCP", "VideoTranscriptMCP", "ExifToolMCP",
+    # Communication & Chat (additional)
+    "MattermostMCP", "RocketchatMCP", "MailgunMCP", "PostmarkMCP", "ResendMCP",
+    "LineMessagingMCP", "PushoverMCP", "MandrillMCP",
+    # Cloud Platforms, Hosting & Infrastructure (additional)
+    "AwsRdsMCP", "AwsCloudwatchMCP", "GcpBigqueryMCP", "AzureDevopsMCP", "DigitaloceanMCP",
+    "FlyIoMCP", "RailwayMCP", "RenderMCP", "LinodeMCP", "VultrMCP",
+    # AI Platforms & Creative APIs (additional)
+    "StabilityAiMCP", "RunwayMCP", "CohereSearchMCP", "MistralMCP", "TogetherAiMCP",
+    "DeepgramMCP", "AssemblyAiMCP", "HeygenMCP", "SunoMCP", "LangsmithMCP",
+    # Reference & Academic (additional)
+    "PubmedMCP", "CrossrefMCP", "SemanticScholarMCP", "OpenLibraryMCP", "NpmRegistryMCP",
+    "PypiMCP", "DockerHubMCP", "OpenMeteoMCP",
+    # Native System & Utilities (additional)
+    "GitMCP", "HttpClientMCP", "WebhookSenderMCP", "YamlValidatorMCP", "XmlParserMCP",
+    "TomlParserMCP", "Base64ToolsMCP", "HashingToolsMCP", "UuidGeneratorMCP",
+    "RegexTesterMCP", "DateTimeMCP",
 ]
