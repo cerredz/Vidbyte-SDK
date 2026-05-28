@@ -1,3 +1,14 @@
+<!-- Context Protocol Header
+Description:
+    Root-level developer guide and API reference documentation for the Vidbyte SDK.
+Purpose:
+    Provides instructions, architectural descriptions, code examples, and package guidelines for developing and using linear and non-linear agent runtimes, strategy chains, and tools.
+Architecture:
+    Markdown documentation organized by major features (Agents, Runtimes, Context Management, Prompts, Packages).
+Relations:
+    Serves as the primary developer entry point. Aligns with the design docs and runtime specifications.
+-->
+
 # Vidbyte SDK
 
 `vidbyte-sdk` is the root-level home for Vidbyte's Python SDK surface.
@@ -115,6 +126,67 @@ agent = Agent(
 ```
 
 For consensus, voting, or multi-agent orchestration, use explicit multi-agent strategies such as `MultiAgentConsensusStrategy`; a plain `strategies=[...]` list means output-only sequential chaining.
+
+## Agent Runtimes
+
+An agent in the Vidbyte SDK is decoupled into a **Cognitive Core** (prompts, tool catalogs, strategies) and an **Execution Runtime**. The runtime governs the perception-reasoning-action loop, controls how raw tool outputs are formatted or compacted within the context window, intercepts tool calls, and handles execution boundaries.
+
+Developers can select different runtimes by setting the `runtime` parameter when instantiating `BaseAgent` or `Agent`.
+
+### Linear Runtime (Default)
+
+The **Linear Runtime** (`AgentRuntimeType.LINEAR`) is the primary production-grade default loop. It operates as a sequential, deterministic control flow:
+1. Formulates the initial context window.
+2. Invokes the configured runner.
+3. Evaluates the response and executes permitted tool calls, passing results through active context-window algorithms.
+4. Appends findings back to history and repeats.
+
+Linear runtime offers full compatibility with all SDK features including Middleware, In-Context Algorithms (like Reflexion), and durable write/execute tools.
+
+```python
+from vidbyte import BaseAgent, AgentRuntimeType
+
+agent = BaseAgent(
+    name="analyst",
+    system_prompt="Analyze step-by-step.",
+    runtime=AgentRuntimeType.LINEAR,  # Or "linear"
+)
+```
+
+### Strictly Non-Linear Runtimes
+
+Non-linear runtimes operate on complex, non-sequential topologies. To prevent state corruption or unexpected side-effects, **all middleware and custom context-window algorithms are disabled** when a non-linear runtime is active.
+
+#### 1. Branching MCTS Search Runtime (`mcts_search`)
+Explores multiple reasoning paths concurrently using Monte Carlo Tree Search. Evaluates paths via heuristic value functions and supports complete **Context Rollback** to parent nodes when hitting a dead end.
+- **Rules**: Incompatible with `WRITE` or `EXECUTE` tools that produce irreversible side-effects on the host workspace. Restricted primarily to `READ` tools.
+
+```python
+agent = BaseAgent(
+    name="explorer",
+    system_prompt="Search all alternative hypotheses.",
+    runtime=AgentRuntimeType.MCTS_SEARCH,  # Or "mcts_search"
+)
+```
+
+#### 2. Asynchronous Actor-Model Runtime (`actor_model`)
+Executes a network of concurrently running agents that communicate asynchronously through isolated mailboxes (`asyncio.Queue`).
+- **Prebuilt Personas**: Pre-engineered actor personas (Planner, Coder, Reviewer, Generator, Critic, Reasoner) are loaded automatically from the prompts catalog.
+- **Cognitive Actors**: Foundational problem-solving personas:
+  - `Explorer`: Focuses on divergent thinking, hypothesis brainstorming, and exploring alternatives.
+  - `Decomposer`: Breaks down high-level, complex goals into distinct, orthogonal sub-problems.
+  - `Evaluator`: Evaluates outputs against constraints, scores alternatives, and performs objective validation.
+- **Dynamic Actor Spawning**: Enables the coordinator agent to spawn new actor instances dynamically during runtime via the `DynamicActorTool`.
+
+```python
+from vidbyte import BaseAgent, AgentRuntimeType
+
+agent = BaseAgent(
+    name="swarm-coordinator",
+    system_prompt="Coordinate the solver swarm.",
+    runtime=AgentRuntimeType.ACTOR_MODEL,  # Or "actor_model"
+)
+```
 
 ## Context Objects
 
@@ -300,6 +372,11 @@ from vidbyte.lib.enums.prompts import Prompt
 prompts = Prompts()
 prompt_text = prompts.get(Prompt.CHAIN_OF_THOUGHT_REASON_PROMPT)
 assert prompt_text == chain_of_thought_reason_prompt
+
+# Load prebuilt cognitive prompts for the actor runtime
+explorer_prompt = prompts.get(Prompt.ACTOR_RUNTIME_EXPLORER)
+decomposer_prompt = prompts.get(Prompt.ACTOR_RUNTIME_DECOMPOSER)
+evaluator_prompt = prompts.get(Prompt.ACTOR_RUNTIME_EVALUATOR)
 ```
 
 `Prompts().keys()` returns all prompt enum keys, and `Prompts().descriptions()` returns descriptions for each key. Prompt lookup does not accept raw strings and the SDK does not expose runtime prompt overrides.
