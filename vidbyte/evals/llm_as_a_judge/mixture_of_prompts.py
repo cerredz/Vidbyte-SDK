@@ -21,15 +21,12 @@ from typing import Callable, ClassVar
 from vidbyte.evals.base import BaseGrader
 from vidbyte.evals.llm_as_a_judge._utils import invoke_runner, parse_json_block
 from vidbyte.evals.types import EvalCase, GraderResult
+from vidbyte.lib.dataclasses.llm_judge import MixtureOfPromptsJudgeConfig
 from vidbyte.lib.enums.prompts import Prompt
+from vidbyte.lib.eval.template_registry import TemplatesRegistry
 from vidbyte.prompts.catalog import Prompts
 
-_DEFAULT_ROUTER_TEMPLATE = (
-    "You are a task classifier. Given a prompt, identify which task type it belongs to from the list below.\n\n"
-    "Available task types:\n{task_types}\n\n"
-    "Output only the exact task type name that best matches. No explanation, no punctuation — just the name.\n\n"
-    "Prompt to classify:\n{prompt}"
-)
+_registry = TemplatesRegistry()
 
 
 class MixtureOfPromptsJudge(BaseGrader):
@@ -37,17 +34,24 @@ class MixtureOfPromptsJudge(BaseGrader):
 
     name: ClassVar[str] = "mixture_of_prompts"
 
-    def __init__(self, *, judge_runner: object, prompt_library: dict[str, str], router_runner: object | None = None, router_fn: Callable[[str], str] | None = None, fallback_key: str | None = None, system_prompt: str | None = None, router_prompt_template: str | None = None) -> None:
-        # Validates prompt_library is non-empty; stores routing configuration.
-        if not prompt_library:
-            raise ValueError("MixtureOfPromptsJudge requires a non-empty prompt_library.")
-        self.judge_runner = judge_runner
-        self.prompt_library = prompt_library
-        self.router_runner = router_runner
-        self.router_fn = router_fn
-        self.fallback_key = fallback_key
-        self.system_prompt = system_prompt
-        self.router_prompt_template = router_prompt_template
+    def __init__(self, config: MixtureOfPromptsJudgeConfig) -> None:
+        # Unpacks config fields for judge runner, prompt library, router config, and overrides.
+        self.judge_runner = config.judge_runner
+        self.prompt_library = config.prompt_library
+        self.router_runner = config.router_runner
+        self.router_fn = config.router_fn
+        self.fallback_key = config.fallback_key
+        self.system_prompt = config.system_prompt
+        self.router_prompt_template = config.router_prompt_template
+
+    def _resolve_template(self, slot: str, override: str | None, prompt_key: Prompt) -> str:
+        # Returns override, SDK catalog prompt, or registry default in priority order.
+        if override:
+            return override
+        try:
+            return Prompts().get(prompt_key)
+        except Exception:
+            return _registry.get(slot)
 
     async def agrade(self, case: EvalCase, actual: str) -> GraderResult:
         # Routes case to best template, formats it, invokes judge, parses JSON.
@@ -61,22 +65,17 @@ class MixtureOfPromptsJudge(BaseGrader):
         raw = await invoke_runner(self.judge_runner, prompt_text)
         return self._parse_response(raw, selected_key)
 
-    def _resolve_router_template(self) -> str:
-        # Returns user-supplied router template, SDK catalog prompt, or inline default.
-        if self.router_prompt_template:
-            return self.router_prompt_template
-        try:
-            return Prompts().get(Prompt.LLM_AS_A_JUDGE_MIXTURE_OF_PROMPTS_ROUTER)
-        except Exception:
-            return _DEFAULT_ROUTER_TEMPLATE
-
     async def _route(self, prompt: str) -> str:
         # Determines the task type key via router_fn, router_runner, or fallback_key.
         if self.router_fn is not None:
             return self.router_fn(prompt)
         if self.router_runner is not None:
             task_types_str = "\n".join(f"- {k}" for k in self.prompt_library.keys())
-            router_template = self._resolve_router_template()
+            router_template = self._resolve_template(
+                "mixture_of_prompts.router",
+                self.router_prompt_template,
+                Prompt.LLM_AS_A_JUDGE_MIXTURE_OF_PROMPTS_ROUTER,
+            )
             router_prompt = router_template.format(task_types=task_types_str, prompt=prompt)
             raw = await invoke_runner(self.router_runner, router_prompt)
             return self._extract_key_from_router_response(raw)

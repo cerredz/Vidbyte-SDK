@@ -21,19 +21,12 @@ from typing import ClassVar
 from vidbyte.evals.base import BaseGrader
 from vidbyte.evals.llm_as_a_judge._utils import invoke_runner, parse_json_block
 from vidbyte.evals.types import EvalCase, GraderResult
+from vidbyte.lib.dataclasses.llm_judge import PeerReviewJudgeConfig
 from vidbyte.lib.enums.prompts import Prompt
+from vidbyte.lib.eval.template_registry import TemplatesRegistry
 from vidbyte.prompts.catalog import Prompts
 
-_DEFAULT_TEMPLATE = (
-    "You are a peer reviewer evaluating a model's response. "
-    "Provide your verdict AND your confidence in that verdict.\n\n"
-    "Score from 0.0 to 1.0. Confidence from 0.0 to 1.0 (0=completely uncertain, 1=fully certain).\n"
-    "Output only a valid JSON object:\n"
-    "{{\"score\": float, \"passed\": boolean, \"confidence\": float, \"reason\": \"explanation\"}}\n\n"
-    "Task Prompt:\n{prompt}\n\n"
-    "Model Response:\n{actual}\n\n"
-    "Expected Output:\n{expected}"
-)
+_registry = TemplatesRegistry()
 
 
 class PeerReviewJudge(BaseGrader):
@@ -41,19 +34,26 @@ class PeerReviewJudge(BaseGrader):
 
     name: ClassVar[str] = "peer_review"
 
-    def __init__(self, *, judge_runners: list, confidence_threshold: float = 0.5, threshold: float = 0.7, system_prompt: str | None = None, prompt_template: str | None = None) -> None:
-        # Validates at least 2 runners; stores confidence threshold and pass threshold.
-        if len(judge_runners) < 2:
-            raise ValueError("PeerReviewJudge requires at least 2 judge_runners.")
-        self.judge_runners = judge_runners
-        self.confidence_threshold = confidence_threshold
-        self.threshold = threshold
-        self.system_prompt = system_prompt
-        self.prompt_template = prompt_template
+    def __init__(self, config: PeerReviewJudgeConfig) -> None:
+        # Unpacks config fields for runners list, confidence threshold, pass threshold, and overrides.
+        self.judge_runners = config.judge_runners
+        self.confidence_threshold = config.confidence_threshold
+        self.threshold = config.threshold
+        self.system_prompt = config.system_prompt
+        self.prompt_template = config.prompt_template
+
+    def _resolve_template(self, slot: str, override: str | None, prompt_key: Prompt) -> str:
+        # Returns override, SDK catalog prompt, or registry default in priority order.
+        if override:
+            return override
+        try:
+            return Prompts().get(prompt_key)
+        except Exception:
+            return _registry.get(slot)
 
     async def agrade(self, case: EvalCase, actual: str) -> GraderResult:
         # Collects confidence-scored reviews, filters low-confidence, computes weighted score.
-        template = self._resolve_template()
+        template = self._resolve_template("peer_review.user", self.prompt_template, Prompt.LLM_AS_A_JUDGE_PEER_REVIEW_USER)
         prompt_text = template.format(
             prompt=case.prompt,
             actual=actual,
@@ -61,15 +61,6 @@ class PeerReviewJudge(BaseGrader):
         )
         reviews = await self._collect_reviews(prompt_text)
         return self._aggregate(reviews)
-
-    def _resolve_template(self) -> str:
-        # Returns user-supplied template, SDK catalog prompt, or inline default in that order.
-        if self.prompt_template:
-            return self.prompt_template
-        try:
-            return Prompts().get(Prompt.LLM_AS_A_JUDGE_PEER_REVIEW_USER)
-        except Exception:
-            return _DEFAULT_TEMPLATE
 
     async def _collect_reviews(self, prompt_text: str) -> list[dict]:
         # Fires all runners concurrently and parses each response for score + confidence.

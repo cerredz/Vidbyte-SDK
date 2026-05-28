@@ -20,19 +20,12 @@ from typing import ClassVar
 from vidbyte.evals.base import BaseGrader
 from vidbyte.evals.llm_as_a_judge._utils import invoke_runner, parse_json_block
 from vidbyte.evals.types import EvalCase, GraderResult
+from vidbyte.lib.dataclasses.llm_judge import PairwiseJudgeConfig
 from vidbyte.lib.enums.prompts import Prompt
+from vidbyte.lib.eval.template_registry import TemplatesRegistry
 from vidbyte.prompts.catalog import Prompts
 
-_DEFAULT_TEMPLATE = (
-    "You are an objective judge comparing two responses to the same prompt. "
-    "Decide which response is better.\n\n"
-    "Output only a valid JSON object:\n"
-    "{{\"winner\": \"A\" or \"B\" or \"Tie\", \"reason\": \"explanation\"}}\n\n"
-    "Task Prompt:\n{prompt}\n\n"
-    "Response A:\n{response_a}\n\n"
-    "Response B:\n{response_b}\n\n"
-    "Expected Output:\n{expected}"
-)
+_registry = TemplatesRegistry()
 
 
 class PairwiseJudge(BaseGrader):
@@ -40,12 +33,21 @@ class PairwiseJudge(BaseGrader):
 
     name: ClassVar[str] = "pairwise"
 
-    def __init__(self, *, judge_runner: object, swap_check: bool = True, system_prompt: str | None = None, prompt_template: str | None = None) -> None:
-        # Stores runner and swap_check flag; swap_check=True runs both orderings for debiasing.
-        self.judge_runner = judge_runner
-        self.swap_check = swap_check
-        self.system_prompt = system_prompt
-        self.prompt_template = prompt_template
+    def __init__(self, config: PairwiseJudgeConfig) -> None:
+        # Unpacks config fields for runner, swap_check flag, and optional template overrides.
+        self.judge_runner = config.judge_runner
+        self.swap_check = config.swap_check
+        self.system_prompt = config.system_prompt
+        self.prompt_template = config.prompt_template
+
+    def _resolve_template(self, slot: str, override: str | None, prompt_key: Prompt) -> str:
+        # Returns override, SDK catalog prompt, or registry default in priority order.
+        if override:
+            return override
+        try:
+            return Prompts().get(prompt_key)
+        except Exception:
+            return _registry.get(slot)
 
     async def agrade(self, case: EvalCase, actual: str) -> GraderResult:
         # Reads response_b from metadata, runs comparison(s), applies consensus rule.
@@ -58,18 +60,9 @@ class PairwiseJudge(BaseGrader):
         verdict_2 = await self._compare(case, response_b, actual)
         return self._consensus(verdict_1, verdict_2)
 
-    def _resolve_template(self) -> str:
-        # Returns user-supplied template, SDK catalog prompt, or inline default in that order.
-        if self.prompt_template:
-            return self.prompt_template
-        try:
-            return Prompts().get(Prompt.LLM_AS_A_JUDGE_PAIRWISE_USER)
-        except Exception:
-            return _DEFAULT_TEMPLATE
-
     async def _compare(self, case: EvalCase, response_a: str, response_b: str) -> str:
         # Formats a single pairwise prompt and returns the raw winner string (A/B/Tie).
-        template = self._resolve_template()
+        template = self._resolve_template("pairwise.user", self.prompt_template, Prompt.LLM_AS_A_JUDGE_PAIRWISE_USER)
         prompt_text = template.format(
             prompt=case.prompt,
             response_a=response_a,

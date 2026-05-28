@@ -21,24 +21,12 @@ from typing import ClassVar
 from vidbyte.evals.base import BaseGrader
 from vidbyte.evals.llm_as_a_judge._utils import invoke_runner, parse_json_block
 from vidbyte.evals.types import EvalCase, GraderResult
+from vidbyte.lib.dataclasses.llm_judge import AtomicClaimsJudgeConfig
 from vidbyte.lib.enums.prompts import Prompt
+from vidbyte.lib.eval.template_registry import TemplatesRegistry
 from vidbyte.prompts.catalog import Prompts
 
-_DEFAULT_DECOMPOSE_TEMPLATE = (
-    "You are a careful fact-checker. Extract every distinct factual claim made in the response below. "
-    "Each claim should be a single declarative sentence that can be independently verified.\n\n"
-    "Response:\n{actual}\n\n"
-    "Output only a valid JSON object:\n"
-    "{{\"claims\": [\"claim 1\", \"claim 2\", ...]}}\n\n"
-    "If there are no factual claims, return {{\"claims\": []}}"
-)
-
-_DEFAULT_VERIFY_TEMPLATE = (
-    "You are a fact-checker. Determine whether the following claim is true based on your knowledge.\n\n"
-    "Claim: {claim}\n\n"
-    "Output only a valid JSON object:\n"
-    "{{\"verified\": true or false, \"reason\": \"one sentence explanation\"}}"
-)
+_registry = TemplatesRegistry()
 
 
 class AtomicClaimsJudge(BaseGrader):
@@ -46,13 +34,22 @@ class AtomicClaimsJudge(BaseGrader):
 
     name: ClassVar[str] = "atomic_claims"
 
-    def __init__(self, *, judge_runner: object, threshold: float = 0.8, system_prompt: str | None = None, decomposition_prompt_template: str | None = None, verification_prompt_template: str | None = None) -> None:
-        # Stores runner, pass threshold, and optional prompt template overrides.
-        self.judge_runner = judge_runner
-        self.threshold = threshold
-        self.system_prompt = system_prompt
-        self.decomposition_prompt_template = decomposition_prompt_template
-        self.verification_prompt_template = verification_prompt_template
+    def __init__(self, config: AtomicClaimsJudgeConfig) -> None:
+        # Unpacks config fields for runner, pass threshold, and optional prompt template overrides.
+        self.judge_runner = config.judge_runner
+        self.threshold = config.threshold
+        self.system_prompt = config.system_prompt
+        self.decomposition_prompt_template = config.decomposition_prompt_template
+        self.verification_prompt_template = config.verification_prompt_template
+
+    def _resolve_template(self, slot: str, override: str | None, prompt_key: Prompt) -> str:
+        # Returns override, SDK catalog prompt, or registry default in priority order.
+        if override:
+            return override
+        try:
+            return Prompts().get(prompt_key)
+        except Exception:
+            return _registry.get(slot)
 
     async def agrade(self, case: EvalCase, actual: str) -> GraderResult:
         # Extracts claims from actual, verifies each concurrently, returns fractional score.
@@ -65,27 +62,13 @@ class AtomicClaimsJudge(BaseGrader):
         reason_parts = "; ".join(f"[{'✓' if v['verified'] else '✗'}] {v['claim']}: {v['reason']}" for v in verdicts)
         return GraderResult(score=score, passed=score >= self.threshold, reason=reason_parts)
 
-    def _resolve_decompose_template(self) -> str:
-        # Returns user-supplied decomposition template, SDK catalog prompt, or inline default.
-        if self.decomposition_prompt_template:
-            return self.decomposition_prompt_template
-        try:
-            return Prompts().get(Prompt.LLM_AS_A_JUDGE_ATOMIC_CLAIMS_DECOMPOSE)
-        except Exception:
-            return _DEFAULT_DECOMPOSE_TEMPLATE
-
-    def _resolve_verify_template(self) -> str:
-        # Returns user-supplied verification template, SDK catalog prompt, or inline default.
-        if self.verification_prompt_template:
-            return self.verification_prompt_template
-        try:
-            return Prompts().get(Prompt.LLM_AS_A_JUDGE_ATOMIC_CLAIMS_VERIFY)
-        except Exception:
-            return _DEFAULT_VERIFY_TEMPLATE
-
     async def _extract_claims(self, actual: str) -> list[str]:
         # Calls the judge to decompose actual into a list of atomic factual claims.
-        template = self._resolve_decompose_template()
+        template = self._resolve_template(
+            "atomic_claims.decompose",
+            self.decomposition_prompt_template,
+            Prompt.LLM_AS_A_JUDGE_ATOMIC_CLAIMS_DECOMPOSE,
+        )
         decompose_prompt = template.format(actual=actual)
         raw = await invoke_runner(self.judge_runner, decompose_prompt)
         try:
@@ -96,7 +79,11 @@ class AtomicClaimsJudge(BaseGrader):
 
     async def _verify_claims(self, claims: list[str]) -> list[dict]:
         # Verifies each claim concurrently and returns list of verdict dicts.
-        template = self._resolve_verify_template()
+        template = self._resolve_template(
+            "atomic_claims.verify",
+            self.verification_prompt_template,
+            Prompt.LLM_AS_A_JUDGE_ATOMIC_CLAIMS_VERIFY,
+        )
 
         async def verify_one(claim: str) -> dict:
             prompt = template.format(claim=claim)

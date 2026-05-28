@@ -21,18 +21,12 @@ from typing import ClassVar
 from vidbyte.evals.base import BaseGrader
 from vidbyte.evals.llm_as_a_judge._utils import invoke_runner, parse_json_block
 from vidbyte.evals.types import EvalCase, GraderResult
+from vidbyte.lib.dataclasses.llm_judge import BinaryJudgeConfig
 from vidbyte.lib.enums.prompts import Prompt
+from vidbyte.lib.eval.template_registry import TemplatesRegistry
 from vidbyte.prompts.catalog import Prompts
 
-_DEFAULT_TEMPLATE = (
-    "You are an objective judge answering a single yes/no question about a model's response.\n\n"
-    "Criterion: {criterion}\n\n"
-    "Answer with a JSON object only:\n"
-    "{{\"passed\": true or false, \"reason\": \"one sentence explanation\"}}\n\n"
-    "Task Prompt:\n{prompt}\n\n"
-    "Model Response:\n{actual}\n\n"
-    "Expected Output:\n{expected}"
-)
+_registry = TemplatesRegistry()
 
 _YES_PATTERN = re.compile(r"\b(yes|pass|true)\b", re.IGNORECASE)
 _NO_PATTERN = re.compile(r"\b(no|fail|false)\b", re.IGNORECASE)
@@ -43,18 +37,25 @@ class BinaryJudge(BaseGrader):
 
     name: ClassVar[str] = "binary"
 
-    def __init__(self, *, judge_runner: object, criterion: str, system_prompt: str | None = None, prompt_template: str | None = None) -> None:
-        # Validates that criterion is non-empty; stores runner and prompt overrides.
-        if not criterion or not criterion.strip():
-            raise ValueError("BinaryJudge requires a non-empty criterion string.")
-        self.judge_runner = judge_runner
-        self.criterion = criterion
-        self.system_prompt = system_prompt
-        self.prompt_template = prompt_template
+    def __init__(self, config: BinaryJudgeConfig) -> None:
+        # Unpacks config fields for runner, criterion, and optional prompt overrides.
+        self.judge_runner = config.judge_runner
+        self.criterion = config.criterion
+        self.system_prompt = config.system_prompt
+        self.prompt_template = config.prompt_template
+
+    def _resolve_template(self, slot: str, override: str | None, prompt_key: Prompt) -> str:
+        # Returns override, SDK catalog prompt, or registry default in priority order.
+        if override:
+            return override
+        try:
+            return Prompts().get(prompt_key)
+        except Exception:
+            return _registry.get(slot)
 
     async def agrade(self, case: EvalCase, actual: str) -> GraderResult:
         # Formats the binary criterion prompt, invokes the judge, and parses pass/fail.
-        template = self._resolve_template()
+        template = self._resolve_template("binary.user", self.prompt_template, Prompt.LLM_AS_A_JUDGE_BINARY_USER)
         prompt_text = template.format(
             criterion=self.criterion,
             prompt=case.prompt,
@@ -63,15 +64,6 @@ class BinaryJudge(BaseGrader):
         )
         raw = await invoke_runner(self.judge_runner, prompt_text)
         return self._parse_response(raw)
-
-    def _resolve_template(self) -> str:
-        # Returns user-supplied template, SDK catalog prompt, or inline default in that order.
-        if self.prompt_template:
-            return self.prompt_template
-        try:
-            return Prompts().get(Prompt.LLM_AS_A_JUDGE_BINARY_USER)
-        except Exception:
-            return _DEFAULT_TEMPLATE
 
     def _parse_response(self, text: str) -> GraderResult:
         # Scans first 100 chars for yes/no keywords; falls back to JSON {"passed": bool}.

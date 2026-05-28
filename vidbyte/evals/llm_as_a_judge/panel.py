@@ -22,18 +22,12 @@ from typing import ClassVar, Literal
 from vidbyte.evals.base import BaseGrader
 from vidbyte.evals.llm_as_a_judge._utils import invoke_runner, parse_json_block
 from vidbyte.evals.types import EvalCase, GraderResult
+from vidbyte.lib.dataclasses.llm_judge import PanelJudgeConfig
 from vidbyte.lib.enums.prompts import Prompt
+from vidbyte.lib.eval.template_registry import TemplatesRegistry
 from vidbyte.prompts.catalog import Prompts
 
-_DEFAULT_TEMPLATE = (
-    "You are an objective judge evaluating a model's response.\n\n"
-    "Score the response on a scale from 0.0 to 1.0 based on accuracy, completeness, and clarity.\n"
-    "Output only a valid JSON object:\n"
-    "{{\"score\": float, \"passed\": boolean, \"reason\": \"explanation\"}}\n\n"
-    "Task Prompt:\n{prompt}\n\n"
-    "Model Response:\n{actual}\n\n"
-    "Expected Output:\n{expected}"
-)
+_registry = TemplatesRegistry()
 
 
 class PanelJudge(BaseGrader):
@@ -41,19 +35,26 @@ class PanelJudge(BaseGrader):
 
     name: ClassVar[str] = "panel"
 
-    def __init__(self, *, judge_runners: list, aggregation: Literal["mean", "median", "majority_vote"] = "mean", threshold: float = 0.7, system_prompt: str | None = None, prompt_template: str | None = None) -> None:
-        # Validates at least 2 runners are provided; stores aggregation mode and threshold.
-        if len(judge_runners) < 2:
-            raise ValueError("PanelJudge requires at least 2 judge_runners.")
-        self.judge_runners = judge_runners
-        self.aggregation = aggregation
-        self.threshold = threshold
-        self.system_prompt = system_prompt
-        self.prompt_template = prompt_template
+    def __init__(self, config: PanelJudgeConfig) -> None:
+        # Unpacks config fields for runners list, aggregation mode, threshold, and template overrides.
+        self.judge_runners = config.judge_runners
+        self.aggregation = config.aggregation
+        self.threshold = config.threshold
+        self.system_prompt = config.system_prompt
+        self.prompt_template = config.prompt_template
+
+    def _resolve_template(self, slot: str, override: str | None, prompt_key: Prompt) -> str:
+        # Returns override, SDK catalog prompt, or registry default in priority order.
+        if override:
+            return override
+        try:
+            return Prompts().get(prompt_key)
+        except Exception:
+            return _registry.get(slot)
 
     async def agrade(self, case: EvalCase, actual: str) -> GraderResult:
         # Fires identical prompt to all runners concurrently and aggregates their verdicts.
-        template = self._resolve_template()
+        template = self._resolve_template("panel.user", self.prompt_template, Prompt.LLM_AS_A_JUDGE_PANEL_USER)
         prompt_text = template.format(
             prompt=case.prompt,
             actual=actual,
@@ -61,15 +62,6 @@ class PanelJudge(BaseGrader):
         )
         verdicts = await self._collect_verdicts(prompt_text)
         return self._aggregate(verdicts)
-
-    def _resolve_template(self) -> str:
-        # Returns user-supplied template, SDK catalog prompt, or inline default in that order.
-        if self.prompt_template:
-            return self.prompt_template
-        try:
-            return Prompts().get(Prompt.LLM_AS_A_JUDGE_PANEL_USER)
-        except Exception:
-            return _DEFAULT_TEMPLATE
 
     async def _collect_verdicts(self, prompt_text: str) -> list[dict]:
         # Invokes all runners concurrently and parses each response into a verdict dict.
@@ -80,6 +72,7 @@ class PanelJudge(BaseGrader):
                 return {"runner": idx, "score": float(parsed.get("score", 0.0)), "passed": bool(parsed.get("passed", False)), "reason": str(parsed.get("reason", ""))}
             except (ValueError, TypeError):
                 return {"runner": idx, "score": 0.0, "passed": False, "reason": f"Parse error: {raw[:100]}"}
+
         tasks = [query_one(r, i) for i, r in enumerate(self.judge_runners)]
         return list(await asyncio.gather(*tasks))
 

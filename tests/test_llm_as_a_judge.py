@@ -41,6 +41,27 @@ from vidbyte.evals.llm_as_a_judge import (
     StructuredRubricJudge,
 )
 from vidbyte.evals.types import EvalCase, GraderResult
+from vidbyte.lib.dataclasses.llm_judge import (
+    AtomicClaimsJudgeConfig,
+    BinaryJudgeConfig,
+    BranchSolveMergeJudgeConfig,
+    ChainOfAspectsJudgeConfig,
+    ChainOfThoughtJudgeConfig,
+    ConstitutionalJudgeConfig,
+    CriteriaDecompositionJudgeConfig,
+    FewShotJudgeConfig,
+    LLMRubricJudgeConfig,
+    MetaJudgeConfig,
+    MixtureOfPromptsJudgeConfig,
+    MultiAgentDebateJudgeConfig,
+    MultiAgentRubricJudgeConfig,
+    PairwiseJudgeConfig,
+    PanelJudgeConfig,
+    PeerReviewJudgeConfig,
+    SelfEvalJudgeConfig,
+    SelfReferenceJudgeConfig,
+    StructuredRubricJudgeConfig,
+)
 
 
 def _make_case(prompt: str = "What is 2+2?", expected: str | None = "4", metadata: dict | None = None) -> EvalCase:
@@ -79,7 +100,7 @@ class LlmAsAJudgeTests(unittest.IsolatedAsyncioTestCase):
     async def test_cot_judge_score_line_parse(self) -> None:
         """Parses trailing Score: line correctly from CoT response."""
         runner = AsyncMockRunner("The response is excellent.\n\nScore: 0.85")
-        judge = ChainOfThoughtJudge(judge_runner=runner)
+        judge = ChainOfThoughtJudge(ChainOfThoughtJudgeConfig(judge_runner=runner))
         result = await judge.agrade(_make_case(), "Four")
         self.assertAlmostEqual(result.score, 0.85)
         self.assertTrue(result.passed)
@@ -87,7 +108,7 @@ class LlmAsAJudgeTests(unittest.IsolatedAsyncioTestCase):
     async def test_cot_judge_json_fallback(self) -> None:
         """Falls back to JSON block parse when no Score line present."""
         runner = AsyncMockRunner(_json_resp(0.6, False))
-        judge = ChainOfThoughtJudge(judge_runner=runner)
+        judge = ChainOfThoughtJudge(ChainOfThoughtJudgeConfig(judge_runner=runner))
         result = await judge.agrade(_make_case(), "Four")
         self.assertAlmostEqual(result.score, 0.6)
         self.assertFalse(result.passed)
@@ -95,7 +116,7 @@ class LlmAsAJudgeTests(unittest.IsolatedAsyncioTestCase):
     async def test_cot_judge_unparseable_returns_zero(self) -> None:
         """Returns score=0.0 and passed=False when response cannot be parsed."""
         runner = AsyncMockRunner("garbage")
-        judge = ChainOfThoughtJudge(judge_runner=runner)
+        judge = ChainOfThoughtJudge(ChainOfThoughtJudgeConfig(judge_runner=runner))
         result = await judge.agrade(_make_case(), "Four")
         self.assertEqual(result.score, 0.0)
         self.assertFalse(result.passed)
@@ -103,7 +124,7 @@ class LlmAsAJudgeTests(unittest.IsolatedAsyncioTestCase):
     async def test_cot_judge_score_clamped_to_range(self) -> None:
         """Clamps scores outside [0, 1] to [0, 1]."""
         runner = AsyncMockRunner("Score: 2.5")
-        judge = ChainOfThoughtJudge(judge_runner=runner)
+        judge = ChainOfThoughtJudge(ChainOfThoughtJudgeConfig(judge_runner=runner))
         result = await judge.agrade(_make_case(), "Four")
         self.assertEqual(result.score, 1.0)
 
@@ -112,7 +133,7 @@ class LlmAsAJudgeTests(unittest.IsolatedAsyncioTestCase):
     async def test_binary_judge_yes_keyword(self) -> None:
         """Detects 'yes' keyword in response to return passed=True."""
         runner = AsyncMockRunner("yes, the criterion is met")
-        judge = BinaryJudge(judge_runner=runner, criterion="Is the answer correct?")
+        judge = BinaryJudge(BinaryJudgeConfig(judge_runner=runner, criterion="Is the answer correct?"))
         result = await judge.agrade(_make_case(), "Four")
         self.assertTrue(result.passed)
         self.assertEqual(result.score, 1.0)
@@ -120,7 +141,7 @@ class LlmAsAJudgeTests(unittest.IsolatedAsyncioTestCase):
     async def test_binary_judge_no_keyword(self) -> None:
         """Detects 'no' keyword to return passed=False."""
         runner = AsyncMockRunner("no, it is incorrect")
-        judge = BinaryJudge(judge_runner=runner, criterion="Is the answer correct?")
+        judge = BinaryJudge(BinaryJudgeConfig(judge_runner=runner, criterion="Is the answer correct?"))
         result = await judge.agrade(_make_case(), "Five")
         self.assertFalse(result.passed)
         self.assertEqual(result.score, 0.0)
@@ -128,19 +149,19 @@ class LlmAsAJudgeTests(unittest.IsolatedAsyncioTestCase):
     async def test_binary_judge_json_fallback(self) -> None:
         """Falls back to JSON {"passed": bool} when no keyword in first 100 chars."""
         runner = AsyncMockRunner(json.dumps({"passed": True, "reason": "correct"}))
-        judge = BinaryJudge(judge_runner=runner, criterion="Is the answer correct?")
+        judge = BinaryJudge(BinaryJudgeConfig(judge_runner=runner, criterion="Is the answer correct?"))
         result = await judge.agrade(_make_case(), "Four")
         self.assertTrue(result.passed)
 
     def test_binary_judge_empty_criterion_raises(self) -> None:
         """Raises ValueError when criterion is empty."""
         with self.assertRaises(ValueError):
-            BinaryJudge(judge_runner=AsyncMockRunner("yes"), criterion="")
+            BinaryJudge(BinaryJudgeConfig(judge_runner=AsyncMockRunner("yes"), criterion=""))
 
     def test_binary_judge_whitespace_criterion_raises(self) -> None:
         """Raises ValueError when criterion is only whitespace."""
         with self.assertRaises(ValueError):
-            BinaryJudge(judge_runner=AsyncMockRunner("yes"), criterion="   ")
+            BinaryJudge(BinaryJudgeConfig(judge_runner=AsyncMockRunner("yes"), criterion="   "))
 
     # --- FewShotJudge ---
 
@@ -148,19 +169,19 @@ class LlmAsAJudgeTests(unittest.IsolatedAsyncioTestCase):
         """Grades correctly using few-shot examples."""
         runner = AsyncMockRunner(_json_resp(0.8))
         examples = [{"prompt": "p", "actual": "a", "expected": "e", "score": 1.0, "reason": "perfect"}]
-        judge = FewShotJudge(judge_runner=runner, examples=examples)
+        judge = FewShotJudge(FewShotJudgeConfig(judge_runner=runner, examples=examples))
         result = await judge.agrade(_make_case(), "Four")
         self.assertAlmostEqual(result.score, 0.8)
 
     def test_few_shot_judge_empty_examples_raises(self) -> None:
         """Raises ValueError when examples list is empty."""
         with self.assertRaises(ValueError):
-            FewShotJudge(judge_runner=AsyncMockRunner("x"), examples=[])
+            FewShotJudge(FewShotJudgeConfig(judge_runner=AsyncMockRunner("x"), examples=[]))
 
     def test_few_shot_judge_missing_key_raises(self) -> None:
         """Raises ValueError when an example is missing required keys."""
         with self.assertRaises(ValueError):
-            FewShotJudge(judge_runner=AsyncMockRunner("x"), examples=[{"prompt": "p"}])
+            FewShotJudge(FewShotJudgeConfig(judge_runner=AsyncMockRunner("x"), examples=[{"prompt": "p"}]))
 
     # --- PairwiseJudge ---
 
@@ -170,7 +191,7 @@ class LlmAsAJudgeTests(unittest.IsolatedAsyncioTestCase):
             json.dumps({"winner": "A", "reason": "A is better"}),
             json.dumps({"winner": "B", "reason": "B is better"}),
         )
-        judge = PairwiseJudge(judge_runner=runner, swap_check=True)
+        judge = PairwiseJudge(PairwiseJudgeConfig(judge_runner=runner, swap_check=True))
         case = _make_case(metadata={"response_b": "Five"})
         result = await judge.agrade(case, "Four")
         self.assertEqual(result.score, 1.0)
@@ -182,21 +203,21 @@ class LlmAsAJudgeTests(unittest.IsolatedAsyncioTestCase):
             json.dumps({"winner": "A", "reason": "A wins"}),
             json.dumps({"winner": "A", "reason": "A wins again"}),
         )
-        judge = PairwiseJudge(judge_runner=runner, swap_check=True)
+        judge = PairwiseJudge(PairwiseJudgeConfig(judge_runner=runner, swap_check=True))
         case = _make_case(metadata={"response_b": "Five"})
         result = await judge.agrade(case, "Four")
         self.assertEqual(result.score, 0.5)
 
     async def test_pairwise_judge_missing_response_b_raises(self) -> None:
         """Raises ValueError when response_b not in case.metadata."""
-        judge = PairwiseJudge(judge_runner=AsyncMockRunner("x"), swap_check=False)
+        judge = PairwiseJudge(PairwiseJudgeConfig(judge_runner=AsyncMockRunner("x"), swap_check=False))
         with self.assertRaises(ValueError):
             await judge.agrade(_make_case(), "Four")
 
     async def test_pairwise_judge_no_swap(self) -> None:
         """Returns result without swap check when swap_check=False."""
         runner = AsyncMockRunner(json.dumps({"winner": "A", "reason": "A wins"}))
-        judge = PairwiseJudge(judge_runner=runner, swap_check=False)
+        judge = PairwiseJudge(PairwiseJudgeConfig(judge_runner=runner, swap_check=False))
         case = _make_case(metadata={"response_b": "Five"})
         result = await judge.agrade(case, "Four")
         self.assertEqual(result.score, 1.0)
@@ -206,14 +227,14 @@ class LlmAsAJudgeTests(unittest.IsolatedAsyncioTestCase):
     async def test_self_reference_judge_happy_path(self) -> None:
         """Generates reference and evaluates correctly."""
         runner = AsyncMockRunner("My reference answer.", _json_resp(0.9))
-        judge = SelfReferenceJudge(judge_runner=runner)
+        judge = SelfReferenceJudge(SelfReferenceJudgeConfig(judge_runner=runner))
         result = await judge.agrade(_make_case(), "Four")
         self.assertAlmostEqual(result.score, 0.9)
 
     async def test_self_reference_judge_multiple_generations(self) -> None:
         """Uses first generation as reference when num_self_generations=2."""
         runner = AsyncMockRunner("First ref.", "Second ref.", _json_resp(0.7))
-        judge = SelfReferenceJudge(judge_runner=runner, num_self_generations=2)
+        judge = SelfReferenceJudge(SelfReferenceJudgeConfig(judge_runner=runner, num_self_generations=2))
         result = await judge.agrade(_make_case(), "Four")
         self.assertAlmostEqual(result.score, 0.7)
 
@@ -225,7 +246,7 @@ class LlmAsAJudgeTests(unittest.IsolatedAsyncioTestCase):
             "1. Is it accurate?\n2. Is it clear?",
             _json_resp(0.85),
         )
-        judge = CriteriaDecompositionJudge(judge_runner=runner, criterion="Quality")
+        judge = CriteriaDecompositionJudge(CriteriaDecompositionJudgeConfig(judge_runner=runner, criterion="Quality"))
         result = await judge.agrade(_make_case(), "Four")
         self.assertAlmostEqual(result.score, 0.85)
 
@@ -237,7 +258,7 @@ class LlmAsAJudgeTests(unittest.IsolatedAsyncioTestCase):
             "scores": {"accuracy": 0.9, "clarity": 0.8},
             "reasons": {"accuracy": "correct", "clarity": "clear"},
         }))
-        judge = ChainOfAspectsJudge(judge_runner=runner, aspects=["accuracy", "clarity"])
+        judge = ChainOfAspectsJudge(ChainOfAspectsJudgeConfig(judge_runner=runner, aspects=["accuracy", "clarity"]))
         result = await judge.agrade(_make_case(), "Four")
         self.assertAlmostEqual(result.score, 0.85)
 
@@ -248,14 +269,14 @@ class LlmAsAJudgeTests(unittest.IsolatedAsyncioTestCase):
             "reasons": {"accuracy": "fine"},
             "overall": 0.75,
         }))
-        judge = ChainOfAspectsJudge(judge_runner=runner, aspects=["accuracy"])
+        judge = ChainOfAspectsJudge(ChainOfAspectsJudgeConfig(judge_runner=runner, aspects=["accuracy"]))
         result = await judge.agrade(_make_case(), "Four")
         self.assertAlmostEqual(result.score, 0.75)
 
     def test_chain_of_aspects_empty_list_raises(self) -> None:
         """Raises ValueError when aspects is empty."""
         with self.assertRaises(ValueError):
-            ChainOfAspectsJudge(judge_runner=AsyncMockRunner("x"), aspects=[])
+            ChainOfAspectsJudge(ChainOfAspectsJudgeConfig(judge_runner=AsyncMockRunner("x"), aspects=[]))
 
     # --- BranchSolveMergeJudge ---
 
@@ -265,10 +286,10 @@ class LlmAsAJudgeTests(unittest.IsolatedAsyncioTestCase):
             json.dumps({"score": 0.8, "reason": "good"}),
             json.dumps({"score": 0.6, "reason": "ok"}),
         )
-        judge = BranchSolveMergeJudge(
+        judge = BranchSolveMergeJudge(BranchSolveMergeJudgeConfig(
             judge_runner=runner,
             branches={"factual": "Is it accurate?", "clarity": "Is it clear?"},
-        )
+        ))
         result = await judge.agrade(_make_case(), "Four")
         self.assertAlmostEqual(result.score, 0.7)
 
@@ -279,11 +300,11 @@ class LlmAsAJudgeTests(unittest.IsolatedAsyncioTestCase):
             json.dumps({"score": 0.6, "reason": "branch2"}),
             json.dumps({"score": 0.75, "reason": "merged"}),
         )
-        judge = BranchSolveMergeJudge(
+        judge = BranchSolveMergeJudge(BranchSolveMergeJudgeConfig(
             judge_runner=runner,
             branches={"a": "rubric_a", "b": "rubric_b"},
             merge_strategy="llm",
-        )
+        ))
         result = await judge.agrade(_make_case(), "Four")
         self.assertAlmostEqual(result.score, 0.75)
 
@@ -296,7 +317,7 @@ class LlmAsAJudgeTests(unittest.IsolatedAsyncioTestCase):
             _json_resp(0.8),
             _json_resp(0.9),
         )
-        judge = LLMRubricJudge(judge_runner=runner, task_description="Answer questions")
+        judge = LLMRubricJudge(LLMRubricJudgeConfig(judge_runner=runner, task_description="Answer questions"))
         result1 = await judge.agrade(_make_case(), "Four")
         result2 = await judge.agrade(_make_case(), "Four")
         self.assertEqual(len(runner.calls), 3)
@@ -311,10 +332,10 @@ class LlmAsAJudgeTests(unittest.IsolatedAsyncioTestCase):
             "scores": {"accuracy": 4, "clarity": 2},
             "reasons": {"accuracy": "good", "clarity": "ok"},
         }))
-        judge = StructuredRubricJudge(
+        judge = StructuredRubricJudge(StructuredRubricJudgeConfig(
             judge_runner=runner,
             dimensions={"accuracy": {1: "bad", 2: "ok", 3: "good", 4: "great", 5: "perfect"}, "clarity": {1: "unclear", 2: "ok", 3: "clear"}},
-        )
+        ))
         result = await judge.agrade(_make_case(), "Four")
         expected = (4 / 5 + 2 / 3) / 2
         self.assertAlmostEqual(result.score, expected, places=5)
@@ -328,7 +349,7 @@ class LlmAsAJudgeTests(unittest.IsolatedAsyncioTestCase):
             json.dumps({"verified": True, "reason": "correct"}),
             json.dumps({"verified": True, "reason": "correct"}),
         )
-        judge = AtomicClaimsJudge(judge_runner=runner)
+        judge = AtomicClaimsJudge(AtomicClaimsJudgeConfig(judge_runner=runner))
         result = await judge.agrade(_make_case(), "The sky is blue. Water is wet.")
         self.assertEqual(result.score, 1.0)
         self.assertTrue(result.passed)
@@ -340,7 +361,7 @@ class LlmAsAJudgeTests(unittest.IsolatedAsyncioTestCase):
             json.dumps({"verified": True, "reason": "ok"}),
             json.dumps({"verified": False, "reason": "wrong"}),
         )
-        judge = AtomicClaimsJudge(judge_runner=runner, threshold=0.8)
+        judge = AtomicClaimsJudge(AtomicClaimsJudgeConfig(judge_runner=runner, threshold=0.8))
         result = await judge.agrade(_make_case(), "True claim. False claim.")
         self.assertAlmostEqual(result.score, 0.5)
         self.assertFalse(result.passed)
@@ -348,7 +369,7 @@ class LlmAsAJudgeTests(unittest.IsolatedAsyncioTestCase):
     async def test_atomic_claims_empty_response_scores_one(self) -> None:
         """Returns score=1.0 when no claims found in response."""
         runner = AsyncMockRunner(json.dumps({"claims": []}))
-        judge = AtomicClaimsJudge(judge_runner=runner)
+        judge = AtomicClaimsJudge(AtomicClaimsJudgeConfig(judge_runner=runner))
         result = await judge.agrade(_make_case(), "")
         self.assertEqual(result.score, 1.0)
         self.assertTrue(result.passed)
@@ -361,7 +382,7 @@ class LlmAsAJudgeTests(unittest.IsolatedAsyncioTestCase):
             json.dumps({"violated": False, "reason": "fine"}),
             json.dumps({"violated": False, "reason": "fine"}),
         )
-        judge = ConstitutionalJudge(judge_runner=runner, principles=["Be helpful.", "Be safe."])
+        judge = ConstitutionalJudge(ConstitutionalJudgeConfig(judge_runner=runner, principles=["Be helpful.", "Be safe."]))
         result = await judge.agrade(_make_case(), "Four")
         self.assertEqual(result.score, 1.0)
 
@@ -371,7 +392,9 @@ class LlmAsAJudgeTests(unittest.IsolatedAsyncioTestCase):
             json.dumps({"violated": True, "reason": "harmful"}),
             json.dumps({"violated": False, "reason": "fine"}),
         )
-        judge = ConstitutionalJudge(judge_runner=runner, principles=["Principle A", "Principle B"], threshold=1.0)
+        judge = ConstitutionalJudge(ConstitutionalJudgeConfig(
+            judge_runner=runner, principles=["Principle A", "Principle B"], threshold=1.0,
+        ))
         result = await judge.agrade(_make_case(), "Some response")
         self.assertAlmostEqual(result.score, 0.5)
         self.assertFalse(result.passed)
@@ -379,14 +402,14 @@ class LlmAsAJudgeTests(unittest.IsolatedAsyncioTestCase):
     def test_constitutional_empty_principles_raises(self) -> None:
         """Raises ValueError when principles is empty."""
         with self.assertRaises(ValueError):
-            ConstitutionalJudge(judge_runner=AsyncMockRunner("x"), principles=[])
+            ConstitutionalJudge(ConstitutionalJudgeConfig(judge_runner=AsyncMockRunner("x"), principles=[]))
 
     # --- PanelJudge ---
 
     async def test_panel_mean_aggregation(self) -> None:
         """Correctly computes mean of panel scores."""
         runners = [AsyncMockRunner(_json_resp(0.8)), AsyncMockRunner(_json_resp(0.6))]
-        judge = PanelJudge(judge_runners=runners, aggregation="mean")
+        judge = PanelJudge(PanelJudgeConfig(judge_runners=runners, aggregation="mean"))
         result = await judge.agrade(_make_case(), "Four")
         self.assertAlmostEqual(result.score, 0.7)
 
@@ -397,14 +420,14 @@ class LlmAsAJudgeTests(unittest.IsolatedAsyncioTestCase):
             AsyncMockRunner(_json_resp(0.3, False)),
             AsyncMockRunner(_json_resp(0.8, True)),
         ]
-        judge = PanelJudge(judge_runners=runners, aggregation="majority_vote", threshold=0.7)
+        judge = PanelJudge(PanelJudgeConfig(judge_runners=runners, aggregation="majority_vote", threshold=0.7))
         result = await judge.agrade(_make_case(), "Four")
         self.assertTrue(result.passed)
 
     def test_panel_requires_two_runners(self) -> None:
         """Raises ValueError when fewer than 2 runners provided."""
         with self.assertRaises(ValueError):
-            PanelJudge(judge_runners=[AsyncMockRunner("x")])
+            PanelJudge(PanelJudgeConfig(judge_runners=[AsyncMockRunner("x")]))
 
     # --- MultiAgentRubricJudge ---
 
@@ -414,7 +437,7 @@ class LlmAsAJudgeTests(unittest.IsolatedAsyncioTestCase):
             (AsyncMockRunner(json.dumps({"score": 0.9, "reason": "ok"})), "rubric1"),
             (AsyncMockRunner(json.dumps({"score": 0.7, "reason": "ok"})), "rubric2"),
         ]
-        judge = MultiAgentRubricJudge(agents=agents, weights=[2.0, 1.0])
+        judge = MultiAgentRubricJudge(MultiAgentRubricJudgeConfig(agents=agents, weights=[2.0, 1.0]))
         result = await judge.agrade(_make_case(), "Four")
         expected = (0.9 * 2 + 0.7 * 1) / 3
         self.assertAlmostEqual(result.score, expected, places=5)
@@ -422,15 +445,15 @@ class LlmAsAJudgeTests(unittest.IsolatedAsyncioTestCase):
     def test_multi_agent_rubric_requires_two_agents(self) -> None:
         """Raises ValueError when fewer than 2 agents provided."""
         with self.assertRaises(ValueError):
-            MultiAgentRubricJudge(agents=[(AsyncMockRunner("x"), "r1")])
+            MultiAgentRubricJudge(MultiAgentRubricJudgeConfig(agents=[(AsyncMockRunner("x"), "r1")]))
 
     def test_multi_agent_rubric_llm_merge_without_runner_raises(self) -> None:
         """Raises ValueError when merge_strategy='llm' without merge_runner."""
         with self.assertRaises(ValueError):
-            MultiAgentRubricJudge(
+            MultiAgentRubricJudge(MultiAgentRubricJudgeConfig(
                 agents=[(AsyncMockRunner("x"), "r1"), (AsyncMockRunner("x"), "r2")],
                 merge_strategy="llm",
-            )
+            ))
 
     # --- MultiAgentDebateJudge ---
 
@@ -446,33 +469,31 @@ class LlmAsAJudgeTests(unittest.IsolatedAsyncioTestCase):
                 json.dumps({"score": 0.8, "passed": True, "reason": "revised"}),
             ),
         ]
-        judge = MultiAgentDebateJudge(judge_runners=runners, debate_rounds=1, threshold=0.7)
+        judge = MultiAgentDebateJudge(MultiAgentDebateJudgeConfig(judge_runners=runners, debate_rounds=1, threshold=0.7))
         result = await judge.agrade(_make_case(), "Four")
         self.assertTrue(result.passed)
 
     def test_debate_requires_two_runners(self) -> None:
         """Raises ValueError when fewer than 2 runners provided."""
         with self.assertRaises(ValueError):
-            MultiAgentDebateJudge(judge_runners=[AsyncMockRunner("x")])
+            MultiAgentDebateJudge(MultiAgentDebateJudgeConfig(judge_runners=[AsyncMockRunner("x")]))
 
     def test_debate_requires_positive_rounds(self) -> None:
         """Raises ValueError when debate_rounds < 1."""
         with self.assertRaises(ValueError):
-            MultiAgentDebateJudge(
+            MultiAgentDebateJudge(MultiAgentDebateJudgeConfig(
                 judge_runners=[AsyncMockRunner("x"), AsyncMockRunner("y")],
                 debate_rounds=0,
-            )
+            ))
 
     # --- MetaJudge ---
 
     async def test_meta_judge_quality_ok_passes_through(self) -> None:
         """Returns primary result unchanged when meta judge approves."""
-        from vidbyte.evals.llm_as_a_judge.binary import BinaryJudge as _B
-
         primary_runner = AsyncMockRunner(_json_resp(0.8))
         meta_runner = AsyncMockRunner(json.dumps({"quality_ok": True, "quality_reason": "coherent"}))
-        primary = BinaryJudge(judge_runner=primary_runner, criterion="Is it correct?")
-        judge = MetaJudge(primary_judge=primary, meta_runner=meta_runner)
+        primary = BinaryJudge(BinaryJudgeConfig(judge_runner=primary_runner, criterion="Is it correct?"))
+        judge = MetaJudge(MetaJudgeConfig(primary_judge=primary, meta_runner=meta_runner))
         result = await judge.agrade(_make_case(), "Four")
         self.assertTrue(result.passed)
 
@@ -480,8 +501,8 @@ class LlmAsAJudgeTests(unittest.IsolatedAsyncioTestCase):
         """Returns score=0.0 when meta flags primary and filter_on_fail=True."""
         primary_runner = AsyncMockRunner(_json_resp(0.9, True))
         meta_runner = AsyncMockRunner(json.dumps({"quality_ok": False, "quality_reason": "incoherent"}))
-        primary = ChainOfThoughtJudge(judge_runner=primary_runner)
-        judge = MetaJudge(primary_judge=primary, meta_runner=meta_runner, filter_on_fail=True)
+        primary = ChainOfThoughtJudge(ChainOfThoughtJudgeConfig(judge_runner=primary_runner))
+        judge = MetaJudge(MetaJudgeConfig(primary_judge=primary, meta_runner=meta_runner, filter_on_fail=True))
         result = await judge.agrade(_make_case(), "Four")
         self.assertEqual(result.score, 0.0)
         self.assertFalse(result.passed)
@@ -490,8 +511,8 @@ class LlmAsAJudgeTests(unittest.IsolatedAsyncioTestCase):
         """Preserves primary score but flags reason when filter_on_fail=False."""
         primary_runner = AsyncMockRunner(_json_resp(0.9, True))
         meta_runner = AsyncMockRunner(json.dumps({"quality_ok": False, "quality_reason": "incoherent"}))
-        primary = ChainOfThoughtJudge(judge_runner=primary_runner)
-        judge = MetaJudge(primary_judge=primary, meta_runner=meta_runner, filter_on_fail=False)
+        primary = ChainOfThoughtJudge(ChainOfThoughtJudgeConfig(judge_runner=primary_runner))
+        judge = MetaJudge(MetaJudgeConfig(primary_judge=primary, meta_runner=meta_runner, filter_on_fail=False))
         result = await judge.agrade(_make_case(), "Four")
         self.assertAlmostEqual(result.score, 0.9)
         self.assertIn("[Meta-judge flagged]", result.reason)
@@ -504,7 +525,7 @@ class LlmAsAJudgeTests(unittest.IsolatedAsyncioTestCase):
             AsyncMockRunner(json.dumps({"score": 0.9, "passed": True, "confidence": 0.8, "reason": "sure"})),
             AsyncMockRunner(json.dumps({"score": 0.5, "passed": False, "confidence": 0.2, "reason": "uncertain"})),
         ]
-        judge = PeerReviewJudge(judge_runners=runners, confidence_threshold=0.0, threshold=0.7)
+        judge = PeerReviewJudge(PeerReviewJudgeConfig(judge_runners=runners, confidence_threshold=0.0, threshold=0.7))
         result = await judge.agrade(_make_case(), "Four")
         expected = (0.9 * 0.8 + 0.5 * 0.2) / (0.8 + 0.2)
         self.assertAlmostEqual(result.score, expected, places=5)
@@ -515,52 +536,52 @@ class LlmAsAJudgeTests(unittest.IsolatedAsyncioTestCase):
             AsyncMockRunner(json.dumps({"score": 0.8, "passed": True, "confidence": 0.3, "reason": "ok"})),
             AsyncMockRunner(json.dumps({"score": 0.6, "passed": False, "confidence": 0.2, "reason": "ok"})),
         ]
-        judge = PeerReviewJudge(judge_runners=runners, confidence_threshold=0.9, threshold=0.7)
+        judge = PeerReviewJudge(PeerReviewJudgeConfig(judge_runners=runners, confidence_threshold=0.9, threshold=0.7))
         result = await judge.agrade(_make_case(), "Four")
         self.assertGreater(result.score, 0.0)
 
     def test_peer_review_requires_two_runners(self) -> None:
         """Raises ValueError when fewer than 2 runners provided."""
         with self.assertRaises(ValueError):
-            PeerReviewJudge(judge_runners=[AsyncMockRunner("x")])
+            PeerReviewJudge(PeerReviewJudgeConfig(judge_runners=[AsyncMockRunner("x")]))
 
     # --- MixtureOfPromptsJudge ---
 
     async def test_mop_router_fn_selects_key(self) -> None:
         """Uses router_fn to select correct prompt template."""
         runner = AsyncMockRunner(_json_resp(0.9))
-        judge = MixtureOfPromptsJudge(
+        judge = MixtureOfPromptsJudge(MixtureOfPromptsJudgeConfig(
             judge_runner=runner,
             prompt_library={"qa": "QA template: {prompt}\n{actual}\n{expected}", "creative": "Creative: {prompt}\n{actual}\n{expected}"},
             router_fn=lambda p: "qa",
-        )
+        ))
         result = await judge.agrade(_make_case(), "Four")
         self.assertAlmostEqual(result.score, 0.9)
 
     async def test_mop_fallback_key_used_when_no_router(self) -> None:
         """Uses fallback_key when no router_fn or router_runner provided."""
         runner = AsyncMockRunner(_json_resp(0.7))
-        judge = MixtureOfPromptsJudge(
+        judge = MixtureOfPromptsJudge(MixtureOfPromptsJudgeConfig(
             judge_runner=runner,
             prompt_library={"qa": "QA: {prompt}\n{actual}\n{expected}"},
             fallback_key="qa",
-        )
+        ))
         result = await judge.agrade(_make_case(), "Four")
         self.assertAlmostEqual(result.score, 0.7)
 
     def test_mop_empty_library_raises(self) -> None:
         """Raises ValueError when prompt_library is empty."""
         with self.assertRaises(ValueError):
-            MixtureOfPromptsJudge(judge_runner=AsyncMockRunner("x"), prompt_library={})
+            MixtureOfPromptsJudge(MixtureOfPromptsJudgeConfig(judge_runner=AsyncMockRunner("x"), prompt_library={}))
 
     async def test_mop_missing_key_no_fallback_raises(self) -> None:
         """Raises KeyError when selected key missing and no fallback_key."""
         runner = AsyncMockRunner(_json_resp(0.5))
-        judge = MixtureOfPromptsJudge(
+        judge = MixtureOfPromptsJudge(MixtureOfPromptsJudgeConfig(
             judge_runner=runner,
             prompt_library={"qa": "{prompt}\n{actual}\n{expected}"},
             router_fn=lambda p: "nonexistent",
-        )
+        ))
         with self.assertRaises(KeyError):
             await judge.agrade(_make_case(), "Four")
 
@@ -569,7 +590,7 @@ class LlmAsAJudgeTests(unittest.IsolatedAsyncioTestCase):
     async def test_self_eval_third_person_framing(self) -> None:
         """Uses third-person framing header and grades correctly."""
         runner = AsyncMockRunner(_json_resp(0.85))
-        judge = SelfEvalJudge(judge_runner=runner, framing="third_person")
+        judge = SelfEvalJudge(SelfEvalJudgeConfig(judge_runner=runner, framing="third_person"))
         result = await judge.agrade(_make_case(), "Four")
         self.assertAlmostEqual(result.score, 0.85)
         self.assertIn("another assistant", runner.calls[0])
@@ -577,7 +598,7 @@ class LlmAsAJudgeTests(unittest.IsolatedAsyncioTestCase):
     async def test_self_eval_anonymous_framing(self) -> None:
         """Uses anonymous framing header in prompt."""
         runner = AsyncMockRunner(_json_resp(0.7, False))
-        judge = SelfEvalJudge(judge_runner=runner, framing="anonymous")
+        judge = SelfEvalJudge(SelfEvalJudgeConfig(judge_runner=runner, framing="anonymous"))
         result = await judge.agrade(_make_case(), "Four")
         self.assertIn("an AI assistant", runner.calls[0])
 

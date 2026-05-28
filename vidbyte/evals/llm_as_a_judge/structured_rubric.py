@@ -21,20 +21,12 @@ from typing import ClassVar
 from vidbyte.evals.base import BaseGrader
 from vidbyte.evals.llm_as_a_judge._utils import invoke_runner, parse_json_block
 from vidbyte.evals.types import EvalCase, GraderResult
+from vidbyte.lib.dataclasses.llm_judge import StructuredRubricJudgeConfig
 from vidbyte.lib.enums.prompts import Prompt
+from vidbyte.lib.eval.template_registry import TemplatesRegistry
 from vidbyte.prompts.catalog import Prompts
 
-_DEFAULT_TEMPLATE = (
-    "You are an objective judge. Evaluate the model's response across multiple dimensions "
-    "using the rubric below.\n\n"
-    "{rubric_block}\n\n"
-    "Score each dimension using the level numbers defined in the rubric.\n"
-    "Output only a valid JSON object:\n"
-    "{{\"scores\": {{\"dimension_name\": integer_level}}, \"reasons\": {{\"dimension_name\": \"explanation\"}}}}\n\n"
-    "Task Prompt:\n{prompt}\n\n"
-    "Model Response:\n{actual}\n\n"
-    "Expected Output:\n{expected}"
-)
+_registry = TemplatesRegistry()
 
 
 class StructuredRubricJudge(BaseGrader):
@@ -42,18 +34,27 @@ class StructuredRubricJudge(BaseGrader):
 
     name: ClassVar[str] = "structured_rubric"
 
-    def __init__(self, *, judge_runner: object, dimensions: dict[str, dict[int, str]], weights: dict[str, float] | None = None, threshold: float = 0.7, system_prompt: str | None = None, prompt_template: str | None = None) -> None:
-        # Stores dimension-level anchors, optional weights, pass threshold, and template overrides.
-        self.judge_runner = judge_runner
-        self.dimensions = dimensions
-        self.weights = weights
-        self.threshold = threshold
-        self.system_prompt = system_prompt
-        self.prompt_template = prompt_template
+    def __init__(self, config: StructuredRubricJudgeConfig) -> None:
+        # Unpacks config fields for dimension-level anchors, optional weights, threshold, and overrides.
+        self.judge_runner = config.judge_runner
+        self.dimensions = config.dimensions
+        self.weights = config.weights
+        self.threshold = config.threshold
+        self.system_prompt = config.system_prompt
+        self.prompt_template = config.prompt_template
+
+    def _resolve_template(self, slot: str, override: str | None, prompt_key: Prompt) -> str:
+        # Returns override, SDK catalog prompt, or registry default in priority order.
+        if override:
+            return override
+        try:
+            return Prompts().get(prompt_key)
+        except Exception:
+            return _registry.get(slot)
 
     async def agrade(self, case: EvalCase, actual: str) -> GraderResult:
         # Serialises rubric block, formats prompt, invokes judge, parses and normalises scores.
-        template = self._resolve_template()
+        template = self._resolve_template("structured_rubric.user", self.prompt_template, Prompt.LLM_AS_A_JUDGE_STRUCTURED_RUBRIC_USER)
         rubric_block = self._serialise_rubric()
         prompt_text = template.format(
             rubric_block=rubric_block,
@@ -63,15 +64,6 @@ class StructuredRubricJudge(BaseGrader):
         )
         raw = await invoke_runner(self.judge_runner, prompt_text)
         return self._parse_response(raw)
-
-    def _resolve_template(self) -> str:
-        # Returns user-supplied template, SDK catalog prompt, or inline default in that order.
-        if self.prompt_template:
-            return self.prompt_template
-        try:
-            return Prompts().get(Prompt.LLM_AS_A_JUDGE_STRUCTURED_RUBRIC_USER)
-        except Exception:
-            return _DEFAULT_TEMPLATE
 
     def _serialise_rubric(self) -> str:
         # Formats each dimension with numbered level descriptions as a readable rubric block.

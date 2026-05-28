@@ -99,7 +99,7 @@ class FewShotJudgeConfig:
         _validate_runner(self.judge_runner, "judge_runner")
         if not self.examples:
             raise ValueError("'examples' must be a non-empty sequence of example dicts.")
-        required_keys = {"prompt", "response", "score"}
+        required_keys = {"prompt", "actual", "expected", "score", "reason"}
         for i, ex in enumerate(self.examples):
             if not isinstance(ex, dict):
                 raise ValueError(f"'examples[{i}]' must be a dict, got {type(ex).__name__}.")
@@ -107,7 +107,7 @@ class FewShotJudgeConfig:
             if missing:
                 raise ValueError(
                     f"'examples[{i}]' is missing required keys: {sorted(missing)}. "
-                    "Each example must have 'prompt', 'response', and 'score'."
+                    "Each example must have 'prompt', 'actual', 'expected', 'score', and 'reason'."
                 )
             try:
                 score = float(ex["score"])

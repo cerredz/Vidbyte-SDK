@@ -21,22 +21,12 @@ from typing import ClassVar
 from vidbyte.evals.base import BaseGrader
 from vidbyte.evals.llm_as_a_judge._utils import invoke_runner, parse_json_block
 from vidbyte.evals.types import EvalCase, GraderResult
+from vidbyte.lib.dataclasses.llm_judge import MetaJudgeConfig
 from vidbyte.lib.enums.prompts import Prompt
+from vidbyte.lib.eval.template_registry import TemplatesRegistry
 from vidbyte.prompts.catalog import Prompts
 
-_DEFAULT_META_TEMPLATE = (
-    "You are a meta-judge evaluating the quality of another judge's evaluation. "
-    "Check whether the verdict below is coherent, whether the reason is consistent with the score, "
-    "and whether important criteria were missed.\n\n"
-    "Primary Judge's Verdict:\n"
-    "Score: {primary_score}\n"
-    "Reason: {primary_reason}\n\n"
-    "Task Prompt:\n{prompt}\n\n"
-    "Model Response:\n{actual}\n\n"
-    "Expected Output:\n{expected}\n\n"
-    "Output only a valid JSON object:\n"
-    "{{\"quality_ok\": true or false, \"quality_reason\": \"explanation of why the verdict is or is not high quality\"}}"
-)
+_registry = TemplatesRegistry()
 
 
 class MetaJudge(BaseGrader):
@@ -44,18 +34,27 @@ class MetaJudge(BaseGrader):
 
     name: ClassVar[str] = "meta_judge"
 
-    def __init__(self, *, primary_judge: BaseGrader, meta_runner: object, filter_on_fail: bool = True, system_prompt: str | None = None, meta_prompt_template: str | None = None) -> None:
-        # Stores the primary judge instance, meta runner, and failure-handling policy.
-        self.primary_judge = primary_judge
-        self.meta_runner = meta_runner
-        self.filter_on_fail = filter_on_fail
-        self.system_prompt = system_prompt
-        self.meta_prompt_template = meta_prompt_template
+    def __init__(self, config: MetaJudgeConfig) -> None:
+        # Unpacks config fields for primary judge instance, meta runner, and failure policy.
+        self.primary_judge = config.primary_judge
+        self.meta_runner = config.meta_runner
+        self.filter_on_fail = config.filter_on_fail
+        self.system_prompt = config.system_prompt
+        self.meta_prompt_template = config.meta_prompt_template
+
+    def _resolve_template(self, slot: str, override: str | None, prompt_key: Prompt) -> str:
+        # Returns override, SDK catalog prompt, or registry default in priority order.
+        if override:
+            return override
+        try:
+            return Prompts().get(prompt_key)
+        except Exception:
+            return _registry.get(slot)
 
     async def agrade(self, case: EvalCase, actual: str) -> GraderResult:
         # Runs primary judge, then meta QA check; applies filter_on_fail policy on bad verdicts.
         primary_result = await self.primary_judge.agrade(case, actual)
-        meta_template = self._resolve_meta_template()
+        meta_template = self._resolve_template("meta_judge.user", self.meta_prompt_template, Prompt.LLM_AS_A_JUDGE_META_JUDGE_USER)
         meta_prompt = meta_template.format(
             primary_score=primary_result.score,
             primary_reason=primary_result.reason,
@@ -65,15 +64,6 @@ class MetaJudge(BaseGrader):
         )
         raw = await invoke_runner(self.meta_runner, meta_prompt)
         return self._apply_meta_verdict(raw, primary_result)
-
-    def _resolve_meta_template(self) -> str:
-        # Returns user-supplied meta template, SDK catalog prompt, or inline default.
-        if self.meta_prompt_template:
-            return self.meta_prompt_template
-        try:
-            return Prompts().get(Prompt.LLM_AS_A_JUDGE_META_JUDGE_USER)
-        except Exception:
-            return _DEFAULT_META_TEMPLATE
 
     def _apply_meta_verdict(self, raw: str, primary_result: GraderResult) -> GraderResult:
         # Parses meta response and returns filtered/flagged/passed-through result.

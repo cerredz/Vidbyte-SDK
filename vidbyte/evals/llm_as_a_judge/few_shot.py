@@ -20,24 +20,12 @@ from typing import ClassVar
 from vidbyte.evals.base import BaseGrader
 from vidbyte.evals.llm_as_a_judge._utils import invoke_runner, parse_json_block
 from vidbyte.evals.types import EvalCase, GraderResult
+from vidbyte.lib.dataclasses.llm_judge import FewShotJudgeConfig
 from vidbyte.lib.enums.prompts import Prompt
+from vidbyte.lib.eval.template_registry import TemplatesRegistry
 from vidbyte.prompts.catalog import Prompts
 
-_REQUIRED_KEYS = {"prompt", "actual", "expected", "score", "reason"}
-
-_DEFAULT_TEMPLATE = (
-    "You are an objective judge evaluating model responses. "
-    "Study the examples below to calibrate your scoring scale, then evaluate the final response.\n\n"
-    "--- CALIBRATION EXAMPLES ---\n"
-    "{examples_block}\n"
-    "--- END EXAMPLES ---\n\n"
-    "Now evaluate the following response on a scale from 0.0 to 1.0.\n"
-    "Output only a valid JSON object:\n"
-    "{{\"score\": float, \"passed\": boolean, \"reason\": \"explanation\"}}\n\n"
-    "Task Prompt:\n{prompt}\n\n"
-    "Model Response:\n{actual}\n\n"
-    "Expected Output:\n{expected}"
-)
+_registry = TemplatesRegistry()
 
 
 class FewShotJudge(BaseGrader):
@@ -45,22 +33,25 @@ class FewShotJudge(BaseGrader):
 
     name: ClassVar[str] = "few_shot"
 
-    def __init__(self, *, judge_runner: object, examples: list[dict], system_prompt: str | None = None, prompt_template: str | None = None) -> None:
-        # Validates examples list and stores runner and optional prompt overrides.
-        if not examples:
-            raise ValueError("FewShotJudge requires at least one example.")
-        for i, ex in enumerate(examples):
-            missing = _REQUIRED_KEYS - set(ex.keys())
-            if missing:
-                raise ValueError(f"Example {i} is missing required keys: {missing}")
-        self.judge_runner = judge_runner
-        self.examples = examples
-        self.system_prompt = system_prompt
-        self.prompt_template = prompt_template
+    def __init__(self, config: FewShotJudgeConfig) -> None:
+        # Unpacks config fields for examples list, runner, and optional prompt overrides.
+        self.judge_runner = config.judge_runner
+        self.examples = config.examples
+        self.system_prompt = config.system_prompt
+        self.prompt_template = config.prompt_template
+
+    def _resolve_template(self, slot: str, override: str | None, prompt_key: Prompt) -> str:
+        # Returns override, SDK catalog prompt, or registry default in priority order.
+        if override:
+            return override
+        try:
+            return Prompts().get(prompt_key)
+        except Exception:
+            return _registry.get(slot)
 
     async def agrade(self, case: EvalCase, actual: str) -> GraderResult:
         # Serialises examples, formats prompt with examples block, invokes judge, parses JSON.
-        template = self._resolve_template()
+        template = self._resolve_template("few_shot.user", self.prompt_template, Prompt.LLM_AS_A_JUDGE_FEW_SHOT_USER)
         examples_block = self._serialise_examples()
         prompt_text = template.format(
             examples_block=examples_block,
@@ -70,15 +61,6 @@ class FewShotJudge(BaseGrader):
         )
         raw = await invoke_runner(self.judge_runner, prompt_text)
         return self._parse_response(raw)
-
-    def _resolve_template(self) -> str:
-        # Returns user-supplied template, SDK catalog prompt, or inline default in that order.
-        if self.prompt_template:
-            return self.prompt_template
-        try:
-            return Prompts().get(Prompt.LLM_AS_A_JUDGE_FEW_SHOT_USER)
-        except Exception:
-            return _DEFAULT_TEMPLATE
 
     def _serialise_examples(self) -> str:
         # Formats each example dict into a numbered readable block for the prompt.

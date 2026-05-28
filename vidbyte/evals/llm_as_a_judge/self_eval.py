@@ -20,23 +20,17 @@ from typing import ClassVar, Literal
 from vidbyte.evals.base import BaseGrader
 from vidbyte.evals.llm_as_a_judge._utils import invoke_runner, parse_json_block
 from vidbyte.evals.types import EvalCase, GraderResult
+from vidbyte.lib.dataclasses.llm_judge import SelfEvalJudgeConfig
 from vidbyte.lib.enums.prompts import Prompt
+from vidbyte.lib.eval.template_registry import TemplatesRegistry
 from vidbyte.prompts.catalog import Prompts
+
+_registry = TemplatesRegistry()
 
 _FRAMING_HEADERS: dict[str, str] = {
     "third_person": "another assistant's response",
     "anonymous": "an AI assistant's response",
 }
-
-_DEFAULT_TEMPLATE = (
-    "You are an objective judge evaluating {framing_header}.\n\n"
-    "Score the response on a scale from 0.0 to 1.0 based on accuracy, completeness, and clarity.\n"
-    "Output only a valid JSON object:\n"
-    "{{\"score\": float, \"passed\": boolean, \"reason\": \"explanation\"}}\n\n"
-    "Task Prompt:\n{prompt}\n\n"
-    "Response to evaluate:\n{actual}\n\n"
-    "Expected Output:\n{expected}"
-)
 
 
 class SelfEvalJudge(BaseGrader):
@@ -44,16 +38,25 @@ class SelfEvalJudge(BaseGrader):
 
     name: ClassVar[str] = "self_eval"
 
-    def __init__(self, *, judge_runner: object, framing: Literal["third_person", "anonymous"] = "third_person", system_prompt: str | None = None, prompt_template: str | None = None) -> None:
-        # Stores the runner and framing mode used to reduce self-preference bias.
-        self.judge_runner = judge_runner
-        self.framing = framing
-        self.system_prompt = system_prompt
-        self.prompt_template = prompt_template
+    def __init__(self, config: SelfEvalJudgeConfig) -> None:
+        # Unpacks config fields for runner, framing mode, and optional template overrides.
+        self.judge_runner = config.judge_runner
+        self.framing = config.framing
+        self.system_prompt = config.system_prompt
+        self.prompt_template = config.prompt_template
+
+    def _resolve_template(self, slot: str, override: str | None, prompt_key: Prompt) -> str:
+        # Returns override, SDK catalog prompt, or registry default in priority order.
+        if override:
+            return override
+        try:
+            return Prompts().get(prompt_key)
+        except Exception:
+            return _registry.get(slot)
 
     async def agrade(self, case: EvalCase, actual: str) -> GraderResult:
         # Selects framing header, formats prompt, invokes runner, parses JSON score.
-        template = self._resolve_template()
+        template = self._resolve_template("self_eval.user", self.prompt_template, Prompt.LLM_AS_A_JUDGE_SELF_EVAL_USER)
         framing_header = _FRAMING_HEADERS.get(self.framing, _FRAMING_HEADERS["third_person"])
         prompt_text = template.format(
             framing_header=framing_header,
@@ -63,15 +66,6 @@ class SelfEvalJudge(BaseGrader):
         )
         raw = await invoke_runner(self.judge_runner, prompt_text)
         return self._parse_response(raw)
-
-    def _resolve_template(self) -> str:
-        # Returns user-supplied template, SDK catalog prompt, or inline default in that order.
-        if self.prompt_template:
-            return self.prompt_template
-        try:
-            return Prompts().get(Prompt.LLM_AS_A_JUDGE_SELF_EVAL_USER)
-        except Exception:
-            return _DEFAULT_TEMPLATE
 
     def _parse_response(self, text: str) -> GraderResult:
         # Parses JSON score/passed/reason from the judge response.

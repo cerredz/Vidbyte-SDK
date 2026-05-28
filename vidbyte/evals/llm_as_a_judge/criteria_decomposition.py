@@ -20,26 +20,12 @@ from typing import ClassVar
 from vidbyte.evals.base import BaseGrader
 from vidbyte.evals.llm_as_a_judge._utils import invoke_runner, parse_json_block
 from vidbyte.evals.types import EvalCase, GraderResult
+from vidbyte.lib.dataclasses.llm_judge import CriteriaDecompositionJudgeConfig
 from vidbyte.lib.enums.prompts import Prompt
+from vidbyte.lib.eval.template_registry import TemplatesRegistry
 from vidbyte.prompts.catalog import Prompts
 
-_DEFAULT_DECOMPOSE_TEMPLATE = (
-    "You are a careful evaluator. Break the following evaluation criterion into exactly "
-    "{num_sub_criteria} specific, non-overlapping sub-questions that can each be answered yes or no.\n\n"
-    "Criterion: {criterion}\n\n"
-    "Output a numbered list of sub-questions only. No other text."
-)
-
-_DEFAULT_EVAL_TEMPLATE = (
-    "You are an objective judge. Evaluate a model's response by reasoning through each "
-    "sub-question below, then produce a final score.\n\n"
-    "Sub-questions:\n{checklist}\n\n"
-    "Output only a valid JSON object:\n"
-    "{{\"score\": float, \"passed\": boolean, \"reason\": \"brief explanation referencing the sub-questions\"}}\n\n"
-    "Task Prompt:\n{prompt}\n\n"
-    "Model Response:\n{actual}\n\n"
-    "Expected Output:\n{expected}"
-)
+_registry = TemplatesRegistry()
 
 
 class CriteriaDecompositionJudge(BaseGrader):
@@ -47,19 +33,32 @@ class CriteriaDecompositionJudge(BaseGrader):
 
     name: ClassVar[str] = "criteria_decomposition"
 
-    def __init__(self, *, judge_runner: object, criterion: str, num_sub_criteria: int = 4, system_prompt: str | None = None, decomposition_prompt_template: str | None = None, eval_prompt_template: str | None = None) -> None:
-        # Stores criterion, sub-criteria count, runner, and optional template overrides.
-        self.judge_runner = judge_runner
-        self.criterion = criterion
-        self.num_sub_criteria = num_sub_criteria
-        self.system_prompt = system_prompt
-        self.decomposition_prompt_template = decomposition_prompt_template
-        self.eval_prompt_template = eval_prompt_template
+    def __init__(self, config: CriteriaDecompositionJudgeConfig) -> None:
+        # Unpacks config fields for criterion, sub-criteria count, runner, and template overrides.
+        self.judge_runner = config.judge_runner
+        self.criterion = config.criterion
+        self.num_sub_criteria = config.num_sub_criteria
+        self.system_prompt = config.system_prompt
+        self.decomposition_prompt_template = config.decomposition_prompt_template
+        self.eval_prompt_template = config.eval_prompt_template
+
+    def _resolve_template(self, slot: str, override: str | None, prompt_key: Prompt) -> str:
+        # Returns override, SDK catalog prompt, or registry default in priority order.
+        if override:
+            return override
+        try:
+            return Prompts().get(prompt_key)
+        except Exception:
+            return _registry.get(slot)
 
     async def agrade(self, case: EvalCase, actual: str) -> GraderResult:
         # Decomposes criterion into checklist, then evaluates response against checklist.
         checklist = await self._decompose_criterion()
-        eval_template = self._resolve_eval_template()
+        eval_template = self._resolve_template(
+            "criteria_decomposition.eval",
+            self.eval_prompt_template,
+            Prompt.LLM_AS_A_JUDGE_CRITERIA_DECOMPOSITION_EVAL,
+        )
         eval_prompt = eval_template.format(
             checklist=checklist,
             prompt=case.prompt,
@@ -69,27 +68,13 @@ class CriteriaDecompositionJudge(BaseGrader):
         raw = await invoke_runner(self.judge_runner, eval_prompt)
         return self._parse_response(raw)
 
-    def _resolve_decompose_template(self) -> str:
-        # Returns user-supplied decomposition template, SDK catalog prompt, or inline default.
-        if self.decomposition_prompt_template:
-            return self.decomposition_prompt_template
-        try:
-            return Prompts().get(Prompt.LLM_AS_A_JUDGE_CRITERIA_DECOMPOSITION_DECOMPOSE)
-        except Exception:
-            return _DEFAULT_DECOMPOSE_TEMPLATE
-
-    def _resolve_eval_template(self) -> str:
-        # Returns user-supplied eval template, SDK catalog prompt, or inline default.
-        if self.eval_prompt_template:
-            return self.eval_prompt_template
-        try:
-            return Prompts().get(Prompt.LLM_AS_A_JUDGE_CRITERIA_DECOMPOSITION_EVAL)
-        except Exception:
-            return _DEFAULT_EVAL_TEMPLATE
-
     async def _decompose_criterion(self) -> str:
         # Calls the judge to expand self.criterion into a numbered sub-question checklist.
-        template = self._resolve_decompose_template()
+        template = self._resolve_template(
+            "criteria_decomposition.decompose",
+            self.decomposition_prompt_template,
+            Prompt.LLM_AS_A_JUDGE_CRITERIA_DECOMPOSITION_DECOMPOSE,
+        )
         decompose_prompt = template.format(criterion=self.criterion, num_sub_criteria=self.num_sub_criteria)
         return await invoke_runner(self.judge_runner, decompose_prompt)
 

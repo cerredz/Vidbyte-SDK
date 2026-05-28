@@ -21,20 +21,12 @@ from typing import ClassVar
 from vidbyte.evals.base import BaseGrader
 from vidbyte.evals.llm_as_a_judge._utils import invoke_runner, parse_json_block
 from vidbyte.evals.types import EvalCase, GraderResult
+from vidbyte.lib.dataclasses.llm_judge import SelfReferenceJudgeConfig
 from vidbyte.lib.enums.prompts import Prompt
+from vidbyte.lib.eval.template_registry import TemplatesRegistry
 from vidbyte.prompts.catalog import Prompts
 
-_DEFAULT_GENERATION_TEMPLATE = "Answer the following question or task as completely and accurately as you can.\n\nTask:\n{prompt}"
-
-_DEFAULT_EVAL_TEMPLATE = (
-    "You are an objective judge comparing a model's response to a reference answer.\n\n"
-    "Score the model's response on a scale from 0.0 to 1.0 based on how well it matches the reference.\n"
-    "Output only a valid JSON object:\n"
-    "{{\"score\": float, \"passed\": boolean, \"reason\": \"explanation\"}}\n\n"
-    "Task Prompt:\n{prompt}\n\n"
-    "Reference Answer:\n{reference}\n\n"
-    "Model Response:\n{actual}"
-)
+_registry = TemplatesRegistry()
 
 
 class SelfReferenceJudge(BaseGrader):
@@ -42,43 +34,42 @@ class SelfReferenceJudge(BaseGrader):
 
     name: ClassVar[str] = "self_reference"
 
-    def __init__(self, *, judge_runner: object, num_self_generations: int = 1, system_prompt: str | None = None, generation_prompt_template: str | None = None, eval_prompt_template: str | None = None) -> None:
-        # Stores runner, generation count, and optional template overrides.
-        self.judge_runner = judge_runner
-        self.num_self_generations = max(1, num_self_generations)
-        self.system_prompt = system_prompt
-        self.generation_prompt_template = generation_prompt_template
-        self.eval_prompt_template = eval_prompt_template
+    def __init__(self, config: SelfReferenceJudgeConfig) -> None:
+        # Unpacks config fields for runner, generation count, and optional template overrides.
+        self.judge_runner = config.judge_runner
+        self.num_self_generations = config.num_self_generations
+        self.system_prompt = config.system_prompt
+        self.generation_prompt_template = config.generation_prompt_template
+        self.eval_prompt_template = config.eval_prompt_template
+
+    def _resolve_template(self, slot: str, override: str | None, prompt_key: Prompt) -> str:
+        # Returns override, SDK catalog prompt, or registry default in priority order.
+        if override:
+            return override
+        try:
+            return Prompts().get(prompt_key)
+        except Exception:
+            return _registry.get(slot)
 
     async def agrade(self, case: EvalCase, actual: str) -> GraderResult:
         # Generates self-answers concurrently, picks first as reference, then evaluates actual against it.
-        gen_template = self._resolve_generation_template()
+        gen_template = self._resolve_template(
+            "self_reference.generation",
+            self.generation_prompt_template,
+            Prompt.LLM_AS_A_JUDGE_SELF_REFERENCE_GENERATION,
+        )
         gen_prompt = gen_template.format(prompt=case.prompt)
         generation_calls = [invoke_runner(self.judge_runner, gen_prompt) for _ in range(self.num_self_generations)]
         generations = await asyncio.gather(*generation_calls)
         soft_reference = generations[0]
-        eval_template = self._resolve_eval_template()
+        eval_template = self._resolve_template(
+            "self_reference.eval",
+            self.eval_prompt_template,
+            Prompt.LLM_AS_A_JUDGE_SELF_REFERENCE_EVAL,
+        )
         eval_prompt = eval_template.format(prompt=case.prompt, reference=soft_reference, actual=actual)
         raw = await invoke_runner(self.judge_runner, eval_prompt)
         return self._parse_response(raw)
-
-    def _resolve_generation_template(self) -> str:
-        # Returns user-supplied generation template or inline default.
-        if self.generation_prompt_template:
-            return self.generation_prompt_template
-        try:
-            return Prompts().get(Prompt.LLM_AS_A_JUDGE_SELF_REFERENCE_GENERATION)
-        except Exception:
-            return _DEFAULT_GENERATION_TEMPLATE
-
-    def _resolve_eval_template(self) -> str:
-        # Returns user-supplied eval template or inline default.
-        if self.eval_prompt_template:
-            return self.eval_prompt_template
-        try:
-            return Prompts().get(Prompt.LLM_AS_A_JUDGE_SELF_REFERENCE_EVAL)
-        except Exception:
-            return _DEFAULT_EVAL_TEMPLATE
 
     def _parse_response(self, text: str) -> GraderResult:
         # Parses JSON score/passed/reason from the eval response.

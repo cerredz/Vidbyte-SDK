@@ -22,28 +22,12 @@ from typing import ClassVar, Literal
 from vidbyte.evals.base import BaseGrader
 from vidbyte.evals.llm_as_a_judge._utils import invoke_runner, parse_json_block
 from vidbyte.evals.types import EvalCase, GraderResult
+from vidbyte.lib.dataclasses.llm_judge import BranchSolveMergeJudgeConfig
 from vidbyte.lib.enums.prompts import Prompt
+from vidbyte.lib.eval.template_registry import TemplatesRegistry
 from vidbyte.prompts.catalog import Prompts
 
-_DEFAULT_BRANCH_TEMPLATE = (
-    "You are a specialist judge evaluating one dimension of a model's response.\n\n"
-    "Dimension: {branch_name}\n"
-    "Evaluation Criteria: {rubric}\n\n"
-    "Score this dimension from 0.0 to 1.0.\n"
-    "Output only a valid JSON object:\n"
-    "{{\"score\": float, \"reason\": \"explanation\"}}\n\n"
-    "Task Prompt:\n{prompt}\n\n"
-    "Model Response:\n{actual}\n\n"
-    "Expected Output:\n{expected}"
-)
-
-_DEFAULT_MERGE_TEMPLATE = (
-    "You are a senior judge synthesising multiple specialist evaluations into a single final score.\n\n"
-    "Specialist evaluations:\n{branch_results}\n\n"
-    "Produce a final overall score from 0.0 to 1.0, weighing the evaluations appropriately.\n"
-    "Output only a valid JSON object:\n"
-    "{{\"score\": float, \"reason\": \"synthesis of the evaluations\"}}"
-)
+_registry = TemplatesRegistry()
 
 
 class BranchSolveMergeJudge(BaseGrader):
@@ -51,15 +35,24 @@ class BranchSolveMergeJudge(BaseGrader):
 
     name: ClassVar[str] = "branch_solve_merge"
 
-    def __init__(self, *, judge_runner: object, branches: dict[str, str], branch_weights: dict[str, float] | None = None, merge_strategy: Literal["weighted_mean", "llm"] = "weighted_mean", system_prompt: str | None = None, branch_prompt_template: str | None = None, merge_prompt_template: str | None = None) -> None:
-        # Stores branches dict, optional weights, merge strategy, and template overrides.
-        self.judge_runner = judge_runner
-        self.branches = branches
-        self.branch_weights = branch_weights
-        self.merge_strategy = merge_strategy
-        self.system_prompt = system_prompt
-        self.branch_prompt_template = branch_prompt_template
-        self.merge_prompt_template = merge_prompt_template
+    def __init__(self, config: BranchSolveMergeJudgeConfig) -> None:
+        # Unpacks config fields for branches dict, optional weights, merge strategy, and template overrides.
+        self.judge_runner = config.judge_runner
+        self.branches = config.branches
+        self.branch_weights = config.branch_weights
+        self.merge_strategy = config.merge_strategy
+        self.system_prompt = config.system_prompt
+        self.branch_prompt_template = config.branch_prompt_template
+        self.merge_prompt_template = config.merge_prompt_template
+
+    def _resolve_template(self, slot: str, override: str | None, prompt_key: Prompt) -> str:
+        # Returns override, SDK catalog prompt, or registry default in priority order.
+        if override:
+            return override
+        try:
+            return Prompts().get(prompt_key)
+        except Exception:
+            return _registry.get(slot)
 
     async def agrade(self, case: EvalCase, actual: str) -> GraderResult:
         # Runs all branch evaluations concurrently then aggregates via weighted mean or LLM.
@@ -68,27 +61,14 @@ class BranchSolveMergeJudge(BaseGrader):
             return await self._llm_merge(branch_results)
         return self._weighted_mean_merge(branch_results)
 
-    def _resolve_branch_template(self) -> str:
-        # Returns user-supplied branch template, SDK catalog prompt, or inline default.
-        if self.branch_prompt_template:
-            return self.branch_prompt_template
-        try:
-            return Prompts().get(Prompt.LLM_AS_A_JUDGE_BRANCH_SOLVE_MERGE_BRANCH)
-        except Exception:
-            return _DEFAULT_BRANCH_TEMPLATE
-
-    def _resolve_merge_template(self) -> str:
-        # Returns user-supplied merge template, SDK catalog prompt, or inline default.
-        if self.merge_prompt_template:
-            return self.merge_prompt_template
-        try:
-            return Prompts().get(Prompt.LLM_AS_A_JUDGE_BRANCH_SOLVE_MERGE_MERGE)
-        except Exception:
-            return _DEFAULT_MERGE_TEMPLATE
-
     async def _run_branches(self, case: EvalCase, actual: str) -> list[dict]:
         # Formats and fires all branch prompts concurrently, returns parsed result dicts.
-        branch_template = self._resolve_branch_template()
+        branch_template = self._resolve_template(
+            "branch_solve_merge.branch",
+            self.branch_prompt_template,
+            Prompt.LLM_AS_A_JUDGE_BRANCH_SOLVE_MERGE_BRANCH,
+        )
+
         async def run_one(name: str, rubric: str) -> dict:
             prompt_text = branch_template.format(
                 branch_name=name,
@@ -103,6 +83,7 @@ class BranchSolveMergeJudge(BaseGrader):
                 return {"name": name, "score": float(parsed.get("score", 0.0)), "reason": str(parsed.get("reason", ""))}
             except (ValueError, TypeError):
                 return {"name": name, "score": 0.0, "reason": f"Parse error: {raw[:100]}"}
+
         tasks = [run_one(name, rubric) for name, rubric in self.branches.items()]
         return list(await asyncio.gather(*tasks))
 
@@ -119,7 +100,11 @@ class BranchSolveMergeJudge(BaseGrader):
 
     async def _llm_merge(self, branch_results: list[dict]) -> GraderResult:
         # Serialises branch results and invokes the judge runner for a synthesis call.
-        merge_template = self._resolve_merge_template()
+        merge_template = self._resolve_template(
+            "branch_solve_merge.merge",
+            self.merge_prompt_template,
+            Prompt.LLM_AS_A_JUDGE_BRANCH_SOLVE_MERGE_MERGE,
+        )
         results_text = json.dumps(branch_results, indent=2)
         merge_prompt = merge_template.format(branch_results=results_text)
         raw = await invoke_runner(self.judge_runner, merge_prompt)
