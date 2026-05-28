@@ -10,6 +10,7 @@ Architecture:
     - Patch/edit tools from builtins.editing.
     - Context compaction tools from builtins.context.
     - MCP discovery tools from builtins.mcp.
+    - Memory provider tools from builtins.memory.
 Relations:
     Related to vidbyte.tools.client and vidbyte.tools.registry.
 """
@@ -26,6 +27,27 @@ from vidbyte.tools.builtins.context import (
 from vidbyte.tools.builtins.context_primitives import ContextListTool, ContextRemoveTool, ContextUpsertTool
 from vidbyte.tools.builtins.editing import PatchTool
 from vidbyte.tools.builtins.mcp import AttachMcpServerTool, SearchMcpServersTool
+from vidbyte.tools.builtins.memory import (
+    CogneeAddTool,
+    CogneeCognifyTool,
+    CogneeDeleteTool,
+    CogneeSearchTool,
+    LettaAddArchivalMemoryTool,
+    LettaDeleteArchivalMemoryTool,
+    LettaGetMemoryBlockTool,
+    LettaSearchArchivalMemoryTool,
+    Mem0AddMemoryTool,
+    Mem0DeleteMemoryTool,
+    Mem0GetMemoriesTool,
+    Mem0SearchMemoryTool,
+    SupermemoryAddMemoryTool,
+    SupermemoryDeleteMemoryTool,
+    SupermemorySearchMemoryTool,
+    ZepAddMemoryTool,
+    ZepDeleteSessionTool,
+    ZepGetMemoryTool,
+    ZepSearchMemoryTool,
+)
 
 __all__ = [
     "AttachMcpServerTool",
@@ -41,4 +63,24 @@ __all__ = [
     "ProgressLog",
     "SearchMcpServersTool",
     "SemanticSearchTool",
+    # Memory providers
+    "CogneeAddTool",
+    "CogneeCognifyTool",
+    "CogneeDeleteTool",
+    "CogneeSearchTool",
+    "LettaAddArchivalMemoryTool",
+    "LettaDeleteArchivalMemoryTool",
+    "LettaGetMemoryBlockTool",
+    "LettaSearchArchivalMemoryTool",
+    "Mem0AddMemoryTool",
+    "Mem0DeleteMemoryTool",
+    "Mem0GetMemoriesTool",
+    "Mem0SearchMemoryTool",
+    "SupermemoryAddMemoryTool",
+    "SupermemoryDeleteMemoryTool",
+    "SupermemorySearchMemoryTool",
+    "ZepAddMemoryTool",
+    "ZepDeleteSessionTool",
+    "ZepGetMemoryTool",
+    "ZepSearchMemoryTool",
 ]
