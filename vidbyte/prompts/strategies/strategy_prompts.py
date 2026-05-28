@@ -1,3 +1,16 @@
+# ==============================================================================
+# CONTEXT PROTOCOL HEADER
+# Description: Defines strategy-specific prompt bundles for the Vidbyte SDK.
+# Purpose: Groups prompts by strategy family to provide clean, unified accessors for agent pipelines.
+# Architecture & Functions:
+#   - _PromptBundle: Abstract base class that retrieves prompts dynamically from catalog by family key.
+#   - PromptTemplatesPrompts: Accessor for the 'templates' prompt family.
+# Codebase Relation:
+#   - Imported by vidbyte.prompts and used by clients to fetch prompt strategies.
+# Similar Files:
+#   - vidbyte/prompts/catalog.py (supplies the prompt map)
+# ==============================================================================
+
 from __future__ import annotations
 
 from typing import ClassVar
@@ -9,6 +22,7 @@ class _PromptBundle:
     key: ClassVar[str]
 
     def export(self) -> dict[str, str]:
+        # Exports all prompt records in the bundle's family as a string dictionary.
         return dict(Prompts().family(self.key))
 
 
@@ -78,4 +92,10 @@ class PromptEngineeringPrompts(_PromptBundle):
 
 class MultiProviderAgenticGraderPrompts(_PromptBundle):
     key = "multi_provider_agentic_grader"
+
+
+class PromptTemplatesPrompts(_PromptBundle):
+    """Bundle containing prompt generation templates (intent-based, persona, specification)."""
+    key = "templates"
+
 
