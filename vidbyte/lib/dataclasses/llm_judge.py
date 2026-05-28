@@ -509,14 +509,17 @@ class PeerReviewJudgeConfig:
     prompt_template: str | None = None
 
     def __post_init__(self) -> None:
-        # Validates >= 2 runners, confidence_threshold and threshold both in (0, 1].
+        # Validates >= 2 runners, confidence_threshold in [0, 1] and threshold in (0, 1].
         if len(self.judge_runners) < 2:
             raise ValueError(
                 f"'judge_runners' must contain at least 2 runners, got {len(self.judge_runners)}."
             )
         for i, r in enumerate(self.judge_runners):
             _validate_runner(r, f"judge_runners[{i}]")
-        _validate_threshold(self.confidence_threshold, "confidence_threshold")
+        if not isinstance(self.confidence_threshold, float) or not (0.0 <= self.confidence_threshold <= 1.0):
+            raise ValueError(
+                f"'confidence_threshold' must be a float in [0.0, 1.0], got: {self.confidence_threshold!r}"
+            )
         _validate_threshold(self.threshold, "threshold")
 
 
