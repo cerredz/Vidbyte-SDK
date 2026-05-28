@@ -1,0 +1,19 @@
+{
+  "name": "Actor Runtime",
+  "description": "System prompts for abstract cognitive problem-solving actors.",
+  "key": "actor_runtime",
+  "prompts": {
+    "explorer": {
+      "path": "explorer.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/actor_runtime/explorer.md"
+    },
+    "decomposer": {
+      "path": "decomposer.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/actor_runtime/decomposer.md"
+    },
+    "evaluator": {
+      "path": "evaluator.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/actor_runtime/evaluator.md"
+    }
+  }
+}

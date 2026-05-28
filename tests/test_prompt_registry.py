@@ -37,6 +37,9 @@ class PromptCatalogTests(unittest.TestCase):
             Prompt.TEMPLATES_INTENT_BASED,
             Prompt.TEMPLATES_PERSONA,
             Prompt.TEMPLATES_SPECIFICATION,
+            Prompt.ACTOR_RUNTIME_EXPLORER,
+            Prompt.ACTOR_RUNTIME_DECOMPOSER,
+            Prompt.ACTOR_RUNTIME_EVALUATOR,
         }
 
         for key, prompt in prompts.all().items():
