@@ -20,7 +20,7 @@ from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
 from vidbyte.agents.mixins import McpAttachableMixin
-from vidbyte.agents.runtimes import LinearAgentRuntime as AgentRuntime, SearchTreeRuntimeComponent, ActorRuntimeComponent
+from vidbyte.agents.runtimes import LinearAgentRuntime as AgentRuntime, SearchTreeRuntimeComponent, PointToPointActorRuntime, BroadcastActorRuntime
 from vidbyte.agents.types import AgentCard, AgentInput, AgentMessage
 from vidbyte.context.manager import ContextManager
 from vidbyte.context.window import ContextWindow, ContextWindowAlgorithm
@@ -49,14 +49,19 @@ class ConfiguredAgentRunner:
 class BaseAgent(McpAttachableMixin):
     """Reusable actor combining a system prompt, optional strategy, runner, and tools."""
 
-    def __init__(self, *, name: str, system_prompt: str, runtime: AgentRuntimeType | str = AgentRuntimeType.LINEAR, strategy: BaseStrategy | None = None, strategies: Sequence[BaseStrategy] | None = None, runner: object | None = None, runners: Mapping[ModelModality | str, object] | None = None, tools: Sequence[object] | Tools = (), permission_policy: PermissionPolicy | None = None, max_tool_rounds: int | None = None, max_iterations: int | None = None, max_tokens: int | None = None, compaction_trigger_tokens: int | None = None, compaction_target_tokens: int | None = None, middleware: Sequence[AgentMiddleware] = (), api_key: str | None = None, provider: ModelProvider | str | None = None, model_name: str | None = None, modality: ModelModality | str = ModelModality.AUTO, temperature: float | None = None, run_id: str | None = None, runner_options: dict[str, Any] | None = None, description: str = "", capabilities: Sequence[str] = (), agent_metadata: AgentMetadata | None = None, context_items: Sequence[ContextItem] = (), context_manager: ContextManager | None = None, algorithm: ContextWindowAlgorithm | str | None = None, metadata: dict[str, Any] | None = None, tracer: type[TracerBase] | TracerBase | None = None) -> None:
+    def __init__(self, *, name: str, system_prompt: str, runtime: AgentRuntimeType | str = AgentRuntimeType.LINEAR, strategy: BaseStrategy | None = None, strategies: Sequence[BaseStrategy] | None = None, runner: object | None = None, runners: Mapping[ModelModality | str, object] | None = None, tools: Sequence[object] | Tools = (), permission_policy: PermissionPolicy | None = None, max_tool_rounds: int | None = None, max_iterations: int | None = None, max_tokens: int | None = None, compaction_trigger_tokens: int | None = None, compaction_target_tokens: int | None = None, middleware: Sequence[AgentMiddleware] = (), api_key: str | None = None, provider: ModelProvider | str | None = None, model_name: str | None = None, modality: ModelModality | str = ModelModality.AUTO, temperature: float | None = None, run_id: str | None = None, runner_options: dict[str, Any] | None = None, description: str = "", capabilities: Sequence[str] = (), agent_metadata: AgentMetadata | None = None, context_items: Sequence[ContextItem] = (), context_manager: ContextManager | None = None, algorithm: ContextWindowAlgorithm | str | None = None, metadata: dict[str, Any] | None = None, tracer: type[TracerBase] | TracerBase | None = None, dynamic_actors: bool = False, max_loop: int = 20, termination_mode: str = "coordinator", worker_model: str | None = None) -> None:
         # Initialize agent details, resolve swappable execution runtimes, and enforce fail-fast gates.
         if not name:
             raise AgentExecutionError("Agent name cannot be empty.")
         if not system_prompt:
             raise AgentExecutionError("Agent system_prompt is required.")
         self.runtime_type = AgentRuntimeType(runtime)
-        if self.runtime_type != AgentRuntimeType.LINEAR:
+        if self.runtime_type in (
+            AgentRuntimeType.MCTS_SEARCH,
+            AgentRuntimeType.ACTOR_MODEL,
+            AgentRuntimeType.ACTOR_MODEL_P2P,
+            AgentRuntimeType.ACTOR_MODEL_BROADCAST,
+        ):
             if middleware:
                 raise ConfigurationError(
                     f"Agent {name} uses non-linear runtime {self.runtime_type.value}, "
@@ -69,6 +74,10 @@ class BaseAgent(McpAttachableMixin):
                         f"Agent {name} uses non-linear runtime {self.runtime_type.value}, "
                         "which does not support in-context learning algorithms."
                     )
+        self.dynamic_actors = dynamic_actors
+        self.max_loop = max_loop
+        self.termination_mode = termination_mode
+        self.worker_model = worker_model
         self.runner_config = AgentRunnerConfig(
             api_key=api_key,
             provider=str(provider.value if isinstance(provider, ModelProvider) else provider) if provider is not None else None,
@@ -477,11 +486,27 @@ class BaseAgent(McpAttachableMixin):
         runtime_classes = {
             AgentRuntimeType.LINEAR: AgentRuntime,
             AgentRuntimeType.MCTS_SEARCH: SearchTreeRuntimeComponent,
-            AgentRuntimeType.ACTOR_MODEL: ActorRuntimeComponent,
+            AgentRuntimeType.ACTOR_MODEL: PointToPointActorRuntime,
+            AgentRuntimeType.ACTOR_MODEL_P2P: PointToPointActorRuntime,
+            AgentRuntimeType.ACTOR_MODEL_BROADCAST: BroadcastActorRuntime,
         }
         runtime_cls = runtime_classes.get(self.runtime_type)
         if not runtime_cls:
             raise ConfigurationError(f"Unknown runtime type: {self.runtime_type}")
+
+        kwargs = {}
+        if self.runtime_type in (
+            AgentRuntimeType.ACTOR_MODEL,
+            AgentRuntimeType.ACTOR_MODEL_P2P,
+            AgentRuntimeType.ACTOR_MODEL_BROADCAST,
+        ):
+            kwargs = {
+                "dynamic_actors": self.dynamic_actors,
+                "max_loop": self.max_loop,
+                "termination_mode": self.termination_mode,
+                "worker_model": self.worker_model,
+            }
+
         return runtime_cls(
             agent_name=self.name,
             system_prompt=self.system_prompt,
@@ -492,6 +517,7 @@ class BaseAgent(McpAttachableMixin):
             middleware=self.middleware,
             run_id=self.runner_config.run_id,
             algorithm=self.algorithm,
+            **kwargs,
         )
 
     def _catalog_from_agent_tools(self, tools: Sequence[object]) -> Tools:

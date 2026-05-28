@@ -8,7 +8,8 @@ Purpose:
 Architecture:
     - LinearAgentRuntime: Sequential perception-action model-tool loop.
     - SearchTreeRuntimeComponent: Branching Monte Carlo Tree Search.
-    - ActorRuntimeComponent: Asynchronous peer-to-peer actor message loop.
+    - PointToPointActorRuntime: Asynchronous point-to-point actor model runtime.
+    - BroadcastActorRuntime: Asynchronous broadcast actor model runtime.
 Relations:
     Imported by vidbyte.agents.base and the test harness suite.
 Similar Files:
@@ -19,10 +20,11 @@ from __future__ import annotations
 
 from vidbyte.agents.runtimes.linear import AgentRuntime as LinearAgentRuntime
 from vidbyte.agents.runtimes.search import SearchTreeRuntimeComponent
-from vidbyte.agents.runtimes.actor import ActorRuntimeComponent
+from vidbyte.agents.runtimes.actor.broker import PointToPointActorRuntime, BroadcastActorRuntime
 
 __all__ = [
     "LinearAgentRuntime",
     "SearchTreeRuntimeComponent",
-    "ActorRuntimeComponent",
+    "PointToPointActorRuntime",
+    "BroadcastActorRuntime",
 ]

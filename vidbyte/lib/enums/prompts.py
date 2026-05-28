@@ -1,5 +1,17 @@
-from __future__ import annotations
+"""Context Protocol Header
 
+Description:
+    Defines the Prompt enum keys for Vidbyte SDK prompt assets.
+Purpose:
+    Enables static typing and validation for static prompts loaded from
+    external JSON and Markdown files.
+Architecture:
+    - Prompt: Enum mapping prompt IDs to their package-relative paths.
+Relations:
+    Used by vidbyte.prompts.catalog.Prompts to load and cache text templates.
+"""
+
+from __future__ import annotations
 from enum import Enum
 
 
@@ -42,6 +54,12 @@ class Prompt(str, Enum):
     VMAO_SYNTHESIZER = "vmao.synthesizer"
     VMAO_VERIFIER = "vmao.verifier"
     VMAO_GAP_PLANNER = "vmao.gap_planner"
+    ACTOR_RUNTIME_PLANNER = "actor_runtime.planner"
+    ACTOR_RUNTIME_CODER = "actor_runtime.coder"
+    ACTOR_RUNTIME_REVIEWER = "actor_runtime.reviewer"
+    ACTOR_RUNTIME_GENERATOR = "actor_runtime.generator"
+    ACTOR_RUNTIME_CRITIC = "actor_runtime.critic"
+    ACTOR_RUNTIME_REASONER = "actor_runtime.reasoner"
 
 
 __all__ = [

@@ -8,7 +8,7 @@ Purpose:
 Architecture:
     - BaseAgent: Client-facing agent coordinator.
     - AgentRegistry: Local/shared memory storage registry.
-    - Swappable Runtimes: LinearAgentRuntime, SearchTreeRuntimeComponent, ActorRuntimeComponent.
+    - Swappable Runtimes: LinearAgentRuntime, SearchTreeRuntimeComponent, PointToPointActorRuntime, BroadcastActorRuntime.
 Relations:
     Imported by main client and evaluator harnesses.
 Similar Files:
@@ -24,7 +24,8 @@ from vidbyte.agents.registry import AgentRegistry
 from vidbyte.agents.runtimes import (
     LinearAgentRuntime as AgentRuntime,
     SearchTreeRuntimeComponent,
-    ActorRuntimeComponent,
+    PointToPointActorRuntime,
+    BroadcastActorRuntime,
 )
 from vidbyte.lib.dataclasses.agents import (
     AgentRunnerConfig,
@@ -54,5 +55,6 @@ __all__ = [
     "ModelModality",
     "AgentRuntime",
     "SearchTreeRuntimeComponent",
-    "ActorRuntimeComponent",
+    "PointToPointActorRuntime",
+    "BroadcastActorRuntime",
 ]

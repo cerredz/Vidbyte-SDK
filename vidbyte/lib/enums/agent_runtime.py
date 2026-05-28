@@ -6,7 +6,8 @@ Purpose:
     Allows developers to select linear or non-linear agent runtimes as standardized
     string-backed enums, supporting validation checks.
 Architecture:
-    - AgentRuntimeType: String-backed Enum class.
+    - AgentRuntimeType: String-backed Enum class containing LINEAR, MCTS_SEARCH,
+      ACTOR_MODEL (alias for P2P), ACTOR_MODEL_P2P, and ACTOR_MODEL_BROADCAST.
 Relations:
     Imported by vidbyte.lib.enums and consumed by BaseAgent.
 Similar Files:
@@ -23,3 +24,5 @@ class AgentRuntimeType(str, Enum):
     LINEAR = "linear"
     MCTS_SEARCH = "mcts_search"
     ACTOR_MODEL = "actor_model"
+    ACTOR_MODEL_P2P = "actor_model_p2p"
+    ACTOR_MODEL_BROADCAST = "actor_model_broadcast"

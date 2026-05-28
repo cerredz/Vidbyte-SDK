@@ -1,3 +1,15 @@
+"""Context Protocol Header
+
+Description:
+    Unit tests for all agent runtime execution loops (Linear and non-linear).
+Purpose:
+    Verifies correct runtime behavior, dispatch, fail-fast gating, and parameter validation.
+Architecture:
+    Unittest test suite.
+Relations:
+    Located in tests/test_agent_runtime.py. Focuses on core runtime code.
+"""
+
 from __future__ import annotations
 
 import unittest
@@ -553,7 +565,7 @@ class AgentRuntimeTests(unittest.IsolatedAsyncioTestCase):
         from vidbyte.lib.enums import AgentRuntimeType
         from vidbyte.agents.runtimes.linear import AgentRuntime as LinearAgentRuntime
         from vidbyte.agents.runtimes.search import SearchTreeRuntimeComponent
-        from vidbyte.agents.runtimes.actor import ActorRuntimeComponent
+        from vidbyte.agents.runtimes.actor.broker import PointToPointActorRuntime
 
         linear_agent = BaseAgent(name="l", system_prompt="L", runtime=AgentRuntimeType.LINEAR)
         self.assertIsInstance(linear_agent._runtime(), LinearAgentRuntime)
@@ -562,7 +574,7 @@ class AgentRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(search_agent._runtime(), SearchTreeRuntimeComponent)
 
         actor_agent = BaseAgent(name="a", system_prompt="A", runtime=AgentRuntimeType.ACTOR_MODEL)
-        self.assertIsInstance(actor_agent._runtime(), ActorRuntimeComponent)
+        self.assertIsInstance(actor_agent._runtime(), PointToPointActorRuntime)
 
 
 if __name__ == "__main__":
