@@ -1,0 +1,9 @@
+{
+  "name": "Evals",
+  "description": "Prompts used for evaluating and grading model outputs.",
+  "key": "evals",
+  "prompts": {
+    "llm_judge": "You are an objective judge assessing the accuracy of a response to a prompt. Compare the model's response against the expected output on a scale from 0.0 to 1.0. Assess whether the response is correct, partially correct, or incorrect. Output only a valid JSON object matching this structure:\n{{\n  \"score\": float,\n  \"passed\": boolean,\n  \"reason\": \"explanation of the grading decision\"\n}}\n\nTask Prompt:\n{prompt}\n\nModel Response:\n{actual}\n\nExpected Output:\n{expected}",
+    "rubric": "You are an objective judge assessing a response to a prompt across multiple dimensions. Please grade the response across the following dimensions on a scale from 0.0 to 1.0:\n{dimensions}\n\nYour evaluation must be unbiased, rigorous, and highly precise. Output only a valid JSON object matching this structure:\n{{\n  \"scores\": {{\n    \"dimension_name\": float\n  }},\n  \"reasons\": {{\n    \"dimension_name\": \"explanation\"\n  }}\n}}\n\nTask Prompt:\n{prompt}\n\nModel Response:\n{actual}\n\nExpected Output:\n{expected}"
+  }
+}
