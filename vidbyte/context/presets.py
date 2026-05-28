@@ -12,13 +12,17 @@ Relations:
     Used by vidbyte.context.window and BaseAgent.
 """
 
-from __future__ import annotations
-
-from vidbyte.context.algorithms import ContextWindowAlgorithm, ReflexionAlgorithm, ToolResultAdmission
+from vidbyte.context.algorithms import (
+    ContextWindowAlgorithm,
+    MultiProviderAgenticGraderAlgorithm,
+    ReflexionAlgorithm,
+    ToolResultAdmission,
+)
 
 
 class ContextWindowPresets:
     """Registry of SDK-provided context-window algorithms."""
+
 
     @property
     def default(self) -> ContextWindowAlgorithm:
@@ -58,6 +62,15 @@ class ContextWindowPresets:
             name="reflexion",
             reflexion=ReflexionAlgorithm(),
         )
+
+    @property
+    def multi_provider_agentic_grader(self) -> ContextWindowAlgorithm:
+        # Run queries concurrently across providers and select the best response via meta-grader.
+        return ContextWindowAlgorithm(
+            name="multi_provider_agentic_grader",
+            multi_provider_agentic_grader=MultiProviderAgenticGraderAlgorithm(),
+        )
+
 
 
 def resolve_context_window_algorithm(

@@ -1,3 +1,22 @@
+"""Context Protocol Header
+
+Description:
+    Automatic model modality detection from model name identifiers.
+Purpose:
+    Provides utility methods to automatically inspect a model name, strip provider prefixes, and resolve the execution modality (text, image, video).
+Architecture:
+    - ModalityDetector: Static helper class.
+Key Functions:
+    - is_text: Returns True if the model name maps to text.
+    - is_image: Returns True if the model name maps to image.
+    - is_video: Returns True if the model name maps to video.
+    - detect_modality: Core resolution logic mapping names to Modality enum.
+Relations:
+    Used by agents, pipelines, and runners to dynamically route execution payloads to correct provider runner adapters.
+Similar Files:
+    - vidbyte/lib/enums/model_modality.py
+"""
+
 from __future__ import annotations
 
 from dataclasses import fields
@@ -28,17 +47,27 @@ class ModalityDetector:
 
     @staticmethod
     def detect_modality(model_name: str) -> ModelModality:
-        """Resolve the execution modality for a known model name."""
+        # Resolves the execution modality for any model name by pattern lookup and slash-splitting.
         name = (model_name or "").strip().lower()
         if not name:
             return ModelModality.AUTO
         if name in _MODEL_NAME_MODALITY_MAP:
             return _MODEL_NAME_MODALITY_MAP[name]
+        
+        # Check fallback by splitting slash for prefixed models (e.g., openai/gpt-4o)
+        base_name = name
+        if "/" in name:
+            parts = name.split("/")
+            if parts[-1]:
+                base_name = parts[-1]
+                if base_name in _MODEL_NAME_MODALITY_MAP:
+                    return _MODEL_NAME_MODALITY_MAP[base_name]
+
         for pattern, modality in _SUBSTRING_MODALITY_MAP:
-            if pattern in name:
+            if pattern in name or pattern in base_name:
                 return modality
         for prefix, modality in _PREFIX_MODALITY_MAP:
-            if name.startswith(prefix):
+            if name.startswith(prefix) or base_name.startswith(prefix):
                 return modality
         return ModelModality.AUTO
 
@@ -188,6 +217,16 @@ _PREFIX_MODALITY_MAP: tuple[tuple[str, ModelModality], ...] = (
     ("glm-", ModelModality.TEXT),
     ("minimax-", ModelModality.TEXT),
     ("abab", ModelModality.TEXT),
+    ("llama-", ModelModality.TEXT),
+    ("mistral-", ModelModality.TEXT),
+    ("ministral-", ModelModality.TEXT),
+    ("qwen-", ModelModality.TEXT),
+    ("qwen", ModelModality.TEXT),
+    ("command-", ModelModality.TEXT),
+    ("sonar-", ModelModality.TEXT),
+    ("nova-", ModelModality.TEXT),
+    ("phi-", ModelModality.TEXT),
+    ("hermes-", ModelModality.TEXT),
 )
 
 

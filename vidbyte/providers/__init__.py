@@ -1,3 +1,21 @@
+"""Context Protocol Header
+
+Description:
+    Central registration and factory registry for all supported SDK model provider adapters.
+Purpose:
+    Exposes a unified ModelProviders class factory to resolve and instantiate text, image, and video adapters dynamically.
+Architecture:
+    - ModelProviders: Static factory mappings.
+Key Functions:
+    - text: Resolves text adapters.
+    - image: Resolves image adapters.
+    - video: Resolves video adapters.
+Relations:
+    Used by ModalityDetector and runner modules to obtain provider adapters for executions.
+Similar Files:
+    - vidbyte/lib/agents/modality_detector.py
+"""
+
 from __future__ import annotations
 
 from vidbyte.lib.config import ImageModelConfig, TextModelConfig, VideoModelConfig
@@ -8,6 +26,7 @@ from vidbyte.providers.client import ProvidersClient
 from vidbyte.providers.compatible import DeepSeekProvider, GLMProvider, MiniMaxProvider
 from vidbyte.providers.gemini import GeminiProvider
 from vidbyte.providers.openai import OpenAIProvider
+from vidbyte.providers.openrouter import OpenRouterProvider
 from vidbyte.providers.base import tool_spec_to_provider_schema
 from vidbyte.providers.xai import XAIProvider
 
@@ -16,7 +35,7 @@ class ModelProviders:
     """Central factory for SDK provider adapters."""
 
     @staticmethod
-    def text(config: TextModelConfig) -> OpenAIProvider | AnthropicProvider | GeminiProvider | XAIProvider | DeepSeekProvider | GLMProvider | MiniMaxProvider:
+    def text(config: TextModelConfig) -> OpenAIProvider | AnthropicProvider | GeminiProvider | XAIProvider | DeepSeekProvider | GLMProvider | MiniMaxProvider | OpenRouterProvider:
         # Return a text-capable adapter for the requested model provider.
         providers = {
             ModelProvider.OPENAI: OpenAIProvider,
@@ -26,6 +45,7 @@ class ModelProviders:
             ModelProvider.DEEPSEEK: DeepSeekProvider,
             ModelProvider.GLM: GLMProvider,
             ModelProvider.MINIMAX: MiniMaxProvider,
+            ModelProvider.OPENROUTER: OpenRouterProvider,
         }
         return ModelProviders._build_text_provider(config, providers)
 
@@ -43,14 +63,17 @@ class ModelProviders:
 
     @staticmethod
     def _build_text_provider(config: TextModelConfig, providers: dict[ModelProvider, type]):
+        # Resolve and construct the text provider adapter.
         return ModelProviders._build_provider(config.normalized_provider(), providers, capability="text", text_config=config)
 
     @staticmethod
     def _build_image_provider(config: ImageModelConfig, providers: dict[ModelProvider, type]):
+        # Resolve and construct the image provider adapter.
         return ModelProviders._build_provider(config.normalized_provider(), providers, capability="image", image_config=config)
 
     @staticmethod
     def _build_video_provider(config: VideoModelConfig, providers: dict[ModelProvider, type]):
+        # Resolve and construct the video provider adapter.
         return ModelProviders._build_provider(config.normalized_provider(), providers, capability="video", video_config=config)
 
     @staticmethod
@@ -85,6 +108,7 @@ __all__ = [
     "MiniMaxProvider",
     "ModelProviders",
     "OpenAIProvider",
+    "OpenRouterProvider",
     "ProvidersClient",
     "XAIProvider",
     "get_image_provider",
@@ -92,3 +116,4 @@ __all__ = [
     "get_video_provider",
     "tool_spec_to_provider_schema",
 ]
+

@@ -4,9 +4,11 @@ Description:
     Implements the central ContextManager abstraction for structured context items.
 Purpose:
     Provides a single developer-facing object for collecting standardized context
-    items and converting them into existing SDK context dataclasses.
+    items and converting them into existing SDK context dataclasses. Supports a
+    dict-backed registry for addressable, window-resident managed primitives.
 Architecture:
-    - ContextManager: Ordered context item collection with simple utilities.
+    - ContextManager: Ordered context item collection with registry for managed primitives.
+    - Registry methods: upsert, get_by_id, remove_by_id, render_primitives_zone.
     - Compatibility conversion from context items to StrategyContext fields.
 Relations:
     Used by BaseAgent/AgentRuntime and re-exported through vidbyte.context.
@@ -42,47 +44,90 @@ from vidbyte.context.primitives import (
 
 @dataclass(slots=True)
 class ContextManager:
-    """Ordered collection and compatibility bridge for context items."""
+    """Ordered collection and compatibility bridge for context items, with a managed primitive registry."""
 
     context_items: Sequence[ContextItem] = ()
     metadata: Mapping[str, Any] = field(default_factory=dict)
+    _registry: dict[str, ContextItem] = field(init=False, repr=False, default_factory=dict)
 
     def __post_init__(self) -> None:
+        # Converts sequences to tuples and ensures metadata is a plain dict.
         self.context_items = tuple(self.context_items)
         self.metadata = dict(self.metadata)
 
+    def upsert(self, item: ContextItem) -> "ContextManager":
+        """Add or replace a managed primitive in the registry by its primitive_id."""
+        primitive_id = getattr(item, "primitive_id", None)
+        if not primitive_id:
+            raise ValueError(
+                "upsert() requires a primitive with a non-empty primitive_id. "
+                "Use add() for unmanaged context items."
+            )
+        existing = self._registry.get(primitive_id)
+        if existing is not None and getattr(existing, "primitive_frozen", False):
+            raise ValueError(
+                f"Primitive '{primitive_id}' is frozen and cannot be overwritten. "
+                "Set primitive_frozen=False to allow updates."
+            )
+        self._registry[primitive_id] = item
+        return self
+
+    def get_by_id(self, primitive_id: str) -> ContextItem | None:
+        """Return the managed primitive with the given id, or None if not found."""
+        return self._registry.get(primitive_id)
+
+    def remove_by_id(self, primitive_id: str) -> "ContextManager":
+        """Remove the managed primitive with the given id; silently ignores missing ids."""
+        self._registry.pop(primitive_id, None)
+        return self
+
+    def clear_registry(self) -> "ContextManager":
+        """Remove all managed primitives from the registry."""
+        self._registry.clear()
+        return self
+
+    def render_primitives_zone(self) -> str:
+        """Return a formatted block of all registry primitives in insertion order."""
+        if not self._registry:
+            return ""
+        sections: list[str] = ["## Context Window Primitives"]
+        for primitive_id, item in self._registry.items():
+            header = f"### [{primitive_id}] {item.title}"
+            sections.append(f"{header}\n{item.to_context_text()}")
+        return "\n\n".join(sections)
+
     def add(self, item: ContextItem) -> "ContextManager":
-        """Append one context item and return this manager."""
+        """Append one unmanaged context item and return this manager."""
         self.context_items = (*tuple(self.context_items), item)
         return self
 
     def extend(self, items: Iterable[ContextItem]) -> "ContextManager":
-        """Append many context items and return this manager."""
+        """Append many unmanaged context items and return this manager."""
         self.context_items = (*tuple(self.context_items), *tuple(items))
         return self
 
     def remove(self, item: ContextItem) -> "ContextManager":
-        """Remove one matching context item and return this manager."""
+        """Remove one matching unmanaged context item and return this manager."""
         items = list(self.context_items)
         items.remove(item)
         self.context_items = tuple(items)
         return self
 
     def clear(self) -> "ContextManager":
-        """Remove all context items and return this manager."""
+        """Remove all unmanaged context items; does not touch the registry."""
         self.context_items = ()
         return self
 
     def items(self) -> tuple[ContextItem, ...]:
-        """Return the current context items in insertion order."""
+        """Return only the unmanaged context items in insertion order."""
         return tuple(self.context_items)
 
     def by_kind(self, kind: str) -> tuple[ContextItem, ...]:
-        """Return all context items matching a kind."""
+        """Return all unmanaged context items matching a kind."""
         return tuple(item for item in self.context_items if item.kind == kind)
 
     def to_context(self, base_context: BaseContext | None = None, **overrides: Any) -> StrategyContext:
-        """Convert managed items into an existing StrategyContext-compatible shape."""
+        """Convert unmanaged items into an existing StrategyContext-compatible shape."""
         fields = _context_fields(base_context)
         fields.update(overrides)
         items = (*tuple(fields.get("context_items", ())), *self.items())
