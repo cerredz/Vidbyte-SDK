@@ -12,7 +12,8 @@ Architecture:
     - Built-ins: AuditLogMiddleware, ModelRetryMiddleware, RuntimeLimitMiddleware,
       TokenRateLimitMiddleware, ToolPolicyMiddleware, TokenBudgetMiddleware,
       CostBudgetMiddleware, ExponentialBackoffRetryMiddleware,
-      LoopDetectionMiddleware, CircuitBreakerMiddleware, and CircuitState.
+      LoopDetectionMiddleware, CircuitBreakerMiddleware, CircuitState,
+      CanaryTripwireMiddleware, ConfusedDeputyGuardMiddleware, and HoneypotToolMiddleware.
 Relations:
     Related to vidbyte.agents.runtime and vidbyte.middleware.builtins.
 """
@@ -29,10 +30,13 @@ from vidbyte.lib.dataclasses.middleware import (
 from vidbyte.middleware.base import AgentMiddleware
 from vidbyte.middleware.builtins import (
     AuditLogMiddleware,
+    CanaryTripwireMiddleware,
     CircuitBreakerMiddleware,
     CircuitState,
+    ConfusedDeputyGuardMiddleware,
     CostBudgetMiddleware,
     ExponentialBackoffRetryMiddleware,
+    HoneypotToolMiddleware,
     LoopDetectionMiddleware,
     ModelRetryMiddleware,
     RuntimeLimitMiddleware,
@@ -45,10 +49,13 @@ from vidbyte.middleware.pipeline import MiddlewarePipeline
 __all__ = [
     "AgentMiddleware",
     "AuditLogMiddleware",
+    "CanaryTripwireMiddleware",
     "CircuitBreakerMiddleware",
     "CircuitState",
+    "ConfusedDeputyGuardMiddleware",
     "CostBudgetMiddleware",
     "ExponentialBackoffRetryMiddleware",
+    "HoneypotToolMiddleware",
     "LoopDetectionMiddleware",
     "MiddlewareAction",
     "MiddlewareContext",

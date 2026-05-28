@@ -1,0 +1,111 @@
+{
+  "name": "LLM as a Judge",
+  "description": "Prompt assets for the 19 LLM-as-a-judge evaluation strategy graders.",
+  "key": "llm_as_a_judge",
+  "prompts": {
+    "chain_of_thought_user": {
+      "path": "chain_of_thought_user.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/llm_as_a_judge/chain_of_thought_user.md"
+    },
+    "binary_user": {
+      "path": "binary_user.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/llm_as_a_judge/binary_user.md"
+    },
+    "few_shot_user": {
+      "path": "few_shot_user.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/llm_as_a_judge/few_shot_user.md"
+    },
+    "pairwise_user": {
+      "path": "pairwise_user.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/llm_as_a_judge/pairwise_user.md"
+    },
+    "self_reference_generation": {
+      "path": "self_reference_generation.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/llm_as_a_judge/self_reference_generation.md"
+    },
+    "self_reference_eval": {
+      "path": "self_reference_eval.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/llm_as_a_judge/self_reference_eval.md"
+    },
+    "criteria_decomposition_decompose": {
+      "path": "criteria_decomposition_decompose.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/llm_as_a_judge/criteria_decomposition_decompose.md"
+    },
+    "criteria_decomposition_eval": {
+      "path": "criteria_decomposition_eval.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/llm_as_a_judge/criteria_decomposition_eval.md"
+    },
+    "chain_of_aspects_user": {
+      "path": "chain_of_aspects_user.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/llm_as_a_judge/chain_of_aspects_user.md"
+    },
+    "branch_solve_merge_branch": {
+      "path": "branch_solve_merge_branch.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/llm_as_a_judge/branch_solve_merge_branch.md"
+    },
+    "branch_solve_merge_merge": {
+      "path": "branch_solve_merge_merge.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/llm_as_a_judge/branch_solve_merge_merge.md"
+    },
+    "llm_rubric_generate": {
+      "path": "llm_rubric_generate.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/llm_as_a_judge/llm_rubric_generate.md"
+    },
+    "llm_rubric_eval": {
+      "path": "llm_rubric_eval.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/llm_as_a_judge/llm_rubric_eval.md"
+    },
+    "structured_rubric_user": {
+      "path": "structured_rubric_user.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/llm_as_a_judge/structured_rubric_user.md"
+    },
+    "atomic_claims_decompose": {
+      "path": "atomic_claims_decompose.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/llm_as_a_judge/atomic_claims_decompose.md"
+    },
+    "atomic_claims_verify": {
+      "path": "atomic_claims_verify.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/llm_as_a_judge/atomic_claims_verify.md"
+    },
+    "constitutional_check": {
+      "path": "constitutional_check.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/llm_as_a_judge/constitutional_check.md"
+    },
+    "panel_user": {
+      "path": "panel_user.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/llm_as_a_judge/panel_user.md"
+    },
+    "multi_agent_rubric_agent": {
+      "path": "multi_agent_rubric_agent.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/llm_as_a_judge/multi_agent_rubric_agent.md"
+    },
+    "multi_agent_rubric_merge": {
+      "path": "multi_agent_rubric_merge.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/llm_as_a_judge/multi_agent_rubric_merge.md"
+    },
+    "multi_agent_debate_initial": {
+      "path": "multi_agent_debate_initial.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/llm_as_a_judge/multi_agent_debate_initial.md"
+    },
+    "multi_agent_debate_round": {
+      "path": "multi_agent_debate_round.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/llm_as_a_judge/multi_agent_debate_round.md"
+    },
+    "meta_judge_user": {
+      "path": "meta_judge_user.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/llm_as_a_judge/meta_judge_user.md"
+    },
+    "peer_review_user": {
+      "path": "peer_review_user.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/llm_as_a_judge/peer_review_user.md"
+    },
+    "mixture_of_prompts_router": {
+      "path": "mixture_of_prompts_router.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/llm_as_a_judge/mixture_of_prompts_router.md"
+    },
+    "self_eval_user": {
+      "path": "self_eval_user.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/llm_as_a_judge/self_eval_user.md"
+    }
+  }
+}
