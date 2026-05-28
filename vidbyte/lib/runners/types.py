@@ -37,3 +37,22 @@ class VideoModelJob:
     job_id: str
     status: str
     raw: Mapping[str, Any]
+
+
+@dataclass(frozen=True, slots=True)
+class AudioModelResponse:
+    provider: ModelProvider
+    model: str
+    audio_bytes: bytes | None
+    transcript: str | None
+    raw: Mapping[str, Any]
+    usage: Mapping[str, Any] | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class EmbeddingResponse:
+    provider: ModelProvider
+    model: str
+    embeddings: tuple[tuple[float, ...], ...]
+    raw: Mapping[str, Any]
+    usage: Mapping[str, Any] | None = None

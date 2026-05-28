@@ -30,6 +30,8 @@ class ModelProvider(str, Enum):
     GLM = "glm"
     MINIMAX = "minimax"
     OPENROUTER = "openrouter"
+    ELEVENLABS = "elevenlabs"
+    PLAYAI = "playai"
 
 
 __all__ = [
