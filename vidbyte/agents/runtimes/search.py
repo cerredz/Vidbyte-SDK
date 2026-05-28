@@ -52,7 +52,7 @@ class SearchNode:
 class SearchTreeRuntimeComponent:
     """Coordinates branching MCTS exploration and context rollbacks for agents."""
 
-    def __init__(self, *, agent_name: str, system_prompt: str, tools: Tools, permission_policy: PermissionPolicy, config: AgentRuntimeConfig | None = None, tracer: TracerBase | None = None, middleware: Sequence[AgentMiddleware] = (), run_id: str | None = None, algorithm: ContextWindowAlgorithm | str | None = None) -> None:
+    def __init__(self, *, agent_name: str, system_prompt: str, tools: Tools, permission_policy: PermissionPolicy, config: AgentRuntimeConfig | None = None, tracer: TracerBase | None = None, middleware: Sequence[AgentMiddleware] = (), run_id: str | None = None, algorithm: ContextWindowAlgorithm | str | None = None, **kwargs: Any) -> None:
         # Store configuration and initialize the MCTS node registry.
         self.agent_name = agent_name
         self.system_prompt = system_prompt

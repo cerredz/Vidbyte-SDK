@@ -57,6 +57,7 @@ class BaseActorRuntime(ABC):
         max_loop: int = 20,
         termination_mode: str = "coordinator",
         worker_model: str | None = None,
+        **kwargs: Any,
     ) -> None:
         self.agent_name = agent_name
         self.system_prompt = system_prompt
