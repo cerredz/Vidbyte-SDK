@@ -54,6 +54,7 @@ class AgentRuntime:
         middleware: Sequence[AgentMiddleware] = (),
         run_id: str | None = None,
         algorithm: ContextWindowAlgorithm | str | None = None,
+        context_manager: ContextManager | None = None,
     ) -> None:
         self.agent_name = agent_name
         self.system_prompt = system_prompt
@@ -65,6 +66,7 @@ class AgentRuntime:
         self.middleware = MiddlewarePipeline(middleware)
         self.run_id = run_id
         self.algorithm = ContextWindow.resolve_algorithm(algorithm)
+        self.context_manager = context_manager
 
     def build_context(
         self,
@@ -865,14 +867,23 @@ class AgentRuntime:
         tool_schemas: Sequence[dict[str, Any]],
         messages: list[dict[str, Any]],
     ) -> dict[str, Any]:
-        """Assemble per-iteration call options with system prompt, tools, and messages."""
+        """Assemble per-iteration call options with system prompt, primitives zone, tools, and messages."""
         call_options = dict(run_options)
-        call_options.setdefault("system", context.build_context())
+        system = self._build_system_string(context)
+        call_options.setdefault("system", system)
         if tool_schemas:
             call_options.setdefault("tools", tool_schemas)
         if messages:
             call_options.setdefault("messages", tuple(messages))
         return call_options
+
+    def _build_system_string(self, context: BaseAgentContext) -> str:
+        """Assemble the system string with fixed header, primitives zone, and body in order."""
+        fixed = context.build_context_fixed()
+        primitives_zone = self.context_manager.render_primitives_zone() if self.context_manager else ""
+        body = context.build_context_body()
+        parts = [p for p in (fixed, primitives_zone, body) if p]
+        return "\n\n".join(parts)
 
     def _final_result(
         self,
@@ -974,8 +985,39 @@ class AgentRuntime:
             )
         if call.tool_name != IS_DONE_TOOL_NAME:
             visible_result = self.algorithm.model_visible_tool_result(call, result)
+            visible_result = self._apply_primitive_binding(call, visible_result)
             messages.append(dict(ToolsFormatter.format_tool_result(call, visible_result, provider)))
         return context_record, result
+
+    def _apply_primitive_binding(self, call: ToolCall, result: ToolResult) -> ToolResult:
+        """Route a successful tool result into its bound primitive and return an acknowledgment result."""
+        if self.context_manager is None or result.status.value != "success":
+            return result
+        try:
+            tool_obj = self.tools._get(call.tool_name)
+            spec = tool_obj.spec()
+        except Exception:
+            return result
+        primitive_id = getattr(spec, "binds_to_primitive", None)
+        if not primitive_id:
+            return result
+        from vidbyte.context.primitives import TextContextItem
+        new_primitive = TextContextItem(
+            primitive_id=primitive_id,
+            title=f"Tool: {call.tool_name}",
+            content=result.output,
+            source=call.tool_name,
+        )
+        try:
+            self.context_manager.upsert(new_primitive)
+        except ValueError:
+            return result
+        from vidbyte.tools.types import ToolResult as TR
+        return TR.success(
+            result.tool_name,
+            f"[Output of '{call.tool_name}' stored in primitive '{primitive_id}']",
+            metadata={**dict(result.metadata), "primitive_id": primitive_id},
+        )
 
     def _budget_stop(
         self,

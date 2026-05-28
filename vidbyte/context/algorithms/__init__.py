@@ -8,6 +8,7 @@ Purpose:
 Architecture:
     - Tool-result admission algorithms from tool_results.
     - Reflexion runtime context-window algorithm from reflexion.
+    - Multi-provider agentic grader context-window algorithm from multi_provider_agentic_grader.
 Relations:
     Used by vidbyte.context.presets and AgentRuntime.
 """
@@ -15,6 +16,7 @@ Relations:
 from __future__ import annotations
 
 from vidbyte.context.algorithms.reflexion import ReflexionAlgorithm
+from vidbyte.context.algorithms.multi_provider_agentic_grader import MultiProviderAgenticGraderAlgorithm
 from vidbyte.context.algorithms.tool_results import (
     ContextWindowAlgorithm,
     ToolResultAdmission,
@@ -22,6 +24,8 @@ from vidbyte.context.algorithms.tool_results import (
 
 __all__ = [
     "ContextWindowAlgorithm",
+    "MultiProviderAgenticGraderAlgorithm",
     "ReflexionAlgorithm",
     "ToolResultAdmission",
 ]
+

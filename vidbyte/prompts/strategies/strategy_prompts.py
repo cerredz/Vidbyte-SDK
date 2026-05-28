@@ -75,3 +75,7 @@ class ExpertPromptingPrompts(_PromptBundle):
 class PromptEngineeringPrompts(_PromptBundle):
     key = "prompt_engineering"
 
+
+class MultiProviderAgenticGraderPrompts(_PromptBundle):
+    key = "multi_provider_agentic_grader"
+
