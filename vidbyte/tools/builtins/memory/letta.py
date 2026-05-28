@@ -5,14 +5,19 @@ Description:
 Purpose:
     Lets agents insert, search, and delete archival memory passages for a
     Letta agent, and read named in-context memory blocks.
-Architecture:
-    - LettaAddArchivalMemoryTool: POST /v1/agents/{agent_id}/archival-memory
-    - LettaSearchArchivalMemoryTool: GET /v1/agents/{agent_id}/archival-memory?query=
-    - LettaDeleteArchivalMemoryTool: DELETE /v1/agents/{agent_id}/archival-memory/{id}
-    - LettaGetMemoryBlockTool: GET /v1/agents/{agent_id}/memory/block/{block_name}
-Relations:
-    Extends BaseMemoryTool from vidbyte.tools.builtins.memory.base.
-    base_url defaults to https://api.letta.com for Letta Cloud.
+Architecture & Key Functions:
+    - LettaAddArchivalMemoryTool: Inserts a text passage into Letta's long-term archival store.
+    - LettaSearchArchivalMemoryTool: Searches an agent's archival memory via query string.
+    - LettaDeleteArchivalMemoryTool: Deletes an archival passage by unique passage ID.
+    - LettaGetMemoryBlockTool: Reads named core blocks (e.g., persona, human) from agent context.
+Relation to Codebase:
+    Exposed under the vidbyte.tools.builtins namespace, enabling agents to leverage
+    dynamic stateful contexts and archival persistence during model execution.
+Similar Files:
+    - vidbyte/tools/builtins/memory/supermemory.py
+    - vidbyte/tools/builtins/memory/mem0.py
+    - vidbyte/tools/builtins/memory/zep.py
+    - vidbyte/tools/builtins/memory/cognee.py
 """
 
 from __future__ import annotations
@@ -35,9 +40,10 @@ class LettaAddArchivalMemoryTool(BaseMemoryTool):
         return ToolSpec(
             name="letta_add_archival_memory",
             description=(
-                "Insert a text passage into a Letta agent's archival memory. "
-                "Archival memory persists across sessions and can be searched later. "
-                "Requires the Letta agent_id and the text to store."
+                "Letta is a state-of-the-art stateful memory platform that equips agents with persistent archival memory and dynamic in-context blocks. "
+                "Use this tool to insert a text passage into a Letta agent's long-term archival memory store. "
+                "Archival memory acts as an infinite-horizon repository that persists across distinct conversation sessions and agent lifetimes. "
+                "The stored passage is automatically indexed via vector embeddings, making it discoverable through future semantic search queries."
             ),
             parameters=(
                 ToolParameter("agent_id", "string", "The Letta agent ID to add archival memory to."),
@@ -82,8 +88,10 @@ class LettaSearchArchivalMemoryTool(BaseMemoryTool):
         return ToolSpec(
             name="letta_search_archival_memory",
             description=(
-                "Search a Letta agent's archival memory for passages matching a query. "
-                "Returns the most relevant stored passages with their IDs."
+                "Letta is a state-of-the-art stateful memory platform that equips agents with persistent archival memory and dynamic in-context blocks. "
+                "Use this tool to search a Letta agent's archival memory for passages matching a natural language query. "
+                "The search returns a ranked list of relevant memory passages along with their unique identifiers and text contents. "
+                "This allows agents to recall precise past facts and interactions on demand during their reasoning loop."
             ),
             parameters=(
                 ToolParameter("agent_id", "string", "The Letta agent ID to search archival memory for."),
@@ -132,8 +140,10 @@ class LettaDeleteArchivalMemoryTool(BaseMemoryTool):
         return ToolSpec(
             name="letta_delete_archival_memory",
             description=(
-                "Permanently delete a specific archival memory passage from a Letta agent. "
-                "Requires the agent_id and the memory_id returned by letta_search_archival_memory."
+                "Letta is a state-of-the-art stateful memory platform that equips agents with persistent archival memory and dynamic in-context blocks. "
+                "Use this tool to permanently delete a specific archival memory passage from a Letta agent's store using its passage ID. "
+                "Deleting a passage immediately removes it from the agent's long-term index, ensuring it will not be returned by future search queries. "
+                "This tool requires both the target agent identifier and the passage identifier to execute."
             ),
             parameters=(
                 ToolParameter("agent_id", "string", "The Letta agent ID."),
@@ -181,9 +191,10 @@ class LettaGetMemoryBlockTool(BaseMemoryTool):
         return ToolSpec(
             name="letta_get_memory_block",
             description=(
-                "Read a named in-context memory block from a Letta agent. "
-                "Common block names: 'persona' (agent identity) and 'human' (user facts). "
-                "Returns the block label and its current text value."
+                "Letta is a state-of-the-art stateful memory platform that equips agents with persistent archival memory and dynamic in-context blocks. "
+                "Use this tool to read the current text value of a named in-context memory block, such as 'persona' or 'human'. "
+                "In-context blocks represent the active working memory of a Letta agent that is directly appended to the model's system instructions. "
+                "Reading a block allows the system to inspect the agent's self-concept or known facts about the user."
             ),
             parameters=(
                 ToolParameter("agent_id", "string", "The Letta agent ID."),
