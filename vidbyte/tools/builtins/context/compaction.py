@@ -6,11 +6,16 @@ Purpose:
     Gives agent loops explicit tools to reduce context size by clearing,
     summarizing, or removing tool-call traces while preserving system prompts.
 Architecture:
-    - CompactionMode: Supported compaction strategy names.
+    - CompactionMode: Enum listing supported compaction strategy names, now including truncate_tool_results.
     - Summarizer: Optional async protocol for model-backed summaries.
-    - ContextCompactionTool: Applies compaction to an injected ContextState.
+    - ContextCompactionTool: Core tool class applying compaction strategies to an injected ContextState.
+Functions:
+    - ContextCompactionTool.spec: Defines the model-facing compaction tool declaration.
+    - ContextCompactionTool.execute: Dispatches the chosen compaction strategy.
+    - ContextCompactionTool._truncate_tool_results: Truncates tool-result bodies exceeding a threshold character count.
 Relations:
-    Related to vidbyte.tools.builtins.context.types and future harness state objects.
+    Uses context data contracts defined in vidbyte.tools.builtins.context.types, mutates
+    agent ContextState, and is tested in tests.test_context_compaction_tools.
 """
 
 from __future__ import annotations
@@ -39,6 +44,7 @@ class CompactionMode(str, Enum):
     STRIP_TOOL_RESULT_BODIES = "strip_tool_result_bodies"
     DEDUPLICATE_TOOL_CALLS = "deduplicate_tool_calls"
     SUMMARIZE_BY_TOPIC_BLOCKS = "summarize_by_topic_blocks"
+    TRUNCATE_TOOL_RESULTS = "truncate_tool_results"
 
 
 class Summarizer(Protocol):
@@ -57,7 +63,7 @@ class ContextCompactionTool(BaseTool):
         self.summarizer = summarizer
 
     def spec(self) -> ToolSpec:
-        """Return the model-facing compaction tool declaration."""
+        # Returns the model-facing schema and declaration for the compaction tool.
         return ToolSpec(
             name="compact_context",
             description=(
@@ -65,7 +71,7 @@ class ContextCompactionTool(BaseTool):
                 "Modes: clear_except_system_and_log, remove_all_tool_calls, "
                 "remove_last_n_tool_calls, remove_tool_call_percentage, summarize_range, "
                 "keep_last_n_messages, summarize_oldest_n, strip_tool_result_bodies, "
-                "deduplicate_tool_calls, summarize_by_topic_blocks."
+                "deduplicate_tool_calls, summarize_by_topic_blocks, truncate_tool_results."
             ),
             permission=ToolPermission.SAFE,
             parameters=(
@@ -76,11 +82,13 @@ class ContextCompactionTool(BaseTool):
                 ToolParameter("keep_last", "integer", "Recent messages to preserve for summarization.", required=False),
                 ToolParameter("block_size", "integer", "Messages per block for block summarization.", required=False),
                 ToolParameter("progress_log", "object", "Structured progress log fields.", required=False),
+                ToolParameter("max_chars", "integer", "Maximum characters to keep for tool results when truncating.", required=False),
+                ToolParameter("truncation_indicator", "string", "Custom indicator suffix or replacement text.", required=False),
             ),
         )
 
     async def execute(self, call: ToolCall) -> ToolResult:
-        """Dispatch the requested compaction strategy and update state."""
+        # Dispatches the requested compaction strategy and applies the updates to the context state.
         try:
             mode = CompactionMode(str(call.arguments["mode"]))
         except ValueError:
@@ -105,6 +113,19 @@ class ContextCompactionTool(BaseTool):
             after = self._strip_tool_result_bodies(before)
         elif mode is CompactionMode.DEDUPLICATE_TOOL_CALLS:
             after = self._deduplicate_tool_calls(before)
+        elif mode is CompactionMode.TRUNCATE_TOOL_RESULTS:
+            max_chars = call.arguments.get("max_chars", 1000)
+            if max_chars is None:
+                max_chars = 1000
+            else:
+                try:
+                    max_chars = int(max_chars)
+                except (ValueError, TypeError):
+                    return ToolResult.error(self.name, "max_chars must be a valid integer.")
+            if max_chars < 0:
+                return ToolResult.error(self.name, "max_chars must be non-negative.")
+            truncation_indicator = str(call.arguments.get("truncation_indicator", " [... truncated {count} characters ...]"))
+            after = self._truncate_tool_results(before, max_chars, truncation_indicator)
         elif mode is CompactionMode.SUMMARIZE_OLDEST_N:
             result = await self._summarize_oldest_n(before, int(call.arguments.get("n", 5)))
             if isinstance(result, ToolResult):
@@ -239,6 +260,30 @@ class ContextCompactionTool(BaseTool):
                             **dict(message.metadata),
                             "compaction": CompactionMode.STRIP_TOOL_RESULT_BODIES.value,
                             "original_chars": len(message.content),
+                        },
+                    )
+                )
+            else:
+                result.append(message)
+        return tuple(result)
+
+    def _truncate_tool_results(self, messages: Sequence[ContextMessage], max_chars: int, truncation_indicator: str) -> tuple[ContextMessage, ...]:
+        # Truncates large tool-result message bodies and appends an indicator with the count of truncated characters.
+        result = []
+        for message in messages:
+            if message.kind == "tool_result" and len(message.content) > max_chars:
+                count = len(message.content) - max_chars
+                formatted = truncation_indicator.replace("{count}", str(count))
+                truncated_content = message.content[:max_chars] + formatted
+                result.append(
+                    dataclasses.replace(
+                        message,
+                        content=truncated_content,
+                        metadata={
+                            **dict(message.metadata),
+                            "compaction": CompactionMode.TRUNCATE_TOOL_RESULTS.value,
+                            "original_chars": len(message.content),
+                            "truncated_chars": count,
                         },
                     )
                 )
