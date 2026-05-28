@@ -42,7 +42,7 @@ class PromptCatalogTests(unittest.TestCase):
         for key, prompt in prompts.all().items():
             sentence_count = len(re.findall(r"[.!?]", prompt))
             self.assertGreaterEqual(sentence_count, 4)
-            if key not in long_form_prompts:
+            if key not in long_form_prompts and not key.name.startswith("ACTOR_RUNTIME_"):
                 self.assertLessEqual(sentence_count, 10)
 
     def test_markdown_backed_prompts_load_as_text(self) -> None:

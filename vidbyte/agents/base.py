@@ -55,7 +55,15 @@ class BaseAgent(McpAttachableMixin):
             raise AgentExecutionError("Agent name cannot be empty.")
         if not system_prompt:
             raise AgentExecutionError("Agent system_prompt is required.")
-        self.runtime_type = AgentRuntimeType(runtime)
+
+        from vidbyte.agents.runtimes.configs import LinearRuntime, MctsSearchRuntime, ActorRuntime
+        if isinstance(runtime, (LinearRuntime, MctsSearchRuntime, ActorRuntime)):
+            self.runtime_type = runtime.runtime_type
+            self.runtime_config_obj = runtime
+        else:
+            self.runtime_type = AgentRuntimeType(runtime)
+            self.runtime_config_obj = None
+
         if self.runtime_type in (
             AgentRuntimeType.MCTS_SEARCH,
             AgentRuntimeType.ACTOR_MODEL,
@@ -74,10 +82,20 @@ class BaseAgent(McpAttachableMixin):
                         f"Agent {name} uses non-linear runtime {self.runtime_type.value}, "
                         "which does not support in-context learning algorithms."
                     )
-        self.dynamic_actors = dynamic_actors
-        self.max_loop = max_loop
-        self.termination_mode = termination_mode
-        self.worker_model = worker_model
+
+        if isinstance(self.runtime_config_obj, ActorRuntime):
+            self.dynamic_actors = self.runtime_config_obj.dynamic_actors
+            self.max_loop = self.runtime_config_obj.max_loop
+            self.termination_mode = self.runtime_config_obj.termination_mode
+            self.worker_model = self.runtime_config_obj.worker_model
+            self.include_actors = self.runtime_config_obj.include_actors
+        else:
+            self.dynamic_actors = dynamic_actors
+            self.max_loop = max_loop
+            self.termination_mode = termination_mode
+            self.worker_model = worker_model
+            self.include_actors = None
+
         self.runner_config = AgentRunnerConfig(
             api_key=api_key,
             provider=str(provider.value if isinstance(provider, ModelProvider) else provider) if provider is not None else None,
@@ -508,6 +526,7 @@ class BaseAgent(McpAttachableMixin):
                 "max_loop": self.max_loop,
                 "termination_mode": self.termination_mode,
                 "worker_model": self.worker_model,
+                "include_actors": self.include_actors,
             }
 
         return runtime_cls(

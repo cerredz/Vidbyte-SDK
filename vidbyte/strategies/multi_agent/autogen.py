@@ -4,7 +4,7 @@ from collections.abc import Callable, Sequence
 from typing import Any
 
 from vidbyte.agents.base import BaseAgent
-from vidbyte.agents.registry import AgentRegistry
+from vidbyte.lib.registries import AgentRegistry
 from vidbyte.agents.types import AgentMessage
 from vidbyte.lib.errors import StrategyExecutionError
 from vidbyte.strategies.multi_agent.base import BaseMultiAgentStrategy

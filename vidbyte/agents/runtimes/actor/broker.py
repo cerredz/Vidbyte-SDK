@@ -57,6 +57,7 @@ class BaseActorRuntime(ABC):
         max_loop: int = 20,
         termination_mode: str = "coordinator",
         worker_model: str | None = None,
+        include_actors: Sequence[type] | None = None,
         **kwargs: Any,
     ) -> None:
         self.agent_name = agent_name
@@ -74,6 +75,7 @@ class BaseActorRuntime(ABC):
         self.max_loop = max_loop
         self.termination_mode = termination_mode
         self.worker_model = worker_model
+        self.include_actors = include_actors
 
         # Registry and state tracking
         self._actors: dict[str, AgentActor] = {}
@@ -97,7 +99,11 @@ class BaseActorRuntime(ABC):
             broker=self,
             model_name=model_name,
         )
-        self._actors[actor_id] = actor
+        return await self.spawn_instance(actor)
+
+    async def spawn_instance(self, actor: AgentActor) -> AgentActor:
+        """Registers an instantiated AgentActor and schedules its reactive loop."""
+        self._actors[actor.actor_id] = actor
         task = asyncio.create_task(actor.start())
         self._tasks.append(task)
         return actor
@@ -190,11 +196,30 @@ class BaseActorRuntime(ABC):
         self._message_count = 0
         self._completion_future = asyncio.get_running_loop().create_future()
 
-        # Spawn prebuilt actors automatically
-        for role in ["planner", "coder", "reviewer", "generator", "critic", "reasoner"]:
+        # Spawn prebuilt actors based on include_actors list
+        actor_classes = self.include_actors
+        if actor_classes is None:
+            from vidbyte.agents.runtimes.actor.actor import (
+                PlannerActor,
+                CoderActor,
+                ReviewerActor,
+                GeneratorActor,
+                CriticActor,
+                ReasonerActor,
+            )
+            actor_classes = [
+                PlannerActor,
+                CoderActor,
+                ReviewerActor,
+                GeneratorActor,
+                CriticActor,
+                ReasonerActor,
+            ]
+
+        for actor_cls in actor_classes:
             try:
-                prompt = PrebuiltActorFactory.load_persona(role)
-                await self.spawn(role, prompt, self.worker_model)
+                actor_inst = actor_cls(broker=self, model_name=self.worker_model)
+                await self.spawn_instance(actor_inst)
             except Exception:
                 pass  # Ignore catalog errors in non-test fallback environments
 

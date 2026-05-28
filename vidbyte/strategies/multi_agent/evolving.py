@@ -1,10 +1,27 @@
+"""Context Protocol Header
+
+Description:
+    Dynamic multi-agent orchestration strategy with pluggable next-agent selection policies.
+Purpose:
+    Enables agents to evolve and coordinate dynamically over multiple conversational turns.
+Architecture:
+    - OrchestrationPolicy: Protocol defining the select_next interface.
+    - HeuristicPolicy: Cycles through workers and service/evaluator agents.
+    - EvolvingOrchestrationStrategy: Integrates policies with AgentRegistry to run evolving agent loops.
+Relations:
+    Located in vidbyte/strategies/multi_agent/evolving.py. Utilized by multi-agent workflows.
+Similar Files:
+    - vidbyte/strategies/multi_agent/consensus.py: Consensus strategy.
+    - vidbyte/strategies/multi_agent/vmao.py: Multi-agent orchestration.
+"""
+
 from __future__ import annotations
 
 from collections.abc import Sequence
 from typing import Protocol
 
 from vidbyte.agents.base import BaseAgent
-from vidbyte.agents.registry import AgentRegistry
+from vidbyte.lib.registries import AgentRegistry
 from vidbyte.agents.types import AgentMessage
 from vidbyte.lib.errors import StrategyExecutionError
 from vidbyte.strategies.multi_agent.base import BaseMultiAgentStrategy

@@ -29,7 +29,6 @@ from vidbyte.tools.executor import ToolExecutor
 from vidbyte.tools.function_tool import FunctionTool
 from vidbyte.lib.tools import ToolsFormatter
 from vidbyte.tools.mixins import ToolMixin
-from vidbyte.tools.registry import ToolRegistry
 from vidbyte.tools.strategy_tool import StrategyTool
 from vidbyte.tools.types import (
     ToolCall,
@@ -68,3 +67,11 @@ __all__ = [
     "tool",
     "vidbyte_tool",
 ]
+
+
+def __getattr__(name: str) -> Any:
+    if name == "ToolRegistry":
+        from vidbyte.lib.registries.tools import ToolRegistry
+
+        return ToolRegistry
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

@@ -6,7 +6,7 @@ from typing import Any, Sequence
 
 from vidbyte.strategies.base import BaseStrategy
 from vidbyte.strategies.types import StrategyContext, StrategyResult
-from vidbyte.tools.registry import ToolRegistry
+from vidbyte.lib.registries.tools import ToolRegistry
 
 
 class ReActStrategy(BaseStrategy):

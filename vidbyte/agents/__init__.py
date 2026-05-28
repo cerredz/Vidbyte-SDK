@@ -20,12 +20,15 @@ from __future__ import annotations
 from vidbyte.agents.base import BaseAgent, ConfiguredAgentRunner
 from vidbyte.agents.client import AgentClient
 from vidbyte.agents.context_algorithms import AgentRuntimeContextAlgorithms
-from vidbyte.agents.registry import AgentRegistry
+from vidbyte.lib.registries import AgentRegistry
 from vidbyte.agents.runtimes import (
     LinearAgentRuntime as AgentRuntime,
     SearchTreeRuntimeComponent,
     PointToPointActorRuntime,
     BroadcastActorRuntime,
+    LinearRuntime,
+    MctsSearchRuntime,
+    ActorRuntime,
 )
 from vidbyte.lib.dataclasses.agents import (
     AgentRunnerConfig,
@@ -57,4 +60,7 @@ __all__ = [
     "SearchTreeRuntimeComponent",
     "PointToPointActorRuntime",
     "BroadcastActorRuntime",
+    "LinearRuntime",
+    "MctsSearchRuntime",
+    "ActorRuntime",
 ]

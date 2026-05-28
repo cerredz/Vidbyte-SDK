@@ -1,18 +1,19 @@
 """Context Protocol Header
 
 Description:
-    Defines the AgentActor class and prebuilt persona catalog for asynchronous actors.
+    Defines the AgentActor, PrebuiltActor hierarchy, and 15 prebuilt actor classes.
 Purpose:
-    Encapsulates concurrent reactive loops, local memory channels, state dicts, and
-    compiled prompt assembly pipelines for specialized LLM agents.
+    Enables concurrent multi-agent executions by resolving and encapsulating
+    actor loops, local memory queues, and specialized LLM prompt channels.
 Architecture:
-    - AgentActor: Base actor class running a background polling loop over its ActorInbox.
-    - Prebuilt Personas: Planner, Coder, Reviewer, Generator, Critic, and Reasoner
-      dynamically loaded from the SDK Prompts catalog.
+    - AgentActor: Base concurrent reactive queue listener.
+    - PrebuiltActor: Specialized subclass loading system prompts from catalog.
+    - 15 specialized personas subclassing PrebuiltActor.
 Relations:
-    Located under vidbyte/agents/runtimes/actor/actor.py. Consumed by BaseActorRuntime.
+    Located in vidbyte/agents/runtimes/actor/actor.py. Consumed by BaseActorRuntime.
 Similar Files:
-    - vidbyte/agents/runtimes/actor/broker.py: The message brokers managing actors.
+    - vidbyte/agents/runtimes/configs.py: Configuration classes.
+    - vidbyte/lib/registries/actors.py: Prebuilt actor class registry.
 """
 
 from __future__ import annotations
@@ -34,6 +35,15 @@ PREBUILT_ACTOR_PROMPTS = {
     "generator": Prompt.ACTOR_RUNTIME_GENERATOR,
     "critic": Prompt.ACTOR_RUNTIME_CRITIC,
     "reasoner": Prompt.ACTOR_RUNTIME_REASONER,
+    "summarization": Prompt.ACTOR_RUNTIME_SUMMARIZATION,
+    "decomposer": Prompt.ACTOR_RUNTIME_DECOMPOSER,
+    "explorer": Prompt.ACTOR_RUNTIME_EXPLORER,
+    "tradeoff": Prompt.ACTOR_RUNTIME_TRADEOFF,
+    "hypothesis_generator": Prompt.ACTOR_RUNTIME_HYPOTHESIS_GENERATOR,
+    "refiner": Prompt.ACTOR_RUNTIME_REFINER,
+    "formatter": Prompt.ACTOR_RUNTIME_FORMATTER,
+    "safety": Prompt.ACTOR_RUNTIME_SAFETY,
+    "final_answer": Prompt.ACTOR_RUNTIME_FINAL_ANSWER,
 }
 
 
@@ -114,3 +124,136 @@ class PrebuiltActorFactory:
         
         prompts_catalog = Prompts()
         return prompts_catalog.get(PREBUILT_ACTOR_PROMPTS[normalized_role])
+
+
+class PrebuiltActor(AgentActor):
+    """Base class for all prebuilt actors resolving their prompts automatically."""
+    role_name: str
+    system_prompt_key: Prompt
+
+    def __init__(
+        self,
+        broker: BaseActorRuntime,
+        model_name: str | None = None,
+    ) -> None:
+        # Load persona system prompt and call parent constructor
+        prompt = PrebuiltActorFactory.load_persona(self.role_name)
+        super().__init__(
+            actor_id=self.role_name,
+            system_prompt=prompt,
+            broker=broker,
+            model_name=model_name,
+        )
+
+
+class PlannerActor(PrebuiltActor):
+    """Specialized Planner actor."""
+    role_name = "planner"
+    system_prompt_key = Prompt.ACTOR_RUNTIME_PLANNER
+
+
+class CoderActor(PrebuiltActor):
+    """Specialized Coder actor."""
+    role_name = "coder"
+    system_prompt_key = Prompt.ACTOR_RUNTIME_CODER
+
+
+class ReviewerActor(PrebuiltActor):
+    """Specialized Reviewer actor."""
+    role_name = "reviewer"
+    system_prompt_key = Prompt.ACTOR_RUNTIME_REVIEWER
+
+
+class GeneratorActor(PrebuiltActor):
+    """Specialized Generator actor."""
+    role_name = "generator"
+    system_prompt_key = Prompt.ACTOR_RUNTIME_GENERATOR
+
+
+class CriticActor(PrebuiltActor):
+    """Specialized Critic actor."""
+    role_name = "critic"
+    system_prompt_key = Prompt.ACTOR_RUNTIME_CRITIC
+
+
+class ReasonerActor(PrebuiltActor):
+    """Specialized Reasoner actor."""
+    role_name = "reasoner"
+    system_prompt_key = Prompt.ACTOR_RUNTIME_REASONER
+
+
+class SummarizationActor(PrebuiltActor):
+    """Specialized Summarization actor."""
+    role_name = "summarization"
+    system_prompt_key = Prompt.ACTOR_RUNTIME_SUMMARIZATION
+
+
+class DecomposerActor(PrebuiltActor):
+    """Specialized Decomposer actor."""
+    role_name = "decomposer"
+    system_prompt_key = Prompt.ACTOR_RUNTIME_DECOMPOSER
+
+
+class ExplorerActor(PrebuiltActor):
+    """Specialized Explorer actor."""
+    role_name = "explorer"
+    system_prompt_key = Prompt.ACTOR_RUNTIME_EXPLORER
+
+
+class TradeoffActor(PrebuiltActor):
+    """Specialized Tradeoff actor."""
+    role_name = "tradeoff"
+    system_prompt_key = Prompt.ACTOR_RUNTIME_TRADEOFF
+
+
+class HypothesisGeneratorActor(PrebuiltActor):
+    """Specialized Hypothesis Generator actor."""
+    role_name = "hypothesis_generator"
+    system_prompt_key = Prompt.ACTOR_RUNTIME_HYPOTHESIS_GENERATOR
+
+
+class RefinerActor(PrebuiltActor):
+    """Specialized Refiner actor."""
+    role_name = "refiner"
+    system_prompt_key = Prompt.ACTOR_RUNTIME_REFINER
+
+
+class FormatterActor(PrebuiltActor):
+    """Specialized Formatter actor."""
+    role_name = "formatter"
+    system_prompt_key = Prompt.ACTOR_RUNTIME_FORMATTER
+
+
+class SafetyActor(PrebuiltActor):
+    """Specialized Safety actor."""
+    role_name = "safety"
+    system_prompt_key = Prompt.ACTOR_RUNTIME_SAFETY
+
+
+class FinalAnswerActor(PrebuiltActor):
+    """Specialized Final Answer actor."""
+    role_name = "final_answer"
+    system_prompt_key = Prompt.ACTOR_RUNTIME_FINAL_ANSWER
+
+
+# Auto-register all prebuilt actor classes in the actors registry
+from vidbyte.lib.registries.actors import actor_registry
+
+for actor_cls in [
+    PlannerActor,
+    CoderActor,
+    ReviewerActor,
+    GeneratorActor,
+    CriticActor,
+    ReasonerActor,
+    SummarizationActor,
+    DecomposerActor,
+    ExplorerActor,
+    TradeoffActor,
+    HypothesisGeneratorActor,
+    RefinerActor,
+    FormatterActor,
+    SafetyActor,
+    FinalAnswerActor,
+]:
+    actor_registry.register(actor_cls.role_name, actor_cls)

@@ -332,7 +332,7 @@ class MultiProviderAgenticGraderTests(unittest.IsolatedAsyncioTestCase):
 
     def test_registry_default_model_invalid_provider(self) -> None:
         # [Edge Case] default_model raises ConfigurationError when queried with an invalid/unregistered provider.
-        from vidbyte.lib.models.registry import ProviderModelRegistry
+        from vidbyte.lib.registries.models import ProviderModelRegistry
         from unittest.mock import MagicMock
 
         fake_provider = MagicMock()
@@ -344,7 +344,7 @@ class MultiProviderAgenticGraderTests(unittest.IsolatedAsyncioTestCase):
 
     def test_registry_resolve_active_missing_keys(self) -> None:
         # [Hidden Failure] resolve_active raises ConfigurationError if no API keys are set in the environment.
-        from vidbyte.lib.models.registry import ProviderModelRegistry
+        from vidbyte.lib.registries.models import ProviderModelRegistry
 
         for env_var in API_KEY_ENV_VARS.values():
             os.environ.pop(env_var, None)
@@ -355,7 +355,7 @@ class MultiProviderAgenticGraderTests(unittest.IsolatedAsyncioTestCase):
 
     def test_registry_all_default_models_are_valid_text_modality(self) -> None:
         # [Silent Failure] All default provider models are valid text models that map to ModelModality.TEXT.
-        from vidbyte.lib.models.registry import ProviderModelRegistry
+        from vidbyte.lib.registries.models import ProviderModelRegistry
         from vidbyte.lib.enums import ModelProvider, ModelModality
         from vidbyte.lib.agents.modality_detector import ModalityDetector
 
@@ -370,7 +370,7 @@ class MultiProviderAgenticGraderTests(unittest.IsolatedAsyncioTestCase):
 
     def test_registry_resolve_active_explicit_provider_models(self) -> None:
         # [Hidden Assumption] resolve_active successfully returns explicit provider models, bypassing env checks when credentials supplied.
-        from vidbyte.lib.models.registry import ProviderModelRegistry
+        from vidbyte.lib.registries.models import ProviderModelRegistry
 
         explicit_map = {"openai": "gpt-5.5", "anthropic": "claude-sonnet-4-6"}
         os.environ["OPENAI_API_KEY"] = "fake-openai-key"
