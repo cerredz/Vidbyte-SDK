@@ -1,3 +1,16 @@
+# ==============================================================================
+# CONTEXT PROTOCOL HEADER
+# Description: Top-level initializer for the Vidbyte SDK prompts package.
+# Purpose: Dynamically registers and exports all registered prompt assets and strategy bundles.
+# Architecture & Functions:
+#   - Exposes Prompt, Prompts, and VMAOPrompts catalog models.
+#   - Automatically inspects the Prompt catalog to populate globals with direct imports.
+# Codebase Relation:
+#   - Canonical entrance for fetching prompt templates or raw prompt strings.
+# Similar Files:
+#   - vidbyte/prompts/strategies/__init__.py (strategy-scoped exports)
+# ==============================================================================
+
 from __future__ import annotations
 
 from vidbyte.lib.enums.prompts import Prompt
@@ -12,9 +25,11 @@ from vidbyte.prompts.strategies import (
     ContextEngineeringPrompts,
     ExpertPromptingPrompts,
     MultiAgentReflexionPrompts,
+    MultiProviderAgenticGraderPrompts,
     ParadigmRouterPrompts,
     PlanAndExecutePrompts,
     PromptEngineeringPrompts,
+    PromptTemplatesPrompts,
     ReflexionPrompts,
     SelfConsistencyPrompts,
     SkeletonOfThoughtPrompts,
@@ -38,12 +53,14 @@ __all__ = [
     "ContextEngineeringPrompts",
     "ExpertPromptingPrompts",
     "MultiAgentReflexionPrompts",
+    "MultiProviderAgenticGraderPrompts",
     "ParadigmRouterPrompts",
     "PlanAndExecutePrompts",
     "Prompt",
     "PromptEngineeringPrompts",
     "PromptRecord",
     "Prompts",
+    "PromptTemplatesPrompts",
     "ReflexionPrompts",
     "SelfConsistencyPrompts",
     "SkeletonOfThoughtPrompts",

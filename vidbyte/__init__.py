@@ -15,8 +15,17 @@ Architecture:
     - Strategy exports: BaseStrategy, StrategyContext, StrategyResult.
     - Pipeline exports: BasePipeline, ConditionalPipeline, ParallelPipeline, PipelineNode, SequentialPipeline.
     - Error exports: McpError, McpConnectionError, McpInitializeError, McpToolDiscoveryError, McpToolExecutionError, McpAttachmentError, PipelineExecutionError.
-Relations:
-    Related to vidbyte.client, vidbyte.agents, vidbyte.tools, vidbyte.context, vidbyte.strategies, and vidbyte.pipelines.
+Key Functions / Exports:
+    - VidbyteSDK: Main SDK entry point.
+    - BaseAgent: Base class for building agents.
+    - BaseTool: Base class for building tools.
+    - BaseContext: Base class for managing conversation contexts.
+Relation to codebase as a whole:
+    Acts as the primary public API entry point of the entire SDK, unifying all sub-packages (agents, context, tools, mcp, pipelines, strategies, middleware) into a single export surface for consumers.
+Similar files:
+    - vidbyte/context/__init__.py: Exposes public context management namespace.
+    - vidbyte/agents/__init__.py: Exposes agent contracts.
+    - vidbyte/tools/__init__.py: Exposes tool abstractions.
 """
 
 from __future__ import annotations
@@ -51,6 +60,8 @@ from vidbyte.context import (
     FileContextItem,
     GitDiffContextItem,
     MemoryContextItem,
+    MultiProviderAgenticGraderAlgorithm,
+    PlanContextItem,
     ProgressContextItem,
     ReflexionAlgorithm,
     ResponseContextItem,
@@ -58,6 +69,11 @@ from vidbyte.context import (
     TextContextItem,
     ToolCallContextItem,
     ToolResultAdmission,
+)
+from vidbyte.tools.builtins.context_primitives import (
+    ContextListTool,
+    ContextRemoveTool,
+    ContextUpsertTool,
 )
 from vidbyte.lib.enums import BudgetPreset, ModelModality, PermissionPreset, Prompt
 from vidbyte.lib.errors import (
@@ -74,6 +90,9 @@ from vidbyte.lib.tracing import NullTracer, TracerBase
 from vidbyte.middleware import (
     AgentMiddleware,
     AuditLogMiddleware,
+    CanaryTripwireMiddleware,
+    ConfusedDeputyGuardMiddleware,
+    HoneypotToolMiddleware,
     MiddlewareAction,
     MiddlewareContext,
     MiddlewareDecision,
@@ -148,6 +167,8 @@ __all__ = [
     "AgentInput",
     "AgentMiddleware",
     "AuditLogMiddleware",
+    "CanaryTripwireMiddleware",
+    "ConfusedDeputyGuardMiddleware",
     "AgentMessage",
     "AgentRegistry",
     "AgentRunnerConfig",
@@ -168,8 +189,11 @@ __all__ = [
     "ChainOfThoughtStrategy",
     "ContextBudget",
     "ContextItem",
+    "ContextListTool",
     "ContextManager",
     "ContextPermissions",
+    "ContextRemoveTool",
+    "ContextUpsertTool",
     "ContextWindow",
     "ContextWindowAlgorithm",
     "DocumentContextItem",
@@ -177,6 +201,7 @@ __all__ = [
     "FileContextItem",
     "GitDiffContextItem",
     "MemoryContextItem",
+    "PlanContextItem",
     "McpAttachmentError",
     "McpConnectionError",
     "McpError",
@@ -194,7 +219,9 @@ __all__ = [
     "MiddlewareHook",
     "MiddlewarePipeline",
     "ModelRetryMiddleware",
+    "HoneypotToolMiddleware",
     "MultiAgentConsensusStrategy",
+    "MultiProviderAgenticGraderAlgorithm",
     "ConditionalPipeline",
     "MapReducePipeline",
     "ModelModality",

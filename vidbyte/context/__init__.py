@@ -1,6 +1,27 @@
+"""Context Protocol Header
+
+Description:
+    Exposes the public context management and context-window algorithm interfaces.
+Purpose:
+    Allows developers to import all context-window configuration models, presets,
+    and managers from a single public namespace.
+Architecture:
+    - Namespace client for ContextWindow and ContextManager.
+Key Functions / Exports:
+    - ContextManager: Manages loading, updating, and exporting context items.
+    - ContextWindow: Represents the sliding/compacted context window.
+    - ContextWindowAlgorithm: Base class for context window compaction/pruning.
+Relation to codebase as a whole:
+    Provides public exports for all context primitives and algorithms (including PlanContextItem, MultiProviderAgenticGraderAlgorithm, ReflexionAlgorithm, etc.) which are consumed by agents and runner engines to manage LLM context windows dynamically.
+Similar files:
+    - vidbyte/__init__.py: Root module exporting overall SDK contracts.
+    - vidbyte/context/manager.py: Contains the concrete ContextManager implementation.
+    - vidbyte/context/window.py: Contains the concrete ContextWindow implementation.
+"""
+
 from __future__ import annotations
 
-from vidbyte.context.algorithms import ContextWindowAlgorithm, ReflexionAlgorithm, ToolResultAdmission
+from vidbyte.context.algorithms import ContextWindowAlgorithm, MultiProviderAgenticGraderAlgorithm, ReflexionAlgorithm, ToolResultAdmission
 from vidbyte.context.primitives import (
     ArtifactContextItem,
     ContextItem,
@@ -9,6 +30,7 @@ from vidbyte.context.primitives import (
     FileContextItem,
     GitDiffContextItem,
     MemoryContextItem,
+    PlanContextItem,
     ProgressContextItem,
     ResponseContextItem,
     TaskContextItem,
@@ -49,6 +71,8 @@ __all__ = [
     "FileContextItem",
     "GitDiffContextItem",
     "MemoryContextItem",
+    "MultiProviderAgenticGraderAlgorithm",
+    "PlanContextItem",
     "ProgressContextItem",
     "ReflexionAlgorithm",
     "ResponseContextItem",

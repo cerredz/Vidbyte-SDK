@@ -4,10 +4,21 @@ Description:
     Exports built-in middleware implementations.
 Purpose:
     Gives developers ready-made runtime controls for common agent safety,
-    reliability, and observability workflows.
+    reliability, observability, and security workflows.
 Architecture:
-    - TokenRateLimitMiddleware, RuntimeLimitMiddleware, ToolPolicyMiddleware,
-      AuditLogMiddleware, and ModelRetryMiddleware.
+    - TokenRateLimitMiddleware: Limits request tokens.
+    - RuntimeLimitMiddleware: Places constraints on execution loops and elapsed time.
+    - ToolPolicyMiddleware: Filters allowed tools.
+    - AuditLogMiddleware: Logs agent and tool interactions.
+    - ModelRetryMiddleware: Retries failed model calls.
+    - TokenBudgetMiddleware: Controls token usage.
+    - CostBudgetMiddleware: Places monetary spending limits.
+    - ExponentialBackoffRetryMiddleware: Retries steps using backing-off intervals.
+    - LoopDetectionMiddleware: Halts execution if a repetitive prompt loop occurs.
+    - CircuitBreakerMiddleware & CircuitState: Cuts off calls when error thresholds are exceeded.
+    - CanaryTripwireMiddleware: Security boundary detection using system secrets.
+    - ConfusedDeputyGuardMiddleware: Authorization check to prevent confused deputy exploits.
+    - HoneypotToolMiddleware: Traps unauthorized tool usages with fake honey tools.
 Relations:
     Related to vidbyte.middleware and vidbyte.agents.runtime.
 """
@@ -15,15 +26,32 @@ Relations:
 from __future__ import annotations
 
 from vidbyte.middleware.builtins.audit import AuditLogMiddleware
+from vidbyte.middleware.builtins.canary_tripwire import CanaryTripwireMiddleware
+from vidbyte.middleware.builtins.circuit_breaker import CircuitBreakerMiddleware, CircuitState
+from vidbyte.middleware.builtins.confused_deputy import ConfusedDeputyGuardMiddleware
+from vidbyte.middleware.builtins.cost_budget import CostBudgetMiddleware
+from vidbyte.middleware.builtins.exponential_backoff_retry import ExponentialBackoffRetryMiddleware
+from vidbyte.middleware.builtins.honeypot_tool import HoneypotToolMiddleware
+from vidbyte.middleware.builtins.loop_detection import LoopDetectionMiddleware
 from vidbyte.middleware.builtins.rate_limit import TokenRateLimitMiddleware
 from vidbyte.middleware.builtins.retry import ModelRetryMiddleware
 from vidbyte.middleware.builtins.runtime_limits import RuntimeLimitMiddleware
+from vidbyte.middleware.builtins.token_budget import TokenBudgetMiddleware
 from vidbyte.middleware.builtins.tool_policy import ToolPolicyMiddleware
 
 __all__ = [
     "AuditLogMiddleware",
+    "CanaryTripwireMiddleware",
+    "CircuitBreakerMiddleware",
+    "CircuitState",
+    "ConfusedDeputyGuardMiddleware",
+    "CostBudgetMiddleware",
+    "ExponentialBackoffRetryMiddleware",
+    "HoneypotToolMiddleware",
+    "LoopDetectionMiddleware",
     "ModelRetryMiddleware",
     "RuntimeLimitMiddleware",
+    "TokenBudgetMiddleware",
     "TokenRateLimitMiddleware",
     "ToolPolicyMiddleware",
 ]
