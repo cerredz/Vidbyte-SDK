@@ -16,11 +16,14 @@ from __future__ import annotations
 import json
 import re
 
+from typing import TYPE_CHECKING
 from vidbyte.lib.errors import ToolRegistryError
 from vidbyte.tools.catalog import Tools
-from vidbyte.tools.registry import ToolRegistry
 from vidbyte.tools.security import PermissionDecision, PermissionPolicy
 from vidbyte.tools.types import ToolCall, ToolResult
+
+if TYPE_CHECKING:
+    from vidbyte.lib.registries.tools import ToolRegistry
 
 
 class ToolExecutor:

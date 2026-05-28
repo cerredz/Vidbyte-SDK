@@ -2,7 +2,7 @@
 
 import unittest
 
-from vidbyte.agents.runtime import AgentRuntime
+from vidbyte.agents import AgentRuntime
 from vidbyte.lib.dataclasses.agents import AgentRuntimeConfig
 from vidbyte.lib.dataclasses.middleware import MiddlewareContext, MiddlewareDecision
 from vidbyte.middleware import AgentMiddleware

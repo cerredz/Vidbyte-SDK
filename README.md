@@ -150,6 +150,46 @@ reply = await agent.arun(
 )
 ```
 
+## Swappable Agent Runtimes
+
+The Vidbyte SDK decouples the core `BaseAgent` class from the execution loop. Developers can select different agent runtime loop paradigms at initialization:
+
+* **Linear Runtime**: Standard sequential perception-action model-tool loop.
+* **MCTS Search**: Non-linear tree search (Monte Carlo Tree Search) exploring parallel reasoning paths.
+* **Actor Model**: Asynchronous, concurrent message-passing loops (supporting Point-to-Point and Broadcast topologies).
+
+```python
+from vidbyte import BaseAgent
+from vidbyte.lib.enums import AgentRuntimeType
+
+# Option 1: Linear runtime (default)
+linear_agent = BaseAgent(
+    name="sequential-agent",
+    system_prompt="Execute sequentially.",
+    runtime=AgentRuntimeType.LINEAR,
+)
+
+# Option 2: Monte Carlo Tree Search runtime
+search_agent = BaseAgent(
+    name="search-agent",
+    system_prompt="Explore reasoning branches.",
+    runtime=AgentRuntimeType.MCTS_SEARCH,
+)
+
+# Option 3: Asynchronous Actor Model swarm
+actor_swarm = BaseAgent(
+    name="swarm-coordinator",
+    system_prompt="Coordinate parallel specialized sub-actors.",
+    runtime=AgentRuntimeType.ACTOR_MODEL_P2P,
+    dynamic_actors=True,
+    max_loop=30,
+    termination_mode="quiescence",
+    worker_model="gpt-4o-mini",
+)
+```
+
+For more details on runtimes, see the [Agent Runtimes Skill Guide](skills/agent-runtimes/SKILL.md).
+
 ### Tools
 
 The SDK tool path is agent-local: create or import tools, pass them into an agent, and let the agent describe, format, and execute them when the model asks for a tool call.

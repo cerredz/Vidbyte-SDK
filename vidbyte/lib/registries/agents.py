@@ -1,11 +1,32 @@
+"""Context Protocol Header
+
+Description:
+    Agent registry for local discovery, capability matching, and tool exposure.
+Purpose:
+    Allows modular systems to register and find active agent instances by capabilities,
+    tool names, or metadata without hardcoding linkages.
+Architecture:
+    - AgentRegistry: In-memory registry containing BaseAgent cards and search methods.
+Key Functions:
+    - register: Registers a live agent instance.
+    - get: Retrieves an agent by its unique name.
+    - find: Searches for agents matching capabilities, tools, or metadata.
+Relations:
+    Located in vidbyte/lib/registries/agents.py. Consumed by BaseAgent.
+Similar Files:
+    - vidbyte/lib/registries/actors.py: Prebuilt actor class registry.
+"""
+
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
-from vidbyte.agents.base import BaseAgent
 from vidbyte.agents.types import AgentCard
 from vidbyte.lib.errors import AgentRegistryError
+
+if TYPE_CHECKING:
+    from vidbyte.agents.base import BaseAgent
 
 
 class AgentRegistry:

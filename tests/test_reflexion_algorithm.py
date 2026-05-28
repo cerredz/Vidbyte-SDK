@@ -14,7 +14,7 @@ import unittest
 from vidbyte import ContextWindow, ReflexionAlgorithm
 from vidbyte.agents.algorithms import ReflexionRuntimeAlgorithm
 from vidbyte.agents.context_algorithms import AgentRuntimeContextAlgorithms
-from vidbyte.agents.runtime import AgentRuntime
+from vidbyte.agents import AgentRuntime
 from vidbyte.lib.dataclasses.agents import AgentRuntimeConfig
 from vidbyte.lib.dataclasses.strategies import AgentResult as StrategyResult
 from vidbyte.tools import ToolCallContext, ToolCallState, ToolResult, Tools, tool

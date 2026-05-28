@@ -25,7 +25,6 @@ Similar Files:
 """
 
 from __future__ import annotations
-
 from enum import Enum
 
 
@@ -49,7 +48,21 @@ class Prompt(str, Enum):
     TEMPLATES_INTENT_BASED = "templates.intent_based"
     TEMPLATES_PERSONA = "templates.persona"
     TEMPLATES_SPECIFICATION = "templates.specification"
-
+    ACTOR_RUNTIME_PLANNER = "actor_runtime.planner"
+    ACTOR_RUNTIME_CODER = "actor_runtime.coder"
+    ACTOR_RUNTIME_REVIEWER = "actor_runtime.reviewer"
+    ACTOR_RUNTIME_GENERATOR = "actor_runtime.generator"
+    ACTOR_RUNTIME_CRITIC = "actor_runtime.critic"
+    ACTOR_RUNTIME_REASONER = "actor_runtime.reasoner"
+    ACTOR_RUNTIME_SUMMARIZATION = "actor_runtime.summarization"
+    ACTOR_RUNTIME_DECOMPOSER = "actor_runtime.decomposer"
+    ACTOR_RUNTIME_EXPLORER = "actor_runtime.explorer"
+    ACTOR_RUNTIME_TRADEOFF = "actor_runtime.tradeoff"
+    ACTOR_RUNTIME_HYPOTHESIS_GENERATOR = "actor_runtime.hypothesis_generator"
+    ACTOR_RUNTIME_REFINER = "actor_runtime.refiner"
+    ACTOR_RUNTIME_FORMATTER = "actor_runtime.formatter"
+    ACTOR_RUNTIME_SAFETY = "actor_runtime.safety"
+    ACTOR_RUNTIME_FINAL_ANSWER = "actor_runtime.final_answer"
 
 __all__ = [
     "Prompt",

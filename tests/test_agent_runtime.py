@@ -1,8 +1,20 @@
-﻿from __future__ import annotations
+"""Context Protocol Header
+
+Description:
+    Unit tests for all agent runtime execution loops (Linear and non-linear).
+Purpose:
+    Verifies correct runtime behavior, dispatch, fail-fast gating, and parameter validation.
+Architecture:
+    Unittest test suite.
+Relations:
+    Located in tests/test_agent_runtime.py. Focuses on core runtime code.
+"""
+
+from __future__ import annotations
 
 import unittest
 
-from vidbyte.agents.runtime import AgentRuntime
+from vidbyte.agents import AgentRuntime
 from vidbyte.agents.types import AgentMessage
 from vidbyte.context import ContextArtifact, ContextPermissions, ContextResponse, ContextToolCall, ContextWindow, TaskContextItem
 from vidbyte.lib.dataclasses.agents import AgentRuntimeConfig
@@ -498,6 +510,71 @@ class AgentRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.output, "done")
         self.assertEqual(result.metadata["iteration_count"], 2)
         self.assertEqual(runner.calls[1]["kwargs"]["messages"][0]["content"], "partial work")
+
+
+    def test_agent_runtime_fail_fast(self) -> None:
+        # [Edge Case] Ensure non-linear runtimes instantiate successfully with default settings.
+        from vidbyte.agents.base import BaseAgent
+        from vidbyte.lib.enums import AgentRuntimeType
+        from vidbyte.lib.errors import ConfigurationError
+
+        agent = BaseAgent(
+            name="searcher",
+            system_prompt="Heuristic finder.",
+            runtime=AgentRuntimeType.MCTS_SEARCH,
+        )
+        self.assertEqual(agent.runtime_type, AgentRuntimeType.MCTS_SEARCH)
+
+        # [Hidden Failure] Ensure passing active middleware list raises ConfigurationError immediately.
+        class DummyMiddleware:
+            pass
+
+        with self.assertRaises(ConfigurationError) as ctx:
+            BaseAgent(
+                name="bad_searcher",
+                system_prompt="Fail fast.",
+                runtime="mcts_search",
+                middleware=[DummyMiddleware()],
+            )
+        self.assertIn("does not support middleware", str(ctx.exception))
+
+        # [Silent Failure] Ensure passing non-default context algorithm preset raises ConfigurationError immediately.
+        from vidbyte.context.presets import ContextWindowPresets
+        with self.assertRaises(ConfigurationError) as ctx:
+            BaseAgent(
+                name="bad_actor",
+                system_prompt="Fail fast.",
+                runtime=AgentRuntimeType.ACTOR_MODEL,
+                algorithm=ContextWindowPresets().compact_tool_outputs,
+            )
+        self.assertIn("does not support in-context learning algorithms", str(ctx.exception))
+
+        # [Hidden Assumption] Ensure a string "actor_model" is correctly coerced and validates.
+        with self.assertRaises(ConfigurationError) as ctx:
+            BaseAgent(
+                name="bad_actor_str",
+                system_prompt="Fail fast.",
+                runtime="actor_model",
+                algorithm=ContextWindowPresets().compact_tool_outputs,
+            )
+        self.assertIn("does not support in-context learning algorithms", str(ctx.exception))
+
+    def test_runtime_dispatch(self) -> None:
+        # [Edge Case] Ensure the correct runtime component classes are instantiated dynamically.
+        from vidbyte.agents.base import BaseAgent
+        from vidbyte.lib.enums import AgentRuntimeType
+        from vidbyte.agents.runtimes.linear import AgentRuntime as LinearAgentRuntime
+        from vidbyte.agents.runtimes.search import SearchTreeRuntimeComponent
+        from vidbyte.agents.runtimes.actor.broker import PointToPointActorRuntime
+
+        linear_agent = BaseAgent(name="l", system_prompt="L", runtime=AgentRuntimeType.LINEAR)
+        self.assertIsInstance(linear_agent._runtime(), LinearAgentRuntime)
+
+        search_agent = BaseAgent(name="s", system_prompt="S", runtime=AgentRuntimeType.MCTS_SEARCH)
+        self.assertIsInstance(search_agent._runtime(), SearchTreeRuntimeComponent)
+
+        actor_agent = BaseAgent(name="a", system_prompt="A", runtime=AgentRuntimeType.ACTOR_MODEL)
+        self.assertIsInstance(actor_agent._runtime(), PointToPointActorRuntime)
 
 
 if __name__ == "__main__":

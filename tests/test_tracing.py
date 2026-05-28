@@ -5,7 +5,7 @@ from typing import Any
 from unittest.mock import patch
 
 from vidbyte.agents.base import BaseAgent
-from vidbyte.agents.runtime import AgentRuntime
+from vidbyte.agents import AgentRuntime
 from vidbyte.lib.dataclasses.agents import AgentRuntimeConfig
 from vidbyte.lib.errors import TracerConfigurationError
 from vidbyte.lib.tracing import NullTracer, SpanContext, TracerBase
