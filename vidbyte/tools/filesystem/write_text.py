@@ -1,19 +1,34 @@
 from __future__ import annotations
 
-from pathlib import Path
-
-from vidbyte.lib.dataclasses.tool_types import ToolResult
 from vidbyte.tools.filesystem._base_tool import FileSystemTool
+from vidbyte.tools.types import ToolCall, ToolParameter, ToolPermission, ToolResult, ToolSpec
 
 
 class WriteTextTool(FileSystemTool):
-    """Write a text file inside a configured root."""
+    """Write text content to a scoped file, creating parent directories if requested."""
 
-    def run(self, path: str, content: str, *, create_parents: bool = False) -> ToolResult:
-        self._require_write()
-        target = self._path(path)
-        self.backend.write_text(target, content, encoding=self._config.encoding, create_parents=create_parents)
-        return ToolResult(
-            value=Path(target),
-            metadata={"path": str(target), "encoding": self._config.encoding},
+    def spec(self) -> ToolSpec:
+        # Declares the model-facing contract for writing text files.
+        return ToolSpec(
+            name="write_text",
+            description="Write text content to a file at the given path inside the configured root.",
+            parameters=(
+                ToolParameter(name="path", type="string", description="Relative path to write."),
+                ToolParameter(name="content", type="string", description="Text content to write."),
+                ToolParameter(name="create_parents", type="boolean", description="Create parent directories if they do not exist.", required=False),
+            ),
+            permission=ToolPermission.WRITE,
         )
+
+    async def execute(self, call: ToolCall) -> ToolResult:
+        # Extract arguments, write the file, and return the resolved path on success.
+        path = call.arguments.get("path", "")
+        content = call.arguments.get("content", "")
+        create_parents = bool(call.arguments.get("create_parents", False))
+        try:
+            self._require_write()
+            target = self._path(path)
+            self.backend.write_text(target, content, encoding=self._config.encoding, create_parents=create_parents)
+            return ToolResult.success(self.name, str(target), metadata={"path": str(target), "encoding": self._config.encoding})
+        except Exception as exc:
+            return ToolResult.error(self.name, str(exc))
