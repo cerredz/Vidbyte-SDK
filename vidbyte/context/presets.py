@@ -13,7 +13,11 @@ Relations:
 """
 
 from vidbyte.context.algorithms import (
+    BeamSearchAlgorithm,
     ContextWindowAlgorithm,
+    DAGDataflowAlgorithm,
+    GossipAlgorithm,
+    MarketAuctionAlgorithm,
     MultiProviderAgenticGraderAlgorithm,
     ReflexionAlgorithm,
     ToolResultAdmission,
@@ -71,6 +75,37 @@ class ContextWindowPresets:
             multi_provider_agentic_grader=MultiProviderAgenticGraderAlgorithm(),
         )
 
+    @property
+    def beam_search(self) -> ContextWindowAlgorithm:
+        """Run beam_width parallel trials, score each output, return the highest-scored result."""
+        return ContextWindowAlgorithm(
+            name="beam_search",
+            beam_search=BeamSearchAlgorithm(),
+        )
+
+    @property
+    def dag_dataflow(self) -> ContextWindowAlgorithm:
+        """Plan a dependency graph, execute nodes in topological order with parallelism."""
+        return ContextWindowAlgorithm(
+            name="dag_dataflow",
+            dag_dataflow=DAGDataflowAlgorithm(),
+        )
+
+    @property
+    def market_auction(self) -> ContextWindowAlgorithm:
+        """Run a specialist bidding protocol and execute the task as the winning role."""
+        return ContextWindowAlgorithm(
+            name="market_auction",
+            market_auction=MarketAuctionAlgorithm(),
+        )
+
+    @property
+    def gossip(self) -> ContextWindowAlgorithm:
+        """Initialize N agents with partial knowledge, run gossip rounds, synthesize the result."""
+        return ContextWindowAlgorithm(
+            name="gossip",
+            gossip=GossipAlgorithm(),
+        )
 
 
 def resolve_context_window_algorithm(

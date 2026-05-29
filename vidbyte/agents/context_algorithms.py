@@ -17,7 +17,14 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING, Any
 
-from vidbyte.agents.algorithms import MultiProviderAgenticGraderRuntimeAlgorithm, ReflexionRuntimeAlgorithm
+from vidbyte.agents.algorithms import (
+    BeamSearchRuntimeAlgorithm,
+    DAGDataflowRuntimeAlgorithm,
+    GossipRuntimeAlgorithm,
+    MarketAuctionRuntimeAlgorithm,
+    MultiProviderAgenticGraderRuntimeAlgorithm,
+    ReflexionRuntimeAlgorithm,
+)
 from vidbyte.lib.tracing import SpanContext
 from vidbyte.lib.dataclasses.context import BaseAgentContext
 from vidbyte.lib.dataclasses.strategies import AgentResult
@@ -38,18 +45,34 @@ class AgentRuntimeContextAlgorithms:
             return "reflexion"
         if self.runtime.algorithm.multi_provider_agentic_grader is not None:
             return "multi_provider_agentic_grader"
+        if self.runtime.algorithm.beam_search is not None:
+            return "beam_search"
+        if self.runtime.algorithm.dag_dataflow is not None:
+            return "dag_dataflow"
+        if self.runtime.algorithm.market_auction is not None:
+            return "market_auction"
+        if self.runtime.algorithm.gossip is not None:
+            return "gossip"
         return None
 
     def is_algorithm(self, name: str) -> bool:
         # Return whether the configured runtime algorithm matches name.
         return self.detect_algorithm() == name
 
-    def return_algorithm(self) -> ReflexionRuntimeAlgorithm | MultiProviderAgenticGraderRuntimeAlgorithm | None:
+    def return_algorithm(self) -> ReflexionRuntimeAlgorithm | MultiProviderAgenticGraderRuntimeAlgorithm | BeamSearchRuntimeAlgorithm | DAGDataflowRuntimeAlgorithm | MarketAuctionRuntimeAlgorithm | GossipRuntimeAlgorithm | None:
         # Return the configured runtime algorithm implementation.
         if self.runtime.algorithm.reflexion is not None:
             return ReflexionRuntimeAlgorithm(self.runtime, self.runtime.algorithm.reflexion)
         if self.runtime.algorithm.multi_provider_agentic_grader is not None:
             return MultiProviderAgenticGraderRuntimeAlgorithm(self.runtime, self.runtime.algorithm.multi_provider_agentic_grader)
+        if self.runtime.algorithm.beam_search is not None:
+            return BeamSearchRuntimeAlgorithm(self.runtime, self.runtime.algorithm.beam_search)
+        if self.runtime.algorithm.dag_dataflow is not None:
+            return DAGDataflowRuntimeAlgorithm(self.runtime, self.runtime.algorithm.dag_dataflow)
+        if self.runtime.algorithm.market_auction is not None:
+            return MarketAuctionRuntimeAlgorithm(self.runtime, self.runtime.algorithm.market_auction)
+        if self.runtime.algorithm.gossip is not None:
+            return GossipRuntimeAlgorithm(self.runtime, self.runtime.algorithm.gossip)
         return None
 
     async def arun(

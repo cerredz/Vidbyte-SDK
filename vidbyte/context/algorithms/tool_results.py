@@ -19,8 +19,12 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
-from vidbyte.context.algorithms.reflexion import ReflexionAlgorithm
+from vidbyte.context.algorithms.beam_search import BeamSearchAlgorithm
+from vidbyte.context.algorithms.dag_dataflow import DAGDataflowAlgorithm
+from vidbyte.context.algorithms.gossip import GossipAlgorithm
+from vidbyte.context.algorithms.market_auction import MarketAuctionAlgorithm
 from vidbyte.context.algorithms.multi_provider_agentic_grader import MultiProviderAgenticGraderAlgorithm
+from vidbyte.context.algorithms.reflexion import ReflexionAlgorithm
 from vidbyte.lib.dataclasses.tools import ToolCall, ToolResult
 
 
@@ -41,11 +45,25 @@ class ContextWindowAlgorithm:
     max_tool_result_chars: int = 600
     reflexion: ReflexionAlgorithm | None = None
     multi_provider_agentic_grader: MultiProviderAgenticGraderAlgorithm | None = None
+    beam_search: BeamSearchAlgorithm | None = None
+    dag_dataflow: DAGDataflowAlgorithm | None = None
+    market_auction: MarketAuctionAlgorithm | None = None
+    gossip: GossipAlgorithm | None = None
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         # Verifies that at most one runtime context algorithm is configured.
-        active = [x for x in (self.reflexion, self.multi_provider_agentic_grader) if x is not None]
+        active = [
+            x for x in (
+                self.reflexion,
+                self.multi_provider_agentic_grader,
+                self.beam_search,
+                self.dag_dataflow,
+                self.market_auction,
+                self.gossip,
+            )
+            if x is not None
+        ]
         if len(active) > 1:
             raise ValueError("At most one runtime context-window algorithm can be configured.")
 

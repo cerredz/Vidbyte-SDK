@@ -30,6 +30,7 @@ from vidbyte.lib.errors.base import (
     ProviderRequestError,
     ProviderResponseError,
     ProviderSelectionError,
+
     ToolExecutionError,
     ToolRegistrationError,
     ToolRegistryError,
@@ -55,6 +56,7 @@ __all__ = [
     "ProviderRequestError",
     "ProviderResponseError",
     "ProviderSelectionError",
+    "StrategyExecutionError",
     "ToolExecutionError",
     "ToolRegistrationError",
     "ToolRegistryError",
