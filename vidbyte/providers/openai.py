@@ -28,31 +28,31 @@ class OpenAIProvider:
         self._video_config = video_config
         self._parser = response_parser or HttpResponseParser()
 
-    def run_text(self, *, prompt: str, system: str | None, metadata: Mapping[str, object] | None, transport: HttpTransport, config: TextModelConfig | None = None) -> TextModelResponse:
+    async def run_text(self, *, prompt: str, system: str | None, metadata: Mapping[str, object] | None, transport: HttpTransport, config: TextModelConfig | None = None) -> TextModelResponse:
         # Execute OpenAI Responses API with tools, metadata, and structured output support.
         config = self._text_config_for(config)
-        response = transport.request(method="POST", url=f"{config.resolved_endpoint()}/responses", headers=self._parser.bearer_headers(config.resolved_api_key()), json_body=self._create_text_payload(config, prompt, system, metadata), timeout_seconds=config.timeout_seconds)
+        response = await transport.request(method="POST", url=f"{config.resolved_endpoint()}/responses", headers=self._parser.bearer_headers(config.resolved_api_key()), json_body=self._create_text_payload(config, prompt, system, metadata), timeout_seconds=config.timeout_seconds)
         parsed = self._parser.parse_json_response(response, provider=self.provider.value)
         return TextModelResponse(provider=self.provider, model=config.model, text=self._extract_response_text(parsed), raw=parsed, usage=parsed.get("usage") if isinstance(parsed.get("usage"), dict) else None)
 
-    def run_image(self, *, prompt: str, transport: HttpTransport, config: ImageModelConfig | None = None) -> ImageModelResponse:
+    async def run_image(self, *, prompt: str, transport: HttpTransport, config: ImageModelConfig | None = None) -> ImageModelResponse:
         # Execute OpenAI image generation endpoint with generation controls.
         config = self._image_config_for(config)
-        response = transport.request(method="POST", url=f"{config.resolved_endpoint()}/images/generations", headers=self._parser.bearer_headers(config.resolved_api_key()), json_body=self._create_image_payload(config, prompt), timeout_seconds=config.timeout_seconds)
+        response = await transport.request(method="POST", url=f"{config.resolved_endpoint()}/images/generations", headers=self._parser.bearer_headers(config.resolved_api_key()), json_body=self._create_image_payload(config, prompt), timeout_seconds=config.timeout_seconds)
         parsed = self._parser.parse_json_response(response, provider=self.provider.value)
         return ImageModelResponse(provider=self.provider, model=config.model, images=self._extract_images(parsed), raw=parsed)
 
-    def create_video(self, *, prompt: str, transport: HttpTransport, config: VideoModelConfig | None = None) -> VideoModelJob:
+    async def create_video(self, *, prompt: str, transport: HttpTransport, config: VideoModelConfig | None = None) -> VideoModelJob:
         # Create an asynchronous OpenAI video job without hiding polling behavior.
         config = self._video_config_for(config)
-        response = transport.request(method="POST", url=f"{config.resolved_endpoint()}/videos", headers=self._parser.bearer_headers(config.resolved_api_key()), json_body=self._create_video_payload(config, prompt), timeout_seconds=config.timeout_seconds)
+        response = await transport.request(method="POST", url=f"{config.resolved_endpoint()}/videos", headers=self._parser.bearer_headers(config.resolved_api_key()), json_body=self._create_video_payload(config, prompt), timeout_seconds=config.timeout_seconds)
         parsed = self._parser.parse_json_response(response, provider=self.provider.value)
         return self._video_job_from_response(parsed, model=config.model)
 
-    def get_video_status(self, *, job_id: str, transport: HttpTransport, config: VideoModelConfig | None = None) -> VideoModelJob:
+    async def get_video_status(self, *, job_id: str, transport: HttpTransport, config: VideoModelConfig | None = None) -> VideoModelJob:
         # Retrieve the latest status for an existing OpenAI video job.
         config = self._video_config_for(config)
-        response = transport.request(method="GET", url=f"{config.resolved_endpoint()}/videos/{job_id}", headers=self._parser.bearer_headers(config.resolved_api_key()), timeout_seconds=config.timeout_seconds)
+        response = await transport.request(method="GET", url=f"{config.resolved_endpoint()}/videos/{job_id}", headers=self._parser.bearer_headers(config.resolved_api_key()), timeout_seconds=config.timeout_seconds)
         parsed = self._parser.parse_json_response(response, provider=self.provider.value)
         return self._video_job_from_response(parsed, model=config.model)
 

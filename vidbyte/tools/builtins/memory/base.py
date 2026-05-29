@@ -43,7 +43,7 @@ class BaseMemoryTool(BaseTool):
 
     async def _json_post(self, url: str, headers: dict[str, str], body: dict) -> tuple[int, dict]:
         # POSTs JSON body to url, decodes response JSON, and returns (status, parsed_dict).
-        response = self._transport.request(
+        response = await self._transport.request(
             method="POST",
             url=url,
             headers=headers,
@@ -56,7 +56,7 @@ class BaseMemoryTool(BaseTool):
         # GETs url with optional query params, decodes response JSON, returns (status, parsed_dict).
         if params:
             url = f"{url}?{urlencode({k: v for k, v in params.items() if v is not None})}"
-        response = self._transport.request(
+        response = await self._transport.request(
             method="GET",
             url=url,
             headers=headers,
@@ -66,7 +66,7 @@ class BaseMemoryTool(BaseTool):
 
     async def _json_delete(self, url: str, headers: dict[str, str]) -> tuple[int, dict]:
         # DELETEs url and decodes the response JSON, returning (status, parsed_dict).
-        response = self._transport.request(
+        response = await self._transport.request(
             method="DELETE",
             url=url,
             headers=headers,

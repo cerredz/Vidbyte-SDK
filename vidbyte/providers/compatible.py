@@ -19,10 +19,10 @@ class OpenAICompatibleProvider:
         self._text_config = text_config or self._build_text_config(model=model, config_options=config_options)
         self._parser = response_parser or HttpResponseParser()
 
-    def run_text(self, *, prompt: str, system: str | None, metadata: Mapping[str, object] | None, transport: HttpTransport, config: TextModelConfig | None = None) -> TextModelResponse:
+    async def run_text(self, *, prompt: str, system: str | None, metadata: Mapping[str, object] | None, transport: HttpTransport, config: TextModelConfig | None = None) -> TextModelResponse:
         # Execute an OpenAI-compatible chat completion request.
         config = self._config(config)
-        response = transport.request(method="POST", url=f"{config.resolved_endpoint()}/chat/completions", headers=self._parser.bearer_headers(config.resolved_api_key()), json_body=self._create_payload(config, prompt, system, metadata), timeout_seconds=config.timeout_seconds)
+        response = await transport.request(method="POST", url=f"{config.resolved_endpoint()}/chat/completions", headers=self._parser.bearer_headers(config.resolved_api_key()), json_body=self._create_payload(config, prompt, system, metadata), timeout_seconds=config.timeout_seconds)
         parsed = self._parser.parse_json_response(response, provider=self.provider.value)
         return TextModelResponse(provider=self.provider, model=config.model, text=self._extract_chat_text(parsed), raw=parsed, usage=parsed.get("usage") if isinstance(parsed.get("usage"), dict) else None)
 
