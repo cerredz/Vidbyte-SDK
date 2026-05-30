@@ -27,13 +27,18 @@ class HttpTransport:
         # Send one async HTTP request with optional non-blocking exponential backoff.
         attempts = max(0, retry_count) + 1
         delay = max(0.0, backoff_seconds)
-        async with httpx.AsyncClient() as client:
-            for attempt in range(attempts):
-                response = await self._send_once(client, method=method, url=url, headers=headers, json_body=json_body, timeout_seconds=timeout_seconds)
-                if response.status_code not in retry_status_codes or attempt == attempts - 1:
-                    return response
-                await asyncio.sleep(delay)
-                delay *= max(1.0, backoff_multiplier)
+        try:
+            async with httpx.AsyncClient() as client:
+                for attempt in range(attempts):
+                    response = await self._send_once(client, method=method, url=url, headers=headers, json_body=json_body, timeout_seconds=timeout_seconds)
+                    if response.status_code not in retry_status_codes or attempt == attempts - 1:
+                        return response
+                    await asyncio.sleep(delay)
+                    delay *= max(1.0, backoff_multiplier)
+        except ProviderRequestError:
+            raise
+        except httpx.RequestError as exc:
+            raise ProviderRequestError("HTTP request failed before receiving a provider response.", provider="http", response_excerpt=str(exc)) from exc
         raise ProviderRequestError("HTTP retry loop exited unexpectedly.", provider="http")
 
     async def _send_once(self, client: httpx.AsyncClient, *, method: str, url: str, headers: Mapping[str, str], json_body: Mapping[str, object] | None, timeout_seconds: float) -> HttpResponse:
