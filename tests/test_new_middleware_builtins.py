@@ -280,17 +280,25 @@ class TestExponentialBackoffRetryMiddleware(unittest.IsolatedAsyncioTestCase):
 
 
 class TestLoopDetectionMiddleware(unittest.IsolatedAsyncioTestCase):
+    def setUp(self) -> None:
+        # Each test gets its own fresh run_state dict so hooks share state within one test.
+        self._run_state: dict = {}
+
     def _tool_ctx(self, name: str, args: dict | None = None, internal: bool = False) -> MiddlewareContext:
         return _ctx(
             hook=MiddlewareHook.BEFORE_TOOL_CALL,
             tool_call=ToolCall(tool_name=name, arguments=args or {}),
             tool_is_internal=internal,
+            run_state=self._run_state,
         )
+
+    def _run_ctx(self) -> MiddlewareContext:
+        return _ctx(hook=MiddlewareHook.BEFORE_RUN, run_state=self._run_state)
 
     async def test_aborts_on_consecutive_identical_calls(self) -> None:
         # [Hidden Failure] Three identical (name, args) calls must abort.
         mw = LoopDetectionMiddleware(max_repeated_calls=3)
-        await mw.before_run(_ctx(hook=MiddlewareHook.BEFORE_RUN))
+        await mw.before_run(self._run_ctx())
         await mw.before_tool_call(self._tool_ctx("search", {"q": "x"}))
         await mw.before_tool_call(self._tool_ctx("search", {"q": "x"}))
         d = await mw.before_tool_call(self._tool_ctx("search", {"q": "x"}))
@@ -300,7 +308,7 @@ class TestLoopDetectionMiddleware(unittest.IsolatedAsyncioTestCase):
     async def test_continues_below_threshold(self) -> None:
         # [Edge Case] Two calls with threshold=3 must not abort.
         mw = LoopDetectionMiddleware(max_repeated_calls=3)
-        await mw.before_run(_ctx(hook=MiddlewareHook.BEFORE_RUN))
+        await mw.before_run(self._run_ctx())
         await mw.before_tool_call(self._tool_ctx("search", {"q": "x"}))
         d = await mw.before_tool_call(self._tool_ctx("search", {"q": "x"}))
         self.assertEqual(d.action, MiddlewareAction.CONTINUE)
@@ -308,7 +316,7 @@ class TestLoopDetectionMiddleware(unittest.IsolatedAsyncioTestCase):
     async def test_resets_consecutive_count_on_different_tool(self) -> None:
         # [Silent Failure] A different call in the middle must break the consecutive streak.
         mw = LoopDetectionMiddleware(max_repeated_calls=3)
-        await mw.before_run(_ctx(hook=MiddlewareHook.BEFORE_RUN))
+        await mw.before_run(self._run_ctx())
         await mw.before_tool_call(self._tool_ctx("search"))
         await mw.before_tool_call(self._tool_ctx("search"))
         await mw.before_tool_call(self._tool_ctx("other"))
@@ -319,7 +327,7 @@ class TestLoopDetectionMiddleware(unittest.IsolatedAsyncioTestCase):
     async def test_skips_internal_tools_by_default(self) -> None:
         # [Hidden Assumption] Internal tools must not be tracked when skip_internal_tools=True.
         mw = LoopDetectionMiddleware(max_repeated_calls=2, skip_internal_tools=True)
-        await mw.before_run(_ctx(hook=MiddlewareHook.BEFORE_RUN))
+        await mw.before_run(self._run_ctx())
         await mw.before_tool_call(self._tool_ctx("isDone", internal=True))
         d = await mw.before_tool_call(self._tool_ctx("isDone", internal=True))
         self.assertEqual(d.action, MiddlewareAction.CONTINUE)
@@ -327,7 +335,7 @@ class TestLoopDetectionMiddleware(unittest.IsolatedAsyncioTestCase):
     async def test_tracks_internal_tools_when_not_skipping(self) -> None:
         # [Hidden Assumption] Internal tools must be tracked when skip_internal_tools=False.
         mw = LoopDetectionMiddleware(max_repeated_calls=2, skip_internal_tools=False)
-        await mw.before_run(_ctx(hook=MiddlewareHook.BEFORE_RUN))
+        await mw.before_run(self._run_ctx())
         await mw.before_tool_call(self._tool_ctx("isDone", internal=True))
         d = await mw.before_tool_call(self._tool_ctx("isDone", internal=True))
         self.assertEqual(d.action, MiddlewareAction.ABORT_RUN)
@@ -335,24 +343,34 @@ class TestLoopDetectionMiddleware(unittest.IsolatedAsyncioTestCase):
     async def test_different_args_not_detected_as_loop(self) -> None:
         # [Silent Failure] Same tool name with different arguments must not trigger detection.
         mw = LoopDetectionMiddleware(max_repeated_calls=2)
-        await mw.before_run(_ctx(hook=MiddlewareHook.BEFORE_RUN))
+        await mw.before_run(self._run_ctx())
         await mw.before_tool_call(self._tool_ctx("search", {"q": "apple"}))
         d = await mw.before_tool_call(self._tool_ctx("search", {"q": "orange"}))
         self.assertEqual(d.action, MiddlewareAction.CONTINUE)
 
     async def test_resets_on_before_run(self) -> None:
-        # [Hidden Failure] Loop history must clear between runs.
+        # [Hidden Failure] Loop history must clear between runs (each run gets its own run_state).
         mw = LoopDetectionMiddleware(max_repeated_calls=2)
-        await mw.before_run(_ctx(hook=MiddlewareHook.BEFORE_RUN))
-        await mw.before_tool_call(self._tool_ctx("search"))
-        await mw.before_run(_ctx(hook=MiddlewareHook.BEFORE_RUN))
-        d = await mw.before_tool_call(self._tool_ctx("search"))
+        rs_a: dict = {}
+        rs_b: dict = {}
+        await mw.before_run(_ctx(hook=MiddlewareHook.BEFORE_RUN, run_state=rs_a))
+        await mw.before_tool_call(_ctx(
+            hook=MiddlewareHook.BEFORE_TOOL_CALL,
+            tool_call=ToolCall(tool_name="search", arguments={}),
+            run_state=rs_a,
+        ))
+        await mw.before_run(_ctx(hook=MiddlewareHook.BEFORE_RUN, run_state=rs_b))
+        d = await mw.before_tool_call(_ctx(
+            hook=MiddlewareHook.BEFORE_TOOL_CALL,
+            tool_call=ToolCall(tool_name="search", arguments={}),
+            run_state=rs_b,
+        ))
         self.assertEqual(d.action, MiddlewareAction.CONTINUE)
 
     async def test_window_bounds_history(self) -> None:
         # [Edge Case] window=3 means only the last 3 calls are considered.
         mw = LoopDetectionMiddleware(max_repeated_calls=3, window=3)
-        await mw.before_run(_ctx(hook=MiddlewareHook.BEFORE_RUN))
+        await mw.before_run(self._run_ctx())
         await mw.before_tool_call(self._tool_ctx("search"))
         await mw.before_tool_call(self._tool_ctx("search"))
         # Third different call evicts the first "search" from the window.
@@ -366,14 +384,16 @@ class TestLoopDetectionMiddleware(unittest.IsolatedAsyncioTestCase):
     async def test_none_tool_call_skipped(self) -> None:
         # [Edge Case] ctx.tool_call is None must not be tracked and must not raise.
         mw = LoopDetectionMiddleware(max_repeated_calls=2)
-        await mw.before_run(_ctx(hook=MiddlewareHook.BEFORE_RUN))
-        d = await mw.before_tool_call(_ctx(hook=MiddlewareHook.BEFORE_TOOL_CALL, tool_call=None))
+        await mw.before_run(self._run_ctx())
+        d = await mw.before_tool_call(_ctx(
+            hook=MiddlewareHook.BEFORE_TOOL_CALL, tool_call=None, run_state=self._run_state
+        ))
         self.assertEqual(d.action, MiddlewareAction.CONTINUE)
 
     async def test_metadata_contains_tool_name_and_count(self) -> None:
         # [Silent Failure] Abort metadata must identify the looping tool.
         mw = LoopDetectionMiddleware(max_repeated_calls=2)
-        await mw.before_run(_ctx(hook=MiddlewareHook.BEFORE_RUN))
+        await mw.before_run(self._run_ctx())
         await mw.before_tool_call(self._tool_ctx("search"))
         d = await mw.before_tool_call(self._tool_ctx("search"))
         self.assertEqual(d.metadata["tool_name"], "search")
