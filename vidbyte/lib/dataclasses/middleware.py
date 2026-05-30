@@ -155,6 +155,8 @@ class MiddlewareContext:
     error: BaseException | None = None
     tool_is_internal: bool = False
     metadata: Mapping[str, Any] = field(default_factory=dict)
+    # Mutable per-run state dict; frozen prevents field reassignment but not dict mutation.
+    run_state: dict[type, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)

@@ -182,6 +182,7 @@ class AgentRuntime:
         tokens_used: int | None = None
         started_at = self.middleware.clock()
         last_response: object | None = None
+        run_state: dict[type, Any] = {}
 
         decision = await self.middleware.before_run(
             self._middleware_context(
@@ -195,6 +196,7 @@ class AgentRuntime:
                 tokens_used=tokens_used,
                 started_at=started_at,
                 metadata=runtime_metadata,
+                run_state=run_state,
             )
         )
         if decision.action is not MiddlewareAction.CONTINUE:
@@ -214,6 +216,7 @@ class AgentRuntime:
                 tokens_used=tokens_used,
                 started_at=started_at,
                 metadata=runtime_metadata,
+                run_state=run_state,
             )
 
         while True:
@@ -233,6 +236,7 @@ class AgentRuntime:
                     tokens_used=tokens_used,
                     started_at=started_at,
                     metadata=runtime_metadata,
+                    run_state=run_state,
                     model_response=last_response,
                 )
 
@@ -248,6 +252,7 @@ class AgentRuntime:
                     tokens_used=tokens_used,
                     started_at=started_at,
                     metadata=runtime_metadata,
+                    run_state=run_state,
                     model_response=last_response,
                 )
             )
@@ -268,6 +273,7 @@ class AgentRuntime:
                     tokens_used=tokens_used,
                     started_at=started_at,
                     metadata=runtime_metadata,
+                    run_state=run_state,
                     model_response=last_response,
                 )
 
@@ -286,6 +292,7 @@ class AgentRuntime:
                 tokens_used=tokens_used,
                 started_at=started_at,
                 metadata=runtime_metadata,
+                run_state=run_state,
                 trace_context=trace_context,
             )
             if isinstance(raw_result, AgentResult):
@@ -299,6 +306,7 @@ class AgentRuntime:
                     tokens_used=tokens_used,
                     started_at=started_at,
                     metadata=runtime_metadata,
+                    run_state=run_state,
                     model_response=last_response,
                 )
             last_response = raw_result
@@ -318,6 +326,7 @@ class AgentRuntime:
                     tokens_used=tokens_used,
                     started_at=started_at,
                     metadata=runtime_metadata,
+                    run_state=run_state,
                     model_response=raw_result,
                 )
             )
@@ -338,6 +347,7 @@ class AgentRuntime:
                     tokens_used=tokens_used,
                     started_at=started_at,
                     metadata=runtime_metadata,
+                    run_state=run_state,
                     model_response=raw_result,
                 )
 
@@ -356,6 +366,7 @@ class AgentRuntime:
                         tokens_used=tokens_used,
                         started_at=started_at,
                         metadata=runtime_metadata,
+                        run_state=run_state,
                         model_response=raw_result,
                     )
                 )
@@ -376,6 +387,7 @@ class AgentRuntime:
                         tokens_used=tokens_used,
                         started_at=started_at,
                         metadata=runtime_metadata,
+                        run_state=run_state,
                         model_response=raw_result,
                     )
                 continue
@@ -393,6 +405,7 @@ class AgentRuntime:
                     tokens_used=tokens_used,
                     started_at=started_at,
                     metadata=runtime_metadata,
+                    run_state=run_state,
                     model_response=raw_result,
                     trace_context=trace_context,
                 )
@@ -407,6 +420,7 @@ class AgentRuntime:
                         tokens_used=tokens_used,
                         started_at=started_at,
                         metadata=runtime_metadata,
+                        run_state=run_state,
                         model_response=raw_result,
                     )
                 _, result = processed
@@ -423,6 +437,7 @@ class AgentRuntime:
                             tokens_used=tokens_used,
                             started_at=started_at,
                             metadata=runtime_metadata,
+                            run_state=run_state,
                             model_response=raw_result,
                         )
                     )
@@ -443,6 +458,7 @@ class AgentRuntime:
                             tokens_used=tokens_used,
                             started_at=started_at,
                             metadata=runtime_metadata,
+                            run_state=run_state,
                             model_response=raw_result,
                         )
                     final = self._final_result(
@@ -463,6 +479,7 @@ class AgentRuntime:
                         tokens_used=tokens_used,
                         started_at=started_at,
                         metadata=runtime_metadata,
+                        run_state=run_state,
                         model_response=raw_result,
                     )
 
@@ -478,6 +495,7 @@ class AgentRuntime:
                     tokens_used=tokens_used,
                     started_at=started_at,
                     metadata=runtime_metadata,
+                    run_state=run_state,
                     model_response=raw_result,
                 )
             )
@@ -498,6 +516,7 @@ class AgentRuntime:
                     tokens_used=tokens_used,
                     started_at=started_at,
                     metadata=runtime_metadata,
+                    run_state=run_state,
                     model_response=raw_result,
                 )
 
@@ -517,6 +536,7 @@ class AgentRuntime:
         tokens_used: int | None,
         started_at: float,
         metadata: Mapping[str, Any],
+        run_state: dict[type, Any] | None = None,
         trace_context: SpanContext | None = None,
     ) -> tuple[object | AgentResult, int]:
         """Invoke the runner, allowing middleware to retry model errors."""
@@ -533,6 +553,7 @@ class AgentRuntime:
                     tokens_used=tokens_used,
                     started_at=started_at,
                     metadata=metadata,
+                    run_state=run_state,
                 )
             )
             if decision.action is not MiddlewareAction.CONTINUE:
@@ -571,6 +592,7 @@ class AgentRuntime:
                         tokens_used=tokens_used,
                         started_at=started_at,
                         metadata=metadata,
+                        run_state=run_state,
                         error=exc,
                     )
                 )
@@ -602,6 +624,7 @@ class AgentRuntime:
         tokens_used: int | None,
         started_at: float,
         metadata: Mapping[str, Any],
+        run_state: dict[type, Any] | None = None,
         model_response: object | None = None,
     ) -> AgentResult:
         """Run after_run middleware and attach final middleware metadata."""
@@ -617,6 +640,7 @@ class AgentRuntime:
                 tokens_used=tokens_used,
                 started_at=started_at,
                 metadata=metadata,
+                run_state=run_state,
                 model_response=model_response,
             )
         )
@@ -642,6 +666,7 @@ class AgentRuntime:
         tokens_used: int | None,
         started_at: float,
         metadata: Mapping[str, Any],
+        run_state: dict[type, Any] | None = None,
         tool_call: ToolCall | None = None,
         tool_result: ToolResult | None = None,
         model_response: object | None = None,
@@ -667,6 +692,7 @@ class AgentRuntime:
             error=error,
             tool_is_internal=tool_is_internal,
             metadata=dict(metadata),
+            run_state=run_state if run_state is not None else {},
         )
 
     def _middleware_abort_result(
@@ -925,6 +951,7 @@ class AgentRuntime:
         tokens_used: int | None,
         started_at: float,
         metadata: Mapping[str, Any],
+        run_state: dict[type, Any] | None = None,
         model_response: object | None = None,
         trace_context: SpanContext | None = None,
     ) -> tuple[ToolCallContext, ToolResult] | AgentResult:
@@ -942,6 +969,7 @@ class AgentRuntime:
                 tokens_used=tokens_used,
                 started_at=started_at,
                 metadata=metadata,
+                run_state=run_state,
                 tool_call=call,
                 tool_is_internal=tool_is_internal,
                 model_response=model_response,
@@ -971,6 +999,7 @@ class AgentRuntime:
                 tokens_used=tokens_used,
                 started_at=started_at,
                 metadata=metadata,
+                run_state=run_state,
                 tool_call=call,
                 tool_result=result,
                 tool_is_internal=tool_is_internal,
