@@ -17,6 +17,8 @@ import unittest
 from vidbyte.lib.enums.prompts import Prompt
 from vidbyte.prompts import (
     Prompts,
+    adversarial_reflection_adversarial_prompt,
+    adversarial_reflection_adversarial_system_prompt,
     goals_goal_prompt,
     mimic_behavior_mimic_prompt,
     templates_intent_based,
@@ -61,6 +63,19 @@ class PromptsInterfaceTests(unittest.TestCase):
         self.assertFalse(hasattr(prompts, "override"))
         self.assertFalse(hasattr(prompts, "tool_call"))
         self.assertFalse(hasattr(prompts, "tools"))
+
+    def test_adversarial_reflection_prompts_are_markdown_backed(self) -> None:
+        prompts = Prompts()
+
+        self.assertEqual(
+            prompts.get(Prompt.ADVERSARIAL_REFLECTION_ADVERSARIAL_SYSTEM_PROMPT),
+            adversarial_reflection_adversarial_system_prompt,
+        )
+        self.assertEqual(
+            prompts.get(Prompt.ADVERSARIAL_REFLECTION_ADVERSARIAL_PROMPT),
+            adversarial_reflection_adversarial_prompt,
+        )
+        self.assertIn("Original task:", adversarial_reflection_adversarial_prompt)
 
 
 if __name__ == "__main__":

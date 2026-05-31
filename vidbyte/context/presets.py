@@ -13,6 +13,7 @@ Relations:
 """
 
 from vidbyte.context.algorithms import (
+    AdversarialReflectionAlgorithm,
     ContextWindowAlgorithm,
     MultiProviderAgenticGraderAlgorithm,
     ReflexionAlgorithm,
@@ -61,6 +62,14 @@ class ContextWindowPresets:
         return ContextWindowAlgorithm(
             name="reflexion",
             reflexion=ReflexionAlgorithm(),
+        )
+
+    @property
+    def adversarial_reflection(self) -> ContextWindowAlgorithm:
+        """Run scheduled adversarial critique inside the normal context window."""
+        return ContextWindowAlgorithm(
+            name="adversarial_reflection",
+            adversarial_reflection=AdversarialReflectionAlgorithm(),
         )
 
     @property

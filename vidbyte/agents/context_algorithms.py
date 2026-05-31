@@ -17,7 +17,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING, Any
 
-from vidbyte.agents.algorithms import MultiProviderAgenticGraderRuntimeAlgorithm, ReflexionRuntimeAlgorithm
+from vidbyte.agents.algorithms import AdversarialReflectionRuntimeAlgorithm, MultiProviderAgenticGraderRuntimeAlgorithm, ReflexionRuntimeAlgorithm
 from vidbyte.lib.tracing import SpanContext
 from vidbyte.lib.dataclasses.context import BaseAgentContext
 from vidbyte.lib.dataclasses.strategies import AgentResult
@@ -38,18 +38,22 @@ class AgentRuntimeContextAlgorithms:
             return "reflexion"
         if self.runtime.algorithm.multi_provider_agentic_grader is not None:
             return "multi_provider_agentic_grader"
+        if self.runtime.algorithm.adversarial_reflection is not None:
+            return "adversarial_reflection"
         return None
 
     def is_algorithm(self, name: str) -> bool:
         # Return whether the configured runtime algorithm matches name.
         return self.detect_algorithm() == name
 
-    def return_algorithm(self) -> ReflexionRuntimeAlgorithm | MultiProviderAgenticGraderRuntimeAlgorithm | None:
+    def return_algorithm(self) -> ReflexionRuntimeAlgorithm | MultiProviderAgenticGraderRuntimeAlgorithm | AdversarialReflectionRuntimeAlgorithm | None:
         # Return the configured runtime algorithm implementation.
         if self.runtime.algorithm.reflexion is not None:
             return ReflexionRuntimeAlgorithm(self.runtime, self.runtime.algorithm.reflexion)
         if self.runtime.algorithm.multi_provider_agentic_grader is not None:
             return MultiProviderAgenticGraderRuntimeAlgorithm(self.runtime, self.runtime.algorithm.multi_provider_agentic_grader)
+        if self.runtime.algorithm.adversarial_reflection is not None:
+            return AdversarialReflectionRuntimeAlgorithm(self.runtime, self.runtime.algorithm.adversarial_reflection)
         return None
 
     async def arun(

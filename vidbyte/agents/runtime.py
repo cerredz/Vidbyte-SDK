@@ -14,7 +14,7 @@ Relations:
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from typing import Any
 
 from vidbyte.agents.context_algorithms import AgentRuntimeContextAlgorithms
@@ -23,7 +23,7 @@ from vidbyte.context.algorithms import ContextWindowAlgorithm
 from vidbyte.context.manager import ContextManager
 from vidbyte.context.primitives import ContextItem
 from vidbyte.context.window import ContextWindow
-from vidbyte.lib.dataclasses.agents import AgentRuntimeConfig, AgentStopReason
+from vidbyte.lib.dataclasses.agents import AgentRuntimeConfig, AgentRuntimeIterationState, AgentRuntimeIterationUpdate, AgentStopReason
 from vidbyte.lib.dataclasses.middleware import MiddlewareAction, MiddlewareContext, MiddlewareDecision, MiddlewareHook
 from vidbyte.lib.enums import ModelModality
 from vidbyte.lib.errors import PermissionDeniedError, ToolExecutionError, ToolRegistryError
@@ -38,6 +38,8 @@ from vidbyte.tools._internal import IS_DONE_TOOL_NAME, with_internal_agent_tools
 from vidbyte.tools.catalog import Tools
 from vidbyte.tools.security import PermissionDecision, PermissionPolicy
 from vidbyte.tools.types import ToolCall, ToolCallContext, ToolCallState, ToolResult
+
+AgentRuntimeIterationHook = Callable[[AgentRuntimeIterationState], Awaitable[AgentRuntimeIterationUpdate | AgentResult | None]]
 
 
 class AgentRuntime:
@@ -170,6 +172,7 @@ class AgentRuntime:
         metadata: Mapping[str, Any] | None = None,
         options: Mapping[str, Any] | None = None,
         trace_context: SpanContext | None = None,
+        iteration_hook: AgentRuntimeIterationHook | None = None,
     ) -> AgentResult:
         """Run one direct model/tool attempt until isDone or a budget stop."""
         run_options = dict(options or {})
@@ -378,6 +381,30 @@ class AgentRuntime:
                         metadata=runtime_metadata,
                         model_response=raw_result,
                     )
+                context, hook_result = await self._apply_iteration_hook(
+                    iteration_hook,
+                    message=message,
+                    context=context,
+                    provider=provider,
+                    iteration_count=iteration_count,
+                    model_call_count=model_call_count,
+                    tokens_used=tokens_used,
+                    call_contexts=call_contexts,
+                    model_response=raw_result,
+                )
+                if hook_result is not None:
+                    return await self._finish_result(
+                        hook_result,
+                        message=message,
+                        context=context,
+                        provider=provider,
+                        iteration_count=iteration_count,
+                        model_call_count=model_call_count,
+                        tokens_used=tokens_used,
+                        started_at=started_at,
+                        metadata=runtime_metadata,
+                        model_response=raw_result,
+                    )
                 continue
 
             for call in tool_calls:
@@ -500,6 +527,66 @@ class AgentRuntime:
                     metadata=runtime_metadata,
                     model_response=raw_result,
                 )
+            context, hook_result = await self._apply_iteration_hook(
+                iteration_hook,
+                message=message,
+                context=context,
+                provider=provider,
+                iteration_count=iteration_count,
+                model_call_count=model_call_count,
+                tokens_used=tokens_used,
+                call_contexts=call_contexts,
+                model_response=raw_result,
+            )
+            if hook_result is not None:
+                return await self._finish_result(
+                    hook_result,
+                    message=message,
+                    context=context,
+                    provider=provider,
+                    iteration_count=iteration_count,
+                    model_call_count=model_call_count,
+                    tokens_used=tokens_used,
+                    started_at=started_at,
+                    metadata=runtime_metadata,
+                    model_response=raw_result,
+                )
+
+    async def _apply_iteration_hook(
+        self,
+        iteration_hook: AgentRuntimeIterationHook | None,
+        *,
+        message: str,
+        context: BaseAgentContext,
+        provider: str,
+        iteration_count: int,
+        model_call_count: int,
+        tokens_used: int | None,
+        call_contexts: list[ToolCallContext],
+        model_response: object | None,
+    ) -> tuple[BaseAgentContext, AgentResult | None]:
+        """Run an optional context algorithm hook after a non-terminal iteration."""
+        if iteration_hook is None:
+            return context, None
+        update = await iteration_hook(
+            AgentRuntimeIterationState(
+                message=message,
+                context=context,
+                provider=provider,
+                iteration_count=iteration_count,
+                model_call_count=model_call_count,
+                tool_call_count=len(call_contexts),
+                tokens_used=tokens_used,
+                call_contexts=tuple(call_contexts),
+                model_response=model_response,
+            )
+        )
+        if isinstance(update, AgentResult):
+            return context, update
+        if update is None:
+            return context, None
+        call_contexts.extend(context_record for context_record in update.tool_contexts if isinstance(context_record, ToolCallContext))
+        return (update.context if isinstance(update.context, BaseAgentContext) else context), None
 
     async def _invoke_with_middleware(
         self,
@@ -771,6 +858,84 @@ class AgentRuntime:
                 provider=provider,
                 metadata=dict(call.metadata),
             ),
+            result,
+        )
+
+    async def execute_scheduled_tool_call(self, tool: object, call: ToolCall, *, message: str, context: BaseAgentContext, provider: str, iteration_count: int, model_call_count: int, tokens_used: int | None, started_at: float, metadata: Mapping[str, Any], model_response: object | None = None, trace_context: SpanContext | None = None) -> tuple[ToolCallContext, ToolResult] | AgentResult:
+        """Execute an algorithm-scheduled tool without emitting provider tool-result messages."""
+        spec = tool.spec()
+        tool_is_internal = bool(isinstance(getattr(spec, "metadata", {}), Mapping) and getattr(spec, "metadata", {}).get("internal"))
+        before_decision = await self.middleware.before_tool_call(
+            self._middleware_context(
+                MiddlewareHook.BEFORE_TOOL_CALL,
+                message=message,
+                context=context,
+                provider=provider,
+                iteration_count=iteration_count,
+                model_call_count=model_call_count,
+                tool_call_count=0,
+                tokens_used=tokens_used,
+                started_at=started_at,
+                metadata=metadata,
+                tool_call=call,
+                tool_is_internal=tool_is_internal,
+                model_response=model_response,
+            )
+        )
+        if before_decision.action is MiddlewareAction.ABORT_RUN:
+            return self._middleware_abort_result(before_decision, iteration_count=iteration_count, tokens_used=tokens_used, contexts=())
+        if before_decision.action is MiddlewareAction.DENY_TOOL:
+            context_record, result = self._middleware_denied_tool(call, provider, before_decision)
+        else:
+            context_record, result = await self._execute_scheduled_tool(tool, call, provider=provider, trace_context=trace_context)
+        after_decision = await self.middleware.after_tool_call(
+            self._middleware_context(
+                MiddlewareHook.AFTER_TOOL_CALL,
+                message=message,
+                context=context,
+                provider=provider,
+                iteration_count=iteration_count,
+                model_call_count=model_call_count,
+                tool_call_count=1,
+                tokens_used=tokens_used,
+                started_at=started_at,
+                metadata=metadata,
+                tool_call=call,
+                tool_result=result,
+                tool_is_internal=tool_is_internal,
+                model_response=model_response,
+            )
+        )
+        if after_decision.action is MiddlewareAction.ABORT_RUN:
+            return self._middleware_abort_result(after_decision, iteration_count=iteration_count, tokens_used=tokens_used, contexts=(context_record,))
+        return context_record, result
+
+    async def _execute_scheduled_tool(self, tool: object, call: ToolCall, *, provider: str, trace_context: SpanContext | None = None) -> tuple[ToolCallContext, ToolResult]:
+        """Run one explicitly supplied scheduled tool with permission and validation checks."""
+        tool_span = self._tracer.start_span("tool.call", parent=trace_context, tool_name=call.tool_name)
+        try:
+            spec = tool.spec()
+            self._check_permission(spec, call)
+            self._validate_tool_call(tool, call)
+            result = await self._execute_tool(tool, call)
+            state = ToolCallState.SUCCEEDED if result.status.value == "success" else ToolCallState.FAILED
+            self._tracer.end_span(tool_span, output=result.output)
+        except PermissionDeniedError as exc:
+            permission = exc.details.get("permission", "")
+            result = ToolResult.error(call.tool_name, str(exc), metadata={"error": "permission_denied", "permission": permission})
+            state = ToolCallState.DENIED
+            self._tracer.end_span(tool_span, error=exc)
+        except ToolExecutionError as exc:
+            error_type = exc.details.get("error_type", type(exc).__name__)
+            result = ToolResult.error(call.tool_name, str(exc), metadata={"error": "execution_error", "error_type": error_type})
+            state = ToolCallState.FAILED
+            self._tracer.end_span(tool_span, error=exc)
+        except Exception as exc:
+            result = ToolResult.error(call.tool_name, f"Tool execution failed: {exc}", metadata={"error": "execution_error", "error_type": type(exc).__name__})
+            state = ToolCallState.FAILED
+            self._tracer.end_span(tool_span, error=exc)
+        return (
+            ToolCallContext(tool_name=call.tool_name, arguments=call.arguments, state=state, call_id=call.call_id, result=result, provider=provider, metadata=dict(call.metadata)),
             result,
         )
 

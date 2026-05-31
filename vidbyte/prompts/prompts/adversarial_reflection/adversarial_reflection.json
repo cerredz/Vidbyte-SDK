@@ -1,0 +1,15 @@
+{
+  "name": "Adversarial Reflection",
+  "description": "Prompt assets for the Adversarial Reflection context-window algorithm. This algorithm periodically runs an internal adversarial critique stage and injects bounded feedback into later context as a tool-like observation while preserving the main agent system prompt and tool loop.",
+  "key": "adversarial_reflection",
+  "prompts": {
+    "adversarial_system_prompt": {
+      "path": "adversarial_system_prompt.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/adversarial_reflection/adversarial_system_prompt.md"
+    },
+    "adversarial_prompt": {
+      "path": "adversarial_prompt.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/adversarial_reflection/adversarial_prompt.md"
+    }
+  }
+}

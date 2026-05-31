@@ -15,6 +15,7 @@ Relations:
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Mapping
@@ -69,6 +70,29 @@ class AgentRuntimeStats:
     tokens_used: int | None = None
     tool_call_count: int = 0
     stop_reason: AgentStopReason = AgentStopReason.FINAL_RESPONSE
+
+
+@dataclass(frozen=True, slots=True)
+class AgentRuntimeIterationState:
+    """Snapshot of one completed direct-runtime iteration for context algorithms."""
+
+    message: str
+    context: Any
+    provider: str
+    iteration_count: int
+    model_call_count: int
+    tool_call_count: int
+    tokens_used: int | None
+    call_contexts: Sequence[Any] = ()
+    model_response: object | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class AgentRuntimeIterationUpdate:
+    """Context update returned by a runtime iteration hook."""
+
+    context: Any | None = None
+    tool_contexts: Sequence[Any] = ()
 
 
 @dataclass(frozen=True, slots=True)

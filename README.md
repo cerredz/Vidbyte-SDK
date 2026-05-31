@@ -135,6 +135,29 @@ agent = Agent(
 )
 ```
 
+Use adversarial reflection when you want the normal agent loop to periodically
+receive a compact critique of what may be going wrong. The critique is scheduled
+internally and injected into later context as tool-like context; it does not
+replace the agent's regular system prompt or append provider-native tool result
+messages without a matching provider tool call.
+
+```python
+from vidbyte import AdversarialAgentTool, AdversarialReflectionAlgorithm, ContextWindowAlgorithm
+
+critic = AdversarialAgentTool(
+    critique=lambda args: "The current trajectory needs a stronger verification step.",
+)
+
+algorithm = ContextWindowAlgorithm(
+    name="adversarial_reflection",
+    adversarial_reflection=AdversarialReflectionAlgorithm(
+        interval_iterations=3,
+        max_critiques=2,
+        adversarial_tool=critic,
+    ),
+)
+```
+
 Per-call context can be supplied with `AgentInput` without mutating the agent's
 default context:
 

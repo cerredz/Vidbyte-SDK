@@ -20,6 +20,7 @@ Relations:
 from __future__ import annotations
 
 from vidbyte.tools.adapters import ToolInput, ensure_tool, ensure_tools
+from vidbyte.tools.adversarial_agent_tool import AdversarialAgentTool
 from vidbyte.tools.agent_tool import AgentTool
 from vidbyte.tools.base import BaseTool, ToolLike
 from vidbyte.tools.catalog import Tools
@@ -43,6 +44,7 @@ from vidbyte.tools.types import (
 
 __all__ = [
     "AgentTool",
+    "AdversarialAgentTool",
     "BaseTool",
     "FunctionTool",
     "ToolCall",

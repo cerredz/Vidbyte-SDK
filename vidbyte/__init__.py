@@ -63,6 +63,7 @@ from vidbyte.evals import (
     RubricGrader,
 )
 from vidbyte.context import (
+    AdversarialReflectionAlgorithm,
     ArtifactContextItem,
     BaseAgentContext,
     BaseContext,
@@ -131,6 +132,7 @@ from vidbyte.pipelines import (
 )
 from vidbyte.prompts import Prompts
 from vidbyte.tools import (
+    AdversarialAgentTool,
     BaseTool,
     FunctionTool,
     ToolCall,
@@ -175,6 +177,8 @@ __all__ = [
     "AgentRuntimeStats",
     "AgentSpec",
     "AgentStopReason",
+    "AdversarialAgentTool",
+    "AdversarialReflectionAlgorithm",
     "ArtifactContextItem",
     "BaseAgent",
     "BaseAgentContext",
