@@ -1,4 +1,4 @@
-"""Context Protocol Header
+﻿"""Context Protocol Header
 
 Description:
     Tests for the Reflexion runtime context-window algorithm.
@@ -16,7 +16,7 @@ from vidbyte.agents.algorithms import ReflexionRuntimeAlgorithm
 from vidbyte.agents.context_algorithms import AgentRuntimeContextAlgorithms
 from vidbyte.agents.runtime import AgentRuntime
 from vidbyte.lib.dataclasses.agents import AgentRuntimeConfig
-from vidbyte.strategies import StrategyResult
+from vidbyte.lib.dataclasses.strategies import AgentResult as StrategyResult
 from vidbyte.tools import ToolCallContext, ToolCallState, ToolResult, Tools, tool
 from vidbyte.tools.security import PermissionPolicy
 
@@ -154,3 +154,4 @@ class ReflexionAlgorithmTests(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+

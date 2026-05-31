@@ -1,4 +1,4 @@
-"""Context Protocol Header
+﻿"""Context Protocol Header
 
 Description:
     Dispatches attached context-window algorithms for AgentRuntime.
@@ -19,7 +19,8 @@ from typing import TYPE_CHECKING, Any
 
 from vidbyte.agents.algorithms import MultiProviderAgenticGraderRuntimeAlgorithm, ReflexionRuntimeAlgorithm
 from vidbyte.lib.tracing import SpanContext
-from vidbyte.strategies.types import BaseAgentContext, StrategyResult
+from vidbyte.lib.dataclasses.context import BaseAgentContext
+from vidbyte.lib.dataclasses.strategies import AgentResult
 
 if TYPE_CHECKING:
     from vidbyte.agents.runtime import AgentRuntime
@@ -64,7 +65,7 @@ class AgentRuntimeContextAlgorithms:
         metadata: Mapping[str, Any] | None = None,
         options: Mapping[str, Any] | None = None,
         trace_context: SpanContext | None = None,
-    ) -> StrategyResult | None:
+    ) -> AgentResult | None:
         """Run the configured algorithm, or return None when no algorithm exists."""
         algorithm = self.return_algorithm()
         if algorithm is None:
@@ -86,3 +87,5 @@ class AgentRuntimeContextAlgorithms:
 __all__ = [
     "AgentRuntimeContextAlgorithms",
 ]
+
+

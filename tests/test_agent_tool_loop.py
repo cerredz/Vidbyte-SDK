@@ -3,7 +3,6 @@ from __future__ import annotations
 import unittest
 
 from vidbyte import Agent, tool
-from vidbyte.strategies import BaseStrategy, StrategyResult
 from vidbyte.tools import BaseTool, ToolCall, ToolPermission, ToolResult, ToolSpec
 
 
@@ -33,20 +32,6 @@ class WriteTool(BaseTool):
     async def execute(self, call: ToolCall) -> ToolResult:
         self.executed = True
         return ToolResult.success("write", "done")
-
-
-class CaptureStrategy(BaseStrategy):
-    name = "capture"
-
-    def __init__(self) -> None:
-        self.tools = ()
-        self.context_tool_names = ()
-
-    async def arun(self, prompt: str, **kwargs: object) -> StrategyResult:
-        self.tools = tuple(kwargs.get("tools", ()))
-        context = kwargs.get("context")
-        self.context_tool_names = tuple(tool.name for tool in getattr(context, "tools", ()))
-        return StrategyResult(output=prompt, strategy_name=self.name)
 
 
 class AgentToolLoopTests(unittest.IsolatedAsyncioTestCase):
@@ -158,19 +143,6 @@ class AgentToolLoopTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(reply.content, "Agent runtime stopped after reaching max_iterations.")
         self.assertEqual(reply.metadata["stop_reason"], "max_iterations")
         self.assertEqual(reply.metadata["iteration_count"], 1)
-
-    async def test_strategy_path_still_receives_tools(self) -> None:
-        @tool
-        def lookup() -> str:
-            return "ok"
-
-        strategy = CaptureStrategy()
-        agent = Agent(name="worker", system_prompt="Work.", strategy=strategy, tools=[lookup])
-
-        await agent.arun("task")
-
-        self.assertEqual(tuple(tool.name for tool in strategy.tools), ("lookup",))
-        self.assertEqual(strategy.context_tool_names, ("lookup",))
 
 
 if __name__ == "__main__":

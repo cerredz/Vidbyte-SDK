@@ -11,7 +11,6 @@ Architecture:
     - ToolExecutionError: Raised for tool execution pipeline failures.
     - PermissionDeniedError: Raised when a policy refuses a tool call.
     - McpProtocolError: Raised when an MCP transport returns malformed data.
-    - StrategyExecutionError: Raised when a strategy cannot produce a result.
     - AgentExecutionError: Raised when an agent cannot generate a reply.
     - AgentRegistryError: Raised when local agent discovery fails.
     - McpError: Base exception for all developer attachment and execution failures.
@@ -56,10 +55,6 @@ class McpProtocolError(VidbyteSdkError):
     """Signals malformed JSON-RPC/MCP messages or remote protocol errors."""
 
 
-class StrategyExecutionError(VidbyteSdkError):
-    """Raised when a strategy cannot produce a result."""
-
-
 class AgentExecutionError(VidbyteSdkError):
     """Raised when an agent cannot generate a reply."""
 
@@ -96,8 +91,6 @@ class McpAttachmentError(McpError):
         super().__init__(message, details=details)
         self.causes = causes
 
-
-# Provider / configuration error family (from PR12)
 
 class ConfigurationError(VidbyteSdkError):
     """Raised when runner or provider configuration is invalid."""
@@ -139,10 +132,6 @@ class ProviderConfigurationError(ProviderRequestError):
 
 class ProviderResponseError(ProviderRequestError):
     """Raised when a provider response cannot be normalized."""
-
-
-class StrategyConfigurationError(StrategyExecutionError):
-    """Raised when a prompt strategy is missing runner/model configuration."""
 
 
 class ToolRegistrationError(ToolRegistryError):

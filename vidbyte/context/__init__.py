@@ -45,8 +45,6 @@ from vidbyte.lib.dataclasses.context import (
     ContextPermissions,
     ContextResponse,
     ContextToolCall,
-    StrategyContext,
-    VMAOContext,
 )
 from vidbyte.context.manager import ContextManager
 from vidbyte.context.presets import ContextWindowPresets
@@ -76,10 +74,8 @@ __all__ = [
     "ProgressContextItem",
     "ReflexionAlgorithm",
     "ResponseContextItem",
-    "StrategyContext",
     "TaskContextItem",
     "TextContextItem",
     "ToolCallContextItem",
     "ToolResultAdmission",
-    "VMAOContext",
 ]

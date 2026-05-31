@@ -1,11 +1,11 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import unittest
 
 from vidbyte.agents.runtime import AgentRuntime
 from vidbyte.context.manager import ContextManager
 from vidbyte.context.primitives import TextContextItem
-from vidbyte.lib.dataclasses.context import StrategyContext
+from vidbyte.lib.dataclasses.context import BaseContext as StrategyContext
 from vidbyte.tools import BaseTool, ToolCall, ToolPermission, ToolResult, ToolSpec, Tools
 from vidbyte.tools.security import PermissionPolicy
 
@@ -170,3 +170,4 @@ class BuildSystemStringTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+

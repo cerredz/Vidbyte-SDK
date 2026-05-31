@@ -3,7 +3,7 @@
 Description:
     Implements EvalRunner, the async-first execution engine for evaluations.
 Purpose:
-    Executes a collection of evaluation cases against any target (agents, strategies, or runners)
+    Executes a collection of evaluation cases against any target (agents or runners)
     with strict concurrency throttling, clean state isolation, and resilient exception handling.
 Architecture:
     - EvalRunner: Orchestrates concurrent execution tasks using a Semaphore, isolates stateful agents
@@ -26,13 +26,12 @@ import asyncio
 from datetime import datetime
 from typing import Any, Sequence
 from vidbyte.agents.base import BaseAgent
-from vidbyte.strategies.base import BaseStrategy
 from vidbyte.evals.types import EvalCase, EvalResult, EvalSuiteResult, GraderResult
 from vidbyte.evals.base import BaseGrader
 
 
 class EvalRunner:
-    """Async-first evaluation runner that executes suites against agents, strategies, or model runners."""
+    """Async-first evaluation runner that executes suites against agents or model runners."""
 
     def __init__(self, target: object, *, default_grader: BaseGrader, concurrency: int = 4, max_retries: int = 1) -> None:
         # Initializes the EvalRunner with an execution target, a default grader, and concurrency settings.
@@ -110,11 +109,6 @@ class EvalRunner:
             metadata = dict(reply.metadata) if reply.metadata else {}
             return str(reply.content), metadata
 
-        if isinstance(target, BaseStrategy):
-            result = await target.arun(case.prompt)
-            metadata = dict(result.metadata) if result.metadata else {}
-            return str(result.output), metadata
-
         if hasattr(target, "arun"):
             res = await target.arun(case.prompt)
         elif hasattr(target, "generate_reply"):
@@ -142,7 +136,7 @@ class EvalRunner:
         return actual, {}
 
     def _resolve_model_name(self) -> str:
-        # Resolves a descriptive name for the target representing the evaluated model/provider strategy.
+        # Resolves a descriptive name for the target representing the evaluated model/provider.
         target = self.target
         if isinstance(target, BaseAgent):
             return target.runner_config.model_name or target.name

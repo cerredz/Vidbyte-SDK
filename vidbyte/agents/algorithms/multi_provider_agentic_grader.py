@@ -1,4 +1,4 @@
-"""Context Protocol Header
+﻿"""Context Protocol Header
 
 Description:
     Executes the Multi-Provider Agentic Grader context-window algorithm for AgentRuntime.
@@ -35,7 +35,8 @@ from vidbyte.lib.errors import AgentExecutionError
 from vidbyte.lib.agents.modality_detector import ModalityDetector
 from vidbyte.lib.models import ProviderModelRegistry
 from vidbyte.lib.tracing import SpanContext
-from vidbyte.strategies.types import BaseAgentContext, StrategyResult
+from vidbyte.lib.dataclasses.context import BaseAgentContext
+from vidbyte.lib.dataclasses.strategies import AgentResult
 
 if TYPE_CHECKING:
     from vidbyte.agents.runtime import AgentRuntime
@@ -51,7 +52,7 @@ class MultiProviderAgenticGraderRuntimeAlgorithm:
         self.runtime = runtime
         self.algorithm = algorithm
 
-    async def arun(self, message: str, *, runner: object, context: BaseAgentContext, provider: str, invoke_runner: Callable[..., Any], runner_output_text: Callable[[object], str], runner_output_metadata: Callable[[object], Mapping[str, Any]], metadata: Mapping[str, Any] | None = None, options: Mapping[str, Any] | None = None, trace_context: SpanContext | None = None) -> StrategyResult:
+    async def arun(self, message: str, *, runner: object, context: BaseAgentContext, provider: str, invoke_runner: Callable[..., Any], runner_output_text: Callable[[object], str], runner_output_metadata: Callable[[object], Mapping[str, Any]], metadata: Mapping[str, Any] | None = None, options: Mapping[str, Any] | None = None, trace_context: SpanContext | None = None) -> AgentResult:
         # Orchestrates concurrent provider trials followed by a meta-grader selection pass.
         started_at = self.runtime.middleware.clock()
         active_models = ProviderModelRegistry.resolve_active(self.algorithm.provider_models, options)
@@ -59,11 +60,11 @@ class MultiProviderAgenticGraderRuntimeAlgorithm:
         candidates, total_tokens, call_contexts = self._collect_candidates(active_models, results)
         candidates_text = self._build_candidates_text(candidates)
         raw_result = await self._run_grader(message, candidates_text, context, invoke_runner, runner_output_text, metadata, started_at, trace_context)
-        if isinstance(raw_result, StrategyResult):
+        if isinstance(raw_result, AgentResult):
             return raw_result
         selected_output, selected_provider = self._select_winner(candidates, raw_result, runner_output_text)
         res_metadata = self._build_result_metadata(metadata, active_models, selected_provider, candidates, total_tokens, call_contexts)
-        return StrategyResult(output=selected_output, strategy_name="multi_provider_agentic_grader", calls=tuple(call_contexts), metadata=res_metadata)
+        return AgentResult(output=selected_output, strategy_name="multi_provider_agentic_grader", calls=tuple(call_contexts), metadata=res_metadata)
 
     async def _run_provider_trials(self, message: str, context: BaseAgentContext, invoke_runner: Callable[..., Any], runner_output_text: Callable[[object], str], runner_output_metadata: Callable[[object], Mapping[str, Any]], metadata: Mapping[str, Any] | None, options: Mapping[str, Any] | None, trace_context: SpanContext | None, active_models: dict[str, str]) -> list[Any]:
         # Launches all provider loops concurrently and returns their results, including exceptions.
@@ -73,7 +74,7 @@ class MultiProviderAgenticGraderRuntimeAlgorithm:
         ]
         return list(await asyncio.gather(*tasks, return_exceptions=True))
 
-    async def _run_provider_trial(self, provider_name: str, model_name: str, message: str, context: BaseAgentContext, invoke_runner: Callable[..., Any], runner_output_text: Callable[[object], str], runner_output_metadata: Callable[[object], Mapping[str, Any]], metadata: Mapping[str, Any] | None, options: Mapping[str, Any] | None, trace_context: SpanContext | None) -> StrategyResult:
+    async def _run_provider_trial(self, provider_name: str, model_name: str, message: str, context: BaseAgentContext, invoke_runner: Callable[..., Any], runner_output_text: Callable[[object], str], runner_output_metadata: Callable[[object], Mapping[str, Any]], metadata: Mapping[str, Any] | None, options: Mapping[str, Any] | None, trace_context: SpanContext | None) -> AgentResult:
         # Runs a single provider's agentic loop and captures its final text output for grading.
         trial_prompt = self.algorithm.agent_system_prompt_text(context.system_prompt or "")
         trial_context = dataclasses.replace(context, system_prompt=trial_prompt)
@@ -173,3 +174,5 @@ class MultiProviderAgenticGraderRuntimeAlgorithm:
 __all__ = [
     "MultiProviderAgenticGraderRuntimeAlgorithm",
 ]
+
+

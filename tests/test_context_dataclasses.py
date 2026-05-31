@@ -4,7 +4,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from vidbyte.context import ContextBudget, ContextPermissions, ContextResponse, ContextToolCall, StrategyContext, TaskContextItem
+from vidbyte.context import ContextBudget, ContextPermissions, ContextResponse, ContextToolCall, TaskContextItem
+from vidbyte.lib.dataclasses.context import BaseContext
 from vidbyte.lib.dataclasses import AgentCard, CandidateResult, ToolSpec
 from vidbyte.lib.enums import BudgetPreset, PermissionPreset
 from vidbyte.prompts import Prompts
@@ -24,10 +25,10 @@ class ContextDataclassTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "note.txt"
             path.write_text("file body", encoding="utf-8")
-            context = StrategyContext(
+            context = BaseContext(
                 system_prompt="system",
                 file_paths=[str(path)],
-                strategy_metadata={"step": "draft"},
+                run_metadata={"step": "draft"},
                 tool_calls=[ContextToolCall(name="lookup", output="tool body")],
                 responses=[ContextResponse(content="response body")],
                 budget=ContextBudget.from_preset(BudgetPreset.TIGHT),
@@ -45,16 +46,16 @@ class ContextDataclassTests(unittest.TestCase):
         self.assertIn("Run metadata", built)
 
     def test_context_items_are_included_in_compatibility_context_build(self) -> None:
-        context = StrategyContext(context_items=[TaskContextItem(goal="document the public API")])
+        context = BaseContext(context_items=[TaskContextItem(goal="document the public API")])
 
         built = context.build_context()
 
         self.assertIn("Context items:", built)
         self.assertIn("document the public API", built)
 
-    def test_prompt_catalog_contains_vmao_prompts(self) -> None:
-        prompts = Prompts().family("vmao")
-        self.assertIn("planner", prompts)
+    def test_prompt_catalog_contains_reflexion_prompts(self) -> None:
+        prompts = Prompts().family("reflexion")
+        self.assertIn("agent_system_prompt", prompts)
 
 
 if __name__ == "__main__":

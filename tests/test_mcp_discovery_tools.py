@@ -1,4 +1,4 @@
-"""Context Protocol Header
+﻿"""Context Protocol Header
 
 Description:
     Tests for SearchMcpServersTool, AttachMcpServerTool, and agent binding integration.
@@ -27,7 +27,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from vidbyte.agents import BaseAgent
 from vidbyte.lib.errors import McpConnectionError
-from vidbyte.strategies import BaseStrategy, StrategyContext, StrategyResult
 from vidbyte.tools import ToolCall, ToolStatus
 from vidbyte.tools.builtins.mcp import AttachMcpServerTool, SearchMcpServersTool
 from vidbyte.tools.builtins.mcp.search import SmitheryRegistryClient, SmitheryServerResult
@@ -113,14 +112,6 @@ class MockMcpStdioTransport:
         self.closed = True
 
 
-class EchoStrategy(BaseStrategy):
-    """Minimal strategy that echoes the prompt."""
-
-    name = "echo"
-
-    async def arun(self, prompt: str, **kwargs: object) -> StrategyResult:
-        """Return the prompt back as output."""
-        return StrategyResult(output=f"echo:{prompt}", strategy_name=self.name)
 
 
 # ---------------------------------------------------------------------------
@@ -246,7 +237,7 @@ class AttachMcpServerToolTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_invalid_json_command_returns_error(self) -> None:
         """[Edge Case] Non-JSON command string must return ToolResult.error."""
-        agent = BaseAgent(name="a", system_prompt=".", strategy=EchoStrategy())
+        agent = BaseAgent(name="a", system_prompt=".")
         tool = AttachMcpServerTool()
         tool.bind_agent(agent)
         result = await tool.execute(ToolCall("attach_mcp_server", {"command": "not json"}))
@@ -255,7 +246,7 @@ class AttachMcpServerToolTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_empty_command_list_returns_error(self) -> None:
         """[Edge Case] command=[] must return ToolResult.error before any attachment attempt."""
-        agent = BaseAgent(name="a", system_prompt=".", strategy=EchoStrategy())
+        agent = BaseAgent(name="a", system_prompt=".")
         tool = AttachMcpServerTool()
         tool.bind_agent(agent)
         result = await tool.execute(ToolCall("attach_mcp_server", {"command": "[]"}))
@@ -264,7 +255,7 @@ class AttachMcpServerToolTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_non_string_elements_in_command_returns_error(self) -> None:
         """[Hidden Assumption] Command array with integers must be rejected."""
-        agent = BaseAgent(name="a", system_prompt=".", strategy=EchoStrategy())
+        agent = BaseAgent(name="a", system_prompt=".")
         tool = AttachMcpServerTool()
         tool.bind_agent(agent)
         result = await tool.execute(ToolCall("attach_mcp_server", {"command": "[1, 2, 3]"}))
@@ -273,7 +264,7 @@ class AttachMcpServerToolTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_successful_attach_returns_tool_names_in_summary(self) -> None:
         """[Silent Failure] Summary must include all bridged tool names, not a truncated list."""
-        agent = BaseAgent(name="a", system_prompt=".", strategy=EchoStrategy())
+        agent = BaseAgent(name="a", system_prompt=".")
         tool = AttachMcpServerTool()
         tool.bind_agent(agent)
         result = await tool.execute(ToolCall("attach_mcp_server", {"command": '["myserver"]'}))
@@ -284,7 +275,7 @@ class AttachMcpServerToolTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_mcp_connection_error_returns_tool_result_error_not_exception(self) -> None:
         """[Silent Failure] McpConnectionError must surface as ToolResult.error, not propagate."""
-        agent = BaseAgent(name="a", system_prompt=".", strategy=EchoStrategy())
+        agent = BaseAgent(name="a", system_prompt=".")
         tool = AttachMcpServerTool()
         tool.bind_agent(agent)
         with patch.object(agent, "attach_mcp_server", side_effect=McpConnectionError("fail")):
@@ -305,7 +296,7 @@ class AttachMcpServerToolTests(unittest.IsolatedAsyncioTestCase):
             agent._mcp_handles.append(mock_handle)
             return agent
 
-        agent = BaseAgent(name="a", system_prompt=".", strategy=EchoStrategy())
+        agent = BaseAgent(name="a", system_prompt=".")
         tool = AttachMcpServerTool()
         tool.bind_agent(agent)
 
@@ -320,7 +311,7 @@ class AttachMcpServerToolTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_result_metadata_includes_source_and_tool_count(self) -> None:
         """[Silent Failure] Metadata must include source=mcp_attach and correct tool_count."""
-        agent = BaseAgent(name="a", system_prompt=".", strategy=EchoStrategy())
+        agent = BaseAgent(name="a", system_prompt=".")
         tool = AttachMcpServerTool()
         tool.bind_agent(agent)
         result = await tool.execute(ToolCall("attach_mcp_server", {"command": '["myserver"]'}))
@@ -339,7 +330,7 @@ class AgentBindingTests(unittest.IsolatedAsyncioTestCase):
 
     def test_add_tool_binds_agent_to_attach_tool(self) -> None:
         """[Hidden Assumption] After add_tool(AttachMcpServerTool()), tool._agent must be the agent."""
-        agent = BaseAgent(name="a", system_prompt=".", strategy=EchoStrategy())
+        agent = BaseAgent(name="a", system_prompt=".")
         attach_tool = AttachMcpServerTool()
         self.assertIsNone(attach_tool._agent)
         agent.add_tool(attach_tool)
@@ -347,7 +338,7 @@ class AgentBindingTests(unittest.IsolatedAsyncioTestCase):
 
     def test_search_tool_does_not_require_binding(self) -> None:
         """[Hidden Assumption] SearchMcpServersTool can be added to an agent without error."""
-        agent = BaseAgent(name="a", system_prompt=".", strategy=EchoStrategy())
+        agent = BaseAgent(name="a", system_prompt=".")
         search_tool = SearchMcpServersTool()
         agent.add_tool(search_tool)
         self.assertIn("search_mcp_servers", [t.name for t in agent._agent_tool_items])
@@ -355,12 +346,12 @@ class AgentBindingTests(unittest.IsolatedAsyncioTestCase):
     def test_constructor_tools_list_also_binds_agent(self) -> None:
         """[Hidden Failure] Tools passed via tools= constructor arg must also be bound at init time."""
         attach_tool = AttachMcpServerTool()
-        agent = BaseAgent(name="a", system_prompt=".", strategy=EchoStrategy(), tools=[attach_tool])
+        agent = BaseAgent(name="a", system_prompt=".", tools=[attach_tool])
         self.assertIs(attach_tool._agent, agent)
 
     def test_both_tools_appear_in_agent_tool_items(self) -> None:
         """[Edge Case] Both search and attach tools must appear in agent._agent_tool_items after add_tool."""
-        agent = BaseAgent(name="a", system_prompt=".", strategy=EchoStrategy())
+        agent = BaseAgent(name="a", system_prompt=".")
         agent.add_tool(SearchMcpServersTool())
         agent.add_tool(AttachMcpServerTool())
         names = {t.name for t in agent._agent_tool_items}
@@ -370,3 +361,4 @@ class AgentBindingTests(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+

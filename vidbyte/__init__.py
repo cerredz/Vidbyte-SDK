@@ -1,7 +1,7 @@
 """Context Protocol Header
 
 Description:
-    Exports the root Vidbyte SDK client and top-level public tool, agent, context, and strategy contracts.
+    Exports the root Vidbyte SDK client and top-level public tool, agent, context, and pipeline contracts.
 Purpose:
     Keeps common SDK imports concise while leaving specialized built-in tools in
     their category packages.
@@ -12,7 +12,6 @@ Architecture:
     - MCP exports: McpServerConfig, McpServerHandle, McpToolPermission.
     - Context exports: BaseAgentContext, BaseContext, ContextBudget, ContextPermissions.
     - Preset exports: BudgetPreset, PermissionPreset.
-    - Strategy exports: BaseStrategy, StrategyContext, StrategyResult.
     - Pipeline exports: BasePipeline, ConditionalPipeline, ParallelPipeline, PipelineNode, SequentialPipeline.
     - Error exports: McpError, McpConnectionError, McpInitializeError, McpToolDiscoveryError, McpToolExecutionError, McpAttachmentError, PipelineExecutionError.
 Key Functions / Exports:
@@ -21,7 +20,7 @@ Key Functions / Exports:
     - BaseTool: Base class for building tools.
     - BaseContext: Base class for managing conversation contexts.
 Relation to codebase as a whole:
-    Acts as the primary public API entry point of the entire SDK, unifying all sub-packages (agents, context, tools, mcp, pipelines, strategies, middleware) into a single export surface for consumers.
+    Acts as the primary public API entry point of the entire SDK, unifying all sub-packages (agents, context, tools, mcp, pipelines, middleware) into a single export surface for consumers.
 Similar files:
     - vidbyte/context/__init__.py: Exposes public context management namespace.
     - vidbyte/agents/__init__.py: Exposes agent contracts.
@@ -131,24 +130,6 @@ from vidbyte.pipelines import (
     SequentialPipeline,
 )
 from vidbyte.prompts import Prompts
-from vidbyte.strategies import (
-    BaseStrategy,
-    BaseStrategyUtils,
-    ChainOfDraftStrategy,
-    ChainOfThoughtStrategy,
-    PlanAndExecuteStrategy,
-    ReActStrategy,
-    ReflexionStrategy,
-    SelfConsistencyStrategy,
-    SelfRefinementStrategy,
-    SkeletonOfThoughtStrategy,
-    StepBackStrategy,
-    StrategyChain,
-    StrategyContext,
-    StrategyResult,
-    TreeOfThoughtsStrategy,
-)
-from vidbyte.strategies.multi_agent import MultiAgentConsensusStrategy
 from vidbyte.tools import (
     BaseTool,
     FunctionTool,
@@ -199,12 +180,8 @@ __all__ = [
     "BaseAgentContext",
     "BaseContext",
     "BasePipeline",
-    "BaseStrategy",
-    "BaseStrategyUtils",
     "BaseTool",
     "BudgetPreset",
-    "ChainOfDraftStrategy",
-    "ChainOfThoughtStrategy",
     "ContextBudget",
     "ContextItem",
     "ContextListTool",
@@ -238,7 +215,6 @@ __all__ = [
     "MiddlewarePipeline",
     "ModelRetryMiddleware",
     "HoneypotToolMiddleware",
-    "MultiAgentConsensusStrategy",
     "MultiProviderAgenticGraderAlgorithm",
     "ConditionalPipeline",
     "MapReducePipeline",
@@ -247,23 +223,13 @@ __all__ = [
     "PermissionPreset",
     "PipelineExecutionError",
     "PipelineNode",
-    "PlanAndExecuteStrategy",
     "ProgressContextItem",
     "Prompt",
     "Prompts",
-    "ReActStrategy",
     "ReflexionAlgorithm",
-    "ReflexionStrategy",
     "ResponseContextItem",
     "RuntimeLimitMiddleware",
-    "SelfConsistencyStrategy",
-    "SelfRefinementStrategy",
-    "SkeletonOfThoughtStrategy",
-    "StepBackStrategy",
-    "StrategyChain",
-    "StrategyContext",
     "SequentialPipeline",
-    "StrategyResult",
     "TaskContextItem",
     "TextContextItem",
     "ToolCall",
@@ -282,7 +248,6 @@ __all__ = [
     "ToolPolicyMiddleware",
     "Tools",
     "ToolsFormatter",
-    "TreeOfThoughtsStrategy",
     "VidbyteSDK",
     "BaseGrader",
     "ComparisonReport",
