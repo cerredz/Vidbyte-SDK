@@ -5,14 +5,19 @@ Description:
 Purpose:
     Lets agents add messages, retrieve context strings, search, and delete
     Zep sessions — all organized around the session-scoped memory model.
-Architecture:
-    - ZepAddMemoryTool: POST /api/v2/sessions/{session_id}/memory
-    - ZepGetMemoryTool: GET /api/v2/sessions/{session_id}/memory
-    - ZepSearchMemoryTool: POST /api/v2/sessions/{session_id}/memory/search
-    - ZepDeleteSessionTool: DELETE /api/v2/sessions/{session_id}
-Relations:
-    Extends BaseMemoryTool from vidbyte.tools.builtins.memory.base.
-    Zep uses "Authorization: Api-Key <key>" instead of Bearer.
+Architecture & Key Functions:
+    - ZepAddMemoryTool: Appends chat history to a Zep session's buffer.
+    - ZepGetMemoryTool: Fetches formatted context summary strings for prompts.
+    - ZepSearchMemoryTool: Searches session history via hybrid semantic/graph search.
+    - ZepDeleteSessionTool: Removes sessions and all memory permanently.
+Relation to Codebase:
+    Exposed under the vidbyte.tools.builtins namespace, enabling agents to leverage
+    external temporal facts and graphs for prompt enrichment across sessions.
+Similar Files:
+    - vidbyte/tools/builtins/memory/supermemory.py
+    - vidbyte/tools/builtins/memory/mem0.py
+    - vidbyte/tools/builtins/memory/cognee.py
+    - vidbyte/tools/builtins/memory/letta.py
 """
 
 from __future__ import annotations
@@ -35,9 +40,10 @@ class ZepAddMemoryTool(BaseMemoryTool):
         return ToolSpec(
             name="zep_add_memory",
             description=(
-                "Add conversation messages to a Zep session's memory. "
-                "Zep auto-creates the session if it does not exist. "
-                "Each message must have 'role' (ai/human/tool), 'role_type', and 'content'."
+                "Zep is a state-of-the-art managed memory platform that provides temporal memory graphs and session history context for AI applications. "
+                "Use this tool to add new conversation messages to a specific Zep session's memory buffer. "
+                "The tool automatically handles session creation if the session ID does not already exist on the Zep platform. "
+                "Added messages are processed asynchronously by Zep to update the session's temporal facts, summary, and memory graph nodes."
             ),
             parameters=(
                 ToolParameter("session_id", "string", "The Zep session ID to add messages to."),
@@ -88,9 +94,10 @@ class ZepGetMemoryTool(BaseMemoryTool):
         return ToolSpec(
             name="zep_get_memory",
             description=(
-                "Retrieve the memory context string for a Zep session. "
-                "Zep returns a pre-formatted context string of relevant facts "
-                "derived from the session's history — ready for prompt injection."
+                "Zep is a state-of-the-art managed memory platform that provides temporal memory graphs and session history context for AI applications. "
+                "Use this tool to retrieve a pre-formatted context string of relevant facts and recent messages for a Zep session. "
+                "The returned context string is optimized for direct injection into the agent's prompt, providing immediate continuity. "
+                "You can customize the retrieval by specifying the number of recent messages to include alongside the summarized facts."
             ),
             parameters=(
                 ToolParameter("session_id", "string", "The Zep session ID to retrieve context for."),
@@ -140,8 +147,10 @@ class ZepSearchMemoryTool(BaseMemoryTool):
         return ToolSpec(
             name="zep_search_memory",
             description=(
-                "Search a Zep session's memory for passages matching the query text. "
-                "Zep performs hybrid vector + graph search and returns ranked results."
+                "Zep is a state-of-the-art managed memory platform that provides temporal memory graphs and session history context for AI applications. "
+                "Use this tool to perform a hybrid semantic and graph-based search against a Zep session's memory history. "
+                "The tool queries the session's memory graph using natural language text, returning ranked excerpts of historical messages and extracted facts. "
+                "This allows the agent to retrieve precise, long-term context from earlier parts of the conversation."
             ),
             parameters=(
                 ToolParameter("session_id", "string", "The Zep session ID to search within."),
@@ -190,8 +199,10 @@ class ZepDeleteSessionTool(BaseMemoryTool):
         return ToolSpec(
             name="zep_delete_session",
             description=(
-                "Delete a Zep session and all of its accumulated memory. "
-                "This is a permanent, irreversible operation."
+                "Zep is a state-of-the-art managed memory platform that provides temporal memory graphs and session history context for AI applications. "
+                "Use this tool to permanently and irreversibly delete a Zep session and all of its accumulated conversation history and facts. "
+                "Deleting a session purges all associated messages, summaries, and graph nodes from Zep's servers, reclaiming storage. "
+                "Future requests for the same session ID will require a new session creation flow."
             ),
             parameters=(
                 ToolParameter("session_id", "string", "The Zep session ID to delete."),

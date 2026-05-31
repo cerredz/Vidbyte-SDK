@@ -5,13 +5,19 @@ Description:
 Purpose:
     Lets agents add, search, retrieve, and delete memories via Mem0 with
     user/agent/run scoping — no provider SDK dependency required.
-Architecture:
-    - Mem0AddMemoryTool: POST /v3/memories/add/
-    - Mem0SearchMemoryTool: POST /v1/memories/search/
-    - Mem0GetMemoriesTool: GET /v1/memories/
-    - Mem0DeleteMemoryTool: DELETE /v1/memories/{id}/
-Relations:
-    Extends BaseMemoryTool from vidbyte.tools.builtins.memory.base.
+Architecture & Key Functions:
+    - Mem0AddMemoryTool: Extracts and adds memories from messages.
+    - Mem0SearchMemoryTool: Searches Mem0 memory via natural language queries.
+    - Mem0GetMemoriesTool: Retrieves all memories for a user/entity with pagination.
+    - Mem0DeleteMemoryTool: Deletes memory records by unique ID.
+Relation to Codebase:
+    Exposed under the vidbyte.tools.builtins namespace, enabling agents to leverage
+    external synthesized graph/semantic memories for persistence across distinct run sessions.
+Similar Files:
+    - vidbyte/tools/builtins/memory/supermemory.py
+    - vidbyte/tools/builtins/memory/zep.py
+    - vidbyte/tools/builtins/memory/cognee.py
+    - vidbyte/tools/builtins/memory/letta.py
 """
 
 from __future__ import annotations
@@ -34,9 +40,10 @@ class Mem0AddMemoryTool(BaseMemoryTool):
         return ToolSpec(
             name="mem0_add_memory",
             description=(
-                "Send conversation messages to Mem0 for automatic memory extraction. "
-                "Mem0 identifies and stores key facts from the messages. "
-                "Provide at least one of user_id, agent_id, or run_id to scope the memory."
+                "Mem0 is a state-of-the-art managed memory platform that provides intelligent, self-improving memory scoped by user, agent, and run. "
+                "Use this tool to send a list of conversation messages to Mem0 for automatic extraction of key facts, preferences, and long-term context. "
+                "The extracted facts are dynamically synthesized, resolved against existing memories, and saved under the specified entity scopes such as user ID or agent ID. "
+                "This allows agents to maintain persistent personalization without manual memory modeling or database management."
             ),
             parameters=(
                 ToolParameter("messages", "array", "List of message dicts with 'role' and 'content' keys."),
@@ -91,9 +98,10 @@ class Mem0SearchMemoryTool(BaseMemoryTool):
         return ToolSpec(
             name="mem0_search_memory",
             description=(
-                "Search Mem0 memories using a natural language query. "
-                "Provide user_id, agent_id, or run_id to scope results. "
-                "Returns the most relevant memory entries with similarity scores."
+                "Mem0 is a state-of-the-art managed memory platform that provides intelligent, self-improving memory scoped by user, agent, and run. "
+                "Use this tool to search for relevant memories using a natural language query under a specific entity scope. "
+                "The search is executed across the synthesized facts associated with the user, agent, or run, returning ranked matches with similarity scores. "
+                "This allows the agent to dynamically retrieve relevant personalization context at runtime to guide its responses."
             ),
             parameters=(
                 ToolParameter("query", "string", "The natural language search query."),
@@ -149,8 +157,10 @@ class Mem0GetMemoriesTool(BaseMemoryTool):
         return ToolSpec(
             name="mem0_get_memories",
             description=(
-                "Retrieve all stored memories for a given user from Mem0. "
-                "Supports pagination via page and page_size parameters."
+                "Mem0 is a state-of-the-art managed memory platform that provides intelligent, self-improving memory scoped by user, agent, and run. "
+                "Use this tool to retrieve a comprehensive list of all synthesized facts stored for a given user or entity scope. "
+                "The retrieved memories are returned in a structured list containing their unique identifiers, text values, and timestamp metadata. "
+                "The tool supports pagination parameters, enabling efficient traversal of large memory histories without overloading the context window."
             ),
             parameters=(
                 ToolParameter("user_id", "string", "Retrieve memories for this user ID."),
@@ -198,7 +208,12 @@ class Mem0DeleteMemoryTool(BaseMemoryTool):
         # Returns the model-facing declaration for the mem0_delete_memory tool.
         return ToolSpec(
             name="mem0_delete_memory",
-            description="Permanently delete a Mem0 memory entry by its memory ID.",
+            description=(
+                "Mem0 is a state-of-the-art managed memory platform that provides intelligent, self-improving memory scoped by user, agent, and run. "
+                "Use this tool to permanently delete a specific memory entry from the Mem0 platform using its unique memory identifier. "
+                "Deleting an entry immediately removes that synthesized fact from the entity's profile, preventing it from appearing in subsequent searches or retrievals. "
+                "This allows agents or users to prune outdated, incorrect, or sensitive facts from their history."
+            ),
             parameters=(
                 ToolParameter("memory_id", "string", "The Mem0 memory ID to delete."),
             ),

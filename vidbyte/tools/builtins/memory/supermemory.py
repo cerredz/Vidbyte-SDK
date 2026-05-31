@@ -5,12 +5,18 @@ Description:
 Purpose:
     Lets agents add, search, and delete semantic memories via Supermemory
     without any provider SDK dependency — only stdlib HttpTransport.
-Architecture:
-    - SupermemoryAddMemoryTool: POST /v3/documents
-    - SupermemorySearchMemoryTool: POST /v3/search
-    - SupermemoryDeleteMemoryTool: DELETE /v3/documents/{id}
-Relations:
-    Extends BaseMemoryTool from vidbyte.tools.builtins.memory.base.
+Architecture & Key Functions:
+    - SupermemoryAddMemoryTool: Stores text passages in Supermemory with metadata.
+    - SupermemorySearchMemoryTool: Searches Supermemory via semantic query.
+    - SupermemoryDeleteMemoryTool: Deletes documents from Supermemory by ID.
+Relation to Codebase:
+    Exposed under the vidbyte.tools.builtins namespace, enabling agents to leverage
+    external semantic long-term memory for persistence across distinct run sessions.
+Similar Files:
+    - vidbyte/tools/builtins/memory/mem0.py
+    - vidbyte/tools/builtins/memory/zep.py
+    - vidbyte/tools/builtins/memory/cognee.py
+    - vidbyte/tools/builtins/memory/letta.py
 """
 
 from __future__ import annotations
@@ -33,9 +39,10 @@ class SupermemoryAddMemoryTool(BaseMemoryTool):
         return ToolSpec(
             name="supermemory_add_memory",
             description=(
-                "Store a text passage in Supermemory. "
-                "Optionally scope it to one or more container tags (e.g. user IDs or project names) "
-                "and attach arbitrary metadata. Returns the created document ID."
+                "Supermemory is a state-of-the-art managed memory platform that organizes semantic information and temporal context traces. "
+                "Use this tool to store a new text passage, such as a webpage, conversation snippet, or note, into Supermemory's cloud index. "
+                "The tool allows optional categorization using container tags to group documents by user or project, and arbitrary metadata key-values for granular filtering. "
+                "It returns a unique document identifier upon a successful write, which can be stored locally or used for subsequent delete operations."
             ),
             parameters=(
                 ToolParameter("content", "string", "The text content to store as a memory."),
@@ -88,9 +95,10 @@ class SupermemorySearchMemoryTool(BaseMemoryTool):
         return ToolSpec(
             name="supermemory_search_memory",
             description=(
-                "Search Supermemory for passages matching a semantic query. "
-                "Optionally filter by container_tag to scope results to a user or project. "
-                "Returns an array of matching document excerpts."
+                "Supermemory is a state-of-the-art managed memory platform that organizes semantic information and temporal context traces. "
+                "Use this tool to perform a semantic search query against the stored documents in the Supermemory index. "
+                "The search utilizes high-dimensional vector embeddings to retrieve relevant text passages even when exact keyword matches are absent. "
+                "You can optionally scope the search to a specific container tag, such as a user ID, to restrict the search boundary and control the maximum number of returned excerpts using the limit parameter."
             ),
             parameters=(
                 ToolParameter("query", "string", "The semantic search query."),
@@ -142,7 +150,12 @@ class SupermemoryDeleteMemoryTool(BaseMemoryTool):
         # Returns the model-facing declaration for the supermemory_delete_memory tool.
         return ToolSpec(
             name="supermemory_delete_memory",
-            description="Delete a Supermemory document by its document ID. This is permanent.",
+            description=(
+                "Supermemory is a state-of-the-art managed memory platform that organizes semantic information and temporal context traces. "
+                "Use this tool to permanently and irreversibly delete a stored document from the Supermemory index using its unique document identifier. "
+                "Deleting a document immediately removes it from the search index, ensuring future semantic queries will not retrieve its contents or metadata. "
+                "This tool requires a valid write permission and a non-empty document ID string to execute successfully."
+            ),
             parameters=(
                 ToolParameter("document_id", "string", "The Supermemory document ID to delete."),
             ),
