@@ -5,11 +5,18 @@ Description:
 Purpose:
     Verifies history reduction modes preserve expected messages and metadata.
 Architecture:
-    - MemoryState: In-memory ContextState for tests.
-    - FakeSummarizer: Deterministic summary provider.
-    - ContextCompactionToolTests: Strategy-specific compaction tests.
+    - MemoryState: In-memory ContextState shim for testing.
+    - FakeSummarizer: Stub summarizer that provides mock summarized counts.
+    - ContextCompactionToolTests: Unit tests for existing and new compaction strategies.
+Functions:
+    - ContextCompactionToolTests.test_truncate_tool_results_basic: Verifies standard tool truncation behavior.
+    - ContextCompactionToolTests.test_truncate_tool_results_zero_max_chars: Tests edge case with zero max character limit.
+    - ContextCompactionToolTests.test_truncate_tool_results_non_tool_messages: Verifies non-tool results are bypassed.
+    - ContextCompactionToolTests.test_truncate_tool_results_invalid_bounds: Tests handling of bad/negative bounds.
+    - ContextCompactionToolTests.test_truncate_tool_results_boundary_length: Verifies exact boundary values are not mutated.
+    - ContextCompactionToolTests.test_truncate_tool_results_no_placeholder: Tests indicators without dynamic placeholders.
 Relations:
-    Related to vidbyte.tools.builtins.context.compaction.
+    Directly tests the implementation within vidbyte.tools.builtins.context.compaction.
 """
 
 from __future__ import annotations
@@ -192,3 +199,133 @@ class ContextCompactionToolTests(unittest.IsolatedAsyncioTestCase):
             ToolCall("compact_context", {"mode": CompactionMode.SUMMARIZE_BY_TOPIC_BLOCKS.value})
         )
         self.assertEqual(result.status.value, "error")
+
+    async def test_truncate_tool_results_basic(self) -> None:
+        # Verifies that tool-result messages exceeding max_chars are truncated and have metadata set correctly.
+        state = MemoryState(
+            (
+                ContextMessage("system", "rules"),
+                ContextMessage("tool", "1234567890", kind="tool_result"),
+            )
+        )
+        await ContextCompactionTool(state).execute(
+            ToolCall(
+                "compact_context",
+                {
+                    "mode": CompactionMode.TRUNCATE_TOOL_RESULTS.value,
+                    "max_chars": 5,
+                    "truncation_indicator": " [truncated {count}]",
+                },
+            )
+        )
+        messages = state.messages()
+        self.assertEqual(messages[1].content, "12345 [truncated 5]")
+        self.assertEqual(messages[1].metadata["compaction"], "truncate_tool_results")
+        self.assertEqual(messages[1].metadata["original_chars"], 10)
+        self.assertEqual(messages[1].metadata["truncated_chars"], 5)
+
+    async def test_truncate_tool_results_zero_max_chars(self) -> None:
+        # [Edge Case] Verifies that max_chars=0 cuts the entire content and appends only the indicator.
+        state = MemoryState(
+            (
+                ContextMessage("tool", "12345", kind="tool_result"),
+            )
+        )
+        await ContextCompactionTool(state).execute(
+            ToolCall(
+                "compact_context",
+                {
+                    "mode": CompactionMode.TRUNCATE_TOOL_RESULTS.value,
+                    "max_chars": 0,
+                    "truncation_indicator": "[truncated]",
+                },
+            )
+        )
+        messages = state.messages()
+        self.assertEqual(messages[0].content, "[truncated]")
+
+    async def test_truncate_tool_results_non_tool_messages(self) -> None:
+        # [Edge Case] Verifies that non-tool-result messages are not truncated even if they exceed max_chars.
+        state = MemoryState(
+            (
+                ContextMessage("user", "1234567890"),
+                ContextMessage("assistant", "1234567890"),
+            )
+        )
+        await ContextCompactionTool(state).execute(
+            ToolCall(
+                "compact_context",
+                {
+                    "mode": CompactionMode.TRUNCATE_TOOL_RESULTS.value,
+                    "max_chars": 5,
+                },
+            )
+        )
+        messages = state.messages()
+        self.assertEqual(messages[0].content, "1234567890")
+        self.assertEqual(messages[1].content, "1234567890")
+
+    async def test_truncate_tool_results_invalid_bounds(self) -> None:
+        # [Hidden Failure] Verifies that passing negative bounds or non-integers returns a clean error.
+        state = self._state()
+        result = await ContextCompactionTool(state).execute(
+            ToolCall(
+                "compact_context",
+                {
+                    "mode": CompactionMode.TRUNCATE_TOOL_RESULTS.value,
+                    "max_chars": -5,
+                },
+            )
+        )
+        self.assertEqual(result.status.value, "error")
+
+        result2 = await ContextCompactionTool(state).execute(
+            ToolCall(
+                "compact_context",
+                {
+                    "mode": CompactionMode.TRUNCATE_TOOL_RESULTS.value,
+                    "max_chars": "abc",
+                },
+            )
+        )
+        self.assertEqual(result2.status.value, "error")
+
+    async def test_truncate_tool_results_boundary_length(self) -> None:
+        # [Silent Failure] Verifies that if tool result length exactly matches max_chars, it is not modified.
+        state = MemoryState(
+            (
+                ContextMessage("tool", "12345", kind="tool_result"),
+            )
+        )
+        await ContextCompactionTool(state).execute(
+            ToolCall(
+                "compact_context",
+                {
+                    "mode": CompactionMode.TRUNCATE_TOOL_RESULTS.value,
+                    "max_chars": 5,
+                },
+            )
+        )
+        messages = state.messages()
+        self.assertEqual(messages[0].content, "12345")
+        self.assertNotIn("compaction", messages[0].metadata)
+
+    async def test_truncate_tool_results_no_placeholder(self) -> None:
+        # [Hidden Assumption] Verifies that if no {count} is present in the indicator, it is appended verbatim.
+        state = MemoryState(
+            (
+                ContextMessage("tool", "1234567890", kind="tool_result"),
+            )
+        )
+        await ContextCompactionTool(state).execute(
+            ToolCall(
+                "compact_context",
+                {
+                    "mode": CompactionMode.TRUNCATE_TOOL_RESULTS.value,
+                    "max_chars": 5,
+                    "truncation_indicator": " [truncated]",
+                },
+            )
+        )
+        messages = state.messages()
+        self.assertEqual(messages[0].content, "12345 [truncated]")
