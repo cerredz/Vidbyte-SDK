@@ -219,7 +219,7 @@ class AdversarialReflectionAlgorithmTests(unittest.IsolatedAsyncioTestCase):
         await runtime.arun("task", runner=runner, context=_context(runtime), provider="openai", invoke_runner=invoke_runner, runner_output_text=runner_output_text, runner_output_metadata=runner_output_metadata)
 
         self.assertIn("Original task:", runner.calls[1]["prompt"])
-        self.assertIn("adversarial critic", runner.calls[1]["kwargs"]["system"])
+        self.assertIn("Adversarial Critic", runner.calls[1]["kwargs"]["system"])
         self.assertIn("asset critique", runner.calls[2]["kwargs"]["system"])
 
 

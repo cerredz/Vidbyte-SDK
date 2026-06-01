@@ -34,9 +34,9 @@ class AdversarialAgentTool(BaseTool):
 
     def __init__(self, *, agent: BaseAgent | None = None, critique: CritiqueCallable | None = None, name: str = "adversarial_critique", description: str | None = None, max_output_chars: int = 2000) -> None:
         # Store one validated critique executor and bounded output settings.
-        _validate_executor(agent, critique)
-        _validate_name(name)
-        _validate_max_output_chars(max_output_chars)
+        self._validate_executor(agent, critique)
+        self._validate_name(name)
+        self._validate_max_output_chars(max_output_chars)
         self._agent = agent
         self._critique = critique
         self._name = name
@@ -104,29 +104,28 @@ class AdversarialAgentTool(BaseTool):
             )
         )
 
+    @staticmethod
+    def _validate_executor(agent: object | None, critique: object | None) -> None:
+        # Require exactly one executor so tool behavior is deterministic.
+        if (agent is None and critique is None) or (agent is not None and critique is not None):
+            raise ConfigurationError("AdversarialAgentTool requires exactly one of agent or critique.")
 
-def _validate_executor(agent: object | None, critique: object | None) -> None:
-    # Require exactly one executor so tool behavior is deterministic.
-    if (agent is None and critique is None) or (agent is not None and critique is not None):
-        raise ConfigurationError("AdversarialAgentTool requires exactly one of agent or critique.")
+    @staticmethod
+    def _validate_name(name: str) -> None:
+        # Reject empty tool names before ToolSpec construction.
+        if not name.strip():
+            raise ConfigurationError("AdversarialAgentTool name must be non-empty.")
 
-
-def _validate_name(name: str) -> None:
-    # Reject empty tool names before ToolSpec construction.
-    if not name.strip():
-        raise ConfigurationError("AdversarialAgentTool name must be non-empty.")
-
-
-def _validate_max_output_chars(max_output_chars: int) -> None:
-    # Bound max_output_chars to avoid unbounded context injection.
-    if max_output_chars <= 0:
-        raise ConfigurationError("max_output_chars must be greater than zero.")
-    if max_output_chars > _MAX_OUTPUT_CHARS_LIMIT:
-        raise ConfigurationError(f"max_output_chars exceeds limit of {_MAX_OUTPUT_CHARS_LIMIT}.")
+    @staticmethod
+    def _validate_max_output_chars(max_output_chars: int) -> None:
+        # Bound max_output_chars to avoid unbounded context injection.
+        if max_output_chars <= 0:
+            raise ConfigurationError("max_output_chars must be greater than zero.")
+        if max_output_chars > _MAX_OUTPUT_CHARS_LIMIT:
+            raise ConfigurationError(f"max_output_chars exceeds limit of {_MAX_OUTPUT_CHARS_LIMIT}.")
 
 
 __all__ = [
     "AdversarialAgentTool",
     "CritiqueCallable",
 ]
-
