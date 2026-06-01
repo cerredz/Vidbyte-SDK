@@ -29,6 +29,7 @@ from vidbyte.lib.enums import ModelModality
 from vidbyte.lib.errors import PermissionDeniedError, ToolExecutionError, ToolRegistryError
 from vidbyte.lib.token_usage import token_usage_from_response
 from vidbyte.lib.tools import ToolsFormatter
+from vidbyte.context.templates import NullRecorder, RecorderBase
 from vidbyte.lib.tracing import NullTracer, SpanContext, TracerBase
 from vidbyte.middleware import AgentMiddleware, MiddlewarePipeline
 from vidbyte.prompts.agentic_loop import append_agentic_loop_prompt
@@ -56,6 +57,7 @@ class AgentRuntime:
         run_id: str | None = None,
         algorithm: ContextWindowAlgorithm | str | None = None,
         context_manager: ContextManager | None = None,
+        recorder: RecorderBase | None = None,
     ) -> None:
         self.agent_name = agent_name
         self.system_prompt = system_prompt
@@ -68,6 +70,7 @@ class AgentRuntime:
         self.run_id = run_id
         self.algorithm = ContextWindow.resolve_algorithm(algorithm)
         self.context_manager = context_manager
+        self.recorder: RecorderBase = recorder or NullRecorder()
 
     def build_context(
         self,
