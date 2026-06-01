@@ -29,6 +29,7 @@ from vidbyte.tools.executor import ToolExecutor
 from vidbyte.tools.function_tool import FunctionTool
 from vidbyte.lib.tools import ToolsFormatter
 from vidbyte.tools.mixins import ToolMixin
+from vidbyte.tools.output_schema import OutputSchemaValidator
 from vidbyte.tools.registry import ToolRegistry
 from vidbyte.tools.types import (
     ToolCall,
@@ -53,6 +54,7 @@ __all__ = [
     "ToolLike",
     "ToolMixin",
     "ToolParameter",
+    "OutputSchemaValidator",
     "ToolPermission",
     "ToolRegistry",
     "ToolResult",

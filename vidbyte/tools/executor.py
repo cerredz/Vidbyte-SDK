@@ -13,14 +13,16 @@ Relations:
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import re
 
 from vidbyte.lib.errors import ToolRegistryError
 from vidbyte.tools.catalog import Tools
+from vidbyte.tools.output_schema import OutputSchemaValidator
 from vidbyte.tools.registry import ToolRegistry
 from vidbyte.tools.security import PermissionDecision, PermissionPolicy
-from vidbyte.tools.types import ToolCall, ToolResult
+from vidbyte.tools.types import ToolCall, ToolResult, ToolStatus
 
 
 class ToolExecutor:
@@ -62,13 +64,30 @@ class ToolExecutor:
             )
 
         try:
-            return await tool.execute(call)
+            result = await tool.execute(call)
         except Exception as exc:  # pragma: no cover - exact concrete failures vary.
             return ToolResult.error(
                 spec.name,
                 f"Tool execution failed: {exc}",
                 metadata={"error": "execution_error", "error_type": type(exc).__name__},
             )
+
+        return self._apply_output_schema(result, spec)
+
+    @staticmethod
+    def _apply_output_schema(result: ToolResult, spec: object) -> ToolResult:
+        """Validate result output against spec.output_schema and populate structured when valid."""
+        schema = getattr(spec, "output_schema", None)
+        if schema is None or result.status is not ToolStatus.SUCCESS:
+            return result
+        parsed, error = OutputSchemaValidator.validate(result.output, schema)
+        if error:
+            return ToolResult.error(
+                result.tool_name,
+                f"Output schema violation: {error}",
+                metadata={"error": "output_schema_violation"},
+            )
+        return dataclasses.replace(result, structured=parsed)
 
     async def execute(self, text: str) -> ToolResult:
         """Parse an Action/Action Input block from text and execute the named tool."""

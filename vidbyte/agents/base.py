@@ -78,6 +78,7 @@ class BaseAgent(McpAttachableMixin):
         algorithm: ContextWindowAlgorithm | str | None = None,
         metadata: dict[str, Any] | None = None,
         tracer: type[TracerBase] | TracerBase | None = None,
+        output_schema: type | Mapping[str, Any] | None = None,
     ) -> None:
         if not name:
             raise AgentExecutionError("Agent name cannot be empty.")
@@ -119,6 +120,7 @@ class BaseAgent(McpAttachableMixin):
         self.context_manager = context_manager
         self.algorithm = ContextWindow.resolve_algorithm(algorithm)
         self.metadata = dict(metadata or {})
+        self.output_schema = output_schema
         self.history: list[AgentMessage] = []
         self._tool_call_contexts: list[ToolCallContext] = []
         self._active_prompt: str = ""
@@ -239,6 +241,7 @@ class BaseAgent(McpAttachableMixin):
             algorithm=self.algorithm if algorithm is None else algorithm,
             metadata={**self.metadata, **dict(metadata or {})},
             tracer=self._tracer,
+            output_schema=self.output_schema,
         )
         if include_history:
             child.history = list(self.history)
@@ -450,6 +453,7 @@ class BaseAgent(McpAttachableMixin):
             run_id=self.runner_config.run_id,
             algorithm=self.algorithm,
             context_manager=self.context_manager,
+            output_schema=self.output_schema,
         )
 
     def _catalog_from_agent_tools(self, tools: Sequence[object]) -> Tools:

@@ -78,6 +78,7 @@ class ToolSpec:
     permission: ToolPermission = ToolPermission.SAFE
     metadata: Mapping[str, Any] = field(default_factory=dict)
     input_schema: Mapping[str, Any] | None = None
+    output_schema: type | Mapping[str, Any] | None = None
     binds_to_primitive: str | None = None
 
     def __post_init__(self) -> None:
@@ -129,6 +130,7 @@ class ToolResult:
     tool_name: str
     status: ToolStatus
     output: str
+    structured: Any = None
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
     @classmethod
