@@ -20,7 +20,6 @@ from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
 from vidbyte.agents.mixins import McpAttachableMixin
-from vidbyte.agents.runtimes import LinearAgentRuntime as AgentRuntime, SearchTreeRuntimeComponent, PointToPointActorRuntime, BroadcastActorRuntime
 from vidbyte.agents.types import AgentCard, AgentInput, AgentMessage
 from vidbyte.context.manager import ContextManager
 from vidbyte.context.window import ContextWindow, ContextWindowAlgorithm
@@ -77,10 +76,6 @@ class BaseAgent(McpAttachableMixin):
         algorithm: ContextWindowAlgorithm | str | None = None,
         metadata: dict[str, Any] | None = None,
         tracer: type[TracerBase] | TracerBase | None = None,
-        dynamic_actors: bool = False,
-        max_loop: int = 20,
-        termination_mode: str = "coordinator",
-        worker_model: str | None = None,
     ) -> None:
         if not name:
             raise AgentExecutionError("Agent name cannot be empty.")
@@ -113,19 +108,6 @@ class BaseAgent(McpAttachableMixin):
                         f"Agent {name} uses non-linear runtime {self.runtime_type.value}, "
                         "which does not support in-context learning algorithms."
                     )
-
-        if isinstance(self.runtime_config_obj, ActorRuntime):
-            self.dynamic_actors = self.runtime_config_obj.dynamic_actors
-            self.max_loop = self.runtime_config_obj.max_loop
-            self.termination_mode = self.runtime_config_obj.termination_mode
-            self.worker_model = self.runtime_config_obj.worker_model
-            self.include_actors = self.runtime_config_obj.include_actors
-        else:
-            self.dynamic_actors = dynamic_actors
-            self.max_loop = max_loop
-            self.termination_mode = termination_mode
-            self.worker_model = worker_model
-            self.include_actors = None
 
         self.runner_config = AgentRunnerConfig(
             api_key=api_key,
@@ -483,31 +465,31 @@ class BaseAgent(McpAttachableMixin):
         )
 
     def _runtime(self) -> Any:
-        # Dynamically selects and constructs the swappable linear or non-linear agent execution runtime.
-        runtime_classes = {
-            AgentRuntimeType.LINEAR: AgentRuntime,
-            AgentRuntimeType.MCTS_SEARCH: SearchTreeRuntimeComponent,
-            AgentRuntimeType.ACTOR_MODEL: PointToPointActorRuntime,
-            AgentRuntimeType.ACTOR_MODEL_P2P: PointToPointActorRuntime,
-            AgentRuntimeType.ACTOR_MODEL_BROADCAST: BroadcastActorRuntime,
-        }
-        runtime_cls = runtime_classes.get(self.runtime_type)
-        if not runtime_cls:
-            raise ConfigurationError(f"Unknown runtime type: {self.runtime_type}")
+        from vidbyte.lib.registries.runtimes import RuntimeRegistry
+        runtime_cls = RuntimeRegistry.resolve(self.runtime_type)
 
-        kwargs = {}
+        kwargs: dict[str, Any] = {}
         if self.runtime_type in (
             AgentRuntimeType.ACTOR_MODEL,
             AgentRuntimeType.ACTOR_MODEL_P2P,
             AgentRuntimeType.ACTOR_MODEL_BROADCAST,
         ):
-            kwargs = {
-                "dynamic_actors": self.dynamic_actors,
-                "max_loop": self.max_loop,
-                "termination_mode": self.termination_mode,
-                "worker_model": self.worker_model,
-                "include_actors": self.include_actors,
-            }
+            if isinstance(self.runtime_config_obj, ActorRuntime):
+                kwargs = {
+                    "dynamic_actors": self.runtime_config_obj.dynamic_actors,
+                    "max_loop": self.runtime_config_obj.max_loop,
+                    "termination_mode": self.runtime_config_obj.termination_mode,
+                    "worker_model": self.runtime_config_obj.worker_model,
+                    "include_actors": self.runtime_config_obj.include_actors,
+                }
+            else:
+                kwargs = {
+                    "dynamic_actors": False,
+                    "max_loop": 20,
+                    "termination_mode": "coordinator",
+                    "worker_model": None,
+                    "include_actors": None,
+                }
 
         return runtime_cls(
             agent_name=self.name,

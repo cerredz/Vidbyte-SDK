@@ -17,6 +17,7 @@ from __future__ import annotations
 from vidbyte.lib.registries.agents import AgentRegistry
 from vidbyte.lib.registries.models import ProviderModelRegistry
 from vidbyte.lib.registries.prompts import PromptRecord, Prompts
+from vidbyte.lib.registries.runtimes import RuntimeRegistry
 from vidbyte.lib.registries.tools import ToolRegistry
 from vidbyte.lib.registries.actors import ActorRegistry, actor_registry
 
@@ -25,6 +26,7 @@ __all__ = [
     "ProviderModelRegistry",
     "PromptRecord",
     "Prompts",
+    "RuntimeRegistry",
     "ToolRegistry",
     "ActorRegistry",
     "actor_registry",

@@ -154,37 +154,31 @@ reply = await agent.arun(
 
 The Vidbyte SDK decouples the core `BaseAgent` class from the execution loop. Developers can select different agent runtime loop paradigms at initialization:
 
-* **Linear Runtime**: Standard sequential perception-action model-tool loop.
 * **MCTS Search**: Non-linear tree search (Monte Carlo Tree Search) exploring parallel reasoning paths.
 * **Actor Model**: Asynchronous, concurrent message-passing loops (supporting Point-to-Point and Broadcast topologies).
 
 ```python
 from vidbyte import BaseAgent
 from vidbyte.lib.enums import AgentRuntimeType
+from vidbyte.agents.runtimes.configs import ActorRuntime
 
-# Option 1: Linear runtime (default)
-linear_agent = BaseAgent(
-    name="sequential-agent",
-    system_prompt="Execute sequentially.",
-    runtime=AgentRuntimeType.LINEAR,
-)
-
-# Option 2: Monte Carlo Tree Search runtime
+# Monte Carlo Tree Search runtime
 search_agent = BaseAgent(
     name="search-agent",
     system_prompt="Explore reasoning branches.",
     runtime=AgentRuntimeType.MCTS_SEARCH,
 )
 
-# Option 3: Asynchronous Actor Model swarm
+# Asynchronous Actor Model swarm (Point-to-Point topology)
 actor_swarm = BaseAgent(
     name="swarm-coordinator",
     system_prompt="Coordinate parallel specialized sub-actors.",
-    runtime=AgentRuntimeType.ACTOR_MODEL_P2P,
-    dynamic_actors=True,
-    max_loop=30,
-    termination_mode="quiescence",
-    worker_model="gpt-4o-mini",
+    runtime=ActorRuntime(
+        worker_model="gpt-4o-mini",
+        dynamic_actors=True,
+        max_loop=30,
+        termination_mode="quiescence",
+    ),
 )
 ```
 

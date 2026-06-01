@@ -30,7 +30,6 @@ if TYPE_CHECKING:
 # Prebuilt actor roles mapped to their Prompt enum keys.
 PREBUILT_ACTOR_PROMPTS = {
     "planner": Prompt.ACTOR_RUNTIME_PLANNER,
-    "coder": Prompt.ACTOR_RUNTIME_CODER,
     "reviewer": Prompt.ACTOR_RUNTIME_REVIEWER,
     "generator": Prompt.ACTOR_RUNTIME_GENERATOR,
     "critic": Prompt.ACTOR_RUNTIME_CRITIC,
@@ -41,7 +40,6 @@ PREBUILT_ACTOR_PROMPTS = {
     "tradeoff": Prompt.ACTOR_RUNTIME_TRADEOFF,
     "hypothesis_generator": Prompt.ACTOR_RUNTIME_HYPOTHESIS_GENERATOR,
     "refiner": Prompt.ACTOR_RUNTIME_REFINER,
-    "formatter": Prompt.ACTOR_RUNTIME_FORMATTER,
     "safety": Prompt.ACTOR_RUNTIME_SAFETY,
     "final_answer": Prompt.ACTOR_RUNTIME_FINAL_ANSWER,
 }
@@ -152,12 +150,6 @@ class PlannerActor(PrebuiltActor):
     system_prompt_key = Prompt.ACTOR_RUNTIME_PLANNER
 
 
-class CoderActor(PrebuiltActor):
-    """Specialized Coder actor."""
-    role_name = "coder"
-    system_prompt_key = Prompt.ACTOR_RUNTIME_CODER
-
-
 class ReviewerActor(PrebuiltActor):
     """Specialized Reviewer actor."""
     role_name = "reviewer"
@@ -218,12 +210,6 @@ class RefinerActor(PrebuiltActor):
     system_prompt_key = Prompt.ACTOR_RUNTIME_REFINER
 
 
-class FormatterActor(PrebuiltActor):
-    """Specialized Formatter actor."""
-    role_name = "formatter"
-    system_prompt_key = Prompt.ACTOR_RUNTIME_FORMATTER
-
-
 class SafetyActor(PrebuiltActor):
     """Specialized Safety actor."""
     role_name = "safety"
@@ -241,7 +227,6 @@ from vidbyte.lib.registries.actors import actor_registry
 
 for actor_cls in [
     PlannerActor,
-    CoderActor,
     ReviewerActor,
     GeneratorActor,
     CriticActor,
@@ -252,7 +237,6 @@ for actor_cls in [
     TradeoffActor,
     HypothesisGeneratorActor,
     RefinerActor,
-    FormatterActor,
     SafetyActor,
     FinalAnswerActor,
 ]:
