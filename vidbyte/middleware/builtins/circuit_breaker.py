@@ -16,6 +16,7 @@ Relations:
 
 from __future__ import annotations
 
+import asyncio
 import time
 from collections.abc import Callable
 from enum import Enum
@@ -58,6 +59,7 @@ class CircuitBreakerMiddleware(AgentMiddleware):
         self.recovery_timeout = recovery_timeout
         self.half_open_max_calls = half_open_max_calls
         self.clock = clock or time.monotonic
+        self._lock = asyncio.Lock()
         self._state: CircuitState = CircuitState.CLOSED
         self._error_timestamps: list[float] = []
         self._opened_at: float | None = None
@@ -71,26 +73,29 @@ class CircuitBreakerMiddleware(AgentMiddleware):
     async def before_model_call(self, ctx: MiddlewareContext) -> MiddlewareDecision:
         """Block the model call or allow a probe depending on the current circuit state."""
         del ctx
-        if self._state is CircuitState.CLOSED:
-            return MiddlewareDecision.continue_()
-        if self._state is CircuitState.OPEN:
-            return self._handle_open_state()
-        return self._handle_half_open_state()
+        async with self._lock:
+            if self._state is CircuitState.CLOSED:
+                return MiddlewareDecision.continue_()
+            if self._state is CircuitState.OPEN:
+                return self._handle_open_state()
+            return self._handle_half_open_state()
 
     async def after_model_response(self, ctx: MiddlewareContext) -> MiddlewareDecision:
         """Close the circuit when a probe succeeds in HALF_OPEN state."""
         del ctx
-        if self._state is CircuitState.HALF_OPEN:
-            self._transition_to_closed()
+        async with self._lock:
+            if self._state is CircuitState.HALF_OPEN:
+                self._transition_to_closed()
         return MiddlewareDecision.continue_()
 
     async def on_model_error(self, ctx: MiddlewareContext) -> MiddlewareDecision:
         """Record the error and transition state if the failure threshold is crossed."""
         del ctx
-        if self._state is CircuitState.HALF_OPEN:
-            self._transition_to_open()
-        elif self._state is CircuitState.CLOSED:
-            self._record_error_and_maybe_open()
+        async with self._lock:
+            if self._state is CircuitState.HALF_OPEN:
+                self._transition_to_open()
+            elif self._state is CircuitState.CLOSED:
+                self._record_error_and_maybe_open()
         return MiddlewareDecision.continue_()
 
     def _handle_open_state(self) -> MiddlewareDecision:

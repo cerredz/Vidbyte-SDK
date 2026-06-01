@@ -203,7 +203,127 @@ class VideoModelConfig:
             raise ConfigurationError(f"{field_name} must be greater than zero.")
 
 
+AUDIO_SUPPORTED_PROVIDERS: frozenset[ModelProvider] = frozenset({
+    ModelProvider.OPENAI,
+    ModelProvider.ELEVENLABS,
+    ModelProvider.PLAYAI,
+})
+
+EMBEDDING_SUPPORTED_PROVIDERS: frozenset[ModelProvider] = frozenset({
+    ModelProvider.OPENAI,
+    ModelProvider.GEMINI,
+})
+
+
+@dataclass(frozen=True, slots=True)
+class AudioModelConfig:
+    provider: ModelProvider | str
+    model: str
+    api_key: str | None = None
+    voice: str | None = None
+    speed: float | None = None
+    response_format: str | None = None
+    language: str | None = None
+    extra_body: Mapping[str, Any] | None = None
+    endpoint: str | None = None
+    timeout_seconds: float = 120.0
+
+    def normalized_provider(self) -> ModelProvider:
+        # Convert strings to the canonical provider enum at the SDK boundary.
+        try:
+            return self.provider if isinstance(self.provider, ModelProvider) else ModelProvider(self.provider)
+        except ValueError as exc:
+            raise ConfigurationError(f"Unsupported model provider: {self.provider!r}") from exc
+
+    def validate(self) -> None:
+        # Validate audio support and shared model fields.
+        provider = self.normalized_provider()
+        if provider not in AUDIO_SUPPORTED_PROVIDERS:
+            raise UnsupportedProviderError(
+                f"AudioModelRunner supports: {', '.join(p.value for p in AUDIO_SUPPORTED_PROVIDERS)}.",
+                details={"provider": provider.value},
+            )
+        if not self.model.strip():
+            raise ConfigurationError("model must be non-empty.")
+        self._validate_speed()
+        self._validate_positive_float(self.timeout_seconds, field_name="timeout_seconds")
+        self.resolved_api_key()
+
+    def resolved_api_key(self) -> str:
+        # Resolve explicit keys before provider-specific environment variables.
+        return ProviderModelRegistry.resolve_api_key(self.normalized_provider(), self.api_key)
+
+    def resolved_endpoint(self) -> str:
+        # Prefer caller-provided endpoints for tests, proxies, and compatible APIs.
+        return ProviderModelRegistry.resolve_endpoint(self.normalized_provider(), self.endpoint)
+
+    def _validate_speed(self) -> None:
+        # OpenAI TTS accepts speed in the 0.25–4.0 range; enforce globally.
+        if self.speed is not None and (self.speed < 0.25 or self.speed > 4.0):
+            raise ConfigurationError("speed must be between 0.25 and 4.0.")
+
+    def _validate_positive_float(self, value: float | None, *, field_name: str) -> None:
+        # Optional floating-point limits must be positive when supplied.
+        if value is not None and value <= 0:
+            raise ConfigurationError(f"{field_name} must be greater than zero.")
+
+
+@dataclass(frozen=True, slots=True)
+class EmbeddingModelConfig:
+    provider: ModelProvider | str
+    model: str
+    api_key: str | None = None
+    dimensions: int | None = None
+    input_type: str | None = None
+    extra_body: Mapping[str, Any] | None = None
+    endpoint: str | None = None
+    timeout_seconds: float = 60.0
+
+    def normalized_provider(self) -> ModelProvider:
+        # Convert strings to the canonical provider enum at the SDK boundary.
+        try:
+            return self.provider if isinstance(self.provider, ModelProvider) else ModelProvider(self.provider)
+        except ValueError as exc:
+            raise ConfigurationError(f"Unsupported model provider: {self.provider!r}") from exc
+
+    def validate(self) -> None:
+        # Validate embedding support and shared model fields.
+        provider = self.normalized_provider()
+        if provider not in EMBEDDING_SUPPORTED_PROVIDERS:
+            raise UnsupportedProviderError(
+                f"EmbeddingModelRunner supports: {', '.join(p.value for p in EMBEDDING_SUPPORTED_PROVIDERS)}.",
+                details={"provider": provider.value},
+            )
+        if not self.model.strip():
+            raise ConfigurationError("model must be non-empty.")
+        self._validate_positive_int(self.dimensions, field_name="dimensions")
+        self._validate_positive_float(self.timeout_seconds, field_name="timeout_seconds")
+        self.resolved_api_key()
+
+    def resolved_api_key(self) -> str:
+        # Resolve explicit keys before provider-specific environment variables.
+        return ProviderModelRegistry.resolve_api_key(self.normalized_provider(), self.api_key)
+
+    def resolved_endpoint(self) -> str:
+        # Prefer caller-provided endpoints for tests, proxies, and compatible APIs.
+        return ProviderModelRegistry.resolve_endpoint(self.normalized_provider(), self.endpoint)
+
+    def _validate_positive_int(self, value: int | None, *, field_name: str) -> None:
+        # Optional integer limits must be positive when supplied.
+        if value is not None and value <= 0:
+            raise ConfigurationError(f"{field_name} must be greater than zero.")
+
+    def _validate_positive_float(self, value: float | None, *, field_name: str) -> None:
+        # Optional floating-point limits must be positive when supplied.
+        if value is not None and value <= 0:
+            raise ConfigurationError(f"{field_name} must be greater than zero.")
+
+
 __all__ = [
+    "AUDIO_SUPPORTED_PROVIDERS",
+    "EMBEDDING_SUPPORTED_PROVIDERS",
+    "AudioModelConfig",
+    "EmbeddingModelConfig",
     "ImageModelConfig",
     "TextModelConfig",
     "VideoModelConfig",

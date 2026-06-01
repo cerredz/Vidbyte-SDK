@@ -250,33 +250,43 @@ class CanaryTripwireTests(unittest.IsolatedAsyncioTestCase):
 
 class ConfusedDeputyGuardTests(unittest.IsolatedAsyncioTestCase):
     async def test_before_run_captures_user_message(self) -> None:
-        # [Hidden Assumption] before_run stores ctx.message.
+        # [Hidden Assumption] before_run stores ctx.message in run_state.
+        from vidbyte.middleware.builtins.confused_deputy import _ConfusedDeputyRunState
         mw = ConfusedDeputyGuardMiddleware()
+        run_state: dict = {}
         ctx = MiddlewareContext(
             hook=MiddlewareHook.BEFORE_RUN,
             agent_name="worker",
             message="Find the weather in NYC",
+            run_state=run_state,
         )
         await mw.before_run(ctx)
-        self.assertEqual(mw._user_message, "Find the weather in NYC")
+        state: _ConfusedDeputyRunState = run_state[ConfusedDeputyGuardMiddleware]
+        self.assertEqual(state.user_message, "Find the weather in NYC")
 
     async def test_after_tool_call_accumulates_results(self) -> None:
-        # [Edge Case] Multiple after_tool_call invocations accumulate outputs.
+        # [Edge Case] Multiple after_tool_call invocations accumulate outputs in run_state.
+        from vidbyte.middleware.builtins.confused_deputy import _ConfusedDeputyRunState
         mw = ConfusedDeputyGuardMiddleware()
+        run_state: dict = {}
         for output in ("result_a", "result_b"):
             ctx = MiddlewareContext(
                 hook=MiddlewareHook.AFTER_TOOL_CALL,
                 agent_name="worker",
                 tool_result=ToolResult.success("lookup", output),
+                run_state=run_state,
             )
             await mw.after_tool_call(ctx)
-        self.assertEqual(len(mw._tool_outputs), 2)
+        state: _ConfusedDeputyRunState = run_state[ConfusedDeputyGuardMiddleware]
+        self.assertEqual(len(state.tool_outputs), 2)
 
     async def test_high_overlap_ratio_aborts(self) -> None:
         # [Edge Case] Argument with 80%+ verbatim match from tool result triggers abort.
         mw = ConfusedDeputyGuardMiddleware(max_external_content_ratio=0.6)
+        run_state: dict = {}
         run_ctx = MiddlewareContext(
-            hook=MiddlewareHook.BEFORE_RUN, agent_name="worker", message="user query"
+            hook=MiddlewareHook.BEFORE_RUN, agent_name="worker", message="user query",
+            run_state=run_state,
         )
         await mw.before_run(run_ctx)
 
@@ -285,6 +295,7 @@ class ConfusedDeputyGuardTests(unittest.IsolatedAsyncioTestCase):
             hook=MiddlewareHook.AFTER_TOOL_CALL,
             agent_name="worker",
             tool_result=ToolResult.success("read_email", tool_output),
+            run_state=run_state,
         )
         await mw.after_tool_call(tool_ctx)
 
@@ -293,6 +304,7 @@ class ConfusedDeputyGuardTests(unittest.IsolatedAsyncioTestCase):
             hook=MiddlewareHook.BEFORE_TOOL_CALL,
             agent_name="worker",
             tool_call=ToolCall("execute_command", {"command": injected_arg}),
+            run_state=run_state,
         )
         decision = await mw.before_tool_call(call_ctx)
         self.assertEqual(decision.action.value, "abort_run")
@@ -303,8 +315,10 @@ class ConfusedDeputyGuardTests(unittest.IsolatedAsyncioTestCase):
     async def test_low_overlap_ratio_continues(self) -> None:
         # [Silent Failure] Low overlap should not trigger abort.
         mw = ConfusedDeputyGuardMiddleware(max_external_content_ratio=0.6)
+        run_state: dict = {}
         run_ctx = MiddlewareContext(
-            hook=MiddlewareHook.BEFORE_RUN, agent_name="worker", message="user query"
+            hook=MiddlewareHook.BEFORE_RUN, agent_name="worker", message="user query",
+            run_state=run_state,
         )
         await mw.before_run(run_ctx)
 
@@ -312,6 +326,7 @@ class ConfusedDeputyGuardTests(unittest.IsolatedAsyncioTestCase):
             hook=MiddlewareHook.AFTER_TOOL_CALL,
             agent_name="worker",
             tool_result=ToolResult.success("search", "The weather in NYC is sunny today"),
+            run_state=run_state,
         )
         await mw.after_tool_call(tool_ctx)
 
@@ -319,6 +334,7 @@ class ConfusedDeputyGuardTests(unittest.IsolatedAsyncioTestCase):
             hook=MiddlewareHook.BEFORE_TOOL_CALL,
             agent_name="worker",
             tool_call=ToolCall("report", {"summary": "A completely different sentence about weather patterns"}),
+            run_state=run_state,
         )
         decision = await mw.before_tool_call(call_ctx)
         self.assertEqual(decision.action.value, "continue")
@@ -326,8 +342,10 @@ class ConfusedDeputyGuardTests(unittest.IsolatedAsyncioTestCase):
     async def test_short_arguments_skipped(self) -> None:
         # [Edge Case] Arguments shorter than min_argument_length are skipped.
         mw = ConfusedDeputyGuardMiddleware(min_argument_length=20)
+        run_state: dict = {}
         run_ctx = MiddlewareContext(
-            hook=MiddlewareHook.BEFORE_RUN, agent_name="worker", message="query"
+            hook=MiddlewareHook.BEFORE_RUN, agent_name="worker", message="query",
+            run_state=run_state,
         )
         await mw.before_run(run_ctx)
 
@@ -335,6 +353,7 @@ class ConfusedDeputyGuardTests(unittest.IsolatedAsyncioTestCase):
             hook=MiddlewareHook.AFTER_TOOL_CALL,
             agent_name="worker",
             tool_result=ToolResult.success("lookup", "short"),
+            run_state=run_state,
         )
         await mw.after_tool_call(tool_ctx)
 
@@ -342,6 +361,7 @@ class ConfusedDeputyGuardTests(unittest.IsolatedAsyncioTestCase):
             hook=MiddlewareHook.BEFORE_TOOL_CALL,
             agent_name="worker",
             tool_call=ToolCall("exec", {"cmd": "short"}),
+            run_state=run_state,
         )
         decision = await mw.before_tool_call(call_ctx)
         self.assertEqual(decision.action.value, "continue")
@@ -349,8 +369,10 @@ class ConfusedDeputyGuardTests(unittest.IsolatedAsyncioTestCase):
     async def test_non_string_arguments_skipped(self) -> None:
         # [Hidden Assumption] Integer and boolean arguments are ignored.
         mw = ConfusedDeputyGuardMiddleware()
+        run_state: dict = {}
         run_ctx = MiddlewareContext(
-            hook=MiddlewareHook.BEFORE_RUN, agent_name="worker", message="query"
+            hook=MiddlewareHook.BEFORE_RUN, agent_name="worker", message="query",
+            run_state=run_state,
         )
         await mw.before_run(run_ctx)
 
@@ -358,6 +380,7 @@ class ConfusedDeputyGuardTests(unittest.IsolatedAsyncioTestCase):
             hook=MiddlewareHook.AFTER_TOOL_CALL,
             agent_name="worker",
             tool_result=ToolResult.success("lookup", "12345 some data"),
+            run_state=run_state,
         )
         await mw.after_tool_call(tool_ctx)
 
@@ -365,6 +388,7 @@ class ConfusedDeputyGuardTests(unittest.IsolatedAsyncioTestCase):
             hook=MiddlewareHook.BEFORE_TOOL_CALL,
             agent_name="worker",
             tool_call=ToolCall("action", {"count": 12345, "verbose": True}),
+            run_state=run_state,
         )
         decision = await mw.before_tool_call(call_ctx)
         self.assertEqual(decision.action.value, "continue")
@@ -372,8 +396,10 @@ class ConfusedDeputyGuardTests(unittest.IsolatedAsyncioTestCase):
     async def test_internal_tool_calls_skipped(self) -> None:
         # [Hidden Assumption] Internal tool calls bypass overlap checking.
         mw = ConfusedDeputyGuardMiddleware(max_external_content_ratio=0.1)
+        run_state: dict = {}
         run_ctx = MiddlewareContext(
-            hook=MiddlewareHook.BEFORE_RUN, agent_name="worker", message="query"
+            hook=MiddlewareHook.BEFORE_RUN, agent_name="worker", message="query",
+            run_state=run_state,
         )
         await mw.before_run(run_ctx)
 
@@ -381,6 +407,7 @@ class ConfusedDeputyGuardTests(unittest.IsolatedAsyncioTestCase):
             hook=MiddlewareHook.AFTER_TOOL_CALL,
             agent_name="worker",
             tool_result=ToolResult.success("lookup", "verbatim content that is very long"),
+            run_state=run_state,
         )
         await mw.after_tool_call(tool_ctx)
 
@@ -389,6 +416,7 @@ class ConfusedDeputyGuardTests(unittest.IsolatedAsyncioTestCase):
             agent_name="worker",
             tool_call=ToolCall("isDone", {"final_answer": "verbatim content that is very long"}),
             tool_is_internal=True,
+            run_state=run_state,
         )
         decision = await mw.before_tool_call(call_ctx)
         self.assertEqual(decision.action.value, "continue")
@@ -396,8 +424,10 @@ class ConfusedDeputyGuardTests(unittest.IsolatedAsyncioTestCase):
     async def test_no_tool_outputs_accumulated_continues(self) -> None:
         # [Hidden Failure] First tool call before any results should continue.
         mw = ConfusedDeputyGuardMiddleware()
+        run_state: dict = {}
         run_ctx = MiddlewareContext(
-            hook=MiddlewareHook.BEFORE_RUN, agent_name="worker", message="query"
+            hook=MiddlewareHook.BEFORE_RUN, agent_name="worker", message="query",
+            run_state=run_state,
         )
         await mw.before_run(run_ctx)
 
@@ -405,35 +435,48 @@ class ConfusedDeputyGuardTests(unittest.IsolatedAsyncioTestCase):
             hook=MiddlewareHook.BEFORE_TOOL_CALL,
             agent_name="worker",
             tool_call=ToolCall("search", {"query": "some very long query string for searching"}),
+            run_state=run_state,
         )
         decision = await mw.before_tool_call(call_ctx)
         self.assertEqual(decision.action.value, "continue")
 
     async def test_before_run_resets_state(self) -> None:
-        # [Hidden Failure] State from previous runs is cleared.
+        # [Hidden Failure] Each run gets its own fresh run_state dict; prior run state is isolated.
+        from vidbyte.middleware.builtins.confused_deputy import _ConfusedDeputyRunState
         mw = ConfusedDeputyGuardMiddleware()
+
+        run_state_a: dict = {}
         tool_ctx = MiddlewareContext(
             hook=MiddlewareHook.AFTER_TOOL_CALL,
             agent_name="worker",
             tool_result=ToolResult.success("lookup", "accumulated output"),
+            run_state=run_state_a,
         )
         await mw.after_tool_call(tool_ctx)
-        self.assertEqual(len(mw._tool_outputs), 1)
+        state_a: _ConfusedDeputyRunState = run_state_a[ConfusedDeputyGuardMiddleware]
+        self.assertEqual(len(state_a.tool_outputs), 1)
 
+        run_state_b: dict = {}
         run_ctx = MiddlewareContext(
             hook=MiddlewareHook.BEFORE_RUN,
             agent_name="worker",
             message="new run",
+            run_state=run_state_b,
         )
         await mw.before_run(run_ctx)
-        self.assertEqual(len(mw._tool_outputs), 0)
-        self.assertEqual(mw._user_message, "new run")
+        state_b: _ConfusedDeputyRunState = run_state_b[ConfusedDeputyGuardMiddleware]
+        self.assertEqual(len(state_b.tool_outputs), 0)
+        self.assertEqual(state_b.user_message, "new run")
+        # Run A's state is unaffected by Run B's before_run.
+        self.assertEqual(len(state_a.tool_outputs), 1)
 
     async def test_multiple_arguments_first_violation_aborts(self) -> None:
         # [Edge Case] Only the first violating argument triggers abort.
         mw = ConfusedDeputyGuardMiddleware(max_external_content_ratio=0.5)
+        run_state: dict = {}
         run_ctx = MiddlewareContext(
-            hook=MiddlewareHook.BEFORE_RUN, agent_name="worker", message="query"
+            hook=MiddlewareHook.BEFORE_RUN, agent_name="worker", message="query",
+            run_state=run_state,
         )
         await mw.before_run(run_ctx)
 
@@ -441,6 +484,7 @@ class ConfusedDeputyGuardTests(unittest.IsolatedAsyncioTestCase):
             hook=MiddlewareHook.AFTER_TOOL_CALL,
             agent_name="worker",
             tool_result=ToolResult.success("lookup", "the exact content that will be copied verbatim"),
+            run_state=run_state,
         )
         await mw.after_tool_call(tool_ctx)
 
@@ -454,6 +498,7 @@ class ConfusedDeputyGuardTests(unittest.IsolatedAsyncioTestCase):
                     "injected_arg": "the exact content that will be copied verbatim",
                 },
             ),
+            run_state=run_state,
         )
         decision = await mw.before_tool_call(call_ctx)
         self.assertEqual(decision.action.value, "abort_run")
@@ -461,8 +506,10 @@ class ConfusedDeputyGuardTests(unittest.IsolatedAsyncioTestCase):
     async def test_exact_copy_argument_aborts(self) -> None:
         # [Edge Case] Argument identical to tool result → ratio=1.0 → abort.
         mw = ConfusedDeputyGuardMiddleware(max_external_content_ratio=0.5)
+        run_state: dict = {}
         run_ctx = MiddlewareContext(
-            hook=MiddlewareHook.BEFORE_RUN, agent_name="worker", message="query"
+            hook=MiddlewareHook.BEFORE_RUN, agent_name="worker", message="query",
+            run_state=run_state,
         )
         await mw.before_run(run_ctx)
 
@@ -471,6 +518,7 @@ class ConfusedDeputyGuardTests(unittest.IsolatedAsyncioTestCase):
             hook=MiddlewareHook.AFTER_TOOL_CALL,
             agent_name="worker",
             tool_result=ToolResult.success("scrape", content),
+            run_state=run_state,
         )
         await mw.after_tool_call(tool_ctx)
 
@@ -478,6 +526,7 @@ class ConfusedDeputyGuardTests(unittest.IsolatedAsyncioTestCase):
             hook=MiddlewareHook.BEFORE_TOOL_CALL,
             agent_name="worker",
             tool_call=ToolCall("exec", {"payload": content}),
+            run_state=run_state,
         )
         decision = await mw.before_tool_call(call_ctx)
         self.assertEqual(decision.action.value, "abort_run")
@@ -623,8 +672,10 @@ class PipelineIntegrationTests(unittest.IsolatedAsyncioTestCase):
         deputy = ConfusedDeputyGuardMiddleware(max_external_content_ratio=0.5)
         pipeline = MiddlewarePipeline([policy, deputy])
 
+        run_state: dict = {}
         run_ctx = MiddlewareContext(
-            hook=MiddlewareHook.BEFORE_RUN, agent_name="worker", message="user query"
+            hook=MiddlewareHook.BEFORE_RUN, agent_name="worker", message="user query",
+            run_state=run_state,
         )
         await pipeline.before_run(run_ctx)
 
@@ -632,6 +683,7 @@ class PipelineIntegrationTests(unittest.IsolatedAsyncioTestCase):
             hook=MiddlewareHook.AFTER_TOOL_CALL,
             agent_name="worker",
             tool_result=ToolResult.success("lookup", "injected payload content here for exec"),
+            run_state=run_state,
         )
         await pipeline.after_tool_call(tool_ctx)
 
@@ -639,6 +691,7 @@ class PipelineIntegrationTests(unittest.IsolatedAsyncioTestCase):
             hook=MiddlewareHook.BEFORE_TOOL_CALL,
             agent_name="worker",
             tool_call=ToolCall("exec", {"cmd": "injected payload content here for exec"}),
+            run_state=run_state,
         )
         decision = await pipeline.before_tool_call(call_ctx)
         self.assertEqual(decision.action.value, "abort_run")

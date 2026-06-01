@@ -46,6 +46,16 @@ class ModalityDetector:
         return ModalityDetector.detect_modality(model_name) is ModelModality.VIDEO
 
     @staticmethod
+    def is_audio(model_name: str) -> bool:
+        """Return True when the model name maps to audio modality."""
+        return ModalityDetector.detect_modality(model_name) is ModelModality.AUDIO
+
+    @staticmethod
+    def is_embedding(model_name: str) -> bool:
+        """Return True when the model name maps to embedding modality."""
+        return ModalityDetector.detect_modality(model_name) is ModelModality.EMBEDDING
+
+    @staticmethod
     def detect_modality(model_name: str) -> ModelModality:
         # Resolves the execution modality for any model name by pattern lookup and slash-splitting.
         name = (model_name or "").strip().lower()
@@ -119,7 +129,7 @@ class ModalityDetector:
         **options: Any,
     ) -> object:
         """Create the internal concrete runner for a resolved modality."""
-        from vidbyte.lib.config import ImageModelConfig, TextModelConfig, VideoModelConfig
+        from vidbyte.lib.config import AudioModelConfig, EmbeddingModelConfig, ImageModelConfig, TextModelConfig, VideoModelConfig
 
         resolved = ModalityDetector.coerce(modality)
         if resolved is ModelModality.AUTO:
@@ -168,6 +178,30 @@ class ModalityDetector:
                 ),
                 transport=transport,
             )
+        if resolved is ModelModality.AUDIO:
+            from vidbyte.lib.runners.audio import AudioModelRunner
+
+            return AudioModelRunner(
+                ModalityDetector.build_config(
+                    AudioModelConfig,
+                    provider=provider,
+                    model=model,
+                    options=common_options,
+                ),
+                transport=transport,
+            )
+        if resolved is ModelModality.EMBEDDING:
+            from vidbyte.lib.runners.embedding import EmbeddingModelRunner
+
+            return EmbeddingModelRunner(
+                ModalityDetector.build_config(
+                    EmbeddingModelConfig,
+                    provider=provider,
+                    model=model,
+                    options=common_options,
+                ),
+                transport=transport,
+            )
         raise ConfigurationError(f"Unsupported model modality: {resolved.value!r}")
 
     @staticmethod
@@ -202,6 +236,11 @@ _SUBSTRING_MODALITY_MAP: tuple[tuple[str, ModelModality], ...] = (
     ("pika", ModelModality.VIDEO),
     ("hailuo", ModelModality.VIDEO),
     ("grok-imagine-video", ModelModality.VIDEO),
+    ("whisper", ModelModality.AUDIO),
+    ("eleven_", ModelModality.AUDIO),
+    ("playdialog", ModelModality.AUDIO),
+    ("text-embedding", ModelModality.EMBEDDING),
+    ("embedding-", ModelModality.EMBEDDING),
 )
 
 _PREFIX_MODALITY_MAP: tuple[tuple[str, ModelModality], ...] = (
@@ -227,6 +266,7 @@ _PREFIX_MODALITY_MAP: tuple[tuple[str, ModelModality], ...] = (
     ("nova-", ModelModality.TEXT),
     ("phi-", ModelModality.TEXT),
     ("hermes-", ModelModality.TEXT),
+    ("tts-", ModelModality.AUDIO),
 )
 
 

@@ -3,19 +3,20 @@ from __future__ import annotations
 from typing import Any, Mapping
 from urllib.parse import quote
 
-from vidbyte.lib.config import TextModelConfig
+from vidbyte.lib.config import EmbeddingModelConfig, TextModelConfig
 from vidbyte.lib.enums import ModelProvider
 from vidbyte.lib.errors import ProviderConfigurationError, ProviderResponseError
 from vidbyte.lib.http import HttpResponseParser, HttpTransport
-from vidbyte.lib.runners.types import TextModelResponse
+from vidbyte.lib.runners.types import EmbeddingResponse, TextModelResponse
 
 
 class GeminiProvider:
     provider = ModelProvider.GEMINI
 
-    def __init__(self, *, text_config: TextModelConfig | None = None, model: str | None = None, response_parser: HttpResponseParser | None = None, **config_options: Any) -> None:
+    def __init__(self, *, text_config: TextModelConfig | None = None, embedding_config: EmbeddingModelConfig | None = None, model: str | None = None, response_parser: HttpResponseParser | None = None, **config_options: Any) -> None:
         # Keep response parsing injectable for tests and alternate transports.
         self._text_config = text_config or self._build_text_config(model=model, config_options=config_options)
+        self._embedding_config = embedding_config
         self._parser = response_parser or HttpResponseParser()
 
     def run_text(self, *, prompt: str, system: str | None, metadata: Mapping[str, object] | None, transport: HttpTransport, config: TextModelConfig | None = None) -> TextModelResponse:
@@ -104,6 +105,44 @@ class GeminiProvider:
             payload.setdefault("labels", {}).update({str(key): str(value) for key, value in metadata.items()})
         if config.extra_body:
             payload.update(dict(config.extra_body))
+
+    def run_embedding(self, *, texts: list[str], transport: HttpTransport, config: EmbeddingModelConfig | None = None) -> EmbeddingResponse:
+        # POST to batchEmbedContents and return one float vector per input text.
+        config = self._embedding_config_for(config)
+        model = quote(config.model, safe="")
+        task_type = config.input_type or "RETRIEVAL_DOCUMENT"
+        payload: dict[str, Any] = {"requests": [{"model": f"models/{model}", "content": {"parts": [{"text": t}]}, "taskType": task_type} for t in texts]}
+        url = f"{config.resolved_endpoint()}/models/{model}:batchEmbedContents"
+        response = transport.request(method="POST", url=url, headers=self._create_embedding_headers(config), json_body=payload, timeout_seconds=config.timeout_seconds)
+        parsed = self._parser.parse_json_response(response, provider=self.provider.value)
+        embeddings = self._extract_batch_embeddings(parsed, expected_count=len(texts))
+        return EmbeddingResponse(provider=self.provider, model=config.model, embeddings=embeddings, raw=parsed)
+
+    def _embedding_config_for(self, config: EmbeddingModelConfig | None) -> EmbeddingModelConfig:
+        # Resolve embedding config from call argument or stored instance config.
+        resolved = config or self._embedding_config
+        if resolved is None:
+            raise ProviderConfigurationError("GeminiProvider requires an EmbeddingModelConfig.", provider=self.provider.value)
+        return resolved
+
+    def _create_embedding_headers(self, config: EmbeddingModelConfig) -> dict[str, str]:
+        # Gemini uses x-goog-api-key for embedding requests the same as text.
+        return {"x-goog-api-key": config.resolved_api_key(), "content-type": "application/json"}
+
+    def _extract_batch_embeddings(self, parsed: Mapping[str, Any], *, expected_count: int) -> tuple[tuple[float, ...], ...]:
+        # Extract the values list from each embedding in the ordered batch response.
+        items = parsed.get("embeddings")
+        if not isinstance(items, list):
+            raise ProviderResponseError("Gemini embeddings response missing embeddings list.", provider=self.provider.value, response_excerpt=str(parsed))
+        if len(items) != expected_count:
+            raise ProviderResponseError(f"Gemini returned {len(items)} embeddings but {expected_count} were requested.", provider=self.provider.value, response_excerpt=str(parsed))
+        result: list[tuple[float, ...]] = []
+        for item in items:
+            values = item.get("values") if isinstance(item, dict) else None
+            if not isinstance(values, list):
+                raise ProviderResponseError("Gemini embedding item missing values list.", provider=self.provider.value, response_excerpt=str(item))
+            result.append(tuple(float(v) for v in values))
+        return tuple(result)
 
     def _extract_text(self, parsed: Mapping[str, Any]) -> str:
         # Normalize text parts from the first Gemini candidate.

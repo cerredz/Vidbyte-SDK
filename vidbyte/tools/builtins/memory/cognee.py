@@ -5,14 +5,19 @@ Description:
 Purpose:
     Lets agents ingest data, build knowledge graphs, search, and delete
     datasets via the Cognee REST API (self-hosted or Cognee Cloud).
-Architecture:
-    - CogneeAddTool: POST /api/v1/add
-    - CogneeCognifyTool: POST /api/v1/cognify (triggers graph construction)
-    - CogneeSearchTool: POST /api/v1/search
-    - CogneeDeleteTool: DELETE /api/v1/datasets/{dataset_id}/
-Relations:
-    Extends BaseMemoryTool from vidbyte.tools.builtins.memory.base.
-    base_url defaults to http://localhost:8000 for self-hosted instances.
+Architecture & Key Functions:
+    - CogneeAddTool: Ingests text chunks into designated staging datasets.
+    - CogneeCognifyTool: Builds a semantic knowledge graph from raw staged text.
+    - CogneeSearchTool: Queries the knowledge graph using vector/traversal search.
+    - CogneeDeleteTool: Permanently deletes Cognee datasets and their graph nodes.
+Relation to Codebase:
+    Exposed under the vidbyte.tools.builtins namespace, enabling agents to leverage
+    external structured knowledge graph memory for relational mapping.
+Similar Files:
+    - vidbyte/tools/builtins/memory/supermemory.py
+    - vidbyte/tools/builtins/memory/mem0.py
+    - vidbyte/tools/builtins/memory/zep.py
+    - vidbyte/tools/builtins/memory/letta.py
 """
 
 from __future__ import annotations
@@ -35,9 +40,10 @@ class CogneeAddTool(BaseMemoryTool):
         return ToolSpec(
             name="cognee_add",
             description=(
-                "Ingest text content into a Cognee dataset. "
-                "After adding data, call cognee_cognify to build the knowledge graph. "
-                "Optionally specify a dataset_id to organize memories into named collections."
+                "Cognee is a state-of-the-art knowledge-graph memory platform that structures unstructured data into semantic graphs for AI agents. "
+                "Use this tool to ingest unstructured text content into a Cognee dataset to prepare it for knowledge graph construction. "
+                "The ingested text is staged in Cognee's database under a specific dataset identifier, which defaults to 'default' if not specified. "
+                "This tool represents the ingestion phase and must be followed by a cognify call to build the graph."
             ),
             parameters=(
                 ToolParameter("content", "string", "The text content to ingest into Cognee."),
@@ -82,9 +88,10 @@ class CogneeCognifyTool(BaseMemoryTool):
         return ToolSpec(
             name="cognee_cognify",
             description=(
-                "Build the Cognee knowledge graph from data previously added via cognee_add. "
-                "This step is required before searching — it extracts entities, relationships, "
-                "and facts from the raw ingested text."
+                "Cognee is a state-of-the-art knowledge-graph memory platform that structures unstructured data into semantic graphs for AI agents. "
+                "Use this tool to trigger the knowledge graph construction process on a previously ingested Cognee dataset. "
+                "The cognification process extracts entities, complex relationships, and hierarchical facts from the staged raw text, creating a queryable semantic graph. "
+                "This step is a prerequisite for executing graph-based queries or searches on the ingested data."
             ),
             parameters=(
                 ToolParameter("dataset_id", "string", "Dataset to cognify (default: 'default').", required=False, default="default"),
@@ -123,11 +130,10 @@ class CogneeSearchTool(BaseMemoryTool):
         return ToolSpec(
             name="cognee_search",
             description=(
-                "Query the Cognee knowledge graph. "
-                "search_type controls the retrieval mode: "
-                "'GRAPH_COMPLETION' (default) uses graph traversal for rich answers; "
-                "'SEMANTIC' uses vector similarity. "
-                "Requires cognee_cognify to have been called first."
+                "Cognee is a state-of-the-art knowledge-graph memory platform that structures unstructured data into semantic graphs for AI agents. "
+                "Use this tool to search a Cognee dataset using semantic or graph-completion search modes. "
+                "The search queries the built knowledge graph, returning structured relationships and facts relevant to the search query. "
+                "You must ensure that the dataset has been successfully cognified prior to calling this search tool."
             ),
             parameters=(
                 ToolParameter("query", "string", "The search query."),
@@ -176,8 +182,10 @@ class CogneeDeleteTool(BaseMemoryTool):
         return ToolSpec(
             name="cognee_delete",
             description=(
-                "Delete a Cognee dataset and all associated ingested data and graph nodes. "
-                "This is permanent and irreversible."
+                "Cognee is a state-of-the-art knowledge-graph memory platform that structures unstructured data into semantic graphs for AI agents. "
+                "Use this tool to permanently delete a Cognee dataset and all of its ingested text and generated graph nodes. "
+                "Deleting the dataset immediately removes all of its associated nodes, edges, and raw chunks from the Cognee server. "
+                "This is a permanent administrative operation that cannot be undone, reclaiming local or cloud storage."
             ),
             parameters=(
                 ToolParameter("dataset_id", "string", "The Cognee dataset ID to delete."),

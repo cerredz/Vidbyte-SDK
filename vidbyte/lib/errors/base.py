@@ -19,6 +19,9 @@ Architecture:
     - McpToolDiscoveryError: Raised when remote tools/list discovery returns an invalid response.
     - McpToolExecutionError: Raised when a remote MCP tool execution returns an error result.
     - McpAttachmentError: Composite error tracking failures from concurrent server startup.
+    - ProviderRequestError: Raised when a provider request fails or returns an invalid response.
+    - ProviderConfigurationError: Raised when a provider adapter is missing required configuration.
+    - ProviderResponseError: Raised when a provider response cannot be normalized.
 Relations:
     Related to vidbyte.tools.executor, vidbyte.tools.registry, and vidbyte.tools.mcp.client.
 """
@@ -126,12 +129,29 @@ class ProviderRequestError(VidbyteSdkError):
         self.response_excerpt = response_excerpt
 
 
-class ProviderConfigurationError(ProviderRequestError):
+class ProviderConfigurationError(VidbyteSdkError):
     """Raised when a provider adapter is missing required configuration."""
 
+    def __init__(self, message: str, *, provider: str) -> None:
+        # Initializes the error with a message and the associated provider.
+        super().__init__(message, details={"provider": provider})
+        self.provider = provider
 
-class ProviderResponseError(ProviderRequestError):
+
+class ProviderResponseError(VidbyteSdkError):
     """Raised when a provider response cannot be normalized."""
+
+    def __init__(self, message: str, *, provider: str, status_code: int | None = None, response_excerpt: str | None = None) -> None:
+        # Initializes the error with response failure context, including status code and response body excerpt.
+        details: dict[str, Any] = {"provider": provider}
+        if status_code is not None:
+            details["status_code"] = status_code
+        if response_excerpt:
+            details["response_excerpt"] = response_excerpt[:500]
+        super().__init__(message, details=details)
+        self.provider = provider
+        self.status_code = status_code
+        self.response_excerpt = response_excerpt
 
 
 class ToolRegistrationError(ToolRegistryError):

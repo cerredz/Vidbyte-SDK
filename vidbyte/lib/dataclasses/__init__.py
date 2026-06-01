@@ -49,7 +49,7 @@ from vidbyte.context.primitives import (
     TextContextItem,
     ToolCallContextItem,
 )
-from vidbyte.lib.dataclasses.filesystem import FileSystemToolConfig
+from vidbyte.lib.dataclasses.filesystem import FileStat, FileSystemToolConfig
 from vidbyte.lib.dataclasses.mcp import McpToolDefinition
 from vidbyte.lib.dataclasses.middleware import (
     MiddlewareAction,
@@ -58,7 +58,6 @@ from vidbyte.lib.dataclasses.middleware import (
     MiddlewareEvent,
     MiddlewareHook,
 )
-from vidbyte.lib.dataclasses.tool_types import FileStat
 from vidbyte.lib.dataclasses.multi_agent import CandidateFailure, CandidateResult, DagNode, EvaluationDecision, NodeState, Verification
 from vidbyte.lib.dataclasses.sandbox import SandboxRequest, SandboxResult, SandboxTransport
 from vidbyte.lib.dataclasses.security import PermissionDecision, PermissionPolicy

@@ -28,6 +28,8 @@ class ModelModality(str, Enum):
     TEXT = "text"
     IMAGE = "image"
     VIDEO = "video"
+    AUDIO = "audio"
+    EMBEDDING = "embedding"
 
 
 class ModelNameModality(str, Enum):
@@ -233,6 +235,31 @@ _MODEL_NAME_MODALITY_MAP: dict[str, ModelModality] = {
     "veo-3.1": ModelModality.VIDEO,
     "veo-3.1-lite-preview": ModelModality.VIDEO,
     "grok-imagine-video": ModelModality.VIDEO,
+
+    # OpenAI audio models
+    "whisper-1": ModelModality.AUDIO,
+    "whisper-2": ModelModality.AUDIO,
+    "tts-1": ModelModality.AUDIO,
+    "tts-1-hd": ModelModality.AUDIO,
+    "gpt-4o-audio-preview": ModelModality.AUDIO,
+    "gpt-4o-realtime-preview": ModelModality.AUDIO,
+    # ElevenLabs audio models
+    "eleven_multilingual_v2": ModelModality.AUDIO,
+    "eleven_turbo_v2_5": ModelModality.AUDIO,
+    "eleven_monolingual_v1": ModelModality.AUDIO,
+    "eleven_turbo_v2": ModelModality.AUDIO,
+    # Play.ai audio models
+    "PlayDialog": ModelModality.AUDIO,
+    "PlayDialogMultilingual": ModelModality.AUDIO,
+
+    # OpenAI embedding models
+    "text-embedding-3-small": ModelModality.EMBEDDING,
+    "text-embedding-3-large": ModelModality.EMBEDDING,
+    "text-embedding-ada-002": ModelModality.EMBEDDING,
+    # Gemini embedding models
+    "text-embedding-004": ModelModality.EMBEDDING,
+    "embedding-001": ModelModality.EMBEDDING,
+    "gemini-embedding-exp-03-07": ModelModality.EMBEDDING,
 }
 
 

@@ -169,3 +169,16 @@ class SemanticSearchTool(BaseCodeSearchTool):
         if left_norm == 0 or right_norm == 0:
             return 0.0
         return dot / (left_norm * right_norm)
+
+
+class EmbeddingModelRunnerProvider:
+    """Adapts EmbeddingModelRunner to the EmbeddingProvider protocol used by SemanticSearchTool."""
+
+    def __init__(self, runner: object) -> None:
+        # Store the EmbeddingModelRunner so embed() can delegate to it.
+        self._runner = runner
+
+    def embed(self, texts: Sequence[str]) -> Sequence[Sequence[float]]:
+        # Delegate to runner.run() and convert the response tuple-of-tuples to list-of-lists.
+        response = self._runner.run(list(texts))
+        return [list(vector) for vector in response.embeddings]

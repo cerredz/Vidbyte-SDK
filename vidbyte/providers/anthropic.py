@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+from collections.abc import Iterator
 from typing import Any, Mapping
 
 from vidbyte.lib.config import TextModelConfig
@@ -87,6 +89,29 @@ class AnthropicProvider:
         # Allow new Anthropic fields without changing the SDK surface each time.
         if config.extra_body:
             payload.update(dict(config.extra_body))
+
+    def stream_text(self, *, prompt: str, system: str | None, metadata: Mapping[str, object] | None, transport: HttpTransport, config: TextModelConfig | None = None) -> Iterator[str]:
+        # POST to /messages with stream=True and yield text from content_block_delta events.
+        config = self._config(config)
+        payload = self._create_payload(config, prompt, system, metadata)
+        payload["stream"] = True
+        for raw_line in transport.stream_request(method="POST", url=f"{config.resolved_endpoint()}/messages", headers=self._create_headers(config), json_body=payload, timeout_seconds=config.timeout_seconds):
+            chunk = self._extract_stream_delta(raw_line)
+            if chunk is not None:
+                yield chunk
+
+    def _extract_stream_delta(self, raw_line: str) -> str | None:
+        # Parse one SSE JSON line and return the text delta, or None for non-delta events.
+        try:
+            event = json.loads(raw_line)
+        except (json.JSONDecodeError, ValueError):
+            return None
+        if event.get("type") == "content_block_delta":
+            delta = event.get("delta", {})
+            if isinstance(delta, dict) and delta.get("type") == "text_delta":
+                text = delta.get("text")
+                return text if isinstance(text, str) else None
+        return None
 
     def _extract_text(self, parsed: Mapping[str, Any]) -> str:
         # Collect text content blocks while leaving tool_use blocks in raw output.

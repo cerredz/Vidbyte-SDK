@@ -12,6 +12,18 @@ if TYPE_CHECKING:
 
 
 @dataclass(frozen=True, slots=True)
+class FileStat:
+    """Portable file metadata returned by filesystem stat operations."""
+
+    path: str
+    exists: bool
+    is_file: bool
+    is_dir: bool
+    size: int | None
+    modified_time: float | None
+
+
+@dataclass(frozen=True, slots=True)
 class FileSystemToolConfig:
     """Configuration shared by root-scoped filesystem tools."""
 
@@ -45,5 +57,6 @@ class FileSystemToolConfig:
 
 
 __all__ = [
+    "FileStat",
     "FileSystemToolConfig",
 ]

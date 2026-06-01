@@ -1,31 +1,26 @@
 from __future__ import annotations
 
+import json
+from collections.abc import Iterator
 from typing import Any, Mapping
 
-from vidbyte.lib.config import ImageModelConfig, TextModelConfig, VideoModelConfig
+from vidbyte.lib.config import AudioModelConfig, EmbeddingModelConfig, ImageModelConfig, TextModelConfig, VideoModelConfig
 from vidbyte.lib.enums import ModelProvider
 from vidbyte.lib.errors import ProviderConfigurationError, ProviderResponseError
 from vidbyte.lib.http import HttpResponseParser, HttpTransport
-from vidbyte.lib.runners.types import GeneratedImage, ImageModelResponse, TextModelResponse, VideoModelJob
+from vidbyte.lib.runners.types import AudioModelResponse, EmbeddingResponse, GeneratedImage, ImageModelResponse, TextModelResponse, VideoModelJob
 
 
 class OpenAIProvider:
     provider = ModelProvider.OPENAI
 
-    def __init__(
-        self,
-        *,
-        text_config: TextModelConfig | None = None,
-        image_config: ImageModelConfig | None = None,
-        video_config: VideoModelConfig | None = None,
-        model: str | None = None,
-        response_parser: HttpResponseParser | None = None,
-        **config_options: Any,
-    ) -> None:
+    def __init__(self, *, text_config: TextModelConfig | None = None, image_config: ImageModelConfig | None = None, video_config: VideoModelConfig | None = None, audio_config: AudioModelConfig | None = None, embedding_config: EmbeddingModelConfig | None = None, model: str | None = None, response_parser: HttpResponseParser | None = None, **config_options: Any) -> None:
         # Keep response parsing injectable for tests and alternate transports.
         self._text_config = text_config or self._build_text_config(model=model, config_options=config_options)
         self._image_config = image_config
         self._video_config = video_config
+        self._audio_config = audio_config
+        self._embedding_config = embedding_config
         self._parser = response_parser or HttpResponseParser()
 
     def run_text(self, *, prompt: str, system: str | None, metadata: Mapping[str, object] | None, transport: HttpTransport, config: TextModelConfig | None = None) -> TextModelResponse:
@@ -55,6 +50,94 @@ class OpenAIProvider:
         response = transport.request(method="GET", url=f"{config.resolved_endpoint()}/videos/{job_id}", headers=self._parser.bearer_headers(config.resolved_api_key()), timeout_seconds=config.timeout_seconds)
         parsed = self._parser.parse_json_response(response, provider=self.provider.value)
         return self._video_job_from_response(parsed, model=config.model)
+
+    def run_tts(self, *, text: str, transport: HttpTransport, config: AudioModelConfig | None = None) -> AudioModelResponse:
+        # POST to /audio/speech and return raw audio bytes from the binary response.
+        config = self._audio_config_for(config)
+        payload: dict[str, Any] = {"model": config.model, "input": text, "voice": config.voice or "alloy", "response_format": config.response_format or "mp3"}
+        if config.speed is not None:
+            payload["speed"] = config.speed
+        if config.extra_body:
+            payload.update(dict(config.extra_body))
+        response = transport.request_bytes(method="POST", url=f"{config.resolved_endpoint()}/audio/speech", headers=self._parser.bearer_headers(config.resolved_api_key()), json_body=payload, timeout_seconds=config.timeout_seconds)
+        if not response.raw_bytes:
+            raise ProviderResponseError("OpenAI TTS returned empty audio bytes.", provider=self.provider.value)
+        return AudioModelResponse(provider=self.provider, model=config.model, audio_bytes=response.raw_bytes, transcript=None, raw={})
+
+    def run_stt(self, *, audio: bytes, format: str, transport: HttpTransport, config: AudioModelConfig | None = None) -> AudioModelResponse:
+        # Upload audio via multipart to /audio/transcriptions and extract the transcript string.
+        config = self._audio_config_for(config)
+        fields: dict[str, str] = {"model": config.model}
+        if config.language:
+            fields["language"] = config.language
+        response = transport.upload_multipart(url=f"{config.resolved_endpoint()}/audio/transcriptions", headers=self._parser.bearer_headers(config.resolved_api_key()), fields=fields, file_field="file", file_bytes=audio, file_name=f"audio.{format}", file_content_type=f"audio/{format}", timeout_seconds=config.timeout_seconds)
+        parsed = self._parser.parse_json_response(response, provider=self.provider.value)
+        transcript = parsed.get("text")
+        if not isinstance(transcript, str):
+            raise ProviderResponseError("OpenAI STT response did not include a text field.", provider=self.provider.value, response_excerpt=str(parsed))
+        return AudioModelResponse(provider=self.provider, model=config.model, audio_bytes=None, transcript=transcript, raw=parsed)
+
+    def run_embedding(self, *, texts: list[str], transport: HttpTransport, config: EmbeddingModelConfig | None = None) -> EmbeddingResponse:
+        # POST to /embeddings and return one float vector per input text, sorted by index.
+        config = self._embedding_config_for(config)
+        payload: dict[str, Any] = {"model": config.model, "input": texts}
+        if config.dimensions is not None:
+            payload["dimensions"] = config.dimensions
+        if config.extra_body:
+            payload.update(dict(config.extra_body))
+        response = transport.request(method="POST", url=f"{config.resolved_endpoint()}/embeddings", headers=self._parser.bearer_headers(config.resolved_api_key()), json_body=payload, timeout_seconds=config.timeout_seconds)
+        parsed = self._parser.parse_json_response(response, provider=self.provider.value)
+        embeddings = self._extract_embeddings(parsed, expected_count=len(texts))
+        return EmbeddingResponse(provider=self.provider, model=config.model, embeddings=embeddings, raw=parsed, usage=parsed.get("usage") if isinstance(parsed.get("usage"), dict) else None)
+
+    def stream_text(self, *, prompt: str, system: str | None, metadata: Mapping[str, object] | None, transport: HttpTransport, config: TextModelConfig | None = None) -> Iterator[str]:
+        # POST to /responses with stream=True and yield text deltas from SSE events.
+        config = self._text_config_for(config)
+        payload = self._create_text_payload(config, prompt, system, metadata)
+        payload["stream"] = True
+        for raw_line in transport.stream_request(method="POST", url=f"{config.resolved_endpoint()}/responses", headers=self._parser.bearer_headers(config.resolved_api_key()), json_body=payload, timeout_seconds=config.timeout_seconds):
+            chunk = self._extract_stream_delta(raw_line)
+            if chunk is not None:
+                yield chunk
+
+    def _audio_config_for(self, config: AudioModelConfig | None) -> AudioModelConfig:
+        # Resolve audio config from call argument or stored instance config.
+        resolved = config or self._audio_config
+        if resolved is None:
+            raise ProviderConfigurationError("OpenAIProvider requires an AudioModelConfig.", provider=self.provider.value)
+        return resolved
+
+    def _embedding_config_for(self, config: EmbeddingModelConfig | None) -> EmbeddingModelConfig:
+        # Resolve embedding config from call argument or stored instance config.
+        resolved = config or self._embedding_config
+        if resolved is None:
+            raise ProviderConfigurationError("OpenAIProvider requires an EmbeddingModelConfig.", provider=self.provider.value)
+        return resolved
+
+    def _extract_embeddings(self, parsed: Mapping[str, Any], *, expected_count: int) -> tuple[tuple[float, ...], ...]:
+        # Sort data items by index and convert each embedding list to an immutable tuple.
+        data = parsed.get("data")
+        if not isinstance(data, list):
+            raise ProviderResponseError("OpenAI embeddings response missing data list.", provider=self.provider.value, response_excerpt=str(parsed))
+        if len(data) != expected_count:
+            raise ProviderResponseError(f"OpenAI returned {len(data)} embeddings but {expected_count} were requested.", provider=self.provider.value, response_excerpt=str(parsed))
+        sorted_items = sorted(data, key=lambda item: item.get("index", 0) if isinstance(item, dict) else 0)
+        return tuple(tuple(float(v) for v in item["embedding"]) for item in sorted_items if isinstance(item, dict) and isinstance(item.get("embedding"), list))
+
+    def _extract_stream_delta(self, raw_line: str) -> str | None:
+        # Parse one SSE JSON line and return the text delta, or None for non-delta events.
+        try:
+            event = json.loads(raw_line)
+        except (json.JSONDecodeError, ValueError):
+            return None
+        event_type = event.get("type", "")
+        if event_type == "response.text.delta":
+            delta = event.get("delta")
+            return delta if isinstance(delta, str) else None
+        if event_type in ("response.output_text.delta",):
+            delta = event.get("delta")
+            return delta if isinstance(delta, str) else None
+        return None
 
     def _text_config_for(self, config: TextModelConfig | None) -> TextModelConfig:
         resolved = config or self._text_config

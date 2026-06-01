@@ -25,7 +25,6 @@ from vidbyte.agents.runtimes.configs import LinearRuntime, MctsSearchRuntime, Ac
 from vidbyte.agents.runtimes.actor.actor import (
     PrebuiltActor,
     PlannerActor,
-    CoderActor,
     ReviewerActor,
     GeneratorActor,
     CriticActor,
@@ -36,7 +35,6 @@ from vidbyte.agents.runtimes.actor.actor import (
     TradeoffActor,
     HypothesisGeneratorActor,
     RefinerActor,
-    FormatterActor,
     SafetyActor,
     FinalAnswerActor,
 )
@@ -51,7 +49,6 @@ __all__ = [
     "ActorRuntime",
     "PrebuiltActor",
     "PlannerActor",
-    "CoderActor",
     "ReviewerActor",
     "GeneratorActor",
     "CriticActor",
@@ -62,7 +59,6 @@ __all__ = [
     "TradeoffActor",
     "HypothesisGeneratorActor",
     "RefinerActor",
-    "FormatterActor",
     "SafetyActor",
     "FinalAnswerActor",
 ]

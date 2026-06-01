@@ -9,14 +9,24 @@ Purpose:
 Architecture:
     - ConfusedDeputyGuardMiddleware: Tracks tool result outputs and computes
       verbatim overlap ratios against tool call arguments.
+    - _ConfusedDeputyRunState: Per-run dataclass stored in MiddlewareContext.run_state.
 Relations:
     Used through vidbyte.middleware.builtins and AgentRuntime middleware hooks.
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
+
 from vidbyte.lib.dataclasses.middleware import MiddlewareContext, MiddlewareDecision
 from vidbyte.middleware.base import AgentMiddleware
+
+
+@dataclass
+class _ConfusedDeputyRunState:
+    # Accumulates per-run user message and prior tool outputs for overlap analysis.
+    user_message: str = ""
+    tool_outputs: list[str] = field(default_factory=list)
 
 
 class ConfusedDeputyGuardMiddleware(AgentMiddleware):
@@ -31,33 +41,33 @@ class ConfusedDeputyGuardMiddleware(AgentMiddleware):
         self._max_ratio = max_external_content_ratio
         self._min_arg_length = min_argument_length
         self._abort_reason = abort_reason
-        self._user_message: str = ""
-        self._tool_outputs: list[str] = []
 
     async def before_run(self, ctx: MiddlewareContext) -> MiddlewareDecision:
-        # Captures user message fingerprint and resets accumulated tool results.
-        self._user_message = ctx.message
-        self._tool_outputs.clear()
+        # Initializes fresh per-run state keyed by this class in ctx.run_state.
+        ctx.run_state[self.__class__] = _ConfusedDeputyRunState(user_message=ctx.message)
         return MiddlewareDecision.continue_()
 
     async def after_tool_call(self, ctx: MiddlewareContext) -> MiddlewareDecision:
-        # Accumulates tool result outputs for subsequent overlap analysis.
+        # Accumulates tool result outputs in per-run state for subsequent overlap analysis.
         if ctx.tool_result is not None and ctx.tool_result.output:
-            self._tool_outputs.append(ctx.tool_result.output)
+            state: _ConfusedDeputyRunState = ctx.run_state.get(self.__class__) or _ConfusedDeputyRunState()
+            state.tool_outputs.append(ctx.tool_result.output)
+            ctx.run_state[self.__class__] = state
         return MiddlewareDecision.continue_()
 
     async def before_tool_call(self, ctx: MiddlewareContext) -> MiddlewareDecision:
         # Checks whether tool call arguments are driven by external tool results.
-        if ctx.tool_call is None or ctx.tool_is_internal or not self._tool_outputs:
+        state: _ConfusedDeputyRunState = ctx.run_state.get(self.__class__) or _ConfusedDeputyRunState()
+        if ctx.tool_call is None or ctx.tool_is_internal or not state.tool_outputs:
             return MiddlewareDecision.continue_()
-        return self._check_arguments(ctx)
+        return self._check_arguments(ctx, state.tool_outputs)
 
-    def _check_arguments(self, ctx: MiddlewareContext) -> MiddlewareDecision:
+    def _check_arguments(self, ctx: MiddlewareContext, tool_outputs: list[str]) -> MiddlewareDecision:
         # Scans each string argument for verbatim overlap with prior tool results.
         for arg_name, arg_value in ctx.tool_call.arguments.items():
             if not isinstance(arg_value, str) or len(arg_value) < self._min_arg_length:
                 continue
-            ratio = self._max_overlap_ratio(arg_value)
+            ratio = self._max_overlap_ratio(arg_value, tool_outputs)
             if ratio > self._max_ratio:
                 return MiddlewareDecision.abort(
                     self._abort_reason,
@@ -70,10 +80,10 @@ class ConfusedDeputyGuardMiddleware(AgentMiddleware):
                 )
         return MiddlewareDecision.continue_()
 
-    def _max_overlap_ratio(self, arg_value: str) -> float:
+    def _max_overlap_ratio(self, arg_value: str, tool_outputs: list[str]) -> float:
         # Returns the maximum overlap ratio between the argument and any tool result.
         best_ratio = 0.0
-        for output in self._tool_outputs:
+        for output in tool_outputs:
             length = self._longest_common_substring_length(arg_value, output)
             ratio = length / len(arg_value) if arg_value else 0.0
             best_ratio = max(best_ratio, ratio)
