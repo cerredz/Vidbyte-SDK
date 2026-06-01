@@ -48,6 +48,8 @@ class ProviderModelRegistry:
         ModelProvider.GLM: "glm-4-plus",
         ModelProvider.MINIMAX: "minimax-text-01",
         ModelProvider.OPENROUTER: "openrouter/auto",
+        ModelProvider.ELEVENLABS: "eleven_multilingual_v2",
+        ModelProvider.PLAYAI: "PlayDialog",
     }
 
     API_KEY_ENV_VARS: ClassVar[dict[ModelProvider, str]] = {
@@ -59,6 +61,8 @@ class ProviderModelRegistry:
         ModelProvider.GLM: "GLM_API_KEY",
         ModelProvider.MINIMAX: "MINIMAX_API_KEY",
         ModelProvider.OPENROUTER: "OPENROUTER_API_KEY",
+        ModelProvider.ELEVENLABS: "ELEVENLABS_API_KEY",
+        ModelProvider.PLAYAI: "PLAYAI_API_KEY",
     }
 
     DEFAULT_ENDPOINTS: ClassVar[dict[ModelProvider, str]] = {
@@ -70,6 +74,8 @@ class ProviderModelRegistry:
         ModelProvider.GLM: "https://open.bigmodel.cn/api/paas/v4",
         ModelProvider.MINIMAX: "https://api.minimax.io/v1",
         ModelProvider.OPENROUTER: "https://openrouter.ai/api/v1",
+        ModelProvider.ELEVENLABS: "https://api.elevenlabs.io/v1",
+        ModelProvider.PLAYAI: "https://api.play.ai/api/v1",
     }
 
     @classmethod
