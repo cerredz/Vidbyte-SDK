@@ -15,9 +15,11 @@ from __future__ import annotations
 
 from vidbyte.agents.algorithms.reflexion import ReflexionRuntimeAlgorithm
 from vidbyte.agents.algorithms.multi_provider_agentic_grader import MultiProviderAgenticGraderRuntimeAlgorithm
+from vidbyte.agents.algorithms.trajectory_checkpoints import TrajectoryCheckpointRuntimeAlgorithm
 
 __all__ = [
     "ReflexionRuntimeAlgorithm",
     "MultiProviderAgenticGraderRuntimeAlgorithm",
+    "TrajectoryCheckpointRuntimeAlgorithm",
 ]
 

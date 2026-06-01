@@ -16,6 +16,7 @@ from vidbyte.context.algorithms import (
     ContextWindowAlgorithm,
     MultiProviderAgenticGraderAlgorithm,
     ReflexionAlgorithm,
+    TrajectoryCheckpointAlgorithm,
     ToolResultAdmission,
 )
 
@@ -69,6 +70,14 @@ class ContextWindowPresets:
         return ContextWindowAlgorithm(
             name="multi_provider_agentic_grader",
             multi_provider_agentic_grader=MultiProviderAgenticGraderAlgorithm(),
+        )
+
+    @property
+    def trajectory_checkpoints(self) -> ContextWindowAlgorithm:
+        """Inject deterministic runtime checkpoints during direct agent loops."""
+        return ContextWindowAlgorithm(
+            name="trajectory_checkpoints",
+            trajectory_checkpoints=TrajectoryCheckpointAlgorithm(),
         )
 
 

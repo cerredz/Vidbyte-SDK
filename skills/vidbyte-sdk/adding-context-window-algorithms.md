@@ -559,6 +559,12 @@ Do not duplicate the tool loop in the adapter unless the algorithm is explicitly
 designed to replace the normal direct runtime. Reimplementing the loop usually
 breaks permissions, `isDone`, provider-specific parsing, or runtime metadata.
 
+For algorithms that need to modify the context between iterations of the same
+direct loop, add or reuse a generic `_arun_once(...)` hook such as an iteration
+observer. The hook should receive a bounded observable snapshot and return an
+optional model-visible message; it must stay algorithm-neutral and preserve the
+normal loop's middleware, permission, tracing, and tool-result behavior.
+
 ### 10.3 Metadata Contract
 
 Every runtime algorithm should attach one algorithm-specific metadata object to

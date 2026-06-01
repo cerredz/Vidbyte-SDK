@@ -21,7 +21,7 @@ Similar files:
 
 from __future__ import annotations
 
-from vidbyte.context.algorithms import ContextWindowAlgorithm, MultiProviderAgenticGraderAlgorithm, ReflexionAlgorithm, ToolResultAdmission
+from vidbyte.context.algorithms import ContextWindowAlgorithm, MultiProviderAgenticGraderAlgorithm, ReflexionAlgorithm, ToolResultAdmission, TrajectoryCheckpoint, TrajectoryCheckpointAlgorithm
 from vidbyte.context.primitives import (
     ArtifactContextItem,
     ContextItem,
@@ -78,4 +78,6 @@ __all__ = [
     "TextContextItem",
     "ToolCallContextItem",
     "ToolResultAdmission",
+    "TrajectoryCheckpoint",
+    "TrajectoryCheckpointAlgorithm",
 ]

@@ -23,7 +23,7 @@ from vidbyte.context.algorithms import ContextWindowAlgorithm
 from vidbyte.context.manager import ContextManager
 from vidbyte.context.primitives import ContextItem
 from vidbyte.context.window import ContextWindow
-from vidbyte.lib.dataclasses.agents import AgentRuntimeConfig, AgentStopReason
+from vidbyte.lib.dataclasses.agents import AgentIterationSnapshot, AgentRuntimeConfig, AgentStopReason
 from vidbyte.lib.dataclasses.middleware import MiddlewareAction, MiddlewareContext, MiddlewareDecision, MiddlewareHook
 from vidbyte.lib.enums import ModelModality
 from vidbyte.lib.errors import PermissionDeniedError, ToolExecutionError, ToolRegistryError
@@ -173,6 +173,7 @@ class AgentRuntime:
         metadata: Mapping[str, Any] | None = None,
         options: Mapping[str, Any] | None = None,
         trace_context: SpanContext | None = None,
+        iteration_observer: Callable[[AgentIterationSnapshot], str | None] | None = None,
     ) -> AgentResult:
         """Run one direct model/tool attempt until isDone or a budget stop."""
         run_options = dict(options or {})
@@ -393,6 +394,17 @@ class AgentRuntime:
                         run_state=run_state,
                         model_response=raw_result,
                     )
+                self._observe_iteration(
+                    iteration_observer,
+                    messages,
+                    iteration_count=iteration_count,
+                    message=message,
+                    provider=provider,
+                    assistant_output=runner_output_text(raw_result),
+                    call_contexts=call_contexts,
+                    tokens_used=tokens_used,
+                    metadata=runtime_metadata,
+                )
                 continue
 
             for call in tool_calls:
@@ -522,6 +534,46 @@ class AgentRuntime:
                     run_state=run_state,
                     model_response=raw_result,
                 )
+            self._observe_iteration(
+                iteration_observer,
+                messages,
+                iteration_count=iteration_count,
+                message=message,
+                provider=provider,
+                assistant_output=None,
+                call_contexts=call_contexts,
+                tokens_used=tokens_used,
+                metadata=runtime_metadata,
+            )
+
+    def _observe_iteration(
+        self,
+        iteration_observer: Callable[[AgentIterationSnapshot], str | None] | None,
+        messages: list[dict[str, Any]],
+        *,
+        iteration_count: int,
+        message: str,
+        provider: str,
+        assistant_output: str | None,
+        call_contexts: Sequence[ToolCallContext],
+        tokens_used: int | None,
+        metadata: Mapping[str, Any],
+    ) -> None:
+        """Append observer-provided context for a completed non-final iteration."""
+        if iteration_observer is None:
+            return
+        snapshot = AgentIterationSnapshot(
+            iteration_count=iteration_count,
+            message=message,
+            provider=provider,
+            assistant_output=assistant_output,
+            tool_calls=tuple(call_contexts),
+            tokens_used=tokens_used,
+            metadata=dict(metadata),
+        )
+        observed = iteration_observer(snapshot)
+        if observed and observed.strip():
+            messages.append(self._assistant_message(observed))
 
     async def _invoke_with_middleware(
         self,

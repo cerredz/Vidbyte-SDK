@@ -86,6 +86,8 @@ from vidbyte.context import (
     TextContextItem,
     ToolCallContextItem,
     ToolResultAdmission,
+    TrajectoryCheckpoint,
+    TrajectoryCheckpointAlgorithm,
 )
 from vidbyte.tools.builtins.context_primitives import (
     ContextListTool,
@@ -237,6 +239,8 @@ __all__ = [
     "ToolCallContextItem",
     "ToolCallState",
     "ToolResultAdmission",
+    "TrajectoryCheckpoint",
+    "TrajectoryCheckpointAlgorithm",
     "ToolExecutor",
     "ToolParameter",
     "ToolPermission",

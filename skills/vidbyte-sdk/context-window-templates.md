@@ -67,6 +67,8 @@ inner_loop_iteration     # one pass through the inner agent loop
 outer_loop_summary       # one summary injected by the outer loop
 outer_loop_critique      # one critique injected by the outer loop
 reasoning_injection      # one injected reasoning token block
+trajectory_checkpoint_iteration  # one completed non-final observed runtime iteration
+trajectory_checkpoint_injection  # one checkpoint block appended for the next model call
 ```
 
 Do not create slots that duplicate base runtime slots. Do not create slots that
@@ -423,7 +425,38 @@ The template is the invariant. The implementation is the variable.
 
 ---
 
-## 10. Adding Templates to a New Algorithm — Checklist
+## 10. Trajectory Checkpoints
+
+### Template
+
+```python
+from vidbyte.lib.templates import TrajectoryCheckpointContextWindowTemplate
+
+template = TrajectoryCheckpointContextWindowTemplate(iterations=5, interval=2)
+print(template.expected_slots)
+# ('system_prompt',
+#  'trajectory_checkpoint_iteration',
+#  'trajectory_checkpoint_iteration', 'trajectory_checkpoint_injection',
+#  'trajectory_checkpoint_iteration',
+#  'trajectory_checkpoint_iteration', 'trajectory_checkpoint_injection',
+#  'trajectory_checkpoint_iteration')
+```
+
+### Instrumentation points
+
+| Method | File | Slot emitted |
+|--------|------|-------------|
+| `TrajectoryCheckpointRuntimeAlgorithm.arun` | `vidbyte/agents/algorithms/trajectory_checkpoints.py` | `"system_prompt"` |
+| `TrajectoryCheckpointObserver.observe` | `vidbyte/agents/algorithms/trajectory_checkpoints.py` | `"trajectory_checkpoint_iteration"` |
+| `TrajectoryCheckpointObserver.observe` | `vidbyte/agents/algorithms/trajectory_checkpoints.py` | `"trajectory_checkpoint_injection"` |
+
+`trajectory_checkpoint_iteration` is emitted for every completed non-final
+iteration snapshot. `trajectory_checkpoint_injection` is emitted only when the
+configured cadence and `max_checkpoints` cap allow a checkpoint to be appended.
+
+---
+
+## 11. Adding Templates to a New Algorithm — Checklist
 
 - [ ] Add `recorder.append("<algo>_<stage>", iteration=...)` at each structural
       emit point in `vidbyte/agents/algorithms/<name>.py`.
@@ -438,7 +471,7 @@ The template is the invariant. The implementation is the variable.
 
 ---
 
-## 11. File Reference
+## 12. File Reference
 
 | File | Role |
 |------|------|
@@ -446,9 +479,11 @@ The template is the invariant. The implementation is the variable.
 | `vidbyte/context/templates/__init__.py` | Module exports |
 | `vidbyte/lib/templates/base.py` | ContextWindowTemplate, TemplateViolation |
 | `vidbyte/lib/templates/reflexion.py` | ReflexionContextWindowTemplate |
+| `vidbyte/lib/templates/trajectory_checkpoints.py` | TrajectoryCheckpointContextWindowTemplate |
 | `vidbyte/lib/templates/__init__.py` | Module exports |
 | `vidbyte/agents/runtime.py` | recorder param added; defaults to NullRecorder |
 | `vidbyte/agents/algorithms/reflexion.py` | system_prompt, reflexion_trial, reflexion_reflection emits |
+| `vidbyte/agents/algorithms/trajectory_checkpoints.py` | system_prompt, trajectory_checkpoint_iteration, trajectory_checkpoint_injection emits |
 | `tests/test_context_window_templates.py` | All template and instrumentation tests |
 | `scripts/test-context-window-templates.py` | Executable verification script |
 | `docs/design/context-window-templates.md` | Full design doc |
