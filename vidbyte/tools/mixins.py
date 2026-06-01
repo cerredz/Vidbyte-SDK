@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
-from typing import Self
+from typing import Self, TYPE_CHECKING
 
 from vidbyte.tools.adapters import ToolInput
 from vidbyte.tools.base import BaseTool
 from vidbyte.tools.executor import ToolExecutor
-from vidbyte.tools.registry import ToolRegistry
+
+if TYPE_CHECKING:
+    from vidbyte.lib.registries.tools import ToolRegistry
 
 
 class ToolMixin:
@@ -26,6 +28,8 @@ class ToolMixin:
     @property
     def tool_registry(self) -> ToolRegistry:
         if self._tool_registry is None:
+            from vidbyte.lib.registries.tools import ToolRegistry
+
             self._tool_registry = ToolRegistry()
         return self._tool_registry
 

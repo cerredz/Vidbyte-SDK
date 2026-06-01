@@ -28,7 +28,7 @@ from vidbyte.tools.mcp.bridge import McpToolBridge
 from vidbyte.tools.mcp.client import McpClient
 from vidbyte.tools.mcp.transport import McpStdioTransport
 from vidbyte.tools.mcp.types import McpServerConfig, McpServerHandle, McpToolPermission
-from vidbyte.tools.registry import ToolRegistry
+from vidbyte.lib.registries.tools import ToolRegistry
 from vidbyte.tools.types import ToolPermission
 
 

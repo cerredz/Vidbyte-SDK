@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from vidbyte.lib.enums import ModelProvider
 
-from vidbyte.lib.models.registry import ProviderModelRegistry
+from vidbyte.lib.registries.models import ProviderModelRegistry
 
 API_KEY_ENV_VARS: dict[ModelProvider, str] = ProviderModelRegistry.API_KEY_ENV_VARS
 DEFAULT_ENDPOINTS: dict[ModelProvider, str] = ProviderModelRegistry.DEFAULT_ENDPOINTS

@@ -27,7 +27,7 @@ from unittest.mock import patch
 
 from vidbyte.lib.enums import ModelProvider
 from vidbyte.lib.errors import ConfigurationError
-from vidbyte.lib.models.registry import ProviderModelRegistry
+from vidbyte.lib.registries.models import ProviderModelRegistry
 
 
 class ModelRegistryTests(unittest.TestCase):

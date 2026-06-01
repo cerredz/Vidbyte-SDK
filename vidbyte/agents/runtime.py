@@ -1,4 +1,4 @@
-﻿"""Context Protocol Header
+"""Context Protocol Header
 
 Description:
     Defines the internal direct execution runtime for Vidbyte agents.

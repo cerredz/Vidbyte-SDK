@@ -1,0 +1,67 @@
+{
+  "name": "Actor Runtime",
+  "description": "System prompts for prebuilt actor roles in the Asynchronous Actor Model Runtime.",
+  "key": "actor_runtime",
+  "prompts": {
+    "planner": {
+      "path": "planner.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/actor_runtime/planner.md"
+    },
+    "coder": {
+      "path": "coder.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/actor_runtime/coder.md"
+    },
+    "reviewer": {
+      "path": "reviewer.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/actor_runtime/reviewer.md"
+    },
+    "generator": {
+      "path": "generator.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/actor_runtime/generator.md"
+    },
+    "critic": {
+      "path": "critic.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/actor_runtime/critic.md"
+    },
+    "reasoner": {
+      "path": "reasoner.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/actor_runtime/reasoner.md"
+    },
+    "summarization": {
+      "path": "summarization.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/actor_runtime/summarization.md"
+    },
+    "decomposer": {
+      "path": "decomposer.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/actor_runtime/decomposer.md"
+    },
+    "explorer": {
+      "path": "explorer.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/actor_runtime/explorer.md"
+    },
+    "tradeoff": {
+      "path": "tradeoff.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/actor_runtime/tradeoff.md"
+    },
+    "hypothesis_generator": {
+      "path": "hypothesis_generator.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/actor_runtime/hypothesis_generator.md"
+    },
+    "refiner": {
+      "path": "refiner.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/actor_runtime/refiner.md"
+    },
+    "formatter": {
+      "path": "formatter.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/actor_runtime/formatter.md"
+    },
+    "safety": {
+      "path": "safety.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/actor_runtime/safety.md"
+    },
+    "final_answer": {
+      "path": "final_answer.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/actor_runtime/final_answer.md"
+    }
+  }
+}

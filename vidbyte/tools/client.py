@@ -19,7 +19,6 @@ from vidbyte.tools.adapters import ToolInput
 from vidbyte.tools.base import BaseTool
 from vidbyte.tools.catalog import Tools
 from vidbyte.tools.executor import ToolExecutor
-from vidbyte.tools.registry import ToolRegistry
 from vidbyte.tools.security import PermissionPolicy
 from vidbyte.tools.types import ToolSpec
 
@@ -31,6 +30,8 @@ class ToolsClient:
 
     def __init__(self, *, permission_policy: PermissionPolicy | None = None) -> None:
         """Create a registry and executor for tool operations."""
+        from vidbyte.lib.registries.tools import ToolRegistry
+
         self.catalog = Tools()
         self.registry = ToolRegistry()
         self.executor = ToolExecutor(

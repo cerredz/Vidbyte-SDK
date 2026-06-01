@@ -20,16 +20,13 @@ from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
 from vidbyte.agents.mixins import McpAttachableMixin
-from vidbyte.agents.runtime import AgentRuntime
 from vidbyte.agents.types import AgentCard, AgentInput, AgentMessage
 from vidbyte.context.manager import ContextManager
 from vidbyte.context.window import ContextWindow, ContextWindowAlgorithm
 from vidbyte.context.primitives import ContextItem
 from vidbyte.lib.agents import ModalityDetector
 from vidbyte.lib.dataclasses.agents import AgentMetadata, AgentRunnerConfig, AgentRuntimeConfig
-from vidbyte.lib.dataclasses.context import BaseAgentContext, BaseContext
-from vidbyte.lib.dataclasses.strategies import AgentResult
-from vidbyte.lib.enums import ModelModality, ModelProvider
+from vidbyte.lib.enums import AgentRuntimeType, ModelModality, ModelProvider
 from vidbyte.lib.errors import AgentExecutionError, ConfigurationError
 from vidbyte.lib.tracing import NullTracer, TracerBase
 from vidbyte.middleware import AgentMiddleware
@@ -53,6 +50,7 @@ class BaseAgent(McpAttachableMixin):
         *,
         name: str,
         system_prompt: str,
+        runtime: AgentRuntimeType | str = AgentRuntimeType.LINEAR,
         runner: object | None = None,
         runners: Mapping[ModelModality | str, object] | None = None,
         tools: Sequence[object] | Tools = (),
@@ -83,6 +81,34 @@ class BaseAgent(McpAttachableMixin):
             raise AgentExecutionError("Agent name cannot be empty.")
         if not system_prompt:
             raise AgentExecutionError("Agent system_prompt is required.")
+
+        from vidbyte.agents.runtimes.configs import LinearRuntime, MctsSearchRuntime, ActorRuntime
+        if isinstance(runtime, (LinearRuntime, MctsSearchRuntime, ActorRuntime)):
+            self.runtime_type = runtime.runtime_type
+            self.runtime_config_obj = runtime
+        else:
+            self.runtime_type = AgentRuntimeType(runtime)
+            self.runtime_config_obj = None
+
+        if self.runtime_type in (
+            AgentRuntimeType.MCTS_SEARCH,
+            AgentRuntimeType.ACTOR_MODEL,
+            AgentRuntimeType.ACTOR_MODEL_P2P,
+            AgentRuntimeType.ACTOR_MODEL_BROADCAST,
+        ):
+            if middleware:
+                raise ConfigurationError(
+                    f"Agent {name} uses non-linear runtime {self.runtime_type.value}, "
+                    "which does not support middleware."
+                )
+            if algorithm is not None:
+                resolved_algo = ContextWindow.resolve_algorithm(algorithm)
+                if resolved_algo.name != "default":
+                    raise ConfigurationError(
+                        f"Agent {name} uses non-linear runtime {self.runtime_type.value}, "
+                        "which does not support in-context learning algorithms."
+                    )
+
         self.runner_config = AgentRunnerConfig(
             api_key=api_key,
             provider=str(provider.value if isinstance(provider, ModelProvider) else provider) if provider is not None else None,
@@ -438,8 +464,34 @@ class BaseAgent(McpAttachableMixin):
             if isinstance(context, ToolCallContext)
         )
 
-    def _runtime(self) -> AgentRuntime:
-        return AgentRuntime(
+    def _runtime(self) -> Any:
+        from vidbyte.lib.registries.runtimes import RuntimeRegistry
+        runtime_cls = RuntimeRegistry.resolve(self.runtime_type)
+
+        kwargs: dict[str, Any] = {}
+        if self.runtime_type in (
+            AgentRuntimeType.ACTOR_MODEL,
+            AgentRuntimeType.ACTOR_MODEL_P2P,
+            AgentRuntimeType.ACTOR_MODEL_BROADCAST,
+        ):
+            if isinstance(self.runtime_config_obj, ActorRuntime):
+                kwargs = {
+                    "dynamic_actors": self.runtime_config_obj.dynamic_actors,
+                    "max_loop": self.runtime_config_obj.max_loop,
+                    "termination_mode": self.runtime_config_obj.termination_mode,
+                    "worker_model": self.runtime_config_obj.worker_model,
+                    "include_actors": self.runtime_config_obj.include_actors,
+                }
+            else:
+                kwargs = {
+                    "dynamic_actors": False,
+                    "max_loop": 20,
+                    "termination_mode": "coordinator",
+                    "worker_model": None,
+                    "include_actors": None,
+                }
+
+        return runtime_cls(
             agent_name=self.name,
             system_prompt=self.system_prompt,
             tools=self.tools,
@@ -450,6 +502,7 @@ class BaseAgent(McpAttachableMixin):
             run_id=self.runner_config.run_id,
             algorithm=self.algorithm,
             context_manager=self.context_manager,
+            **kwargs,
         )
 
     def _catalog_from_agent_tools(self, tools: Sequence[object]) -> Tools:

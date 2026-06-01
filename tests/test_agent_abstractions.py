@@ -15,7 +15,7 @@ from vidbyte.tools.builtins.calculator import CalculatorTool
 from vidbyte.tools.builtins.code_execution import CodeExecutionTool
 from vidbyte.tools.builtins.document_retrieval import DocumentRetrievalTool
 from vidbyte.tools.executor import ToolExecutor
-from vidbyte.tools.registry import ToolRegistry
+from vidbyte.lib.registries.tools import ToolRegistry
 from vidbyte.tools.types import ToolCall, ToolStatus
 
 

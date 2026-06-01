@@ -23,7 +23,7 @@ from vidbyte.lib.dataclasses.context import BaseAgentContext
 from vidbyte.lib.dataclasses.strategies import AgentResult
 
 if TYPE_CHECKING:
-    from vidbyte.agents.runtime import AgentRuntime
+    from vidbyte.agents.runtimes import LinearAgentRuntime as AgentRuntime
 
 
 class AgentRuntimeContextAlgorithms:

@@ -25,7 +25,7 @@ from typing import Any, Mapping
 
 from vidbyte.lib.enums import ModelProvider
 from vidbyte.lib.errors import ConfigurationError, UnsupportedProviderError
-from vidbyte.lib.models.registry import ProviderModelRegistry
+from vidbyte.lib.registries.models import ProviderModelRegistry
 
 
 @dataclass(frozen=True, slots=True)

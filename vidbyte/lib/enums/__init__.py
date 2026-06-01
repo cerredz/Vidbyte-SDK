@@ -1,5 +1,21 @@
+"""Context Protocol Header
+
+Description:
+    Exposes library enums for Vidbyte SDK.
+Purpose:
+    Exposes all SDK-level enums in a single clean namespace for consumption
+    by providers, clients, contexts, and runtimes.
+Architecture:
+    - Namespace package mapping various enum types.
+Relations:
+    Imported by agents, providers, contexts, and strategies.
+Similar Files:
+    - vidbyte/lib/enums/agent_runtime.py: Swappable runtime enums.
+"""
+
 from __future__ import annotations
 
+from vidbyte.lib.enums.agent_runtime import AgentRuntimeType
 from vidbyte.lib.enums.context import BudgetPreset, PermissionPreset
 from vidbyte.lib.enums.model_modality import ModelModality, ModelNameModality
 from vidbyte.lib.enums.model_provider import ModelProvider
@@ -7,6 +23,7 @@ from vidbyte.lib.enums.platform import Platform
 from vidbyte.lib.enums.prompts import Prompt
 
 __all__ = [
+    "AgentRuntimeType",
     "BudgetPreset",
     "ModelModality",
     "ModelNameModality",
