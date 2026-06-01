@@ -82,20 +82,29 @@ class BaseAgent(McpAttachableMixin):
         if not system_prompt:
             raise AgentExecutionError("Agent system_prompt is required.")
 
-        from vidbyte.agents.runtimes.configs import LinearRuntime, MctsSearchRuntime, ActorRuntime
-        if isinstance(runtime, (LinearRuntime, MctsSearchRuntime, ActorRuntime)):
+        from vidbyte.agents.runtimes.configs import (
+            LinearRuntime, MctsSearchRuntime, ActorRuntime,
+            BeamSearchRuntime, DAGDataflowRuntime, MarketAuctionRuntime, GossipRuntime,
+        )
+        _all_runtime_configs = (LinearRuntime, MctsSearchRuntime, ActorRuntime, BeamSearchRuntime, DAGDataflowRuntime, MarketAuctionRuntime, GossipRuntime)
+        if isinstance(runtime, _all_runtime_configs):
             self.runtime_type = runtime.runtime_type
             self.runtime_config_obj = runtime
         else:
             self.runtime_type = AgentRuntimeType(runtime)
             self.runtime_config_obj = None
 
-        if self.runtime_type in (
+        _NON_LINEAR_RUNTIMES = (
             AgentRuntimeType.MCTS_SEARCH,
             AgentRuntimeType.ACTOR_MODEL,
             AgentRuntimeType.ACTOR_MODEL_P2P,
             AgentRuntimeType.ACTOR_MODEL_BROADCAST,
-        ):
+            AgentRuntimeType.BEAM_SEARCH,
+            AgentRuntimeType.DAG_DATAFLOW,
+            AgentRuntimeType.MARKET_AUCTION,
+            AgentRuntimeType.GOSSIP,
+        )
+        if self.runtime_type in _NON_LINEAR_RUNTIMES:
             if middleware:
                 raise ConfigurationError(
                     f"Agent {name} uses non-linear runtime {self.runtime_type.value}, "
@@ -466,6 +475,7 @@ class BaseAgent(McpAttachableMixin):
 
     def _runtime(self) -> Any:
         from vidbyte.lib.registries.runtimes import RuntimeRegistry
+        from vidbyte.agents.runtimes.configs import ActorRuntime, BeamSearchRuntime, DAGDataflowRuntime, MarketAuctionRuntime, GossipRuntime
         runtime_cls = RuntimeRegistry.resolve(self.runtime_type)
 
         kwargs: dict[str, Any] = {}
@@ -489,6 +499,48 @@ class BaseAgent(McpAttachableMixin):
                     "termination_mode": "coordinator",
                     "worker_model": None,
                     "include_actors": None,
+                }
+        elif self.runtime_type is AgentRuntimeType.BEAM_SEARCH:
+            cfg = self.runtime_config_obj
+            if isinstance(cfg, BeamSearchRuntime):
+                kwargs = {
+                    "beam_width": cfg.beam_width,
+                    "max_scorer_chars": cfg.max_scorer_chars,
+                    "scorer_system_prompt": cfg.scorer_system_prompt,
+                    "scorer_prompt": cfg.scorer_prompt,
+                }
+        elif self.runtime_type is AgentRuntimeType.DAG_DATAFLOW:
+            cfg = self.runtime_config_obj
+            if isinstance(cfg, DAGDataflowRuntime):
+                kwargs = {
+                    "max_parallel": cfg.max_parallel,
+                    "max_node_output_chars": cfg.max_node_output_chars,
+                    "planner_system_prompt": cfg.planner_system_prompt,
+                    "node_system_prompt": cfg.node_system_prompt,
+                    "synthesizer_system_prompt": cfg.synthesizer_system_prompt,
+                }
+        elif self.runtime_type is AgentRuntimeType.MARKET_AUCTION:
+            cfg = self.runtime_config_obj
+            if isinstance(cfg, MarketAuctionRuntime):
+                kwargs = {
+                    "num_agents": cfg.num_agents,
+                    "roles": cfg.roles,
+                    "max_approach_chars": cfg.max_approach_chars,
+                    "auctioneer_system_prompt": cfg.auctioneer_system_prompt,
+                    "bidder_system_prompt_template": cfg.bidder_system_prompt_template,
+                    "executor_system_prompt_template": cfg.executor_system_prompt_template,
+                }
+        elif self.runtime_type is AgentRuntimeType.GOSSIP:
+            cfg = self.runtime_config_obj
+            if isinstance(cfg, GossipRuntime):
+                kwargs = {
+                    "num_agents": cfg.num_agents,
+                    "gossip_rounds": cfg.gossip_rounds,
+                    "max_knowledge_chars": cfg.max_knowledge_chars,
+                    "angles": cfg.angles,
+                    "agent_system_prompt": cfg.agent_system_prompt,
+                    "merge_system_prompt": cfg.merge_system_prompt,
+                    "synthesizer_system_prompt": cfg.synthesizer_system_prompt,
                 }
 
         return runtime_cls(

@@ -35,6 +35,10 @@ class RuntimeRegistry:
             SearchTreeRuntimeComponent,
             PointToPointActorRuntime,
             BroadcastActorRuntime,
+            BeamSearchAgentRuntime,
+            DAGDataflowAgentRuntime,
+            MarketAuctionAgentRuntime,
+            GossipAgentRuntime,
         )
         _registry: dict[AgentRuntimeType, type] = {
             AgentRuntimeType.LINEAR: LinearAgentRuntime,
@@ -42,6 +46,10 @@ class RuntimeRegistry:
             AgentRuntimeType.ACTOR_MODEL: PointToPointActorRuntime,
             AgentRuntimeType.ACTOR_MODEL_P2P: PointToPointActorRuntime,
             AgentRuntimeType.ACTOR_MODEL_BROADCAST: BroadcastActorRuntime,
+            AgentRuntimeType.BEAM_SEARCH: BeamSearchAgentRuntime,
+            AgentRuntimeType.DAG_DATAFLOW: DAGDataflowAgentRuntime,
+            AgentRuntimeType.MARKET_AUCTION: MarketAuctionAgentRuntime,
+            AgentRuntimeType.GOSSIP: GossipAgentRuntime,
         }
         runtime_cls = _registry.get(runtime_type)
         if runtime_cls is None:
