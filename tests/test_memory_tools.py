@@ -60,7 +60,7 @@ class MockTransport:
         self.raise_exc = raise_exc
         self.last_call: dict = {}
 
-    def request(self, *, method: str, url: str, headers: Any = None, json_body: Any = None, timeout_seconds: float = 30.0, **kwargs: Any) -> FakeHttpResponse:
+    async def request(self, *, method: str, url: str, headers: Any = None, json_body: Any = None, timeout_seconds: float = 30.0, **kwargs: Any) -> FakeHttpResponse:
         self.last_call = {"method": method, "url": url, "headers": headers or {}, "json_body": json_body}
         if self.raise_exc:
             raise self.raise_exc

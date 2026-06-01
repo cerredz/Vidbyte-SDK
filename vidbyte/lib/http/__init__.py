@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from vidbyte.lib.http.parser import HttpResponseParser
-from vidbyte.lib.http.transport import HttpResponse, HttpTransport
+from vidbyte.lib.http.transport import HttpResponse, HttpTransport, SyncHttpTransport
 
 __all__ = [
     "HttpResponse",
     "HttpResponseParser",
     "HttpTransport",
+    "SyncHttpTransport",
 ]

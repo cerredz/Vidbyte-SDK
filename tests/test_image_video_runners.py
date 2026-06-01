@@ -14,7 +14,7 @@ class FakeTransport:
         self.responses = list(responses)
         self.requests: list[dict[str, object]] = []
 
-    def request(
+    async def request(
         self,
         *,
         method: str,
@@ -22,6 +22,7 @@ class FakeTransport:
         headers: Mapping[str, str],
         json_body: Mapping[str, object] | None = None,
         timeout_seconds: float = 60.0,
+        **kwargs: object,
     ) -> HttpResponse:
         self.requests.append({"method": method, "url": url, "json_body": dict(json_body or {})})
         return HttpResponse(status_code=200, body=json.dumps(self.responses.pop(0)), headers={})

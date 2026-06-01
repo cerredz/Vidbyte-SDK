@@ -34,12 +34,12 @@ class OpenRouterProvider(OpenAICompatibleProvider):
         # Initialize the OpenRouter provider adapter.
         super().__init__(text_config=text_config, model=model, response_parser=response_parser, **config_options)
 
-    def run_text(self, *, prompt: str, system: str | None, metadata: Mapping[str, object] | None, transport: HttpTransport, config: TextModelConfig | None = None) -> TextModelResponse:
+    async def run_text(self, *, prompt: str, system: str | None, metadata: Mapping[str, object] | None, transport: HttpTransport, config: TextModelConfig | None = None) -> TextModelResponse:
         # Execute an OpenRouter chat completion request with custom headers for client attribution.
         config = self._config(config)
         headers = self._parser.bearer_headers(config.resolved_api_key())
         headers["HTTP-Referer"] = "https://github.com/vidbyte/vidbyte-sdk"
         headers["X-OpenRouter-Title"] = "Vidbyte SDK"
-        response = transport.request(method="POST", url=f"{config.resolved_endpoint()}/chat/completions", headers=headers, json_body=self._create_payload(config, prompt, system, metadata), timeout_seconds=config.timeout_seconds)
+        response = await transport.request(method="POST", url=f"{config.resolved_endpoint()}/chat/completions", headers=headers, json_body=self._create_payload(config, prompt, system, metadata), timeout_seconds=config.timeout_seconds)
         parsed = self._parser.parse_json_response(response, provider=self.provider.value)
         return TextModelResponse(provider=self.provider, model=config.model, text=self._extract_chat_text(parsed), raw=parsed, usage=parsed.get("usage") if isinstance(parsed.get("usage"), dict) else None)

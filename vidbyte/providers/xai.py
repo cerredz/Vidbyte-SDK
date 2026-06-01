@@ -17,10 +17,10 @@ class XAIProvider(OpenAICompatibleProvider):
         super().__init__(text_config=text_config, model=model, response_parser=response_parser, **config_options)
         self._image_config = image_config
 
-    def run_image(self, *, prompt: str, transport: HttpTransport, config: ImageModelConfig | None = None) -> ImageModelResponse:
+    async def run_image(self, *, prompt: str, transport: HttpTransport, config: ImageModelConfig | None = None) -> ImageModelResponse:
         # Execute xAI's image generation endpoint and normalize image outputs.
         config = self._image_config_for(config)
-        response = transport.request(method="POST", url=f"{config.resolved_endpoint()}/images/generations", headers=self._parser.bearer_headers(config.resolved_api_key()), json_body=self._create_image_payload(config, prompt), timeout_seconds=config.timeout_seconds)
+        response = await transport.request(method="POST", url=f"{config.resolved_endpoint()}/images/generations", headers=self._parser.bearer_headers(config.resolved_api_key()), json_body=self._create_image_payload(config, prompt), timeout_seconds=config.timeout_seconds)
         parsed = self._parser.parse_json_response(response, provider=self.provider.value)
         return ImageModelResponse(provider=self.provider, model=config.model, images=self._extract_images(parsed), raw=parsed)
 

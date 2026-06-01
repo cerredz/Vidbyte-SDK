@@ -41,7 +41,7 @@ class FakeTransport:
         self.status_code = status_code
         self.requests: list[dict[str, object]] = []
 
-    def request(
+    async def request(
         self,
         *,
         method: str,
@@ -49,6 +49,7 @@ class FakeTransport:
         headers: Mapping[str, str],
         json_body: Mapping[str, object] | None = None,
         timeout_seconds: float = 60.0,
+        **kwargs: object,
     ) -> HttpResponse:
         self.requests.append(
             {

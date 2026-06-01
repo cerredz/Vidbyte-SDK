@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import asyncio
 from typing import Any, Mapping
 
 from vidbyte.lib.config import VideoModelConfig
 from vidbyte.lib.enums import ModelProvider
-from vidbyte.lib.errors import ConfigurationError
+from vidbyte.lib.errors import AgentExecutionError, ConfigurationError
 from vidbyte.lib.http import HttpTransport
 from vidbyte.lib.runners.types import VideoModelJob
 from vidbyte.providers import ModelProviders
@@ -28,17 +29,31 @@ class VideoModelRunner:
         self._transport = transport or HttpTransport()
         self._provider = ModelProviders.video(config)
 
+    async def arun(self, prompt: str) -> VideoModelJob:
+        # Async entry point for video job creation; awaits the provider call without blocking.
+        return await self._provider.create_video(prompt=prompt, transport=self._transport)
+
+    async def astatus(self, job_id: str) -> VideoModelJob:
+        # Async entry point for job status polling; awaits the provider call without blocking.
+        return await self._provider.get_video_status(job_id=job_id, transport=self._transport)
+
     def run(self, prompt: str) -> VideoModelJob:
-        return self._provider.create_video(
-            prompt=prompt,
-            transport=self._transport,
-        )
+        # Synchronous wrapper for video job creation; raises if called from a running event loop.
+        try:
+            asyncio.get_running_loop()
+            raise AgentExecutionError("VideoModelRunner.run() cannot be called from an active event loop; use await arun().")
+        except RuntimeError:
+            pass
+        return asyncio.run(self.arun(prompt))
 
     def status(self, job_id: str) -> VideoModelJob:
-        return self._provider.get_video_status(
-            job_id=job_id,
-            transport=self._transport,
-        )
+        # Synchronous wrapper for job status polling; raises if called from a running event loop.
+        try:
+            asyncio.get_running_loop()
+            raise AgentExecutionError("VideoModelRunner.status() cannot be called from an active event loop; use await astatus().")
+        except RuntimeError:
+            pass
+        return asyncio.run(self.astatus(job_id))
 
     def model_name(self) -> str:
         return self._config.model
@@ -46,14 +61,7 @@ class VideoModelRunner:
     def print(self, response: VideoModelJob) -> None:
         print(f"{response.job_id}: {response.status}")
 
-    def _coerce_config(
-        self,
-        config: VideoModelConfig | None,
-        *,
-        provider: ModelProvider | str | None,
-        model: str | None,
-        config_options: Mapping[str, Any],
-    ) -> VideoModelConfig:
+    def _coerce_config(self, config: VideoModelConfig | None, *, provider: ModelProvider | str | None, model: str | None, config_options: Mapping[str, Any]) -> VideoModelConfig:
         if config is not None:
             return config
         if provider is None or model is None:
