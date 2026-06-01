@@ -14,6 +14,7 @@ Relations:
 
 from __future__ import annotations
 
+import dataclasses
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
@@ -37,8 +38,9 @@ from vidbyte.lib.dataclasses.context import BaseAgentContext, BaseContext
 from vidbyte.lib.dataclasses.strategies import AgentResult
 from vidbyte.tools._internal import IS_DONE_TOOL_NAME, with_internal_agent_tools
 from vidbyte.tools.catalog import Tools
+from vidbyte.tools.output_schema import OutputSchemaValidator
 from vidbyte.tools.security import PermissionDecision, PermissionPolicy
-from vidbyte.tools.types import ToolCall, ToolCallContext, ToolCallState, ToolResult
+from vidbyte.tools.types import ToolCall, ToolCallContext, ToolCallState, ToolResult, ToolStatus
 
 
 class AgentRuntime:
@@ -58,6 +60,7 @@ class AgentRuntime:
         algorithm: ContextWindowAlgorithm | str | None = None,
         context_manager: ContextManager | None = None,
         recorder: RecorderBase | None = None,
+        output_schema: type | Mapping[str, Any] | None = None,
     ) -> None:
         self.agent_name = agent_name
         self.system_prompt = system_prompt
@@ -71,6 +74,7 @@ class AgentRuntime:
         self.algorithm = ContextWindow.resolve_algorithm(algorithm)
         self.context_manager = context_manager
         self.recorder: RecorderBase = recorder or NullRecorder()
+        self.output_schema = output_schema
 
     def build_context(
         self,
@@ -728,12 +732,13 @@ class AgentRuntime:
         )
 
     def _with_middleware_metadata(self, result: AgentResult) -> AgentResult:
-        """Attach latest middleware metadata to a AgentResult."""
+        """Attach latest middleware metadata to a AgentResult, preserving structured output."""
         metadata = dict(result.metadata)
         metadata["middleware"] = self.middleware.metadata()
         return AgentResult(
             output=result.output,
             strategy_name=result.strategy_name,
+            structured=result.structured,
             calls=result.calls,
             metadata=metadata,
         )
@@ -872,14 +877,31 @@ class AgentRuntime:
             )
 
     async def _execute_tool(self, tool: object, call: ToolCall) -> ToolResult:
-        """Execute the tool and return its result, raising ToolExecutionError on failure."""
+        """Execute the tool, validate its output schema, and return the result."""
         try:
-            return await tool.execute(call)
+            result = await tool.execute(call)
         except Exception as exc:
             raise ToolExecutionError(
                 f"Tool execution failed: {exc}",
                 details={"tool_name": call.tool_name, "error_type": type(exc).__name__},
             ) from exc
+        return self._apply_tool_output_schema(result, tool)
+
+    @staticmethod
+    def _apply_tool_output_schema(result: ToolResult, tool: object) -> ToolResult:
+        """Validate and populate structured on a successful result when the tool declares output_schema."""
+        spec = tool.spec()
+        schema = getattr(spec, "output_schema", None)
+        if schema is None or result.status is not ToolStatus.SUCCESS:
+            return result
+        parsed, error = OutputSchemaValidator.validate(result.output, schema)
+        if error:
+            return ToolResult.error(
+                result.tool_name,
+                f"Output schema violation: {error}",
+                metadata={"error": "output_schema_violation"},
+            )
+        return dataclasses.replace(result, structured=parsed)
 
     def _resolve_tool_schemas(self, provider: str) -> Sequence[dict[str, Any]]:
         """Return provider-native tool schemas when the toolkit is non-empty."""
@@ -908,12 +930,16 @@ class AgentRuntime:
         return call_options
 
     def _build_system_string(self, context: BaseAgentContext) -> str:
-        """Assemble the system string with fixed header, primitives zone, and body in order."""
+        """Assemble the system string with fixed header, primitives zone, body, and optional schema hint."""
         fixed = context.build_context_fixed()
         primitives_zone = self.context_manager.render_primitives_zone() if self.context_manager else ""
         body = context.build_context_body()
         parts = [p for p in (fixed, primitives_zone, body) if p]
-        return "\n\n".join(parts)
+        result = "\n\n".join(parts)
+        if self.output_schema is not None:
+            hint = OutputSchemaValidator.schema_prompt_hint(self.output_schema)
+            result = f"{result}\n\n{hint}" if result else hint
+        return result
 
     def _final_result(
         self,
@@ -925,20 +951,32 @@ class AgentRuntime:
         tokens_used: int | None,
         stop_reason: AgentStopReason,
     ) -> AgentResult:
-        """Build the final AgentResult from an explicit runtime stop."""
+        """Build the final AgentResult, validating output against output_schema when declared."""
+        structured, schema_error = self._validate_agent_output(output)
+        metadata: dict[str, Any] = {
+            **self._runtime_metadata(
+                contexts=contexts,
+                iteration_count=iteration_count,
+                tokens_used=tokens_used,
+                stop_reason=stop_reason,
+            ),
+            **runner_metadata,
+        }
+        if schema_error:
+            metadata["output_schema_error"] = schema_error
         return AgentResult(
             output=output,
             strategy_name="direct_runner",
-            metadata={
-                **self._runtime_metadata(
-                    contexts=contexts,
-                    iteration_count=iteration_count,
-                    tokens_used=tokens_used,
-                    stop_reason=stop_reason,
-                ),
-                **runner_metadata,
-            },
+            structured=structured,
+            metadata=metadata,
         )
+
+    def _validate_agent_output(self, output: str) -> tuple[Any, str | None]:
+        """Parse and validate output against output_schema. Returns (structured, error_or_None)."""
+        if self.output_schema is None:
+            return None, None
+        parsed, error = OutputSchemaValidator.validate(output, self.output_schema)
+        return parsed, error
 
     async def _process_tool_call(
         self,

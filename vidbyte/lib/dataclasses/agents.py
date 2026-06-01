@@ -142,3 +142,4 @@ class AgentSpec:
     context_items: tuple[ContextItem, ...] = ()
     context_manager: ContextManager | None = None
     algorithm: ContextWindowAlgorithm | str | None = None
+    output_schema: type | Mapping[str, Any] | None = None
