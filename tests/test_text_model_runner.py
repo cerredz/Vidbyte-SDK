@@ -92,6 +92,53 @@ class TextModelRunnerTests(unittest.TestCase):
         self.assertEqual(transport.requests[0]["url"], "https://api.x.ai/v1/chat/completions")
         self.assertEqual(transport.requests[0]["json_body"]["messages"][-1]["content"], "Hello")
 
+    def test_call_scoped_response_format_passes_through(self) -> None:
+        transport = FakeTransport({"output_text": "ok"})
+        runner = TextModelRunner(
+            TextModelConfig(provider=ModelProvider.OPENAI, model="gpt-test", api_key="key"),
+            transport=transport,
+        )
+
+        runner.run("Hello", response_format={"type": "json_schema", "schema": {"type": "object"}})
+
+        payload = transport.requests[0]["json_body"]
+        self.assertEqual(payload["text"]["format"]["type"], "json_schema")
+
+    def test_runner_level_response_format_is_preserved(self) -> None:
+        transport = FakeTransport({"output_text": "ok"})
+        runner = TextModelRunner(
+            TextModelConfig(provider=ModelProvider.OPENAI, model="gpt-test", api_key="key", response_format={"type": "json_object"}),
+            transport=transport,
+        )
+
+        runner.run("Hello")
+
+        payload = transport.requests[0]["json_body"]
+        self.assertEqual(payload["text"]["format"], {"type": "json_object"})
+
+    def test_runner_level_call_options_are_preserved(self) -> None:
+        transport = FakeTransport({"output_text": "ok"})
+        runner = TextModelRunner(
+            TextModelConfig(
+                provider=ModelProvider.OPENAI,
+                model="gpt-test",
+                api_key="key",
+                tools=({"type": "function", "name": "lookup"},),
+                tool_choice="auto",
+                messages=({"role": "user", "content": "prior"},),
+                response_format={"type": "json_object"},
+            ),
+            transport=transport,
+        )
+
+        runner.run("Hello")
+
+        payload = transport.requests[0]["json_body"]
+        self.assertEqual(payload["tools"], [{"type": "function", "name": "lookup"}])
+        self.assertEqual(payload["tool_choice"], "auto")
+        self.assertIsInstance(payload["input"], list)
+        self.assertEqual(payload["text"]["format"], {"type": "json_object"})
+
 
 if __name__ == "__main__":
     unittest.main()

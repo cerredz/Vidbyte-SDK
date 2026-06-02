@@ -74,6 +74,29 @@ class ProviderToolSchemaTranslationTests(unittest.TestCase):
 
         self.assertEqual(schema["function"]["name"], "fetch_user_metrics")
 
+    def test_strict_openai_and_anthropic_schema_shape(self) -> None:
+        @vidbyte_tool
+        def fetch_user_metrics(user_id: int) -> str:
+            """Fetches user metrics."""
+            return str(user_id)
+
+        openai = tool_spec_to_provider_schema(fetch_user_metrics.spec(), "openai", strict=True)
+        anthropic = tool_spec_to_provider_schema(fetch_user_metrics.spec(), "anthropic", strict=True)
+
+        self.assertTrue(openai["function"]["strict"])
+        self.assertTrue(anthropic["strict"])
+
+    def test_strict_gemini_schema_shape_remains_compatible(self) -> None:
+        @vidbyte_tool
+        def fetch_user_metrics(user_id: int) -> str:
+            """Fetches user metrics."""
+            return str(user_id)
+
+        schema = tool_spec_to_provider_schema(fetch_user_metrics.spec(), "gemini", strict=True)
+
+        self.assertEqual(schema["name"], "fetch_user_metrics")
+        self.assertNotIn("strict", schema)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -106,6 +106,29 @@ class StreamingTextRunnerTests(unittest.TestCase):
 
         self.assertEqual(transport.requests[0]["json_body"].get("instructions"), "Be concise")
 
+    def test_openai_stream_preserves_runner_level_call_options(self) -> None:
+        transport = FakeStreamingTransport([_openai_delta("hi")])
+        runner = StreamingTextModelRunner(
+            TextModelConfig(
+                provider=ModelProvider.OPENAI,
+                model="gpt-4o",
+                api_key="key",
+                tools=({"type": "function", "name": "lookup"},),
+                tool_choice="auto",
+                messages=({"role": "user", "content": "prior"},),
+                response_format={"type": "json_object"},
+            ),
+            transport=transport,
+        )
+
+        list(runner.stream("Test"))
+
+        payload = transport.requests[0]["json_body"]
+        self.assertEqual(payload["tools"], [{"type": "function", "name": "lookup"}])
+        self.assertEqual(payload["tool_choice"], "auto")
+        self.assertIsInstance(payload["input"], list)
+        self.assertEqual(payload["text"]["format"], {"type": "json_object"})
+
     # --- Anthropic streaming ---
 
     def test_anthropic_stream_yields_text_deltas(self) -> None:
