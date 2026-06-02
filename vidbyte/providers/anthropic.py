@@ -42,6 +42,7 @@ class AnthropicProvider:
         payload: dict[str, Any] = {"model": config.model, "max_tokens": config.max_output_tokens or 1024, "messages": self._create_messages(config, prompt)}
         self._attach_instructions(payload, config, system)
         self._attach_sampling(payload, config)
+        self._attach_response_format(payload, config)
         self._attach_tools(payload, config)
         self._attach_metadata(payload, config, metadata)
         self._attach_extra_body(payload, config)
@@ -69,6 +70,11 @@ class AnthropicProvider:
             payload["top_p"] = config.top_p
         if config.stop_sequences:
             payload["stop_sequences"] = list(config.stop_sequences)
+
+    def _attach_response_format(self, payload: dict[str, Any], config: TextModelConfig) -> None:
+        # Adds Anthropic native structured output format when the caller requests one.
+        if config.response_format is not None:
+            payload["output_config"] = {"format": dict(config.response_format)}
 
     def _attach_tools(self, payload: dict[str, Any], config: TextModelConfig) -> None:
         # Anthropic tools and tool_choice pass through to the Messages API.

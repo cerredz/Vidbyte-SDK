@@ -59,9 +59,9 @@ class Tools(Sequence[BaseTool]):
             return "No tools available."
         return "\n\n".join(spec.to_prompt_str() for spec in specs)
 
-    def provider_schemas(self, provider_or_model: str) -> tuple[dict[str, Any], ...]:
-        """Return provider-native tool declarations for this catalog."""
-        return ToolsFormatter.format_tools(self, provider_or_model)
+    def provider_schemas(self, provider_or_model: str, *, strict: bool = False) -> tuple[dict[str, Any], ...]:
+        # Returns provider-native tool declarations for this catalog.
+        return ToolsFormatter.format_tools(self, provider_or_model, strict=strict)
 
     def add(self, tool: ToolInput, *, replace: bool = False) -> "Tools":
         """Return a new catalog with one tool added."""

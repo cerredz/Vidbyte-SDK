@@ -26,8 +26,8 @@ from vidbyte.context.primitives import ContextItem
 from vidbyte.context.window import ContextWindow
 from vidbyte.lib.dataclasses.agents import AgentRuntimeConfig, AgentStopReason
 from vidbyte.lib.dataclasses.middleware import MiddlewareAction, MiddlewareContext, MiddlewareDecision, MiddlewareHook
-from vidbyte.lib.enums import ModelModality
-from vidbyte.lib.errors import PermissionDeniedError, ToolExecutionError, ToolRegistryError
+from vidbyte.lib.enums import ModelModality, StructuredOutputMode
+from vidbyte.lib.errors import ConfigurationError, PermissionDeniedError, ToolExecutionError, ToolRegistryError
 from vidbyte.lib.token_usage import token_usage_from_response
 from vidbyte.lib.tools import ToolsFormatter
 from vidbyte.context.templates import NullRecorder, RecorderBase
@@ -41,6 +41,7 @@ from vidbyte.tools.catalog import Tools
 from vidbyte.tools.output_schema import OutputSchemaValidator
 from vidbyte.tools.security import PermissionDecision, PermissionPolicy
 from vidbyte.tools.types import ToolCall, ToolCallContext, ToolCallState, ToolResult, ToolStatus
+from vidbyte.providers.structured_output import ProviderStructuredOutputPlanner
 
 
 class AgentRuntime:
@@ -61,6 +62,8 @@ class AgentRuntime:
         context_manager: ContextManager | None = None,
         recorder: RecorderBase | None = None,
         output_schema: type | Mapping[str, Any] | None = None,
+        structured_output_mode: StructuredOutputMode | str = StructuredOutputMode.AUTO,
+        strict_provider_tool_schemas: bool = False,
     ) -> None:
         self.agent_name = agent_name
         self.system_prompt = system_prompt
@@ -75,6 +78,9 @@ class AgentRuntime:
         self.context_manager = context_manager
         self.recorder: RecorderBase = recorder or NullRecorder()
         self.output_schema = output_schema
+        self.structured_output_mode = StructuredOutputMode.coerce(structured_output_mode)
+        self.strict_provider_tool_schemas = bool(strict_provider_tool_schemas)
+        self.structured_output_planner = ProviderStructuredOutputPlanner()
 
     def build_context(
         self,
@@ -284,7 +290,7 @@ class AgentRuntime:
                     model_response=last_response,
                 )
 
-            call_options = self._build_iteration_call_options(run_options, context, tool_schemas, messages)
+            call_options = self._build_iteration_call_options(run_options, context, tool_schemas, messages, provider=provider)
             raw_result, model_call_count = await self._invoke_with_middleware(
                 runner,
                 message,
@@ -905,7 +911,7 @@ class AgentRuntime:
 
     def _resolve_tool_schemas(self, provider: str) -> Sequence[dict[str, Any]]:
         """Return provider-native tool schemas when the toolkit is non-empty."""
-        return self.tools.provider_schemas(provider) if len(self.tools) else ()
+        return self.tools.provider_schemas(provider, strict=self.strict_provider_tool_schemas) if len(self.tools) else ()
 
     @staticmethod
     def _extract_initial_messages(run_options: dict[str, Any]) -> list[dict[str, Any]]:
@@ -918,10 +924,17 @@ class AgentRuntime:
         context: BaseAgentContext,
         tool_schemas: Sequence[dict[str, Any]],
         messages: list[dict[str, Any]],
+        *,
+        provider: str,
     ) -> dict[str, Any]:
         """Assemble per-iteration call options with system prompt, primitives zone, tools, and messages."""
         call_options = dict(run_options)
-        system = self._build_system_string(context)
+        plan = self.structured_output_planner.plan(provider=provider, schema=self.output_schema, mode=self.structured_output_mode)
+        if "response_format" in call_options and plan.response_format is not None and self.structured_output_mode is StructuredOutputMode.NATIVE:
+            raise ConfigurationError("response_format cannot override output_schema when structured_output_mode='native'.")
+        if plan.response_format is not None and "response_format" not in call_options:
+            call_options["response_format"] = plan.response_format
+        system = self._build_system_string(context, use_schema_hint=plan.use_prompt_hint)
         call_options.setdefault("system", system)
         if tool_schemas:
             call_options.setdefault("tools", tool_schemas)
@@ -929,14 +942,14 @@ class AgentRuntime:
             call_options.setdefault("messages", tuple(messages))
         return call_options
 
-    def _build_system_string(self, context: BaseAgentContext) -> str:
+    def _build_system_string(self, context: BaseAgentContext, *, use_schema_hint: bool = True) -> str:
         """Assemble the system string with fixed header, primitives zone, body, and optional schema hint."""
         fixed = context.build_context_fixed()
         primitives_zone = self.context_manager.render_primitives_zone() if self.context_manager else ""
         body = context.build_context_body()
         parts = [p for p in (fixed, primitives_zone, body) if p]
         result = "\n\n".join(parts)
-        if self.output_schema is not None:
+        if self.output_schema is not None and use_schema_hint:
             hint = OutputSchemaValidator.schema_prompt_hint(self.output_schema)
             result = f"{result}\n\n{hint}" if result else hint
         return result

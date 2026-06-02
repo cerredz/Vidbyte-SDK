@@ -92,7 +92,7 @@ from vidbyte.tools.builtins.context_primitives import (
     ContextRemoveTool,
     ContextUpsertTool,
 )
-from vidbyte.lib.enums import BudgetPreset, ModelModality, PermissionPreset, Prompt
+from vidbyte.lib.enums import BudgetPreset, ModelModality, PermissionPreset, Prompt, StructuredOutputMode
 from vidbyte.lib.errors import (
     McpAttachmentError,
     McpConnectionError,
@@ -230,6 +230,7 @@ __all__ = [
     "ResponseContextItem",
     "RuntimeLimitMiddleware",
     "SequentialPipeline",
+    "StructuredOutputMode",
     "TaskContextItem",
     "TextContextItem",
     "ToolCall",

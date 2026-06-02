@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Mapping
 
-from vidbyte.lib.enums import ModelModality
+from vidbyte.lib.enums import ModelModality, StructuredOutputMode
 
 if TYPE_CHECKING:
     from vidbyte.context.manager import ContextManager
@@ -143,3 +143,5 @@ class AgentSpec:
     context_manager: ContextManager | None = None
     algorithm: ContextWindowAlgorithm | str | None = None
     output_schema: type | Mapping[str, Any] | None = None
+    structured_output_mode: StructuredOutputMode | str = StructuredOutputMode.AUTO
+    strict_provider_tool_schemas: bool = False

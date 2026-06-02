@@ -26,7 +26,7 @@ from vidbyte.context.window import ContextWindow, ContextWindowAlgorithm
 from vidbyte.context.primitives import ContextItem
 from vidbyte.lib.agents import ModalityDetector
 from vidbyte.lib.dataclasses.agents import AgentMetadata, AgentRunnerConfig, AgentRuntimeConfig
-from vidbyte.lib.enums import AgentRuntimeType, ModelModality, ModelProvider
+from vidbyte.lib.enums import AgentRuntimeType, ModelModality, ModelProvider, StructuredOutputMode
 from vidbyte.lib.errors import AgentExecutionError, ConfigurationError
 from vidbyte.lib.tracing import NullTracer, TracerBase
 from vidbyte.middleware import AgentMiddleware
@@ -77,6 +77,8 @@ class BaseAgent(McpAttachableMixin):
         metadata: dict[str, Any] | None = None,
         tracer: type[TracerBase] | TracerBase | None = None,
         output_schema: type | Mapping[str, Any] | None = None,
+        structured_output_mode: StructuredOutputMode | str = StructuredOutputMode.AUTO,
+        strict_provider_tool_schemas: bool = False,
     ) -> None:
         if not name:
             raise AgentExecutionError("Agent name cannot be empty.")
@@ -147,6 +149,8 @@ class BaseAgent(McpAttachableMixin):
         self.algorithm = ContextWindow.resolve_algorithm(algorithm)
         self.metadata = dict(metadata or {})
         self.output_schema = output_schema
+        self.structured_output_mode = StructuredOutputMode.coerce(structured_output_mode)
+        self.strict_provider_tool_schemas = bool(strict_provider_tool_schemas)
         self.history: list[AgentMessage] = []
         self._tool_call_contexts: list[ToolCallContext] = []
         self._active_prompt: str = ""
@@ -268,6 +272,8 @@ class BaseAgent(McpAttachableMixin):
             metadata={**self.metadata, **dict(metadata or {})},
             tracer=self._tracer,
             output_schema=self.output_schema,
+            structured_output_mode=self.structured_output_mode,
+            strict_provider_tool_schemas=self.strict_provider_tool_schemas,
         )
         if include_history:
             child.history = list(self.history)
@@ -468,6 +474,7 @@ class BaseAgent(McpAttachableMixin):
         )
 
     def _runtime(self) -> Any:
+        from vidbyte.agents.runtimes.configs import ActorRuntime
         from vidbyte.lib.registries.runtimes import RuntimeRegistry
         runtime_cls = RuntimeRegistry.resolve(self.runtime_type)
 
@@ -506,6 +513,8 @@ class BaseAgent(McpAttachableMixin):
             algorithm=self.algorithm,
             context_manager=self.context_manager,
             output_schema=self.output_schema,
+            structured_output_mode=self.structured_output_mode,
+            strict_provider_tool_schemas=self.strict_provider_tool_schemas,
             **kwargs,
         )
 

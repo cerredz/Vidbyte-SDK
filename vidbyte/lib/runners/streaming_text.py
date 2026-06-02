@@ -28,13 +28,14 @@ class StreamingTextModelRunner:
         self._transport = transport or HttpTransport()
         self._provider = ModelProviders.streaming_text(config)
 
-    def stream(self, prompt: str, *, system: str | None = None, metadata: Mapping[str, object] | None = None, tools: Iterable[Mapping[str, Any]] = (), tool_choice: str | Mapping[str, Any] | None = None, messages: Iterable[Mapping[str, Any]] = ()) -> Iterator[str]:
+    def stream(self, prompt: str, *, system: str | None = None, metadata: Mapping[str, object] | None = None, tools: Iterable[Mapping[str, Any]] | None = None, tool_choice: str | Mapping[str, Any] | None = None, messages: Iterable[Mapping[str, Any]] | None = None, response_format: Mapping[str, Any] | None = None) -> Iterator[str]:
         # Yield text chunk strings as they arrive from the provider SSE stream.
         call_config = replace(
             self._config,
-            tools=tuple(dict(tool) for tool in tools),
-            tool_choice=tool_choice,
-            messages=tuple(dict(message) for message in messages),
+            tools=tuple(dict(tool) for tool in tools) if tools is not None else self._config.tools,
+            tool_choice=tool_choice if tool_choice is not None else self._config.tool_choice,
+            messages=tuple(dict(message) for message in messages) if messages is not None else self._config.messages,
+            response_format=dict(response_format) if response_format is not None else self._config.response_format,
         )
         yield from self._provider.stream_text(
             prompt=prompt,

@@ -38,8 +38,8 @@ class ToolsFormatter:
         return "openai"
 
     @staticmethod
-    def format_tools(tools: object, provider_or_model: str) -> tuple[dict[str, Any], ...]:
-        """Format a tool catalog or iterable of specs for a provider family."""
+    def format_tools(tools: object, provider_or_model: str, *, strict: bool = False) -> tuple[dict[str, Any], ...]:
+        # Formats a tool catalog or iterable of specs for a provider family.
         specs_method = getattr(tools, "specs", None)
         if callable(specs_method):
             specs = tuple(specs_method())
@@ -54,42 +54,49 @@ class ToolsFormatter:
             if not isinstance(spec, ToolSpec):
                 continue
             if provider == "anthropic":
-                formatted.append(ToolsFormatter.to_anthropic_tool(spec))
+                formatted.append(ToolsFormatter.to_anthropic_tool(spec, strict=strict))
             elif provider == "gemini":
-                formatted.append(ToolsFormatter.to_gemini_tool(spec))
+                formatted.append(ToolsFormatter.to_gemini_tool(spec, strict=strict))
             else:
-                formatted.append(ToolsFormatter.to_openai_tool(spec))
+                formatted.append(ToolsFormatter.to_openai_tool(spec, strict=strict))
         return tuple(formatted)
 
     @staticmethod
-    def to_openai_tool(spec: ToolSpec) -> dict[str, Any]:
-        """Convert a ToolSpec into an OpenAI-compatible function tool."""
+    def to_openai_tool(spec: ToolSpec, *, strict: bool = False) -> dict[str, Any]:
+        # Converts a ToolSpec into an OpenAI-compatible function tool.
+        function = {
+            "name": spec.name,
+            "description": spec.description,
+            "parameters": ToolsFormatter._schema_for_spec(spec),
+        }
+        if strict:
+            function["strict"] = True
         return {
             "type": "function",
-            "function": {
-                "name": spec.name,
-                "description": spec.description,
-                "parameters": ToolsFormatter._schema_for_spec(spec),
-            },
+            "function": function,
         }
 
     @staticmethod
-    def to_anthropic_tool(spec: ToolSpec) -> dict[str, Any]:
-        """Convert a ToolSpec into an Anthropic Claude tool declaration."""
-        return {
+    def to_anthropic_tool(spec: ToolSpec, *, strict: bool = False) -> dict[str, Any]:
+        # Converts a ToolSpec into an Anthropic Claude tool declaration.
+        tool = {
             "name": spec.name,
             "description": spec.description,
             "input_schema": ToolsFormatter._schema_for_spec(spec),
         }
+        if strict:
+            tool["strict"] = True
+        return tool
 
     @staticmethod
-    def to_grok_tool(spec: ToolSpec) -> dict[str, Any]:
-        """Convert a ToolSpec into a Grok/xAI OpenAI-compatible tool."""
-        return ToolsFormatter.to_openai_tool(spec)
+    def to_grok_tool(spec: ToolSpec, *, strict: bool = False) -> dict[str, Any]:
+        # Converts a ToolSpec into a Grok/xAI OpenAI-compatible tool.
+        return ToolsFormatter.to_openai_tool(spec, strict=strict)
 
     @staticmethod
-    def to_gemini_tool(spec: ToolSpec) -> dict[str, Any]:
-        """Convert a ToolSpec into a Gemini function declaration."""
+    def to_gemini_tool(spec: ToolSpec, *, strict: bool = False) -> dict[str, Any]:
+        # Converts a ToolSpec into a Gemini function declaration; strict is unsupported in this adapter.
+        del strict
         return {
             "function_declarations": [
                 {

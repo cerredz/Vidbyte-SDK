@@ -21,6 +21,7 @@ from vidbyte.lib.enums.model_modality import ModelModality, ModelNameModality
 from vidbyte.lib.enums.model_provider import ModelProvider
 from vidbyte.lib.enums.platform import Platform
 from vidbyte.lib.enums.prompts import Prompt
+from vidbyte.lib.enums.structured_output import StructuredOutputMode
 
 __all__ = [
     "AgentRuntimeType",
@@ -31,4 +32,5 @@ __all__ = [
     "PermissionPreset",
     "Platform",
     "Prompt",
+    "StructuredOutputMode",
 ]
