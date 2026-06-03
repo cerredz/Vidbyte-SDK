@@ -5,9 +5,15 @@ Description:
 Purpose:
     Verifies correct runtime behavior, dispatch, fail-fast gating, and parameter validation.
 Architecture:
-    Unittest test suite.
+    - FakeRunner & FakeResponse: Mocks model interaction for checking agent decision cycles.
+    - AgentRuntimeTests: TestCase verifying token budgeting, rate limiting, and algorithm execution.
+Key Functions:
+    - test_inner_context_window_lifecycle_writes_to_next_system_context: Validates trajectory algorithm integration.
+    - test_runtime_denies_write_tool_by_default: Validates security middleware defaults.
 Relations:
-    Located in tests/test_agent_runtime.py. Focuses on core runtime code.
+    Tests `AgentRuntime` in `vidbyte/agents/runtime.py` and its interaction with context algorithms.
+Similar Files:
+    - `tests/test_trajectory_checkpoint_algorithm.py`
 """
 
 from __future__ import annotations
@@ -273,9 +279,11 @@ class AgentRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(raw_context.result.output, "raw secret result for sdk")
 
     async def test_inner_context_window_lifecycle_writes_to_next_system_context(self) -> None:
+        json_output = '{"reasoning_summary": "res", "trajectory": "traj", "output": "out", "score": 0.85, "feedback": "feed"}'
         runner = FakeRunner(
             [
                 FakeResponse("draft", {}),
+                FakeResponse(json_output, {}),
                 FakeResponse("", {"output": [{"type": "function_call", "name": "isDone", "arguments": '{"final_answer": "done"}'}]}),
             ]
         )
@@ -290,8 +298,8 @@ class AgentRuntimeTests(unittest.IsolatedAsyncioTestCase):
 
         result = await runtime.arun("task", runner=runner, context=context, provider="openai", invoke_runner=invoke_runner, runner_output_text=runner_output_text, runner_output_metadata=runner_output_metadata)
 
-        self.assertIn("Runtime Checkpoint", runner.calls[1]["kwargs"]["system"])
-        self.assertEqual(runner.calls[1]["kwargs"]["messages"][0]["content"], "draft")
+        self.assertIn("Runtime Checkpoint", runner.calls[2]["kwargs"]["system"])
+        self.assertEqual(runner.calls[2]["kwargs"]["messages"][0]["content"], "draft")
         self.assertEqual(result.metadata["trajectory_checkpoints"]["checkpoint_count"], 1)
 
     async def test_runtime_denies_write_tool_by_default(self) -> None:

@@ -1,4 +1,26 @@
-"""Run the trajectory checkpoint inner-loop context-window verification cases."""
+"""Context Protocol Header
+
+Description:
+    Verification script for trajectory checkpoint context-window algorithms.
+Purpose:
+    Provides automated validation for the SDK's agentic trajectory checkpoints,
+    running unit and integration tests from the test suites.
+Architecture:
+    - PassFailResult & PassFailRunner: Custom unittest run wrappers to print compact pass/fail labels.
+    - _build_suite & main: Script controllers that collect specified test cases and execute them.
+Key Functions:
+    - main: Runs the verification suite and returns an exit code based on test outcome.
+Relations:
+    Uses the tests from:
+    - `tests/test_trajectory_checkpoint_algorithm.py`
+    - `tests/test_context_primitives_registry.py`
+    - `tests/test_context_primitives_binding.py`
+    - `tests/test_context_window_templates.py`
+    - `tests/test_inner_context_window_algorithms.py`
+    - `tests/test_agent_runtime.py`
+Similar Files:
+    - `scripts/test-filesystem-tool-migration.py`
+"""
 
 from __future__ import annotations
 
@@ -85,8 +107,6 @@ def _build_suite() -> unittest.TestSuite:
         "test_context_window_algorithm_rejects_multiple_runtime_algorithms",
         "test_checkpoint_item_outputs_required_sections_in_order",
         "test_checkpoint_item_bounds_rendered_text",
-        "test_score_disabled_renders_na",
-        "test_score_heuristic_penalizes_failed_tool_calls",
         "test_dispatcher_detects_inner_loop_algorithm",
         "test_runtime_writes_checkpoint_primitive_after_interval",
         "test_runtime_does_not_write_checkpoint_before_interval",
@@ -99,13 +119,11 @@ def _build_suite() -> unittest.TestSuite:
         "test_inner_context_window_private_manager_created_when_missing",
         "test_context_window_conversation_top_placement_visible_before_existing_messages",
         "test_after_tool_calls_hook_receives_tool_results",
-        "test_config_accepts_valid_modes",
-        "test_config_rejects_invalid_mode",
         "test_agentic_prompt_asset_loads_successfully",
         "test_agentic_parsing_valid_json",
-        "test_agentic_parsing_invalid_json_falls_back_to_deterministic",
-        "test_runtime_invokes_model_call_for_agentic_checkpoints",
-        "test_runtime_gracefully_handles_agentic_model_call_failure_with_fallback",
+        "test_agentic_parsing_invalid_json_raises_error",
+        "test_runtime_invokes_model_call_for_checkpoints",
+        "test_runtime_handles_model_call_failure",
     ):
         suite.addTest(_named_test(TrajectoryCheckpointAlgorithmTests, method_name))
     for method_name in (
