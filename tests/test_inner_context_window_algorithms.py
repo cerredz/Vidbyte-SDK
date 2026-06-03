@@ -16,7 +16,7 @@ def _ctx(iteration: AgentIterationSnapshot | None = None) -> ContextWindowRunCon
     )
 
 
-class ContextWindowRunContextTests(unittest.TestCase):
+class ContextWindowRunContextTests(unittest.IsolatedAsyncioTestCase):
     def test_place_after_tools_writes_to_context_manager(self) -> None:
         ctx = _ctx()
         item = TextContextItem(primitive_id="note:1", title="Note", content="body")
@@ -67,12 +67,11 @@ class ContextWindowRunContextTests(unittest.TestCase):
         self.assertEqual(ctx.state["a"], 1)
         self.assertEqual(ctx.state["b"], 2)
 
-    def test_inner_algorithm_default_hook_is_noop(self) -> None:
+    async def test_inner_algorithm_default_hook_is_noop(self) -> None:
+        # [Edge Case] Verify default after_tool_calls is a no-op coroutine.
         algorithm = InnerContextWindowAlgorithm()
         ctx = _ctx()
-
-        algorithm.after_tool_calls(ctx)
-
+        await algorithm.after_tool_calls(ctx)
         self.assertEqual(ctx.state, {})
 
 

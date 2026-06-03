@@ -15,6 +15,7 @@ Relations:
 
 from __future__ import annotations
 
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING, Any
@@ -43,7 +44,7 @@ class InnerContextWindowAlgorithm:
     and again after the tool calls of each completed non-final iteration.
     """
 
-    def after_tool_calls(self, ctx: ContextWindowRunContext) -> None:
+    async def after_tool_calls(self, ctx: ContextWindowRunContext) -> None:
         # Runs after the tool calls of a completed non-final iteration finish.
         del ctx
 
@@ -62,6 +63,14 @@ class ContextWindowRunContext:
     recorder: RecorderBase
     state: dict[str, Any]
     iteration: AgentIterationSnapshot | None = None
+    runner: object | None = None
+    provider: str | None = None
+    invoke_runner: Callable[..., Any] | None = None
+    runner_output_text: Callable[[object], str] | None = None
+    runner_output_metadata: Callable[[object], Mapping[str, Any]] | None = None
+    options: Mapping[str, Any] | None = None
+    messages: Sequence[dict[str, Any]] | None = None
+    system_prompt: str | None = None
 
     def place_after_system_prompt(self, item: ContextItem) -> str:
         # Places a primitive at the top of the context zone (just after the system prompt).

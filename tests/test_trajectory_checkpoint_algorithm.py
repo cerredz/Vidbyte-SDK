@@ -6,11 +6,14 @@ from typing import Any
 from vidbyte import ContextWindow, ContextWindowAlgorithm, ContextWindowPlacement, ReflexionAlgorithm, TrajectoryCheckpointAlgorithm
 from vidbyte.agents.context_algorithms import AgentRuntimeContextAlgorithms
 from vidbyte.agents.runtime import AgentRuntime
+from vidbyte.context.runtime import ContextWindowRunContext
 from vidbyte.context.templates import ContextWindowRecorder
 from vidbyte.lib.dataclasses.agents import AgentIterationSnapshot
 from vidbyte.lib.dataclasses.context import BaseAgentContext
+from vidbyte.lib.enums.prompts import Prompt
 from vidbyte.lib.errors import ConfigurationError
 from vidbyte.lib.templates import TrajectoryCheckpointContextWindowTemplate
+from vidbyte.prompts.catalog import Prompts
 from vidbyte.tools import ToolCallContext, ToolCallState, ToolResult, Tools, tool
 from vidbyte.tools.security import PermissionPolicy
 
@@ -53,9 +56,9 @@ def tool_response(name: str = "lookup") -> FakeResponse:
 
 
 class ToolRecordingTrajectoryAlgorithm(TrajectoryCheckpointAlgorithm):
-    def after_tool_calls(self, ctx) -> None:
+    async def after_tool_calls(self, ctx: ContextWindowRunContext) -> None:
         # Records the latest observed tool result output from the iteration snapshot.
-        super().after_tool_calls(ctx)
+        await super().after_tool_calls(ctx)
         if ctx.iteration is not None and ctx.iteration.tool_calls:
             latest = ctx.iteration.tool_calls[-1]
             if latest.result is not None:
@@ -235,6 +238,124 @@ class TrajectoryCheckpointAlgorithmTests(unittest.IsolatedAsyncioTestCase):
         result = await runtime.arun("task", runner=runner, context=base_context(), provider="openai", invoke_runner=invoke_runner, runner_output_text=runner_output_text, runner_output_metadata=runner_output_metadata)
 
         self.assertEqual(result.metadata["tool_seen"], "tool output")
+
+    def test_config_accepts_valid_modes(self) -> None:
+        # [Edge Case] Verify valid modes work.
+        algo1 = TrajectoryCheckpointAlgorithm(mode="deterministic")
+        algo2 = TrajectoryCheckpointAlgorithm(mode="agentic")
+        self.assertEqual(algo1.mode, "deterministic")
+        self.assertEqual(algo2.mode, "agentic")
+
+    def test_config_rejects_invalid_mode(self) -> None:
+        # [Edge Case] Verify invalid modes raise ConfigurationError.
+        with self.assertRaises(ConfigurationError):
+            TrajectoryCheckpointAlgorithm(mode="invalid")
+
+    def test_agentic_prompt_asset_loads_successfully(self) -> None:
+        # [Hidden Assumption] Verify prompt asset loads from catalog.
+        prompt_text = Prompts().get(Prompt.TRAJECTORY_CHECKPOINTS_AGENTIC_SUMMARIZER)
+        self.assertIn("You are a trajectory checkpoints generator", prompt_text)
+
+    def test_agentic_parsing_valid_json(self) -> None:
+        # [Hidden Assumption] Verify JSON extraction works for markdown and standard JSON.
+        algo = TrajectoryCheckpointAlgorithm(mode="agentic")
+        raw_json = '{"reasoning_summary": "res", "trajectory": "traj", "output": "out", "score": 0.85, "feedback": "feed"}'
+        parsed = algo._parse_json_response(raw_json)
+        self.assertEqual(parsed["reasoning_summary"], "res")
+        self.assertEqual(parsed["score"], 0.85)
+
+        raw_markdown = '```json\n{"reasoning_summary": "res2", "trajectory": "traj2", "output": "out2", "score": 0.9, "feedback": "feed2"}\n```'
+        parsed_md = algo._parse_json_response(raw_markdown)
+        self.assertEqual(parsed_md["reasoning_summary"], "res2")
+        self.assertEqual(parsed_md["score"], 0.9)
+
+    def test_agentic_parsing_invalid_json_falls_back_to_deterministic(self) -> None:
+        # [Silent Failure] Verify malformed LLM responses fall back to build_item.
+        algo = TrajectoryCheckpointAlgorithm(mode="agentic")
+        snapshot = AgentIterationSnapshot(iteration_count=3, message="task", provider="openai", assistant_output="draft")
+        class BadRunner:
+            pass
+        async def bad_invoke(runner: Any, prompt: str, **kwargs: Any) -> FakeResponse:
+            # Helper that returns a malformed json response to trigger fallback behavior.
+            return FakeResponse("bad json response")
+        from vidbyte.context.manager import ContextManager
+        from vidbyte.context.templates import NullRecorder
+        ctx = ContextWindowRunContext(
+            context_manager=ContextManager(),
+            recorder=NullRecorder(),
+            state={},
+            iteration=snapshot,
+            runner=BadRunner(),
+            provider="openai",
+            invoke_runner=bad_invoke,
+            runner_output_text=runner_output_text,
+            runner_output_metadata=runner_output_metadata,
+            messages=[],
+            system_prompt="sys"
+        )
+        import asyncio
+        item = asyncio.run(algo.build_agentic_item(ctx, snapshot, 1))
+        self.assertEqual(item.iteration, 3)
+        self.assertEqual(item.checkpoint_index, 1)
+        self.assertEqual(item.reasoning_summary, algo._reasoning_summary(snapshot))
+
+    async def test_runtime_invokes_model_call_for_agentic_checkpoints(self) -> None:
+        # [Integration] Verify LLM summary is invoked on interval when mode is agentic.
+        json_output = '{"reasoning_summary": "Rich summary.", "trajectory": "Executed task.", "output": "Status ok.", "score": 0.95, "feedback": "Keep going."}'
+        runner = FakeRunner([
+            FakeResponse("main response 1"),
+            FakeResponse(json_output),
+            is_done_response("final output")
+        ])
+        algorithm = TrajectoryCheckpointAlgorithm(interval=1, mode="agentic")
+        runtime = AgentRuntime(
+            agent_name="worker",
+            system_prompt="Work.",
+            tools=Tools(),
+            permission_policy=PermissionPolicy(),
+            algorithm=ContextWindowAlgorithm(name="trajectory_checkpoints", trajectory_checkpoints=algorithm)
+        )
+        result = await runtime.arun(
+            "task",
+            runner=runner,
+            context=base_context(),
+            provider="openai",
+            invoke_runner=invoke_runner,
+            runner_output_text=runner_output_text,
+            runner_output_metadata=runner_output_metadata
+        )
+        system_instructions = runner.calls[2]["kwargs"]["system"]
+        self.assertIn("Rich summary.", system_instructions)
+        self.assertIn("Keep going.", system_instructions)
+        self.assertEqual(result.metadata["trajectory_checkpoints"]["checkpoint_count"], 1)
+
+    async def test_runtime_gracefully_handles_agentic_model_call_failure_with_fallback(self) -> None:
+        # [Hidden Failure] Verify fallback if invoke_runner fails.
+        runner = FakeRunner([
+            FakeResponse("main response 1"),
+            FakeResponse("malformed json response"),
+            is_done_response("final output")
+        ])
+        algorithm = TrajectoryCheckpointAlgorithm(interval=1, mode="agentic")
+        runtime = AgentRuntime(
+            agent_name="worker",
+            system_prompt="Work.",
+            tools=Tools(),
+            permission_policy=PermissionPolicy(),
+            algorithm=ContextWindowAlgorithm(name="trajectory_checkpoints", trajectory_checkpoints=algorithm)
+        )
+        result = await runtime.arun(
+            "task",
+            runner=runner,
+            context=base_context(),
+            provider="openai",
+            invoke_runner=invoke_runner,
+            runner_output_text=runner_output_text,
+            runner_output_metadata=runner_output_metadata
+        )
+        system_instructions = runner.calls[2]["kwargs"]["system"]
+        self.assertIn("Observed iteration 1 for the original task.", system_instructions)
+        self.assertEqual(result.metadata["trajectory_checkpoints"]["checkpoint_count"], 1)
 
 
 if __name__ == "__main__":

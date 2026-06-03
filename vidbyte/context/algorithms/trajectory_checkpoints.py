@@ -12,14 +12,17 @@ Relations:
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+import json
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
 from vidbyte.context.primitives import TrajectoryCheckpointContextItem
 from vidbyte.context.runtime import ContextWindowPlacement, ContextWindowRunContext, InnerContextWindowAlgorithm
 from vidbyte.lib.dataclasses.agents import AgentIterationSnapshot
+from vidbyte.lib.enums.prompts import Prompt
 from vidbyte.lib.errors import ConfigurationError
+from vidbyte.prompts.catalog import Prompts
 
 _MAX_CHECKPOINT_CHARS_LIMIT = 100_000
 _MAX_FIELD_CHARS_LIMIT = 25_000
@@ -28,7 +31,7 @@ _STATE_KEY = "_trajectory_checkpoints_state"
 
 @dataclass(frozen=True, slots=True)
 class TrajectoryCheckpointAlgorithm(InnerContextWindowAlgorithm):
-    """Deterministic inner-loop trajectory checkpoint algorithm config."""
+    """Deterministic or Agentic inner-loop trajectory checkpoint algorithm config."""
 
     interval: int = 3
     max_checkpoints: int = 8
@@ -39,6 +42,7 @@ class TrajectoryCheckpointAlgorithm(InnerContextWindowAlgorithm):
     checkpoint_title: str = "Runtime Checkpoint"
     placement: ContextWindowPlacement = ContextWindowPlacement.END_OF_CONTEXT
     metadata: Mapping[str, Any] = field(default_factory=dict)
+    mode: str = "deterministic"
 
     def __post_init__(self) -> None:
         # Validates public config values before runtime execution starts.
@@ -48,9 +52,11 @@ class TrajectoryCheckpointAlgorithm(InnerContextWindowAlgorithm):
         _validate_limit("max_field_chars", self.max_field_chars, _MAX_FIELD_CHARS_LIMIT)
         _validate_non_empty("checkpoint_title", self.checkpoint_title)
         _validate_metadata_keys(self.metadata)
+        if self.mode not in {"deterministic", "agentic"}:
+            raise ConfigurationError(f"mode must be 'deterministic' or 'agentic', found: {self.mode!r}")
         object.__setattr__(self, "placement", ContextWindowPlacement(self.placement))
 
-    def after_tool_calls(self, ctx: ContextWindowRunContext) -> None:
+    async def after_tool_calls(self, ctx: ContextWindowRunContext) -> None:
         # Single inner-loop hook: initializes on the first call, then checkpoints per cadence.
         state = self._state(ctx)
         snapshot = ctx.iteration
@@ -66,7 +72,10 @@ class TrajectoryCheckpointAlgorithm(InnerContextWindowAlgorithm):
         ctx.record("trajectory_checkpoint_iteration", iteration=snapshot.iteration_count)
         checkpoints = state["checkpoints"]
         if self.should_checkpoint(snapshot.iteration_count, len(checkpoints)):
-            item = self.build_item(snapshot, checkpoint_index=len(checkpoints) + 1)
+            if self.mode == "agentic":
+                item = await self.build_agentic_item(ctx, snapshot, checkpoint_index=len(checkpoints) + 1)
+            else:
+                item = self.build_item(snapshot, checkpoint_index=len(checkpoints) + 1)
             self._place_checkpoint(ctx, item)
             checkpoints.append(self._checkpoint_record(item))
             ctx.record("trajectory_checkpoint_injection", iteration=item.iteration, checkpoint_index=item.checkpoint_index)
@@ -121,6 +130,84 @@ class TrajectoryCheckpointAlgorithm(InnerContextWindowAlgorithm):
                 **dict(self.metadata),
             },
         )
+
+    async def build_agentic_item(self, ctx: ContextWindowRunContext, snapshot: AgentIterationSnapshot, checkpoint_index: int) -> TrajectoryCheckpointContextItem:
+        # Calls the summarizer model to build the checkpoint, falling back to build_item on error.
+        try:
+            system_prompt = Prompts().get(Prompt.TRAJECTORY_CHECKPOINTS_AGENTIC_SUMMARIZER)
+            history_str = self._format_history(ctx.messages)
+            user_message = f"Main Agent System Prompt:\n{ctx.system_prompt or ''}\n\nMain Agent Conversation History:\n{history_str}"
+            if not ctx.runner or not ctx.invoke_runner or not ctx.runner_output_text:
+                raise ValueError("Context lacks runner or invoke_runner callable.")
+            combined_prompt = f"{system_prompt}\n\n{user_message}"
+            response = await ctx.invoke_runner(ctx.runner, combined_prompt, **dict(ctx.options or {}))
+            response_text = ctx.runner_output_text(response)
+            parsed = self._parse_json_response(response_text)
+            score = parsed.get("score")
+            if score is not None:
+                try:
+                    score = round(float(score), 2)
+                except (ValueError, TypeError):
+                    score = None
+            return TrajectoryCheckpointContextItem(
+                primitive_id=f"trajectory_checkpoint:{checkpoint_index}",
+                iteration=snapshot.iteration_count,
+                checkpoint_index=checkpoint_index,
+                reasoning_summary=parsed.get("reasoning_summary", ""),
+                trajectory=parsed.get("trajectory", ""),
+                output=parsed.get("output", ""),
+                score=score,
+                feedback=parsed.get("feedback", ""),
+                title=self.checkpoint_title,
+                max_chars=self.max_checkpoint_chars,
+                metadata={
+                    "iteration": snapshot.iteration_count,
+                    "checkpoint_index": checkpoint_index,
+                    "tool_call_count": len(snapshot.tool_calls),
+                    "tokens_used": snapshot.tokens_used,
+                    "agentic": True,
+                    **dict(self.metadata),
+                },
+            )
+        except Exception as exc:
+            ctx.record("trajectory_checkpoint_agentic_failure", error=str(exc))
+            return self.build_item(snapshot, checkpoint_index=checkpoint_index)
+
+    def _format_history(self, messages: Sequence[dict[str, Any]] | None) -> str:
+        # Stringifies the main agent's conversation history messages.
+        if not messages:
+            return "No history."
+        lines = []
+        for msg in messages:
+            role = msg.get("role", "unknown")
+            content = msg.get("content")
+            if isinstance(content, list):
+                text = " ".join(part.get("text", "") if isinstance(part, dict) else str(part) for part in content)
+            else:
+                text = str(content or "")
+            tool_calls = msg.get("tool_calls")
+            if tool_calls:
+                text += f" [Tool Calls: {tool_calls}]"
+            name = msg.get("name")
+            name_suffix = f" ({name})" if name else ""
+            lines.append(f"{role.capitalize()}{name_suffix}: {text}")
+        return "\n".join(lines)
+
+    def _parse_json_response(self, text: str) -> dict[str, Any]:
+        # Robustly extracts and parses a JSON object from a model response.
+        cleaned = text.strip()
+        if cleaned.startswith("```"):
+            lines = cleaned.splitlines()
+            if lines[0].startswith("```"):
+                lines = lines[1:]
+            if lines and lines[-1].startswith("```"):
+                lines = lines[:-1]
+            cleaned = "\n".join(lines).strip()
+        start = cleaned.find("{")
+        end = cleaned.rfind("}")
+        if start != -1 and end != -1:
+            cleaned = cleaned[start : end + 1]
+        return json.loads(cleaned)
 
     def _state(self, ctx: ContextWindowRunContext) -> dict[str, Any]:
         # Returns the mutable per-run trajectory checkpoint state.

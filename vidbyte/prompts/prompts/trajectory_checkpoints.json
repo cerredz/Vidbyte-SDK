@@ -1,0 +1,8 @@
+{
+  "name": "Trajectory Checkpoints",
+  "description": "Prompts used to generate agentic trajectory checkpoints.",
+  "key": "trajectory_checkpoints",
+  "prompts": {
+    "agentic_summarizer": "You are a trajectory checkpoints generator. Analyze the following agent context window containing the system prompt and conversation history (including tool calls and outcomes). Synthesize a concise trajectory checkpoint summarizing: reasoning summary of the progress, a compact trajectory outline, latest output/state of the task, a score (0.0 to 1.0) assessing overall success/confidence, and concrete feedback/guidance for next steps. Output only a valid JSON object matching this structure:\n{{\n  \"reasoning_summary\": \"string\",\n  \"trajectory\": \"string\",\n  \"output\": \"string\",\n  \"score\": float,\n  \"feedback\": \"string\"\n}}\n\nMain Agent System Prompt:\n{main_system_prompt}\n\nMain Agent Conversation History:\n{conversation_history}"
+  }
+}

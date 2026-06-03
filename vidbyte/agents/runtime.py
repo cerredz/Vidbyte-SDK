@@ -185,7 +185,7 @@ class AgentRuntime:
             runtime_metadata["_inner_context_window_algorithm"] = inner_algorithm
             runtime_metadata["_context_window_state"] = {}
             # One run-start invocation lets the algorithm initialize before any iteration.
-            self._run_inner_context_window_hook(runtime_metadata, message=message, provider=provider)
+            await self._run_inner_context_window_hook(runtime_metadata, message=message, provider=provider)
         tool_schemas = self._resolve_tool_schemas(provider)
         messages = self._extract_initial_messages(run_options)
         call_contexts: list[ToolCallContext] = []
@@ -235,7 +235,7 @@ class AgentRuntime:
         while True:
             # Single inner-loop context-window point: after the prior iteration's tool calls finished.
             if iteration_count > 0:
-                self._run_inner_context_window_hook(
+                await self._run_inner_context_window_hook(
                     runtime_metadata,
                     message=message,
                     provider=provider,
@@ -243,6 +243,13 @@ class AgentRuntime:
                     assistant_output=last_assistant_output,
                     call_contexts=call_contexts,
                     tokens_used=tokens_used,
+                    runner=runner,
+                    invoke_runner=invoke_runner,
+                    runner_output_text=runner_output_text,
+                    runner_output_metadata=runner_output_metadata,
+                    options=run_options,
+                    messages=messages,
+                    system_prompt=self.system_prompt,
                 )
             stop_result = self._budget_stop(
                 iteration_count=iteration_count,
@@ -679,7 +686,7 @@ class AgentRuntime:
         result = self._with_context_window_metadata(result, metadata)
         return self._with_middleware_metadata(result)
 
-    def _run_inner_context_window_hook(self, metadata: Mapping[str, Any], *, message: str, provider: str, iteration_count: int = 0, assistant_output: str | None = None, call_contexts: Sequence[ToolCallContext] = (), tokens_used: int | None = None) -> None:
+    async def _run_inner_context_window_hook(self, metadata: Mapping[str, Any], *, message: str, provider: str, iteration_count: int = 0, assistant_output: str | None = None, call_contexts: Sequence[ToolCallContext] = (), tokens_used: int | None = None, runner: object | None = None, invoke_runner: Callable[..., Any] | None = None, runner_output_text: Callable[[object], str] | None = None, runner_output_metadata: Callable[[object], Mapping[str, Any]] | None = None, options: Mapping[str, Any] | None = None, messages: Sequence[dict[str, Any]] | None = None, system_prompt: str | None = None) -> None:
         """Build the slim run context and invoke the inner-loop algorithm's single hook."""
         # Called once at run start (no iteration) and once after each completed iteration's tool calls.
         algorithm = metadata.get("_inner_context_window_algorithm")
@@ -699,12 +706,20 @@ class AgentRuntime:
                 tokens_used=tokens_used,
                 metadata=metadata,
             )
-        algorithm.after_tool_calls(
+        await algorithm.after_tool_calls(
             ContextWindowRunContext(
                 context_manager=self.context_manager,
                 recorder=self.recorder,
                 state=state,
                 iteration=iteration,
+                runner=runner,
+                provider=provider,
+                invoke_runner=invoke_runner,
+                runner_output_text=runner_output_text,
+                runner_output_metadata=runner_output_metadata,
+                options=options,
+                messages=messages,
+                system_prompt=system_prompt,
             )
         )
 

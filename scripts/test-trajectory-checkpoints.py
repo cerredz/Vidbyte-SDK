@@ -99,6 +99,13 @@ def _build_suite() -> unittest.TestSuite:
         "test_inner_context_window_private_manager_created_when_missing",
         "test_context_window_conversation_top_placement_visible_before_existing_messages",
         "test_after_tool_calls_hook_receives_tool_results",
+        "test_config_accepts_valid_modes",
+        "test_config_rejects_invalid_mode",
+        "test_agentic_prompt_asset_loads_successfully",
+        "test_agentic_parsing_valid_json",
+        "test_agentic_parsing_invalid_json_falls_back_to_deterministic",
+        "test_runtime_invokes_model_call_for_agentic_checkpoints",
+        "test_runtime_gracefully_handles_agentic_model_call_failure_with_fallback",
     ):
         suite.addTest(_named_test(TrajectoryCheckpointAlgorithmTests, method_name))
     for method_name in (
