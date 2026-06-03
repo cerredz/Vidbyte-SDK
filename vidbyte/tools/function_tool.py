@@ -15,20 +15,15 @@ from vidbyte.tools.types import ToolCall, ToolParameter, ToolPermission, ToolRes
 class FunctionTool(BaseTool):
     """Adapter that turns a Python callable into a Vidbyte tool."""
 
-    def __init__(
-        self,
-        func: Callable[..., Any],
-        *,
-        name: str | None = None,
-        description: str | None = None,
-        permission: ToolPermission = ToolPermission.SAFE,
-    ) -> None:
+    def __init__(self, func: Callable[..., Any], *, name: str | None = None, description: str | None = None, permission: ToolPermission = ToolPermission.SAFE, output_schema: type | None = None) -> None:
+        # Build a tool from a callable with optional name, description, permission, and output schema.
         if not callable(func):
             raise TypeError("FunctionTool requires a callable.")
         self.func = func
         self._name = name or func.__name__
         self._description = description or _docstring_summary(func) or "Custom function tool."
         self._permission = permission
+        self._output_schema = output_schema
         self.args_model = _build_args_model(func, self._name)
         self._spec = self._build_spec()
         self.__name__ = self._name
@@ -36,15 +31,9 @@ class FunctionTool(BaseTool):
         self.__module__ = getattr(func, "__module__", self.__class__.__module__)
 
     @classmethod
-    def from_function(
-        cls,
-        func: Callable[..., Any],
-        *,
-        name: str | None = None,
-        description: str | None = None,
-        permission: ToolPermission = ToolPermission.SAFE,
-    ) -> "FunctionTool":
-        return cls(func, name=name, description=description, permission=permission)
+    def from_function(cls, func: Callable[..., Any], *, name: str | None = None, description: str | None = None, permission: ToolPermission = ToolPermission.SAFE, output_schema: type | None = None) -> "FunctionTool":
+        # Alternate constructor that mirrors __init__ for ergonomic one-liner usage.
+        return cls(func, name=name, description=description, permission=permission, output_schema=output_schema)
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
         return self.func(*args, **kwargs)
@@ -107,6 +96,7 @@ class FunctionTool(BaseTool):
             parameters=tuple(parameters),
             input_schema=schema,
             permission=self._permission,
+            output_schema=self._output_schema,
             metadata={
                 "source": "function",
                 "function": f"{getattr(self.func, '__module__', '')}.{getattr(self.func, '__name__', self._name)}",

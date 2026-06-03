@@ -12,6 +12,7 @@ class AgentResult:
     strategy_name: str
     calls: tuple[Any, ...] = field(default_factory=tuple)
     metadata: Mapping[str, Any] = field(default_factory=dict)
+    structured: Any = None
 
 
 StrategyResult = AgentResult
