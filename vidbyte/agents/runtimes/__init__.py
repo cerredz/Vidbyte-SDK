@@ -25,6 +25,7 @@ from __future__ import annotations
 from vidbyte.agents.runtimes.linear import AgentRuntime as LinearAgentRuntime
 from vidbyte.agents.runtimes.search import SearchTreeRuntimeComponent
 from vidbyte.agents.runtimes.actor.broker import PointToPointActorRuntime, BroadcastActorRuntime
+from vidbyte.agents.runtimes.base_nonlinear import BaseNonLinearRuntime
 from vidbyte.agents.runtimes.beam_search import BeamSearchAgentRuntime
 from vidbyte.agents.runtimes.dag_dataflow import DAGDataflowAgentRuntime
 from vidbyte.agents.runtimes.market_auction import MarketAuctionAgentRuntime
@@ -52,6 +53,7 @@ __all__ = [
     "SearchTreeRuntimeComponent",
     "PointToPointActorRuntime",
     "BroadcastActorRuntime",
+    "BaseNonLinearRuntime",
     "BeamSearchAgentRuntime",
     "DAGDataflowAgentRuntime",
     "MarketAuctionAgentRuntime",

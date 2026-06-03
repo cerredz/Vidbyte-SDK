@@ -37,9 +37,10 @@ from vidbyte.tools.types import ToolCallContext
 from vidbyte.lib.tracing import NullTracer, TracerBase
 from vidbyte.context.window import ContextWindowAlgorithm
 from vidbyte.middleware import AgentMiddleware
+from vidbyte.agents.runtimes.base_nonlinear import BaseNonLinearRuntime
 
 
-class GossipAgentRuntime:
+class GossipAgentRuntime(BaseNonLinearRuntime):
     """Initializes N agents with partial knowledge, runs gossip rounds, then synthesizes."""
 
     def __init__(
@@ -78,43 +79,6 @@ class GossipAgentRuntime:
         self.agent_system_prompt = agent_system_prompt
         self.merge_system_prompt = merge_system_prompt
         self.synthesizer_system_prompt = synthesizer_system_prompt
-
-    def build_context(
-        self,
-        message: str,
-        *,
-        base_context: StrategyContext | None,
-        history: Sequence[AgentMessage],
-        agent_history: Sequence[AgentMessage],
-        agent_metadata: Mapping[str, Any],
-        existing_tool_calls: Sequence[ToolCallContext],
-        input_metadata: Mapping[str, Any] | None = None,
-        modality: ModelModality | None = None,
-        agentic_loop: bool = True,
-        context_items: Sequence[ContextItem] = (),
-        context_manager: ContextManager | None = None,
-    ) -> BaseAgentContext:
-        # Build the initial context window for the gossip agent trials.
-        manager = ContextManager()
-        if context_manager is not None:
-            manager.extend(context_manager.items())
-        manager.extend(context_items)
-        managed_context = manager.to_context(base_context)
-        return BaseAgentContext(
-            system_prompt=self.system_prompt,
-            history=tuple(history) + tuple(agent_history),
-            tools=self.tools.specs(),
-            file_paths=tuple(managed_context.file_paths),
-            strategy_metadata=dict(managed_context.strategy_metadata),
-            tool_calls=(*tuple(managed_context.tool_calls), *tuple(existing_tool_calls)),
-            responses=tuple(managed_context.responses),
-            budget=managed_context.budget,
-            artifacts=tuple(managed_context.artifacts),
-            memory=managed_context.memory,
-            permissions=managed_context.permissions,
-            metadata=dict(agent_metadata),
-            context_items=tuple(managed_context.context_items),
-        )
 
     async def arun(
         self,

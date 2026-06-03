@@ -38,9 +38,10 @@ from vidbyte.tools.types import ToolCallContext
 from vidbyte.lib.tracing import NullTracer, TracerBase
 from vidbyte.context.window import ContextWindowAlgorithm
 from vidbyte.middleware import AgentMiddleware
+from vidbyte.agents.runtimes.base_nonlinear import BaseNonLinearRuntime
 
 
-class MarketAuctionAgentRuntime:
+class MarketAuctionAgentRuntime(BaseNonLinearRuntime):
     """Generates specialist roles, collects bids, selects winner, and executes under the winning role."""
 
     def __init__(
@@ -77,43 +78,6 @@ class MarketAuctionAgentRuntime:
         self.auctioneer_system_prompt = auctioneer_system_prompt
         self.bidder_system_prompt_template = bidder_system_prompt_template
         self.executor_system_prompt_template = executor_system_prompt_template
-
-    def build_context(
-        self,
-        message: str,
-        *,
-        base_context: StrategyContext | None,
-        history: Sequence[AgentMessage],
-        agent_history: Sequence[AgentMessage],
-        agent_metadata: Mapping[str, Any],
-        existing_tool_calls: Sequence[ToolCallContext],
-        input_metadata: Mapping[str, Any] | None = None,
-        modality: ModelModality | None = None,
-        agentic_loop: bool = True,
-        context_items: Sequence[ContextItem] = (),
-        context_manager: ContextManager | None = None,
-    ) -> BaseAgentContext:
-        # Build the initial context window for the auction process.
-        manager = ContextManager()
-        if context_manager is not None:
-            manager.extend(context_manager.items())
-        manager.extend(context_items)
-        managed_context = manager.to_context(base_context)
-        return BaseAgentContext(
-            system_prompt=self.system_prompt,
-            history=tuple(history) + tuple(agent_history),
-            tools=self.tools.specs(),
-            file_paths=tuple(managed_context.file_paths),
-            strategy_metadata=dict(managed_context.strategy_metadata),
-            tool_calls=(*tuple(managed_context.tool_calls), *tuple(existing_tool_calls)),
-            responses=tuple(managed_context.responses),
-            budget=managed_context.budget,
-            artifacts=tuple(managed_context.artifacts),
-            memory=managed_context.memory,
-            permissions=managed_context.permissions,
-            metadata=dict(agent_metadata),
-            context_items=tuple(managed_context.context_items),
-        )
 
     async def arun(
         self,

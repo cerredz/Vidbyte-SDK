@@ -1,0 +1,19 @@
+{
+  "name": "DAG Dataflow Runtime",
+  "description": "Prompt assets for the DAG Dataflow non-linear agent execution runtime. The runtime asks an LLM planner to decompose the task into a JSON dependency graph, executes nodes in topological order with bounded parallelism across independent branches, and synthesizes a final answer from all node outputs. These prompts separate the planner, node execution, and synthesis stages so SDK users can inspect or override any stage independently when constructing DAGDataflowRuntime.",
+  "key": "dag_dataflow",
+  "prompts": {
+    "planner_system_prompt": {
+      "path": "planner_system_prompt.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/dag_dataflow/planner_system_prompt.md"
+    },
+    "node_system_prompt": {
+      "path": "node_system_prompt.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/dag_dataflow/node_system_prompt.md"
+    },
+    "synthesizer_system_prompt": {
+      "path": "synthesizer_system_prompt.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/dag_dataflow/synthesizer_system_prompt.md"
+    }
+  }
+}

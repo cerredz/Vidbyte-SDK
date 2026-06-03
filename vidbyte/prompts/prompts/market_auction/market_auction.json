@@ -1,0 +1,19 @@
+{
+  "name": "Market Auction Runtime",
+  "description": "Prompt assets for the Market Auction non-linear agent execution runtime. The runtime generates specialist roles, collects parallel bids expressing confidence and approach, selects the highest-confidence winner, and executes the task under the winning role's identity. These prompts separate the auctioneer, bidder, and executor stages so SDK users can inspect or override any stage independently when constructing MarketAuctionRuntime.",
+  "key": "market_auction",
+  "prompts": {
+    "auctioneer_system_prompt": {
+      "path": "auctioneer_system_prompt.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/market_auction/auctioneer_system_prompt.md"
+    },
+    "bidder_system_prompt": {
+      "path": "bidder_system_prompt.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/market_auction/bidder_system_prompt.md"
+    },
+    "executor_system_prompt": {
+      "path": "executor_system_prompt.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/market_auction/executor_system_prompt.md"
+    }
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "name": "Gossip Runtime",
+  "description": "Prompt assets for the Gossip non-linear agent execution runtime. The runtime initializes N agents with distinct analytical angles, runs pairwise gossip merge rounds until knowledge converges across all agents, then synthesizes a final answer from the fully propagated knowledge stores. These prompts separate the agent initialization, pairwise merge, and final synthesis stages so SDK users can inspect or override any stage independently when constructing GossipRuntime.",
+  "key": "gossip",
+  "prompts": {
+    "agent_system_prompt": {
+      "path": "agent_system_prompt.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/gossip/agent_system_prompt.md"
+    },
+    "merge_system_prompt": {
+      "path": "merge_system_prompt.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/gossip/merge_system_prompt.md"
+    },
+    "synthesizer_system_prompt": {
+      "path": "synthesizer_system_prompt.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/gossip/synthesizer_system_prompt.md"
+    }
+  }
+}
