@@ -63,6 +63,17 @@ class Prompt(str, Enum):
     ACTOR_RUNTIME_FORMATTER = "actor_runtime.formatter"
     ACTOR_RUNTIME_SAFETY = "actor_runtime.safety"
     ACTOR_RUNTIME_FINAL_ANSWER = "actor_runtime.final_answer"
+    BEAM_SEARCH_SCORER_SYSTEM_PROMPT = "beam_search.scorer_system_prompt"
+    BEAM_SEARCH_SCORER_PROMPT = "beam_search.scorer_prompt"
+    DAG_DATAFLOW_PLANNER_SYSTEM_PROMPT = "dag_dataflow.planner_system_prompt"
+    DAG_DATAFLOW_NODE_SYSTEM_PROMPT = "dag_dataflow.node_system_prompt"
+    DAG_DATAFLOW_SYNTHESIZER_SYSTEM_PROMPT = "dag_dataflow.synthesizer_system_prompt"
+    MARKET_AUCTION_AUCTIONEER_SYSTEM_PROMPT = "market_auction.auctioneer_system_prompt"
+    MARKET_AUCTION_BIDDER_SYSTEM_PROMPT = "market_auction.bidder_system_prompt"
+    MARKET_AUCTION_EXECUTOR_SYSTEM_PROMPT = "market_auction.executor_system_prompt"
+    GOSSIP_AGENT_SYSTEM_PROMPT = "gossip.agent_system_prompt"
+    GOSSIP_MERGE_SYSTEM_PROMPT = "gossip.merge_system_prompt"
+    GOSSIP_SYNTHESIZER_SYSTEM_PROMPT = "gossip.synthesizer_system_prompt"
 
 __all__ = [
     "Prompt",

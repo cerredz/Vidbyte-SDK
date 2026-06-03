@@ -242,6 +242,38 @@ class BaseContext:
 class BaseAgentContext(BaseContext):
     """Context object built by BaseAgent before delegating to a runner."""
 
+    @classmethod
+    def from_manager(
+        cls,
+        manager: "ContextManager",
+        base_context: "BaseContext | None",
+        *,
+        system_prompt: str,
+        history: tuple,
+        tools: tuple,
+        existing_tool_calls: "Sequence[object]",
+        metadata: dict,
+    ) -> "BaseAgentContext":
+        # Assembles a BaseAgentContext from a ContextManager and merged field values,
+        # so non-linear runtimes share one construction path instead of duplicating it.
+        from vidbyte.context.manager import ContextManager as _ContextManager  # noqa: F401
+        managed = manager.to_context(base_context)
+        return cls(
+            system_prompt=system_prompt,
+            history=history,
+            tools=tools,
+            file_paths=tuple(managed.file_paths),
+            run_metadata=dict(managed.run_metadata),
+            tool_calls=(*tuple(managed.tool_calls), *tuple(existing_tool_calls)),
+            responses=tuple(managed.responses),
+            budget=managed.budget,
+            artifacts=tuple(managed.artifacts),
+            memory=managed.memory,
+            permissions=managed.permissions,
+            metadata=metadata,
+            context_items=tuple(managed.context_items),
+        )
+
 
 # Backward-compat alias — callers that imported StrategyContext can use BaseContext directly.
 StrategyContext = BaseContext

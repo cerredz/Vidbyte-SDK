@@ -1,0 +1,15 @@
+{
+  "name": "Beam Search Runtime",
+  "description": "Prompt assets for the Beam Search non-linear agent execution runtime. Beam Search runs beam_width parallel agent trials for the same task, scores each candidate output with a lightweight LLM scorer call, and returns the highest-scored result. These prompts separate the scorer identity context from the scoring instruction so SDK users can override either independently when constructing BeamSearchRuntime.",
+  "key": "beam_search",
+  "prompts": {
+    "scorer_system_prompt": {
+      "path": "scorer_system_prompt.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/beam_search/scorer_system_prompt.md"
+    },
+    "scorer_prompt": {
+      "path": "scorer_prompt.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/beam_search/scorer_prompt.md"
+    }
+  }
+}
