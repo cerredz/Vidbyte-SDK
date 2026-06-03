@@ -32,6 +32,7 @@ class Prompt(str, Enum):
     """Prompt keys for Vidbyte SDK prompt assets."""
 
     AGENTIC_LOOP_CONTEXT_PROMPT = "agentic_loop.context_prompt"
+    HANDOFF_SYSTEM_PROMPT = "handoff.system_prompt"
     CONTEXT_ENGINEERING_GUIDELINE_PROMPT = "context_engineering.guideline_prompt"
     EXPERT_PROMPTING_EXPERT_PROMPT = "expert_prompting.expert_prompt"
     GOALS_GOAL_PROMPT = "goals.goal_prompt"
