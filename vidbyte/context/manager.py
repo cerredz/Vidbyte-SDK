@@ -20,6 +20,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
+from vidbyte.context.runtime import ContextWindowPlacement
 from vidbyte.lib.dataclasses.context import (
     BaseContext,
     ContextArtifact,
@@ -48,14 +49,16 @@ class ContextManager:
     context_items: Sequence[ContextItem] = ()
     metadata: Mapping[str, Any] = field(default_factory=dict)
     _registry: dict[str, ContextItem] = field(init=False, repr=False, default_factory=dict)
+    _placements: dict[str, ContextWindowPlacement] = field(init=False, repr=False, default_factory=dict)
 
     def __post_init__(self) -> None:
         # Converts sequences to tuples and ensures metadata is a plain dict.
         self.context_items = tuple(self.context_items)
         self.metadata = dict(self.metadata)
 
-    def upsert(self, item: ContextItem) -> "ContextManager":
+    def upsert(self, item: ContextItem, *, placement: ContextWindowPlacement = ContextWindowPlacement.END_OF_CONTEXT) -> "ContextManager":
         """Add or replace a managed primitive in the registry by its primitive_id."""
+        # Stores an addressable primitive and its render placement.
         primitive_id = getattr(item, "primitive_id", None)
         if not primitive_id:
             raise ValueError(
@@ -68,7 +71,9 @@ class ContextManager:
                 f"Primitive '{primitive_id}' is frozen and cannot be overwritten. "
                 "Set primitive_frozen=False to allow updates."
             )
+        normalized_placement = ContextWindowPlacement(placement)
         self._registry[primitive_id] = item
+        self._placements[primitive_id] = normalized_placement
         return self
 
     def get_by_id(self, primitive_id: str) -> ContextItem | None:
@@ -78,22 +83,53 @@ class ContextManager:
     def remove_by_id(self, primitive_id: str) -> "ContextManager":
         """Remove the managed primitive with the given id; silently ignores missing ids."""
         self._registry.pop(primitive_id, None)
+        self._placements.pop(primitive_id, None)
         return self
 
     def clear_registry(self) -> "ContextManager":
         """Remove all managed primitives from the registry."""
         self._registry.clear()
+        self._placements.clear()
         return self
+
+    def placement_for(self, primitive_id: str) -> ContextWindowPlacement | None:
+        """Return the render placement for a managed primitive id."""
+        # Exposes placement metadata without exposing the mutable placement registry.
+        return self._placements.get(primitive_id)
 
     def render_primitives_zone(self) -> str:
         """Return a formatted block of all registry primitives in insertion order."""
-        if not self._registry:
+        visible = self._items_for_context_zone()
+        if not visible:
             return ""
         sections: list[str] = ["## Context Window Primitives"]
-        for primitive_id, item in self._registry.items():
+        for primitive_id, item in visible:
             header = f"### [{primitive_id}] {item.title}"
             sections.append(f"{header}\n{item.to_context_text()}")
         return "\n\n".join(sections)
+
+    def render_conversation_messages(self, placement: ContextWindowPlacement) -> tuple[dict[str, str], ...]:
+        """Return managed primitives for a conversation placement as provider messages."""
+        # Converts conversation-placed primitives into assistant messages for the next call.
+        normalized_placement = ContextWindowPlacement(placement)
+        messages: list[dict[str, str]] = []
+        for primitive_id, item in self._registry.items():
+            if self._placements.get(primitive_id, ContextWindowPlacement.END_OF_CONTEXT) is normalized_placement:
+                messages.append({"role": "assistant", "content": item.to_context_text()})
+        return tuple(messages)
+
+    def _items_for_context_zone(self) -> list[tuple[str, ContextItem]]:
+        """Return primitives that should render in the system context zone."""
+        # Keeps top-of-context entries before default end-of-context entries.
+        top: list[tuple[str, ContextItem]] = []
+        end: list[tuple[str, ContextItem]] = []
+        for primitive_id, item in self._registry.items():
+            placement = self._placements.get(primitive_id, ContextWindowPlacement.END_OF_CONTEXT)
+            if placement is ContextWindowPlacement.TOP_OF_CONTEXT:
+                top.append((primitive_id, item))
+            elif placement is ContextWindowPlacement.END_OF_CONTEXT:
+                end.append((primitive_id, item))
+        return [*top, *end]
 
     def add(self, item: ContextItem) -> "ContextManager":
         """Append one unmanaged context item and return this manager."""

@@ -559,7 +559,71 @@ Do not duplicate the tool loop in the adapter unless the algorithm is explicitly
 designed to replace the normal direct runtime. Reimplementing the loop usually
 breaks permissions, `isDone`, provider-specific parsing, or runtime metadata.
 
-### 10.3 Metadata Contract
+### 10.3 Updating The Inner Agent Loop
+
+Some context-window algorithms need to add or update model-visible context
+inside one direct `_arun_once(...)` run instead of wrapping whole trials. Use the
+inner-loop context-window lifecycle for that shape.
+
+The standard interface is:
+
+```python
+from vidbyte.context.runtime import ContextWindowRunContext, InnerContextWindowAlgorithm
+
+class ExampleInnerAlgorithm(InnerContextWindowAlgorithm):
+    def after_iteration(self, ctx: ContextWindowRunContext) -> None:
+        ctx.upsert(item, placement=ContextWindowPlacement.END_OF_CONTEXT)
+```
+
+Inner-loop algorithms must update context only through
+`ContextWindowRunContext`. That context exposes the active `ContextManager`,
+the current observable iteration snapshot, the recorder, per-run metadata, tool
+call facts, and helper methods such as `upsert`, `append`, `remove`, `record`,
+`set_metadata`, and `every(iterations=n)`.
+
+Use this path when the algorithm needs lifecycle points such as:
+
+- `on_run_start`
+- `before_model_call`
+- `after_model_response`
+- `after_tool_call`
+- `after_iteration`
+- `on_run_end`
+
+Do not mutate provider `messages` directly from a context-window algorithm.
+Do not add an arbitrary callback such as `iteration_observer` that returns text
+for runtime to append. Do not make deterministic runtime algorithms depend on a
+model-called `write_context` tool. Tools are model-selected; inner-loop context
+algorithms are SDK-selected runtime behavior.
+
+The preferred write target is a typed `ContextItem` stored in `ContextManager`:
+
+```python
+ctx.upsert(
+    ExampleContextItem(
+        primitive_id="example:current",
+        content="bounded context",
+    ),
+    placement=ContextWindowPlacement.END_OF_CONTEXT,
+)
+```
+
+`AgentRuntime` renders the manager on the next model call through the existing
+context-window primitive path. This keeps a single standard for context-window
+updates and preserves middleware, permissions, tracing, tool execution, and
+provider formatting.
+
+When adding an inner-loop algorithm:
+
+1. Define a public frozen config dataclass that subclasses `InnerContextWindowAlgorithm`.
+2. Define a typed `ContextItem` for any algorithm-owned context block.
+3. Use `ctx.every(iterations=n)` or equivalent config-owned logic for cadence.
+4. Write context with `ctx.upsert(...)` or `ctx.append(...)`.
+5. Record template slots with `ctx.record(...)`.
+6. Publish final metadata with `ctx.set_metadata(...)` in `on_run_end`.
+7. Add tests proving the next model call sees the context through `ContextManager`, not direct message injection.
+
+### 10.4 Metadata Contract
 
 Every runtime algorithm should attach one algorithm-specific metadata object to
 the final `StrategyResult.metadata`.
@@ -588,7 +652,7 @@ Metadata should answer:
 Keep raw provider responses out of algorithm metadata unless already part of
 normal runtime metadata. Store bounded strings and structured counters instead.
 
-### 10.4 Runtime Silent Failures
+### 10.5 Runtime Silent Failures
 
 Watch for these issues:
 

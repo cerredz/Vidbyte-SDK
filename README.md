@@ -135,6 +135,21 @@ agent = Agent(
 )
 ```
 
+For long-running direct loops, trajectory checkpoints can periodically write a
+bounded runtime checkpoint into the context window through managed context
+primitives. Checkpoints summarize observable runtime state only; their score is
+a deterministic heuristic, not an external correctness grade.
+
+```python
+agent = Agent(
+    name="repo-analyst",
+    system_prompt="Use tools when they help answer precisely.",
+    runner=my_runner,
+    tools=[lookup_metric],
+    algorithm=ContextWindow.preset.trajectory_checkpoints,
+)
+```
+
 Per-call context can be supplied with `AgentInput` without mutating the agent's
 default context:
 

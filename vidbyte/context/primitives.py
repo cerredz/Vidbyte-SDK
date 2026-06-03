@@ -262,6 +262,51 @@ class ProgressContextItem:
 
 
 @dataclass(frozen=True, slots=True)
+class TrajectoryCheckpointContextItem:
+    """Structured runtime checkpoint context for trajectory algorithms."""
+
+    primitive_id: str
+    iteration: int
+    checkpoint_index: int
+    reasoning_summary: str
+    trajectory: str
+    output: str
+    score: float | None
+    feedback: str
+    title: str = "Runtime Checkpoint"
+    max_chars: int = 2000
+    metadata: Mapping[str, Any] = field(default_factory=dict)
+    kind: str = "trajectory_checkpoint"
+    primitive_frozen: bool = False
+
+    def to_context_text(self) -> str:
+        # Renders required checkpoint sections in deterministic order.
+        score_text = "N/A" if self.score is None else f"{self.score:.2f}"
+        text = "\n".join(
+            (
+                f"Iteration: {self.iteration}",
+                f"Checkpoint: {self.checkpoint_index}",
+                "",
+                "### Reasoning Summary",
+                self.reasoning_summary,
+                "",
+                "### Trajectory",
+                self.trajectory,
+                "",
+                "### Output",
+                self.output,
+                "",
+                "### Score",
+                score_text,
+                "",
+                "### Feedback",
+                self.feedback,
+            )
+        )
+        return _truncate_text(text, self.max_chars)
+
+
+@dataclass(frozen=True, slots=True)
 class PlanContextItem:
     """Structured plan context for algorithm-owned multi-step execution plans."""
 
@@ -346,6 +391,15 @@ def _extend_section(lines: list[str], title: str, values: tuple[str, ...]) -> No
     lines.extend(f"- {value}" for value in values)
 
 
+def _truncate_text(value: str, max_chars: int) -> str:
+    if len(value) <= max_chars:
+        return value
+    suffix = "\n...[truncated]"
+    if max_chars <= len(suffix):
+        return value[:max_chars]
+    return value[: max_chars - len(suffix)].rstrip() + suffix
+
+
 def _language_from_path(path: Path) -> str | None:
     suffix = path.suffix.lower().lstrip(".")
     return suffix or None
@@ -365,4 +419,5 @@ __all__ = [
     "TaskContextItem",
     "TextContextItem",
     "ToolCallContextItem",
+    "TrajectoryCheckpointContextItem",
 ]

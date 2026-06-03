@@ -16,7 +16,7 @@ import unittest
 
 from vidbyte.agents import AgentRuntime
 from vidbyte.agents.types import AgentMessage
-from vidbyte.context import ContextArtifact, ContextPermissions, ContextResponse, ContextToolCall, ContextWindow, TaskContextItem
+from vidbyte.context import ContextArtifact, ContextPermissions, ContextResponse, ContextToolCall, ContextWindow, ContextWindowAlgorithm, TaskContextItem, TrajectoryCheckpointAlgorithm
 from vidbyte.lib.dataclasses.agents import AgentRuntimeConfig
 from vidbyte.lib.enums import ModelModality
 from vidbyte.lib.dataclasses.context import BaseContext as StrategyContext
@@ -271,6 +271,28 @@ class AgentRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Raw tool output was withheld", visible_tool_message["content"])
         raw_context = result.metadata["tool_calls"][0]
         self.assertEqual(raw_context.result.output, "raw secret result for sdk")
+
+    async def test_inner_context_window_lifecycle_writes_to_next_system_context(self) -> None:
+        runner = FakeRunner(
+            [
+                FakeResponse("draft", {}),
+                FakeResponse("", {"output": [{"type": "function_call", "name": "isDone", "arguments": '{"final_answer": "done"}'}]}),
+            ]
+        )
+        runtime = AgentRuntime(
+            agent_name="worker",
+            system_prompt="Work.",
+            tools=Tools(),
+            permission_policy=PermissionPolicy(),
+            algorithm=ContextWindowAlgorithm(name="trajectory_checkpoints", trajectory_checkpoints=TrajectoryCheckpointAlgorithm(interval=1)),
+        )
+        context = runtime.build_context("task", base_context=None, history=(), agent_history=(), agent_metadata={}, existing_tool_calls=())
+
+        result = await runtime.arun("task", runner=runner, context=context, provider="openai", invoke_runner=invoke_runner, runner_output_text=runner_output_text, runner_output_metadata=runner_output_metadata)
+
+        self.assertIn("Runtime Checkpoint", runner.calls[1]["kwargs"]["system"])
+        self.assertEqual(runner.calls[1]["kwargs"]["messages"][0]["content"], "draft")
+        self.assertEqual(result.metadata["trajectory_checkpoints"]["checkpoint_count"], 1)
 
     async def test_runtime_denies_write_tool_by_default(self) -> None:
         write_tool = WriteTool()
