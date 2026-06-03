@@ -31,13 +31,14 @@ class TextModelRunner:
         self._transport = transport or HttpTransport()
         self._provider = ModelProviders.text(config)
 
-    async def arun(self, prompt: str, *, system: str | None = None, metadata: Mapping[str, object] | None = None, tools: Iterable[Mapping[str, Any]] = (), tool_choice: str | Mapping[str, Any] | None = None, messages: Iterable[Mapping[str, Any]] = ()) -> TextModelResponse:
+    async def arun(self, prompt: str, *, system: str | None = None, metadata: Mapping[str, object] | None = None, tools: Iterable[Mapping[str, Any]] = (), tool_choice: str | Mapping[str, Any] | None = None, messages: Iterable[Mapping[str, Any]] = (), response_format: Mapping[str, Any] | None = None) -> TextModelResponse:
         # Async entry point; awaits the provider's HTTP call without blocking the event loop.
         call_config = replace(
             self._config,
             tools=tuple(dict(tool) for tool in tools),
             tool_choice=tool_choice,
             messages=tuple(dict(message) for message in messages),
+            response_format=response_format,
         )
         return await self._provider.run_text(
             prompt=prompt,
@@ -47,14 +48,14 @@ class TextModelRunner:
             config=call_config,
         )
 
-    def run(self, prompt: str, *, system: str | None = None, metadata: Mapping[str, object] | None = None, tools: Iterable[Mapping[str, Any]] = (), tool_choice: str | Mapping[str, Any] | None = None, messages: Iterable[Mapping[str, Any]] = ()) -> TextModelResponse:
+    def run(self, prompt: str, *, system: str | None = None, metadata: Mapping[str, object] | None = None, tools: Iterable[Mapping[str, Any]] = (), tool_choice: str | Mapping[str, Any] | None = None, messages: Iterable[Mapping[str, Any]] = (), response_format: Mapping[str, Any] | None = None) -> TextModelResponse:
         # Synchronous wrapper; raises if called from inside a running event loop.
         try:
             asyncio.get_running_loop()
             raise AgentExecutionError("TextModelRunner.run() cannot be called from an active event loop; use await arun().")
         except RuntimeError:
             pass
-        return asyncio.run(self.arun(prompt, system=system, metadata=metadata, tools=tools, tool_choice=tool_choice, messages=messages))
+        return asyncio.run(self.arun(prompt, system=system, metadata=metadata, tools=tools, tool_choice=tool_choice, messages=messages, response_format=response_format))
 
     def model_name(self) -> str:
         return self._config.model

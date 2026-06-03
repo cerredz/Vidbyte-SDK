@@ -149,6 +149,7 @@ from vidbyte.tools import (
     tool,
     vidbyte_tool,
 )
+from vidbyte.providers.output_schema import OutputSchemaFormatter
 from vidbyte.mcp_server import McpStudioServer
 from vidbyte.tools.mcp import (
     McpServerConfig,
@@ -158,6 +159,7 @@ from vidbyte.tools.mcp import (
 
 __all__ = [
     "Agent",
+    "OutputSchemaFormatter",
     "NullTracer",
     "TracerBase",
     "TracerConfigurationError",

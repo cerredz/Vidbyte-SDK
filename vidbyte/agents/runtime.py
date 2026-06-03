@@ -26,6 +26,7 @@ from vidbyte.context.window import ContextWindow
 from vidbyte.lib.dataclasses.agents import AgentRuntimeConfig, AgentStopReason
 from vidbyte.lib.dataclasses.middleware import MiddlewareAction, MiddlewareContext, MiddlewareDecision, MiddlewareHook
 from vidbyte.lib.dataclasses.runner import RunnerHandle
+from vidbyte.providers.output_schema import OutputSchemaFormatter
 from vidbyte.lib.enums import ModelModality
 from vidbyte.lib.errors import PermissionDeniedError, ToolExecutionError, ToolRegistryError
 from vidbyte.lib.token_usage import token_usage_from_response
@@ -59,6 +60,7 @@ class AgentRuntime:
         algorithm: ContextWindowAlgorithm | str | None = None,
         context_manager: ContextManager | None = None,
         recorder: RecorderBase | None = None,
+        output_schema: type | Mapping[str, Any] | None = None,
     ) -> None:
         self.agent_name = agent_name
         self.system_prompt = system_prompt
@@ -72,6 +74,8 @@ class AgentRuntime:
         self.algorithm = ContextWindow.resolve_algorithm(algorithm)
         self.context_manager = context_manager
         self.recorder: RecorderBase = recorder or NullRecorder()
+        self.output_schema = output_schema
+        self._schema_formatter = OutputSchemaFormatter()
 
     def build_context(
         self,
@@ -248,7 +252,7 @@ class AgentRuntime:
                     model_response=last_response,
                 )
 
-            call_options = self._build_iteration_call_options(run_options, context, tool_schemas, messages)
+            call_options = self._build_iteration_call_options(run_options, context, tool_schemas, messages, provider)
             raw_result, model_call_count = await self._invoke_with_middleware(
                 handle,
                 message,
@@ -705,6 +709,14 @@ class AgentRuntime:
             self._check_permission(spec, call)
             self._validate_tool_call(tool, call)
             result = await self._execute_tool(tool, call)
+            if spec.output_schema is not None and result.status.value == "success":
+                _, error = self._schema_formatter.validate(result.output, spec.output_schema)
+                if error:
+                    result = ToolResult.error(
+                        call.tool_name,
+                        f"tool call error: output shape mismatch: {error}",
+                        metadata={"error": "output_schema_violation", "detail": error},
+                    )
             state = ToolCallState.SUCCEEDED if result.status.value == "success" else ToolCallState.FAILED
             self._tracer.end_span(tool_span, output=result.output)
         except ToolRegistryError as exc:
@@ -838,14 +850,8 @@ class AgentRuntime:
         """Pop and normalize the initial messages list from run options."""
         return [dict(item) for item in run_options.pop("messages", ())]
 
-    def _build_iteration_call_options(
-        self,
-        run_options: dict[str, Any],
-        context: BaseAgentContext,
-        tool_schemas: Sequence[dict[str, Any]],
-        messages: list[dict[str, Any]],
-    ) -> dict[str, Any]:
-        """Assemble per-iteration call options with system prompt, primitives zone, tools, and messages."""
+    def _build_iteration_call_options(self, run_options: dict[str, Any], context: BaseAgentContext, tool_schemas: Sequence[dict[str, Any]], messages: list[dict[str, Any]], provider: str = "") -> dict[str, Any]:
+        """Assemble per-iteration call options with system prompt, primitives zone, tools, messages, and response format."""
         call_options = dict(run_options)
         system = self._build_system_string(context)
         call_options.setdefault("system", system)
@@ -853,6 +859,10 @@ class AgentRuntime:
             call_options.setdefault("tools", tool_schemas)
         if messages:
             call_options.setdefault("messages", tuple(messages))
+        if self.output_schema is not None:
+            fmt = self._schema_formatter.build_response_format(provider, self.output_schema)
+            if fmt is not None:
+                call_options.setdefault("response_format", fmt)
         return call_options
 
     def _build_system_string(self, context: BaseAgentContext) -> str:
@@ -873,10 +883,14 @@ class AgentRuntime:
         tokens_used: int | None,
         stop_reason: AgentStopReason,
     ) -> AgentResult:
-        """Build the final AgentResult from an explicit runtime stop."""
+        """Build the final AgentResult, populating structured when output_schema is set."""
+        structured: Any = None
+        if self.output_schema is not None:
+            structured, _ = self._schema_formatter.validate(output, self.output_schema)
         return AgentResult(
             output=output,
             strategy_name="direct_runner",
+            structured=structured,
             metadata={
                 **self._runtime_metadata(
                     contexts=contexts,
