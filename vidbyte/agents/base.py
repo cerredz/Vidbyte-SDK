@@ -24,6 +24,7 @@ from vidbyte.agents.types import AgentCard, AgentInput, AgentMessage
 from vidbyte.context.manager import ContextManager
 from vidbyte.context.window import ContextWindow, ContextWindowAlgorithm
 from vidbyte.context.primitives import ContextItem
+from vidbyte.context.handoffs import Handoff, MinimalHandoff
 from vidbyte.lib.agents import ModalityDetector
 from vidbyte.lib.dataclasses.agents import AgentMetadata, AgentRunnerConfig, AgentRuntimeConfig
 from vidbyte.lib.dataclasses.runner import RunnerHandle
@@ -77,6 +78,7 @@ class BaseAgent(McpAttachableMixin):
         algorithm: ContextWindowAlgorithm | str | None = None,
         metadata: dict[str, Any] | None = None,
         tracer: type[TracerBase] | TracerBase | None = None,
+        handoff: Handoff | None = None,
     ) -> None:
         if not name:
             raise AgentExecutionError("Agent name cannot be empty.")
@@ -149,6 +151,10 @@ class BaseAgent(McpAttachableMixin):
         self.history: list[AgentMessage] = []
         self._tool_call_contexts: list[ToolCallContext] = []
         self._active_prompt: str = ""
+        self._handoff_spec: Handoff | None = handoff
+        self.last_handoff: Handoff | None = None
+        self.last_prompt: str = ""
+        self.last_reply: AgentMessage | None = None
         for _tool in self._agent_tool_items:
             self._bind_agent_tool_context(_tool)
 
@@ -266,6 +272,7 @@ class BaseAgent(McpAttachableMixin):
             algorithm=self.algorithm if algorithm is None else algorithm,
             metadata={**self.metadata, **dict(metadata or {})},
             tracer=self._tracer,
+            handoff=self._handoff_spec,
         )
         if include_history:
             child.history = list(self.history)
@@ -328,18 +335,23 @@ class BaseAgent(McpAttachableMixin):
                 details={"agent": self.name, "error_type": type(exc).__name__},
             ) from exc
         self._active_prompt = ""
+        metadata: dict[str, Any] = {
+            "strategy": result.strategy_name,
+            "modality": selected_modality.value,
+            **dict(input_metadata),
+            **dict(result.metadata),
+        }
         reply = AgentMessage(
             sender=self.name,
             recipient=recipient,
             content=result.output,
-            metadata={
-                "strategy": result.strategy_name,
-                "modality": selected_modality.value,
-                **dict(input_metadata),
-                **dict(result.metadata),
-            },
+            metadata=metadata,
         )
         self.history.append(reply)
+        self.last_prompt = prompt
+        self.last_reply = reply
+        if self._handoff_spec is not None:
+            await self._run_auto_handoff(metadata)
         return reply
 
     async def arun(self, message: str | AgentInput, **options: Any) -> AgentMessage:
@@ -353,6 +365,67 @@ class BaseAgent(McpAttachableMixin):
         except RuntimeError:
             return asyncio.run(self.generate_reply(message, **options))
         raise AgentExecutionError("BaseAgent.run() cannot be called from an active event loop; use await arun().")
+
+    async def handoff(self, spec: Handoff | None = None, *, by: "BaseAgent | None" = None) -> Handoff:
+        """Produce a structured handoff document describing this agent's most recent run."""
+        resolved = spec or self._handoff_spec or MinimalHandoff()
+        generator = by or self._build_handoff_agent(resolved)
+        return await generator.generate_handoff(self._render_run_for_handoff())
+
+    async def _run_auto_handoff(self, metadata: dict[str, Any]) -> None:
+        # Generate the configured handoff after a run and record it without breaking the primary reply.
+        try:
+            produced = await self.handoff(self._handoff_spec)
+            self.last_handoff = produced
+            metadata["handoff"] = produced
+        except Exception as exc:
+            metadata["handoff_error"] = repr(exc)
+            self.last_handoff = None
+
+    def _build_handoff_agent(self, spec: Handoff) -> "BaseAgent":
+        # Build a handoff agent that reuses this agent's runner and provider configuration.
+        from vidbyte.agents.handoff import HandoffAgent
+        real_runner = self.runner if not isinstance(self.runner, ConfiguredAgentRunner) else None
+        return HandoffAgent(
+            spec,
+            runner=real_runner,
+            runners=dict(self.runners),
+            provider=self.runner_config.provider,
+            model_name=self.runner_config.model_name,
+            api_key=self.runner_config.api_key,
+            temperature=self.runner_config.temperature,
+        )
+
+    def _render_run_for_handoff(self) -> str:
+        # Compose a comprehensive digest of the most recent run for the handoff author to read.
+        final_output = self.last_reply.content if self.last_reply is not None else "No completed run recorded."
+        sections = [
+            f"# Source Agent\n{self.name}",
+            f"# Original System Prompt\n{self.system_prompt}",
+            f"# Original Task\n{self.last_prompt or 'No task recorded.'}",
+            f"# Conversation Transcript\n{self._render_history()}",
+            f"# Tool Calls\n{self._render_tool_calls()}",
+            f"# Final Result\n{final_output}",
+        ]
+        return "\n\n".join(sections)
+
+    def _render_history(self) -> str:
+        # Render the ordered message transcript, or a placeholder when no history exists.
+        if not self.history:
+            return "No conversation history."
+        return "\n".join(f"[{message.sender} -> {message.recipient}] {message.content}" for message in self.history)
+
+    def _render_tool_calls(self) -> str:
+        # Render the recorded tool-call lifecycle, or a placeholder when no tools were used.
+        if not self._tool_call_contexts:
+            return "No tools were used."
+        return "\n".join(self._render_one_tool_call(context) for context in self._tool_call_contexts)
+
+    @staticmethod
+    def _render_one_tool_call(context: ToolCallContext) -> str:
+        # Render a single tool call's name, arguments, lifecycle state, and output.
+        state = getattr(context.state, "value", context.state)
+        return f"- {context.name}({dict(context.arguments)}) [{state}] -> {context.output}"
 
     def _build_context(
         self,
