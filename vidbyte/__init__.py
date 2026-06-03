@@ -150,6 +150,7 @@ from vidbyte.tools import (
     vidbyte_tool,
 )
 from vidbyte.providers.output_schema import OutputSchemaFormatter
+from vidbyte.trace import TraceMode, TraceOption, TraceSchema
 from vidbyte.mcp_server import McpStudioServer
 from vidbyte.tools.mcp import (
     McpServerConfig,
@@ -250,6 +251,9 @@ __all__ = [
     "ToolPolicyMiddleware",
     "Tools",
     "ToolsFormatter",
+    "TraceMode",
+    "TraceOption",
+    "TraceSchema",
     "VidbyteSDK",
     "BaseGrader",
     "ComparisonReport",

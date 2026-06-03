@@ -19,6 +19,7 @@ from __future__ import annotations
 
 from vidbyte.agents.base import BaseAgent, ConfiguredAgentRunner
 from vidbyte.agents.client import AgentClient
+from vidbyte.agents.continual_trace import ContinualTraceAgent
 from vidbyte.agents.context_algorithms import AgentRuntimeContextAlgorithms
 from vidbyte.lib.registries import AgentRegistry
 from vidbyte.agents.runtimes import (
@@ -55,6 +56,7 @@ __all__ = [
     "AgentStopReason",
     "BaseAgent",
     "ConfiguredAgentRunner",
+    "ContinualTraceAgent",
     "ModelModality",
     "AgentRuntime",
     "SearchTreeRuntimeComponent",

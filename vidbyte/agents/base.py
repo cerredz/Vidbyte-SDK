@@ -26,7 +26,10 @@ from vidbyte.context.window import ContextWindow, ContextWindowAlgorithm
 from vidbyte.context.primitives import ContextItem
 from vidbyte.lib.agents import ModalityDetector
 from vidbyte.lib.dataclasses.agents import AgentMetadata, AgentRunnerConfig, AgentRuntimeConfig
+from vidbyte.lib.dataclasses.context import BaseAgentContext, BaseContext
 from vidbyte.lib.dataclasses.runner import RunnerHandle
+from vidbyte.lib.dataclasses.strategies import AgentResult
+from vidbyte.lib.dataclasses.trace import TraceOption
 from vidbyte.lib.enums import AgentRuntimeType, ModelModality, ModelProvider
 from vidbyte.lib.errors import AgentExecutionError, ConfigurationError
 from vidbyte.lib.tracing import NullTracer, TracerBase
@@ -76,6 +79,7 @@ class BaseAgent(McpAttachableMixin):
         context_manager: ContextManager | None = None,
         algorithm: ContextWindowAlgorithm | str | None = None,
         metadata: dict[str, Any] | None = None,
+        trace: TraceOption | None = None,
         tracer: type[TracerBase] | TracerBase | None = None,
         output_schema: type | Mapping[str, Any] | None = None,
     ) -> None:
@@ -92,6 +96,7 @@ class BaseAgent(McpAttachableMixin):
             self.runtime_type = AgentRuntimeType(runtime)
             self.runtime_config_obj = None
 
+        resolved_algorithm = ContextWindow.resolve_algorithm(algorithm)
         if self.runtime_type in (
             AgentRuntimeType.MCTS_SEARCH,
             AgentRuntimeType.ACTOR_MODEL,
@@ -104,12 +109,20 @@ class BaseAgent(McpAttachableMixin):
                     "which does not support middleware."
                 )
             if algorithm is not None:
-                resolved_algo = ContextWindow.resolve_algorithm(algorithm)
-                if resolved_algo.name != "default":
+                if resolved_algorithm.name != "default":
                     raise ConfigurationError(
                         f"Agent {name} uses non-linear runtime {self.runtime_type.value}, "
                         "which does not support in-context learning algorithms."
                     )
+            if trace is not None:
+                raise ConfigurationError(
+                    f"Agent {name} uses non-linear runtime {self.runtime_type.value}, "
+                    "which does not support continual trace."
+                )
+        if trace is not None and not isinstance(trace, TraceOption):
+            raise ConfigurationError("Agent trace must be a TraceOption created by TraceOption.continual(...).")
+        if trace is not None and resolved_algorithm.name != "default":
+            raise ConfigurationError("Agent continual trace only supports the default context-window algorithm.")
 
         self.runner_config = AgentRunnerConfig(
             api_key=api_key,
@@ -145,8 +158,9 @@ class BaseAgent(McpAttachableMixin):
         self.agent_metadata = agent_metadata or AgentMetadata()
         self.context_items = tuple(context_items)
         self.context_manager = context_manager
-        self.algorithm = ContextWindow.resolve_algorithm(algorithm)
+        self.algorithm = resolved_algorithm
         self.metadata = dict(metadata or {})
+        self.trace = trace
         self.output_schema = output_schema
         self.history: list[AgentMessage] = []
         self._tool_call_contexts: list[ToolCallContext] = []
@@ -239,6 +253,7 @@ class BaseAgent(McpAttachableMixin):
         context_items: Sequence[ContextItem] | None = None,
         context_manager: ContextManager | None = None,
         algorithm: ContextWindowAlgorithm | str | None = None,
+        trace: TraceOption | None = None,
         include_history: bool = False,
     ) -> BaseAgent:
         child = BaseAgent(
@@ -267,6 +282,7 @@ class BaseAgent(McpAttachableMixin):
             context_manager=self.context_manager if context_manager is None else context_manager,
             algorithm=self.algorithm if algorithm is None else algorithm,
             metadata={**self.metadata, **dict(metadata or {})},
+            trace=self.trace if trace is None else trace,
             tracer=self._tracer,
             output_schema=self.output_schema,
         )
@@ -476,9 +492,12 @@ class BaseAgent(McpAttachableMixin):
 
     def _runtime(self) -> Any:
         from vidbyte.lib.registries.runtimes import RuntimeRegistry
+        from vidbyte.agents.runtimes.configs import ActorRuntime
         runtime_cls = RuntimeRegistry.resolve(self.runtime_type)
 
         kwargs: dict[str, Any] = {}
+        if self.runtime_type is AgentRuntimeType.LINEAR:
+            kwargs["trace"] = self.trace
         if self.runtime_type in (
             AgentRuntimeType.ACTOR_MODEL,
             AgentRuntimeType.ACTOR_MODEL_P2P,

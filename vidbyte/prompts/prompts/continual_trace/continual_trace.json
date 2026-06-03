@@ -1,0 +1,11 @@
+{
+  "name": "Continual Trace",
+  "description": "Prompt assets for updating user-visible continual trace artifacts.",
+  "key": "continual_trace",
+  "prompts": {
+    "system_prompt": {
+      "path": "system_prompt.md",
+      "source_url": "https://vidbyte.ai/internal/prompts/continual-trace"
+    }
+  }
+}

@@ -42,6 +42,7 @@ class Prompt(str, Enum):
     PROMPT_ENGINEERING_MASTER_PROMPT = "prompt_engineering.master_prompt"
     EVALS_LLM_JUDGE = "evals.llm_judge"
     EVALS_RUBRIC = "evals.rubric"
+    CONTINUAL_TRACE_SYSTEM_PROMPT = "continual_trace.system_prompt"
     MULTI_PROVIDER_AGENTIC_GRADER_AGENT_SYSTEM_PROMPT = "multi_provider_agentic_grader.agent_system_prompt"
     MULTI_PROVIDER_AGENTIC_GRADER_GRADER_SYSTEM_PROMPT = "multi_provider_agentic_grader.grader_system_prompt"
     MULTI_PROVIDER_AGENTIC_GRADER_GRADER_PROMPT = "multi_provider_agentic_grader.grader_prompt"

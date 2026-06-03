@@ -14,6 +14,7 @@ Relations:
 
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping, Sequence
 from typing import Any
 
@@ -26,6 +27,7 @@ from vidbyte.context.window import ContextWindow
 from vidbyte.lib.dataclasses.agents import AgentRuntimeConfig, AgentStopReason
 from vidbyte.lib.dataclasses.middleware import MiddlewareAction, MiddlewareContext, MiddlewareDecision, MiddlewareHook
 from vidbyte.lib.dataclasses.runner import RunnerHandle
+from vidbyte.lib.dataclasses.trace import TraceOption
 from vidbyte.providers.output_schema import OutputSchemaFormatter
 from vidbyte.lib.enums import ModelModality
 from vidbyte.lib.errors import PermissionDeniedError, ToolExecutionError, ToolRegistryError
@@ -61,6 +63,7 @@ class AgentRuntime:
         context_manager: ContextManager | None = None,
         recorder: RecorderBase | None = None,
         output_schema: type | Mapping[str, Any] | None = None,
+        trace: TraceOption | None = None,
     ) -> None:
         self.agent_name = agent_name
         self.system_prompt = system_prompt
@@ -75,6 +78,7 @@ class AgentRuntime:
         self.context_manager = context_manager
         self.recorder: RecorderBase = recorder or NullRecorder()
         self.output_schema = output_schema
+        self.trace = trace
         self._schema_formatter = OutputSchemaFormatter()
 
     def build_context(
@@ -158,6 +162,9 @@ class AgentRuntime:
         started_at = self.middleware.clock()
         last_response: object | None = None
         run_state: dict[type, Any] = {}
+        trace_controller = ContinualTraceController(option=self.trace, runner=handle.runner, provider=provider)
+        if trace_controller.enabled:
+            run_state[ContinualTraceController] = trace_controller
 
         decision = await self.middleware.before_run(
             self._middleware_context(
@@ -362,6 +369,16 @@ class AgentRuntime:
                         run_state=run_state,
                         model_response=raw_result,
                     )
+                await self._update_trace_if_due(
+                    force=False,
+                    iteration_count=iteration_count,
+                    context=context,
+                    messages=messages,
+                    tool_calls=call_contexts,
+                    tokens_used=tokens_used,
+                    stop_reason=None,
+                    run_state=run_state,
+                )
                 continue
 
             for call in tool_calls:
@@ -433,6 +450,16 @@ class AgentRuntime:
                             run_state=run_state,
                             model_response=raw_result,
                         )
+                    await self._update_trace_if_due(
+                        force=True,
+                        iteration_count=iteration_count,
+                        context=context,
+                        messages=messages,
+                        tool_calls=call_contexts,
+                        tokens_used=tokens_used,
+                        stop_reason=AgentStopReason.IS_DONE,
+                        run_state=run_state,
+                    )
                     final = self._final_result(
                         output=result.output,
                         runner_metadata=runner_metadata,
@@ -491,6 +518,16 @@ class AgentRuntime:
                     run_state=run_state,
                     model_response=raw_result,
                 )
+            await self._update_trace_if_due(
+                force=False,
+                iteration_count=iteration_count,
+                context=context,
+                messages=messages,
+                tool_calls=call_contexts,
+                tokens_used=tokens_used,
+                stop_reason=None,
+                run_state=run_state,
+            )
 
     async def _invoke_with_middleware(self, handle: RunnerHandle, message: str, call_options: Mapping[str, Any], *, context: BaseAgentContext, iteration_count: int, model_call_count: int, call_contexts: Sequence[ToolCallContext], tokens_used: int | None, started_at: float, metadata: Mapping[str, Any], run_state: dict[type, Any] | None = None, trace_context: SpanContext | None = None) -> tuple[object | AgentResult, int]:
         """Invoke the runner, allowing middleware to retry model errors."""
@@ -606,7 +643,7 @@ class AgentRuntime:
                 tokens_used=tokens_used,
                 contexts=tuple(dict(result.metadata).get("tool_calls", ())),
             )
-        return self._with_middleware_metadata(result)
+        return self._with_trace_metadata(self._with_middleware_metadata(result), run_state)
 
     def _middleware_context(
         self,
@@ -688,6 +725,42 @@ class AgentRuntime:
             strategy_name=result.strategy_name,
             calls=result.calls,
             metadata=metadata,
+            structured=result.structured,
+        )
+
+    def _with_trace_metadata(self, result: AgentResult, run_state: dict[type, Any] | None) -> AgentResult:
+        # Attaches the current trace artifact and metadata when continual trace is enabled.
+        controller = (run_state or {}).get(ContinualTraceController)
+        if not isinstance(controller, ContinualTraceController) or not controller.enabled:
+            return result
+        metadata = dict(result.metadata)
+        metadata["trace"] = controller.artifact()
+        metadata["trace_metadata"] = controller.metadata()
+        return AgentResult(
+            output=result.output,
+            strategy_name=result.strategy_name,
+            calls=result.calls,
+            metadata=metadata,
+            structured=result.structured,
+        )
+
+    async def _update_trace_if_due(self, *, force: bool, iteration_count: int, context: BaseAgentContext, messages: Sequence[Mapping[str, Any]], tool_calls: Sequence[ToolCallContext], tokens_used: int | None, stop_reason: AgentStopReason | None, run_state: dict[type, Any]) -> None:
+        # Delegates a due trace update to the per-run controller when tracing is enabled.
+        controller = run_state.get(ContinualTraceController)
+        if not isinstance(controller, ContinualTraceController):
+            return
+        await controller.update_if_due(
+            force=force,
+            iteration_count=iteration_count,
+            context=context,
+            messages=messages,
+            tool_calls=tool_calls,
+            runtime_metadata={
+                "iteration_count": iteration_count,
+                "tool_call_count": len(tool_calls),
+                "tokens_used": tokens_used,
+                "stop_reason": stop_reason.value if stop_reason is not None else None,
+            },
         )
 
     async def execute_tool_call(
@@ -1087,5 +1160,105 @@ class AgentRuntime:
         return (current or 0) + delta
 
 
-__all__ = ["AgentRuntime"]
+class ContinualTraceController:
+    """Per-run controller for invoking ContinualTraceAgent at bounded intervals."""
+
+    def __init__(self, *, option: TraceOption | None, runner: object, provider: str) -> None:
+        # Initializes trace state and bookkeeping for one main-agent run.
+        self.option = option
+        self.runner = runner
+        self.provider = provider
+        self._artifact = option.schema.initial_artifact() if option is not None and option.enabled else {}
+        self.update_count = 0
+        self.error_count = 0
+        self.last_error: str | None = None
+        self._last_update_iteration: int | None = None
+        self._finalized = False
+
+    @property
+    def enabled(self) -> bool:
+        # Returns whether this controller should perform trace updates.
+        return self.option is not None and self.option.enabled
+
+    async def update_if_due(self, *, force: bool, iteration_count: int, context: BaseAgentContext, messages: Sequence[Mapping[str, Any]], tool_calls: Sequence[ToolCallContext], runtime_metadata: Mapping[str, Any]) -> None:
+        # Runs a trace update when the configured interval or final update requires it.
+        if not self.enabled or self.option is None:
+            return
+        if not self._should_update(force, iteration_count):
+            return
+        try:
+            from vidbyte.agents.continual_trace import ContinualTraceAgent
+
+            agent = ContinualTraceAgent(
+                runner=self.runner,
+                schema=self.option.schema,
+                max_iterations=self.option.max_trace_iterations,
+                provider=self.provider,
+            )
+            self._artifact = await agent.update(
+                context_window=self._render_context_window(context, messages, tool_calls),
+                trace_so_far=self._artifact,
+                runtime_metadata=runtime_metadata,
+            )
+            if agent.last_error:
+                self._record_error(agent.last_error)
+            else:
+                self.update_count += 1
+                self.last_error = None
+        except Exception as exc:
+            self._record_error(f"{type(exc).__name__}: {exc}")
+        finally:
+            self._last_update_iteration = iteration_count
+            if force:
+                self._finalized = True
+
+    def artifact(self) -> dict[str, Any]:
+        # Returns the current trace artifact as a plain dictionary.
+        return dict(self._artifact)
+
+    def metadata(self) -> dict[str, Any]:
+        # Returns compact trace bookkeeping suitable for AgentResult metadata.
+        metadata = {
+            "mode": self.option.mode.value if self.option is not None else None,
+            "schema": self.option.schema.name if self.option is not None else None,
+            "update_count": self.update_count,
+            "error_count": self.error_count,
+        }
+        if self.last_error:
+            metadata["last_error"] = self.last_error
+        return metadata
+
+    def _should_update(self, force: bool, iteration_count: int) -> bool:
+        # Decides whether the current main-agent iteration should trigger a trace update.
+        if self.option is None:
+            return False
+        if force:
+            return not self._finalized
+        if iteration_count <= 0 or iteration_count % self.option.every_n_iterations != 0:
+            return False
+        return self._last_update_iteration != iteration_count
+
+    def _record_error(self, error: str) -> None:
+        # Records a recoverable trace-agent error without changing the main run.
+        self.error_count += 1
+        self.last_error = error
+
+    def _render_context_window(self, context: BaseAgentContext, messages: Sequence[Mapping[str, Any]], tool_calls: Sequence[ToolCallContext]) -> str:
+        # Renders the main agent context plus provider messages and tool summaries.
+        sections = [context.build_context()]
+        if messages:
+            sections.append("Provider messages:\n" + json.dumps(tuple(messages), indent=2, sort_keys=True, default=str))
+        if tool_calls:
+            sections.append("Main tool calls:\n" + "\n".join(self._tool_call_summary(call) for call in tool_calls))
+        return "\n\n".join(section for section in sections if section)
+
+    @staticmethod
+    def _tool_call_summary(call: ToolCallContext) -> str:
+        # Renders one main-agent tool call without exposing trace-agent internal calls.
+        status = call.state.value
+        output = call.result.output if call.result is not None else None
+        return f"- {call.tool_name} ({status}): args={dict(call.arguments)} output={output}"
+
+
+__all__ = ["AgentRuntime", "ContinualTraceController"]
 
