@@ -22,7 +22,7 @@ from vidbyte.agents.types import AgentMessage
 from vidbyte.context.algorithms import ContextWindowAlgorithm
 from vidbyte.context.manager import ContextManager
 from vidbyte.context.primitives import ContextItem
-from vidbyte.context.runtime import ContextWindowLifecycleEvent, ContextWindowPlacement, ContextWindowRunContext, InnerContextWindowAlgorithm
+from vidbyte.context.runtime import ContextWindowPlacement, ContextWindowRunContext, InnerContextWindowAlgorithm
 from vidbyte.context.window import ContextWindow
 from vidbyte.lib.dataclasses.agents import AgentIterationSnapshot, AgentRuntimeConfig, AgentStopReason
 from vidbyte.lib.dataclasses.middleware import MiddlewareAction, MiddlewareContext, MiddlewareDecision, MiddlewareHook
@@ -183,14 +183,9 @@ class AgentRuntime:
             if self.context_manager is None:
                 self.context_manager = ContextManager()
             runtime_metadata["_inner_context_window_algorithm"] = inner_algorithm
-            runtime_metadata["_context_window_metadata"] = {}
-            self._run_inner_context_window_hook(
-                runtime_metadata,
-                ContextWindowLifecycleEvent.RUN_START,
-                message=message,
-                context=context,
-                provider=provider,
-            )
+            runtime_metadata["_context_window_state"] = {}
+            # One run-start invocation lets the algorithm initialize before any iteration.
+            self._run_inner_context_window_hook(runtime_metadata, message=message, provider=provider)
         tool_schemas = self._resolve_tool_schemas(provider)
         messages = self._extract_initial_messages(run_options)
         call_contexts: list[ToolCallContext] = []
@@ -199,6 +194,7 @@ class AgentRuntime:
         tokens_used: int | None = None
         started_at = self.middleware.clock()
         last_response: object | None = None
+        last_assistant_output: str | None = None
         run_state: dict[type, Any] = {}
 
         decision = await self.middleware.before_run(
@@ -237,6 +233,17 @@ class AgentRuntime:
             )
 
         while True:
+            # Single inner-loop context-window point: after the prior iteration's tool calls finished.
+            if iteration_count > 0:
+                self._run_inner_context_window_hook(
+                    runtime_metadata,
+                    message=message,
+                    provider=provider,
+                    iteration_count=iteration_count,
+                    assistant_output=last_assistant_output,
+                    call_contexts=call_contexts,
+                    tokens_used=tokens_used,
+                )
             stop_result = self._budget_stop(
                 iteration_count=iteration_count,
                 tokens_used=tokens_used,
@@ -294,17 +301,6 @@ class AgentRuntime:
                     model_response=last_response,
                 )
 
-            self._run_inner_context_window_hook(
-                runtime_metadata,
-                ContextWindowLifecycleEvent.BEFORE_MODEL_CALL,
-                message=message,
-                context=context,
-                provider=provider,
-                iteration_count=iteration_count,
-                model_response=last_response,
-                call_contexts=call_contexts,
-                tokens_used=tokens_used,
-            )
             call_options = self._build_iteration_call_options(run_options, context, tool_schemas, messages)
             raw_result, model_call_count = await self._invoke_with_middleware(
                 runner,
@@ -339,6 +335,7 @@ class AgentRuntime:
                 )
             last_response = raw_result
             iteration_count += 1
+            last_assistant_output = runner_output_text(raw_result)
             runner_metadata = dict(runner_output_metadata(raw_result))
             tokens_used = self._add_token_usage(tokens_used, token_usage_from_response(raw_result, runner_metadata))
 
@@ -379,17 +376,6 @@ class AgentRuntime:
                     model_response=raw_result,
                 )
 
-            self._run_inner_context_window_hook(
-                runtime_metadata,
-                ContextWindowLifecycleEvent.AFTER_MODEL_RESPONSE,
-                message=message,
-                context=context,
-                provider=provider,
-                iteration_count=iteration_count,
-                model_response=raw_result,
-                call_contexts=call_contexts,
-                tokens_used=tokens_used,
-            )
             tool_calls = ToolsFormatter.parse_tool_calls(raw_result, provider)
             if not tool_calls:
                 messages.append(self._assistant_message(runner_output_text(raw_result)))
@@ -429,18 +415,6 @@ class AgentRuntime:
                         run_state=run_state,
                         model_response=raw_result,
                     )
-                self._run_inner_context_window_hook(
-                    runtime_metadata,
-                    ContextWindowLifecycleEvent.AFTER_ITERATION,
-                    message=message,
-                    context=context,
-                    provider=provider,
-                    iteration_count=iteration_count,
-                    assistant_output=runner_output_text(raw_result),
-                    model_response=raw_result,
-                    call_contexts=call_contexts,
-                    tokens_used=tokens_used,
-                )
                 continue
 
             for call in tool_calls:
@@ -475,20 +449,6 @@ class AgentRuntime:
                         model_response=raw_result,
                     )
                 _, result = processed
-                if not self._tool_is_internal(call):
-                    self._run_inner_context_window_hook(
-                        runtime_metadata,
-                        ContextWindowLifecycleEvent.AFTER_TOOL_CALL,
-                        message=message,
-                        context=context,
-                        provider=provider,
-                        iteration_count=iteration_count,
-                        model_response=raw_result,
-                        call_contexts=call_contexts,
-                        tokens_used=tokens_used,
-                        tool_call=call,
-                        tool_result=result,
-                    )
                 if call.tool_name == IS_DONE_TOOL_NAME:
                     decision = await self.middleware.after_iteration(
                         self._middleware_context(
@@ -584,18 +544,6 @@ class AgentRuntime:
                     run_state=run_state,
                     model_response=raw_result,
                 )
-            self._run_inner_context_window_hook(
-                runtime_metadata,
-                ContextWindowLifecycleEvent.AFTER_ITERATION,
-                message=message,
-                context=context,
-                provider=provider,
-                iteration_count=iteration_count,
-                assistant_output=None,
-                model_response=raw_result,
-                call_contexts=call_contexts,
-                tokens_used=tokens_used,
-            )
 
     async def _invoke_with_middleware(
         self,
@@ -705,17 +653,6 @@ class AgentRuntime:
         model_response: object | None = None,
     ) -> AgentResult:
         """Run after_run middleware and attach final middleware metadata."""
-        self._run_inner_context_window_hook(
-            metadata,
-            ContextWindowLifecycleEvent.RUN_END,
-            message=message,
-            context=context,
-            provider=provider,
-            iteration_count=iteration_count,
-            model_response=model_response,
-            tokens_used=tokens_used,
-            is_final=True,
-        )
         decision = await self.middleware.after_run(
             self._middleware_context(
                 MiddlewareHook.AFTER_RUN,
@@ -742,12 +679,12 @@ class AgentRuntime:
         result = self._with_context_window_metadata(result, metadata)
         return self._with_middleware_metadata(result)
 
-    def _run_inner_context_window_hook(self, metadata: Mapping[str, Any], event: ContextWindowLifecycleEvent, *, message: str, context: BaseAgentContext, provider: str, iteration_count: int = 0, assistant_output: str | None = None, call_contexts: Sequence[ToolCallContext] = (), tokens_used: int | None = None, tool_call: ToolCall | None = None, tool_result: ToolResult | None = None, model_response: object | None = None, is_final: bool = False) -> None:
-        """Run a configured inner-loop context-window lifecycle hook."""
-        # Builds a bounded run context and dispatches to the event-specific hook.
+    def _run_inner_context_window_hook(self, metadata: Mapping[str, Any], *, message: str, provider: str, iteration_count: int = 0, assistant_output: str | None = None, call_contexts: Sequence[ToolCallContext] = (), tokens_used: int | None = None) -> None:
+        """Build the slim run context and invoke the inner-loop algorithm's single hook."""
+        # Called once at run start (no iteration) and once after each completed iteration's tool calls.
         algorithm = metadata.get("_inner_context_window_algorithm")
-        context_window_metadata = metadata.get("_context_window_metadata")
-        if not isinstance(algorithm, InnerContextWindowAlgorithm) or not isinstance(context_window_metadata, dict):
+        state = metadata.get("_context_window_state")
+        if not isinstance(algorithm, InnerContextWindowAlgorithm) or not isinstance(state, dict):
             return
         if self.context_manager is None:
             return
@@ -762,36 +699,14 @@ class AgentRuntime:
                 tokens_used=tokens_used,
                 metadata=metadata,
             )
-        run_context = ContextWindowRunContext(
-            event=event,
-            context_manager=self.context_manager,
-            recorder=self.recorder,
-            metadata=context_window_metadata,
-            message=message,
-            provider=provider,
-            iteration=iteration,
-            tool_call=tool_call,
-            tool_result=tool_result,
-            model_response=model_response,
-            is_final=is_final,
+        algorithm.after_tool_calls(
+            ContextWindowRunContext(
+                context_manager=self.context_manager,
+                recorder=self.recorder,
+                state=state,
+                iteration=iteration,
+            )
         )
-        self._dispatch_inner_context_window_hook(algorithm, event, run_context)
-
-    def _dispatch_inner_context_window_hook(self, algorithm: InnerContextWindowAlgorithm, event: ContextWindowLifecycleEvent, ctx: ContextWindowRunContext) -> None:
-        """Dispatch one lifecycle event to the matching algorithm method."""
-        # Keeps the event-to-method mapping explicit and algorithm-neutral.
-        if event is ContextWindowLifecycleEvent.RUN_START:
-            algorithm.on_run_start(ctx)
-        elif event is ContextWindowLifecycleEvent.BEFORE_MODEL_CALL:
-            algorithm.before_model_call(ctx)
-        elif event is ContextWindowLifecycleEvent.AFTER_MODEL_RESPONSE:
-            algorithm.after_model_response(ctx)
-        elif event is ContextWindowLifecycleEvent.AFTER_TOOL_CALL:
-            algorithm.after_tool_call(ctx)
-        elif event is ContextWindowLifecycleEvent.AFTER_ITERATION:
-            algorithm.after_iteration(ctx)
-        elif event is ContextWindowLifecycleEvent.RUN_END:
-            algorithm.on_run_end(ctx)
 
     @staticmethod
     def _iteration_snapshot(*, message: str, provider: str, iteration_count: int, assistant_output: str | None, call_contexts: Sequence[ToolCallContext], tokens_used: int | None, metadata: Mapping[str, Any]) -> AgentIterationSnapshot:
@@ -812,10 +727,10 @@ class AgentRuntime:
     def _with_context_window_metadata(result: AgentResult, metadata: Mapping[str, Any]) -> AgentResult:
         """Attach public context-window metadata produced by inner-loop algorithms."""
         # Copies only public metadata keys and leaves private runtime state out of the result.
-        context_window_metadata = metadata.get("_context_window_metadata")
-        if not isinstance(context_window_metadata, dict):
+        state = metadata.get("_context_window_state")
+        if not isinstance(state, dict):
             return result
-        public_metadata = {key: value for key, value in context_window_metadata.items() if not str(key).startswith("_")}
+        public_metadata = {key: value for key, value in state.items() if not str(key).startswith("_")}
         if not public_metadata:
             return result
         result_metadata = {**dict(result.metadata), **public_metadata}

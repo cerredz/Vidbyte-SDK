@@ -16,6 +16,7 @@ Relations:
 
 from __future__ import annotations
 
+import dataclasses
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
@@ -50,6 +51,7 @@ class ContextManager:
     metadata: Mapping[str, Any] = field(default_factory=dict)
     _registry: dict[str, ContextItem] = field(init=False, repr=False, default_factory=dict)
     _placements: dict[str, ContextWindowPlacement] = field(init=False, repr=False, default_factory=dict)
+    _id_counters: dict[str, int] = field(init=False, repr=False, default_factory=dict)
 
     def __post_init__(self) -> None:
         # Converts sequences to tuples and ensures metadata is a plain dict.
@@ -76,6 +78,40 @@ class ContextManager:
         self._placements[primitive_id] = normalized_placement
         return self
 
+    def place_after_system_prompt(self, item: ContextItem) -> str:
+        """Place a primitive at the top of the context zone, just after the system prompt."""
+        # Renders before default end-of-context primitives via TOP_OF_CONTEXT placement.
+        return self._place(item, ContextWindowPlacement.TOP_OF_CONTEXT)
+
+    def place_after_tools(self, item: ContextItem) -> str:
+        """Place a primitive at the end of the context zone, after tool-bound primitives."""
+        # Renders at the end of the primitives zone via END_OF_CONTEXT placement.
+        return self._place(item, ContextWindowPlacement.END_OF_CONTEXT)
+
+    def _place(self, item: ContextItem, placement: ContextWindowPlacement) -> str:
+        """Upsert a primitive at a placement, generating a stable id when missing."""
+        # Lets callers add a fresh primitive without minting their own ids.
+        primitive_id = str(getattr(item, "primitive_id", "") or "").strip()
+        if not primitive_id:
+            primitive_id = self._generate_primitive_id(item)
+            item = self._with_primitive_id(item, primitive_id)
+        self.upsert(item, placement=placement)
+        return primitive_id
+
+    def _generate_primitive_id(self, item: ContextItem) -> str:
+        """Build a deterministic id scoped to this manager and item kind."""
+        kind = str(getattr(item, "kind", "context"))
+        next_value = self._id_counters.get(kind, 0) + 1
+        self._id_counters[kind] = next_value
+        return f"{kind}:{next_value}"
+
+    @staticmethod
+    def _with_primitive_id(item: ContextItem, primitive_id: str) -> ContextItem:
+        """Return a copy of a dataclass primitive with a primitive id attached."""
+        if not dataclasses.is_dataclass(item):
+            raise ValueError("place_*() requires a dataclass context item when primitive_id is missing.")
+        return dataclasses.replace(item, primitive_id=primitive_id)
+
     def get_by_id(self, primitive_id: str) -> ContextItem | None:
         """Return the managed primitive with the given id, or None if not found."""
         return self._registry.get(primitive_id)
@@ -90,6 +126,7 @@ class ContextManager:
         """Remove all managed primitives from the registry."""
         self._registry.clear()
         self._placements.clear()
+        self._id_counters.clear()
         return self
 
     def placement_for(self, primitive_id: str) -> ContextWindowPlacement | None:

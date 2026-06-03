@@ -446,9 +446,9 @@ print(template.expected_slots)
 
 | Method | File | Slot emitted |
 |--------|------|-------------|
-| `TrajectoryCheckpointAlgorithm.on_run_start` | `vidbyte/context/algorithms/trajectory_checkpoints.py` | `"system_prompt"` |
-| `TrajectoryCheckpointAlgorithm.after_iteration` | `vidbyte/context/algorithms/trajectory_checkpoints.py` | `"trajectory_checkpoint_iteration"` |
-| `TrajectoryCheckpointAlgorithm.after_iteration` | `vidbyte/context/algorithms/trajectory_checkpoints.py` | `"trajectory_checkpoint_injection"` |
+| `TrajectoryCheckpointAlgorithm.after_tool_calls` (run-start init, `ctx.iteration is None`) | `vidbyte/context/algorithms/trajectory_checkpoints.py` | `"system_prompt"` |
+| `TrajectoryCheckpointAlgorithm.after_tool_calls` (per completed iteration) | `vidbyte/context/algorithms/trajectory_checkpoints.py` | `"trajectory_checkpoint_iteration"` |
+| `TrajectoryCheckpointAlgorithm.after_tool_calls` (cadence boundary) | `vidbyte/context/algorithms/trajectory_checkpoints.py` | `"trajectory_checkpoint_injection"` |
 
 `trajectory_checkpoint_iteration` is emitted for every completed non-final
 iteration snapshot. `trajectory_checkpoint_injection` is emitted only when the

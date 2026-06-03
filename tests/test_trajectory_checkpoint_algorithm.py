@@ -53,10 +53,13 @@ def tool_response(name: str = "lookup") -> FakeResponse:
 
 
 class ToolRecordingTrajectoryAlgorithm(TrajectoryCheckpointAlgorithm):
-    def after_tool_call(self, ctx) -> None:
-        # Records that the generic after_tool_call lifecycle received the tool result.
-        if ctx.tool_result is not None:
-            ctx.set_metadata("tool_seen", ctx.tool_result.output)
+    def after_tool_calls(self, ctx) -> None:
+        # Records the latest observed tool result output from the iteration snapshot.
+        super().after_tool_calls(ctx)
+        if ctx.iteration is not None and ctx.iteration.tool_calls:
+            latest = ctx.iteration.tool_calls[-1]
+            if latest.result is not None:
+                ctx.set_metadata("tool_seen", latest.result.output)
 
 
 class TrajectoryCheckpointAlgorithmTests(unittest.IsolatedAsyncioTestCase):
@@ -221,7 +224,7 @@ class TrajectoryCheckpointAlgorithmTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("### Reasoning Summary", messages[0]["content"])
         self.assertEqual(messages[1]["content"], "one")
 
-    async def test_after_tool_call_lifecycle_receives_tool_result(self) -> None:
+    async def test_after_tool_calls_hook_receives_tool_results(self) -> None:
         @tool
         def lookup() -> str:
             return "tool output"

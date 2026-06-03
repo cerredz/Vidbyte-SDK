@@ -56,14 +56,13 @@ def _build_suite() -> unittest.TestSuite:
     # Builds the exact verification suite for trajectory checkpoint inner-loop context.
     suite = unittest.TestSuite()
     for method_name in (
-        "test_run_context_upsert_writes_to_context_manager",
-        "test_run_context_append_generates_stable_primitive_id",
+        "test_place_after_tools_writes_to_context_manager",
+        "test_place_after_system_prompt_sets_top_placement",
+        "test_place_generates_stable_primitive_id",
         "test_run_context_remove_deletes_primitive",
         "test_run_context_record_delegates_to_recorder",
         "test_run_context_set_metadata_preserves_existing_keys",
-        "test_run_context_every_rejects_zero_iterations",
-        "test_run_context_every_false_without_iteration_snapshot",
-        "test_inner_algorithm_default_hooks_are_noops",
+        "test_inner_algorithm_default_hook_is_noop",
     ):
         suite.addTest(_named_test(ContextWindowRunContextTests, method_name))
     for method_name in (
@@ -99,7 +98,7 @@ def _build_suite() -> unittest.TestSuite:
         "test_runtime_slots_match_template",
         "test_inner_context_window_private_manager_created_when_missing",
         "test_context_window_conversation_top_placement_visible_before_existing_messages",
-        "test_after_tool_call_lifecycle_receives_tool_result",
+        "test_after_tool_calls_hook_receives_tool_results",
     ):
         suite.addTest(_named_test(TrajectoryCheckpointAlgorithmTests, method_name))
     for method_name in (

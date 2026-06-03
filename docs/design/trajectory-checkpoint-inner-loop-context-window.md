@@ -7,6 +7,22 @@
 
 ---
 
+> **Revision (PR #100 review):** The inner-loop API described below was
+> simplified during review. The six-event `ContextWindowLifecycleEvent`
+> lifecycle and the matching `InnerContextWindowAlgorithm` methods
+> (`on_run_start`, `before_model_call`, `after_model_response`, `after_tool_call`,
+> `after_iteration`, `on_run_end`) were collapsed into a **single** hook,
+> `after_tool_calls`, dispatched from one point in the runtime loop (after a
+> completed non-final iteration's tool calls; plus one run-start invocation with
+> `ctx.iteration is None`). The two runtime dispatch helpers were merged into one.
+> `ContextWindowRunContext` was reduced to `context_manager`, `recorder`, `state`,
+> and `iteration`; all primitive placement logic now lives on `ContextManager`,
+> which exposes semantic methods `place_after_system_prompt` and
+> `place_after_tools` (these mint a stable `primitive_id` when missing). The
+> `primitives.py` module was split into a `vidbyte/context/primitives/` package.
+> Sections below that describe per-event lifecycle methods or the wide run-context
+> object reflect the original design, not the shipped API.
+
 ## 1. Overview
 
 This feature replaces PR #94's ad hoc `iteration_observer` message injection with a standard inner-loop context-window lifecycle API built on the existing `ContextManager`. Context-window algorithms that need to update model-visible context during the direct agent loop will receive a small `ContextWindowRunContext` object and will write typed `ContextItem` primitives into the active manager. The trajectory checkpoint preset will use this path by writing a custom `TrajectoryCheckpointContextItem` every configured number of completed non-final iterations, so the next model call sees the checkpoint through the normal context-window primitive rendering path.

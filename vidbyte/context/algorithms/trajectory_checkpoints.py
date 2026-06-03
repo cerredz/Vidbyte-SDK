@@ -50,34 +50,39 @@ class TrajectoryCheckpointAlgorithm(InnerContextWindowAlgorithm):
         _validate_metadata_keys(self.metadata)
         object.__setattr__(self, "placement", ContextWindowPlacement(self.placement))
 
-    def on_run_start(self, ctx: ContextWindowRunContext) -> None:
-        # Initializes per-run checkpoint state and records the system prompt slot.
-        ctx.record("system_prompt")
-        ctx.metadata[_STATE_KEY] = {"seen_iterations": set(), "checkpoints": []}
-
-    def after_iteration(self, ctx: ContextWindowRunContext) -> None:
-        # Writes a checkpoint primitive when a completed non-final iteration reaches cadence.
-        snapshot = ctx.iteration
-        if snapshot is None or ctx.is_final:
-            return
+    def after_tool_calls(self, ctx: ContextWindowRunContext) -> None:
+        # Single inner-loop hook: initializes on the first call, then checkpoints per cadence.
         state = self._state(ctx)
+        snapshot = ctx.iteration
+        if snapshot is None:
+            # Run-start initialization: record the system prompt and publish empty metadata.
+            ctx.record("system_prompt")
+            self._publish_metadata(ctx, state)
+            return
         seen = state["seen_iterations"]
         if snapshot.iteration_count in seen:
             return
         seen.add(snapshot.iteration_count)
         ctx.record("trajectory_checkpoint_iteration", iteration=snapshot.iteration_count)
         checkpoints = state["checkpoints"]
-        if not self.should_checkpoint(snapshot.iteration_count, len(checkpoints)):
-            return
-        item = self.build_item(snapshot, checkpoint_index=len(checkpoints) + 1)
-        ctx.upsert(item, placement=self.placement)
-        record = self._checkpoint_record(item)
-        checkpoints.append(record)
-        ctx.record("trajectory_checkpoint_injection", iteration=item.iteration, checkpoint_index=item.checkpoint_index)
+        if self.should_checkpoint(snapshot.iteration_count, len(checkpoints)):
+            item = self.build_item(snapshot, checkpoint_index=len(checkpoints) + 1)
+            self._place_checkpoint(ctx, item)
+            checkpoints.append(self._checkpoint_record(item))
+            ctx.record("trajectory_checkpoint_injection", iteration=item.iteration, checkpoint_index=item.checkpoint_index)
+        self._publish_metadata(ctx, state)
 
-    def on_run_end(self, ctx: ContextWindowRunContext) -> None:
+    def _place_checkpoint(self, ctx: ContextWindowRunContext, item: TrajectoryCheckpointContextItem) -> None:
+        # Writes the checkpoint through the configured placement using semantic manager methods.
+        if self.placement is ContextWindowPlacement.TOP_OF_CONTEXT:
+            ctx.place_after_system_prompt(item)
+        elif self.placement is ContextWindowPlacement.END_OF_CONTEXT:
+            ctx.place_after_tools(item)
+        else:
+            ctx.context_manager.upsert(item, placement=self.placement)
+
+    def _publish_metadata(self, ctx: ContextWindowRunContext, state: dict[str, Any]) -> None:
         # Publishes compact checkpoint metadata for the final AgentResult.
-        state = self._state(ctx)
         ctx.set_metadata(
             "trajectory_checkpoints",
             {
@@ -119,7 +124,7 @@ class TrajectoryCheckpointAlgorithm(InnerContextWindowAlgorithm):
 
     def _state(self, ctx: ContextWindowRunContext) -> dict[str, Any]:
         # Returns the mutable per-run trajectory checkpoint state.
-        return ctx.metadata.setdefault(_STATE_KEY, {"seen_iterations": set(), "checkpoints": []})
+        return ctx.state.setdefault(_STATE_KEY, {"seen_iterations": set(), "checkpoints": []})
 
     def _reasoning_summary(self, snapshot: AgentIterationSnapshot) -> str:
         # Summarizes observable progress without claiming hidden chain-of-thought.

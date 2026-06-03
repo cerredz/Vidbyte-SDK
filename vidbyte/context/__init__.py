@@ -38,7 +38,7 @@ from vidbyte.context.primitives import (
     ToolCallContextItem,
     TrajectoryCheckpointContextItem,
 )
-from vidbyte.context.runtime import ContextWindowLifecycleEvent, ContextWindowPlacement, ContextWindowRunContext, InnerContextWindowAlgorithm
+from vidbyte.context.runtime import ContextWindowPlacement, ContextWindowRunContext, InnerContextWindowAlgorithm
 from vidbyte.lib.dataclasses.context import (
     BaseAgentContext,
     BaseContext,
@@ -65,7 +65,6 @@ __all__ = [
     "ContextToolCall",
     "ContextWindow",
     "ContextWindowAlgorithm",
-    "ContextWindowLifecycleEvent",
     "ContextWindowPlacement",
     "ContextWindowPresets",
     "ContextWindowRunContext",
