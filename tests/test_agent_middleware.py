@@ -5,6 +5,7 @@ import unittest
 from vidbyte.agents import AgentRuntime
 from vidbyte.lib.dataclasses.agents import AgentRuntimeConfig
 from vidbyte.lib.dataclasses.middleware import MiddlewareContext, MiddlewareDecision
+from vidbyte.lib.dataclasses.runner import RunnerHandle
 from vidbyte.middleware import AgentMiddleware
 from vidbyte.middleware.builtins import ModelRetryMiddleware, ToolPolicyMiddleware
 from vidbyte.lib.dataclasses.context import BaseContext as StrategyContext
@@ -133,12 +134,8 @@ class AgentMiddlewareTests(unittest.IsolatedAsyncioTestCase):
 
         result = await runtime.arun(
             "task",
-            runner=runner,
+            handle=RunnerHandle(runner=runner, provider="openai", invoke=invoke_runner, extract_text=runner_output_text, extract_metadata=runner_output_metadata),
             context=self._context(runtime),
-            provider="openai",
-            invoke_runner=invoke_runner,
-            runner_output_text=runner_output_text,
-            runner_output_metadata=runner_output_metadata,
             metadata={"tenant_id": "tenant-a"},
         )
 
@@ -165,12 +162,8 @@ class AgentMiddlewareTests(unittest.IsolatedAsyncioTestCase):
 
         result = await runtime.arun(
             "task",
-            runner=runner,
+            handle=RunnerHandle(runner=runner, provider="openai", invoke=invoke_runner, extract_text=runner_output_text, extract_metadata=runner_output_metadata),
             context=self._context(runtime),
-            provider="openai",
-            invoke_runner=invoke_runner,
-            runner_output_text=runner_output_text,
-            runner_output_metadata=runner_output_metadata,
         )
 
         self.assertEqual(result.output, "done")
@@ -213,12 +206,8 @@ class AgentMiddlewareTests(unittest.IsolatedAsyncioTestCase):
 
         result = await runtime.arun(
             "task",
-            runner=runner,
+            handle=RunnerHandle(runner=runner, provider="openai", invoke=invoke_runner, extract_text=runner_output_text, extract_metadata=runner_output_metadata),
             context=self._context(runtime),
-            provider="openai",
-            invoke_runner=invoke_runner,
-            runner_output_text=runner_output_text,
-            runner_output_metadata=runner_output_metadata,
         )
 
         self.assertFalse(tool_instance.executed)
@@ -238,12 +227,8 @@ class AgentMiddlewareTests(unittest.IsolatedAsyncioTestCase):
 
         result = await runtime.arun(
             "task",
-            runner=runner,
+            handle=RunnerHandle(runner=runner, provider="openai", invoke=invoke_runner, extract_text=runner_output_text, extract_metadata=runner_output_metadata),
             context=self._context(runtime),
-            provider="openai",
-            invoke_runner=invoke_runner,
-            runner_output_text=runner_output_text,
-            runner_output_metadata=runner_output_metadata,
         )
 
         self.assertEqual(result.output, "done")
@@ -256,12 +241,8 @@ class AgentMiddlewareTests(unittest.IsolatedAsyncioTestCase):
 
         result = await runtime.arun(
             "task",
-            runner=runner,
+            handle=RunnerHandle(runner=runner, provider="openai", invoke=invoke_runner, extract_text=runner_output_text, extract_metadata=runner_output_metadata),
             context=self._context(runtime),
-            provider="openai",
-            invoke_runner=invoke_runner,
-            runner_output_text=runner_output_text,
-            runner_output_metadata=runner_output_metadata,
         )
 
         self.assertEqual(result.metadata["stop_reason"], "middleware_abort")
@@ -280,12 +261,8 @@ class AgentMiddlewareTests(unittest.IsolatedAsyncioTestCase):
 
         result = await runtime.arun(
             "task",
-            runner=runner,
+            handle=RunnerHandle(runner=runner, provider="openai", invoke=invoke_runner, extract_text=runner_output_text, extract_metadata=runner_output_metadata),
             context=self._context(runtime),
-            provider="openai",
-            invoke_runner=invoke_runner,
-            runner_output_text=runner_output_text,
-            runner_output_metadata=runner_output_metadata,
         )
 
         self.assertEqual(result.output, "done")
@@ -311,12 +288,8 @@ class AgentMiddlewareTests(unittest.IsolatedAsyncioTestCase):
 
         result = await runtime.arun(
             "task",
-            runner=runner,
+            handle=RunnerHandle(runner=runner, provider="openai", invoke=invoke_runner, extract_text=runner_output_text, extract_metadata=runner_output_metadata),
             context=self._context(runtime),
-            provider="openai",
-            invoke_runner=invoke_runner,
-            runner_output_text=runner_output_text,
-            runner_output_metadata=runner_output_metadata,
         )
 
         self.assertEqual(result.metadata["stop_reason"], "max_iterations")

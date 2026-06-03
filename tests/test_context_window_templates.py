@@ -28,6 +28,7 @@ from vidbyte.agents.runtime import AgentRuntime
 from vidbyte.context.templates import ContextWindowRecorder, NullRecorder, RecorderBase, SlotEvent
 from vidbyte.context.window import ContextWindow
 from vidbyte.lib.dataclasses.agents import AgentRuntimeConfig
+from vidbyte.lib.dataclasses.runner import RunnerHandle
 from vidbyte.lib.templates import ContextWindowTemplate, ReflexionContextWindowTemplate, TemplateViolation
 from vidbyte.strategies.types import BaseAgentContext
 from vidbyte.tools import Tools
@@ -355,12 +356,8 @@ class ReflexionInstrumentationTests(unittest.IsolatedAsyncioTestCase):
         runner = FakeRunner([_is_done_response()])
         await runtime.arun(
             "task",
-            runner=runner,
+            handle=RunnerHandle(runner=runner, provider="openai", invoke=_invoke_runner, extract_text=_output_text, extract_metadata=_output_metadata),
             context=_base_context(),
-            provider="openai",
-            invoke_runner=_invoke_runner,
-            runner_output_text=_output_text,
-            runner_output_metadata=_output_metadata,
         )
         system_prompt_slots = [s for s in recorder.slots() if s == "system_prompt"]
         self.assertEqual(len(system_prompt_slots), 1)
@@ -373,12 +370,8 @@ class ReflexionInstrumentationTests(unittest.IsolatedAsyncioTestCase):
         runner = FakeRunner([_max_iterations_response(), _reflection_response(), _is_done_response()])
         await runtime.arun(
             "task",
-            runner=runner,
+            handle=RunnerHandle(runner=runner, provider="openai", invoke=_invoke_runner, extract_text=_output_text, extract_metadata=_output_metadata),
             context=_base_context(),
-            provider="openai",
-            invoke_runner=_invoke_runner,
-            runner_output_text=_output_text,
-            runner_output_metadata=_output_metadata,
         )
         trial_slots = [s for s in recorder.slots() if s == "reflexion_trial"]
         self.assertEqual(len(trial_slots), 2)
@@ -389,12 +382,8 @@ class ReflexionInstrumentationTests(unittest.IsolatedAsyncioTestCase):
         runner = FakeRunner([_max_iterations_response(), _reflection_response(), _is_done_response()])
         await runtime.arun(
             "task",
-            runner=runner,
+            handle=RunnerHandle(runner=runner, provider="openai", invoke=_invoke_runner, extract_text=_output_text, extract_metadata=_output_metadata),
             context=_base_context(),
-            provider="openai",
-            invoke_runner=_invoke_runner,
-            runner_output_text=_output_text,
-            runner_output_metadata=_output_metadata,
         )
         reflection_slots = [s for s in recorder.slots() if s == "reflexion_reflection"]
         self.assertEqual(len(reflection_slots), 1)
@@ -405,12 +394,8 @@ class ReflexionInstrumentationTests(unittest.IsolatedAsyncioTestCase):
         runner = FakeRunner([_max_iterations_response(), _reflection_response(), _is_done_response()])
         await runtime.arun(
             "task",
-            runner=runner,
+            handle=RunnerHandle(runner=runner, provider="openai", invoke=_invoke_runner, extract_text=_output_text, extract_metadata=_output_metadata),
             context=_base_context(),
-            provider="openai",
-            invoke_runner=_invoke_runner,
-            runner_output_text=_output_text,
-            runner_output_metadata=_output_metadata,
         )
         template = ReflexionContextWindowTemplate(max_trials=2, failing_trials=1)
         self.assertTrue(template.passes(recorder), msg=f"Violations: {template.validate(recorder)}")
@@ -421,12 +406,8 @@ class ReflexionInstrumentationTests(unittest.IsolatedAsyncioTestCase):
         runner = FakeRunner([_is_done_response()])
         await runtime.arun(
             "task",
-            runner=runner,
+            handle=RunnerHandle(runner=runner, provider="openai", invoke=_invoke_runner, extract_text=_output_text, extract_metadata=_output_metadata),
             context=_base_context(),
-            provider="openai",
-            invoke_runner=_invoke_runner,
-            runner_output_text=_output_text,
-            runner_output_metadata=_output_metadata,
         )
         self.assertNotIn("reflexion_reflection", recorder.slots())
 
@@ -436,12 +417,8 @@ class ReflexionInstrumentationTests(unittest.IsolatedAsyncioTestCase):
         runner = FakeRunner([_is_done_response()])
         result = await runtime.arun(
             "task",
-            runner=runner,
+            handle=RunnerHandle(runner=runner, provider="openai", invoke=_invoke_runner, extract_text=_output_text, extract_metadata=_output_metadata),
             context=_base_context(),
-            provider="openai",
-            invoke_runner=_invoke_runner,
-            runner_output_text=_output_text,
-            runner_output_metadata=_output_metadata,
         )
         self.assertIsNotNone(result)
 
@@ -451,12 +428,8 @@ class ReflexionInstrumentationTests(unittest.IsolatedAsyncioTestCase):
         runner = FakeRunner([_max_iterations_response(), _reflection_response(), _is_done_response()])
         await runtime.arun(
             "task",
-            runner=runner,
+            handle=RunnerHandle(runner=runner, provider="openai", invoke=_invoke_runner, extract_text=_output_text, extract_metadata=_output_metadata),
             context=_base_context(),
-            provider="openai",
-            invoke_runner=_invoke_runner,
-            runner_output_text=_output_text,
-            runner_output_metadata=_output_metadata,
         )
         trial_events = [e for e in recorder.events() if e.slot_type == "reflexion_trial"]
         self.assertEqual(trial_events[0].iteration, 0)
@@ -474,12 +447,8 @@ class ReflexionInstrumentationTests(unittest.IsolatedAsyncioTestCase):
         ])
         await runtime.arun(
             "task",
-            runner=runner,
+            handle=RunnerHandle(runner=runner, provider="openai", invoke=_invoke_runner, extract_text=_output_text, extract_metadata=_output_metadata),
             context=_base_context(),
-            provider="openai",
-            invoke_runner=_invoke_runner,
-            runner_output_text=_output_text,
-            runner_output_metadata=_output_metadata,
         )
         template = ReflexionContextWindowTemplate(max_trials=3, failing_trials=2)
         violations = template.validate(recorder)

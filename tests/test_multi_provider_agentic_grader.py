@@ -32,6 +32,7 @@ from vidbyte.agents.context_algorithms import AgentRuntimeContextAlgorithms
 from vidbyte.agents.runtime import AgentRuntime
 from vidbyte.lib.errors import AgentExecutionError, ConfigurationError
 from vidbyte.lib.dataclasses.agents import AgentRuntimeConfig
+from vidbyte.lib.dataclasses.runner import RunnerHandle
 from vidbyte.lib.config.constants import API_KEY_ENV_VARS
 from vidbyte.tools.catalog import Tools
 from vidbyte.tools.security import PermissionPolicy
@@ -126,12 +127,8 @@ class MultiProviderAgenticGraderTests(unittest.IsolatedAsyncioTestCase):
 
         result = await runtime.arun(
             "task",
-            runner=FakeRunner("ignored"),
+            handle=RunnerHandle(runner=FakeRunner("ignored"), provider="openai", invoke=_invoke_runner_helper, extract_text=lambda r: getattr(r, "text", str(r)), extract_metadata=lambda r: {}),
             context=context,
-            provider="openai",
-            invoke_runner=_invoke_runner_helper,
-            runner_output_text=lambda r: getattr(r, "text", str(r)),
-            runner_output_metadata=lambda r: {},
         )
 
         self.assertEqual(result.output, "candidate output text")
@@ -164,12 +161,8 @@ class MultiProviderAgenticGraderTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(AgentExecutionError):
             await runtime.arun(
                 "task",
-                runner=FakeRunner("ignored"),
+                handle=RunnerHandle(runner=FakeRunner("ignored"), provider="openai", invoke=_invoke_runner_helper, extract_text=lambda r: getattr(r, "text", str(r)), extract_metadata=lambda r: {}),
                 context=context,
-                provider="openai",
-                invoke_runner=_invoke_runner_helper,
-                runner_output_text=lambda r: getattr(r, "text", str(r)),
-                runner_output_metadata=lambda r: {},
             )
 
     async def test_missing_api_key_for_explicit_provider(self) -> None:
@@ -198,12 +191,8 @@ class MultiProviderAgenticGraderTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(ConfigurationError) as ctx:
             await runtime.arun(
                 "task",
-                runner=FakeRunner("ignored"),
+                handle=RunnerHandle(runner=FakeRunner("ignored"), provider="openai", invoke=_invoke_runner_helper, extract_text=lambda r: getattr(r, "text", str(r)), extract_metadata=lambda r: {}),
                 context=context,
-                provider="openai",
-                invoke_runner=_invoke_runner_helper,
-                runner_output_text=lambda r: getattr(r, "text", str(r)),
-                runner_output_metadata=lambda r: {},
             )
         self.assertIn("Missing API key for explicitly requested provider 'openai'", str(ctx.exception))
 
@@ -246,12 +235,8 @@ class MultiProviderAgenticGraderTests(unittest.IsolatedAsyncioTestCase):
 
         result = await runtime.arun(
             "task",
-            runner=FakeRunner("ignored"),
+            handle=RunnerHandle(runner=FakeRunner("ignored"), provider="openai", invoke=_invoke_runner_helper, extract_text=lambda r: getattr(r, "text", str(r)), extract_metadata=lambda r: {}),
             context=context,
-            provider="openai",
-            invoke_runner=_invoke_runner_helper,
-            runner_output_text=lambda r: getattr(r, "text", str(r)),
-            runner_output_metadata=lambda r: {},
         )
 
         self.assertEqual(result.output, "openai response output")
@@ -286,12 +271,8 @@ class MultiProviderAgenticGraderTests(unittest.IsolatedAsyncioTestCase):
 
         result = await runtime.arun(
             "task",
-            runner=FakeRunner("ignored"),
+            handle=RunnerHandle(runner=FakeRunner("ignored"), provider="openai", invoke=_invoke_runner_helper, extract_text=lambda r: getattr(r, "text", str(r)), extract_metadata=lambda r: {}),
             context=context,
-            provider="openai",
-            invoke_runner=_invoke_runner_helper,
-            runner_output_text=lambda r: getattr(r, "text", str(r)),
-            runner_output_metadata=lambda r: {},
         )
 
         self.assertEqual(result.output, "candidate answer")
@@ -322,12 +303,8 @@ class MultiProviderAgenticGraderTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(ConfigurationError) as ctx:
             await runtime.arun(
                 "task",
-                runner=FakeRunner("ignored"),
+                handle=RunnerHandle(runner=FakeRunner("ignored"), provider="openai", invoke=_invoke_runner_helper, extract_text=lambda r: getattr(r, "text", str(r)), extract_metadata=lambda r: {}),
                 context=context,
-                provider="openai",
-                invoke_runner=_invoke_runner_helper,
-                runner_output_text=lambda r: getattr(r, "text", str(r)),
-                runner_output_metadata=lambda r: {},
             )
         self.assertIn("No model providers have API keys configured in the environment", str(ctx.exception))
 

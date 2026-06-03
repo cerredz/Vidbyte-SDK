@@ -16,6 +16,7 @@ from vidbyte.agents.algorithms import ReflexionRuntimeAlgorithm
 from vidbyte.agents.context_algorithms import AgentRuntimeContextAlgorithms
 from vidbyte.agents import AgentRuntime
 from vidbyte.lib.dataclasses.agents import AgentRuntimeConfig
+from vidbyte.lib.dataclasses.runner import RunnerHandle
 from vidbyte.lib.dataclasses.strategies import AgentResult as StrategyResult
 from vidbyte.tools import ToolCallContext, ToolCallState, ToolResult, Tools, tool
 from vidbyte.tools.security import PermissionPolicy
@@ -114,12 +115,8 @@ class ReflexionAlgorithmTests(unittest.IsolatedAsyncioTestCase):
 
         result = await runtime.arun(
             "task",
-            runner=runner,
+            handle=RunnerHandle(runner=runner, provider="openai", invoke=invoke_runner, extract_text=runner_output_text, extract_metadata=runner_output_metadata),
             context=context,
-            provider="openai",
-            invoke_runner=invoke_runner,
-            runner_output_text=runner_output_text,
-            runner_output_metadata=runner_output_metadata,
         )
 
         self.assertEqual(result.output, "fixed")

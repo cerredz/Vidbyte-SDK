@@ -7,6 +7,7 @@ from unittest.mock import patch
 from vidbyte.agents.base import BaseAgent
 from vidbyte.agents import AgentRuntime
 from vidbyte.lib.dataclasses.agents import AgentRuntimeConfig
+from vidbyte.lib.dataclasses.runner import RunnerHandle
 from vidbyte.lib.errors import TracerConfigurationError
 from vidbyte.lib.tracing import NullTracer, SpanContext, TracerBase
 from vidbyte.tools import BaseTool, ToolCall, ToolPermission, ToolResult, ToolSpec, Tools
@@ -227,12 +228,8 @@ class AgentRuntimeSpanTests(unittest.IsolatedAsyncioTestCase):
         context = BaseAgentContext(system_prompt="sys", history=(), file_paths=(), tools=(), budget=None)
         await runtime.arun(
             "prompt",
-            runner=runner,
+            handle=RunnerHandle(runner=runner, provider="openai", invoke=_invoke_runner, extract_text=_output_text, extract_metadata=_output_metadata),
             context=context,
-            provider="openai",
-            invoke_runner=_invoke_runner,
-            runner_output_text=_output_text,
-            runner_output_metadata=_output_metadata,
         )
         llm_spans = [s for s in tracer.spans_started if s["name"] == "llm.call"]
         self.assertEqual(len(llm_spans), 1)
@@ -247,12 +244,8 @@ class AgentRuntimeSpanTests(unittest.IsolatedAsyncioTestCase):
         context = BaseAgentContext(system_prompt="sys", history=(), file_paths=(), tools=(), budget=None)
         await runtime.arun(
             "prompt",
-            runner=runner,
+            handle=RunnerHandle(runner=runner, provider="openai", invoke=_invoke_runner, extract_text=_output_text, extract_metadata=_output_metadata),
             context=context,
-            provider="openai",
-            invoke_runner=_invoke_runner,
-            runner_output_text=_output_text,
-            runner_output_metadata=_output_metadata,
         )
         # At minimum the LLM span is closed; isDone tool also closes a span.
         llm_spans_started = [s for s in tracer.spans_started if s["name"] == "llm.call"]
@@ -270,12 +263,8 @@ class AgentRuntimeSpanTests(unittest.IsolatedAsyncioTestCase):
         context = BaseAgentContext(system_prompt="sys", history=(), file_paths=(), tools=(), budget=None)
         await runtime.arun(
             "prompt",
-            runner=runner,
+            handle=RunnerHandle(runner=runner, provider="openai", invoke=_invoke_runner, extract_text=_output_text, extract_metadata=_output_metadata),
             context=context,
-            provider="openai",
-            invoke_runner=_invoke_runner,
-            runner_output_text=_output_text,
-            runner_output_metadata=_output_metadata,
             trace_context=root_ctx,
         )
         llm_span = next(s for s in tracer.spans_started if s["name"] == "llm.call")
@@ -305,12 +294,8 @@ class AgentRuntimeSpanTests(unittest.IsolatedAsyncioTestCase):
         context = BaseAgentContext(system_prompt="sys", history=(), file_paths=(), tools=(), budget=None)
         await runtime.arun(
             "prompt",
-            runner=runner,
+            handle=RunnerHandle(runner=runner, provider="openai", invoke=_invoke_runner, extract_text=_output_text, extract_metadata=_output_metadata),
             context=context,
-            provider="openai",
-            invoke_runner=_invoke_runner,
-            runner_output_text=_output_text,
-            runner_output_metadata=_output_metadata,
         )
         tool_spans = [s for s in tracer.spans_started if s["name"] == "tool.call"]
         self.assertGreaterEqual(len(tool_spans), 1)
