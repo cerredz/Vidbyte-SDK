@@ -39,6 +39,7 @@ vidbyte/
 |   `-- prompts/
 |-- providers/
 |   `-- client.py
+|-- trace/
 |-- pipelines/
 |   |-- base.py
 |   |-- conditional.py
@@ -74,6 +75,9 @@ vidbyte/
 - Follow `skills/vidbyte-sdk/adding-context-window-algorithms.md` when adding or changing attached context-window algorithms.
 - Keep prompt templates in `vidbyte/prompts/prompts/` and expose them through `vidbyte.prompts.Prompts` plus `vidbyte.lib.enums.prompts.Prompt`; follow the JSON-descriptor-plus-Markdown format in `skills/vidbyte-sdk/adding-prompts.md` for new large prompt assets.
 - Follow `skills/vidbyte-sdk/adding-prompts.md` whenever adding or changing prompt assets.
+- Keep public trace presets and helper factories under `vidbyte/trace/`.
+- Keep provider-neutral tracer protocols under `vidbyte/lib/tracing/`.
+- Keep external tracing provider adapters under `vidbyte/providers/tracing/`.
 - Keep enum presets under `vidbyte/lib/enums/`.
 - Keep internal library helpers under `vidbyte/lib/`.
 - Keep SDK dataclass definitions under `vidbyte/lib/dataclasses/`; package-local type modules should re-export those contracts when stable imports are needed.

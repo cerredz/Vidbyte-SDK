@@ -142,6 +142,51 @@ reply = await agent.arun(
 )
 ```
 
+## Tracing
+
+Use `Trace` presets when you want agent runs to emit trace spans without wiring
+provider adapters manually. `Trace.off()` disables tracing, `Trace.debug()` keeps
+an in-memory event list for local inspection, and provider helpers wrap the
+existing tracing adapters.
+
+```python
+from vidbyte import Agent, Trace
+
+events = []
+
+agent = Agent(
+    name="repo-analyst",
+    system_prompt="Use tools when they help answer precisely.",
+    runner=my_runner,
+    tools=[lookup_metric],
+    trace=Trace.debug(events),
+)
+```
+
+Provider-backed tracing uses the existing optional adapters:
+
+```python
+agent = Agent(
+    name="observed-agent",
+    system_prompt="Work carefully.",
+    runner=my_runner,
+    trace=Trace.langfuse(public_key="...", secret_key="..."),
+)
+```
+
+`Trace.continual(...)` is a validated first-step capture preset for future
+trace-to-context feedback. It records lifecycle events and stores settings, but
+does not yet inject trace memory into the agent context.
+
+```python
+agent = Agent(
+    name="continual-agent",
+    system_prompt="Preserve useful run context.",
+    runner=my_runner,
+    trace=Trace.continual(["tool_calls", "failures"], max_memory_chars=1200),
+)
+```
+
 ## Swappable Agent Runtimes
 
 The Vidbyte SDK decouples the core `BaseAgent` class from the execution loop. Developers can select different agent runtime loop paradigms at initialization:
@@ -301,6 +346,7 @@ vidbyte/
 |   `-- prompts/
 |-- providers/
 |   `-- client.py
+|-- trace/
 |-- middleware/
 |   `-- builtins/
 |-- tools/
