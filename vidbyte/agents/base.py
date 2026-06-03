@@ -77,6 +77,7 @@ class BaseAgent(McpAttachableMixin):
         algorithm: ContextWindowAlgorithm | str | None = None,
         metadata: dict[str, Any] | None = None,
         tracer: type[TracerBase] | TracerBase | None = None,
+        trace: type[TracerBase] | TracerBase | None = None,
         output_schema: type | Mapping[str, Any] | None = None,
     ) -> None:
         if not name:
@@ -154,12 +155,7 @@ class BaseAgent(McpAttachableMixin):
         for _tool in self._agent_tool_items:
             self._bind_agent_tool_context(_tool)
 
-        if tracer is None:
-            self._tracer: TracerBase = NullTracer()
-        elif isinstance(tracer, type):
-            self._tracer = tracer()
-        else:
-            self._tracer = tracer
+        self._tracer = self._resolve_tracer(tracer, trace)
 
         # MCP Attachable State
         self._mcp_handles = []
@@ -168,6 +164,18 @@ class BaseAgent(McpAttachableMixin):
     @classmethod
     def from_run_id(cls, run_id: str, *, name: str, system_prompt: str, **kwargs: Any) -> BaseAgent:
         return cls(name=name, system_prompt=system_prompt, run_id=run_id, **kwargs)
+
+    @staticmethod
+    def _resolve_tracer(tracer: type[TracerBase] | TracerBase | None, trace: type[TracerBase] | TracerBase | None) -> TracerBase:
+        # Normalizes the legacy tracer= argument and the public trace= alias.
+        if tracer is not None and trace is not None:
+            raise ConfigurationError("Pass either trace= or tracer=, not both.")
+        selected = trace if trace is not None else tracer
+        if selected is None:
+            return NullTracer()
+        if isinstance(selected, type):
+            return selected()
+        return selected
 
     def card(self) -> AgentCard:
         return AgentCard(

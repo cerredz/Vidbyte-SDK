@@ -144,6 +144,10 @@ vidbyte/
 |   `-- prompts/
 |-- providers/
 |   `-- client.py
+|-- trace/
+|   |-- base.py
+|   |-- debug.py
+|   `-- continual/
 |-- pipelines/
 |   |-- __init__.py
 |   |-- base.py
@@ -178,6 +182,11 @@ vidbyte/
 - Keep public context objects in `vidbyte/context/`, but define dataclasses centrally under `vidbyte/lib/dataclasses/`.
 - Keep prompt templates in `vidbyte/prompts/prompts/` and expose them through `vidbyte.prompts.Prompts` plus `vidbyte.lib.enums.prompts.Prompt`.
 - Follow `skills/vidbyte-sdk/adding-prompts.md` whenever adding or changing prompt assets.
+- Keep the public `Trace` tracer client and helper factories in `vidbyte/trace/base.py`.
+- Keep concrete debug tracing implementation in `vidbyte/trace/debug.py`.
+- Keep continual tracing presets and future continual trace memory work under `vidbyte/trace/continual/`.
+- Keep provider-neutral tracer protocols under `vidbyte/lib/tracing/`.
+- Keep external tracing provider adapters under `vidbyte/providers/tracing/`.
 - Keep enum presets under `vidbyte/lib/enums/`.
 - Keep internal library helpers under `vidbyte/lib/`.
 - Keep SDK dataclass definitions under `vidbyte/lib/dataclasses/`; package-local type modules should re-export those contracts when stable imports are needed.
