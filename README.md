@@ -67,6 +67,39 @@ reply = await agent.arun("Draft a concise release note")
 For custom agents, pass an explicit `system_prompt`, model config, runner, and tools into `Agent` or `BaseAgent`.
 Semantic labels such as roles belong in agent metadata when callers need them.
 
+## Continual Trace Artifacts
+
+Use `trace=TraceOption.continual(...)` when a direct text agent should return a structured artifact describing what happened during its run. This is different from `tracer=`, which is for observability spans. Continual trace artifacts are user-visible run metadata.
+
+```python
+from vidbyte import Agent, TraceOption
+from vidbyte.trace.prebuilt import ActionTrace
+
+agent = Agent(
+    name="worker",
+    system_prompt="Work carefully and use tools when helpful.",
+    runner=my_runner,
+    trace=TraceOption.continual(ActionTrace, every_n_iterations=5, max_trace_iterations=3),
+)
+
+reply = await agent.arun("Fix the failing tests")
+print(reply.content)
+print(reply.metadata["trace"])
+print(reply.metadata["trace_metadata"])
+```
+
+You can define a custom schema with a simple field-description mapping:
+
+```python
+trace = TraceOption.continual({
+    "goal": "The main goal the agent is pursuing.",
+    "actions_taken": "Important steps and tool calls completed so far.",
+    "mistakes": "Mistakes or failed attempts that matter for a handoff.",
+})
+```
+
+Continual tracing is currently scoped to the default direct linear text runtime. Non-linear runtimes and non-default context-window algorithms reject `trace=` at agent construction time.
+
 ## Context Objects
 
 Context dataclasses are exposed through `vidbyte.context` and centralized internally under `vidbyte.lib.dataclasses`.

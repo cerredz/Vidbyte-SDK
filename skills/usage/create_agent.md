@@ -42,6 +42,7 @@ Agent(
     metadata: dict[str, Any] | None = None,  # arbitrary key-value metadata for discovery
     tools: Sequence[BaseTool] = (),      # tools the agent can call during execution
     middleware: Sequence[AgentMiddleware] = (),  # runtime policy middleware
+    trace: TraceOption | None = None,    # optional continual trace artifact config
     permission_policy: PermissionPolicy | None = None,  # tool permission policy
     runners: Mapping[ModelModality | str, object] | None = None,  # per-modality runners
 )
@@ -52,6 +53,29 @@ Each parameter has a specific role:
 - **Model** (`provider`, `model_name`, `api_key`, `temperature`, `modality`): Configures which model to use and how.
 - **Execution** (`max_tool_rounds`, `max_iterations`, `max_tokens`): Controls resource consumption and loop limits.
 - **Capability** (`tools`, `middleware`, `permission_policy`): What the agent can do and how it behaves.
+- **Trace artifact** (`trace`): Optional user-visible continual trace metadata returned in `reply.metadata`.
+
+## Add Continual Trace
+
+Use `trace=TraceOption.continual(...)` when the agent should return a structured artifact describing what it did:
+
+```python
+from vidbyte import Agent, TraceOption
+from vidbyte.trace.prebuilt import ActionTrace
+
+agent = Agent(
+    name="worker",
+    system_prompt="Work carefully.",
+    provider="openai",
+    model_name="gpt-4.1",
+    trace=TraceOption.continual(ActionTrace),
+)
+
+reply = await agent.arun("Complete the task")
+trace = reply.metadata["trace"]
+```
+
+Use `trace=` for user-visible run artifacts. Use `tracer=` only for observability spans. See [`skills/usage/use_continual_trace.md`](use_continual_trace.md).
 
 ## Run the Agent
 
@@ -132,6 +156,7 @@ The parent's tools, strategy, middleware, and permissions are inherited by the c
 ## Next Steps
 
 - **Add tools**: See [`skills/usage/create_agent_with_tools.md`](create_agent_with_tools.md)
+- **Add continual trace**: See [`skills/usage/use_continual_trace.md`](use_continual_trace.md)
 - **Add a strategy**: See [`skills/usage/available_features.md`](available_features.md)
 - **Manage multiple agents**: See [`skills/usage/create_agents.md`](create_agents.md)
 - **Build pipelines**: See [`skills/usage/create_pipeline.md`](create_pipeline.md)

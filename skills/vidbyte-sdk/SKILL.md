@@ -72,6 +72,9 @@ vidbyte/
 - Keep standardized context item primitives under `vidbyte/context/primitives.py` and expose the central `ContextManager` from `vidbyte/context/manager.py`.
 - Keep context-window presets in `vidbyte/context/presets.py` and algorithm implementations under `vidbyte/context/algorithms/`.
 - Follow `skills/vidbyte-sdk/adding-context-window-algorithms.md` when adding or changing attached context-window algorithms.
+- Keep user-visible trace artifact configuration under `vidbyte/trace/`, with shared contracts in `vidbyte/lib/dataclasses/trace.py` and prebuilt schemas in `vidbyte/trace/prebuilt/`.
+- Keep the built-in continual trace wrapper in `vidbyte/agents/continual_trace.py`; it must compose `BaseAgent` and should not become a separate runtime.
+- Follow `skills/vidbyte-sdk/continual-tracing.md` when configuring, testing, or modifying continual trace behavior.
 - Keep prompt templates in `vidbyte/prompts/prompts/` and expose them through `vidbyte.prompts.Prompts` plus `vidbyte.lib.enums.prompts.Prompt`; follow the JSON-descriptor-plus-Markdown format in `skills/vidbyte-sdk/adding-prompts.md` for new large prompt assets.
 - Follow `skills/vidbyte-sdk/adding-prompts.md` whenever adding or changing prompt assets.
 - Keep enum presets under `vidbyte/lib/enums/`.
@@ -97,6 +100,7 @@ vidbyte/
 - Agents may accept default `context_items` or a `context_manager`; per-call context belongs on `AgentInput`. Call-level context must not mutate agent defaults.
 - Tools are injected into agents or strategies; avoid global mutable tool state for orchestration. Prefer `@tool` and `Tools(...)` for new public examples; keep `@vidbyte_tool`, `ToolRegistry`, and `ToolExecutor` references for compatibility notes only.
 - Middleware is injected into direct text agents with `middleware=[...]`; it is deterministic runtime policy code and must not be model-visible or included in tool specs/cards.
+- Continual trace is injected into direct text agents with `trace=TraceOption.continual(...)`; it is user-visible run metadata and must remain distinct from observability `tracer=`.
 - Custom middleware should subclass `AgentMiddleware` and override only needed lifecycle hooks. Middleware should return `MiddlewareDecision` values instead of mutating runtime state directly.
 - Concrete `TextModelRunner`, `ImageModelRunner`, and `VideoModelRunner` classes are internal/advanced implementation details in user-facing docs. Prefer `Agent`/`BaseAgent` or harness composition in examples.
 - Do not add provider network calls, remote protocol transports, or private Vidbyte service logic without a separate approved design.
