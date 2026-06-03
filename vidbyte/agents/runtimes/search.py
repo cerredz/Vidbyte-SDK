@@ -19,12 +19,13 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass, field
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 from vidbyte.context.primitives import ContextItem
 from vidbyte.context.manager import ContextManager
 from vidbyte.lib.dataclasses.context import BaseAgentContext, StrategyContext
+from vidbyte.lib.dataclasses.runner import RunnerHandle
 from vidbyte.lib.dataclasses.strategies import StrategyResult
 from vidbyte.agents.types import AgentMessage
 from vidbyte.lib.enums import ModelModality
@@ -86,7 +87,7 @@ class SearchTreeRuntimeComponent:
             context_items=tuple(managed_context.context_items),
         )
 
-    async def arun(self, message: str, *, runner: object, context: BaseAgentContext, provider: str, invoke_runner: Callable[..., Any], runner_output_text: Callable[[object], str], runner_output_metadata: Callable[[object], Mapping[str, Any]], metadata: Mapping[str, Any] | None = None, options: Mapping[str, Any] | None = None, trace_context: Any = None) -> StrategyResult:
+    async def arun(self, message: str, *, handle: RunnerHandle, context: BaseAgentContext, metadata: Mapping[str, Any] | None = None, options: Mapping[str, Any] | None = None, trace_context: Any = None) -> StrategyResult:
         # Orchestrate the branching search tree, selecting nodes and executing rollbacks.
         root = SearchNode(node_id=str(uuid.uuid4()), parent=None, context=context)
         self._nodes[root.node_id] = root

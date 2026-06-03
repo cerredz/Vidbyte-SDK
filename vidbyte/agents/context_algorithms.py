@@ -14,10 +14,11 @@ Relations:
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
 from vidbyte.agents.algorithms import MultiProviderAgenticGraderRuntimeAlgorithm, ReflexionRuntimeAlgorithm
+from vidbyte.lib.dataclasses.runner import RunnerHandle
 from vidbyte.lib.tracing import SpanContext
 from vidbyte.lib.dataclasses.context import BaseAgentContext
 from vidbyte.lib.dataclasses.strategies import AgentResult
@@ -52,32 +53,15 @@ class AgentRuntimeContextAlgorithms:
             return MultiProviderAgenticGraderRuntimeAlgorithm(self.runtime, self.runtime.algorithm.multi_provider_agentic_grader)
         return None
 
-    async def arun(
-        self,
-        message: str,
-        *,
-        runner: object,
-        context: BaseAgentContext,
-        provider: str,
-        invoke_runner: Callable[..., Any],
-        runner_output_text: Callable[[object], str],
-        runner_output_metadata: Callable[[object], Mapping[str, Any]],
-        metadata: Mapping[str, Any] | None = None,
-        options: Mapping[str, Any] | None = None,
-        trace_context: SpanContext | None = None,
-    ) -> AgentResult | None:
+    async def arun(self, message: str, *, handle: RunnerHandle, context: BaseAgentContext, metadata: Mapping[str, Any] | None = None, options: Mapping[str, Any] | None = None, trace_context: SpanContext | None = None) -> AgentResult | None:
         """Run the configured algorithm, or return None when no algorithm exists."""
         algorithm = self.return_algorithm()
         if algorithm is None:
             return None
         return await algorithm.arun(
             message,
-            runner=runner,
+            handle=handle,
             context=context,
-            provider=provider,
-            invoke_runner=invoke_runner,
-            runner_output_text=runner_output_text,
-            runner_output_metadata=runner_output_metadata,
             metadata=metadata,
             options=options,
             trace_context=trace_context,

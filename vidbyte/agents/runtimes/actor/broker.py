@@ -20,13 +20,14 @@ from __future__ import annotations
 import asyncio
 import uuid
 from abc import ABC, abstractmethod
-from typing import Any, Callable, Mapping, Sequence
+from typing import Any, Mapping, Sequence
 
 from vidbyte.agents.runtimes.actor.actor import AgentActor, PrebuiltActorFactory
 from vidbyte.agents.runtimes.actor.message import ActorMessage
 from vidbyte.context.primitives import ContextItem
 from vidbyte.context.manager import ContextManager
 from vidbyte.lib.dataclasses.context import BaseAgentContext, StrategyContext
+from vidbyte.lib.dataclasses.runner import RunnerHandle
 from vidbyte.lib.dataclasses.strategies import StrategyResult
 from vidbyte.agents.types import AgentMessage
 from vidbyte.lib.enums import ModelModality
@@ -84,12 +85,8 @@ class BaseActorRuntime(ABC):
         self._message_count = 0
         self._completion_future: asyncio.Future[str] | None = None
 
-        # Core runner references populated at execution time
-        self._runner: object | None = None
-        self._invoke_runner: Callable[..., Any] | None = None
-        self._runner_output_text: Callable[[object], str] | None = None
-        self._runner_output_metadata: Callable[[object], Mapping[str, Any]] | None = None
-        self._provider: str | None = None
+        # RunnerHandle and options populated at execution time
+        self._handle: RunnerHandle | None = None
         self._options: Mapping[str, Any] | None = None
 
     async def spawn(self, actor_id: str, system_prompt: str, model_name: str | None = None) -> AgentActor:
@@ -162,37 +159,13 @@ class BaseActorRuntime(ABC):
         if target_model:
             call_options["model_name"] = target_model
 
-        # Invoke runner callback passed at arun
-        assert self._invoke_runner is not None
-        raw_result = await self._invoke_runner(
-            self._runner,
-            prompt,
-            context=actor_context,
-            **call_options
-        )
-        assert self._runner_output_text is not None
-        return self._runner_output_text(raw_result)
+        assert self._handle is not None
+        raw_result = await self._handle.invoke(prompt, context=actor_context, **call_options)
+        return self._handle.extract_text(raw_result)
 
-    async def arun(
-        self,
-        message: str,
-        *,
-        runner: object,
-        context: BaseAgentContext,
-        provider: str,
-        invoke_runner: Callable[..., Any],
-        runner_output_text: Callable[[object], str],
-        runner_output_metadata: Callable[[object], Mapping[str, Any]],
-        metadata: Mapping[str, Any] | None = None,
-        options: Mapping[str, Any] | None = None,
-        trace_context: Any = None,
-    ) -> StrategyResult:
+    async def arun(self, message: str, *, handle: RunnerHandle, context: BaseAgentContext, metadata: Mapping[str, Any] | None = None, options: Mapping[str, Any] | None = None, trace_context: Any = None) -> StrategyResult:
         """Launches prebuilt/dynamic networks and runs asynchronous message-passing loops."""
-        self._runner = runner
-        self._invoke_runner = invoke_runner
-        self._runner_output_text = runner_output_text
-        self._runner_output_metadata = runner_output_metadata
-        self._provider = provider
+        self._handle = handle
         self._options = options or {}
         self._message_count = 0
         self._completion_future = asyncio.get_running_loop().create_future()
