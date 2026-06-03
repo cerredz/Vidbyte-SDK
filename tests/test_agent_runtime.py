@@ -18,6 +18,7 @@ from vidbyte.agents import AgentRuntime
 from vidbyte.agents.types import AgentMessage
 from vidbyte.context import ContextArtifact, ContextPermissions, ContextResponse, ContextToolCall, ContextWindow, TaskContextItem
 from vidbyte.lib.dataclasses.agents import AgentRuntimeConfig
+from vidbyte.lib.dataclasses.runner import RunnerHandle
 from vidbyte.lib.enums import ModelModality
 from vidbyte.lib.dataclasses.context import BaseContext as StrategyContext
 from vidbyte.tools import BaseTool, ToolCall, ToolCallContext, ToolPermission, ToolResult, ToolSpec, Tools, tool
@@ -187,12 +188,8 @@ class AgentRuntimeTests(unittest.IsolatedAsyncioTestCase):
 
         result = await runtime.arun(
             "task",
-            runner=runner,
+            handle=RunnerHandle(runner=runner, provider="openai", invoke=invoke_runner, extract_text=runner_output_text, extract_metadata=runner_output_metadata),
             context=context,
-            provider="openai",
-            invoke_runner=invoke_runner,
-            runner_output_text=runner_output_text,
-            runner_output_metadata=runner_output_metadata,
         )
 
         self.assertEqual(result.output, "final answer")
@@ -258,12 +255,8 @@ class AgentRuntimeTests(unittest.IsolatedAsyncioTestCase):
 
         result = await runtime.arun(
             "task",
-            runner=runner,
+            handle=RunnerHandle(runner=runner, provider="openai", invoke=invoke_runner, extract_text=runner_output_text, extract_metadata=runner_output_metadata),
             context=context,
-            provider="openai",
-            invoke_runner=invoke_runner,
-            runner_output_text=runner_output_text,
-            runner_output_metadata=runner_output_metadata,
         )
 
         visible_tool_message = runner.calls[1]["kwargs"]["messages"][0]
@@ -303,12 +296,8 @@ class AgentRuntimeTests(unittest.IsolatedAsyncioTestCase):
 
         result = await runtime.arun(
             "task",
-            runner=runner,
+            handle=RunnerHandle(runner=runner, provider="openai", invoke=invoke_runner, extract_text=runner_output_text, extract_metadata=runner_output_metadata),
             context=context,
-            provider="openai",
-            invoke_runner=invoke_runner,
-            runner_output_text=runner_output_text,
-            runner_output_metadata=runner_output_metadata,
         )
 
         self.assertFalse(write_tool.executed)
@@ -344,12 +333,8 @@ class AgentRuntimeTests(unittest.IsolatedAsyncioTestCase):
 
         result = await runtime.arun(
             "task",
-            runner=runner,
+            handle=RunnerHandle(runner=runner, provider="openai", invoke=invoke_runner, extract_text=runner_output_text, extract_metadata=runner_output_metadata),
             context=context,
-            provider="openai",
-            invoke_runner=invoke_runner,
-            runner_output_text=runner_output_text,
-            runner_output_metadata=runner_output_metadata,
         )
 
         self.assertEqual(result.metadata["tool_call_states"], ("failed", "succeeded"))
@@ -383,12 +368,8 @@ class AgentRuntimeTests(unittest.IsolatedAsyncioTestCase):
 
         result = await runtime.arun(
             "task",
-            runner=runner,
+            handle=RunnerHandle(runner=runner, provider="openai", invoke=invoke_runner, extract_text=runner_output_text, extract_metadata=runner_output_metadata),
             context=context,
-            provider="openai",
-            invoke_runner=invoke_runner,
-            runner_output_text=runner_output_text,
-            runner_output_metadata=runner_output_metadata,
         )
 
         self.assertEqual(result.metadata["stop_reason"], "max_iterations")
@@ -415,12 +396,8 @@ class AgentRuntimeTests(unittest.IsolatedAsyncioTestCase):
 
         result = await runtime.arun(
             "long task that exceeds the tiny token estimate",
-            runner=runner,
+            handle=RunnerHandle(runner=runner, provider="openai", invoke=invoke_runner, extract_text=runner_output_text, extract_metadata=runner_output_metadata),
             context=context,
-            provider="openai",
-            invoke_runner=invoke_runner,
-            runner_output_text=runner_output_text,
-            runner_output_metadata=runner_output_metadata,
         )
 
         self.assertEqual(result.metadata["stop_reason"], "max_tokens")
@@ -460,12 +437,8 @@ class AgentRuntimeTests(unittest.IsolatedAsyncioTestCase):
 
         result = await runtime.arun(
             "task",
-            runner=runner,
+            handle=RunnerHandle(runner=runner, provider="openai", invoke=invoke_runner, extract_text=runner_output_text, extract_metadata=runner_output_metadata),
             context=context,
-            provider="openai",
-            invoke_runner=invoke_runner,
-            runner_output_text=runner_output_text,
-            runner_output_metadata=runner_output_metadata,
         )
 
         self.assertEqual(result.output, "done")
@@ -499,12 +472,8 @@ class AgentRuntimeTests(unittest.IsolatedAsyncioTestCase):
 
         result = await runtime.arun(
             "task",
-            runner=runner,
+            handle=RunnerHandle(runner=runner, provider="openai", invoke=invoke_runner, extract_text=runner_output_text, extract_metadata=runner_output_metadata),
             context=context,
-            provider="openai",
-            invoke_runner=invoke_runner,
-            runner_output_text=runner_output_text,
-            runner_output_metadata=runner_output_metadata,
         )
 
         self.assertEqual(result.output, "done")

@@ -14,7 +14,7 @@ Relations:
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 from vidbyte.agents.context_algorithms import AgentRuntimeContextAlgorithms
@@ -25,6 +25,7 @@ from vidbyte.context.primitives import ContextItem
 from vidbyte.context.window import ContextWindow
 from vidbyte.lib.dataclasses.agents import AgentRuntimeConfig, AgentStopReason
 from vidbyte.lib.dataclasses.middleware import MiddlewareAction, MiddlewareContext, MiddlewareDecision, MiddlewareHook
+from vidbyte.lib.dataclasses.runner import RunnerHandle
 from vidbyte.lib.enums import ModelModality
 from vidbyte.lib.errors import PermissionDeniedError, ToolExecutionError, ToolRegistryError
 from vidbyte.lib.token_usage import token_usage_from_response
@@ -118,29 +119,12 @@ class AgentRuntime:
             context_items=tuple(managed_context.context_items),
         )
 
-    async def arun(
-        self,
-        message: str,
-        *,
-        runner: object,
-        context: BaseAgentContext,
-        provider: str,
-        invoke_runner: Callable[..., Any],
-        runner_output_text: Callable[[object], str],
-        runner_output_metadata: Callable[[object], Mapping[str, Any]],
-        metadata: Mapping[str, Any] | None = None,
-        options: Mapping[str, Any] | None = None,
-        trace_context: SpanContext | None = None,
-    ) -> AgentResult:
+    async def arun(self, message: str, *, handle: RunnerHandle, context: BaseAgentContext, metadata: Mapping[str, Any] | None = None, options: Mapping[str, Any] | None = None, trace_context: SpanContext | None = None) -> AgentResult:
         """Run the direct model/tool loop until isDone or a budget stop."""
         algorithm_result = await AgentRuntimeContextAlgorithms(self).arun(
             message,
-            runner=runner,
+            handle=handle,
             context=context,
-            provider=provider,
-            invoke_runner=invoke_runner,
-            runner_output_text=runner_output_text,
-            runner_output_metadata=runner_output_metadata,
             metadata=metadata,
             options=options,
             trace_context=trace_context,
@@ -149,32 +133,16 @@ class AgentRuntime:
             return algorithm_result
         return await self._arun_once(
             message,
-            runner=runner,
+            handle=handle,
             context=context,
-            provider=provider,
-            invoke_runner=invoke_runner,
-            runner_output_text=runner_output_text,
-            runner_output_metadata=runner_output_metadata,
             metadata=metadata,
             options=options,
             trace_context=trace_context,
         )
 
-    async def _arun_once(
-        self,
-        message: str,
-        *,
-        runner: object,
-        context: BaseAgentContext,
-        provider: str,
-        invoke_runner: Callable[..., Any],
-        runner_output_text: Callable[[object], str],
-        runner_output_metadata: Callable[[object], Mapping[str, Any]],
-        metadata: Mapping[str, Any] | None = None,
-        options: Mapping[str, Any] | None = None,
-        trace_context: SpanContext | None = None,
-    ) -> AgentResult:
+    async def _arun_once(self, message: str, *, handle: RunnerHandle, context: BaseAgentContext, metadata: Mapping[str, Any] | None = None, options: Mapping[str, Any] | None = None, trace_context: SpanContext | None = None) -> AgentResult:
         """Run one direct model/tool attempt until isDone or a budget stop."""
+        provider = handle.provider
         run_options = dict(options or {})
         runtime_metadata = dict(metadata or {})
         tool_schemas = self._resolve_tool_schemas(provider)
@@ -282,13 +250,10 @@ class AgentRuntime:
 
             call_options = self._build_iteration_call_options(run_options, context, tool_schemas, messages)
             raw_result, model_call_count = await self._invoke_with_middleware(
-                runner,
+                handle,
                 message,
                 call_options,
                 context=context,
-                provider=provider,
-                invoke_runner=invoke_runner,
-                runner_output_text=runner_output_text,
                 iteration_count=iteration_count,
                 model_call_count=model_call_count,
                 call_contexts=call_contexts,
@@ -314,7 +279,7 @@ class AgentRuntime:
                 )
             last_response = raw_result
             iteration_count += 1
-            runner_metadata = dict(runner_output_metadata(raw_result))
+            runner_metadata = dict(handle.extract_metadata(raw_result))
             tokens_used = self._add_token_usage(tokens_used, token_usage_from_response(raw_result, runner_metadata))
 
             decision = await self.middleware.after_model_response(
@@ -356,7 +321,7 @@ class AgentRuntime:
 
             tool_calls = ToolsFormatter.parse_tool_calls(raw_result, provider)
             if not tool_calls:
-                messages.append(self._assistant_message(runner_output_text(raw_result)))
+                messages.append(self._assistant_message(handle.extract_text(raw_result)))
                 decision = await self.middleware.after_iteration(
                     self._middleware_context(
                         MiddlewareHook.AFTER_ITERATION,
@@ -523,26 +488,9 @@ class AgentRuntime:
                     model_response=raw_result,
                 )
 
-    async def _invoke_with_middleware(
-        self,
-        runner: object,
-        message: str,
-        call_options: Mapping[str, Any],
-        *,
-        context: BaseAgentContext,
-        provider: str,
-        invoke_runner: Callable[..., Any],
-        runner_output_text: Callable[[object], str],
-        iteration_count: int,
-        model_call_count: int,
-        call_contexts: Sequence[ToolCallContext],
-        tokens_used: int | None,
-        started_at: float,
-        metadata: Mapping[str, Any],
-        run_state: dict[type, Any] | None = None,
-        trace_context: SpanContext | None = None,
-    ) -> tuple[object | AgentResult, int]:
+    async def _invoke_with_middleware(self, handle: RunnerHandle, message: str, call_options: Mapping[str, Any], *, context: BaseAgentContext, iteration_count: int, model_call_count: int, call_contexts: Sequence[ToolCallContext], tokens_used: int | None, started_at: float, metadata: Mapping[str, Any], run_state: dict[type, Any] | None = None, trace_context: SpanContext | None = None) -> tuple[object | AgentResult, int]:
         """Invoke the runner, allowing middleware to retry model errors."""
+        provider = handle.provider
         while True:
             decision = await self.middleware.before_model_call(
                 self._middleware_context(
@@ -577,8 +525,8 @@ class AgentRuntime:
                 iteration=iteration_count,
             )
             try:
-                raw_result = await invoke_runner(runner, message, **dict(call_options))
-                output_text = runner_output_text(raw_result)
+                raw_result = await handle.invoke(message, **dict(call_options))
+                output_text = handle.extract_text(raw_result)
                 self._tracer.end_span(llm_span, output=output_text)
                 return raw_result, model_call_count
             except Exception as exc:

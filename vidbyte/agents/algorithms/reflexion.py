@@ -14,10 +14,11 @@ Relations:
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
 from vidbyte.context.algorithms import ReflexionAlgorithm
+from vidbyte.lib.dataclasses.runner import RunnerHandle
 from vidbyte.lib.tracing import SpanContext
 from vidbyte.lib.dataclasses.context import BaseAgentContext
 from vidbyte.lib.dataclasses.strategies import AgentResult
@@ -35,20 +36,7 @@ class ReflexionRuntimeAlgorithm:
         self.runtime = runtime
         self.algorithm = algorithm
 
-    async def arun(
-        self,
-        message: str,
-        *,
-        runner: object,
-        context: BaseAgentContext,
-        provider: str,
-        invoke_runner: Callable[..., Any],
-        runner_output_text: Callable[[object], str],
-        runner_output_metadata: Callable[[object], Mapping[str, Any]],
-        metadata: Mapping[str, Any] | None = None,
-        options: Mapping[str, Any] | None = None,
-        trace_context: SpanContext | None = None,
-    ) -> AgentResult:
+    async def arun(self, message: str, *, handle: RunnerHandle, context: BaseAgentContext, metadata: Mapping[str, Any] | None = None, options: Mapping[str, Any] | None = None, trace_context: SpanContext | None = None) -> AgentResult:
         """Run Reflexion attempts, reflecting after failed trials."""
         reflections: list[str] = []
         failed_attempts: list[str] = []
@@ -60,12 +48,8 @@ class ReflexionRuntimeAlgorithm:
             result = await self._run_trial(
                 message,
                 trial_index=trial_index,
-                runner=runner,
+                handle=handle,
                 context=context,
-                provider=provider,
-                invoke_runner=invoke_runner,
-                runner_output_text=runner_output_text,
-                runner_output_metadata=runner_output_metadata,
                 metadata=metadata,
                 options=options,
                 reflections=reflections,
@@ -80,14 +64,11 @@ class ReflexionRuntimeAlgorithm:
 
             failed_attempts.append(failed_attempt)
             reflected = await self._reflect_after_failure(
-                runner,
+                handle,
                 task=message,
                 failed_attempt=failed_attempt,
                 reflections=reflections,
                 context=context,
-                provider=provider,
-                invoke_runner=invoke_runner,
-                runner_output_text=runner_output_text,
                 metadata=metadata,
                 trial_index=trial_index,
                 trace_context=trace_context,
@@ -100,23 +81,7 @@ class ReflexionRuntimeAlgorithm:
         assert last_result is not None
         return self._with_reflexion_metadata(last_result, reflections=reflections, attempts=attempt_summaries)
 
-    async def _run_trial(
-        self,
-        message: str,
-        *,
-        trial_index: int,
-        runner: object,
-        context: BaseAgentContext,
-        provider: str,
-        invoke_runner: Callable[..., Any],
-        runner_output_text: Callable[[object], str],
-        runner_output_metadata: Callable[[object], Mapping[str, Any]],
-        metadata: Mapping[str, Any] | None,
-        options: Mapping[str, Any] | None,
-        reflections: Sequence[str],
-        failed_attempts: Sequence[str],
-        trace_context: SpanContext | None,
-    ) -> AgentResult:
+    async def _run_trial(self, message: str, *, trial_index: int, handle: RunnerHandle, context: BaseAgentContext, metadata: Mapping[str, Any] | None, options: Mapping[str, Any] | None, reflections: Sequence[str], failed_attempts: Sequence[str], trace_context: SpanContext | None) -> AgentResult:
         """Run one main Reflexion trial through the normal runtime loop."""
         self.runtime.recorder.append("reflexion_trial", iteration=trial_index)
         trial_context = self.algorithm.context_for_trial(
@@ -127,36 +92,18 @@ class ReflexionRuntimeAlgorithm:
         )
         return await self.runtime._arun_once(
             message,
-            runner=runner,
+            handle=handle,
             context=trial_context,
-            provider=provider,
-            invoke_runner=invoke_runner,
-            runner_output_text=runner_output_text,
-            runner_output_metadata=runner_output_metadata,
             metadata=self._trial_metadata(metadata, trial_index=trial_index),
             options=dict(options or {}),
             trace_context=trace_context,
         )
 
-    async def _reflect_after_failure(
-        self,
-        runner: object,
-        *,
-        task: str,
-        failed_attempt: str,
-        reflections: Sequence[str],
-        context: BaseAgentContext,
-        provider: str,
-        invoke_runner: Callable[..., Any],
-        runner_output_text: Callable[[object], str],
-        metadata: Mapping[str, Any] | None,
-        trial_index: int,
-        trace_context: SpanContext | None,
-    ) -> str | AgentResult:
+    async def _reflect_after_failure(self, handle: RunnerHandle, *, task: str, failed_attempt: str, reflections: Sequence[str], context: BaseAgentContext, metadata: Mapping[str, Any] | None, trial_index: int, trace_context: SpanContext | None) -> str | AgentResult:
         """Run the reflection-stage model call through runtime middleware."""
         self.runtime.recorder.append("reflexion_reflection", iteration=trial_index)
         raw_result, _ = await self.runtime._invoke_with_middleware(
-            runner,
+            handle,
             self.algorithm.render_reflection_prompt(
                 task=task,
                 failed_attempt=failed_attempt,
@@ -164,9 +111,6 @@ class ReflexionRuntimeAlgorithm:
             ),
             {"system": self.algorithm.reflection_system_prompt()},
             context=context,
-            provider=provider,
-            invoke_runner=invoke_runner,
-            runner_output_text=runner_output_text,
             iteration_count=trial_index,
             model_call_count=0,
             call_contexts=(),
@@ -177,7 +121,7 @@ class ReflexionRuntimeAlgorithm:
         )
         if isinstance(raw_result, AgentResult):
             return raw_result
-        return self.algorithm.capture_reflection(runner_output_text(raw_result))
+        return self.algorithm.capture_reflection(handle.extract_text(raw_result))
 
     @staticmethod
     def _trial_metadata(

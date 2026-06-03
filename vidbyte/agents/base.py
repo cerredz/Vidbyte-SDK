@@ -26,6 +26,7 @@ from vidbyte.context.window import ContextWindow, ContextWindowAlgorithm
 from vidbyte.context.primitives import ContextItem
 from vidbyte.lib.agents import ModalityDetector
 from vidbyte.lib.dataclasses.agents import AgentMetadata, AgentRunnerConfig, AgentRuntimeConfig
+from vidbyte.lib.dataclasses.runner import RunnerHandle
 from vidbyte.lib.enums import AgentRuntimeType, ModelModality, ModelProvider
 from vidbyte.lib.errors import AgentExecutionError, ConfigurationError
 from vidbyte.lib.tracing import NullTracer, TracerBase
@@ -418,14 +419,17 @@ class BaseAgent(McpAttachableMixin):
                 metadata=self._runner_output_metadata(raw_result),
             )
         provider = str(options.pop("provider", None) or self._runner_provider(runner))
+        handle = RunnerHandle(
+            runner=runner,
+            provider=provider,
+            invoke=self._invoke_runner,
+            extract_text=self._runner_output_text,
+            extract_metadata=self._runner_output_metadata,
+        )
         result = await self._runtime().arun(
             message,
-            runner=runner,
+            handle=handle,
             context=context,
-            provider=provider,
-            invoke_runner=self._invoke_runner,
-            runner_output_text=self._runner_output_text,
-            runner_output_metadata=self._runner_output_metadata,
             metadata=runtime_metadata,
             options=options,
             trace_context=trace_context,
@@ -442,14 +446,17 @@ class BaseAgent(McpAttachableMixin):
         **options: Any,
     ) -> AgentResult:
         provider = str(options.pop("provider", None) or self._runner_provider(runner))
+        handle = RunnerHandle(
+            runner=runner,
+            provider=provider,
+            invoke=self._invoke_runner,
+            extract_text=self._runner_output_text,
+            extract_metadata=self._runner_output_metadata,
+        )
         result = await self._runtime().arun(
             message,
-            runner=runner,
+            handle=handle,
             context=context,
-            provider=provider,
-            invoke_runner=self._invoke_runner,
-            runner_output_text=self._runner_output_text,
-            runner_output_metadata=self._runner_output_metadata,
             metadata=self.metadata,
             options=options,
         )
