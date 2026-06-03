@@ -22,10 +22,14 @@ sdk.providers
 
 ## Agents and Modalities
 
-Use agents as the public entry point for model execution. Pick a modality explicitly when the request is not ordinary text; plain string prompts default to text.
+Use agents as the public entry point for model execution. Agents infer execution
+modality from the configured model name when possible, so callers normally pass
+plain strings to `run()` and `arun()`. If the model name is unknown and no
+explicit override is provided, execution falls back to text; prompt text is not
+semantically classified.
 
 ```python
-from vidbyte import ModelModality, VidbyteSDK
+from vidbyte import VidbyteSDK
 
 sdk = VidbyteSDK()
 
@@ -34,21 +38,10 @@ image_agent = sdk.agents.base(
     system_prompt="Create useful product assets.",
     provider="openai",
     model_name="gpt-image-1",
-    modality=ModelModality.IMAGE,
 )
 
 reply = image_agent.run("A clean product mockup on a white desk")
 print(reply.content)
-```
-
-Typed inputs can carry modality at call time:
-
-```python
-from vidbyte import AgentInput, ModelModality
-
-reply = await image_agent.arun(
-    AgentInput("A launch graphic with a simple product silhouette", modality=ModelModality.IMAGE)
-)
 ```
 
 ## Multi-Agent Orchestration
@@ -59,20 +52,19 @@ Multi-agent execution is modeled as composition:
 - Custom harnesses stay outside the base SDK until their public contracts are explicitly defined.
 
 ```python
-from vidbyte import BaseAgent, ModelModality
+from vidbyte import BaseAgent
 
 agent = BaseAgent(
     name="researcher",
     system_prompt="Answer directly and cite uncertainty.",
     provider="openai",
     model_name="gpt-4.1",
-    modality=ModelModality.TEXT,
 )
 
 reply = await agent.arun("Draft a concise release note")
 ```
 
-For custom agents, pass an explicit `system_prompt`, modality, model config, runner, and tools into `Agent` or `BaseAgent`.
+For custom agents, pass an explicit `system_prompt`, model config, runner, and tools into `Agent` or `BaseAgent`.
 Semantic labels such as roles belong in agent metadata when callers need them.
 
 ## Context Objects
