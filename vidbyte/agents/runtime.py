@@ -725,6 +725,7 @@ class AgentRuntime:
             strategy_name=result.strategy_name,
             calls=result.calls,
             metadata=metadata,
+            structured=result.structured,
         )
 
     async def execute_tool_call(

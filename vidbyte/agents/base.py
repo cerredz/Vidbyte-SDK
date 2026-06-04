@@ -24,6 +24,7 @@ from vidbyte.agents.types import AgentCard, AgentInput, AgentMessage
 from vidbyte.context.manager import ContextManager
 from vidbyte.context.window import ContextWindow, ContextWindowAlgorithm
 from vidbyte.context.primitives import ContextItem
+from vidbyte.context.handoff import Handoff, MinimalHandoff
 from vidbyte.lib.agents import ModalityDetector
 from vidbyte.lib.dataclasses.agents import AgentMetadata, AgentRunnerConfig, AgentRuntimeConfig
 from vidbyte.lib.dataclasses.runner import RunnerHandle
@@ -79,6 +80,7 @@ class BaseAgent(McpAttachableMixin):
         tracer: type[TracerBase] | TracerBase | None = None,
         trace: type[TracerBase] | TracerBase | None = None,
         output_schema: type | Mapping[str, Any] | None = None,
+        handoff: Handoff | None = None,
     ) -> None:
         if not name:
             raise AgentExecutionError("Agent name cannot be empty.")
@@ -152,6 +154,10 @@ class BaseAgent(McpAttachableMixin):
         self.history: list[AgentMessage] = []
         self._tool_call_contexts: list[ToolCallContext] = []
         self._active_prompt: str = ""
+        self._handoff_spec: Handoff | None = handoff
+        self.last_handoff: Handoff | None = None
+        self.last_prompt: str = ""
+        self.last_reply: AgentMessage | None = None
         for _tool in self._agent_tool_items:
             self._bind_agent_tool_context(_tool)
 
@@ -277,6 +283,7 @@ class BaseAgent(McpAttachableMixin):
             metadata={**self.metadata, **dict(metadata or {})},
             tracer=self._tracer,
             output_schema=self.output_schema,
+            handoff=self._handoff_spec,
         )
         if include_history:
             child.history = list(self.history)
@@ -339,18 +346,25 @@ class BaseAgent(McpAttachableMixin):
                 details={"agent": self.name, "error_type": type(exc).__name__},
             ) from exc
         self._active_prompt = ""
+        metadata: dict[str, Any] = {
+            "strategy": result.strategy_name,
+            "modality": selected_modality.value,
+            **dict(input_metadata),
+            **dict(result.metadata),
+        }
+        if result.structured is not None:
+            metadata["structured"] = result.structured
         reply = AgentMessage(
             sender=self.name,
             recipient=recipient,
             content=result.output,
-            metadata={
-                "strategy": result.strategy_name,
-                "modality": selected_modality.value,
-                **dict(input_metadata),
-                **dict(result.metadata),
-            },
+            metadata=metadata,
         )
         self.history.append(reply)
+        self.last_prompt = prompt
+        self.last_reply = reply
+        if self._handoff_spec is not None:
+            await self._run_auto_handoff(metadata)
         return reply
 
     async def arun(self, message: str | AgentInput, **options: Any) -> AgentMessage:
@@ -364,6 +378,24 @@ class BaseAgent(McpAttachableMixin):
         except RuntimeError:
             return asyncio.run(self.generate_reply(message, **options))
         raise AgentExecutionError("BaseAgent.run() cannot be called from an active event loop; use await arun().")
+
+    async def handoff(self, spec: Handoff | None = None, *, by: "BaseAgent | None" = None) -> Handoff:
+        """Produce a structured handoff document describing this agent's most recent run."""
+        from vidbyte.agents.handoff import HandoffAgent
+        resolved = spec or self._handoff_spec or MinimalHandoff()
+        generator = by or HandoffAgent.from_source_agent(self, resolved)
+        return await generator.generate_handoff(HandoffAgent.render_source_run(self))
+
+    async def _run_auto_handoff(self, metadata: dict[str, Any]) -> None:
+        # Generate the configured handoff after a run and record it without breaking the primary reply.
+        from vidbyte.agents.handoff import HandoffAgent
+        try:
+            produced = await HandoffAgent.run_auto_handoff(self, self._handoff_spec)
+            self.last_handoff = produced
+            metadata["handoff"] = produced
+        except Exception as exc:
+            metadata["handoff_error"] = repr(exc)
+            self.last_handoff = None
 
     def _build_context(
         self,
