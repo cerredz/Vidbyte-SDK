@@ -54,6 +54,47 @@ from vidbyte import TreeSearchHandoff, RefinementLoopHandoff, BudgetBoundedHando
 spec = TreeSearchHandoff()        # for branch-and-prune exploration agents
 ```
 
+### Software-engineering catalog
+
+Prebuilts tuned to common software-engineering task types:
+
+| Variant | SWE task | Section skeleton |
+|---------|----------|------------------|
+| `CodeReviewHandoff` | reviewing a PR/diff | Scope Reviewed · Blocking Issues · Non-Blocking Suggestions · Approved Aspects · Unresolved Threads · Verdict |
+| `BugFixHandoff` | fixing a defect | Symptom · Reproduction · Root Cause · Fix Applied · Tests Added · Regression Risk |
+| `RefactorHandoff` | restructure, no behavior change | Motivation · Scope & Boundaries · Behavior-Preservation Evidence · Changes by Module · Risk Areas · Follow-up Cleanups |
+| `PerformanceOptimizationHandoff` | profiling/optimization | Baseline Metrics · Bottlenecks Identified · Optimizations Applied · Measured Improvement · Trade-offs · Remaining Hotspots |
+| `TestAuthoringHandoff` | writing tests / coverage | Coverage Goal · Areas Covered · Test Cases Added · Gaps & Untested Paths · Flaky/Skipped Tests · Next Tests |
+| `APIDesignHandoff` | designing an endpoint/contract | Purpose & Consumers · Endpoints/Contracts · Request/Response Schemas · Versioning & Compatibility · Error Model · Open Design Questions |
+| `SchemaMigrationHandoff` | DB schema change | Schema Change · Migration Steps · Backfill Plan · Forward/Backward Compatibility · Data-Integrity Checks · Rollback Plan |
+| `DependencyUpgradeHandoff` | lib/framework bump | Target Versions · Breaking Changes · Code Adjustments Made · Compatibility Verification · Remaining Deprecations · Rollback |
+| `IncidentResponseHandoff` | on-call / outage | Impact & Severity · Timeline · Current Mitigation · Root-Cause Status · Action Items · Comms Status |
+| `ArchitectureDecisionHandoff` | system design / ADR | Problem & Context · Options Considered · Decision & Rationale · Consequences & Trade-offs · Open Risks · Next Steps |
+| `CodebaseOnboardingHandoff` | understanding unfamiliar code | Goal · System Map · Key Components & Responsibilities · Entry Points & Data Flow · Conventions & Gotchas · Open Questions |
+| `CICDPipelineHandoff` | build/deploy pipeline work | Pipeline Goal · Stages & Status · Build/Deploy Config · Secrets & Environments · Failing/Flaky Stages · Next Steps |
+| `IntegrationHandoff` | third-party integration | Integration Goal · External Contract · Auth & Credentials · Implemented Surface · Edge Cases & Failure Modes · Untested Paths |
+| `SecurityRemediationHandoff` | fixing vulnerabilities | Vulnerabilities · Severity & Exploitability · Fixes Applied · Verification · Residual Risk · Remaining Items |
+| `ReleaseHandoff` | cutting a release/deploy | Release Scope · Changelog · Pre-Deploy Checklist · Deploy Steps · Verification & Smoke · Rollback Plan |
+
+### Discovering handoffs with the registry
+
+`HandoffRegistry` is a prefilled catalog of every prebuilt handoff (general + process-shape
++ software-engineering). Use it to browse, construct by name, or build an agent in one step:
+
+```python
+from vidbyte import HandoffRegistry
+
+registry = HandoffRegistry()
+registry.list()                       # every prebuilt slug, e.g. "code_review", "tree_search", "engineering"
+registry.describe()                   # slug -> {class, title, sections} for the whole catalog
+spec = registry.create("bug_fix")     # a BugFixHandoff instance
+agent = registry.build_agent("code_review", provider="anthropic", model_name="claude-opus-4-8")
+
+registry.register("my_handoff", MyHandoff)   # add a custom handoff to this registry instance
+```
+
+`get(name)` raises `ConfigurationError` for an unknown slug, listing the available names.
+
 Bring your own structure by passing `sections` (or subclassing `Handoff`):
 
 ```python
