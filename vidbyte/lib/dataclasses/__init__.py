@@ -57,6 +57,7 @@ from vidbyte.lib.dataclasses.middleware import (
     MiddlewareDecision,
     MiddlewareEvent,
     MiddlewareHook,
+    MiddlewareTransform,
 )
 from vidbyte.lib.dataclasses.multi_agent import CandidateFailure, CandidateResult, DagNode, EvaluationDecision, NodeState, Verification
 from vidbyte.lib.dataclasses.sandbox import SandboxRequest, SandboxResult, SandboxTransport
@@ -111,6 +112,7 @@ __all__ = [
     "MiddlewareDecision",
     "MiddlewareEvent",
     "MiddlewareHook",
+    "MiddlewareTransform",
     "NodeState",
     "PermissionDecision",
     "PermissionPolicy",
