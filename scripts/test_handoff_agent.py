@@ -8,7 +8,7 @@ Purpose:
 Architecture:
     - HandoffVerification: Loads the handoff test module, runs each test, and reports results.
 Relations:
-    Exercises vidbyte.context.handoffs, vidbyte.agents.handoff, and the BaseAgent handoff
+    Exercises vidbyte.context.handoff, vidbyte.agents.handoff, and the BaseAgent handoff
     integration. Mirrors the Testing Plan in docs/design/handoff-agent.md.
 Similar Files:
     - tests/test_handoff_agent.py: The unittest suite this script drives case by case.

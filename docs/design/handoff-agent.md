@@ -30,7 +30,7 @@ This feature adds a first-class "handoff" capability to the Vidbyte SDK: the abi
 
 ### Non-Goals
 
-- No JSON-schema / `response_format` enforcement of the output in this iteration. Output is markdown parsed back into sections. Schema hardening is a documented future option.
+- Handoff generation uses the SDK's `output_schema` support to request deterministic JSON shaped by the handoff spec. Markdown section parsing remains only as a defensive compatibility fallback.
 - No deterministic no-LLM renderer in this iteration (the `Handoff` object supports it structurally via `fill()`, but the shipped generation path is the agent).
 - No new context-window algorithm, middleware, or pipeline type.
 - No changes to the return *type* of `generate_reply()` (stays `AgentMessage`); the handoff document is surfaced via metadata + an attribute to preserve the existing contract used by pipelines.
@@ -107,7 +107,7 @@ The design unifies three conceptual roles into one object so there is no paralle
         ▼                                                │   HANDOFF_SYSTEM_PROMPT
  HandoffAgent.generate_handoff(run_text) ────────────────┘   + spec.render_section_brief()
         │ arun(run_text) -> AgentMessage
-        │ parse "## <Title>" blocks -> sections
+        │ parse schema-shaped JSON -> sections
         ▼
  filled Handoff ──► reply.metadata["handoff"], self.last_handoff
         │
@@ -115,7 +115,7 @@ The design unifies three conceptual roles into one object so there is no paralle
  next_agent = Agent(..., context_items=[filled_handoff])   # loop closes
 ```
 
-**Components created:** `vidbyte/context/handoffs.py` (the `Handoff` family), `vidbyte/agents/handoff.py` (`HandoffAgent`), `vidbyte/prompts/prompts/handoff/handoff.json` (system prompt asset).
+**Components created:** `vidbyte/context/handoff/` (the `Handoff` family split by base and prebuilt classes), `vidbyte/agents/handoff.py` (`HandoffAgent`), `vidbyte/prompts/prompts/handoff/handoff.json` plus `handoff.md` (system prompt asset).
 
 **Components modified:** `vidbyte/agents/base.py` (`handoff` param, `handoff()` method, run-rendering helpers, `last_*` state, fork propagation, auto-run in `generate_reply`), `vidbyte/agents/client.py` (`handoff()` factory), `vidbyte/agents/__init__.py`, `vidbyte/context/__init__.py`, `vidbyte/lib/enums/prompts.py`, `vidbyte/__init__.py`, plus the skill index.
 
@@ -132,7 +132,7 @@ The design unifies three conceptual roles into one object so there is no paralle
 
 ### 6.1 `Handoff` family (context primitive + spec + output)
 
-**File(s):** `vidbyte/context/handoffs.py`
+**File(s):** `vidbyte/context/handoff/base.py`, `vidbyte/context/handoff/engineering.py`, `vidbyte/context/handoff/research.py`, `vidbyte/context/handoff/minimal.py`
 **Type:** New file
 
 #### What it does
@@ -194,15 +194,15 @@ class HandoffAgent(BaseAgent):
     def __init__(self, handoff: Handoff | None = None, *, name: str = "handoff", **kwargs: Any) -> None: ...
     async def generate_handoff(self, source: str) -> Handoff: ...
     def build_system_prompt(self) -> str: ...                 # asset + section brief + title/instructions
-    def parse_sections(self, text: str) -> dict[str, str]: ...# "## <Title>" blocks -> {title: content}
+    def parse_sections(self, text: str) -> dict[str, str]: ...# JSON sections first, markdown fallback
 ```
 
 #### Logic / Algorithm
 
-1. `__init__` resolves `handoff` to the provided spec or `MinimalHandoff()`, stores it as `self.spec`, builds the system prompt via `build_system_prompt()`, and calls `super().__init__(name=name, system_prompt=..., handoff=None, **kwargs)` (never recursively auto-handoff).
+1. `__init__` resolves `handoff` to the provided spec or `MinimalHandoff()`, stores it as `self.spec`, builds the system prompt via `build_system_prompt()`, builds a JSON `output_schema` from the spec, and calls `super().__init__(name=name, system_prompt=..., handoff=None, output_schema=..., **kwargs)` (never recursively auto-handoff).
 2. `build_system_prompt()` fetches `Prompts().get(Prompt.HANDOFF_SYSTEM_PROMPT)` and appends a `# Required Sections` block from `spec.render_section_brief()`, the output title, and any spec instructions.
-3. `generate_handoff(source)` calls `await self.arun(source)`, parses the reply via `parse_sections()`, and returns `self.spec.fill(parsed)`.
-4. `parse_sections(text)` splits on `^##\s*(.+)$` headers; for each spec section title, captures the matching block case-insensitively; unmatched titles map to `""`.
+3. `generate_handoff(source)` calls `await self.arun(source)`, parses runtime-validated structured JSON first, falls back to markdown section parsing only when needed, and returns `self.spec.fill(parsed)`.
+4. `parse_sections(text)` accepts either JSON shaped as `{"sections": {...}}` or `## <Title>` blocks; for each spec section title, captures the matching content case-insensitively; unmatched titles map to `""`.
 
 #### Edge Cases & Error Handling
 
@@ -224,7 +224,7 @@ Adds the optional `handoff=` config, the `handoff()` method, run-rendering helpe
 ```python
 def __init__(self, *, ..., handoff: Handoff | None = None, ...) -> None: ...   # new kwarg
 async def handoff(self, spec: Handoff | None = None, *, by: "BaseAgent | None" = None) -> Handoff: ...
-def _render_run_for_handoff(self) -> str: ...
+# HandoffAgent.render_source_run(source_agent) owns run rendering.
 # new attributes: self._handoff_spec, self.last_handoff, self.last_prompt, self.last_reply
 ```
 
@@ -235,15 +235,15 @@ def _render_run_for_handoff(self) -> str: ...
    - `try`: `produced = await self.handoff(self._handoff_spec)`; `self.last_handoff = produced`; add `metadata["handoff"] = produced`.
    - `except Exception as exc`: add `metadata["handoff_error"] = repr(exc)`; leave `self.last_handoff = None`.
    - The auto-handoff runs against the freshly-appended reply in `self.history`, then the single `AgentMessage` carrying the augmented metadata is the one returned. `self.last_reply` is set to that message.
-3. `handoff(spec, by)` resolves `spec` to the argument, else `self._handoff_spec`, else `MinimalHandoff()`. Builds `generator = by or HandoffAgent(spec, runner=self.runner, runners=self.runners, provider=self.runner_config.provider, model_name=self.runner_config.model_name, api_key=self.runner_config.api_key)`. Renders source text via `_render_run_for_handoff()`. Returns `await generator.generate_handoff(source_text)`.
-4. `_render_run_for_handoff()` composes a comprehensive run digest: the agent name + original system prompt, the last user prompt (`self.last_prompt`), an ordered transcript from `self.history` (`AgentMessage.sender/content`), the tool-call log from `self._tool_call_contexts`, and the final output (last reply content). Uses small named helpers (`_render_history`, `_render_tool_calls`) to stay class-first.
+3. `handoff(spec, by)` resolves `spec` to the argument, else `self._handoff_spec`, else `MinimalHandoff()`. Builds `generator = by or HandoffAgent.from_source_agent(self, resolved)`. Renders source text via `HandoffAgent.render_source_run(self)`. Returns `await generator.generate_handoff(source_text)`.
+4. `HandoffAgent.render_source_run()` composes a comprehensive run digest: the agent name + original system prompt, the last user prompt (`self.last_prompt`), an ordered transcript from `self.history` (`AgentMessage.sender/content`), the tool-call log from `self._tool_call_contexts`, and the final output (last reply content). The helper methods live on `HandoffAgent` so handoff-specific rendering stays with the handoff agent.
 5. `fork()` adds `handoff=self._handoff_spec` to the child constructor kwargs.
 
 #### Edge Cases & Error Handling
 
 - **Auto-handoff must not break the primary run** (Hidden Failure): wrapped in `try/except`; failure is recorded in metadata, primary reply still returned.
-- **`handoff()` called before any run** (Hidden Assumption): `self.last_reply is None` → `_render_run_for_handoff()` renders "No completed run recorded." and still produces a (sparse) handoff rather than crashing.
-- **No tool calls** (Edge Case): `_render_tool_calls` returns "No tools were used." rather than an empty section.
+- **`handoff()` called before any run** (Hidden Assumption): `self.last_reply is None` -> `HandoffAgent.render_source_run()` renders "No completed run recorded." and still produces a (sparse) handoff rather than crashing.
+- **No tool calls** (Edge Case): `HandoffAgent.render_tool_calls()` returns "No tools were used." rather than an empty section.
 - **Empty history** (Edge Case): transcript renders "No conversation history."
 - **Recursion guard** (Hidden Failure): `HandoffAgent.__init__` forces `handoff=None` so a handoff agent never auto-triggers its own handoff.
 
@@ -254,7 +254,7 @@ def _render_run_for_handoff(self) -> str: ...
 
 #### What it does
 
-Holds the comprehensive, static system prompt instructing a model how to write an excellent handoff document: role framing, what a handoff is for, how to mine a run transcript and tool log, how to write each section (concrete, decision-oriented, no fluff), how to flag open threads/risks/assumptions, the exact `## <Title>` output format, and rules (don't fabricate, prefer specifics, surface uncertainty).
+Holds the comprehensive, static system prompt instructing a model how to write an excellent handoff document: identity framing, intent, goal, success criteria, how to mine a run transcript and tool log, how to write each schema-backed section, how to flag open threads/risks/assumptions, and rules for returning only valid JSON.
 
 #### Interface / API
 
@@ -324,13 +324,19 @@ N/A for HTTP endpoints. Public **Python API** additions are covered in Section 6
 | Action | File Path | Reason |
 |--------|-----------|--------|
 | CREATE | `docs/design/handoff-agent.md` | This design doc (first commit) |
-| CREATE | `vidbyte/context/handoffs.py` | `Handoff` primitive + prebuilt subclasses |
+| CREATE | `vidbyte/context/handoff/base.py` | `Handoff` primitive |
+| CREATE | `vidbyte/context/handoff/engineering.py` | `EngineeringHandoff` prebuilt subclass |
+| CREATE | `vidbyte/context/handoff/research.py` | `ResearchHandoff` prebuilt subclass |
+| CREATE | `vidbyte/context/handoff/minimal.py` | `MinimalHandoff` prebuilt subclass |
+| CREATE | `vidbyte/context/handoff/__init__.py` | Handoff package exports |
+| MODIFY | `vidbyte/context/handoffs.py` | Compatibility re-export |
 | MODIFY | `vidbyte/context/__init__.py` | Export `Handoff` family |
 | CREATE | `vidbyte/agents/handoff.py` | `HandoffAgent` thin `BaseAgent` subclass |
 | MODIFY | `vidbyte/agents/base.py` | `handoff=` param, `handoff()` method, run rendering, `last_*` state, fork, auto-run hook |
 | MODIFY | `vidbyte/agents/client.py` | `AgentClient.handoff()` factory |
 | MODIFY | `vidbyte/agents/__init__.py` | Export `HandoffAgent` |
-| CREATE | `vidbyte/prompts/prompts/handoff/handoff.json` | Comprehensive handoff system prompt asset |
+| CREATE | `vidbyte/prompts/prompts/handoff/handoff.json` | Handoff prompt catalog descriptor |
+| CREATE | `vidbyte/prompts/prompts/handoff/handoff.md` | Comprehensive handoff system prompt asset |
 | MODIFY | `vidbyte/lib/enums/prompts.py` | Add `HANDOFF_SYSTEM_PROMPT` enum member |
 | MODIFY | `vidbyte/__init__.py` | Root exports for `HandoffAgent` + `Handoff` family |
 | CREATE | `skills/vidbyte-sdk/handoff.md` | Handoff skill/topic doc |
@@ -342,7 +348,7 @@ N/A for HTTP endpoints. Public **Python API** additions are covered in Section 6
 
 ## 10. Testing Plan
 
-All tests use Python `unittest` with `IsolatedAsyncioTestCase` and fake runners (no network), matching `tests/` conventions. A fake runner returns a fixed markdown body with `## <Title>` sections.
+All tests use Python `unittest` with `IsolatedAsyncioTestCase` and fake runners (no network), matching `tests/` conventions. Fake runners cover both schema-shaped JSON output and markdown fallback bodies with `## <Title>` sections.
 
 ### Unit Tests
 
@@ -371,8 +377,8 @@ All tests use Python `unittest` with `IsolatedAsyncioTestCase` and fake runners 
 - `it('generate_reply does NOT attach handoff when handoff= is None')` — [Edge Case]
 - `it('auto-handoff failure records metadata["handoff_error"] and leaves last_handoff None without breaking the reply')` — [Hidden Failure] (the primary reply must survive)
 - `it('handoff() called before any run renders a sparse digest and still returns a Handoff')` — [Hidden Assumption]
-- `it('_render_run_for_handoff includes tool calls, history, and final output')` — [Silent Failure]
-- `it('_render_run_for_handoff reports "No tools were used." when there are no tool calls')` — [Edge Case]
+- `it('HandoffAgent.render_source_run includes tool calls, history, and final output')` — [Silent Failure]
+- `it('HandoffAgent.render_tool_calls reports "No tools were used." when there are no tool calls')` — [Edge Case]
 - `it('handoff(by=custom_agent) uses the provided generator instead of building one')` — [Hidden Assumption]
 - `it('fork() propagates the handoff spec to the child')` — [Silent Failure]
 - `it('handoff() reuses self.runner by default')` — [Hidden Assumption]
@@ -453,6 +459,6 @@ Still defaulted, open to change later:
 - What: return both objects.
 - Why rejected: pipelines and existing callers rely on the `AgentMessage` return contract and `.content` being a string; metadata attachment is non-breaking.
 
-### Alternative 5: Enforce output with a JSON schema (`response_format`)
-- What: build a schema from section keys and require structured JSON.
-- Why rejected for v1: heavier and provider-dependent; markdown `## <Title>` parsing is simpler, tolerant, and provider-agnostic. Documented as a future hardening option.
+### Alternative 5: Markdown-only parsing without output schema
+- What: ask the model to emit `## <Title>` blocks and parse the markdown without using `output_schema`.
+- Why rejected: reviewer feedback requested deterministic output schemas. The implementation now builds a spec-derived schema and retains markdown parsing only as a fallback.

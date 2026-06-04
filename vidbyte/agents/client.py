@@ -4,7 +4,7 @@ from typing import Any
 
 from vidbyte.agents.base import BaseAgent
 from vidbyte.agents.handoff import HandoffAgent
-from vidbyte.context.handoffs import Handoff
+from vidbyte.context.handoff import Handoff
 
 
 class AgentClient:

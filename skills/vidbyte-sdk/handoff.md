@@ -13,9 +13,9 @@ A handoff is a structured document describing what an agent did, so another agen
 - **Output** — once produced, the same object holds the filled content (`fill()` returns
   the same subclass with `metadata["filled"] = True`).
 
-There is intentionally **no** `vidbyte/handoff/` subsystem. The primitive lives in
-`vidbyte/context/handoffs.py` and the agent in `vidbyte/agents/handoff.py`, built from
-existing SDK primitives.
+There is intentionally **no** top-level `vidbyte/handoff/` subsystem. The primitive family
+lives under `vidbyte/context/handoff/` and the agent in `vidbyte/agents/handoff.py`, built
+from existing SDK primitives.
 
 ## Prebuilt handoffs (objects, not functions)
 
@@ -43,9 +43,11 @@ spec = Handoff(sections={
 ## The handoff agent
 
 `HandoffAgent` is a thin configuration over `BaseAgent`. It builds its system prompt from
-the comprehensive handoff prompt asset (`Prompt.HANDOFF_SYSTEM_PROMPT`, stored at
-`vidbyte/prompts/prompts/handoff/handoff.json`) plus the spec's section brief, then parses
-the model's `## Title` blocks back into a filled `Handoff`.
+the comprehensive handoff prompt asset (`Prompt.HANDOFF_SYSTEM_PROMPT`, stored via
+`vidbyte/prompts/prompts/handoff/handoff.json` and `handoff.md`) plus the spec's section
+brief. It also sets `output_schema` from the handoff spec so providers with native
+structured output support produce deterministic JSON. The agent parses structured JSON
+first and keeps markdown parsing only as a defensive fallback.
 
 ```python
 from vidbyte import VidbyteSDK, EngineeringHandoff
@@ -107,10 +109,15 @@ unaffected.
 ## Module layout
 
 ```
-vidbyte/context/handoffs.py     Handoff base + EngineeringHandoff/ResearchHandoff/MinimalHandoff
+vidbyte/context/handoff/base.py          Handoff base primitive
+vidbyte/context/handoff/engineering.py   EngineeringHandoff preset
+vidbyte/context/handoff/research.py      ResearchHandoff preset
+vidbyte/context/handoff/minimal.py       MinimalHandoff preset
+vidbyte/context/handoffs.py              compatibility re-export
 vidbyte/agents/handoff.py       HandoffAgent (thin BaseAgent subclass)
-vidbyte/agents/base.py          handoff= param, handoff() method, run digest, auto-run hook
-vidbyte/prompts/prompts/handoff/handoff.json   comprehensive handoff system prompt
+vidbyte/agents/base.py          handoff= param, handoff() method, auto-run hook
+vidbyte/prompts/prompts/handoff/handoff.json   prompt catalog descriptor
+vidbyte/prompts/prompts/handoff/handoff.md     comprehensive handoff system prompt
 ```
 
 Public imports:
@@ -124,9 +131,12 @@ from vidbyte import HandoffAgent, Handoff, EngineeringHandoff, ResearchHandoff, 
 ## Rules for adding a new prebuilt handoff
 
 - Subclass `Handoff`, set `DEFAULT_TITLE`, and override `default_sections()` with a
-  `{title: description}` map. Do not add a new module or subsystem.
-- Export it from `vidbyte/context/handoffs.py` `__all__`, `vidbyte/context/__init__.py`,
-  and `vidbyte/__init__.py`.
+  `{title: description}` map. Put each new prebuilt handoff class in its own module under
+  `vidbyte/context/handoff/`.
+- Export it from `vidbyte/context/handoff/__init__.py`, `vidbyte/context/handoffs.py`,
+  `vidbyte/context/__init__.py`, and `vidbyte/__init__.py`.
+- Make every default section description at least four clear sentences because those
+  descriptions become both model-facing prompt guidance and JSON-schema field descriptions.
 - Keep sections decision-oriented: each section title should map to something the next
   agent must know to continue.
 - Add a unit test asserting the new variant exposes a non-empty, distinct section map and

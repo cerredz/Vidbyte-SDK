@@ -36,9 +36,11 @@ class HandoffRunner:
     def __init__(self, body: str) -> None:
         self.body = body
         self.calls = 0
+        self.last_response_format: object | None = None
 
     def run(self, prompt: str, *, system: str | None = None, **_: object) -> FakeResponse:
         self.calls += 1
+        self.last_response_format = _.get("response_format")
         return _is_done_response(self.body)
 
 
@@ -114,12 +116,26 @@ class HandoffAgentTests(unittest.IsolatedAsyncioTestCase):
         for title in EngineeringHandoff().section_titles():
             self.assertIn(title, prompt)
 
+    def test_output_schema_contains_required_section_titles(self) -> None:
+        agent = HandoffAgent(EngineeringHandoff(), runner=HandoffRunner(_ENGINEERING_BODY))
+        section_schema = agent.output_schema["properties"]["sections"]
+        self.assertEqual(section_schema["required"], list(EngineeringHandoff().section_titles()))
+        self.assertIn("Objective", section_schema["properties"])
+
     async def test_generate_handoff_returns_filled_spec_subclass(self) -> None:
         agent = HandoffAgent(EngineeringHandoff(), runner=HandoffRunner(_ENGINEERING_BODY))
         doc = await agent.generate_handoff("the run digest")
         self.assertIsInstance(doc, EngineeringHandoff)
         self.assertTrue(doc.is_filled)
         self.assertEqual(doc.sections["Changes Made"], "Edited base.py.")
+
+    async def test_generate_handoff_uses_structured_json_output_when_available(self) -> None:
+        body = json.dumps({"sections": {"Summary": "done", "Next Steps": "ship"}})
+        runner = HandoffRunner(body)
+        agent = HandoffAgent(MinimalHandoff(), runner=runner)
+        doc = await agent.generate_handoff("the run digest")
+        self.assertEqual(doc.sections["Summary"], "done")
+        self.assertIsNotNone(runner.last_response_format)
 
     async def test_parse_sections_is_case_insensitive(self) -> None:
         agent = HandoffAgent(MinimalHandoff(), runner=HandoffRunner("## summary\nhi\n## NEXT STEPS\ngo"))
@@ -180,18 +196,23 @@ class BaseAgentHandoffIntegrationTests(unittest.IsolatedAsyncioTestCase):
         # Primary run succeeds; only the handoff generation fails.
         agent = self._agent(_ENGINEERING_BODY, handoff=MinimalHandoff())
 
-        async def boom(_spec: Handoff | None = None, *, by: object = None) -> Handoff:
+        original = HandoffAgent.run_auto_handoff
+
+        async def boom(cls: type[HandoffAgent], source_agent: BaseAgent, spec: Handoff | None) -> Handoff:
             raise RuntimeError("handoff boom")
 
-        agent.handoff = boom  # type: ignore[method-assign]
-        reply = await agent.generate_reply("task")
-        self.assertIn("handoff_error", reply.metadata)
-        self.assertIsNone(agent.last_handoff)
-        self.assertTrue(reply.content)
+        HandoffAgent.run_auto_handoff = classmethod(boom)  # type: ignore[method-assign]
+        try:
+            reply = await agent.generate_reply("task")
+            self.assertIn("handoff_error", reply.metadata)
+            self.assertIsNone(agent.last_handoff)
+            self.assertTrue(reply.content)
+        finally:
+            HandoffAgent.run_auto_handoff = original  # type: ignore[method-assign]
 
     async def test_handoff_before_any_run_renders_sparse_digest(self) -> None:
         agent = self._agent(_ENGINEERING_BODY)
-        digest = agent._render_run_for_handoff()
+        digest = HandoffAgent.render_source_run(agent)
         self.assertIn("No completed run recorded.", digest)
         doc = await agent.handoff(MinimalHandoff())
         self.assertIsInstance(doc, MinimalHandoff)
@@ -199,9 +220,9 @@ class BaseAgentHandoffIntegrationTests(unittest.IsolatedAsyncioTestCase):
     async def test_render_run_reports_no_tools_when_none_used(self) -> None:
         agent = self._agent(_ENGINEERING_BODY)
         # Before any run, no tool-call contexts exist, so the placeholder branch is exercised.
-        self.assertEqual(agent._render_tool_calls(), "No tools were used.")
+        self.assertEqual(HandoffAgent.render_tool_calls(agent._tool_call_contexts), "No tools were used.")
         await agent.generate_reply("task")
-        digest = agent._render_run_for_handoff()
+        digest = HandoffAgent.render_source_run(agent)
         self.assertIn("# Final Result", digest)
 
     async def test_handoff_by_uses_provided_generator(self) -> None:

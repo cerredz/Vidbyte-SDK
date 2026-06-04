@@ -69,7 +69,7 @@ vidbyte/
 - Keep `vidbyte/` as the top-level Python package namespace.
 - Keep namespace clients in `vidbyte/harnesses/`, `vidbyte/tools/`, and `vidbyte/providers/`.
 - Keep agent actor abstractions in `vidbyte/agents/`.
-- Keep the handoff primitive in `vidbyte/context/handoffs.py` and the `HandoffAgent` in `vidbyte/agents/handoff.py`; do not create a separate handoff subsystem. Follow `skills/vidbyte-sdk/handoff.md` when adding handoff variants or changing handoff behavior.
+- Keep the handoff primitive family under `vidbyte/context/handoff/` with one prebuilt class per file, keep `vidbyte/context/handoffs.py` as a compatibility re-export, and keep the `HandoffAgent` in `vidbyte/agents/handoff.py`; do not create a top-level handoff subsystem. Follow `skills/vidbyte-sdk/handoff.md` when adding handoff variants or changing handoff behavior.
 - Keep reasoning and orchestration topologies in `vidbyte/strategies/`.
 - Keep multi-agent orchestration implementations in `vidbyte/strategies/multi_agent/`.
 - Keep agent-to-agent wiring topologies (pipeline compositions) in `vidbyte/pipelines/`. Pipelines move strings between agents; they do not manage context, budget, or artifacts. Follow `skills/vidbyte-sdk/pipelines.md` when adding new pipeline topology types.

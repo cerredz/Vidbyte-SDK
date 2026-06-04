@@ -46,7 +46,7 @@ from vidbyte.lib.dataclasses.context import (
     ContextResponse,
     ContextToolCall,
 )
-from vidbyte.context.handoffs import (
+from vidbyte.context.handoff import (
     EngineeringHandoff,
     Handoff,
     MinimalHandoff,
