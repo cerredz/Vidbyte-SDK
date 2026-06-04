@@ -25,6 +25,7 @@ from vidbyte import (
 )
 from vidbyte.agents import HandoffAgent
 from vidbyte.context.primitives import ContextItem
+from vidbyte.lib.config.handoff import DEFAULT_HANDOFFS
 from vidbyte.lib.errors import ConfigurationError
 
 SWE_VARIANTS = [
@@ -76,6 +77,17 @@ class SweVariantTests(unittest.TestCase):
             with self.subTest(variant=cls.__name__):
                 self.assertTrue(cls().sections)
 
+    def test_every_swe_variant_has_detailed_section_guidance(self) -> None:
+        for cls in SWE_VARIANTS:
+            with self.subTest(variant=cls.__name__):
+                sections = cls().sections
+                self.assertGreaterEqual(len(sections), 9)
+                for title, guidance in sections.items():
+                    with self.subTest(variant=cls.__name__, section=title):
+                        self.assertGreaterEqual(guidance.count("."), 4)
+                        self.assertIn("Output", guidance)
+                        self.assertIn("500 tokens", guidance)
+
     def test_all_28_prebuilt_section_maps_are_pairwise_distinct(self) -> None:
         registry = HandoffRegistry()
         maps = [tuple(cls().sections.items()) for cls in registry.all().values()]
@@ -103,6 +115,9 @@ class HandoffRegistryTests(unittest.TestCase):
     def test_list_contains_all_28_slugs(self) -> None:
         self.assertEqual(len(HandoffRegistry().list()), 28)
         self.assertIn("code_review", HandoffRegistry().list())
+
+    def test_registry_defaults_are_seeded_from_config(self) -> None:
+        self.assertEqual(HandoffRegistry().all(), DEFAULT_HANDOFFS)
 
     def test_get_returns_matching_class(self) -> None:
         registry = HandoffRegistry()

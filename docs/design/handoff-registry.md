@@ -19,9 +19,9 @@ This change adds fifteen software-engineering-specific prebuilt `Handoff` primit
 
 ### Goals
 
-- Add fifteen SWE `Handoff` subclasses in `vidbyte/context/handoffs.py`, each a title + decision-oriented section map.
+- Add fifteen SWE `Handoff` subclasses in `vidbyte/context/handoffs.py`, each a title + detailed decision-oriented section map.
 - Export each from `vidbyte/context/handoffs.py` `__all__`, `vidbyte/context/__init__.py`, and `vidbyte/__init__.py`.
-- Add `HandoffRegistry` in `vidbyte/lib/registries/handoffs.py`, prefilled with every prebuilt handoff (3 base + 10 process-shape + 15 SWE = 28), following the existing registry conventions.
+- Add `HandoffRegistry` in `vidbyte/lib/registries/handoffs.py`, prefilled from `vidbyte/lib/config/handoff.py` with every prebuilt handoff (3 base + 10 process-shape + 15 SWE = 28), following the existing registry conventions.
 - Provide discovery helpers: `list`, `get`, `create`, `all`, `register`, `describe` (title + section map per prebuilt), and `build_agent` (construct a `HandoffAgent` from a named handoff).
 - Export `HandoffRegistry` from `vidbyte/lib/registries/__init__.py` and the root `vidbyte` namespace.
 - Update the handoff skill doc and add tests + a verification script.
@@ -47,11 +47,11 @@ Because the SWE handoffs subclass `Handoff` and the registry references all preb
 
 ### Functional Requirements
 
-1. Fifteen new `Handoff` subclasses exist in `vidbyte/context/handoffs.py`, each overriding `DEFAULT_TITLE` and `default_sections()` with a non-empty ordered map.
+1. Fifteen new `Handoff` subclasses exist in `vidbyte/context/handoffs.py`, each overriding `DEFAULT_TITLE` and `default_sections()` with a non-empty ordered map of detailed 4-5 sentence section guidance.
 2. All section maps are pairwise distinct across the full 28-prebuilt catalog.
 3. `default_sections()` returns a fresh dict per call.
 4. Each new class is exported from the three export sites and satisfies the `ContextItem` protocol and `fill()` type preservation (inherited).
-5. `HandoffRegistry` is prefilled with all 28 prebuilts keyed by a stable slug (e.g. `code_review`, `tree_search`, `engineering`).
+5. `vidbyte/lib/config/handoff.py` defines the default all-28-prebuilt slug map, and `HandoffRegistry` is prefilled from it using stable slugs (e.g. `code_review`, `tree_search`, `engineering`).
 6. `HandoffRegistry.get(name)` returns the class; unknown names raise `ConfigurationError`.
 7. `HandoffRegistry.create(name, **kwargs)` returns a `Handoff` instance.
 8. `HandoffRegistry.register(name, cls)` adds or overrides an entry (name normalized to lowercase).
@@ -72,12 +72,14 @@ Because the SWE handoffs subclass `Handoff` and the registry references all preb
 
 ## 5. High-Level Design
 
-Each SWE handoff is a ~10-line `Handoff` subclass (title + section map), identical in mechanics to the existing prebuilts. The `HandoffRegistry` is a thin instance-based catalog: its `__init__` copies a module-level `_DEFAULT_HANDOFFS` mapping of slug → class (covering all 28 prebuilts) into instance state, and its methods provide discovery (`list`, `all`, `describe`), construction (`get`, `create`), extension (`register`), and a one-stop agent factory (`build_agent`).
+Each SWE handoff is a `Handoff` subclass (title + section map), identical in mechanics to the existing prebuilts but with richer per-section generation guidance. The default slug catalog lives in `vidbyte/lib/config/handoff.py`. The `HandoffRegistry` is a thin instance-based catalog: its `__init__` copies `DEFAULT_HANDOFFS` (covering all 28 prebuilts) into instance state, and its methods provide discovery (`list`, `all`, `describe`), construction (`get`, `create`), extension (`register`), and a one-stop agent factory (`build_agent`).
 
 ```
 vidbyte/context/handoffs.py   Handoff base + 28 prebuilt subclasses (3 + 10 + 15)
                                    ^ imported by
-vidbyte/lib/registries/handoffs.py   HandoffRegistry  (slug -> class catalog)
+vidbyte/lib/config/handoff.py        DEFAULT_HANDOFFS  (slug -> class catalog)
+                                   ^ imported by
+vidbyte/lib/registries/handoffs.py   HandoffRegistry  (mutable registry copy)
                                    ^ lazily builds
 vidbyte/agents/handoff.py            HandoffAgent (via build_agent)
 ```
@@ -92,7 +94,7 @@ Key decisions: (1) SWE classes live in `handoffs.py` alongside the others (their
 
 **File(s):** `vidbyte/context/handoffs.py` — Modified (append fifteen classes + extend `__all__`)
 
-Adds: `CodeReviewHandoff`, `BugFixHandoff`, `RefactorHandoff`, `PerformanceOptimizationHandoff`, `TestAuthoringHandoff`, `APIDesignHandoff`, `SchemaMigrationHandoff`, `DependencyUpgradeHandoff`, `IncidentResponseHandoff`, `ArchitectureDecisionHandoff`, `CodebaseOnboardingHandoff`, `CICDPipelineHandoff`, `IntegrationHandoff`, `SecurityRemediationHandoff`, `ReleaseHandoff`. Each overrides `DEFAULT_TITLE` and `default_sections()`. Full section maps in Appendix A. No other methods overridden.
+Adds: `CodeReviewHandoff`, `BugFixHandoff`, `RefactorHandoff`, `PerformanceOptimizationHandoff`, `TestAuthoringHandoff`, `APIDesignHandoff`, `SchemaMigrationHandoff`, `DependencyUpgradeHandoff`, `IncidentResponseHandoff`, `ArchitectureDecisionHandoff`, `CodebaseOnboardingHandoff`, `CICDPipelineHandoff`, `IntegrationHandoff`, `SecurityRemediationHandoff`, `ReleaseHandoff`. Each overrides `DEFAULT_TITLE` and `default_sections()`. Full section skeletons are in Appendix A; each section description instructs what to output and targets up to roughly 500 tokens. No other methods overridden.
 
 ### 6.2 `HandoffRegistry`
 
@@ -110,7 +112,7 @@ class HandoffRegistry:
     def build_agent(self, name: str, **agent_kwargs: Any): ...       # -> HandoffAgent (lazy import)
 ```
 
-Logic: `__init__` copies `_DEFAULT_HANDOFFS`; `get`/`create`/`build_agent` resolve by normalized lowercase name; `describe` instantiates each class once to read `title` and `sections`; `build_agent` lazily imports `HandoffAgent` and passes a freshly constructed spec.
+Logic: `__init__` copies `DEFAULT_HANDOFFS` from `vidbyte.lib.config.handoff`; `get`/`create`/`build_agent` resolve by normalized lowercase name; `describe` instantiates each class once to read `title` and `sections`; `build_agent` lazily imports `HandoffAgent` and passes a freshly constructed spec.
 
 Edge cases: unknown name → `ConfigurationError` listing available names; `register` normalizes/overrides; `create` forwards kwargs to the `Handoff` constructor while `build_agent` forwards kwargs to the agent.
 
@@ -152,6 +154,7 @@ N/A for HTTP. New Python exports: fifteen SWE handoff classes (from `vidbyte` an
 | MODIFY | `vidbyte/context/handoffs.py` | Add fifteen SWE `Handoff` subclasses + `__all__` |
 | MODIFY | `vidbyte/context/__init__.py` | Export the fifteen SWE classes |
 | MODIFY | `vidbyte/__init__.py` | Root exports for SWE classes + `HandoffRegistry` |
+| CREATE | `vidbyte/lib/config/handoff.py` | Canonical default handoff slug map |
 | CREATE | `vidbyte/lib/registries/handoffs.py` | `HandoffRegistry` |
 | MODIFY | `vidbyte/lib/registries/__init__.py` | Export `HandoffRegistry` |
 | MODIFY | `skills/vidbyte-sdk/handoff.md` | Document the SWE catalog and the registry |
@@ -167,11 +170,13 @@ Python `unittest` with fake runners, no network. `SWE` = the fifteen new classes
 ### Unit Tests
 
 - `it('every SWE variant exposes a non-empty default_sections map')` — [Edge Case]
+- `it('every SWE variant uses detailed output guidance and at least nine sections')` — [Hidden Assumption]
 - `it('all 28 prebuilt section maps are pairwise distinct')` — [Silent Failure]
 - `it('every SWE variant fill() returns the same subclass')` — [Silent Failure]
 - `it('every SWE variant is a ContextItem and has a non-default title')` — [Hidden Assumption]
 - `it('default_sections returns a fresh dict per instance for a SWE variant')` — [Hidden Failure]
 - `it('registry.list() contains all 28 slugs')` — [Edge Case]
+- `it('registry defaults are seeded from vidbyte.lib.config.handoff.DEFAULT_HANDOFFS')` — [Hidden Failure]
 - `it('registry.get(slug) returns the matching class for several slugs')` — [Hidden Assumption]
 - `it('registry.get(unknown) raises ConfigurationError listing available names')` — [Hidden Assumption]
 - `it('registry.create(slug) returns a Handoff instance of the right type')` — [Edge Case]
@@ -242,18 +247,18 @@ No new third-party packages.
 
 Each entry is `Section Title → guidance description`, implemented verbatim.
 
-**CodeReviewHandoff** (Code Review Handoff): Scope Reviewed; Blocking Issues; Non-Blocking Suggestions; Approved Aspects; Unresolved Threads; Verdict.
-**BugFixHandoff** (Bug Fix Handoff): Symptom; Reproduction; Root Cause; Fix Applied; Tests Added; Regression Risk.
-**RefactorHandoff** (Refactor Handoff): Motivation; Scope & Boundaries; Behavior-Preservation Evidence; Changes by Module; Risk Areas; Follow-up Cleanups.
-**PerformanceOptimizationHandoff** (Performance Optimization Handoff): Baseline Metrics; Bottlenecks Identified; Optimizations Applied; Measured Improvement; Trade-offs; Remaining Hotspots.
-**TestAuthoringHandoff** (Test Authoring Handoff): Coverage Goal; Areas Covered; Test Cases Added; Gaps & Untested Paths; Flaky/Skipped Tests; Next Tests.
-**APIDesignHandoff** (API Design Handoff): Purpose & Consumers; Endpoints/Contracts; Request/Response Schemas; Versioning & Compatibility; Error Model; Open Design Questions.
-**SchemaMigrationHandoff** (Schema Migration Handoff): Schema Change; Migration Steps; Backfill Plan; Forward/Backward Compatibility; Data-Integrity Checks; Rollback Plan.
-**DependencyUpgradeHandoff** (Dependency Upgrade Handoff): Target Versions; Breaking Changes; Code Adjustments Made; Compatibility Verification; Remaining Deprecations; Rollback.
-**IncidentResponseHandoff** (Incident Response Handoff): Impact & Severity; Timeline; Current Mitigation; Root-Cause Status; Action Items; Comms Status.
-**ArchitectureDecisionHandoff** (Architecture Decision Handoff): Problem & Context; Options Considered; Decision & Rationale; Consequences & Trade-offs; Open Risks; Next Steps.
-**CodebaseOnboardingHandoff** (Codebase Onboarding Handoff): Goal; System Map; Key Components & Responsibilities; Entry Points & Data Flow; Conventions & Gotchas; Open Questions.
-**CICDPipelineHandoff** (CI/CD Pipeline Handoff): Pipeline Goal; Stages & Status; Build/Deploy Config; Secrets & Environments; Failing/Flaky Stages; Next Steps.
-**IntegrationHandoff** (Integration Handoff): Integration Goal; External Contract; Auth & Credentials; Implemented Surface; Edge Cases & Failure Modes; Untested Paths.
-**SecurityRemediationHandoff** (Security Remediation Handoff): Vulnerabilities; Severity & Exploitability; Fixes Applied; Verification; Residual Risk; Remaining Items.
-**ReleaseHandoff** (Release Handoff): Release Scope; Changelog; Pre-Deploy Checklist; Deploy Steps; Verification & Smoke; Rollback Plan.
+**CodeReviewHandoff** (Code Review Handoff): Scope Reviewed; Review Method; Blocking Issues; Non-Blocking Suggestions; Approved Aspects; Test & Verification Notes; Compatibility & API Impact; Security & Data Handling; Unresolved Threads; Verdict.
+**BugFixHandoff** (Bug Fix Handoff): Symptom; Impact & Priority; Reproduction; Investigation Trail; Root Cause; Fix Applied; Tests Added; Verification Results; Regression Risk; Follow-up Work.
+**RefactorHandoff** (Refactor Handoff): Motivation; Scope & Boundaries; Old Structure; New Structure; Changes by Module; Behavior-Preservation Evidence; Compatibility Notes; Risk Areas; Follow-up Cleanups; Reviewer Notes.
+**PerformanceOptimizationHandoff** (Performance Optimization Handoff): Performance Goal; Baseline Metrics; Profiling Method; Bottlenecks Identified; Optimizations Applied; Measured Improvement; Correctness Safeguards; Trade-offs; Remaining Hotspots; Monitoring Plan.
+**TestAuthoringHandoff** (Test Authoring Handoff): Coverage Goal; Test Strategy; Areas Covered; Test Cases Added; Fixtures & Test Data; Execution Results; Gaps & Untested Paths; Flaky/Skipped Tests; Maintenance Notes; Next Tests.
+**APIDesignHandoff** (API Design Handoff): Purpose & Consumers; Endpoints/Contracts; Request/Response Schemas; Authentication & Authorization; State & Side Effects; Versioning & Compatibility; Error Model; Examples & Edge Cases; Implementation Notes; Open Design Questions.
+**SchemaMigrationHandoff** (Schema Migration Handoff): Schema Change; Current Data Shape; Target Data Shape; Migration Steps; Backfill Plan; Forward/Backward Compatibility; Data-Integrity Checks; Operational Risks; Rollback Plan; Post-Migration Cleanup.
+**DependencyUpgradeHandoff** (Dependency Upgrade Handoff): Target Versions; Upgrade Motivation; Breaking Changes; Code Adjustments Made; Config & Build Changes; Compatibility Verification; Runtime Behavior Changes; Remaining Deprecations; Rollback; Follow-up Monitoring.
+**IncidentResponseHandoff** (Incident Response Handoff): Impact & Severity; Detection & Alerts; Timeline; Current Mitigation; Root-Cause Status; Systems & Owners; Action Items; Comms Status; Verification & Recovery; Post-Incident Follow-up.
+**ArchitectureDecisionHandoff** (Architecture Decision Handoff): Problem & Context; Requirements & Constraints; Options Considered; Evaluation Evidence; Decision & Rationale; Consequences & Trade-offs; Implementation Plan; Open Risks; Review & Reversal Criteria; Next Steps.
+**CodebaseOnboardingHandoff** (Codebase Onboarding Handoff): Goal; Repository Layout; System Map; Key Components & Responsibilities; Entry Points & Data Flow; Configuration & Environment; Conventions & Gotchas; Testing & Verification Map; Useful Files & Commands; Open Questions.
+**CICDPipelineHandoff** (CI/CD Pipeline Handoff): Pipeline Goal; Current Pipeline Topology; Stages & Status; Build/Deploy Config; Secrets & Environments; Artifacts & Outputs; Failing/Flaky Stages; Changes Applied; Validation & Rollback; Next Steps.
+**IntegrationHandoff** (Integration Handoff): Integration Goal; External Contract; Auth & Credentials; Implemented Surface; Data Mapping; Error Handling & Retries; Edge Cases & Failure Modes; Local & Test Setup; Verification Status; Untested Paths.
+**SecurityRemediationHandoff** (Security Remediation Handoff): Vulnerabilities; Severity & Exploitability; Threat Model; Affected Surface; Fixes Applied; Verification; Regression & Abuse Tests; Operational Rollout; Residual Risk; Remaining Items.
+**ReleaseHandoff** (Release Handoff): Release Scope; Release Readiness; Changelog; Versioning & Artifacts; Pre-Deploy Checklist; Deploy Steps; Verification & Smoke; Communications; Rollback Plan; Post-Release Follow-up.

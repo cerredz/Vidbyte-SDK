@@ -15,8 +15,8 @@ Key Functions:
     - register: Add or override a custom handoff.
     - build_agent: Construct a HandoffAgent configured with a named handoff.
 Relations:
-    Located in vidbyte/lib/registries/handoffs.py. References prebuilt classes from
-    vidbyte.context.handoffs and lazily builds vidbyte.agents.handoff.HandoffAgent.
+    Located in vidbyte/lib/registries/handoffs.py. Seeds its default catalog from
+    vidbyte.lib.config.handoff and lazily builds vidbyte.agents.handoff.HandoffAgent.
 Similar Files:
     - vidbyte/lib/registries/actors.py: Prebuilt actor class registry.
     - vidbyte/lib/registries/agents.py: Agent discovery registry.
@@ -26,76 +26,12 @@ from __future__ import annotations
 
 from typing import Any, TYPE_CHECKING
 
-from vidbyte.context.handoffs import (
-    APIDesignHandoff,
-    ArchitectureDecisionHandoff,
-    BacktrackingHandoff,
-    BudgetBoundedHandoff,
-    BugFixHandoff,
-    CICDPipelineHandoff,
-    CodeReviewHandoff,
-    CodebaseOnboardingHandoff,
-    ConstraintSatisfactionHandoff,
-    CoverageHandoff,
-    DecompositionHandoff,
-    DependencyUpgradeHandoff,
-    EngineeringHandoff,
-    GoalStackHandoff,
-    Handoff,
-    IncidentResponseHandoff,
-    IntegrationHandoff,
-    MigrationHandoff,
-    MinimalHandoff,
-    PerformanceOptimizationHandoff,
-    RefactorHandoff,
-    RefinementLoopHandoff,
-    ReleaseHandoff,
-    ResearchHandoff,
-    SchemaMigrationHandoff,
-    SecurityRemediationHandoff,
-    TestAuthoringHandoff,
-    TradeoffHandoff,
-    TreeSearchHandoff,
-)
+from vidbyte.context.handoffs import Handoff
+from vidbyte.lib.config.handoff import DEFAULT_HANDOFFS
 from vidbyte.lib.errors import ConfigurationError
 
 if TYPE_CHECKING:
     from vidbyte.agents.handoff import HandoffAgent
-
-
-_DEFAULT_HANDOFFS: dict[str, type[Handoff]] = {
-    # General prebuilts.
-    "engineering": EngineeringHandoff,
-    "research": ResearchHandoff,
-    "minimal": MinimalHandoff,
-    # Process-shape prebuilts.
-    "tree_search": TreeSearchHandoff,
-    "decomposition": DecompositionHandoff,
-    "refinement_loop": RefinementLoopHandoff,
-    "constraint_satisfaction": ConstraintSatisfactionHandoff,
-    "backtracking": BacktrackingHandoff,
-    "tradeoff": TradeoffHandoff,
-    "goal_stack": GoalStackHandoff,
-    "coverage": CoverageHandoff,
-    "budget_bounded": BudgetBoundedHandoff,
-    "migration": MigrationHandoff,
-    # Software-engineering prebuilts.
-    "code_review": CodeReviewHandoff,
-    "bug_fix": BugFixHandoff,
-    "refactor": RefactorHandoff,
-    "performance_optimization": PerformanceOptimizationHandoff,
-    "test_authoring": TestAuthoringHandoff,
-    "api_design": APIDesignHandoff,
-    "schema_migration": SchemaMigrationHandoff,
-    "dependency_upgrade": DependencyUpgradeHandoff,
-    "incident_response": IncidentResponseHandoff,
-    "architecture_decision": ArchitectureDecisionHandoff,
-    "codebase_onboarding": CodebaseOnboardingHandoff,
-    "cicd_pipeline": CICDPipelineHandoff,
-    "integration": IntegrationHandoff,
-    "security_remediation": SecurityRemediationHandoff,
-    "release": ReleaseHandoff,
-}
 
 
 class HandoffRegistry:
@@ -103,7 +39,7 @@ class HandoffRegistry:
 
     def __init__(self) -> None:
         # Prefill this registry instance with all SDK-provided prebuilt handoffs.
-        self._handoffs: dict[str, type[Handoff]] = dict(_DEFAULT_HANDOFFS)
+        self._handoffs: dict[str, type[Handoff]] = dict(DEFAULT_HANDOFFS)
 
     def register(self, name: str, handoff_cls: type[Handoff]) -> None:
         # Add or override a handoff under a normalized slug.
