@@ -76,10 +76,55 @@ Prebuilts tuned to common software-engineering task types:
 | `SecurityRemediationHandoff` | fixing vulnerabilities | Vulnerabilities · Severity & Exploitability · Fixes Applied · Verification · Residual Risk · Remaining Items |
 | `ReleaseHandoff` | cutting a release/deploy | Release Scope · Changelog · Pre-Deploy Checklist · Deploy Steps · Verification & Smoke · Rollback Plan |
 
+### Domain catalog
+
+Prebuilts tuned to high-fit professional fields:
+
+| Variant | Field | Section skeleton |
+|---------|-------|------------------|
+| `PatientHandoff` | healthcare (SBAR) | Situation · Background · Assessment · Recommendation · Pending Tasks · Watch-fors |
+| `CareTransitionHandoff` | healthcare | Diagnosis & Status · Medications · Procedures Done/Pending · Follow-up Plan · Red Flags |
+| `DiagnosticWorkupHandoff` | healthcare | Presentation · Differential · Tests Ordered/Resulted · Leading Diagnosis · Next Steps |
+| `ContractReviewHandoff` | legal | Parties & Purpose · Key Terms · Risk Flags · Redlines Proposed · Open Negotiation Points · Recommendation |
+| `LegalResearchHandoff` | legal | Issue · Authorities Found · Holdings & Application · Counterarguments · Confidence & Gaps |
+| `DueDiligenceHandoff` | legal | Scope · Findings by Category · Material Risks · Documents Reviewed · Outstanding Requests |
+| `TicketEscalationHandoff` | support | Customer Goal · Actions Tried · Current State · Reproduction · Why Escalated · Suggested Next Step |
+| `AccountHealthHandoff` | customer success | Account Status · Usage & Risk Signals · Open Issues · Relationship Notes · Renewal/Expansion Posture |
+| `AlertTriageHandoff` | SOC | Alerts in Queue · Triaged & Dispositioned · Under Investigation · Suspected Scope · Next Actions |
+| `ThreatHuntHandoff` | SOC | Hypothesis · Data Sources Queried · Findings · Ruled Out · Open Leads |
+| `InvestmentThesisHandoff` | finance | Thesis · Supporting Evidence · Key Risks · Valuation View · Catalysts · Open Diligence |
+| `DealHandoff` | finance (M&A) | Deal Status · Workstreams · Open Items by Workstream · Key Risks · Next Milestones |
+| `CreditAnalysisHandoff` | finance | Borrower & Facility · Financial Assessment · Risk Factors · Rating/Recommendation · Open Questions |
+
+### Agent-native catalog
+
+Prebuilts tuned to the artifacts and transition moments of agentic execution — these map
+onto SDK runtime concepts (the context window, the `ToolCallContext` trace, sub-agents,
+memory, permissions):
+
+| Variant | Agent moment | Section skeleton |
+|---------|--------------|------------------|
+| `ContextWindowHandoff` | running out of context | Task State · Key Facts to Preserve · Decisions Made · Compacted/Dropped Context · Active Working Set · Resume Instructions |
+| `ToolTrajectoryHandoff` | tool-heavy execution | Available Tools · Calls Made & Results · Failed Calls & Errors · Current Tool State · Next Tool Action |
+| `SubAgentDelegationHandoff` | delegating to sub-agents | Top Goal · Subagents Spawned · Results Received · Pending Delegations · Synthesis State · Next Delegation |
+| `OrchestrationHandoff` | multi-agent orchestration | Plan · Agent Assignments · Completed/In-Flight/Blocked · Cross-Agent Conflicts · Next Dispatch |
+| `HumanEscalationHandoff` | agent → human | What I Was Doing · Where I'm Stuck · What I Tried · Specific Decision Needed · Options & Recommendation |
+| `CheckpointResumeHandoff` | long-horizon checkpoint | Goal · Progress So Far · Current Step · Environment State · Blockers · Resume Point |
+| `DeepResearchHandoff` | agentic research | Question · Search Queries Run · Sources Gathered · Synthesis So Far · Contradictions · Confidence & Next Queries |
+| `RetrievalHandoff` | RAG | Query · Chunks Retrieved · Relevance Assessment · Coverage Gaps · Re-query Plan |
+| `BrowserSessionHandoff` | browser automation | Current Location · Session & Auth State · Action Trail · Extracted Data · Blockers · Next Action |
+| `ComputerUseHandoff` | desktop/computer use | Desktop State · Apps & Windows Open · Action Trail · Files Touched · Blockers · Next Step |
+| `MemoryHandoff` | memory-backed agent | Working Memory · Long-Term Facts Learned · Updated/Stale Beliefs · Open Questions · What to Persist |
+| `VerificationHandoff` | self-verification | Claims Made · Verified vs Unverified · Failed Checks · Confidence per Claim · What Still Needs Checking |
+| `ReasoningTraceHandoff` | reasoning continuity | Goal · Reasoning So Far · Key Inferences · Assumptions Made · Dead Ends · Current Direction |
+| `GuardrailHandoff` | guardrail/policy stop | Requested Action · Policy Triggered · What Was Blocked · Safe Alternatives · Needs Human Approval |
+| `EvaluationHandoff` | grading/evaluation | Rubric · Items Graded · Scores & Rationale · Uncertain/Disputed · Remaining to Grade |
+
 ### Discovering handoffs with the registry
 
 `HandoffRegistry` is a prefilled catalog of every prebuilt handoff (general + process-shape
-+ software-engineering). Use it to browse, construct by name, or build an agent in one step:
++ software-engineering + domain + agent-native). Use it to browse, construct by name, or
+build an agent in one step:
 
 ```python
 from vidbyte import HandoffRegistry
