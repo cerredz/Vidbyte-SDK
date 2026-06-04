@@ -83,8 +83,8 @@ class UpdateTraceTool(BaseTool):
     def _input_schema(self) -> dict[str, Any]:
         # Builds a provider-native JSON Schema for the updateTrace tool argument.
         properties = {
-            field_name: {"description": description}
-            for field_name, description in self.schema.fields.items()
+            field_name: {"type": field.type.value, "description": field.description}
+            for field_name, field in self.schema.fields.items()
         }
         return {
             "type": "object",

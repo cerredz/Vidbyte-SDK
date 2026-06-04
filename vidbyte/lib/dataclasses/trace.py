@@ -7,7 +7,9 @@ Purpose:
     giving agents a stable option object for continual trace updates.
 Architecture:
     - TraceMode: Supported trace execution modes.
-    - TraceSchema: Ordered field descriptions for JSON-like trace artifacts.
+    - TraceFieldType: JSON-like value types a trace field can hold.
+    - TraceField: Pydantic description object carrying a typed field description.
+    - TraceSchema: Ordered typed field descriptions for JSON-like trace artifacts.
     - TraceOption: Agent constructor option for continual tracing.
 Relations:
     Re-exported by vidbyte.trace and consumed by vidbyte.agents runtime wiring.
@@ -15,10 +17,13 @@ Relations:
 
 from __future__ import annotations
 
+import typing
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
+
+from pydantic import BaseModel
 
 
 class TraceMode(str, Enum):
@@ -27,16 +32,34 @@ class TraceMode(str, Enum):
     CONTINUAL = "continual"
 
 
+class TraceFieldType(str, Enum):
+    """JSON-like value types a single trace field can hold."""
+
+    STRING = "string"
+    INTEGER = "integer"
+    NUMBER = "number"
+    BOOLEAN = "boolean"
+    ARRAY = "array"
+    OBJECT = "object"
+
+
+class TraceField(BaseModel):
+    """Typed description object for one continual trace field."""
+
+    description: str
+    type: TraceFieldType = TraceFieldType.STRING
+
+
 @dataclass(frozen=True, slots=True)
 class TraceSchema:
-    """Ordered schema for a JSON-like continual trace artifact."""
+    """Ordered schema of typed field descriptions for a JSON-like trace artifact."""
 
     name: str
-    fields: Mapping[str, str] = field(default_factory=dict)
+    fields: Mapping[str, TraceField | str] = field(default_factory=dict)
     description: str = ""
 
     def __post_init__(self) -> None:
-        # Validates and normalizes schema names and field descriptions.
+        # Validates and normalizes schema names and typed field descriptions.
         normalized_name = self.name.strip() if isinstance(self.name, str) else ""
         if not normalized_name:
             raise ValueError("TraceSchema.name cannot be empty")
@@ -46,37 +69,84 @@ class TraceSchema:
         object.__setattr__(self, "description", self.description.strip())
 
     @classmethod
-    def coerce(cls, raw: "TraceSchema | Mapping[str, str]") -> "TraceSchema":
-        # Converts mapping schemas into named TraceSchema instances.
+    def coerce(cls, raw: "TraceSchema | type[BaseModel] | Mapping[str, Any]") -> "TraceSchema":
+        # Converts pydantic models or mapping schemas into named TraceSchema instances.
         if isinstance(raw, TraceSchema):
             return raw
+        if isinstance(raw, type) and issubclass(raw, BaseModel):
+            return cls.from_model(raw)
         if isinstance(raw, Mapping):
             return cls(name="custom_trace", fields=raw, description="Custom continual trace schema.")
-        raise TypeError("trace schema must be a TraceSchema or a mapping of field names to descriptions")
+        raise TypeError("trace schema must be a TraceSchema, a pydantic BaseModel subclass, or a mapping of field names to descriptions")
+
+    @classmethod
+    def from_model(cls, model: type[BaseModel], *, name: str | None = None, description: str | None = None) -> "TraceSchema":
+        # Builds a typed TraceSchema from a pydantic model using each field's description and annotation.
+        fields: dict[str, TraceField] = {}
+        for field_name, info in model.model_fields.items():
+            field_description = (info.description or "").strip()
+            if not field_description:
+                raise ValueError(f"TraceSchema field {field_name!r} must have a pydantic Field(description=...)")
+            fields[field_name] = TraceField(description=field_description, type=cls._annotation_to_type(info.annotation))
+        schema_name = (name or model.__name__).strip()
+        schema_description = description if description is not None else (model.__doc__ or "").strip()
+        return cls(name=schema_name, fields=fields, description=schema_description)
 
     def initial_artifact(self) -> dict[str, Any]:
         # Returns a complete empty artifact keyed by every declared schema field.
         return {field_name: None for field_name in self.fields}
 
     def describe_fields(self) -> str:
-        # Renders field descriptions for trace-agent prompts.
-        return "\n".join(f"- {name}: {description}" for name, description in self.fields.items())
+        # Renders typed field descriptions for trace-agent prompts.
+        return "\n".join(f"- {name} ({field.type.value}): {field.description}" for name, field in self.fields.items())
 
-    @staticmethod
-    def _normalized_fields(fields: Mapping[str, str]) -> dict[str, str]:
+    @classmethod
+    def _normalized_fields(cls, fields: Mapping[str, Any]) -> dict[str, TraceField]:
         # Validates schema fields while preserving caller-provided insertion order.
         if not isinstance(fields, Mapping) or not fields:
             raise ValueError("TraceSchema.fields must contain at least one field")
-        normalized: dict[str, str] = {}
-        for raw_name, raw_description in fields.items():
+        normalized: dict[str, TraceField] = {}
+        for raw_name, raw_value in fields.items():
             name = raw_name.strip() if isinstance(raw_name, str) else ""
-            description = raw_description.strip() if isinstance(raw_description, str) else ""
             if not name:
                 raise ValueError("TraceSchema field names cannot be empty")
-            if not description:
-                raise ValueError(f"TraceSchema field {name!r} must have a description")
-            normalized[name] = description
+            normalized[name] = cls._normalize_field_value(name, raw_value)
         return normalized
+
+    @staticmethod
+    def _normalize_field_value(name: str, value: Any) -> TraceField:
+        # Accepts a plain description string, a mapping, or a TraceField and returns a TraceField.
+        if isinstance(value, TraceField):
+            field_obj = value
+        elif isinstance(value, str):
+            field_obj = TraceField(description=value)
+        elif isinstance(value, Mapping):
+            field_obj = TraceField(**value)
+        else:
+            raise ValueError(f"TraceSchema field {name!r} must be a description string, mapping, or TraceField")
+        if not field_obj.description.strip():
+            raise ValueError(f"TraceSchema field {name!r} must have a description")
+        return field_obj.model_copy(update={"description": field_obj.description.strip()})
+
+    @staticmethod
+    def _annotation_to_type(annotation: Any) -> TraceFieldType:
+        # Maps a Python type annotation onto the closest JSON-like trace field type.
+        origin = typing.get_origin(annotation)
+        target = origin if origin is not None else annotation
+        if isinstance(target, type):
+            if issubclass(target, bool):
+                return TraceFieldType.BOOLEAN
+            if issubclass(target, int):
+                return TraceFieldType.INTEGER
+            if issubclass(target, float):
+                return TraceFieldType.NUMBER
+            if issubclass(target, str):
+                return TraceFieldType.STRING
+            if issubclass(target, (list, tuple, set, frozenset)):
+                return TraceFieldType.ARRAY
+            if issubclass(target, Mapping):
+                return TraceFieldType.OBJECT
+        return TraceFieldType.STRING
 
 
 @dataclass(frozen=True, slots=True)
@@ -99,8 +169,8 @@ class TraceOption:
             raise ValueError("TraceOption.max_trace_iterations must be between 1 and 3")
 
     @classmethod
-    def continual(cls, schema: TraceSchema | Mapping[str, str], *, every_n_iterations: int = 5, max_trace_iterations: int = 3) -> "TraceOption":
-        # Builds a validated continual trace option from a schema or field mapping.
+    def continual(cls, schema: TraceSchema | type[BaseModel] | Mapping[str, Any], *, every_n_iterations: int = 5, max_trace_iterations: int = 3) -> "TraceOption":
+        # Builds a validated continual trace option from a schema, pydantic model, or field mapping.
         return cls(
             mode=TraceMode.CONTINUAL,
             schema=TraceSchema.coerce(schema),
@@ -121,6 +191,8 @@ class TraceOption:
 
 __all__ = [
     "TraceMode",
+    "TraceFieldType",
+    "TraceField",
     "TraceOption",
     "TraceSchema",
 ]
