@@ -235,38 +235,38 @@ No new third-party packages.
 
 ## Appendix A — Section maps
 
-Each entry is `Section Title → guidance description`, implemented verbatim.
+Each entry is `Section Title → guidance description`. Each section guidance is generated as four model-facing sentences that explain what to output, request roughly 500 tokens when the task has enough substance, and state what continuity details to preserve.
 
 ### Domain pack
 
-**PatientHandoff** (Patient Handoff): Situation; Background; Assessment; Recommendation; Pending Tasks; Watch-fors.
-**CareTransitionHandoff** (Care Transition Handoff): Diagnosis & Status; Medications; Procedures Done/Pending; Follow-up Plan; Red Flags.
-**DiagnosticWorkupHandoff** (Diagnostic Workup Handoff): Presentation; Differential; Tests Ordered/Resulted; Leading Diagnosis; Next Steps.
-**ContractReviewHandoff** (Contract Review Handoff): Parties & Purpose; Key Terms; Risk Flags; Redlines Proposed; Open Negotiation Points; Recommendation.
-**LegalResearchHandoff** (Legal Research Handoff): Issue; Authorities Found; Holdings & Application; Counterarguments; Confidence & Gaps.
-**DueDiligenceHandoff** (Due Diligence Handoff): Scope; Findings by Category; Material Risks; Documents Reviewed; Outstanding Requests.
-**TicketEscalationHandoff** (Ticket Escalation Handoff): Customer Goal; Actions Tried; Current State; Reproduction; Why Escalated; Suggested Next Step.
-**AccountHealthHandoff** (Account Health Handoff): Account Status; Usage & Risk Signals; Open Issues; Relationship Notes; Renewal/Expansion Posture.
-**AlertTriageHandoff** (Alert Triage Handoff): Alerts in Queue; Triaged & Dispositioned; Under Investigation; Suspected Scope; Next Actions.
-**ThreatHuntHandoff** (Threat Hunt Handoff): Hypothesis; Data Sources Queried; Findings; Ruled Out; Open Leads.
-**InvestmentThesisHandoff** (Investment Thesis Handoff): Thesis; Supporting Evidence; Key Risks; Valuation View; Catalysts; Open Diligence.
-**DealHandoff** (Deal Handoff): Deal Status; Workstreams; Open Items by Workstream; Key Risks; Next Milestones.
-**CreditAnalysisHandoff** (Credit Analysis Handoff): Borrower & Facility; Financial Assessment; Risk Factors; Rating/Recommendation; Open Questions.
+**PatientHandoff** (Patient Handoff): Situation; Background; Assessment; Recommendation; Pending Tasks; Watch-fors; Medications & Treatments; Care Team & Family Context; Escalation Criteria.
+**CareTransitionHandoff** (Care Transition Handoff): Diagnosis & Status; Medications; Procedures Done/Pending; Follow-up Plan; Red Flags; Receiving Team Responsibilities; Patient Constraints; Documentation Gaps.
+**DiagnosticWorkupHandoff** (Diagnostic Workup Handoff): Presentation; Differential; Tests Ordered/Resulted; Leading Diagnosis; Next Steps; Ruled-Out Concerns; Urgency & Safety Plan; Consults & Ownership.
+**ContractReviewHandoff** (Contract Review Handoff): Parties & Purpose; Key Terms; Risk Flags; Redlines Proposed; Open Negotiation Points; Recommendation; Business Context; Fallback Positions; Approval Path.
+**LegalResearchHandoff** (Legal Research Handoff): Issue; Authorities Found; Holdings & Application; Counterarguments; Confidence & Gaps; Research Trail; Fact Dependencies; Draft Answer.
+**DueDiligenceHandoff** (Due Diligence Handoff): Scope; Findings by Category; Material Risks; Documents Reviewed; Outstanding Requests; Decision Impact; Assumptions & Limits; Next Review Pass.
+**TicketEscalationHandoff** (Ticket Escalation Handoff): Customer Goal; Actions Tried; Current State; Reproduction; Why Escalated; Suggested Next Step; Environment Details; Artifacts & Evidence; Customer Communication.
+**AccountHealthHandoff** (Account Health Handoff): Account Status; Usage & Risk Signals; Open Issues; Relationship Notes; Renewal/Expansion Posture; Success Plan; Executive Narrative; Next Touchpoints.
+**AlertTriageHandoff** (Alert Triage Handoff): Alerts in Queue; Triaged & Dispositioned; Under Investigation; Suspected Scope; Next Actions; Evidence Collected; Containment Status; Escalation Path.
+**ThreatHuntHandoff** (Threat Hunt Handoff): Hypothesis; Data Sources Queried; Findings; Ruled Out; Open Leads; Coverage Map; Detection Opportunities; Response Readiness.
+**InvestmentThesisHandoff** (Investment Thesis Handoff): Thesis; Supporting Evidence; Key Risks; Valuation View; Catalysts; Open Diligence; Positioning & Sizing; Variant Views; Monitoring Plan.
+**DealHandoff** (Deal Handoff): Deal Status; Workstreams; Open Items by Workstream; Key Risks; Next Milestones; Negotiation State; Stakeholder Map; Integration or Closing Readiness.
+**CreditAnalysisHandoff** (Credit Analysis Handoff): Borrower & Facility; Financial Assessment; Risk Factors; Rating/Recommendation; Open Questions; Covenants & Protections; Scenario Analysis; Approval Conditions.
 
 ### Agent-native pack
 
-**ContextWindowHandoff** (Context Window Handoff): Task State; Key Facts to Preserve; Decisions Made; Compacted/Dropped Context; Active Working Set; Resume Instructions.
-**ToolTrajectoryHandoff** (Tool Trajectory Handoff): Available Tools; Calls Made & Results; Failed Calls & Errors; Current Tool State; Next Tool Action.
-**SubAgentDelegationHandoff** (Sub-Agent Delegation Handoff): Top Goal; Subagents Spawned; Results Received; Pending Delegations; Synthesis State; Next Delegation.
-**OrchestrationHandoff** (Orchestration Handoff): Plan; Agent Assignments; Completed/In-Flight/Blocked; Cross-Agent Conflicts; Next Dispatch.
-**HumanEscalationHandoff** (Human Escalation Handoff): What I Was Doing; Where I'm Stuck; What I Tried; Specific Decision Needed; Options & Recommendation.
-**CheckpointResumeHandoff** (Checkpoint Resume Handoff): Goal; Progress So Far; Current Step; Environment State; Blockers; Resume Point.
-**DeepResearchHandoff** (Deep Research Handoff): Question; Search Queries Run; Sources Gathered; Synthesis So Far; Contradictions; Confidence & Next Queries.
-**RetrievalHandoff** (Retrieval Handoff): Query; Chunks Retrieved; Relevance Assessment; Coverage Gaps; Re-query Plan.
-**BrowserSessionHandoff** (Browser Session Handoff): Current Location; Session & Auth State; Action Trail; Extracted Data; Blockers; Next Action.
-**ComputerUseHandoff** (Computer Use Handoff): Desktop State; Apps & Windows Open; Action Trail; Files Touched; Blockers; Next Step.
-**MemoryHandoff** (Memory Handoff): Working Memory; Long-Term Facts Learned; Updated/Stale Beliefs; Open Questions; What to Persist.
-**VerificationHandoff** (Verification Handoff): Claims Made; Verified vs Unverified; Failed Checks; Confidence per Claim; What Still Needs Checking.
-**ReasoningTraceHandoff** (Reasoning Trace Handoff): Goal; Reasoning So Far; Key Inferences; Assumptions Made; Dead Ends; Current Direction.
-**GuardrailHandoff** (Guardrail Handoff): Requested Action; Policy Triggered; What Was Blocked; Safe Alternatives; Needs Human Approval.
-**EvaluationHandoff** (Evaluation Handoff): Rubric; Items Graded; Scores & Rationale; Uncertain/Disputed; Remaining to Grade.
+**ContextWindowHandoff** (Context Window Handoff): Task State; Key Facts to Preserve; Decisions Made; Compacted/Dropped Context; Active Working Set; Resume Instructions; Token Budget Strategy; Validation Needed; Lost Nuance.
+**ToolTrajectoryHandoff** (Tool Trajectory Handoff): Available Tools; Calls Made & Results; Failed Calls & Errors; Current Tool State; Next Tool Action; Artifacts Produced; Permission Boundaries; Ordering Dependencies.
+**SubAgentDelegationHandoff** (Sub-Agent Delegation Handoff): Top Goal; Subagents Spawned; Results Received; Pending Delegations; Synthesis State; Next Delegation; Conflict Resolution; Quality Gates; Shared Context.
+**OrchestrationHandoff** (Orchestration Handoff): Plan; Agent Assignments; Completed/In-Flight/Blocked; Cross-Agent Conflicts; Next Dispatch; Shared State; Coordination Rules; Completion Criteria.
+**HumanEscalationHandoff** (Human Escalation Handoff): What I Was Doing; Where I'm Stuck; What I Tried; Specific Decision Needed; Options & Recommendation; Risk of Proceeding; Needed Context From Human; Safe Holding Pattern.
+**CheckpointResumeHandoff** (Checkpoint Resume Handoff): Goal; Progress So Far; Current Step; Environment State; Blockers; Resume Point; Verification Snapshot; Rollback or Recovery; Budget Remaining.
+**DeepResearchHandoff** (Deep Research Handoff): Question; Search Queries Run; Sources Gathered; Synthesis So Far; Contradictions; Confidence & Next Queries; Source Quality Notes; Unanswered Subquestions; Citation Trail.
+**RetrievalHandoff** (Retrieval Handoff): Query; Chunks Retrieved; Relevance Assessment; Coverage Gaps; Re-query Plan; Corpus Assumptions; Answer Candidates; Deduplication Notes.
+**BrowserSessionHandoff** (Browser Session Handoff): Current Location; Session & Auth State; Action Trail; Extracted Data; Blockers; Next Action; Viewport & Timing Notes; Download or Upload State; Safety Constraints.
+**ComputerUseHandoff** (Computer Use Handoff): Desktop State; Apps & Windows Open; Action Trail; Files Touched; Blockers; Next Step; Input State; System Constraints; Recovery Notes.
+**MemoryHandoff** (Memory Handoff): Working Memory; Long-Term Facts Learned; Updated/Stale Beliefs; Open Questions; What to Persist; What Not to Persist; Source Evidence; Memory Conflicts.
+**VerificationHandoff** (Verification Handoff): Claims Made; Verified vs Unverified; Failed Checks; Confidence per Claim; What Still Needs Checking; Verification Methods; Corrections Applied; Residual Risk.
+**ReasoningTraceHandoff** (Reasoning Trace Handoff): Goal; Reasoning So Far; Key Inferences; Assumptions Made; Dead Ends; Current Direction; Decision Points; Evidence Ledger; Output Implications.
+**GuardrailHandoff** (Guardrail Handoff): Requested Action; Policy Triggered; What Was Blocked; Safe Alternatives; Needs Human Approval; Risk Rationale; Allowed Progress; Escalation Record.
+**EvaluationHandoff** (Evaluation Handoff): Rubric; Items Graded; Scores & Rationale; Uncertain/Disputed; Remaining to Grade; Calibration Notes; Evidence Reviewed; Finalization Criteria.

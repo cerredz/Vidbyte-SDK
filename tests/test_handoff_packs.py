@@ -64,6 +64,19 @@ class NewPackStructureTests(unittest.TestCase):
             with self.subTest(variant=cls.__name__):
                 self.assertTrue(cls().sections)
 
+    def test_every_new_variant_has_expanded_section_count(self) -> None:
+        for cls in _new_classes():
+            with self.subTest(variant=cls.__name__):
+                self.assertGreaterEqual(len(cls().sections), 8)
+
+    def test_every_new_section_guidance_is_detailed(self) -> None:
+        for cls in _new_classes():
+            for title, description in cls().sections.items():
+                with self.subTest(variant=cls.__name__, section=title):
+                    self.assertGreaterEqual(description.count("."), 4)
+                    self.assertLessEqual(description.count("."), 5)
+                    self.assertIn("roughly 500 tokens", description)
+
     def test_full_catalog_section_maps_are_pairwise_distinct(self) -> None:
         registry = _registry()
         maps = [tuple(cls().sections.items()) for cls in registry.all().values()]

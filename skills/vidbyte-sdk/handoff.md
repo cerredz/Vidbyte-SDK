@@ -1,4 +1,4 @@
-# Handoffs
+﻿# Handoffs
 
 ## What a handoff is
 
@@ -6,11 +6,11 @@ A handoff is a structured document describing what an agent did, so another agen
 (or a human) can continue the work cold. In the Vidbyte SDK a handoff is one object,
 `Handoff`, that plays three roles at once:
 
-- **Context primitive** — it implements the `ContextItem` protocol, so a finished
+- **Context primitive** â€” it implements the `ContextItem` protocol, so a finished
   handoff drops straight into another agent via `context_items=[...]`.
-- **Spec** — its ordered `sections` mapping (title → description) tells a `HandoffAgent`
+- **Spec** â€” its ordered `sections` mapping (title â†’ description) tells a `HandoffAgent`
   what structure to produce.
-- **Output** — once produced, the same object holds the filled content (`fill()` returns
+- **Output** â€” once produced, the same object holds the filled content (`fill()` returns
   the same subclass with `metadata["filled"] = True`).
 
 There is intentionally **no** `vidbyte/handoff/` subsystem. The primitive lives in
@@ -32,21 +32,21 @@ spec = MinimalHandoff()          # Summary, Next Steps  (the default when none i
 ### Process-shape catalog
 
 Beyond the three above, the SDK ships prebuilts keyed to the *shape of the agent's
-problem-solving process* — each models a distinct reasoning/execution topology, not a
+problem-solving process* â€” each models a distinct reasoning/execution topology, not a
 domain. Pick the one whose structural element matches how the work actually unfolded:
 
 | Variant | Shape | Section skeleton |
 |---------|-------|------------------|
-| `TreeSearchHandoff` | search frontier | Search Goal · Frontier · Explored Branches · Pruned / Dead Branches · Best So Far · Next Expansion |
-| `DecompositionHandoff` | subproblem tree | Top-Level Problem · Decomposition · Solved Subproblems · Open Subproblems · Composition Status · Next Steps |
-| `RefinementLoopHandoff` | iteration journal | Objective · Current Draft State · Iteration Log · Open Critiques · Convergence Status · Next Revision |
-| `ConstraintSatisfactionHandoff` | constraint ledger | Objective · Constraints · Current Candidate · Conflicts & Tensions · Trade-offs Made · Next Steps |
-| `BacktrackingHandoff` | decision stack | Objective · Decision Stack · Tentative Choices · Backtrack Points · Abandoned Paths · Next Steps |
-| `TradeoffHandoff` | Pareto frontier | Decision to Make · Objectives & Priorities · Options Evaluated · Frontier · Leaning / Chosen · Open Questions |
-| `GoalStackHandoff` | goal hierarchy | Root Goal · Goal Hierarchy · Active Path · Satisfied Goals · Suspended Goals · Next Steps |
-| `CoverageHandoff` | coverage map | Objective & Scope · Coverage Map · Completed · Gaps & Skipped · Systematic Next |
-| `BudgetBoundedHandoff` | budget curve | Objective · Budget Status · Value Delivered · Remaining Work · Cut Line · Next Steps |
-| `MigrationHandoff` | state delta | Target State · Current State · Completed Migrations · Remaining Delta · Reversibility · Next Steps |
+| `TreeSearchHandoff` | search frontier | Search Goal Â· Frontier Â· Explored Branches Â· Pruned / Dead Branches Â· Best So Far Â· Next Expansion |
+| `DecompositionHandoff` | subproblem tree | Top-Level Problem Â· Decomposition Â· Solved Subproblems Â· Open Subproblems Â· Composition Status Â· Next Steps |
+| `RefinementLoopHandoff` | iteration journal | Objective Â· Current Draft State Â· Iteration Log Â· Open Critiques Â· Convergence Status Â· Next Revision |
+| `ConstraintSatisfactionHandoff` | constraint ledger | Objective Â· Constraints Â· Current Candidate Â· Conflicts & Tensions Â· Trade-offs Made Â· Next Steps |
+| `BacktrackingHandoff` | decision stack | Objective Â· Decision Stack Â· Tentative Choices Â· Backtrack Points Â· Abandoned Paths Â· Next Steps |
+| `TradeoffHandoff` | Pareto frontier | Decision to Make Â· Objectives & Priorities Â· Options Evaluated Â· Frontier Â· Leaning / Chosen Â· Open Questions |
+| `GoalStackHandoff` | goal hierarchy | Root Goal Â· Goal Hierarchy Â· Active Path Â· Satisfied Goals Â· Suspended Goals Â· Next Steps |
+| `CoverageHandoff` | coverage map | Objective & Scope Â· Coverage Map Â· Completed Â· Gaps & Skipped Â· Systematic Next |
+| `BudgetBoundedHandoff` | budget curve | Objective Â· Budget Status Â· Value Delivered Â· Remaining Work Â· Cut Line Â· Next Steps |
+| `MigrationHandoff` | state delta | Target State Â· Current State Â· Completed Migrations Â· Remaining Delta Â· Reversibility Â· Next Steps |
 
 ```python
 from vidbyte import TreeSearchHandoff, RefinementLoopHandoff, BudgetBoundedHandoff
@@ -60,21 +60,21 @@ Prebuilts tuned to common software-engineering task types:
 
 | Variant | SWE task | Section skeleton |
 |---------|----------|------------------|
-| `CodeReviewHandoff` | reviewing a PR/diff | Scope Reviewed · Blocking Issues · Non-Blocking Suggestions · Approved Aspects · Unresolved Threads · Verdict |
-| `BugFixHandoff` | fixing a defect | Symptom · Reproduction · Root Cause · Fix Applied · Tests Added · Regression Risk |
-| `RefactorHandoff` | restructure, no behavior change | Motivation · Scope & Boundaries · Behavior-Preservation Evidence · Changes by Module · Risk Areas · Follow-up Cleanups |
-| `PerformanceOptimizationHandoff` | profiling/optimization | Baseline Metrics · Bottlenecks Identified · Optimizations Applied · Measured Improvement · Trade-offs · Remaining Hotspots |
-| `TestAuthoringHandoff` | writing tests / coverage | Coverage Goal · Areas Covered · Test Cases Added · Gaps & Untested Paths · Flaky/Skipped Tests · Next Tests |
-| `APIDesignHandoff` | designing an endpoint/contract | Purpose & Consumers · Endpoints/Contracts · Request/Response Schemas · Versioning & Compatibility · Error Model · Open Design Questions |
-| `SchemaMigrationHandoff` | DB schema change | Schema Change · Migration Steps · Backfill Plan · Forward/Backward Compatibility · Data-Integrity Checks · Rollback Plan |
-| `DependencyUpgradeHandoff` | lib/framework bump | Target Versions · Breaking Changes · Code Adjustments Made · Compatibility Verification · Remaining Deprecations · Rollback |
-| `IncidentResponseHandoff` | on-call / outage | Impact & Severity · Timeline · Current Mitigation · Root-Cause Status · Action Items · Comms Status |
-| `ArchitectureDecisionHandoff` | system design / ADR | Problem & Context · Options Considered · Decision & Rationale · Consequences & Trade-offs · Open Risks · Next Steps |
-| `CodebaseOnboardingHandoff` | understanding unfamiliar code | Goal · System Map · Key Components & Responsibilities · Entry Points & Data Flow · Conventions & Gotchas · Open Questions |
-| `CICDPipelineHandoff` | build/deploy pipeline work | Pipeline Goal · Stages & Status · Build/Deploy Config · Secrets & Environments · Failing/Flaky Stages · Next Steps |
-| `IntegrationHandoff` | third-party integration | Integration Goal · External Contract · Auth & Credentials · Implemented Surface · Edge Cases & Failure Modes · Untested Paths |
-| `SecurityRemediationHandoff` | fixing vulnerabilities | Vulnerabilities · Severity & Exploitability · Fixes Applied · Verification · Residual Risk · Remaining Items |
-| `ReleaseHandoff` | cutting a release/deploy | Release Scope · Changelog · Pre-Deploy Checklist · Deploy Steps · Verification & Smoke · Rollback Plan |
+| `CodeReviewHandoff` | reviewing a PR/diff | Scope Reviewed Â· Blocking Issues Â· Non-Blocking Suggestions Â· Approved Aspects Â· Unresolved Threads Â· Verdict |
+| `BugFixHandoff` | fixing a defect | Symptom Â· Reproduction Â· Root Cause Â· Fix Applied Â· Tests Added Â· Regression Risk |
+| `RefactorHandoff` | restructure, no behavior change | Motivation Â· Scope & Boundaries Â· Behavior-Preservation Evidence Â· Changes by Module Â· Risk Areas Â· Follow-up Cleanups |
+| `PerformanceOptimizationHandoff` | profiling/optimization | Baseline Metrics Â· Bottlenecks Identified Â· Optimizations Applied Â· Measured Improvement Â· Trade-offs Â· Remaining Hotspots |
+| `TestAuthoringHandoff` | writing tests / coverage | Coverage Goal Â· Areas Covered Â· Test Cases Added Â· Gaps & Untested Paths Â· Flaky/Skipped Tests Â· Next Tests |
+| `APIDesignHandoff` | designing an endpoint/contract | Purpose & Consumers Â· Endpoints/Contracts Â· Request/Response Schemas Â· Versioning & Compatibility Â· Error Model Â· Open Design Questions |
+| `SchemaMigrationHandoff` | DB schema change | Schema Change Â· Migration Steps Â· Backfill Plan Â· Forward/Backward Compatibility Â· Data-Integrity Checks Â· Rollback Plan |
+| `DependencyUpgradeHandoff` | lib/framework bump | Target Versions Â· Breaking Changes Â· Code Adjustments Made Â· Compatibility Verification Â· Remaining Deprecations Â· Rollback |
+| `IncidentResponseHandoff` | on-call / outage | Impact & Severity Â· Timeline Â· Current Mitigation Â· Root-Cause Status Â· Action Items Â· Comms Status |
+| `ArchitectureDecisionHandoff` | system design / ADR | Problem & Context Â· Options Considered Â· Decision & Rationale Â· Consequences & Trade-offs Â· Open Risks Â· Next Steps |
+| `CodebaseOnboardingHandoff` | understanding unfamiliar code | Goal Â· System Map Â· Key Components & Responsibilities Â· Entry Points & Data Flow Â· Conventions & Gotchas Â· Open Questions |
+| `CICDPipelineHandoff` | build/deploy pipeline work | Pipeline Goal Â· Stages & Status Â· Build/Deploy Config Â· Secrets & Environments Â· Failing/Flaky Stages Â· Next Steps |
+| `IntegrationHandoff` | third-party integration | Integration Goal Â· External Contract Â· Auth & Credentials Â· Implemented Surface Â· Edge Cases & Failure Modes Â· Untested Paths |
+| `SecurityRemediationHandoff` | fixing vulnerabilities | Vulnerabilities Â· Severity & Exploitability Â· Fixes Applied Â· Verification Â· Residual Risk Â· Remaining Items |
+| `ReleaseHandoff` | cutting a release/deploy | Release Scope Â· Changelog Â· Pre-Deploy Checklist Â· Deploy Steps Â· Verification & Smoke Â· Rollback Plan |
 
 ### Domain catalog
 
@@ -82,44 +82,43 @@ Prebuilts tuned to high-fit professional fields:
 
 | Variant | Field | Section skeleton |
 |---------|-------|------------------|
-| `PatientHandoff` | healthcare (SBAR) | Situation · Background · Assessment · Recommendation · Pending Tasks · Watch-fors |
-| `CareTransitionHandoff` | healthcare | Diagnosis & Status · Medications · Procedures Done/Pending · Follow-up Plan · Red Flags |
-| `DiagnosticWorkupHandoff` | healthcare | Presentation · Differential · Tests Ordered/Resulted · Leading Diagnosis · Next Steps |
-| `ContractReviewHandoff` | legal | Parties & Purpose · Key Terms · Risk Flags · Redlines Proposed · Open Negotiation Points · Recommendation |
-| `LegalResearchHandoff` | legal | Issue · Authorities Found · Holdings & Application · Counterarguments · Confidence & Gaps |
-| `DueDiligenceHandoff` | legal | Scope · Findings by Category · Material Risks · Documents Reviewed · Outstanding Requests |
-| `TicketEscalationHandoff` | support | Customer Goal · Actions Tried · Current State · Reproduction · Why Escalated · Suggested Next Step |
-| `AccountHealthHandoff` | customer success | Account Status · Usage & Risk Signals · Open Issues · Relationship Notes · Renewal/Expansion Posture |
-| `AlertTriageHandoff` | SOC | Alerts in Queue · Triaged & Dispositioned · Under Investigation · Suspected Scope · Next Actions |
-| `ThreatHuntHandoff` | SOC | Hypothesis · Data Sources Queried · Findings · Ruled Out · Open Leads |
-| `InvestmentThesisHandoff` | finance | Thesis · Supporting Evidence · Key Risks · Valuation View · Catalysts · Open Diligence |
-| `DealHandoff` | finance (M&A) | Deal Status · Workstreams · Open Items by Workstream · Key Risks · Next Milestones |
-| `CreditAnalysisHandoff` | finance | Borrower & Facility · Financial Assessment · Risk Factors · Rating/Recommendation · Open Questions |
+| `PatientHandoff` | healthcare (SBAR) | Situation; Background; Assessment; Recommendation; Pending Tasks; Watch-fors; Medications & Treatments; Care Team & Family Context; Escalation Criteria |
+| `CareTransitionHandoff` | healthcare | Diagnosis & Status; Medications; Procedures Done/Pending; Follow-up Plan; Red Flags; Receiving Team Responsibilities; Patient Constraints; Documentation Gaps |
+| `DiagnosticWorkupHandoff` | healthcare | Presentation; Differential; Tests Ordered/Resulted; Leading Diagnosis; Next Steps; Ruled-Out Concerns; Urgency & Safety Plan; Consults & Ownership |
+| `ContractReviewHandoff` | legal | Parties & Purpose; Key Terms; Risk Flags; Redlines Proposed; Open Negotiation Points; Recommendation; Business Context; Fallback Positions; Approval Path |
+| `LegalResearchHandoff` | legal | Issue; Authorities Found; Holdings & Application; Counterarguments; Confidence & Gaps; Research Trail; Fact Dependencies; Draft Answer |
+| `DueDiligenceHandoff` | legal | Scope; Findings by Category; Material Risks; Documents Reviewed; Outstanding Requests; Decision Impact; Assumptions & Limits; Next Review Pass |
+| `TicketEscalationHandoff` | support | Customer Goal; Actions Tried; Current State; Reproduction; Why Escalated; Suggested Next Step; Environment Details; Artifacts & Evidence; Customer Communication |
+| `AccountHealthHandoff` | customer success | Account Status; Usage & Risk Signals; Open Issues; Relationship Notes; Renewal/Expansion Posture; Success Plan; Executive Narrative; Next Touchpoints |
+| `AlertTriageHandoff` | SOC | Alerts in Queue; Triaged & Dispositioned; Under Investigation; Suspected Scope; Next Actions; Evidence Collected; Containment Status; Escalation Path |
+| `ThreatHuntHandoff` | SOC | Hypothesis; Data Sources Queried; Findings; Ruled Out; Open Leads; Coverage Map; Detection Opportunities; Response Readiness |
+| `InvestmentThesisHandoff` | finance | Thesis; Supporting Evidence; Key Risks; Valuation View; Catalysts; Open Diligence; Positioning & Sizing; Variant Views; Monitoring Plan |
+| `DealHandoff` | finance (M&A) | Deal Status; Workstreams; Open Items by Workstream; Key Risks; Next Milestones; Negotiation State; Stakeholder Map; Integration or Closing Readiness |
+| `CreditAnalysisHandoff` | finance | Borrower & Facility; Financial Assessment; Risk Factors; Rating/Recommendation; Open Questions; Covenants & Protections; Scenario Analysis; Approval Conditions |
 
 ### Agent-native catalog
 
-Prebuilts tuned to the artifacts and transition moments of agentic execution — these map
+Prebuilts tuned to the artifacts and transition moments of agentic execution - these map
 onto SDK runtime concepts (the context window, the `ToolCallContext` trace, sub-agents,
 memory, permissions):
 
 | Variant | Agent moment | Section skeleton |
 |---------|--------------|------------------|
-| `ContextWindowHandoff` | running out of context | Task State · Key Facts to Preserve · Decisions Made · Compacted/Dropped Context · Active Working Set · Resume Instructions |
-| `ToolTrajectoryHandoff` | tool-heavy execution | Available Tools · Calls Made & Results · Failed Calls & Errors · Current Tool State · Next Tool Action |
-| `SubAgentDelegationHandoff` | delegating to sub-agents | Top Goal · Subagents Spawned · Results Received · Pending Delegations · Synthesis State · Next Delegation |
-| `OrchestrationHandoff` | multi-agent orchestration | Plan · Agent Assignments · Completed/In-Flight/Blocked · Cross-Agent Conflicts · Next Dispatch |
-| `HumanEscalationHandoff` | agent → human | What I Was Doing · Where I'm Stuck · What I Tried · Specific Decision Needed · Options & Recommendation |
-| `CheckpointResumeHandoff` | long-horizon checkpoint | Goal · Progress So Far · Current Step · Environment State · Blockers · Resume Point |
-| `DeepResearchHandoff` | agentic research | Question · Search Queries Run · Sources Gathered · Synthesis So Far · Contradictions · Confidence & Next Queries |
-| `RetrievalHandoff` | RAG | Query · Chunks Retrieved · Relevance Assessment · Coverage Gaps · Re-query Plan |
-| `BrowserSessionHandoff` | browser automation | Current Location · Session & Auth State · Action Trail · Extracted Data · Blockers · Next Action |
-| `ComputerUseHandoff` | desktop/computer use | Desktop State · Apps & Windows Open · Action Trail · Files Touched · Blockers · Next Step |
-| `MemoryHandoff` | memory-backed agent | Working Memory · Long-Term Facts Learned · Updated/Stale Beliefs · Open Questions · What to Persist |
-| `VerificationHandoff` | self-verification | Claims Made · Verified vs Unverified · Failed Checks · Confidence per Claim · What Still Needs Checking |
-| `ReasoningTraceHandoff` | reasoning continuity | Goal · Reasoning So Far · Key Inferences · Assumptions Made · Dead Ends · Current Direction |
-| `GuardrailHandoff` | guardrail/policy stop | Requested Action · Policy Triggered · What Was Blocked · Safe Alternatives · Needs Human Approval |
-| `EvaluationHandoff` | grading/evaluation | Rubric · Items Graded · Scores & Rationale · Uncertain/Disputed · Remaining to Grade |
-
+| `ContextWindowHandoff` | running out of context | Task State; Key Facts to Preserve; Decisions Made; Compacted/Dropped Context; Active Working Set; Resume Instructions; Token Budget Strategy; Validation Needed; Lost Nuance |
+| `ToolTrajectoryHandoff` | tool-heavy execution | Available Tools; Calls Made & Results; Failed Calls & Errors; Current Tool State; Next Tool Action; Artifacts Produced; Permission Boundaries; Ordering Dependencies |
+| `SubAgentDelegationHandoff` | delegating to sub-agents | Top Goal; Subagents Spawned; Results Received; Pending Delegations; Synthesis State; Next Delegation; Conflict Resolution; Quality Gates; Shared Context |
+| `OrchestrationHandoff` | multi-agent orchestration | Plan; Agent Assignments; Completed/In-Flight/Blocked; Cross-Agent Conflicts; Next Dispatch; Shared State; Coordination Rules; Completion Criteria |
+| `HumanEscalationHandoff` | agent -> human | What I Was Doing; Where I'm Stuck; What I Tried; Specific Decision Needed; Options & Recommendation; Risk of Proceeding; Needed Context From Human; Safe Holding Pattern |
+| `CheckpointResumeHandoff` | long-horizon checkpoint | Goal; Progress So Far; Current Step; Environment State; Blockers; Resume Point; Verification Snapshot; Rollback or Recovery; Budget Remaining |
+| `DeepResearchHandoff` | agentic research | Question; Search Queries Run; Sources Gathered; Synthesis So Far; Contradictions; Confidence & Next Queries; Source Quality Notes; Unanswered Subquestions; Citation Trail |
+| `RetrievalHandoff` | RAG | Query; Chunks Retrieved; Relevance Assessment; Coverage Gaps; Re-query Plan; Corpus Assumptions; Answer Candidates; Deduplication Notes |
+| `BrowserSessionHandoff` | browser automation | Current Location; Session & Auth State; Action Trail; Extracted Data; Blockers; Next Action; Viewport & Timing Notes; Download or Upload State; Safety Constraints |
+| `ComputerUseHandoff` | desktop/computer use | Desktop State; Apps & Windows Open; Action Trail; Files Touched; Blockers; Next Step; Input State; System Constraints; Recovery Notes |
+| `MemoryHandoff` | memory-backed agent | Working Memory; Long-Term Facts Learned; Updated/Stale Beliefs; Open Questions; What to Persist; What Not to Persist; Source Evidence; Memory Conflicts |
+| `VerificationHandoff` | self-verification | Claims Made; Verified vs Unverified; Failed Checks; Confidence per Claim; What Still Needs Checking; Verification Methods; Corrections Applied; Residual Risk |
+| `ReasoningTraceHandoff` | reasoning continuity | Goal; Reasoning So Far; Key Inferences; Assumptions Made; Dead Ends; Current Direction; Decision Points; Evidence Ledger; Output Implications |
+| `GuardrailHandoff` | guardrail/policy stop | Requested Action; Policy Triggered; What Was Blocked; Safe Alternatives; Needs Human Approval; Risk Rationale; Allowed Progress; Escalation Record |
+| `EvaluationHandoff` | grading/evaluation | Rubric; Items Graded; Scores & Rationale; Uncertain/Disputed; Remaining to Grade; Calibration Notes; Evidence Reviewed; Finalization Criteria |
 ### Discovering handoffs with the registry
 
 `HandoffRegistry` is a prefilled catalog of every prebuilt handoff (general + process-shape
@@ -166,7 +165,7 @@ ho = sdk.agents.handoff(EngineeringHandoff(), provider="anthropic", model_name="
 doc = await ho.generate_handoff(run_digest_text)   # -> filled EngineeringHandoff
 ```
 
-You rarely build it directly — `BaseAgent.handoff()` does it for you.
+You rarely build it directly â€” `BaseAgent.handoff()` does it for you.
 
 ## Producing a handoff from an agent's own run
 
