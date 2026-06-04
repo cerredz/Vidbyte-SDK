@@ -26,6 +26,7 @@ from vidbyte.lib.dataclasses.middleware import (
     MiddlewareDecision,
     MiddlewareEvent,
     MiddlewareHook,
+    MiddlewareTransform,
 )
 from vidbyte.middleware.base import AgentMiddleware
 from vidbyte.middleware.builtins import (
@@ -38,10 +39,13 @@ from vidbyte.middleware.builtins import (
     ExponentialBackoffRetryMiddleware,
     HoneypotToolMiddleware,
     LoopDetectionMiddleware,
+    MessageHistoryCompactionMiddleware,
     ModelRetryMiddleware,
     RuntimeLimitMiddleware,
+    SummaryCompactionMiddleware,
     TokenBudgetMiddleware,
     TokenRateLimitMiddleware,
+    ToolResultCompactionMiddleware,
     ToolPolicyMiddleware,
 )
 from vidbyte.middleware.pipeline import MiddlewarePipeline
@@ -63,9 +67,13 @@ __all__ = [
     "MiddlewareEvent",
     "MiddlewareHook",
     "MiddlewarePipeline",
+    "MiddlewareTransform",
+    "MessageHistoryCompactionMiddleware",
     "ModelRetryMiddleware",
     "RuntimeLimitMiddleware",
+    "SummaryCompactionMiddleware",
     "TokenBudgetMiddleware",
     "TokenRateLimitMiddleware",
+    "ToolResultCompactionMiddleware",
     "ToolPolicyMiddleware",
 ]

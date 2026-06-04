@@ -19,6 +19,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
+from vidbyte.context.compaction import CompactionMode, ContextCompactionEngine
 from vidbyte.context.algorithms.reflexion import ReflexionAlgorithm
 from vidbyte.context.algorithms.multi_provider_agentic_grader import MultiProviderAgenticGraderAlgorithm
 from vidbyte.lib.dataclasses.tools import ToolCall, ToolResult
@@ -51,53 +52,16 @@ class ContextWindowAlgorithm:
 
     def model_visible_tool_result(self, call: ToolCall, result: ToolResult) -> ToolResult:
 
-        """Return the tool result that should be appended to provider messages."""
+        """Return the compatibility model-visible tool result for direct callers."""
         admission = ToolResultAdmission(self.tool_result_admission)
         if admission is ToolResultAdmission.RAW:
             return result
+        engine = ContextCompactionEngine()
         if admission is ToolResultAdmission.COMPACT:
-            output = _compact_output(result.output, self.max_tool_result_chars)
-            return _replace_tool_result(
-                result,
-                output,
-                {
-                    "context_window_algorithm": self.name,
-                    "raw_output_compacted": output != result.output,
-                    "raw_output_chars": len(result.output),
-                },
-            )
-        return _replace_tool_result(
-            result,
-            (
-                f"Tool '{call.tool_name}' completed with status '{result.status.value}'. "
-                "Raw tool output was withheld from the model context window."
-            ),
-            {
-                "context_window_algorithm": self.name,
-                "raw_output_hidden": True,
-                "raw_output_chars": len(result.output),
-            },
-        )
-
-
-def _replace_tool_result(
-    result: ToolResult,
-    output: str,
-    metadata: Mapping[str, Any],
-) -> ToolResult:
-    result_metadata = {**dict(result.metadata), **dict(metadata)}
-    return ToolResult(
-        tool_name=result.tool_name,
-        status=result.status,
-        output=output,
-        metadata=result_metadata,
-    )
-
-
-def _compact_output(output: str, max_chars: int) -> str:
-    if max_chars <= 0 or len(output) <= max_chars:
-        return output
-    return output[:max_chars].rstrip() + "\n...[tool output compacted]"
+            visible, _ = engine.compact_tool_result(call, result, mode=CompactionMode.TRUNCATE_TOOL_RESULTS, options={"max_chars": self.max_tool_result_chars, "truncation_indicator": "\n...[tool output compacted]"})
+            return visible
+        visible, _ = engine.compact_tool_result(call, result, mode=CompactionMode.HIDE_TOOL_RESULTS)
+        return visible
 
 
 __all__ = [

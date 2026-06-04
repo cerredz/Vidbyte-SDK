@@ -24,6 +24,7 @@ from vidbyte.lib.dataclasses.middleware import (
     MiddlewareDecision,
     MiddlewareEvent,
     MiddlewareHook,
+    MiddlewareTransform,
 )
 from vidbyte.middleware.base import AgentMiddleware
 
@@ -100,13 +101,17 @@ class MiddlewarePipeline:
         hook: MiddlewareHook,
         ctx: MiddlewareContext,
     ) -> MiddlewareDecision:
-        decision = MiddlewareDecision.continue_()
+        aggregate = MiddlewareDecision.continue_()
         for middleware in self.middleware:
             try:
                 raw_decision = await getattr(middleware, hook.value)(ctx)
                 decision = raw_decision or MiddlewareDecision.continue_()
             except Exception as exc:
                 decision = self._exception_decision(middleware, hook, exc)
+
+            if decision.action is MiddlewareAction.CONTINUE:
+                aggregate = self._merge_continue_decisions(aggregate, decision)
+                continue
 
             if decision.action is not MiddlewareAction.CONTINUE:
                 self._record(middleware, hook, decision)
@@ -116,7 +121,27 @@ class MiddlewarePipeline:
                 continue
             if decision.action is not MiddlewareAction.CONTINUE:
                 return decision
-        return MiddlewareDecision.continue_()
+        return aggregate
+
+    def _merge_continue_decisions(self, current: MiddlewareDecision, next_decision: MiddlewareDecision) -> MiddlewareDecision:
+        """Merge continue-decision metadata and transforms in middleware order."""
+        metadata = {**dict(current.metadata), **dict(next_decision.metadata)}
+        transform = self._merge_transforms(current.transform, next_decision.transform)
+        return MiddlewareDecision.continue_(metadata=metadata, transform=transform)
+
+    def _merge_transforms(self, current: MiddlewareTransform | None, next_transform: MiddlewareTransform | None) -> MiddlewareTransform | None:
+        """Merge transform fields, letting later middleware override earlier fields."""
+        if current is None:
+            return next_transform
+        if next_transform is None:
+            return current
+        metadata = {**dict(current.metadata), **dict(next_transform.metadata)}
+        return MiddlewareTransform(
+            model_visible_tool_result=next_transform.model_visible_tool_result or current.model_visible_tool_result,
+            provider_messages=next_transform.provider_messages if next_transform.provider_messages is not None else current.provider_messages,
+            system=next_transform.system if next_transform.system is not None else current.system,
+            metadata=metadata,
+        )
 
     def _exception_decision(
         self,
