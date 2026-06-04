@@ -12,10 +12,12 @@ Relations:
 
 from __future__ import annotations
 
-from vidbyte.trace.prebuilt.action import ActionTrace
-from vidbyte.trace.prebuilt.debug import DebugTrace
+from vidbyte.trace.prebuilt.action import ActionTrace, ActionTraceModel
+from vidbyte.trace.prebuilt.debug import DebugTrace, DebugTraceModel
 
 __all__ = [
     "ActionTrace",
+    "ActionTraceModel",
     "DebugTrace",
+    "DebugTraceModel",
 ]

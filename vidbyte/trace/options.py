@@ -12,9 +12,11 @@ Relations:
 
 from __future__ import annotations
 
-from vidbyte.lib.dataclasses.trace import TraceMode, TraceOption, TraceSchema
+from vidbyte.lib.dataclasses.trace import TraceField, TraceFieldType, TraceMode, TraceOption, TraceSchema
 
 __all__ = [
+    "TraceField",
+    "TraceFieldType",
     "TraceMode",
     "TraceOption",
     "TraceSchema",

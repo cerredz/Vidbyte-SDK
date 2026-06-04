@@ -6,27 +6,69 @@ Purpose:
     Gives developers a ready-made schema for summarizing an agent's goal,
     actions, mistakes, and current status during execution.
 Architecture:
-    Module-level TraceSchema constant.
+    Pydantic model declaring typed, described fields, converted to a module-level
+    TraceSchema constant via TraceSchema.from_model.
 Relations:
     Re-exported by vidbyte.trace.prebuilt.
 """
 
 from __future__ import annotations
 
+from pydantic import BaseModel, Field
+
 from vidbyte.trace.options import TraceSchema
 
 
-ActionTrace = TraceSchema(
+class ActionTraceModel(BaseModel):
+    """Action-oriented continual trace describing goal, work, mistakes, and status."""
+
+    goal: str = Field(
+        description=(
+            "The original or current high-level goal the main agent is working toward. "
+            "Capture the developer's intent as precisely as the context allows, including "
+            "any explicit success criteria or constraints. If the goal is refined or "
+            "narrowed during the run, record the most current understanding rather than the "
+            "first phrasing. Keep this stable across updates unless the context clearly "
+            "redefines what the agent is trying to accomplish."
+        ),
+    )
+    actions_taken: list[str] = Field(
+        description=(
+            "An ordered list of the important actions, tool calls, decisions, or steps the "
+            "main agent has already performed. Each entry should be a short, concrete "
+            "statement of what happened and, when useful, why it mattered. Prefer appending "
+            "new meaningful actions over rewriting the whole history so the trace reads as a "
+            "running log. Omit trivial or repetitive steps that add no value to a later "
+            "handoff."
+        ),
+    )
+    mistakes: list[str] = Field(
+        description=(
+            "Mistakes, failed attempts, incorrect assumptions, dead ends, or recoveries "
+            "observed so far. Record what went wrong and, where the context reveals it, the "
+            "correction that followed. This field is one of the most valuable parts of a "
+            "handoff because it stops a future agent from repeating the same error. Keep "
+            "prior entries unless the context shows they were not actually mistakes."
+        ),
+    )
+    current_status: str = Field(
+        description=(
+            "The latest known state of the task and what still remains unresolved. Summarize "
+            "how far the agent has progressed and what the immediate next step appears to be. "
+            "Note any blocking conditions, pending tool results, or waiting states that affect "
+            "progress. This field should always reflect the most recent context and is "
+            "expected to change on nearly every update."
+        ),
+    )
+
+
+ActionTrace = TraceSchema.from_model(
+    ActionTraceModel,
     name="action_trace",
     description="Tracks the agent goal, work performed, mistakes, and current status.",
-    fields={
-        "goal": "The original or current goal the main agent is working toward.",
-        "actions_taken": "Important actions, tool calls, decisions, or steps the main agent has taken.",
-        "mistakes": "Mistakes, failed attempts, incorrect assumptions, or recoveries observed so far.",
-        "current_status": "The latest known state of the task and what remains unresolved.",
-    },
 )
 
 __all__ = [
     "ActionTrace",
+    "ActionTraceModel",
 ]
