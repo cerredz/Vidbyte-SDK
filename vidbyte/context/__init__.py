@@ -22,6 +22,7 @@ Similar files:
 from __future__ import annotations
 
 from vidbyte.context.algorithms import ContextWindowAlgorithm, MultiProviderAgenticGraderAlgorithm, ReflexionAlgorithm, ToolResultAdmission, TrajectoryCheckpointAlgorithm
+from vidbyte.context.compaction import CompactionMode, CompactionStats, ContextCompactionEngine, Summarizer
 from vidbyte.context.primitives import (
     ArtifactContextItem,
     ContextItem,
@@ -48,6 +49,12 @@ from vidbyte.lib.dataclasses.context import (
     ContextResponse,
     ContextToolCall,
 )
+from vidbyte.context.handoff import (
+    EngineeringHandoff,
+    Handoff,
+    MinimalHandoff,
+    ResearchHandoff,
+)
 from vidbyte.context.manager import ContextManager
 from vidbyte.context.presets import ContextWindowPresets
 from vidbyte.context.window import ContextWindow
@@ -58,6 +65,9 @@ __all__ = [
     "BaseAgentContext",
     "ContextArtifact",
     "ContextBudget",
+    "CompactionMode",
+    "CompactionStats",
+    "ContextCompactionEngine",
     "ContextItem",
     "ContextManager",
     "ContextPermissions",
@@ -69,16 +79,21 @@ __all__ = [
     "ContextWindowPresets",
     "ContextWindowRunContext",
     "DocumentContextItem",
+    "EngineeringHandoff",
     "EnvironmentContextItem",
     "FileContextItem",
     "GitDiffContextItem",
+    "Handoff",
     "MemoryContextItem",
+    "MinimalHandoff",
+    "ResearchHandoff",
     "MultiProviderAgenticGraderAlgorithm",
     "InnerContextWindowAlgorithm",
     "PlanContextItem",
     "ProgressContextItem",
     "ReflexionAlgorithm",
     "ResponseContextItem",
+    "Summarizer",
     "TaskContextItem",
     "TextContextItem",
     "ToolCallContextItem",

@@ -1,0 +1,11 @@
+{
+  "name": "Handoff",
+  "description": "System prompt for the handoff agent that turns a completed agent run into a structured, reusable handoff document another agent or human can use to continue the work cold.",
+  "key": "handoff",
+  "prompts": {
+    "system_prompt": {
+      "path": "handoff.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/handoff/handoff.md"
+    }
+  }
+}

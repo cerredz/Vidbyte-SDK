@@ -32,7 +32,8 @@ import os
 from collections.abc import Mapping
 from typing import Any, ClassVar
 
-from vidbyte.lib.enums import ModelProvider
+from vidbyte.lib.agents.modality_detector import ModalityDetector
+from vidbyte.lib.enums import ModelModality, ModelProvider
 from vidbyte.lib.errors import ConfigurationError
 
 
@@ -190,6 +191,8 @@ class ProviderModelRegistry:
         # Builds the active-models dict from all providers that have env-var API keys set.
         active: dict[str, str] = {}
         for provider_enum, model_name in cls.DEFAULT_PROVIDER_MODELS.items():
+            if ModalityDetector.detect_modality(model_name) is not ModelModality.TEXT:
+                continue
             env_var = cls.API_KEY_ENV_VARS.get(provider_enum)
             if env_var and os.environ.get(env_var):
                 active[provider_enum.value] = model_name

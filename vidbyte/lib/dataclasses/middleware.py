@@ -17,7 +17,7 @@ Relations:
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
@@ -51,6 +51,16 @@ class MiddlewareAction(str, Enum):
 
 
 @dataclass(frozen=True, slots=True)
+class MiddlewareTransform:
+    """Model-visible runtime updates requested by middleware."""
+
+    model_visible_tool_result: ToolResult | None = None
+    provider_messages: Sequence[Mapping[str, Any]] | None = None
+    system: str | None = None
+    metadata: Mapping[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
 class MiddlewareDecision:
     """Decision returned by one middleware hook."""
 
@@ -58,20 +68,24 @@ class MiddlewareDecision:
     reason: str | None = None
     sleep_seconds: float = 0
     metadata: Mapping[str, Any] = field(default_factory=dict)
+    transform: MiddlewareTransform | None = None
 
     def __post_init__(self) -> None:
-        """Validate decision values."""
+        # Validates timing and transform constraints for middleware decisions.
         if self.sleep_seconds < 0:
             raise ValueError("sleep_seconds cannot be negative.")
+        if self.transform is not None and self.action is not MiddlewareAction.CONTINUE:
+            raise ValueError("Middleware transforms are only valid for continue decisions.")
 
     @classmethod
     def continue_(
         cls,
         *,
         metadata: Mapping[str, Any] | None = None,
+        transform: MiddlewareTransform | None = None,
     ) -> "MiddlewareDecision":
-        """Continue normal runtime execution."""
-        return cls(metadata=dict(metadata or {}))
+        # Builds a continue decision with optional metadata and runtime transform.
+        return cls(metadata=dict(metadata or {}), transform=transform)
 
     @classmethod
     def sleep(
@@ -153,6 +167,8 @@ class MiddlewareContext:
     tool_result: ToolResult | None = None
     model_response: object | None = None
     error: BaseException | None = None
+    provider_messages: Sequence[Mapping[str, Any]] = ()
+    system: str | None = None
     tool_is_internal: bool = False
     metadata: Mapping[str, Any] = field(default_factory=dict)
     # Mutable per-run state dict; frozen prevents field reassignment but not dict mutation.
@@ -176,4 +192,5 @@ __all__ = [
     "MiddlewareDecision",
     "MiddlewareEvent",
     "MiddlewareHook",
+    "MiddlewareTransform",
 ]
