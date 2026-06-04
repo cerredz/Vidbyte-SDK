@@ -30,6 +30,10 @@ Related design docs:
 Context-window algorithms are agent-attached runtime policies. They receive the
 same task, runner, context, tools, middleware, and tracing path as a normal
 direct agent run, but they may modify the context between attempts or stages.
+Simple compaction of tool results or provider message history now belongs in
+`vidbyte.middleware.builtins` instead of new context-window algorithms. Use a
+context-window algorithm only when the behavior owns a full runtime flow, such
+as Reflexion retries or multi-provider grading.
 
 The developer-facing shape should stay simple:
 

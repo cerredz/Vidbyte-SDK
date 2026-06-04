@@ -22,6 +22,7 @@ Similar files:
 from __future__ import annotations
 
 from vidbyte.context.algorithms import ContextWindowAlgorithm, MultiProviderAgenticGraderAlgorithm, ReflexionAlgorithm, ToolResultAdmission
+from vidbyte.context.compaction import CompactionMode, CompactionStats, ContextCompactionEngine, Summarizer
 from vidbyte.context.primitives import (
     ArtifactContextItem,
     ContextItem,
@@ -62,6 +63,9 @@ __all__ = [
     "BaseAgentContext",
     "ContextArtifact",
     "ContextBudget",
+    "CompactionMode",
+    "CompactionStats",
+    "ContextCompactionEngine",
     "ContextItem",
     "ContextManager",
     "ContextPermissions",
@@ -84,6 +88,7 @@ __all__ = [
     "ProgressContextItem",
     "ReflexionAlgorithm",
     "ResponseContextItem",
+    "Summarizer",
     "TaskContextItem",
     "TextContextItem",
     "ToolCallContextItem",
