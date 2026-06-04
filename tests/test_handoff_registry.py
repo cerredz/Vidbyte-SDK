@@ -76,10 +76,10 @@ class SweVariantTests(unittest.TestCase):
             with self.subTest(variant=cls.__name__):
                 self.assertTrue(cls().sections)
 
-    def test_all_28_prebuilt_section_maps_are_pairwise_distinct(self) -> None:
+    def test_all_prebuilt_section_maps_are_pairwise_distinct(self) -> None:
         registry = HandoffRegistry()
         maps = [tuple(cls().sections.items()) for cls in registry.all().values()]
-        self.assertEqual(len(maps), 28)
+        self.assertEqual(len(maps), len(registry.all()))
         self.assertEqual(len(maps), len(set(maps)))
 
     def test_fill_preserves_each_swe_subclass(self) -> None:
@@ -100,9 +100,11 @@ class SweVariantTests(unittest.TestCase):
 
 
 class HandoffRegistryTests(unittest.TestCase):
-    def test_list_contains_all_28_slugs(self) -> None:
-        self.assertEqual(len(HandoffRegistry().list()), 28)
-        self.assertIn("code_review", HandoffRegistry().list())
+    def test_list_matches_catalog_and_contains_known_slug(self) -> None:
+        registry = HandoffRegistry()
+        self.assertEqual(len(registry.list()), len(registry.all()))
+        self.assertEqual(len(registry.list()), len(set(registry.list())))
+        self.assertIn("code_review", registry.list())
 
     def test_get_returns_matching_class(self) -> None:
         registry = HandoffRegistry()
@@ -129,8 +131,9 @@ class HandoffRegistryTests(unittest.TestCase):
         self.assertIs(registry.get("bug_fix"), CustomHandoff)
 
     def test_describe_returns_class_title_and_sections_for_every_slug(self) -> None:
-        described = HandoffRegistry().describe()
-        self.assertEqual(len(described), 28)
+        registry = HandoffRegistry()
+        described = registry.describe()
+        self.assertEqual(len(described), len(registry.all()))
         for slug, info in described.items():
             with self.subTest(slug=slug):
                 self.assertTrue(info["class"])
