@@ -254,7 +254,7 @@ Middleware gives direct text agents deterministic runtime hooks for authorizatio
 
 ```python
 from vidbyte import Agent, AgentMiddleware, MiddlewareDecision
-from vidbyte.middleware.builtins import ToolPolicyMiddleware
+from vidbyte.middleware.builtins import ToolPolicyMiddleware, ToolResultCompactionMiddleware
 
 class TenantPermissionMiddleware(AgentMiddleware):
     def __init__(self, db):
@@ -278,17 +278,18 @@ agent = Agent(
     middleware=[
         TenantPermissionMiddleware(db),
         ToolPolicyMiddleware(allow_tools={"lookup_metric"}),
+        ToolResultCompactionMiddleware.truncate(max_chars=600),
     ],
 )
 ```
 
-Subclass `AgentMiddleware` and override only the hooks you need, such as `before_run`, `before_iteration`, `before_model_call`, `after_model_response`, `on_model_error`, `before_tool_call`, `after_tool_call`, `after_iteration`, or `after_run`. Built-ins are available from `vidbyte.middleware.builtins`, including `TokenRateLimitMiddleware`, `RuntimeLimitMiddleware`, `ToolPolicyMiddleware`, `AuditLogMiddleware`, and `ModelRetryMiddleware`.
+Subclass `AgentMiddleware` and override only the hooks you need, such as `before_run`, `before_iteration`, `before_model_call`, `after_model_response`, `on_model_error`, `before_tool_call`, `after_tool_call`, `after_iteration`, or `after_run`. Built-ins are available from `vidbyte.middleware.builtins`, including `TokenRateLimitMiddleware`, `RuntimeLimitMiddleware`, `ToolPolicyMiddleware`, `AuditLogMiddleware`, `ModelRetryMiddleware`, `ToolResultCompactionMiddleware`, `MessageHistoryCompactionMiddleware`, and `SummaryCompactionMiddleware`.
 
 Advanced built-ins are grouped by category:
 
 - `vidbyte.tools.builtins.code_search`: `GlobTool`, `GrepTool`, `SemanticSearchTool`
 - `vidbyte.tools.builtins.editing`: `PatchTool`
-- `vidbyte.tools.builtins.context`: `ContextCompactionTool`
+- `vidbyte.tools.builtins.context`: `ContextCompactionTool` for legacy/manual compaction tool use; new agent code should prefer compaction middleware.
 - `vidbyte.tools.mcp`: `McpClient`, `McpStdioTransport`, `McpBridgedTool`
 - `vidbyte.tools.security`: `PermissionPolicy`, `ToolPermission`, sandbox transport protocols
 

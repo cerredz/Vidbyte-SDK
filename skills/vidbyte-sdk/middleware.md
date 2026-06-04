@@ -231,6 +231,33 @@ agent = Agent(
 
 ---
 
+## 5.1 Context Compaction Middleware
+
+Context compaction belongs in middleware for new agent code. Do not expose compaction as a model-visible tool unless you need legacy/manual behavior through `ContextCompactionTool`.
+
+Use `ToolResultCompactionMiddleware` when the model-visible version of a tool result should be truncated, stripped, or hidden while raw output remains in runtime metadata:
+
+```python
+from vidbyte.middleware.builtins import ToolResultCompactionMiddleware
+
+agent = Agent(
+    name="repo-analyst",
+    system_prompt="Use tools when useful.",
+    tools=[lookup],
+    middleware=[
+        ToolResultCompactionMiddleware.truncate(max_chars=600),
+    ],
+)
+```
+
+Use `MessageHistoryCompactionMiddleware` for deterministic provider-message history pruning, such as `keep_last`, `remove_all_tool_calls`, `remove_last_n_tool_calls`, `remove_tool_call_percentage`, `clear_except_system_and_log`, and `deduplicate_tool_calls`.
+
+Use `SummaryCompactionMiddleware` only with an explicitly injected summarizer. Middleware must not perform hidden provider calls for summarization.
+
+Compaction middleware returns `MiddlewareDecision.continue_(transform=...)`. The runtime applies those transforms only at supported hook boundaries; custom middleware should not mutate runtime internals directly.
+
+---
+
 ## 6. Writing Custom Middleware
 
 To implement custom runtime policies, inherit from `AgentMiddleware` and override the required lifecycle hooks.

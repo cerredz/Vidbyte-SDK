@@ -19,7 +19,7 @@ from typing import Any
 
 from vidbyte.agents.context_algorithms import AgentRuntimeContextAlgorithms
 from vidbyte.agents.types import AgentMessage
-from vidbyte.context.algorithms import ContextWindowAlgorithm
+from vidbyte.context.algorithms import ContextWindowAlgorithm, ToolResultAdmission
 from vidbyte.context.manager import ContextManager
 from vidbyte.context.primitives import ContextItem
 from vidbyte.context.window import ContextWindow
@@ -34,6 +34,7 @@ from vidbyte.lib.tools import ToolsFormatter
 from vidbyte.context.templates import NullRecorder, RecorderBase
 from vidbyte.lib.tracing import NullTracer, SpanContext, TracerBase
 from vidbyte.middleware import AgentMiddleware, MiddlewarePipeline
+from vidbyte.middleware.builtins.context_compaction import ToolResultCompactionMiddleware
 from vidbyte.prompts.agentic_loop import append_agentic_loop_prompt
 from vidbyte.lib.dataclasses.context import BaseAgentContext, BaseContext
 from vidbyte.lib.dataclasses.strategies import AgentResult
@@ -68,14 +69,23 @@ class AgentRuntime:
         self.tools = with_internal_agent_tools(tools)
         self.permission_policy = permission_policy
         self.config = config or AgentRuntimeConfig()
-        self._tracer: TracerBase = tracer or NullTracer()
-        self.middleware = MiddlewarePipeline(middleware)
         self.run_id = run_id
         self.algorithm = ContextWindow.resolve_algorithm(algorithm)
+        self._tracer: TracerBase = tracer or NullTracer()
+        self.middleware = MiddlewarePipeline((*tuple(middleware), *self._context_window_admission_middleware()))
         self.context_manager = context_manager
         self.recorder: RecorderBase = recorder or NullRecorder()
         self.output_schema = output_schema
         self._schema_formatter = OutputSchemaFormatter()
+
+    def _context_window_admission_middleware(self) -> tuple[AgentMiddleware, ...]:
+        # Returns compatibility middleware for legacy tool-result admission presets.
+        admission = ToolResultAdmission(self.algorithm.tool_result_admission)
+        if admission is ToolResultAdmission.COMPACT:
+            return (ToolResultCompactionMiddleware.truncate(max_chars=self.algorithm.max_tool_result_chars),)
+        if admission is ToolResultAdmission.HIDE_RAW:
+            return (ToolResultCompactionMiddleware.hide(),)
+        return ()
 
     def build_context(
         self,
@@ -496,6 +506,7 @@ class AgentRuntime:
         """Invoke the runner, allowing middleware to retry model errors."""
         provider = handle.provider
         while True:
+            current_call_options = dict(call_options)
             decision = await self.middleware.before_model_call(
                 self._middleware_context(
                     MiddlewareHook.BEFORE_MODEL_CALL,
@@ -509,6 +520,8 @@ class AgentRuntime:
                     started_at=started_at,
                     metadata=metadata,
                     run_state=run_state,
+                    provider_messages=self._provider_messages_from_options(current_call_options),
+                    system=str(current_call_options.get("system")) if current_call_options.get("system") is not None else None,
                 )
             )
             if decision.action is not MiddlewareAction.CONTINUE:
@@ -521,6 +534,7 @@ class AgentRuntime:
                     ),
                     model_call_count,
                 )
+            current_call_options = self._apply_before_model_call_transform(current_call_options, decision)
             model_call_count += 1
             llm_span = self._tracer.start_span(
                 "llm.call",
@@ -529,7 +543,7 @@ class AgentRuntime:
                 iteration=iteration_count,
             )
             try:
-                raw_result = await handle.invoke(message, **dict(call_options))
+                raw_result = await handle.invoke(message, **current_call_options)
                 output_text = handle.extract_text(raw_result)
                 self._tracer.end_span(llm_span, output=output_text)
                 return raw_result, model_call_count
@@ -608,6 +622,25 @@ class AgentRuntime:
             )
         return self._with_middleware_metadata(result)
 
+    def _apply_before_model_call_transform(self, call_options: Mapping[str, Any], decision: MiddlewareDecision) -> dict[str, Any]:
+        # Returns call options with any before-model-call transform applied.
+        transformed = dict(call_options)
+        transform = decision.transform
+        if transform is None:
+            return transformed
+        if transform.system is not None:
+            transformed["system"] = transform.system
+        if transform.provider_messages is not None:
+            transformed["messages"] = tuple(dict(message) for message in transform.provider_messages)
+        return transformed
+
+    def _provider_messages_from_options(self, call_options: Mapping[str, Any]) -> tuple[Mapping[str, Any], ...]:
+        # Extracts provider messages from runner call options as immutable mapping copies.
+        raw_messages = call_options.get("messages", ())
+        if not isinstance(raw_messages, Sequence) or isinstance(raw_messages, (str, bytes)):
+            return ()
+        return tuple(dict(message) for message in raw_messages if isinstance(message, Mapping))
+
     def _middleware_context(
         self,
         hook: MiddlewareHook,
@@ -627,6 +660,8 @@ class AgentRuntime:
         model_response: object | None = None,
         error: BaseException | None = None,
         tool_is_internal: bool = False,
+        provider_messages: Sequence[Mapping[str, Any]] = (),
+        system: str | None = None,
     ) -> MiddlewareContext:
         """Build a middleware context without adding metadata to the model prompt."""
         return MiddlewareContext(
@@ -645,6 +680,8 @@ class AgentRuntime:
             tool_result=tool_result,
             model_response=model_response,
             error=error,
+            provider_messages=tuple(provider_messages),
+            system=system,
             tool_is_internal=tool_is_internal,
             metadata=dict(metadata),
             run_state=run_state if run_state is not None else {},
@@ -979,8 +1016,9 @@ class AgentRuntime:
                 contexts=call_contexts,
             )
         if call.tool_name != IS_DONE_TOOL_NAME:
-            visible_result = self.algorithm.model_visible_tool_result(call, result)
-            visible_result = self._apply_primitive_binding(call, visible_result)
+            visible_result = self._apply_primitive_binding(call, result)
+            if visible_result is result and after_decision.transform is not None and after_decision.transform.model_visible_tool_result is not None:
+                visible_result = after_decision.transform.model_visible_tool_result
             messages.append(dict(ToolsFormatter.format_tool_result(call, visible_result, provider)))
         return context_record, result
 
