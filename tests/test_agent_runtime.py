@@ -5,9 +5,15 @@ Description:
 Purpose:
     Verifies correct runtime behavior, dispatch, fail-fast gating, and parameter validation.
 Architecture:
-    Unittest test suite.
+    - FakeRunner & FakeResponse: Mocks model interaction for checking agent decision cycles.
+    - AgentRuntimeTests: TestCase verifying token budgeting, rate limiting, and algorithm execution.
+Key Functions:
+    - test_inner_context_window_lifecycle_writes_to_next_system_context: Validates trajectory algorithm integration.
+    - test_runtime_denies_write_tool_by_default: Validates security middleware defaults.
 Relations:
-    Located in tests/test_agent_runtime.py. Focuses on core runtime code.
+    Tests `AgentRuntime` in `vidbyte/agents/runtime.py` and its interaction with context algorithms.
+Similar Files:
+    - `tests/test_trajectory_checkpoint_algorithm.py`
 """
 
 from __future__ import annotations
@@ -16,7 +22,7 @@ import unittest
 
 from vidbyte.agents import AgentRuntime
 from vidbyte.agents.types import AgentMessage
-from vidbyte.context import ContextArtifact, ContextPermissions, ContextResponse, ContextToolCall, ContextWindow, TaskContextItem
+from vidbyte.context import ContextArtifact, ContextPermissions, ContextResponse, ContextToolCall, ContextWindow, ContextWindowAlgorithm, TaskContextItem, TrajectoryCheckpointAlgorithm
 from vidbyte.lib.dataclasses.agents import AgentRuntimeConfig
 from vidbyte.lib.dataclasses.runner import RunnerHandle
 from vidbyte.lib.enums import ModelModality
@@ -264,6 +270,34 @@ class AgentRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Raw tool output was withheld", visible_tool_message["content"])
         raw_context = result.metadata["tool_calls"][0]
         self.assertEqual(raw_context.result.output, "raw secret result for sdk")
+
+    async def test_inner_context_window_lifecycle_writes_to_next_system_context(self) -> None:
+        json_output = '{"reasoning_summary": "res", "trajectory": "traj", "output": "out", "score": 0.85, "feedback": "feed"}'
+        runner = FakeRunner(
+            [
+                FakeResponse("draft", {}),
+                FakeResponse(json_output, {}),
+                FakeResponse("", {"output": [{"type": "function_call", "name": "isDone", "arguments": '{"final_answer": "done"}'}]}),
+            ]
+        )
+        runtime = AgentRuntime(
+            agent_name="worker",
+            system_prompt="Work.",
+            tools=Tools(),
+            permission_policy=PermissionPolicy(),
+            algorithm=ContextWindowAlgorithm(name="trajectory_checkpoints", trajectory_checkpoints=TrajectoryCheckpointAlgorithm(interval=1)),
+        )
+        context = runtime.build_context("task", base_context=None, history=(), agent_history=(), agent_metadata={}, existing_tool_calls=())
+
+        result = await runtime.arun(
+            "task",
+            handle=RunnerHandle(runner=runner, provider="openai", invoke=invoke_runner, extract_text=runner_output_text, extract_metadata=runner_output_metadata),
+            context=context,
+        )
+
+        self.assertIn("Runtime Checkpoint", runner.calls[2]["kwargs"]["system"])
+        self.assertEqual(runner.calls[2]["kwargs"]["messages"][0]["content"], "draft")
+        self.assertEqual(result.metadata["trajectory_checkpoints"]["checkpoint_count"], 1)
 
     async def test_runtime_denies_write_tool_by_default(self) -> None:
         write_tool = WriteTool()

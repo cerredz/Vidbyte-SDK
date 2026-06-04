@@ -559,7 +559,78 @@ Do not duplicate the tool loop in the adapter unless the algorithm is explicitly
 designed to replace the normal direct runtime. Reimplementing the loop usually
 breaks permissions, `isDone`, provider-specific parsing, or runtime metadata.
 
-### 10.3 Metadata Contract
+### 10.3 Updating The Inner Agent Loop
+
+Some context-window algorithms need to add or update model-visible context
+inside one direct `_arun_once(...)` run instead of wrapping whole trials. Use the
+inner-loop context-window lifecycle for that shape.
+
+The interface is intentionally small. An inner-loop algorithm exposes a single
+hook, `after_tool_calls`, which the runtime invokes after the tool calls of each
+completed non-final iteration finish. The runtime also invokes it once at run
+start with `ctx.iteration is None` so the algorithm can initialize per-run state:
+
+```python
+from vidbyte.context.runtime import ContextWindowRunContext, InnerContextWindowAlgorithm
+
+class ExampleInnerAlgorithm(InnerContextWindowAlgorithm):
+    def after_tool_calls(self, ctx: ContextWindowRunContext) -> None:
+        if ctx.iteration is None:
+            return  # run-start initialization
+        ctx.place_after_tools(
+            ExampleContextItem(primitive_id="example:current", content="bounded context")
+        )
+```
+
+There is exactly one runtime dispatch point. Do not reintroduce per-stage hooks
+such as `before_model_call`, `after_model_response`, or `on_run_end`; everything
+an inner-loop algorithm needs is observable from the iteration snapshot at the
+single `after_tool_calls` point.
+
+`ContextWindowRunContext` is a slim write surface over the active
+`ContextManager`. It carries only:
+
+- `iteration`: the observable `AgentIterationSnapshot` (read), or `None` at run start.
+- `context_manager`: the active `ContextManager` (write surface).
+- `recorder`: the run recorder for template slots.
+- `state`: a per-run dict for cadence tracking and published metadata.
+
+All primitive placement logic lives on `ContextManager`. Use its semantically
+named methods rather than a raw placement enum:
+
+- `place_after_system_prompt(item)` renders the primitive at the top of the
+  context zone, just after the system prompt.
+- `place_after_tools(item)` renders the primitive at the end of the context
+  zone, after tool-bound primitives.
+
+Both methods mint a stable `primitive_id` when the item does not already have
+one and return it. The run context exposes the same two methods plus `remove`,
+`record`, and `set_metadata`.
+
+Do not mutate provider `messages` directly from a context-window algorithm.
+Do not add an arbitrary callback such as `iteration_observer` that returns text
+for runtime to append. Do not make deterministic runtime algorithms depend on a
+model-called `write_context` tool. Tools are model-selected; inner-loop context
+algorithms are SDK-selected runtime behavior.
+
+`AgentRuntime` renders the manager on the next model call through the existing
+context-window primitive path. This keeps a single standard for context-window
+updates and preserves middleware, permissions, tracing, tool execution, and
+provider formatting.
+
+When adding an inner-loop algorithm:
+
+1. Define a public frozen config dataclass that subclasses `InnerContextWindowAlgorithm`.
+2. Define a typed `ContextItem` for any algorithm-owned context block.
+3. Implement `after_tool_calls`, initializing on the `ctx.iteration is None` call
+   and using config-owned cadence logic (e.g. `iteration_count % interval == 0`).
+4. Write context with `ctx.place_after_tools(...)` or `ctx.place_after_system_prompt(...)`.
+5. Record template slots with `ctx.record(...)`.
+6. Publish final metadata with `ctx.set_metadata(...)`; the runtime copies public
+   `state` keys onto the final result metadata.
+7. Add tests proving the next model call sees the context through `ContextManager`, not direct message injection.
+
+### 10.4 Metadata Contract
 
 Every runtime algorithm should attach one algorithm-specific metadata object to
 the final `StrategyResult.metadata`.
@@ -588,7 +659,7 @@ Metadata should answer:
 Keep raw provider responses out of algorithm metadata unless already part of
 normal runtime metadata. Store bounded strings and structured counters instead.
 
-### 10.4 Runtime Silent Failures
+### 10.5 Runtime Silent Failures
 
 Watch for these issues:
 

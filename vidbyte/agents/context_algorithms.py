@@ -18,6 +18,7 @@ from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
 from vidbyte.agents.algorithms import MultiProviderAgenticGraderRuntimeAlgorithm, ReflexionRuntimeAlgorithm
+from vidbyte.context.runtime import InnerContextWindowAlgorithm
 from vidbyte.lib.dataclasses.runner import RunnerHandle
 from vidbyte.lib.tracing import SpanContext
 from vidbyte.lib.dataclasses.context import BaseAgentContext
@@ -39,6 +40,8 @@ class AgentRuntimeContextAlgorithms:
             return "reflexion"
         if self.runtime.algorithm.multi_provider_agentic_grader is not None:
             return "multi_provider_agentic_grader"
+        if self.runtime.algorithm.trajectory_checkpoints is not None:
+            return "trajectory_checkpoints"
         return None
 
     def is_algorithm(self, name: str) -> bool:
@@ -52,6 +55,16 @@ class AgentRuntimeContextAlgorithms:
         if self.runtime.algorithm.multi_provider_agentic_grader is not None:
             return MultiProviderAgenticGraderRuntimeAlgorithm(self.runtime, self.runtime.algorithm.multi_provider_agentic_grader)
         return None
+
+    def inner_loop_algorithm(self) -> InnerContextWindowAlgorithm | None:
+        # Return the configured inner-loop context-window algorithm, if any.
+        if self.runtime.algorithm.trajectory_checkpoints is not None:
+            return self.runtime.algorithm.trajectory_checkpoints
+        return None
+
+    def has_inner_loop_algorithm(self) -> bool:
+        # Return whether the active algorithm updates context inside _arun_once.
+        return self.inner_loop_algorithm() is not None
 
     async def arun(self, message: str, *, handle: RunnerHandle, context: BaseAgentContext, metadata: Mapping[str, Any] | None = None, options: Mapping[str, Any] | None = None, trace_context: SpanContext | None = None) -> AgentResult | None:
         """Run the configured algorithm, or return None when no algorithm exists."""

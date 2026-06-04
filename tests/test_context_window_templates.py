@@ -28,9 +28,9 @@ from vidbyte.agents.runtime import AgentRuntime
 from vidbyte.context.templates import ContextWindowRecorder, NullRecorder, RecorderBase, SlotEvent
 from vidbyte.context.window import ContextWindow
 from vidbyte.lib.dataclasses.agents import AgentRuntimeConfig
+from vidbyte.lib.dataclasses.context import BaseAgentContext
 from vidbyte.lib.dataclasses.runner import RunnerHandle
-from vidbyte.lib.templates import ContextWindowTemplate, ReflexionContextWindowTemplate, TemplateViolation
-from vidbyte.strategies.types import BaseAgentContext
+from vidbyte.lib.templates import ContextWindowTemplate, ReflexionContextWindowTemplate, TemplateViolation, TrajectoryCheckpointContextWindowTemplate
 from vidbyte.tools import Tools
 from vidbyte.tools.security import PermissionPolicy
 
@@ -302,6 +302,45 @@ class ReflexionContextWindowTemplateTests(unittest.TestCase):
     def test_zero_failing_trials_produces_system_prompt_plus_one_trial(self) -> None:
         template = ReflexionContextWindowTemplate(max_trials=3, failing_trials=0)
         self.assertEqual(template.expected_slots, ("system_prompt", "reflexion_trial"))
+
+
+class TrajectoryCheckpointContextWindowTemplateTests(unittest.TestCase):
+    def test_trajectory_template_zero_iterations(self) -> None:
+        template = TrajectoryCheckpointContextWindowTemplate(iterations=0, interval=2)
+
+        self.assertEqual(template.expected_slots, ("system_prompt",))
+
+    def test_trajectory_template_interval_two(self) -> None:
+        template = TrajectoryCheckpointContextWindowTemplate(iterations=4, interval=2)
+
+        self.assertEqual(
+            template.expected_slots,
+            (
+                "system_prompt",
+                "trajectory_checkpoint_iteration",
+                "trajectory_checkpoint_iteration",
+                "trajectory_checkpoint_injection",
+                "trajectory_checkpoint_iteration",
+                "trajectory_checkpoint_iteration",
+                "trajectory_checkpoint_injection",
+            ),
+        )
+
+    def test_trajectory_template_respects_max_checkpoints(self) -> None:
+        template = TrajectoryCheckpointContextWindowTemplate(iterations=4, interval=1, max_checkpoints=2)
+
+        self.assertEqual(
+            template.expected_slots,
+            (
+                "system_prompt",
+                "trajectory_checkpoint_iteration",
+                "trajectory_checkpoint_injection",
+                "trajectory_checkpoint_iteration",
+                "trajectory_checkpoint_injection",
+                "trajectory_checkpoint_iteration",
+                "trajectory_checkpoint_iteration",
+            ),
+        )
 
 
 # ---------------------------------------------------------------------------

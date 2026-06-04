@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from vidbyte.lib.dataclasses.agents import (
     AgentCard,
+    AgentIterationSnapshot,
     AgentMessage,
     AgentRunnerConfig,
     AgentRuntimeConfig,
@@ -48,6 +49,7 @@ from vidbyte.context.primitives import (
     TaskContextItem,
     TextContextItem,
     ToolCallContextItem,
+    TrajectoryCheckpointContextItem,
 )
 from vidbyte.lib.dataclasses.filesystem import FileStat, FileSystemToolConfig
 from vidbyte.lib.dataclasses.mcp import McpToolDefinition
@@ -76,6 +78,7 @@ from vidbyte.lib.dataclasses.tools import (
 
 __all__ = [
     "AgentCard",
+    "AgentIterationSnapshot",
     "AgentMessage",
     "AgentResult",
     "AgentRunnerConfig",
@@ -127,6 +130,7 @@ __all__ = [
     "ToolCallContext",
     "ToolCallState",
     "ToolCallContextItem",
+    "TrajectoryCheckpointContextItem",
     "ToolParameter",
     "ToolPermission",
     "ToolResult",

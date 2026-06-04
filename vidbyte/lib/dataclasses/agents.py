@@ -25,6 +25,7 @@ if TYPE_CHECKING:
     from vidbyte.context.manager import ContextManager
     from vidbyte.context.primitives import ContextItem
     from vidbyte.context.window import ContextWindowAlgorithm
+    from vidbyte.tools.types import ToolCallContext
 
 
 class AgentStopReason(str, Enum):
@@ -69,6 +70,19 @@ class AgentRuntimeStats:
     tokens_used: int | None = None
     tool_call_count: int = 0
     stop_reason: AgentStopReason = AgentStopReason.FINAL_RESPONSE
+
+
+@dataclass(frozen=True, slots=True)
+class AgentIterationSnapshot:
+    """Observable direct-runtime state captured after one completed iteration."""
+
+    iteration_count: int
+    message: str
+    provider: str
+    assistant_output: str | None = None
+    tool_calls: tuple[ToolCallContext, ...] = ()
+    tokens_used: int | None = None
+    metadata: Mapping[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)

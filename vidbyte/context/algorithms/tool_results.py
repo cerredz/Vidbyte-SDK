@@ -21,6 +21,7 @@ from typing import Any
 
 from vidbyte.context.algorithms.reflexion import ReflexionAlgorithm
 from vidbyte.context.algorithms.multi_provider_agentic_grader import MultiProviderAgenticGraderAlgorithm
+from vidbyte.context.algorithms.trajectory_checkpoints import TrajectoryCheckpointAlgorithm
 from vidbyte.lib.dataclasses.tools import ToolCall, ToolResult
 
 
@@ -41,11 +42,12 @@ class ContextWindowAlgorithm:
     max_tool_result_chars: int = 600
     reflexion: ReflexionAlgorithm | None = None
     multi_provider_agentic_grader: MultiProviderAgenticGraderAlgorithm | None = None
+    trajectory_checkpoints: TrajectoryCheckpointAlgorithm | None = None
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         # Verifies that at most one runtime context algorithm is configured.
-        active = [x for x in (self.reflexion, self.multi_provider_agentic_grader) if x is not None]
+        active = [x for x in (self.reflexion, self.multi_provider_agentic_grader, self.trajectory_checkpoints) if x is not None]
         if len(active) > 1:
             raise ValueError("At most one runtime context-window algorithm can be configured.")
 
@@ -104,6 +106,7 @@ __all__ = [
     "ContextWindowAlgorithm",
     "MultiProviderAgenticGraderAlgorithm",
     "ReflexionAlgorithm",
+    "TrajectoryCheckpointAlgorithm",
     "ToolResultAdmission",
 ]
 
