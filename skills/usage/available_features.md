@@ -62,33 +62,41 @@ Use middleware for cross-cutting concerns that should not be part of the model's
 
 ### Lifecycle Hooks
 
-| Hook | When Called | Returns |
-|------|------------|---------|
-| `before_model_call` | Before the model is invoked | `MiddlewareDecision` (ALLOW / BLOCK / SKIP) |
-| `after_model_call` | After the model returns a response | `MiddlewareDecision` |
-| `before_tool_call` | Before a tool is executed | `MiddlewareDecision` |
-| `after_tool_call` | After a tool returns a result | `MiddlewareDecision` |
+Each hook receives a read-only `MiddlewareContext` and returns a `MiddlewareDecision`. There are nine hooks across the run:
+
+| Hook | When Called |
+|------|------------|
+| `before_run` | Before the runtime starts |
+| `before_iteration` | Before each loop iteration |
+| `before_model_call` | Before the model is invoked |
+| `after_model_response` | After a successful model response |
+| `on_model_error` | When a model call raises |
+| `before_tool_call` | Before a tool is executed |
+| `after_tool_call` | After a tool returns or is denied |
+| `after_iteration` | After each loop iteration |
+| `after_run` | Before the final result is returned |
+
+Decisions: `MiddlewareDecision.continue_()`, `abort(reason)`, `deny_tool(reason)` (in `before_tool_call`), `retry(reason)` (in `on_model_error`), and `sleep(seconds)`.
 
 ### Built-in Middleware
 
-Built-in middleware lives under `vidbyte/middleware/builtins/` and provides common policies out of the box:
-- **Logging middleware** — Records all model calls, tool calls, and results for audit trails.
-- **Rate limiting middleware** — Caps the number of tool calls or model invocations per time window.
-- **Content filtering middleware** — Blocks or sanitizes model outputs that match forbidden patterns.
-- **Input/Output validation middleware** — Validates tool call arguments and tool results against schemas.
+Built-in middleware lives under `vidbyte/middleware/builtins/`. Security/defense: `CanaryTripwireMiddleware`, `ConfusedDeputyGuardMiddleware`, `HoneypotToolMiddleware`. Budgets: `TokenBudgetMiddleware`, `CostBudgetMiddleware`. Reliability: `ModelRetryMiddleware`, `ExponentialBackoffRetryMiddleware`, `CircuitBreakerMiddleware`. Safety/observability: `LoopDetectionMiddleware`, `RuntimeLimitMiddleware`, `ToolPolicyMiddleware`, `TokenRateLimitMiddleware`, `AuditLogMiddleware`. Compaction: `ToolResultCompactionMiddleware`, `MessageHistoryCompactionMiddleware`, `SummaryCompactionMiddleware`. See [`skills/vidbyte-sdk/middleware.md`](../vidbyte-sdk/middleware.md) for the full catalog and arguments.
+
+> Context compaction is **middleware**, not a tool. Use the compaction middlewares above; the legacy `ContextCompactionTool` is for manual/legacy flows only.
 
 ### Building Custom Middleware
 
 Subclass `AgentMiddleware` and override only the hooks you need:
 
 ```python
-from vidbyte import AgentMiddleware, MiddlewareDecision
+from vidbyte.middleware import AgentMiddleware
+from vidbyte.lib.dataclasses.middleware import MiddlewareContext, MiddlewareDecision
 
 class CustomGuardMiddleware(AgentMiddleware):
-    async def before_tool_call(self, call):
-        if "dangerous" in str(call.arguments):
-            return MiddlewareDecision.BLOCK
-        return MiddlewareDecision.ALLOW
+    async def before_tool_call(self, ctx: MiddlewareContext) -> MiddlewareDecision:
+        if ctx.tool_call and "dangerous" in str(ctx.tool_call.arguments):
+            return MiddlewareDecision.deny_tool(reason="blocked dangerous argument")
+        return MiddlewareDecision.continue_()
 
 agent = Agent(
     name="guarded",
@@ -137,7 +145,7 @@ class StockPriceTool(BaseTool):
 
 ## Prompt Collection
 
-The SDK includes a built-in prompt catalog with 15 prompt families covering reasoning, planning, orchestration, and more. Prompts are repository-backed text assets accessible through enum keys and direct Python imports — no API keys or network calls needed.
+The SDK includes a built-in prompt catalog with 13 prompt families covering handoffs, reflexion, actor-runtime personas, goals, evals, templates, and more. Prompts are repository-backed text assets accessible through enum keys and direct Python imports — no API keys or network calls needed.
 
 ### Accessing Prompts
 
@@ -146,12 +154,12 @@ Prompts can be accessed two ways:
 1. **Via `Prompts.get()` with enum keys:**
    ```python
    from vidbyte import Prompts, Prompt
-   text = Prompts().get(Prompt.CHAIN_OF_THOUGHT_REASON_PROMPT)
+   text = Prompts().get(Prompt.GOALS_GOAL_PROMPT)
    ```
 
 2. **Via direct string imports:**
    ```python
-   from vidbyte.prompts import chain_of_thought_reason_prompt
+   from vidbyte.prompts import goals_goal_prompt
    ```
 
 ### Using Prompts with Agents
@@ -163,12 +171,12 @@ from vidbyte import Agent, Prompts, Prompt
 
 prompts = Prompts()
 agent = Agent(
-    name="reasoner",
-    system_prompt=prompts.get(Prompt.CHAIN_OF_THOUGHT_SYSTEM_PROMPT),
+    name="goal-driven",
+    system_prompt=prompts.get(Prompt.GOALS_GOAL_PROMPT),
     provider="openai",
     model_name="gpt-4.1",
 )
-reply = await agent.arun(prompts.get(Prompt.CHAIN_OF_THOUGHT_REASON_PROMPT))
+reply = await agent.arun(prompts.get(Prompt.CONTEXT_ENGINEERING_GUIDELINE_PROMPT))
 ```
 
 For a complete listing of every available prompt, prompt family, and import name, see [`skills/usage/import_prompt.md`](import_prompt.md).
@@ -204,12 +212,14 @@ from vidbyte import ContextBudget, ContextPermissions, BudgetPreset, PermissionP
 
 # Budget presets control resource consumption
 budget = ContextBudget.from_preset(BudgetPreset.BALANCED)
-# TIGHT:       3 model calls,   4k tokens,  30s timeout
-# BALANCED:    8 model calls,  16k tokens, 120s timeout
-# EXPLORATORY: 20 model calls, 64k tokens, 300s timeout
+# TIGHT:       small model-call / token / time budget
+# BALANCED:    moderate budget (default for most agents)
+# EXPLORATORY: large budget for long-running work
+# UNBOUNDED:   no budget limits
 
 # Permission presets control what the agent can do
 permissions = ContextPermissions.from_preset(PermissionPreset.READ_ONLY)
+# SANDBOXED:  most restrictive — no reads, no tools, no write
 # READ_ONLY:  can read files, no tools, no write
 # TOOLS_ONLY: tools allowed, no filesystem access
 # TRUSTED:    full access — read, write, execute
@@ -222,13 +232,16 @@ The SDK supports multiple model providers through a unified interface. Switch pr
 ```python
 from vidbyte import ModelProvider
 
-ModelProvider.OPENAI      # GPT-4, GPT-4o, O1, O3, etc.
-ModelProvider.ANTHROPIC   # Claude 3.5 Sonnet, Claude 3 Opus, etc.
-ModelProvider.GEMINI      # Gemini 1.5 Pro, Gemini 1.5 Flash, etc.
+ModelProvider.OPENAI      # GPT-4, GPT-4o, O-series, etc.
+ModelProvider.ANTHROPIC   # Claude Opus, Sonnet, Haiku, etc.
+ModelProvider.GEMINI      # Gemini Pro / Flash, etc.
 ModelProvider.XAI         # Grok models
 ModelProvider.DEEPSEEK    # DeepSeek V3, DeepSeek R1, etc.
 ModelProvider.GLM         # GLM models
 ModelProvider.MINIMAX     # MiniMax models
+ModelProvider.OPENROUTER  # OpenRouter-hosted models (OpenAI-compatible)
+ModelProvider.ELEVENLABS  # ElevenLabs (audio)
+ModelProvider.PLAYAI      # PlayAI (audio)
 ```
 
 ## Agent Forking
