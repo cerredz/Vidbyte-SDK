@@ -3,6 +3,7 @@
 import unittest
 
 from vidbyte.agents.runtime import AgentRuntime
+from vidbyte.context import ContextWindowPlacement
 from vidbyte.context.manager import ContextManager
 from vidbyte.context.primitives import TextContextItem
 from vidbyte.lib.dataclasses.context import BaseContext as StrategyContext
@@ -74,6 +75,17 @@ class PrimitiveBindingTests(unittest.TestCase):
 
         self.assertIn("stored in primitive", returned.output)
         self.assertNotIn("raw file content", returned.output)
+
+    def test_bound_tool_binding_uses_default_context_placement(self) -> None:
+        manager = ContextManager()
+        tool = BoundTool("file:auth.py")
+        runtime = _make_runtime(Tools([tool]), manager)
+        call = ToolCall(tool_name="shell_read", arguments={})
+        result = ToolResult.success("shell_read", "raw file content")
+
+        runtime._apply_primitive_binding(call, result)
+
+        self.assertEqual(manager.placement_for("file:auth.py"), ContextWindowPlacement.END_OF_CONTEXT)
 
     def test_unbound_tool_passes_result_through_unchanged(self) -> None:
         manager = ContextManager()

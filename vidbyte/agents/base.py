@@ -28,9 +28,11 @@ from vidbyte.context.handoff import Handoff, MinimalHandoff
 from vidbyte.lib.agents import ModalityDetector
 from vidbyte.lib.dataclasses.agents import AgentMetadata, AgentRunnerConfig, AgentRuntimeConfig
 from vidbyte.lib.dataclasses.runner import RunnerHandle
+from vidbyte.lib.dataclasses.strategies import AgentResult
 from vidbyte.lib.enums import AgentRuntimeType, ModelModality, ModelProvider
 from vidbyte.lib.errors import AgentExecutionError, ConfigurationError
 from vidbyte.lib.tracing import NullTracer, TracerBase
+from vidbyte.agents.runtimes.configs import ActorRuntime, LinearRuntime, MctsSearchRuntime
 from vidbyte.middleware import AgentMiddleware
 from vidbyte.tools.catalog import Tools
 from vidbyte.tools.security import PermissionPolicy
@@ -87,7 +89,6 @@ class BaseAgent(McpAttachableMixin):
         if not system_prompt:
             raise AgentExecutionError("Agent system_prompt is required.")
 
-        from vidbyte.agents.runtimes.configs import LinearRuntime, MctsSearchRuntime, ActorRuntime
         if isinstance(runtime, (LinearRuntime, MctsSearchRuntime, ActorRuntime)):
             self.runtime_type = runtime.runtime_type
             self.runtime_config_obj = runtime

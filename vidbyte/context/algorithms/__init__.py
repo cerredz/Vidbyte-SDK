@@ -17,6 +17,7 @@ from __future__ import annotations
 
 from vidbyte.context.algorithms.reflexion import ReflexionAlgorithm
 from vidbyte.context.algorithms.multi_provider_agentic_grader import MultiProviderAgenticGraderAlgorithm
+from vidbyte.context.algorithms.trajectory_checkpoints import TrajectoryCheckpointAlgorithm
 from vidbyte.context.algorithms.tool_results import (
     ContextWindowAlgorithm,
     ToolResultAdmission,
@@ -26,6 +27,7 @@ __all__ = [
     "ContextWindowAlgorithm",
     "MultiProviderAgenticGraderAlgorithm",
     "ReflexionAlgorithm",
+    "TrajectoryCheckpointAlgorithm",
     "ToolResultAdmission",
 ]
 

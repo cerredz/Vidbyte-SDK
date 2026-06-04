@@ -2,7 +2,7 @@
 
 import unittest
 
-from vidbyte.context import ContextManager, PlanContextItem
+from vidbyte.context import ContextManager, ContextWindowPlacement, PlanContextItem
 from vidbyte.context.primitives import (
     DocumentContextItem,
     MemoryContextItem,
@@ -155,6 +155,55 @@ class RenderPrimitivesZoneTests(unittest.TestCase):
         zone = manager.render_primitives_zone()
 
         self.assertIn("## Context Window Primitives", zone)
+
+    def test_upsert_default_placement_matches_existing_rendering(self) -> None:
+        manager = ContextManager()
+        manager.upsert(TextContextItem(primitive_id="x", title="X", content="c"))
+
+        self.assertEqual(manager.placement_for("x"), ContextWindowPlacement.END_OF_CONTEXT)
+        self.assertIn("X", manager.render_primitives_zone())
+
+    def test_top_of_context_renders_before_end_of_context(self) -> None:
+        manager = ContextManager()
+        manager.upsert(TextContextItem(primitive_id="end", title="End", content="end"))
+        manager.upsert(TextContextItem(primitive_id="top", title="Top", content="top"), placement=ContextWindowPlacement.TOP_OF_CONTEXT)
+
+        zone = manager.render_primitives_zone()
+
+        self.assertLess(zone.index("Top"), zone.index("End"))
+
+    def test_replacing_primitive_updates_placement(self) -> None:
+        manager = ContextManager()
+        manager.upsert(TextContextItem(primitive_id="x", title="X", content="c"))
+
+        manager.upsert(TextContextItem(primitive_id="x", title="X", content="c"), placement=ContextWindowPlacement.TOP_OF_CONTEXT)
+
+        self.assertEqual(manager.placement_for("x"), ContextWindowPlacement.TOP_OF_CONTEXT)
+
+    def test_remove_by_id_removes_placement_metadata(self) -> None:
+        manager = ContextManager()
+        manager.upsert(TextContextItem(primitive_id="x", title="X", content="c"), placement=ContextWindowPlacement.TOP_OF_CONTEXT)
+
+        manager.remove_by_id("x")
+
+        self.assertIsNone(manager.placement_for("x"))
+
+    def test_conversation_placement_does_not_render_in_primitives_zone(self) -> None:
+        manager = ContextManager()
+        manager.upsert(TextContextItem(primitive_id="x", title="X", content="c"), placement=ContextWindowPlacement.TOP_OF_CONVERSATION)
+
+        self.assertEqual(manager.render_primitives_zone(), "")
+
+    def test_conversation_messages_render_in_placement_order(self) -> None:
+        manager = ContextManager()
+        manager.upsert(TextContextItem(primitive_id="top", title="Top", content="top"), placement=ContextWindowPlacement.TOP_OF_CONVERSATION)
+        manager.upsert(TextContextItem(primitive_id="end", title="End", content="end"), placement=ContextWindowPlacement.END_OF_CONVERSATION)
+
+        top = manager.render_conversation_messages(ContextWindowPlacement.TOP_OF_CONVERSATION)
+        end = manager.render_conversation_messages(ContextWindowPlacement.END_OF_CONVERSATION)
+
+        self.assertIn("top", top[0]["content"])
+        self.assertIn("end", end[0]["content"])
 
 
 class PlanContextItemTests(unittest.TestCase):

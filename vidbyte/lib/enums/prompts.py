@@ -64,6 +64,7 @@ class Prompt(str, Enum):
     ACTOR_RUNTIME_FORMATTER = "actor_runtime.formatter"
     ACTOR_RUNTIME_SAFETY = "actor_runtime.safety"
     ACTOR_RUNTIME_FINAL_ANSWER = "actor_runtime.final_answer"
+    TRAJECTORY_CHECKPOINTS_AGENTIC_SUMMARIZER = "trajectory_checkpoints.agentic_summarizer"
 
 __all__ = [
     "Prompt",

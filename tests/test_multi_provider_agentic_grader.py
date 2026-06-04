@@ -331,19 +331,24 @@ class MultiProviderAgenticGraderTests(unittest.IsolatedAsyncioTestCase):
             ProviderModelRegistry.resolve_active(provider_models=None, options=None)
         self.assertIn("No model providers have API keys configured in the environment", str(ctx.exception))
 
-    def test_registry_all_default_models_are_valid_text_modality(self) -> None:
-        # [Silent Failure] All default provider models are valid text models that map to ModelModality.TEXT.
+    def test_registry_resolve_active_environment_uses_text_defaults(self) -> None:
+        # [Silent Failure] Environment discovery only activates text defaults for the grader.
         from vidbyte.lib.registries.models import ProviderModelRegistry
         from vidbyte.lib.enums import ModelProvider, ModelModality
         from vidbyte.lib.agents.modality_detector import ModalityDetector
 
-        for provider in ModelProvider:
-            model_name = ProviderModelRegistry.default_model(provider)
+        env_values = {env_var: "fake-key" for env_var in API_KEY_ENV_VARS.values()}
+        with patch.dict(os.environ, env_values, clear=False):
+            resolved = ProviderModelRegistry.resolve_active(provider_models=None, options=None)
+
+        self.assertNotIn(ModelProvider.ELEVENLABS.value, resolved)
+        self.assertNotIn(ModelProvider.PLAYAI.value, resolved)
+        for provider_name, model_name in resolved.items():
             modality = ModalityDetector.detect_modality(model_name)
             self.assertEqual(
                 modality,
                 ModelModality.TEXT,
-                f"Default model '{model_name}' for provider '{provider.value}' did not resolve to TEXT modality."
+                f"Resolved model '{model_name}' for provider '{provider_name}' did not resolve to TEXT modality."
             )
 
     def test_registry_resolve_active_explicit_provider_models(self) -> None:

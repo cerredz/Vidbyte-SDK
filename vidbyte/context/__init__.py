@@ -21,7 +21,7 @@ Similar files:
 
 from __future__ import annotations
 
-from vidbyte.context.algorithms import ContextWindowAlgorithm, MultiProviderAgenticGraderAlgorithm, ReflexionAlgorithm, ToolResultAdmission
+from vidbyte.context.algorithms import ContextWindowAlgorithm, MultiProviderAgenticGraderAlgorithm, ReflexionAlgorithm, ToolResultAdmission, TrajectoryCheckpointAlgorithm
 from vidbyte.context.compaction import CompactionMode, CompactionStats, ContextCompactionEngine, Summarizer
 from vidbyte.context.primitives import (
     ArtifactContextItem,
@@ -37,7 +37,9 @@ from vidbyte.context.primitives import (
     TaskContextItem,
     TextContextItem,
     ToolCallContextItem,
+    TrajectoryCheckpointContextItem,
 )
+from vidbyte.context.runtime import ContextWindowPlacement, ContextWindowRunContext, InnerContextWindowAlgorithm
 from vidbyte.lib.dataclasses.context import (
     BaseAgentContext,
     BaseContext,
@@ -73,7 +75,9 @@ __all__ = [
     "ContextToolCall",
     "ContextWindow",
     "ContextWindowAlgorithm",
+    "ContextWindowPlacement",
     "ContextWindowPresets",
+    "ContextWindowRunContext",
     "DocumentContextItem",
     "EngineeringHandoff",
     "EnvironmentContextItem",
@@ -84,6 +88,7 @@ __all__ = [
     "MinimalHandoff",
     "ResearchHandoff",
     "MultiProviderAgenticGraderAlgorithm",
+    "InnerContextWindowAlgorithm",
     "PlanContextItem",
     "ProgressContextItem",
     "ReflexionAlgorithm",
@@ -93,4 +98,6 @@ __all__ = [
     "TextContextItem",
     "ToolCallContextItem",
     "ToolResultAdmission",
+    "TrajectoryCheckpointAlgorithm",
+    "TrajectoryCheckpointContextItem",
 ]

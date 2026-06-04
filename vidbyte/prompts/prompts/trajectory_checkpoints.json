@@ -1,0 +1,11 @@
+{
+  "name": "Trajectory Checkpoints",
+  "description": "Prompts used to generate agentic trajectory checkpoints.",
+  "key": "trajectory_checkpoints",
+  "prompts": {
+    "agentic_summarizer": {
+      "path": "trajectory_checkpoints_agentic_summarizer.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/trajectory_checkpoints_agentic_summarizer.md"
+    }
+  }
+}
