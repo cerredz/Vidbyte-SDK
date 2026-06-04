@@ -553,6 +553,465 @@ class ReleaseHandoff(Handoff):
         }
 
 
+class PatientHandoff(Handoff):
+    """Prebuilt handoff for a clinical patient transfer (SBAR shape)."""
+
+    DEFAULT_TITLE = "Patient Handoff"
+
+    def default_sections(self) -> dict[str, str]:
+        # SBAR structure, the standard clinical shift-change handoff format.
+        return {
+            "Situation": "The patient's current status and the immediate reason for the handoff.",
+            "Background": "Relevant history, admissions, and context leading to now.",
+            "Assessment": "The current clinical assessment and working diagnosis.",
+            "Recommendation": "What the receiving clinician should do next.",
+            "Pending Tasks": "Orders, labs, or actions still outstanding.",
+            "Watch-fors": "Warning signs or changes that require immediate attention.",
+        }
+
+
+class CareTransitionHandoff(Handoff):
+    """Prebuilt handoff for transferring a patient's ongoing care."""
+
+    DEFAULT_TITLE = "Care Transition Handoff"
+
+    def default_sections(self) -> dict[str, str]:
+        # Structure centered on continuity of treatment across a care transition.
+        return {
+            "Diagnosis & Status": "Primary diagnoses and the patient's current condition.",
+            "Medications": "Active medications, recent changes, and administration notes.",
+            "Procedures Done/Pending": "Procedures completed and those still scheduled.",
+            "Follow-up Plan": "The ongoing care plan after this transition.",
+            "Red Flags": "Conditions or symptoms that should trigger escalation.",
+        }
+
+
+class DiagnosticWorkupHandoff(Handoff):
+    """Prebuilt handoff for an in-progress diagnostic workup."""
+
+    DEFAULT_TITLE = "Diagnostic Workup Handoff"
+
+    def default_sections(self) -> dict[str, str]:
+        # Differential-driven structure for transferring a diagnostic investigation.
+        return {
+            "Presentation": "The presenting symptoms and findings.",
+            "Differential": "The differential diagnoses under consideration.",
+            "Tests Ordered/Resulted": "Investigations ordered and any results returned.",
+            "Leading Diagnosis": "The current most likely diagnosis and supporting evidence.",
+            "Next Steps": "The next diagnostic or treatment actions.",
+        }
+
+
+class ContractReviewHandoff(Handoff):
+    """Prebuilt handoff for reviewing a legal contract."""
+
+    DEFAULT_TITLE = "Contract Review Handoff"
+
+    def default_sections(self) -> dict[str, str]:
+        # Recommendation-oriented structure for a contract review in progress.
+        return {
+            "Parties & Purpose": "Who the agreement is between and what it covers.",
+            "Key Terms": "The material terms and obligations.",
+            "Risk Flags": "Clauses that create legal or commercial risk.",
+            "Redlines Proposed": "Changes proposed and their rationale.",
+            "Open Negotiation Points": "Terms still under negotiation.",
+            "Recommendation": "Whether to sign, revise, or escalate, and why.",
+        }
+
+
+class LegalResearchHandoff(Handoff):
+    """Prebuilt handoff for a legal research question."""
+
+    DEFAULT_TITLE = "Legal Research Handoff"
+
+    def default_sections(self) -> dict[str, str]:
+        # Authority-and-application structure for transferring legal research.
+        return {
+            "Issue": "The legal question being researched.",
+            "Authorities Found": "Statutes, cases, and sources located.",
+            "Holdings & Application": "What each authority holds and how it applies.",
+            "Counterarguments": "Opposing positions and their strength.",
+            "Confidence & Gaps": "How settled the answer is and what remains unresearched.",
+        }
+
+
+class DueDiligenceHandoff(Handoff):
+    """Prebuilt handoff for a due-diligence review."""
+
+    DEFAULT_TITLE = "Due Diligence Handoff"
+
+    def default_sections(self) -> dict[str, str]:
+        # Coverage-and-risk structure for handing off a diligence effort.
+        return {
+            "Scope": "What the diligence review covers.",
+            "Findings by Category": "Material findings grouped by area.",
+            "Material Risks": "Issues that could affect the transaction or decision.",
+            "Documents Reviewed": "What was examined, for traceability.",
+            "Outstanding Requests": "Information still needed from the counterparty.",
+        }
+
+
+class TicketEscalationHandoff(Handoff):
+    """Prebuilt handoff for escalating a customer support ticket."""
+
+    DEFAULT_TITLE = "Ticket Escalation Handoff"
+
+    def default_sections(self) -> dict[str, str]:
+        # Escalation structure so a higher tier can continue without re-asking the customer.
+        return {
+            "Customer Goal": "What the customer is trying to accomplish.",
+            "Actions Tried": "Troubleshooting already attempted.",
+            "Current State": "Where the issue stands now.",
+            "Reproduction": "How to reproduce the problem, if known.",
+            "Why Escalated": "The reason this needs a higher tier or specialist.",
+            "Suggested Next Step": "The recommended next action for the receiver.",
+        }
+
+
+class AccountHealthHandoff(Handoff):
+    """Prebuilt handoff for transferring a customer account in success management."""
+
+    DEFAULT_TITLE = "Account Health Handoff"
+
+    def default_sections(self) -> dict[str, str]:
+        # Relationship-and-risk structure for handing off account ownership.
+        return {
+            "Account Status": "The account's current standing and key facts.",
+            "Usage & Risk Signals": "Engagement metrics and churn or risk indicators.",
+            "Open Issues": "Unresolved problems or requests.",
+            "Relationship Notes": "Stakeholders, sentiment, and history.",
+            "Renewal/Expansion Posture": "The outlook for renewal or growth and next moves.",
+        }
+
+
+class AlertTriageHandoff(Handoff):
+    """Prebuilt handoff for a security operations alert-triage shift."""
+
+    DEFAULT_TITLE = "Alert Triage Handoff"
+
+    def default_sections(self) -> dict[str, str]:
+        # Queue-state structure for a SOC shift handoff.
+        return {
+            "Alerts in Queue": "Outstanding alerts awaiting triage.",
+            "Triaged & Dispositioned": "Alerts already handled and their outcomes.",
+            "Under Investigation": "Alerts actively being investigated and current findings.",
+            "Suspected Scope": "The estimated blast radius or affected assets.",
+            "Next Actions": "What the next analyst should pick up first.",
+        }
+
+
+class ThreatHuntHandoff(Handoff):
+    """Prebuilt handoff for an in-progress threat hunt."""
+
+    DEFAULT_TITLE = "Threat Hunt Handoff"
+
+    def default_sections(self) -> dict[str, str]:
+        # Hypothesis-elimination structure applied to threat hunting.
+        return {
+            "Hypothesis": "The threat hypothesis being investigated.",
+            "Data Sources Queried": "Logs, telemetry, and tools examined.",
+            "Findings": "Evidence gathered so far.",
+            "Ruled Out": "Hypotheses or indicators eliminated, with reasoning.",
+            "Open Leads": "Promising threads still to pursue.",
+        }
+
+
+class InvestmentThesisHandoff(Handoff):
+    """Prebuilt handoff for an investment thesis under development."""
+
+    DEFAULT_TITLE = "Investment Thesis Handoff"
+
+    def default_sections(self) -> dict[str, str]:
+        # Thesis-and-risk structure for transferring an investment analysis.
+        return {
+            "Thesis": "The core investment argument.",
+            "Supporting Evidence": "Data and analysis backing the thesis.",
+            "Key Risks": "What could invalidate the thesis.",
+            "Valuation View": "The current valuation assessment.",
+            "Catalysts": "Events expected to move the position.",
+            "Open Diligence": "Analysis still outstanding.",
+        }
+
+
+class DealHandoff(Handoff):
+    """Prebuilt handoff for an in-progress deal or transaction."""
+
+    DEFAULT_TITLE = "Deal Handoff"
+
+    def default_sections(self) -> dict[str, str]:
+        # Workstream-status structure for handing off a live deal.
+        return {
+            "Deal Status": "Where the deal stands in its lifecycle.",
+            "Workstreams": "The active workstreams and their owners.",
+            "Open Items by Workstream": "Outstanding tasks per workstream.",
+            "Key Risks": "Risks that could derail or reprice the deal.",
+            "Next Milestones": "Upcoming deadlines and gating events.",
+        }
+
+
+class CreditAnalysisHandoff(Handoff):
+    """Prebuilt handoff for a credit analysis."""
+
+    DEFAULT_TITLE = "Credit Analysis Handoff"
+
+    def default_sections(self) -> dict[str, str]:
+        # Assessment-and-decision structure for transferring a credit review.
+        return {
+            "Borrower & Facility": "Who is being assessed and the proposed terms.",
+            "Financial Assessment": "Key financial metrics and trends analyzed.",
+            "Risk Factors": "Credit risks identified.",
+            "Rating/Recommendation": "The proposed rating or credit decision and rationale.",
+            "Open Questions": "Information or analysis still needed.",
+        }
+
+
+class ContextWindowHandoff(Handoff):
+    """Prebuilt agent-native handoff for continuing across a context-window boundary."""
+
+    DEFAULT_TITLE = "Context Window Handoff"
+
+    def default_sections(self) -> dict[str, str]:
+        # Compaction-aware structure: what survives the window versus what is dropped.
+        return {
+            "Task State": "What the agent is doing and how far along it is.",
+            "Key Facts to Preserve": "Facts that must survive into the fresh context.",
+            "Decisions Made": "Choices already committed that should not be revisited.",
+            "Compacted/Dropped Context": "What was removed from the window and why it is safe to drop.",
+            "Active Working Set": "The files, variables, or entities currently in play.",
+            "Resume Instructions": "Exactly how to continue from here.",
+        }
+
+
+class ToolTrajectoryHandoff(Handoff):
+    """Prebuilt agent-native handoff for a tool-using agent's call trace."""
+
+    DEFAULT_TITLE = "Tool Trajectory Handoff"
+
+    def default_sections(self) -> dict[str, str]:
+        # Structure mirroring the tool-call lifecycle so tool work can resume.
+        return {
+            "Available Tools": "The tools the agent can call.",
+            "Calls Made & Results": "Tool calls executed and what they returned.",
+            "Failed Calls & Errors": "Calls that failed and the errors encountered.",
+            "Current Tool State": "Any side effects or state established by prior calls.",
+            "Next Tool Action": "The next tool call to make and why.",
+        }
+
+
+class SubAgentDelegationHandoff(Handoff):
+    """Prebuilt agent-native handoff for a supervisor delegating to sub-agents."""
+
+    DEFAULT_TITLE = "Sub-Agent Delegation Handoff"
+
+    def default_sections(self) -> dict[str, str]:
+        # Delegation structure tracking spawned subagents and synthesis of their results.
+        return {
+            "Top Goal": "The overall objective being delegated.",
+            "Subagents Spawned": "Which subagents were created and their assignments.",
+            "Results Received": "What each subagent has returned so far.",
+            "Pending Delegations": "Subtasks still waiting on a subagent.",
+            "Synthesis State": "How subagent outputs are being combined.",
+            "Next Delegation": "The next subtask to delegate.",
+        }
+
+
+class OrchestrationHandoff(Handoff):
+    """Prebuilt agent-native handoff for multi-agent orchestration."""
+
+    DEFAULT_TITLE = "Orchestration Handoff"
+
+    def default_sections(self) -> dict[str, str]:
+        # Plan-and-assignment structure for handing off a multi-agent execution.
+        return {
+            "Plan": "The multi-agent plan or DAG being executed.",
+            "Agent Assignments": "Which agent owns which part.",
+            "Completed/In-Flight/Blocked": "Status of each part of the plan.",
+            "Cross-Agent Conflicts": "Disagreements or contention between agents.",
+            "Next Dispatch": "The next agent to invoke and with what input.",
+        }
+
+
+class HumanEscalationHandoff(Handoff):
+    """Prebuilt agent-native handoff for escalating from an agent to a human."""
+
+    DEFAULT_TITLE = "Human Escalation Handoff"
+
+    def default_sections(self) -> dict[str, str]:
+        # Structure that turns a stuck agent into an actionable human decision.
+        return {
+            "What I Was Doing": "The task the agent was working on.",
+            "Where I'm Stuck": "The exact point of failure or uncertainty.",
+            "What I Tried": "Approaches already attempted.",
+            "Specific Decision Needed": "The precise question the human must answer.",
+            "Options & Recommendation": "The choices available and the agent's recommended one.",
+        }
+
+
+class CheckpointResumeHandoff(Handoff):
+    """Prebuilt agent-native handoff for checkpointing a long-horizon run."""
+
+    DEFAULT_TITLE = "Checkpoint Resume Handoff"
+
+    def default_sections(self) -> dict[str, str]:
+        # Checkpoint structure capturing the exact place and state to resume from.
+        return {
+            "Goal": "The long-running objective.",
+            "Progress So Far": "What has been accomplished up to this checkpoint.",
+            "Current Step": "The step in progress when the checkpoint was taken.",
+            "Environment State": "External state the resume depends on (files, services, sessions).",
+            "Blockers": "Anything currently preventing progress.",
+            "Resume Point": "The exact place and action to continue from.",
+        }
+
+
+class DeepResearchHandoff(Handoff):
+    """Prebuilt agent-native handoff for an agentic multi-hop research run."""
+
+    DEFAULT_TITLE = "Deep Research Handoff"
+
+    def default_sections(self) -> dict[str, str]:
+        # Query-and-synthesis structure for transferring an autonomous research run.
+        return {
+            "Question": "The research question driving the investigation.",
+            "Search Queries Run": "Queries already executed.",
+            "Sources Gathered": "Sources collected and their relevance.",
+            "Synthesis So Far": "The current synthesized understanding.",
+            "Contradictions": "Conflicting evidence encountered.",
+            "Confidence & Next Queries": "How sure the findings are and what to search next.",
+        }
+
+
+class RetrievalHandoff(Handoff):
+    """Prebuilt agent-native handoff for a retrieval-augmented agent."""
+
+    DEFAULT_TITLE = "Retrieval Handoff"
+
+    def default_sections(self) -> dict[str, str]:
+        # Retrieval structure capturing what was fetched and what coverage remains.
+        return {
+            "Query": "The retrieval query or information need.",
+            "Chunks Retrieved": "The passages or documents retrieved.",
+            "Relevance Assessment": "How relevant each retrieved item is.",
+            "Coverage Gaps": "Aspects of the query not yet covered by retrieval.",
+            "Re-query Plan": "How to refine retrieval next.",
+        }
+
+
+class BrowserSessionHandoff(Handoff):
+    """Prebuilt agent-native handoff for a browser-automation agent (live-state shape)."""
+
+    DEFAULT_TITLE = "Browser Session Handoff"
+
+    def default_sections(self) -> dict[str, str]:
+        # Live-state structure capturing where the browser is and how to resume.
+        return {
+            "Current Location": "The current URL and page state.",
+            "Session & Auth State": "Login state, cookies, and tokens, and what expires.",
+            "Action Trail": "The navigations and interactions performed, with selectors that worked.",
+            "Extracted Data": "Data captured so far and where it lives.",
+            "Blockers": "Broken selectors, captchas, or dynamic content encountered.",
+            "Next Action": "The next browser action from this state.",
+        }
+
+
+class ComputerUseHandoff(Handoff):
+    """Prebuilt agent-native handoff for a desktop computer-use agent."""
+
+    DEFAULT_TITLE = "Computer Use Handoff"
+
+    def default_sections(self) -> dict[str, str]:
+        # Live-state structure for a GUI/desktop agent's session.
+        return {
+            "Desktop State": "The current screen and focused application.",
+            "Apps & Windows Open": "Applications and windows currently active.",
+            "Action Trail": "The clicks, keystrokes, and steps performed.",
+            "Files Touched": "Files created, opened, or modified.",
+            "Blockers": "Dialogs, permissions, or UI states blocking progress.",
+            "Next Step": "The next desktop action to take.",
+        }
+
+
+class MemoryHandoff(Handoff):
+    """Prebuilt agent-native handoff for a memory-backed agent."""
+
+    DEFAULT_TITLE = "Memory Handoff"
+
+    def default_sections(self) -> dict[str, str]:
+        # Structure separating working memory from durable facts worth persisting.
+        return {
+            "Working Memory": "What the agent is actively holding in mind.",
+            "Long-Term Facts Learned": "Durable facts worth persisting.",
+            "Updated/Stale Beliefs": "Beliefs that changed or are now outdated.",
+            "Open Questions": "Unresolved questions to revisit.",
+            "What to Persist": "What should be written to long-term memory.",
+        }
+
+
+class VerificationHandoff(Handoff):
+    """Prebuilt agent-native handoff for an agent self-verifying its output."""
+
+    DEFAULT_TITLE = "Verification Handoff"
+
+    def default_sections(self) -> dict[str, str]:
+        # Structure separating verified claims from asserted-but-unchecked ones.
+        return {
+            "Claims Made": "The assertions in the agent's output.",
+            "Verified vs Unverified": "Which claims were checked and which were not.",
+            "Failed Checks": "Claims that did not hold up, with evidence.",
+            "Confidence per Claim": "How confident the agent is in each claim.",
+            "What Still Needs Checking": "Verification work remaining.",
+        }
+
+
+class ReasoningTraceHandoff(Handoff):
+    """Prebuilt agent-native handoff for transferring a chain of reasoning."""
+
+    DEFAULT_TITLE = "Reasoning Trace Handoff"
+
+    def default_sections(self) -> dict[str, str]:
+        # Structure capturing the reasoning chain, assumptions, and dead ends.
+        return {
+            "Goal": "What the reasoning is trying to achieve.",
+            "Reasoning So Far": "The chain of reasoning up to this point.",
+            "Key Inferences": "The important conclusions drawn.",
+            "Assumptions Made": "Assumptions the reasoning depends on.",
+            "Dead Ends": "Lines of reasoning abandoned and why.",
+            "Current Direction": "Where the reasoning is heading next.",
+        }
+
+
+class GuardrailHandoff(Handoff):
+    """Prebuilt agent-native handoff for an agent that hit a guardrail or policy stop."""
+
+    DEFAULT_TITLE = "Guardrail Handoff"
+
+    def default_sections(self) -> dict[str, str]:
+        # Structure for handing off a blocked action with safe alternatives.
+        return {
+            "Requested Action": "The action the agent attempted.",
+            "Policy Triggered": "The guardrail, permission, or policy that fired.",
+            "What Was Blocked": "Precisely what was prevented.",
+            "Safe Alternatives": "Permitted approaches that achieve a similar goal.",
+            "Needs Human Approval": "Items that require human authorization to proceed.",
+        }
+
+
+class EvaluationHandoff(Handoff):
+    """Prebuilt agent-native handoff for an agent grading or evaluating against a rubric."""
+
+    DEFAULT_TITLE = "Evaluation Handoff"
+
+    def default_sections(self) -> dict[str, str]:
+        # Rubric-progress structure for transferring an evaluation in progress.
+        return {
+            "Rubric": "The criteria being evaluated against.",
+            "Items Graded": "What has been scored so far.",
+            "Scores & Rationale": "The scores assigned and the reasoning.",
+            "Uncertain/Disputed": "Items where the grade is unclear or contested.",
+            "Remaining to Grade": "What still needs evaluation.",
+        }
+
+
 __all__ = [
     "Handoff",
     "EngineeringHandoff",
@@ -583,4 +1042,32 @@ __all__ = [
     "IntegrationHandoff",
     "SecurityRemediationHandoff",
     "ReleaseHandoff",
+    "PatientHandoff",
+    "CareTransitionHandoff",
+    "DiagnosticWorkupHandoff",
+    "ContractReviewHandoff",
+    "LegalResearchHandoff",
+    "DueDiligenceHandoff",
+    "TicketEscalationHandoff",
+    "AccountHealthHandoff",
+    "AlertTriageHandoff",
+    "ThreatHuntHandoff",
+    "InvestmentThesisHandoff",
+    "DealHandoff",
+    "CreditAnalysisHandoff",
+    "ContextWindowHandoff",
+    "ToolTrajectoryHandoff",
+    "SubAgentDelegationHandoff",
+    "OrchestrationHandoff",
+    "HumanEscalationHandoff",
+    "CheckpointResumeHandoff",
+    "DeepResearchHandoff",
+    "RetrievalHandoff",
+    "BrowserSessionHandoff",
+    "ComputerUseHandoff",
+    "MemoryHandoff",
+    "VerificationHandoff",
+    "ReasoningTraceHandoff",
+    "GuardrailHandoff",
+    "EvaluationHandoff",
 ]
