@@ -339,6 +339,77 @@ class ToolCallContextItem:
         return f"Tool call: {self.name}\nArguments: {dict(self.arguments)}\nOutput: {self.output}"
 
 
+@dataclass(frozen=True, slots=True)
+class TrajectoryCheckpointContextItem:
+    """Structured runtime checkpoint written by the model at a self-chosen moment."""
+
+    primitive_id: str
+    iteration: int
+    checkpoint_index: int
+    reasoning_summary: str
+    trajectory: str
+    output: str
+    score: float | None
+    feedback: str
+    title: str = "Runtime Checkpoint"
+    max_chars: int = 2000
+    metadata: Mapping[str, Any] = field(default_factory=dict)
+    kind: str = "trajectory_checkpoint"
+    primitive_frozen: bool = False
+
+    def to_context_text(self) -> str:
+        # Renders all checkpoint sections in deterministic order, bounded by max_chars.
+        score_text = "N/A" if self.score is None else f"{self.score:.2f}"
+        text = "\n".join((
+            f"Iteration: {self.iteration}",
+            f"Checkpoint: {self.checkpoint_index}",
+            "",
+            "### Reasoning Summary",
+            self.reasoning_summary,
+            "",
+            "### Trajectory",
+            self.trajectory,
+            "",
+            "### Output",
+            self.output,
+            "",
+            "### Score",
+            score_text,
+            "",
+            "### Feedback",
+            self.feedback,
+        ))
+        return _truncate_text(text, self.max_chars)
+
+
+@dataclass(frozen=True, slots=True)
+class ReflexionContextItem:
+    """Structured self-critique written by the model when it detects a reasoning failure."""
+
+    primitive_id: str
+    critique: str
+    correction_plan: str
+    failed_attempt: str | None = None
+    title: str = "Reflexion Note"
+    max_chars: int = 1200
+    metadata: Mapping[str, Any] = field(default_factory=dict)
+    kind: str = "reflexion"
+    primitive_frozen: bool = False
+
+    def to_context_text(self) -> str:
+        # Renders critique, correction plan, and optional failed attempt, bounded by max_chars.
+        lines = [
+            "### Critique",
+            self.critique,
+            "",
+            "### Correction Plan",
+            self.correction_plan,
+        ]
+        if self.failed_attempt is not None:
+            lines.extend(("", "### Failed Attempt", self.failed_attempt))
+        return _truncate_text("\n".join(lines), self.max_chars)
+
+
 def _extend_section(lines: list[str], title: str, values: tuple[str, ...]) -> None:
     if not values:
         return
@@ -351,6 +422,12 @@ def _language_from_path(path: Path) -> str | None:
     return suffix or None
 
 
+def _truncate_text(text: str, max_chars: int) -> str:
+    if max_chars <= 0 or len(text) <= max_chars:
+        return text
+    return text[:max_chars].rstrip() + "\n...[truncated]"
+
+
 __all__ = [
     "ArtifactContextItem",
     "ContextItem",
@@ -361,8 +438,10 @@ __all__ = [
     "MemoryContextItem",
     "PlanContextItem",
     "ProgressContextItem",
+    "ReflexionContextItem",
     "ResponseContextItem",
     "TaskContextItem",
     "TextContextItem",
     "ToolCallContextItem",
+    "TrajectoryCheckpointContextItem",
 ]
