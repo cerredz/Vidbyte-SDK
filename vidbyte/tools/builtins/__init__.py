@@ -11,6 +11,7 @@ Architecture:
     - Context compaction tools from builtins.context.
     - MCP discovery tools from builtins.mcp.
     - Memory provider tools from builtins.memory.
+    - Context algorithm tools from builtins.trajectory_checkpoint and builtins.reflexion.
 Relations:
     Related to vidbyte.tools.client and vidbyte.tools.registry.
 """
@@ -18,6 +19,8 @@ Relations:
 from __future__ import annotations
 
 from vidbyte.tools.builtins.code_search import GlobTool, GrepTool, SemanticSearchTool
+from vidbyte.tools.builtins.reflexion import ReflexionTool
+from vidbyte.tools.builtins.trajectory_checkpoint import TrajectoryCheckpointTool
 from vidbyte.tools.builtins.context import (
     CompactionMode,
     ContextCompactionTool,
@@ -61,8 +64,10 @@ __all__ = [
     "GrepTool",
     "PatchTool",
     "ProgressLog",
+    "ReflexionTool",
     "SearchMcpServersTool",
     "SemanticSearchTool",
+    "TrajectoryCheckpointTool",
     # Memory providers
     "CogneeAddTool",
     "CogneeCognifyTool",
