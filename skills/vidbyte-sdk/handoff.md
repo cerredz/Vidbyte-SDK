@@ -54,6 +54,47 @@ from vidbyte import TreeSearchHandoff, RefinementLoopHandoff, BudgetBoundedHando
 spec = TreeSearchHandoff()        # for branch-and-prune exploration agents
 ```
 
+### Software-engineering catalog
+
+Prebuilts tuned to common software-engineering task types:
+
+| Variant | SWE task | Section skeleton |
+|---------|----------|------------------|
+| `CodeReviewHandoff` | reviewing a PR/diff | Scope Reviewed · Review Method · Blocking Issues · Non-Blocking Suggestions · Approved Aspects · Test & Verification Notes · Compatibility & API Impact · Security & Data Handling · Unresolved Threads · Verdict |
+| `BugFixHandoff` | fixing a defect | Symptom · Impact & Priority · Reproduction · Investigation Trail · Root Cause · Fix Applied · Tests Added · Verification Results · Regression Risk · Follow-up Work |
+| `RefactorHandoff` | restructure, no behavior change | Motivation · Scope & Boundaries · Old Structure · New Structure · Changes by Module · Behavior-Preservation Evidence · Compatibility Notes · Risk Areas · Follow-up Cleanups · Reviewer Notes |
+| `PerformanceOptimizationHandoff` | profiling/optimization | Performance Goal · Baseline Metrics · Profiling Method · Bottlenecks Identified · Optimizations Applied · Measured Improvement · Correctness Safeguards · Trade-offs · Remaining Hotspots · Monitoring Plan |
+| `TestAuthoringHandoff` | writing tests / coverage | Coverage Goal · Test Strategy · Areas Covered · Test Cases Added · Fixtures & Test Data · Execution Results · Gaps & Untested Paths · Flaky/Skipped Tests · Maintenance Notes · Next Tests |
+| `APIDesignHandoff` | designing an endpoint/contract | Purpose & Consumers · Endpoints/Contracts · Request/Response Schemas · Authentication & Authorization · State & Side Effects · Versioning & Compatibility · Error Model · Examples & Edge Cases · Implementation Notes · Open Design Questions |
+| `SchemaMigrationHandoff` | DB schema change | Schema Change · Current Data Shape · Target Data Shape · Migration Steps · Backfill Plan · Forward/Backward Compatibility · Data-Integrity Checks · Operational Risks · Rollback Plan · Post-Migration Cleanup |
+| `DependencyUpgradeHandoff` | lib/framework bump | Target Versions · Upgrade Motivation · Breaking Changes · Code Adjustments Made · Config & Build Changes · Compatibility Verification · Runtime Behavior Changes · Remaining Deprecations · Rollback · Follow-up Monitoring |
+| `IncidentResponseHandoff` | on-call / outage | Impact & Severity · Detection & Alerts · Timeline · Current Mitigation · Root-Cause Status · Systems & Owners · Action Items · Comms Status · Verification & Recovery · Post-Incident Follow-up |
+| `ArchitectureDecisionHandoff` | system design / ADR | Problem & Context · Requirements & Constraints · Options Considered · Evaluation Evidence · Decision & Rationale · Consequences & Trade-offs · Implementation Plan · Open Risks · Review & Reversal Criteria · Next Steps |
+| `CodebaseOnboardingHandoff` | understanding unfamiliar code | Goal · Repository Layout · System Map · Key Components & Responsibilities · Entry Points & Data Flow · Configuration & Environment · Conventions & Gotchas · Testing & Verification Map · Useful Files & Commands · Open Questions |
+| `CICDPipelineHandoff` | build/deploy pipeline work | Pipeline Goal · Current Pipeline Topology · Stages & Status · Build/Deploy Config · Secrets & Environments · Artifacts & Outputs · Failing/Flaky Stages · Changes Applied · Validation & Rollback · Next Steps |
+| `IntegrationHandoff` | third-party integration | Integration Goal · External Contract · Auth & Credentials · Implemented Surface · Data Mapping · Error Handling & Retries · Edge Cases & Failure Modes · Local & Test Setup · Verification Status · Untested Paths |
+| `SecurityRemediationHandoff` | fixing vulnerabilities | Vulnerabilities · Severity & Exploitability · Threat Model · Affected Surface · Fixes Applied · Verification · Regression & Abuse Tests · Operational Rollout · Residual Risk · Remaining Items |
+| `ReleaseHandoff` | cutting a release/deploy | Release Scope · Release Readiness · Changelog · Versioning & Artifacts · Pre-Deploy Checklist · Deploy Steps · Verification & Smoke · Communications · Rollback Plan · Post-Release Follow-up |
+
+### Discovering handoffs with the registry
+
+`HandoffRegistry` is a prefilled catalog of every prebuilt handoff (general + process-shape
++ software-engineering). Use it to browse, construct by name, or build an agent in one step:
+
+```python
+from vidbyte import HandoffRegistry
+
+registry = HandoffRegistry()
+registry.list()                       # every prebuilt slug, e.g. "code_review", "tree_search", "engineering"
+registry.describe()                   # slug -> {class, title, sections} for the whole catalog
+spec = registry.create("bug_fix")     # a BugFixHandoff instance
+agent = registry.build_agent("code_review", provider="anthropic", model_name="claude-opus-4-8")
+
+registry.register("my_handoff", MyHandoff)   # add a custom handoff to this registry instance
+```
+
+`get(name)` raises `ConfigurationError` for an unknown slug, listing the available names.
+
 Bring your own structure by passing `sections` (or subclassing `Handoff`):
 
 ```python
@@ -154,5 +195,11 @@ from vidbyte import HandoffAgent, Handoff, EngineeringHandoff, ResearchHandoff, 
   and `vidbyte/__init__.py`.
 - Keep sections decision-oriented: each section title should map to something the next
   agent must know to continue.
+- Make each section description detailed enough to steer generation: use about 4-5
+  sentences, explain what information belongs in the section, specify what the model
+  should output, and include enough structure for roughly up to 500 tokens per section.
+- Prefer richer handoffs with enough sections to preserve the task state. For new
+  domain-specific prebuilts, use around 9-10 sections unless the shape has a strong
+  reason to be smaller.
 - Add a unit test asserting the new variant exposes a non-empty, distinct section map and
   that `fill()` preserves its type.
