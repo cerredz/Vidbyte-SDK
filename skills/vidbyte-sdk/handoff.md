@@ -29,6 +29,31 @@ spec = ResearchHandoff()         # Question, Findings, Sources, Confidence & Gap
 spec = MinimalHandoff()          # Summary, Next Steps  (the default when none is given)
 ```
 
+### Process-shape catalog
+
+Beyond the three above, the SDK ships prebuilts keyed to the *shape of the agent's
+problem-solving process* — each models a distinct reasoning/execution topology, not a
+domain. Pick the one whose structural element matches how the work actually unfolded:
+
+| Variant | Shape | Section skeleton |
+|---------|-------|------------------|
+| `TreeSearchHandoff` | search frontier | Search Goal · Frontier · Explored Branches · Pruned / Dead Branches · Best So Far · Next Expansion |
+| `DecompositionHandoff` | subproblem tree | Top-Level Problem · Decomposition · Solved Subproblems · Open Subproblems · Composition Status · Next Steps |
+| `RefinementLoopHandoff` | iteration journal | Objective · Current Draft State · Iteration Log · Open Critiques · Convergence Status · Next Revision |
+| `ConstraintSatisfactionHandoff` | constraint ledger | Objective · Constraints · Current Candidate · Conflicts & Tensions · Trade-offs Made · Next Steps |
+| `BacktrackingHandoff` | decision stack | Objective · Decision Stack · Tentative Choices · Backtrack Points · Abandoned Paths · Next Steps |
+| `TradeoffHandoff` | Pareto frontier | Decision to Make · Objectives & Priorities · Options Evaluated · Frontier · Leaning / Chosen · Open Questions |
+| `GoalStackHandoff` | goal hierarchy | Root Goal · Goal Hierarchy · Active Path · Satisfied Goals · Suspended Goals · Next Steps |
+| `CoverageHandoff` | coverage map | Objective & Scope · Coverage Map · Completed · Gaps & Skipped · Systematic Next |
+| `BudgetBoundedHandoff` | budget curve | Objective · Budget Status · Value Delivered · Remaining Work · Cut Line · Next Steps |
+| `MigrationHandoff` | state delta | Target State · Current State · Completed Migrations · Remaining Delta · Reversibility · Next Steps |
+
+```python
+from vidbyte import TreeSearchHandoff, RefinementLoopHandoff, BudgetBoundedHandoff
+
+spec = TreeSearchHandoff()        # for branch-and-prune exploration agents
+```
+
 Bring your own structure by passing `sections` (or subclassing `Handoff`):
 
 ```python
