@@ -8,8 +8,9 @@ from vidbyte.agents.base import BaseAgent
 from vidbyte.agents import AgentRuntime
 from vidbyte.lib.dataclasses.agents import AgentRuntimeConfig
 from vidbyte.lib.dataclasses.runner import RunnerHandle
-from vidbyte.lib.errors import TracerConfigurationError
+from vidbyte.lib.errors import ConfigurationError, TracerConfigurationError
 from vidbyte.lib.tracing import NullTracer, SpanContext, TracerBase
+from vidbyte.trace import Trace
 from vidbyte.tools import BaseTool, ToolCall, ToolPermission, ToolResult, ToolSpec, Tools
 from vidbyte.tools.security import PermissionPolicy
 
@@ -143,6 +144,15 @@ class BaseAgentTracerWiringTests(unittest.IsolatedAsyncioTestCase):
             tracer=tracer,
         )
 
+    def _make_agent_with_trace(self, trace=None) -> BaseAgent:
+        # Builds a test agent through the new trace= alias.
+        return BaseAgent(
+            name="test-agent",
+            system_prompt="Be helpful.",
+            runner=AlwaysDoneRunner(),
+            trace=trace,
+        )
+
     def test_defaults_to_null_tracer_when_tracer_is_none(self) -> None:
         agent = self._make_agent(tracer=None)
         self.assertIsInstance(agent._tracer, NullTracer)
@@ -192,6 +202,40 @@ class BaseAgentTracerWiringTests(unittest.IsolatedAsyncioTestCase):
     def test_fork_propagates_tracer_instance(self) -> None:
         tracer = RecordingTracer()
         parent = self._make_agent(tracer=tracer)
+        child = parent.fork(name="child-agent")
+        self.assertIs(child._tracer, tracer)
+
+    def test_trace_alias_accepts_off_preset(self) -> None:
+        # Verifies Trace.off() can be supplied through the trace= alias.
+        agent = self._make_agent_with_trace(trace=Trace.off())
+        self.assertIsInstance(agent._tracer, NullTracer)
+
+    def test_trace_alias_instantiates_tracer_class(self) -> None:
+        # Verifies trace= preserves existing tracer class normalization.
+        agent = self._make_agent_with_trace(trace=RecordingTracer)
+        self.assertIsInstance(agent._tracer, RecordingTracer)
+
+    def test_trace_alias_uses_tracer_instance_directly(self) -> None:
+        # Verifies trace= preserves existing tracer instance normalization.
+        tracer = RecordingTracer()
+        agent = self._make_agent_with_trace(trace=tracer)
+        self.assertIs(agent._tracer, tracer)
+
+    def test_trace_alias_rejects_tracer_and_trace_together(self) -> None:
+        # Verifies users cannot supply both tracing entry points at once.
+        with self.assertRaises(ConfigurationError):
+            BaseAgent(
+                name="test-agent",
+                system_prompt="Be helpful.",
+                runner=AlwaysDoneRunner(),
+                tracer=RecordingTracer(),
+                trace=Trace.off(),
+            )
+
+    def test_fork_preserves_tracer_from_trace_alias(self) -> None:
+        # Verifies forking keeps the resolved trace alias tracer instance.
+        tracer = RecordingTracer()
+        parent = self._make_agent_with_trace(trace=tracer)
         child = parent.fork(name="child-agent")
         self.assertIs(child._tracer, tracer)
 
