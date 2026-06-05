@@ -29,7 +29,8 @@ Agent(
     *,                                    # all keyword-only
     name: str,                            # required, non-empty â€” agent identity
     system_prompt: str,                   # required, non-empty â€” defines agent behavior and constraints
-    provider: str | ModelProvider | None, # "openai", "anthropic", "gemini", "xai", "deepseek", "glm", "minimax"
+    runtime: AgentRuntimeType | str = AgentRuntimeType.LINEAR,  # execution runtime: linear, mcts_search, actor_model_p2p, actor_model_broadcast
+    provider: str | ModelProvider | None, # "openai", "anthropic", "gemini", "xai", "deepseek", "glm", "minimax", "openrouter", "elevenlabs", "playai"
     model_name: str | None,              # specific model ID for the provider
     modality: ModelModality = ModelModality.AUTO,  # AUTO, TEXT, IMAGE, VIDEO
     api_key: str | None = None,          # override for provider API key
@@ -41,17 +42,25 @@ Agent(
     capabilities: Sequence[str] = (),    # tags for registry discovery (e.g., ["code_generation", "refactoring"])
     metadata: dict[str, Any] | None = None,  # arbitrary key-value metadata for discovery
     tools: Sequence[BaseTool] = (),      # tools the agent can call during execution
-    middleware: Sequence[AgentMiddleware] = (),  # runtime policy middleware
+    middleware: Sequence[AgentMiddleware] = (),  # runtime policy middleware (deterministic, not model-visible)
     permission_policy: PermissionPolicy | None = None,  # tool permission policy
     runners: Mapping[ModelModality | str, object] | None = None,  # per-modality runners
+    context_items: Sequence[ContextItem] = (),  # default context items injected into the agent
+    context_manager: ContextManager | None = None,  # explicit context manager
+    algorithm: ContextWindowAlgorithm | str | None = None,  # context-window algorithm, e.g. ContextWindow.preset.reflexion
+    output_schema: type | Mapping[str, Any] | None = None,  # structured-output schema for providers that support it
+    handoff: Handoff | None = None,      # produce a handoff document automatically after each run
 )
 ```
 
 Each parameter has a specific role:
 - **Identity** (`name`, `description`, `capabilities`, `metadata`): Used for registry lookup, agent cards, and multi-agent discovery.
 - **Model** (`provider`, `model_name`, `api_key`, `temperature`, `modality`): Configures which model to use and how.
+- **Runtime** (`runtime`): Selects the execution paradigm — `linear` (default), `mcts_search`, or actor model. See [`skills/agent-runtimes/SKILL.md`](../agent-runtimes/SKILL.md). Note: non-linear runtimes are incompatible with middleware and context-window algorithms and raise `ConfigurationError` if combined.
 - **Execution** (`max_tool_rounds`, `max_iterations`, `max_tokens`): Controls resource consumption and loop limits.
 - **Capability** (`tools`, `middleware`, `permission_policy`): What the agent can do and how it behaves.
+- **Context** (`context_items`, `context_manager`, `algorithm`): Default context and context-window behavior. Per-call context belongs on `AgentInput`.
+- **Output / handoff** (`output_schema`, `handoff`): Structured output and automatic handoff-document generation.
 
 ## Run the Agent
 
@@ -95,15 +104,16 @@ specs = agent.tool_specs()   # tuple[ToolSpec, ...] â€” model-facing tool d
 
 ## Adding Middleware
 
-Middleware is deterministic runtime policy that runs at specific lifecycle hooks (before/after model calls, before/after tool calls). It is never visible to the model:
+Middleware is deterministic runtime policy that runs at lifecycle hooks across the agent run (`before_run`, `before_iteration`, `before_model_call`, `after_model_response`, `on_model_error`, `before_tool_call`, `after_tool_call`, `after_iteration`, `after_run`). Each hook receives a read-only `MiddlewareContext` and returns a `MiddlewareDecision`. Middleware is never visible to the model. See [`skills/vidbyte-sdk/middleware.md`](../vidbyte-sdk/middleware.md) for the full hook lifecycle, decision types, and built-in catalog.
 
 ```python
-from vidbyte import AgentMiddleware, MiddlewareDecision
+from vidbyte.middleware import AgentMiddleware
+from vidbyte.lib.dataclasses.middleware import MiddlewareContext, MiddlewareDecision
 
 class LoggingMiddleware(AgentMiddleware):
-    async def before_model_call(self, agent, prompt):
-        print(f"[LOG] Agent '{agent.name}' about to call model")
-        return MiddlewareDecision.ALLOW
+    async def before_model_call(self, ctx: MiddlewareContext) -> MiddlewareDecision:
+        print(f"[LOG] Agent '{ctx.agent_name}' about to call model")
+        return MiddlewareDecision.continue_()
 
 agent = Agent(
     name="logged-agent",
@@ -113,6 +123,8 @@ agent = Agent(
     middleware=[LoggingMiddleware()],
 )
 ```
+
+Decisions: `MiddlewareDecision.continue_()` proceeds; `abort(reason)` terminates the run with `AgentExecutionError`; `deny_tool(reason)` blocks a tool in `before_tool_call`; `retry(reason)` retries a failed model call in `on_model_error`; `sleep(seconds)` throttles before proceeding.
 
 ## Fork an Agent
 

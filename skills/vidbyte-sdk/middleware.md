@@ -59,7 +59,7 @@ A middleware hook MUST return a `MiddlewareDecision` object. The runtime interce
 
 ## 4. Built-in Middleware Catalog
 
-The Vidbyte SDK includes 13 built-in middlewares designed to guard and govern agent execution out of the box.
+The Vidbyte SDK includes 13 built-in middlewares designed to guard and govern agent execution out of the box. Three additional **compaction** middlewares (`ToolResultCompactionMiddleware`, `MessageHistoryCompactionMiddleware`, `SummaryCompactionMiddleware`) are covered separately in §5.1, bringing the public total to 16. Compaction implementations live in `vidbyte/middleware/compaction/` and are re-exported through `vidbyte/middleware/builtins/context_compaction.py`.
 
 ### A. Security & Defense
 

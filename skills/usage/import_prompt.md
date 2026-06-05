@@ -1,6 +1,6 @@
 # Import Prompt
 
-Access the SDK's built-in prompt catalog — a collection of 30+ prompts across 16 prompt families covering reasoning, planning, orchestration, and more. Prompts are repository-backed text assets that can be accessed through enum keys or direct Python imports.
+Access the SDK's built-in prompt catalog — 34 prompts across 13 prompt families covering handoffs, reflexion, actor-runtime personas, goals, evals, grading, templates, and more. Prompts are repository-backed text assets that can be accessed through enum keys or direct Python imports. The authoritative source of truth is `vidbyte/lib/enums/prompts.py`.
 
 ## Getting a Prompt by Enum
 
@@ -12,9 +12,9 @@ from vidbyte import Prompts, Prompt
 prompts = Prompts()
 
 # Get a single prompt string by enum
-text = prompts.get(Prompt.CHAIN_OF_THOUGHT_REASON_PROMPT)
-text = prompts.get(Prompt.STEP_BACK_PRINCIPLE_PROMPT)
-text = prompts.get(Prompt.PLAN_AND_EXECUTE_PLAN_PROMPT)
+text = prompts.get(Prompt.HANDOFF_SYSTEM_PROMPT)
+text = prompts.get(Prompt.REFLEXION_REFLECT_PROMPT)
+text = prompts.get(Prompt.GOALS_GOAL_PROMPT)
 ```
 
 ## Direct String Imports
@@ -23,36 +23,40 @@ Every prompt is also importable as a module-level constant from `vidbyte.prompts
 
 ```python
 from vidbyte.prompts import (
-    chain_of_thought_reason_prompt,
-    step_back_principle_prompt,
-    step_back_answer_prompt,
-    chain_of_draft_draft_prompt,
-    skeleton_of_thought_skeleton_prompt,
-    skeleton_of_thought_expand_prompt,
-    tree_of_thoughts_branch_prompt,
-    tree_of_thoughts_evaluate_prompt,
-    tree_of_thoughts_final_prompt,
-    plan_and_execute_plan_prompt,
-    plan_and_execute_execute_prompt,
-    plan_and_execute_final_prompt,
-    self_consistency_sample_prompt,
-    answer_convergence_attempt_prompt,
-    budget_forcing_initial_prompt,
-    budget_forcing_continue_prompt,
-    multi_agent_reflexion_draft_prompt,
-    multi_agent_reflexion_critic_prompt,
-    multi_agent_reflexion_final_prompt,
-    paradigm_router_route_prompt,
     agentic_loop_context_prompt,
-    agentic_rag_retrieve_prompt,
-    agentic_rag_answer_prompt,
+    handoff_system_prompt,
     context_engineering_guideline_prompt,
     expert_prompting_expert_prompt,
-    vmao_planner,
-    vmao_planner_repair,
-    vmao_synthesizer,
-    vmao_verifier,
-    vmao_gap_planner,
+    goals_goal_prompt,
+    mimic_behavior_mimic_prompt,
+    reflexion_agent_system_prompt,
+    reflexion_reflect_system_prompt,
+    reflexion_reflect_prompt,
+    prompt_engineering_master_prompt,
+    evals_llm_judge,
+    evals_rubric,
+    multi_provider_agentic_grader_agent_system_prompt,
+    multi_provider_agentic_grader_grader_system_prompt,
+    multi_provider_agentic_grader_grader_prompt,
+    templates_intent_based,
+    templates_persona,
+    templates_specification,
+    actor_runtime_planner,
+    actor_runtime_coder,
+    actor_runtime_reviewer,
+    actor_runtime_generator,
+    actor_runtime_critic,
+    actor_runtime_reasoner,
+    actor_runtime_summarization,
+    actor_runtime_decomposer,
+    actor_runtime_explorer,
+    actor_runtime_tradeoff,
+    actor_runtime_hypothesis_generator,
+    actor_runtime_refiner,
+    actor_runtime_formatter,
+    actor_runtime_safety,
+    actor_runtime_final_answer,
+    trajectory_checkpoints_agentic_summarizer,
 )
 ```
 
@@ -86,11 +90,11 @@ Retrieve all prompts within a family at once:
 from vidbyte import Prompts
 
 # Get all prompts within a family
-family = Prompts().family("chain_of_thought")
-# {"reason_prompt": "Solve the task carefully by reasoning step by step..."}
+family = Prompts().family("reflexion")
+# {"agent_system_prompt": "...", "reflect_system_prompt": "...", "reflect_prompt": "..."}
 
-family = Prompts().family("vmao")
-# {"planner": "...", "planner_repair": "...", "synthesizer": "...", "verifier": "...", "gap_planner": "..."}
+family = Prompts().family("actor_runtime")
+# {"planner": "...", "coder": "...", "reviewer": "...", ...}  # 15 persona prompts
 ```
 
 ## Complete Prompt Listing
@@ -99,57 +103,17 @@ Below is every prompt available in the SDK, organized by family. Each prompt can
 
 ### agentic_loop
 
-Prompts for agents that need to run in an autonomous loop with tools.
-
 | Enum | Import Name | Description |
 |------|-------------|-------------|
 | `Prompt.AGENTIC_LOOP_CONTEXT_PROMPT` | `agentic_loop_context_prompt` | Context injection prompt for agentic loop cycles |
 
-### agentic_rag
-
-Prompts for agentic Retrieval-Augmented Generation workflows.
+### handoff
 
 | Enum | Import Name | Description |
 |------|-------------|-------------|
-| `Prompt.AGENTIC_RAG_RETRIEVE_PROMPT` | `agentic_rag_retrieve_prompt` | Prompt guiding document retrieval in RAG pipelines |
-| `Prompt.AGENTIC_RAG_ANSWER_PROMPT` | `agentic_rag_answer_prompt` | Prompt for answering questions using retrieved documents |
-
-### answer_convergence
-
-Prompts for answer convergence sampling — repeat until answers stabilize.
-
-| Enum | Import Name | Description |
-|------|-------------|-------------|
-| `Prompt.ANSWER_CONVERGENCE_ATTEMPT_PROMPT` | `answer_convergence_attempt_prompt` | Single attempt prompt in the convergence loop |
-
-### budget_forcing
-
-Prompts for budget-forced retry — bounded retry attempts within cost limits.
-
-| Enum | Import Name | Description |
-|------|-------------|-------------|
-| `Prompt.BUDGET_FORCING_INITIAL_PROMPT` | `budget_forcing_initial_prompt` | First-attempt prompt with budget awareness |
-| `Prompt.BUDGET_FORCING_CONTINUE_PROMPT` | `budget_forcing_continue_prompt` | Continuation prompt for remaining budget |
-
-### chain_of_draft
-
-Prompts for chain-of-draft reasoning — compact, minimal drafting.
-
-| Enum | Import Name | Description |
-|------|-------------|-------------|
-| `Prompt.CHAIN_OF_DRAFT_DRAFT_PROMPT` | `chain_of_draft_draft_prompt` | Prompt for producing a compact reasoning draft |
-
-### chain_of_thought
-
-Prompts for chain-of-thought reasoning — the foundational step-by-step reasoning strategy.
-
-| Enum | Import Name | Description |
-|------|-------------|-------------|
-| `Prompt.CHAIN_OF_THOUGHT_REASON_PROMPT` | `chain_of_thought_reason_prompt` | Step-by-step reasoning prompt that instructs the model to work through a problem methodically before giving a final answer |
+| `Prompt.HANDOFF_SYSTEM_PROMPT` | `handoff_system_prompt` | System prompt for the handoff agent that produces structured handoff documents |
 
 ### context_engineering
-
-Prompts for context engineering — optimizing how context is structured and injected.
 
 | Enum | Import Name | Description |
 |------|-------------|-------------|
@@ -157,87 +121,86 @@ Prompts for context engineering — optimizing how context is structured and inj
 
 ### expert_prompting
 
-Prompts for expert prompting — instructing the model to adopt expert personas.
-
 | Enum | Import Name | Description |
 |------|-------------|-------------|
 | `Prompt.EXPERT_PROMPTING_EXPERT_PROMPT` | `expert_prompting_expert_prompt` | Prompt for adopting an expert role and reasoning style |
 
-### multi_agent_reflexion
-
-Prompts for multi-agent reflexion — draft, critique, and refine across agents.
+### goals
 
 | Enum | Import Name | Description |
 |------|-------------|-------------|
-| `Prompt.MULTI_AGENT_REFLEXION_DRAFT_PROMPT` | `multi_agent_reflexion_draft_prompt` | Initial draft generation prompt |
-| `Prompt.MULTI_AGENT_REFLEXION_CRITIC_PROMPT` | `multi_agent_reflexion_critic_prompt` | Critique and feedback prompt |
-| `Prompt.MULTI_AGENT_REFLEXION_FINAL_PROMPT` | `multi_agent_reflexion_final_prompt` | Final synthesis incorporating all feedback |
+| `Prompt.GOALS_GOAL_PROMPT` | `goals_goal_prompt` | Goal-oriented behavior prompt |
 
-### paradigm_router
-
-Prompts for paradigm routing — dynamically selecting reasoning paradigms.
+### mimic_behavior
 
 | Enum | Import Name | Description |
 |------|-------------|-------------|
-| `Prompt.PARADIGM_ROUTER_ROUTE_PROMPT` | `paradigm_router_route_prompt` | Prompt for selecting the appropriate reasoning paradigm |
+| `Prompt.MIMIC_BEHAVIOR_MIMIC_PROMPT` | `mimic_behavior_mimic_prompt` | Prompt for mimicking a target behavior or style |
 
-### plan_and_execute
-
-Prompts for plan-and-execute workflows — plan steps, then execute them.
+### reflexion
 
 | Enum | Import Name | Description |
 |------|-------------|-------------|
-| `Prompt.PLAN_AND_EXECUTE_PLAN_PROMPT` | `plan_and_execute_plan_prompt` | Planning phase — decompose the task into steps |
-| `Prompt.PLAN_AND_EXECUTE_EXECUTE_PROMPT` | `plan_and_execute_execute_prompt` | Execution phase — carry out a single step |
-| `Prompt.PLAN_AND_EXECUTE_FINAL_PROMPT` | `plan_and_execute_final_prompt` | Synthesis phase — combine step results into final answer |
+| `Prompt.REFLEXION_AGENT_SYSTEM_PROMPT` | `reflexion_agent_system_prompt` | System prompt for the reflexion agent trial |
+| `Prompt.REFLEXION_REFLECT_SYSTEM_PROMPT` | `reflexion_reflect_system_prompt` | System prompt for the reflexion reflection stage |
+| `Prompt.REFLEXION_REFLECT_PROMPT` | `reflexion_reflect_prompt` | Reflection prompt used after a failed trial |
 
-### self_consistency
-
-Prompts for self-consistency sampling — multiple independent samples, pick the most consistent.
+### prompt_engineering
 
 | Enum | Import Name | Description |
 |------|-------------|-------------|
-| `Prompt.SELF_CONSISTENCY_SAMPLE_PROMPT` | `self_consistency_sample_prompt` | Single sample prompt for consistency sampling |
+| `Prompt.PROMPT_ENGINEERING_MASTER_PROMPT` | `prompt_engineering_master_prompt` | Master prompt-engineering guidance prompt |
 
-### skeleton_of_thought
-
-Prompts for skeleton-of-thought — outline first, then expand.
+### evals
 
 | Enum | Import Name | Description |
 |------|-------------|-------------|
-| `Prompt.SKELETON_OF_THOUGHT_SKELETON_PROMPT` | `skeleton_of_thought_skeleton_prompt` | Generate a skeletal outline of the response |
-| `Prompt.SKELETON_OF_THOUGHT_EXPAND_PROMPT` | `skeleton_of_thought_expand_prompt` | Expand each skeleton point into full content |
+| `Prompt.EVALS_LLM_JUDGE` | `evals_llm_judge` | LLM-as-judge grading prompt |
+| `Prompt.EVALS_RUBRIC` | `evals_rubric` | Rubric-based grading prompt |
 
-### step_back
-
-Prompts for step-back reasoning — extract principles first, then apply them.
+### multi_provider_agentic_grader
 
 | Enum | Import Name | Description |
 |------|-------------|-------------|
-| `Prompt.STEP_BACK_PRINCIPLE_PROMPT` | `step_back_principle_prompt` | Extract abstract principles and relevant knowledge |
-| `Prompt.STEP_BACK_ANSWER_PROMPT` | `step_back_answer_prompt` | Apply extracted principles to answer the question |
+| `Prompt.MULTI_PROVIDER_AGENTIC_GRADER_AGENT_SYSTEM_PROMPT` | `multi_provider_agentic_grader_agent_system_prompt` | System prompt for the agent under grading |
+| `Prompt.MULTI_PROVIDER_AGENTIC_GRADER_GRADER_SYSTEM_PROMPT` | `multi_provider_agentic_grader_grader_system_prompt` | System prompt for the grader model |
+| `Prompt.MULTI_PROVIDER_AGENTIC_GRADER_GRADER_PROMPT` | `multi_provider_agentic_grader_grader_prompt` | Grading instruction prompt |
 
-### tree_of_thoughts
-
-Prompts for tree-of-thoughts — branch, evaluate, and synthesize multiple reasoning paths.
-
-| Enum | Import Name | Description |
-|------|-------------|-------------|
-| `Prompt.TREE_OF_THOUGHTS_BRANCH_PROMPT` | `tree_of_thoughts_branch_prompt` | Generate branching reasoning paths |
-| `Prompt.TREE_OF_THOUGHTS_EVALUATE_PROMPT` | `tree_of_thoughts_evaluate_prompt` | Evaluate the quality of each branch |
-| `Prompt.TREE_OF_THOUGHTS_FINAL_PROMPT` | `tree_of_thoughts_final_prompt` | Synthesize the best branches into a final answer |
-
-### vmao
-
-Prompts for Verified Multi-Agent Orchestration — plan, execute, verify with multiple agents.
+### templates
 
 | Enum | Import Name | Description |
 |------|-------------|-------------|
-| `Prompt.VMAO_PLANNER` | `vmao_planner` | Initial planning prompt for task decomposition |
-| `Prompt.VMAO_PLANNER_REPAIR` | `vmao_planner_repair` | Plan repair prompt when execution reveals gaps |
-| `Prompt.VMAO_SYNTHESIZER` | `vmao_synthesizer` | Synthesize agent outputs into a cohesive result |
-| `Prompt.VMAO_VERIFIER` | `vmao_verifier` | Verify correctness and completeness of outputs |
-| `Prompt.VMAO_GAP_PLANNER` | `vmao_gap_planner` | Identify and plan resolution of gaps found during verification |
+| `Prompt.TEMPLATES_INTENT_BASED` | `templates_intent_based` | Intent-based system-prompt template |
+| `Prompt.TEMPLATES_PERSONA` | `templates_persona` | Persona system-prompt template |
+| `Prompt.TEMPLATES_SPECIFICATION` | `templates_specification` | Specification system-prompt template |
+
+### actor_runtime
+
+Persona system prompts for the actor-model runtime (15 prompts).
+
+| Enum | Import Name | Description |
+|------|-------------|-------------|
+| `Prompt.ACTOR_RUNTIME_PLANNER` | `actor_runtime_planner` | Planner actor persona |
+| `Prompt.ACTOR_RUNTIME_CODER` | `actor_runtime_coder` | Coder actor persona |
+| `Prompt.ACTOR_RUNTIME_REVIEWER` | `actor_runtime_reviewer` | Reviewer actor persona |
+| `Prompt.ACTOR_RUNTIME_GENERATOR` | `actor_runtime_generator` | Generator actor persona |
+| `Prompt.ACTOR_RUNTIME_CRITIC` | `actor_runtime_critic` | Critic actor persona |
+| `Prompt.ACTOR_RUNTIME_REASONER` | `actor_runtime_reasoner` | Reasoner actor persona |
+| `Prompt.ACTOR_RUNTIME_SUMMARIZATION` | `actor_runtime_summarization` | Summarization actor persona |
+| `Prompt.ACTOR_RUNTIME_DECOMPOSER` | `actor_runtime_decomposer` | Decomposer actor persona |
+| `Prompt.ACTOR_RUNTIME_EXPLORER` | `actor_runtime_explorer` | Explorer actor persona |
+| `Prompt.ACTOR_RUNTIME_TRADEOFF` | `actor_runtime_tradeoff` | Tradeoff actor persona |
+| `Prompt.ACTOR_RUNTIME_HYPOTHESIS_GENERATOR` | `actor_runtime_hypothesis_generator` | Hypothesis generator actor persona |
+| `Prompt.ACTOR_RUNTIME_REFINER` | `actor_runtime_refiner` | Refiner actor persona |
+| `Prompt.ACTOR_RUNTIME_FORMATTER` | `actor_runtime_formatter` | Formatter actor persona |
+| `Prompt.ACTOR_RUNTIME_SAFETY` | `actor_runtime_safety` | Safety actor persona |
+| `Prompt.ACTOR_RUNTIME_FINAL_ANSWER` | `actor_runtime_final_answer` | Final-answer actor persona |
+
+### trajectory_checkpoints
+
+| Enum | Import Name | Description |
+|------|-------------|-------------|
+| `Prompt.TRAJECTORY_CHECKPOINTS_AGENTIC_SUMMARIZER` | `trajectory_checkpoints_agentic_summarizer` | Summarizer prompt for trajectory-checkpoint context-window algorithm |
 
 ## Using Prompts with Agents
 
@@ -248,19 +211,19 @@ from vidbyte import Agent, Prompts, Prompt
 
 prompts = Prompts()
 
-# Chain-of-thought reasoning agent
+# Goal-oriented agent
 agent = Agent(
-    name="reasoner",
-    system_prompt=prompts.get(Prompt.CHAIN_OF_THOUGHT_REASON_PROMPT),
+    name="goal-driven",
+    system_prompt=prompts.get(Prompt.GOALS_GOAL_PROMPT),
     provider="openai",
     model_name="gpt-4.1",
 )
 reply = await agent.arun("Explain how binary search trees balance themselves.")
 
-# Plan-and-execute agent for multi-step tasks
+# Expert-persona agent
 agent = Agent(
-    name="planner",
-    system_prompt=prompts.get(Prompt.PLAN_AND_EXECUTE_PLAN_PROMPT),
+    name="expert",
+    system_prompt=prompts.get(Prompt.EXPERT_PROMPTING_EXPERT_PROMPT),
     provider="openai",
     model_name="gpt-4.1",
 )
@@ -269,7 +232,7 @@ reply = await agent.arun("Build a REST API for a todo list application.")
 
 ## Prompt Enum Naming Convention
 
-- **Value format:** `"<family_key>.<prompt_key>"` (e.g., `"chain_of_thought.reason_prompt"`)
-- **Enum member:** `UPPERCASE_SNAKE` of the value with dots replaced by underscores (e.g., `CHAIN_OF_THOUGHT_REASON_PROMPT`)
-- **Direct import name:** Lowercase snake_case with dots replaced by underscores (e.g., `chain_of_thought_reason_prompt`)
-- **Example:** `chain_of_thought.reason_prompt` → `Prompt.CHAIN_OF_THOUGHT_REASON_PROMPT` → `chain_of_thought_reason_prompt`
+- **Value format:** `"<family_key>.<prompt_key>"` (e.g., `"reflexion.reflect_prompt"`)
+- **Enum member:** `UPPERCASE_SNAKE` of the value with dots replaced by underscores (e.g., `REFLEXION_REFLECT_PROMPT`)
+- **Direct import name:** Lowercase snake_case with dots replaced by underscores (e.g., `reflexion_reflect_prompt`)
+- **Example:** `reflexion.reflect_prompt` → `Prompt.REFLEXION_REFLECT_PROMPT` → `reflexion_reflect_prompt`

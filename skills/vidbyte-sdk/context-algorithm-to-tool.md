@@ -108,11 +108,13 @@ When converting an algorithm to a tool, work through each concern:
 ### Step 1: Identify the shared ContextItem primitive
 
 The algorithm and its tool equivalent share the same `ContextItem` dataclass. Identify
-which primitive the algorithm writes. If it does not yet exist in `vidbyte/context/primitives.py`,
-add it there — not as an algorithm-private class.
+which primitive the algorithm writes. If it does not yet exist in the
+`vidbyte/context/primitives/` package, add it to the appropriate module (e.g.
+`checkpoints.py`, `tasks.py`, `records.py`) and export it from
+`vidbyte/context/primitives/__init__.py` — not as an algorithm-private class.
 
 ```python
-# primitives.py — shared by both the algorithm and its tool
+# vidbyte/context/primitives/checkpoints.py — shared by both the algorithm and its tool
 @dataclass(frozen=True, slots=True)
 class TrajectoryCheckpointContextItem:
     primitive_id: str
@@ -320,9 +322,11 @@ Searched /etc/app/, ~/.config/app/, and /usr/local/app/ — none exist
 Follow these rules when adding a new algorithm-to-tool conversion:
 
 ```
-vidbyte/context/primitives.py
-    Add the shared ContextItem dataclass here. Both the algorithm and the tool import
-    from this module. Do not define primitives inside the algorithm or tool file.
+vidbyte/context/primitives/
+    Add the shared ContextItem dataclass to the appropriate module in this package
+    (e.g. checkpoints.py) and export it from __init__.py. Both the algorithm and the
+    tool import it from vidbyte.context.primitives. Do not define primitives inside
+    the algorithm or tool file.
 
 vidbyte/tools/builtins/<tool_name>.py
     One file per tool. Follow the naming of existing builtins (reflexion.py,
@@ -361,7 +365,7 @@ skills/vidbyte-sdk/context-algorithm-to-tool.md (this file)
 - **Return `to_context_text()` in ToolResult.output.** This is the confirmation the model
   reads to verify what was stored. A bare "OK" leaves the model guessing.
 
-- **`_truncate_text` is in `primitives.py`.** Use `_truncate_text(text, max_chars)` in
+- **`_truncate_text` is in `vidbyte/context/primitives/base.py`.** Use `_truncate_text(text, max_chars)` in
   `to_context_text()` to enforce character bounds. It passes through when `max_chars <= 0`.
 
 - **ToolPermission.SAFE for all context-writing tools.** Context tools do not touch the

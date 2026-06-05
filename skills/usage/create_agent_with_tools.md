@@ -67,6 +67,7 @@ Filesystem tools give agents read/write access to the filesystem. Tools like `Wr
 
 ```python
 from vidbyte import Agent
+from vidbyte.tools.security import PermissionPolicy
 from vidbyte.tools.filesystem import (
     ReadTextTool, WriteTextTool, ListDirTool, MakeDirTool,
     DeleteTool, CopyTool, MoveTool, ExistsTool,
@@ -93,7 +94,8 @@ agent = Agent(
 Every tool declares a permission level (`SAFE`, `READ`, `WRITE`, `EXECUTE`). The agent evaluates each tool call against its permission policy. The default policy allows `SAFE` and `READ` tools, and denies `WRITE` and `EXECUTE` tools — this prevents accidental filesystem modifications or code execution.
 
 ```python
-from vidbyte import PermissionPolicy, ToolPermission
+from vidbyte import ToolPermission
+from vidbyte.tools.security import PermissionPolicy
 
 # Allow everything — use with caution
 agent = Agent(..., permission_policy=PermissionPolicy.allow_all())

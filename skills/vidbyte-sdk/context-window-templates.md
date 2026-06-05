@@ -357,7 +357,7 @@ from vidbyte.lib.templates import ReflexionContextWindowTemplate
 from vidbyte.lib.dataclasses.agents import AgentRuntimeConfig
 from vidbyte.tools import Tools
 from vidbyte.tools.security import PermissionPolicy
-from vidbyte.strategies.types import BaseAgentContext
+from vidbyte.context import BaseAgentContext
 
 recorder = ContextWindowRecorder()
 algorithm = ContextWindowAlgorithm(
