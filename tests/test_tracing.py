@@ -7,6 +7,7 @@ from typing import Any
 from unittest.mock import patch
 
 from vidbyte.agents.base import BaseAgent
+from vidbyte.agents.types import AgentInput
 from vidbyte.agents import AgentRuntime
 from vidbyte.lib.dataclasses.agents import AgentRuntimeConfig
 from vidbyte.lib.dataclasses.runner import RunnerHandle
@@ -68,6 +69,9 @@ class FakeRunner:
 
 class AlwaysDoneRunner:
     """Immediately returns isDone so tests don't need multi-turn setup."""
+
+    def __init__(self) -> None:
+        self._config = types.SimpleNamespace(provider="xai", model="grok-test")
 
     def run(self, prompt: str, **kwargs: object) -> FakeResponse:
         return FakeResponse(
@@ -248,6 +252,22 @@ class BaseAgentTracerWiringTests(unittest.IsolatedAsyncioTestCase):
         attrs = tracer.traces_started[0]["attributes"]
         self.assertEqual(attrs.get("agent_name"), "test-agent")
 
+    async def test_start_trace_attributes_include_prompt_model_and_safe_metadata(self) -> None:
+        tracer = RecordingTracer()
+        agent = self._make_agent(tracer=tracer)
+        await agent.generate_reply(
+            AgentInput("solve this", metadata={"case": "visible", "LANGSMITH_API_KEY": "secret"}),
+            trace_metadata={"eval_suite": "mbpp", "XAI_API_KEY": "secret"},
+        )
+        attrs = tracer.traces_started[0]["attributes"]
+        self.assertEqual(attrs["prompt"], "solve this")
+        self.assertEqual(attrs["provider"], "xai")
+        self.assertEqual(attrs["model"], "grok-test")
+        self.assertEqual(attrs["metadata"]["case"], "visible")
+        self.assertEqual(attrs["metadata"]["eval_suite"], "mbpp")
+        self.assertNotIn("LANGSMITH_API_KEY", attrs["metadata"])
+        self.assertNotIn("XAI_API_KEY", attrs["metadata"])
+
 
 # ---------------------------------------------------------------------------
 # AgentRuntime span hooks tests
@@ -315,6 +335,29 @@ class AgentRuntimeSpanTests(unittest.IsolatedAsyncioTestCase):
         )
         llm_span = next(s for s in tracer.spans_started if s["name"] == "llm.call")
         self.assertIs(llm_span["parent"], root_ctx)
+
+    async def test_llm_span_inputs_include_prompt_model_and_safe_metadata(self) -> None:
+        tracer = RecordingTracer()
+        runtime = self._make_runtime(tracer)
+        runner = FakeRunner([
+            FakeResponse("", {"output": [{"type": "function_call", "name": "isDone", "arguments": '{"final_answer": "ok"}'}]}),
+        ])
+        runner._config = types.SimpleNamespace(provider="xai", model="grok-test")
+        from vidbyte.lib.dataclasses.context import BaseAgentContext
+        context = BaseAgentContext(system_prompt="sys", history=(), file_paths=(), tools=(), budget=None)
+        await runtime.arun(
+            "prompt",
+            handle=RunnerHandle(runner=runner, provider="xai", invoke=_invoke_runner, extract_text=_output_text, extract_metadata=_output_metadata),
+            context=context,
+            metadata={"eval_suite": "mbpp", "LANGSMITH_API_KEY": "secret"},
+        )
+        attrs = next(s for s in tracer.spans_started if s["name"] == "llm.call")["attributes"]
+        self.assertEqual(attrs["agent_name"], "rt-agent")
+        self.assertEqual(attrs["provider"], "xai")
+        self.assertEqual(attrs["model"], "grok-test")
+        self.assertEqual(attrs["prompt"], "prompt")
+        self.assertEqual(attrs["system"], "System prompt:\nsys")
+        self.assertEqual(attrs["metadata"], {"eval_suite": "mbpp"})
 
     async def test_tool_span_emitted_per_tool_execution(self) -> None:
         tracer = RecordingTracer()
@@ -444,7 +487,7 @@ class LangSmithTracerDiagnosticsTests(unittest.TestCase):
         with patch.dict("sys.modules", {"langsmith": self._module_with_client(Client)}):
             with patch.dict(os.environ, {}, clear=True):
                 LangSmithTracer(api_key="test-key")
-        self.assertEqual(calls, [{"api_key": "test-key"}])
+        self.assertEqual(calls, [{"api_key": "test-key", "omit_traced_runtime_info": True}])
 
     def test_langsmith_endpoint_env_passed_as_api_url(self) -> None:
         # [Edge Case] LANGSMITH_ENDPOINT must be forwarded to the LangSmith client.
@@ -458,7 +501,21 @@ class LangSmithTracerDiagnosticsTests(unittest.TestCase):
         with patch.dict("sys.modules", {"langsmith": self._module_with_client(Client)}):
             with patch.dict(os.environ, {"LANGSMITH_ENDPOINT": "https://api.smith.langchain.com"}, clear=True):
                 LangSmithTracer(api_key="test-key")
-        self.assertEqual(calls, [{"api_key": "test-key", "api_url": "https://api.smith.langchain.com"}])
+        self.assertEqual(calls, [{"api_key": "test-key", "omit_traced_runtime_info": True, "api_url": "https://api.smith.langchain.com"}])
+
+    def test_langsmith_can_include_runtime_info_when_requested(self) -> None:
+        # [Edge Case] Callers can opt back into LangSmith's automatic runtime metadata.
+        calls: list[dict[str, Any]] = []
+
+        class Client:
+            def __init__(self, **kwargs: Any) -> None:
+                calls.append(dict(kwargs))
+
+        from vidbyte.providers.tracing.langsmith import LangSmithTracer
+        with patch.dict("sys.modules", {"langsmith": self._module_with_client(Client)}):
+            with patch.dict(os.environ, {}, clear=True):
+                LangSmithTracer(api_key="test-key", include_runtime_info=True)
+        self.assertEqual(calls, [{"api_key": "test-key", "omit_traced_runtime_info": False}])
 
     def test_langsmith_strict_create_failure_raises_sanitized_error(self) -> None:
         # [Hidden Failure] Strict mode must fail loudly without leaking key-like strings.

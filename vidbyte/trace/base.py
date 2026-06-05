@@ -53,10 +53,10 @@ class Trace:
         return LangfuseTracer(public_key=public_key, secret_key=secret_key, host=host)
 
     @staticmethod
-    def langsmith(api_key: str | None = None, project: str | None = None) -> TracerBase:
+    def langsmith(api_key: str | None = None, project: str | None = None, endpoint: str | None = None, strict: bool = False, include_runtime_info: bool = False) -> TracerBase:
         # Builds the existing LangSmith provider tracer with forwarded settings.
         from vidbyte.providers.tracing import LangSmithTracer
-        return LangSmithTracer(api_key=api_key, project=project)
+        return LangSmithTracer(api_key=api_key, project=project, endpoint=endpoint, strict=strict, include_runtime_info=include_runtime_info)
 
     @staticmethod
     def phoenix(endpoint: str | None = None) -> TracerBase:

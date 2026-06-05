@@ -25,7 +25,7 @@ class LangSmithTracer(TracerBase):
     variables LANGSMITH_API_KEY and LANGSMITH_PROJECT.
     """
 
-    def __init__(self, *, api_key: str | None = None, project: str | None = None, endpoint: str | None = None, strict: bool = False) -> None:
+    def __init__(self, *, api_key: str | None = None, project: str | None = None, endpoint: str | None = None, strict: bool = False, include_runtime_info: bool = False) -> None:
         # Resolves LangSmith credentials/settings and creates the client adapter.
         try:
             from langsmith import Client
@@ -44,6 +44,7 @@ class LangSmithTracer(TracerBase):
         self._project = project or os.environ.get("LANGSMITH_PROJECT", "default")
         self._endpoint = endpoint or os.environ.get("LANGSMITH_ENDPOINT")
         self._strict = strict
+        self._include_runtime_info = include_runtime_info
         self._last_error: Exception | None = None
         self._client = self._build_client(Client, api_key=resolved_api_key)
 
@@ -55,6 +56,7 @@ class LangSmithTracer(TracerBase):
     def _build_client(self, client_cls: type[Any], *, api_key: str) -> Any:
         # Constructs the LangSmith client with endpoint support when configured.
         kwargs: dict[str, Any] = {"api_key": api_key}
+        kwargs["omit_traced_runtime_info"] = not self._include_runtime_info
         if self._endpoint:
             kwargs["api_url"] = self._endpoint
         try:

@@ -568,8 +568,15 @@ class AgentRuntime:
             llm_span = self._tracer.start_span(
                 "llm.call",
                 parent=trace_context,
-                provider=provider,
-                iteration=iteration_count,
+                **self._llm_trace_inputs(
+                    handle,
+                    message=message,
+                    call_options=current_call_options,
+                    provider=provider,
+                    iteration_count=iteration_count,
+                    model_call_count=model_call_count,
+                    metadata=metadata,
+                ),
             )
             try:
                 raw_result = await handle.invoke(message, **current_call_options)
@@ -1006,6 +1013,60 @@ class AgentRuntime:
                 call_options.setdefault("response_format", fmt)
         return call_options
 
+    def _llm_trace_inputs(
+        self,
+        handle: RunnerHandle,
+        *,
+        message: str,
+        call_options: Mapping[str, Any],
+        provider: str,
+        iteration_count: int,
+        model_call_count: int,
+        metadata: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        # Build useful, bounded LangSmith inputs for the model-call child span.
+        system = call_options.get("system")
+        messages = call_options.get("messages")
+        tools = call_options.get("tools")
+        inputs: dict[str, Any] = {
+            "agent_name": self.agent_name,
+            "provider": provider,
+            "model": self._runner_model_name(handle.runner),
+            "iteration": iteration_count,
+            "model_call": model_call_count,
+            "prompt": _trace_text(message),
+            "metadata": _safe_trace_mapping(metadata),
+        }
+        if system is not None:
+            inputs["system"] = _trace_text(system)
+        if messages:
+            inputs["messages"] = _safe_trace_value(messages)
+        if tools:
+            tool_items = tuple(tools)
+            inputs["tool_count"] = len(tool_items)
+            inputs["tool_names"] = tuple(
+                str(tool.get("name") or tool.get("function", {}).get("name") or "")
+                for tool in tool_items
+                if isinstance(tool, Mapping)
+            )
+        return inputs
+
+    @staticmethod
+    def _runner_model_name(runner: object) -> str | None:
+        config = getattr(runner, "_config", None)
+        model = getattr(config, "model", None)
+        if model is not None:
+            return str(model)
+        model_name = getattr(runner, "model_name", None)
+        if callable(model_name):
+            try:
+                return str(model_name())
+            except Exception:
+                return None
+        if model_name is not None:
+            return str(model_name)
+        return None
+
     def _build_conversation_messages(self, messages: list[dict[str, Any]]) -> tuple[dict[str, Any], ...]:
         """Assemble placed context-window conversation messages around runtime messages."""
         # Preserves existing runtime messages while adding explicit conversation placements.
@@ -1236,6 +1297,36 @@ class AgentRuntime:
         if delta is None:
             return current
         return (current or 0) + delta
+
+
+def _trace_text(value: object, *, max_chars: int = 12000) -> str:
+    # Keep trace payloads useful without letting very large prompts dominate requests.
+    text = str(value)
+    if len(text) <= max_chars:
+        return text
+    return f"{text[:max_chars]}...[truncated]"
+
+
+def _safe_trace_mapping(metadata: Mapping[str, Any] | None) -> dict[str, Any]:
+    # Removes env/credential-like fields before sending user metadata to tracing backends.
+    safe: dict[str, Any] = {}
+    for key, value in dict(metadata or {}).items():
+        key_text = str(key)
+        upper = key_text.upper()
+        if upper.startswith("LANGSMITH_") or any(token in upper for token in ("API_KEY", "TOKEN", "SECRET", "PASSWORD", "CREDENTIAL", "AUTH")):
+            continue
+        safe[key_text] = _safe_trace_value(value)
+    return safe
+
+
+def _safe_trace_value(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return _safe_trace_mapping(value)
+    if isinstance(value, (list, tuple)):
+        return tuple(_safe_trace_value(item) for item in value)
+    if isinstance(value, str):
+        return _trace_text(value)
+    return value
 
 
 __all__ = ["AgentRuntime"]
