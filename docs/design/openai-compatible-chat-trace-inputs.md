@@ -177,6 +177,7 @@ Complete list of every file that will be created, modified, or deleted:
 | Action | File Path | Reason |
 |--------|-----------|--------|
 | CREATE | `docs/design/openai-compatible-chat-trace-inputs.md` | Design record for provider payload and trace input fixes |
+| CREATE | `scripts/test-openai-compatible-chat-trace-inputs.py` | Verification script required by the design-doc workflow |
 | MODIFY | `vidbyte/providers/compatible.py` | Preserve system prompt when OpenAI-compatible chat history exists |
 | MODIFY | `vidbyte/agents/runtime.py` | Add provider-visible `input_messages` to LLM trace inputs |
 
