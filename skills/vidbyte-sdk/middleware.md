@@ -250,7 +250,16 @@ agent = Agent(
 )
 ```
 
-Use `MessageHistoryCompactionMiddleware` for deterministic provider-message history pruning, such as `keep_last`, `remove_all_tool_calls`, `remove_last_n_tool_calls`, `remove_tool_call_percentage`, `clear_except_system_and_log`, and `deduplicate_tool_calls`.
+Use `MessageHistoryCompactionMiddleware` for deterministic provider-message history pruning, such as `keep_last`, `remove_all_tool_calls`, `remove_last_n_tool_calls`, `remove_tool_call_percentage`, `clear_except_system_and_log`, `deduplicate_tool_calls`, `trim_to_token_budget`, `trim_with_provider_boundaries`, `delete_messages`, `tool_output_sliding_window`, `clear_tool_results_except`, `head_tail_tool_preview`, `scrub_bloat`, `summary_with_backrefs`, `selective_prune`, `salience_score_eviction`, `query_relevance_filter`, and `context_snapshot_branch_trim`.
+
+```python
+from vidbyte.middleware.builtins import MessageHistoryCompactionMiddleware
+
+middleware = [
+    MessageHistoryCompactionMiddleware.trim_to_token_budget(max_tokens=8000),
+    MessageHistoryCompactionMiddleware.query_relevance_filter(query=None, keep_recent=4),
+]
+```
 
 Use `SummaryCompactionMiddleware` only with an explicitly injected summarizer. Middleware must not perform hidden provider calls for summarization.
 

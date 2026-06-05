@@ -75,6 +75,7 @@ Keep central contracts under `vidbyte/lib/` when they are shared by multiple pac
 - Runtime config: `AgentRuntimeConfig`, `AgentRuntimeStats`.
 - Pipelines: `BasePipeline`, `SequentialPipeline`, `ParallelPipeline`, `ConditionalPipeline`, `MapReducePipeline`, `PipelineNode`, `PipelineExecutionError`.
 - Middleware (root exports): `AgentMiddleware`, `MiddlewarePipeline`, `MiddlewareContext`, `MiddlewareDecision`, `MiddlewareAction`, `MiddlewareEvent`, `MiddlewareHook`, `MiddlewareTransform`, plus built-ins `AuditLogMiddleware`, `ModelRetryMiddleware`, `RuntimeLimitMiddleware`, `TokenRateLimitMiddleware`, `ToolPolicyMiddleware`, `CanaryTripwireMiddleware`, `ConfusedDeputyGuardMiddleware`, `HoneypotToolMiddleware`, `ToolResultCompactionMiddleware`, `MessageHistoryCompactionMiddleware`, `SummaryCompactionMiddleware`. Other built-ins (`TokenBudgetMiddleware`, `CostBudgetMiddleware`, `CircuitBreakerMiddleware`/`CircuitState`, `LoopDetectionMiddleware`, `ExponentialBackoffRetryMiddleware`) are imported from `vidbyte.middleware`.
+- Compaction middleware includes deterministic, code-only modes such as `trim_to_token_budget`, `trim_with_provider_boundaries`, `delete_messages_by_id_or_range`, `tool_output_sliding_window`, `tool_result_clearing_with_exclusions`, `head_tail_tool_preview`, `mechanical_bloat_scrubber`, `summary_with_backrefs`, `selective_context_pruning`, `salience_score_eviction`, `query_relevance_filter`, and `context_snapshot_branch_trim`. Model-backed summary modes still require an injected summarizer.
 - Evals: `BaseGrader`, `ContainsGrader`, `ExactMatchGrader`, `RegexMatchGrader`, `JSONSchemaGrader`, `LLMJudgeGrader`, `RubricGrader`, `GraderResult`.
 - Enums: `BudgetPreset`, `PermissionPreset`, `Prompt`, `ModelModality`. (`AgentRuntimeType` is imported from `vidbyte.lib.enums`.)
 - Prompts: `Prompts`.
@@ -505,7 +506,7 @@ Context management rules:
 - Keep context-window presets in `vidbyte/context/presets.py`, algorithm implementations under `vidbyte/context/algorithms/`, and `vidbyte/context/window.py` as the thin `ContextWindow.preset.<name>` namespace.
 - Agents may receive default `context_items`/`context_manager`; per-call context belongs on `AgentInput`.
 - Agents may receive `algorithm=ContextWindow.preset.<name>` to opt into SDK-provided context-window behavior. Initial presets focus on tool-result admission between model calls, including raw, compacted, and hidden raw tool outputs.
-- Rich custom renderers, ranking, redaction, summarization, and open-ended compaction policies are not part of the foundation layer and require a separate approved design.
+- Rich custom renderers, redaction, model-backed summarization without injection, and open-ended compaction policies outside the deterministic middleware modes require a separate approved design.
 
 Budget and permission presets:
 
@@ -587,7 +588,7 @@ Use tests as executable examples for expected behavior:
 The `tests/` directory is authoritative; representative files include:
 
 - Agents/runtime: `test_agent_base.py`, `test_agent_abstractions.py`, `test_agent_runtime.py`, `test_agent_modality_routing.py`, `test_agent_registry.py`, `test_agent_tool.py`, `test_agent_tool_loop.py`, `test_handoff_agent.py`.
-- Middleware: `test_agent_middleware.py`, `test_middleware_builtins.py`, `test_new_middleware_builtins.py`, `test_security_middleware.py`, `test_concurrent_middleware.py`, `test_context_compaction_middleware.py`.
+- Middleware: `test_agent_middleware.py`, `test_middleware_builtins.py`, `test_new_middleware_builtins.py`, `test_security_middleware.py`, `test_concurrent_middleware.py`, `test_context_compaction_middleware.py`, `test_deterministic_compaction_middleware.py`.
 - Context/algorithms: `test_context_management.py`, `test_context_dataclasses.py`, `test_context_primitives_binding.py`, `test_context_primitives_builtins.py`, `test_context_primitives_registry.py`, `test_context_window_templates.py`, `test_inner_context_window_algorithms.py`, `test_reflexion_algorithm.py`, `test_trajectory_checkpoint_algorithm.py`, `test_context_algorithm_tools.py`, `test_context_compaction_tools.py`, `test_multi_provider_agentic_grader.py`.
 - Pipelines: `test_pipelines.py`.
 - Tools: `test_tools_catalog.py`, `test_tool_core.py`, `test_tool_mixin.py`, `test_custom_function_tools.py`, `test_tool_registry_custom_inputs.py`, `test_code_search_tools.py`, `test_patch_tool.py`, `test_filesystem_tools.py`, `test_security_executor.py`, `test_memory_tools.py`, `test_mcp_discovery_tools.py`.

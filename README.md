@@ -300,6 +300,23 @@ agent = Agent(
 
 Subclass `AgentMiddleware` and override only the hooks you need, such as `before_run`, `before_iteration`, `before_model_call`, `after_model_response`, `on_model_error`, `before_tool_call`, `after_tool_call`, `after_iteration`, or `after_run`. Built-ins are available from `vidbyte.middleware.builtins`, including `TokenRateLimitMiddleware`, `RuntimeLimitMiddleware`, `ToolPolicyMiddleware`, `AuditLogMiddleware`, `ModelRetryMiddleware`, `ToolResultCompactionMiddleware`, `MessageHistoryCompactionMiddleware`, and `SummaryCompactionMiddleware`.
 
+Compaction middleware supports deterministic provider-message pruning without hidden model calls. Examples include `trim_to_token_budget`, `trim_with_provider_boundaries`, `delete_messages`, `tool_output_sliding_window`, `clear_tool_results_except`, `head_tail_tool_preview`, `scrub_bloat`, `summary_with_backrefs`, `selective_prune`, `salience_score_eviction`, `query_relevance_filter`, and `context_snapshot_branch_trim`.
+
+```python
+from vidbyte.middleware.builtins import MessageHistoryCompactionMiddleware
+
+agent = Agent(
+    name="bounded-agent",
+    system_prompt="Keep working context compact.",
+    runner=my_runner,
+    tools=[lookup_metric],
+    middleware=[
+        MessageHistoryCompactionMiddleware.trim_to_token_budget(max_tokens=8000),
+        MessageHistoryCompactionMiddleware.query_relevance_filter(query=None, keep_recent=4),
+    ],
+)
+```
+
 Advanced built-ins are grouped by category:
 
 - `vidbyte.tools.builtins.code_search`: `GlobTool`, `GrepTool`, `SemanticSearchTool`
