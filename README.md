@@ -335,9 +335,190 @@ agent = Agent(
 
 `ToolRegistry`, `ToolExecutor`, and `vidbyte_tool` remain available for compatibility with older examples. New user-facing code should prefer `Tools`, `@tool`, and agent-local `tools=[...]`.
 
+## Registries
+
+The SDK keeps discovery and compatibility catalogs under `vidbyte.lib.registries`.
+Use these when you need to inspect supported SDK capabilities, bridge older code, or
+register local runtime objects without hardcoding lookups.
+
+| Registry | Purpose |
+|----------|---------|
+| `AgentRegistry` | Registers live agents and finds them by name, capability, tool name, or metadata. |
+| `ProviderModelRegistry` | Centralizes provider defaults, API key env vars, endpoints, model validation, and active provider resolution. |
+| `Prompts` / `PromptRecord` | Loads prompt assets and exposes prompt text, descriptions, families, and direct import names. |
+| `RuntimeRegistry` | Resolves `AgentRuntimeType` enum values to concrete runtime classes. |
+| `ToolRegistry` | Thread-safe compatibility wrapper around the newer agent-local `Tools` catalog. |
+| `ActorRegistry` / `actor_registry` | Registers and discovers actor-runtime role classes. |
+
+```python
+from vidbyte import tool
+from vidbyte.lib.enums import AgentRuntimeType, ModelProvider
+from vidbyte.lib.registries import ProviderModelRegistry, RuntimeRegistry, ToolRegistry, actor_registry
+
+@tool
+def lookup_metric(user_id: int) -> dict[str, int]:
+    return {"user_id": user_id, "score": 94}
+
+default_openai_model = ProviderModelRegistry.default_model(ModelProvider.OPENAI)
+openai_env_var = ProviderModelRegistry.get_api_key_env_var("openai")
+runtime_cls = RuntimeRegistry.resolve(AgentRuntimeType.LINEAR)
+tool_registry = ToolRegistry([lookup_metric])
+known_actor_roles = actor_registry.list()
+```
+
+Use `AgentRegistry` for application-local agent discovery:
+
+```python
+from vidbyte import Agent
+from vidbyte.lib.registries import AgentRegistry
+
+registry = AgentRegistry()
+registry.register(
+    Agent(
+        name="researcher",
+        system_prompt="Answer directly and cite uncertainty.",
+        provider="openai",
+        model_name="gpt-4.1",
+    )
+)
+
+agent = registry.get("researcher")
+matches = registry.find(capability="research")
+```
+
+## MCP Servers
+
+Vidbyte supports MCP in two directions: expose Vidbyte agents and tools to an
+external MCP client, or attach third-party MCP servers as tools on a Vidbyte agent.
+
+### Vidbyte as an MCP Studio Server
+
+Install the SDK in the Python environment your MCP client will launch, then use the
+console entry point:
+
+```bash
+vidbyte-mcp-server
+```
+
+The equivalent module command is:
+
+```bash
+python -m vidbyte.mcp_server
+```
+
+The server speaks stdio JSON-RPC and is meant to be launched by an MCP client such
+as Claude Code, Cursor, Codex, or another MCP-compatible host. For project-specific
+agents, tools, and prompts, create a launcher script and point the MCP client at it:
+
+```python
+import asyncio
+from vidbyte import McpStudioServer, Prompts
+from my_project.agents import code_agent, research_agent
+from my_project.tools import database_tool
+
+async def main() -> None:
+    prompts = Prompts()
+    server = McpStudioServer(
+        name="my-vidbyte-studio",
+        agents={"coder": code_agent, "researcher": research_agent},
+        tools=[database_tool],
+        pipeline_names=["sequential", "parallel", "map-reduce"],
+        prompt_content={key.value: text for key, text in prompts.all().items()},
+    )
+    await server.run()
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+The Studio server exposes these built-in MCP tools:
+
+- `studio.agents.list`
+- `studio.agents.run`
+- `studio.tools.list`
+- `studio.strategies.list`
+- `studio.strategies.run`
+- `studio.prompts.list`
+- `studio.prompts.get`
+- `studio.pipelines.list`
+
+It also supports MCP-native `prompts/list` and `prompts/get` for clients that use
+the prompt protocol directly.
+
+### Preset MCP Servers for Agents
+
+Use `McpPresetRegistry` when you want to discover or build third-party MCP server
+configs without memorizing subprocess commands. Presets define command templates
+and required environment variables; they do not store secrets or guarantee host
+packages are installed. The core discovery methods are
+`McpPresetRegistry.get()`, `McpPresetRegistry.list_presets()`, and
+`McpPresetRegistry.build_config()`.
+
+```python
+import os
+from vidbyte import Agent
+from vidbyte.tools.mcp.presets import McpPresetRegistry
+
+github = McpPresetRegistry.get("github")
+all_search_servers = McpPresetRegistry.list_presets("Search & Web Research")
+
+github_config = McpPresetRegistry.build_config(
+    "github",
+    env={"GITHUB_PERSONAL_ACCESS_TOKEN": os.environ["GITHUB_PERSONAL_ACCESS_TOKEN"]},
+)
+
+agent = Agent(
+    name="repo-analyst",
+    system_prompt="Use repository tools when they help.",
+    provider="openai",
+    model_name="gpt-4.1",
+).with_preset_mcp_server(
+    "github",
+    env={"GITHUB_PERSONAL_ACCESS_TOKEN": os.environ["GITHUB_PERSONAL_ACCESS_TOKEN"]},
+)
+```
+
+Use eager attachment when you want to connect and discover tools immediately:
+
+```python
+await agent.attach_preset_mcp_server(
+    "linear",
+    env={"LINEAR_API_KEY": os.environ["LINEAR_API_KEY"]},
+)
+```
+
+Raw MCP server configs are still supported when you need a custom command:
+
+```python
+await agent.attach_mcp_server(
+    ["npx", "-y", "@modelcontextprotocol/server-filesystem", "."],
+    name="local-filesystem",
+)
+```
+
+The current preset catalog contains 201 presets:
+
+| Category | Presets |
+|----------|---------|
+| Search & Web Research | `apify`, `brave-search`, `browserbase`, `duckduckgo`, `exa`, `firecrawl`, `google-search`, `jina-reader`, `linkup`, `perplexity`, `playwright`, `puppeteer`, `scrapingbee`, `searxng`, `serper`, `tavily`, `you-search`, `zenrows` |
+| Version Control, Development & Task Tracking | `asana`, `bitbucket`, `circleci`, `clickup`, `datadog`, `docker`, `github`, `github-actions`, `gitlab`, `jenkins`, `jira`, `kubernetes`, `linear`, `monday`, `newrelic`, `pagerduty`, `sentry`, `sonarqube`, `terraform`, `travis-ci`, `trello`, `vercel` |
+| Databases & Cache | `cassandra`, `chromadb`, `clickhouse`, `cockroachdb`, `dynamodb`, `elasticsearch`, `faunadb`, `firebase`, `milvus`, `mongodb`, `mysql`, `neon`, `pinecone`, `planetscale`, `postgres`, `qdrant`, `redis`, `sqlite`, `supabase`, `timescaledb`, `turso`, `weaviate` |
+| Productivity, Office & CRM | `airtable`, `basecamp`, `coda`, `confluence`, `evernote`, `freshservice`, `gmail`, `google-calendar`, `google-drive`, `google-sheets`, `hubspot`, `intercom`, `notion`, `obsidian-vault`, `onedrive`, `outlook`, `pipedrive`, `salesforce`, `smartsheet`, `todoist`, `zendesk`, `zoho-crm` |
+| Document Parsers & Media Utilities | `camelot`, `docling`, `docx-parser`, `epub-reader`, `exiftool`, `ffmpeg`, `graphviz`, `imagemagick`, `libreoffice`, `markitdown`, `pandoc`, `pdf-parser`, `pptx-parser`, `tesseract-ocr`, `unstructured`, `video-transcript`, `whisper`, `xlsx-parser` |
+| Communication & Chat | `discord`, `line-messaging`, `mailgun`, `mandrill`, `mattermost`, `postmark`, `pushover`, `resend`, `rocketchat`, `sendgrid`, `slack`, `teams`, `telegram`, `twilio`, `whatsapp`, `zoom` |
+| Cloud Platforms, Hosting & Infrastructure | `aws-cloudwatch`, `aws-ec2`, `aws-lambda`, `aws-rds`, `aws-s3`, `azure-blob`, `azure-devops`, `azure-vm`, `cloudflare`, `digitalocean`, `fly-io`, `gcp-bigquery`, `gcp-compute`, `gcp-storage`, `heroku`, `linode`, `netlify`, `railway`, `render`, `vultr` |
+| AI Platforms & Creative APIs | `anthropic-agent`, `assembly-ai`, `cohere-search`, `deepgram`, `elevenlabs`, `fal-ai`, `groq`, `heygen`, `huggingface`, `langsmith`, `midjourney`, `mistral`, `openai-agent`, `replicate`, `runway`, `stability-ai`, `suno`, `together-ai` |
+| Reference & Academic | `arxiv`, `crossref`, `devdocs`, `docker-hub`, `geonames`, `mdn`, `npm-registry`, `open-library`, `open-meteo`, `pubchem`, `pubmed`, `pypi`, `semantic-scholar`, `stackoverflow`, `wikipedia`, `wolfram-alpha` |
+| Native System & Utilities | `base64-tools`, `csv-parser`, `datetime`, `env-inspector`, `git`, `hashing-tools`, `http-client`, `json-validator`, `local-filesystem`, `markdown-linter`, `os-command`, `process-manager`, `python-sandbox`, `regex-tester`, `sequential-thinking`, `sqlite-sandbox`, `system-diagnostics`, `toml-parser`, `uuid-generator`, `webhook-sender`, `xml-parser`, `yaml-validator` |
+| E-Commerce & Payments | `paypal`, `shopify`, `square`, `stripe`, `woocommerce` |
+| Automation & Workflow | `n8n`, `zapier` |
+
 ## Prompts
 
-Prompts are plain text assets exposed through an enum-keyed accessor:
+Prompts are repository-backed text assets exposed through an enum-keyed accessor
+and direct Python imports. The catalog currently includes 34 prompt assets across
+13 families, including handoff, reflexion, evals, prompt templates, goals,
+actor-runtime personas, and trajectory checkpoints.
 
 ```python
 from vidbyte.prompts import Prompts
@@ -347,7 +528,171 @@ prompts = Prompts()
 prompt_text = prompts.get(Prompt.REFLEXION_AGENT_SYSTEM_PROMPT)
 ```
 
-`Prompts().keys()` returns all prompt enum keys, and `Prompts().descriptions()` returns descriptions for each key. Prompt lookup does not accept raw strings and the SDK does not expose runtime prompt overrides.
+Direct import names are generated from prompt enum values by replacing dots with
+underscores:
+
+```python
+from vidbyte.prompts import handoff_system_prompt, templates_persona, evals_llm_judge
+
+system_prompt = handoff_system_prompt
+persona_template = templates_persona
+judge_prompt = evals_llm_judge
+```
+
+Use the catalog methods when you need discovery:
+
+```python
+from vidbyte import Prompts
+
+prompts = Prompts()
+keys = prompts.keys()
+descriptions = prompts.descriptions()
+import_names = prompts.import_names()
+reflexion_prompts = prompts.family("reflexion")
+all_prompt_text = prompts.all()
+```
+
+The same discovery calls are available directly as `Prompts().keys()`,
+`Prompts().descriptions()`, `Prompts().import_names()`, `Prompts().family(...)`,
+and `Prompts().all()`.
+
+Prompt lookup accepts `Prompt` enum members, not raw strings. The SDK prompt
+catalog is a static asset collection; runtime prompt overrides should be passed
+through the agent or runner API that consumes the text.
+
+## Evals
+
+`vidbyte.evals` provides small building blocks for writing local eval scripts:
+`EvalCase` defines prompts and expectations, `EvalSuite` groups cases,
+`EvalRunner` executes a target with concurrency controls, and graders score each
+output. The runner accepts agents and runner-like objects that expose `arun()`,
+`run()`, or `generate_reply()`.
+
+```python
+from vidbyte import Agent, ContainsGrader, EvalCase, EvalRunner, EvalSuite
+
+agent = Agent(
+    name="qa",
+    system_prompt="Answer concisely.",
+    provider="openai",
+    model_name="gpt-4.1",
+)
+
+suite = EvalSuite("smoke", [
+    EvalCase(prompt="Capital of France?", expected="Paris", tags=("geography",)),
+    EvalCase(prompt="2 + 2?", expected="4", tags=("math",)),
+])
+
+runner = EvalRunner(agent, default_grader=ContainsGrader(), concurrency=4)
+result = await runner.arun(suite)
+
+print(result.pass_rate, result.mean_score, result.p95_latency_ms)
+```
+
+Built-in graders cover common script-writing needs:
+
+| Grader | Use |
+|--------|-----|
+| `ExactMatchGrader` | Exact string matches with stripping and case controls. |
+| `ContainsGrader` | Substring expectations. |
+| `RegexMatchGrader` | Regex pattern assertions. |
+| `JSONSchemaGrader` | JSON parsing and structure checks. |
+| `LLMJudgeGrader` | Model-judged open-ended outputs using an injected judge runner. |
+| `RubricGrader` | Weighted rubric scoring using an injected judge runner. |
+
+Suites can be loaded from JSON or CSV files and filtered by tags:
+
+```python
+from vidbyte.evals import EvalSuite
+
+suite = EvalSuite.from_json("evals/smoke.json")
+focused = suite.filter(["geography"])
+result = await runner.arun(focused)
+```
+
+Use `EvalClient` through `VidbyteSDK.evals` when you want a convenience factory and
+a local SQLite-backed registry for recording and comparing runs:
+
+```python
+from vidbyte import VidbyteSDK, ContainsGrader, EvalCase
+
+sdk = VidbyteSDK()
+suite = sdk.evals.suite("smoke", [EvalCase(prompt="2 + 2?", expected="4")])
+runner = sdk.evals.runner(agent, grader=ContainsGrader())
+result = await runner.arun(suite)
+sdk.evals.registry.record(result)
+```
+
+## Pipelines
+
+Pipelines compose agents across agent boundaries. The contract is string-in and
+string-out: one stage's output becomes another stage's prompt. Each agent keeps
+its own tools, middleware, context, and history; the pipeline layer does not add
+shared context, budgets, artifacts, streaming, retries, or voting.
+
+Use `SequentialPipeline` for chain workflows:
+
+```python
+from vidbyte import SequentialPipeline
+
+pipeline = SequentialPipeline([planner_agent, coder_agent, reviewer_agent])
+result = await pipeline.run("Build a small caching layer")
+```
+
+Use `ParallelPipeline` when every stage should receive the same prompt and the
+outputs should be joined:
+
+```python
+from vidbyte import ParallelPipeline
+
+pipeline = ParallelPipeline([security_agent, performance_agent, style_agent])
+result = await pipeline.run("Review this diff")
+```
+
+Use `ConditionalPipeline` to route by a synchronous predicate:
+
+```python
+from vidbyte import ConditionalPipeline
+
+def route(prompt: str) -> str:
+    return "code" if "implement" in prompt.lower() else "research"
+
+pipeline = ConditionalPipeline(
+    predicate=route,
+    branches={"code": code_agent, "research": research_agent},
+)
+result = await pipeline.run("Implement binary search")
+```
+
+Use `MapReducePipeline` for fan-out followed by a reducer:
+
+```python
+from vidbyte import MapReducePipeline
+
+pipeline = MapReducePipeline(
+    map_stages=[security_agent, performance_agent, style_agent],
+    reduce_stage=summarizer_agent,
+)
+result = await pipeline.run("Review this service for production readiness")
+```
+
+Pipelines can be nested because every pipeline is also a valid pipeline stage:
+
+```python
+from vidbyte import MapReducePipeline, ParallelPipeline, SequentialPipeline
+
+pipeline = SequentialPipeline([
+    planner_agent,
+    ParallelPipeline([solver_a, solver_b]),
+    MapReducePipeline(map_stages=[reviewer_a, reviewer_b], reduce_stage=summarizer_agent),
+])
+```
+
+For synchronous scripts, call `run_sync()` outside an active event loop:
+
+```python
+result = pipeline.run_sync("Draft a release plan")
+```
 
 ## Package Structure
 
@@ -356,12 +701,15 @@ vidbyte/
 |-- client.py
 |-- agents/
 |-- context/
+|-- evals/
 |-- harnesses/
 |   `-- client.py
+|-- mcp_server/
 |-- prompts/
 |   `-- prompts/
 |-- providers/
 |   `-- client.py
+|-- pipelines/
 |-- trace/
 |   |-- base.py
 |   |-- debug.py
@@ -380,6 +728,7 @@ vidbyte/
 |-- shared/
 `-- lib/
     |-- dataclasses/
+    |-- registries/
     |-- runners/
     |-- tools/
     |-- enums/
