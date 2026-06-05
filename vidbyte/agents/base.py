@@ -314,8 +314,9 @@ class BaseAgent(McpAttachableMixin):
         **options: Any,
     ) -> AgentMessage:
         await self._ensure_mcp_connected()
-        trace_ctx = self._tracer.start_trace("agent.run", agent_name=self.name, strategy="direct")
+        trace_ctx: Any = None
         try:
+            trace_metadata = _safe_trace_mapping(dict(options.pop("trace_metadata", {}) or {}))
             prompt, input_modality, input_metadata = self._normalize_input(message)
             input_context_items, input_context_manager = self._normalize_input_context(message)
             self._active_prompt = prompt
@@ -329,6 +330,21 @@ class BaseAgent(McpAttachableMixin):
             if selected_modality is ModelModality.AUTO:
                 selected_modality = ModelModality.TEXT
             runner = self._runner_for_modality(selected_modality)
+            provider = self._runner_provider(runner)
+            trace_ctx = self._tracer.start_trace(
+                "agent.run",
+                agent_name=self.name,
+                strategy="direct",
+                provider=provider,
+                model=self._runner_model_name(runner),
+                prompt=_trace_text(prompt),
+                modality=selected_modality.value,
+                metadata={
+                    **_safe_trace_mapping(self.metadata),
+                    **_safe_trace_mapping(input_metadata),
+                    **trace_metadata,
+                },
+            )
             agent_context = self._build_context(
                 prompt,
                 context=context,
@@ -350,7 +366,8 @@ class BaseAgent(McpAttachableMixin):
             )
             self._tracer.end_trace(trace_ctx, output=result.output)
         except Exception as exc:
-            self._tracer.end_trace(trace_ctx, error=exc)
+            if trace_ctx is not None:
+                self._tracer.end_trace(trace_ctx, error=exc)
             self._active_prompt = ""
             raise AgentExecutionError(
                 f"Agent '{self.name}' failed to generate a reply.",
@@ -653,6 +670,22 @@ class BaseAgent(McpAttachableMixin):
         return "openai"
 
     @staticmethod
+    def _runner_model_name(runner: object) -> str | None:
+        config = getattr(runner, "_config", None)
+        model = getattr(config, "model", None)
+        if model is not None:
+            return str(model)
+        model_name = getattr(runner, "model_name", None)
+        if callable(model_name):
+            try:
+                return str(model_name())
+            except Exception:
+                return None
+        if model_name is not None:
+            return str(model_name)
+        return None
+
+    @staticmethod
     def _runner_output_metadata(result: object) -> dict[str, Any]:
         metadata: dict[str, Any] = {}
         response_metadata = getattr(result, "metadata", None)
@@ -764,3 +797,33 @@ class BaseAgent(McpAttachableMixin):
             if name:
                 return str(name)
         return tool.__class__.__name__
+
+
+def _trace_text(value: object, *, max_chars: int = 12000) -> str:
+    # Keep trace payloads useful without letting very large prompts dominate requests.
+    text = str(value)
+    if len(text) <= max_chars:
+        return text
+    return f"{text[:max_chars]}...[truncated]"
+
+
+def _safe_trace_mapping(metadata: Mapping[str, Any] | None) -> dict[str, Any]:
+    # Removes env/credential-like fields before sending user metadata to tracing backends.
+    safe: dict[str, Any] = {}
+    for key, value in dict(metadata or {}).items():
+        key_text = str(key)
+        upper = key_text.upper()
+        if upper.startswith("LANGSMITH_") or any(token in upper for token in ("API_KEY", "TOKEN", "SECRET", "PASSWORD", "CREDENTIAL", "AUTH")):
+            continue
+        safe[key_text] = _safe_trace_value(value)
+    return safe
+
+
+def _safe_trace_value(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return _safe_trace_mapping(value)
+    if isinstance(value, (list, tuple)):
+        return tuple(_safe_trace_value(item) for item in value)
+    if isinstance(value, str):
+        return _trace_text(value)
+    return value
