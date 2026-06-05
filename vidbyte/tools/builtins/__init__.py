@@ -29,6 +29,7 @@ from vidbyte.tools.builtins.context import (
 )
 from vidbyte.tools.builtins.context_primitives import ContextListTool, ContextRemoveTool, ContextUpsertTool
 from vidbyte.tools.builtins.editing import PatchTool
+from vidbyte.tools.builtins.handoff import CreateHandoffTool
 from vidbyte.tools.builtins.mcp import AttachMcpServerTool, SearchMcpServersTool
 from vidbyte.tools.builtins.memory import (
     CogneeAddTool,
@@ -60,6 +61,7 @@ __all__ = [
     "ContextMessage",
     "ContextRemoveTool",
     "ContextUpsertTool",
+    "CreateHandoffTool",
     "GlobTool",
     "GrepTool",
     "PatchTool",
