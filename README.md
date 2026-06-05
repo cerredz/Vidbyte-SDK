@@ -202,6 +202,51 @@ agent = Agent(
 )
 ```
 
+### Continual Trace Agent
+
+For a structured, continually-updated handoff artifact, pass
+`trace_option=TraceOption.continual(schema)`. While the main agent runs, a dedicated
+`ContinualTraceAgent` is invoked as middleware every `every_n_iterations` and once at
+the end. It reads a read-only snapshot of the main run and fills your schema through a
+validating `updateTrace` tool: array fields are appended to, object fields deep-merged,
+scalar fields replaced, and unknown keys dropped. The artifact is returned on
+`reply.metadata["trace"]` (and `agent.last_trace`) and is never written into the main
+agent's context window. This is orthogonal to the `trace=` observability tracers.
+
+Schemas can be a Pydantic model (recommended — typed and described), a `TraceSchema`,
+or a `{field: description}` mapping. A prebuilt `ActionTrace` is included.
+
+```python
+from vidbyte import Agent, TraceOption
+from vidbyte.trace.continual import ActionTrace
+
+agent = Agent(
+    name="worker",
+    system_prompt="Work carefully.",
+    runner=my_runner,
+    trace_option=TraceOption.continual(ActionTrace, every_n_iterations=5, max_trace_iterations=3),
+)
+reply = await agent.arun("Fix the failing tests")
+trace_artifact = reply.metadata["trace"]   # {"goal": ..., "actions_taken": [...], "mistakes": [...], "current_status": ...}
+```
+
+Define a custom typed schema with Pydantic:
+
+```python
+from pydantic import BaseModel, Field
+from vidbyte import TraceOption
+
+class DebugTraceModel(BaseModel):
+    goal: str = Field(description="What the agent is trying to fix.")
+    mistakes: list[str] = Field(default_factory=list, description="Failed attempts and dead ends, appended over time.")
+    current_status: str = Field(description="The latest state and immediate next step.")
+
+agent = Agent(..., trace_option=TraceOption.continual(DebugTraceModel))
+```
+
+Continual tracing is fail-open (trace failures never abort the main run) and is only
+supported on the default linear runtime.
+
 ## Swappable Agent Runtimes
 
 The Vidbyte SDK decouples the core `BaseAgent` class from the execution loop. Developers can select different agent runtime loop paradigms at initialization:

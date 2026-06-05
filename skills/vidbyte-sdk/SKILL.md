@@ -92,6 +92,7 @@ vidbyte/
 - Keep middleware runtime policy code under `vidbyte/middleware/`; built-in middleware belongs under `vidbyte/middleware/builtins/`.
 - Keep middleware dataclass contracts under `vidbyte/lib/dataclasses/middleware.py`; public middleware modules should re-export stable contracts.
 - Follow `skills/vidbyte-sdk/middleware.md` when configuring, using, or implementing agent runtime middleware.
+- Keep the continual trace agent under `vidbyte/trace/continual/` (`agent.py`, `tools.py`, `middleware.py`, `prebuilt.py`) and its config contracts in `vidbyte/lib/dataclasses/trace.py`; the `trace_option=` agent path is separate from the `trace=`/`tracer=` observability tracers. Follow `skills/vidbyte-sdk/continual-tracing.md` when changing continual tracing behavior.
 - Keep concrete text/image/video model runners under `vidbyte/lib/runners/`; they are internal or advanced implementation details, not the preferred user-facing docs surface.
 - Keep shared SDK scaffolding under `vidbyte/shared/`.
 - Advanced tools are approved under `vidbyte/tools/` when they follow the shared `BaseTool`, `ToolSpec`, `Tools`, and agent-local execution contracts. `ToolRegistry` and `ToolExecutor` are compatibility/lower-level strategy infrastructure, not the preferred public workflow.
