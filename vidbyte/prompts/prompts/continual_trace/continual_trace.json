@@ -1,0 +1,11 @@
+{
+  "name": "Continual Trace",
+  "description": "System prompt for the continual trace agent that incrementally fills a typed trace schema from a read-only snapshot of a running agent, calling updateTrace to record new goal, action, mistake, and status information.",
+  "key": "continual_trace",
+  "prompts": {
+    "system_prompt": {
+      "path": "system_prompt.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/continual_trace/system_prompt.md"
+    }
+  }
+}
