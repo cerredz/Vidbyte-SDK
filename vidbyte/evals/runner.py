@@ -26,6 +26,7 @@ import asyncio
 from datetime import datetime
 from typing import Any, Sequence
 from vidbyte.agents.base import BaseAgent
+from vidbyte.agents.types import AgentInput
 from vidbyte.evals.types import EvalCase, EvalResult, EvalSuiteResult, GraderResult
 from vidbyte.evals.base import BaseGrader
 
@@ -48,7 +49,7 @@ class EvalRunner:
             cases = tuple(c for c in cases if any(t in target_tags for t in c.tags))
 
         semaphore = asyncio.Semaphore(self.concurrency)
-        tasks = [self._run_single_case(case, semaphore) for case in cases]
+        tasks = [self._run_single_case(case, semaphore, case_index=index, suite_name=suite.name) for index, case in enumerate(cases)]
         results = await asyncio.gather(*tasks)
 
         model_name = self._resolve_model_name()
@@ -69,7 +70,7 @@ class EvalRunner:
             raise RuntimeError("EvalRunner.run() cannot be called from a running event loop; use await arun() instead.")
         return loop.run_until_complete(self.arun(suite, tags=tags))
 
-    async def _run_single_case(self, case: EvalCase, semaphore: asyncio.Semaphore) -> EvalResult:
+    async def _run_single_case(self, case: EvalCase, semaphore: asyncio.Semaphore, *, case_index: int, suite_name: str) -> EvalResult:
         # Runs a single evaluation case under the protection of the concurrency semaphore.
         async with semaphore:
             grader = case.grader if case.grader is not None else self.default_grader
@@ -79,7 +80,7 @@ class EvalRunner:
             metadata = {}
 
             try:
-                actual, metadata = await self._invoke_target(case)
+                actual, metadata = await self._invoke_target(case, case_index=case_index, suite_name=suite_name)
                 grader_result = await grader.agrade(case, actual)
             except Exception as exc:
                 error_msg = str(exc)
@@ -99,13 +100,16 @@ class EvalRunner:
                 metadata=metadata
             )
 
-    async def _invoke_target(self, case: EvalCase) -> tuple[str, dict[str, Any]]:
+    async def _invoke_target(self, case: EvalCase, *, case_index: int = 0, suite_name: str = "") -> tuple[str, dict[str, Any]]:
         # Invokes the target execution method (with fork handling for agents) and returns content and metadata.
         target = self.target
 
         if isinstance(target, BaseAgent):
             forked = target.fork(name=f"{target.name}_eval")
-            reply = await forked.arun(case.prompt)
+            reply = await forked.arun(
+                AgentInput(prompt=case.prompt),
+                trace_metadata=self._case_trace_metadata(case, case_index=case_index, suite_name=suite_name),
+            )
             metadata = dict(reply.metadata) if reply.metadata else {}
             return str(reply.content), metadata
 
@@ -134,6 +138,18 @@ class EvalRunner:
             actual = str(res)
 
         return actual, {}
+
+    def _case_trace_metadata(self, case: EvalCase, *, case_index: int, suite_name: str) -> dict[str, Any]:
+        # Trace-only eval identifiers; intentionally not inserted into the model prompt.
+        metadata: dict[str, Any] = {
+            "eval_suite": suite_name,
+            "eval_case_index": case_index,
+            "eval_tags": tuple(case.tags),
+        }
+        case_id = case.metadata.get("id") or case.metadata.get("task_id")
+        if case_id is not None:
+            metadata["eval_case_id"] = case_id
+        return metadata
 
     def _resolve_model_name(self) -> str:
         # Resolves a descriptive name for the target representing the evaluated model/provider.

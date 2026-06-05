@@ -650,7 +650,24 @@ class AgentRuntime:
                 contexts=tuple(dict(result.metadata).get("tool_calls", ())),
             )
         result = self._with_context_window_metadata(result, metadata)
+        result = self._with_run_state_metadata(result, run_state)
         return self._with_middleware_metadata(result)
+
+    @staticmethod
+    def _with_run_state_metadata(result: AgentResult, run_state: dict[type, Any] | None) -> AgentResult:
+        """Merge per-run metadata published by middleware (e.g. trace artifacts) into the result."""
+        # Generic, feature-agnostic lift of run_state["__result_metadata__"]; no feature imports here.
+        published = (run_state or {}).get("__result_metadata__")
+        if not isinstance(published, Mapping) or not published:
+            return result
+        metadata = {**dict(result.metadata), **dict(published)}
+        return AgentResult(
+            output=result.output,
+            strategy_name=result.strategy_name,
+            calls=result.calls,
+            metadata=metadata,
+            structured=result.structured,
+        )
 
     async def _run_inner_context_window_hook(self, metadata: Mapping[str, Any], *, message: str, provider: str, iteration_count: int = 0, assistant_output: str | None = None, call_contexts: Sequence[ToolCallContext] = (), tokens_used: int | None = None, runner: object | None = None, invoke_runner: Callable[..., Any] | None = None, runner_output_text: Callable[[object], str] | None = None, runner_output_metadata: Callable[[object], Mapping[str, Any]] | None = None, options: Mapping[str, Any] | None = None, messages: Sequence[dict[str, Any]] | None = None, system_prompt: str | None = None) -> None:
         """Build the slim run context and invoke the inner-loop algorithm's single hook."""

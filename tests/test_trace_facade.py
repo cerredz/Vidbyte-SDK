@@ -125,9 +125,9 @@ class TraceFacadeTests(unittest.TestCase):
                 langfuse_calls.append({"public_key": public_key, "secret_key": secret_key, "host": host})
 
         class FakeLangSmithTracer(RecordingTracer):
-            def __init__(self, *, api_key: str | None = None, project: str | None = None) -> None:
+            def __init__(self, *, api_key: str | None = None, project: str | None = None, endpoint: str | None = None, strict: bool = False, include_runtime_info: bool = False) -> None:
                 # Captures forwarded LangSmith constructor arguments.
-                langsmith_calls.append({"api_key": api_key, "project": project})
+                langsmith_calls.append({"api_key": api_key, "project": project, "endpoint": endpoint, "strict": strict, "include_runtime_info": include_runtime_info})
 
         class FakePhoenixTracer(RecordingTracer):
             def __init__(self, *, endpoint: str | None = None) -> None:
@@ -137,11 +137,11 @@ class TraceFacadeTests(unittest.TestCase):
         with patch("vidbyte.providers.tracing.LangfuseTracer", FakeLangfuseTracer):
             self.assertIsInstance(Trace.langfuse(public_key="pk", secret_key="sk", host="host"), FakeLangfuseTracer)
         with patch("vidbyte.providers.tracing.LangSmithTracer", FakeLangSmithTracer):
-            self.assertIsInstance(Trace.langsmith(api_key="key", project="project"), FakeLangSmithTracer)
+            self.assertIsInstance(Trace.langsmith(api_key="key", project="project", endpoint="endpoint", strict=True, include_runtime_info=True), FakeLangSmithTracer)
         with patch("vidbyte.providers.tracing.PhoenixTracer", FakePhoenixTracer):
             self.assertIsInstance(Trace.phoenix(endpoint="endpoint"), FakePhoenixTracer)
         self.assertEqual(langfuse_calls[0], {"public_key": "pk", "secret_key": "sk", "host": "host"})
-        self.assertEqual(langsmith_calls[0], {"api_key": "key", "project": "project"})
+        self.assertEqual(langsmith_calls[0], {"api_key": "key", "project": "project", "endpoint": "endpoint", "strict": True, "include_runtime_info": True})
         self.assertEqual(phoenix_calls[0], {"endpoint": "endpoint"})
 
     def test_provider_helpers_propagate_configuration_errors(self) -> None:

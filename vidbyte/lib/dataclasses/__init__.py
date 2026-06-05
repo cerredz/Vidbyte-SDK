@@ -66,6 +66,13 @@ from vidbyte.lib.dataclasses.sandbox import SandboxRequest, SandboxResult, Sandb
 from vidbyte.lib.dataclasses.security import PermissionDecision, PermissionPolicy
 from vidbyte.lib.dataclasses.runner import RunnerHandle
 from vidbyte.lib.dataclasses.strategies import AgentResult
+from vidbyte.lib.dataclasses.trace import (
+    TraceField,
+    TraceFieldType,
+    TraceMode,
+    TraceOption,
+    TraceSchema,
+)
 from vidbyte.lib.dataclasses.tools import (
     ToolCall,
     ToolCallContext,
@@ -138,5 +145,10 @@ __all__ = [
     "ToolResult",
     "ToolSpec",
     "ToolStatus",
+    "TraceField",
+    "TraceFieldType",
+    "TraceMode",
+    "TraceOption",
+    "TraceSchema",
     "Verification",
 ]

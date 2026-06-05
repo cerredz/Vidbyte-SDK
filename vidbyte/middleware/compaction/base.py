@@ -25,6 +25,18 @@ class CompactionMode(str, Enum):
     TRUNCATE_TOOL_RESULTS = "truncate_tool_results"
     HIDE_TOOL_RESULTS = "hide_tool_results"
     REPLACE_WITH_TRACE = "replace_with_trace"
+    TRIM_TO_TOKEN_BUDGET = "trim_to_token_budget"
+    TRIM_WITH_PROVIDER_BOUNDARIES = "trim_with_provider_boundaries"
+    DELETE_MESSAGES_BY_ID_OR_RANGE = "delete_messages_by_id_or_range"
+    TOOL_OUTPUT_SLIDING_WINDOW = "tool_output_sliding_window"
+    TOOL_RESULT_CLEARING_WITH_EXCLUSIONS = "tool_result_clearing_with_exclusions"
+    HEAD_TAIL_TOOL_PREVIEW = "head_tail_tool_preview"
+    MECHANICAL_BLOAT_SCRUBBER = "mechanical_bloat_scrubber"
+    SUMMARY_WITH_BACKREFS = "summary_with_backrefs"
+    SELECTIVE_CONTEXT_PRUNING = "selective_context_pruning"
+    SALIENCE_SCORE_EVICTION = "salience_score_eviction"
+    QUERY_RELEVANCE_FILTER = "query_relevance_filter"
+    CONTEXT_SNAPSHOT_BRANCH_TRIM = "context_snapshot_branch_trim"
 
 
 class Summarizer(Protocol):

@@ -39,7 +39,12 @@ class ContextCompactionTool(BaseTool):
                 "Modes: clear_except_system_and_log, remove_all_tool_calls, "
                 "remove_last_n_tool_calls, remove_tool_call_percentage, summarize_range, "
                 "keep_last_n_messages, summarize_oldest_n, strip_tool_result_bodies, "
-                "deduplicate_tool_calls, summarize_by_topic_blocks, truncate_tool_results."
+                "deduplicate_tool_calls, summarize_by_topic_blocks, truncate_tool_results, "
+                "trim_to_token_budget, trim_with_provider_boundaries, delete_messages_by_id_or_range, "
+                "tool_output_sliding_window, tool_result_clearing_with_exclusions, "
+                "head_tail_tool_preview, mechanical_bloat_scrubber, summary_with_backrefs, "
+                "selective_context_pruning, salience_score_eviction, query_relevance_filter, "
+                "context_snapshot_branch_trim."
             ),
             permission=ToolPermission.SAFE,
             parameters=(
@@ -51,7 +56,20 @@ class ContextCompactionTool(BaseTool):
                 ToolParameter("block_size", "integer", "Messages per block for block summarization.", required=False),
                 ToolParameter("progress_log", "object", "Structured progress log fields.", required=False),
                 ToolParameter("max_chars", "integer", "Maximum characters to keep for tool results when truncating.", required=False),
+                ToolParameter("max_tokens", "integer", "Maximum deterministic token budget for token trimming modes.", required=False),
+                ToolParameter("max_messages", "integer", "Maximum messages to keep for bounded trim, relevance, or salience modes.", required=False),
+                ToolParameter("message_ids", "array", "Provider or context message IDs to delete.", required=False),
+                ToolParameter("start", "integer", "Zero-based inclusive start index for range modes.", required=False),
+                ToolParameter("end", "integer", "Zero-based inclusive end index for range modes.", required=False),
+                ToolParameter("keep_recent", "integer", "Recent tool outputs or messages to preserve.", required=False),
+                ToolParameter("head_chars", "integer", "Characters to keep from the head of long tool outputs.", required=False),
+                ToolParameter("tail_chars", "integer", "Characters to keep from the tail of long tool outputs.", required=False),
+                ToolParameter("exclude_tools", "array", "Tool names whose outputs should not be cleared.", required=False),
+                ToolParameter("query", "string", "Lexical query used by query_relevance_filter.", required=False),
+                ToolParameter("min_score", "integer", "Minimum lexical overlap required by relevance filtering.", required=False),
+                ToolParameter("active_branch", "string", "Active branch ID for context snapshot branch trimming.", required=False),
                 ToolParameter("truncation_indicator", "string", "Custom indicator suffix or replacement text.", required=False),
+                ToolParameter("placeholder", "string", "Custom replacement placeholder for clearing and scrubbing modes.", required=False),
             ),
         )
 

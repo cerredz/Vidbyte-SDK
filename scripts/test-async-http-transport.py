@@ -95,6 +95,32 @@ async def _t_transport_is_coroutine() -> None:
 asyncio.run(_t_transport_is_coroutine())
 
 
+async def _t_send_once_does_not_pass_timeout_to_send() -> None:
+    """Installed httpx.AsyncClient.send() may reject per-call timeout kwargs."""
+    from vidbyte.lib.http.transport import HttpTransport
+
+    class Response:
+        status_code = 200
+        text = "{}"
+        headers = {}
+
+    class Client:
+        def build_request(self, *args: Any, **kwargs: Any) -> object:
+            return object()
+
+        async def send(self, request: object) -> Response:
+            return Response()
+
+    try:
+        response = await HttpTransport()._send_once(Client(), method="GET", url="http://x", headers={}, json_body=None, timeout_seconds=0.01)
+        check("HttpTransport._send_once() does not pass timeout= to client.send()", response.status_code == 200)
+    except TypeError as exc:
+        check("HttpTransport._send_once() does not pass timeout= to client.send()", False, str(exc))
+
+
+asyncio.run(_t_send_once_does_not_pass_timeout_to_send())
+
+
 async def _t_sync_transport_is_not_coroutine() -> None:
     from vidbyte.lib.http.transport import SyncHttpTransport
     t = SyncHttpTransport()

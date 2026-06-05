@@ -4,7 +4,7 @@ from collections.abc import Awaitable, Callable, Mapping, Sequence
 from typing import Any
 
 from vidbyte.lib.dataclasses.context import ContextMessage
-from vidbyte.middleware.compaction.base import CompactionMode, Summarizer
+from vidbyte.middleware.compaction.base import CompactionMode, Summarizer, TokenCounter
 from vidbyte.middleware.compaction.engine import ContextCompactionEngine
 from vidbyte.middleware.compaction.strategies import ReplaceWithTraceCompaction, _provider_groups
 from vidbyte.middleware.compaction.trace_render import TraceArtifactRenderer
@@ -45,6 +45,21 @@ class ToolResultCompactionMiddleware(AgentMiddleware):
         # Builds middleware that withholds raw tool outputs from model context.
         return cls(mode=CompactionMode.HIDE_TOOL_RESULTS)
 
+    @classmethod
+    def clear_except(cls, exclude_tools: tuple[str, ...] = (), placeholder: str = "[tool result cleared by compaction]") -> "ToolResultCompactionMiddleware":
+        # Builds middleware that clears tool outputs except for named tools.
+        return cls(mode=CompactionMode.TOOL_RESULT_CLEARING_WITH_EXCLUSIONS, exclude_tools=exclude_tools, placeholder=placeholder)
+
+    @classmethod
+    def head_tail_preview(cls, head_chars: int = 400, tail_chars: int = 200, indicator: str = "\n...[omitted {count} characters]...\n") -> "ToolResultCompactionMiddleware":
+        # Builds middleware that exposes only the head and tail of long tool outputs.
+        return cls(mode=CompactionMode.HEAD_TAIL_TOOL_PREVIEW, head_chars=head_chars, tail_chars=tail_chars, indicator=indicator)
+
+    @classmethod
+    def scrub_bloat(cls, base64_min_chars: int = 80, max_repeated_lines: int = 3, placeholder: str = "[scrubbed {kind}: {count} chars]") -> "ToolResultCompactionMiddleware":
+        # Builds middleware that removes mechanical bloat from model-visible tool outputs.
+        return cls(mode=CompactionMode.MECHANICAL_BLOAT_SCRUBBER, base64_min_chars=base64_min_chars, max_repeated_lines=max_repeated_lines, placeholder=placeholder)
+
     async def after_tool_call(self, ctx: MiddlewareContext) -> MiddlewareDecision:
         # Replaces the model-visible tool result while preserving raw runtime metadata.
         if not self.options.get("enabled", True):
@@ -61,6 +76,14 @@ class ToolResultCompactionMiddleware(AgentMiddleware):
         # Raises ValueError for invalid constructor options before runtime starts.
         if "max_chars" in self.options and int(self.options["max_chars"]) < 0:
             raise ValueError("max_chars must be non-negative.")
+        if "head_chars" in self.options and int(self.options["head_chars"]) < 0:
+            raise ValueError("head_chars must be non-negative.")
+        if "tail_chars" in self.options and int(self.options["tail_chars"]) < 0:
+            raise ValueError("tail_chars must be non-negative.")
+        if "base64_min_chars" in self.options and int(self.options["base64_min_chars"]) < 1:
+            raise ValueError("base64_min_chars must be positive.")
+        if "max_repeated_lines" in self.options and int(self.options["max_repeated_lines"]) < 0:
+            raise ValueError("max_repeated_lines must be non-negative.")
 
 
 class MessageHistoryCompactionMiddleware(AgentMiddleware):
@@ -105,11 +128,74 @@ class MessageHistoryCompactionMiddleware(AgentMiddleware):
         # Builds middleware that removes duplicate tool-call/result pairs.
         return cls(mode=CompactionMode.DEDUPLICATE_TOOL_CALLS)
 
+    @classmethod
+    def trim_to_token_budget(cls, max_tokens: int, token_counter: TokenCounter | None = None, preserve_system: bool = True) -> "MessageHistoryCompactionMiddleware":
+        # Builds middleware that keeps newest messages within a token budget.
+        return cls(mode=CompactionMode.TRIM_TO_TOKEN_BUDGET, max_tokens=max_tokens, token_counter=token_counter, preserve_system=preserve_system)
+
+    @classmethod
+    def trim_with_provider_boundaries(cls, max_messages: int | None = None, max_tokens: int | None = None, token_counter: TokenCounter | None = None) -> "MessageHistoryCompactionMiddleware":
+        # Builds middleware that trims history while preserving adjacent tool boundaries.
+        return cls(mode=CompactionMode.TRIM_WITH_PROVIDER_BOUNDARIES, max_messages=max_messages, max_tokens=max_tokens, token_counter=token_counter)
+
+    @classmethod
+    def delete_messages(cls, message_ids: tuple[str, ...] = (), start: int | None = None, end: int | None = None) -> "MessageHistoryCompactionMiddleware":
+        # Builds middleware that deletes explicitly targeted messages or an inclusive range.
+        return cls(mode=CompactionMode.DELETE_MESSAGES_BY_ID_OR_RANGE, message_ids=message_ids, start=start, end=end)
+
+    @classmethod
+    def tool_output_sliding_window(cls, keep_recent: int = 2, window_mode: CompactionMode | str = CompactionMode.TRUNCATE_TOOL_RESULTS, max_chars: int = 600) -> "MessageHistoryCompactionMiddleware":
+        # Builds middleware that compacts older tool outputs per tool name.
+        return cls(mode=CompactionMode.TOOL_OUTPUT_SLIDING_WINDOW, keep_recent=keep_recent, window_mode=window_mode, max_chars=max_chars)
+
+    @classmethod
+    def clear_tool_results_except(cls, exclude_tools: tuple[str, ...] = (), placeholder: str = "[tool result cleared by compaction]") -> "MessageHistoryCompactionMiddleware":
+        # Builds middleware that clears tool-result messages except for named tools.
+        return cls(mode=CompactionMode.TOOL_RESULT_CLEARING_WITH_EXCLUSIONS, exclude_tools=exclude_tools, placeholder=placeholder)
+
+    @classmethod
+    def head_tail_tool_preview(cls, head_chars: int = 400, tail_chars: int = 200, indicator: str = "\n...[omitted {count} characters]...\n") -> "MessageHistoryCompactionMiddleware":
+        # Builds middleware that previews long tool-result messages with head and tail text.
+        return cls(mode=CompactionMode.HEAD_TAIL_TOOL_PREVIEW, head_chars=head_chars, tail_chars=tail_chars, indicator=indicator)
+
+    @classmethod
+    def scrub_bloat(cls, base64_min_chars: int = 80, max_repeated_lines: int = 3, placeholder: str = "[scrubbed {kind}: {count} chars]") -> "MessageHistoryCompactionMiddleware":
+        # Builds middleware that strips ANSI escapes, base64-like spans, and repeated lines.
+        return cls(mode=CompactionMode.MECHANICAL_BLOAT_SCRUBBER, base64_min_chars=base64_min_chars, max_repeated_lines=max_repeated_lines, placeholder=placeholder)
+
+    @classmethod
+    def summary_with_backrefs(cls, start: int | None = None, end: int | None = None, excerpt_chars: int = 120) -> "MessageHistoryCompactionMiddleware":
+        # Builds middleware that replaces a range with deterministic backreferenced excerpts.
+        return cls(mode=CompactionMode.SUMMARY_WITH_BACKREFS, start=start, end=end, excerpt_chars=excerpt_chars)
+
+    @classmethod
+    def selective_prune(cls, remove_empty: bool = True, remove_duplicates: bool = True, boilerplate_patterns: tuple[str, ...] = (), min_unique_terms: int = 0) -> "MessageHistoryCompactionMiddleware":
+        # Builds middleware that removes low-signal messages with deterministic checks.
+        return cls(mode=CompactionMode.SELECTIVE_CONTEXT_PRUNING, remove_empty=remove_empty, remove_duplicates=remove_duplicates, boilerplate_patterns=boilerplate_patterns, min_unique_terms=min_unique_terms)
+
+    @classmethod
+    def salience_score_eviction(cls, max_messages: int, max_tokens: int | None = None, token_counter: TokenCounter | None = None) -> "MessageHistoryCompactionMiddleware":
+        # Builds middleware that keeps the highest deterministic salience scores.
+        return cls(mode=CompactionMode.SALIENCE_SCORE_EVICTION, max_messages=max_messages, max_tokens=max_tokens, token_counter=token_counter)
+
+    @classmethod
+    def query_relevance_filter(cls, query: str | None = None, max_messages: int | None = None, min_score: int = 1, keep_recent: int = 0) -> "MessageHistoryCompactionMiddleware":
+        # Builds middleware that filters messages by lexical overlap with a query.
+        return cls(mode=CompactionMode.QUERY_RELEVANCE_FILTER, query=query, max_messages=max_messages, min_score=min_score, keep_recent=keep_recent)
+
+    @classmethod
+    def context_snapshot_branch_trim(cls, active_branch: str, include_ancestors: bool = True) -> "MessageHistoryCompactionMiddleware":
+        # Builds middleware that keeps the active context branch and optional ancestors.
+        return cls(mode=CompactionMode.CONTEXT_SNAPSHOT_BRANCH_TRIM, active_branch=active_branch, include_ancestors=include_ancestors)
+
     async def before_model_call(self, ctx: MiddlewareContext) -> MiddlewareDecision:
         # Compacts current provider messages before the runner invocation.
         if not ctx.provider_messages:
             return MiddlewareDecision.continue_()
-        messages, stats = await self.engine.compact_provider_messages(ctx.provider_messages, mode=self.mode, options=self.options)
+        options = dict(self.options)
+        if self.mode is CompactionMode.QUERY_RELEVANCE_FILTER and options.get("query") is None:
+            options["query"] = ctx.message
+        messages, stats = await self.engine.compact_provider_messages(ctx.provider_messages, mode=self.mode, options=options)
         transform = MiddlewareTransform(provider_messages=messages, metadata={"compaction": stats.mode, "before_count": stats.before_count, "after_count": stats.after_count})
         return MiddlewareDecision.continue_(transform=transform)
 
@@ -119,6 +205,15 @@ class MessageHistoryCompactionMiddleware(AgentMiddleware):
             raise ValueError("percentage must be between 0 and 1.")
         if "order" in self.options and self.options["order"] not in {"oldest", "newest"}:
             raise ValueError("order must be 'oldest' or 'newest'.")
+        for key in ("n", "max_chars", "max_tokens", "max_messages", "keep_recent", "head_chars", "tail_chars", "min_score", "excerpt_chars", "min_unique_terms"):
+            if key in self.options and self.options[key] is not None and int(self.options[key]) < 0:
+                raise ValueError(f"{key} must be non-negative.")
+        if "base64_min_chars" in self.options and int(self.options["base64_min_chars"]) < 1:
+            raise ValueError("base64_min_chars must be positive.")
+        if "max_repeated_lines" in self.options and int(self.options["max_repeated_lines"]) < 0:
+            raise ValueError("max_repeated_lines must be non-negative.")
+        if self.mode is CompactionMode.CONTEXT_SNAPSHOT_BRANCH_TRIM and not str(self.options.get("active_branch", "")).strip():
+            raise ValueError("active_branch must be provided.")
 
 
 class SummaryCompactionMiddleware(MessageHistoryCompactionMiddleware):
