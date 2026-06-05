@@ -48,13 +48,12 @@ class OpenAICompatibleProvider:
         return payload
 
     def _create_messages(self, config: TextModelConfig, prompt: str, system: str | None) -> list[Mapping[str, Any]]:
-        # Use explicit history when provided, otherwise synthesize system/user turns.
-        if config.messages:
-            return [dict(message) for message in config.messages] + [{"role": "user", "content": prompt}]
+        # Preserves system instructions even when explicit conversation history is present.
         messages: list[Mapping[str, Any]] = []
         instructions = system or config.system
         if instructions:
             messages.append({"role": "system", "content": instructions})
+        messages.extend(dict(message) for message in config.messages)
         messages.append({"role": "user", "content": prompt})
         return messages
 
