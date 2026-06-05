@@ -117,7 +117,16 @@ from vidbyte.lib.errors import (
     TracerConfigurationError,
 )
 from vidbyte.lib.tracing import NullTracer, TracerBase
-from vidbyte.trace import ContinualTracer, DebugTracer, Trace
+from vidbyte.trace import (
+    ActionTrace,
+    ContinualTraceAgent,
+    ContinualTraceMiddleware,
+    ContinualTracer,
+    DebugTracer,
+    Trace,
+    TraceOption,
+    TraceSchema,
+)
 from vidbyte.middleware import (
     AgentMiddleware,
     AuditLogMiddleware,
@@ -177,7 +186,12 @@ from vidbyte.tools.mcp import (
 
 __all__ = [
     "Agent",
+    "ActionTrace",
+    "ContinualTraceAgent",
+    "ContinualTraceMiddleware",
     "ContinualTracer",
+    "TraceOption",
+    "TraceSchema",
     "DebugTracer",
     "NullTracer",
     "OutputSchemaFormatter",

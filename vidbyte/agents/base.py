@@ -29,6 +29,7 @@ from vidbyte.lib.agents import ModalityDetector
 from vidbyte.lib.dataclasses.agents import AgentMetadata, AgentRunnerConfig, AgentRuntimeConfig
 from vidbyte.lib.dataclasses.runner import RunnerHandle
 from vidbyte.lib.dataclasses.strategies import AgentResult
+from vidbyte.lib.dataclasses.trace import TraceOption
 from vidbyte.lib.enums import AgentRuntimeType, ModelModality, ModelProvider
 from vidbyte.lib.errors import AgentExecutionError, ConfigurationError
 from vidbyte.lib.tracing import NullTracer, TracerBase
@@ -83,6 +84,7 @@ class BaseAgent(McpAttachableMixin):
         trace: type[TracerBase] | TracerBase | None = None,
         output_schema: type | Mapping[str, Any] | None = None,
         handoff: Handoff | None = None,
+        trace_option: TraceOption | None = None,
     ) -> None:
         if not name:
             raise AgentExecutionError("Agent name cannot be empty.")
@@ -106,6 +108,11 @@ class BaseAgent(McpAttachableMixin):
                 raise ConfigurationError(
                     f"Agent {name} uses non-linear runtime {self.runtime_type.value}, "
                     "which does not support middleware."
+                )
+            if trace_option is not None and trace_option.enabled:
+                raise ConfigurationError(
+                    f"Agent {name} uses non-linear runtime {self.runtime_type.value}, "
+                    "which does not support continual tracing."
                 )
             if algorithm is not None:
                 resolved_algo = ContextWindow.resolve_algorithm(algorithm)
@@ -157,6 +164,8 @@ class BaseAgent(McpAttachableMixin):
         self._active_prompt: str = ""
         self._handoff_spec: Handoff | None = handoff
         self.last_handoff: Handoff | None = None
+        self._trace_option: TraceOption | None = trace_option
+        self.last_trace: dict[str, Any] | None = None
         self.last_prompt: str = ""
         self.last_reply: AgentMessage | None = None
         for _tool in self._agent_tool_items:
@@ -285,6 +294,7 @@ class BaseAgent(McpAttachableMixin):
             tracer=self._tracer,
             output_schema=self.output_schema,
             handoff=self._handoff_spec,
+            trace_option=self._trace_option,
         )
         if include_history:
             child.history = list(self.history)
@@ -364,6 +374,9 @@ class BaseAgent(McpAttachableMixin):
         self.history.append(reply)
         self.last_prompt = prompt
         self.last_reply = reply
+        if self._trace_option is not None and self._trace_option.enabled:
+            trace_artifact = metadata.get("trace")
+            self.last_trace = dict(trace_artifact) if isinstance(trace_artifact, Mapping) else None
         if self._handoff_spec is not None:
             await self._run_auto_handoff(metadata)
         return reply
@@ -549,13 +562,20 @@ class BaseAgent(McpAttachableMixin):
             permission_policy=self.permission_policy,
             config=self.runtime_config,
             tracer=self._tracer,
-            middleware=self.middleware,
+            middleware=self._runtime_middleware(),
             run_id=self.runner_config.run_id,
             algorithm=self.algorithm,
             context_manager=self.context_manager,
             output_schema=self.output_schema,
             **kwargs,
         )
+
+    def _runtime_middleware(self) -> tuple[AgentMiddleware, ...]:
+        # Appends the continual trace middleware to the user middleware when tracing is enabled.
+        if self._trace_option is None or not self._trace_option.enabled:
+            return self.middleware
+        from vidbyte.trace.continual.middleware import ContinualTraceMiddleware
+        return (*self.middleware, ContinualTraceMiddleware(self._trace_option, source_agent=self))
 
     def _catalog_from_agent_tools(self, tools: Sequence[object]) -> Tools:
         catalog = Tools()

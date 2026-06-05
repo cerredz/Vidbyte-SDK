@@ -18,6 +18,11 @@ class AgentClient:
         # Construct a handoff agent for a given handoff spec, defaulting to MinimalHandoff.
         return HandoffAgent(handoff, **kwargs)
 
+    def continual_trace(self, schema: Any, **kwargs: Any) -> Any:
+        # Construct a continual trace agent that fills the given trace schema.
+        from vidbyte.trace.continual.agent import ContinualTraceAgent
+        return ContinualTraceAgent(schema, **kwargs)
+
 
 __all__ = [
     "AgentClient",
