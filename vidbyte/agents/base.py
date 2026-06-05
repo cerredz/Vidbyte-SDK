@@ -29,6 +29,7 @@ from vidbyte.lib.agents import ModalityDetector
 from vidbyte.lib.dataclasses.agents import AgentMetadata, AgentRunnerConfig, AgentRuntimeConfig
 from vidbyte.lib.dataclasses.runner import RunnerHandle
 from vidbyte.lib.dataclasses.strategies import AgentResult
+from vidbyte.lib.dataclasses.trace import TraceOption
 from vidbyte.lib.enums import AgentRuntimeType, ModelModality, ModelProvider
 from vidbyte.lib.errors import AgentExecutionError, ConfigurationError
 from vidbyte.lib.tracing import NullTracer, TracerBase
@@ -83,6 +84,7 @@ class BaseAgent(McpAttachableMixin):
         trace: type[TracerBase] | TracerBase | None = None,
         output_schema: type | Mapping[str, Any] | None = None,
         handoff: Handoff | None = None,
+        trace_option: TraceOption | None = None,
     ) -> None:
         if not name:
             raise AgentExecutionError("Agent name cannot be empty.")
@@ -106,6 +108,11 @@ class BaseAgent(McpAttachableMixin):
                 raise ConfigurationError(
                     f"Agent {name} uses non-linear runtime {self.runtime_type.value}, "
                     "which does not support middleware."
+                )
+            if trace_option is not None and trace_option.enabled:
+                raise ConfigurationError(
+                    f"Agent {name} uses non-linear runtime {self.runtime_type.value}, "
+                    "which does not support continual tracing."
                 )
             if algorithm is not None:
                 resolved_algo = ContextWindow.resolve_algorithm(algorithm)
@@ -157,6 +164,8 @@ class BaseAgent(McpAttachableMixin):
         self._active_prompt: str = ""
         self._handoff_spec: Handoff | None = handoff
         self.last_handoff: Handoff | None = None
+        self._trace_option: TraceOption | None = trace_option
+        self.last_trace: dict[str, Any] | None = None
         self.last_prompt: str = ""
         self.last_reply: AgentMessage | None = None
         for _tool in self._agent_tool_items:
@@ -285,6 +294,7 @@ class BaseAgent(McpAttachableMixin):
             tracer=self._tracer,
             output_schema=self.output_schema,
             handoff=self._handoff_spec,
+            trace_option=self._trace_option,
         )
         if include_history:
             child.history = list(self.history)
@@ -304,9 +314,8 @@ class BaseAgent(McpAttachableMixin):
         **options: Any,
     ) -> AgentMessage:
         await self._ensure_mcp_connected()
-        trace_ctx: Any = None
+        trace_ctx = self._tracer.start_trace("agent.run", agent_name=self.name, strategy="direct")
         try:
-            trace_metadata = _safe_trace_mapping(dict(options.pop("trace_metadata", {}) or {}))
             prompt, input_modality, input_metadata = self._normalize_input(message)
             input_context_items, input_context_manager = self._normalize_input_context(message)
             self._active_prompt = prompt
@@ -320,21 +329,6 @@ class BaseAgent(McpAttachableMixin):
             if selected_modality is ModelModality.AUTO:
                 selected_modality = ModelModality.TEXT
             runner = self._runner_for_modality(selected_modality)
-            provider = self._runner_provider(runner)
-            trace_ctx = self._tracer.start_trace(
-                "agent.run",
-                agent_name=self.name,
-                strategy="direct",
-                provider=provider,
-                model=self._runner_model_name(runner),
-                prompt=_trace_text(prompt),
-                modality=selected_modality.value,
-                metadata={
-                    **_safe_trace_mapping(self.metadata),
-                    **_safe_trace_mapping(input_metadata),
-                    **trace_metadata,
-                },
-            )
             agent_context = self._build_context(
                 prompt,
                 context=context,
@@ -352,13 +346,11 @@ class BaseAgent(McpAttachableMixin):
                 modality=selected_modality,
                 trace_context=trace_ctx,
                 runtime_metadata={**self.metadata, **dict(input_metadata)},
-                provider=provider,
                 **options,
             )
             self._tracer.end_trace(trace_ctx, output=result.output)
         except Exception as exc:
-            if trace_ctx is not None:
-                self._tracer.end_trace(trace_ctx, error=exc)
+            self._tracer.end_trace(trace_ctx, error=exc)
             self._active_prompt = ""
             raise AgentExecutionError(
                 f"Agent '{self.name}' failed to generate a reply.",
@@ -382,6 +374,9 @@ class BaseAgent(McpAttachableMixin):
         self.history.append(reply)
         self.last_prompt = prompt
         self.last_reply = reply
+        if self._trace_option is not None and self._trace_option.enabled:
+            trace_artifact = metadata.get("trace")
+            self.last_trace = dict(trace_artifact) if isinstance(trace_artifact, Mapping) else None
         if self._handoff_spec is not None:
             await self._run_auto_handoff(metadata)
         return reply
@@ -567,13 +562,20 @@ class BaseAgent(McpAttachableMixin):
             permission_policy=self.permission_policy,
             config=self.runtime_config,
             tracer=self._tracer,
-            middleware=self.middleware,
+            middleware=self._runtime_middleware(),
             run_id=self.runner_config.run_id,
             algorithm=self.algorithm,
             context_manager=self.context_manager,
             output_schema=self.output_schema,
             **kwargs,
         )
+
+    def _runtime_middleware(self) -> tuple[AgentMiddleware, ...]:
+        # Appends the continual trace middleware to the user middleware when tracing is enabled.
+        if self._trace_option is None or not self._trace_option.enabled:
+            return self.middleware
+        from vidbyte.middleware.continual_trace import ContinualTraceMiddleware
+        return (*self.middleware, ContinualTraceMiddleware(self._trace_option, source_agent=self))
 
     def _catalog_from_agent_tools(self, tools: Sequence[object]) -> Tools:
         catalog = Tools()
@@ -649,22 +651,6 @@ class BaseAgent(McpAttachableMixin):
             except Exception:
                 return "openai"
         return "openai"
-
-    @staticmethod
-    def _runner_model_name(runner: object) -> str | None:
-        config = getattr(runner, "_config", None)
-        model = getattr(config, "model", None)
-        if model is not None:
-            return str(model)
-        model_name = getattr(runner, "model_name", None)
-        if callable(model_name):
-            try:
-                return str(model_name())
-            except Exception:
-                return None
-        if model_name is not None:
-            return str(model_name)
-        return None
 
     @staticmethod
     def _runner_output_metadata(result: object) -> dict[str, Any]:
@@ -778,33 +764,3 @@ class BaseAgent(McpAttachableMixin):
             if name:
                 return str(name)
         return tool.__class__.__name__
-
-
-def _trace_text(value: object, *, max_chars: int = 12000) -> str:
-    # Keep trace payloads useful without letting very large prompts dominate requests.
-    text = str(value)
-    if len(text) <= max_chars:
-        return text
-    return f"{text[:max_chars]}...[truncated]"
-
-
-def _safe_trace_mapping(metadata: Mapping[str, Any] | None) -> dict[str, Any]:
-    # Removes env/credential-like fields before sending user metadata to tracing backends.
-    safe: dict[str, Any] = {}
-    for key, value in dict(metadata or {}).items():
-        key_text = str(key)
-        upper = key_text.upper()
-        if upper.startswith("LANGSMITH_") or any(token in upper for token in ("API_KEY", "TOKEN", "SECRET", "PASSWORD", "CREDENTIAL", "AUTH")):
-            continue
-        safe[key_text] = _safe_trace_value(value)
-    return safe
-
-
-def _safe_trace_value(value: Any) -> Any:
-    if isinstance(value, Mapping):
-        return _safe_trace_mapping(value)
-    if isinstance(value, (list, tuple)):
-        return tuple(_safe_trace_value(item) for item in value)
-    if isinstance(value, str):
-        return _trace_text(value)
-    return value

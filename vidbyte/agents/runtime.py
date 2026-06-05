@@ -568,15 +568,8 @@ class AgentRuntime:
             llm_span = self._tracer.start_span(
                 "llm.call",
                 parent=trace_context,
-                **self._llm_trace_inputs(
-                    handle,
-                    message=message,
-                    call_options=current_call_options,
-                    provider=provider,
-                    iteration_count=iteration_count,
-                    model_call_count=model_call_count,
-                    metadata=metadata,
-                ),
+                provider=provider,
+                iteration=iteration_count,
             )
             try:
                 raw_result = await handle.invoke(message, **current_call_options)
@@ -657,7 +650,24 @@ class AgentRuntime:
                 contexts=tuple(dict(result.metadata).get("tool_calls", ())),
             )
         result = self._with_context_window_metadata(result, metadata)
+        result = self._with_run_state_metadata(result, run_state)
         return self._with_middleware_metadata(result)
+
+    @staticmethod
+    def _with_run_state_metadata(result: AgentResult, run_state: dict[type, Any] | None) -> AgentResult:
+        """Merge per-run metadata published by middleware (e.g. trace artifacts) into the result."""
+        # Generic, feature-agnostic lift of run_state["__result_metadata__"]; no feature imports here.
+        published = (run_state or {}).get("__result_metadata__")
+        if not isinstance(published, Mapping) or not published:
+            return result
+        metadata = {**dict(result.metadata), **dict(published)}
+        return AgentResult(
+            output=result.output,
+            strategy_name=result.strategy_name,
+            calls=result.calls,
+            metadata=metadata,
+            structured=result.structured,
+        )
 
     async def _run_inner_context_window_hook(self, metadata: Mapping[str, Any], *, message: str, provider: str, iteration_count: int = 0, assistant_output: str | None = None, call_contexts: Sequence[ToolCallContext] = (), tokens_used: int | None = None, runner: object | None = None, invoke_runner: Callable[..., Any] | None = None, runner_output_text: Callable[[object], str] | None = None, runner_output_metadata: Callable[[object], Mapping[str, Any]] | None = None, options: Mapping[str, Any] | None = None, messages: Sequence[dict[str, Any]] | None = None, system_prompt: str | None = None) -> None:
         """Build the slim run context and invoke the inner-loop algorithm's single hook."""
@@ -1013,60 +1023,6 @@ class AgentRuntime:
                 call_options.setdefault("response_format", fmt)
         return call_options
 
-    def _llm_trace_inputs(
-        self,
-        handle: RunnerHandle,
-        *,
-        message: str,
-        call_options: Mapping[str, Any],
-        provider: str,
-        iteration_count: int,
-        model_call_count: int,
-        metadata: Mapping[str, Any],
-    ) -> dict[str, Any]:
-        # Build useful, bounded LangSmith inputs for the model-call child span.
-        system = call_options.get("system")
-        messages = call_options.get("messages")
-        tools = call_options.get("tools")
-        inputs: dict[str, Any] = {
-            "agent_name": self.agent_name,
-            "provider": provider,
-            "model": self._runner_model_name(handle.runner),
-            "iteration": iteration_count,
-            "model_call": model_call_count,
-            "prompt": _trace_text(message),
-            "metadata": _safe_trace_mapping(metadata),
-        }
-        if system is not None:
-            inputs["system"] = _trace_text(system)
-        if messages:
-            inputs["messages"] = _safe_trace_value(messages)
-        if tools:
-            tool_items = tuple(tools)
-            inputs["tool_count"] = len(tool_items)
-            inputs["tool_names"] = tuple(
-                str(tool.get("name") or tool.get("function", {}).get("name") or "")
-                for tool in tool_items
-                if isinstance(tool, Mapping)
-            )
-        return inputs
-
-    @staticmethod
-    def _runner_model_name(runner: object) -> str | None:
-        config = getattr(runner, "_config", None)
-        model = getattr(config, "model", None)
-        if model is not None:
-            return str(model)
-        model_name = getattr(runner, "model_name", None)
-        if callable(model_name):
-            try:
-                return str(model_name())
-            except Exception:
-                return None
-        if model_name is not None:
-            return str(model_name)
-        return None
-
     def _build_conversation_messages(self, messages: list[dict[str, Any]]) -> tuple[dict[str, Any], ...]:
         """Assemble placed context-window conversation messages around runtime messages."""
         # Preserves existing runtime messages while adding explicit conversation placements.
@@ -1297,36 +1253,6 @@ class AgentRuntime:
         if delta is None:
             return current
         return (current or 0) + delta
-
-
-def _trace_text(value: object, *, max_chars: int = 12000) -> str:
-    # Keep trace payloads useful without letting very large prompts dominate requests.
-    text = str(value)
-    if len(text) <= max_chars:
-        return text
-    return f"{text[:max_chars]}...[truncated]"
-
-
-def _safe_trace_mapping(metadata: Mapping[str, Any] | None) -> dict[str, Any]:
-    # Removes env/credential-like fields before sending user metadata to tracing backends.
-    safe: dict[str, Any] = {}
-    for key, value in dict(metadata or {}).items():
-        key_text = str(key)
-        upper = key_text.upper()
-        if upper.startswith("LANGSMITH_") or any(token in upper for token in ("API_KEY", "TOKEN", "SECRET", "PASSWORD", "CREDENTIAL", "AUTH")):
-            continue
-        safe[key_text] = _safe_trace_value(value)
-    return safe
-
-
-def _safe_trace_value(value: Any) -> Any:
-    if isinstance(value, Mapping):
-        return _safe_trace_mapping(value)
-    if isinstance(value, (list, tuple)):
-        return tuple(_safe_trace_value(item) for item in value)
-    if isinstance(value, str):
-        return _trace_text(value)
-    return value
 
 
 __all__ = ["AgentRuntime"]
