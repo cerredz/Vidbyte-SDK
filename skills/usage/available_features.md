@@ -230,7 +230,7 @@ permissions = ContextPermissions.from_preset(PermissionPreset.READ_ONLY)
 The SDK supports multiple model providers through a unified interface. Switch providers by changing a single parameter — no code changes needed.
 
 ```python
-from vidbyte import ModelProvider
+from vidbyte.lib.enums import ModelProvider
 
 ModelProvider.OPENAI      # GPT-4, GPT-4o, O-series, etc.
 ModelProvider.ANTHROPIC   # Claude Opus, Sonnet, Haiku, etc.
@@ -279,7 +279,7 @@ await agent.close_mcp_servers()
 The SDK has a structured error hierarchy so you can catch errors at the right level of granularity:
 
 ```python
-from vidbyte import (
+from vidbyte.lib.errors import (
     VidbyteSdkError,             # base — catch-all for SDK errors
     AgentExecutionError,         # agent failures during arun/run
     PipelineExecutionError,      # pipeline construction or runtime failures
