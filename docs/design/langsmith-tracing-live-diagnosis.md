@@ -115,12 +115,14 @@ class EnvLoader:
 3. The loader parses `KEY=value`, trims whitespace, strips matching single or double quotes, and leaves internal characters unchanged.
 4. Existing environment variables win when `override=False`.
 5. The loader returns the keys loaded for tests without printing values.
+6. Eval scripts accept `VIDBYTE_SDK_PATH` as an explicit SDK checkout override so the eval worktree can run against the paired SDK worktree instead of the original sibling checkout.
 
 #### Edge Cases & Error Handling
 
 - Missing `.env` returns `{}` and does not raise.
 - Malformed non-comment lines raise `ValueError` in tests and local runs.
 - Empty values are loaded as empty strings only if the key does not already exist.
+- UTF-8 BOM-prefixed files written by Windows PowerShell are accepted by stripping `\ufeff` from the first parsed key.
 
 ### 6.2 MBPP Provider Configuration
 
@@ -215,7 +217,36 @@ python scripts/test-langsmith-tracing-live.py
 - Auth/endpoint errors fail with sanitized message.
 - Successful create but failed update fails the script.
 
-### 6.5 Eval Verification Script
+### 6.5 SDK Async HTTP Transport Compatibility
+
+**File(s):** `vidbyte-sdk/vidbyte/lib/http/transport.py`, `scripts/test-async-http-transport.py`
+**Type:** Modified
+
+#### What it does
+
+Fixes live provider calls under installed `httpx` versions where `AsyncClient.send()` rejects a per-call `timeout=` keyword.
+
+#### Interface / API
+
+```python
+class HttpTransport:
+    async def request(...) -> HttpResponse: ...
+    async def _send_once(...) -> HttpResponse: ...
+```
+
+#### Logic / Algorithm
+
+1. Construct `httpx.AsyncClient(timeout=timeout_seconds)` in `request()`.
+2. Build the request as before.
+3. Call `client.send(request)` without a per-call timeout keyword.
+4. Preserve existing retry and response normalization behavior.
+
+#### Edge Cases & Error Handling
+
+- `httpx.RequestError` is still wrapped as `ProviderRequestError`.
+- Non-2xx HTTP responses are still returned to provider parsers rather than raised by transport.
+
+### 6.6 Eval Verification Script
 
 **File(s):** `vidbyte-evals/scripts/test-langsmith-eval-env.py`, `scripts/test_mbpp_eval_runs.py`
 **Type:** New file, Modified
@@ -244,6 +275,34 @@ python scripts/test_mbpp_eval_runs.py
 - Empty `.env`, missing `.env`, comments, quoted values, and malformed lines are covered.
 - Tests must not call LangSmith or xAI.
 
+### 6.7 HuggingFace Dataset Import Isolation
+
+**File(s):** `vidbyte-evals/datasets/hf/base_loader.py`, `scripts/test_mbpp_eval_runs.py`
+**Type:** Modified
+
+#### What it does
+
+Prevents the repo-local `datasets/` package from shadowing HuggingFace's external `datasets` package during live eval runs.
+
+#### Interface / API
+
+```python
+class HFLoader:
+    def _load_huggingface_dataset_fn(self) -> Any: ...
+```
+
+#### Logic / Algorithm
+
+1. Temporarily remove the eval repo root from `sys.path`.
+2. Temporarily remove the repo-local `datasets` root module from `sys.modules` when it points under this repo.
+3. Import external `datasets` and return `load_dataset`.
+4. Restore `sys.path` and the repo-local `datasets` module after resolving the function.
+
+#### Edge Cases & Error Handling
+
+- If HuggingFace `datasets` is missing, the original import error still surfaces clearly.
+- Local `datasets.hf.*` modules remain usable after the temporary import isolation.
+
 ---
 
 ## 7. Data Model Changes
@@ -268,12 +327,15 @@ Complete list of every file that will be created, modified, or deleted:
 | CREATE | `vidbyte-sdk/docs/design/langsmith-tracing-live-diagnosis.md` | Companion cross-repo design doc for SDK-side work |
 | CREATE | `vidbyte-evals/lib/env_loader.py` | Local ignored `.env` parsing before eval setup |
 | MODIFY | `vidbyte-evals/evals/mbpp/base_agent_execution_grader.py` | Load `.env` before tracer/model key resolution |
+| MODIFY | `vidbyte-evals/datasets/hf/base_loader.py` | Avoid local `datasets/` shadowing HuggingFace `datasets.load_dataset` |
 | MODIFY | `vidbyte-evals/evals/mbpp/config.yaml` | Align MBPP provider defaults with available xAI credential if approved |
 | MODIFY | `vidbyte-evals/scripts/test_mbpp_eval_runs.py` | Assert env loading and intended provider/tracer wiring |
 | CREATE | `vidbyte-evals/scripts/test-langsmith-eval-env.py` | Verification script for eval env loading and tracer setup |
 | MODIFY | `vidbyte-sdk/vidbyte/providers/tracing/langsmith.py` | Add endpoint support, strict mode, and safe diagnostics |
+| MODIFY | `vidbyte-sdk/vidbyte/lib/http/transport.py` | Move async timeout configuration from `send()` to `AsyncClient` |
 | MODIFY | `vidbyte-sdk/tests/test_tracing.py` | Unit tests for endpoint, strict mode, and safe error recording |
 | CREATE | `vidbyte-sdk/scripts/test-langsmith-tracing-live.py` | Live LangSmith adapter smoke verification |
+| MODIFY | `vidbyte-sdk/scripts/test-async-http-transport.py` | Regression check for `AsyncClient.send()` timeout compatibility |
 
 ---
 

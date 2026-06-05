@@ -31,7 +31,7 @@ class HttpTransport:
         attempts = max(0, retry_count) + 1
         delay = max(0.0, backoff_seconds)
         try:
-            async with httpx.AsyncClient() as client:
+            async with httpx.AsyncClient(timeout=timeout_seconds) as client:
                 for attempt in range(attempts):
                     response = await self._send_once(client, method=method, url=url, headers=headers, json_body=json_body, timeout_seconds=timeout_seconds)
                     if response.status_code not in retry_status_codes or attempt == attempts - 1:
@@ -53,7 +53,7 @@ class HttpTransport:
             request_headers.setdefault("content-type", "application/json")
         request = client.build_request(method, url, headers=request_headers, content=content)
         try:
-            response = await client.send(request, timeout=timeout_seconds)
+            response = await client.send(request)
             return HttpResponse(status_code=response.status_code, body=response.text, headers=dict(response.headers))
         except httpx.RequestError as exc:
             raise ProviderRequestError("HTTP request failed before receiving a provider response.", provider="http", response_excerpt=str(exc)) from exc

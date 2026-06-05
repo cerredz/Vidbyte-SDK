@@ -1,5 +1,7 @@
 ﻿from __future__ import annotations
 
+import os
+import types
 import unittest
 from typing import Any
 from unittest.mock import patch
@@ -421,6 +423,118 @@ class TracerConfigurationErrorTests(unittest.TestCase):
             with self.assertRaises(TracerConfigurationError) as cm:
                 PhoenixTracer()
             self.assertIn("opentelemetry", str(cm.exception).lower())
+
+
+class LangSmithTracerDiagnosticsTests(unittest.TestCase):
+    def _module_with_client(self, client_cls: type[Any]) -> types.ModuleType:
+        # Builds a fake langsmith module exposing the requested Client class.
+        module = types.ModuleType("langsmith")
+        module.Client = client_cls
+        return module
+
+    def test_langsmith_omits_api_url_without_endpoint(self) -> None:
+        # [Edge Case] Client construction should not pass api_url unless endpoint is configured.
+        calls: list[dict[str, Any]] = []
+
+        class Client:
+            def __init__(self, **kwargs: Any) -> None:
+                calls.append(dict(kwargs))
+
+        from vidbyte.providers.tracing.langsmith import LangSmithTracer
+        with patch.dict("sys.modules", {"langsmith": self._module_with_client(Client)}):
+            with patch.dict(os.environ, {}, clear=True):
+                LangSmithTracer(api_key="test-key")
+        self.assertEqual(calls, [{"api_key": "test-key"}])
+
+    def test_langsmith_endpoint_env_passed_as_api_url(self) -> None:
+        # [Edge Case] LANGSMITH_ENDPOINT must be forwarded to the LangSmith client.
+        calls: list[dict[str, Any]] = []
+
+        class Client:
+            def __init__(self, **kwargs: Any) -> None:
+                calls.append(dict(kwargs))
+
+        from vidbyte.providers.tracing.langsmith import LangSmithTracer
+        with patch.dict("sys.modules", {"langsmith": self._module_with_client(Client)}):
+            with patch.dict(os.environ, {"LANGSMITH_ENDPOINT": "https://api.smith.langchain.com"}, clear=True):
+                LangSmithTracer(api_key="test-key")
+        self.assertEqual(calls, [{"api_key": "test-key", "api_url": "https://api.smith.langchain.com"}])
+
+    def test_langsmith_strict_create_failure_raises_sanitized_error(self) -> None:
+        # [Hidden Failure] Strict mode must fail loudly without leaking key-like strings.
+        class Client:
+            def __init__(self, **kwargs: Any) -> None:
+                pass
+
+            def create_run(self, **kwargs: Any) -> None:
+                raise RuntimeError("bad key lsv2_pt_secret and xai-secret")
+
+        from vidbyte.providers.tracing.langsmith import LangSmithTracer
+        with patch.dict("sys.modules", {"langsmith": self._module_with_client(Client)}):
+            tracer = LangSmithTracer(api_key="test-key", strict=True)
+            with self.assertRaises(TracerConfigurationError) as cm:
+                tracer.start_trace("agent.run")
+        message = str(cm.exception)
+        self.assertIn("lsv2_[REDACTED]", message)
+        self.assertIn("xai-[REDACTED]", message)
+        self.assertNotIn("lsv2_pt_secret", message)
+        self.assertNotIn("xai-secret", message)
+
+    def test_langsmith_nonstrict_records_last_error(self) -> None:
+        # [Silent Failure] Non-strict mode should keep the run alive while preserving diagnostics.
+        class Client:
+            def __init__(self, **kwargs: Any) -> None:
+                pass
+
+            def create_run(self, **kwargs: Any) -> None:
+                raise RuntimeError("delivery failed lsv2_pt_secret")
+
+        from vidbyte.providers.tracing.langsmith import LangSmithTracer
+        with patch.dict("sys.modules", {"langsmith": self._module_with_client(Client)}):
+            tracer = LangSmithTracer(api_key="test-key")
+            tracer.start_trace("agent.run")
+        self.assertIsNotNone(tracer.last_error)
+        self.assertIn("lsv2_[REDACTED]", str(tracer.last_error))
+
+    def test_langsmith_strict_update_failure_raises(self) -> None:
+        # [Hidden Failure] Strict mode must also fail when update_run is rejected.
+        class Client:
+            def __init__(self, **kwargs: Any) -> None:
+                pass
+
+            def create_run(self, **kwargs: Any) -> None:
+                pass
+
+            def update_run(self, *args: Any, **kwargs: Any) -> None:
+                raise RuntimeError("update rejected")
+
+        from vidbyte.providers.tracing.langsmith import LangSmithTracer
+        with patch.dict("sys.modules", {"langsmith": self._module_with_client(Client)}):
+            tracer = LangSmithTracer(api_key="test-key", strict=True)
+            context = tracer.start_trace("agent.run")
+            with self.assertRaises(TracerConfigurationError):
+                tracer.end_trace(context, output="ok")
+
+    def test_langsmith_update_uses_datetime_end_time(self) -> None:
+        # [Hidden Assumption] LangSmith update_run expects a datetime-like end_time.
+        captured: list[Any] = []
+
+        class Client:
+            def __init__(self, **kwargs: Any) -> None:
+                pass
+
+            def create_run(self, **kwargs: Any) -> None:
+                pass
+
+            def update_run(self, *args: Any, **kwargs: Any) -> None:
+                captured.append(kwargs["end_time"])
+
+        from vidbyte.providers.tracing.langsmith import LangSmithTracer
+        with patch.dict("sys.modules", {"langsmith": self._module_with_client(Client)}):
+            tracer = LangSmithTracer(api_key="test-key", strict=True)
+            context = tracer.start_trace("agent.run")
+            tracer.end_trace(context, output="ok")
+        self.assertTrue(hasattr(captured[0], "isoformat"))
 
 
 if __name__ == "__main__":
