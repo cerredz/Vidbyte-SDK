@@ -36,7 +36,7 @@ Do not claim a feature exists just because a design doc describes it. Confirm th
 - Normal verification:
   - `python -m compileall vidbyte`
   - `python -m unittest discover -s tests`
-  - `python -c "from vidbyte import VidbyteSDK; sdk = VidbyteSDK(); print(type(sdk.strategies).__name__)"`
+  - `python -c "from vidbyte import VidbyteSDK; sdk = VidbyteSDK(); print(type(sdk.agents).__name__)"`
 - Public boundary: reusable SDK abstractions only. Private Vidbyte service logic, proprietary evaluations, customer data, database access, and private scoring logic stay outside this package.
 
 ## Package Map
@@ -45,16 +45,21 @@ Do not claim a feature exists just because a design doc describes it. Confirm th
 vidbyte/
 |-- __init__.py          Root public exports.
 |-- client.py            VidbyteSDK namespace client.
-|-- agents/              Agent actors, registry, modality-facing input types, MCP attach mixin.
-|-- context/             Public context primitives, manager, presets, and context-window algorithms.
+|-- agents/              Agent actors, runtime, runtimes (linear/search/actor), context-algorithm dispatcher, handoff agent, registry, MCP attach mixin.
+|-- context/             Public context primitives (package), manager, presets, context-window algorithms, handoff primitives, compaction, templates.
+|-- evals/               Eval suites, graders, runner, registry.
 |-- harnesses/           Minimal namespace for future/custom harness integrations.
-|-- prompts/             JSON-backed prompt catalog and strategy prompt bundles.
+|-- middleware/          Runtime middleware: base, pipeline, builtins, compaction engine/strategies.
+|-- pipelines/           String-in/string-out agent wiring: sequential, parallel, conditional, map_reduce.
+|-- prompts/             JSON/Markdown-backed prompt catalog and prompt bundles.
 |-- providers/           Provider adapters and provider selection helpers.
-|-- strategies/          Strategy contracts, reasoning, sampling, routing, agent loops, multi-agent topologies.
+|-- trace/               Tracer client, debug tracer, continual tracing.
 |-- tools/               Tool contracts, catalog, registry/executor, decorators, built-ins, filesystem, MCP, security.
 |-- shared/              Shared SDK namespace placeholder.
-`-- lib/                 Central dataclasses, enums, errors, config, HTTP, runners, tools, agents helpers.
+`-- lib/                 Central dataclasses, enums, errors, config, HTTP, runners, templates, tools, agents helpers.
 ```
+
+> There is no `vidbyte/strategies/` package. The former strategy layer was replaced by **agent runtimes** (`vidbyte/agents/runtimes/`) and **context-window algorithms** (`vidbyte/context/algorithms/`). `StrategyResult` remains only as the internal runtime result dataclass in `vidbyte/lib/dataclasses/strategies.py`.
 
 Keep central contracts under `vidbyte/lib/` when they are shared by multiple packages. Public package modules often re-export those contracts for stable imports.
 
@@ -64,13 +69,20 @@ Keep central contracts under `vidbyte/lib/` when they are shared by multiple pac
 
 - Root client: `VidbyteSDK`.
 - Agents: `Agent`, `BaseAgent`, `AgentClient`, `AgentInput`, `AgentCard`, `AgentMessage`, `AgentRegistry`, `AgentRunnerConfig`, `AgentSpec`.
-- Contexts: `BaseContext`, `BaseAgentContext`, `ContextBudget`, `ContextPermissions`, `ContextManager`, `ContextWindow`, `ContextWindowAlgorithm`, `ToolResultAdmission`, `ContextItem`, `TextContextItem`, `FileContextItem`, `GitDiffContextItem`, `TaskContextItem`, `DocumentContextItem`, `EnvironmentContextItem`, `MemoryContextItem`, `ProgressContextItem`, `ArtifactContextItem`, `ResponseContextItem`, `ToolCallContextItem`, `StrategyContext`.
-- Enums: `BudgetPreset`, `PermissionPreset`, `Prompt`, `ModelModality`.
+- Contexts: `BaseContext`, `BaseAgentContext`, `ContextBudget`, `ContextPermissions`, `ContextManager`, `ContextWindow`, `ContextWindowAlgorithm`, `ToolResultAdmission`, `ContextItem`, `TextContextItem`, `FileContextItem`, `GitDiffContextItem`, `TaskContextItem`, `DocumentContextItem`, `EnvironmentContextItem`, `MemoryContextItem`, `ProgressContextItem`, `ArtifactContextItem`, `ResponseContextItem`, `ToolCallContextItem`, `TrajectoryCheckpointContextItem`, `PlanContextItem`.
+- Context-window algorithms: `ReflexionAlgorithm`, `TrajectoryCheckpointAlgorithm`, `MultiProviderAgenticGraderAlgorithm`, `InnerContextWindowAlgorithm`.
+- Handoffs: `Handoff`, `EngineeringHandoff`, `ResearchHandoff`, `MinimalHandoff`, `HandoffAgent`.
+- Runtime config: `AgentRuntimeConfig`, `AgentRuntimeStats`.
+- Pipelines: `BasePipeline`, `SequentialPipeline`, `ParallelPipeline`, `ConditionalPipeline`, `MapReducePipeline`, `PipelineNode`, `PipelineExecutionError`.
+- Middleware (root exports): `AgentMiddleware`, `MiddlewarePipeline`, `MiddlewareContext`, `MiddlewareDecision`, `MiddlewareAction`, `MiddlewareEvent`, `MiddlewareHook`, `MiddlewareTransform`, plus built-ins `AuditLogMiddleware`, `ModelRetryMiddleware`, `RuntimeLimitMiddleware`, `TokenRateLimitMiddleware`, `ToolPolicyMiddleware`, `CanaryTripwireMiddleware`, `ConfusedDeputyGuardMiddleware`, `HoneypotToolMiddleware`, `ToolResultCompactionMiddleware`, `MessageHistoryCompactionMiddleware`, `SummaryCompactionMiddleware`. Other built-ins (`TokenBudgetMiddleware`, `CostBudgetMiddleware`, `CircuitBreakerMiddleware`/`CircuitState`, `LoopDetectionMiddleware`, `ExponentialBackoffRetryMiddleware`) are imported from `vidbyte.middleware`.
+- Evals: `BaseGrader`, `ContainsGrader`, `ExactMatchGrader`, `RegexMatchGrader`, `JSONSchemaGrader`, `LLMJudgeGrader`, `RubricGrader`, `GraderResult`.
+- Enums: `BudgetPreset`, `PermissionPreset`, `Prompt`, `ModelModality`. (`AgentRuntimeType` is imported from `vidbyte.lib.enums`.)
 - Prompts: `Prompts`.
-- Strategies: `BaseStrategy`, `BaseStrategyUtils`, `StrategyResult`, `ChainOfThoughtStrategy`, `ChainOfDraftStrategy`, `StepBackStrategy`, `SkeletonOfThoughtStrategy`, `SelfConsistencyStrategy`, `PlanAndExecuteStrategy`, `SelfRefinementStrategy`, `TreeOfThoughtsStrategy`, `ReActStrategy`, `ReflexionStrategy`, `MultiAgentConsensusStrategy`.
 - Tools: `BaseTool`, `Tools`, `FunctionTool`, `ToolCall`, `ToolCallContext`, `ToolCallState`, `ToolExecutor`, `ToolParameter`, `ToolPermission`, `ToolRegistry`, `ToolResult`, `ToolSpec`, `ToolStatus`, `ToolMixin`, `ToolsFormatter`, `tool`, `vidbyte_tool`.
 - MCP: `McpServerConfig`, `McpServerHandle`, `McpToolPermission`.
 - MCP errors: `McpError`, `McpConnectionError`, `McpInitializeError`, `McpToolDiscoveryError`, `McpToolExecutionError`, `McpAttachmentError`.
+
+> The exact `__all__` is authoritative in `vidbyte/__init__.py`; the list above is a curated summary. There are **no** `BaseStrategy`/`ChainOfThoughtStrategy`/`MultiAgentConsensusStrategy` public exports anymore.
 
 Root exports are meant for common imports. More specialized built-ins should still be imported from their category packages.
 
@@ -82,9 +94,8 @@ Root exports are meant for common imports. More specialized built-ins should sti
 - `sdk.harnesses`: `HarnessClient`.
 - `sdk.tools`: `ToolsClient`.
 - `sdk.providers`: `ProvidersClient`.
-- `sdk.strategies`: `StrategyClient`.
 
-The root client should stay light. Feature-specific behavior belongs in the feature package.
+There is no `sdk.strategies` namespace. Reasoning/orchestration is configured per-agent via `runtime=` and `algorithm=`, and agents are wired together with pipelines. The root client should stay light. Feature-specific behavior belongs in the feature package.
 
 ## Agents And Modality Routing
 
@@ -101,7 +112,7 @@ Primary files:
 Primary concepts:
 
 - `Agent = BaseAgent` is the ergonomic alias.
-- `BaseAgent` is the executable actor. It owns name, system prompt, strategy, runner settings, explicit runners by modality, tools, permission policy, MCP attachment state, history, metadata, and capabilities.
+- `BaseAgent` is the executable actor. It owns name, system prompt, runtime selection, context-window algorithm, runner settings, explicit runners by modality, tools, permission policy, middleware, MCP attachment state, history, metadata, and capabilities.
 - `AgentInput` is a typed input wrapper with `prompt`, `modality`, `metadata`, optional `context_items`, and optional `context_manager`.
 - `AgentMessage` is the in-process message payload passed between agents.
 - `AgentCard` exposes local capability metadata: description, system prompt, capabilities, tool names, MCP server/tool names, modalities, and metadata.
@@ -114,10 +125,9 @@ Agent execution:
 - `BaseAgent.generate_reply()` is async and returns an `AgentMessage`.
 - `BaseAgent.arun()` is the async ergonomic alias.
 - `BaseAgent.run()` is the sync wrapper and rejects use from an active event loop.
-- If a strategy is present, the agent delegates to `strategy.arun(prompt, runner=..., context=..., tools=...)`.
-- If no strategy is present, the agent requires an executable runner.
-- Direct runner execution supports `run()`, `arun()`, or a callable runner.
-- Agent context is built as `BaseAgentContext` and includes system prompt, agent name, history, files, strategy metadata, tool calls, responses, budget, artifacts, memory, permissions, and metadata.
+- The agent runs under its configured `AgentRuntime` (linear by default), which owns the per-iteration loop, middleware dispatch, tool execution, and tracing.
+- Direct runner execution supports `run()`, `arun()`, or a callable runner; the runtime requires an executable runner.
+- Agent context is built as `BaseAgentContext` and includes system prompt, agent name, history, files, runtime/algorithm metadata, tool calls, responses, budget, artifacts, memory, permissions, and metadata.
 
 Modality routing:
 
@@ -141,99 +151,40 @@ MCP attachment:
 - Attached remote tools are bridged into native `BaseTool` objects.
 - Agents should close MCP servers through `close_mcp_servers()` or async context manager usage.
 
-## Strategies
+## Agent Runtimes
+
+The former `vidbyte/strategies/` layer no longer exists. An agent's execution paradigm is chosen with `runtime=AgentRuntimeType.<name>` (or the string value), and reasoning behaviors that transform the context window are attached with `algorithm=ContextWindow.preset.<name>`. See `skills/agent-runtimes/SKILL.md` and `skills/vidbyte-sdk/adding-context-window-algorithms.md`.
 
 Primary files:
 
-- `vidbyte/strategies/base.py`
-- `vidbyte/strategies/types.py`
-- `vidbyte/strategies/client.py`
-- `vidbyte/strategies/mixins.py`
-- `vidbyte/strategies/reasoning/`
-- `vidbyte/strategies/sampling/`
-- `vidbyte/strategies/agent_loops/`
-- `vidbyte/strategies/routing/`
-- `vidbyte/strategies/multi_agent/`
-- `vidbyte/strategies/react.py`
-- `vidbyte/strategies/codeact.py`
-- `vidbyte/strategies/reflexion.py`
-- `vidbyte/strategies/tree_of_thoughts.py`
+- `vidbyte/agents/runtime.py` — `AgentRuntime` (generic per-iteration loop, middleware/tracing/tool execution).
+- `vidbyte/agents/runtimes/` — `linear.py`, `search.py` (MCTS), `actor/` (actor model broker/inbox/message/actor).
+- `vidbyte/agents/context_algorithms.py` — `AgentRuntimeContextAlgorithms` dispatcher mapping a configured algorithm to its runtime adapter.
+- `vidbyte/agents/algorithms/` — runtime adapters (e.g. `reflexion.py`, multi-provider grader).
+- `vidbyte/lib/enums/agent_runtime.py` — `AgentRuntimeType`.
+- `vidbyte/lib/dataclasses/strategies.py` — `StrategyResult` (internal runtime result: `output`, `strategy_name`, optional metadata).
 
-Base contract:
+`AgentRuntimeType` values:
 
-- `BaseStrategy` is async-first.
-- Implement `async arun(prompt, *, runner=None, context=None, tools=(), **options) -> StrategyResult`.
-- `run()` wraps `arun()` for sync callers and refuses active event loops.
-- `_resolve_runner()` raises `StrategyExecutionError` when no runner is available.
-- `BaseStrategyUtils` owns shared parsing helpers such as final-answer extraction, answer normalization, numbered-line parsing, positive integer validation, and non-empty string validation.
-- `StrategyResult` carries `output`, `strategy_name`, and optional metadata.
+- `LINEAR` (default) — sequential reason/act/model loop. Fully compatible with middleware and context-window algorithms.
+- `MCTS_SEARCH` (`mcts_search`) — Monte Carlo tree search over reasoning paths.
+- `ACTOR_MODEL`, `ACTOR_MODEL_P2P`, `ACTOR_MODEL_BROADCAST` — concurrent multi-actor message-passing swarm.
 
-Reasoning strategies:
+Non-linear runtimes (MCTS, actor) are structurally incompatible with middleware and context-window algorithms; combining them raises `ConfigurationError` at construction.
 
-- `ChainOfThoughtStrategy`: asks the runner for explicit reasoning and returns a final response.
-- `StepBackStrategy`: extracts broader principles, then answers using those principles.
-- `ChainOfDraftStrategy`: constrains intermediate reasoning through compact draft steps.
-- `SkeletonOfThoughtStrategy`: builds a skeleton, expands points, and assembles output.
+Public runtime exports (from `vidbyte.agents.runtimes`): `LinearRuntime`, `MctsSearchRuntime`, `ActorRuntime`, the runtime components (`LinearAgentRuntime`, `SearchTreeRuntimeComponent`, `PointToPointActorRuntime`, `BroadcastActorRuntime`), and prebuilt actor personas (`PlannerActor`, `ReviewerActor`, `GeneratorActor`, `CriticActor`, `ReasonerActor`, `SummarizationActor`, `DecomposerActor`, `ExplorerActor`, `TradeoffActor`, `HypothesisGeneratorActor`, `RefinerActor`, `SafetyActor`, `FinalAnswerActor`, `PrebuiltActor`). Actor personas are backed by the `actor_runtime` prompt family.
 
-Sampling strategies:
+## Context-Window Algorithms
 
-- `SelfConsistencyStrategy`: samples multiple responses and chooses a consistent answer.
-- `BudgetForcingStrategy`: continues work across a bounded number of attempts.
-- `AnswerConvergenceStrategy`: repeats attempts until answers converge.
-
-Agent-loop and routing strategies:
-
-- `PlanAndExecuteStrategy`: plans, executes plan steps, and synthesizes a final answer.
-- `SelfRefinementStrategy`: creates, critiques, and refines output.
-- `ParadigmRouterStrategy`: uses prompt guidance to choose a reasoning paradigm.
-
-Other single-agent strategies:
-
-- `TreeOfThoughtsStrategy`: branches, evaluates branches, and synthesizes from selected thoughts.
-- `ReActStrategy`: follows reason/action style strategy flow.
-- `CodeActStrategy`: extends ReAct-oriented behavior for code-action patterns.
-- `ReflexionStrategy`: supports reflective retry/refinement behavior.
-
-Strategy client:
-
-- `VidbyteSDK().strategies` exposes multi-agent factory helpers: `consensus()`, `autogen()`, `vmao()`, `economic_gate()`, and `evolving()`.
-- `StrategyMixin` lets host objects attach one strategy with `with_strategy()` or compose multiple strategies through `with_strategies()`.
-
-## Multi-Agent Orchestration
+Context-window algorithms are SDK-selected runtime behaviors that transform what the model sees during a run. They are attached with `algorithm=ContextWindow.preset.<name>` and dispatched by `AgentRuntimeContextAlgorithms`.
 
 Primary files:
 
-- `vidbyte/strategies/multi_agent/base.py`
-- `vidbyte/strategies/multi_agent/consensus.py`
-- `vidbyte/strategies/multi_agent/autogen.py`
-- `vidbyte/strategies/multi_agent/vmao.py`
-- `vidbyte/strategies/multi_agent/economic_gate.py`
-- `vidbyte/strategies/multi_agent/evolving.py`
-- `vidbyte/strategies/multi_agent/types.py`
-- `vidbyte/lib/dataclasses/multi_agent.py`
+- `vidbyte/context/algorithms/` — public config dataclasses (`reflexion.py`, `trajectory_checkpoints.py`, `multi_provider_agentic_grader.py`, `tool_results.py`).
+- `vidbyte/context/presets.py` — `ContextWindow.preset.<name>` registration.
+- `vidbyte/context/runtime.py` — inner-loop context-window lifecycle (`InnerContextWindowAlgorithm`, `ContextWindowRunContext`).
 
-Core contracts:
-
-- `BaseMultiAgentStrategy` extends `BaseStrategy`, tracks call limits, wraps agent execution, and normalizes safe error text.
-- Multi-agent strategies import `vidbyte.agents`, so they are not all re-exported from `vidbyte.strategies.__init__` to avoid circular imports. Import them from `vidbyte.strategies.multi_agent`.
-
-Topologies:
-
-- `MultiAgentConsensusStrategy`: runs candidate strategies, optionally captures failures, renders an evaluator prompt, and selects a final output through an evaluator agent, evaluator strategy, or runner.
-- `AutoGenConversationStrategy`: models AutoGen-style message passing among agents.
-- `VerifiedMultiAgentOrchestrationStrategy`: VMAO-style plan, execute DAG, synthesize, verify, and gap-replan loop.
-- `EconomicGateStrategy`: scores whether orchestration is worth the cost and chooses baseline or orchestration behavior.
-- `EvolvingOrchestrationStrategy`: uses a policy to choose the next agent across turns.
-- `HeuristicPolicy` is the built-in simple policy for evolving orchestration.
-
-Multi-agent dataclasses:
-
-- `CandidateResult`: successful candidate strategy result.
-- `CandidateFailure`: failed candidate summary.
-- `EvaluationDecision`: selected candidate, final output, grades, and rationale.
-- `DagNode`: VMAO DAG node with dependencies and optional preferred capability.
-- `Verification`: verifier approval, score, gaps, and rationale.
-- `NodeState`: mutable per-node execution state.
+Public algorithm config exports: `ReflexionAlgorithm`, `TrajectoryCheckpointAlgorithm`, `MultiProviderAgenticGraderAlgorithm`, `InnerContextWindowAlgorithm`, `ContextWindowAlgorithm`. Each algorithm also has a model-callable **tool** equivalent (`ReflexionTool`, `TrajectoryCheckpointTool`); see `skills/vidbyte-sdk/context-algorithm-to-tool.md`.
 
 ## Tools
 
@@ -255,7 +206,7 @@ Preferred public model:
 
 - Use `Tools(...)`, `@tool`, `@vidbyte_tool`, and `Agent(..., tools=[...])` for new public examples.
 - `ToolRegistry` and `ToolExecutor` remain supported compatibility/lower-level infrastructure.
-- Avoid global mutable tool state for orchestration. Tools should be injected into agents, strategies, or namespace clients.
+- Avoid global mutable tool state for orchestration. Tools should be injected into agents or namespace clients.
 
 Tool contracts:
 
@@ -304,7 +255,11 @@ Built-in tool groups:
 - `vidbyte.tools.builtins.document_retrieval.DocumentRetrievalTool`
 - `vidbyte.tools.builtins.code_search`: `GlobTool`, `GrepTool`, `SemanticSearchTool`
 - `vidbyte.tools.builtins.editing`: `PatchTool`
-- `vidbyte.tools.builtins.context`: `ContextCompactionTool`, compaction modes and related types
+- `vidbyte.tools.builtins.context`: `ContextCompactionTool`, compaction modes and related types — **legacy/manual** only; prefer compaction middleware (`vidbyte/middleware/compaction/`)
+- `vidbyte.tools.builtins.context_primitives`: `ContextUpsertTool`, `ContextListTool`, `ContextRemoveTool`
+- `vidbyte.tools.builtins.reflexion.ReflexionTool`, `vidbyte.tools.builtins.trajectory_checkpoint.TrajectoryCheckpointTool` (model-callable forms of the context-window algorithms)
+- `vidbyte.tools.builtins.memory`: Cognee, Letta, Mem0, Supermemory, and Zep memory tools — see `skills/vidbyte-sdk/memory-tools.md`
+- `vidbyte.tools.builtins.mcp`: `AttachMcpServerTool`, `SearchMcpServersTool`
 
 ## Filesystem Tools
 
@@ -407,6 +362,9 @@ Provider enum:
 - `ModelProvider.DEEPSEEK`
 - `ModelProvider.GLM`
 - `ModelProvider.MINIMAX`
+- `ModelProvider.OPENROUTER`
+- `ModelProvider.ELEVENLABS`
+- `ModelProvider.PLAYAI`
 
 Provider adapters:
 
@@ -414,10 +372,11 @@ Provider adapters:
 - `AnthropicProvider`: text API.
 - `GeminiProvider`: text API.
 - `XAIProvider`: OpenAI-compatible text plus image support.
+- `OpenRouterProvider`: OpenAI-compatible aggregator provider.
+- `ElevenLabsProvider`, `PlayAIProvider`: audio providers.
 - `OpenAICompatibleProvider`: base for OpenAI-compatible text providers.
 - `DeepSeekProvider`, `GLMProvider`, `MiniMaxProvider`: compatible text providers.
-- `ModelProviders`: central factory for text/image/video provider selection.
-- `get_text_provider()`, `get_image_provider()`, and `get_video_provider()` are compatibility wrappers.
+- `ModelProviders`: central factory for text/image/video/audio/embedding provider selection.
 - `tool_spec_to_provider_schema()` translates SDK tool specs to provider-specific schema shapes.
 
 Model configs:
@@ -450,7 +409,6 @@ Primary files:
 - `vidbyte/prompts/__init__.py`
 - `vidbyte/prompts/registry.py`
 - `vidbyte/prompts/prompts/*.json`
-- `vidbyte/prompts/strategies/`
 - `vidbyte/lib/enums/prompts.py`
 - `skills/vidbyte-sdk/adding-prompts.md`
 
@@ -467,29 +425,27 @@ Prompt model:
 - `Prompts().import_names()` returns generated direct import names.
 - `vidbyte.prompts.registry` is a compatibility re-export for `PromptRecord` and `Prompts`.
 
-Current prompt families:
+Current prompt families (13 families, 34 prompts — authoritative source is `vidbyte/lib/enums/prompts.py`):
 
-- `agentic_rag`
-- `answer_convergence`
-- `budget_forcing`
-- `chain_of_draft`
-- `chain_of_thought`
+- `agentic_loop`
+- `handoff`
 - `context_engineering`
 - `expert_prompting`
-- `multi_agent_reflexion`
-- `paradigm_router`
-- `plan_and_execute`
-- `self_consistency`
-- `skeleton_of_thought`
-- `step_back`
-- `tree_of_thoughts`
-- `vmao`
+- `goals`
+- `mimic_behavior`
+- `reflexion`
+- `prompt_engineering`
+- `evals`
+- `multi_provider_agentic_grader`
+- `templates`
+- `actor_runtime` (15 actor-persona prompts)
+- `trajectory_checkpoints`
 
-Strategy prompt bundles:
+Prompt assets and bundles:
 
-- Strategy prompt bundle classes live under `vidbyte/prompts/strategies/`.
-- Most bundles read prompt text through `Prompts().family(...)`.
-- `SelfRefinementCreatePrompt`, `SelfRefinementFeedbackPrompt`, and `SelfRefinementRefinePrompt` are dataclass prompt helpers.
+- Prompt assets live under `vidbyte/prompts/prompts/`, as either inline-JSON families or a per-family folder with a JSON descriptor plus Markdown bodies (see `skills/vidbyte-sdk/adding-prompts.md`).
+- `vidbyte/prompts/catalog.py` holds the `Prompts` catalog loader.
+- The full listing with enum names and direct-import names is in `skills/usage/import_prompt.md`.
 
 When adding prompts:
 
@@ -497,7 +453,7 @@ When adding prompts:
 - Add one JSON file per prompt family under `vidbyte/prompts/prompts/`.
 - Add enum members under `vidbyte/lib/enums/prompts.py`.
 - Ensure direct imports are exposed from `vidbyte.prompts`.
-- Update tests for enum lookup, direct imports, descriptions, and consuming strategies.
+- Update tests for enum lookup, direct imports, descriptions, and any consumers of the family.
 
 ## Context And Dataclasses
 
@@ -505,18 +461,18 @@ Primary files:
 
 - `vidbyte/context/__init__.py`
 - `vidbyte/context/manager.py`
-- `vidbyte/context/primitives.py`
+- `vidbyte/context/primitives/` (package: `base.py`, `checkpoints.py`, `documents.py`, `records.py`, `tasks.py`)
 - `vidbyte/context/presets.py`
 - `vidbyte/context/window.py`
 - `vidbyte/context/algorithms/`
+- `vidbyte/context/runtime.py`
 - `vidbyte/lib/dataclasses/`
-- `vidbyte/strategies/types.py`
 - `vidbyte/tools/types.py`
 - `vidbyte/agents/types.py`
 
 Central rule:
 
-- Shared infrastructure dataclasses live under `vidbyte/lib/dataclasses/`; public context item primitives live under `vidbyte/context/primitives.py`.
+- Shared infrastructure dataclasses live under `vidbyte/lib/dataclasses/`; public context item primitives live under the `vidbyte/context/primitives/` package. See `skills/vidbyte-sdk/context-primitives.md`.
 - Package-local `types.py` modules and package `__init__` files re-export stable contracts.
 - Prefer extending central dataclasses rather than duplicating type definitions in feature packages.
 
@@ -536,10 +492,8 @@ Context dataclasses:
 - `ContextWindowAlgorithm`: named runtime admission behavior attached to an agent with `algorithm=...`.
 - `ToolResultAdmission`: enum for how tool results are admitted into model-visible context.
 - `BaseContext`: baseline context with `build_context()`, context items, and optional file content rendering.
-- `StrategyContext`: per-run strategy context.
 - `BaseAgentContext`: context built by agents.
-- `VMAOContext`: VMAO-specific context with round and notes fields.
-- Standard context item dataclasses: `TextContextItem`, `FileContextItem`, `GitDiffContextItem`, `TaskContextItem`, `DocumentContextItem`, `EnvironmentContextItem`, `MemoryContextItem`, `ProgressContextItem`, `ArtifactContextItem`, `ResponseContextItem`, and `ToolCallContextItem`.
+- Standard context item dataclasses (in `vidbyte/context/primitives/`): `TextContextItem`, `FileContextItem`, `GitDiffContextItem`, `TaskContextItem`, `PlanContextItem`, `DocumentContextItem`, `EnvironmentContextItem`, `MemoryContextItem`, `ProgressContextItem`, `ArtifactContextItem`, `ResponseContextItem`, `ToolCallContextItem`, and `TrajectoryCheckpointContextItem`.
 
 Context management rules:
 
@@ -587,14 +541,15 @@ Error classes live under `vidbyte/lib/errors/base.py` and are re-exported throug
 - Base: `VidbyteSdkError`.
 - Tool errors: `ToolRegistryError`, `ToolExecutionError`, `ToolRegistrationError`, `PermissionDeniedError`.
 - MCP errors: `McpError`, `McpConnectionError`, `McpInitializeError`, `McpToolDiscoveryError`, `McpToolExecutionError`, `McpAttachmentError`, `McpProtocolError`.
-- Strategy and agent errors: `StrategyExecutionError`, `StrategyConfigurationError`, `AgentExecutionError`, `AgentRegistryError`.
+- Agent and pipeline errors: `AgentExecutionError`, `AgentRegistryError`, `PipelineExecutionError`.
 - Provider/config errors: `ConfigurationError`, `UnsupportedProviderError`, `ProviderSelectionError`, `ProviderRequestError`, `ProviderConfigurationError`, `ProviderResponseError`.
+- Tracing errors: `TracerConfigurationError`.
 
 Errors should carry useful details where the existing class supports them. Public boundaries should raise SDK-specific errors rather than leaking arbitrary lower-level exceptions when practical.
 
 ## Harnesses And Shared Namespace
 
-`vidbyte/harnesses/client.py` currently contains a minimal `HarnessClient` namespace. Harnesses are intentionally not where multi-agent topology flags belong. Compose strategy behavior through agents and strategies instead.
+`vidbyte/harnesses/client.py` currently contains a minimal `HarnessClient` namespace. Harnesses are intentionally not where multi-agent topology flags belong. Compose behavior through agent runtimes, context-window algorithms, and pipelines instead.
 
 `vidbyte/shared/` is currently a placeholder namespace for shared SDK scaffolding.
 
@@ -604,8 +559,15 @@ Use these docs for background and intent. Confirm current implementation before 
 
 - `docs/design/sdk-consolidated.md`: describes merging several parallel SDK PRs into a unified SDK branch. Useful for understanding why multiple subsystems landed together.
 - `docs/design/agent-abstractions.md`: early design for tools, prompt registry, prompt translations, strategies, and harness integrations. Historical in parts because prompt and tool APIs were later simplified/consolidated.
-- `docs/design/prompt-api-strategies-sdk.md`: provider execution, filesystem tools, config, HTTP, runners, and initial prompt/API strategy batch.
-- `docs/design/multi-agent-orchestration-strategies.md`: agents package, strategy framework, multi-agent topologies, context dataclasses, VMAO, and orchestration boundaries.
+- `docs/design/remove-strategies.md`: removal of the `vidbyte/strategies/` layer in favor of agent runtimes and context-window algorithms — read this to understand the strategy→runtime migration.
+- `docs/design/non-linear-agent-runtimes.md`, `docs/design/actor-model-runtime-redesign.md`, `docs/design/feat-advanced-runtimes-and-registries.md`: the agent-runtime model (linear, MCTS, actor).
+- `docs/design/agent-runtime-middleware.md`, `docs/design/middleware-builtins-expansion.md`, `docs/design/concurrent-middleware-safety.md`, `docs/design/security-middleware-tripwire-deputy-honeypot.md`: the middleware subsystem and built-ins.
+- `docs/design/context-compaction-middleware.md`, `docs/design/truncate-tool-results-compaction.md`: compaction moved from tools to middleware.
+- `docs/design/handoff-agent.md`: handoff documents and the handoff agent.
+- `docs/design/context-window-primitives.md`, `docs/design/context-window-templates.md`, `docs/design/context-algorithms-as-tools.md`, `docs/design/agentic-trajectory-checkpoints.md`, `docs/design/multi-provider-agentic-grader.md`: context primitives and context-window algorithms.
+- `docs/design/sdk-evals.md`: eval suites, graders, and runner.
+- `docs/design/memory-provider-tools.md`: memory tool providers (Cognee, Letta, Mem0, Supermemory, Zep).
+- `docs/design/structured-output.md`, `docs/design/new-runners.md`, `docs/design/agent-tracing-observability.md`, `docs/design/trace-facade.md`: structured output, new runners (audio/embedding/streaming), and tracing.
 - `docs/design/advanced-tool-ecosystem.md`: dependency-free tool foundation, code search, MCP bridge, permissions/sandbox, patch/edit tools, and context compaction. Its own supersession note says later tool API docs update the public mental model.
 - `docs/design/custom-function-tools.md`: decorator-first function tool API with Pydantic validation and integration into registries, strategies, agents, providers, and harnesses. Superseded in public examples by `@tool`, `Tools`, and agent-local tools.
 - `docs/design/mcp-server-attachment.md`: attaching MCP servers to agents and harnesses, lifecycle management, and bridged remote tools.
@@ -620,41 +582,20 @@ If local-only docs such as `minimal-agent-runtime.md` or `pipelines.md` are pres
 
 Use tests as executable examples for expected behavior:
 
-- `test_agent_abstractions.py`: early SDK client, tools, prompt abstractions.
-- `test_agent_base.py`: base agent execution, strategy/runner integration, history.
-- `test_agent_modality_routing.py`: typed inputs, modality detection, runner routing, agent-facing model execution.
-- `test_agent_registry.py`: agent registry lookup and cards.
-- `test_agent_tool_loop.py`: agent-local tool-call loop and provider tool-call parsing.
-- `test_autogen_conversation.py`: AutoGen-style multi-agent conversation.
-- `test_code_search_tools.py`: glob, grep, semantic search.
-- `test_config_validation.py`: config validation and API key resolution.
-- `test_context_compaction_tools.py`: context compaction behavior.
-- `test_context_dataclasses.py`: context and preset dataclasses.
-- `test_context_management.py`: context item dataclasses, `ContextManager`, compatibility bridging, and public imports.
-- `test_custom_function_tools.py`: function decorators, validation, sync/async execution.
-- `test_economic_gate.py`: economic gate strategy.
-- `test_evolving_orchestration.py`: evolving orchestration.
-- `test_filesystem_tools.py`: filesystem tool behavior.
-- `test_image_video_runners.py`: image/video runner response parsing and provider behavior.
-- `test_mcp_attachment.py`: MCP lifecycle attachment to agents.
-- `test_mcp_bridge.py`: MCP client/bridged tool behavior.
-- `test_multi_agent_consensus.py`: consensus strategy.
-- `test_patch_tool.py`: exact patch editing.
-- `test_prompt_registry.py`: prompt catalog loading and enum sync.
-- `test_prompts_interface.py`: simplified prompt interface and direct imports.
-- `test_provider_tool_schema_translation.py`: provider schema formatting and parsing.
-- `test_reasoning_strategies.py`: reasoning strategy behavior.
-- `test_sampling_strategies.py`: sampling strategy behavior.
-- `test_security_executor.py`: permission policy and executor behavior.
-- `test_self_refinement_strategy.py`: self-refinement prompt and loop behavior.
-- `test_strategy_mixin.py`: strategy composition helper.
-- `test_strategy_router.py`: paradigm router.
-- `test_text_model_runner.py`: text runner/provider behavior.
-- `test_tool_core.py`: tool core contracts.
-- `test_tool_mixin.py`: tool mixin helper.
-- `test_tool_registry_custom_inputs.py`: custom input normalization in registry.
-- `test_tools_catalog.py`: preferred `Tools` catalog behavior.
-- `test_vmao.py`: verified multi-agent orchestration.
+The `tests/` directory is authoritative; representative files include:
+
+- Agents/runtime: `test_agent_base.py`, `test_agent_abstractions.py`, `test_agent_runtime.py`, `test_agent_modality_routing.py`, `test_agent_registry.py`, `test_agent_tool.py`, `test_agent_tool_loop.py`, `test_handoff_agent.py`.
+- Middleware: `test_agent_middleware.py`, `test_middleware_builtins.py`, `test_new_middleware_builtins.py`, `test_security_middleware.py`, `test_concurrent_middleware.py`, `test_context_compaction_middleware.py`.
+- Context/algorithms: `test_context_management.py`, `test_context_dataclasses.py`, `test_context_primitives_binding.py`, `test_context_primitives_builtins.py`, `test_context_primitives_registry.py`, `test_context_window_templates.py`, `test_inner_context_window_algorithms.py`, `test_reflexion_algorithm.py`, `test_trajectory_checkpoint_algorithm.py`, `test_context_algorithm_tools.py`, `test_context_compaction_tools.py`, `test_multi_provider_agentic_grader.py`.
+- Pipelines: `test_pipelines.py`.
+- Tools: `test_tools_catalog.py`, `test_tool_core.py`, `test_tool_mixin.py`, `test_custom_function_tools.py`, `test_tool_registry_custom_inputs.py`, `test_code_search_tools.py`, `test_patch_tool.py`, `test_filesystem_tools.py`, `test_security_executor.py`, `test_memory_tools.py`, `test_mcp_discovery_tools.py`.
+- Evals: `test_evals.py`.
+- MCP: `test_mcp_attachment.py`, `test_mcp_bridge.py`, `test_mcp_studio_server.py`.
+- Providers/runners: `test_text_model_runner.py`, `test_streaming_text_runner.py`, `test_image_video_runners.py`, `test_audio_runner.py`, `test_embedding_runner.py`, `test_openrouter_provider.py`, `test_provider_tool_schema_translation.py`, `test_model_registry.py`, `test_config_validation.py`.
+- Prompts: `test_prompts_interface.py`.
+- Tracing: `test_tracing.py`, `test_trace_facade.py`.
+
+Run `ls tests/` for the complete, current list.
 
 ## Development Guardrails
 
@@ -665,7 +606,7 @@ Use tests as executable examples for expected behavior:
 - Keep model provider configs under `vidbyte/lib/config/`.
 - Keep provider-neutral formatting helpers under `vidbyte/lib/tools/`.
 - Keep internal model runners under `vidbyte/lib/runners/`; public examples should usually prefer agent-facing APIs.
-- Keep multi-agent orchestration under `vidbyte/strategies/multi_agent/`.
+- Keep agent execution runtimes under `vidbyte/agents/runtimes/` and context-window algorithms under `vidbyte/context/algorithms/` + `vidbyte/agents/algorithms/`.
 - Keep tools under `vidbyte/tools/` and built-ins grouped by category.
 - Keep MCP code under `vidbyte/tools/mcp/`.
 - Keep permission and sandbox abstractions under `vidbyte/tools/security/`.
@@ -683,13 +624,13 @@ Run these before handoff for most changes:
 ```bash
 python -m compileall vidbyte
 python -m unittest discover -s tests
-python -c "from vidbyte import VidbyteSDK; sdk = VidbyteSDK(); print(type(sdk.strategies).__name__)"
+python -c "from vidbyte import VidbyteSDK; sdk = VidbyteSDK(); print(type(sdk.agents).__name__)"
 ```
 
 For prompt changes, also verify:
 
 ```bash
-python -m unittest tests.test_prompt_registry tests.test_prompts_interface
+python -m unittest tests.test_prompts_interface
 ```
 
 For tool changes, run the relevant focused tests first:
@@ -708,11 +649,10 @@ python -m unittest tests.test_text_model_runner tests.test_image_video_runners t
 
 Adding a prompt:
 
-1. Add or update one JSON family in `vidbyte/prompts/prompts/`.
+1. Add or update one prompt family in `vidbyte/prompts/prompts/` (inline JSON, or a folder with a JSON descriptor plus Markdown bodies).
 2. Add matching enum members in `vidbyte/lib/enums/prompts.py`.
 3. Ensure direct imports are exposed from `vidbyte.prompts`.
-4. Update strategy prompt bundles if they consume the family.
-5. Add or update prompt tests.
+4. Add or update prompt tests (`tests/test_prompts_interface.py`).
 
 Adding a tool:
 
@@ -730,20 +670,25 @@ Adding a provider:
 4. Register it in `ModelProviders` for the supported modalities.
 5. Add fake transport tests for payload construction and response parsing.
 
-Adding a strategy:
+Adding a context-window algorithm:
 
-1. Subclass `BaseStrategy`.
-2. Implement async `arun()` and return `StrategyResult`.
-3. Use prompt bundles or prompt assets instead of hardcoded long prompt strings where possible.
-4. Accept runner/context/tools consistently with other strategies.
-5. Export from the relevant package `__init__` if it is intended public API.
-6. Add focused unittest coverage.
+1. Add the public config dataclass under `vidbyte/context/algorithms/` and register a preset in `vidbyte/context/presets.py`.
+2. Add the runtime adapter under `vidbyte/agents/algorithms/` and wire it through `AgentRuntimeContextAlgorithms`.
+3. Keep `AgentRuntime.arun()` thin (dispatcher delegation + fallback).
+4. Attach a structured algorithm trace to `StrategyResult.metadata`.
+5. Follow `skills/vidbyte-sdk/adding-context-window-algorithms.md` and add tests with fake runners.
+
+Adding an agent runtime:
+
+1. Implement the runtime under `vidbyte/agents/runtimes/` and add an `AgentRuntimeType` value.
+2. Decide middleware / context-window-algorithm compatibility; raise `ConfigurationError` for unsupported combinations.
+3. Follow `skills/agent-runtimes/SKILL.md` and add tests.
 
 Adding an agent-facing capability:
 
 1. Prefer extending `BaseAgent` only when the behavior belongs to all agents.
 2. Keep modality selection in `ModalityDetector` or runner routing helpers.
-3. Preserve direct runner and strategy delegation behavior.
+3. Preserve direct runner and runtime delegation behavior.
 4. Preserve tool loop permission checks and structured context records.
 5. Add tests around sync/async calls, modality, tools, and metadata.
 
