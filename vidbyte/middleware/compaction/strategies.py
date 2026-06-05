@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import dataclasses
 import math
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 
 from vidbyte.lib.dataclasses.context import ContextMessage, ProgressLog
 from vidbyte.middleware.compaction.base import BaseCompaction, CompactionMode, Summarizer
@@ -10,6 +10,21 @@ from vidbyte.middleware.compaction.base import BaseCompaction, CompactionMode, S
 
 def _is_tool_message(message: ContextMessage) -> bool:
     return message.kind in {"tool_call", "tool_result"}
+
+
+def _provider_groups(messages: Sequence[ContextMessage]) -> tuple[tuple[ContextMessage, ...], ...]:
+    # Groups messages into logical units, pairing each tool call with its immediate result.
+    groups: list[tuple[ContextMessage, ...]] = []
+    index = 0
+    while index < len(messages):
+        message = messages[index]
+        if message.kind == "tool_call" and index + 1 < len(messages) and messages[index + 1].kind == "tool_result":
+            groups.append((message, messages[index + 1]))
+            index += 2
+        else:
+            groups.append((message,))
+            index += 1
+    return tuple(groups)
 
 
 def _build_progress_log(raw_log: object) -> ProgressLog:
@@ -250,6 +265,146 @@ class SummarizeByTopicBlocksCompaction(BaseCompaction):
         return system + tuple(summaries)
 
 
+_VALID_TRACE_SCOPES = {"all_non_system", "oldest_n_groups", "oldest_percentage", "middle_keep_bookends"}
+_VALID_TRACE_PLACEMENTS = {"summary", "system_suffix", "synthetic_user"}
+
+
+class ReplaceWithTraceCompaction(BaseCompaction):
+    """Replaces a selected region of non-system history with one rendered trace message."""
+
+    def __init__(self, trace_text: str, *, scope: str = "all_non_system", n: int = 0, percentage: float = 0.0, keep_last_groups: int = 0, keep_last_user: bool = False, keep_pinned: bool = False, keep_errors: bool = False, keep_active_branch: str | None = None, placement: str = "summary", trace_marker: str = "continual_trace") -> None:
+        # Stores replacement settings and validates scope, placement, and numeric bounds eagerly.
+        self.trace_text = trace_text
+        self.scope = scope
+        self.n = n
+        self.percentage = percentage
+        self.keep_last_groups = keep_last_groups
+        self.keep_last_user = keep_last_user
+        self.keep_pinned = keep_pinned
+        self.keep_errors = keep_errors
+        self.keep_active_branch = keep_active_branch
+        self.placement = placement
+        self.trace_marker = trace_marker
+        self._validate()
+
+    async def compact(self, messages: Sequence[ContextMessage]) -> tuple[ContextMessage, ...]:
+        # Replaces the scope-selected, unprotected non-system groups with a single trace message.
+        if not self.trace_text.strip():
+            return tuple(messages)
+        system = [m for m in messages if m.role == "system"]
+        non_system = [m for m in messages if m.role != "system"]
+        groups = _provider_groups(non_system)
+        replaced = self._replaced_group_indices(groups)
+        if groups and not replaced:
+            return tuple(messages)
+        trace_message = self._build_trace_message(sum(len(groups[i]) for i in replaced))
+        system_out = system + ([trace_message] if self.placement == "system_suffix" else [])
+        body_trace = None if self.placement == "system_suffix" else trace_message
+        return tuple(system_out + self._assemble_body(groups, replaced, body_trace))
+
+    def _validate(self) -> None:
+        # Raises ValueError for any unsupported scope, placement, or out-of-range numeric option.
+        if self.scope not in _VALID_TRACE_SCOPES:
+            raise ValueError(f"scope must be one of {sorted(_VALID_TRACE_SCOPES)}.")
+        if self.placement not in _VALID_TRACE_PLACEMENTS:
+            raise ValueError(f"placement must be one of {sorted(_VALID_TRACE_PLACEMENTS)}.")
+        if not 0 <= self.percentage <= 1:
+            raise ValueError("percentage must be between 0 and 1.")
+        if self.n < 0 or self.keep_last_groups < 0:
+            raise ValueError("n and keep_last_groups must be non-negative.")
+
+    def _replaced_group_indices(self, groups: Sequence[tuple[ContextMessage, ...]]) -> set[int]:
+        # Selects replaced groups from unprotected candidates, always re-including stale trace markers.
+        protected = self._protected_group_indices(groups)
+        candidates = [i for i in range(len(groups)) if i not in protected]
+        replaced = self._select_by_scope(candidates)
+        return replaced | self._groups_matching(groups, self._is_stale_trace)
+
+    def _protected_group_indices(self, groups: Sequence[tuple[ContextMessage, ...]]) -> set[int]:
+        # Computes the groups protected from replacement by the configured retention flags.
+        protected: set[int] = set()
+        if self.keep_last_groups > 0:
+            protected |= set(range(max(0, len(groups) - self.keep_last_groups), len(groups)))
+        if self.keep_last_user:
+            last_user = self._last_user_group(groups)
+            if last_user is not None:
+                protected.add(last_user)
+        if self.keep_pinned:
+            protected |= self._groups_matching(groups, self._is_pinned)
+        if self.keep_errors:
+            protected |= self._groups_matching(groups, self._is_error_result)
+        if self.keep_active_branch is not None:
+            protected |= self._groups_matching(groups, self._on_active_branch)
+        return protected
+
+    def _select_by_scope(self, candidates: Sequence[int]) -> set[int]:
+        # Picks which unprotected candidate groups to replace according to the configured scope.
+        if self.scope == "oldest_n_groups":
+            return set(candidates[: self.n])
+        if self.scope == "oldest_percentage":
+            return set(candidates[: math.ceil(len(candidates) * self.percentage)])
+        if self.scope == "middle_keep_bookends":
+            return set(candidates[1:]) if len(candidates) > 1 else set()
+        return set(candidates)
+
+    def _assemble_body(self, groups: Sequence[tuple[ContextMessage, ...]], replaced: set[int], trace_message: ContextMessage | None) -> list[ContextMessage]:
+        # Rebuilds non-system messages, collapsing the replaced groups into the trace at their position.
+        body: list[ContextMessage] = []
+        inserted = False
+        for index, group in enumerate(groups):
+            if index in replaced:
+                if trace_message is not None and not inserted:
+                    body.append(trace_message)
+                    inserted = True
+                continue
+            body.extend(group)
+        if trace_message is not None and not inserted:
+            body.append(trace_message)
+        return body
+
+    def _build_trace_message(self, replaced_count: int) -> ContextMessage:
+        # Builds the single trace message with role/kind chosen by the configured placement.
+        metadata = {"compaction": CompactionMode.REPLACE_WITH_TRACE.value, "trace_marker": self.trace_marker, "original_count": replaced_count}
+        if self.placement == "synthetic_user":
+            return ContextMessage(role="user", content="Continual trace (state so far):\n" + self.trace_text, kind="message", metadata=metadata)
+        if self.placement == "system_suffix":
+            return ContextMessage(role="system", content=self.trace_text, kind="summary", metadata=metadata)
+        return ContextMessage(role="assistant", content=self.trace_text, kind="summary", metadata=metadata)
+
+    def _groups_matching(self, groups: Sequence[tuple[ContextMessage, ...]], predicate: Callable[[ContextMessage], bool]) -> set[int]:
+        # Returns indices of groups containing at least one message matching the predicate.
+        return {index for index, group in enumerate(groups) if any(predicate(message) for message in group)}
+
+    @staticmethod
+    def _last_user_group(groups: Sequence[tuple[ContextMessage, ...]]) -> int | None:
+        # Returns the index of the newest group containing a user message, or None.
+        for index in range(len(groups) - 1, -1, -1):
+            if any(message.role == "user" for message in groups[index]):
+                return index
+        return None
+
+    @staticmethod
+    def _is_pinned(message: ContextMessage) -> bool:
+        # Returns whether a message is explicitly pinned via metadata.
+        return bool(dict(message.metadata).get("pinned"))
+
+    @staticmethod
+    def _is_error_result(message: ContextMessage) -> bool:
+        # Returns whether a message is a failed tool result worth preserving.
+        return message.kind == "tool_result" and dict(message.metadata).get("status") == "error"
+
+    def _is_stale_trace(self, message: ContextMessage) -> bool:
+        # Returns whether a message is a previously injected trace with this strategy's marker.
+        return dict(message.metadata).get("trace_marker") == self.trace_marker
+
+    def _on_active_branch(self, message: ContextMessage) -> bool:
+        # Returns whether a message belongs to the active snapshot branch or is unbranched.
+        metadata = dict(message.metadata)
+        branch = metadata.get("branch") or metadata.get("snapshot_branch")
+        ancestors = tuple(str(item) for item in metadata.get("branch_ancestors", ()))
+        return branch is None or str(branch) == self.keep_active_branch or self.keep_active_branch in ancestors
+
+
 class NoOpCompaction(BaseCompaction):
     """Returns messages unchanged; used as a safe fallback for unknown modes."""
 
@@ -265,6 +420,7 @@ __all__ = [
     "RemoveAllToolCallsCompaction",
     "RemoveLastNCompaction",
     "RemoveToolCallPercentageCompaction",
+    "ReplaceWithTraceCompaction",
     "StripToolResultBodiesCompaction",
     "SummarizeByTopicBlocksCompaction",
     "SummarizeOldestNCompaction",

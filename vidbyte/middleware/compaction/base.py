@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Protocol
@@ -24,6 +24,7 @@ class CompactionMode(str, Enum):
     SUMMARIZE_BY_TOPIC_BLOCKS = "summarize_by_topic_blocks"
     TRUNCATE_TOOL_RESULTS = "truncate_tool_results"
     HIDE_TOOL_RESULTS = "hide_tool_results"
+    REPLACE_WITH_TRACE = "replace_with_trace"
 
 
 class Summarizer(Protocol):
@@ -32,6 +33,9 @@ class Summarizer(Protocol):
     async def summarize(self, messages: Sequence[ContextMessage]) -> str:
         # Returns a compact summary of the supplied messages.
         ...
+
+
+TokenCounter = Callable[[str], int]
 
 
 @dataclass(frozen=True, slots=True)
@@ -60,4 +64,5 @@ __all__ = [
     "CompactionMode",
     "CompactionStats",
     "Summarizer",
+    "TokenCounter",
 ]

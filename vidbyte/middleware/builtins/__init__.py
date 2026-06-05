@@ -16,6 +16,8 @@ Architecture:
     - ToolResultCompactionMiddleware: Compacts model-visible tool outputs.
     - MessageHistoryCompactionMiddleware: Compacts provider message history.
     - SummaryCompactionMiddleware: Summarizes provider message history.
+    - TraceReplacementCompactionMiddleware: Replaces history with a rendered continual-trace artifact.
+    - TraceSummaryTailCompactionMiddleware: Replaces old history with the trace and summarizes the recent tail.
     - ExponentialBackoffRetryMiddleware: Retries steps using backing-off intervals.
     - LoopDetectionMiddleware: Halts execution if a repetitive prompt loop occurs.
     - CircuitBreakerMiddleware & CircuitState: Cuts off calls when error thresholds are exceeded.
@@ -32,7 +34,7 @@ from vidbyte.middleware.builtins.audit import AuditLogMiddleware
 from vidbyte.middleware.builtins.canary_tripwire import CanaryTripwireMiddleware
 from vidbyte.middleware.builtins.circuit_breaker import CircuitBreakerMiddleware, CircuitState
 from vidbyte.middleware.builtins.confused_deputy import ConfusedDeputyGuardMiddleware
-from vidbyte.middleware.builtins.context_compaction import MessageHistoryCompactionMiddleware, SummaryCompactionMiddleware, ToolResultCompactionMiddleware
+from vidbyte.middleware.builtins.context_compaction import MessageHistoryCompactionMiddleware, SummaryCompactionMiddleware, ToolResultCompactionMiddleware, TraceReplacementCompactionMiddleware, TraceSummaryTailCompactionMiddleware
 from vidbyte.middleware.builtins.cost_budget import CostBudgetMiddleware
 from vidbyte.middleware.builtins.exponential_backoff_retry import ExponentialBackoffRetryMiddleware
 from vidbyte.middleware.builtins.honeypot_tool import HoneypotToolMiddleware
@@ -61,4 +63,6 @@ __all__ = [
     "TokenRateLimitMiddleware",
     "ToolResultCompactionMiddleware",
     "ToolPolicyMiddleware",
+    "TraceReplacementCompactionMiddleware",
+    "TraceSummaryTailCompactionMiddleware",
 ]

@@ -14,6 +14,7 @@ from vidbyte.middleware.compaction.strategies import (
     RemoveAllToolCallsCompaction,
     RemoveLastNCompaction,
     RemoveToolCallPercentageCompaction,
+    ReplaceWithTraceCompaction,
     StripToolResultBodiesCompaction,
     SummarizeByTopicBlocksCompaction,
     SummarizeOldestNCompaction,
@@ -64,6 +65,14 @@ class ContextCompactionEngine:
         stats = CompactionStats(mode=selected.value, before_count=1, after_count=1, metadata=dict(visible.metadata))
         return visible, stats
 
+    def to_context_messages(self, messages: Sequence[Mapping[str, Any]]) -> tuple[ContextMessage, ...]:
+        # Converts provider message dictionaries into generic ContextMessage records.
+        return tuple(self._provider_to_context_message(m) for m in messages)
+
+    def from_context_messages(self, messages: Sequence[ContextMessage]) -> tuple[dict[str, Any], ...]:
+        # Converts ContextMessage records back into provider message dictionaries.
+        return tuple(self._context_message_to_provider(m) for m in messages)
+
     def _build_strategy(self, mode: CompactionMode, options: Mapping[str, Any]) -> BaseCompaction:
         # Creates the appropriate compaction strategy instance for the given mode and options.
         if mode is CompactionMode.CLEAR_EXCEPT_SYSTEM_AND_LOG:
@@ -80,6 +89,20 @@ class ContextCompactionEngine:
             return StripToolResultBodiesCompaction(str(options.get("placeholder", "[tool result stripped by compaction]")))
         if mode is CompactionMode.DEDUPLICATE_TOOL_CALLS:
             return DeduplicateToolCallsCompaction()
+        if mode is CompactionMode.REPLACE_WITH_TRACE:
+            return ReplaceWithTraceCompaction(
+                str(options.get("trace_text", "")),
+                scope=str(options.get("scope", "all_non_system")),
+                n=int(options.get("n", 0)),
+                percentage=float(options.get("percentage", 0.0)),
+                keep_last_groups=int(options.get("keep_last_groups", 0)),
+                keep_last_user=bool(options.get("keep_last_user", False)),
+                keep_pinned=bool(options.get("keep_pinned", False)),
+                keep_errors=bool(options.get("keep_errors", False)),
+                keep_active_branch=options.get("keep_active_branch"),
+                placement=str(options.get("placement", "summary")),
+                trace_marker=str(options.get("trace_marker", "continual_trace")),
+            )
         if mode is CompactionMode.TRUNCATE_TOOL_RESULTS:
             return TruncateToolResultMessagesCompaction(int(options.get("max_chars", 1000)), str(options.get("truncation_indicator", " [... truncated {count} characters ...]")))
         if mode is CompactionMode.SUMMARIZE_OLDEST_N:
