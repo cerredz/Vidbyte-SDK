@@ -298,7 +298,7 @@ agent = Agent(
 )
 ```
 
-Subclass `AgentMiddleware` and override only the hooks you need, such as `before_run`, `before_iteration`, `before_model_call`, `after_model_response`, `on_model_error`, `before_tool_call`, `after_tool_call`, `after_iteration`, or `after_run`. Built-ins are available from `vidbyte.middleware.builtins`, including `TokenRateLimitMiddleware`, `RuntimeLimitMiddleware`, `ToolPolicyMiddleware`, `AuditLogMiddleware`, `ModelRetryMiddleware`, `ToolResultCompactionMiddleware`, `MessageHistoryCompactionMiddleware`, and `SummaryCompactionMiddleware`.
+Subclass `AgentMiddleware` and override only the hooks you need, such as `before_run`, `before_iteration`, `before_model_call`, `after_model_response`, `on_model_error`, `before_tool_call`, `after_tool_call`, `after_iteration`, or `after_run`. Built-ins are available from `vidbyte.middleware.builtins`, including `TokenRateLimitMiddleware`, `RuntimeLimitMiddleware`, `ToolPolicyMiddleware`, `AuditLogMiddleware`, `ModelRetryMiddleware`, `ToolResultCompactionMiddleware`, `MessageHistoryCompactionMiddleware`, `SummaryCompactionMiddleware`, and `TraceReplacementCompactionMiddleware` (folds a continual-trace artifact back into history; e.g. `TraceReplacementCompactionMiddleware.keep_recent_tail(keep_last_groups=2)`).
 
 Advanced built-ins are grouped by category:
 
