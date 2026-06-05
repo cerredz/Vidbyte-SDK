@@ -1,3 +1,21 @@
+"""Context Protocol Header
+
+Description:
+    HTTP transport utilities for the Vidbyte SDK, providing async (httpx-based)
+    and sync (urllib-based) request executors with retry/backoff mechanisms.
+Purpose:
+    Abstracts downstream HTTP request processing, ensuring consistent timing, timeout
+    controls, and error categorization across all model and API providers.
+Architecture:
+    - HttpResponse: Standard response wrapper structure.
+    - HttpTransport: Async HTTP transporter with retry loop.
+    - SyncHttpTransport: Synchronous urllib-based request processor.
+Relation to Codebase:
+    Core network I/O layer used by all LLM providers and integration systems.
+Similar Files:
+    - None (central transport module)
+"""
+
 from __future__ import annotations
 
 import asyncio
@@ -31,12 +49,18 @@ class HttpTransport:
         attempts = max(0, retry_count) + 1
         delay = max(0.0, backoff_seconds)
         try:
-            async with httpx.AsyncClient() as client:
+            async with httpx.AsyncClient(timeout=timeout_seconds) as client:
                 for attempt in range(attempts):
-                    response = await self._send_once(client, method=method, url=url, headers=headers, json_body=json_body, timeout_seconds=timeout_seconds)
+                    response = await self._send_once(client, method=method, url=url, headers=headers, json_body=json_body)
                     if response.status_code not in retry_status_codes or attempt == attempts - 1:
                         return response
-                    await asyncio.sleep(delay)
+                    sleep_time = delay
+                    if response.status_code == 429 and response.body:
+                        import re
+                        match = re.search(r"Please retry in\s+([0-9.]+)\s*s", response.body, re.IGNORECASE)
+                        if match:
+                            sleep_time = float(match.group(1)) + 1.0
+                    await asyncio.sleep(sleep_time)
                     delay *= max(1.0, backoff_multiplier)
         except ProviderRequestError:
             raise
@@ -44,7 +68,7 @@ class HttpTransport:
             raise ProviderRequestError("HTTP request failed before receiving a provider response.", provider="http", response_excerpt=str(exc)) from exc
         raise ProviderRequestError("HTTP retry loop exited unexpectedly.", provider="http")
 
-    async def _send_once(self, client: httpx.AsyncClient, *, method: str, url: str, headers: Mapping[str, str], json_body: Mapping[str, object] | None, timeout_seconds: float) -> HttpResponse:
+    async def _send_once(self, client: httpx.AsyncClient, *, method: str, url: str, headers: Mapping[str, str], json_body: Mapping[str, object] | None) -> HttpResponse:
         # Execute a single httpx request and return HTTP errors as responses rather than exceptions.
         request_headers = dict(headers)
         content: bytes | None = None
@@ -53,7 +77,7 @@ class HttpTransport:
             request_headers.setdefault("content-type", "application/json")
         request = client.build_request(method, url, headers=request_headers, content=content)
         try:
-            response = await client.send(request, timeout=timeout_seconds)
+            response = await client.send(request)
             return HttpResponse(status_code=response.status_code, body=response.text, headers=dict(response.headers))
         except httpx.RequestError as exc:
             raise ProviderRequestError("HTTP request failed before receiving a provider response.", provider="http", response_excerpt=str(exc)) from exc
@@ -70,7 +94,13 @@ class SyncHttpTransport:
             response = self._send_once(method=method, url=url, headers=headers, json_body=json_body, timeout_seconds=timeout_seconds)
             if response.status_code not in retry_status_codes or attempt == attempts - 1:
                 return response
-            time.sleep(delay)
+            sleep_time = delay
+            if response.status_code == 429 and response.body:
+                import re
+                match = re.search(r"Please retry in\s+([0-9.]+)\s*s", response.body, re.IGNORECASE)
+                if match:
+                    sleep_time = float(match.group(1)) + 1.0
+            time.sleep(sleep_time)
             delay *= max(1.0, backoff_multiplier)
         raise ProviderRequestError("HTTP retry loop exited unexpectedly.", provider="http")
 

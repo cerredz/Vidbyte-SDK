@@ -90,12 +90,16 @@ class ToolsFormatter:
     @staticmethod
     def to_gemini_tool(spec: ToolSpec) -> dict[str, Any]:
         """Convert a ToolSpec into a Gemini function declaration."""
+        schema = ToolsFormatter._schema_for_spec(spec)
+        if isinstance(schema, dict):
+            schema = dict(schema)
+            schema.pop("additionalProperties", None)
         return {
             "function_declarations": [
                 {
                     "name": spec.name,
                     "description": spec.description,
-                    "parameters": ToolsFormatter._schema_for_spec(spec),
+                    "parameters": schema,
                 }
             ]
         }

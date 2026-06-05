@@ -1,3 +1,21 @@
+"""Context Protocol Header
+
+Description:
+    Gemini model provider for the Vidbyte SDK, implementing the generateContent
+    and batchEmbedContents endpoints with full tool calling and configuration mapping.
+Purpose:
+    Enables execution of text generation, structured outputs, and embeddings using
+    Google's Gemini models, while translating standard message formats into Gemini's contents schema.
+Architecture:
+    - GeminiProvider: Main provider class containing run_text and run_embedding logic.
+    - _create_contents: Translates multi-turn conversation messages into Gemini-compliant role/parts.
+Relation to Codebase:
+    Implements the standard model provider interface used by TextModelRunner and client libraries.
+Similar Files:
+    - vidbyte/providers/openai.py
+    - vidbyte/providers/anthropic.py
+"""
+
 from __future__ import annotations
 
 from typing import Any, Mapping
@@ -23,7 +41,16 @@ class GeminiProvider:
         # Execute Gemini generateContent with contents, tools, safety, and cache options.
         config = self._config(config)
         model = quote(config.model, safe="")
-        response = await transport.request(method="POST", url=f"{config.resolved_endpoint()}/models/{model}:generateContent", headers=self._create_headers(config), json_body=self._create_payload(config, prompt, system, metadata), timeout_seconds=config.timeout_seconds)
+        response = await transport.request(
+            method="POST",
+            url=f"{config.resolved_endpoint()}/models/{model}:generateContent",
+            headers=self._create_headers(config),
+            json_body=self._create_payload(config, prompt, system, metadata),
+            timeout_seconds=config.timeout_seconds,
+            retry_count=5,
+            backoff_seconds=8.0,
+            backoff_multiplier=1.5,
+        )
         parsed = self._parser.parse_json_response(response, provider=self.provider.value)
         return TextModelResponse(provider=self.provider, model=config.model, text=self._extract_text(parsed), raw=parsed, usage=parsed.get("usageMetadata") if isinstance(parsed.get("usageMetadata"), dict) else None)
 
@@ -54,10 +81,25 @@ class GeminiProvider:
         return payload
 
     def _create_contents(self, config: TextModelConfig, prompt: str) -> list[Mapping[str, Any]]:
-        # Gemini supports alternating user/model turns through the contents array.
+        """Translate messages and format the user prompt for Gemini's contents array."""
+        contents: list[Mapping[str, Any]] = []
         if config.messages:
-            return [dict(message) for message in config.messages] + [{"role": "user", "parts": [{"text": prompt}]}]
-        return [{"role": "user", "parts": [{"text": prompt}]}]
+            for message in config.messages:
+                msg = dict(message)
+                role = msg.get("role")
+                if role in ("assistant", "model"):
+                    msg["role"] = "model"
+                else:
+                    msg["role"] = "user"
+                if "content" in msg:
+                    content = msg.pop("content")
+                    if isinstance(content, str):
+                        msg["parts"] = [{"text": content}]
+                    elif isinstance(content, list):
+                        msg["parts"] = content
+                contents.append(msg)
+        contents.append({"role": "user", "parts": [{"text": prompt}]})
+        return contents
 
     def _attach_instructions(self, payload: dict[str, Any], config: TextModelConfig, system: str | None) -> None:
         # Gemini uses systemInstruction for developer-provided instructions.
