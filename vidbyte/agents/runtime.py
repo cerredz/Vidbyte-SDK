@@ -568,8 +568,7 @@ class AgentRuntime:
             llm_span = self._tracer.start_span(
                 "llm.call",
                 parent=trace_context,
-                provider=provider,
-                iteration=iteration_count,
+                **self._llm_trace_inputs(handle, message, current_call_options, provider, iteration_count, model_call_count, metadata),
             )
             try:
                 raw_result = await handle.invoke(message, **current_call_options)
@@ -759,6 +758,71 @@ class AgentRuntime:
         if not isinstance(raw_messages, Sequence) or isinstance(raw_messages, (str, bytes)):
             return ()
         return tuple(dict(message) for message in raw_messages if isinstance(message, Mapping))
+
+    def _llm_trace_inputs(self, handle: RunnerHandle, message: str, call_options: Mapping[str, Any], provider: str, iteration_count: int, model_call_count: int, metadata: Mapping[str, Any]) -> dict[str, Any]:
+        # Builds sanitized, inspectable model-call inputs for trace providers.
+        system = call_options.get("system")
+        messages = self._provider_messages_from_options(call_options)
+        tools = tuple(call_options.get("tools", ()) or ())
+        inputs: dict[str, Any] = {
+            "agent_name": self.agent_name,
+            "provider": provider,
+            "model": self._runner_model_name(handle.runner),
+            "iteration": iteration_count,
+            "model_call": model_call_count,
+            "prompt": self._safe_trace_value(message),
+            "metadata": self._safe_trace_value(metadata),
+            "input_messages": self._safe_trace_value(self._provider_visible_trace_messages(system, messages, message)),
+        }
+        if system is not None:
+            inputs["system"] = self._safe_trace_value(str(system))
+        if messages:
+            inputs["messages"] = self._safe_trace_value(messages)
+        if tools:
+            inputs["tool_count"] = len(tools)
+            inputs["tool_names"] = tuple(str(tool.get("name") or tool.get("function", {}).get("name") or "") for tool in tools if isinstance(tool, Mapping))
+        return inputs
+
+    def _provider_visible_trace_messages(self, system: object | None, messages: Sequence[Mapping[str, Any]], prompt: str) -> tuple[Mapping[str, Any], ...]:
+        # Mirrors the provider-visible message order for trace inspection.
+        visible: list[Mapping[str, Any]] = []
+        if system is not None:
+            visible.append({"role": "system", "content": str(system)})
+        visible.extend(dict(message) for message in messages)
+        visible.append({"role": "user", "content": prompt})
+        return tuple(visible)
+
+    @staticmethod
+    def _runner_model_name(runner: object) -> str | None:
+        # Extracts a best-effort model name from common SDK runner shapes.
+        config = getattr(runner, "_config", None)
+        model = getattr(config, "model", None)
+        if model is not None:
+            return str(model)
+        model_name = getattr(runner, "model_name", None)
+        if callable(model_name):
+            try:
+                return str(model_name())
+            except Exception:
+                return None
+        return str(model_name) if model_name is not None else None
+
+    @classmethod
+    def _safe_trace_value(cls, value: Any) -> Any:
+        # Recursively removes secret-like mapping keys from trace inputs.
+        if isinstance(value, Mapping):
+            return {key: cls._safe_trace_value(item) for key, item in value.items() if not cls._is_secret_trace_key(str(key))}
+        if isinstance(value, tuple):
+            return tuple(cls._safe_trace_value(item) for item in value)
+        if isinstance(value, list):
+            return [cls._safe_trace_value(item) for item in value]
+        return value
+
+    @staticmethod
+    def _is_secret_trace_key(key: str) -> bool:
+        # Identifies credential-like keys that must not be sent to trace providers.
+        upper = key.upper()
+        return any(token in upper for token in ("API_KEY", "TOKEN", "SECRET", "PASSWORD", "CREDENTIAL", "AUTH"))
 
     def _middleware_context(
         self,
