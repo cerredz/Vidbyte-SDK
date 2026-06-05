@@ -137,7 +137,7 @@ This composes: plan → three parallel solvers → two review agents with a summ
 
 ## Sync Entry Point
 
-For synchronous scripts, use `run_sync()`. Mirrors `BaseStrategy.run()`:
+For synchronous scripts, use `run_sync()`. Mirrors `BaseAgent.run()`:
 
 ```python
 result = pipeline.run_sync("Build a binary search tree")

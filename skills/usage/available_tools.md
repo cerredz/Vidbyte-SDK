@@ -44,9 +44,9 @@ from vidbyte.tools.builtins.editing import PatchTool
 |------|-------------|
 | `PatchTool()` | Exact string-replacement patch editing. Finds an exact string in a file and replaces it with new content. Fails if the old string is not found or appears multiple times. |
 
-## Context
+## Context (legacy compaction tool)
 
-Context tools help agents manage their conversation context to stay within token limits. The context compaction tool summarizes or prunes conversation history so agents can work on long-running tasks without exceeding context windows.
+> Context compaction is now **middleware**, not a tool. For new agents, prefer the compaction middlewares (`ToolResultCompactionMiddleware`, `MessageHistoryCompactionMiddleware`, `SummaryCompactionMiddleware`) documented in [`skills/vidbyte-sdk/middleware.md`](../vidbyte-sdk/middleware.md). The tool below remains only for manual/legacy flows.
 
 ```python
 from vidbyte.tools.builtins.context import ContextCompactionTool
@@ -54,7 +54,59 @@ from vidbyte.tools.builtins.context import ContextCompactionTool
 
 | Tool | Description |
 |------|-------------|
-| `ContextCompactionTool()` | Compact conversation context to save tokens. Summarizes older messages so the agent can continue working without losing important context. |
+| `ContextCompactionTool()` | **Legacy/manual.** Model-callable context compaction. New code should use compaction middleware instead. |
+
+## Context Primitives
+
+Context-primitive tools let the model read and write structured items in the agent's context window through the shared `ContextManager`. They are `SAFE` (no filesystem, network, or external state).
+
+```python
+from vidbyte.tools.builtins.context_primitives import ContextUpsertTool, ContextListTool, ContextRemoveTool
+```
+
+| Tool | Description |
+|------|-------------|
+| `ContextUpsertTool(context_manager)` | Insert or update a structured context item in the context window. |
+| `ContextListTool(context_manager)` | List the current context items. |
+| `ContextRemoveTool(context_manager)` | Remove a context item by id. |
+
+See [`skills/vidbyte-sdk/context-primitives.md`](../vidbyte-sdk/context-primitives.md).
+
+## Context Algorithm Tools
+
+Model-callable forms of context-window algorithms. The model decides when to record state, writing the same `ContextItem` primitives that the runtime-triggered algorithms produce. See [`skills/vidbyte-sdk/context-algorithm-to-tool.md`](../vidbyte-sdk/context-algorithm-to-tool.md).
+
+```python
+from vidbyte.tools.builtins.reflexion import ReflexionTool
+from vidbyte.tools.builtins.trajectory_checkpoint import TrajectoryCheckpointTool
+```
+
+| Tool | Description |
+|------|-------------|
+| `ReflexionTool(context_manager)` | Record a self-critique and correction plan when the model detects a reasoning error. |
+| `TrajectoryCheckpointTool(context_manager)` | Record a compressed checkpoint of reasoning, trajectory, output, score, and feedback. |
+
+## Memory
+
+Memory tools connect agents to external memory providers so they can store and retrieve long-term memories across runs. Each provider has its own tool family. See [`skills/vidbyte-sdk/memory-tools.md`](../vidbyte-sdk/memory-tools.md).
+
+```python
+from vidbyte.tools.builtins.memory import (
+    Mem0AddMemoryTool, Mem0SearchMemoryTool, Mem0GetMemoriesTool, Mem0DeleteMemoryTool,
+    ZepAddMemoryTool, ZepSearchMemoryTool, ZepGetMemoryTool, ZepDeleteSessionTool,
+    SupermemoryAddMemoryTool, SupermemorySearchMemoryTool, SupermemoryDeleteMemoryTool,
+    LettaAddArchivalMemoryTool, LettaSearchArchivalMemoryTool, LettaGetMemoryBlockTool, LettaDeleteArchivalMemoryTool,
+    CogneeAddTool, CogneeCognifyTool, CogneeSearchTool, CogneeDeleteTool,
+)
+```
+
+| Provider | Tools |
+|----------|-------|
+| Mem0 | `Mem0AddMemoryTool`, `Mem0SearchMemoryTool`, `Mem0GetMemoriesTool`, `Mem0DeleteMemoryTool` |
+| Zep | `ZepAddMemoryTool`, `ZepSearchMemoryTool`, `ZepGetMemoryTool`, `ZepDeleteSessionTool` |
+| Supermemory | `SupermemoryAddMemoryTool`, `SupermemorySearchMemoryTool`, `SupermemoryDeleteMemoryTool` |
+| Letta | `LettaAddArchivalMemoryTool`, `LettaSearchArchivalMemoryTool`, `LettaGetMemoryBlockTool`, `LettaDeleteArchivalMemoryTool` |
+| Cognee | `CogneeAddTool`, `CogneeCognifyTool`, `CogneeSearchTool`, `CogneeDeleteTool` |
 
 ## Computation
 

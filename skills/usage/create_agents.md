@@ -6,7 +6,7 @@ Use the registry when you have multiple agents that need to discover each other,
 
 ## Creating Multiple Agents
 
-Define each agent independently with its own name, system prompt, model, tools, and tools. Each agent is a self-contained execution unit:
+Define each agent independently with its own name, system prompt, model, and tools. Each agent is a self-contained execution unit:
 
 ```python
 from vidbyte import Agent

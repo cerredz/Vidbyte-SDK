@@ -67,6 +67,7 @@ Filesystem tools give agents read/write access to the filesystem. Tools like `Wr
 
 ```python
 from vidbyte import Agent
+from vidbyte.tools.security import PermissionPolicy
 from vidbyte.tools.filesystem import (
     ReadTextTool, WriteTextTool, ListDirTool, MakeDirTool,
     DeleteTool, CopyTool, MoveTool, ExistsTool,

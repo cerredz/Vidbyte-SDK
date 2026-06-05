@@ -104,8 +104,10 @@ Primary files:
 - `vidbyte/agents/base.py`
 - `vidbyte/agents/client.py`
 - `vidbyte/agents/mixins.py`
-- `vidbyte/agents/registry.py`
+- `vidbyte/agents/runtime.py`, `vidbyte/agents/runtimes/`, `vidbyte/agents/context_algorithms.py`, `vidbyte/agents/algorithms/`
+- `vidbyte/agents/handoff.py`
 - `vidbyte/agents/types.py`
+- `vidbyte/lib/registries/agents.py` (`AgentRegistry`)
 - `vidbyte/lib/dataclasses/agents.py`
 - `vidbyte/lib/agents/modality_detector.py`
 

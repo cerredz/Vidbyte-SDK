@@ -77,6 +77,26 @@ result = await pipeline.run("implement a binary search tree")
 The predicate receives the prompt string and returns a branch key. If the returned key
 is not in `branches`, `PipelineExecutionError` is raised with the available keys listed.
 
+### MapReducePipeline
+
+Runs all `map_stages` concurrently with the same input (fan-out), joins their outputs
+with a separator (default `"\n\n---\n\n"`, configurable via `separator=`), then feeds the
+joined string to a single `reduce_stage` (fan-in). Returns the reduce stage's output.
+
+```python
+from vidbyte import MapReducePipeline
+
+pipeline = MapReducePipeline(
+    map_stages=[security_agent, performance_agent, style_agent],
+    reduce_stage=summarizer,
+)
+result = await pipeline.run("Review this codebase for production readiness.")
+```
+
+`PipelineExecutionError` is raised if `map_stages` is empty. Like `ParallelPipeline`,
+the map stages run via `asyncio.gather` without `return_exceptions`, so the first map
+failure aborts the others.
+
 ## Composability
 
 Every pipeline is itself a valid stage inside another pipeline. Nest them freely:
@@ -97,7 +117,7 @@ stage, so nesting depth is unlimited.
 
 ## Sync entry point
 
-Mirrors `BaseStrategy.run()`. Cannot be called from an active event loop.
+Mirrors `BaseAgent.run()`. Cannot be called from an active event loop.
 
 ```python
 result = pipeline.run_sync("prompt")   # fine from plain synchronous code
@@ -107,12 +127,12 @@ result = pipeline.run_sync("prompt")   # fine from plain synchronous code
 
 | Error | When raised |
 |-------|-------------|
-| `PipelineExecutionError` | Empty `stages` or `branches` at construction; unknown predicate key at runtime; `run_sync` called from active event loop |
+| `PipelineExecutionError` | Empty `stages`/`branches`/`map_stages` at construction; unknown predicate key at runtime; `run_sync` called from active event loop |
 | `AgentExecutionError` | Any agent stage raises — propagates unwrapped |
 | Any other exception | Propagates from the failing stage unwrapped |
 
-`ParallelPipeline` uses `asyncio.gather` without `return_exceptions`; the first agent
-failure aborts all concurrent branches.
+`ParallelPipeline` and `MapReducePipeline` use `asyncio.gather` without
+`return_exceptions`; the first agent failure aborts all concurrent branches.
 
 ## Module layout
 
@@ -121,6 +141,7 @@ vidbyte/pipelines/
 ├── __init__.py        public surface
 ├── base.py            BasePipeline + _invoke dispatcher
 ├── conditional.py     ConditionalPipeline
+├── map_reduce.py      MapReducePipeline
 ├── parallel.py        ParallelPipeline + PARALLEL_JOIN_SEPARATOR
 ├── sequential.py      SequentialPipeline
 └── types.py           PipelineNode type alias
@@ -129,7 +150,7 @@ vidbyte/pipelines/
 All types are also importable from the root `vidbyte` namespace:
 
 ```python
-from vidbyte import SequentialPipeline, ParallelPipeline, ConditionalPipeline
+from vidbyte import SequentialPipeline, ParallelPipeline, ConditionalPipeline, MapReducePipeline
 from vidbyte import BasePipeline, PipelineNode, PipelineExecutionError
 ```
 
@@ -152,4 +173,5 @@ from vidbyte import BasePipeline, PipelineNode, PipelineExecutionError
 - Pipelines do not manage context, history, or budgets. Each agent does that
   internally.
 - Pipelines do not stream results or emit partial outputs.
-- Pipelines do not retry, vote, or reduce — those are future topology types.
+- Pipelines do not retry or vote — those are future topology types. Map-reduce
+  (fan-out → fan-in) is supported via `MapReducePipeline`.
