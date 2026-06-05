@@ -20,6 +20,8 @@ import tempfile
 import json
 import unittest
 from datetime import datetime
+from typing import Any
+from vidbyte.agents.types import AgentInput
 from vidbyte.agents.base import BaseAgent
 from vidbyte.evals import (
     ContainsGrader,
@@ -65,6 +67,7 @@ class MockAgent(BaseAgent):
         )
         self.fork_count = 0
         self.last_name = ""
+        self.last_options: dict[str, Any] = {}
 
     def fork(self, **kwargs: Any) -> MockAgent:
         # Custom fork that counts clone invocations and returns self for simplified testing.
@@ -72,10 +75,13 @@ class MockAgent(BaseAgent):
         self.last_name = kwargs.get("name", "")
         return self
 
-    async def arun(self, message: str, **options: Any) -> Any:
+    async def arun(self, message: str | AgentInput, **options: Any) -> Any:
         # Simulates a replies payload for the agent run.
+        self.last_options = dict(options)
+        prompt = message.prompt if isinstance(message, AgentInput) else message
+
         class Reply:
-            content = f"processed:{message}"
+            content = f"processed:{prompt}"
             metadata = {"mock": True}
         return Reply()
 
@@ -241,7 +247,7 @@ class EvalTests(unittest.IsolatedAsyncioTestCase):
         # Tests EvalRunner executing suites and ensures state isolation using clone forks.
         agent = MockAgent()
         suite = EvalSuite("suite", [EvalCase(prompt="q1"), EvalCase(prompt="q2")])
-        runner = EvalRunner(agent, default_grader=ExactMatchGrader())
+        runner = EvalRunner(agent, default_grader=ExactMatchGrader(), concurrency=1)
 
         result = await runner.arun(suite)
         self.assertEqual(len(result.results), 2)
@@ -250,6 +256,8 @@ class EvalTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(agent.fork_count, 2)
         self.assertEqual(agent.last_name, "mock_agent_eval")
         self.assertEqual(result.results[0].actual, "processed:q1")
+        self.assertEqual(agent.last_options["trace_metadata"]["eval_suite"], "suite")
+        self.assertEqual(agent.last_options["trace_metadata"]["eval_case_index"], 1)
 
     async def test_eval_runner_graceful_exception_handling(self) -> None:
         # Tests EvalRunner resilient case execution when targets raise errors.
