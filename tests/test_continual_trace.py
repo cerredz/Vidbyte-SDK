@@ -10,9 +10,31 @@ from vidbyte.lib.dataclasses.middleware import MiddlewareContext, MiddlewareHook
 from vidbyte.lib.dataclasses.trace import TraceField, TraceFieldType
 from vidbyte.lib.errors import ConfigurationError
 from vidbyte.tools import BaseTool, ToolCall, ToolResult, ToolSpec
-from vidbyte.trace.continual import ActionTrace, ContinualTraceAgent, ContinualTraceMiddleware
+from vidbyte.trace.continual import (
+    ActionTrace,
+    ArtifactTrace,
+    ContinualTraceAgent,
+    ContinualTraceMiddleware,
+    DecisionTrace,
+    HistoryTrace,
+    KnowledgeTrace,
+    PlanTrace,
+    ReasoningTrace,
+    ToolTrace,
+)
 from vidbyte.trace.continual.middleware import RESULT_METADATA_KEY, _TraceRunState
 from vidbyte.trace.continual.tools import UPDATE_TRACE_TOOL_NAME, UpdateTraceTool
+
+_ALL_PREBUILT = {
+    "action_trace": ActionTrace,
+    "plan_trace": PlanTrace,
+    "reasoning_trace": ReasoningTrace,
+    "history_trace": HistoryTrace,
+    "tool_trace": ToolTrace,
+    "decision_trace": DecisionTrace,
+    "artifact_trace": ArtifactTrace,
+    "knowledge_trace": KnowledgeTrace,
+}
 
 
 class _ProgressModel(BaseModel):
@@ -221,8 +243,92 @@ class BaseAgentTraceWiringTests(unittest.TestCase):
     def test_fork_preserves_trace_option(self) -> None:  # [Edge Case]
         agent = Agent(name="a", system_prompt="s", trace_option=TraceOption.continual(_ProgressModel))
         child = agent.fork(name="b")
-        self.assertIsNotNone(child._trace_option)
-        self.assertTrue(child._trace_option.enabled)
+        self.assertEqual(len(child._trace_options), 1)
+        self.assertIsNotNone(child._primary_trace_option)
+        self.assertTrue(child._primary_trace_option.enabled)
+
+
+# ---------------------------------------------------------------------------
+# Prebuilt schema catalog
+# ---------------------------------------------------------------------------
+class PrebuiltSchemaTests(unittest.TestCase):
+    def test_all_eight_schemas_have_at_least_20_fields(self) -> None:  # [Hidden Assumption]
+        for name, schema in _ALL_PREBUILT.items():
+            self.assertGreaterEqual(len(schema.fields), 20, f"{name} has fewer than 20 fields")
+
+    def test_every_field_has_description_and_type(self) -> None:  # [Silent Failure]
+        for name, schema in _ALL_PREBUILT.items():
+            for field_name, spec in schema.fields.items():
+                self.assertTrue(spec.description.strip(), f"{name}.{field_name} missing description")
+                self.assertIsInstance(spec.type, TraceFieldType)
+
+    def test_schema_names_match_registry_keys_and_are_unique(self) -> None:  # [Silent Failure]
+        for expected_name, schema in _ALL_PREBUILT.items():
+            self.assertEqual(schema.name, expected_name)
+        names = [schema.name for schema in _ALL_PREBUILT.values()]
+        self.assertEqual(len(names), len(set(names)))
+
+    def test_initial_artifact_keys_match_declared_fields(self) -> None:  # [Silent Failure]
+        for schema in _ALL_PREBUILT.values():
+            self.assertEqual(set(schema.initial_artifact().keys()), set(schema.fields.keys()))
+
+    def test_schemas_carry_mixed_merge_types(self) -> None:  # [Edge Case]
+        self.assertEqual(ToolTrace.fields["tool_state"].type, TraceFieldType.OBJECT)
+        self.assertEqual(ToolTrace.fields["tool_call_count"].type, TraceFieldType.INTEGER)
+        self.assertEqual(PlanTrace.fields["plan_steps"].type, TraceFieldType.ARRAY)
+        self.assertEqual(PlanTrace.fields["goal"].type, TraceFieldType.STRING)
+
+
+# ---------------------------------------------------------------------------
+# Multi-trace BaseAgent normalization + validation
+# ---------------------------------------------------------------------------
+class MultiTraceWiringTests(unittest.TestCase):
+    def test_single_option_normalized_to_one_tuple(self) -> None:  # [Hidden Assumption]
+        agent = Agent(name="a", system_prompt="s", trace_option=TraceOption.continual(PlanTrace))
+        self.assertEqual(len(agent._trace_options), 1)
+        self.assertEqual(agent._primary_trace_option.schema.name, "plan_trace")
+
+    def test_sequence_of_options_stored(self) -> None:  # [Edge Case]
+        agent = Agent(
+            name="a", system_prompt="s",
+            trace_option=[TraceOption.continual(PlanTrace), TraceOption.continual(ReasoningTrace)],
+        )
+        self.assertEqual(len(agent._trace_options), 2)
+        self.assertEqual(agent._primary_trace_option.schema.name, "plan_trace")
+
+    def test_empty_sequence_disables_tracing(self) -> None:  # [Edge Case]
+        agent = Agent(name="a", system_prompt="s", trace_option=[])
+        self.assertEqual(agent._trace_options, ())
+        self.assertIsNone(agent._primary_trace_option)
+        self.assertEqual(agent._runtime_middleware(), agent.middleware)
+
+    def test_duplicate_schema_names_rejected(self) -> None:  # [Hidden Failure]
+        with self.assertRaises(ConfigurationError):
+            Agent(
+                name="a", system_prompt="s",
+                trace_option=[TraceOption.continual(PlanTrace), TraceOption.continual(PlanTrace)],
+            )
+
+    def test_non_trace_option_element_rejected(self) -> None:  # [Hidden Assumption]
+        with self.assertRaises(ConfigurationError):
+            Agent(name="a", system_prompt="s", trace_option=[TraceOption.continual(PlanTrace), "nope"])
+
+    def test_two_options_inject_two_middleware(self) -> None:  # [Silent Failure]
+        agent = Agent(
+            name="a", system_prompt="s",
+            trace_option=[TraceOption.continual(PlanTrace), TraceOption.continual(ReasoningTrace)],
+        )
+        injected = [m for m in agent._runtime_middleware() if isinstance(m, ContinualTraceMiddleware)]
+        self.assertEqual(len(injected), 2)
+        self.assertEqual(sum(1 for m in injected if m.primary), 1)
+
+    def test_fork_preserves_all_options(self) -> None:  # [Silent Failure]
+        agent = Agent(
+            name="a", system_prompt="s",
+            trace_option=[TraceOption.continual(PlanTrace), TraceOption.continual(ReasoningTrace)],
+        )
+        child = agent.fork(name="b")
+        self.assertEqual(len(child._trace_options), 2)
 
 
 # ---------------------------------------------------------------------------
@@ -319,6 +425,127 @@ class ContinualTraceIntegrationTests(unittest.IsolatedAsyncioTestCase):
         reply = await agent.arun("task")
         self.assertEqual(reply.content, "done")
         self.assertGreaterEqual(reply.metadata["trace_metadata"]["error_count"], 1)
+
+
+# ---------------------------------------------------------------------------
+# Multi-trace middleware keying
+# ---------------------------------------------------------------------------
+class MultiTraceMiddlewareTests(unittest.IsolatedAsyncioTestCase):
+    async def test_distinct_state_keys_and_primary_mirror(self) -> None:  # [Hidden Failure]
+        mw_a = ContinualTraceMiddleware(TraceOption.continual(PlanTrace), source_agent=object(), primary=True)
+        mw_b = ContinualTraceMiddleware(TraceOption.continual(ReasoningTrace), source_agent=object(), primary=False)
+        run_state: dict = {}
+        await mw_a.before_run(_ctx(MiddlewareHook.BEFORE_RUN, iteration_count=0, run_state=run_state))
+        await mw_b.before_run(_ctx(MiddlewareHook.BEFORE_RUN, iteration_count=0, run_state=run_state))
+        published = run_state[RESULT_METADATA_KEY]
+        self.assertEqual(set(published["traces"]), {"plan_trace", "reasoning_trace"})
+        self.assertEqual(set(published["traces_metadata"]), {"plan_trace", "reasoning_trace"})
+        self.assertEqual(published["trace_metadata"]["schema"], "plan_trace")
+        self.assertNotEqual(mw_a._state_key, mw_b._state_key)
+        self.assertIsInstance(run_state[mw_a._state_key], _TraceRunState)
+        self.assertIsInstance(run_state[mw_b._state_key], _TraceRunState)
+
+
+# ---------------------------------------------------------------------------
+# Integration: multiple traces over one main run
+# ---------------------------------------------------------------------------
+class _PlanModel(BaseModel):
+    """Plan."""
+
+    goal: str = Field(description="The goal.")
+    plan_steps: list[str] = Field(default_factory=list, description="Ordered plan steps.")
+
+
+class _ThoughtModel(BaseModel):
+    """Thought."""
+
+    goal: str = Field(description="The goal.")
+    thoughts: list[str] = Field(default_factory=list, description="Reasoning notes.")
+
+
+def _plan_schema() -> TraceSchema:
+    return TraceSchema.from_model(_PlanModel, name="plan")
+
+
+def _thought_schema() -> TraceSchema:
+    return TraceSchema.from_model(_ThoughtModel, name="thought")
+
+
+class MultiScriptedRunner:
+    """Routes each trace-agent call to the right schema by its name in the prompt."""
+
+    def __init__(self, *, fail_schema: str | None = None) -> None:
+        self.fail_schema = fail_schema
+        self.main_payloads: list[str] = []
+
+    def run(self, prompt: str, **kwargs: object) -> _Resp:
+        is_trace = "<trace_schema>" in prompt
+        has_messages = "messages" in kwargs
+        if is_trace:
+            return self._run_trace(prompt, has_messages)
+        self.main_payloads.append(prompt + str(kwargs.get("messages", "")))
+        if not has_messages:
+            return _Resp(_fc("lookup", "{}", "m1"))
+        return _Resp(_fc("isDone", '{"final_answer": "done"}', "m2"))
+
+    def _run_trace(self, prompt: str, has_messages: bool) -> _Resp:
+        # Emits a schema-appropriate updateTrace call, or raises for the designated failing schema.
+        if self.fail_schema is not None and f"Name: {self.fail_schema}" in prompt:
+            raise RuntimeError("trace model failure")
+        if has_messages:
+            return _Resp(_fc("isDone", '{"final_answer": "traced"}', "t2"))
+        if "Name: plan" in prompt:
+            return _Resp(_fc("updateTrace", '{"trace": {"plan_steps": ["p1"]}}', "t1"))
+        return _Resp(_fc("updateTrace", '{"trace": {"thoughts": ["why1"]}}', "t1"))
+
+
+class MultiTraceIntegrationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_both_traces_present_and_primary_mirrored(self) -> None:  # [Silent Failure]
+        runner = MultiScriptedRunner()
+        agent = Agent(
+            name="worker", system_prompt="Work.", runner=runner, tools=[_Lookup()],
+            trace_option=[
+                TraceOption.continual(_plan_schema(), every_n_iterations=1),
+                TraceOption.continual(_thought_schema(), every_n_iterations=1),
+            ],
+        )
+        reply = await agent.arun("task")
+        self.assertEqual(reply.content, "done")
+        traces = reply.metadata["traces"]
+        self.assertEqual(set(traces), {"plan", "thought"})
+        self.assertIn("p1", traces["plan"]["plan_steps"])
+        self.assertIn("why1", traces["thought"]["thoughts"])
+        self.assertEqual(reply.metadata["trace"], traces["plan"])
+        self.assertEqual(set(agent.last_traces), {"plan", "thought"})
+
+    async def test_one_trace_failure_isolates_from_other(self) -> None:  # [Hidden Failure]
+        runner = MultiScriptedRunner(fail_schema="thought")
+        agent = Agent(
+            name="worker", system_prompt="Work.", runner=runner, tools=[_Lookup()],
+            trace_option=[
+                TraceOption.continual(_plan_schema(), every_n_iterations=1),
+                TraceOption.continual(_thought_schema(), every_n_iterations=1),
+            ],
+        )
+        reply = await agent.arun("task")
+        self.assertEqual(reply.content, "done")
+        self.assertIn("p1", reply.metadata["traces"]["plan"]["plan_steps"])
+        self.assertGreaterEqual(reply.metadata["traces_metadata"]["thought"]["error_count"], 1)
+
+    async def test_multi_trace_never_leaks_into_main_context(self) -> None:  # [Silent Failure]
+        runner = MultiScriptedRunner()
+        agent = Agent(
+            name="worker", system_prompt="Work.", runner=runner, tools=[_Lookup()],
+            trace_option=[
+                TraceOption.continual(_plan_schema(), every_n_iterations=1),
+                TraceOption.continual(_thought_schema(), every_n_iterations=1),
+            ],
+        )
+        await agent.arun("task")
+        for payload in runner.main_payloads:
+            self.assertNotIn("p1", payload)
+            self.assertNotIn("why1", payload)
+            self.assertNotIn("trace_so_far", payload)
 
 
 if __name__ == "__main__":

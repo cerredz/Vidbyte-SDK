@@ -84,12 +84,14 @@ class BaseAgent(McpAttachableMixin):
         trace: type[TracerBase] | TracerBase | None = None,
         output_schema: type | Mapping[str, Any] | None = None,
         handoff: Handoff | None = None,
-        trace_option: TraceOption | None = None,
+        trace_option: TraceOption | Sequence[TraceOption] | None = None,
     ) -> None:
         if not name:
             raise AgentExecutionError("Agent name cannot be empty.")
         if not system_prompt:
             raise AgentExecutionError("Agent system_prompt is required.")
+
+        trace_options = self._normalize_trace_options(trace_option)
 
         if isinstance(runtime, (LinearRuntime, MctsSearchRuntime, ActorRuntime)):
             self.runtime_type = runtime.runtime_type
@@ -109,7 +111,7 @@ class BaseAgent(McpAttachableMixin):
                     f"Agent {name} uses non-linear runtime {self.runtime_type.value}, "
                     "which does not support middleware."
                 )
-            if trace_option is not None and trace_option.enabled:
+            if any(option.enabled for option in trace_options):
                 raise ConfigurationError(
                     f"Agent {name} uses non-linear runtime {self.runtime_type.value}, "
                     "which does not support continual tracing."
@@ -164,8 +166,10 @@ class BaseAgent(McpAttachableMixin):
         self._active_prompt: str = ""
         self._handoff_spec: Handoff | None = handoff
         self.last_handoff: Handoff | None = None
-        self._trace_option: TraceOption | None = trace_option
+        self._trace_options: tuple[TraceOption, ...] = trace_options
+        self._primary_trace_option: TraceOption | None = next((option for option in trace_options if option.enabled), None)
         self.last_trace: dict[str, Any] | None = None
+        self.last_traces: dict[str, dict[str, Any]] | None = None
         self.last_prompt: str = ""
         self.last_reply: AgentMessage | None = None
         for _tool in self._agent_tool_items:
@@ -294,7 +298,7 @@ class BaseAgent(McpAttachableMixin):
             tracer=self._tracer,
             output_schema=self.output_schema,
             handoff=self._handoff_spec,
-            trace_option=self._trace_option,
+            trace_option=self._trace_options,
         )
         if include_history:
             child.history = list(self.history)
@@ -374,9 +378,11 @@ class BaseAgent(McpAttachableMixin):
         self.history.append(reply)
         self.last_prompt = prompt
         self.last_reply = reply
-        if self._trace_option is not None and self._trace_option.enabled:
+        if self._primary_trace_option is not None:
             trace_artifact = metadata.get("trace")
             self.last_trace = dict(trace_artifact) if isinstance(trace_artifact, Mapping) else None
+            traces = metadata.get("traces")
+            self.last_traces = {name: dict(artifact) for name, artifact in traces.items()} if isinstance(traces, Mapping) else None
         if self._handoff_spec is not None:
             await self._run_auto_handoff(metadata)
         return reply
@@ -571,11 +577,29 @@ class BaseAgent(McpAttachableMixin):
         )
 
     def _runtime_middleware(self) -> tuple[AgentMiddleware, ...]:
-        # Appends the continual trace middleware to the user middleware when tracing is enabled.
-        if self._trace_option is None or not self._trace_option.enabled:
+        # Appends one continual trace middleware per enabled trace option, tagging the first as primary.
+        enabled = [option for option in self._trace_options if option.enabled]
+        if not enabled:
             return self.middleware
         from vidbyte.trace.continual.middleware import ContinualTraceMiddleware
-        return (*self.middleware, ContinualTraceMiddleware(self._trace_option, source_agent=self))
+        trace_middleware = tuple(
+            ContinualTraceMiddleware(option, source_agent=self, primary=(option is self._primary_trace_option))
+            for option in enabled
+        )
+        return (*self.middleware, *trace_middleware)
+
+    @staticmethod
+    def _normalize_trace_options(trace_option: TraceOption | Sequence[TraceOption] | None) -> tuple[TraceOption, ...]:
+        # Coerces a single option, a sequence, or None into a validated tuple of unique-named TraceOptions.
+        if trace_option is None:
+            return ()
+        options = (trace_option,) if isinstance(trace_option, TraceOption) else tuple(trace_option)
+        if any(not isinstance(option, TraceOption) for option in options):
+            raise ConfigurationError("trace_option must be a TraceOption or a sequence of TraceOptions.")
+        enabled_names = [option.schema.name for option in options if option.enabled]
+        if len(enabled_names) != len(set(enabled_names)):
+            raise ConfigurationError(f"Duplicate continual trace schema names are not allowed: {sorted(enabled_names)}.")
+        return options
 
     def _catalog_from_agent_tools(self, tools: Sequence[object]) -> Tools:
         catalog = Tools()
