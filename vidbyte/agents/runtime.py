@@ -364,7 +364,37 @@ class AgentRuntime:
 
             tool_calls = ToolsFormatter.parse_tool_calls(raw_result, provider)
             if not tool_calls:
-                messages.append(self._assistant_message(handle.extract_text(raw_result)))
+                if self.config.max_tokens is not None and tokens_used is not None and tokens_used >= self.config.max_tokens:
+                    token_stop = self._stopped_result(
+                        "Agent runtime stopped after reaching max_tokens.",
+                        stop_reason=AgentStopReason.MAX_TOKENS,
+                        iteration_count=iteration_count,
+                        tokens_used=tokens_used,
+                        contexts=call_contexts,
+                    )
+                    return await self._finish_result(
+                        token_stop,
+                        message=message,
+                        context=context,
+                        provider=provider,
+                        iteration_count=iteration_count,
+                        model_call_count=model_call_count,
+                        tokens_used=tokens_used,
+                        started_at=started_at,
+                        metadata=runtime_metadata,
+                        run_state=run_state,
+                        model_response=raw_result,
+                    )
+                final = self._final_result(
+                    output=last_assistant_output,
+                    runner_metadata=runner_metadata,
+                    contexts=call_contexts,
+                    iteration_count=iteration_count,
+                    tokens_used=tokens_used,
+                    stop_reason=AgentStopReason.FINAL_RESPONSE,
+                )
+                if inner_algorithm is not None:
+                    messages.append(self._assistant_message(last_assistant_output))
                 decision = await self.middleware.after_iteration(
                     self._middleware_context(
                         MiddlewareHook.AFTER_ITERATION,
@@ -381,27 +411,28 @@ class AgentRuntime:
                         model_response=raw_result,
                     )
                 )
+                if inner_algorithm is not None and decision.action is MiddlewareAction.CONTINUE:
+                    continue
                 if decision.action is not MiddlewareAction.CONTINUE:
-                    result = self._middleware_abort_result(
+                    final = self._middleware_abort_result(
                         decision,
                         iteration_count=iteration_count,
                         tokens_used=tokens_used,
                         contexts=call_contexts,
                     )
-                    return await self._finish_result(
-                        result,
-                        message=message,
-                        context=context,
-                        provider=provider,
-                        iteration_count=iteration_count,
-                        model_call_count=model_call_count,
-                        tokens_used=tokens_used,
-                        started_at=started_at,
-                        metadata=runtime_metadata,
-                        run_state=run_state,
-                        model_response=raw_result,
-                    )
-                continue
+                return await self._finish_result(
+                    final,
+                    message=message,
+                    context=context,
+                    provider=provider,
+                    iteration_count=iteration_count,
+                    model_call_count=model_call_count,
+                    tokens_used=tokens_used,
+                    started_at=started_at,
+                    metadata=runtime_metadata,
+                    run_state=run_state,
+                    model_response=raw_result,
+                )
 
             for call in tool_calls:
                 processed = await self._process_tool_call(
@@ -568,15 +599,7 @@ class AgentRuntime:
             llm_span = self._tracer.start_span(
                 "llm.call",
                 parent=trace_context,
-                **self._llm_trace_inputs(
-                    handle,
-                    message=message,
-                    call_options=current_call_options,
-                    provider=provider,
-                    iteration_count=iteration_count,
-                    model_call_count=model_call_count,
-                    metadata=metadata,
-                ),
+                **self._llm_trace_inputs(handle, message, current_call_options, provider, iteration_count, model_call_count, metadata),
             )
             try:
                 raw_result = await handle.invoke(message, **current_call_options)
@@ -766,6 +789,74 @@ class AgentRuntime:
         if not isinstance(raw_messages, Sequence) or isinstance(raw_messages, (str, bytes)):
             return ()
         return tuple(dict(message) for message in raw_messages if isinstance(message, Mapping))
+
+    def _llm_trace_inputs(self, handle: RunnerHandle, message: str, call_options: Mapping[str, Any], provider: str, iteration_count: int, model_call_count: int, metadata: Mapping[str, Any]) -> dict[str, Any]:
+        # Builds sanitized, inspectable model-call inputs for trace providers.
+        system = call_options.get("system")
+        messages = self._provider_messages_from_options(call_options)
+        visible_messages = self._provider_visible_trace_messages(system, messages, message)
+        tools = tuple(call_options.get("tools", ()) or ())
+        public_metadata = {k: v for k, v in dict(metadata).items() if not k.startswith("_")}
+        inputs: dict[str, Any] = {
+            "agent_name": self.agent_name,
+            "provider": provider,
+            "model": self._runner_model_name(handle.runner),
+            "iteration": iteration_count,
+            "model_call": model_call_count,
+            "prompt": self._safe_trace_value(message),
+            "metadata": self._safe_trace_value(public_metadata),
+            "messages": self._safe_trace_value(visible_messages),
+            "input_messages": self._safe_trace_value(visible_messages),
+        }
+        if system is not None:
+            inputs["system"] = self._safe_trace_value(str(system))
+        if messages:
+            inputs["history_messages"] = self._safe_trace_value(messages)
+        if tools:
+            inputs["tool_count"] = len(tools)
+            inputs["tool_names"] = tuple(str(tool.get("name") or tool.get("function", {}).get("name") or "") for tool in tools if isinstance(tool, Mapping))
+        return inputs
+
+    def _provider_visible_trace_messages(self, system: object | None, messages: Sequence[Mapping[str, Any]], prompt: str) -> tuple[Mapping[str, Any], ...]:
+        # Mirrors the provider-visible message order for trace inspection.
+        visible: list[Mapping[str, Any]] = []
+        if system is not None:
+            visible.append({"role": "system", "content": str(system)})
+        visible.extend(dict(message) for message in messages)
+        visible.append({"role": "user", "content": prompt})
+        return tuple(visible)
+
+    @staticmethod
+    def _runner_model_name(runner: object) -> str | None:
+        # Extracts a best-effort model name from common SDK runner shapes.
+        config = getattr(runner, "_config", None)
+        model = getattr(config, "model", None)
+        if model is not None:
+            return str(model)
+        model_name = getattr(runner, "model_name", None)
+        if callable(model_name):
+            try:
+                return str(model_name())
+            except Exception:
+                return None
+        return str(model_name) if model_name is not None else None
+
+    @classmethod
+    def _safe_trace_value(cls, value: Any) -> Any:
+        # Recursively removes secret-like mapping keys from trace inputs.
+        if isinstance(value, Mapping):
+            return {key: cls._safe_trace_value(item) for key, item in value.items() if not cls._is_secret_trace_key(str(key))}
+        if isinstance(value, tuple):
+            return tuple(cls._safe_trace_value(item) for item in value)
+        if isinstance(value, list):
+            return [cls._safe_trace_value(item) for item in value]
+        return value
+
+    @staticmethod
+    def _is_secret_trace_key(key: str) -> bool:
+        # Identifies credential-like keys that must not be sent to trace providers.
+        upper = key.upper()
+        return any(token in upper for token in ("API_KEY", "TOKEN", "SECRET", "PASSWORD", "CREDENTIAL", "AUTH"))
 
     def _middleware_context(
         self,
