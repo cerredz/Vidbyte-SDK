@@ -162,9 +162,10 @@ class VerificationRunner:
         self._assert_equal(inputs["input_messages"][2], {"role": "user", "content": "Task"})
 
     def test_trace_inputs_keep_history_messages_field(self) -> None:
-        # Verifies raw history remains available in the legacy messages field.
+        # Verifies trace messages show full input while raw history remains inspectable.
         inputs = self._trace_inputs(metadata={})
-        self._assert_equal(inputs["messages"], ({"role": "assistant", "content": "draft"},))
+        self._assert_equal(inputs["messages"], inputs["input_messages"])
+        self._assert_equal(inputs["history_messages"], ({"role": "assistant", "content": "draft"},))
 
     def test_trace_inputs_filter_secret_metadata(self) -> None:
         # Verifies credential-like metadata keys are not sent to trace providers.
@@ -181,19 +182,20 @@ class VerificationRunner:
         self._assert_equal(messages[-1], {"role": "user", "content": "Task"})
 
     async def test_tool_loop_followup_trace_is_readable(self) -> None:
-        # Verifies a real runtime follow-up span includes readable provider-visible messages.
+        # Verifies a plain assistant response stops instead of replaying code as history.
         tracer = RecordingTracer()
         runtime = AgentRuntime(agent_name="agent", system_prompt="System", tools=Tools(), permission_policy=PermissionPolicy(), config=AgentRuntimeConfig(max_iterations=3), tracer=tracer)
         runner = FakeRunner([FakeResponse("draft"), FakeResponse("", {"choices": [{"message": {"tool_calls": [{"id": "call-1", "function": {"name": "isDone", "arguments": "{\"final_answer\":\"done\"}"}}]}}]})])
         context = BaseAgentContext(system_prompt="System", history=(), file_paths=(), tools=(), budget=None)
-        await runtime.arun("Task", handle=RunnerHandle(runner=runner, provider="xai", invoke=invoke_runner, extract_text=output_text, extract_metadata=output_metadata), context=context)
+        result = await runtime.arun("Task", handle=RunnerHandle(runner=runner, provider="xai", invoke=invoke_runner, extract_text=output_text, extract_metadata=output_metadata), context=context)
         llm_spans = [span for span in tracer.spans_started if span["name"] == "llm.call"]
-        self._assert_equal(len(llm_spans), 2)
-        second = llm_spans[1]["attributes"]
-        self._assert_equal(second["messages"], ({"role": "assistant", "content": "draft"},))
-        self._assert_equal(second["input_messages"][0]["role"], "system")
-        self._assert_equal(second["input_messages"][1], {"role": "assistant", "content": "draft"})
-        self._assert_equal(second["input_messages"][2], {"role": "user", "content": "Task"})
+        self._assert_equal(result.output, "draft")
+        self._assert_equal(result.metadata["stop_reason"], "final_response")
+        self._assert_equal(len(llm_spans), 1)
+        first = llm_spans[0]["attributes"]
+        self._assert_equal(first["messages"], first["input_messages"])
+        self._assert_equal(first["messages"][0]["role"], "system")
+        self._assert_equal(first["messages"][1], {"role": "user", "content": "Task"})
 
     async def test_existing_payload_fields_still_pass_through(self) -> None:
         # Verifies tools, tool choice, response format, and metadata still pass through.

@@ -479,7 +479,7 @@ class AgentRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.metadata["iteration_count"], 3)
         self.assertEqual(result.metadata["tool_call_count"], 3)
 
-    async def test_runtime_continues_when_response_has_no_tool_calls(self) -> None:
+    async def test_runtime_finishes_when_response_has_no_tool_calls(self) -> None:
         runner = FakeRunner(
             [
                 FakeResponse("partial work", {"output_text": "partial work"}),
@@ -510,9 +510,10 @@ class AgentRuntimeTests(unittest.IsolatedAsyncioTestCase):
             context=context,
         )
 
-        self.assertEqual(result.output, "done")
-        self.assertEqual(result.metadata["iteration_count"], 2)
-        self.assertEqual(runner.calls[1]["kwargs"]["messages"][0]["content"], "partial work")
+        self.assertEqual(result.output, "partial work")
+        self.assertEqual(result.metadata["stop_reason"], "final_response")
+        self.assertEqual(result.metadata["iteration_count"], 1)
+        self.assertEqual(len(runner.calls), 1)
 
 
     def test_agent_runtime_fail_fast(self) -> None:

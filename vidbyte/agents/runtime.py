@@ -364,7 +364,37 @@ class AgentRuntime:
 
             tool_calls = ToolsFormatter.parse_tool_calls(raw_result, provider)
             if not tool_calls:
-                messages.append(self._assistant_message(handle.extract_text(raw_result)))
+                if self.config.max_tokens is not None and tokens_used is not None and tokens_used >= self.config.max_tokens:
+                    token_stop = self._stopped_result(
+                        "Agent runtime stopped after reaching max_tokens.",
+                        stop_reason=AgentStopReason.MAX_TOKENS,
+                        iteration_count=iteration_count,
+                        tokens_used=tokens_used,
+                        contexts=call_contexts,
+                    )
+                    return await self._finish_result(
+                        token_stop,
+                        message=message,
+                        context=context,
+                        provider=provider,
+                        iteration_count=iteration_count,
+                        model_call_count=model_call_count,
+                        tokens_used=tokens_used,
+                        started_at=started_at,
+                        metadata=runtime_metadata,
+                        run_state=run_state,
+                        model_response=raw_result,
+                    )
+                final = self._final_result(
+                    output=last_assistant_output,
+                    runner_metadata=runner_metadata,
+                    contexts=call_contexts,
+                    iteration_count=iteration_count,
+                    tokens_used=tokens_used,
+                    stop_reason=AgentStopReason.FINAL_RESPONSE,
+                )
+                if inner_algorithm is not None:
+                    messages.append(self._assistant_message(last_assistant_output))
                 decision = await self.middleware.after_iteration(
                     self._middleware_context(
                         MiddlewareHook.AFTER_ITERATION,
@@ -381,27 +411,28 @@ class AgentRuntime:
                         model_response=raw_result,
                     )
                 )
+                if inner_algorithm is not None and decision.action is MiddlewareAction.CONTINUE:
+                    continue
                 if decision.action is not MiddlewareAction.CONTINUE:
-                    result = self._middleware_abort_result(
+                    final = self._middleware_abort_result(
                         decision,
                         iteration_count=iteration_count,
                         tokens_used=tokens_used,
                         contexts=call_contexts,
                     )
-                    return await self._finish_result(
-                        result,
-                        message=message,
-                        context=context,
-                        provider=provider,
-                        iteration_count=iteration_count,
-                        model_call_count=model_call_count,
-                        tokens_used=tokens_used,
-                        started_at=started_at,
-                        metadata=runtime_metadata,
-                        run_state=run_state,
-                        model_response=raw_result,
-                    )
-                continue
+                return await self._finish_result(
+                    final,
+                    message=message,
+                    context=context,
+                    provider=provider,
+                    iteration_count=iteration_count,
+                    model_call_count=model_call_count,
+                    tokens_used=tokens_used,
+                    started_at=started_at,
+                    metadata=runtime_metadata,
+                    run_state=run_state,
+                    model_response=raw_result,
+                )
 
             for call in tool_calls:
                 processed = await self._process_tool_call(
@@ -763,6 +794,7 @@ class AgentRuntime:
         # Builds sanitized, inspectable model-call inputs for trace providers.
         system = call_options.get("system")
         messages = self._provider_messages_from_options(call_options)
+        visible_messages = self._provider_visible_trace_messages(system, messages, message)
         tools = tuple(call_options.get("tools", ()) or ())
         inputs: dict[str, Any] = {
             "agent_name": self.agent_name,
@@ -772,12 +804,13 @@ class AgentRuntime:
             "model_call": model_call_count,
             "prompt": self._safe_trace_value(message),
             "metadata": self._safe_trace_value(metadata),
-            "input_messages": self._safe_trace_value(self._provider_visible_trace_messages(system, messages, message)),
+            "messages": self._safe_trace_value(visible_messages),
+            "input_messages": self._safe_trace_value(visible_messages),
         }
         if system is not None:
             inputs["system"] = self._safe_trace_value(str(system))
         if messages:
-            inputs["messages"] = self._safe_trace_value(messages)
+            inputs["history_messages"] = self._safe_trace_value(messages)
         if tools:
             inputs["tool_count"] = len(tools)
             inputs["tool_names"] = tuple(str(tool.get("name") or tool.get("function", {}).get("name") or "") for tool in tools if isinstance(tool, Mapping))

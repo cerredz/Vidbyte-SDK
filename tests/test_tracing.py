@@ -358,6 +358,47 @@ class AgentRuntimeSpanTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(attrs["prompt"], "prompt")
         self.assertEqual(attrs["system"], "System prompt:\nsys")
         self.assertEqual(attrs["metadata"], {"eval_suite": "mbpp"})
+        self.assertEqual(
+            attrs["messages"],
+            (
+                {"role": "system", "content": "System prompt:\nsys"},
+                {"role": "user", "content": "prompt"},
+            ),
+        )
+        self.assertEqual(attrs["input_messages"], attrs["messages"])
+        self.assertNotIn("history_messages", attrs)
+
+    async def test_llm_span_messages_include_full_input_when_history_exists(self) -> None:
+        tracer = RecordingTracer()
+        runtime = self._make_runtime(tracer)
+        runner = FakeRunner([
+            FakeResponse("", {"output": [{"type": "function_call", "name": "isDone", "arguments": '{"final_answer": "ok"}'}]}),
+        ])
+        handle = RunnerHandle(runner=runner, provider="xai", invoke=_invoke_runner, extract_text=_output_text, extract_metadata=_output_metadata)
+
+        inputs = runtime._llm_trace_inputs(
+            handle,
+            "prompt",
+            {
+                "system": "System prompt:\nsys",
+                "messages": ({"role": "assistant", "content": "draft"},),
+            },
+            "xai",
+            1,
+            2,
+            {},
+        )
+
+        self.assertEqual(
+            inputs["messages"],
+            (
+                {"role": "system", "content": "System prompt:\nsys"},
+                {"role": "assistant", "content": "draft"},
+                {"role": "user", "content": "prompt"},
+            ),
+        )
+        self.assertEqual(inputs["input_messages"], inputs["messages"])
+        self.assertEqual(inputs["history_messages"], ({"role": "assistant", "content": "draft"},))
 
     async def test_tool_span_emitted_per_tool_execution(self) -> None:
         tracer = RecordingTracer()

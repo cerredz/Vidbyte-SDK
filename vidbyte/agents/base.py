@@ -314,8 +314,9 @@ class BaseAgent(McpAttachableMixin):
         **options: Any,
     ) -> AgentMessage:
         await self._ensure_mcp_connected()
-        trace_ctx = self._tracer.start_trace("agent.run", agent_name=self.name, strategy="direct")
+        trace_ctx = None
         try:
+            trace_metadata = dict(options.pop("trace_metadata", {}) or {})
             prompt, input_modality, input_metadata = self._normalize_input(message)
             input_context_items, input_context_manager = self._normalize_input_context(message)
             self._active_prompt = prompt
@@ -329,6 +330,15 @@ class BaseAgent(McpAttachableMixin):
             if selected_modality is ModelModality.AUTO:
                 selected_modality = ModelModality.TEXT
             runner = self._runner_for_modality(selected_modality)
+            trace_ctx = self._tracer.start_trace(
+                "agent.run",
+                agent_name=self.name,
+                strategy="direct",
+                prompt=self._safe_trace_value(prompt),
+                provider=self._runner_provider(runner),
+                model=self._runner_model_name(runner),
+                metadata=self._safe_trace_value({**self.metadata, **dict(input_metadata), **trace_metadata}),
+            )
             agent_context = self._build_context(
                 prompt,
                 context=context,
@@ -345,12 +355,14 @@ class BaseAgent(McpAttachableMixin):
                 runner=runner,
                 modality=selected_modality,
                 trace_context=trace_ctx,
-                runtime_metadata={**self.metadata, **dict(input_metadata)},
+                runtime_metadata={**self.metadata, **dict(input_metadata), **trace_metadata},
                 **options,
             )
-            self._tracer.end_trace(trace_ctx, output=result.output)
+            if trace_ctx is not None:
+                self._tracer.end_trace(trace_ctx, output=result.output)
         except Exception as exc:
-            self._tracer.end_trace(trace_ctx, error=exc)
+            if trace_ctx is not None:
+                self._tracer.end_trace(trace_ctx, error=exc)
             self._active_prompt = ""
             raise AgentExecutionError(
                 f"Agent '{self.name}' failed to generate a reply.",
@@ -651,6 +663,35 @@ class BaseAgent(McpAttachableMixin):
             except Exception:
                 return "openai"
         return "openai"
+
+    @staticmethod
+    def _runner_model_name(runner: object) -> str | None:
+        config = getattr(runner, "_config", None)
+        model = getattr(config, "model", None)
+        if model is not None:
+            return str(model)
+        model_name = getattr(runner, "model_name", None)
+        if callable(model_name):
+            try:
+                return str(model_name())
+            except Exception:
+                return None
+        return str(model_name) if model_name is not None else None
+
+    @classmethod
+    def _safe_trace_value(cls, value: Any) -> Any:
+        if isinstance(value, Mapping):
+            return {key: cls._safe_trace_value(item) for key, item in value.items() if not cls._is_secret_trace_key(str(key))}
+        if isinstance(value, tuple):
+            return tuple(cls._safe_trace_value(item) for item in value)
+        if isinstance(value, list):
+            return [cls._safe_trace_value(item) for item in value]
+        return value
+
+    @staticmethod
+    def _is_secret_trace_key(key: str) -> bool:
+        upper = key.upper()
+        return any(token in upper for token in ("API_KEY", "TOKEN", "SECRET", "PASSWORD", "CREDENTIAL", "AUTH"))
 
     @staticmethod
     def _runner_output_metadata(result: object) -> dict[str, Any]:
