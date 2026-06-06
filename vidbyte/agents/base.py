@@ -164,6 +164,7 @@ class BaseAgent(McpAttachableMixin):
         self._active_prompt: str = ""
         self._handoff_spec: Handoff | None = handoff
         self.last_handoff: Handoff | None = None
+        self.handoffs: list[Handoff] = []
         self._trace_option: TraceOption | None = trace_option
         self.last_trace: dict[str, Any] | None = None
         self.last_prompt: str = ""
@@ -239,11 +240,14 @@ class BaseAgent(McpAttachableMixin):
     def _bind_agent_tool_context(self, tool: object) -> None:
         """Bind this agent's live context getter to AgentTool instances."""
         from vidbyte.tools.agent_tool import AgentTool
+        from vidbyte.tools.builtins.handoff import CreateHandoffTool
         from vidbyte.tools.builtins.mcp import AttachMcpServerTool
 
         if isinstance(tool, AgentTool):
             tool.bind_context_getter(lambda: (self._active_prompt, list(self.history)))
         if isinstance(tool, AttachMcpServerTool):
+            tool.bind_agent(self)
+        if isinstance(tool, CreateHandoffTool):
             tool.bind_agent(self)
 
     def tool_specs(self) -> tuple[ToolSpec, ...]:
@@ -412,12 +416,27 @@ class BaseAgent(McpAttachableMixin):
         generator = by or HandoffAgent.from_source_agent(self, resolved)
         return await generator.generate_handoff(HandoffAgent.render_source_run(self))
 
+    def record_handoff(self, handoff: Handoff) -> None:
+        """Append a produced handoff to the run's collection and sync it to the context registry."""
+        self.handoffs.append(handoff)
+        self.last_handoff = handoff
+        self._sync_handoff_primitive(handoff)
+
+    def _sync_handoff_primitive(self, handoff: Handoff) -> None:
+        """Upsert the handoff into the context manager when one is configured and an id exists."""
+        if self.context_manager is None or not handoff.primitive_id:
+            return
+        try:
+            self.context_manager.upsert(handoff)
+        except ValueError:
+            return
+
     async def _run_auto_handoff(self, metadata: dict[str, Any]) -> None:
         # Generate the configured handoff after a run and record it without breaking the primary reply.
         from vidbyte.agents.handoff import HandoffAgent
         try:
             produced = await HandoffAgent.run_auto_handoff(self, self._handoff_spec)
-            self.last_handoff = produced
+            self.record_handoff(produced)
             metadata["handoff"] = produced
         except Exception as exc:
             metadata["handoff_error"] = repr(exc)
