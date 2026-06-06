@@ -90,10 +90,16 @@ Add a new module under `vidbyte/trace/continual/prebuilt/` (one schema per modul
 holding a Pydantic model with described fields, convert it with
 `TraceSchema.from_model(..., name="snake_case")`, then re-export the schema and its
 `*Model` from `prebuilt/__init__.py`, `vidbyte/trace/continual/__init__.py`,
-`vidbyte/trace/__init__.py`, and root `vidbyte/__init__.py`. Give each field a 3–5
-sentence description and choose its type to get the right merge behavior: `list[...]`
-appends, `dict` deep-merges, scalars (`str`/`int`/`bool`) replace. Keep schema names
-unique. Update `tests/test_continual_trace.py` and `scripts/test-continual-trace.py`.
+`vidbyte/trace/__init__.py`, and root `vidbyte/__init__.py`. Give each field a
+`title=` string (human-readable name), a `min_length=` constraint (`min_length=1` for
+required `str` fields, `min_length=0` for optional `str` and `list` fields; omit for
+`int` and `dict`), and a **4–5 sentence description** that coherently explains both the
+field's meaning and its intent: what it contains, how to populate it (what goes in each
+entry), when to append versus overwrite, what value it provides for a handoff reader, and
+any precision or edge-case guidance. Choose each field's type to get the right merge
+behavior: `list[...]` appends, `dict` deep-merges, scalars (`str`/`int`/`bool`) replace.
+Keep schema names unique. Update `tests/test_continual_trace.py` and
+`scripts/test-continual-trace.py`.
 
 ## Verify
 
