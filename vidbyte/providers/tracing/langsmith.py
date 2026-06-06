@@ -16,6 +16,7 @@ class LangSmithSpanContext(SpanContext):
 
     run_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     parent_run_id: str | None = None
+    trace_id: str | None = None
 
 
 class LangSmithTracer(TracerBase):
@@ -97,7 +98,7 @@ class LangSmithTracer(TracerBase):
             inputs=attributes,
             project_name=self._project,
         )
-        return LangSmithSpanContext(run_id=run_id)
+        return LangSmithSpanContext(run_id=run_id, trace_id=run_id)
 
     def end_trace(self, context: SpanContext, *, output: str | None = None, error: Exception | None = None) -> None:
         # Closes a root LangSmith chain run with either output or error metadata.
@@ -107,15 +108,15 @@ class LangSmithTracer(TracerBase):
             self._call_langsmith("update_run", self._client.update_run, context.run_id, error=str(error), end_time=_now())
         else:
             self._call_langsmith("update_run", self._client.update_run, context.run_id, outputs={"output": output}, end_time=_now())
+        self._call_langsmith("flush", self._client.flush)
 
     def start_span(self, name: str, parent: SpanContext | None = None, **attributes: Any) -> LangSmithSpanContext:
         # Opens a child LangSmith run under the parent trace when available.
         run_id = str(uuid.uuid4())
         parent_run_id = parent.run_id if isinstance(parent, LangSmithSpanContext) else None
+        trace_id = parent.trace_id if isinstance(parent, LangSmithSpanContext) else None
         run_type = "llm" if name.startswith("llm.") else "tool"
-        self._call_langsmith(
-            "create_run",
-            self._client.create_run,
+        create_kwargs: dict[str, Any] = dict(
             id=run_id,
             name=name,
             run_type=run_type,
@@ -123,7 +124,10 @@ class LangSmithTracer(TracerBase):
             parent_run_id=parent_run_id,
             project_name=self._project,
         )
-        return LangSmithSpanContext(run_id=run_id, parent_run_id=parent_run_id)
+        if trace_id is not None:
+            create_kwargs["trace_id"] = trace_id
+        self._call_langsmith("create_run", self._client.create_run, **create_kwargs)
+        return LangSmithSpanContext(run_id=run_id, parent_run_id=parent_run_id, trace_id=trace_id)
 
     def end_span(self, context: SpanContext, *, output: str | None = None, error: Exception | None = None) -> None:
         # Closes a child LangSmith run with either output or error metadata.
@@ -133,6 +137,7 @@ class LangSmithTracer(TracerBase):
             self._call_langsmith("update_run", self._client.update_run, context.run_id, error=str(error), end_time=_now())
         else:
             self._call_langsmith("update_run", self._client.update_run, context.run_id, outputs={"output": output}, end_time=_now())
+        self._call_langsmith("flush", self._client.flush)
 
 
 def _now() -> Any:
