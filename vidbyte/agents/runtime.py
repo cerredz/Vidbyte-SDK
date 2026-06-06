@@ -796,6 +796,7 @@ class AgentRuntime:
         messages = self._provider_messages_from_options(call_options)
         visible_messages = self._provider_visible_trace_messages(system, messages, message)
         tools = tuple(call_options.get("tools", ()) or ())
+        public_metadata = {k: v for k, v in dict(metadata).items() if not k.startswith("_")}
         inputs: dict[str, Any] = {
             "agent_name": self.agent_name,
             "provider": provider,
@@ -803,7 +804,7 @@ class AgentRuntime:
             "iteration": iteration_count,
             "model_call": model_call_count,
             "prompt": self._safe_trace_value(message),
-            "metadata": self._safe_trace_value(metadata),
+            "metadata": self._safe_trace_value(public_metadata),
             "messages": self._safe_trace_value(visible_messages),
             "input_messages": self._safe_trace_value(visible_messages),
         }
