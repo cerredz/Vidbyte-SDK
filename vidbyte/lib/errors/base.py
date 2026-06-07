@@ -164,3 +164,23 @@ class PipelineExecutionError(VidbyteSdkError):
 
 class TracerConfigurationError(VidbyteSdkError):
     """Raised when a tracing provider cannot be configured (missing credentials or SDK)."""
+
+
+class SandboxError(VidbyteSdkError):
+    """Base class for sandbox environment failures."""
+
+
+class SandboxProviderError(SandboxError):
+    """Raised when a sandbox provider is unavailable, unknown, or misconfigured."""
+
+
+class SandboxProvisionError(SandboxError):
+    """Raised when provisioning a sandbox (clone, seed, setup) fails."""
+
+
+class SandboxExecutionError(SandboxError):
+    """Raised when a command or file operation inside a sandbox fails."""
+
+
+class SandboxNotFoundError(SandboxError):
+    """Raised when a sandbox id cannot be found in the manager."""

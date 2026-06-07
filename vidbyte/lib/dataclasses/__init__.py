@@ -62,7 +62,17 @@ from vidbyte.lib.dataclasses.middleware import (
     MiddlewareTransform,
 )
 from vidbyte.lib.dataclasses.multi_agent import CandidateFailure, CandidateResult, DagNode, EvaluationDecision, NodeState, Verification
-from vidbyte.lib.dataclasses.sandbox import SandboxRequest, SandboxResult, SandboxTransport
+from vidbyte.lib.dataclasses.sandbox import (
+    AgentManifest,
+    Sandbox,
+    SandboxConfig,
+    SandboxInfo,
+    SandboxProvider,
+    SandboxRequest,
+    SandboxResult,
+    SandboxStatus,
+    SandboxTransport,
+)
 from vidbyte.lib.dataclasses.security import PermissionDecision, PermissionPolicy
 from vidbyte.lib.dataclasses.runner import RunnerHandle
 from vidbyte.lib.dataclasses.strategies import AgentResult
@@ -129,9 +139,15 @@ __all__ = [
     "ProgressContextItem",
     "ProgressLog",
     "ResponseContextItem",
+    "AgentManifest",
     "RunnerHandle",
+    "Sandbox",
+    "SandboxConfig",
+    "SandboxInfo",
+    "SandboxProvider",
     "SandboxRequest",
     "SandboxResult",
+    "SandboxStatus",
     "SandboxTransport",
     "TaskContextItem",
     "TextContextItem",

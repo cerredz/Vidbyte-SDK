@@ -10,6 +10,9 @@ class Platform(str, Enum):
     DOCKER = "docker"
     E2B = "e2b"
     WASM = "wasm"
+    MODAL = "modal"
+    DAYTONA = "daytona"
+    FLY = "fly"
 
 
 __all__ = [
