@@ -250,6 +250,9 @@ vidbyte/
 - Custom middleware should subclass `AgentMiddleware` and override only needed lifecycle hooks. Middleware should return `MiddlewareDecision` values instead of mutating runtime state directly.
 - Concrete `TextModelRunner`, `ImageModelRunner`, and `VideoModelRunner` classes are internal/advanced implementation details in user-facing docs. Prefer `Agent`/`BaseAgent` or harness composition in examples.
 - Do not add provider network calls, remote protocol transports, or private Vidbyte service logic without a separate approved design.
+- Keep the durable-sessions primitive under `vidbyte/sessions/` (facade, `SessionStore` protocol + `BaseSessionStore`, serialization, trace capture, `SessionTool`) with local stores under `vidbyte/sessions/stores/`. Define session dataclasses (`RunState`, `Checkpoint`, `SessionMeta`, enums) in `vidbyte/lib/dataclasses/sessions.py` and session errors under `vidbyte/lib/errors/`. Expose the namespace via `sdk.harnesses.sessions`.
+- Keep database-backed session stores under `vidbyte/lib/providers/`; they must subclass `ProviderSessionStore`, import their driver lazily, and raise `ConfigurationError` when the driver is absent so the SDK core stays import-safe.
+- Sessions persist raw agent history as source of truth and re-supply non-serializable parts (tools, runner, middleware) at `resume`/`fork`. Never persist secrets, and never use the trace artifact as a `resume` input.
 
 ## Update Skill Files
 

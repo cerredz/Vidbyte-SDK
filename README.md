@@ -575,6 +575,61 @@ The current preset catalog contains 201 presets:
 | E-Commerce & Payments | `paypal`, `shopify`, `square`, `stripe`, `woocommerce` |
 | Automation & Workflow | `n8n`, `zapier` |
 
+## Durable Sessions
+
+Durable sessions are a harness-level primitive that make any agent persistent
+with `continue`, `resume`, and `fork` over an append-only checkpoint DAG. The
+agent stays pure — persistence lives in a `Session` wrapper, so it works for
+every runtime. Attach an agent in one line:
+
+```python
+from vidbyte import Agent, Session
+
+agent = Agent(name="researcher", system_prompt="Investigate carefully.", provider="openai", model_name="gpt-4.1")
+session = Session(agent)                      # defaults to an in-memory store
+reply = await session.arun("Investigate the failing test")
+print(session.id, session.head)              # session id + latest checkpoint id
+```
+
+Sessions are also reachable through the harness namespace
+(`sdk.harnesses.sessions.attach(agent, store=...)`). Resuming reconstructs the
+agent from a checkpoint; because live runners, tools, and middleware cannot be
+serialized, you re-supply them at resume time (the rehydration contract):
+
+```python
+from vidbyte.sessions import FileSessionStore
+
+store = FileSessionStore(root="./.vidbyte/sessions")
+session = Session(agent, store=store)
+await session.arun("first step")
+
+# later / cold process — re-supply non-serializable parts
+session = Session.resume(store, session_id, tools=[grep], runner=my_runner)
+session = Session.continue_(store, session_id, runner=my_runner)   # == resume(head)
+branch = Session.fork_from(store, checkpoint_id, runner=my_runner) # new id + parent lineage
+session.rewind(to=checkpoint_id)                                    # time-travel
+session.edit(lambda history: history[:-1])                         # state editing
+```
+
+Stores are pluggable behind one `SessionStore` protocol. The local stores
+(`InMemorySessionStore`, `FileSessionStore` with atomic JSON writes) ship in
+`vidbyte.sessions`; database-backed stores (`MongoDbSessionStore`,
+`SupabaseSessionStore`, `PostgresSessionStore`) live in `vidbyte.lib.providers`
+and import their drivers lazily, so the SDK core needs no database dependency.
+
+When saving, a session reads the agent's existing trace settings and persists the
+continual-trace artifact onto each checkpoint. Control it with the `trace`
+option: `TraceCapture.AUTO` (default — capture when the agent has tracing
+enabled), `OFF`, `ARTIFACT`, or `FULL` (artifact plus raw span events). Trace
+data is a derived observation stored alongside the checkpoint; it never feeds
+`resume`, which always restores the agent's raw history as source of truth.
+
+An agent can operate on its own sessions through the permission-gated
+`SessionTool` (`create_checkpoint`, `fork_current`, `list_my_runs`, `read_run`),
+scoped to its own runs by default — the foundation for subagent
+checkpoint-and-return flows. Persisting a checkpoint is fail-open: a store write
+failure is recorded in the reply metadata but never ends the run.
+
 ## Prompts
 
 Prompts are repository-backed text assets exposed through an enum-keyed accessor
