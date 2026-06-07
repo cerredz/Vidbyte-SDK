@@ -157,6 +157,7 @@ from vidbyte.pipelines import (
     SequentialPipeline,
 )
 from vidbyte.prompts import Prompts
+from vidbyte.sandbox import Sandbox, SandboxConfig, SandboxInfo, SandboxManager, SandboxProviders, SandboxStatus
 from vidbyte.tools import (
     BaseTool,
     FunctionTool,
@@ -302,6 +303,12 @@ __all__ = [
     "ToolPolicyMiddleware",
     "Tools",
     "ToolsFormatter",
+    "Sandbox",
+    "SandboxConfig",
+    "SandboxInfo",
+    "SandboxManager",
+    "SandboxProviders",
+    "SandboxStatus",
     "VidbyteSDK",
     "BaseGrader",
     "ComparisonReport",

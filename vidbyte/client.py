@@ -18,6 +18,7 @@ from vidbyte.agents.client import AgentClient
 from vidbyte.harnesses.client import HarnessClient
 from vidbyte.providers.client import ProvidersClient
 from vidbyte.evals.client import EvalClient
+from vidbyte.sandbox.client import SandboxClient
 from vidbyte.tools.client import ToolsClient
 
 
@@ -30,3 +31,4 @@ class VidbyteSDK:
         self.tools = ToolsClient()
         self.providers = ProvidersClient()
         self.evals = EvalClient()
+        self.sandboxes = SandboxClient()

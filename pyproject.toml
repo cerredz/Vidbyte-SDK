@@ -17,6 +17,13 @@ dependencies = [
   "httpx>=0.27",
 ]
 
+[project.optional-dependencies]
+e2b = ["e2b>=0.17"]
+modal = ["modal>=0.64"]
+daytona = ["daytona-sdk>=0.10"]
+fly = ["httpx>=0.27"]
+sandboxes = ["e2b>=0.17", "modal>=0.64", "daytona-sdk>=0.10"]
+
 [project.urls]
 Homepage = "https://vidbyte.ai"
 
