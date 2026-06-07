@@ -42,6 +42,10 @@ class AgentRuntimeContextAlgorithms:
             return "multi_provider_agentic_grader"
         if self.runtime.algorithm.trajectory_checkpoints is not None:
             return "trajectory_checkpoints"
+        if self.runtime.algorithm.problem_space_search is not None:
+            return "problem_space_search"
+        if self.runtime.algorithm.error_correction is not None:
+            return "error_correction"
         return None
 
     def is_algorithm(self, name: str) -> bool:
@@ -60,6 +64,10 @@ class AgentRuntimeContextAlgorithms:
         # Return the configured inner-loop context-window algorithm, if any.
         if self.runtime.algorithm.trajectory_checkpoints is not None:
             return self.runtime.algorithm.trajectory_checkpoints
+        if self.runtime.algorithm.problem_space_search is not None:
+            return self.runtime.algorithm.problem_space_search
+        if self.runtime.algorithm.error_correction is not None:
+            return self.runtime.algorithm.error_correction
         return None
 
     def has_inner_loop_algorithm(self) -> bool:
