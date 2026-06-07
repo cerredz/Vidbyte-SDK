@@ -164,3 +164,27 @@ class PipelineExecutionError(VidbyteSdkError):
 
 class TracerConfigurationError(VidbyteSdkError):
     """Raised when a tracing provider cannot be configured (missing credentials or SDK)."""
+
+
+class SessionError(VidbyteSdkError):
+    """Base class for durable-session failures."""
+
+
+class SessionNotFoundError(SessionError):
+    """Raised when a session id is not present in the store."""
+
+
+class CheckpointNotFoundError(SessionError):
+    """Raised when a checkpoint id is not present in the store."""
+
+
+class SessionSerializationError(SessionError):
+    """Raised when a session payload cannot be serialized or parsed."""
+
+
+class SessionStoreError(SessionError):
+    """Raised when a session store read/write fails or returns corrupt data."""
+
+
+class SessionVersionError(SessionError):
+    """Raised when a persisted session payload has an unsupported schema version."""

@@ -65,6 +65,15 @@ from vidbyte.lib.dataclasses.multi_agent import CandidateFailure, CandidateResul
 from vidbyte.lib.dataclasses.sandbox import SandboxRequest, SandboxResult, SandboxTransport
 from vidbyte.lib.dataclasses.security import PermissionDecision, PermissionPolicy
 from vidbyte.lib.dataclasses.runner import RunnerHandle
+from vidbyte.lib.dataclasses.sessions import (
+    SESSION_SCHEMA_VERSION,
+    Checkpoint,
+    CheckpointPolicy,
+    RunState,
+    SessionMeta,
+    SessionStatus,
+    TraceCapture,
+)
 from vidbyte.lib.dataclasses.strategies import AgentResult
 from vidbyte.lib.dataclasses.trace import (
     TraceField,
@@ -130,9 +139,16 @@ __all__ = [
     "ProgressLog",
     "ResponseContextItem",
     "RunnerHandle",
+    "RunState",
+    "SESSION_SCHEMA_VERSION",
     "SandboxRequest",
     "SandboxResult",
     "SandboxTransport",
+    "Checkpoint",
+    "CheckpointPolicy",
+    "SessionMeta",
+    "SessionStatus",
+    "TraceCapture",
     "TaskContextItem",
     "TextContextItem",
     "ToolCall",
