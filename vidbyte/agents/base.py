@@ -28,6 +28,7 @@ from vidbyte.context.handoff import Handoff, MinimalHandoff
 from vidbyte.lib.agents import ModalityDetector
 from vidbyte.lib.dataclasses.agents import AgentMetadata, AgentRunnerConfig, AgentRuntimeConfig
 from vidbyte.lib.dataclasses.runner import RunnerHandle
+from vidbyte.lib.dataclasses.sessions import SESSION_SCHEMA_VERSION, RunState
 from vidbyte.lib.dataclasses.strategies import AgentResult
 from vidbyte.lib.dataclasses.trace import TraceOption
 from vidbyte.lib.enums import AgentRuntimeType, ModelModality, ModelProvider
@@ -299,6 +300,99 @@ class BaseAgent(McpAttachableMixin):
         if include_history:
             child.history = list(self.history)
         return child
+
+    def export_state(self) -> RunState:
+        """Capture a serializable RunState snapshot of this agent (no secrets, no live objects)."""
+        from vidbyte.sessions.serialization import SessionSerializer
+        serializer = SessionSerializer()
+        return RunState(
+            schema_version=SESSION_SCHEMA_VERSION,
+            agent_name=self.name,
+            system_prompt=self.system_prompt,
+            description=self.description,
+            capabilities=tuple(self.capabilities),
+            provider=self.runner_config.provider,
+            model_name=self.runner_config.model_name,
+            modality=self.modality.value,
+            temperature=self.runner_config.temperature,
+            runner_options=dict(self.runner_config.options),
+            runtime_type=self.runtime_type.value,
+            runtime_config=self._export_runtime_config(),
+            algorithm=self.algorithm.name,
+            metadata=dict(self.metadata),
+            agent_metadata=self._export_agent_metadata(),
+            tool_names=tuple(self._tool_name(tool) for tool in self._agent_tool_items),
+            history=tuple(serializer.message_to_dict(message) for message in self.history),
+        )
+
+    @classmethod
+    def restore(cls, state: RunState, *, tools: Sequence[object] = (), runner: object | None = None, middleware: Sequence[AgentMiddleware] = (), tracer: object | None = None, trace: object | None = None, output_schema: object | None = None) -> BaseAgent:
+        """Rebuild a live agent from a RunState, re-supplying non-serializable parts (the rehydration contract)."""
+        from vidbyte.sessions.serialization import SessionSerializer
+        serializer = SessionSerializer()
+        agent_metadata = AgentMetadata(**{key: str(state.agent_metadata.get(key, "")) for key in ("name", "description", "use_cases")})
+        child = cls(
+            name=state.agent_name,
+            system_prompt=state.system_prompt,
+            runtime=state.runtime_type,
+            runner=runner,
+            tools=tools,
+            middleware=middleware,
+            provider=state.provider,
+            model_name=state.model_name,
+            modality=state.modality,
+            temperature=state.temperature,
+            runner_options=dict(state.runner_options),
+            max_iterations=state.runtime_config.get("max_iterations"),
+            max_tokens=state.runtime_config.get("max_tokens"),
+            compaction_trigger_tokens=state.runtime_config.get("compaction_trigger_tokens"),
+            compaction_target_tokens=state.runtime_config.get("compaction_target_tokens"),
+            description=state.description,
+            capabilities=tuple(state.capabilities),
+            agent_metadata=agent_metadata,
+            algorithm=None if state.algorithm in ("", "default") else state.algorithm,
+            metadata=dict(state.metadata),
+            tracer=tracer,
+            trace=trace,
+            output_schema=output_schema,
+        )
+        child.history = [serializer.message_from_dict(item) for item in state.history]
+        cls._record_resume_tool_mismatch(child, state.tool_names)
+        return child
+
+    def _export_runtime_config(self) -> dict[str, Any]:
+        # Capture runtime budgets plus actor-runtime settings when present.
+        config: dict[str, Any] = {
+            "max_iterations": self.runtime_config.max_iterations,
+            "max_tokens": self.runtime_config.max_tokens,
+            "compaction_trigger_tokens": self.runtime_config.compaction_trigger_tokens,
+            "compaction_target_tokens": self.runtime_config.compaction_target_tokens,
+        }
+        if isinstance(self.runtime_config_obj, ActorRuntime):
+            config.update(
+                {
+                    "dynamic_actors": self.runtime_config_obj.dynamic_actors,
+                    "max_loop": self.runtime_config_obj.max_loop,
+                    "termination_mode": self.runtime_config_obj.termination_mode,
+                    "worker_model": self.runtime_config_obj.worker_model,
+                }
+            )
+        return config
+
+    def _export_agent_metadata(self) -> dict[str, str]:
+        # Render the agent-as-tool metadata into a plain dict.
+        return {
+            "name": self.agent_metadata.name,
+            "description": self.agent_metadata.description,
+            "use_cases": self.agent_metadata.use_cases,
+        }
+
+    @staticmethod
+    def _record_resume_tool_mismatch(child: BaseAgent, expected: Sequence[str]) -> None:
+        # Record a non-fatal marker when restored tools differ from the persisted set.
+        got = tuple(child._tool_name(tool) for tool in child._agent_tool_items)
+        if set(expected) != set(got):
+            child.metadata["__resume_tool_mismatch__"] = {"expected": list(expected), "got": list(got)}
 
     async def receive(self, message: AgentMessage) -> None:
         self.history.append(message)
