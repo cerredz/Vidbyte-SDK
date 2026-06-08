@@ -29,6 +29,7 @@ from vidbyte.tools.builtins.context import (
 )
 from vidbyte.tools.builtins.context_primitives import ContextListTool, ContextRemoveTool, ContextUpsertTool
 from vidbyte.tools.builtins.editing import PatchTool
+from vidbyte.tools.builtins.handoff import CreateHandoffTool
 from vidbyte.tools.builtins.mcp import AttachMcpServerTool, SearchMcpServersTool
 from vidbyte.tools.builtins.memory import (
     CogneeAddTool,
@@ -54,6 +55,7 @@ from vidbyte.tools.builtins.memory import (
 
 __all__ = [
     "AttachMcpServerTool",
+    "CreateHandoffTool",
     "CompactionMode",
     "ContextCompactionTool",
     "ContextListTool",

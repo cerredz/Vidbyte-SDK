@@ -105,6 +105,7 @@ from vidbyte.tools.builtins.context_primitives import (
     ContextRemoveTool,
     ContextUpsertTool,
 )
+from vidbyte.tools.builtins.handoff import CreateHandoffTool
 from vidbyte.lib.enums import BudgetPreset, ModelModality, PermissionPreset, Prompt
 from vidbyte.lib.errors import (
     McpAttachmentError,
@@ -229,6 +230,7 @@ __all__ = [
     "ContextPermissions",
     "ContextRemoveTool",
     "ContextUpsertTool",
+    "CreateHandoffTool",
     "ContextWindow",
     "ContextWindowAlgorithm",
     "ContextWindowPlacement",
