@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from vidbyte.middleware.compaction.base import BaseCompaction, CompactionMode, CompactionStats, Summarizer, TokenCounter
-from vidbyte.middleware.compaction.context_compaction import MessageHistoryCompactionMiddleware, SummaryCompactionMiddleware, ToolResultCompactionMiddleware
+from vidbyte.middleware.compaction.context_compaction import MessageHistoryCompactionMiddleware, SummaryCompactionMiddleware, ToolResultCompactionMiddleware, TraceReplacementCompactionMiddleware, TraceSummaryTailCompactionMiddleware
 from vidbyte.middleware.compaction.engine import ContextCompactionEngine
 from vidbyte.middleware.compaction.strategies import (
     ClearExceptSystemAndLogCompaction,
@@ -16,6 +16,7 @@ from vidbyte.middleware.compaction.strategies import (
     RemoveAllToolCallsCompaction,
     RemoveLastNCompaction,
     RemoveToolCallPercentageCompaction,
+    ReplaceWithTraceCompaction,
     SalienceScoreEvictionCompaction,
     SelectiveContextPruningCompaction,
     StripToolResultBodiesCompaction,
@@ -29,6 +30,7 @@ from vidbyte.middleware.compaction.strategies import (
     TrimWithProviderBoundariesCompaction,
     TruncateToolResultMessagesCompaction,
 )
+from vidbyte.middleware.compaction.trace_render import TraceArtifactRenderer
 
 __all__ = [
     "BaseCompaction",
@@ -48,6 +50,7 @@ __all__ = [
     "RemoveAllToolCallsCompaction",
     "RemoveLastNCompaction",
     "RemoveToolCallPercentageCompaction",
+    "ReplaceWithTraceCompaction",
     "SalienceScoreEvictionCompaction",
     "SelectiveContextPruningCompaction",
     "StripToolResultBodiesCompaction",
@@ -61,6 +64,9 @@ __all__ = [
     "ToolResultCompactionMiddleware",
     "ToolOutputSlidingWindowCompaction",
     "ToolResultClearingWithExclusionsCompaction",
+    "TraceArtifactRenderer",
+    "TraceReplacementCompactionMiddleware",
+    "TraceSummaryTailCompactionMiddleware",
     "TrimToTokenBudgetCompaction",
     "TrimWithProviderBoundariesCompaction",
     "TruncateToolResultMessagesCompaction",

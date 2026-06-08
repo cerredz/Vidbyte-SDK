@@ -805,3 +805,33 @@ class BaseAgent(McpAttachableMixin):
             if name:
                 return str(name)
         return tool.__class__.__name__
+
+
+def _trace_text(value: object, *, max_chars: int = 12000) -> str:
+    # Keep trace payloads useful without letting very large prompts dominate requests.
+    text = str(value)
+    if len(text) <= max_chars:
+        return text
+    return f"{text[:max_chars]}...[truncated]"
+
+
+def _safe_trace_mapping(metadata: Mapping[str, Any] | None) -> dict[str, Any]:
+    # Removes env/credential-like fields before sending user metadata to tracing backends.
+    safe: dict[str, Any] = {}
+    for key, value in dict(metadata or {}).items():
+        key_text = str(key)
+        upper = key_text.upper()
+        if upper.startswith("LANGSMITH_") or any(token in upper for token in ("API_KEY", "TOKEN", "SECRET", "PASSWORD", "CREDENTIAL", "AUTH")):
+            continue
+        safe[key_text] = _safe_trace_value(value)
+    return safe
+
+
+def _safe_trace_value(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return _safe_trace_mapping(value)
+    if isinstance(value, (list, tuple)):
+        return tuple(_safe_trace_value(item) for item in value)
+    if isinstance(value, str):
+        return _trace_text(value)
+    return value

@@ -59,7 +59,7 @@ A middleware hook MUST return a `MiddlewareDecision` object. The runtime interce
 
 ## 4. Built-in Middleware Catalog
 
-The Vidbyte SDK includes 13 built-in middlewares designed to guard and govern agent execution out of the box. Three additional **compaction** middlewares (`ToolResultCompactionMiddleware`, `MessageHistoryCompactionMiddleware`, `SummaryCompactionMiddleware`) are covered separately in §5.1, bringing the public total to 16. Compaction implementations live in `vidbyte/middleware/compaction/` and are re-exported through `vidbyte/middleware/builtins/context_compaction.py`.
+The Vidbyte SDK includes 13 built-in middlewares designed to guard and govern agent execution out of the box. Five additional **compaction** middlewares (`ToolResultCompactionMiddleware`, `MessageHistoryCompactionMiddleware`, `SummaryCompactionMiddleware`, `TraceReplacementCompactionMiddleware`, `TraceSummaryTailCompactionMiddleware`) are covered separately in §5.1, bringing the public total to 18. Compaction implementations live in `vidbyte/middleware/compaction/` and are re-exported through `vidbyte/middleware/builtins/context_compaction.py`.
 
 ### A. Security & Defense
 
@@ -262,6 +262,26 @@ middleware = [
 ```
 
 Use `SummaryCompactionMiddleware` only with an explicitly injected summarizer. Middleware must not perform hidden provider calls for summarization.
+
+Use `TraceReplacementCompactionMiddleware` to fold a continual-trace artifact back into provider history on `before_model_call`. The artifact is read (in precedence order) from an injected `artifact`, an async `refresh_callback`, an `artifact_provider`, or `run_state[run_state_key][trace_key]` (default `("__result_metadata__", "trace")`) — the same key the continual-trace agent publishes. If the artifact is empty/initial (cold start), the middleware applies `fallback_mode` or no-ops; it never replaces real history with an empty trace. The single mode `CompactionMode.REPLACE_WITH_TRACE` is parameterized by `scope` (`all_non_system`, `oldest_n_groups`, `oldest_percentage`, `middle_keep_bookends`), group-aware retention (`keep_last_groups`, `keep_last_user`, `keep_pinned`, `keep_errors`, `keep_active_branch`), `placement` (`summary`, `system_suffix`, `synthetic_user`), and render bounds via `render={...}` (`fields`, `max_chars`, `array_head`, `array_tail`, `max_tokens`). Named constructors expose each method:
+
+```python
+from vidbyte.middleware.builtins import TraceReplacementCompactionMiddleware
+
+agent = Agent(
+    name="long-runner",
+    system_prompt="Work carefully.",
+    tools=[lookup],
+    middleware=[
+        # Replace old history with the trace, keep the newest 2 tool groups verbatim.
+        TraceReplacementCompactionMiddleware.keep_recent_tail(keep_last_groups=2),
+    ],
+)
+```
+
+Family A (scope): `replace_all_with_trace` (keeps the live user turn by default), `keep_recent_tail`, `replace_oldest_n_iterations`, `replace_oldest_percentage`, `replace_middle_keep_bookends`, `replace_keep_last_user`. Family B (placement): `trace_as_summary`, `trace_as_system_suffix`, `trace_as_synthetic_user`. Family C (render): `trace_truncated_chars`, `trace_field_subset`. Family E (freshness): `stale_ok`, `with_refresh(refresh_callback)`. Family F (composition): `trace_fallback_to_mechanical`, `trace_plus_strip_tool_results`. Family G (protected retention): `replace_keep_pinned`, `replace_keep_errors`, `replace_keep_active_branch`. Use `TraceSummaryTailCompactionMiddleware.trace_then_summarize_tail(summarizer, ...)` to collapse old history to the trace and summarize the recent tail with an injected summarizer.
+
+The renderer (`TraceArtifactRenderer`) and strategy (`ReplaceWithTraceCompaction`) are pure: the middleware is the only layer that reads `run_state`. This middleware is the sanctioned, opt-in exception to the continual-trace invariant that the trace is never written into the main context window — it only crosses that boundary when explicitly attached.
 
 Compaction middleware returns `MiddlewareDecision.continue_(transform=...)`. The runtime applies those transforms only at supported hook boundaries; custom middleware should not mutate runtime internals directly.
 

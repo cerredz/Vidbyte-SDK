@@ -4,6 +4,7 @@ from vidbyte.middleware.compaction import (
     ContextCompactionEngine,
     Summarizer,
     TokenCounter,
+    TraceArtifactRenderer,
 )
 
 __all__ = [
@@ -12,4 +13,5 @@ __all__ = [
     "ContextCompactionEngine",
     "Summarizer",
     "TokenCounter",
+    "TraceArtifactRenderer",
 ]
