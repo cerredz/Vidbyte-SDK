@@ -47,20 +47,26 @@ class ContinualTraceMiddleware(AgentMiddleware):
 
     fail_closed = False
 
-    def __init__(self, option: TraceOption, *, source_agent: "BaseAgent") -> None:
-        # Stores the trace option and the source agent whose runner/provider is reused.
+    def __init__(self, option: TraceOption, *, source_agent: "BaseAgent", primary: bool = True) -> None:
+        # Stores the trace option, the source agent whose runner/provider is reused, and primary status.
         self.option = option
         self.source_agent = source_agent
+        self.primary = primary
 
     @property
     def middleware_name(self) -> str:
         # Stable display name for middleware metadata and audit events.
         return "ContinualTraceMiddleware"
 
+    @property
+    def _state_key(self) -> tuple[type, str]:
+        # Per-schema run_state key so multiple trace middleware on one run never collide.
+        return (type(self), self.option.schema.name)
+
     async def before_run(self, ctx: MiddlewareContext) -> MiddlewareDecision:
         """Seed a fresh per-run trace artifact in ctx.run_state."""
         state = _TraceRunState(artifact=self.option.schema.initial_artifact())
-        ctx.run_state[self.__class__] = state
+        ctx.run_state[self._state_key] = state
         self._publish(ctx, state)
         return MiddlewareDecision.continue_()
 
@@ -82,10 +88,10 @@ class ContinualTraceMiddleware(AgentMiddleware):
 
     def _state(self, ctx: MiddlewareContext) -> _TraceRunState:
         # Returns the per-run trace state, recreating it if a hook ran before before_run.
-        state = ctx.run_state.get(self.__class__)
+        state = ctx.run_state.get(self._state_key)
         if not isinstance(state, _TraceRunState):
             state = _TraceRunState(artifact=self.option.schema.initial_artifact())
-            ctx.run_state[self.__class__] = state
+            ctx.run_state[self._state_key] = state
         return state
 
     def _is_interval_due(self, state: _TraceRunState, iteration_count: int) -> bool:
@@ -125,8 +131,18 @@ class ContinualTraceMiddleware(AgentMiddleware):
         published = ctx.run_state.get(RESULT_METADATA_KEY)
         if not isinstance(published, dict):
             published = {}
-        published["trace"] = dict(state.artifact)
-        published["trace_metadata"] = self._summary(state)
+        artifact = dict(state.artifact)
+        summary = self._summary(state)
+        schema_name = self.option.schema.name
+        traces = published.get("traces") if isinstance(published.get("traces"), dict) else {}
+        traces_metadata = published.get("traces_metadata") if isinstance(published.get("traces_metadata"), dict) else {}
+        traces[schema_name] = artifact
+        traces_metadata[schema_name] = summary
+        published["traces"] = traces
+        published["traces_metadata"] = traces_metadata
+        if self.primary:
+            published["trace"] = artifact
+            published["trace_metadata"] = summary
         ctx.run_state[RESULT_METADATA_KEY] = published
 
     def _summary(self, state: _TraceRunState) -> dict[str, Any]:

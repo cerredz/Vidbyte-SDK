@@ -214,7 +214,9 @@ scalar fields replaced, and unknown keys dropped. The artifact is returned on
 agent's context window. This is orthogonal to the `trace=` observability tracers.
 
 Schemas can be a Pydantic model (recommended — typed and described), a `TraceSchema`,
-or a `{field: description}` mapping. A prebuilt `ActionTrace` is included.
+or a `{field: description}` mapping. Eight prebuilt schemas ship, each a different lens
+over a run: `ActionTrace`, `PlanTrace`, `ReasoningTrace`, `HistoryTrace`, `ToolTrace`,
+`DecisionTrace`, `ArtifactTrace`, and `KnowledgeTrace`.
 
 ```python
 from vidbyte import Agent, TraceOption
@@ -227,8 +229,38 @@ agent = Agent(
     trace_option=TraceOption.continual(ActionTrace, every_n_iterations=5, max_trace_iterations=3),
 )
 reply = await agent.arun("Fix the failing tests")
-trace_artifact = reply.metadata["trace"]   # {"goal": ..., "actions_taken": [...], "mistakes": [...], "current_status": ...}
+trace_artifact = reply.metadata["trace"]   # {"goal": ..., "actions_taken": [...], "mistakes": [...], ...}
 ```
+
+#### Multiple traces at once
+
+Pass a list of options to run several lenses over the same run. Each trace is
+independent (its own schedule and artifact), and one trace failing never affects the
+others or the main run. Cost stacks linearly in the number of traces.
+
+```python
+from vidbyte import Agent, TraceOption
+from vidbyte.trace.continual import PlanTrace, ReasoningTrace
+
+agent = Agent(
+    name="worker",
+    system_prompt="Work carefully.",
+    runner=my_runner,
+    trace_option=[
+        TraceOption.continual(PlanTrace, every_n_iterations=4),
+        TraceOption.continual(ReasoningTrace, every_n_iterations=6),
+    ],
+)
+reply = await agent.arun("Fix the failing tests")
+traces = reply.metadata["traces"]            # {"plan_trace": {...}, "reasoning_trace": {...}}
+plan = reply.metadata["traces"]["plan_trace"]
+agent.last_traces                            # same map, mirrors agent.last_trace
+```
+
+With multiple traces, `reply.metadata["traces"]` and `["traces_metadata"]` are keyed by
+schema name. The first option is the primary and is also mirrored to the single-trace
+`reply.metadata["trace"]` / `["trace_metadata"]` keys and `agent.last_trace`, so existing
+single-trace code keeps working. Schema names must be unique within one agent.
 
 Define a custom typed schema with Pydantic:
 

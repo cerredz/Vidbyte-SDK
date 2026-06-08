@@ -29,9 +29,30 @@ from vidbyte import Agent, TraceOption, TraceSchema
 from vidbyte.lib.dataclasses.trace import TraceField, TraceFieldType
 from vidbyte.lib.errors import ConfigurationError
 from vidbyte.tools import BaseTool, ToolCall, ToolResult, ToolSpec
-from vidbyte.trace.continual import ActionTrace, ContinualTraceMiddleware
+from vidbyte.trace.continual import (
+    ActionTrace,
+    ArtifactTrace,
+    ContinualTraceMiddleware,
+    DecisionTrace,
+    HistoryTrace,
+    KnowledgeTrace,
+    PlanTrace,
+    ReasoningTrace,
+    ToolTrace,
+)
 from vidbyte.trace.continual.middleware import RESULT_METADATA_KEY
 from vidbyte.trace.continual.tools import UPDATE_TRACE_TOOL_NAME, UpdateTraceTool
+
+ALL_PREBUILT = {
+    "action_trace": ActionTrace,
+    "plan_trace": PlanTrace,
+    "reasoning_trace": ReasoningTrace,
+    "history_trace": HistoryTrace,
+    "tool_trace": ToolTrace,
+    "decision_trace": DecisionTrace,
+    "artifact_trace": ArtifactTrace,
+    "knowledge_trace": KnowledgeTrace,
+}
 
 
 class ProgressModel(BaseModel):
@@ -84,6 +105,50 @@ class ScriptedRunner:
                 iteration = int(match.group(1)) if match else 0
                 return Resp(fc("updateTrace", '{"trace": {"steps": ["step-%d"]}}' % iteration, "t1"))
             return Resp(fc("isDone", '{"final_answer": "traced"}', "t2"))
+        self.main_payloads.append(prompt + str(kwargs.get("messages", "")))
+        if not has_messages:
+            return Resp(fc("lookup", "{}", "m1"))
+        return Resp(fc("isDone", '{"final_answer": "done"}', "m2"))
+
+
+class PlanModel(BaseModel):
+    """Plan."""
+
+    goal: str = Field(description="The goal.")
+    plan_steps: list[str] = Field(default_factory=list, description="Ordered plan steps.")
+
+
+class ThoughtModel(BaseModel):
+    """Thought."""
+
+    goal: str = Field(description="The goal.")
+    thoughts: list[str] = Field(default_factory=list, description="Reasoning notes.")
+
+
+def plan_schema() -> TraceSchema:
+    return TraceSchema.from_model(PlanModel, name="plan")
+
+
+def thought_schema() -> TraceSchema:
+    return TraceSchema.from_model(ThoughtModel, name="thought")
+
+
+class MultiScriptedRunner:
+    def __init__(self, *, fail_schema: str | None = None) -> None:
+        self.fail_schema = fail_schema
+        self.main_payloads: list[str] = []
+
+    def run(self, prompt: str, **kwargs: object) -> Resp:
+        is_trace = "<trace_schema>" in prompt
+        has_messages = "messages" in kwargs
+        if is_trace:
+            if self.fail_schema is not None and f"Name: {self.fail_schema}" in prompt:
+                raise RuntimeError("trace model failure")
+            if has_messages:
+                return Resp(fc("isDone", '{"final_answer": "traced"}', "t2"))
+            if "Name: plan" in prompt:
+                return Resp(fc("updateTrace", '{"trace": {"plan_steps": ["p1"]}}', "t1"))
+            return Resp(fc("updateTrace", '{"trace": {"thoughts": ["why1"]}}', "t1"))
         self.main_payloads.append(prompt + str(kwargs.get("messages", "")))
         if not has_messages:
             return Resp(fc("lookup", "{}", "m1"))
@@ -204,12 +269,45 @@ async def case_non_linear_guard() -> None:
 
 async def case_fork_preserves_option() -> None:
     agent = Agent(name="a", system_prompt="s", trace_option=TraceOption.continual(ProgressModel))
-    assert agent.fork(name="b")._trace_option.enabled
+    assert agent.fork(name="b")._primary_trace_option.enabled
 
 
 async def case_prebuilt_action_trace() -> None:
-    assert set(ActionTrace.fields) == {"goal", "actions_taken", "mistakes", "current_status"}
+    assert {"goal", "actions_taken", "mistakes", "current_status"} <= set(ActionTrace.fields)
     assert ActionTrace.fields["actions_taken"].type is TraceFieldType.ARRAY
+
+
+async def case_all_schemas_have_20_typed_fields() -> None:
+    for name, sch in ALL_PREBUILT.items():
+        assert sch.name == name, f"{name} name mismatch"
+        assert len(sch.fields) >= 20, f"{name} has fewer than 20 fields"
+        for field_name, spec in sch.fields.items():
+            assert spec.description.strip(), f"{name}.{field_name} missing description"
+            assert isinstance(spec.type, TraceFieldType)
+
+
+async def case_multi_trace_both_present() -> None:
+    runner = MultiScriptedRunner()
+    agent = Agent(name="worker", system_prompt="Work.", runner=runner, tools=[Lookup()], trace_option=[TraceOption.continual(plan_schema(), every_n_iterations=1), TraceOption.continual(thought_schema(), every_n_iterations=1)])
+    reply = await agent.arun("task")
+    traces = reply.metadata["traces"]
+    assert set(traces) == {"plan", "thought"}
+    assert "p1" in traces["plan"]["plan_steps"] and "why1" in traces["thought"]["thoughts"]
+    assert reply.metadata["trace"] == traces["plan"]
+    assert set(agent.last_traces) == {"plan", "thought"}
+
+
+async def case_multi_trace_duplicate_rejected() -> None:
+    _assert_raises(ConfigurationError, lambda: Agent(name="a", system_prompt="s", trace_option=[TraceOption.continual(PlanTrace), TraceOption.continual(PlanTrace)]))
+
+
+async def case_multi_trace_isolation() -> None:
+    runner = MultiScriptedRunner(fail_schema="thought")
+    agent = Agent(name="worker", system_prompt="Work.", runner=runner, tools=[Lookup()], trace_option=[TraceOption.continual(plan_schema(), every_n_iterations=1), TraceOption.continual(thought_schema(), every_n_iterations=1)])
+    reply = await agent.arun("task")
+    assert reply.content == "done"
+    assert "p1" in reply.metadata["traces"]["plan"]["plan_steps"]
+    assert reply.metadata["traces_metadata"]["thought"]["error_count"] >= 1
 
 
 async def case_middleware_fail_open_flag() -> None:
@@ -246,6 +344,10 @@ CHECKS = [
     ("non_linear_runtime_guard", case_non_linear_guard),
     ("fork_preserves_trace_option", case_fork_preserves_option),
     ("prebuilt_action_trace", case_prebuilt_action_trace),
+    ("all_schemas_have_20_typed_fields", case_all_schemas_have_20_typed_fields),
+    ("multi_trace_both_present", case_multi_trace_both_present),
+    ("multi_trace_duplicate_rejected", case_multi_trace_duplicate_rejected),
+    ("multi_trace_isolation", case_multi_trace_isolation),
     ("middleware_fail_open_flag", case_middleware_fail_open_flag),
 ]
 
