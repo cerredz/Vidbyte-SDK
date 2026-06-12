@@ -1,8 +1,42 @@
 # Vidbyte SDK
 
-`vidbyte-sdk` is the root-level home for Vidbyte's Python SDK surface.
+Vidbyte is an agent engineering platform for building, evaluating, instrumenting,
+and distributing AI workflows. The Vidbyte SDK is the Python package surface for
+that platform: it gives developers composable agents, tools, middleware, context
+management, MCP server integration, prompts, evals, provider adapters, pipelines,
+and tracing primitives.
 
-This package is intentionally minimal right now. It establishes the SDK package identity and namespace layout without including private Vidbyte service logic.
+This repository is intentionally focused on reusable SDK abstractions. Private
+Vidbyte service logic, proprietary learning systems, hosted scoring, and database
+access remain outside this package.
+
+## What You Can Build
+
+- Agent applications with explicit system prompts, runners, tools, context, and trace behavior.
+- Tool-using agents with local Python functions, MCP-backed tools, permission policies, and provider-native schemas.
+- Runtime policies with deterministic middleware for rate limits, budgets, retries, audit logs, compaction, and safety checks.
+- MCP Studio servers that expose Vidbyte agents, tools, prompts, and pipelines to MCP-compatible clients.
+- Local eval suites with reusable graders, concurrency controls, and run registries.
+- Agent pipelines that compose specialized agents through sequential, parallel, conditional, and map-reduce topologies.
+- Prompt libraries, context-window algorithms, and trace artifacts that make long-running agent work easier to inspect.
+
+## Layer Guide
+
+| Layer | Role |
+|-------|------|
+| [`vidbyte.agents`](vidbyte/agents/README.md) | Executable agent actors, runtimes, modality routing, handoff, and agent registries |
+| [`vidbyte.context`](vidbyte/context/README.md) | Structured context items, context windows, compaction, algorithms, and handoff models |
+| [`vidbyte.evals`](vidbyte/evals/README.md) | Local eval cases, suites, runners, graders, registries, and result summaries |
+| [`vidbyte.harnesses`](vidbyte/harnesses/README.md) | Namespace boundary for custom harness integrations |
+| [`vidbyte.lib`](vidbyte/lib/README.md) | Shared dataclasses, enums, registries, errors, runners, config, and tracing contracts |
+| [`vidbyte.mcp_server`](vidbyte/mcp_server/README.md) | Stdio MCP Studio server for exposing agents, tools, prompts, and pipelines |
+| [`vidbyte.middleware`](vidbyte/middleware/README.md) | Deterministic runtime hooks and built-in policy, safety, retry, budget, and compaction middleware |
+| [`vidbyte.pipelines`](vidbyte/pipelines/README.md) | Multi-agent pipeline topologies with a string-in/string-out contract |
+| [`vidbyte.prompts`](vidbyte/prompts/README.md) | Static prompt assets, enum-keyed lookup, direct imports, and prompt families |
+| [`vidbyte.providers`](vidbyte/providers/README.md) | Provider adapter factories for text, image, video, audio, embeddings, and streaming |
+| [`vidbyte.shared`](vidbyte/shared/README.md) | Reserved shared namespace; currently no stable public symbols |
+| [`vidbyte.tools`](vidbyte/tools/README.md) | Tool contracts, decorators, catalogs, execution, MCP bridges, and permissions |
+| [`vidbyte.trace`](vidbyte/trace/README.md) | Trace facade, debug tracer, provider tracers, and continual trace artifacts |
 
 ## Status
 
