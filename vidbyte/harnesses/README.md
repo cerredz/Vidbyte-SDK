@@ -17,6 +17,13 @@ should remain usable in ordinary Python code, while harness-specific launch,
 configuration, or discovery behavior can live behind this namespace when those
 contracts become stable.
 
+## Vidbyte Website
+
+This namespace supports the SDK architecture used to power agents on the
+[Vidbyte website](https://vidbyte.pro). As website and external harness needs
+diverge, this layer is the intended place for stable harness adapters rather
+than one-off integration code inside agent or tool modules.
+
 ## Usage
 
 ```python
@@ -26,6 +33,22 @@ sdk = VidbyteSDK()
 harnesses = sdk.harnesses
 print(type(harnesses).__name__)
 ```
+
+Keep application code pointed at the namespace boundary even before concrete
+helpers are added:
+
+```python
+def configure_harnesses(sdk: VidbyteSDK) -> None:
+    harness_client = sdk.harnesses
+    assert type(harness_client).__name__ == "HarnessClient"
+```
+
+## Feature Coverage
+
+- `HarnessClient` as the current namespace client exposed by `VidbyteSDK`.
+- A stable package location for future adapters that connect Vidbyte agents to external harnesses.
+- Explicit separation from agent execution, tool execution, provider configuration, and MCP serving.
+- A documentation boundary that tells contributors not to bury harness-specific behavior in unrelated layers.
 
 ## Key Modules
 

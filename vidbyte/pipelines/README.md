@@ -19,6 +19,14 @@ implicit shared state, hidden retries, voting, streaming, artifacts, or budgets
 at the pipeline layer. If a workflow needs those behaviors, they should be owned
 by agents, tools, middleware, or a custom pipeline.
 
+## Vidbyte Website
+
+This abstraction is used by the SDK architecture that powers agents on the
+[Vidbyte website](https://vidbyte.pro). Website workflows often need to split
+planning, drafting, review, and summarization across specialized agents; the
+pipeline layer provides those coordination shapes without hiding agent-local
+state.
+
 ## Usage
 
 ```python
@@ -43,6 +51,30 @@ map_reduce = MapReducePipeline(
     reduce_stage=summarizer_agent,
 )
 ```
+
+Nest pipelines when a larger workflow needs multiple coordination patterns:
+
+```python
+from vidbyte import MapReducePipeline, SequentialPipeline
+
+workflow = SequentialPipeline([
+    planner_agent,
+    MapReducePipeline(map_stages=[reviewer_a, reviewer_b], reduce_stage=summarizer_agent),
+    publisher_agent,
+])
+
+final_text = workflow.run_sync("Prepare a learner feedback summary.")
+```
+
+## Feature Coverage
+
+- `BasePipeline` async contract and synchronous `run_sync()` bridge.
+- Sequential pipelines that thread one stage output into the next stage input.
+- Parallel pipelines that send the same prompt to multiple stages and join outputs.
+- Conditional pipelines that route by a caller-provided synchronous predicate.
+- Map-reduce pipelines that fan out to map stages and reduce the joined response.
+- Nested pipelines because every pipeline is also a valid pipeline node.
+- Stage dispatch to either Vidbyte agents or nested pipelines.
 
 ## Key Modules
 

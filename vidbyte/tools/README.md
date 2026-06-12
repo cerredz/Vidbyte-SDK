@@ -18,6 +18,13 @@ should pass tools directly to agents or wrap collections with `Tools`. Legacy
 registries remain available for compatibility, but the catalog-first pattern
 makes tool availability easier to inspect.
 
+## Vidbyte Website
+
+This abstraction is used by the SDK architecture that powers agents on the
+[Vidbyte website](https://vidbyte.pro). Website agents need controlled access to
+retrieval, memory, editing, handoff, MCP, and context operations; the tools layer
+turns those capabilities into explicit, inspectable contracts.
+
 ## Usage
 
 ```python
@@ -38,6 +45,44 @@ agent = Agent(
 print(catalog.names())
 print(catalog.provider_schemas("openai"))
 ```
+
+Create a class-based tool when execution needs state:
+
+```python
+from vidbyte.tools import BaseTool, ToolCall, ToolResult, ToolSpec
+
+class TenantLookupTool(BaseTool):
+    def __init__(self, tenant_id: str) -> None:
+        self.tenant_id = tenant_id
+
+    def spec(self) -> ToolSpec:
+        return ToolSpec(name="tenant_lookup", description="Look up tenant metadata.")
+
+    async def execute(self, call: ToolCall) -> ToolResult:
+        return ToolResult.success("tenant_lookup", f"tenant={self.tenant_id}")
+```
+
+Attach a preset MCP server when the agent needs external tools:
+
+```python
+import os
+
+await agent.attach_preset_mcp_server(
+    "github",
+    env={"GITHUB_PERSONAL_ACCESS_TOKEN": os.environ["GITHUB_PERSONAL_ACCESS_TOKEN"]},
+)
+```
+
+## Feature Coverage
+
+- Function tools through `@tool` and `FunctionTool.from_function()`.
+- Class-based tools through `BaseTool`, `ToolSpec`, `ToolCall`, and `ToolResult`.
+- `Tools` catalogs for deterministic names, specs, provider schemas, and prompt descriptions.
+- `ToolExecutor` and compatibility `ToolRegistry` for older registry-first code.
+- Tool permissions and sandbox policy under `tools.security`.
+- MCP clients, transports, presets, attachment helpers, and bridged MCP tools.
+- Built-ins for code search, context primitives, editing, handoff, MCP attachment/search, memory providers, and utility tools.
+- Provider-specific formatting through `ToolsFormatter`.
 
 ## Key Modules
 

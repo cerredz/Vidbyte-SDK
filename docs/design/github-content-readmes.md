@@ -90,6 +90,10 @@ The working tree is already dirty before this task, mostly generated `.pyc` file
 21. Code snippets SHALL use only locally audited imports and APIs.
 22. Documentation SHALL avoid real secrets, tokens, API keys, and direct credential literals.
 23. A verification script SHALL check that all required README files exist and contain required headings, phrases, and code fences.
+24. Every SDK README SHALL include a section linking to the Vidbyte website at `https://vidbyte.pro`.
+25. Every layer README SHALL explain that the abstraction participates in the SDK architecture used to power agents on the Vidbyte website.
+26. Every layer README SHALL provide deeper feature coverage than a short overview, including the major public classes, factories, helpers, or boundaries for that abstraction.
+27. Every public layer README SHOULD include multiple usage snippets when the abstraction has more than one developer-facing workflow.
 
 ### Non-Functional Requirements
 
@@ -624,6 +628,8 @@ Total: 15 files created, 1 file modified, 0 files deleted.
 - [Hidden Failure] `scripts/test-github-content-readmes.py` rejects a public layer README that lacks a fenced Python code block.
 - [Silent Failure] `scripts/test-github-content-readmes.py` rejects a README that omits `Vidbyte SDK`, because the file could look complete while failing the cross-repo positioning requirement.
 - [Silent Failure] `scripts/test-github-content-readmes.py` rejects the root README if the layer guide omits one of the required layer links.
+- [Silent Failure] `scripts/test-github-content-readmes.py` rejects any SDK README that omits the `https://vidbyte.pro` website link.
+- [Hidden Assumption] `scripts/test-github-content-readmes.py` verifies each layer README names `Vidbyte website`, because the docs assume readers should understand how the SDK relates to the hosted product.
 - [Hidden Assumption] `scripts/test-github-content-readmes.py` checks `shared` separately because it assumes most layers are public but `shared` is currently reserved.
 - [Hidden Assumption] `scripts/test-github-content-readmes.py` checks keyword coverage for MCP, tools, middleware, evals, providers, prompts, pipelines, context, agents, and trace.
 

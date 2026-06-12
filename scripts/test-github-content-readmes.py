@@ -72,6 +72,7 @@ def main() -> int:
         file_path = REPO_ROOT / path
         checks.check(f"{path} exists", file_path.exists(), path)
         checks.check(f"{path} is non-empty", bool(read(path).strip()), path)
+        checks.check(f"{path} links Vidbyte website", "https://vidbyte.pro" in read(path), path)
 
     root = read("README.md")
     for keyword in ROOT_KEYWORDS:
@@ -86,6 +87,7 @@ def main() -> int:
         checks.check(f"{path} has Design Philosophy", "## Design Philosophy" in content, path)
         checks.check(f"{path} has Usage", "## Usage" in content, path)
         checks.check(f"{path} has python fence", "```python" in content, path)
+        checks.check(f"{path} mentions Vidbyte website", "Vidbyte website" in content, path)
 
     shared = read("vidbyte/shared/README.md")
     checks.check("shared README is reserved", "reserved namespace" in shared.lower(), "vidbyte/shared/README.md")

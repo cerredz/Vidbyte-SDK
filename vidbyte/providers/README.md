@@ -19,6 +19,13 @@ capability/provider pairs should fail early through provider-selection errors.
 Credentials should come from caller configuration or environment variables, not
 from hardcoded examples.
 
+## Vidbyte Website
+
+This abstraction is used by the SDK architecture that powers agents on the
+[Vidbyte website](https://vidbyte.pro). Website agents may need different model
+vendors or modalities behind the same agent surface; provider adapters keep that
+selection explicit and testable.
+
 ## Usage
 
 ```python
@@ -37,6 +44,27 @@ from vidbyte.providers import tool_spec_to_provider_schema
 
 schema = tool_spec_to_provider_schema(lookup_metric.spec(), "openai")
 ```
+
+Select another capability when the model output is not plain text:
+
+```python
+from vidbyte.lib.config import ImageModelConfig
+from vidbyte.providers import ModelProviders
+
+image_provider = ModelProviders.image(
+    ImageModelConfig(provider=ModelProvider.OPENAI, model="gpt-image-1")
+)
+```
+
+## Feature Coverage
+
+- Text, image, video, audio, embedding, and streaming text provider factories.
+- OpenAI, Anthropic, Gemini, xAI, OpenRouter, DeepSeek, GLM, MiniMax, ElevenLabs, and PlayAI adapter exports where supported.
+- Provider capability validation through `ProviderSelectionError`.
+- Provider schema conversion for OpenAI-style, Anthropic, and Gemini tool declarations.
+- Model configuration dataclasses from `vidbyte.lib.config`.
+- Provider-backed tracing adapters under `vidbyte.providers.tracing`.
+- Compatibility providers for OpenAI-compatible APIs.
 
 ## Key Modules
 

@@ -15,6 +15,13 @@ An empty namespace is better than an accidental public API. Keeping this package
 reserved prevents temporary implementation helpers from becoming compatibility
 promises before their boundaries are clear.
 
+## Vidbyte Website
+
+This namespace supports the SDK architecture used to power agents on the
+[Vidbyte website](https://vidbyte.pro) by reserving a place for future
+cross-cutting shared code. It intentionally does not expose website-specific
+internals today.
+
 ## Usage
 
 ```python
@@ -22,6 +29,13 @@ import vidbyte.shared
 
 assert hasattr(vidbyte.shared, "__all__")
 ```
+
+## Feature Coverage
+
+- Reserved package location for future shared code.
+- Empty `__all__` to avoid accidental public exports.
+- Clear signal that stable shared contracts currently live in `vidbyte.lib` or root `vidbyte` exports.
+- A safe place to document future shared abstractions if they become public.
 
 ## Key Modules
 

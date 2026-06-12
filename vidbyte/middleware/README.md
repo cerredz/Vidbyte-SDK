@@ -19,6 +19,13 @@ structured `MiddlewareDecision` objects instead of mutating hidden global state.
 By default middleware fails closed, while individual middleware can opt into
 fail-open behavior when policy failure should not abort the run.
 
+## Vidbyte Website
+
+This abstraction is used by the SDK architecture that powers agents on the
+[Vidbyte website](https://vidbyte.pro). Website agents need deterministic runtime
+controls for budgets, permissions, retries, auditability, and context bloat; the
+middleware layer keeps those controls outside model-visible tool definitions.
+
 ## Usage
 
 ```python
@@ -44,6 +51,29 @@ Built-ins are available from `vidbyte.middleware.builtins` and include rate
 limits, token and cost budgets, runtime limits, retry, circuit breaker, audit,
 tool policy, tool-result compaction, message-history compaction, canary tripwire,
 confused-deputy guard, and honeypot tool checks.
+
+Apply built-in tool policy and compaction together:
+
+```python
+from vidbyte.middleware.builtins import MessageHistoryCompactionMiddleware, ToolPolicyMiddleware
+
+agent = agent.fork(
+    middleware=[
+        ToolPolicyMiddleware(allow_tools={"lookup_metric"}),
+        MessageHistoryCompactionMiddleware.trim_to_token_budget(max_tokens=8000),
+    ]
+)
+```
+
+## Feature Coverage
+
+- Lifecycle hooks before and after runs, iterations, model calls, model errors, tool calls, and completed runs.
+- Structured decisions for continue, abort, sleep, deny tool, and transform behavior.
+- Ordered middleware pipelines with metadata merging and transform merging.
+- Failure policy through `fail_closed` and fail-open event recording.
+- Built-ins for audit logs, rate limits, token/cost budgets, runtime limits, retries, circuit breakers, loop detection, tool policy, safety tripwires, and compaction.
+- Context and provider-message transforms for deterministic compaction.
+- Metadata output for final agent results.
 
 ## Key Modules
 

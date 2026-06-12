@@ -19,6 +19,13 @@ uses the null tracer, `Trace.debug()` keeps events in memory for local
 inspection, provider tracers are configured by the caller, and continual trace
 artifacts fail open so trace failures do not abort the main agent run.
 
+## Vidbyte Website
+
+This abstraction is used by the SDK architecture that powers agents on the
+[Vidbyte website](https://vidbyte.pro). Website agents need visibility into what
+they attempted, which tools they called, what failed, and what state should be
+preserved for handoff or follow-up work.
+
 ## Usage
 
 ```python
@@ -44,6 +51,26 @@ from vidbyte.trace.continual import ActionTrace
 
 agent = agent.fork(trace_option=TraceOption.continual(ActionTrace))
 ```
+
+Use provider-backed tracing when an external observability backend is configured:
+
+```python
+from vidbyte import Trace
+
+agent = agent.fork(
+    trace=Trace.langsmith(project="vidbyte-agents", include_runtime_info=True)
+)
+```
+
+## Feature Coverage
+
+- `Trace.off()`, `Trace.debug()`, `Trace.custom()`, `Trace.continual()`, and provider helpers.
+- `DebugTracer` for local in-memory trace event inspection.
+- Shared tracer base contracts through `vidbyte.lib.tracing`.
+- Provider-backed Langfuse, LangSmith, and Phoenix tracer helpers.
+- `TraceOption.continual()` for structured trace artifacts produced by a dedicated trace agent.
+- `TraceSchema`, `TraceField`, `TraceMode`, and prebuilt `ActionTrace` schema support.
+- Continual trace middleware that records lifecycle events without writing trace memory into the main agent context.
 
 ## Key Modules
 

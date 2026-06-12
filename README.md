@@ -20,6 +20,14 @@ access remain outside this package.
 - Agent pipelines that compose specialized agents through sequential, parallel, conditional, and map-reduce topologies.
 - Prompt libraries, context-window algorithms, and trace artifacts that make long-running agent work easier to inspect.
 
+## Vidbyte Website
+
+The abstractions in this SDK are used to power agent experiences on the
+[Vidbyte website](https://vidbyte.pro). The website is the product surface where
+Vidbyte agents, learning workflows, feedback systems, and retained artifacts come
+together; this repository documents the reusable Python architecture underneath
+those agent systems.
+
 ## Layer Guide
 
 | Layer | Role |

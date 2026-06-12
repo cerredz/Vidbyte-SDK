@@ -23,6 +23,13 @@ The default linear runtime is the compatibility path for middleware and continua
 trace artifacts. Non-linear runtimes such as search and actor-model execution are
 separate runtime choices with narrower compatibility rules.
 
+## Vidbyte Website
+
+This abstraction is used by the SDK architecture that powers agents on the
+[Vidbyte website](https://vidbyte.pro). Website agents rely on the same core
+ideas documented here: explicit prompts, controlled tools, managed context,
+runtime policies, and traceable outputs.
+
 ## Usage
 
 ```python
@@ -56,6 +63,50 @@ reply = await agent.arun(
     )
 )
 ```
+
+Configure provider-backed agents without manually constructing a runner:
+
+```python
+from vidbyte import Agent
+
+agent = Agent(
+    name="website-feedback-agent",
+    system_prompt="Give concise, actionable feedback.",
+    provider="openai",
+    model_name="gpt-4.1",
+    temperature=0.2,
+)
+```
+
+Expose an agent as a tool when it has metadata describing when to use it:
+
+```python
+from vidbyte.lib.dataclasses.agents import AgentMetadata
+
+reviewer = agent.fork(
+    name="reviewer",
+    agent_metadata=AgentMetadata(
+        name="reviewer",
+        description="Reviews drafts and returns improvement suggestions.",
+        use_cases=("review feedback drafts", "tighten learning explanations"),
+    ),
+)
+
+reviewer_tool = reviewer.as_tool()
+```
+
+## Feature Coverage
+
+- Direct execution through `run()`, `arun()`, and `generate_reply()`.
+- `AgentInput` for per-call context items, metadata, and modality requests.
+- Provider/model configuration for model-backed runners without custom runner wiring.
+- Agent-local tools through `tools=[...]` and `Tools` catalogs.
+- Context managers, unmanaged context items, and context-window algorithms.
+- Runtime configuration for max iterations, token budgets, compaction triggers, and runtime type.
+- Middleware on compatible direct/linear runtimes.
+- Tracing through `trace=` and structured continual artifacts through `trace_option=`.
+- Handoff support through explicit `handoff()` calls or configured automatic handoff generation.
+- Forking for reusable variants without mutating the source agent.
 
 ## Key Modules
 

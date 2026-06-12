@@ -16,6 +16,13 @@ Evals should be easy to write as normal Python scripts. The runner isolates
 stateful agents by forking them, limits concurrency with a semaphore, and turns
 target or grader errors into failed results instead of crashing the entire suite.
 
+## Vidbyte Website
+
+This abstraction is used by the SDK architecture that powers agents on the
+[Vidbyte website](https://vidbyte.pro). Website agent behavior needs repeatable
+checks for answer quality, rubric alignment, latency, and regression resistance;
+the eval layer provides local building blocks for those checks.
+
 ## Usage
 
 ```python
@@ -40,6 +47,34 @@ from vidbyte.evals import EvalSuite
 suite = EvalSuite.from_json("evals/smoke.json")
 focused = suite.filter(["geography"])
 ```
+
+Use a stricter grader for exact outputs:
+
+```python
+from vidbyte import EvalCase, EvalRunner, EvalSuite, ExactMatchGrader
+
+suite = EvalSuite("math", [EvalCase(prompt="2 + 2?", expected="4")])
+result = await EvalRunner(agent, default_grader=ExactMatchGrader()).arun(suite)
+```
+
+Record and compare runs locally:
+
+```python
+from vidbyte import VidbyteSDK
+
+sdk = VidbyteSDK()
+sdk.evals.registry.record(result)
+```
+
+## Feature Coverage
+
+- `EvalCase` for prompts, expected values, tags, metadata, and optional per-case graders.
+- `EvalSuite` for grouping, loading from JSON/CSV, filtering, and iteration.
+- `EvalRunner` for async execution, concurrency control, retry accounting, and state isolation through agent forks.
+- Built-in graders: exact match, contains, regex, JSON schema, LLM judge, and rubric.
+- `EvalSuiteResult` metrics such as pass rate, mean score, and latency summaries.
+- `EvalRegistry` for recording and comparing local result history.
+- `EvalClient` convenience factories through `VidbyteSDK().evals`.
 
 ## Key Modules
 
