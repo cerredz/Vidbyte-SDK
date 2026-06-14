@@ -27,6 +27,7 @@ from vidbyte.context.primitives import ContextItem
 from vidbyte.context.handoff import Handoff, MinimalHandoff
 from vidbyte.lib.agents import ModalityDetector
 from vidbyte.lib.dataclasses.agents import AgentMetadata, AgentRunnerConfig, AgentRuntimeConfig
+from vidbyte.lib.dataclasses.multi_agent import AggregateConfig, ProposerSpec
 from vidbyte.lib.dataclasses.runner import RunnerHandle
 from vidbyte.lib.dataclasses.strategies import AgentResult
 from vidbyte.lib.dataclasses.trace import TraceOption
@@ -68,7 +69,10 @@ class BaseAgent(McpAttachableMixin):
         middleware: Sequence[AgentMiddleware] = (),
         api_key: str | None = None,
         provider: ModelProvider | str | None = None,
-        model_name: str | None = None,
+        model_name: str | Sequence[str] | None = None,
+        proposers: Sequence[Any] | None = None,
+        aggregator: Any | None = None,
+        aggregate: AggregateConfig | None = None,
         modality: ModelModality | str = ModelModality.AUTO,
         temperature: float | None = None,
         run_id: str | None = None,
@@ -122,9 +126,23 @@ class BaseAgent(McpAttachableMixin):
                         "which does not support in-context learning algorithms."
                     )
 
+        provider_str = str(provider.value if isinstance(provider, ModelProvider) else provider) if provider is not None else None
+        self._aggregate_agent: BaseAgent | None = None
+        self._aggregate_plan, model_name = self._resolve_aggregate_plan(model_name, provider_str, proposers, aggregator, aggregate)
+        if self._aggregate_plan is not None and self.runtime_type in (
+            AgentRuntimeType.MCTS_SEARCH,
+            AgentRuntimeType.ACTOR_MODEL,
+            AgentRuntimeType.ACTOR_MODEL_P2P,
+            AgentRuntimeType.ACTOR_MODEL_BROADCAST,
+        ):
+            raise ConfigurationError(
+                f"Agent {name} uses non-linear runtime {self.runtime_type.value}, "
+                "which does not support multi-model aggregation."
+            )
+
         self.runner_config = AgentRunnerConfig(
             api_key=api_key,
-            provider=str(provider.value if isinstance(provider, ModelProvider) else provider) if provider is not None else None,
+            provider=provider_str,
             model_name=model_name,
             modality=modality,
             temperature=temperature,
@@ -177,6 +195,62 @@ class BaseAgent(McpAttachableMixin):
         # MCP Attachable State
         self._mcp_handles = []
         self._pending_mcp_configs = []
+
+        if self._aggregate_plan is not None:
+            self._aggregate_agent = self._build_aggregate_agent()
+
+    def _resolve_aggregate_plan(self, model_name: str | Sequence[str] | None, provider_str: str | None, proposers: Sequence[Any] | None, aggregator: Any | None, aggregate: AggregateConfig | None) -> tuple[dict[str, Any] | None, str | None]:
+        # Detects a multi-model aggregation request and returns (plan_or_None, normalized single host model name).
+        is_sequence = isinstance(model_name, (list, tuple)) and not isinstance(model_name, str)
+        if proposers:
+            specs = list(proposers)
+            host_model = model_name if isinstance(model_name, str) else None
+        elif is_sequence and len(model_name) >= 2:
+            if not provider_str:
+                raise ConfigurationError("A list of model names requires a provider for multi-model aggregation.")
+            specs = [ProposerSpec(provider=provider_str, model=str(m)) for m in model_name]
+            host_model = str(model_name[0])
+        else:
+            normalized = str(model_name[0]) if is_sequence and len(model_name) == 1 else (None if is_sequence else model_name)
+            return None, normalized
+        plan = {
+            "proposers": specs,
+            "aggregator": aggregator,
+            "config": aggregate,
+            "provider": provider_str,
+            "model": host_model or self._first_spec_model(specs),
+        }
+        return plan, None
+
+    def _build_aggregate_agent(self) -> BaseAgent:
+        # Constructs the internal AggregateAgent that generate_reply delegates to when a plan is present.
+        from vidbyte.agents.aggregation import AggregateAgent
+        plan = self._aggregate_plan or {}
+        return AggregateAgent(
+            name=self.name,
+            system_prompt=self.system_prompt,
+            proposers=plan["proposers"],
+            aggregator=plan["aggregator"],
+            config=plan["config"],
+            provider=plan["provider"],
+            model_name=plan["model"],
+            api_key=self.runner_config.api_key,
+            agent_metadata=self.agent_metadata,
+            tools=self._agent_tool_items,
+            middleware=self.middleware,
+            temperature=self.runner_config.temperature,
+            metadata=dict(self.metadata),
+        )
+
+    @staticmethod
+    def _first_spec_model(specs: Sequence[Any]) -> str | None:
+        # Returns the model name of the first proposer that is a ProposerSpec or (provider, model) tuple.
+        for spec in specs:
+            if isinstance(spec, ProposerSpec):
+                return spec.model
+            if isinstance(spec, tuple) and len(spec) >= 2 and isinstance(spec[1], str):
+                return spec[1]
+        return None
 
     @classmethod
     def from_run_id(cls, run_id: str, *, name: str, system_prompt: str, **kwargs: Any) -> BaseAgent:
@@ -317,6 +391,8 @@ class BaseAgent(McpAttachableMixin):
         recipient: str = "orchestrator",
         **options: Any,
     ) -> AgentMessage:
+        if self._aggregate_agent is not None:
+            return await self._aggregate_agent.generate_reply(message, recipient=recipient, **options)
         await self._ensure_mcp_connected()
         trace_ctx = None
         try:
