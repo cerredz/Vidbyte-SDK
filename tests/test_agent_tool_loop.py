@@ -144,6 +144,51 @@ class AgentToolLoopTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(reply.metadata["stop_reason"], "max_iterations")
         self.assertEqual(reply.metadata["iteration_count"], 1)
 
+    async def test_tool_call_arguments_echoed_into_next_turn_context(self) -> None:
+        # [Silent Failure] the agent must re-read the arguments of the tool it called, not just the result.
+        @tool
+        def lookup(topic: str) -> str:
+            """Look up a topic."""
+            return f"found:{topic}"
+
+        runner = ToolCallingRunner(
+            [
+                FakeResponse("", {"output": [{"type": "function_call", "name": "lookup", "arguments": '{"topic": "sdk"}', "call_id": "call_1"}]}),
+                FakeResponse("", {"output": [{"type": "function_call", "name": "isDone", "arguments": '{"final_answer": "ok"}'}]}),
+            ]
+        )
+        agent = Agent(name="worker", system_prompt="Work.", runner=runner, tools=[lookup])
+
+        await agent.arun("task")
+
+        sent_messages = runner.calls[1]["kwargs"]["messages"]
+        assistant_calls = [m for m in sent_messages if m.get("role") == "assistant" and m.get("tool_calls")]
+        self.assertEqual(len(assistant_calls), 1)
+        self.assertIn("sdk", assistant_calls[0]["tool_calls"][0]["function"]["arguments"])
+
+    async def test_isdone_only_turn_appends_no_assistant_tool_call_message(self) -> None:
+        # [Hidden Assumption] a turn that only signals completion must not echo a dangling tool_use.
+        runner = ToolCallingRunner(
+            [
+                FakeResponse("", {"output": [{"type": "function_call", "name": "lookup", "arguments": '{"topic": "x"}', "call_id": "c1"}]}),
+                FakeResponse("", {"output": [{"type": "function_call", "name": "isDone", "arguments": '{"final_answer": "done"}'}]}),
+            ]
+        )
+
+        @tool
+        def lookup(topic: str) -> str:
+            """Look up a topic."""
+            return f"found:{topic}"
+
+        agent = Agent(name="worker", system_prompt="Work.", runner=runner, tools=[lookup])
+        await agent.arun("task")
+
+        # The second runner call carries history from the lookup turn but not from a (terminal) isDone echo.
+        assistant_calls = [m for m in runner.calls[1]["kwargs"]["messages"] if m.get("role") == "assistant" and m.get("tool_calls")]
+        echoed_names = [tc["function"]["name"] for m in assistant_calls for tc in m["tool_calls"]]
+        self.assertNotIn("isDone", echoed_names)
+        self.assertEqual(echoed_names, ["lookup"])
+
 
 if __name__ == "__main__":
     unittest.main()

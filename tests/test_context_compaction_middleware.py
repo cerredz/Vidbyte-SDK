@@ -180,7 +180,7 @@ class RuntimeCompactionIntegrationTests(unittest.IsolatedAsyncioTestCase):
         runner = FakeRunner([FakeResponse(raw={"output": [{"type": "function_call", "name": "lookup", "arguments": "{}"}]}), FakeResponse(raw={"output": [{"type": "function_call", "name": "isDone", "arguments": '{"final_answer": "done"}'}]})])
         runtime = self._runtime(middleware=(ToolResultCompactionMiddleware.truncate(max_chars=3),))
         result = await runtime.arun("task", handle=RunnerHandle(runner=runner, provider="openai", invoke=invoke_runner, extract_text=runner_output_text, extract_metadata=runner_output_metadata), context=self._context(runtime))
-        visible = runner.calls[1]["kwargs"]["messages"][0]["content"]
+        visible = next(m for m in runner.calls[1]["kwargs"]["messages"] if m.get("role") == "tool")["content"]
         self.assertIn("raw", visible)
         self.assertNotIn("secret result", visible)
         self.assertEqual(result.metadata["tool_calls"][0].result.output, "raw secret result")
@@ -190,7 +190,7 @@ class RuntimeCompactionIntegrationTests(unittest.IsolatedAsyncioTestCase):
         runner = FakeRunner([FakeResponse(raw={"output": [{"type": "function_call", "name": "lookup", "arguments": "{}"}]}), FakeResponse(raw={"output": [{"type": "function_call", "name": "isDone", "arguments": '{"final_answer": "done"}'}]})])
         runtime = self._runtime(algorithm=ContextWindow.preset.no_raw_tool_outputs)
         result = await runtime.arun("task", handle=RunnerHandle(runner=runner, provider="openai", invoke=invoke_runner, extract_text=runner_output_text, extract_metadata=runner_output_metadata), context=self._context(runtime))
-        visible = runner.calls[1]["kwargs"]["messages"][0]["content"]
+        visible = next(m for m in runner.calls[1]["kwargs"]["messages"] if m.get("role") == "tool")["content"]
         self.assertNotIn("raw secret result", visible)
         self.assertIn("Raw tool output was withheld", visible)
         self.assertEqual(result.metadata["tool_calls"][0].result.output, "raw secret result")
