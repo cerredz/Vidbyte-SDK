@@ -23,6 +23,11 @@ class AgentClient:
         from vidbyte.agents.continual_trace import ContinualTraceAgent
         return ContinualTraceAgent(schema, **kwargs)
 
+    def aggregate(self, **kwargs: Any) -> Any:
+        # Construct an AggregateAgent that fans out to multiple proposer models and synthesizes one answer.
+        from vidbyte.agents.aggregation import AggregateAgent
+        return AggregateAgent(**kwargs)
+
 
 __all__ = [
     "AgentClient",
