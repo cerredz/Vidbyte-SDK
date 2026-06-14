@@ -1108,7 +1108,6 @@ class AgentRuntime:
     def _llm_trace_inputs(
         self,
         handle: RunnerHandle,
-        *,
         message: str,
         call_options: Mapping[str, Any],
         provider: str,

@@ -45,6 +45,7 @@ from vidbyte.agents import (
     HandoffAgent,
 )
 from vidbyte.client import VidbyteSDK
+from vidbyte.harnesses import CompetitorGrowthHarness, CompetitorGrowthAnalysis
 from vidbyte.evals import (
     BaseGrader,
     ComparisonReport,
@@ -323,4 +324,7 @@ __all__ = [
     "RubricGrader",
     "tool",
     "vidbyte_tool",
+    "CompetitorGrowthHarness",
+    "CompetitorGrowthAnalysis",
 ]
+
