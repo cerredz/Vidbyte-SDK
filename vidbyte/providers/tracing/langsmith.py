@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import re
 import uuid
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -129,14 +130,15 @@ class LangSmithTracer(TracerBase):
         self._call_langsmith("create_run", self._client.create_run, **create_kwargs)
         return LangSmithSpanContext(run_id=run_id, parent_run_id=parent_run_id, trace_id=trace_id)
 
-    def end_span(self, context: SpanContext, *, output: str | None = None, error: Exception | None = None) -> None:
-        # Closes a child LangSmith run with either output or error metadata.
+    def end_span(self, context: SpanContext, *, output: str | None = None, error: Exception | None = None, metadata: Mapping[str, Any] | None = None) -> None:
+        # Closes a child LangSmith run with output or error plus optional structured metadata.
         if not isinstance(context, LangSmithSpanContext):
             return
+        extra = dict(metadata or {})
         if error is not None:
-            self._call_langsmith("update_run", self._client.update_run, context.run_id, error=str(error), end_time=_now())
+            self._call_langsmith("update_run", self._client.update_run, context.run_id, error=str(error), outputs=extra or None, end_time=_now())
         else:
-            self._call_langsmith("update_run", self._client.update_run, context.run_id, outputs={"output": output}, end_time=_now())
+            self._call_langsmith("update_run", self._client.update_run, context.run_id, outputs={"output": output, **extra}, end_time=_now())
         self._call_langsmith("flush", self._client.flush)
 
 

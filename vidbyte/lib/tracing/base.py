@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -46,8 +47,9 @@ class TracerBase(ABC):
         *,
         output: str | None = None,
         error: Exception | None = None,
+        metadata: Mapping[str, Any] | None = None,
     ) -> None:
-        """Close a child span."""
+        """Close a child span, optionally recording structured close-time metadata."""
 
 
 class NullTracer(TracerBase):
