@@ -16,6 +16,7 @@ from __future__ import annotations
 from vidbyte.lib.errors.base import (
     AgentExecutionError,
     AgentRegistryError,
+    AggregateExecutionError,
     ConfigurationError,
     McpAttachmentError,
     McpConnectionError,
@@ -41,6 +42,7 @@ from vidbyte.lib.errors.base import (
 __all__ = [
     "AgentExecutionError",
     "AgentRegistryError",
+    "AggregateExecutionError",
     "ConfigurationError",
     "McpAttachmentError",
     "McpConnectionError",
