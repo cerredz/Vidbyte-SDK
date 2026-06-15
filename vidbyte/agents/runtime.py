@@ -599,7 +599,15 @@ class AgentRuntime:
             llm_span = self._tracer.start_span(
                 "llm.call",
                 parent=trace_context,
-                **self._llm_trace_inputs(handle, message, current_call_options, provider, iteration_count, model_call_count, metadata),
+                **self._llm_trace_inputs(
+                    handle,
+                    message=message,
+                    call_options=current_call_options,
+                    provider=provider,
+                    iteration_count=iteration_count,
+                    model_call_count=model_call_count,
+                    metadata=metadata,
+                ),
             )
             try:
                 raw_result = await handle.invoke(message, **current_call_options)
@@ -789,33 +797,6 @@ class AgentRuntime:
         if not isinstance(raw_messages, Sequence) or isinstance(raw_messages, (str, bytes)):
             return ()
         return tuple(dict(message) for message in raw_messages if isinstance(message, Mapping))
-
-    def _llm_trace_inputs(self, handle: RunnerHandle, message: str, call_options: Mapping[str, Any], provider: str, iteration_count: int, model_call_count: int, metadata: Mapping[str, Any]) -> dict[str, Any]:
-        # Builds sanitized, inspectable model-call inputs for trace providers.
-        system = call_options.get("system")
-        messages = self._provider_messages_from_options(call_options)
-        visible_messages = self._provider_visible_trace_messages(system, messages, message)
-        tools = tuple(call_options.get("tools", ()) or ())
-        public_metadata = {k: v for k, v in dict(metadata).items() if not k.startswith("_")}
-        inputs: dict[str, Any] = {
-            "agent_name": self.agent_name,
-            "provider": provider,
-            "model": self._runner_model_name(handle.runner),
-            "iteration": iteration_count,
-            "model_call": model_call_count,
-            "prompt": self._safe_trace_value(message),
-            "metadata": self._safe_trace_value(public_metadata),
-            "messages": self._safe_trace_value(visible_messages),
-            "input_messages": self._safe_trace_value(visible_messages),
-        }
-        if system is not None:
-            inputs["system"] = self._safe_trace_value(str(system))
-        if messages:
-            inputs["history_messages"] = self._safe_trace_value(messages)
-        if tools:
-            inputs["tool_count"] = len(tools)
-            inputs["tool_names"] = tuple(str(tool.get("name") or tool.get("function", {}).get("name") or "") for tool in tools if isinstance(tool, Mapping))
-        return inputs
 
     def _provider_visible_trace_messages(self, system: object | None, messages: Sequence[Mapping[str, Any]], prompt: str) -> tuple[Mapping[str, Any], ...]:
         # Mirrors the provider-visible message order for trace inspection.
@@ -1353,6 +1334,14 @@ class AgentRuntime:
             return self._stopped_result(
                 "Agent runtime stopped after reaching max_tokens.",
                 stop_reason=AgentStopReason.MAX_TOKENS,
+                iteration_count=iteration_count,
+                tokens_used=tokens_used,
+                contexts=contexts,
+            )
+        if self.config.max_tool_calls is not None and len(contexts) >= self.config.max_tool_calls:
+            return self._stopped_result(
+                "Agent runtime stopped after reaching max_tool_calls.",
+                stop_reason=AgentStopReason.MAX_TOOL_CALLS,
                 iteration_count=iteration_count,
                 tokens_used=tokens_used,
                 contexts=contexts,
