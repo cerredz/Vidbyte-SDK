@@ -75,6 +75,133 @@ class ProviderToolSchemaTranslationTests(unittest.TestCase):
         self.assertEqual(schema["function"]["name"], "fetch_user_metrics")
 
 
+class AssistantToolCallHistoryFormatterTests(unittest.TestCase):
+    # ── OpenAI chat completions ──────────────────────────────────────────────
+
+    def test_openai_returns_assistant_message_when_tool_calls_present(self) -> None:
+        raw = {
+            "choices": [
+                {"message": {"role": "assistant", "content": None, "tool_calls": [{"id": "call_1", "type": "function", "function": {"name": "read", "arguments": "{}"}}]}}
+            ]
+        }
+        result = ToolsFormatter.format_assistant_tool_calls(raw, "openai")
+        self.assertIsNotNone(result)
+        self.assertEqual(result["role"], "assistant")
+        self.assertIsInstance(result["tool_calls"], list)
+        self.assertEqual(result["tool_calls"][0]["id"], "call_1")
+
+    def test_openai_returns_none_for_text_only_response(self) -> None:
+        raw = {"choices": [{"message": {"role": "assistant", "content": "Hello!", "tool_calls": None}}]}
+        result = ToolsFormatter.format_assistant_tool_calls(raw, "openai")
+        self.assertIsNone(result)
+
+    def test_openai_returns_none_when_tool_calls_absent(self) -> None:
+        raw = {"choices": [{"message": {"role": "assistant", "content": "Hello!"}}]}
+        result = ToolsFormatter.format_assistant_tool_calls(raw, "openai")
+        self.assertIsNone(result)
+
+    def test_openai_returns_none_for_responses_api_shape(self) -> None:
+        raw = {"output": [{"type": "function_call", "name": "read", "arguments": "{}", "call_id": "fc_1"}]}
+        result = ToolsFormatter.format_assistant_tool_calls(raw, "openai")
+        self.assertIsNone(result)
+
+    def test_openai_returns_none_for_empty_choices(self) -> None:
+        result = ToolsFormatter.format_assistant_tool_calls({"choices": []}, "openai")
+        self.assertIsNone(result)
+
+    def test_openai_multiple_tool_calls_returns_single_message(self) -> None:
+        raw = {
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": [
+                        {"id": "c1", "type": "function", "function": {"name": "a", "arguments": "{}"}},
+                        {"id": "c2", "type": "function", "function": {"name": "b", "arguments": "{}"}},
+                    ],
+                }
+            }]
+        }
+        result = ToolsFormatter.format_assistant_tool_calls(raw, "openai")
+        self.assertIsNotNone(result)
+        self.assertEqual(len(result["tool_calls"]), 2)
+
+    # ── Anthropic ────────────────────────────────────────────────────────────
+
+    def test_anthropic_returns_assistant_message_when_tool_use_present(self) -> None:
+        raw = {"content": [{"type": "tool_use", "id": "tu_1", "name": "read", "input": {"path": "f.py"}}]}
+        result = ToolsFormatter.format_assistant_tool_calls(raw, "anthropic")
+        self.assertIsNotNone(result)
+        self.assertEqual(result["role"], "assistant")
+        self.assertEqual(result["content"][0]["type"], "tool_use")
+
+    def test_anthropic_returns_none_for_text_only_content(self) -> None:
+        raw = {"content": [{"type": "text", "text": "Hello!"}]}
+        result = ToolsFormatter.format_assistant_tool_calls(raw, "anthropic")
+        self.assertIsNone(result)
+
+    def test_anthropic_preserves_text_blocks_alongside_tool_use(self) -> None:
+        raw = {
+            "content": [
+                {"type": "text", "text": "I'll check that."},
+                {"type": "tool_use", "id": "tu_2", "name": "read", "input": {}},
+            ]
+        }
+        result = ToolsFormatter.format_assistant_tool_calls(raw, "anthropic")
+        self.assertIsNotNone(result)
+        self.assertEqual(len(result["content"]), 2)
+        self.assertEqual(result["content"][0]["type"], "text")
+
+    def test_anthropic_returns_none_for_empty_content(self) -> None:
+        result = ToolsFormatter.format_assistant_tool_calls({"content": []}, "anthropic")
+        self.assertIsNone(result)
+
+    # ── Gemini ───────────────────────────────────────────────────────────────
+
+    def test_gemini_returns_model_content_when_function_call_present(self) -> None:
+        raw = {"candidates": [{"content": {"role": "model", "parts": [{"functionCall": {"name": "read", "args": {}}}]}}]}
+        result = ToolsFormatter.format_assistant_tool_calls(raw, "gemini")
+        self.assertIsNotNone(result)
+        self.assertEqual(result["role"], "model")
+        self.assertIn("functionCall", result["parts"][0])
+
+    def test_gemini_returns_none_for_text_only_parts(self) -> None:
+        raw = {"candidates": [{"content": {"role": "model", "parts": [{"text": "Hello!"}]}}]}
+        result = ToolsFormatter.format_assistant_tool_calls(raw, "gemini")
+        self.assertIsNone(result)
+
+    def test_gemini_returns_none_for_empty_candidates(self) -> None:
+        result = ToolsFormatter.format_assistant_tool_calls({"candidates": []}, "gemini")
+        self.assertIsNone(result)
+
+    # ── Generic / edge cases ─────────────────────────────────────────────────
+
+    def test_returns_none_for_non_mapping_raw(self) -> None:
+        result = ToolsFormatter.format_assistant_tool_calls("not a dict", "openai")
+        self.assertIsNone(result)
+
+    def test_returns_none_for_none_raw(self) -> None:
+        result = ToolsFormatter.format_assistant_tool_calls(None, "openai")
+        self.assertIsNone(result)
+
+    def test_role_is_assistant_for_openai(self) -> None:
+        raw = {"choices": [{"message": {"role": "assistant", "tool_calls": [{"id": "x", "type": "function", "function": {"name": "f", "arguments": "{}"}}]}}]}
+        result = ToolsFormatter.format_assistant_tool_calls(raw, "openai")
+        self.assertEqual(result["role"], "assistant")
+
+    def test_role_is_model_for_gemini(self) -> None:
+        raw = {"candidates": [{"content": {"role": "model", "parts": [{"functionCall": {"name": "f", "args": {}}}]}}]}
+        result = ToolsFormatter.format_assistant_tool_calls(raw, "gemini")
+        self.assertEqual(result["role"], "model")
+
+    def test_raw_object_with_raw_attribute_is_unwrapped(self) -> None:
+        class FakeResponse:
+            raw = {"choices": [{"message": {"role": "assistant", "tool_calls": [{"id": "y", "type": "function", "function": {"name": "g", "arguments": "{}"}}]}}]}
+        result = ToolsFormatter.format_assistant_tool_calls(FakeResponse(), "openai")
+        self.assertIsNotNone(result)
+        self.assertEqual(result["tool_calls"][0]["id"], "y")
+
+
 if __name__ == "__main__":
     unittest.main()
 
