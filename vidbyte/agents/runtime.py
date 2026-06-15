@@ -290,7 +290,16 @@ class AgentRuntime:
                     model_response=last_response,
                 )
 
-            call_options = self._build_iteration_call_options(run_options, context, tool_schemas, messages, provider)
+            call_options = self._build_iteration_call_options(
+                run_options,
+                context,
+                tool_schemas,
+                messages,
+                provider,
+                iteration_count=iteration_count,
+                tokens_used=tokens_used,
+                tool_call_count=len(call_contexts),
+            )
             raw_result, model_call_count = await self._invoke_with_middleware(
                 handle,
                 message,
@@ -1140,10 +1149,15 @@ class AgentRuntime:
             return str(model_name)
         return None
 
-    def _build_iteration_call_options(self, run_options: dict[str, Any], context: BaseAgentContext, tool_schemas: Sequence[dict[str, Any]], messages: list[dict[str, Any]], provider: str = "") -> dict[str, Any]:
-        """Assemble per-iteration call options with system prompt, primitives zone, tools, messages, and response format."""
+    def _build_iteration_call_options(self, run_options: dict[str, Any], context: BaseAgentContext, tool_schemas: Sequence[dict[str, Any]], messages: list[dict[str, Any]], provider: str = "", *, iteration_count: int = 0, tokens_used: int | None = None, tool_call_count: int = 0) -> dict[str, Any]:
+        """Assemble per-iteration call options with system prompt, loop settings, primitives zone, tools, messages, and response format."""
         call_options = dict(run_options)
-        system = self._build_system_string(context)
+        loop_settings_block = self._render_loop_settings_block(
+            iteration_count=iteration_count,
+            tokens_used=tokens_used,
+            tool_call_count=tool_call_count,
+        )
+        system = self._build_system_string(context, loop_settings_block=loop_settings_block)
         call_options.setdefault("system", system)
         if tool_schemas:
             call_options.setdefault("tools", tool_schemas)
@@ -1165,13 +1179,38 @@ class AgentRuntime:
         end = self.context_manager.render_conversation_messages(ContextWindowPlacement.END_OF_CONVERSATION)
         return (*top, *tuple(messages), *end)
 
-    def _build_system_string(self, context: BaseAgentContext) -> str:
-        """Assemble the system string with fixed header, primitives zone, and body in order."""
+    def _build_system_string(self, context: BaseAgentContext, *, loop_settings_block: str = "") -> str:
+        """Assemble the system string with fixed header, loop settings, primitives zone, and body in order."""
+        # loop_settings_block is placed directly after the fixed system-prompt header so the agent
+        # always sees its live loop budgets (current usage / configured limit) near the top of context.
         fixed = context.build_context_fixed()
         primitives_zone = self.context_manager.render_primitives_zone() if self.context_manager else ""
         body = context.build_context_body()
-        parts = [p for p in (fixed, primitives_zone, body) if p]
+        parts = [p for p in (fixed, loop_settings_block, primitives_zone, body) if p]
         return "\n\n".join(parts)
+
+    def _render_loop_settings_block(self, *, iteration_count: int, tokens_used: int | None, tool_call_count: int) -> str:
+        """Render the agent-loop-settings context block as 'current usage / configured limit' lines.
+
+        Only the budgets that are both numerically calculable and tracked by the runtime loop are
+        injected (max_iterations, max_tokens, max_tool_calls). Settings without a live runtime
+        measurement (max_retries, timeout_seconds, allowed_tools, etc.) are intentionally excluded.
+        Returns an empty string when no relevant budget is configured.
+        """
+        lines: list[str] = []
+        if self.config.max_iterations is not None:
+            lines.append(f"- max_iterations: {iteration_count}/{self.config.max_iterations}")
+        if self.config.max_tokens is not None:
+            lines.append(f"- max_tokens: {tokens_used or 0}/{self.config.max_tokens}")
+        if self.config.max_tool_calls is not None:
+            lines.append(f"- max_tool_calls: {tool_call_count}/{self.config.max_tool_calls}")
+        if not lines:
+            return ""
+        header = (
+            "Below are your agent loop settings, shown as current usage / configured limit. "
+            "Stay within these limits:"
+        )
+        return header + "\n" + "\n".join(lines)
 
     def _final_result(
         self,

@@ -11,8 +11,12 @@ import sys
 import traceback
 
 from vidbyte.agents import AgentLoopSettings, BaseAgent
+from vidbyte.agents.runtime import AgentRuntime
 from vidbyte.lib.dataclasses.agents import AgentRuntimeConfig, AgentStopReason
+from vidbyte.lib.dataclasses.context import BaseAgentContext
 from vidbyte.lib.errors import ConfigurationError
+from vidbyte.tools.catalog import Tools
+from vidbyte.tools.security import PermissionPolicy
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
@@ -113,19 +117,6 @@ run("raises ConfigurationError when timeout_seconds is 0.0", lambda: (
 run("raises ConfigurationError when timeout_seconds is negative", lambda: (
     raises(ConfigurationError, lambda: AgentLoopSettings(timeout_seconds=-5.0))
 ))
-
-run("raises ConfigurationError when memory_strategy is unrecognized", lambda: (
-    raises(ConfigurationError, lambda: AgentLoopSettings(memory_strategy="magic"))
-))
-
-
-def _test_valid_memory_strategies():
-    for strategy in ("sliding_window", "summarize", "trim"):
-        s = AgentLoopSettings(memory_strategy=strategy)
-        assert s.memory_strategy == strategy, f"expected {strategy!r}, got {s.memory_strategy!r}"
-
-
-run("accepts all three valid memory_strategy values", _test_valid_memory_strategies)
 
 run(
     "raises ConfigurationError when compaction_target_tokens >= compaction_trigger_tokens",
@@ -325,6 +316,73 @@ def _test_no_max_tool_calls_no_enforcement():
 
 
 run("does not enforce max_tool_calls when far above the call count", _test_no_max_tool_calls_no_enforcement)
+
+# ── Loop settings context-window injection ────────────────────────────────────
+
+print("\n-- Loop settings context-window injection --")
+
+
+def _make_runtime(config: AgentRuntimeConfig) -> AgentRuntime:
+    return AgentRuntime(
+        agent_name="test",
+        system_prompt="You are a helpful assistant.",
+        tools=Tools(),
+        permission_policy=PermissionPolicy(),
+        config=config,
+    )
+
+
+def _test_block_renders_calculable_budgets():
+    runtime = _make_runtime(AgentRuntimeConfig(max_iterations=3, max_tokens=6000, max_tool_calls=5))
+    block = runtime._render_loop_settings_block(iteration_count=1, tokens_used=100, tool_call_count=0)
+    assert "max_iterations: 1/3" in block, block
+    assert "max_tokens: 100/6000" in block, block
+    assert "max_tool_calls: 0/5" in block, block
+
+
+run("renders calculable budgets as current/limit lines", _test_block_renders_calculable_budgets)
+
+
+def _test_block_excludes_unset_budgets():
+    runtime = _make_runtime(AgentRuntimeConfig(max_iterations=3))
+    block = runtime._render_loop_settings_block(iteration_count=0, tokens_used=None, tool_call_count=0)
+    assert "max_iterations: 0/3" in block, block
+    assert "max_tokens" not in block, block
+    assert "max_tool_calls" not in block, block
+
+
+run("excludes budgets that are not configured", _test_block_excludes_unset_budgets)
+
+
+def _test_block_empty_when_no_budgets():
+    runtime = _make_runtime(AgentRuntimeConfig())
+    block = runtime._render_loop_settings_block(iteration_count=0, tokens_used=None, tool_call_count=0)
+    assert block == "", f"expected empty block, got {block!r}"
+
+
+run("renders empty block when no budgets are configured", _test_block_empty_when_no_budgets)
+
+
+def _test_block_placed_under_system_prompt():
+    runtime = _make_runtime(AgentRuntimeConfig(max_iterations=3))
+    context = BaseAgentContext(system_prompt="You are a helpful assistant.")
+    block = runtime._render_loop_settings_block(iteration_count=1, tokens_used=None, tool_call_count=0)
+    system = runtime._build_system_string(context, loop_settings_block=block)
+    assert "max_iterations: 1/3" in system, system
+    assert system.index("System prompt") < system.index("max_iterations"), system
+
+
+run("places the loop settings block beneath the system prompt header", _test_block_placed_under_system_prompt)
+
+
+def _test_system_string_unaffected_without_block():
+    runtime = _make_runtime(AgentRuntimeConfig())
+    context = BaseAgentContext(system_prompt="You are a helpful assistant.")
+    system = runtime._build_system_string(context)
+    assert "max_iterations" not in system, system
+
+
+run("omits the loop settings block when no budgets are configured", _test_system_string_unaffected_without_block)
 
 # ── AgentStopReason enum ──────────────────────────────────────────────────────
 

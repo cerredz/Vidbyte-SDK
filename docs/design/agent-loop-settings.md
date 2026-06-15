@@ -18,16 +18,18 @@
 ### Goals
 - Introduce `AgentLoopSettings` as a structured class in `vidbyte/agents/settings/` that holds all agentic loop control parameters.
 - Move validation for existing loop budget params (`max_iterations`, `max_tokens`, `compaction_trigger_tokens`, `compaction_target_tokens`) from `AgentRuntimeConfig.__post_init__` into `AgentLoopSettings.__init__`.
-- Add new validated parameters: `max_tool_calls`, `max_parallel_tool_calls`, `max_retries`, `timeout_seconds`, `context_window_budget`, `allowed_tools`, `memory_strategy`.
+- Add new validated parameters: `max_tool_calls`, `max_parallel_tool_calls`, `max_retries`, `timeout_seconds`, `context_window_budget`, `allowed_tools`.
 - Wire `self.agent_loop_settings` onto `BaseAgent` so every agent exposes a populated settings object.
 - Enforce `max_tool_calls` at runtime via `AgentRuntime._budget_stop()` (the one new param that maps directly to existing runtime accounting).
+- Inject the calculable loop budgets (`max_iterations`, `max_tokens`, `max_tool_calls`) into the system context on every iteration as `current usage / configured limit`, placed directly beneath the system-prompt header.
 - Write the canonical `skills/agentic-loop-settings/SKILL.md` skill file as the ground-truth reference for all agentic loop settings — past, present, and future.
 - Export `AgentLoopSettings` from `vidbyte/agents/__init__.py`.
 - Maintain full backward compatibility with the existing flat kwargs on `BaseAgent`.
 
 ### Non-Goals
-- Runtime enforcement of `max_parallel_tool_calls`, `max_retries`, `timeout_seconds`, `context_window_budget`, `allowed_tools`, or `memory_strategy` (these are stored and validated on `AgentLoopSettings` but the runtime loop enforcement is deferred to follow-up PRs).
-- Context-window injection of loop settings values into the system prompt (i.e. telling the agent "your max_iterations is 10" at prompt time) — deferred.
+- Runtime enforcement of `max_parallel_tool_calls`, `max_retries`, `timeout_seconds`, `context_window_budget`, or `allowed_tools` (these are stored and validated on `AgentLoopSettings` but the runtime loop enforcement is deferred to follow-up PRs).
+- Context-window injection of the non-calculable settings (`max_retries`, `timeout_seconds`, `allowed_tools`, etc.) — only the calculable budgets are surfaced to the agent.
+- A `memory_strategy` parameter — this concept does not belong on `AgentLoopSettings` and is intentionally excluded.
 - Removal or replacement of `AgentRuntimeConfig` — it stays as the internal runtime-facing dataclass; `AgentLoopSettings` converts to it via `to_runtime_config()`.
 - Changes to MCTS or Actor runtimes — they do not read `AgentRuntimeConfig` via the same path.
 - Identity or multi-agent parameters (`agent_role`, `parent_agent_id`, `max_subagents`, `output_schema`).
@@ -52,17 +54,17 @@ The `ActorRuntime` class in `vidbyte/agents/runtimes/configs.py` is the nearest 
 ### Functional Requirements
 1. `AgentLoopSettings` can be constructed with any combination of its parameters; all parameters are optional and default to `None`.
 2. `AgentLoopSettings.__init__` raises `ConfigurationError` for any param that is provided with a non-positive numeric value.
-3. `AgentLoopSettings.__init__` raises `ConfigurationError` if `memory_strategy` is not one of `"sliding_window"`, `"summarize"`, `"trim"`.
-4. `AgentLoopSettings.__init__` raises `ConfigurationError` if `compaction_target_tokens >= compaction_trigger_tokens` when both are provided.
-5. `AgentLoopSettings.to_runtime_config()` returns an `AgentRuntimeConfig` populated from the settings.
-6. `BaseAgent.__init__` accepts `agent_loop_settings: AgentLoopSettings | None = None` in addition to existing flat params.
-7. If both `agent_loop_settings` and any individual flat param (`max_iterations`, `max_tokens`, etc.) are provided simultaneously, `BaseAgent.__init__` raises `ConfigurationError`.
-8. If only flat params are provided (no `agent_loop_settings`), `BaseAgent.__init__` internally constructs an `AgentLoopSettings` from them so `self.agent_loop_settings` is always set.
-9. `BaseAgent.agent_loop_settings` is a public attribute, always set after construction.
-10. `AgentRuntime._budget_stop()` enforces `max_tool_calls` in addition to existing `max_iterations` / `max_tokens`.
-11. `AgentRuntimeConfig` gains a `max_tool_calls: int | None = None` field.
-12. `AgentLoopSettings` is exported from `vidbyte/agents/__init__.py`.
-13. The skill file `skills/agentic-loop-settings/SKILL.md` documents all parameters with descriptions, intent, implementation status, and code examples.
+3. `AgentLoopSettings.__init__` raises `ConfigurationError` if `compaction_target_tokens >= compaction_trigger_tokens` when both are provided.
+4. `AgentLoopSettings.to_runtime_config()` returns an `AgentRuntimeConfig` populated from the settings.
+5. `BaseAgent.__init__` accepts `agent_loop_settings: AgentLoopSettings | None = None` in addition to existing flat params.
+6. If both `agent_loop_settings` and any individual flat param (`max_iterations`, `max_tokens`, etc.) are provided simultaneously, `BaseAgent.__init__` raises `ConfigurationError`.
+7. If only flat params are provided (no `agent_loop_settings`), `BaseAgent.__init__` internally constructs an `AgentLoopSettings` from them so `self.agent_loop_settings` is always set.
+8. `BaseAgent.agent_loop_settings` is a public attribute, always set after construction.
+9. `AgentRuntime._budget_stop()` enforces `max_tool_calls` in addition to existing `max_iterations` / `max_tokens`.
+10. `AgentRuntimeConfig` gains a `max_tool_calls: int | None = None` field.
+11. `AgentLoopSettings` is exported from `vidbyte/agents/__init__.py`.
+12. The skill file `skills/agentic-loop-settings/SKILL.md` documents all parameters with descriptions, intent, implementation status, and code examples.
+13. `AgentRuntime` injects the calculable budgets (`max_iterations`, `max_tokens`, `max_tool_calls`) into the system context on every iteration as `current usage / configured limit`, placed directly beneath the system-prompt header. Non-calculable settings are excluded. When no calculable budget is configured, no block is injected.
 
 ### Non-Functional Requirements
 - No performance regression: `AgentLoopSettings.__init__` runs at agent construction time, not in the hot loop.
@@ -117,7 +119,6 @@ class AgentLoopSettings:
         compaction_trigger_tokens: int | None = None,
         compaction_target_tokens: int | None = None,
         allowed_tools: tuple[str, ...] | None = None,
-        memory_strategy: str | None = None,
     ) -> None: ...
 
     def to_runtime_config(self) -> AgentRuntimeConfig: ...
@@ -129,7 +130,6 @@ class AgentLoopSettings:
 3. `_validate()` checks:
    - For each of `max_iterations`, `max_tokens`, `max_tool_calls`, `max_parallel_tool_calls`, `max_retries`, `context_window_budget`, `compaction_trigger_tokens`, `compaction_target_tokens`: if not `None` and `<= 0`, raise `ConfigurationError`.
    - For `timeout_seconds`: if not `None` and `<= 0.0`, raise `ConfigurationError`.
-   - For `memory_strategy`: if not `None` and not in `{"sliding_window", "summarize", "trim"}`, raise `ConfigurationError`.
    - If both `compaction_trigger_tokens` and `compaction_target_tokens` are set and `compaction_target_tokens >= compaction_trigger_tokens`, raise `ConfigurationError`.
 4. `to_runtime_config()` returns `AgentRuntimeConfig(max_iterations=..., max_tokens=..., max_tool_calls=..., compaction_trigger_tokens=..., compaction_target_tokens=...)`.
 
@@ -327,8 +327,6 @@ N/A — no HTTP endpoints are affected. The public Python SDK surface gains:
 - `it('should raise ConfigurationError when max_tool_calls is 0')` — [Edge Case]
 - `it('should raise ConfigurationError when timeout_seconds is 0.0')` — [Edge Case]
 - `it('should raise ConfigurationError when timeout_seconds is negative')` — [Edge Case]
-- `it('should raise ConfigurationError when memory_strategy is an unrecognized string')` — [Hidden Assumption]
-- `it('should accept all three valid memory_strategy values')` — [Edge Case]
 - `it('should raise ConfigurationError when compaction_target_tokens >= compaction_trigger_tokens')` — [Hidden Failure]
 - `it('should accept allowed_tools as empty tuple')` — [Edge Case]
 - `it('should raise ConfigurationError when context_window_budget is 0')` — [Edge Case]
@@ -353,6 +351,12 @@ N/A — no HTTP endpoints are affected. The public Python SDK surface gains:
 - `it('should stop on MAX_TOOL_CALLS even if max_iterations has not been reached')` — [Hidden Failure]
 - `it('should not enforce max_tool_calls when the field is None')` — [Hidden Assumption]
 
+#### `AgentRuntime` loop-settings context injection
+- `it('should render calculable budgets as current/limit lines')` — [Silent Failure]
+- `it('should exclude budgets that are not configured')` — [Edge Case]
+- `it('should render an empty block when no budgets are configured')` — [Edge Case]
+- `it('should place the loop settings block beneath the system prompt header')` — [Hidden Assumption]
+
 ### Integration Tests
 - `BaseAgent` constructed with `agent_loop_settings=AgentLoopSettings(max_tool_calls=2)` — run a fake runner that issues 3 tool calls and verify the loop stops with `stop_reason=max_tool_calls`. This catches the wiring between `AgentLoopSettings.to_runtime_config()` → `AgentRuntimeConfig` → `AgentRuntime._budget_stop()`. [Hidden Failure]
 - `BaseAgent` constructed with flat params (`max_iterations=5`) — verify `self.agent_loop_settings.max_iterations == 5` and the runtime still stops correctly. [Silent Failure]
@@ -361,7 +365,7 @@ N/A — no HTTP endpoints are affected. The public Python SDK surface gains:
 ### Manual / QA Test Cases
 1. Given a `BaseAgent` with `agent_loop_settings=AgentLoopSettings(max_tool_calls=1)`, when the agent calls a tool and the tool result returns, then the loop stops and `stop_reason` in metadata is `"max_tool_calls"`. — [Edge Case]
 2. Given a `BaseAgent` constructed with `max_iterations=3` (flat param path), when `agent.agent_loop_settings` is inspected, then `agent_loop_settings.max_iterations == 3`. — [Silent Failure]
-3. Given `AgentLoopSettings(memory_strategy="invalid")`, then construction raises `ConfigurationError` immediately. — [Hidden Assumption]
+3. Given a `BaseAgent` with `agent_loop_settings=AgentLoopSettings(max_iterations=3)`, when it runs, then the system context contains a line `max_iterations: <current>/3` beneath the system prompt. — [Hidden Assumption]
 
 ---
 

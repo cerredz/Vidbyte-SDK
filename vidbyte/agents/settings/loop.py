@@ -20,8 +20,6 @@ from __future__ import annotations
 
 from vidbyte.lib.errors import ConfigurationError
 
-_VALID_MEMORY_STRATEGIES = frozenset({"sliding_window", "summarize", "trim"})
-
 _POSITIVE_INT_FIELDS = (
     "max_iterations",
     "max_tokens",
@@ -50,7 +48,6 @@ class AgentLoopSettings:
         compaction_trigger_tokens: int | None = None,
         compaction_target_tokens: int | None = None,
         allowed_tools: tuple[str, ...] | None = None,
-        memory_strategy: str | None = None,
     ) -> None:
         # Stores all loop parameters as instance attributes, then validates them immediately.
         self.max_iterations = max_iterations
@@ -63,14 +60,12 @@ class AgentLoopSettings:
         self.compaction_trigger_tokens = compaction_trigger_tokens
         self.compaction_target_tokens = compaction_target_tokens
         self.allowed_tools = allowed_tools
-        self.memory_strategy = memory_strategy
         self._validate()
 
     def _validate(self) -> None:
         # Raises ConfigurationError for any constraint violation found on this settings object.
         self._validate_positive_int_fields()
         self._validate_timeout_seconds()
-        self._validate_memory_strategy()
         self._validate_compaction_pair()
 
     def _validate_positive_int_fields(self) -> None:
@@ -87,15 +82,6 @@ class AgentLoopSettings:
         if self.timeout_seconds is not None and self.timeout_seconds <= 0.0:
             raise ConfigurationError(
                 f"AgentLoopSettings.timeout_seconds must be greater than zero when provided, got {self.timeout_seconds}."
-            )
-
-    def _validate_memory_strategy(self) -> None:
-        # memory_strategy must be one of the three supported strategies when provided.
-        if self.memory_strategy is not None and self.memory_strategy not in _VALID_MEMORY_STRATEGIES:
-            valid = ", ".join(sorted(_VALID_MEMORY_STRATEGIES))
-            raise ConfigurationError(
-                f"AgentLoopSettings.memory_strategy must be one of [{valid}] when provided, "
-                f"got '{self.memory_strategy}'."
             )
 
     def _validate_compaction_pair(self) -> None:
@@ -136,7 +122,6 @@ class AgentLoopSettings:
                 "compaction_trigger_tokens",
                 "compaction_target_tokens",
                 "allowed_tools",
-                "memory_strategy",
             )
             if getattr(self, name) is not None
         }

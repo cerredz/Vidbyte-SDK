@@ -35,7 +35,7 @@ An agent in the Vidbyte SDK executes inside a loop. Each tick of that loop:
 **Agentic loop settings** are the deterministic parameters that control this loop. They are not dynamic — they are fixed at agent construction time. Every setting answers one of two questions:
 
 - **When should the loop stop?** (budgets: `max_iterations`, `max_tokens`, `max_tool_calls`, `timeout_seconds`)
-- **How should the loop behave while running?** (behavior: `max_parallel_tool_calls`, `max_retries`, `context_window_budget`, `memory_strategy`, `allowed_tools`, compaction params)
+- **How should the loop behave while running?** (behavior: `max_parallel_tool_calls`, `max_retries`, `context_window_budget`, `allowed_tools`, compaction params)
 
 These settings live on a single `AgentLoopSettings` object that is attached to every `BaseAgent` as `self.agent_loop_settings`. This makes it introspectable at any point in the agent's lifecycle.
 
@@ -105,7 +105,6 @@ These parameters are accepted and validated on `AgentLoopSettings` at constructi
 | `timeout_seconds` | `float \| None` | `None` | Wall-clock time limit for the entire run in seconds. Distinct from iteration or token limits — enforces an absolute time ceiling regardless of progress. |
 | `context_window_budget` | `int \| None` | `None` | Tokens reserved for context messages (history, tool results, primitives) as opposed to generation. Helps the agent self-regulate verbosity when it is aware that its context is constrained. |
 | `allowed_tools` | `tuple[str, ...] \| None` | `None` | Explicit whitelist of tool names this agent is permitted to call. When set, the runtime will refuse any tool call whose name is not in this set. |
-| `memory_strategy` | `str \| None` | `None` | How the agent handles context overflow. One of `"sliding_window"`, `"summarize"`, or `"trim"`. |
 
 ---
 
@@ -117,7 +116,6 @@ These parameters are accepted and validated on `AgentLoopSettings` at constructi
 |-----------|-------|
 | Any integer field is `0` or negative | `{field} must be greater than zero when provided` |
 | `timeout_seconds` is `0.0` or negative | `timeout_seconds must be greater than zero when provided` |
-| `memory_strategy` is not `"sliding_window"`, `"summarize"`, or `"trim"` | `memory_strategy must be one of [...]` |
 | `compaction_target_tokens >= compaction_trigger_tokens` (when both set) | `compaction_target_tokens must be less than compaction_trigger_tokens` |
 | Both `agent_loop_settings=` and flat params passed to `BaseAgent` | `Pass either agent_loop_settings= or individual loop params (...), not both.` |
 
@@ -137,14 +135,42 @@ When the runtime stops due to an `AgentLoopSettings` budget, the `AgentResult.me
 
 ---
 
-## 6. Reading Settings at Runtime
+## 6. Context-Window Injection
+
+On every iteration, the runtime injects a live snapshot of the agent's loop budgets into the system context, placed directly beneath the system-prompt header. This gives the model awareness of the execution envelope it is operating inside so it can pace its work (for example, wrapping up before `max_iterations` is exhausted).
+
+The block is rendered by `AgentRuntime._render_loop_settings_block()` and assembled into the system string by `AgentRuntime._build_system_string()`. It renders each budget as `current usage / configured limit`:
+
+```
+Below are your agent loop settings, shown as current usage / configured limit. Stay within these limits:
+- max_iterations: 1/3
+- max_tokens: 100/6000
+- max_tool_calls: 0/5
+```
+
+### What is injected
+
+Only budgets that are **both numerically calculable and tracked by the runtime loop** are injected:
+
+| Setting | Current value source |
+|---------|----------------------|
+| `max_iterations` | live iteration count |
+| `max_tokens` | cumulative tokens used so far |
+| `max_tool_calls` | live tool-call count |
+
+Budgets that have no meaningful live "current/limit" measurement are intentionally **excluded** from the context window: `max_retries`, `timeout_seconds`, `allowed_tools`, `max_parallel_tool_calls`, `context_window_budget`, and the compaction params. They remain available for introspection on `agent.agent_loop_settings`.
+
+A budget that is not configured (`None`) is omitted from the block. When none of the calculable budgets are set, no block is injected at all and the system context is unchanged.
+
+---
+
+## 7. Reading Settings at Runtime
 
 ```python
 # Inspect any agent's loop settings:
 agent.agent_loop_settings.max_iterations   # int | None
 agent.agent_loop_settings.max_tool_calls   # int | None
 agent.agent_loop_settings.timeout_seconds  # float | None
-agent.agent_loop_settings.memory_strategy  # str | None
 
 # Check if a budget is set:
 has_tool_limit = agent.agent_loop_settings.max_tool_calls is not None
@@ -152,7 +178,7 @@ has_tool_limit = agent.agent_loop_settings.max_tool_calls is not None
 
 ---
 
-## 7. Design Intent
+## 8. Design Intent
 
 ### Static Config vs Runtime-Injected State
 
@@ -168,7 +194,7 @@ has_tool_limit = agent.agent_loop_settings.max_tool_calls is not None
 
 ---
 
-## 8. Future Roadmap
+## 9. Future Roadmap
 
 The following runtime enforcement work is deferred to follow-up PRs:
 
@@ -177,6 +203,5 @@ The following runtime enforcement work is deferred to follow-up PRs:
 - `timeout_seconds`: requires async wall-clock tracking via `asyncio.wait_for` wrapping the run.
 - `context_window_budget`: requires the compaction middleware to read this value as a signal.
 - `allowed_tools`: requires a pre-execution check in `AgentRuntime.execute_tool_call`.
-- `memory_strategy`: requires compaction algorithm selection based on this field.
 
 Each deferred param is already validated and stored; adding runtime enforcement only requires reading the existing attribute.
