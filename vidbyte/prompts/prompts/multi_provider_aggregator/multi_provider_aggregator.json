@@ -1,0 +1,15 @@
+{
+  "name": "Multi-Provider Aggregator",
+  "description": "Prompt assets for the Multi-Provider Aggregator (Mixture-of-Agents). This pattern runs the same request concurrently across multiple proposer models and then routes every candidate answer to a single aggregator model that synthesizes a new, superior response grounded in all of them. Unlike the Multi-Provider Agentic Grader, the aggregator composes its own answer instead of selecting one candidate verbatim. These prompts let SDK users inspect, override, or extend the aggregator's system instruction and the synthesis message template independently when constructing AggregateConfig.",
+  "key": "multi_provider_aggregator",
+  "prompts": {
+    "synthesis_system_prompt": {
+      "path": "synthesis_system_prompt.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/multi_provider_aggregator/synthesis_system_prompt.md"
+    },
+    "synthesis_prompt": {
+      "path": "synthesis_prompt.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/multi_provider_aggregator/synthesis_prompt.md"
+    }
+  }
+}

@@ -35,6 +35,7 @@ class AgentStopReason(str, Enum):
     IS_DONE = "is_done"
     MAX_ITERATIONS = "max_iterations"
     MAX_TOKENS = "max_tokens"
+    MAX_TOOL_CALLS = "max_tool_calls"
     MIDDLEWARE_ABORT = "middleware_abort"
     TOOL_LOOP_LIMIT = "tool_loop_limit"
     ERROR = "error"
@@ -46,6 +47,7 @@ class AgentRuntimeConfig:
 
     max_iterations: int | None = None
     max_tokens: int | None = None
+    max_tool_calls: int | None = None
     compaction_trigger_tokens: int | None = None
     compaction_target_tokens: int | None = None
 
@@ -54,6 +56,7 @@ class AgentRuntimeConfig:
         for field_name in (
             "max_iterations",
             "max_tokens",
+            "max_tool_calls",
             "compaction_trigger_tokens",
             "compaction_target_tokens",
         ):

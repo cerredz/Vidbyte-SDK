@@ -31,6 +31,9 @@ from __future__ import annotations
 
 from vidbyte.agents import (
     Agent,
+    AggregateAgent,
+    AggregateConfig,
+    AggregateResult,
     AgentClient,
     AgentCard,
     AgentInput,
@@ -43,6 +46,8 @@ from vidbyte.agents import (
     AgentStopReason,
     BaseAgent,
     HandoffAgent,
+    MultiProviderAggregator,
+    ProposerSpec,
 )
 from vidbyte.client import VidbyteSDK
 from vidbyte.evals import (
@@ -199,10 +204,15 @@ __all__ = [
     "Trace",
     "TracerBase",
     "TracerConfigurationError",
+    "AggregateAgent",
+    "AggregateConfig",
+    "AggregateResult",
     "AgentCard",
     "AgentClient",
     "AgentInput",
     "AgentMiddleware",
+    "MultiProviderAggregator",
+    "ProposerSpec",
     "AuditLogMiddleware",
     "CanaryTripwireMiddleware",
     "ConfusedDeputyGuardMiddleware",
