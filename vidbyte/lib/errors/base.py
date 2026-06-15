@@ -66,6 +66,10 @@ class AgentRegistryError(VidbyteSdkError):
     """Raised when local agent discovery fails."""
 
 
+class AggregateExecutionError(AgentExecutionError):
+    """Raised when an aggregate (mixture-of-agents) run cannot produce a synthesis."""
+
+
 class McpError(VidbyteSdkError):
     """Base class for all MCP errors."""
 
