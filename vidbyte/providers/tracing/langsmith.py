@@ -100,7 +100,7 @@ class LangSmithTracer(TracerBase):
         )
         return LangSmithSpanContext(run_id=run_id, trace_id=run_id)
 
-    def end_trace(self, context: SpanContext, *, output: str | None = None, error: Exception | None = None) -> None:
+    def end_trace(self, context: SpanContext, *, output: str | None = None, error: BaseException | None = None) -> None:
         # Closes a root LangSmith chain run with either output or error metadata.
         if not isinstance(context, LangSmithSpanContext):
             return
@@ -129,7 +129,7 @@ class LangSmithTracer(TracerBase):
         self._call_langsmith("create_run", self._client.create_run, **create_kwargs)
         return LangSmithSpanContext(run_id=run_id, parent_run_id=parent_run_id, trace_id=trace_id)
 
-    def end_span(self, context: SpanContext, *, output: str | None = None, error: Exception | None = None) -> None:
+    def end_span(self, context: SpanContext, *, output: str | None = None, error: BaseException | None = None) -> None:
         # Closes a child LangSmith run with either output or error metadata.
         if not isinstance(context, LangSmithSpanContext):
             return

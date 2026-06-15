@@ -41,7 +41,7 @@ class RecordingTracer(TracerBase):
         self.traces_started.append({"name": name, "attributes": attributes, "ctx": ctx})
         return ctx
 
-    def end_trace(self, context: SpanContext, *, output: str | None = None, error: Exception | None = None) -> None:
+    def end_trace(self, context: SpanContext, *, output: str | None = None, error: BaseException | None = None) -> None:
         self.traces_ended.append({"ctx": context, "output": output, "error": error})
 
     def start_span(self, name: str, parent: SpanContext | None = None, **attributes: Any) -> SpanContext:
@@ -49,7 +49,7 @@ class RecordingTracer(TracerBase):
         self.spans_started.append({"name": name, "parent": parent, "attributes": attributes, "ctx": ctx})
         return ctx
 
-    def end_span(self, context: SpanContext, *, output: str | None = None, error: Exception | None = None) -> None:
+    def end_span(self, context: SpanContext, *, output: str | None = None, error: BaseException | None = None) -> None:
         self.spans_ended.append({"ctx": context, "output": output, "error": error})
 
 
@@ -633,6 +633,201 @@ class LangSmithTracerDiagnosticsTests(unittest.TestCase):
             context = tracer.start_trace("agent.run")
             tracer.end_trace(context, output="ok")
         self.assertTrue(hasattr(captured[0], "isoformat"))
+
+
+# ---------------------------------------------------------------------------
+# Cancellation / BaseException trace-closure tests  (#142)
+# ---------------------------------------------------------------------------
+
+class CancelledRunner:
+    """Raises asyncio.CancelledError on the first invoke to simulate task cancellation."""
+
+    def __init__(self) -> None:
+        self._config = types.SimpleNamespace(provider="xai", model="grok-test")
+
+    def run(self, prompt: str, **kwargs: object) -> None:
+        raise NotImplementedError("sync path unused")
+
+
+async def _invoke_cancelled(runner: object, prompt: str, **kwargs: object) -> None:
+    import asyncio
+    raise asyncio.CancelledError("simulated task cancellation")
+
+
+class GenerateReplyCancellationTests(unittest.IsolatedAsyncioTestCase):
+    """Verifies generate_reply closes its root trace on CancelledError."""
+
+    def _make_cancelling_agent(self, tracer: TracerBase) -> BaseAgent:
+        return BaseAgent(
+            name="cancel-agent",
+            system_prompt="Be helpful.",
+            runner=CancelledRunner(),
+            tracer=tracer,
+        )
+
+    async def test_root_trace_closed_on_cancelled_error(self) -> None:
+        # [Hidden Failure] CancelledError previously bypassed end_trace, leaving trace pending.
+        import asyncio
+        tracer = RecordingTracer()
+        agent = self._make_cancelling_agent(tracer)
+        with self.assertRaises((asyncio.CancelledError, Exception)):
+            await agent.generate_reply("hello")
+        self.assertEqual(len(tracer.traces_ended), 1, "root trace must be closed exactly once")
+
+    async def test_root_trace_closed_with_error_on_cancelled_error(self) -> None:
+        # [Silent Failure] Trace must not be closed as success when cancelled.
+        import asyncio
+        tracer = RecordingTracer()
+        agent = self._make_cancelling_agent(tracer)
+        with self.assertRaises((asyncio.CancelledError, Exception)):
+            await agent.generate_reply("hello")
+        self.assertIsNotNone(tracer.traces_ended[0]["error"])
+
+    async def test_cancelled_error_propagates_after_trace_close(self) -> None:
+        # [Hidden Assumption] Callers expect CancelledError (or wrapping) to propagate.
+        import asyncio
+        tracer = RecordingTracer()
+        agent = self._make_cancelling_agent(tracer)
+        raised = False
+        try:
+            await agent.generate_reply("hello")
+        except (asyncio.CancelledError, Exception):
+            raised = True
+        self.assertTrue(raised, "exception must propagate to caller after trace is closed")
+
+    async def test_active_prompt_reset_on_cancelled_error(self) -> None:
+        # [Edge Case] Agent _active_prompt must be cleared even when CancelledError is raised.
+        import asyncio
+        tracer = RecordingTracer()
+        agent = self._make_cancelling_agent(tracer)
+        with self.assertRaises((asyncio.CancelledError, Exception)):
+            await agent.generate_reply("hello")
+        self.assertEqual(agent._active_prompt, "")
+
+    async def test_root_trace_not_double_closed_on_normal_exception(self) -> None:
+        # [Edge Case] Standard Exception path must still close the trace exactly once.
+        tracer = RecordingTracer()
+
+        class BombRunner:
+            def run(self, *a: object, **kw: object) -> None:
+                raise RuntimeError("explode")
+
+        agent = BaseAgent(
+            name="bomb-agent",
+            system_prompt="Crash.",
+            runner=BombRunner(),
+            tracer=tracer,
+        )
+        with self.assertRaises(Exception):
+            await agent.generate_reply("hello")
+        self.assertEqual(len(tracer.traces_ended), 1, "exactly one end_trace call on Exception path")
+
+    async def test_end_trace_receives_base_exception_instance(self) -> None:
+        # [Silent Failure] The error recorded must be the actual BaseException, not None or a string.
+        import asyncio
+        tracer = RecordingTracer()
+        agent = self._make_cancelling_agent(tracer)
+        with self.assertRaises((asyncio.CancelledError, Exception)):
+            await agent.generate_reply("hello")
+        recorded_error = tracer.traces_ended[0]["error"]
+        self.assertIsInstance(recorded_error, BaseException)
+
+
+class LlmSpanCancellationTests(unittest.IsolatedAsyncioTestCase):
+    """Verifies _invoke_with_middleware closes the llm.call span on CancelledError."""
+
+    def _make_runtime(self, tracer: TracerBase) -> AgentRuntime:
+        return AgentRuntime(
+            agent_name="rt-agent",
+            system_prompt="system",
+            tools=Tools(),
+            permission_policy=PermissionPolicy(),
+            config=AgentRuntimeConfig(),
+            tracer=tracer,
+        )
+
+    def _cancelling_handle(self) -> RunnerHandle:
+        # Returns a RunnerHandle whose invoke raises CancelledError.
+        return RunnerHandle(
+            runner=CancelledRunner(),
+            provider="xai",
+            invoke=_invoke_cancelled,
+            extract_text=_output_text,
+            extract_metadata=_output_metadata,
+        )
+
+    async def _run_with_stub_trace_inputs(self, runtime: AgentRuntime, handle: RunnerHandle) -> None:
+        # Runs arun with _llm_trace_inputs stubbed to {} to bypass the pre-existing
+        # duplicate-definition bug that causes TypeError before invoke is reached.
+        from unittest.mock import patch
+        from vidbyte.lib.dataclasses.context import BaseAgentContext
+        context = BaseAgentContext(system_prompt="sys", history=(), file_paths=(), tools=(), budget=None)
+        with patch.object(type(runtime), "_llm_trace_inputs", return_value={}):
+            await runtime.arun("prompt", handle=handle, context=context)
+
+    async def test_llm_span_closed_on_cancelled_error(self) -> None:
+        # [Hidden Failure] CancelledError previously bypassed end_span for llm.call.
+        import asyncio
+        tracer = RecordingTracer()
+        runtime = self._make_runtime(tracer)
+        with self.assertRaises((asyncio.CancelledError, Exception)):
+            await self._run_with_stub_trace_inputs(runtime, self._cancelling_handle())
+        llm_spans_ended = [s for s in tracer.spans_ended if any(
+            started["name"] == "llm.call" and started["ctx"] is s["ctx"]
+            for started in tracer.spans_started
+        )]
+        self.assertEqual(len(llm_spans_ended), 1, "llm.call span must be closed exactly once on cancellation")
+
+    async def test_llm_span_closed_with_error_on_cancelled_error(self) -> None:
+        # [Silent Failure] llm.call span must not be marked as success on cancellation.
+        import asyncio
+        tracer = RecordingTracer()
+        runtime = self._make_runtime(tracer)
+        with self.assertRaises((asyncio.CancelledError, Exception)):
+            await self._run_with_stub_trace_inputs(runtime, self._cancelling_handle())
+        llm_span_end = next(
+            (s for s in tracer.spans_ended if any(
+                started["name"] == "llm.call" and started["ctx"] is s["ctx"]
+                for started in tracer.spans_started
+            )),
+            None,
+        )
+        self.assertIsNotNone(llm_span_end)
+        self.assertIsNotNone(llm_span_end["error"])
+
+    async def test_cancelled_error_propagates_from_runtime(self) -> None:
+        # [Hidden Assumption] CancelledError (or wrapping) must reach the caller after span close.
+        import asyncio
+        tracer = RecordingTracer()
+        runtime = self._make_runtime(tracer)
+        raised = False
+        try:
+            await self._run_with_stub_trace_inputs(runtime, self._cancelling_handle())
+        except (asyncio.CancelledError, Exception):
+            raised = True
+        self.assertTrue(raised)
+
+
+class TracerBaseContractTests(unittest.TestCase):
+    """Verifies the widened BaseException type hint is structurally correct."""
+
+    def test_end_trace_accepts_base_exception_without_type_error(self) -> None:
+        # [Hidden Assumption] end_trace must accept any BaseException, not just Exception.
+        import asyncio
+        tracer = RecordingTracer()
+        ctx = tracer.start_trace("agent.run")
+        tracer.end_trace(ctx, error=asyncio.CancelledError("cancelled"))
+        self.assertEqual(len(tracer.traces_ended), 1)
+        self.assertIsInstance(tracer.traces_ended[0]["error"], asyncio.CancelledError)
+
+    def test_end_span_accepts_base_exception_without_type_error(self) -> None:
+        # [Hidden Assumption] end_span must accept any BaseException, not just Exception.
+        import asyncio
+        tracer = RecordingTracer()
+        ctx = tracer.start_span("llm.call")
+        tracer.end_span(ctx, error=asyncio.CancelledError("cancelled"))
+        self.assertEqual(len(tracer.spans_ended), 1)
+        self.assertIsInstance(tracer.spans_ended[0]["error"], asyncio.CancelledError)
 
 
 if __name__ == "__main__":
