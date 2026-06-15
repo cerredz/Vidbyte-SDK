@@ -1,4 +1,24 @@
-﻿from __future__ import annotations
+"""Context Protocol Header
+
+Description:
+    Unit tests for the tracing provider adapters (LangSmith, Langfuse, Phoenix, and NullTracer).
+Purpose:
+    Verifies that root traces and child spans correctly record execution metadata, inputs/outputs,
+    filtering of environment keys/secrets, and error diagnostics under strict configuration modes.
+Architecture:
+    - LangSmithTracerTests, LangfuseTracerTests, PhoenixTracerTests: Test suites validating mock clients and metadata schemas.
+    - AgentRuntimeSpanTests: Integration tests executing mock runtimes and asserting correct span lifecycle logs.
+Key Functions:
+    - test_langsmith_update_uses_datetime_end_time: Confirms datetime object propagation to the LangSmith API.
+    - test_tool_span_inputs_include_arguments_call_id_and_fingerprint: Regression guard for issue #141 span details.
+Relation to Codebase:
+    Tests the adapters in vidbyte/providers/tracing/ and the core tracing lifecycle driven by AgentRuntime in vidbyte/agents/runtime.py.
+Similar Files:
+    - tests/test_agent_runtime.py
+    - tests/test_trace_facade.py
+"""
+
+from __future__ import annotations
 
 import os
 import types
@@ -679,6 +699,9 @@ class LangSmithTracerDiagnosticsTests(unittest.TestCase):
 
             def update_run(self, *args: Any, **kwargs: Any) -> None:
                 captured.append(kwargs["end_time"])
+
+            def flush(self) -> None:
+                pass
 
         from vidbyte.providers.tracing.langsmith import LangSmithTracer
         with patch.dict("sys.modules", {"langsmith": self._module_with_client(Client)}):
