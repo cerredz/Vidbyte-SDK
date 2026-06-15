@@ -1,8 +1,31 @@
+"""Context Protocol Header
+
+Description:
+    Tracer adapter implementation for the LangSmith observability platform.
+Purpose:
+    Enables logging agent and tool runs as structured chains, LLM calls, and tools within LangSmith, supporting debugging, dataset generation, and evaluation.
+Architecture:
+    - LangSmithSpanContext: Context structure carrying trace_id, run_id, and parent relationship for LangSmith.
+    - LangSmithTracer: Adapter wrapping the third-party langsmith Client to start/end traces and spans.
+Key Functions:
+    - start_trace: Initiates a root run trace.
+    - end_trace: Finalizes a root run trace, sending outputs/errors and flushing logs.
+    - start_span: Opens a child span (e.g. llm.call, tool.call).
+    - end_span: Closes a child span with outcome metadata.
+Relation to Codebase:
+    Implements TracerBase from vidbyte/lib/tracing/base.py. Loaded dynamically by AgentRuntime to track execution paths.
+Similar Files:
+    - vidbyte/providers/tracing/langfuse.py
+    - vidbyte/providers/tracing/phoenix.py
+    - vidbyte/lib/tracing/base.py
+"""
+
 from __future__ import annotations
 
 import os
 import re
 import uuid
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -108,7 +131,9 @@ class LangSmithTracer(TracerBase):
             self._call_langsmith("update_run", self._client.update_run, context.run_id, error=str(error), end_time=_now())
         else:
             self._call_langsmith("update_run", self._client.update_run, context.run_id, outputs={"output": output}, end_time=_now())
-        self._call_langsmith("flush", self._client.flush)
+        flush_fn = getattr(self._client, "flush", None)
+        if flush_fn is not None:
+            self._call_langsmith("flush", flush_fn)
 
     def start_span(self, name: str, parent: SpanContext | None = None, **attributes: Any) -> LangSmithSpanContext:
         # Opens a child LangSmith run under the parent trace when available.
@@ -129,15 +154,18 @@ class LangSmithTracer(TracerBase):
         self._call_langsmith("create_run", self._client.create_run, **create_kwargs)
         return LangSmithSpanContext(run_id=run_id, parent_run_id=parent_run_id, trace_id=trace_id)
 
-    def end_span(self, context: SpanContext, *, output: str | None = None, error: BaseException | None = None) -> None:
-        # Closes a child LangSmith run with either output or error metadata.
+    def end_span(self, context: SpanContext, *, output: str | None = None, error: BaseException | None = None, metadata: Mapping[str, Any] | None = None) -> None:
+        # Closes a child LangSmith run with output or error plus optional structured metadata.
         if not isinstance(context, LangSmithSpanContext):
             return
+        extra = dict(metadata or {})
         if error is not None:
-            self._call_langsmith("update_run", self._client.update_run, context.run_id, error=str(error), end_time=_now())
+            self._call_langsmith("update_run", self._client.update_run, context.run_id, error=str(error), outputs=extra or None, end_time=_now())
         else:
-            self._call_langsmith("update_run", self._client.update_run, context.run_id, outputs={"output": output}, end_time=_now())
-        self._call_langsmith("flush", self._client.flush)
+            self._call_langsmith("update_run", self._client.update_run, context.run_id, outputs={"output": output, **extra}, end_time=_now())
+        flush_fn = getattr(self._client, "flush", None)
+        if flush_fn is not None:
+            self._call_langsmith("flush", flush_fn)
 
 
 def _now() -> Any:

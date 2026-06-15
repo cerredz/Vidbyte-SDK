@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -103,12 +104,16 @@ class PhoenixTracer(TracerBase):
         *,
         output: str | None = None,
         error: Exception | None = None,
+        metadata: Mapping[str, Any] | None = None,
     ) -> None:
+        # Closes a Phoenix span with output/error plus optional structured metadata as attributes.
         if not isinstance(context, PhoenixSpanContext) or context.span is None:
             return
         try:
             if output is not None:
                 context.span.set_attribute("output.value", output)
+            for key, value in dict(metadata or {}).items():
+                context.span.set_attribute(f"tool.{key}", value)
             if error is not None:
                 context.span.set_attribute("error.message", str(error))
                 context.span.record_exception(error)

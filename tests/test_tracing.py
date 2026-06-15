@@ -1,4 +1,24 @@
-﻿from __future__ import annotations
+"""Context Protocol Header
+
+Description:
+    Unit tests for the tracing provider adapters (LangSmith, Langfuse, Phoenix, and NullTracer).
+Purpose:
+    Verifies that root traces and child spans correctly record execution metadata, inputs/outputs,
+    filtering of environment keys/secrets, and error diagnostics under strict configuration modes.
+Architecture:
+    - LangSmithTracerTests, LangfuseTracerTests, PhoenixTracerTests: Test suites validating mock clients and metadata schemas.
+    - AgentRuntimeSpanTests: Integration tests executing mock runtimes and asserting correct span lifecycle logs.
+Key Functions:
+    - test_langsmith_update_uses_datetime_end_time: Confirms datetime object propagation to the LangSmith API.
+    - test_tool_span_inputs_include_arguments_call_id_and_fingerprint: Regression guard for issue #141 span details.
+Relation to Codebase:
+    Tests the adapters in vidbyte/providers/tracing/ and the core tracing lifecycle driven by AgentRuntime in vidbyte/agents/runtime.py.
+Similar Files:
+    - tests/test_agent_runtime.py
+    - tests/test_trace_facade.py
+"""
+
+from __future__ import annotations
 
 import os
 import types
@@ -49,8 +69,8 @@ class RecordingTracer(TracerBase):
         self.spans_started.append({"name": name, "parent": parent, "attributes": attributes, "ctx": ctx})
         return ctx
 
-    def end_span(self, context: SpanContext, *, output: str | None = None, error: BaseException | None = None) -> None:
-        self.spans_ended.append({"ctx": context, "output": output, "error": error})
+    def end_span(self, context: SpanContext, *, output: str | None = None, error: BaseException | None = None, metadata: Any = None) -> None:
+        self.spans_ended.append({"ctx": context, "output": output, "error": error, "metadata": metadata})
 
 
 class FakeResponse:
@@ -453,6 +473,59 @@ class AgentRuntimeSpanTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(tool_spans_ended), 1)
         self.assertIsNotNone(tool_spans_ended[0]["error"])
 
+    def _span_runtime(self, tracer: "RecordingTracer") -> AgentRuntime:
+        # Builds a runtime with a default-permission success tool wired to the given recording tracer.
+        class OkTool(BaseTool):
+            def spec(self) -> ToolSpec:
+                return ToolSpec(name="write", description="Writes a record.")
+            async def execute(self, call: ToolCall) -> ToolResult:
+                return ToolResult.success("write", "written ok")
+
+        return AgentRuntime(agent_name="rt-agent", system_prompt="sys", tools=Tools().add(OkTool()), permission_policy=PermissionPolicy(), tracer=tracer)
+
+    async def test_tool_span_inputs_include_arguments_call_id_and_fingerprint(self) -> None:
+        # [Silent Failure] regression guard for issue #141: span must carry more than the tool name.
+        tracer = RecordingTracer()
+        runtime = self._span_runtime(tracer)
+        await runtime.execute_tool_call(ToolCall("write", {"path": "a.py", "line": 3}, call_id="call_9"), provider="openai")
+        attrs = next(s for s in tracer.spans_started if s["name"] == "tool.call")["attributes"]
+        self.assertEqual(attrs["arguments"], {"path": "a.py", "line": 3})
+        self.assertEqual(attrs["call_id"], "call_9")
+        self.assertEqual(attrs["provider"], "openai")
+        self.assertTrue(attrs["arguments_fingerprint"])
+
+    async def test_tool_span_arguments_redact_secret_keys(self) -> None:
+        # [Hidden Assumption] trace policy must strip credential-shaped argument keys.
+        tracer = RecordingTracer()
+        runtime = self._span_runtime(tracer)
+        await runtime.execute_tool_call(ToolCall("write", {"path": "a.py", "api_token": "xai-secret"}), provider="openai")
+        attrs = next(s for s in tracer.spans_started if s["name"] == "tool.call")["attributes"]
+        self.assertNotIn("api_token", attrs["arguments"])
+        self.assertIn("path", attrs["arguments"])
+
+    async def test_tool_span_close_records_state_and_output_fingerprint(self) -> None:
+        # [Silent Failure] a reviewer must see execution state and an output correlation key.
+        tracer = RecordingTracer()
+        runtime = self._span_runtime(tracer)
+        await runtime.execute_tool_call(ToolCall("write", {"path": "a.py"}), provider="openai")
+        meta = tracer.spans_ended[0]["metadata"]
+        self.assertEqual(meta["state"], "succeeded")
+        self.assertTrue(meta["output_fingerprint"])
+
+    async def test_tool_span_close_records_failed_state_on_error(self) -> None:
+        # [Edge Case] a raising tool must close the span with failed state metadata.
+        tracer = RecordingTracer()
+
+        class BombTool(BaseTool):
+            def spec(self) -> ToolSpec:
+                return ToolSpec(name="bomb", description="Explodes.")
+            async def execute(self, call: ToolCall) -> ToolResult:
+                raise RuntimeError("boom")
+
+        runtime = AgentRuntime(agent_name="rt", system_prompt="sys", tools=Tools().add(BombTool()), permission_policy=PermissionPolicy(), tracer=tracer)
+        await runtime.execute_tool_call(ToolCall("bomb", {}), provider="openai")
+        self.assertEqual(tracer.spans_ended[0]["metadata"]["state"], "failed")
+
 
 # ---------------------------------------------------------------------------
 # TracerConfigurationError tests (import-error simulation)
@@ -626,6 +699,9 @@ class LangSmithTracerDiagnosticsTests(unittest.TestCase):
 
             def update_run(self, *args: Any, **kwargs: Any) -> None:
                 captured.append(kwargs["end_time"])
+
+            def flush(self) -> None:
+                pass
 
         from vidbyte.providers.tracing.langsmith import LangSmithTracer
         with patch.dict("sys.modules", {"langsmith": self._module_with_client(Client)}):

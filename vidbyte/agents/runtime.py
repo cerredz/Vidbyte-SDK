@@ -1,19 +1,29 @@
 """Context Protocol Header
 
 Description:
-    Defines the internal direct execution runtime for Vidbyte agents.
+    Defines the internal direct execution runtime (AgentRuntime) for Vidbyte agents, managing model call loops and tool execution.
 Purpose:
-    Keeps agent loop execution, context-window construction, tool execution,
-    permission checks, and provider-reported token accounting out of BaseAgent.
+    Encapsulates agent execution loop, context-window assembly, tool execution, permission checks, and provider-reported token accounting to keep them out of BaseAgent.
 Architecture:
-    - AgentRuntime: Builds BaseAgentContext and runs direct model/tool loops.
-Relations:
-    Used by vidbyte.agents.base. Depends on shared context, tool, security, and
-    strategy dataclasses without owning modality routing or runner construction.
+    - AgentRuntime: The central runner class that builds the agent's context and handles loops.
+    - ContextManager integration: Manages dynamic context items.
+    - Middleware integration: Orchestrates before/after hooks for runs, iterations, model calls, and tools.
+Key Functions:
+    - build_context: Constructs the context window dictionary passed to models.
+    - arun: The main asynchronous execution entrypoint.
+    - execute_tool_call: Safely executes a single tool call through the permission and validation layers.
+    - _llm_trace_inputs / _tool_trace_inputs: Prepares metadata and inputs for span tracing.
+Relation to Codebase:
+    Used by the agent base classes (vidbyte/agents/base.py) to run agent execution tasks. Cooperates with tracing systems, provider clients, and context primitives.
+Similar Files:
+    - vidbyte/agents/base.py
+    - vidbyte/agents/runtimes/linear.py
 """
 
 from __future__ import annotations
 
+import hashlib
+import json
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
@@ -443,6 +453,10 @@ class AgentRuntime:
                     model_response=raw_result,
                 )
 
+            echoable_calls = tuple(call for call in tool_calls if call.tool_name != IS_DONE_TOOL_NAME)
+            if echoable_calls:
+                messages.append(dict(ToolsFormatter.format_assistant_tool_calls(echoable_calls, last_assistant_output, provider, max_arg_chars=self.algorithm.max_tool_result_chars)))
+
             for call in tool_calls:
                 processed = await self._process_tool_call(
                     call,
@@ -812,6 +826,44 @@ class AgentRuntime:
             return ()
         return tuple(dict(message) for message in raw_messages if isinstance(message, Mapping))
 
+    def _llm_trace_inputs(self, handle: RunnerHandle, message: str, call_options: Mapping[str, Any], provider: str, iteration_count: int, model_call_count: int, metadata: Mapping[str, Any]) -> dict[str, Any]:
+        # Builds sanitized, inspectable model-call inputs for trace providers.
+        system = call_options.get("system")
+        messages = self._provider_messages_from_options(call_options)
+        visible_messages = self._provider_visible_trace_messages(system, messages, message)
+        tools = tuple(call_options.get("tools", ()) or ())
+        public_metadata = {k: v for k, v in dict(metadata).items() if not k.startswith("_")}
+        inputs: dict[str, Any] = {
+            "agent_name": self.agent_name,
+            "provider": provider,
+            "model": self._runner_model_name(handle.runner),
+            "iteration": iteration_count,
+            "model_call": model_call_count,
+            "prompt": self._safe_trace_value(message),
+            "metadata": self._safe_trace_value(public_metadata),
+            "messages": self._safe_trace_value(visible_messages),
+            "input_messages": self._safe_trace_value(visible_messages),
+        }
+        if system is not None:
+            inputs["system"] = self._safe_trace_value(str(system))
+        if messages:
+            inputs["history_messages"] = self._safe_trace_value(messages)
+        if tools:
+            inputs["tool_count"] = len(tools)
+            inputs["tool_names"] = tuple(str(tool.get("name") or tool.get("function", {}).get("name") or "") for tool in tools if isinstance(tool, Mapping))
+        return inputs
+
+    def _tool_trace_inputs(self, call: ToolCall, provider: str) -> dict[str, Any]:
+        # Builds secret-redacted, fingerprinted tool-call inputs for trace providers.
+        safe_args = self._safe_trace_value(dict(call.arguments))
+        return {
+            "tool_name": call.tool_name,
+            "provider": provider,
+            "call_id": call.call_id,
+            "arguments": safe_args,
+            "arguments_text": _trace_text(safe_args),
+            "arguments_fingerprint": _args_fingerprint(safe_args),
+        }
     def _provider_visible_trace_messages(self, system: object | None, messages: Sequence[Mapping[str, Any]], prompt: str) -> tuple[Mapping[str, Any], ...]:
         # Mirrors the provider-visible message order for trace inspection.
         visible: list[Mapping[str, Any]] = []
@@ -951,7 +1003,7 @@ class AgentRuntime:
         tool_span = self._tracer.start_span(
             "tool.call",
             parent=trace_context,
-            tool_name=call.tool_name,
+            **self._tool_trace_inputs(call, provider),
         )
         try:
             tool = self._get_tool(call)
@@ -968,11 +1020,11 @@ class AgentRuntime:
                         metadata={"error": "output_schema_violation", "detail": error},
                     )
             state = ToolCallState.SUCCEEDED if result.status.value == "success" else ToolCallState.FAILED
-            self._tracer.end_span(tool_span, output=result.output)
+            self._tracer.end_span(tool_span, output=result.output, metadata={"state": state.value, "output_fingerprint": _output_fingerprint(result.output)})
         except ToolRegistryError as exc:
             result = ToolResult.error(call.tool_name, str(exc), metadata={"error": "unknown_tool", "detail": str(exc)})
             state = ToolCallState.FAILED
-            self._tracer.end_span(tool_span, error=exc)
+            self._tracer.end_span(tool_span, error=exc, metadata={"state": state.value})
         except PermissionDeniedError as exc:
             permission = exc.details.get("permission", "")
             result = ToolResult.error(
@@ -981,7 +1033,7 @@ class AgentRuntime:
                 metadata={"error": "permission_denied", "permission": permission},
             )
             state = ToolCallState.DENIED
-            self._tracer.end_span(tool_span, error=exc)
+            self._tracer.end_span(tool_span, error=exc, metadata={"state": state.value})
         except ToolExecutionError as exc:
             error_type = exc.details.get("error_type", type(exc).__name__)
             result = ToolResult.error(
@@ -990,7 +1042,7 @@ class AgentRuntime:
                 metadata={"error": "execution_error", "error_type": error_type},
             )
             state = ToolCallState.FAILED
-            self._tracer.end_span(tool_span, error=exc)
+            self._tracer.end_span(tool_span, error=exc, metadata={"state": state.value})
         except Exception as exc:
             result = ToolResult.error(
                 call.tool_name,
@@ -998,7 +1050,7 @@ class AgentRuntime:
                 metadata={"error": "execution_error", "error_type": type(exc).__name__},
             )
             state = ToolCallState.FAILED
-            self._tracer.end_span(tool_span, error=exc)
+            self._tracer.end_span(tool_span, error=exc, metadata={"state": state.value})
 
         return (
             ToolCallContext(
@@ -1099,44 +1151,6 @@ class AgentRuntime:
     def _extract_initial_messages(run_options: dict[str, Any]) -> list[dict[str, Any]]:
         """Pop and normalize the initial messages list from run options."""
         return [dict(item) for item in run_options.pop("messages", ())]
-
-    def _llm_trace_inputs(
-        self,
-        handle: RunnerHandle,
-        *,
-        message: str,
-        call_options: Mapping[str, Any],
-        provider: str,
-        iteration_count: int,
-        model_call_count: int,
-        metadata: Mapping[str, Any],
-    ) -> dict[str, Any]:
-        # Build useful, bounded tracing inputs for the model-call child span.
-        system = call_options.get("system")
-        messages = call_options.get("messages")
-        tools = call_options.get("tools")
-        inputs: dict[str, Any] = {
-            "agent_name": self.agent_name,
-            "provider": provider,
-            "model": self._runner_model_name(handle.runner),
-            "iteration": iteration_count,
-            "model_call": model_call_count,
-            "prompt": _trace_text(message),
-            "metadata": _safe_trace_mapping(metadata),
-        }
-        if system is not None:
-            inputs["system"] = _trace_text(system)
-        if messages:
-            inputs["messages"] = _safe_trace_value(messages)
-        if tools:
-            tool_items = tuple(tools)
-            inputs["tool_count"] = len(tool_items)
-            inputs["tool_names"] = tuple(
-                str(tool.get("name") or tool.get("function", {}).get("name") or "")
-                for tool in tool_items
-                if isinstance(tool, Mapping)
-            )
-        return inputs
 
     @staticmethod
     def _runner_model_name(runner: object) -> str | None:
@@ -1446,6 +1460,17 @@ def _trace_text(value: object, *, max_chars: int = 12000) -> str:
     if len(text) <= max_chars:
         return text
     return f"{text[:max_chars]}...[truncated]"
+
+
+def _args_fingerprint(arguments: Mapping[str, Any]) -> str:
+    # Stable 12-char hash of arguments, order-independent over mapping keys.
+    blob = json.dumps(arguments, sort_keys=True, default=str, ensure_ascii=False)
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:12]
+
+
+def _output_fingerprint(output: str) -> str:
+    # Stable 12-char hash of a tool output for repeated-call correlation.
+    return hashlib.sha256(str(output).encode("utf-8")).hexdigest()[:12]
 
 
 def _safe_trace_mapping(metadata: Mapping[str, Any] | None) -> dict[str, Any]:
