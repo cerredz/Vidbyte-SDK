@@ -1,3 +1,25 @@
+"""Context Protocol Header
+
+Description:
+    Abstract base contract and primitives for the Vidbyte tracing system.
+Purpose:
+    Defines TracerBase and SpanContext contracts to decouple the SDK runtime from specific
+    observability platform adapters (LangSmith, Langfuse, Phoenix, etc.).
+Architecture:
+    - SpanContext: Dataclass holding metadata of an active trace or span.
+    - TracerBase: Abstract base class enforcing interface hooks for traces and spans.
+    - NullTracer: No-op TracerBase implementation for default zero-overhead execution.
+Key Functions:
+    - start_trace / end_trace: Standard hook contracts for root traces.
+    - start_span / end_span: Standard hook contracts for child spans.
+Relation to Codebase:
+    Subclassed by adapters in vidbyte/providers/tracing/ and consumed directly by AgentRuntime
+    in vidbyte/agents/runtime.py to instrument execution runs.
+Similar Files:
+    - vidbyte/providers/tracing/langsmith.py
+    - vidbyte/providers/tracing/langfuse.py
+"""
+
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
@@ -27,7 +49,7 @@ class TracerBase(ABC):
         context: SpanContext,
         *,
         output: str | None = None,
-        error: Exception | None = None,
+        error: BaseException | None = None,
     ) -> None:
         """Close the root trace, recording final output or error."""
 
@@ -46,7 +68,7 @@ class TracerBase(ABC):
         context: SpanContext,
         *,
         output: str | None = None,
-        error: Exception | None = None,
+        error: BaseException | None = None,
         metadata: Mapping[str, Any] | None = None,
     ) -> None:
         """Close a child span, optionally recording structured close-time metadata."""

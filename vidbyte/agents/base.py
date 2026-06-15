@@ -467,6 +467,13 @@ class BaseAgent(McpAttachableMixin):
                 f"Agent '{self.name}' failed to generate a reply.",
                 details={"agent": self.name, "error_type": type(exc).__name__},
             ) from exc
+        except BaseException as exc:
+            # Catches CancelledError and other BaseException subclasses that bypass
+            # the Exception handler, ensuring the root trace is always finalized.
+            if trace_ctx is not None:
+                self._tracer.end_trace(trace_ctx, error=exc)
+            self._active_prompt = ""
+            raise
         self._active_prompt = ""
         metadata: dict[str, Any] = {
             "strategy": result.strategy_name,

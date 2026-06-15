@@ -123,7 +123,7 @@ class LangSmithTracer(TracerBase):
         )
         return LangSmithSpanContext(run_id=run_id, trace_id=run_id)
 
-    def end_trace(self, context: SpanContext, *, output: str | None = None, error: Exception | None = None) -> None:
+    def end_trace(self, context: SpanContext, *, output: str | None = None, error: BaseException | None = None) -> None:
         # Closes a root LangSmith chain run with either output or error metadata.
         if not isinstance(context, LangSmithSpanContext):
             return
@@ -154,7 +154,7 @@ class LangSmithTracer(TracerBase):
         self._call_langsmith("create_run", self._client.create_run, **create_kwargs)
         return LangSmithSpanContext(run_id=run_id, parent_run_id=parent_run_id, trace_id=trace_id)
 
-    def end_span(self, context: SpanContext, *, output: str | None = None, error: Exception | None = None, metadata: Mapping[str, Any] | None = None) -> None:
+    def end_span(self, context: SpanContext, *, output: str | None = None, error: BaseException | None = None, metadata: Mapping[str, Any] | None = None) -> None:
         # Closes a child LangSmith run with output or error plus optional structured metadata.
         if not isinstance(context, LangSmithSpanContext):
             return
@@ -163,7 +163,9 @@ class LangSmithTracer(TracerBase):
             self._call_langsmith("update_run", self._client.update_run, context.run_id, error=str(error), outputs=extra or None, end_time=_now())
         else:
             self._call_langsmith("update_run", self._client.update_run, context.run_id, outputs={"output": output, **extra}, end_time=_now())
-        self._call_langsmith("flush", self._client.flush)
+        flush_fn = getattr(self._client, "flush", None)
+        if flush_fn is not None:
+            self._call_langsmith("flush", flush_fn)
 
 
 def _now() -> Any:
