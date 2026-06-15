@@ -26,7 +26,7 @@ class TracerBase(ABC):
         context: SpanContext,
         *,
         output: str | None = None,
-        error: Exception | None = None,
+        error: BaseException | None = None,
     ) -> None:
         """Close the root trace, recording final output or error."""
 
@@ -45,7 +45,7 @@ class TracerBase(ABC):
         context: SpanContext,
         *,
         output: str | None = None,
-        error: Exception | None = None,
+        error: BaseException | None = None,
     ) -> None:
         """Close a child span."""
 

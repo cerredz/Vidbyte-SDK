@@ -639,6 +639,11 @@ class AgentRuntime:
                         model_call_count,
                     )
                 raise
+            except BaseException as exc:
+                # Catches CancelledError and other BaseException subclasses so the
+                # llm.call span is always finalized before propagating.
+                self._tracer.end_span(llm_span, error=exc)
+                raise
 
     async def _finish_result(
         self,
