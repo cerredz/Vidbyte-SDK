@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import unittest
+from unittest.mock import patch
 
 from vidbyte import Agent, tool
+from vidbyte.agents import AgentRuntime
 from vidbyte.tools import BaseTool, ToolCall, ToolPermission, ToolResult, ToolSpec
 
 
@@ -191,7 +193,8 @@ class AssistantToolCallHistoryTests(unittest.IsolatedAsyncioTestCase):
             ]
         )
         agent = Agent(name="worker", system_prompt="Work.", runner=runner, tools=[read])
-        await agent.arun("task")
+        with patch.object(AgentRuntime, "_llm_trace_inputs", return_value={}):
+            await agent.arun("task")
 
         second_call_messages = runner.calls[1]["kwargs"]["messages"]
         self.assertGreater(len(second_call_messages), 1)
@@ -234,7 +237,8 @@ class AssistantToolCallHistoryTests(unittest.IsolatedAsyncioTestCase):
             ]
         )
         agent = Agent(name="worker", system_prompt="Work.", runner=runner, tools=[read])
-        await agent.arun("task")
+        with patch.object(AgentRuntime, "_llm_trace_inputs", return_value={}):
+            await agent.arun("task", provider="anthropic")
 
         second_call_messages = runner.calls[1]["kwargs"]["messages"]
         assistant_idx = next(
@@ -288,7 +292,8 @@ class AssistantToolCallHistoryTests(unittest.IsolatedAsyncioTestCase):
             ]
         )
         agent = Agent(name="worker", system_prompt="Work.", runner=runner, tools=[read])
-        await agent.arun("task")
+        with patch.object(AgentRuntime, "_llm_trace_inputs", return_value={}):
+            await agent.arun("task", provider="gemini")
 
         second_call_messages = runner.calls[1]["kwargs"]["messages"]
         model_idx = next(
@@ -324,7 +329,8 @@ class AssistantToolCallHistoryTests(unittest.IsolatedAsyncioTestCase):
             ]
         )
         agent = Agent(name="worker", system_prompt="Work.", runner=runner, tools=[read])
-        reply = await agent.arun("task")
+        with patch.object(AgentRuntime, "_llm_trace_inputs", return_value={}):
+            reply = await agent.arun("task")
         # The run must still complete successfully — just without an assistant turn in messages.
         self.assertEqual(reply.content, "done")
 
@@ -336,7 +342,8 @@ class AssistantToolCallHistoryTests(unittest.IsolatedAsyncioTestCase):
             ]
         )
         agent = Agent(name="worker", system_prompt="Work.", runner=runner, tools=[])
-        reply = await agent.arun("task")
+        with patch.object(AgentRuntime, "_llm_trace_inputs", return_value={}):
+            reply = await agent.arun("task")
         self.assertEqual(reply.content, "just text")
         # Only one call was made — no second call to inspect messages on.
         self.assertEqual(len(runner.calls), 1)
@@ -380,7 +387,8 @@ class AssistantToolCallHistoryTests(unittest.IsolatedAsyncioTestCase):
             ]
         )
         agent = Agent(name="worker", system_prompt="Work.", runner=runner, tools=[read])
-        await agent.arun("task")
+        with patch.object(AgentRuntime, "_llm_trace_inputs", return_value={}):
+            await agent.arun("task")
 
         third_call_messages = runner.calls[1]["kwargs"]["messages"]
         assistant_turns = [m for m in third_call_messages if isinstance(m.get("tool_calls"), list)]
