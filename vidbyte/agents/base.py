@@ -20,6 +20,7 @@ from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
 from vidbyte.agents.mixins import McpAttachableMixin
+from vidbyte.agents.settings import AgentLoopSettings
 from vidbyte.agents.types import AgentCard, AgentInput, AgentMessage
 from vidbyte.context.manager import ContextManager
 from vidbyte.context.window import ContextWindow, ContextWindowAlgorithm
@@ -60,6 +61,7 @@ class BaseAgent(McpAttachableMixin):
         runners: Mapping[ModelModality | str, object] | None = None,
         tools: Sequence[object] | Tools = (),
         permission_policy: PermissionPolicy | None = None,
+        agent_loop_settings: AgentLoopSettings | None = None,
         max_tool_rounds: int | None = None,
         max_iterations: int | None = None,
         max_tokens: int | None = None,
@@ -142,13 +144,15 @@ class BaseAgent(McpAttachableMixin):
         self.tools = tools if isinstance(tools, Tools) else self._catalog_from_agent_tools(self._agent_tool_items)
         self.permission_policy = permission_policy or PermissionPolicy()
         effective_max_iterations = max_iterations if max_iterations is not None else max_tool_rounds
-        self.runtime_config = AgentRuntimeConfig(
+        self.agent_loop_settings = self._resolve_loop_settings(
+            agent_loop_settings,
             max_iterations=effective_max_iterations,
             max_tokens=max_tokens,
             compaction_trigger_tokens=compaction_trigger_tokens,
             compaction_target_tokens=compaction_target_tokens,
         )
-        self.max_tool_rounds = effective_max_iterations
+        self.runtime_config = self.agent_loop_settings.to_runtime_config()
+        self.max_tool_rounds = self.agent_loop_settings.max_iterations
         self.system_prompt = system_prompt
         self.middleware = tuple(middleware)
         self.description = description or "General purpose agent."
@@ -181,6 +185,24 @@ class BaseAgent(McpAttachableMixin):
     @classmethod
     def from_run_id(cls, run_id: str, *, name: str, system_prompt: str, **kwargs: Any) -> BaseAgent:
         return cls(name=name, system_prompt=system_prompt, run_id=run_id, **kwargs)
+
+    @staticmethod
+    def _resolve_loop_settings(agent_loop_settings: AgentLoopSettings | None, *, max_iterations: int | None, max_tokens: int | None, compaction_trigger_tokens: int | None, compaction_target_tokens: int | None) -> AgentLoopSettings:
+        # Resolves the final AgentLoopSettings from either a pre-built object or flat kwargs.
+        flat_params = {
+            "max_iterations": max_iterations,
+            "max_tokens": max_tokens,
+            "compaction_trigger_tokens": compaction_trigger_tokens,
+            "compaction_target_tokens": compaction_target_tokens,
+        }
+        active_flat = {k: v for k, v in flat_params.items() if v is not None}
+        if agent_loop_settings is not None and active_flat:
+            raise ConfigurationError(
+                f"Pass either agent_loop_settings= or individual loop params ({', '.join(active_flat)}), not both."
+            )
+        if agent_loop_settings is not None:
+            return agent_loop_settings
+        return AgentLoopSettings(**flat_params)
 
     @staticmethod
     def _resolve_tracer(tracer: type[TracerBase] | TracerBase | None, trace: type[TracerBase] | TracerBase | None) -> TracerBase:
@@ -275,10 +297,7 @@ class BaseAgent(McpAttachableMixin):
             runners=runners if runners is not None else self.runners,
             tools=self._agent_tool_items if tools is None else tools,
             permission_policy=self.permission_policy,
-            max_tool_rounds=self.max_tool_rounds,
-            max_tokens=self.runtime_config.max_tokens,
-            compaction_trigger_tokens=self.runtime_config.compaction_trigger_tokens,
-            compaction_target_tokens=self.runtime_config.compaction_target_tokens,
+            agent_loop_settings=self.agent_loop_settings,
             middleware=self.middleware if middleware is None else middleware,
             system_prompt=self.system_prompt if system_prompt is None else system_prompt,
             api_key=self.runner_config.api_key,
