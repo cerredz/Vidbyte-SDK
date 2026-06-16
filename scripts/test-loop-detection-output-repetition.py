@@ -11,6 +11,7 @@ from typing import Any
 from vidbyte.lib.dataclasses.middleware import MiddlewareAction, MiddlewareContext, MiddlewareHook
 from vidbyte.lib.dataclasses.tools import ToolCall, ToolResult
 from vidbyte.middleware.builtins import LoopDetectionMiddleware
+from vidbyte.middleware.builtins.loop_detection import REPEATED_OUTPUT_LOOP_NOTICE
 
 
 _passed = 0
@@ -58,7 +59,7 @@ def _run_ctx(run_state: dict) -> MiddlewareContext:
 
 async def test_aborts_on_threshold() -> None:
     rs: dict = {}
-    mw = LoopDetectionMiddleware(max_repeated_outputs=3)
+    mw = LoopDetectionMiddleware(hard_max_repeated_outputs=3)
     await mw.before_run(_run_ctx(rs))
     await mw.after_tool_call(_result_ctx(rs, "read_file", "content"))
     await mw.after_tool_call(_result_ctx(rs, "read_file", "content"))
@@ -80,7 +81,7 @@ async def test_disabled_by_default() -> None:
 
 async def test_continues_below_threshold() -> None:
     rs: dict = {}
-    mw = LoopDetectionMiddleware(max_repeated_outputs=4)
+    mw = LoopDetectionMiddleware(hard_max_repeated_outputs=4)
     await mw.before_run(_run_ctx(rs))
     await mw.after_tool_call(_result_ctx(rs, "read_file", "content"))
     await mw.after_tool_call(_result_ctx(rs, "read_file", "content"))
@@ -90,7 +91,7 @@ async def test_continues_below_threshold() -> None:
 
 async def test_tools_counted_independently() -> None:
     rs: dict = {}
-    mw = LoopDetectionMiddleware(max_repeated_outputs=2)
+    mw = LoopDetectionMiddleware(hard_max_repeated_outputs=2)
     await mw.before_run(_run_ctx(rs))
     await mw.after_tool_call(_result_ctx(rs, "read_file", "x"))
     await mw.after_tool_call(_result_ctx(rs, "read_file", "x"))
@@ -101,7 +102,7 @@ async def test_tools_counted_independently() -> None:
 
 async def test_non_consecutive_counted() -> None:
     rs: dict = {}
-    mw = LoopDetectionMiddleware(max_repeated_outputs=3)
+    mw = LoopDetectionMiddleware(hard_max_repeated_outputs=3)
     await mw.before_run(_run_ctx(rs))
     await mw.after_tool_call(_result_ctx(rs, "read_file", "no change"))
     await mw.after_tool_call(_result_ctx(rs, "glob", "[]"))
@@ -114,7 +115,7 @@ async def test_non_consecutive_counted() -> None:
 
 async def test_skips_internal_tools() -> None:
     rs: dict = {}
-    mw = LoopDetectionMiddleware(max_repeated_outputs=2, skip_internal_tools=True)
+    mw = LoopDetectionMiddleware(hard_max_repeated_outputs=2, skip_internal_tools=True)
     await mw.before_run(_run_ctx(rs))
     await mw.after_tool_call(_result_ctx(rs, "isDone", "done", internal=True))
     d = await mw.after_tool_call(_result_ctx(rs, "isDone", "done", internal=True))
@@ -124,7 +125,7 @@ async def test_skips_internal_tools() -> None:
 
 async def test_tracks_internal_tools_when_enabled() -> None:
     rs: dict = {}
-    mw = LoopDetectionMiddleware(max_repeated_outputs=2, skip_internal_tools=False)
+    mw = LoopDetectionMiddleware(hard_max_repeated_outputs=2, skip_internal_tools=False)
     await mw.before_run(_run_ctx(rs))
     await mw.after_tool_call(_result_ctx(rs, "isDone", "done", internal=True))
     d = await mw.after_tool_call(_result_ctx(rs, "isDone", "done", internal=True))
@@ -134,7 +135,7 @@ async def test_tracks_internal_tools_when_enabled() -> None:
 
 async def test_skips_none_result() -> None:
     rs: dict = {}
-    mw = LoopDetectionMiddleware(max_repeated_outputs=2)
+    mw = LoopDetectionMiddleware(hard_max_repeated_outputs=2)
     await mw.before_run(_run_ctx(rs))
     d = await mw.after_tool_call(_ctx(
         hook=MiddlewareHook.AFTER_TOOL_CALL, tool_result=None, run_state=rs
@@ -145,7 +146,7 @@ async def test_skips_none_result() -> None:
 
 async def test_empty_string_counted() -> None:
     rs: dict = {}
-    mw = LoopDetectionMiddleware(max_repeated_outputs=2)
+    mw = LoopDetectionMiddleware(hard_max_repeated_outputs=2)
     await mw.before_run(_run_ctx(rs))
     await mw.after_tool_call(_result_ctx(rs, "grep", ""))
     d = await mw.after_tool_call(_result_ctx(rs, "grep", ""))
@@ -155,7 +156,7 @@ async def test_empty_string_counted() -> None:
 
 async def test_metadata_complete() -> None:
     rs: dict = {}
-    mw = LoopDetectionMiddleware(max_repeated_outputs=2)
+    mw = LoopDetectionMiddleware(hard_max_repeated_outputs=2)
     await mw.before_run(_run_ctx(rs))
     await mw.after_tool_call(_result_ctx(rs, "read_file", "same"))
     d = await mw.after_tool_call(_result_ctx(rs, "read_file", "same"))
@@ -163,24 +164,24 @@ async def test_metadata_complete() -> None:
         d.metadata.get("tool_name") == "read_file"
         and "output_hash" in d.metadata
         and d.metadata.get("repeated_count") == 2
-        and "max_repeated_outputs" in d.metadata
+        and "hard_max_repeated_outputs" in d.metadata
     )
-    _report("abort metadata contains tool_name, output_hash, repeated_count, max_repeated_outputs", ok)
+    _report("abort metadata contains tool_name, output_hash, repeated_count, hard_max_repeated_outputs", ok)
 
 
 def test_raises_on_max_repeated_outputs_one() -> None:
     raised = False
     try:
-        LoopDetectionMiddleware(max_repeated_outputs=1)
+        LoopDetectionMiddleware(hard_max_repeated_outputs=1)
     except ValueError:
         raised = True
-    _report("ValueError raised when max_repeated_outputs=1", raised)
+    _report("ValueError raised when hard_max_repeated_outputs=1", raised)
 
 
 async def test_output_resets_on_new_run() -> None:
     rs_a: dict = {}
     rs_b: dict = {}
-    mw = LoopDetectionMiddleware(max_repeated_outputs=2)
+    mw = LoopDetectionMiddleware(hard_max_repeated_outputs=2)
     await mw.before_run(_run_ctx(rs_a))
     await mw.after_tool_call(_ctx(
         hook=MiddlewareHook.AFTER_TOOL_CALL,
@@ -199,12 +200,54 @@ async def test_output_resets_on_new_run() -> None:
 
 async def test_input_and_output_coexist() -> None:
     rs: dict = {}
-    mw = LoopDetectionMiddleware(max_repeated_calls=2, max_repeated_outputs=5)
+    mw = LoopDetectionMiddleware(max_repeated_calls=2, hard_max_repeated_outputs=5)
     await mw.before_run(_run_ctx(rs))
     await mw.before_tool_call(_tool_ctx(rs, "search", {"q": "x"}))
     d = await mw.before_tool_call(_tool_ctx(rs, "search", {"q": "x"}))
     _report("input loop abort fires correctly when both thresholds active",
             d.reason == "tool_loop_detected")
+
+
+async def test_soft_injects_notice_and_continues() -> None:
+    rs: dict = {}
+    mw = LoopDetectionMiddleware(soft_max_repeated_outputs=2)
+    await mw.before_run(_run_ctx(rs))
+    await mw.after_tool_call(_result_ctx(rs, "read_file", "content"))
+    d = await mw.after_tool_call(_result_ctx(rs, "read_file", "content"))
+    visible = d.transform.model_visible_tool_result if d.transform else None
+    ok = (
+        d.action == MiddlewareAction.CONTINUE
+        and visible is not None
+        and "content" in visible.output
+        and REPEATED_OUTPUT_LOOP_NOTICE in visible.output
+    )
+    _report("soft threshold injects loop notice into context and continues (no abort)", ok)
+
+
+async def test_soft_then_hard() -> None:
+    rs: dict = {}
+    mw = LoopDetectionMiddleware(soft_max_repeated_outputs=2, hard_max_repeated_outputs=4)
+    await mw.before_run(_run_ctx(rs))
+    d1 = await mw.after_tool_call(_result_ctx(rs, "read_file", "x"))
+    d2 = await mw.after_tool_call(_result_ctx(rs, "read_file", "x"))
+    d3 = await mw.after_tool_call(_result_ctx(rs, "read_file", "x"))
+    d4 = await mw.after_tool_call(_result_ctx(rs, "read_file", "x"))
+    ok = (
+        d1.action == MiddlewareAction.CONTINUE and d1.transform is None
+        and d2.transform is not None and d3.transform is not None
+        and d4.action == MiddlewareAction.ABORT_RUN
+        and d4.reason == "tool_output_loop_detected"
+    )
+    _report("soft nudges in band then hard aborts at hard threshold", ok)
+
+
+def test_raises_when_soft_not_below_hard() -> None:
+    raised = False
+    try:
+        LoopDetectionMiddleware(soft_max_repeated_outputs=3, hard_max_repeated_outputs=3)
+    except ValueError:
+        raised = True
+    _report("ValueError raised when soft_max_repeated_outputs >= hard_max_repeated_outputs", raised)
 
 
 async def main() -> None:
@@ -221,6 +264,9 @@ async def main() -> None:
     test_raises_on_max_repeated_outputs_one()
     await test_output_resets_on_new_run()
     await test_input_and_output_coexist()
+    await test_soft_injects_notice_and_continues()
+    await test_soft_then_hard()
+    test_raises_when_soft_not_below_hard()
 
     total = _passed + _failed
     print(f"\n{_passed}/{total} tests passed")

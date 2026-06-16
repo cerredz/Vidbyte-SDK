@@ -7,9 +7,20 @@
 
 ---
 
+## 0. Revision — Soft / Hard Thresholds (review on #151)
+
+Review feedback: aborting the run is too blunt a response to a repeated-output loop. The primary intervention should be to **warn the agent in-band** — insert a message into its context window explaining that it appears stuck — and only abort as a last resort. Accordingly the single `max_repeated_outputs` parameter is replaced by two:
+
+- **`soft_max_repeated_outputs`** — when a (tool, output) pair reaches this count, `after_tool_call` returns a `continue_` decision carrying a `MiddlewareTransform(model_visible_tool_result=…)` whose output has the constant `REPEATED_OUTPUT_LOOP_NOTICE` appended. The run is **not** aborted; the agent is nudged to change course.
+- **`hard_max_repeated_outputs`** — when a (tool, output) pair reaches this count, `after_tool_call` aborts the run with reason `tool_output_loop_detected` (the original behavior).
+
+Both are optional and independent. When both are set, `soft_max_repeated_outputs` must be `< hard_max_repeated_outputs` so the nudge fires before the abort. `REPEATED_OUTPUT_LOOP_NOTICE` is a module-level constant in `loop_detection.py` and is also carried in decision metadata under `description`. Sections below that describe a single `max_repeated_outputs` parameter or an unconditional abort are superseded by this revision.
+
+---
+
 ## 1. Overview
 
-`LoopDetectionMiddleware` currently aborts only when the same tool is called with the same arguments consecutively. The SWE-bench trace showed a more common stuck pattern: the agent alternates among multiple tools (`read_file`, `glob`, `run_tests`, `grep`) and each tool repeatedly returns the same output, yet no consecutive-call threshold is ever crossed. This design adds `max_repeated_outputs` to `LoopDetectionMiddleware` — an optional total-count check in `after_tool_call` that fires when any single (tool, output) pair has been observed more than the threshold number of times during the run.
+`LoopDetectionMiddleware` currently aborts only when the same tool is called with the same arguments consecutively. The SWE-bench trace showed a more common stuck pattern: the agent alternates among multiple tools (`read_file`, `glob`, `run_tests`, `grep`) and each tool repeatedly returns the same output, yet no consecutive-call threshold is ever crossed. This design adds repeated-output detection to `LoopDetectionMiddleware` — a total-count check in `after_tool_call` that fires when any single (tool, output) pair has been observed more than a threshold number of times during the run. Per the Section 0 revision, the response is graduated: a **soft** threshold injects an in-context warning and continues, while a **hard** threshold aborts the run.
 
 ---
 

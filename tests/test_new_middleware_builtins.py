@@ -20,6 +20,7 @@ from vidbyte.middleware.builtins import (
     LoopDetectionMiddleware,
     TokenBudgetMiddleware,
 )
+from vidbyte.middleware.builtins.loop_detection import REPEATED_OUTPUT_LOOP_NOTICE
 
 
 def _ctx(**kwargs) -> MiddlewareContext:
@@ -409,7 +410,7 @@ class TestLoopDetectionMiddleware(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(ValueError):
             LoopDetectionMiddleware(max_repeated_calls=5, window=3)
 
-    # --- max_repeated_outputs tests ---
+    # --- repeated-output detection (soft / hard thresholds) ---
 
     def _result_ctx(self, tool_name: str, output: str, internal: bool = False) -> MiddlewareContext:
         return _ctx(
@@ -419,9 +420,9 @@ class TestLoopDetectionMiddleware(unittest.IsolatedAsyncioTestCase):
             run_state=self._run_state,
         )
 
-    async def test_output_aborts_when_threshold_reached(self) -> None:
-        # [Hidden Failure] Identical output seen max_repeated_outputs times must abort.
-        mw = LoopDetectionMiddleware(max_repeated_outputs=3)
+    async def test_output_hard_aborts_when_threshold_reached(self) -> None:
+        # [Hidden Failure] Identical output seen hard_max_repeated_outputs times must abort.
+        mw = LoopDetectionMiddleware(hard_max_repeated_outputs=3)
         await mw.before_run(self._run_ctx())
         await mw.after_tool_call(self._result_ctx("read_file", "content"))
         await mw.after_tool_call(self._result_ctx("read_file", "content"))
@@ -430,25 +431,70 @@ class TestLoopDetectionMiddleware(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(d.reason, "tool_output_loop_detected")
 
     async def test_output_disabled_by_default(self) -> None:
-        # [Edge Case] Default middleware must not abort on repeated outputs.
+        # [Edge Case] Default middleware must neither abort nor nudge on repeated outputs.
         mw = LoopDetectionMiddleware()
         await mw.before_run(self._run_ctx())
         for _ in range(50):
             d = await mw.after_tool_call(self._result_ctx("read_file", "same content"))
         self.assertEqual(d.action, MiddlewareAction.CONTINUE)
+        self.assertIsNone(d.transform)
 
-    async def test_output_continues_below_threshold(self) -> None:
-        # [Edge Case] Count below threshold must not abort.
-        mw = LoopDetectionMiddleware(max_repeated_outputs=4)
+    async def test_output_continues_below_hard_threshold(self) -> None:
+        # [Edge Case] Count below the hard threshold must not abort.
+        mw = LoopDetectionMiddleware(hard_max_repeated_outputs=4)
         await mw.before_run(self._run_ctx())
         await mw.after_tool_call(self._result_ctx("read_file", "content"))
         await mw.after_tool_call(self._result_ctx("read_file", "content"))
         d = await mw.after_tool_call(self._result_ctx("read_file", "content"))
         self.assertEqual(d.action, MiddlewareAction.CONTINUE)
 
+    async def test_output_soft_injects_notice_and_continues(self) -> None:
+        # [Hidden Failure] Soft threshold must inject the notice into the context window, not abort.
+        mw = LoopDetectionMiddleware(soft_max_repeated_outputs=2)
+        await mw.before_run(self._run_ctx())
+        first = await mw.after_tool_call(self._result_ctx("read_file", "content"))
+        # Below threshold: plain continue, no transform.
+        self.assertEqual(first.action, MiddlewareAction.CONTINUE)
+        self.assertIsNone(first.transform)
+        d = await mw.after_tool_call(self._result_ctx("read_file", "content"))
+        self.assertEqual(d.action, MiddlewareAction.CONTINUE)
+        self.assertIsNotNone(d.transform)
+        visible = d.transform.model_visible_tool_result
+        self.assertIsNotNone(visible)
+        # Original output preserved and the constant notice appended.
+        self.assertIn("content", visible.output)
+        self.assertIn(REPEATED_OUTPUT_LOOP_NOTICE, visible.output)
+        self.assertTrue(visible.metadata["loop_detection_notice"])
+
+    async def test_output_soft_never_aborts(self) -> None:
+        # [Silent Failure] With only a soft threshold the run must never abort, however long the loop.
+        mw = LoopDetectionMiddleware(soft_max_repeated_outputs=2)
+        await mw.before_run(self._run_ctx())
+        d = None
+        for _ in range(20):
+            d = await mw.after_tool_call(self._result_ctx("read_file", "content"))
+        self.assertEqual(d.action, MiddlewareAction.CONTINUE)
+
+    async def test_output_soft_then_hard(self) -> None:
+        # [Hidden Failure] Soft nudges in the band, hard aborts at the hard threshold.
+        mw = LoopDetectionMiddleware(soft_max_repeated_outputs=2, hard_max_repeated_outputs=4)
+        await mw.before_run(self._run_ctx())
+        d1 = await mw.after_tool_call(self._result_ctx("read_file", "x"))  # count 1
+        d2 = await mw.after_tool_call(self._result_ctx("read_file", "x"))  # count 2 (soft)
+        d3 = await mw.after_tool_call(self._result_ctx("read_file", "x"))  # count 3 (soft)
+        d4 = await mw.after_tool_call(self._result_ctx("read_file", "x"))  # count 4 (hard)
+        self.assertEqual(d1.action, MiddlewareAction.CONTINUE)
+        self.assertIsNone(d1.transform)
+        self.assertEqual(d2.action, MiddlewareAction.CONTINUE)
+        self.assertIsNotNone(d2.transform)
+        self.assertEqual(d3.action, MiddlewareAction.CONTINUE)
+        self.assertIsNotNone(d3.transform)
+        self.assertEqual(d4.action, MiddlewareAction.ABORT_RUN)
+        self.assertEqual(d4.reason, "tool_output_loop_detected")
+
     async def test_output_counts_tools_independently(self) -> None:
         # [Silent Failure] Tool A hitting threshold must not abort tool B.
-        mw = LoopDetectionMiddleware(max_repeated_outputs=2)
+        mw = LoopDetectionMiddleware(hard_max_repeated_outputs=2)
         await mw.before_run(self._run_ctx())
         await mw.after_tool_call(self._result_ctx("read_file", "content"))
         await mw.after_tool_call(self._result_ctx("read_file", "content"))
@@ -458,7 +504,7 @@ class TestLoopDetectionMiddleware(unittest.IsolatedAsyncioTestCase):
 
     async def test_output_counts_non_consecutive_calls(self) -> None:
         # [Hidden Failure] The key use-case: A-B-A-B where A always returns same output.
-        mw = LoopDetectionMiddleware(max_repeated_outputs=3)
+        mw = LoopDetectionMiddleware(hard_max_repeated_outputs=3)
         await mw.before_run(self._run_ctx())
         await mw.after_tool_call(self._result_ctx("read_file", "no change"))
         await mw.after_tool_call(self._result_ctx("glob", "[]"))
@@ -470,7 +516,7 @@ class TestLoopDetectionMiddleware(unittest.IsolatedAsyncioTestCase):
 
     async def test_output_skips_internal_tools_when_configured(self) -> None:
         # [Hidden Assumption] Internal tool outputs must not count when skip_internal_tools=True.
-        mw = LoopDetectionMiddleware(max_repeated_outputs=2, skip_internal_tools=True)
+        mw = LoopDetectionMiddleware(hard_max_repeated_outputs=2, skip_internal_tools=True)
         await mw.before_run(self._run_ctx())
         await mw.after_tool_call(self._result_ctx("isDone", "done", internal=True))
         d = await mw.after_tool_call(self._result_ctx("isDone", "done", internal=True))
@@ -478,7 +524,7 @@ class TestLoopDetectionMiddleware(unittest.IsolatedAsyncioTestCase):
 
     async def test_output_tracks_internal_tools_when_not_skipping(self) -> None:
         # [Hidden Assumption] Internal tools must be tracked when skip_internal_tools=False.
-        mw = LoopDetectionMiddleware(max_repeated_outputs=2, skip_internal_tools=False)
+        mw = LoopDetectionMiddleware(hard_max_repeated_outputs=2, skip_internal_tools=False)
         await mw.before_run(self._run_ctx())
         await mw.after_tool_call(self._result_ctx("isDone", "done", internal=True))
         d = await mw.after_tool_call(self._result_ctx("isDone", "done", internal=True))
@@ -486,7 +532,7 @@ class TestLoopDetectionMiddleware(unittest.IsolatedAsyncioTestCase):
 
     async def test_output_skips_none_tool_result(self) -> None:
         # [Edge Case] ctx.tool_result is None (denied call) must not raise or count.
-        mw = LoopDetectionMiddleware(max_repeated_outputs=2)
+        mw = LoopDetectionMiddleware(hard_max_repeated_outputs=2)
         await mw.before_run(self._run_ctx())
         d = await mw.after_tool_call(_ctx(
             hook=MiddlewareHook.AFTER_TOOL_CALL, tool_result=None, run_state=self._run_state
@@ -495,7 +541,7 @@ class TestLoopDetectionMiddleware(unittest.IsolatedAsyncioTestCase):
 
     async def test_output_counts_empty_string(self) -> None:
         # [Edge Case] Empty string output is valid and must be counted.
-        mw = LoopDetectionMiddleware(max_repeated_outputs=2)
+        mw = LoopDetectionMiddleware(hard_max_repeated_outputs=2)
         await mw.before_run(self._run_ctx())
         await mw.after_tool_call(self._result_ctx("grep", ""))
         d = await mw.after_tool_call(self._result_ctx("grep", ""))
@@ -503,24 +549,38 @@ class TestLoopDetectionMiddleware(unittest.IsolatedAsyncioTestCase):
 
     async def test_output_metadata_contains_tool_name_hash_and_count(self) -> None:
         # [Silent Failure] Abort metadata must be complete for observability.
-        mw = LoopDetectionMiddleware(max_repeated_outputs=2)
+        mw = LoopDetectionMiddleware(hard_max_repeated_outputs=2)
         await mw.before_run(self._run_ctx())
         await mw.after_tool_call(self._result_ctx("read_file", "same"))
         d = await mw.after_tool_call(self._result_ctx("read_file", "same"))
         self.assertIn("tool_name", d.metadata)
         self.assertIn("output_hash", d.metadata)
         self.assertIn("repeated_count", d.metadata)
+        self.assertIn("description", d.metadata)
         self.assertEqual(d.metadata["tool_name"], "read_file")
         self.assertEqual(d.metadata["repeated_count"], 2)
+        self.assertEqual(d.metadata["description"], REPEATED_OUTPUT_LOOP_NOTICE)
 
-    def test_output_raises_on_max_repeated_outputs_one(self) -> None:
-        # [Edge Case] max_repeated_outputs=1 is meaningless; must raise ValueError.
+    def test_output_raises_on_soft_max_one(self) -> None:
+        # [Edge Case] soft_max_repeated_outputs=1 is meaningless; must raise ValueError.
         with self.assertRaises(ValueError):
-            LoopDetectionMiddleware(max_repeated_outputs=1)
+            LoopDetectionMiddleware(soft_max_repeated_outputs=1)
+
+    def test_output_raises_on_hard_max_one(self) -> None:
+        # [Edge Case] hard_max_repeated_outputs=1 is meaningless; must raise ValueError.
+        with self.assertRaises(ValueError):
+            LoopDetectionMiddleware(hard_max_repeated_outputs=1)
+
+    def test_output_raises_when_soft_not_below_hard(self) -> None:
+        # [Edge Case] soft must fire before hard; soft >= hard is a misconfiguration.
+        with self.assertRaises(ValueError):
+            LoopDetectionMiddleware(soft_max_repeated_outputs=4, hard_max_repeated_outputs=3)
+        with self.assertRaises(ValueError):
+            LoopDetectionMiddleware(soft_max_repeated_outputs=3, hard_max_repeated_outputs=3)
 
     async def test_output_resets_on_new_run(self) -> None:
         # [Hidden Failure] Output counts must not persist across separate run_state dicts.
-        mw = LoopDetectionMiddleware(max_repeated_outputs=2)
+        mw = LoopDetectionMiddleware(hard_max_repeated_outputs=2)
         rs_a: dict = {}
         rs_b: dict = {}
         await mw.before_run(_ctx(hook=MiddlewareHook.BEFORE_RUN, run_state=rs_a))
@@ -539,7 +599,7 @@ class TestLoopDetectionMiddleware(unittest.IsolatedAsyncioTestCase):
 
     async def test_input_and_output_detection_coexist(self) -> None:
         # [Hidden Assumption] Both thresholds can be active; input abort fires first on consecutive.
-        mw = LoopDetectionMiddleware(max_repeated_calls=2, max_repeated_outputs=5)
+        mw = LoopDetectionMiddleware(max_repeated_calls=2, hard_max_repeated_outputs=5)
         await mw.before_run(self._run_ctx())
         # Two identical input calls → input loop triggers
         await mw.before_tool_call(self._tool_ctx("search", {"q": "x"}))
