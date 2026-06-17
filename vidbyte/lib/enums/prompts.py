@@ -52,6 +52,7 @@ class Prompt(str, Enum):
     TEMPLATES_INTENT_BASED = "templates.intent_based"
     TEMPLATES_PERSONA = "templates.persona"
     TEMPLATES_SPECIFICATION = "templates.specification"
+    TEMPLATES_MASTER = "templates.master"
     ACTOR_RUNTIME_PLANNER = "actor_runtime.planner"
     ACTOR_RUNTIME_CODER = "actor_runtime.coder"
     ACTOR_RUNTIME_REVIEWER = "actor_runtime.reviewer"
