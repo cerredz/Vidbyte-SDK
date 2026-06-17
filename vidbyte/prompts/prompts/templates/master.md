@@ -8,7 +8,7 @@ Treat this document as the anatomy of a well-engineered system prompt: it is a l
 
 - **Read the task first.** Parse `{task}` carefully and decide what the target agent must actually do, who it serves, what it must never do, and what "done" means. Let those answers drive which sections you include.
 - **Gather missing domain knowledge.** When the task depends on expertise you do not already hold with confidence, use web search to pull real, expert-authored information before writing the Context section, rather than inventing facts.
-- **Select, do not dump.** Include a section only when one of its triggers fires for this task. A focused six-section prompt beats a bloated sixteen-section one.
+- **Select, do not dump.** Include a section only when one of its triggers fires for this task. A focused six-section prompt beats a bloated twenty-section one.
 - **Assemble for attention.** Lead with identity, objective, and context; end with the rules and constraints that would cause the most damage if ignored.
 - **Output only the finished prompt.** No commentary, no explanation of your choices, no preamble — just the raw, ready-to-use system prompt.
 
@@ -152,7 +152,32 @@ Treat this document as the anatomy of a well-engineered system prompt: it is a l
 
 ---
 
-## 7. Reasoning / Chain-of-Thought Instructions
+## 7. Sub-Tasks / Decomposition
+
+**What it is.** The sub-tasks section instructs the model to break a complex problem into a list of smaller, ordered sub-tasks before attempting to solve any of them, and then to work through that list one item at a time. It separates the act of decomposing the problem from the act of solving it, so the model plans the breakdown first and executes second. Where Workflow prescribes a fixed external procedure, sub-tasking is the model generating its own task breakdown for the specific problem in front of it. It turns one large, intimidating problem into a sequence of small, tractable ones that can be completed in turn.
+
+**Why include it.** The purpose is to reduce the cognitive load of large problems by forcing explicit decomposition, because models that attempt a complex task in one pass tend to lose track of parts, conflate concerns, or solve the easy bits and forget the rest. Listing the sub-tasks first creates a checklist the model can hold itself to, so nothing is silently dropped. Solving them one at a time keeps the model's attention concentrated on a single, well-scoped piece rather than diffused across the whole problem. It also exposes the structure of the problem early, which often reveals dependencies and ordering the model would otherwise discover too late. Decomposition makes progress legible, because each completed sub-task is a visible milestone. It tends to improve correctness on multi-part problems, since each piece gets full focus and the assembled whole is more complete. It is the model's own planning step, generated fresh for each problem rather than fixed in advance.
+
+**When to use it.**
+
+- **The problem is large or multi-part.** When a task obviously contains several distinct pieces, decomposing it first prevents pieces from being missed. Big problems shrink when split.
+- **The model tends to drop parts.** When one-pass attempts leave requirements unaddressed, an explicit sub-task list holds the model accountable. The list is a completeness check.
+- **Pieces have dependencies.** When some parts must be solved before others, listing sub-tasks surfaces the ordering. Decomposition makes hidden sequencing visible.
+- **The task feels open-ended or intimidating.** When the path forward is unclear, breaking it down gives the model a concrete starting point. Structure replaces paralysis.
+- **Focus per piece improves quality.** When each part deserves full attention, solving one at a time beats juggling all at once. Concentration raises correctness.
+- **Progress needs to be trackable.** When you want visible milestones, completed sub-tasks provide them. Each checked item signals advancement.
+- **The problem decomposes cleanly.** When the work naturally splits into independent or semi-independent units, sub-tasking fits perfectly. Clean seams make decomposition cheap.
+- **Different pieces need different approaches.** When sub-problems call for distinct methods, separating them lets each get the right treatment. One approach rarely fits all parts.
+- **You want to avoid premature synthesis.** When jumping straight to a combined answer risks a muddled result, decompose first and assemble last. Solve before you stitch.
+- **The task will be handed off or resumed.** When a clear task list helps another agent or a later session pick up the work, decomposition produces that artifact. The breakdown is reusable.
+- **Skip it for simple, single-step tasks.** When the problem is atomic, decomposition is artificial overhead. Do not split what is already one thing.
+- **Skip it when the breakdown is obvious and trivial.** If listing sub-tasks adds nothing the model would not already do, omit it.
+
+**Output (format & length).** A short instruction directing the model to first produce a numbered list of sub-tasks that fully cover the problem, then solve them one by one in order, finishing and verifying each before moving to the next. A few sentences plus the expectation of an explicit task list; keep the breakdown proportional to the problem's real complexity rather than splitting for its own sake.
+
+---
+
+## 8. Reasoning / Chain-of-Thought Instructions
 
 **What it is.** The reasoning section tells the model to think before it answers and specifies whether that thinking is shown to the user or kept internal. It governs how the model decomposes a problem, what intermediate steps it works through, and how visible its deliberation is. It is not the answer itself but the cognition that produces the answer. Critically, it can also direct the *style* of reasoning toward whatever the task actually rewards.
 
@@ -175,7 +200,7 @@ Treat this document as the anatomy of a well-engineered system prompt: it is a l
 
 ---
 
-## 8. Tools / Function Definitions
+## 9. Tools / Function Definitions
 
 **What it is.** The tools section describes the tools, skills, or external functions the agent has available and, more importantly, when to reach for each one. In this SDK the user supplies their own tools, skills, and MCP servers, and those definitions are already injected into the system prompt by the runtime — so this section is not about re-declaring schemas but about giving the model usage guidance. Its job is to briefly tell the agent things like "use `{tool_name}` to do X" so the model knows which capability to invoke for which situation. It is the layer of judgment that sits on top of the raw tool list.
 
@@ -198,7 +223,32 @@ Treat this document as the anatomy of a well-engineered system prompt: it is a l
 
 ---
 
-## 9. Examples / Few-Shot Demonstrations
+## 10. Commands
+
+**What it is.** The commands section is a single place that catalogs the terminal or shell commands the agent may need, each paired with a short description of what it does and when to run it. It consolidates all command-line knowledge for the task into one section so the model is not guessing at syntax or hunting for the right invocation. It covers the concrete commands themselves — the exact strings to run — together with their purpose. It is the agent's command reference card for the environment it operates in, kept in one location by design.
+
+**Why include it.** The purpose is to give the model accurate, ready-to-use commands so it executes the right invocation instead of fabricating plausible-but-wrong syntax, which is a common and costly failure for agents with shell access. Models frequently misremember flags, invent non-existent subcommands, or reach for the wrong tool for an environment, and a curated command list eliminates that guesswork. Keeping every command in one section means the model has a single, scannable reference rather than commands scattered through the prompt where they are easy to miss. Pairing each command with a description of what it does lets the model select the correct one for the situation by intent rather than by memory. It also encodes environment-specific choices — the right package manager, the correct test runner, the project's build command — that the model could not reliably infer on its own. This reduces failed executions, wasted turns, and the risk of a wrong command causing harm. For any agent that runs commands, a clear command catalog turns shaky improvisation into reliable execution.
+
+**When to use it.**
+
+- **The agent runs terminal commands.** Whenever the model has shell access, give it the exact commands it will need. This is the section's basic trigger.
+- **Command syntax is easy to get wrong.** When flags or invocations are non-obvious, documenting them prevents fabricated syntax. Exact strings beat guessed ones.
+- **The environment dictates specific tools.** When the project uses a particular package manager, test runner, or build tool, name the exact commands. The model should not guess the stack's conventions.
+- **There is a canonical way to do common operations.** When running tests, building, linting, or deploying has one correct command, document it. Canonical commands prevent ad-hoc variants.
+- **Wrong commands are costly.** When a mistaken invocation could damage state or waste significant time, a vetted list reduces that risk. Curation is a safety measure.
+- **Commands should be discoverable in one place.** When you want the model to scan a single reference rather than recall scattered hints, consolidate them. One section is easier to attend to.
+- **The model under-uses the shell.** When it should run a command but tends to reason in prose instead, listing the command nudges it to execute. Availability plus purpose drives use.
+- **Multiple similar commands exist.** When several commands are close but distinct, descriptions disambiguate which to use when. Intent-pairing prevents the wrong pick.
+- **Setup or teardown steps are required.** When environment prep or cleanup commands must run, document them so they are not skipped. Undocumented setup gets forgotten.
+- **Commands take project-specific arguments.** When invocations need particular paths or flags for this project, capture the exact form. Generic commands fail on specifics.
+- **Skip it when the agent has no shell access.** When the model cannot run commands, this section is irrelevant. Do not list capabilities that do not exist.
+- **Skip it for commands the model reliably knows.** When invocations are universal and unambiguous, documenting them adds little. Reserve the section for what is non-obvious or project-specific.
+
+**Output (format & length).** A single consolidated list of commands, each given as the exact command string paired with a one-line description of what it does and when to use it. Group related commands under short labels if the list grows long; keep every entry to the real, runnable invocation rather than a vague paraphrase.
+
+---
+
+## 11. Examples / Few-Shot Demonstrations
 
 **What it is.** The examples section provides concrete demonstrations of the desired behavior — sample inputs paired with their ideal outputs — so the model can pattern-match against them. It shows, rather than tells, what a correct response looks like, capturing nuances of format, depth, and style that prose instructions struggle to convey. Examples may be positive (do it like this) or include negative cases (not like this, and here is why). They anchor abstract requirements in observable instances.
 
@@ -221,7 +271,7 @@ Treat this document as the anatomy of a well-engineered system prompt: it is a l
 
 ---
 
-## 10. Output Format / Response Contract
+## 12. Output Format / Response Contract
 
 **What it is.** The output-format section defines the exact shape the response must take when the user needs a deterministic, specific structure. It is a contract: it names each piece of the output and what that piece must contain, leaving no ambiguity about layout, fields, or ordering. It is the section that makes the output machine-parseable or consistently structured rather than free-form prose. Whenever the consumer of the output expects a precise shape, this contract is what guarantees it.
 
@@ -244,7 +294,7 @@ Treat this document as the anatomy of a well-engineered system prompt: it is a l
 
 ---
 
-## 11. Tone & Style
+## 13. Tone & Style
 
 **What it is.** The tone-and-style section defines how the model should sound: its verbosity, formality, warmth, formatting habits, and small stylistic rules like not opening every reply with "Certainly" or "Absolutely." It governs the surface texture of communication rather than its substance. It is the lightest-weight section here and, candidly, the least impactful on correctness — it shapes feel, not accuracy. For that reason it should be included only when the way the output sounds genuinely matters.
 
@@ -267,7 +317,7 @@ Treat this document as the anatomy of a well-engineered system prompt: it is a l
 
 ---
 
-## 12. Plan Before Act
+## 14. Plan Before Act
 
 **What it is.** The plan-before-act section imposes a two-phase architecture on the agent: a planning phase in which it scopes the work and proposes an approach, followed by an execution phase in which it carries that approach out — with a hard rule that it must not act before the plan is settled. It separates thinking about the work from doing the work, and gates the second on the first. Major AI harnesses converge on this pattern because premature action is a dominant failure mode. It is most valuable precisely when actions are hard to undo.
 
@@ -290,7 +340,32 @@ Treat this document as the anatomy of a well-engineered system prompt: it is a l
 
 ---
 
-## 13. State Management & Checkpointing
+## 15. Persistent Memory / File Storage
+
+**What it is.** The persistent-memory section instructs the agent to save information into files — creating, structuring, and updating small memory files that hold what it needs to remember. Because many agents can already write and edit files, this section repurposes that capability into a lightweight memory system, where specific files hold specific kinds of remembered information. It is deliberately scoped to short-term, thin memory: a few important facts kept in small, well-structured files rather than large stores. It tells the model what to write down, which file holds it, and in what shape.
+
+**Why include it.** The purpose is to give the agent a simple external place to keep track of a handful of important things, so they survive beyond the immediate moment without bloating the context window. The intent is short-term memory kept deliberately thin — a few key facts, decisions, or pointers rather than an exhaustive log. Writing these to structured files means the model can store a particular kind of memory in a particular file and look it back up reliably, which is more robust than holding it in volatile context. Keeping the files small is itself a design goal, because a thin file is easy to read back, cheap to keep current, and unlikely to drift into noise. This suits tracking a small working set — the current focus, a few constraints to remember, a short list of what has already been tried. It is intentionally lighter-weight than full state-checkpointing or a long-term memory system; it is for remembering a little, well. Used this way, file-backed memory keeps a few important things stable across steps without the overhead of heavy persistence.
+
+**When to use it.**
+
+- **A few important things must be remembered.** When the model needs to keep track of a small handful of facts, a thin memory file holds them. The emphasis is on few, not many.
+- **The agent can write and edit files.** When file-writing capability already exists, repurposing it for lightweight memory is natural. The capability is there to use.
+- **Context is volatile but the facts matter.** When something important might be lost as context shifts, writing it to a file preserves it. Files outlast the window's churn.
+- **Specific memories deserve specific files.** When different kinds of remembered information should live separately, structure them into dedicated files. Structure aids reliable retrieval.
+- **You want memory kept thin.** When the goal is a small, current working set rather than a growing log, file-backed memory enforces that discipline. Thin files stay useful.
+- **A short working set should stay stable.** When a few items — current focus, key constraints, what has been tried — must persist across steps, store them. Stability beats re-deriving them each turn.
+- **The model re-derives the same facts repeatedly.** When it keeps recomputing things it could simply note down, a memory file saves the effort. Write once, read back.
+- **Lightweight tracking beats heavy state.** When full checkpointing would be overkill, a thin memory file is the right-sized tool. Match the mechanism to the small need.
+- **Files should be structured for readback.** When the model will consult its own notes later, a clean structure makes that easy. Well-shaped files are easy to reuse.
+- **Decisions or pointers need to persist briefly.** When a short-lived decision or reference should be remembered for the near term, a memory file fits. Short-term is the sweet spot.
+- **Skip it when there is little to remember.** When the task holds everything it needs in context, file memory is unnecessary overhead. Do not persist what does not need persisting.
+- **Skip it for large or long-term memory needs.** When the working set is big or must endure long-term, a dedicated memory system fits better than thin files. This section is for remembering a little.
+
+**Output (format & length).** A short instruction specifying what to store, which file (and structure) holds each kind of memory, and a directive to keep the files thin and current — writing only the few important things and updating them in place rather than letting them grow. A few sentences; emphasize small, well-structured files over comprehensive logs.
+
+---
+
+## 16. State Management & Checkpointing
 
 **What it is.** The state-management section defines how the agent persists progress across a long task so that an interruption does not erase its work. It instructs the model to externalize its state — what it has done, what remains, key decisions, the current step — into durable form at meaningful moments, and to resume cleanly from that record. It addresses the reality that the context window is volatile and finite, so progress on long tasks cannot live there alone. It is the section that makes hours-long, hundreds-of-steps work survivable.
 
@@ -313,7 +388,7 @@ Treat this document as the anatomy of a well-engineered system prompt: it is a l
 
 ---
 
-## 14. Reflection & Self-Criticism
+## 17. Reflection & Self-Criticism
 
 **What it is.** The reflection section builds a self-review phase into the workflow, where the model critiques and revises its own output against an explicit rubric before delivering it. It treats verification not as an afterthought but as a required step between generating an answer and committing to it. The model is told to check its work for errors, omissions, and rule violations, then fix what it finds. It is the quality gate the model applies to itself.
 
@@ -336,7 +411,32 @@ Treat this document as the anatomy of a well-engineered system prompt: it is a l
 
 ---
 
-## 15. Constraints / Rules / Guardrails
+## 18. Iterative Improvement
+
+**What it is.** The iterative-improvement section tells the model not to stop at its first output but to improve on it — to take the generated result and refine it through one or more further passes. It defines what the model should do after an initial answer exists: revisit, enhance, and elevate it rather than treating the first draft as final. Where reflection checks an output for errors against a rubric, iterative improvement is about making an already-correct output better — tightening, deepening, and polishing it. It turns a single-shot generation into a deliberate refinement loop over the post-output phase.
+
+**Why include it.** The purpose is to push output quality past the level of a first attempt, because a model's initial response is rarely its best possible one and often leaves easy gains on the table. Instructing the model to iterate tells it that "generated an answer" is not the same as "done," and that the next move is to improve what it produced. This is valuable whenever the first draft is a starting point rather than a deliverable, when there is real headroom to make the result sharper, more complete, or more refined. Each improvement pass lets the model spot weak spots, add missing depth, and raise the overall standard incrementally. It explicitly governs the post-output phase, which most prompts leave undefined, so the model knows the work continues after the first result. Unlike pure error-checking, it targets enhancement — better structure, stronger content, higher polish — rather than mere correctness. Used well, it converts a competent first answer into a markedly better final one. It is the difference between stopping at "good enough" and reaching for "as good as it can be."
+
+**When to use it.**
+
+- **The first output is a draft, not the deliverable.** When you expect the initial result to be improved before it is final, say so explicitly. This is the section's core trigger.
+- **There is real headroom to improve.** When the task has quality the model can keep raising, iteration captures those gains. First drafts usually leave room.
+- **Quality matters more than speed.** When a better result is worth extra passes, instruct the model to refine. The trade is latency for excellence.
+- **The output benefits from polish.** When structure, clarity, or depth can be sharpened, an improvement pass delivers it. Polish is rarely present in a first draft.
+- **You don't want the model to stop early.** When the model tends to halt at a merely-acceptable answer, this section keeps it working. It redefines when "done" is reached.
+- **The result can be deepened.** When more thorough or more complete output is achievable, iteration adds the missing depth. Each pass fills gaps.
+- **Creative or open-ended work is involved.** When there is no single right answer and refinement genuinely helps, iterating improves the result. Open tasks reward revision.
+- **A higher standard is expected.** When the deliverable should be excellent rather than adequate, build in the push past the first attempt. Standards drive iteration.
+- **Successive passes converge on better output.** When refining a result reliably makes it better, define how many passes to run or when to stop. Convergence justifies the loop.
+- **The post-output phase is otherwise undefined.** When you want explicit behavior after the first answer, this section provides it. It fills a gap most prompts ignore.
+- **Skip it when latency is critical.** For fast, high-volume tasks, extra improvement passes are not worth the delay. Keep those single-shot.
+- **Skip it when the first output is already sufficient.** When the task has a clear, complete answer with no meaningful headroom, iteration adds cost without benefit.
+
+**Output (format & length).** A short instruction describing what the model should do after producing an initial result — how to evaluate it for improvement, which dimensions to enhance (depth, clarity, structure, completeness), and how many passes or what stopping condition applies. A few sentences focused on the post-output refinement loop; always specify a stopping condition so iteration does not run indefinitely.
+
+---
+
+## 19. Constraints / Rules / Guardrails
 
 **What it is.** The constraints section defines the hard boundaries on what the model must never do — the non-negotiable rules that override everything else in the prompt. It is the negative space of the prompt: where instructions say what to do, constraints say what is forbidden, out of scope, or unsafe. In practice it functions as concentrated negative prompting, capturing the specific things you do not want the model to do, including the common ways this kind of model tends to fail or misbehave. It is widely regarded as the single most critical section in a production prompt.
 
@@ -359,7 +459,7 @@ Treat this document as the anatomy of a well-engineered system prompt: it is a l
 
 ---
 
-## 16. Failure Modes & Escalation
+## 20. Failure Modes & Escalation
 
 **What it is.** The failure-modes section tells the model what to do when it cannot complete the task: when it is uncertain, when inputs are invalid, when required information is missing, or when a constraint blocks the work. It defines what failure looks like and mandates the exact response — stop, report what is wrong, and either ask for clarification or abort with a clear status — instead of pushing out a confident guess. It is the counterpart to the success criteria: success says what "done" means, this section says what "cannot be done" means and how to surface it. It exists because the most dangerous outputs are confident fabrications presented as finished work.
 
