@@ -114,6 +114,62 @@ class ToolsFormatter:
         return ToolsFormatter._parse_openai_tool_calls(raw_payload)
 
     @staticmethod
+    def format_assistant_tool_calls(raw: object, provider_or_model: str) -> Mapping[str, Any] | None:
+        """Extract the assistant/model turn from a tool-call response so it can precede tool results."""
+        raw_payload = getattr(raw, "raw", raw)
+        if not isinstance(raw_payload, Mapping):
+            return None
+        provider = ToolsFormatter.provider_from_model(provider_or_model)
+        if provider == "anthropic":
+            return ToolsFormatter._assistant_turn_anthropic(raw_payload)
+        if provider == "gemini":
+            return ToolsFormatter._assistant_turn_gemini(raw_payload)
+        return ToolsFormatter._assistant_turn_openai(raw_payload)
+
+    @staticmethod
+    def _assistant_turn_openai(raw_payload: Mapping[str, Any]) -> Mapping[str, Any] | None:
+        """Return the assistant message from an OpenAI chat-completions payload, or None for Responses API."""
+        if isinstance(raw_payload.get("output"), list):
+            return None
+        choices = raw_payload.get("choices")
+        if not isinstance(choices, list) or not choices:
+            return None
+        message = choices[0].get("message") if isinstance(choices[0], Mapping) else None
+        if isinstance(message, Mapping) and isinstance(message.get("tool_calls"), list):
+            return dict(message)
+        return None
+
+    @staticmethod
+    def _assistant_turn_anthropic(raw_payload: Mapping[str, Any]) -> Mapping[str, Any] | None:
+        """Return an assistant message wrapping the full content list from an Anthropic payload."""
+        content = raw_payload.get("content")
+        if not isinstance(content, list) or not content:
+            return None
+        has_tool_use = any(isinstance(item, Mapping) and item.get("type") == "tool_use" for item in content)
+        if not has_tool_use:
+            return None
+        return {"role": "assistant", "content": list(content)}
+
+    @staticmethod
+    def _assistant_turn_gemini(raw_payload: Mapping[str, Any]) -> Mapping[str, Any] | None:
+        """Return the model content from a Gemini candidates payload."""
+        candidates = raw_payload.get("candidates")
+        if not isinstance(candidates, list) or not candidates:
+            return None
+        content = candidates[0].get("content") if isinstance(candidates[0], Mapping) else None
+        if not isinstance(content, Mapping):
+            return None
+        parts = content.get("parts")
+        if not isinstance(parts, list):
+            return None
+        has_function_call = any(
+            isinstance(p, Mapping) and ("functionCall" in p or "function_call" in p) for p in parts
+        )
+        if not has_function_call:
+            return None
+        return dict(content)
+
+    @staticmethod
     def format_tool_result(
         call: ToolCall,
         result: ToolResult,

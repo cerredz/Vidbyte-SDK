@@ -443,6 +443,9 @@ class AgentRuntime:
                     model_response=raw_result,
                 )
 
+            assistant_tool_msg = ToolsFormatter.format_assistant_tool_calls(raw_result, provider)
+            if assistant_tool_msg is not None:
+                messages.append(dict(assistant_tool_msg))
             for call in tool_calls:
                 processed = await self._process_tool_call(
                     call,
