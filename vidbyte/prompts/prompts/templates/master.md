@@ -265,77 +265,6 @@ Treat this document as the anatomy of a well-engineered system prompt: it is a l
 
 **Output (format & length).** A short block of style directives — a few sentences or bullets — covering verbosity, formality, any banned phrasings, and formatting preferences. Keep it brief and concrete ("lead with the answer; no preamble; no emoji"); include it only when the output's voice genuinely matters.
 
----
-
-## 12. Plan Before Act
-
-**What it is.** The plan-before-act section imposes a two-phase architecture on the agent: a planning phase in which it scopes the work and proposes an approach, followed by an execution phase in which it carries that approach out — with a hard rule that it must not act before the plan is settled. It separates thinking about the work from doing the work, and gates the second on the first. Major AI harnesses converge on this pattern because premature action is a dominant failure mode. It is most valuable precisely when actions are hard to undo.
-
-**Why include it.** The purpose is to prevent the model from taking irreversible or expensive actions before it adequately understands the task, because agents that start editing, deleting, or calling before scoping routinely do the wrong thing confidently. Forcing a plan first makes the model build a mental model of the whole task and surface its assumptions before any state changes. It creates a natural review checkpoint where a human (or the model itself) can catch a flawed approach while it is still cheap to change. It counters local, greedy behavior by requiring a global strategy up front. For multi-step or stateful tasks, this is one of the most effective safeguards against compounding mistakes. The plan also becomes a reference the model can check its execution against, reducing drift. When the cost of acting wrongly is high, planning first is almost always worth the extra step.
-
-**When to use it.**
-
-- **Actions are hard to reverse.** When the agent can delete, overwrite, deploy, or send, force a plan before any of it. Irreversibility is the strongest trigger.
-- **The task is multi-step and stateful.** When work unfolds over many actions that change state, plan the whole arc first. Up-front scoping prevents early missteps from compounding.
-- **A human should review the approach.** When you want a checkpoint to approve direction before resources are spent, the plan provides it. Review is cheapest before execution.
-- **The cost of a wrong action is high.** When mistakes are expensive in time, money, or trust, the planning tax is worth paying. Plan-first is insurance.
-- **The model tends to act prematurely.** When you have seen it dive in before understanding, the gate forces patience. It substitutes deliberation for impulse.
-- **Requirements need to be surfaced.** When planning forces the model to state assumptions and unknowns, you catch gaps early. The plan exposes what was unclear.
-- **The work decomposes into sub-tasks.** When a complex request should be broken down before execution, planning is where that happens. Decomposition belongs in the plan phase.
-- **Coordination or ordering is non-trivial.** When steps depend on each other in subtle ways, a plan resolves the dependencies first. Better to map them than to discover them mid-execution.
-- **Skip it for trivial single actions.** When the task is one safe, reversible step, a planning ceremony just adds latency. Reserve it for consequential work.
-- **Skip it for pure read-only queries.** When nothing is being changed, the risk that motivates planning is absent.
-
-**Output (format & length).** A short protocol statement instructing the model to first produce a numbered plan covering the intended steps, to wait for confirmation (or to self-verify the plan) before acting, and to begin execution only afterward. A few sentences is enough; make the "do not act before planning" gate explicit.
-
----
-
-## 13. State Management & Checkpointing
-
-**What it is.** The state-management section defines how the agent persists progress across a long task so that an interruption does not erase its work. It instructs the model to externalize its state — what it has done, what remains, key decisions, the current step — into durable form at meaningful moments, and to resume cleanly from that record. It addresses the reality that the context window is volatile and finite, so progress on long tasks cannot live there alone. It is the section that makes hours-long, hundreds-of-steps work survivable.
-
-**Why include it.** The purpose is to decouple progress from the fragile context window, so a crash, timeout, or context overflow does not throw away everything the agent has accomplished. Long-horizon tasks accumulate state that exceeds what the window can reliably hold, and without checkpoints a single interruption forces a costly restart from scratch. Saving structured snapshots at sub-task boundaries and decision points lets the agent pick up exactly where it left off. The resume protocol should be clean — the model continues directly from the last checkpoint without re-narrating what happened or announcing that it is resuming. Checkpoints also create an audit trail, letting both the user and the model verify that no step was skipped or repeated after a restart. For any task expected to run long or in an open-ended loop, this resilience is the difference between a robust agent and a brittle one. It is what lets autonomy scale past the length of a single context window.
-
-**When to use it.**
-
-- **The task is long-running.** When work spans many steps or a long wall-clock time, checkpointing protects the investment. Length is the core trigger.
-- **Interruptions are likely.** When crashes, timeouts, or network failures are plausible, durable state makes them recoverable. Resilience requires externalized progress.
-- **The task exceeds one context window.** When the work cannot fit in working memory at once, state must live outside it. Checkpoints are that external memory.
-- **Losing partial progress is expensive.** When redoing completed work is costly, saving it is clearly worth it. Checkpointing amortizes the risk.
-- **The agent runs in an open-ended loop.** When there is no fixed endpoint, periodic state-saving keeps the loop recoverable. Long loops need save points.
-- **Resumption must be clean.** When restarts should continue seamlessly without recap, specify a no-acknowledgment resume protocol. Clean resumes avoid wasted turns and confusion.
-- **An audit trail is valuable.** When you want to verify which steps ran, checkpoints provide the record. Traceability falls out of good state-saving.
-- **Batch or incremental processing is involved.** When the task processes items in batches, a resume-from-item-N capability prevents reprocessing. Idempotent progress matters at scale.
-- **Skip it for short tasks.** When work finishes well within one context window and one sitting, checkpointing is overhead. Reserve it for long horizons.
-- **Skip it when no durable store is available.** If there is nowhere to persist state, this section cannot be honored; rely on shorter scoping instead.
-
-**Output (format & length).** A checkpoint protocol of a few sentences or bullets specifying when to save state (after each sub-task or at decision points), what to record (completed work, remaining work, key decisions, current step), and how to resume (load the checkpoint and continue directly, without acknowledging or recapping).
-
----
-
-## 14. Reflection & Self-Criticism
-
-**What it is.** The reflection section builds a self-review phase into the workflow, where the model critiques and revises its own output against an explicit rubric before delivering it. It treats verification not as an afterthought but as a required step between generating an answer and committing to it. The model is told to check its work for errors, omissions, and rule violations, then fix what it finds. It is the quality gate the model applies to itself.
-
-**Why include it.** The purpose is to catch errors before they reach the user by inserting a verification pass between generation and delivery, because models that answer in one shot miss mistakes they would catch on a second look. Reflection asks the model to apply the same scrutiny a good reviewer would — does this meet every requirement, is each claim supported, are there inconsistencies — and to revise accordingly. Pairing it with an embedded rubric gives the self-check concrete criteria rather than a vague "look it over." It measurably reduces hallucination and incompleteness, because the model must reconcile its draft against the actual requirements before finishing. This is worth the extra tokens whenever accuracy matters more than latency and the quality bar can be written as checkable conditions. It is especially valuable for high-stakes output where a wrong answer is costly. Reflection turns a confident first draft into a verified final answer.
-
-**When to use it.**
-
-- **Accuracy matters more than speed.** When a correct answer is worth extra latency and tokens, a self-review pass pays for itself. This is the central trade-off the section addresses.
-- **The quality bar is expressible as a checklist.** When you can name the conditions a good answer must meet, the model can check against them. Concrete rubrics make reflection effective.
-- **A wrong answer is costly.** When mistakes carry real consequences, the verification step is cheap insurance. High stakes justify the overhead.
-- **Output tends to have subtle errors.** When this task type produces plausible-but-flawed results, reflection catches them. A second look finds what the first missed.
-- **Claims must be substantiated.** When every assertion should trace to evidence, instruct the model to verify each before delivering. Unsupported claims get flagged or removed.
-- **Requirements are numerous.** When many conditions must all be satisfied, a final reconciliation against the list prevents dropped requirements. Reflection is the completeness check.
-- **Consistency must be enforced.** When internal contradictions are a risk, self-review surfaces them. The model reconciles conflicting parts before finishing.
-- **The task involves planning or analysis.** When a proposed plan or analysis should be stress-tested before presentation, reflection is that test. It refines judgment before commitment.
-- **Skip it when latency is paramount.** For fast, high-volume, low-stakes tasks, the extra pass is not worth the delay. Keep those lean.
-- **Skip it for trivially verifiable output.** When correctness is obvious or externally checked, self-criticism adds little.
-
-**Output (format & length).** A reflection protocol of a few sentences or a short rubric: state the criteria the model must check its output against, instruct it to perform the self-review (internally) before delivering, and require it to revise until each criterion passes. Keep the rubric to a handful of concrete, checkable items.
-
----
-
 ## 15. Constraints / Rules / Guardrails
 
 **What it is.** The constraints section defines the hard boundaries on what the model must never do — the non-negotiable rules that override everything else in the prompt. It is the negative space of the prompt: where instructions say what to do, constraints say what is forbidden, out of scope, or unsafe. In practice it functions as concentrated negative prompting, capturing the specific things you do not want the model to do, including the common ways this kind of model tends to fail or misbehave. It is widely regarded as the single most critical section in a production prompt.
@@ -356,29 +285,6 @@ Treat this document as the anatomy of a well-engineered system prompt: it is a l
 - **Skip (or keep minimal) only for throwaway internal experiments.** When nothing and no one is at risk, heavy guardrails may be unnecessary — but err toward including the critical few.
 
 **Output (format & length).** A short paragraph of framing followed by an emphatic bulleted list of prohibitions, each ideally phrased as "DO NOT [action] — [reason]." Place this section near the very end of the prompt for maximum recency salience, and keep the list focused on the genuinely critical boundaries rather than exhaustive trivia.
-
----
-
-## 16. Failure Modes & Escalation
-
-**What it is.** The failure-modes section tells the model what to do when it cannot complete the task: when it is uncertain, when inputs are invalid, when required information is missing, or when a constraint blocks the work. It defines what failure looks like and mandates the exact response — stop, report what is wrong, and either ask for clarification or abort with a clear status — instead of pushing out a confident guess. It is the counterpart to the success criteria: success says what "done" means, this section says what "cannot be done" means and how to surface it. It exists because the most dangerous outputs are confident fabrications presented as finished work.
-
-**Why include it.** The purpose is to give the model a safe, explicit path to say "I cannot do this" or "I am not sure," because the default behavior under uncertainty is to produce something that looks like an answer rather than to admit the gap. This directly attacks hallucination: when the model knows it is allowed — indeed required — to report inability, it stops inventing. It also prevents silent partial completion, where the model presents incomplete work as done, by defining the conditions that must be met for the task to count as finished. Specifying the exact words and actions for each failure case (for instance, "state 'I could not verify X' rather than guessing") makes the failure behavior reliable rather than improvised. It draws a clean line between abandoning a task and completing one, so the two are never conflated. For any task where the model might hit information it cannot verify or requirements it cannot meet, this section is what keeps it honest. It converts ambiguous dead-ends into clear, actionable signals.
-
-**When to use it.**
-
-- **The model may encounter unverifiable information.** When the task could require facts the model cannot confirm, give it a way to say so. Honesty about uncertainty prevents fabrication.
-- **Hallucination is a known risk.** When this task type tempts the model to invent details, an explicit "report, do not guess" rule counters it. This is the section's core purpose.
-- **Inputs may be invalid or incomplete.** When malformed or missing inputs are possible, define how to handle them. Specified handling beats silent improvisation.
-- **The task has hard requirements that cannot be approximated.** When "close enough" is unacceptable, the model must report inability rather than fudge. Some tasks have no partial credit.
-- **Partial completion would be dangerous.** When presenting unfinished work as done causes harm, define the completion bar explicitly. Make "not done" a reportable state.
-- **A wrong answer is worse than no answer.** When the cost of confident error exceeds the cost of escalation, instruct the model to escalate. Sometimes silence is the safe move.
-- **Clarification is sometimes the right move.** When ambiguity should trigger a question rather than a guess, say so and specify when. Asking beats assuming on consequential calls.
-- **Blocking conditions should be surfaced.** When something prevents completion, the model should name exactly what is blocking it. Clear blockers are actionable; vague failure is not.
-- **Exact failure wording matters.** When downstream systems or users key off specific phrasing, mandate it. Predictable failure messages are easier to handle.
-- **Skip it for trivial, low-risk tasks.** When failure is harmless and obvious, an elaborate protocol is unnecessary. Reserve it for work where getting failure right matters.
-
-**Output (format & length).** A short list pairing each anticipated failure or uncertainty condition with the mandated response — the exact words to use and the action to take (ask, abort, or report). Keep it to a handful of concrete cases; this section should make the boundary between "completed" and "could not complete" unmistakable.
 
 ---
 
