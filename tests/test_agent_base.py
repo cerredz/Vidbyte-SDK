@@ -50,6 +50,36 @@ class TextRunner:
         return TextModelResponse(provider=ModelProvider.OPENAI, model="fake", text="Final answer: OK", raw={})
 
 
+class FailOnSecondRunner:
+    """Runner that succeeds on the first call and raises on the second."""
+
+    def __init__(self) -> None:
+        self.call_count = 0
+
+    def run(self, prompt: str, **_: object) -> object:
+        self.call_count += 1
+        if self.call_count >= 2:
+            raise RuntimeError("runner failure on second call")
+        return FakeResponse(
+            "",
+            {"output": [{"type": "function_call", "name": "isDone", "arguments": f'{{"final_answer": "ok:{prompt}"}}'}]},
+        )
+
+
+class OptionCaptureRunner:
+    """Runner that records all kwargs passed to it."""
+
+    def __init__(self) -> None:
+        self.captured_options: list[dict] = []
+
+    def run(self, prompt: str, **kwargs: object) -> object:
+        self.captured_options.append(dict(kwargs))
+        return FakeResponse(
+            "",
+            {"output": [{"type": "function_call", "name": "isDone", "arguments": f'{{"final_answer": "ok:{prompt}"}}'}]},
+        )
+
+
 class AgentBaseTests(unittest.IsolatedAsyncioTestCase):
     async def test_card_and_generate_reply_pass_tools(self) -> None:
         tool = FakeTool()
@@ -139,6 +169,83 @@ class AgentBaseTests(unittest.IsolatedAsyncioTestCase):
 
         with self.assertRaises(AgentExecutionError):
             await agent.generate_reply("task")
+
+    # --- run_sequentially / arun_sequentially tests ---
+
+    async def test_arun_sequentially_returns_all_replies(self) -> None:
+        # [Edge Case] Three prompts → three replies returned in order
+        agent = BaseAgent(name="seq", system_prompt="S.", runner=EchoRunner())
+        replies = await agent.arun_sequentially(["a", "b", "c"])
+        self.assertEqual(len(replies), 3)
+        self.assertIn("direct:a", replies[0].content)
+        self.assertIn("direct:b", replies[1].content)
+        self.assertIn("direct:c", replies[2].content)
+
+    async def test_arun_sequentially_empty_list_returns_empty(self) -> None:
+        # [Edge Case] Empty input must return [] without touching the runner
+        runner = EchoRunner()
+        agent = BaseAgent(name="seq", system_prompt="S.", runner=runner)
+        replies = await agent.arun_sequentially([])
+        self.assertEqual(replies, [])
+        self.assertEqual(len(agent.history), 0)
+
+    async def test_arun_sequentially_single_prompt(self) -> None:
+        # [Edge Case] Single-element list behaves identically to one generate_reply call
+        agent = BaseAgent(name="seq", system_prompt="S.", runner=EchoRunner())
+        replies = await agent.arun_sequentially(["only"])
+        self.assertEqual(len(replies), 1)
+        self.assertIn("direct:only", replies[0].content)
+
+    async def test_arun_sequentially_preserves_history(self) -> None:
+        # [Silent Failure] history must grow by 1 per prompt (agent reply only — user messages
+        # are not pushed by generate_reply, so expect exactly N entries after N prompts)
+        agent = BaseAgent(name="seq", system_prompt="S.", runner=EchoRunner())
+        await agent.arun_sequentially(["p1", "p2", "p3"])
+        self.assertEqual(len(agent.history), 3)
+
+    async def test_arun_sequentially_context_accumulates(self) -> None:
+        # [Hidden Failure] Each successive prompt sees the prior reply in agent.history.
+        # Verify that after the second prompt, history contains the first reply.
+        agent = BaseAgent(name="seq", system_prompt="S.", runner=EchoRunner())
+        replies = await agent.arun_sequentially(["first", "second"])
+        self.assertEqual(len(agent.history), 2)
+        # The first reply should be the first entry in history
+        self.assertEqual(agent.history[0].content, replies[0].content)
+        # The second reply is appended after
+        self.assertEqual(agent.history[1].content, replies[1].content)
+
+    async def test_run_sequentially_raises_in_active_loop(self) -> None:
+        # [Hidden Assumption] run_sequentially must refuse when called inside a running event loop
+        agent = BaseAgent(name="seq", system_prompt="S.", runner=EchoRunner())
+        with self.assertRaises(AgentExecutionError):
+            agent.run_sequentially(["prompt"])
+
+    async def test_arun_sequentially_stops_on_first_failure(self) -> None:
+        # [Hidden Failure] If prompt N raises, prompts N+1..end must not be called
+        runner = FailOnSecondRunner()
+        agent = BaseAgent(name="seq", system_prompt="S.", runner=runner)
+        with self.assertRaises(AgentExecutionError):
+            await agent.arun_sequentially(["ok", "fail", "never"])
+        self.assertEqual(runner.call_count, 2)
+        # Only one reply was committed to history before the failure
+        self.assertEqual(len(agent.history), 1)
+
+    async def test_arun_sequentially_accepts_agent_input_objects(self) -> None:
+        # [Hidden Assumption] AgentInput objects must be forwarded correctly, not coerced to strings
+        agent = BaseAgent(name="seq", system_prompt="S.", runner=EchoRunner())
+        inp = AgentInput(prompt="from-input")
+        replies = await agent.arun_sequentially([inp])
+        self.assertEqual(len(replies), 1)
+        self.assertIn("direct:from-input", replies[0].content)
+
+    async def test_arun_sequentially_forwards_options_to_each_call(self) -> None:
+        # [Silent Failure] **options must reach every underlying generate_reply invocation
+        runner = OptionCaptureRunner()
+        agent = BaseAgent(name="seq", system_prompt="S.", runner=runner)
+        await agent.arun_sequentially(["x", "y"])
+        # Both calls must have received the system kwarg (injected by the runtime)
+        for captured in runner.captured_options:
+            self.assertIn("system", captured)
 
 
 if __name__ == "__main__":
