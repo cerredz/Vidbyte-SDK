@@ -67,6 +67,7 @@ prompt text.
 | Prompt Engineering | `prompt_engineering` | master_prompt | [prompt_engineering.json](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/prompt_engineering.json) |
 | Reflexion | `reflexion` | agent_system_prompt, reflect_system_prompt, reflect_prompt | [reflexion/](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/reflexion) |
 | Prompt Templates | `templates` | intent_based, persona, specification | [templates/](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/templates) |
+| Tri-CLI Agent Synthesis | `tri_cli_agent_synthesis` | orchestrator | [tri_cli_agent_synthesis/orchestrator.md](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/tri_cli_agent_synthesis/orchestrator.md) |
 | Trajectory Checkpoints | `trajectory_checkpoints` | agentic_summarizer | [trajectory_checkpoints_agentic_summarizer.md](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/trajectory_checkpoints_agentic_summarizer.md) |
 
 ### Descriptions
@@ -228,6 +229,19 @@ specific engineering paradigms. Includes `intent_based`, `persona`, and
 `specification` templates.
 
 Link: <https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/templates>
+
+#### Tri-CLI Agent Synthesis - `tri_cli_agent_synthesis`
+
+Prompt assets for running one user request through Codex, Claude Code, and
+opencode as separate local CLI calls before synthesizing a final answer in the
+current host conversation. The orchestrator prompt treats each external CLI
+answer as fallible candidate material, asks the host agent to reconcile
+contradictions, and returns one final answer rather than selecting a candidate
+verbatim. A companion PowerShell script in the same folder defines default model
+and thinking settings for all three CLIs and emits stable Markdown sections for
+the host agent to consume.
+
+Link: <https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/tri_cli_agent_synthesis/orchestrator.md>
 
 #### Trajectory Checkpoints — `trajectory_checkpoints`
 

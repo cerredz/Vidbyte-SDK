@@ -49,6 +49,7 @@ class Prompt(str, Enum):
     MULTI_PROVIDER_AGENTIC_GRADER_GRADER_PROMPT = "multi_provider_agentic_grader.grader_prompt"
     MULTI_PROVIDER_AGGREGATOR_SYNTHESIS_SYSTEM_PROMPT = "multi_provider_aggregator.synthesis_system_prompt"
     MULTI_PROVIDER_AGGREGATOR_SYNTHESIS_PROMPT = "multi_provider_aggregator.synthesis_prompt"
+    TRI_CLI_AGENT_SYNTHESIS_ORCHESTRATOR = "tri_cli_agent_synthesis.orchestrator"
     TEMPLATES_INTENT_BASED = "templates.intent_based"
     TEMPLATES_PERSONA = "templates.persona"
     TEMPLATES_SPECIFICATION = "templates.specification"

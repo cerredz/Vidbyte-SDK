@@ -1,0 +1,11 @@
+{
+  "name": "Tri-CLI Agent Synthesis",
+  "description": "Prompt assets for running one request through Codex, Claude Code, and opencode as separate local CLI calls before synthesizing a final answer in the host conversation. This workflow is intended for users who want independent perspectives from multiple coding-agent surfaces without replacing the current conversation as the final source of response. The orchestrator prompt tells the host agent to preserve the user's request, gather candidate answers, reconcile disagreements, and compose a single answer rather than selecting one candidate verbatim. It pairs with a companion PowerShell script that defines default models and thinking-effort settings for the three local CLIs. The prompt treats external CLI output as fallible candidate material, so failures, contradictions, and unsupported claims must be handled explicitly. It is a local workflow aid, not a hosted SDK runtime or provider adapter.",
+  "key": "tri_cli_agent_synthesis",
+  "prompts": {
+    "orchestrator": {
+      "path": "orchestrator.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/tri_cli_agent_synthesis/orchestrator.md"
+    }
+  }
+}

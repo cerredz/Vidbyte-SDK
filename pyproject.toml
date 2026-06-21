@@ -27,4 +27,4 @@ include = ["vidbyte*"]
 vidbyte-mcp-server = "vidbyte.mcp_server.__main__:main"
 
 [tool.setuptools.package-data]
-"vidbyte.prompts.prompts" = ["*.json", "*/*.json", "*/*.md"]
+"vidbyte.prompts.prompts" = ["*.json", "*/*.json", "*/*.md", "*/*.ps1"]
