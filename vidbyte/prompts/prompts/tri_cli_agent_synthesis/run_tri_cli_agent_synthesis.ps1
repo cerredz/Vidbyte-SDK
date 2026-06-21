@@ -14,14 +14,16 @@ class AgentCommandResult {
     [string]$Name
     [string]$Status
     [int]$ExitCode
-    [string]$Output
+    [string]$Stdout
+    [string]$Stderr
 
-    AgentCommandResult([string]$Name, [string]$Status, [int]$ExitCode, [string]$Output) {
+    AgentCommandResult([string]$Name, [string]$Status, [int]$ExitCode, [string]$Stdout, [string]$Stderr) {
         # Stores one agent command result for later Markdown rendering.
         $this.Name = $Name
         $this.Status = $Status
         $this.ExitCode = $ExitCode
-        $this.Output = $Output
+        $this.Stdout = $Stdout
+        $this.Stderr = $Stderr
     }
 
     [string] ToSummaryRow() {
@@ -31,8 +33,9 @@ class AgentCommandResult {
 
     [string] ToMarkdownSection() {
         # Formats this result as a stable Markdown section for host-agent synthesis.
-        $safeOutput = if ([string]::IsNullOrWhiteSpace($this.Output)) { "(no output)" } else { $this.Output.Trim() }
-        return "## $($this.Name)`n`nStatus: $($this.Status)`nExit code: $($this.ExitCode)`n`n``````text`n$safeOutput`n``````"
+        $safeStdout = if ([string]::IsNullOrWhiteSpace($this.Stdout)) { "(no stdout)" } else { $this.Stdout.Trim() }
+        $safeStderr = if ([string]::IsNullOrWhiteSpace($this.Stderr)) { "(no stderr)" } else { $this.Stderr.Trim() }
+        return "## $($this.Name)`n`nStatus: $($this.Status)`nExit code: $($this.ExitCode)`n`n### stdout`n`n``````text`n$safeStdout`n```````n`n### stderr`n`n``````text`n$safeStderr`n``````"
     }
 }
 
@@ -62,11 +65,16 @@ class TriCliAgentSynthesisRunner {
         # Runs every configured CLI independently and returns their captured results.
         $this.AssertWorkingDirectoryExists()
         $candidatePrompt = $this.BuildCandidatePrompt()
-        return @(
-            $this.InvokeAgent("codex", "codex", @("exec", "-m", $this.CodexModel, "-c", "model_reasoning_effort=`"$($this.CodexThinking)`"", "--sandbox", "read-only", "-a", "never", "--color", "never", "--cd", $this.WorkingDirectory, "-"), $candidatePrompt, $true),
-            $this.InvokeAgent("claude_code", "claude", @("--print", "--model", $this.ClaudeModel, "--effort", $this.ClaudeThinking, "--permission-mode", "dontAsk", "--tools", "", "--add-dir", $this.WorkingDirectory), $candidatePrompt, $true),
-            $this.InvokeAgent("opencode", "opencode", @("run", "--model", $this.OpencodeModel, "--variant", $this.OpencodeThinking, "--dir", $this.WorkingDirectory, $candidatePrompt), "", $false)
-        )
+        $promptFile = $this.WritePromptFile($candidatePrompt)
+        try {
+            return @(
+                $this.InvokeAgent("codex", "codex", @("exec", "-m", $this.CodexModel, "-c", "model_reasoning_effort=`"$($this.CodexThinking)`"", "--sandbox", "read-only", "-a", "never", "--color", "never", "--cd", $this.WorkingDirectory, "-"), $candidatePrompt, $true),
+                $this.InvokeAgent("claude_code", "claude", @("--print", "--model", $this.ClaudeModel, "--effort", $this.ClaudeThinking, "--permission-mode", "dontAsk", "--tools", "", "--add-dir", $this.WorkingDirectory), $candidatePrompt, $true),
+                $this.InvokeAgent("opencode", "opencode", @("run", "--model", $this.OpencodeModel, "--variant", $this.OpencodeThinking, "--dir", $this.WorkingDirectory, "--file", $promptFile, "Read the attached prompt file and return only your candidate answer."), "", $false)
+            )
+        } finally {
+            Remove-Item -LiteralPath $promptFile -Force -ErrorAction SilentlyContinue
+        }
     }
 
     [void] AssertWorkingDirectoryExists() {
@@ -88,36 +96,94 @@ $($this.Prompt)
 "@
     }
 
+    [string] WritePromptFile([string]$Content) {
+        # Writes prompt content to a temporary UTF-8 file for CLIs that prefer file input.
+        $path = Join-Path ([System.IO.Path]::GetTempPath()) ("tri-cli-agent-synthesis-" + [System.Guid]::NewGuid().ToString("N") + ".md")
+        [System.IO.File]::WriteAllText($path, $Content, [System.Text.Encoding]::UTF8)
+        return $path
+    }
+
     [AgentCommandResult] InvokeAgent([string]$Name, [string]$Command, [string[]]$Arguments, [string]$InputText, [bool]$UseStdin) {
-        # Executes one CLI command, captures output, and converts failures into result sections.
-        if (-not (Get-Command -Name $Command -ErrorAction SilentlyContinue)) {
-            return [AgentCommandResult]::new($Name, "missing_command", 127, "Command not found: $Command")
+        # Executes one CLI command, captures stdout and stderr separately, and returns a result section.
+        $commandInfo = Get-Command -Name $Command -ErrorAction SilentlyContinue
+        if (-not $commandInfo) {
+            return [AgentCommandResult]::new($Name, "missing_command", 127, "", "Command not found: $Command")
         }
 
-        $previousLocation = Get-Location
         try {
-            Set-Location -LiteralPath $this.WorkingDirectory
+            $launch = $this.BuildLaunch($commandInfo, $Arguments)
+            $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
+            $startInfo.FileName = $launch["FileName"]
+            $startInfo.Arguments = $this.JoinArguments($launch["Arguments"])
+            $startInfo.WorkingDirectory = $this.WorkingDirectory
+            $startInfo.UseShellExecute = $false
+            $startInfo.RedirectStandardInput = $UseStdin
+            $startInfo.RedirectStandardOutput = $true
+            $startInfo.RedirectStandardError = $true
+
+            $process = [System.Diagnostics.Process]::new()
+            $process.StartInfo = $startInfo
+            $null = $process.Start()
             if ($UseStdin) {
-                $rawOutput = $InputText | & $Command @Arguments 2>&1
-            } else {
-                $rawOutput = & $Command @Arguments 2>&1
+                $process.StandardInput.Write($InputText)
+                $process.StandardInput.Close()
             }
-            $exitCode = if ($global:LASTEXITCODE -is [int]) { $global:LASTEXITCODE } else { 0 }
-            $status = if ($exitCode -eq 0) { "ok" } else { "failed" }
-            return [AgentCommandResult]::new($Name, $status, $exitCode, $this.JoinOutput($rawOutput))
+            $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+            $stderrTask = $process.StandardError.ReadToEndAsync()
+            $process.WaitForExit()
+            $status = if ($process.ExitCode -eq 0) { "ok" } else { "failed" }
+            return [AgentCommandResult]::new($Name, $status, $process.ExitCode, $stdoutTask.Result, $stderrTask.Result)
         } catch {
-            return [AgentCommandResult]::new($Name, "failed", 1, $_.Exception.Message)
-        } finally {
-            Set-Location -LiteralPath $previousLocation.Path
+            return [AgentCommandResult]::new($Name, "failed", 1, "", $_.Exception.Message)
         }
     }
 
-    [string] JoinOutput([object[]]$RawOutput) {
-        # Converts PowerShell output objects into a stable text block.
-        if ($null -eq $RawOutput -or $RawOutput.Count -eq 0) {
-            return ""
+    [hashtable] BuildLaunch([object]$CommandInfo, [string[]]$Arguments) {
+        # Resolves scripts and native executables into a process filename plus arguments.
+        $source = $CommandInfo.Source
+        if ($source.EndsWith(".ps1", [System.StringComparison]::OrdinalIgnoreCase)) {
+            return @{ FileName = "powershell.exe"; Arguments = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $source) + $Arguments }
         }
-        return ($RawOutput | ForEach-Object { $_.ToString() }) -join [Environment]::NewLine
+        return @{ FileName = $source; Arguments = $Arguments }
+    }
+
+    [string] JoinArguments([string[]]$Arguments) {
+        # Converts an argument array into a Windows process argument string.
+        return ($Arguments | ForEach-Object { $this.QuoteArgument($_) }) -join " "
+    }
+
+    [string] QuoteArgument([string]$Argument) {
+        # Quotes one argument for CreateProcess without invoking a shell.
+        if ($null -eq $Argument) {
+            return '""'
+        }
+        if ($Argument -notmatch '[\s"]') {
+            return $Argument
+        }
+
+        $builder = [System.Text.StringBuilder]::new()
+        [void]$builder.Append('"')
+        $backslashes = 0
+        foreach ($character in $Argument.ToCharArray()) {
+            if ($character -eq '\') {
+                $backslashes += 1
+            } elseif ($character -eq '"') {
+                [void]$builder.Append("\" * (($backslashes * 2) + 1))
+                [void]$builder.Append('"')
+                $backslashes = 0
+            } else {
+                if ($backslashes -gt 0) {
+                    [void]$builder.Append("\" * $backslashes)
+                    $backslashes = 0
+                }
+                [void]$builder.Append($character)
+            }
+        }
+        if ($backslashes -gt 0) {
+            [void]$builder.Append("\" * ($backslashes * 2))
+        }
+        [void]$builder.Append('"')
+        return $builder.ToString()
     }
 
     [void] WriteReport([AgentCommandResult[]]$Results) {
