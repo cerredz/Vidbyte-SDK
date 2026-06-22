@@ -511,6 +511,22 @@ class BaseAgent(McpAttachableMixin):
             return asyncio.run(self.generate_reply(message, **options))
         raise AgentExecutionError("BaseAgent.run() cannot be called from an active event loop; use await arun().")
 
+    async def arun_sequentially(self, prompts: Sequence[str | AgentInput], **options: Any) -> list[AgentMessage]:
+        # Runs each prompt through generate_reply in order, preserving self.history across all calls.
+        results: list[AgentMessage] = []
+        for prompt in prompts:
+            reply = await self.generate_reply(prompt, **options)
+            results.append(reply)
+        return results
+
+    def run_sequentially(self, prompts: Sequence[str | AgentInput], **options: Any) -> list[AgentMessage]:
+        # Synchronous entry point for sequential prompt execution; mirrors run()'s event-loop guard.
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return asyncio.run(self.arun_sequentially(prompts, **options))
+        raise AgentExecutionError("BaseAgent.run_sequentially() cannot be called from an active event loop; use await arun_sequentially().")
+
     async def handoff(self, spec: Handoff | None = None, *, by: "BaseAgent | None" = None) -> Handoff:
         """Produce a structured handoff document describing this agent's most recent run."""
         from vidbyte.agents.handoff import HandoffAgent
