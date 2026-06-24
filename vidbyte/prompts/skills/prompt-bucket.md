@@ -1,42 +1,108 @@
 ---
 name: prompt-bucket
-description: Capture this session's prompts into a named SQLite bucket and replay every prompt from a bucket on demand. Use when the user runs /create-bucket --key <key>, /load-bucket --key <key>, or asks to save/preload the prompts behind a topic.
+description: Capture a session's prompts into a named SQLite bucket and replay them on demand. Master skill that routes natural language — "create bucket '<key>' ...", "load bucket '<key>'" — and the slash forms /create-bucket --key and /load-bucket --key to the create-bucket and load-bucket sub-prompts. Use whenever the user creates, captures into, or loads a prompt bucket.
 ---
 
-# Prompt Bucket
+# Prompt Bucket — master skill
 
 Capture the **prompts** you send while building something — the thin artifacts that hold
 your intent — into a named SQLite "bucket", then replay a whole bucket into a fresh session.
-Code captures the result; your prompts capture the *why*. This skill makes that why a
-replayable asset.
+Code captures the result; your prompts capture the *why*.
 
-Two commands:
+This file is the **master prompt**. It routes to two sub-prompts that live beside it in this
+skill's folder:
 
-- `/create-bucket --key <key>` — create/activate a bucket; from now on every prompt this
-  session is logged into it.
-- `/load-bucket --key <key>` — print every prompt previously captured under that bucket, in
-  order, as context to preload.
+- `create-bucket.md` — create/activate a bucket and capture this session's prompts into it.
+- `load-bucket.md` — replay every prompt previously stored in a bucket.
 
-<!-- SETUP:START — INSTALLER ONLY. Perform these steps once, then DELETE this whole block (everything from SETUP:START to SETUP:END) from the installed SKILL.md. -->
+Throughout, `<DIR>` is **this skill's own folder** (the folder this `SKILL.md` lives in;
+every other file is right beside it). `python` means a working Python 3 launcher — on
+Windows prefer `py -3`; a bare `python`/`python3` is often a non-functional Microsoft Store
+alias that prints "Python was not found".
+
+## Routing — what to do with each user message
+
+1. **Create** — the message is `create bucket '<key>' [text…]`, `create bucket <key>`, or
+   `/create-bucket --key <key>` → read `<DIR>/create-bucket.md` and follow it. Pass any text
+   after the key along as the first prompt to capture.
+2. **Load** — the message is `load bucket '<key>'` or `/load-bucket --key <key>` → read
+   `<DIR>/load-bucket.md` and follow it.
+3. **Anything else** — handle the request normally, but if capture is armed (below), the
+   Capture Contract still runs first.
+
+> Example: `create bucket 'vidbyte-sdk' add agent eval functionality` → key is `vidbyte-sdk`,
+> the trailing text `add agent eval functionality` becomes the bucket's first captured prompt,
+> and you then carry out that request as usual.
+
+## Capture Contract — always-on once armed
+
+Capture is driven by you, the model — there is no background hook — so these rules are
+mandatory, not optional.
+
+**WHEN CAPTURE IS ARMED.** Capture is armed for a conversation only if the user ran a
+**create** command (above) *earlier in this same conversation*. The `<DIR>/.active_bucket`
+file merely records the most-recent key; it is **not** by itself permission to capture. Do
+NOT auto-log in a conversation where the user never created/activated a bucket here —
+otherwise a stale pointer from a previous session would silently capture unrelated prompts.
+
+**FIRST-ACTION CONTRACT.** While capture is armed, the **FIRST** action of **EVERY** one of
+your responses — before reading files, before answering, before any other tool call — MUST
+be to log the user's current verbatim message to the active bucket. Never skip a turn. Never
+batch. It is idempotent, so logging is always safe.
+
+**How to log (quote-safe).** Never pass the prompt as a shell argument (quotes, newlines, and
+backticks corrupt it). Instead:
+
+1. Read the active key from `<DIR>/.active_bucket`.
+2. Write the user's message **verbatim** to a temporary file with your file-write tool.
+3. Run: `python <DIR>/bucket.py log --key <active-key> --file <tmp-file>`
+4. Expect `logged` (new) or `duplicate-skip` (already captured). Either is success.
+
+Then proceed with the user's actual request.
+
+**Stopping capture.** Capture ends automatically when the conversation ends (arming does not
+carry into the next session). To stop mid-conversation, the user says so — stop logging and
+optionally clear `<DIR>/.active_bucket`.
+
+### Few-shot — what a captured turn looks like
+
+> **User:** Let's add retry-with-backoff to the eval runner.
+>
+> **You (first, silently):** read `.active_bucket` → `agent-behavior`; write the message to a
+> temp file; run `python <DIR>/bucket.py log --key agent-behavior --file <tmp>` → `logged`;
+> *then* help with the retry logic.
+
+> **User:** Actually make the backoff jittered, not fixed.
+>
+> **You (first, silently):** log this verbatim message to `agent-behavior` exactly as above
+> (→ `logged`), then implement jittered backoff.
+
+## Notes
+
+- All state — `buckets.db`, `keys.md`, `.active_bucket` — lives in this skill's folder, so
+  buckets persist across sessions and projects and the folder can be moved anywhere.
+- `keys.md` mirrors the known keys for quick eyeballing; `buckets.db` is the source of truth.
+- Prompts are stored verbatim, including any secrets/paths they contain. Treat `buckets.db`
+  as sensitive.
+
+<!-- SETUP:START — INSTALLER ONLY. Perform these steps once, then DELETE this whole block (everything from SETUP:START to SETUP:END) so it does not remain in the installed SKILL.md. -->
 
 ## Installation (run once, then delete this SETUP block)
 
-You are installing the `prompt-bucket` skill. The supporting files below must be written to
-the **same folder** this skill lives in, so the skill is fully self-contained and
-relocatable.
+**Every file goes directly into one folder — this skill's folder. No subfolders, nothing
+written outside it.** After step 1, all paths below are **relative to that folder**.
 
-1. **Choose the skill folder for the current harness** and create `prompt-bucket/` in it:
+1. **Create the skill folder** for the current harness and treat it as the working directory
+   for the rest of these steps:
    - Claude Code: `~/.claude/skills/prompt-bucket/`
    - Codex: `~/.codex/skills/prompt-bucket/`
    - Antigravity CLI: `~/.codeium/windsurf/skills/prompt-bucket/`
-   - opencode: write the files to `~/.claude/skills/prompt-bucket/` (a folder-based home),
-     then create `~/.config/opencode/commands/prompt-bucket.md` whose body is "Run the
-     prompt-bucket skill at ~/.claude/skills/prompt-bucket/SKILL.md" so the single-file
-     command delegates to the folder. (opencode commands are single files, not folders.)
+   - opencode: create the folder at `~/.claude/skills/prompt-bucket/`, then add
+     `~/.config/opencode/commands/prompt-bucket.md` whose body is "Run the prompt-bucket
+     skill at ~/.claude/skills/prompt-bucket/SKILL.md" (opencode commands are single files,
+     so it delegates to the folder).
 
-   Use the folder of the harness you are running in. Call this folder `<SKILL_DIR>` below.
-
-2. **Write `<SKILL_DIR>/schema.sql`** with exactly:
+2. Create `./schema.sql`:
 
 ```sql
 CREATE TABLE IF NOT EXISTS buckets (
@@ -58,7 +124,7 @@ CREATE TABLE IF NOT EXISTS prompts (
 CREATE INDEX IF NOT EXISTS idx_prompts_bucket_seq ON prompts(bucket_id, seq);
 ```
 
-3. **Write `<SKILL_DIR>/bucket.py`** with exactly:
+3. Create `./bucket.py`:
 
 ```python
 #!/usr/bin/env python3
@@ -256,7 +322,7 @@ if __name__ == "__main__":
     raise SystemExit(main())
 ```
 
-4. **Write `<SKILL_DIR>/keys.md`** with exactly:
+4. Create `./keys.md`:
 
 ```markdown
 # Bucket keys
@@ -266,110 +332,66 @@ Known keys (source of truth = buckets.db):
 - _(none yet)_
 ```
 
-5. **Save THIS file as `<SKILL_DIR>/SKILL.md`** (copy it verbatim).
+5. Create `./create-bucket.md` (the create sub-prompt):
 
-6. **Initialize the database:** run `python <SKILL_DIR>/bucket.py init` (use `python3` if
-   `python` is unavailable). Expect output `prompt-bucket initialized`.
+```markdown
+# create-bucket (sub-prompt)
 
-7. **Strip setup:** in the just-saved `<SKILL_DIR>/SKILL.md`, delete this entire block —
-   everything from the `SETUP:START` marker to the `SETUP:END` marker, inclusive. The
-   installed `SKILL.md` must NOT contain the installation steps or the embedded source.
+`<DIR>` = this skill's folder (where SKILL.md and bucket.py live). `python` = a working
+Python 3 launcher (Windows: `py -3`).
 
-8. Confirm to the user: the folder used, the files created, and that init succeeded.
+Handle a request to create/activate a bucket. Triggers:
+- `create bucket '<key>' [initial prompt text…]`
+- `create bucket <key>`
+- `/create-bucket --key <key>`
+
+Steps:
+1. Parse `<key>` (strip surrounding quotes). Capture any text after the key as `<initial>`
+   (may be empty).
+2. Run: `python <DIR>/bucket.py create --key <key>` → expect `bucket ready: <key>`. This is
+   idempotent and writes `<DIR>/.active_bucket`.
+3. ARM capture for this conversation (follow the Capture Contract in SKILL.md from now on).
+   Tell the user capture is on and which bucket their prompts will land in.
+4. If `<initial>` is non-empty, log it now as the first prompt: write `<initial>` verbatim to
+   a temp file, run `python <DIR>/bucket.py log --key <key> --file <tmp>`, then carry out
+   that request normally.
+5. To capture into an existing bucket in a *new* session later, the user re-runs this command
+   with the same key — it re-arms capture and will not duplicate the bucket.
+```
+
+6. Create `./load-bucket.md` (the load sub-prompt):
+
+```markdown
+# load-bucket (sub-prompt)
+
+`<DIR>` = this skill's folder. `python` = a working Python 3 launcher (Windows: `py -3`).
+
+Handle a request to replay a bucket. Triggers:
+- `load bucket '<key>'`
+- `/load-bucket --key <key>`
+
+Steps:
+1. Parse `<key>` (strip surrounding quotes).
+2. Run: `python <DIR>/bucket.py load --key <key>`.
+3. stdout is the replay block — every captured prompt for that bucket, in order. Read it as
+   preloaded intent context for the rest of the session.
+4. If stderr shows `# resolved 'x' -> 'y'`, the key was fuzzy-matched; tell the user which
+   bucket you actually loaded.
+5. If it exits non-zero with `NO_MATCH`, show the available keys (the stderr line lists them,
+   or run `python <DIR>/bucket.py keys`) and ask which they meant.
+6. Loading does NOT arm capture — it only reads.
+```
+
+7. Create `./SKILL.md`: save everything in THIS file **above** the `SETUP:START` marker (the
+   master prompt) verbatim.
+
+8. Initialize the database: run `python ./bucket.py init` (Windows: `py -3 ./bucket.py init`).
+   Expect output `prompt-bucket initialized`.
+
+9. Delete this entire SETUP block (SETUP:START … SETUP:END inclusive) from `./SKILL.md`.
+
+10. **Verify** the skill folder now contains exactly these files and that nothing was written
+    outside it, then report the folder path + file list to the user:
+    `./SKILL.md  ./create-bucket.md  ./load-bucket.md  ./schema.sql  ./bucket.py  ./keys.md  ./buckets.db`
 
 <!-- SETUP:END -->
-
-## Commands
-
-In all commands below, `<DIR>` is this skill's own folder (where this `SKILL.md` lives).
-
-**Choosing the interpreter.** Use whatever Python 3 launcher works on this machine:
-- macOS/Linux: `python3` (fall back to `python`).
-- Windows: prefer `py -3`. A bare `python`/`python3` is often a non-functional Microsoft
-  Store alias that prints "Python was not found" — if you see that, switch to `py -3`.
-
-Pick a working launcher once, then use it for every `bucket.py` call below (shown as
-`python` for brevity).
-
-### `/create-bucket --key <key>`
-
-1. Run: `python <DIR>/bucket.py create --key <key>`
-2. Expect `bucket ready: <key>`. This is idempotent: it creates the bucket if new, and
-   records `<key>` in `<DIR>/.active_bucket` as the most-recent/default bucket.
-3. **This command ARMS capture for the current conversation.** From now until this
-   conversation ends, follow the capture contract below. Tell the user capture is on for
-   this session and which bucket prompts will land in.
-4. To capture into an existing bucket in a *new* session later, just run this command again
-   with the same `--key` — it re-arms capture and won't duplicate the bucket.
-
-### `/load-bucket --key <key>`
-
-1. Run: `python <DIR>/bucket.py load --key <key>`
-2. **stdout** is the replay block — every captured prompt for that bucket, in order. Read it
-   as preloaded intent context for the rest of the session.
-3. If **stderr** shows `# resolved 'x' -> 'y'`, the key was fuzzy-matched; tell the user
-   which bucket you actually loaded.
-4. If the command exits non-zero with `NO_MATCH`, show the user the available keys (the
-   stderr line lists them, or run `python <DIR>/bucket.py keys`) and ask which they meant.
-
-## Capture behavior (read this every turn)
-
-This is the core of the skill. Capture is driven by you, the model — there is no background
-hook — so the rules below are mandatory, not optional.
-
-**WHEN CAPTURE IS ARMED.** Capture is armed for a conversation only if the user ran
-`/create-bucket --key <key>` *earlier in this same conversation*. The `.active_bucket` file
-merely records the most-recent key; it is **not** by itself permission to capture. Do NOT
-auto-log in a conversation where the user never ran `/create-bucket` here — otherwise a
-stale pointer from a previous session would silently capture unrelated prompts. (If the user
-wants to resume an old bucket, they re-run `/create-bucket --key <key>`, which re-arms.)
-
-**FIRST-ACTION CONTRACT.** While capture is armed, the **FIRST** action of **EVERY** one of
-your responses — before reading files, before answering, before any other tool call — MUST
-be to log the user's current verbatim message to the active bucket. Never skip a turn. Never
-batch. It is idempotent, so logging is always safe.
-
-**How to log (quote-safe).** Do not pass the prompt as a shell argument (quotes, newlines,
-and backticks will corrupt it). Instead:
-
-1. Read the active key from `<DIR>/.active_bucket`.
-2. Write the user's message **verbatim** to a temporary file using your file-write tool
-   (e.g. a scratch path like `<tmp>/prompt.txt`).
-3. Run: `python <DIR>/bucket.py log --key <active-key> --file <tmp>/prompt.txt`
-4. Expect `logged` (new) or `duplicate-skip` (already captured). Either is success.
-
-Then proceed with the user's actual request as normal.
-
-**Stopping capture.** Capture ends automatically when the conversation ends (arming does not
-carry into the next session). To stop mid-conversation, the user says so — stop logging and
-optionally clear `<DIR>/.active_bucket`. Running `/create-bucket` with a different key
-redirects capture to that key for the rest of the conversation.
-
-### Few-shot — what a captured turn looks like
-
-> **User:** Let's add retry-with-backoff to the eval runner.
->
-> **You (first, silently):**
-> - read `.active_bucket` → `agent-behavior`
-> - write "Let's add retry-with-backoff to the eval runner." to `<tmp>/prompt.txt`
-> - run `python <DIR>/bucket.py log --key agent-behavior --file <tmp>/prompt.txt` → `logged`
-> - *then* help with the retry logic as usual.
-
-> **User:** Actually make the backoff jittered, not fixed.
->
-> **You (first, silently):** log this verbatim message to `agent-behavior` exactly as above
-> (→ `logged`), then implement jittered backoff.
-
-> **User (new session, days later):** `/load-bucket --key agent-behaviour`
->
-> **You:** run `python <DIR>/bucket.py load --key agent-behaviour`. stderr says
-> `# resolved 'agent-behaviour' -> 'agent-behavior'`; stdout returns both prompts above.
-> Tell the user you loaded `agent-behavior` and now have the intent behind that work.
-
-## Notes
-
-- All state — `buckets.db`, `keys.md`, `.active_bucket` — lives in this skill's folder, so
-  buckets persist across sessions and projects and the folder can be moved anywhere.
-- `keys.md` mirrors the known keys for quick eyeballing; `buckets.db` is the source of truth.
-- Prompts are stored verbatim, including any secrets/paths they contain. Treat `buckets.db`
-  as sensitive.

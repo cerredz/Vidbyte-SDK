@@ -14,9 +14,12 @@ user's *prompts* (not the resulting code) into named topic "buckets" backed by a
 SQLite database, and replays a whole bucket into a fresh session on demand. It ships as a
 **single installer Markdown file** in the Vidbyte SDK repo that, when run by any coding
 harness (Claude Code, Codex, opencode, Antigravity), expands into a multi-file skill
-folder on disk and then strips its own setup instructions so the installed skill is lean.
-Two commands drive it: `/create-bucket --key <key>` (start capturing this session's
-prompts into a bucket) and `/load-bucket --key <key>` (preload every prompt previously
+folder on disk (all files in the one folder) and then strips its own setup instructions so
+the installed skill is lean. The skill is **three prompts** — a master `SKILL.md` that
+routes natural language and dispatches to a `create-bucket.md` and a `load-bucket.md`
+sub-prompt. Two flows drive it: `create bucket '<key>' [text…]` / `/create-bucket --key
+<key>` (start capturing this conversation's prompts into a bucket) and `load bucket
+'<key>'` / `/load-bucket --key <key>` (preload every prompt previously
 captured under that bucket).
 
 The motivating insight: the prompts a user sends while building a feature are thin, dense
@@ -90,14 +93,19 @@ each turn. We accept that and engineer around it (§6.4).
 
 ### Functional Requirements
 1. A single repo file `vidbyte/prompts/skills/prompt-bucket.md` contains the entire skill:
-   the live `SKILL.md` body **plus** a `SETUP` block holding every supporting file's
-   contents (schema, Python CLI, keys template) and the install steps.
-2. Running the installer creates a folder containing: `SKILL.md`, `schema.sql`,
-   `bucket.py`, `keys.md`, and (after init) `buckets.db`.
+   the master `SKILL.md` body (above `SETUP`) **plus** a `SETUP` block holding every
+   supporting file's contents (schema, Python CLI, keys template, and the two sub-prompts)
+   and the install steps, which use **relative paths** so all files land in one folder.
+2. Running the installer creates one folder containing the **three prompts** — `SKILL.md`
+   (master), `create-bucket.md`, `load-bucket.md` — plus `schema.sql`, `bucket.py`,
+   `keys.md`, and (after init) `buckets.db`. Nothing is written outside that folder.
 3. After scaffolding, the installer **removes** the `SETUP` block from the installed
-   `SKILL.md`, leaving only command + behavior documentation.
-4. `/create-bucket --key <key>` creates the bucket if absent, marks it the **active
-   bucket** (a pointer file), and refreshes `keys.md`.
+   `SKILL.md`, leaving only the master routing + capture-contract documentation.
+4. The master routes `create bucket '<key>' [text…]` / `/create-bucket --key <key>` to
+   `create-bucket.md` and `load bucket '<key>'` / `/load-bucket --key <key>` to
+   `load-bucket.md`. Creating a bucket makes it if absent, marks it the **active bucket** (a
+   pointer file), refreshes `keys.md`, arms capture for the conversation, and logs any
+   trailing one-liner text as the bucket's first prompt.
 5. While a bucket is active, the skill instructs the model to log the user's verbatim
    prompt to that bucket at the start of every turn.
 6. Logging is **idempotent**: re-logging an identical prompt to the same bucket is a no-op
@@ -133,29 +141,43 @@ each turn. We accept that and engineer around it (§6.4).
 Three layers, deliberately decoupled:
 
 ```
-ONE REPO FILE                         INSTALLED SKILL FOLDER (anywhere)
-vidbyte/prompts/skills/               ~/.claude/skills/prompt-bucket/  (or codex/etc.)
-  prompt-bucket.md   --- install -->    SKILL.md      (installer minus SETUP block)
-   ├─ SKILL body                        schema.sql    (from SETUP)
-   └─ SETUP block ──────────────────►   bucket.py     (from SETUP)
-       (embedded files + steps,         keys.md       (generated)
-        deleted after install)          buckets.db    (created by `bucket.py init`)
-                                        .active_bucket (runtime pointer)
+ONE REPO FILE                          INSTALLED SKILL FOLDER (anywhere — all files in it)
+vidbyte/prompts/skills/                ~/.claude/skills/prompt-bucket/  (or codex/etc.)
+  prompt-bucket.md   --- install -->     SKILL.md         MASTER: routing + capture contract
+   ├─ master body (above SETUP) ──────►                   (= installer body above SETUP)
+   └─ SETUP block ────────────────────►  create-bucket.md sub-prompt: create / arm / capture
+       (embedded files + steps,          load-bucket.md   sub-prompt: replay
+        deleted after install)           schema.sql       (from SETUP)
+                                         bucket.py        (from SETUP)
+                                         keys.md          (generated)
+                                         buckets.db       (created by `bucket.py init`)
+                                         .active_bucket   (runtime pointer)
 
-RUNTIME
-  /create-bucket --key K  ->  python bucket.py create --key K   (+ writes .active_bucket)
-  (each turn, model-driven) ->  python bucket.py log --key K --file <tmp>
-  /load-bucket  --key K   ->  python bucket.py load --key K     (stdout = replay block)
+RUNTIME (master SKILL.md routes the user's message)
+  "create bucket 'K' <text>" | /create-bucket --key K
+        -> read create-bucket.md -> python bucket.py create --key K (+ .active_bucket)
+        -> if <text>, log it as prompt 1
+  (each armed turn, model-driven)       -> python bucket.py log --key K --file <tmp>
+  "load bucket 'K'" | /load-bucket --key K
+        -> read load-bucket.md -> python bucket.py load --key K      (stdout = replay block)
 ```
 
 **Key design decisions**
 
-1. **Single-file install → multi-file skill.** The repo holds one `.md`. Its `SETUP` block
-   embeds the contents of `schema.sql`, `bucket.py`, and the `keys.md` template inside
-   fenced code blocks, plus ordered install steps. The model writes those files, runs
-   `python bucket.py init`, then deletes the `SETUP` block from the now-installed
-   `SKILL.md`. This satisfies "multiple files, installed as if one file" and "remove the
-   setup context after setup."
+1. **Single-file install → multi-file skill.** The repo holds one `.md`. The text **above**
+   its `SETUP` marker is the master `SKILL.md`; the `SETUP` block embeds the contents of
+   `schema.sql`, `bucket.py`, the `keys.md` template, and the two sub-prompts
+   (`create-bucket.md`, `load-bucket.md`), plus ordered install steps using **relative
+   paths** so every file lands directly in the one skill folder. The model writes those
+   files, saves the above-SETUP master as `SKILL.md`, runs `python ./bucket.py init`, then
+   deletes the `SETUP` block. This satisfies "multiple files, installed as if one file",
+   "all files in the skill folder", and "remove the setup context after setup."
+
+   **Three prompts.** The skill is a master plus two sub-prompts: `SKILL.md` (master) holds
+   the always-on capture contract and routes natural language — `create bucket '<key>'
+   [text…]` and `load bucket '<key>'` — as well as the `/create-bucket --key` /
+   `/load-bucket --key` slash forms, dispatching to `create-bucket.md` or `load-bucket.md`.
+   The master is the only file a harness auto-loads; it reads the sub-prompt files on demand.
 
 2. **Persistence is a plain CLI, not harness magic.** A single `bucket.py` exposes
    `init | create | log | load | keys | resolve` subcommands over SQLite. Because it is
@@ -508,40 +530,57 @@ mutually reinforcing mechanisms, in priority order:
 **Type:** New file
 
 #### Structure
+The text **above** `SETUP:START` is the master `SKILL.md`. The `SETUP` block holds the
+install steps and every embedded file, using **relative paths** so all files land in the one
+skill folder.
+
 ```markdown
 ---
 name: prompt-bucket
-description: Capture this session's prompts into a named SQLite bucket and replay them later.
+description: ... routes "create bucket '<key>' ..." / "load bucket '<key>'" + slash forms ...
 ---
 
-# Prompt Bucket
+# Prompt Bucket — master skill        (everything here -> installed SKILL.md)
+## Routing            (NL + slash -> create-bucket.md / load-bucket.md)
+## Capture Contract   (per-conversation arming + first-action + few-shot, §6.4)
+## Notes
 
-<!-- SETUP:START — remove this entire block after installing -->
-## Installation (run once, then delete this SETUP block)
-1. Pick the skills dir for the current harness and create `prompt-bucket/` inside it:
-   - Claude Code:     ~/.claude/skills/prompt-bucket/
-   - Codex:           ~/.codex/skills/prompt-bucket/
-   - Antigravity CLI: ~/.codeium/windsurf/skills/prompt-bucket/
-   - opencode:        place files in ~/.claude/skills/prompt-bucket/ and create
-                      ~/.config/opencode/commands/prompt-bucket.md delegating to it
-2. Write `schema.sql` with the SQL below.            ```sql ... ```
-3. Write `bucket.py` with the Python below.          ```python ... ```
-4. Write `keys.md` with the template below.          ```markdown ... ```
-5. Save THIS file as `SKILL.md` in that folder.
-6. Run: `python prompt-bucket/bucket.py init`
-7. Delete everything between SETUP:START and SETUP:END from the installed SKILL.md.
+<!-- SETUP:START — installer only; delete this whole block after installing -->
+## Installation (all paths relative to the skill folder; nothing written outside it)
+1. Create the skill folder for the current harness (Claude Code / Codex / Antigravity;
+   opencode uses the folder + a delegating commands/prompt-bucket.md). Work relative to it.
+2. Create `./schema.sql`           ```sql ... ```        (§6.1)
+3. Create `./bucket.py`            ```python ... ```     (§6.2)
+4. Create `./keys.md`              ```markdown ... ```   (§6.3)
+5. Create `./create-bucket.md`     ```markdown ... ```   (§6.7)
+6. Create `./load-bucket.md`       ```markdown ... ```   (§6.7)
+7. Create `./SKILL.md` = everything in THIS file above SETUP:START (the master).
+8. Run `python ./bucket.py init`  ->  "prompt-bucket initialized".
+9. Delete this SETUP block from `./SKILL.md`.
+10. Verify the folder holds exactly: SKILL.md, create-bucket.md, load-bucket.md, schema.sql,
+    bucket.py, keys.md, buckets.db — and nothing outside it. Report to the user.
 <!-- SETUP:END -->
-
-## Commands           (survives as the live SKILL.md)
-### /create-bucket --key <key> ...
-### /load-bucket  --key <key> ...
-
-## Capture behavior   (the determinism stack from §6.4 + few-shot)
-...
 ```
 
-The full code in steps 2–3 is exactly §6.1 and §6.2. After step 7, the installed
-`SKILL.md` contains only the Commands + Capture-behavior sections.
+After step 9, the installed `SKILL.md` is exactly the master (routing + capture contract +
+notes); the sub-prompts and code live in their own sibling files.
+
+### 6.7 `create-bucket.md` and `load-bucket.md` sub-prompts (New files)
+
+**File(s):** `<skill-dir>/create-bucket.md`, `<skill-dir>/load-bucket.md`
+**Type:** New files (embedded in installer SETUP block, written beside `SKILL.md`)
+
+The master reads these on demand when routing a message.
+
+- **`create-bucket.md`** — triggers `create bucket '<key>' [text…]`, `create bucket <key>`,
+  `/create-bucket --key <key>`. Parses `<key>` (strips quotes) and any trailing `<initial>`
+  text; runs `python <DIR>/bucket.py create --key <key>`; arms capture for the conversation;
+  if `<initial>` is non-empty, logs it as the bucket's first prompt and then acts on it;
+  notes that re-running re-arms an existing bucket without duplicating it.
+- **`load-bucket.md`** — triggers `load bucket '<key>'`, `/load-bucket --key <key>`. Parses
+  `<key>`; runs `python <DIR>/bucket.py load --key <key>`; treats stdout as the replay block;
+  surfaces a fuzzy `resolved` note from stderr; on `NO_MATCH` lists available keys. Loading
+  does not arm capture.
 
 ---
 
