@@ -6,7 +6,7 @@ Purpose:
     Enforces unified schema boundaries for inputs and results throughout the run, persistence,
     and comparison lifecycle of the Vidbyte SDK evaluation harness.
 Architecture:
-    - EvalCase: Input payload defining prompt, expected outcome, tags, and custom grader.
+    - EvalCase: Input payload defining prompt, expected outcome, tags, custom grader, and templates.
     - GraderResult: Direct feedback containing the normalized score, passed flag, and reason.
     - EvalResult: Container for single case execution metrics, actual responses, and metadata.
     - EvalSuiteResult: Aggregated suite run results with derived helper stats (pass rate, mean score).
@@ -19,20 +19,22 @@ from __future__ import annotations
 import statistics
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, Sequence
+from typing import TYPE_CHECKING, Any, Mapping, Sequence
 
 if TYPE_CHECKING:
     from vidbyte.evals.base import BaseGrader
+    from vidbyte.evals.templates.base import EvalTemplate
 
 
 @dataclass(frozen=True)
 class EvalCase:
-    """Represents a single evaluation test case containing a prompt, expected answer, tags, and grader."""
+    """Represents a single evaluation test case containing a prompt, expected answer, tags, grader, and templates."""
 
     prompt: str
-    expected: str | None = None
+    expected: Any | None = None
     tags: tuple[str, ...] = ()
     grader: BaseGrader | None = None
+    templates: tuple[EvalTemplate | str | Mapping[str, Any], ...] = ()
     metadata: dict[str, Any] = field(default_factory=dict)
 
 

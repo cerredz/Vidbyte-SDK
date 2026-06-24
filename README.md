@@ -696,6 +696,36 @@ Built-in graders cover common script-writing needs:
 | `LLMJudgeGrader` | Model-judged open-ended outputs using an injected judge runner. |
 | `RubricGrader` | Weighted rubric scoring using an injected judge runner. |
 
+Eval cases can also use prebuilt templates: reusable bundles made from one or
+more graders. `grader` remains the low-level escape hatch; when `grader` is not
+set, `templates` are resolved before the runner falls back to `default_grader`.
+
+```python
+from vidbyte.evals import EvalCase, EvalSuite, templates as T
+
+suite = EvalSuite("support-smoke", [
+    EvalCase(
+        prompt="What is our refund window?",
+        expected="30 days",
+        templates=(T.short_answer_fact(), T.safe_customer_support()),
+    ),
+    EvalCase(
+        prompt="Return routing JSON.",
+        expected={"category": "billing"},
+        templates=(T.structured_json(schema={
+            "type": "object",
+            "required": ["category"],
+            "properties": {"category": {"type": "string"}},
+        }),),
+    ),
+])
+```
+
+Built-in template bundles include `short_answer_fact`, `multiple_choice`,
+`structured_json`, `classification`, `numeric_answer`,
+`concise_grounded_answer`, and `safe_customer_support`. Custom templates can
+subclass `EvalTemplate` and return any `BaseGrader` from `build_grader()`.
+
 Suites can be loaded from JSON or CSV files and filtered by tags:
 
 ```python
@@ -704,6 +734,26 @@ from vidbyte.evals import EvalSuite
 suite = EvalSuite.from_json("evals/smoke.json")
 focused = suite.filter(["geography"])
 result = await runner.arun(focused)
+```
+
+JSON suites can specify templates by name or by name plus options:
+
+```json
+{
+  "name": "support-smoke",
+  "cases": [
+    {
+      "prompt": "Pick the best option.",
+      "expected": "B",
+      "templates": [
+        {
+          "name": "multiple_choice",
+          "options": { "choices": ["A", "B", "C", "D"] }
+        }
+      ]
+    }
+  ]
+}
 ```
 
 Use `EvalClient` through `VidbyteSDK.evals` when you want a convenience factory and

@@ -12,6 +12,7 @@ Functions:
     - arun: Canonical asynchronous orchestration loop.
     - run: Synchronous wrapper for non-async environments.
     - _run_single_case: Semaphore-guarded single case lifecycle runner.
+    - _resolve_grader: Resolves explicit graders, templates, or the default grader.
     - _invoke_target: Dynamic invocation block mapping target execution styles (agents vs. runners).
     - _resolve_model_name: Resolves the descriptor name for the evaluated target entity.
 Relations:
@@ -30,6 +31,7 @@ from vidbyte.agents.types import AgentInput
 from vidbyte.evals.behavior.probe import RunProbe
 from vidbyte.evals.types import EvalCase, EvalResult, EvalSuiteResult, GraderResult
 from vidbyte.evals.base import BaseGrader
+from vidbyte.evals.templates import default_template_registry
 
 
 class EvalRunner:
@@ -74,13 +76,13 @@ class EvalRunner:
     async def _run_single_case(self, case: EvalCase, semaphore: asyncio.Semaphore, *, case_index: int, suite_name: str) -> EvalResult:
         # Runs a single evaluation case under the protection of the concurrency semaphore.
         async with semaphore:
-            grader = case.grader if case.grader is not None else self.default_grader
             start_time = time.perf_counter()
             actual = ""
             error_msg = None
             metadata = {}
 
             try:
+                grader = self._resolve_grader(case)
                 actual, metadata = await self._invoke_target(case, case_index=case_index, suite_name=suite_name)
                 probe = metadata.get("probe")
                 if probe is not None and hasattr(grader, "agrade_with_probe"):
@@ -104,6 +106,15 @@ class EvalRunner:
                 error=error_msg,
                 metadata=metadata
             )
+
+    def _resolve_grader(self, case: EvalCase) -> BaseGrader:
+        # Resolves a grader from explicit case grader, case templates, or runner default.
+        if case.grader is not None:
+            return case.grader
+        if case.templates:
+            templates = tuple(default_template_registry.create(template) for template in case.templates)
+            return default_template_registry.build_grader(templates)
+        return self.default_grader
 
     async def _invoke_target(self, case: EvalCase, *, case_index: int = 0, suite_name: str = "") -> tuple[str, dict[str, Any]]:
         # Invokes the target execution method (with fork handling for agents) and returns content and metadata.

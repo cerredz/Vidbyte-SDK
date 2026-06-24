@@ -20,8 +20,9 @@ from __future__ import annotations
 import csv
 import json
 from pathlib import Path
-from typing import Iterator, Sequence
+from typing import Any, Iterator, Mapping, Sequence
 from vidbyte.evals.types import EvalCase
+from vidbyte.evals.templates import default_template_registry
 
 
 class EvalSuite:
@@ -42,11 +43,13 @@ class EvalSuite:
         cases_list = []
         for c in data.get("cases", []):
             case_tags = tuple(c.get("tags", []))
+            templates = cls._load_templates(c)
             cases_list.append(
                 EvalCase(
                     prompt=c["prompt"],
                     expected=c.get("expected"),
                     tags=case_tags,
+                    templates=templates,
                     metadata=dict(c.get("metadata", {}))
                 )
             )
@@ -78,6 +81,22 @@ class EvalSuite:
         target_tags = set(tags)
         filtered_cases = [c for c in self.cases if any(t in target_tags for t in c.tags)]
         return EvalSuite(name=f"{self.name}_filtered", cases=filtered_cases)
+
+    @classmethod
+    def _load_templates(cls, case_data: Mapping[str, Any]) -> tuple[Any, ...]:
+        # Resolves JSON template or templates fields into concrete template instances.
+        has_template = "template" in case_data
+        has_templates = "templates" in case_data
+        if has_template and has_templates:
+            raise ValueError("Eval case cannot define both 'template' and 'templates'.")
+        if has_template:
+            return (default_template_registry.create(case_data["template"]),)
+        if not has_templates:
+            return ()
+        templates_data = case_data["templates"]
+        if not isinstance(templates_data, list):
+            raise ValueError("Eval case 'templates' must be a list.")
+        return tuple(default_template_registry.create(template) for template in templates_data)
 
     def __len__(self) -> int:
         # Returns the number of evaluation cases contained in this suite.

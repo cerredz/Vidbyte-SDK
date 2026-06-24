@@ -19,12 +19,38 @@ Relations:
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 from vidbyte.evals.types import EvalCase, EvalResult, EvalSuiteResult, GraderResult
+
+
+class EvalExpectedSerializer:
+    """Serializer for preserving structured expected values in SQLite TEXT fields."""
+
+    prefix = "__vidbyte_json__:"
+
+    def dumps(self, expected: Any | None) -> str | None:
+        # Serializes expected values while preserving plain string compatibility.
+        if expected is None or isinstance(expected, str):
+            return expected
+        try:
+            return self.prefix + json.dumps(expected, sort_keys=True, separators=(",", ":"))
+        except TypeError as exc:
+            raise TypeError(f"Eval expected value is not JSON serializable: {exc}") from exc
+
+    def loads(self, raw: str | None) -> Any | None:
+        # Restores structured expected values when a registry sentinel is present.
+        if raw is None or not raw.startswith(self.prefix):
+            return raw
+        payload = raw[len(self.prefix):]
+        try:
+            return json.loads(payload)
+        except json.JSONDecodeError:
+            return raw
 
 
 @dataclass(frozen=True)
@@ -50,6 +76,7 @@ class EvalRegistry:
     def __init__(self, db_path: str | Path = ".vidbyte_evals.db") -> None:
         # Connects to the local SQLite database and initializes results tables if they do not exist.
         self.db_path = str(db_path)
+        self._expected_serializer = EvalExpectedSerializer()
         self._init_db()
 
     def _init_db(self) -> None:
@@ -111,7 +138,7 @@ class EvalRegistry:
                         (
                             run_id,
                             r.case.prompt,
-                            r.case.expected,
+                            self._expected_serializer.dumps(r.case.expected),
                             r.actual,
                             r.grader_result.score,
                             1 if r.grader_result.passed else 0,
@@ -140,7 +167,7 @@ class EvalRegistry:
             cursor.execute("SELECT * FROM eval_results WHERE run_id = ?", (run_row["id"],))
             results = []
             for row in cursor.fetchall():
-                case = EvalCase(prompt=row["prompt"], expected=row["expected"])
+                case = EvalCase(prompt=row["prompt"], expected=self._expected_serializer.loads(row["expected"]))
                 grader_result = GraderResult(
                     score=row["score"],
                     passed=bool(row["passed"]),
@@ -181,7 +208,7 @@ class EvalRegistry:
                 cursor.execute("SELECT * FROM eval_results WHERE run_id = ?", (run_row["id"],))
                 results = []
                 for row in cursor.fetchall():
-                    case = EvalCase(prompt=row["prompt"], expected=row["expected"])
+                    case = EvalCase(prompt=row["prompt"], expected=self._expected_serializer.loads(row["expected"]))
                     grader_result = GraderResult(
                         score=row["score"],
                         passed=bool(row["passed"]),
