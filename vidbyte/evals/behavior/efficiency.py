@@ -136,7 +136,7 @@ class EfficiencyBehavior:
         return tuple(repeated)
 
     def no_repeated_tool_results(self, name: str | None = None) -> bool:
-        # Returns True if no non-empty scoped tool result output repeats.
+        # Returns True if no non-None scoped tool result output repeats.
         return self.repeated_tool_result_count(name) == 0
 
     def repeated_tool_result_count(self, name: str | None = None) -> int:
