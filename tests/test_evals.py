@@ -24,20 +24,40 @@ from typing import Any
 from vidbyte.agents.types import AgentInput
 from vidbyte.agents.base import BaseAgent
 from vidbyte.evals import (
+    AllOfGrader,
+    AnyOfGrader,
+    ChoiceMatchGrader,
+    ClassificationTemplate,
     ContainsGrader,
+    ContainsAllGrader,
+    ConciseGroundedAnswerTemplate,
     EvalCase,
     EvalClient,
+    EvalTemplate,
+    EvalTemplateRegistry,
     ExactMatchGrader,
+    ForbiddenContentGrader,
     JSONSchemaGrader,
+    JSONExactMatchGrader,
+    JSONSubsetGrader,
+    LengthGrader,
     LLMJudgeGrader,
+    MultipleChoiceTemplate,
+    NumericAnswerTemplate,
+    NumericMatchGrader,
     RegexMatchGrader,
     RubricGrader,
+    SafeCustomerSupportTemplate,
+    ShortAnswerFactTemplate,
+    StructuredJsonTemplate,
+    WeightedGrader,
     EvalSuite,
     EvalRunner,
     EvalRegistry,
     GraderResult,
     EvalResult,
     EvalSuiteResult,
+    templates as T,
 )
 
 
@@ -109,6 +129,10 @@ class EvalTests(unittest.IsolatedAsyncioTestCase):
         res_empty = await grader.agrade(EvalCase(prompt="t", expected=""), "   ")
         self.assertTrue(res_empty.passed)
 
+        # [Hidden Assumption] Structured expected values stringify instead of crashing
+        res_structured = await grader.agrade(EvalCase(prompt="t", expected={"answer": "hello"}), "{'answer': 'hello'}")
+        self.assertTrue(res_structured.passed)
+
     async def test_contains_grader(self) -> None:
         # Tests ContainsGrader keyword verification and case-sensitivity toggles.
         grader = ContainsGrader(case_sensitive=False)
@@ -126,6 +150,10 @@ class EvalTests(unittest.IsolatedAsyncioTestCase):
         # [Edge Case] Empty expected substring behaves properly
         res_empty = await grader.agrade(EvalCase(prompt="t", expected=""), "banana")
         self.assertTrue(res_empty.passed)
+
+        # [Hidden Assumption] Structured expected values stringify instead of crashing
+        res_structured = await grader.agrade(EvalCase(prompt="t", expected={"answer": "apple"}), "{'answer': 'apple'}")
+        self.assertTrue(res_structured.passed)
 
     async def test_regex_match_grader(self) -> None:
         # Tests RegexMatchGrader pattern scanning and error handling.
@@ -180,6 +208,203 @@ class EvalTests(unittest.IsolatedAsyncioTestCase):
         res_malformed = await grader.agrade(case, "not a json string")
         self.assertFalse(res_malformed.passed)
         self.assertEqual(res_malformed.score, 0.0)
+
+    async def test_eval_template_data_model(self) -> None:
+        # Tests EvalCase template fields and structured expected payloads.
+        case = EvalCase(prompt="t", expected={"category": "billing"}, templates=(T.structured_json(),))
+        self.assertIsInstance(case.expected, dict)
+        self.assertEqual(len(case.templates), 1)
+
+        legacy = EvalCase(prompt="t", expected="Paris")
+        self.assertEqual(legacy.templates, ())
+
+    async def test_composite_graders(self) -> None:
+        # Tests all-of, any-of, weighted scoring, and composite validation failures.
+        case = EvalCase(prompt="t", expected="Paris")
+        all_of = AllOfGrader([ContainsGrader(), ForbiddenContentGrader(["secret"])])
+        res = await all_of.agrade(case, "Paris is the answer.")
+        self.assertTrue(res.passed)
+        self.assertEqual(res.score, 1.0)
+
+        res_fail = await all_of.agrade(case, "Paris secret")
+        self.assertFalse(res_fail.passed)
+        self.assertAlmostEqual(res_fail.score, 0.5)
+
+        any_of = AnyOfGrader([ExactMatchGrader(), ContainsGrader()])
+        res_any = await any_of.agrade(case, "The answer is Paris.")
+        self.assertTrue(res_any.passed)
+        self.assertEqual(res_any.score, 1.0)
+
+        weighted = WeightedGrader([(ContainsGrader(), 0.7), (ForbiddenContentGrader(["secret"]), 0.3)], threshold=0.9)
+        res_weighted = await weighted.agrade(case, "Paris secret")
+        self.assertFalse(res_weighted.passed)
+        self.assertAlmostEqual(res_weighted.score, 0.7)
+
+        with self.assertRaises(ValueError):
+            AllOfGrader([])
+        with self.assertRaises(ValueError):
+            WeightedGrader([(ContainsGrader(), 0.0)])
+
+    async def test_supporting_deterministic_graders(self) -> None:
+        # Tests deterministic graders used by prebuilt template bundles.
+        contains_all = ContainsAllGrader(["refund", "30 days"])
+        self.assertTrue((await contains_all.agrade(EvalCase(prompt="t"), "Refunds are available for 30 DAYS.")).passed)
+        self.assertFalse((await contains_all.agrade(EvalCase(prompt="t"), "Refunds are available.")).passed)
+
+        forbidden = ForbiddenContentGrader(["internal"])
+        self.assertTrue((await forbidden.agrade(EvalCase(prompt="t"), "Customer-facing answer.")).passed)
+        self.assertFalse((await forbidden.agrade(EvalCase(prompt="t"), "Internal policy leaked.")).passed)
+        self.assertTrue((await ForbiddenContentGrader([]).agrade(EvalCase(prompt="t"), "anything")).passed)
+
+        length = LengthGrader(min_chars=2, max_chars=4)
+        self.assertTrue((await length.agrade(EvalCase(prompt="t"), "abcd")).passed)
+        self.assertFalse((await length.agrade(EvalCase(prompt="t"), "abcde")).passed)
+
+    async def test_choice_numeric_and_json_match_graders(self) -> None:
+        # Tests choice extraction, numeric tolerance, and JSON exact/subset matching.
+        choice = ChoiceMatchGrader(["A", "B", "C"])
+        self.assertTrue((await choice.agrade(EvalCase(prompt="t", expected="A"), "The answer is A.")).passed)
+        self.assertTrue((await choice.agrade(EvalCase(prompt="t", expected="A"), "(A)")).passed)
+        self.assertFalse((await choice.agrade(EvalCase(prompt="t", expected="A"), "A or B")).passed)
+
+        numeric = NumericMatchGrader(tolerance=0.01)
+        self.assertTrue((await numeric.agrade(EvalCase(prompt="t", expected=3.14), "3.141")).passed)
+        self.assertFalse((await numeric.agrade(EvalCase(prompt="t", expected=3.14), "no number")).passed)
+
+        exact = JSONExactMatchGrader()
+        self.assertTrue((await exact.agrade(EvalCase(prompt="t", expected={"a": 1, "b": 2}), '{"b": 2, "a": 1}')).passed)
+        self.assertFalse((await exact.agrade(EvalCase(prompt="t", expected={"a": 1}), "not json")).passed)
+
+        subset = JSONSubsetGrader()
+        self.assertTrue((await subset.agrade(EvalCase(prompt="t", expected={"a": {"b": 2}}), '{"a": {"b": 2, "c": 3}}')).passed)
+        self.assertFalse((await subset.agrade(EvalCase(prompt="t", expected=[1, 3]), "[1, 2]")).passed)
+
+    async def test_template_registry_and_custom_templates(self) -> None:
+        # Tests template registry resolution, validation, and custom template support.
+        registry = EvalTemplateRegistry()
+        registry.register("short", ShortAnswerFactTemplate)
+        template = registry.create("short")
+        self.assertIsInstance(template, ShortAnswerFactTemplate)
+
+        mapped = registry.create({"name": "short", "options": {"max_chars": 20}})
+        self.assertIsInstance(mapped, ShortAnswerFactTemplate)
+
+        with self.assertRaises(ValueError):
+            registry.create("missing")
+        with self.assertRaises(ValueError):
+            registry.create({"name": "short", "options": []})
+        with self.assertRaises(ValueError):
+            T.default_template_registry.create({"name": "classification"})
+
+        class CustomTemplate(EvalTemplate):
+            name = "custom"
+
+            def build_grader(self) -> Any:
+                # Builds a simple contains grader for custom template validation.
+                return ContainsGrader()
+
+        custom = CustomTemplate()
+        self.assertIs(registry.create(custom), custom)
+        grader = registry.build_grader((custom,))
+        self.assertTrue((await grader.agrade(EvalCase(prompt="t", expected="x"), "x")).passed)
+
+    async def test_prebuilt_template_bundles(self) -> None:
+        # Tests all prebuilt deterministic template bundles.
+        self.assertTrue((await ShortAnswerFactTemplate(max_chars=20).build_grader().agrade(EvalCase(prompt="t", expected="Paris"), "Paris")).passed)
+        self.assertFalse((await ShortAnswerFactTemplate(max_chars=5).build_grader().agrade(EvalCase(prompt="t", expected="Paris"), "Paris is the answer")).passed)
+
+        self.assertTrue((await MultipleChoiceTemplate(choices=("A", "B")).build_grader().agrade(EvalCase(prompt="t", expected="B"), "B.")).passed)
+        self.assertFalse((await MultipleChoiceTemplate(choices=("A", "B")).build_grader().agrade(EvalCase(prompt="t", expected="B"), "A or B")).passed)
+
+        schema = {"type": "object", "required": ["category"], "properties": {"category": {"type": "string"}}}
+        structured = StructuredJsonTemplate(schema=schema).build_grader()
+        self.assertTrue((await structured.agrade(EvalCase(prompt="t", expected={"category": "billing"}), '{"category": "billing", "urgency": "low"}')).passed)
+        self.assertFalse((await structured.agrade(EvalCase(prompt="t", expected={"category": "billing"}), '```{"category": "billing"}```')).passed)
+
+        self.assertTrue((await ClassificationTemplate(labels=("billing", "sales")).build_grader().agrade(EvalCase(prompt="t", expected="billing"), "billing")).passed)
+        self.assertTrue((await NumericAnswerTemplate(tolerance=0.1).build_grader().agrade(EvalCase(prompt="t", expected=10), "10.05")).passed)
+        self.assertTrue((await ConciseGroundedAnswerTemplate(required_terms=("refund",), forbidden_terms=("internal",)).build_grader().agrade(EvalCase(prompt="t"), "Refund allowed.")).passed)
+        self.assertFalse((await SafeCustomerSupportTemplate().build_grader().agrade(EvalCase(prompt="t", expected="30 days"), "30 days. Internal policy.")).passed)
+
+    async def test_eval_runner_template_resolution(self) -> None:
+        # Tests runner precedence across explicit grader, templates, and default grader.
+        class StaticRunner:
+            def run(self, prompt: str) -> str:
+                # Returns a deterministic response for template runner tests.
+                return "The answer is Paris."
+
+        explicit_case = EvalCase(prompt="q", expected="Paris", grader=ExactMatchGrader(case_sensitive=True), templates=(T.short_answer_fact(),))
+        explicit_result = await EvalRunner(StaticRunner(), default_grader=ContainsGrader()).arun(EvalSuite("explicit", [explicit_case]))
+        self.assertFalse(explicit_result.results[0].grader_result.passed)
+
+        template_case = EvalCase(prompt="q", expected="Paris", templates=(T.short_answer_fact(),))
+        template_result = await EvalRunner(StaticRunner(), default_grader=ExactMatchGrader()).arun(EvalSuite("template", [template_case]))
+        self.assertTrue(template_result.results[0].grader_result.passed)
+
+        default_case = EvalCase(prompt="q", expected="Rome")
+        default_result = await EvalRunner(StaticRunner(), default_grader=ContainsGrader()).arun(EvalSuite("default", [default_case]))
+        self.assertFalse(default_result.results[0].grader_result.passed)
+
+    async def test_eval_suite_json_template_loading(self) -> None:
+        # Tests JSON suite loading for template specs and legacy cases.
+        temp_dir = tempfile.mkdtemp()
+        try:
+            path = os.path.join(temp_dir, "templated.json")
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump({
+                    "name": "templated",
+                    "cases": [
+                        {"prompt": "q1", "expected": "Paris", "template": "short_answer_fact"},
+                        {"prompt": "q2", "expected": "B", "templates": [{"name": "multiple_choice", "options": {"choices": ["A", "B"]}}]},
+                        {"prompt": "q3", "expected": "legacy"},
+                    ],
+                }, f)
+            suite = EvalSuite.from_json(path)
+            self.assertEqual(len(suite.cases[0].templates), 1)
+            self.assertEqual(len(suite.cases[1].templates), 1)
+            self.assertEqual(suite.cases[2].templates, ())
+
+            bad_path = os.path.join(temp_dir, "bad.json")
+            with open(bad_path, "w", encoding="utf-8") as f:
+                json.dump({"cases": [{"prompt": "q", "template": "short_answer_fact", "templates": []}]}, f)
+            with self.assertRaises(ValueError):
+                EvalSuite.from_json(bad_path)
+        finally:
+            for name in os.listdir(temp_dir):
+                os.remove(os.path.join(temp_dir, name))
+            os.rmdir(temp_dir)
+
+    async def test_eval_registry_structured_expected_roundtrip(self) -> None:
+        # Tests SQLite registry persistence for structured expected payloads.
+        temp_dir = tempfile.mkdtemp()
+        db_path = os.path.join(temp_dir, "structured.db")
+        try:
+            registry = EvalRegistry(db_path)
+            case = EvalCase(prompt="json", expected={"category": "billing"})
+            result = EvalSuiteResult(
+                "suite",
+                "model",
+                (EvalResult(case, '{"category": "billing"}', GraderResult(1.0, True), 1.0),),
+                datetime.utcnow(),
+            )
+            registry.record(result)
+            latest = registry.latest("suite", "model")
+            self.assertIsNotNone(latest)
+            self.assertEqual(latest.results[0].case.expected, {"category": "billing"})
+        finally:
+            if os.path.exists(db_path):
+                os.remove(db_path)
+            os.rmdir(temp_dir)
+
+    async def test_template_import_surfaces(self) -> None:
+        # Tests public import surfaces for eval templates and selected graders.
+        from vidbyte import EvalTemplate as RootEvalTemplate, templates as root_templates
+        from vidbyte.evals import EvalTemplate as EvalsEvalTemplate, templates as eval_templates
+        from vidbyte.evals.templates import default_template_registry
+
+        self.assertIs(RootEvalTemplate, EvalsEvalTemplate)
+        self.assertEqual(root_templates.short_answer_fact().name, eval_templates.short_answer_fact().name)
+        self.assertIsInstance(default_template_registry.create("short_answer_fact"), ShortAnswerFactTemplate)
 
     async def test_llm_judge_grader(self) -> None:
         # Tests LLMJudgeGrader dynamic JSON parsing, grader templates, and failure states.

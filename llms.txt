@@ -495,9 +495,23 @@ Prompt lookup accepts `Prompt` enum members, not raw strings. Runtime prompt ove
 - `EvalSuite` groups cases.
 - `EvalRunner` executes targets with concurrency controls.
 - Graders score outputs.
+- Eval templates provide reusable multi-grader bundles through `EvalCase.templates`.
 - `EvalClient` through `VidbyteSDK.evals` provides convenience factories and a local SQLite-backed registry for comparing runs.
 
 Built-in graders include exact match, contains, regex, JSON schema, LLM judge, and weighted rubric graders.
+Built-in template bundles include short factual answers, multiple-choice answers, structured JSON responses, classification, numeric answers, concise grounded answers, and safe customer support answers.
+
+Use templates when a case should apply several deterministic checks without manually composing graders:
+
+```python
+from vidbyte.evals import EvalCase, templates as T
+
+case = EvalCase(
+    prompt="What is our refund window?",
+    expected="30 days",
+    templates=(T.short_answer_fact(), T.safe_customer_support()),
+)
+```
 
 ### Pipelines
 

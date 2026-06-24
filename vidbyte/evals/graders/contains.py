@@ -29,9 +29,11 @@ class ContainsGrader(BaseGrader):
     async def agrade(self, case: EvalCase, actual: str) -> GraderResult:
         # Asynchronously verifies the presence of the substring in the actual response.
         expected = case.expected if case.expected is not None else ""
-        
-        a = actual if self.case_sensitive else actual.lower()
-        e = expected if self.case_sensitive else expected.lower()
+
+        actual_text = str(actual)
+        expected_text = str(expected)
+        a = actual_text if self.case_sensitive else actual_text.lower()
+        e = expected_text if self.case_sensitive else expected_text.lower()
 
         passed = (e in a)
         score = 1.0 if passed else 0.0
