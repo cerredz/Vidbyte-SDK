@@ -109,6 +109,12 @@ class OpenAICompatibleProvider:
 class DeepSeekProvider(OpenAICompatibleProvider):
     provider = ModelProvider.DEEPSEEK
 
+    def _attach_response_format(self, payload: dict[str, Any], config: TextModelConfig) -> None:
+        # DeepSeek does not support json_schema; use json_object so the LLM
+        # still produces parseable JSON that the SDK validates client-side.
+        if config.response_format is not None:
+            payload["response_format"] = {"type": "json_object"}
+
 
 class GLMProvider(OpenAICompatibleProvider):
     provider = ModelProvider.GLM
