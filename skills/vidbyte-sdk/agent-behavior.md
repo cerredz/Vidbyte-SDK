@@ -7,7 +7,8 @@ Purpose:
     Documents the agent.behavior API, the RunProbe snapshot, the category decomposition,
     the PredicateGrader bridge, and the invariants any change must preserve.
 Architecture:
-    - Usage: agent.behavior.tool, agent.behavior.tool_args, agent.behavior.stop, agent.behavior.handoff, agent.behavior.output.
+    - Usage: agent.behavior.tool, agent.behavior.tool_args, agent.behavior.stop,
+      agent.behavior.handoff, agent.behavior.output, agent.behavior.efficiency.
     - Internals: RunProbe + Behavior facade + category classes + BaseAgent property.
 Relation to the codebase as a whole:
     Sub-skill referenced by skills/vidbyte-sdk/SKILL.md. Pairs with evals.md and
@@ -20,8 +21,8 @@ Relation to the codebase as a whole:
 
 A post-run predicate facade that lets developers inspect *what an agent did* — not just
 what it said. After `await agent.arun(prompt)`, access `agent.behavior` to query tool
-presence, tool outcomes, tool arguments, stop conditions, handoff occurrence, and
-output shape through ergonomic boolean methods grouped by category.
+presence, tool outcomes, tool arguments, stop conditions, handoff occurrence,
+output shape, and loop efficiency through ergonomic boolean methods grouped by category.
 
 ```python
 from vidbyte import Agent
@@ -52,6 +53,11 @@ assert agent.behavior.handoff.handoff_occurred()
 assert agent.behavior.output.is_not_empty()
 assert agent.behavior.output.contains_code_block("python")
 assert agent.behavior.output.structured_field_exists("answer")
+
+# Efficiency / loop behavior
+assert agent.behavior.efficiency.no_duplicate_tool_calls()
+assert agent.behavior.efficiency.completed_within_iterations(4)
+assert agent.behavior.efficiency.did_not_stop_on_budget()
 ```
 
 ## Architecture (do not bypass)
@@ -61,7 +67,7 @@ assert agent.behavior.output.structured_field_exists("answer")
   `agent.last_handoff`, `agent.handoffs`, `agent.last_trace`, and structured output from
   `reply.metadata["structured"]`.
 - `vidbyte/evals/behavior/behavior.py` — `Behavior`: facade that lazily builds a `RunProbe`
-  and composes four category behavior objects. Exposed via `agent.behavior`.
+  and composes category behavior objects. Exposed via `agent.behavior`.
 - `vidbyte/evals/behavior/tool.py` — `ToolBehavior`: predicates over tool presence (A) and
   outcome/state (B).
 - `vidbyte/evals/behavior/tool_arguments.py` — `ToolArgumentBehavior`: predicates over tool
@@ -71,6 +77,8 @@ assert agent.behavior.output.structured_field_exists("answer")
 - `vidbyte/evals/behavior/output.py` - `OutputBehavior`: predicates over response text and
   structured output (F).
 - `vidbyte/evals/behavior/handoff.py` — `HandoffBehavior`: predicates over handoff occurrence (E).
+- `vidbyte/evals/behavior/efficiency.py` — `EfficiencyBehavior`: predicates over loop
+  efficiency, redundant tool calls, repeated results, budget stops, and failure thrash (G).
 - `vidbyte/agents/base.py` — `behavior` property (lazy, cached), invalidated at the start of
   `generate_reply`.
 - `vidbyte/evals/graders/predicate.py` — `PredicateGrader`: bridges behavior predicates into
@@ -161,6 +169,47 @@ assert agent.behavior.output.structured_field_exists("answer")
 | `structured_field_type(path, expected_type)` | True if a structured field has the expected type. |
 | `structured_contains_keys(keys)` | True if top-level structured output contains every key. |
 
+### `agent.behavior.efficiency` (EfficiencyBehavior)
+
+All duplicate checks use exact deterministic equality. They do not perform semantic similarity, query normalization, embeddings, or LLM judging.
+
+| Method | Description |
+|--------|-------------|
+| `max_tool_repetitions(name, max_count)` | True if a named tool was called no more than `max_count` times. |
+| `max_any_tool_repetitions(max_count)` | True if no tool name exceeds `max_count` calls. |
+| `completed_within_iterations(max_iterations)` | True if iteration count is within the inclusive limit. |
+| `completed_within_tool_calls(max_calls)` | True if tool-call count is within the inclusive limit. |
+| `tool_calls_between(minimum, maximum)` | True if total tool calls are inside the inclusive range. |
+| `no_duplicate_tool_args(name)` | True if no two calls to `name` used equal arguments. |
+| `no_duplicate_tool_calls()` | True if no exact `(tool_name, arguments)` pair repeated. |
+| `duplicate_tool_arg_count(name)` | Count duplicate argument occurrences for one tool after the first. |
+| `duplicate_tool_call_count()` | Count duplicate exact tool-call occurrences after the first. |
+| `unique_tool_call_count()` | Count unique exact `(tool_name, arguments)` pairs. |
+| `unique_tool_ratio_at_least(min_ratio)` | True if unique exact calls divided by total calls meets `min_ratio`. |
+| `no_consecutive_identical_calls()` | True if adjacent calls never repeat the same tool and arguments. |
+| `no_consecutive_same_tool()` | True if adjacent calls never use the same tool name. |
+| `consecutive_identical_call_count()` | Count adjacent repeated exact calls. |
+| `consecutive_same_tool_count()` | Count adjacent same-tool pairs regardless of args. |
+| `max_consecutive_tool_calls(name, max_count)` | True if the longest adjacent run for `name` is within `max_count`. |
+| `max_any_consecutive_tool_repetitions(max_count)` | True if every same-tool run is within `max_count`. |
+| `repeated_tool_names()` | Ordered unique tool names that appeared more than once. |
+| `no_repeated_tool_results(name=None)` | True if scoped non-None result outputs do not repeat. |
+| `repeated_tool_result_count(name=None)` | Count scoped repeated result outputs after the first. |
+| `max_result_repetitions(max_count, name=None)` | True if every scoped result output appears within `max_count`. |
+| `failed_tool_calls_at_most(max_count)` | True if FAILED calls are within the inclusive limit. |
+| `denied_tool_calls_at_most(max_count)` | True if DENIED calls are within the inclusive limit. |
+| `unsuccessful_tool_calls_at_most(max_count)` | True if FAILED plus DENIED calls are within the inclusive limit. |
+| `successful_tool_call_ratio_at_least(min_ratio)` | True if SUCCEEDED calls divided by total calls meets `min_ratio`. |
+| `no_failed_tool_retries(name=None)` | True if unsuccessful exact attempts did not repeat. |
+| `failed_tool_retry_count(name=None)` | Count repeated unsuccessful exact attempts after the first. |
+| `did_not_stop_on_budget()` | True if stop reason is not max iterations, max tool calls, or max tokens. |
+| `stopped_normally_within_iterations(max_iterations)` | True if final-response stop and iteration limit both pass. |
+| `stopped_normally_within_tool_calls(max_calls)` | True if final-response stop and tool-call limit both pass. |
+| `tokens_per_tool_call()` | Average tokens per tool call, or None when unavailable. |
+| `tokens_per_tool_call_at_most(max_tokens)` | True if known average tokens per tool call is within limit. |
+| `tokens_per_iteration()` | Average tokens per iteration, or None when unavailable. |
+| `tokens_per_iteration_at_most(max_tokens)` | True if known average tokens per iteration is within limit. |
+
 ## Using PredicateGrader in Eval Suites
 
 ```python
@@ -195,6 +244,9 @@ unaffected — the runner falls back to `agrade` when `agrade_with_probe` is not
 6. **Output behavior is not arbitrary text grading.** Keep substring and caller-provided regex
    assertions in `ContainsGrader` and `RegexMatchGrader`; `OutputBehavior` owns structural and
    linguistic response properties.
+7. **Efficiency behavior is exact and post-run only.** Keep semantic duplicate detection,
+   latency metrics, and per-iteration model-call checks out of `EfficiencyBehavior` unless
+   the runtime/probe data model is explicitly extended.
 
 ## Adding a new behavior category
 

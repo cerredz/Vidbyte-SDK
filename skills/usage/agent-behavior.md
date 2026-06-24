@@ -15,7 +15,7 @@ Relations:
 # Agent Behavior Usage
 
 After running an agent, use `agent.behavior` to inspect what the agent did during its last
-run. The facade exposes five sub-properties grouped by category.
+run. The facade exposes six sub-properties grouped by category.
 
 ## Quick Start
 
@@ -35,6 +35,10 @@ assert agent.behavior.stop.stopped_normally()
 # Check output shape
 assert agent.behavior.output.is_not_empty()
 assert agent.behavior.output.contains_code_block("python")
+
+# Check loop efficiency
+assert agent.behavior.efficiency.no_duplicate_tool_calls()
+assert agent.behavior.efficiency.completed_within_iterations(4)
 ```
 
 ## Tool Presence (`agent.behavior.tool`)
@@ -154,6 +158,54 @@ agent.behavior.output.structured_field_exists("items.0.title")
 agent.behavior.output.structured_field_equals("status", "complete")
 agent.behavior.output.structured_field_type("items", list)
 agent.behavior.output.structured_contains_keys(["status", "items"])
+```
+
+## Efficiency / Loop Behavior (`agent.behavior.efficiency`)
+
+Efficiency predicates inspect existing run metadata only. Duplicate checks are exact:
+they compare tool names, argument mappings, and result strings; they do not detect
+semantic similarity between queries.
+
+```python
+# Tool repetition and loop budgets
+agent.behavior.efficiency.max_tool_repetitions("search", 2)
+agent.behavior.efficiency.max_any_tool_repetitions(3)
+agent.behavior.efficiency.completed_within_iterations(4)
+agent.behavior.efficiency.completed_within_tool_calls(5)
+agent.behavior.efficiency.tool_calls_between(1, 5)
+agent.behavior.efficiency.did_not_stop_on_budget()
+
+# Duplicate calls and arguments
+agent.behavior.efficiency.no_duplicate_tool_args("search")
+agent.behavior.efficiency.no_duplicate_tool_calls()
+agent.behavior.efficiency.duplicate_tool_arg_count("search")
+agent.behavior.efficiency.duplicate_tool_call_count()
+agent.behavior.efficiency.unique_tool_call_count()
+agent.behavior.efficiency.unique_tool_ratio_at_least(0.5)
+
+# Consecutive repetition
+agent.behavior.efficiency.no_consecutive_identical_calls()
+agent.behavior.efficiency.no_consecutive_same_tool()
+agent.behavior.efficiency.consecutive_identical_call_count()
+agent.behavior.efficiency.consecutive_same_tool_count()
+agent.behavior.efficiency.max_consecutive_tool_calls("search", 1)
+agent.behavior.efficiency.max_any_consecutive_tool_repetitions(2)
+
+# Results and failure thrash
+agent.behavior.efficiency.repeated_tool_names()
+agent.behavior.efficiency.no_repeated_tool_results()
+agent.behavior.efficiency.repeated_tool_result_count("search")
+agent.behavior.efficiency.max_result_repetitions(1, name="search")
+agent.behavior.efficiency.failed_tool_calls_at_most(1)
+agent.behavior.efficiency.denied_tool_calls_at_most(0)
+agent.behavior.efficiency.unsuccessful_tool_calls_at_most(1)
+agent.behavior.efficiency.no_failed_tool_retries()
+
+# Token density
+agent.behavior.efficiency.tokens_per_tool_call()
+agent.behavior.efficiency.tokens_per_tool_call_at_most(500)
+agent.behavior.efficiency.tokens_per_iteration()
+agent.behavior.efficiency.tokens_per_iteration_at_most(1500)
 ```
 
 ## Using PredicateGrader in Eval Suites

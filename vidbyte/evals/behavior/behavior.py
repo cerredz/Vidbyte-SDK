@@ -4,12 +4,13 @@ Description:
     Implements the Behavior facade that composes category behavior classes.
 Purpose:
     Provides a single entry point accessed via agent.behavior that lazily builds
-    a RunProbe and exposes tool, tool_args, stop, handoff, and output predicate groups.
+    a RunProbe and exposes tool, tool_args, stop, handoff, output, and efficiency predicate groups.
 Architecture:
     - Behavior: holds a BaseAgent reference, lazily builds RunProbe, and
-      initializes ToolBehavior, ToolArgumentBehavior, StopBehavior, HandoffBehavior, OutputBehavior.
+      initializes ToolBehavior, ToolArgumentBehavior, StopBehavior, HandoffBehavior,
+      OutputBehavior, EfficiencyBehavior.
     - probe property: cached RunProbe built from the agent on first access.
-    - tool / tool_args / stop / handoff / output properties: return pre-built category objects.
+    - tool / tool_args / stop / handoff / output / efficiency properties: return pre-built category objects.
 Relations:
     Instantiated by BaseAgent.behavior property; re-exported from vidbyte.evals.
 """
@@ -18,6 +19,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from vidbyte.evals.behavior.efficiency import EfficiencyBehavior
 from vidbyte.evals.behavior.handoff import HandoffBehavior
 from vidbyte.evals.behavior.output import OutputBehavior
 from vidbyte.evals.behavior.probe import RunProbe
@@ -41,6 +43,7 @@ class Behavior:
         self._stop = StopBehavior(self)
         self._handoff = HandoffBehavior(self)
         self._output = OutputBehavior(self)
+        self._efficiency = EfficiencyBehavior(self)
 
     @property
     def probe(self) -> RunProbe:
@@ -73,6 +76,11 @@ class Behavior:
     def output(self) -> OutputBehavior:
         # Returns the output shape and structured-output predicate group.
         return self._output
+
+    @property
+    def efficiency(self) -> EfficiencyBehavior:
+        # Returns the loop efficiency and redundancy predicate group.
+        return self._efficiency
 
 
 __all__ = ["Behavior"]
