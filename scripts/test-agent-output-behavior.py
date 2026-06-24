@@ -122,6 +122,26 @@ def behavior_from_probe(probe: RunProbe) -> Behavior:
     return b
 
 
+def output_behavior(text: str = "", structured: Any = None) -> OutputBehavior:
+    # Builds an OutputBehavior backed by a RunProbe with the provided text and structured data.
+    return behavior_from_probe(RunProbe(output=text, structured=structured)).output
+
+
+def expect(condition: bool) -> None:
+    # Raises AssertionError when condition is false so lambdas can act as test cases.
+    if not condition:
+        raise AssertionError("condition was false")
+
+
+def expect_raises(exc_type: type[BaseException], fn: Any) -> None:
+    # Raises AssertionError unless fn raises the expected exception type.
+    try:
+        fn()
+    except exc_type:
+        return
+    raise AssertionError(f"expected {exc_type.__name__}")
+
+
 def test_probe_from_agent_structured() -> None:
     # [Hidden Assumption] from_agent copies metadata["structured"] into probe.structured.
     structured = {"answer": "yes"}
@@ -302,18 +322,75 @@ async def run_async_tests(tr: TestRunner) -> None:
 def main() -> int:
     # Runs every Section 10 test case and returns a process exit code.
     tr = TestRunner()
-    tr.run("probe_from_agent_structured [Hidden Assumption]", test_probe_from_agent_structured)
-    tr.run("probe_from_reply_structured [Hidden Assumption]", test_probe_from_reply_structured)
-    tr.run("probe_missing_structured_defaults_none [Edge Case]", test_probe_missing_structured_defaults_none)
-    tr.run("output_empty_and_whitespace [Edge Case/Silent Failure]", test_output_empty_and_whitespace)
-    tr.run("output_length_line_word_counts [Edge Case/Silent Failure]", test_output_length_line_word_counts)
-    tr.run("output_json_validity [Edge Case/Hidden Failure/Silent Failure]", test_output_json_validity)
-    tr.run("output_code_blocks [Edge Case/Hidden Failure/Silent Failure]", test_output_code_blocks)
-    tr.run("output_urls_and_citations [Edge Case/Silent Failure/Hidden Failure]", test_output_urls_and_citations)
-    tr.run("output_refusal_hedging_prefix_suffix [Silent Failure/Edge Case]", test_output_refusal_hedging_prefix_suffix)
-    tr.run("structured_fields [Edge Case/Silent Failure/Hidden Failure]", test_structured_fields)
-    tr.run("structured_pydantic_model_dump [Hidden Assumption]", test_structured_pydantic_model_dump)
-    tr.run("behavior_facade_output [Edge Case/Silent Failure/Hidden Assumption]", test_behavior_facade_output)
+    structured = {"answer": "yes"}
+    tr.run("RunProbe.from_agent structured [Hidden Assumption]", lambda: expect(RunProbe.from_agent(StubAgent(reply=make_reply(metadata={"structured": structured}))).structured is structured))
+    tr.run("RunProbe.from_reply structured [Hidden Assumption]", lambda: expect(RunProbe.from_reply(make_reply(metadata={"structured": structured})).structured is structured))
+    tr.run("RunProbe missing structured [Edge Case]", lambda: expect(RunProbe.from_reply(make_reply()).structured is None))
+
+    tr.run("output empty string [Edge Case]", lambda: expect(output_behavior("").is_empty() is True))
+    tr.run("output whitespace empty with strip [Edge Case]", lambda: expect(output_behavior("   ").is_empty(strip=True) is True))
+    tr.run("output whitespace not empty without strip [Silent Failure]", lambda: expect(output_behavior("   ").is_empty(strip=False) is False))
+    tr.run("output is_not_empty negates empty [Silent Failure]", lambda: expect(output_behavior("text").is_not_empty(strip=True) is True))
+    tr.run("output length zero bounds [Edge Case]", lambda: expect(output_behavior("").length(at_least=0, at_most=0) is True))
+    tr.run("output length inclusive bounds [Silent Failure]", lambda: expect(output_behavior("abcd").length(at_least=2, at_most=4) is True))
+    tr.run("output line_count empty [Edge Case]", lambda: expect(output_behavior("").line_count(at_least=0, at_most=0) is True))
+    tr.run("output line_count splitlines [Silent Failure]", lambda: expect(output_behavior("a\nb").line_count(at_least=2, at_most=2) is True))
+    tr.run("output word_count tokens [Silent Failure]", lambda: expect(output_behavior("one, two three").word_count(at_least=3, at_most=3) is True))
+
+    tr.run("output valid_json empty false [Edge Case]", lambda: expect(output_behavior("").is_valid_json() is False))
+    tr.run("output valid_json malformed false [Hidden Failure]", lambda: expect(output_behavior("{bad").is_valid_json() is False))
+    tr.run("output valid_json object true [Silent Failure]", lambda: expect(output_behavior('{"a": 1}').is_valid_json() is True))
+    tr.run("output valid_json array true [Silent Failure]", lambda: expect(output_behavior("[1, 2]").is_valid_json() is True))
+    code = "Before\n```Python\nprint('x')\n```\n~~~js\nconsole.log(1)\n~~~"
+    tr.run("output code_block absent false [Edge Case]", lambda: expect(output_behavior("plain").contains_code_block() is False))
+    tr.run("output code_block unclosed false [Hidden Failure]", lambda: expect(output_behavior("```python\nx").contains_code_block() is False))
+    tr.run("output code_block language case-insensitive [Silent Failure]", lambda: expect(output_behavior(code).contains_code_block("python") is True))
+    tr.run("output code_block_count language only [Silent Failure]", lambda: expect(output_behavior(code).code_block_count("python") == 1))
+    tr.run("output code_block_count zero bounds [Edge Case]", lambda: expect(output_behavior("plain").code_block_count(at_least=0, at_most=0) is True))
+
+    urls = "https://a.test http://b.test www.c.test"
+    citations = "See [source](https://example.com), [1], and [^note]."
+    tr.run("output contains_url absent false [Edge Case]", lambda: expect(output_behavior("no link").contains_url() is False))
+    tr.run("output contains_url detects forms [Silent Failure]", lambda: expect(output_behavior(urls).url_count(at_least=3, at_most=3) is True))
+    tr.run("output url_count two urls [Silent Failure]", lambda: expect(output_behavior("https://a.test http://b.test").url_count(at_least=2, at_most=2) is True))
+    tr.run("output contains_citation absent false [Edge Case]", lambda: expect(output_behavior("no citations").contains_citation() is False))
+    tr.run("output citation markdown [Silent Failure]", lambda: expect(output_behavior(citations).contains_citation("markdown") is True))
+    tr.run("output citation bracket [Silent Failure]", lambda: expect(output_behavior(citations).contains_citation("bracket") is True))
+    tr.run("output citation footnote [Silent Failure]", lambda: expect(output_behavior(citations).contains_citation("footnote") is True))
+    tr.run("output citation url [Silent Failure]", lambda: expect(output_behavior(citations).contains_citation("url") is True))
+    tr.run("output citation unknown raises [Hidden Failure]", lambda: expect_raises(ValueError, lambda: output_behavior(citations).contains_citation("apa")))
+
+    tr.run("output refused detects cant [Silent Failure]", lambda: expect(output_behavior("I can't help with that.").refused() is True))
+    tr.run("output refused detects cannot [Silent Failure]", lambda: expect(output_behavior("I cannot comply.").refused() is True))
+    tr.run("output refused detects unable [Silent Failure]", lambda: expect(output_behavior("I'm unable to do that.").refused() is True))
+    tr.run("output refused ordinary false [Edge Case]", lambda: expect(output_behavior("I can help with that.").refused() is False))
+    tr.run("output hedging detects terms [Silent Failure]", lambda: expect(output_behavior("Maybe this is likely correct.").contains_hedging() is True))
+    tr.run("output hedging decisive false [Edge Case]", lambda: expect(output_behavior("This is correct.").contains_hedging() is False))
+    tr.run("output starts_with casefold [Silent Failure]", lambda: expect(output_behavior(" Result: done. \n").starts_with("result:", case_sensitive=False, strip=True) is True))
+    tr.run("output ends_with strip [Silent Failure]", lambda: expect(output_behavior(" Result: done. \n").ends_with(".", strip=True) is True))
+    tr.run("output empty prefix suffix true [Edge Case]", lambda: expect(output_behavior("x").starts_with("") is True and output_behavior("x").ends_with("") is True))
+
+    data = {"answer": "", "items": [{"title": "First"}], "count": 0, "score": 0.9, "a": 0, "b": False}
+    tr.run("structured_valid none false [Edge Case]", lambda: expect(output_behavior(structured=None).structured_valid() is False))
+    tr.run("structured_valid empty dict true [Edge Case]", lambda: expect(output_behavior(structured={}).structured_valid() is True))
+    tr.run("structured_field_exists falsey [Silent Failure]", lambda: expect(output_behavior(structured=data).structured_field_exists("answer") is True))
+    tr.run("structured_field_exists missing false [Hidden Failure]", lambda: expect(output_behavior(structured=data).structured_field_exists("missing") is False))
+    tr.run("structured_field_exists nested list [Silent Failure]", lambda: expect(output_behavior(structured=data).structured_field_exists("items.0.title") is True))
+    tr.run("structured_field_exists noninteger index false [Hidden Failure]", lambda: expect(output_behavior(structured=data).structured_field_exists("items.x.title") is False))
+    tr.run("structured_field_exists out-of-range false [Hidden Failure]", lambda: expect(output_behavior(structured=data).structured_field_exists("items.99.title") is False))
+    tr.run("structured_field_equals falsey [Silent Failure]", lambda: expect(output_behavior(structured=data).structured_field_equals("count", 0) is True))
+    tr.run("structured_field_matches predicate [Hidden Assumption]", lambda: expect(output_behavior(structured=data).structured_field_matches("score", lambda v: v > 0.8) is True))
+    tr.run("structured_field_matches exception propagates [Hidden Failure]", lambda: expect_raises(ValueError, lambda: output_behavior(structured=data).structured_field_matches("score", lambda v: (_ for _ in ()).throw(ValueError("boom")))))
+    tr.run("structured_field_type list [Silent Failure]", lambda: expect(output_behavior(structured=data).structured_field_type("items", list) is True))
+    tr.run("structured_contains_keys all required [Silent Failure]", lambda: expect(output_behavior(structured=data).structured_contains_keys(["a", "b"]) is True))
+    tr.run("structured pydantic model_dump [Hidden Assumption]", lambda: expect(output_behavior(structured=StructuredPayload(answer="yes", items=[{"title": "First"}])).structured_field_exists("items.0.title") is True))
+
+    tr.run("behavior output property [Edge Case]", lambda: expect(isinstance(BaseAgent(name="t", system_prompt="t", runner=object()).behavior.output, OutputBehavior)))
+    agent = BaseAgent(name="t", system_prompt="t", runner=object())
+    tr.run("behavior output cached category [Silent Failure]", lambda: expect(agent.behavior.output is agent.behavior.output))
+    b = behavior_from_probe(RunProbe(output="x"))
+    tr.run("behavior output shared probe [Hidden Assumption]", lambda: expect(b.output._behavior.probe is b.tool._behavior.probe))
+
     asyncio.run(run_async_tests(tr))
     return tr.summary()
 
