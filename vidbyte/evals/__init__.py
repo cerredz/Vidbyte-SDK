@@ -14,12 +14,14 @@ Relations:
 from __future__ import annotations
 
 from vidbyte.evals.base import BaseGrader
+from vidbyte.evals.behavior import Behavior, RunProbe
 from vidbyte.evals.client import EvalClient
 from vidbyte.evals.graders import (
     ContainsGrader,
     ExactMatchGrader,
     JSONSchemaGrader,
     LLMJudgeGrader,
+    PredicateGrader,
     RegexMatchGrader,
     RubricGrader,
 )
@@ -30,6 +32,7 @@ from vidbyte.evals.types import EvalCase, EvalResult, EvalSuiteResult, GraderRes
 
 __all__ = [
     "BaseGrader",
+    "Behavior",
     "ComparisonReport",
     "ContainsGrader",
     "EvalCase",
@@ -43,6 +46,8 @@ __all__ = [
     "GraderResult",
     "JSONSchemaGrader",
     "LLMJudgeGrader",
+    "PredicateGrader",
     "RegexMatchGrader",
+    "RunProbe",
     "RubricGrader",
 ]
