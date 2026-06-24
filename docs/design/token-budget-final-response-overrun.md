@@ -138,11 +138,12 @@ class TokenBudgetMiddleware(AgentMiddleware):
 7. In `before_iteration`, if `allow_final_response_over_budget=False` and usage is at or over budget, return the existing abort decision.
 8. In `before_iteration`, if `allow_final_response_over_budget=True` and the final-answer notice has not yet been requested, return `continue_()` with metadata indicating the run is over budget and a final response will be requested.
 9. In `before_iteration`, if `allow_final_response_over_budget=True` and the final-answer notice has already been requested, abort with `abort_reason` and existing budget metadata.
-10. In `before_model_call`, if soft mode is enabled, usage is at or over budget, and `final_response_requested` is false, set it to true.
-11. Publish `ctx.run_state["__result_metadata__"]["token_budget"] = {"max_tokens": ..., "tokens_used": ..., "final_response_requested": True}` so the final result exposes that the run used the soft-overrun path.
-12. Return `continue_(transform=MiddlewareTransform(system=<system plus notice>), metadata=...)`.
-13. If `ctx.system` is present, append the notice after two newlines. If `ctx.system` is missing, use only the notice. The runtime currently supplies a system string, but this keeps the middleware safe for isolated unit calls.
-14. In all other cases, return `continue_()`.
+10. In `before_model_call`, if soft mode is enabled, usage is at or over budget, and `final_response_requested` is already true, abort with `abort_reason`. This prevents retry paths from making a second over-budget provider attempt.
+11. In `before_model_call`, if soft mode is enabled, usage is at or over budget, and `final_response_requested` is false, set it to true.
+12. Publish `ctx.run_state["__result_metadata__"]["token_budget"] = {"max_tokens": ..., "tokens_used": ..., "final_response_requested": True}` so the final result exposes that the run used the soft-overrun path.
+13. Return `continue_(transform=MiddlewareTransform(system=<system plus notice>), metadata=...)`.
+14. If `ctx.system` is present, append the notice after two newlines. If `ctx.system` is missing, use only the notice. The runtime currently supplies a system string, but this keeps the middleware safe for isolated unit calls.
+15. In all other cases, return `continue_()`.
 
 #### Edge Cases & Error Handling
 

@@ -101,10 +101,11 @@ The Vidbyte SDK includes 13 built-in middlewares designed to guard and govern ag
 *   **Class**: `TokenBudgetMiddleware`
 *   **Module**: `vidbyte.middleware.builtins.token_budget`
 *   **Purpose**: Places absolute upper bounds on cumulative token utilization for a single run.
-*   **How it works**: Checks accumulated token counts on iteration/model hooks and aborts the run if the budget is exceeded.
+*   **How it works**: Checks accumulated token counts on iteration/model hooks and aborts the run if the budget is exceeded. When `allow_final_response_over_budget=True`, it permits one final over-budget model call and injects a system notice telling the agent to answer immediately instead of continuing exploration.
 *   **Arguments**:
     *   `max_tokens: int` (Absolute token limit)
     *   `abort_reason: str = "token_budget_exceeded"`
+    *   `allow_final_response_over_budget: bool = False` (When true, request one final answer after the limit is reached instead of aborting immediately)
 
 #### 5. `CostBudgetMiddleware`
 *   **Class**: `CostBudgetMiddleware`
