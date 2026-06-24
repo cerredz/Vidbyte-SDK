@@ -21,6 +21,7 @@ from __future__ import annotations
 
 from vidbyte.context.primitives.base import ContextItem
 from vidbyte.context.primitives.checkpoints import ReflexionContextItem, TrajectoryCheckpointContextItem
+from vidbyte.context.primitives.reasoning import ErrorCorrectionContextItem, ProblemSpaceSearchContextItem
 from vidbyte.context.primitives.documents import (
     DocumentContextItem,
     EnvironmentContextItem,
@@ -45,10 +46,12 @@ __all__ = [
     "ContextItem",
     "DocumentContextItem",
     "EnvironmentContextItem",
+    "ErrorCorrectionContextItem",
     "FileContextItem",
     "GitDiffContextItem",
     "MemoryContextItem",
     "PlanContextItem",
+    "ProblemSpaceSearchContextItem",
     "ProgressContextItem",
     "ReflexionContextItem",
     "ResponseContextItem",

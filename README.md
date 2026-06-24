@@ -176,6 +176,26 @@ agent = Agent(
 )
 ```
 
+Two reasoning algorithms periodically pause a direct loop to reflect on the run
+so far. `problem_space_search` runs an explorer pass every N iterations
+(default 5) that surfaces angles the agent has not yet considered — blind spots,
+unexplored approaches, and next directions — and injects them as a bounded note.
+`error_correction` runs an auditor pass every N iterations (default 4) that
+treats the original system prompt as ground truth, flags context that
+contradicts it, prunes its own stale managed primitives, and writes a single
+authoritative correction notice. Both update the context window through managed
+primitives only; they never rewrite prior conversation history.
+
+```python
+agent = Agent(
+    name="repo-analyst",
+    system_prompt="Use tools when they help answer precisely.",
+    runner=my_runner,
+    tools=[lookup_metric],
+    algorithm=ContextWindow.preset.problem_space_search,  # or ContextWindow.preset.error_correction
+)
+```
+
 Per-call context can be supplied with `AgentInput` without mutating the agent's
 default context:
 

@@ -14,7 +14,9 @@ Relations:
 
 from vidbyte.context.algorithms import (
     ContextWindowAlgorithm,
+    ErrorCorrectionAlgorithm,
     MultiProviderAgenticGraderAlgorithm,
+    ProblemSpaceSearchAlgorithm,
     ReflexionAlgorithm,
     TrajectoryCheckpointAlgorithm,
     ToolResultAdmission,
@@ -78,6 +80,22 @@ class ContextWindowPresets:
         return ContextWindowAlgorithm(
             name="trajectory_checkpoints",
             trajectory_checkpoints=TrajectoryCheckpointAlgorithm(),
+        )
+
+    @property
+    def problem_space_search(self) -> ContextWindowAlgorithm:
+        # Every N iterations, surface unconsidered angles into the context window.
+        return ContextWindowAlgorithm(
+            name="problem_space_search",
+            problem_space_search=ProblemSpaceSearchAlgorithm(),
+        )
+
+    @property
+    def error_correction(self) -> ContextWindowAlgorithm:
+        # Every N iterations, audit and clean the context window against the system prompt.
+        return ContextWindowAlgorithm(
+            name="error_correction",
+            error_correction=ErrorCorrectionAlgorithm(),
         )
 
 
