@@ -111,3 +111,5 @@ vidbyte/
 - Custom middleware should subclass `AgentMiddleware` and override only needed lifecycle hooks. Middleware should return `MiddlewareDecision` values instead of mutating runtime state directly.
 - Concrete `TextModelRunner`, `ImageModelRunner`, and `VideoModelRunner` classes are internal/advanced implementation details in user-facing docs. Prefer `Agent`/`BaseAgent` or harness composition in examples.
 - Do not add provider network calls, remote protocol transports, or private Vidbyte service logic without a separate approved design.
+- Keep agent behavior predicates under `vidbyte/evals/behavior/` with one category file per
+  behavior group and the `Behavior` facade composing them. Follow `skills/vidbyte-sdk/agent-behavior.md`.

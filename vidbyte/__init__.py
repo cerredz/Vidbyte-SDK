@@ -52,6 +52,7 @@ from vidbyte.agents import (
 from vidbyte.client import VidbyteSDK
 from vidbyte.evals import (
     BaseGrader,
+    Behavior,
     ComparisonReport,
     ContainsGrader,
     EvalCase,
@@ -65,7 +66,9 @@ from vidbyte.evals import (
     GraderResult,
     JSONSchemaGrader,
     LLMJudgeGrader,
+    PredicateGrader,
     RegexMatchGrader,
+    RunProbe,
     RubricGrader,
 )
 from vidbyte.context import (
@@ -316,6 +319,7 @@ __all__ = [
     "ToolsFormatter",
     "VidbyteSDK",
     "BaseGrader",
+    "Behavior",
     "ComparisonReport",
     "ContainsGrader",
     "EvalCase",
@@ -329,7 +333,9 @@ __all__ = [
     "GraderResult",
     "JSONSchemaGrader",
     "LLMJudgeGrader",
+    "PredicateGrader",
     "RegexMatchGrader",
+    "RunProbe",
     "RubricGrader",
     "tool",
     "vidbyte_tool",

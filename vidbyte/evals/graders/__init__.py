@@ -18,6 +18,7 @@ from vidbyte.evals.graders.contains import ContainsGrader
 from vidbyte.evals.graders.exact_match import ExactMatchGrader
 from vidbyte.evals.graders.json_schema import JSONSchemaGrader
 from vidbyte.evals.graders.llm_judge import LLMJudgeGrader
+from vidbyte.evals.graders.predicate import PredicateGrader
 from vidbyte.evals.graders.regex_match import RegexMatchGrader
 from vidbyte.evals.graders.rubric import RubricGrader
 
@@ -26,6 +27,7 @@ __all__ = [
     "ExactMatchGrader",
     "JSONSchemaGrader",
     "LLMJudgeGrader",
+    "PredicateGrader",
     "RegexMatchGrader",
     "RubricGrader",
 ]

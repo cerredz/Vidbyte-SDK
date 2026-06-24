@@ -123,6 +123,7 @@ For step-by-step instructions on specific SDK operations, see the usage skill fi
 | Create Pipeline | [`skills/usage/create_pipeline.md`](../usage/create_pipeline.md) | Sequential, parallel, conditional, map-reduce pipelines, nesting |
 | Available Tools | [`skills/usage/available_tools.md`](../usage/available_tools.md) | Complete catalog of built-in tools (code search, filesystem, context primitives, memory, MCP) |
 | Available Features | [`skills/usage/available_features.md`](../usage/available_features.md) | Runtimes, pipelines, middleware, modalities, budgets, providers, MCP, prompts |
+| Agent Behavior | [`skills/usage/agent-behavior.md`](../usage/agent-behavior.md) | Post-run behavior predicates via `agent.behavior`, `PredicateGrader` in eval suites |
 
 ## SDK Developer Reference
 
@@ -138,6 +139,7 @@ For step-by-step instructions on specific SDK operations, see the usage skill fi
 | Context Primitives | [`skills/vidbyte-sdk/context-primitives.md`](../vidbyte-sdk/context-primitives.md) | Context primitives package, `ContextManager`, and context tools |
 | Memory Tools | [`skills/vidbyte-sdk/memory-tools.md`](../vidbyte-sdk/memory-tools.md) | Cognee, Letta, Mem0, Supermemory, Zep memory tools |
 | Evals | [`skills/vidbyte-sdk/evals.md`](../vidbyte-sdk/evals.md) | Eval suites, graders, and runner |
+| Agent Behavior | [`skills/vidbyte-sdk/agent-behavior.md`](../vidbyte-sdk/agent-behavior.md) | Post-run behavior predicates (`agent.behavior`), `RunProbe`, `PredicateGrader` |
 | Adding Prompts | [`skills/vidbyte-sdk/adding-prompts.md`](../vidbyte-sdk/adding-prompts.md) | How to add prompt JSON assets, enums, and imports |
 | Full SDK Reference | [`skills/vidbyte-sdk-doc/SKILL.md`](../vidbyte-sdk-doc/SKILL.md) | Exhaustive reference for all subsystems |
 
@@ -217,6 +219,9 @@ vidbyte/
 - Keep context-window algorithm runtime adapters in `vidbyte/agents/algorithms/` and public config under `vidbyte/context/algorithms/`. Follow `skills/vidbyte-sdk/adding-context-window-algorithms.md`.
 - Keep the handoff primitive family under `vidbyte/context/handoff/` and `HandoffAgent` in `vidbyte/agents/handoff.py`. Follow `skills/vidbyte-sdk/handoff.md`.
 - Keep eval suites, graders, and the runner under `vidbyte/evals/`. Follow `skills/vidbyte-sdk/evals.md`.
+- Keep agent behavior predicates under `vidbyte/evals/behavior/` with one category file per
+  behavior group (tool, tool_arguments, stop, handoff) and the `Behavior` facade composing them.
+  Follow `skills/vidbyte-sdk/agent-behavior.md` when adding or changing behavior predicates.
 - Keep agent-to-agent wiring topologies (pipeline compositions) in `vidbyte/pipelines/`. Pipelines move strings between agents; they do not manage context, budget, or artifacts. Follow `skills/vidbyte-sdk/pipelines.md` when adding or modifying pipeline topology types.
 - Keep public context objects in `vidbyte/context/`, but define dataclasses centrally under `vidbyte/lib/dataclasses/`.
 - Keep prompt templates in `vidbyte/prompts/prompts/` and expose them through `vidbyte.prompts.Prompts` plus `vidbyte.lib.enums.prompts.Prompt`.

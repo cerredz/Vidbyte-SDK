@@ -191,6 +191,7 @@ class BaseAgent(McpAttachableMixin):
         self.last_trace: dict[str, Any] | None = None
         self.last_prompt: str = ""
         self.last_reply: AgentMessage | None = None
+        self._behavior_view: Any = None
         for _tool in self._agent_tool_items:
             self._bind_agent_tool_context(_tool)
 
@@ -333,6 +334,15 @@ class BaseAgent(McpAttachableMixin):
 
         return AgentTool(self)
 
+    @property
+    def behavior(self) -> Any:
+        # Lazily builds and caches a Behavior facade over the agent's last run.
+        from vidbyte.evals.behavior import Behavior
+
+        if self._behavior_view is None:
+            self._behavior_view = Behavior(self)
+        return self._behavior_view
+
     def _bind_agent_tool_context(self, tool: object) -> None:
         """Bind this agent's live context getter to AgentTool instances."""
         from vidbyte.tools.agent_tool import AgentTool
@@ -419,6 +429,7 @@ class BaseAgent(McpAttachableMixin):
             prompt, input_modality, input_metadata = self._normalize_input(message)
             input_context_items, input_context_manager = self._normalize_input_context(message)
             self._active_prompt = prompt
+            self._behavior_view = None
             selected_modality = ModalityDetector.resolve(
                 requested=modality,
                 input_modality=input_modality,
