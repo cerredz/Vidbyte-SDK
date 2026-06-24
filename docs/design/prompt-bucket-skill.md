@@ -250,6 +250,7 @@ class BucketStore:
         # Opens (and lazily creates) the SQLite database file at db_path.
         self._connection = sqlite3.connect(db_path)
         self._connection.execute("PRAGMA foreign_keys = ON;")
+        self._connection.execute("PRAGMA busy_timeout = 5000;")
 
     def initialize(self) -> None:
         # Creates all tables by executing the bundled schema.sql DDL script.
@@ -459,15 +460,22 @@ capture behavior. This is the *only* part that survives install.
 Model-driven capture is non-deterministic in principle. We narrow the gap with five
 mutually reinforcing mechanisms, in priority order:
 
+0. **Per-conversation arming (correctness guard).** Capture is armed only when the user ran
+   `/create-bucket` *in the current conversation*. The `.active_bucket` file records the
+   most-recent key but is NOT, by itself, consent to capture — otherwise a stale pointer from
+   a prior session would silently log unrelated prompts into an old bucket. Re-running
+   `/create-bucket --key <key>` re-arms (and is idempotent). This scopes "every prompt in the
+   session" to the session the user actually intended.
+
 1. **State externalization — `.active_bucket` pointer.** `create` writes the active key to
-   disk. The model never has to remember or re-ask which bucket is live; the behavioral
-   loop reads the pointer. Removes the most common failure (lost key across turns).
+   disk so, once armed, the model never has to remember or re-ask which bucket is live.
+   Removes the most common failure (lost key across turns).
 
 2. **A strict first-action contract, placed at the top of the behavior section.** Strong,
    imperative, unambiguous wording, e.g.:
-   > While `.active_bucket` is non-empty, the **FIRST** action in **EVERY** response — before
-   > reading files, before answering — MUST be to log the user's verbatim message:
-   > write it to a temp file, then run `python <skill-dir>/bucket.py log --key <active> --file <tmp>`.
+   > While capture is armed, the **FIRST** action in **EVERY** response — before reading
+   > files, before answering — MUST be to log the user's verbatim message: write it to a temp
+   > file, then run `python <skill-dir>/bucket.py log --key <active> --file <tmp>`.
    > This is non-negotiable and idempotent; never skip it, never batch it.
 
    Placement (top) and absolute phrasing ("FIRST", "EVERY", "MUST", "never") materially

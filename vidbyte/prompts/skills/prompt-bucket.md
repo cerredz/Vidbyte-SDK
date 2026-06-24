@@ -87,6 +87,7 @@ class BucketStore:
         # Opens (and lazily creates) the SQLite database file at db_path.
         self._connection = sqlite3.connect(db_path)
         self._connection.execute("PRAGMA foreign_keys = ON;")
+        self._connection.execute("PRAGMA busy_timeout = 5000;")
 
     def initialize(self) -> None:
         # Creates all tables by executing the bundled schema.sql DDL script.
@@ -280,15 +281,26 @@ Known keys (source of truth = buckets.db):
 
 ## Commands
 
-In all commands below, `<DIR>` is this skill's own folder (where this `SKILL.md` lives) and
-`python` may be `python3` depending on the system.
+In all commands below, `<DIR>` is this skill's own folder (where this `SKILL.md` lives).
+
+**Choosing the interpreter.** Use whatever Python 3 launcher works on this machine:
+- macOS/Linux: `python3` (fall back to `python`).
+- Windows: prefer `py -3`. A bare `python`/`python3` is often a non-functional Microsoft
+  Store alias that prints "Python was not found" — if you see that, switch to `py -3`.
+
+Pick a working launcher once, then use it for every `bucket.py` call below (shown as
+`python` for brevity).
 
 ### `/create-bucket --key <key>`
 
 1. Run: `python <DIR>/bucket.py create --key <key>`
-2. Expect `bucket ready: <key>`. This also writes `<DIR>/.active_bucket` so the bucket is
-   now the active capture target.
-3. Tell the user the bucket is active and that their prompts this session will be captured.
+2. Expect `bucket ready: <key>`. This is idempotent: it creates the bucket if new, and
+   records `<key>` in `<DIR>/.active_bucket` as the most-recent/default bucket.
+3. **This command ARMS capture for the current conversation.** From now until this
+   conversation ends, follow the capture contract below. Tell the user capture is on for
+   this session and which bucket prompts will land in.
+4. To capture into an existing bucket in a *new* session later, just run this command again
+   with the same `--key` — it re-arms capture and won't duplicate the bucket.
 
 ### `/load-bucket --key <key>`
 
@@ -305,11 +317,17 @@ In all commands below, `<DIR>` is this skill's own folder (where this `SKILL.md`
 This is the core of the skill. Capture is driven by you, the model — there is no background
 hook — so the rules below are mandatory, not optional.
 
-**FIRST-ACTION CONTRACT.** Whenever `<DIR>/.active_bucket` exists and is non-empty, the
-**FIRST** action of **EVERY** one of your responses — before reading files, before
-answering, before any other tool call — MUST be to log the user's current verbatim message
-to the active bucket. Never skip a turn. Never batch. It is idempotent, so logging is always
-safe.
+**WHEN CAPTURE IS ARMED.** Capture is armed for a conversation only if the user ran
+`/create-bucket --key <key>` *earlier in this same conversation*. The `.active_bucket` file
+merely records the most-recent key; it is **not** by itself permission to capture. Do NOT
+auto-log in a conversation where the user never ran `/create-bucket` here — otherwise a
+stale pointer from a previous session would silently capture unrelated prompts. (If the user
+wants to resume an old bucket, they re-run `/create-bucket --key <key>`, which re-arms.)
+
+**FIRST-ACTION CONTRACT.** While capture is armed, the **FIRST** action of **EVERY** one of
+your responses — before reading files, before answering, before any other tool call — MUST
+be to log the user's current verbatim message to the active bucket. Never skip a turn. Never
+batch. It is idempotent, so logging is always safe.
 
 **How to log (quote-safe).** Do not pass the prompt as a shell argument (quotes, newlines,
 and backticks will corrupt it). Instead:
@@ -322,9 +340,10 @@ and backticks will corrupt it). Instead:
 
 Then proceed with the user's actual request as normal.
 
-**Stopping capture.** Capture continues until `<DIR>/.active_bucket` is cleared. To stop,
-delete that file (or empty it). Starting a different bucket with `/create-bucket` overwrites
-it, redirecting capture to the new key.
+**Stopping capture.** Capture ends automatically when the conversation ends (arming does not
+carry into the next session). To stop mid-conversation, the user says so — stop logging and
+optionally clear `<DIR>/.active_bucket`. Running `/create-bucket` with a different key
+redirects capture to that key for the rest of the conversation.
 
 ### Few-shot — what a captured turn looks like
 
