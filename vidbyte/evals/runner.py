@@ -27,6 +27,7 @@ from datetime import datetime
 from typing import Any, Sequence
 from vidbyte.agents.base import BaseAgent
 from vidbyte.agents.types import AgentInput
+from vidbyte.evals.behavior.probe import RunProbe
 from vidbyte.evals.types import EvalCase, EvalResult, EvalSuiteResult, GraderResult
 from vidbyte.evals.base import BaseGrader
 
@@ -81,7 +82,11 @@ class EvalRunner:
 
             try:
                 actual, metadata = await self._invoke_target(case, case_index=case_index, suite_name=suite_name)
-                grader_result = await grader.agrade(case, actual)
+                probe = metadata.get("probe")
+                if probe is not None and hasattr(grader, "agrade_with_probe"):
+                    grader_result = await grader.agrade_with_probe(case, actual, probe)
+                else:
+                    grader_result = await grader.agrade(case, actual)
             except Exception as exc:
                 error_msg = str(exc)
                 grader_result = GraderResult(
@@ -111,6 +116,7 @@ class EvalRunner:
                 trace_metadata=self._case_trace_metadata(case, case_index=case_index, suite_name=suite_name),
             )
             metadata = dict(reply.metadata) if reply.metadata else {}
+            metadata["probe"] = RunProbe.from_agent(forked)
             return str(reply.content), metadata
 
         if hasattr(target, "arun"):
