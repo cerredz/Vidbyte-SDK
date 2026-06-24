@@ -21,6 +21,7 @@ from vidbyte.middleware.builtins import (
     TokenBudgetMiddleware,
 )
 from vidbyte.middleware.builtins.loop_detection import REPEATED_OUTPUT_LOOP_NOTICE
+from vidbyte.middleware.builtins.token_budget import TOKEN_BUDGET_FINAL_RESPONSE_NOTICE
 
 
 def _ctx(**kwargs) -> MiddlewareContext:
@@ -78,6 +79,93 @@ class TestTokenBudgetMiddleware(unittest.IsolatedAsyncioTestCase):
         decision = await mw.before_iteration(ctx)
         self.assertEqual(decision.metadata["max_tokens"], 50)
         self.assertEqual(decision.metadata["tokens_used"], 60)
+
+    async def test_soft_overrun_injects_final_response_notice_once(self) -> None:
+        # [Hidden Failure] Soft overrun must request exactly one final model-visible answer.
+        mw = TokenBudgetMiddleware(max_tokens=100, allow_final_response_over_budget=True)
+        run_state: dict = {}
+        await mw.before_run(_ctx(hook=MiddlewareHook.BEFORE_RUN, run_state=run_state))
+        decision = await mw.before_model_call(
+            _ctx(
+                hook=MiddlewareHook.BEFORE_MODEL_CALL,
+                tokens_used=100,
+                system="base system",
+                run_state=run_state,
+            )
+        )
+        self.assertEqual(decision.action, MiddlewareAction.CONTINUE)
+        self.assertIsNotNone(decision.transform)
+        self.assertIn("base system", decision.transform.system)
+        self.assertIn(TOKEN_BUDGET_FINAL_RESPONSE_NOTICE, decision.transform.system)
+        self.assertTrue(decision.metadata["final_response_requested"])
+        self.assertTrue(run_state["__result_metadata__"]["token_budget"]["final_response_requested"])
+
+    async def test_soft_overrun_aborts_after_notice_was_requested(self) -> None:
+        # [Silent Failure] Soft overrun must not allow unlimited over-budget iterations.
+        mw = TokenBudgetMiddleware(max_tokens=100, allow_final_response_over_budget=True)
+        run_state: dict = {}
+        await mw.before_run(_ctx(hook=MiddlewareHook.BEFORE_RUN, run_state=run_state))
+        first = await mw.before_iteration(_ctx(tokens_used=100, run_state=run_state))
+        await mw.before_model_call(
+            _ctx(
+                hook=MiddlewareHook.BEFORE_MODEL_CALL,
+                tokens_used=100,
+                system="base system",
+                run_state=run_state,
+            )
+        )
+        second = await mw.before_iteration(_ctx(tokens_used=101, run_state=run_state))
+        self.assertEqual(first.action, MiddlewareAction.CONTINUE)
+        self.assertEqual(second.action, MiddlewareAction.ABORT_RUN)
+        self.assertEqual(second.reason, "token_budget_exceeded")
+
+    async def test_soft_overrun_aborts_second_model_call_attempt(self) -> None:
+        # [Hidden Failure] Retry paths must not get a second over-budget model call.
+        mw = TokenBudgetMiddleware(max_tokens=100, allow_final_response_over_budget=True)
+        run_state: dict = {}
+        await mw.before_model_call(
+            _ctx(
+                hook=MiddlewareHook.BEFORE_MODEL_CALL,
+                tokens_used=100,
+                system="base system",
+                run_state=run_state,
+            )
+        )
+        decision = await mw.before_model_call(
+            _ctx(
+                hook=MiddlewareHook.BEFORE_MODEL_CALL,
+                tokens_used=100,
+                system="base system",
+                run_state=run_state,
+            )
+        )
+        self.assertEqual(decision.action, MiddlewareAction.ABORT_RUN)
+        self.assertEqual(decision.reason, "token_budget_exceeded")
+
+    async def test_soft_overrun_continues_without_token_usage(self) -> None:
+        # [Edge Case] Providers without token usage must preserve existing no-op behavior.
+        mw = TokenBudgetMiddleware(max_tokens=100, allow_final_response_over_budget=True)
+        decision = await mw.before_model_call(
+            _ctx(hook=MiddlewareHook.BEFORE_MODEL_CALL, tokens_used=None, system="base system")
+        )
+        self.assertEqual(decision.action, MiddlewareAction.CONTINUE)
+        self.assertIsNone(decision.transform)
+
+    async def test_soft_overrun_lazy_state_injects_without_before_run(self) -> None:
+        # [Hidden Assumption] Direct hook tests that skip before_run still get isolated run state.
+        mw = TokenBudgetMiddleware(max_tokens=100, allow_final_response_over_budget=True)
+        run_state: dict = {}
+        decision = await mw.before_model_call(
+            _ctx(
+                hook=MiddlewareHook.BEFORE_MODEL_CALL,
+                tokens_used=101,
+                system=None,
+                run_state=run_state,
+            )
+        )
+        self.assertEqual(decision.action, MiddlewareAction.CONTINUE)
+        self.assertEqual(decision.transform.system, TOKEN_BUDGET_FINAL_RESPONSE_NOTICE)
+        self.assertTrue(run_state["__result_metadata__"]["token_budget"]["final_response_requested"])
 
     def test_raises_on_zero_max(self) -> None:
         # [Edge Case] Zero is not a meaningful ceiling.

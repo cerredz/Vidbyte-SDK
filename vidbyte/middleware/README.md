@@ -45,6 +45,23 @@ limits, token and cost budgets, runtime limits, retry, circuit breaker, audit,
 tool policy, tool-result compaction, message-history compaction, canary tripwire,
 confused-deputy guard, and honeypot tool checks.
 
+`TokenBudgetMiddleware(max_tokens=...)` is a hard cap by default: once
+provider-reported cumulative usage reaches the limit, the run stops before the
+next iteration. Set `allow_final_response_over_budget=True` to allow one final
+over-budget model call with an injected instruction to answer immediately:
+
+```python
+from vidbyte.middleware.builtins import TokenBudgetMiddleware
+
+middleware = [
+    TokenBudgetMiddleware(max_tokens=50_000, allow_final_response_over_budget=True),
+]
+```
+
+This soft-overrun mode depends on provider-reported token usage. It is separate
+from `Agent(max_tokens=...)`, which remains a runtime hard cap and can stop the
+run before middleware gets a chance to request the final response.
+
 ## Key Modules
 
 - `base.py`: hook base class for custom middleware.
