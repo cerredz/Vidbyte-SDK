@@ -55,7 +55,10 @@ class EvalTemplateRegistry:
         factory = self._factories.get(name)
         if factory is None:
             raise ValueError(f"Unknown eval template: {name}")
-        return factory(**options)
+        try:
+            return factory(**options)
+        except TypeError as exc:
+            raise ValueError(f"Invalid options for eval template '{name}': {exc}") from exc
 
     def _build_single_grader(self, template: EvalTemplate) -> BaseGrader:
         # Builds and validates one grader from one template.
@@ -63,4 +66,3 @@ class EvalTemplateRegistry:
         if not isinstance(grader, BaseGrader):
             raise TypeError(f"Eval template '{template.name}' returned {type(grader).__name__}, not BaseGrader.")
         return grader
-

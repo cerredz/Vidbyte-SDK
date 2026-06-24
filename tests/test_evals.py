@@ -129,6 +129,10 @@ class EvalTests(unittest.IsolatedAsyncioTestCase):
         res_empty = await grader.agrade(EvalCase(prompt="t", expected=""), "   ")
         self.assertTrue(res_empty.passed)
 
+        # [Hidden Assumption] Structured expected values stringify instead of crashing
+        res_structured = await grader.agrade(EvalCase(prompt="t", expected={"answer": "hello"}), "{'answer': 'hello'}")
+        self.assertTrue(res_structured.passed)
+
     async def test_contains_grader(self) -> None:
         # Tests ContainsGrader keyword verification and case-sensitivity toggles.
         grader = ContainsGrader(case_sensitive=False)
@@ -146,6 +150,10 @@ class EvalTests(unittest.IsolatedAsyncioTestCase):
         # [Edge Case] Empty expected substring behaves properly
         res_empty = await grader.agrade(EvalCase(prompt="t", expected=""), "banana")
         self.assertTrue(res_empty.passed)
+
+        # [Hidden Assumption] Structured expected values stringify instead of crashing
+        res_structured = await grader.agrade(EvalCase(prompt="t", expected={"answer": "apple"}), "{'answer': 'apple'}")
+        self.assertTrue(res_structured.passed)
 
     async def test_regex_match_grader(self) -> None:
         # Tests RegexMatchGrader pattern scanning and error handling.
@@ -285,6 +293,8 @@ class EvalTests(unittest.IsolatedAsyncioTestCase):
             registry.create("missing")
         with self.assertRaises(ValueError):
             registry.create({"name": "short", "options": []})
+        with self.assertRaises(ValueError):
+            T.default_template_registry.create({"name": "classification"})
 
         class CustomTemplate(EvalTemplate):
             name = "custom"
