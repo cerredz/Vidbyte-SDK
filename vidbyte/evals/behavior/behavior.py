@@ -4,12 +4,12 @@ Description:
     Implements the Behavior facade that composes category behavior classes.
 Purpose:
     Provides a single entry point accessed via agent.behavior that lazily builds
-    a RunProbe and exposes tool, tool_args, stop, and handoff predicate groups.
+    a RunProbe and exposes tool, tool_args, stop, handoff, and output predicate groups.
 Architecture:
     - Behavior: holds a BaseAgent reference, lazily builds RunProbe, and
-      initializes ToolBehavior, ToolArgumentBehavior, StopBehavior, HandoffBehavior.
+      initializes ToolBehavior, ToolArgumentBehavior, StopBehavior, HandoffBehavior, OutputBehavior.
     - probe property: cached RunProbe built from the agent on first access.
-    - tool / tool_args / stop / handoff properties: return pre-built category objects.
+    - tool / tool_args / stop / handoff / output properties: return pre-built category objects.
 Relations:
     Instantiated by BaseAgent.behavior property; re-exported from vidbyte.evals.
 """
@@ -19,6 +19,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from vidbyte.evals.behavior.handoff import HandoffBehavior
+from vidbyte.evals.behavior.output import OutputBehavior
 from vidbyte.evals.behavior.probe import RunProbe
 from vidbyte.evals.behavior.stop import StopBehavior
 from vidbyte.evals.behavior.tool import ToolBehavior
@@ -39,6 +40,7 @@ class Behavior:
         self._tool_args = ToolArgumentBehavior(self)
         self._stop = StopBehavior(self)
         self._handoff = HandoffBehavior(self)
+        self._output = OutputBehavior(self)
 
     @property
     def probe(self) -> RunProbe:
@@ -66,6 +68,11 @@ class Behavior:
     def handoff(self) -> HandoffBehavior:
         # Returns the handoff occurrence predicate group.
         return self._handoff
+
+    @property
+    def output(self) -> OutputBehavior:
+        # Returns the output shape and structured-output predicate group.
+        return self._output
 
 
 __all__ = ["Behavior"]

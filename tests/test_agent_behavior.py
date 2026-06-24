@@ -23,9 +23,11 @@ from vidbyte.agents.base import BaseAgent
 from vidbyte.agents.types import AgentInput
 from vidbyte.context.handoff.base import Handoff
 from vidbyte.evals import Behavior, ContainsGrader, EvalCase, EvalRunner, EvalSuite, PredicateGrader, RunProbe
+from vidbyte.evals.behavior.output import OutputBehavior
 from vidbyte.evals.behavior.tool import ToolBehavior
 from vidbyte.lib.dataclasses.agents import AgentMessage
 from vidbyte.lib.dataclasses.tools import ToolCallContext, ToolCallState, ToolResult, ToolStatus
+from pydantic import BaseModel
 
 
 def make_call(name: str, state: ToolCallState = ToolCallState.SUCCEEDED, args: dict[str, Any] | None = None, result_output: str | None = "ok") -> ToolCallContext:
@@ -57,7 +59,16 @@ def behavior_from_probe(probe: RunProbe) -> Behavior:
     b._stop._behavior = b
     b._handoff = HandoffBehavior.__new__(HandoffBehavior)
     b._handoff._behavior = b
+    b._output = OutputBehavior.__new__(OutputBehavior)
+    b._output._behavior = b
     return b
+
+
+class StructuredPayload(BaseModel):
+    """Pydantic payload used to verify model_dump structured traversal."""
+
+    answer: str
+    items: list[dict[str, Any]]
 
 
 class StubAgent:
@@ -73,16 +84,17 @@ class StubAgent:
 class MockAgent(BaseAgent):
     """BaseAgent subclass returning scripted replies with tool call metadata."""
 
-    def __init__(self, reply_metadata: dict[str, Any] | None = None) -> None:
+    def __init__(self, reply_metadata: dict[str, Any] | None = None, reply_content: str = "processed") -> None:
         super().__init__(name="mock", system_prompt="test", runner=object())
         self._reply_metadata = reply_metadata or {}
+        self._reply_content = reply_content
 
     def fork(self, **kwargs: Any) -> MockAgent:
         return self
 
     async def arun(self, message: str | AgentInput, **options: Any) -> AgentMessage:
         self._behavior_view = None
-        reply = AgentMessage(sender="mock", recipient="orchestrator", content="processed", metadata=dict(self._reply_metadata))
+        reply = AgentMessage(sender="mock", recipient="orchestrator", content=self._reply_content, metadata=dict(self._reply_metadata))
         self.last_reply = reply
         return reply
 
@@ -137,6 +149,23 @@ class AgentBehaviorTests(unittest.IsolatedAsyncioTestCase):
         calls = (make_call("a", state=ToolCallState.SUCCEEDED), make_call("b", state=ToolCallState.FAILED))
         probe = RunProbe.from_agent(StubAgent(reply=make_reply(metadata={"tool_calls": calls})))
         self.assertEqual(probe.tool_call_states, ("succeeded", "failed"))
+
+    def test_probe_from_agent_structured(self) -> None:
+        # [Hidden Assumption] from_agent copies metadata["structured"] into probe.structured.
+        structured = {"answer": "yes"}
+        probe = RunProbe.from_agent(StubAgent(reply=make_reply(metadata={"structured": structured})))
+        self.assertIs(probe.structured, structured)
+
+    def test_probe_from_reply_structured(self) -> None:
+        # [Hidden Assumption] from_reply copies metadata["structured"] without an agent.
+        structured = {"answer": "yes"}
+        probe = RunProbe.from_reply(make_reply(metadata={"structured": structured}))
+        self.assertIs(probe.structured, structured)
+
+    def test_probe_missing_structured_defaults_none(self) -> None:
+        # [Edge Case] missing structured metadata leaves probe.structured as None.
+        probe = RunProbe.from_reply(make_reply())
+        self.assertIsNone(probe.structured)
 
     # --- ToolBehavior Category A ---
 
@@ -340,6 +369,136 @@ class AgentBehaviorTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(b.handoff.handoff_is_filled())
         self.assertEqual(b.handoff.handoff_count(), 0)
 
+    # --- OutputBehavior Category F ---
+
+    def test_output_empty_and_not_empty(self) -> None:
+        # [Edge Case / Silent Failure] is_empty and is_not_empty handle empty and whitespace output.
+        self.assertTrue(behavior_from_probe(RunProbe(output="")).output.is_empty())
+        self.assertTrue(behavior_from_probe(RunProbe(output="   ")).output.is_empty(strip=True))
+        self.assertFalse(behavior_from_probe(RunProbe(output="   ")).output.is_empty(strip=False))
+        self.assertTrue(behavior_from_probe(RunProbe(output="text")).output.is_not_empty())
+
+    def test_output_length_bounds(self) -> None:
+        # [Edge Case / Silent Failure] length uses inclusive character bounds.
+        self.assertTrue(behavior_from_probe(RunProbe(output="")).output.length(at_least=0, at_most=0))
+        self.assertTrue(behavior_from_probe(RunProbe(output="abcd")).output.length(at_least=2, at_most=4))
+        self.assertFalse(behavior_from_probe(RunProbe(output="abcde")).output.length(at_least=2, at_most=4))
+
+    def test_output_line_count(self) -> None:
+        # [Edge Case / Silent Failure] line_count uses splitlines logical lines.
+        self.assertTrue(behavior_from_probe(RunProbe(output="")).output.line_count(at_least=0, at_most=0))
+        self.assertTrue(behavior_from_probe(RunProbe(output="a\nb")).output.line_count(at_least=2, at_most=2))
+        self.assertFalse(behavior_from_probe(RunProbe(output="a\nb\nc")).output.line_count(at_most=2))
+
+    def test_output_word_count(self) -> None:
+        # [Silent Failure] word_count counts word tokens instead of raw whitespace splits.
+        self.assertTrue(behavior_from_probe(RunProbe(output="one, two three")).output.word_count(at_least=3, at_most=3))
+        self.assertFalse(behavior_from_probe(RunProbe(output="one two")).output.word_count(at_least=3))
+
+    def test_output_is_valid_json(self) -> None:
+        # [Edge Case / Hidden Failure / Silent Failure] JSON validity returns booleans without raising.
+        self.assertFalse(behavior_from_probe(RunProbe(output="")).output.is_valid_json())
+        self.assertFalse(behavior_from_probe(RunProbe(output="{bad")).output.is_valid_json())
+        self.assertTrue(behavior_from_probe(RunProbe(output='{"a": 1}')).output.is_valid_json())
+        self.assertTrue(behavior_from_probe(RunProbe(output='[1, 2]')).output.is_valid_json())
+
+    def test_output_code_blocks(self) -> None:
+        # [Edge Case / Hidden Failure / Silent Failure] code block detection handles language and unclosed fences.
+        output = "Before\n```Python\nprint('x')\n```\n~~~js\nconsole.log(1)\n~~~"
+        b = behavior_from_probe(RunProbe(output=output))
+        self.assertTrue(b.output.contains_code_block())
+        self.assertTrue(b.output.contains_code_block("python"))
+        self.assertEqual(b.output.code_block_count(), 2)
+        self.assertEqual(b.output.code_block_count("python"), 1)
+        self.assertTrue(b.output.code_block_count("python", at_least=1, at_most=1))
+        self.assertFalse(behavior_from_probe(RunProbe(output="```python\nx")).output.contains_code_block())
+        self.assertTrue(behavior_from_probe(RunProbe(output="plain")).output.code_block_count(at_least=0, at_most=0))
+
+    def test_output_urls(self) -> None:
+        # [Edge Case / Silent Failure] URL detection handles http, https, and www forms.
+        self.assertFalse(behavior_from_probe(RunProbe(output="no link")).output.contains_url())
+        b = behavior_from_probe(RunProbe(output="See https://a.test and http://b.test plus www.c.test"))
+        self.assertTrue(b.output.contains_url())
+        self.assertTrue(b.output.url_count(at_least=3, at_most=3))
+
+    def test_output_citations(self) -> None:
+        # [Edge Case / Silent Failure] citation detection supports markdown, bracket, footnote, url, and any.
+        self.assertFalse(behavior_from_probe(RunProbe(output="no citations")).output.contains_citation())
+        output = "See [source](https://example.com), [1], and [^note]."
+        b = behavior_from_probe(RunProbe(output=output))
+        self.assertTrue(b.output.contains_citation("markdown"))
+        self.assertTrue(b.output.contains_citation("bracket"))
+        self.assertTrue(b.output.contains_citation("footnote"))
+        self.assertTrue(b.output.contains_citation("url"))
+        self.assertTrue(b.output.citation_count("any", at_least=4))
+
+    def test_output_unknown_citation_style_raises(self) -> None:
+        # [Hidden Failure] unknown citation style raises ValueError.
+        with self.assertRaises(ValueError):
+            behavior_from_probe(RunProbe(output="text")).output.contains_citation("apa")
+
+    def test_output_refusal_and_hedging(self) -> None:
+        # [Silent Failure / Edge Case] refusal and hedging phrases are detected case-insensitively.
+        self.assertTrue(behavior_from_probe(RunProbe(output="I can't help with that.")).output.refused())
+        self.assertTrue(behavior_from_probe(RunProbe(output="I cannot comply.")).output.refused())
+        self.assertTrue(behavior_from_probe(RunProbe(output="I'm unable to do that.")).output.refused())
+        self.assertFalse(behavior_from_probe(RunProbe(output="I can help with that.")).output.refused())
+        self.assertTrue(behavior_from_probe(RunProbe(output="Maybe this is likely correct.")).output.contains_hedging())
+        self.assertTrue(behavior_from_probe(RunProbe(output="I think it works.")).output.contains_hedging())
+        self.assertFalse(behavior_from_probe(RunProbe(output="This is correct.")).output.contains_hedging())
+
+    def test_output_prefix_suffix(self) -> None:
+        # [Silent Failure / Edge Case] prefix and suffix checks handle case, stripping, and empty strings.
+        b = behavior_from_probe(RunProbe(output=" Result: done. \n"))
+        self.assertTrue(b.output.starts_with("result:", case_sensitive=False, strip=True))
+        self.assertTrue(b.output.ends_with(".", strip=True))
+        self.assertTrue(b.output.starts_with(""))
+        self.assertTrue(b.output.ends_with(""))
+
+    def test_structured_valid(self) -> None:
+        # [Edge Case] structured_valid distinguishes None from empty structured objects.
+        self.assertFalse(behavior_from_probe(RunProbe(structured=None)).output.structured_valid())
+        self.assertTrue(behavior_from_probe(RunProbe(structured={})).output.structured_valid())
+
+    def test_structured_field_exists(self) -> None:
+        # [Silent Failure / Hidden Failure] structured_field_exists handles falsey values and missing fields.
+        b = behavior_from_probe(RunProbe(structured={"answer": "", "items": [{"title": "First"}]}))
+        self.assertTrue(b.output.structured_field_exists("answer"))
+        self.assertTrue(b.output.structured_field_exists("items.0.title"))
+        self.assertFalse(b.output.structured_field_exists("missing"))
+        self.assertFalse(b.output.structured_field_exists("items.x.title"))
+        self.assertFalse(b.output.structured_field_exists("items.99.title"))
+
+    def test_structured_field_equals(self) -> None:
+        # [Silent Failure] structured_field_equals compares with == and preserves falsey values.
+        b = behavior_from_probe(RunProbe(structured={"count": 0, "status": "complete"}))
+        self.assertTrue(b.output.structured_field_equals("count", 0))
+        self.assertTrue(b.output.structured_field_equals("status", "complete"))
+        self.assertFalse(b.output.structured_field_equals("missing", None))
+
+    def test_structured_field_matches(self) -> None:
+        # [Hidden Assumption / Hidden Failure] predicate is called only for existing fields and errors propagate.
+        b = behavior_from_probe(RunProbe(structured={"score": 0.9}))
+        self.assertTrue(b.output.structured_field_matches("score", lambda v: v > 0.8))
+        self.assertFalse(b.output.structured_field_matches("missing", lambda v: True))
+        with self.assertRaises(ValueError):
+            b.output.structured_field_matches("score", lambda v: (_ for _ in ()).throw(ValueError("boom")))
+
+    def test_structured_field_type_and_keys(self) -> None:
+        # [Silent Failure] structured_field_type and structured_contains_keys use resolved/top-level values.
+        b = behavior_from_probe(RunProbe(structured={"items": [], "a": 0, "b": False}))
+        self.assertTrue(b.output.structured_field_type("items", list))
+        self.assertFalse(b.output.structured_field_type("items", dict))
+        self.assertTrue(b.output.structured_contains_keys(["a", "b"]))
+        self.assertFalse(b.output.structured_contains_keys(["a", "c"]))
+
+    def test_structured_pydantic_model_dump(self) -> None:
+        # [Hidden Assumption] Pydantic structured objects are supported through model_dump().
+        payload = StructuredPayload(answer="yes", items=[{"title": "First"}])
+        b = behavior_from_probe(RunProbe(structured=payload))
+        self.assertTrue(b.output.structured_field_equals("answer", "yes"))
+        self.assertTrue(b.output.structured_field_exists("items.0.title"))
+
     # --- Behavior Facade ---
 
     def test_agent_behavior_returns_behavior(self) -> None:
@@ -347,10 +506,16 @@ class AgentBehaviorTests(unittest.IsolatedAsyncioTestCase):
         agent = BaseAgent(name="t", system_prompt="t", runner=object())
         self.assertIsInstance(agent.behavior, Behavior)
 
+    def test_agent_behavior_output_returns_output_behavior(self) -> None:
+        # [Edge Case] agent.behavior.output returns an OutputBehavior instance.
+        agent = BaseAgent(name="t", system_prompt="t", runner=object())
+        self.assertIsInstance(agent.behavior.output, OutputBehavior)
+
     def test_agent_behavior_cached(self) -> None:
         # [Silent Failure] agent.behavior returns the same instance on repeated access.
         agent = BaseAgent(name="t", system_prompt="t", runner=object())
         self.assertIs(agent.behavior, agent.behavior)
+        self.assertIs(agent.behavior.output, agent.behavior.output)
 
     def test_behavior_probe_lazy_and_cached(self) -> None:
         # [Hidden Assumption / Silent Failure] probe built lazily and cached.
@@ -359,6 +524,7 @@ class AgentBehaviorTests(unittest.IsolatedAsyncioTestCase):
         first = b.probe
         self.assertIsNotNone(b._probe)
         self.assertIs(first, b.probe)
+        self.assertIs(b.output._behavior.probe, b.tool._behavior.probe)
 
     # --- PredicateGrader ---
 
@@ -396,11 +562,32 @@ class AgentBehaviorTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(agent.behavior.tool.called_tool("search"))
         self.assertTrue(agent.behavior.stop.stopped_normally())
 
+    async def test_integration_output_structured_after_run(self) -> None:
+        # [Hidden Assumption] End-to-end: structured metadata is visible through output behavior.
+        agent = MockAgent(reply_metadata={"structured": {"answer": "yes"}}, reply_content='{"answer": "yes"}')
+        await agent.arun("answer")
+        self.assertTrue(agent.behavior.output.structured_field_equals("answer", "yes"))
+        self.assertTrue(agent.behavior.output.is_valid_json())
+
+    async def test_integration_output_code_block_after_run(self) -> None:
+        # [Silent Failure] End-to-end: code block output is visible through output behavior.
+        agent = MockAgent(reply_content="```python\nprint('x')\n```")
+        await agent.arun("code")
+        self.assertTrue(agent.behavior.output.contains_code_block("python"))
+
     async def test_integration_eval_runner_with_predicate(self) -> None:
         # [Hidden Assumption] EvalRunner + PredicateGrader: verify passed reflects predicate.
         calls = (make_call("search", state=ToolCallState.SUCCEEDED),)
         agent = MockAgent(reply_metadata={"tool_calls": calls, "stop_reason": "final_response", "tool_call_count": 1, "iteration_count": 1})
         suite = EvalSuite("s", [EvalCase(prompt="t", grader=PredicateGrader(lambda p: p.tool_call_count > 0))])
+        runner = EvalRunner(agent, default_grader=PredicateGrader(lambda p: False))
+        result = await runner.arun(suite)
+        self.assertTrue(result.results[0].grader_result.passed)
+
+    async def test_integration_eval_runner_with_structured_predicate(self) -> None:
+        # [Hidden Failure] EvalRunner + PredicateGrader passes structured output through the probe.
+        agent = MockAgent(reply_metadata={"structured": {"answer": "yes"}}, reply_content='{"answer": "yes"}')
+        suite = EvalSuite("s", [EvalCase(prompt="t", grader=PredicateGrader(lambda p: p.structured is not None and p.output != ""))])
         runner = EvalRunner(agent, default_grader=PredicateGrader(lambda p: False))
         result = await runner.arun(suite)
         self.assertTrue(result.results[0].grader_result.passed)
@@ -419,9 +606,11 @@ class AgentBehaviorTests(unittest.IsolatedAsyncioTestCase):
         await agent.arun("first")
         self.assertTrue(agent.behavior.tool.called_tool("search"))
         agent._reply_metadata = {"tool_calls": (make_call("write"),), "stop_reason": "final_response", "tool_call_count": 1, "iteration_count": 1}
+        agent._reply_content = "second output"
         await agent.arun("second")
         self.assertFalse(agent.behavior.tool.called_tool("search"))
         self.assertTrue(agent.behavior.tool.called_tool("write"))
+        self.assertTrue(agent.behavior.output.starts_with("second"))
 
 
 if __name__ == "__main__":

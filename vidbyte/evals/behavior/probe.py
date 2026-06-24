@@ -3,8 +3,8 @@
 Description:
     Defines the RunProbe frozen snapshot of a completed agent run's observable state.
 Purpose:
-    Captures tool calls, stop reason, iterations, tokens, output, handoff, and trace
-    artifact into a single immutable dataclass that behavior predicates read from.
+    Captures tool calls, stop reason, iterations, tokens, output, structured output,
+    handoff, and trace artifact into a single immutable dataclass that behavior predicates read from.
 Architecture:
     - RunProbe: frozen, slotted dataclass built from agent.last_reply.metadata and
       the agent's post-run fields (last_handoff, handoffs, last_trace).
@@ -39,6 +39,7 @@ class RunProbe:
     iteration_count: int = 0
     tokens_used: int | None = None
     output: str = ""
+    structured: Any = None
     handoff: Any = None
     handoffs: tuple[Any, ...] = field(default_factory=tuple)
     trace_artifact: Mapping[str, Any] | None = None
@@ -74,6 +75,7 @@ class RunProbe:
             iteration_count=int(md.get("iteration_count", 0)),
             tokens_used=md.get("tokens_used"),
             output=str(reply.content),
+            structured=md.get("structured"),
             handoff=agent.last_handoff,
             handoffs=tuple(agent.handoffs),
             trace_artifact=agent.last_trace,
@@ -95,6 +97,7 @@ class RunProbe:
             iteration_count=int(md.get("iteration_count", 0)),
             tokens_used=md.get("tokens_used"),
             output=str(reply.content),
+            structured=md.get("structured"),
         )
 
 
