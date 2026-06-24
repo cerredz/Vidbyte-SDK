@@ -445,6 +445,8 @@ class BaseAgent(McpAttachableMixin):
                 agent_name=self.name,
                 strategy="direct",
                 prompt=self._safe_trace_value(prompt),
+                system_prompt=self._safe_trace_value(self.system_prompt),
+                tools=self._safe_trace_value([self._tool_name(t) for t in self._agent_tool_items]),
                 provider=self._runner_provider(runner),
                 model=self._runner_model_name(runner),
                 metadata=self._safe_trace_value({**self.metadata, **dict(input_metadata), **trace_metadata}),
