@@ -68,6 +68,7 @@ prompt text.
 | Reflexion | `reflexion` | agent_system_prompt, reflect_system_prompt, reflect_prompt | [reflexion/](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/reflexion) |
 | Prompt Templates | `templates` | intent_based, persona, specification | [templates/](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/templates) |
 | Trajectory Checkpoints | `trajectory_checkpoints` | agentic_summarizer | [trajectory_checkpoints_agentic_summarizer.md](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/trajectory_checkpoints_agentic_summarizer.md) |
+| Prompt Bucket | `prompt_bucket` | installer (skill) | [skills/prompt-bucket.md](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/skills/prompt-bucket.md) |
 
 ### Descriptions
 
@@ -234,6 +235,21 @@ Link: <https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/
 Prompts used to generate agentic trajectory checkpoints.
 
 Link: <https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/trajectory_checkpoints_agentic_summarizer.md>
+
+#### Prompt Bucket — `prompt_bucket`
+
+An **installable coding-agent skill**, not an SDK prompt string — it is intentionally
+**not** part of the import-validated Python catalog (`vidbyte/prompts/prompts/`) and has no
+`Prompt` enum member. It ships as a single installer Markdown file that expands into a
+self-contained, multi-file skill (`SKILL.md`, `schema.sql`, `bucket.py`, `keys.md`,
+`buckets.db`) and then strips its own setup section. Once installed, `/create-bucket --key
+<key>` captures every prompt you send in a session into a named SQLite bucket, and
+`/load-bucket --key <key>` replays all of a bucket's prompts into a fresh session so the
+intent behind past work can be preloaded on demand. Capture is model-driven (no hook), so it
+runs in any harness with file and terminal tools. Download it like any other entry to keep
+the installer link in your `/vidbyte-prompts` collection, then run it to install.
+
+Link: <https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/skills/prompt-bucket.md>
 
 ## Key Modules
 
