@@ -7,7 +7,7 @@ Purpose:
     Documents the agent.behavior API, the RunProbe snapshot, the category decomposition,
     the PredicateGrader bridge, and the invariants any change must preserve.
 Architecture:
-    - Usage: agent.behavior.tool, agent.behavior.tool_args, agent.behavior.stop, agent.behavior.handoff.
+    - Usage: agent.behavior.tool, agent.behavior.tool_args, agent.behavior.stop, agent.behavior.handoff, agent.behavior.output.
     - Internals: RunProbe + Behavior facade + category classes + BaseAgent property.
 Relation to the codebase as a whole:
     Sub-skill referenced by skills/vidbyte-sdk/SKILL.md. Pairs with evals.md and
@@ -20,8 +20,8 @@ Relation to the codebase as a whole:
 
 A post-run predicate facade that lets developers inspect *what an agent did* — not just
 what it said. After `await agent.arun(prompt)`, access `agent.behavior` to query tool
-presence, tool outcomes, tool arguments, stop conditions, and handoff occurrence through
-ergonomic boolean methods grouped by category.
+presence, tool outcomes, tool arguments, stop conditions, handoff occurrence, and
+output shape through ergonomic boolean methods grouped by category.
 
 ```python
 from vidbyte import Agent
@@ -47,13 +47,19 @@ assert agent.behavior.stop.did_not_hit_max_iterations()
 
 # Handoff
 assert agent.behavior.handoff.handoff_occurred()
+
+# Output shape
+assert agent.behavior.output.is_not_empty()
+assert agent.behavior.output.contains_code_block("python")
+assert agent.behavior.output.structured_field_exists("answer")
 ```
 
 ## Architecture (do not bypass)
 
 - `vidbyte/evals/behavior/probe.py` — `RunProbe`: frozen, slotted dataclass capturing a
   completed run's observable state. Built from `agent.last_reply.metadata` plus
-  `agent.last_handoff`, `agent.handoffs`, `agent.last_trace`.
+  `agent.last_handoff`, `agent.handoffs`, `agent.last_trace`, and structured output from
+  `reply.metadata["structured"]`.
 - `vidbyte/evals/behavior/behavior.py` — `Behavior`: facade that lazily builds a `RunProbe`
   and composes four category behavior objects. Exposed via `agent.behavior`.
 - `vidbyte/evals/behavior/tool.py` — `ToolBehavior`: predicates over tool presence (A) and
@@ -62,6 +68,8 @@ assert agent.behavior.handoff.handoff_occurred()
   call arguments (C).
 - `vidbyte/evals/behavior/stop.py` — `StopBehavior`: predicates over stop reason, iterations,
   tokens (D).
+- `vidbyte/evals/behavior/output.py` - `OutputBehavior`: predicates over response text and
+  structured output (F).
 - `vidbyte/evals/behavior/handoff.py` — `HandoffBehavior`: predicates over handoff occurrence (E).
 - `vidbyte/agents/base.py` — `behavior` property (lazy, cached), invalidated at the start of
   `generate_reply`.
@@ -126,6 +134,33 @@ assert agent.behavior.handoff.handoff_occurred()
 | `handoff_has_section(title)` | True if the last handoff has the named section. |
 | `handoff_section_contains(title, substring)` | True if the named section contains substring. |
 
+### `agent.behavior.output` (OutputBehavior)
+
+| Method | Description |
+|--------|-------------|
+| `is_empty(strip=True)` | True if output is empty, optionally after stripping whitespace. |
+| `is_not_empty(strip=True)` | Negation of `is_empty`. |
+| `length(at_least=None, at_most=None, strip=False)` | True if character length is within inclusive bounds. |
+| `line_count(at_least=None, at_most=None)` | True if logical line count is within inclusive bounds. |
+| `word_count(at_least=None, at_most=None)` | True if word-token count is within inclusive bounds. |
+| `is_valid_json()` | True if raw output parses as JSON. |
+| `contains_code_block(language=None)` | True if output contains a Markdown fenced code block. |
+| `code_block_count(language=None, at_least=None, at_most=None)` | Count fenced code blocks, or check bounds when supplied. |
+| `contains_url()` | True if output contains an HTTP(S) or `www.` URL. |
+| `url_count(at_least=None, at_most=None)` | Count URLs, or check bounds when supplied. |
+| `contains_citation(style="any")` | True if output contains a citation-like marker. |
+| `citation_count(style="any", at_least=None, at_most=None)` | Count citations, or check bounds when supplied. |
+| `refused()` | True if output contains common refusal language. |
+| `contains_hedging()` | True if output contains common hedging language. |
+| `starts_with(prefix, case_sensitive=True, strip=False)` | True if output starts with prefix. |
+| `ends_with(suffix, case_sensitive=True, strip=False)` | True if output ends with suffix. |
+| `structured_valid()` | True if `RunProbe.structured` is not None. |
+| `structured_field_exists(path)` | True if a dot-path field exists in structured output. |
+| `structured_field_equals(path, value)` | True if a structured field equals value. |
+| `structured_field_matches(path, predicate)` | True if predicate(value) is true for a structured field. |
+| `structured_field_type(path, expected_type)` | True if a structured field has the expected type. |
+| `structured_contains_keys(keys)` | True if top-level structured output contains every key. |
+
 ## Using PredicateGrader in Eval Suites
 
 ```python
@@ -157,6 +192,9 @@ unaffected — the runner falls back to `agrade` when `agrade_with_probe` is not
    an empty `tool_calls` tuple is correct, not a bug.
 5. **`PredicateGrader` is opt-in.** The runner uses `hasattr(grader, "agrade_with_probe")`
    duck-typing; `BaseGrader.agrade` signature is unchanged.
+6. **Output behavior is not arbitrary text grading.** Keep substring and caller-provided regex
+   assertions in `ContainsGrader` and `RegexMatchGrader`; `OutputBehavior` owns structural and
+   linguistic response properties.
 
 ## Adding a new behavior category
 
@@ -165,7 +203,7 @@ unaffected — the runner falls back to `agrade` when `agrade_with_probe` is not
 2. Export the class from `vidbyte/evals/behavior/__init__.py`.
 3. Add a property to `Behavior` in `vidbyte/evals/behavior/behavior.py` that returns the
    new category object.
-4. Add tests to `tests/test_agent_behavior.py` and `scripts/test-agent-behavior.py`.
+4. Add tests to `tests/test_agent_behavior.py` and the relevant script in `scripts/`.
 5. Update this skill file's function catalog.
 
 ## Verify

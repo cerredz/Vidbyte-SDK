@@ -15,7 +15,7 @@ Relations:
 # Agent Behavior Usage
 
 After running an agent, use `agent.behavior` to inspect what the agent did during its last
-run. The facade exposes four sub-properties grouped by category.
+run. The facade exposes five sub-properties grouped by category.
 
 ## Quick Start
 
@@ -31,6 +31,10 @@ assert agent.behavior.tool.tool_succeeded("search")
 
 # Check stop conditions
 assert agent.behavior.stop.stopped_normally()
+
+# Check output shape
+assert agent.behavior.output.is_not_empty()
+assert agent.behavior.output.contains_code_block("python")
 ```
 
 ## Tool Presence (`agent.behavior.tool`)
@@ -115,6 +119,43 @@ agent.behavior.handoff.handoff_has_section("summary") # True/False
 agent.behavior.handoff.handoff_section_contains("summary", "searched")
 ```
 
+## Output (`agent.behavior.output`)
+
+```python
+# Emptiness and size
+agent.behavior.output.is_empty()
+agent.behavior.output.is_not_empty()
+agent.behavior.output.length(at_least=10, at_most=500)
+agent.behavior.output.line_count(at_most=10)
+agent.behavior.output.word_count(at_least=3)
+
+# Format and references
+agent.behavior.output.is_valid_json()
+agent.behavior.output.contains_code_block("python")
+agent.behavior.output.code_block_count("python", at_least=1)
+agent.behavior.output.contains_url()
+agent.behavior.output.contains_citation("markdown")
+
+# Response stance
+agent.behavior.output.refused()
+agent.behavior.output.contains_hedging()
+agent.behavior.output.starts_with("Result:", case_sensitive=False)
+agent.behavior.output.ends_with(".", strip=True)
+```
+
+## Structured Output (`agent.behavior.output`)
+
+When an agent run produces parsed structured output, `RunProbe.structured` reads
+`reply.metadata["structured"]`.
+
+```python
+agent.behavior.output.structured_valid()
+agent.behavior.output.structured_field_exists("items.0.title")
+agent.behavior.output.structured_field_equals("status", "complete")
+agent.behavior.output.structured_field_type("items", list)
+agent.behavior.output.structured_contains_keys(["status", "items"])
+```
+
 ## Using PredicateGrader in Eval Suites
 
 ```python
@@ -127,7 +168,7 @@ suite = EvalSuite("behavior", [
     ),
     EvalCase(
         prompt="read the file",
-        grader=PredicateGrader(lambda p: p.tool_call_count > 0 and p.tool_succeeded("read")),
+        grader=PredicateGrader(lambda p: p.tool_call_count > 0 and any(c.tool_name == "read" for c in p.tool_calls)),
     ),
 ])
 
@@ -139,3 +180,10 @@ print(result.pass_rate)
 The `PredicateGrader` receives a `RunProbe` with all the same fields the behavior facade
 reads. Use `p.tool_calls`, `p.stop_reason`, `p.iteration_count`, `p.handoff`, etc. directly
 in the predicate lambda.
+
+```python
+EvalCase(
+    prompt="Return JSON with an answer field",
+    grader=PredicateGrader(lambda p: p.structured is not None and "answer" in p.structured),
+)
+```
