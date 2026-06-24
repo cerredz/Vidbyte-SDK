@@ -8,12 +8,16 @@ from __future__ import annotations
 
 import asyncio
 import sys
+from pathlib import Path
 from typing import Any
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from vidbyte.agents.base import BaseAgent
 from vidbyte.agents.types import AgentInput
 from vidbyte.context.handoff.base import Handoff
 from vidbyte.evals import Behavior, ContainsGrader, EvalCase, EvalRunner, EvalSuite, PredicateGrader, RunProbe
+from vidbyte.evals.behavior.efficiency import EfficiencyBehavior
 from vidbyte.evals.behavior.tool import ToolBehavior
 from vidbyte.lib.dataclasses.agents import AgentMessage
 from vidbyte.lib.dataclasses.tools import ToolCallContext, ToolCallState, ToolResult, ToolStatus
@@ -48,6 +52,8 @@ def behavior_from_probe(probe: RunProbe) -> Behavior:
     b._stop._behavior = b
     b._handoff = HandoffBehavior.__new__(HandoffBehavior)
     b._handoff._behavior = b
+    b._efficiency = EfficiencyBehavior.__new__(EfficiencyBehavior)
+    b._efficiency._behavior = b
     return b
 
 
@@ -425,12 +431,255 @@ def test_handoff_all_predicates_none() -> None:
     assert b.handoff.handoff_section_contains("a", "b") is False
 
 
+# --- EfficiencyBehavior Category G ---
+
+def test_efficiency_max_tool_repetitions() -> None:
+    # [Edge Case] max_tool_repetitions handles below, equal, and above threshold.
+    b = behavior_from_probe(RunProbe(tool_calls=(make_call("search"), make_call("search"), make_call("read"))))
+    assert b.efficiency.max_tool_repetitions("search", 2) is True
+    assert b.efficiency.max_tool_repetitions("search", 1) is False
+    assert b.efficiency.max_tool_repetitions("write", 0) is True
+
+def test_efficiency_max_any_tool_repetitions() -> None:
+    # [Silent Failure] max_any_tool_repetitions uses the most repeated tool name.
+    b = behavior_from_probe(RunProbe(tool_calls=(make_call("search"), make_call("search"), make_call("read"))))
+    assert b.efficiency.max_any_tool_repetitions(2) is True
+    assert b.efficiency.max_any_tool_repetitions(1) is False
+
+def test_efficiency_completed_within_iterations() -> None:
+    # [Edge Case] completed_within_iterations uses an inclusive boundary.
+    b = behavior_from_probe(RunProbe(iteration_count=4))
+    assert b.efficiency.completed_within_iterations(4) is True
+    assert b.efficiency.completed_within_iterations(3) is False
+
+def test_efficiency_completed_within_tool_calls() -> None:
+    # [Edge Case] completed_within_tool_calls uses an inclusive boundary.
+    b = behavior_from_probe(RunProbe(tool_call_count=3))
+    assert b.efficiency.completed_within_tool_calls(3) is True
+    assert b.efficiency.completed_within_tool_calls(2) is False
+
+def test_efficiency_tool_calls_between() -> None:
+    # [Silent Failure] tool_calls_between uses inclusive lower and upper bounds.
+    b = behavior_from_probe(RunProbe(tool_call_count=3))
+    assert b.efficiency.tool_calls_between(3, 3) is True
+    assert b.efficiency.tool_calls_between(1, 5) is True
+    assert b.efficiency.tool_calls_between(4, 5) is False
+    assert b.efficiency.tool_calls_between(0, 2) is False
+
+def test_efficiency_no_duplicate_tool_args() -> None:
+    # [Hidden Assumption] duplicate args are scoped to the named tool only.
+    calls = (make_call("search", args={"q": "x"}), make_call("read", args={"q": "x"}), make_call("search", args={"q": "x"}))
+    b = behavior_from_probe(RunProbe(tool_calls=calls))
+    assert b.efficiency.no_duplicate_tool_args("search") is False
+    assert b.efficiency.no_duplicate_tool_args("read") is True
+
+def test_efficiency_no_duplicate_tool_calls() -> None:
+    # [Silent Failure] duplicate tool calls require both same tool name and same arguments.
+    duplicate = behavior_from_probe(RunProbe(tool_calls=(make_call("search", args={"q": "x"}), make_call("search", args={"q": "x"}))))
+    unique = behavior_from_probe(RunProbe(tool_calls=(make_call("search", args={"q": "x"}), make_call("search", args={"q": "y"}))))
+    assert duplicate.efficiency.no_duplicate_tool_calls() is False
+    assert unique.efficiency.no_duplicate_tool_calls() is True
+
+def test_efficiency_duplicate_tool_arg_count() -> None:
+    # [Silent Failure] duplicate_tool_arg_count counts duplicate occurrences after the first.
+    calls = (make_call("search", args={"q": "x"}), make_call("search", args={"q": "x"}), make_call("search", args={"q": "x"}))
+    assert behavior_from_probe(RunProbe(tool_calls=calls)).efficiency.duplicate_tool_arg_count("search") == 2
+
+def test_efficiency_duplicate_tool_call_count() -> None:
+    # [Silent Failure] duplicate_tool_call_count counts duplicate exact calls after the first.
+    calls = (make_call("search", args={"q": "x"}), make_call("search", args={"q": "x"}), make_call("read", args={"q": "x"}))
+    assert behavior_from_probe(RunProbe(tool_calls=calls)).efficiency.duplicate_tool_call_count() == 1
+
+def test_efficiency_unique_tool_call_count() -> None:
+    # [Silent Failure] unique_tool_call_count does not inflate repeated exact calls.
+    calls = (make_call("search", args={"q": "x"}), make_call("search", args={"q": "x"}), make_call("search", args={"q": "y"}))
+    assert behavior_from_probe(RunProbe(tool_calls=calls)).efficiency.unique_tool_call_count() == 2
+
+def test_efficiency_unique_tool_ratio_at_least_empty() -> None:
+    # [Edge Case] zero tool calls are treated as a unique ratio of 1.0.
+    b = behavior_from_probe(RunProbe(tool_calls=(), tool_call_count=0))
+    assert b.efficiency.unique_tool_ratio_at_least(1.0) is True
+    assert b.efficiency.unique_tool_ratio_at_least(1.1) is False
+
+def test_efficiency_unique_tool_ratio_at_least_mixed() -> None:
+    # [Silent Failure] unique_tool_ratio_at_least uses exact unique calls over total calls.
+    calls = (make_call("search", args={"q": "x"}), make_call("search", args={"q": "x"}), make_call("read", args={"path": "a"}))
+    b = behavior_from_probe(RunProbe(tool_calls=calls, tool_call_count=3))
+    assert b.efficiency.unique_tool_ratio_at_least(2 / 3) is True
+    assert b.efficiency.unique_tool_ratio_at_least(0.75) is False
+
+def test_efficiency_no_consecutive_identical_calls() -> None:
+    # [Hidden Assumption] no_consecutive_identical_calls only checks adjacent exact repeats.
+    adjacent = behavior_from_probe(RunProbe(tool_calls=(make_call("search", args={"q": "x"}), make_call("search", args={"q": "x"}))))
+    non_adjacent = behavior_from_probe(RunProbe(tool_calls=(make_call("search", args={"q": "x"}), make_call("read"), make_call("search", args={"q": "x"}))))
+    assert adjacent.efficiency.no_consecutive_identical_calls() is False
+    assert non_adjacent.efficiency.no_consecutive_identical_calls() is True
+
+def test_efficiency_no_consecutive_same_tool() -> None:
+    # [Hidden Assumption] no_consecutive_same_tool ignores arguments.
+    b = behavior_from_probe(RunProbe(tool_calls=(make_call("search", args={"q": "x"}), make_call("search", args={"q": "y"}))))
+    assert b.efficiency.no_consecutive_same_tool() is False
+
+def test_efficiency_consecutive_identical_call_count() -> None:
+    # [Silent Failure] consecutive_identical_call_count ignores non-adjacent repeats.
+    calls = (make_call("search", args={"q": "x"}), make_call("search", args={"q": "x"}), make_call("read"), make_call("search", args={"q": "x"}))
+    assert behavior_from_probe(RunProbe(tool_calls=calls)).efficiency.consecutive_identical_call_count() == 1
+
+def test_efficiency_consecutive_same_tool_count() -> None:
+    # [Silent Failure] consecutive_same_tool_count counts adjacent same-tool pairs.
+    calls = (make_call("search", args={"q": "x"}), make_call("search", args={"q": "y"}), make_call("search", args={"q": "z"}), make_call("read"))
+    assert behavior_from_probe(RunProbe(tool_calls=calls)).efficiency.consecutive_same_tool_count() == 2
+
+def test_efficiency_max_consecutive_tool_calls() -> None:
+    # [Silent Failure] max_consecutive_tool_calls uses the longest run for one tool.
+    calls = (make_call("search"), make_call("search"), make_call("read"), make_call("search"))
+    b = behavior_from_probe(RunProbe(tool_calls=calls))
+    assert b.efficiency.max_consecutive_tool_calls("search", 2) is True
+    assert b.efficiency.max_consecutive_tool_calls("search", 1) is False
+
+def test_efficiency_max_any_consecutive_tool_repetitions() -> None:
+    # [Silent Failure] max_any_consecutive_tool_repetitions uses the longest run across all tools.
+    calls = (make_call("search"), make_call("read"), make_call("read"), make_call("read"))
+    b = behavior_from_probe(RunProbe(tool_calls=calls))
+    assert b.efficiency.max_any_consecutive_tool_repetitions(3) is True
+    assert b.efficiency.max_any_consecutive_tool_repetitions(2) is False
+
+def test_efficiency_repeated_tool_names_ordered() -> None:
+    # [Silent Failure] repeated_tool_names preserves first-occurrence order.
+    calls = (make_call("b"), make_call("a"), make_call("b"), make_call("a"), make_call("c"))
+    assert behavior_from_probe(RunProbe(tool_calls=calls)).efficiency.repeated_tool_names() == ("b", "a")
+
+def test_efficiency_no_repeated_tool_results_global_and_scoped() -> None:
+    # [Hidden Assumption] no_repeated_tool_results can be global or scoped to one tool.
+    calls = (make_call("search", result_output="same"), make_call("read", result_output="same"))
+    b = behavior_from_probe(RunProbe(tool_calls=calls))
+    assert b.efficiency.no_repeated_tool_results() is False
+    assert b.efficiency.no_repeated_tool_results("search") is True
+
+def test_efficiency_repeated_tool_result_count() -> None:
+    # [Hidden Failure] repeated_tool_result_count skips None results and counts repeats after first.
+    calls = (make_call("search", result_output="same"), make_call("search", result_output=None), make_call("read", result_output="same"), make_call("write", result_output="same"))
+    assert behavior_from_probe(RunProbe(tool_calls=calls)).efficiency.repeated_tool_result_count() == 2
+
+def test_efficiency_max_result_repetitions() -> None:
+    # [Edge Case] max_result_repetitions uses an inclusive frequency threshold.
+    calls = (make_call("search", result_output="same"), make_call("read", result_output="same"))
+    b = behavior_from_probe(RunProbe(tool_calls=calls))
+    assert b.efficiency.max_result_repetitions(2) is True
+    assert b.efficiency.max_result_repetitions(1) is False
+
+def test_efficiency_failed_tool_calls_at_most() -> None:
+    # [Edge Case] failed_tool_calls_at_most uses an inclusive FAILED-call threshold.
+    b = behavior_from_probe(RunProbe(tool_calls=(make_call("a", state=ToolCallState.FAILED),)))
+    assert b.efficiency.failed_tool_calls_at_most(1) is True
+    assert b.efficiency.failed_tool_calls_at_most(0) is False
+
+def test_efficiency_denied_tool_calls_at_most() -> None:
+    # [Edge Case] denied_tool_calls_at_most uses an inclusive DENIED-call threshold.
+    b = behavior_from_probe(RunProbe(tool_calls=(make_call("a", state=ToolCallState.DENIED),)))
+    assert b.efficiency.denied_tool_calls_at_most(1) is True
+    assert b.efficiency.denied_tool_calls_at_most(0) is False
+
+def test_efficiency_unsuccessful_tool_calls_at_most() -> None:
+    # [Hidden Assumption] unsuccessful_tool_calls_at_most counts FAILED and DENIED only.
+    calls = (make_call("a", state=ToolCallState.FAILED), make_call("b", state=ToolCallState.DENIED), make_call("c", state=ToolCallState.SUCCEEDED))
+    b = behavior_from_probe(RunProbe(tool_calls=calls))
+    assert b.efficiency.unsuccessful_tool_calls_at_most(2) is True
+    assert b.efficiency.unsuccessful_tool_calls_at_most(1) is False
+
+def test_efficiency_successful_tool_call_ratio_at_least_empty() -> None:
+    # [Edge Case] zero calls are treated as a successful-call ratio of 1.0.
+    b = behavior_from_probe(RunProbe(tool_calls=(), tool_call_count=0))
+    assert b.efficiency.successful_tool_call_ratio_at_least(1.0) is True
+    assert b.efficiency.successful_tool_call_ratio_at_least(1.1) is False
+
+def test_efficiency_successful_tool_call_ratio_at_least_mixed() -> None:
+    # [Silent Failure] successful_tool_call_ratio_at_least uses succeeded count over total count.
+    calls = (make_call("a", state=ToolCallState.SUCCEEDED), make_call("b", state=ToolCallState.FAILED))
+    b = behavior_from_probe(RunProbe(tool_calls=calls, tool_call_count=2))
+    assert b.efficiency.successful_tool_call_ratio_at_least(0.5) is True
+    assert b.efficiency.successful_tool_call_ratio_at_least(0.75) is False
+
+def test_efficiency_no_failed_tool_retries() -> None:
+    # [Hidden Assumption] no_failed_tool_retries is scoped to unsuccessful exact attempts.
+    calls = (make_call("search", state=ToolCallState.FAILED, args={"q": "x"}), make_call("search", state=ToolCallState.DENIED, args={"q": "x"}), make_call("read", state=ToolCallState.FAILED, args={"q": "x"}))
+    b = behavior_from_probe(RunProbe(tool_calls=calls))
+    assert b.efficiency.no_failed_tool_retries("search") is False
+    assert b.efficiency.no_failed_tool_retries("read") is True
+
+def test_efficiency_failed_tool_retry_count() -> None:
+    # [Silent Failure] failed_tool_retry_count counts repeated unsuccessful exact attempts after first.
+    calls = (make_call("search", state=ToolCallState.FAILED, args={"q": "x"}), make_call("search", state=ToolCallState.DENIED, args={"q": "x"}), make_call("search", state=ToolCallState.FAILED, args={"q": "x"}))
+    assert behavior_from_probe(RunProbe(tool_calls=calls)).efficiency.failed_tool_retry_count("search") == 2
+
+def test_efficiency_did_not_stop_on_budget() -> None:
+    # [Hidden Assumption] did_not_stop_on_budget rejects all budget stop reasons.
+    assert behavior_from_probe(RunProbe(stop_reason="final_response")).efficiency.did_not_stop_on_budget() is True
+    assert behavior_from_probe(RunProbe(stop_reason="max_iterations")).efficiency.did_not_stop_on_budget() is False
+    assert behavior_from_probe(RunProbe(stop_reason="max_tool_calls")).efficiency.did_not_stop_on_budget() is False
+    assert behavior_from_probe(RunProbe(stop_reason="max_tokens")).efficiency.did_not_stop_on_budget() is False
+
+def test_efficiency_stopped_normally_within_iterations() -> None:
+    # [Hidden Failure] stopped_normally_within_iterations requires normal stop and iteration bound.
+    assert behavior_from_probe(RunProbe(stop_reason="final_response", iteration_count=2)).efficiency.stopped_normally_within_iterations(2) is True
+    assert behavior_from_probe(RunProbe(stop_reason="max_iterations", iteration_count=2)).efficiency.stopped_normally_within_iterations(2) is False
+    assert behavior_from_probe(RunProbe(stop_reason="final_response", iteration_count=3)).efficiency.stopped_normally_within_iterations(2) is False
+
+def test_efficiency_stopped_normally_within_tool_calls() -> None:
+    # [Hidden Failure] stopped_normally_within_tool_calls requires normal stop and tool-call bound.
+    assert behavior_from_probe(RunProbe(stop_reason="final_response", tool_call_count=2)).efficiency.stopped_normally_within_tool_calls(2) is True
+    assert behavior_from_probe(RunProbe(stop_reason="max_tool_calls", tool_call_count=2)).efficiency.stopped_normally_within_tool_calls(2) is False
+    assert behavior_from_probe(RunProbe(stop_reason="final_response", tool_call_count=3)).efficiency.stopped_normally_within_tool_calls(2) is False
+
+def test_efficiency_tokens_per_tool_call() -> None:
+    # [Edge Case] tokens_per_tool_call divides normally and returns None when unavailable.
+    assert behavior_from_probe(RunProbe(tokens_used=100, tool_call_count=4)).efficiency.tokens_per_tool_call() == 25.0
+    assert behavior_from_probe(RunProbe(tokens_used=None, tool_call_count=4)).efficiency.tokens_per_tool_call() is None
+    assert behavior_from_probe(RunProbe(tokens_used=100, tool_call_count=0)).efficiency.tokens_per_tool_call() is None
+
+def test_efficiency_tokens_per_tool_call_at_most() -> None:
+    # [Silent Failure] tokens_per_tool_call_at_most passes unknown usage and fails known over-limit usage.
+    assert behavior_from_probe(RunProbe(tokens_used=None, tool_call_count=4)).efficiency.tokens_per_tool_call_at_most(1) is True
+    assert behavior_from_probe(RunProbe(tokens_used=100, tool_call_count=4)).efficiency.tokens_per_tool_call_at_most(25) is True
+    assert behavior_from_probe(RunProbe(tokens_used=100, tool_call_count=4)).efficiency.tokens_per_tool_call_at_most(24) is False
+
+def test_efficiency_tokens_per_iteration() -> None:
+    # [Edge Case] tokens_per_iteration divides normally and returns None when unavailable.
+    assert behavior_from_probe(RunProbe(tokens_used=100, iteration_count=4)).efficiency.tokens_per_iteration() == 25.0
+    assert behavior_from_probe(RunProbe(tokens_used=None, iteration_count=4)).efficiency.tokens_per_iteration() is None
+    assert behavior_from_probe(RunProbe(tokens_used=100, iteration_count=0)).efficiency.tokens_per_iteration() is None
+
+def test_efficiency_tokens_per_iteration_at_most() -> None:
+    # [Silent Failure] tokens_per_iteration_at_most passes unknown usage and fails known over-limit usage.
+    assert behavior_from_probe(RunProbe(tokens_used=None, iteration_count=4)).efficiency.tokens_per_iteration_at_most(1) is True
+    assert behavior_from_probe(RunProbe(tokens_used=100, iteration_count=4)).efficiency.tokens_per_iteration_at_most(25) is True
+    assert behavior_from_probe(RunProbe(tokens_used=100, iteration_count=4)).efficiency.tokens_per_iteration_at_most(24) is False
+
+def test_efficiency_handles_nested_unhashable_args() -> None:
+    # [Hidden Failure] duplicate detection handles nested list and dict argument values.
+    args = {"query": {"terms": ["a", "b"]}}
+    calls = (make_call("search", args=args), make_call("search", args=args))
+    b = behavior_from_probe(RunProbe(tool_calls=calls))
+    assert b.efficiency.duplicate_tool_call_count() == 1
+    assert b.efficiency.no_duplicate_tool_args("search") is False
+
+
 # --- Behavior Facade tests ---
 
 def test_agent_behavior_returns_behavior() -> None:
     # [Edge Case] agent.behavior returns a Behavior instance.
     agent = BaseAgent(name="t", system_prompt="t", runner=object())
     assert isinstance(agent.behavior, Behavior)
+
+def test_agent_behavior_efficiency_returns_efficiency_behavior() -> None:
+    # [Edge Case] agent.behavior.efficiency returns an EfficiencyBehavior instance.
+    agent = BaseAgent(name="t", system_prompt="t", runner=object())
+    assert isinstance(agent.behavior.efficiency, EfficiencyBehavior)
+
+def test_behavior_from_probe_helper_initializes_efficiency() -> None:
+    # [Hidden Assumption] behavior_from_probe wires the efficiency category for isolated tests.
+    b = behavior_from_probe(RunProbe(tool_calls=()))
+    assert b.efficiency.no_duplicate_tool_calls() is True
 
 def test_agent_behavior_cached() -> None:
     # [Silent Failure] agent.behavior returns the same instance on repeated access.
@@ -499,6 +748,14 @@ async def test_integration_behavior_after_run() -> None:
     assert agent.behavior.tool.called_tool("search") is True
     assert agent.behavior.stop.stopped_normally() is True
 
+async def test_integration_efficiency_after_run() -> None:
+    # [Silent Failure] End-to-end: efficiency behavior reflects repeated tool calls from the latest run.
+    calls = (make_call("search", args={"q": "x"}), make_call("search", args={"q": "x"}))
+    agent = MockAgent(reply_metadata={"tool_calls": calls, "stop_reason": "final_response", "tool_call_count": 2, "iteration_count": 1})
+    await agent.arun("find X")
+    assert agent.behavior.efficiency.no_duplicate_tool_calls() is False
+    assert agent.behavior.efficiency.duplicate_tool_call_count() == 1
+
 async def test_integration_eval_runner_with_predicate_grader() -> None:
     # [Hidden Assumption] EvalRunner + PredicateGrader: verify passed reflects predicate.
     calls = (make_call("search", state=ToolCallState.SUCCEEDED),)
@@ -507,6 +764,15 @@ async def test_integration_eval_runner_with_predicate_grader() -> None:
     runner = EvalRunner(agent, default_grader=PredicateGrader(lambda p: False))
     result = await runner.arun(suite)
     assert len(result.results) == 1
+    assert result.results[0].grader_result.passed is True
+
+async def test_integration_eval_runner_with_efficiency_predicate() -> None:
+    # [Hidden Assumption] EvalRunner still passes probes that can express efficiency predicates.
+    calls = (make_call("search", args={"q": "x"}), make_call("search", args={"q": "x"}))
+    agent = MockAgent(reply_metadata={"tool_calls": calls, "stop_reason": "final_response", "tool_call_count": 2, "iteration_count": 1})
+    suite = EvalSuite("s", [EvalCase(prompt="t", grader=PredicateGrader(lambda p: len({str(dict(c.arguments)) for c in p.tool_calls}) == 1))])
+    runner = EvalRunner(agent, default_grader=PredicateGrader(lambda p: False))
+    result = await runner.arun(suite)
     assert result.results[0].grader_result.passed is True
 
 async def test_integration_eval_runner_standard_grader_unchanged() -> None:
@@ -526,6 +792,15 @@ async def test_integration_cache_invalidation() -> None:
     await agent.arun("second")
     assert agent.behavior.tool.called_tool("search") is False
     assert agent.behavior.tool.called_tool("write") is True
+
+async def test_integration_efficiency_cache_invalidation() -> None:
+    # [Silent Failure] Cache invalidation: efficiency predicates reflect the second run.
+    agent = MockAgent(reply_metadata={"tool_calls": (make_call("search", args={"q": "x"}), make_call("search", args={"q": "x"})), "stop_reason": "final_response", "tool_call_count": 2, "iteration_count": 1})
+    await agent.arun("first")
+    assert agent.behavior.efficiency.no_duplicate_tool_calls() is False
+    agent._reply_metadata = {"tool_calls": (make_call("search", args={"q": "x"}), make_call("search", args={"q": "y"})), "stop_reason": "final_response", "tool_call_count": 2, "iteration_count": 1}
+    await agent.arun("second")
+    assert agent.behavior.efficiency.no_duplicate_tool_calls() is True
 
 
 # --- Main ---
@@ -590,8 +865,48 @@ def main() -> int:
     tr.run("handoff_section_contains [Silent Failure]", test_handoff_section_contains_finds_substring)
     tr.run("handoff_section_contains_missing [Hidden Failure]", test_handoff_section_contains_missing_section)
     tr.run("handoff_all_predicates_none [Edge Case]", test_handoff_all_predicates_none)
+    # EfficiencyBehavior G
+    tr.run("efficiency_max_tool_repetitions [Edge Case]", test_efficiency_max_tool_repetitions)
+    tr.run("efficiency_max_any_tool_repetitions [Silent Failure]", test_efficiency_max_any_tool_repetitions)
+    tr.run("efficiency_completed_within_iterations [Edge Case]", test_efficiency_completed_within_iterations)
+    tr.run("efficiency_completed_within_tool_calls [Edge Case]", test_efficiency_completed_within_tool_calls)
+    tr.run("efficiency_tool_calls_between [Silent Failure]", test_efficiency_tool_calls_between)
+    tr.run("efficiency_no_duplicate_tool_args [Hidden Assumption]", test_efficiency_no_duplicate_tool_args)
+    tr.run("efficiency_no_duplicate_tool_calls [Silent Failure]", test_efficiency_no_duplicate_tool_calls)
+    tr.run("efficiency_duplicate_tool_arg_count [Silent Failure]", test_efficiency_duplicate_tool_arg_count)
+    tr.run("efficiency_duplicate_tool_call_count [Silent Failure]", test_efficiency_duplicate_tool_call_count)
+    tr.run("efficiency_unique_tool_call_count [Silent Failure]", test_efficiency_unique_tool_call_count)
+    tr.run("efficiency_unique_tool_ratio_empty [Edge Case]", test_efficiency_unique_tool_ratio_at_least_empty)
+    tr.run("efficiency_unique_tool_ratio_mixed [Silent Failure]", test_efficiency_unique_tool_ratio_at_least_mixed)
+    tr.run("efficiency_no_consecutive_identical_calls [Hidden Assumption]", test_efficiency_no_consecutive_identical_calls)
+    tr.run("efficiency_no_consecutive_same_tool [Hidden Assumption]", test_efficiency_no_consecutive_same_tool)
+    tr.run("efficiency_consecutive_identical_call_count [Silent Failure]", test_efficiency_consecutive_identical_call_count)
+    tr.run("efficiency_consecutive_same_tool_count [Silent Failure]", test_efficiency_consecutive_same_tool_count)
+    tr.run("efficiency_max_consecutive_tool_calls [Silent Failure]", test_efficiency_max_consecutive_tool_calls)
+    tr.run("efficiency_max_any_consecutive_tool_repetitions [Silent Failure]", test_efficiency_max_any_consecutive_tool_repetitions)
+    tr.run("efficiency_repeated_tool_names_ordered [Silent Failure]", test_efficiency_repeated_tool_names_ordered)
+    tr.run("efficiency_no_repeated_tool_results [Hidden Assumption]", test_efficiency_no_repeated_tool_results_global_and_scoped)
+    tr.run("efficiency_repeated_tool_result_count [Hidden Failure]", test_efficiency_repeated_tool_result_count)
+    tr.run("efficiency_max_result_repetitions [Edge Case]", test_efficiency_max_result_repetitions)
+    tr.run("efficiency_failed_tool_calls_at_most [Edge Case]", test_efficiency_failed_tool_calls_at_most)
+    tr.run("efficiency_denied_tool_calls_at_most [Edge Case]", test_efficiency_denied_tool_calls_at_most)
+    tr.run("efficiency_unsuccessful_tool_calls_at_most [Hidden Assumption]", test_efficiency_unsuccessful_tool_calls_at_most)
+    tr.run("efficiency_successful_ratio_empty [Edge Case]", test_efficiency_successful_tool_call_ratio_at_least_empty)
+    tr.run("efficiency_successful_ratio_mixed [Silent Failure]", test_efficiency_successful_tool_call_ratio_at_least_mixed)
+    tr.run("efficiency_no_failed_tool_retries [Hidden Assumption]", test_efficiency_no_failed_tool_retries)
+    tr.run("efficiency_failed_tool_retry_count [Silent Failure]", test_efficiency_failed_tool_retry_count)
+    tr.run("efficiency_did_not_stop_on_budget [Hidden Assumption]", test_efficiency_did_not_stop_on_budget)
+    tr.run("efficiency_stopped_normally_within_iterations [Hidden Failure]", test_efficiency_stopped_normally_within_iterations)
+    tr.run("efficiency_stopped_normally_within_tool_calls [Hidden Failure]", test_efficiency_stopped_normally_within_tool_calls)
+    tr.run("efficiency_tokens_per_tool_call [Edge Case]", test_efficiency_tokens_per_tool_call)
+    tr.run("efficiency_tokens_per_tool_call_at_most [Silent Failure]", test_efficiency_tokens_per_tool_call_at_most)
+    tr.run("efficiency_tokens_per_iteration [Edge Case]", test_efficiency_tokens_per_iteration)
+    tr.run("efficiency_tokens_per_iteration_at_most [Silent Failure]", test_efficiency_tokens_per_iteration_at_most)
+    tr.run("efficiency_handles_nested_unhashable_args [Hidden Failure]", test_efficiency_handles_nested_unhashable_args)
     # Behavior Facade
     tr.run("agent_behavior_returns_behavior [Edge Case]", test_agent_behavior_returns_behavior)
+    tr.run("agent_behavior_efficiency_returns_efficiency [Edge Case]", test_agent_behavior_efficiency_returns_efficiency_behavior)
+    tr.run("behavior_from_probe_initializes_efficiency [Hidden Assumption]", test_behavior_from_probe_helper_initializes_efficiency)
     tr.run("agent_behavior_cached [Silent Failure]", test_agent_behavior_cached)
     tr.run("agent_behavior_tool_returns_tb [Edge Case]", test_agent_behavior_tool_returns_tool_behavior)
     tr.run("behavior_probe_built_lazily [Hidden Assumption]", test_behavior_probe_built_lazily)
@@ -604,9 +919,12 @@ def main() -> int:
 
     # Async integration tests
     asyncio.run(tr.run_async("integration_behavior_after_run [Silent Failure]", test_integration_behavior_after_run))
+    asyncio.run(tr.run_async("integration_efficiency_after_run [Silent Failure]", test_integration_efficiency_after_run))
     asyncio.run(tr.run_async("integration_eval_runner_predicate [Hidden Assumption]", test_integration_eval_runner_with_predicate_grader))
+    asyncio.run(tr.run_async("integration_eval_runner_efficiency_predicate [Hidden Assumption]", test_integration_eval_runner_with_efficiency_predicate))
     asyncio.run(tr.run_async("integration_eval_runner_standard [Hidden Failure]", test_integration_eval_runner_standard_grader_unchanged))
     asyncio.run(tr.run_async("integration_cache_invalidation [Silent Failure]", test_integration_cache_invalidation))
+    asyncio.run(tr.run_async("integration_efficiency_cache_invalidation [Silent Failure]", test_integration_efficiency_cache_invalidation))
 
     return tr.summary()
 

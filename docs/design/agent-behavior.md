@@ -26,6 +26,8 @@ Relations:
 
 ## 1. Overview
 
+**2026-06-24 addendum:** The facade now includes additional categories beyond this original design, including `agent.behavior.output` and `agent.behavior.efficiency`. The efficiency category is specified in `docs/design/agent-behavior-efficiency.md` and uses existing `RunProbe` fields only; it does not change agent runtime loop behavior.
+
 This feature adds a first-class **behavior introspection layer** to the Vidbyte SDK. After an agent runs, developers can inspect *what the agent did* — not just what it said — via `agent.behavior`, a lazily-built facade that exposes boolean predicates grouped by category: tool presence and outcome (`agent.behavior.tool`), tool argument inspection (`agent.behavior.tool_args`), run-level stop conditions (`agent.behavior.stop`), and handoff occurrence (`agent.behavior.handoff`). The facade reads a single `RunProbe` snapshot built from `agent.last_reply.metadata` and the agent's post-run fields. A `PredicateGrader` bridges the same probes into the existing `EvalRunner` suite pipeline so behavior assertions run at scale alongside text graders.
 
 ---
