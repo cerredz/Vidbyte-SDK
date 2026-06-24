@@ -317,30 +317,7 @@ Treat this document as the anatomy of a well-engineered system prompt: it is a l
 
 ---
 
-## 14. Plan Before Act
-
-**What it is.** The plan-before-act section imposes a two-phase architecture on the agent: a planning phase in which it scopes the work and proposes an approach, followed by an execution phase in which it carries that approach out — with a hard rule that it must not act before the plan is settled. It separates thinking about the work from doing the work, and gates the second on the first. Major AI harnesses converge on this pattern because premature action is a dominant failure mode. It is most valuable precisely when actions are hard to undo.
-
-**Why include it.** The purpose is to prevent the model from taking irreversible or expensive actions before it adequately understands the task, because agents that start editing, deleting, or calling before scoping routinely do the wrong thing confidently. Forcing a plan first makes the model build a mental model of the whole task and surface its assumptions before any state changes. It creates a natural review checkpoint where a human (or the model itself) can catch a flawed approach while it is still cheap to change. It counters local, greedy behavior by requiring a global strategy up front. For multi-step or stateful tasks, this is one of the most effective safeguards against compounding mistakes. The plan also becomes a reference the model can check its execution against, reducing drift. When the cost of acting wrongly is high, planning first is almost always worth the extra step.
-
-**When to use it.**
-
-- **Actions are hard to reverse.** When the agent can delete, overwrite, deploy, or send, force a plan before any of it. Irreversibility is the strongest trigger.
-- **The task is multi-step and stateful.** When work unfolds over many actions that change state, plan the whole arc first. Up-front scoping prevents early missteps from compounding.
-- **A human should review the approach.** When you want a checkpoint to approve direction before resources are spent, the plan provides it. Review is cheapest before execution.
-- **The cost of a wrong action is high.** When mistakes are expensive in time, money, or trust, the planning tax is worth paying. Plan-first is insurance.
-- **The model tends to act prematurely.** When you have seen it dive in before understanding, the gate forces patience. It substitutes deliberation for impulse.
-- **Requirements need to be surfaced.** When planning forces the model to state assumptions and unknowns, you catch gaps early. The plan exposes what was unclear.
-- **The work decomposes into sub-tasks.** When a complex request should be broken down before execution, planning is where that happens. Decomposition belongs in the plan phase.
-- **Coordination or ordering is non-trivial.** When steps depend on each other in subtle ways, a plan resolves the dependencies first. Better to map them than to discover them mid-execution.
-- **Skip it for trivial single actions.** When the task is one safe, reversible step, a planning ceremony just adds latency. Reserve it for consequential work.
-- **Skip it for pure read-only queries.** When nothing is being changed, the risk that motivates planning is absent.
-
-**Output (format & length).** A short protocol statement instructing the model to first produce a numbered plan covering the intended steps, to wait for confirmation (or to self-verify the plan) before acting, and to begin execution only afterward. A few sentences is enough; make the "do not act before planning" gate explicit.
-
----
-
-## 15. Persistent Memory / File Storage
+## 14. Persistent Memory / File Storage
 
 **What it is.** The persistent-memory section instructs the agent to save information into files — creating, structuring, and updating small memory files that hold what it needs to remember. Because many agents can already write and edit files, this section repurposes that capability into a lightweight memory system, where specific files hold specific kinds of remembered information. It is deliberately scoped to short-term, thin memory: a few important facts kept in small, well-structured files rather than large stores. It tells the model what to write down, which file holds it, and in what shape.
 
@@ -365,7 +342,7 @@ Treat this document as the anatomy of a well-engineered system prompt: it is a l
 
 ---
 
-## 16. State Management & Checkpointing
+## 15. State Management & Checkpointing
 
 **What it is.** The state-management section defines how the agent persists progress across a long task so that an interruption does not erase its work. It instructs the model to externalize its state — what it has done, what remains, key decisions, the current step — into durable form at meaningful moments, and to resume cleanly from that record. It addresses the reality that the context window is volatile and finite, so progress on long tasks cannot live there alone. It is the section that makes hours-long, hundreds-of-steps work survivable.
 
@@ -388,7 +365,7 @@ Treat this document as the anatomy of a well-engineered system prompt: it is a l
 
 ---
 
-## 17. Reflection & Self-Criticism
+## 16. Reflection & Self-Criticism
 
 **What it is.** The reflection section builds a self-review phase into the workflow, where the model critiques and revises its own output against an explicit rubric before delivering it. It treats verification not as an afterthought but as a required step between generating an answer and committing to it. The model is told to check its work for errors, omissions, and rule violations, then fix what it finds. It is the quality gate the model applies to itself.
 
@@ -411,7 +388,7 @@ Treat this document as the anatomy of a well-engineered system prompt: it is a l
 
 ---
 
-## 18. Iterative Improvement
+## 17. Iterative Improvement
 
 **What it is.** The iterative-improvement section tells the model not to stop at its first output but to improve on it — to take the generated result and refine it through one or more further passes. It defines what the model should do after an initial answer exists: revisit, enhance, and elevate it rather than treating the first draft as final. Where reflection checks an output for errors against a rubric, iterative improvement is about making an already-correct output better — tightening, deepening, and polishing it. It turns a single-shot generation into a deliberate refinement loop over the post-output phase.
 
@@ -436,7 +413,7 @@ Treat this document as the anatomy of a well-engineered system prompt: it is a l
 
 ---
 
-## 19. Constraints / Rules / Guardrails
+## 18. Constraints / Rules / Guardrails
 
 **What it is.** The constraints section defines the hard boundaries on what the model must never do — the non-negotiable rules that override everything else in the prompt. It is the negative space of the prompt: where instructions say what to do, constraints say what is forbidden, out of scope, or unsafe. In practice it functions as concentrated negative prompting, capturing the specific things you do not want the model to do, including the common ways this kind of model tends to fail or misbehave. It is widely regarded as the single most critical section in a production prompt.
 
@@ -459,7 +436,7 @@ Treat this document as the anatomy of a well-engineered system prompt: it is a l
 
 ---
 
-## 20. Failure Modes & Escalation
+## 19. Failure Modes & Escalation
 
 **What it is.** The failure-modes section tells the model what to do when it cannot complete the task: when it is uncertain, when inputs are invalid, when required information is missing, or when a constraint blocks the work. It defines what failure looks like and mandates the exact response — stop, report what is wrong, and either ask for clarification or abort with a clear status — instead of pushing out a confident guess. It is the counterpart to the success criteria: success says what "done" means, this section says what "cannot be done" means and how to surface it. It exists because the most dangerous outputs are confident fabrications presented as finished work.
 
