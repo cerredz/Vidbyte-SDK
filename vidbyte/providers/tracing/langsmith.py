@@ -124,8 +124,6 @@ class LangSmithTracer(TracerBase):
             parent_run_id=parent_run_id,
             project_name=self._project,
         )
-        if trace_id is not None:
-            create_kwargs["trace_id"] = trace_id
         self._call_langsmith("create_run", self._client.create_run, **create_kwargs)
         return LangSmithSpanContext(run_id=run_id, parent_run_id=parent_run_id, trace_id=trace_id)
 
