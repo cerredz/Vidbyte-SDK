@@ -446,7 +446,7 @@ class BaseAgent(McpAttachableMixin):
                 strategy="direct",
                 prompt=self._safe_trace_value(prompt),
                 system_prompt=self._safe_trace_value(self.system_prompt),
-                tools=self._safe_trace_value([self._tool_name(t) for t in self._agent_tool_items]),
+                tools=self._safe_trace_value(self._trace_tool_specs()),
                 provider=self._runner_provider(runner),
                 model=self._runner_model_name(runner),
                 metadata=self._safe_trace_value({**self.metadata, **dict(input_metadata), **trace_metadata}),
@@ -955,6 +955,50 @@ class BaseAgent(McpAttachableMixin):
             if name:
                 return str(name)
         return tool.__class__.__name__
+
+    def _trace_tool_specs(self) -> list[dict[str, Any]]:
+        """Build a list of full tool specs (name, description, parameters) for tracing."""
+        try:
+            builtin_specs = self.tools.specs()
+        except Exception:
+            builtin_specs = ()
+        result: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for spec in builtin_specs:
+            name = getattr(spec, "name", None)
+            if name and name not in seen:
+                seen.add(name)
+                result.append(self._tool_spec_to_dict(spec))
+        for tool in self._agent_tool_items:
+            name = self._tool_name(tool)
+            if name in seen:
+                continue
+            seen.add(name)
+            spec_attr = getattr(tool, "spec", None)
+            if spec_attr is not None:
+                try:
+                    real_spec = spec_attr() if callable(spec_attr) else spec_attr
+                    result.append(self._tool_spec_to_dict(real_spec))
+                    continue
+                except Exception:
+                    pass
+            result.append({"name": name})
+        return result
+
+    @staticmethod
+    def _tool_spec_to_dict(spec: object) -> dict[str, Any]:
+        """Convert a ToolSpec-like object to a dict safe for trace backends."""
+        entry: dict[str, Any] = {}
+        entry["name"] = getattr(spec, "name", "")
+        entry["description"] = getattr(spec, "description", "")
+        params = getattr(spec, "parameters", ())
+        if params:
+            entry["parameters"] = [
+                {"name": getattr(p, "name", ""), "type": getattr(p, "type", ""),
+                 "description": getattr(p, "description", ""), "required": getattr(p, "required", False)}
+                for p in params
+            ]
+        return entry
 
 
 def _trace_text(value: object, *, max_chars: int = 12000) -> str:
