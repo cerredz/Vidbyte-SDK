@@ -68,6 +68,7 @@ prompt text.
 | Reflexion | `reflexion` | agent_system_prompt, reflect_system_prompt, reflect_prompt | [reflexion/](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/reflexion) |
 | Prompt Templates | `templates` | intent_based, persona, specification | [templates/](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/templates) |
 | Trajectory Checkpoints | `trajectory_checkpoints` | agentic_summarizer | [trajectory_checkpoints_agentic_summarizer.md](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/trajectory_checkpoints_agentic_summarizer.md) |
+| Prompt Bucket | `prompt_bucket` | skill | [skills/prompt-bucket.md](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/skills/prompt-bucket.md) |
 
 ### Descriptions
 
@@ -234,6 +235,18 @@ Link: <https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/
 Prompts used to generate agentic trajectory checkpoints.
 
 Link: <https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/trajectory_checkpoints_agentic_summarizer.md>
+
+#### Prompt Bucket — `prompt_bucket`
+
+A self-contained skill file that captures session prompts into named topic
+buckets (flat Markdown files in `~/.prompt-buckets/`) and replays them as
+intent context in any new session. Driven by `/create-bucket`, automatic
+per-turn capture, and `/load-bucket`. Mirrors across Claude Code, Codex,
+opencode, and Antigravity via `/sync-prompt-bucket`. Note: this is an on-disk
+skill, not an SDK prompt string, and is not part of the import-validated
+catalog.
+
+Link: <https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/skills/prompt-bucket.md>
 
 ## Key Modules
 
