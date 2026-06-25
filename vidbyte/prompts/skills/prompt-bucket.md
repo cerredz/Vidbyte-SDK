@@ -85,6 +85,21 @@ bucket file. This is non-negotiable. Never skip it. Never batch it. Never
 summarize the prompt before saving. Never decide the prompt is "not worth
 saving." Save every prompt, every turn, without exception.
 
+**Command exclusion.** The first-action contract applies only to substantive
+user prompts — not to skill commands. If the user's message starts with one of
+the following skill commands, do NOT append it to the bucket; just execute the
+command:
+- `/create-bucket`
+- `/load-bucket`
+- `/stop-bucket`
+- `/list-buckets`
+- `/sync-prompt-bucket`
+
+These are metadata operations on the bucket system itself, not topic prompts.
+Capturing them would pollute bucket files with commands mixed with real
+prompts. Only capture the user's actual questions, instructions, and prompts
+about their work.
+
 The append procedure:
 1. Read `~/.prompt-buckets/.active` to get the active bucket slug.
 2. Append to `~/.prompt-buckets/<slug>.md`:
@@ -451,12 +466,14 @@ Model: appended to agent-behavior-evals.md
         and is now extending that work to tool-selection accuracy]
 ```
 
-Note: in this example, the load itself does NOT trigger an append (load is a
-command, not a user prompt to capture). But the *next* user message after the
-load IS captured, because the bucket is now active again (the user would need
-to run `/create-bucket` or `/stop-bucket` to change capture state). If no
-bucket is active, the load still works — it just reads and presents the
-prompts without starting capture.
+Note: `/load-bucket` is a skill command, so it does NOT trigger an append
+(per the command exclusion in the Instructions section). The next substantive
+user message after the load IS captured, but only if `.active` still contains
+a slug — `.active` persists across sessions, so if the user had
+`agent-behavior-evals` active from a previous session, capture continues
+automatically in the new session. If no bucket is active (`.active` is empty
+or missing), the load still works — it just reads and presents the prompts
+without starting capture. Run `/create-bucket <slug>` to start capturing.
 
 ### Example 3 — Syncing across harnesses
 
