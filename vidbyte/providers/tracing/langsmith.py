@@ -115,7 +115,7 @@ class LangSmithTracer(TracerBase):
         run_id = str(uuid.uuid4())
         parent_run_id = parent.run_id if isinstance(parent, LangSmithSpanContext) else None
         trace_id = parent.trace_id if isinstance(parent, LangSmithSpanContext) else None
-        run_type = "llm" if name.startswith("llm.") else "tool"
+        run_type = self._resolve_run_type(name, attributes.pop("run_type", None))
         create_kwargs: dict[str, Any] = dict(
             id=run_id,
             name=name,
@@ -138,6 +138,17 @@ class LangSmithTracer(TracerBase):
         else:
             self._call_langsmith("update_run", self._client.update_run, context.run_id, outputs={"output": output}, end_time=_now())
         self._call_langsmith("flush", self._client.flush)
+
+    @staticmethod
+    def _resolve_run_type(name: str, explicit: str | None) -> str:
+        # Classify a span name into a LangSmith run_type: chain, llm, or tool.
+        if explicit is not None:
+            return explicit
+        if name.startswith("llm."):
+            return "llm"
+        if name.startswith("tool."):
+            return "tool"
+        return "chain"
 
 
 def _now() -> Any:
