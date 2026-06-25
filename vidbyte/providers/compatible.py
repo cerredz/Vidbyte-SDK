@@ -115,6 +115,30 @@ class DeepSeekProvider(OpenAICompatibleProvider):
         if config.response_format is not None:
             payload["response_format"] = {"type": "json_object"}
 
+    def _extract_chat_text(self, parsed: Mapping[str, Any]) -> str:
+        import re
+
+        choices = parsed.get("choices")
+        if not isinstance(choices, list) or not choices:
+            raise ProviderResponseError(f"{self.provider.value} response did not include choices.", provider=self.provider.value, response_excerpt=str(parsed))
+        first = choices[0]
+        message = first.get("message") if isinstance(first, dict) else None
+        content = message.get("content") if isinstance(message, dict) else None
+        has_tool_calls = isinstance(message, dict) and isinstance(message.get("tool_calls"), list) and len(message["tool_calls"]) > 0
+        if isinstance(content, str) and content.strip():
+            text = content
+        elif has_tool_calls:
+            tool_args = message["tool_calls"][0].get("function", {}).get("arguments", "")
+            text = tool_args if isinstance(tool_args, str) else ""
+        else:
+            text = content if isinstance(content, str) else ""
+        if not text or not text.strip():
+            raise ProviderResponseError(f"{self.provider.value} response did not include message content.", provider=self.provider.value, response_excerpt=str(parsed))
+        text = text.strip()
+        text = re.sub(r"^```(?:json)?\s*\n?", "", text)
+        text = re.sub(r"\n?```\s*$", "", text)
+        return text
+
 
 class GLMProvider(OpenAICompatibleProvider):
     provider = ModelProvider.GLM
