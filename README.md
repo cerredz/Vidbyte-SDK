@@ -40,7 +40,13 @@ access remain outside this package.
 
 ## Status
 
-This package is not published. It is marked `UNLICENSED` until Vidbyte's release, licensing, and open-source strategy are finalized.
+> **Alpha — active development.** APIs may change between minor versions.
+
+Install from PyPI:
+
+```bash
+pip install vidbyte-sdk
+```
 
 ## Usage
 
