@@ -1118,6 +1118,8 @@ class AgentRuntime:
         system = call_options.get("system")
         messages = call_options.get("messages")
         tools = call_options.get("tools")
+        if not messages and iteration_count == 0:
+            messages = [{"role": "user", "content": message}]
         inputs: dict[str, Any] = {
             "agent_name": self.agent_name,
             "provider": provider,
@@ -1139,6 +1141,11 @@ class AgentRuntime:
                 for tool in tool_items
                 if isinstance(tool, Mapping)
             )
+        inputs["context_window_summary"] = (
+            f"system={len(system) if system else 0}chars, "
+            f"messages={len(list(messages)) if messages else 0}, "
+            f"tools={len(list(tools)) if tools else 0}"
+        )
         return inputs
 
     @staticmethod
