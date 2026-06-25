@@ -110,10 +110,44 @@ class DeepSeekProvider(OpenAICompatibleProvider):
     provider = ModelProvider.DEEPSEEK
 
     def _attach_response_format(self, payload: dict[str, Any], config: TextModelConfig) -> None:
-        # DeepSeek does not support json_schema; use json_object so the LLM
-        # still produces parseable JSON that the SDK validates client-side.
+        # DeepSeek does not support json_schema or json_object natively.
+        # Instead, inject the expected JSON schema into the system prompt
+        # so the model knows the exact field names and structure to return.
         if config.response_format is not None:
-            payload["response_format"] = {"type": "json_object"}
+            fmt = dict(config.response_format)
+            schema_desc = ""
+            json_schema = fmt.get("json_schema", {}).get("schema")
+            if isinstance(json_schema, dict):
+                import json as _json
+                schema_desc = (
+                    "\n\nYou MUST respond with ONLY a valid JSON object matching this exact schema."
+                    " Use these exact field names and types:\n"
+                    f"```json\n{_json.dumps(json_schema, indent=2, ensure_ascii=False)}\n```"
+                )
+            messages = payload.get("messages", [])
+            if messages:
+                first = messages[0]
+                if first.get("role") == "system":
+                    first["content"] += schema_desc
+                else:
+                    messages.insert(0, {"role": "system", "content": schema_desc.strip()})
+
+    def _extract_chat_text(self, parsed: Mapping[str, Any]) -> str:
+        # DeepSeek may return tool_calls even when no tools are configured,
+        # and may wrap JSON in markdown code fences.
+        # Always prefer text content; strip markdown wrappers.
+        choices = parsed.get("choices")
+        if not isinstance(choices, list) or not choices:
+            raise ProviderResponseError(f"{self.provider.value} response did not include choices.", provider=self.provider.value, response_excerpt=str(parsed))
+        first = choices[0]
+        message = first.get("message") if isinstance(first, dict) else None
+        content = message.get("content") if isinstance(message, dict) else None
+        if isinstance(content, str) and content.strip():
+            import re
+            return re.sub(r'\A\s*```(?:json)?\s*\n?(.*?)\n?\s*```\s*\Z', r'\1', content.strip(), flags=re.DOTALL)
+        if not isinstance(content, str):
+            raise ProviderResponseError(f"{self.provider.value} response did not include message content.", provider=self.provider.value, response_excerpt=str(parsed))
+        return content
 
 
 class GLMProvider(OpenAICompatibleProvider):
