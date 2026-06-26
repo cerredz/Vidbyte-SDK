@@ -471,7 +471,7 @@ class BaseAgent(McpAttachableMixin):
                 **options,
             )
             if trace_ctx is not None:
-                self._tracer.end_trace(trace_ctx, output=result.output)
+                self._tracer.end_trace(trace_ctx, output=_format_trace_output(result))
         except Exception as exc:
             if trace_ctx is not None:
                 self._tracer.end_trace(trace_ctx, error=exc)
@@ -1029,3 +1029,25 @@ def _safe_trace_value(value: Any) -> Any:
     if isinstance(value, str):
         return _trace_text(value)
     return value
+
+
+def _format_trace_output(result: Any) -> str:
+    """Format agent.run output for tracing: wraps each agentic loop iteration in XML tags.
+
+    When iteration_outputs are present in result metadata, produces:
+        <iteration_1>...<iteration_1>
+        <iteration_2>...<iteration_2>
+        ...
+    This makes the full agentic loop visible in LangSmith instead of only the final output.
+    Falls back to result.output when no iteration data is available (e.g. single-shot agents).
+    """
+    iteration_outputs = None
+    metadata = getattr(result, "metadata", None)
+    if isinstance(metadata, Mapping):
+        iteration_outputs = metadata.get("iteration_outputs")
+    if not iteration_outputs:
+        return str(getattr(result, "output", result) or "")
+    return "\n".join(
+        f"<iteration_{i + 1}>\n{out}\n</iteration_{i + 1}>"
+        for i, out in enumerate(iteration_outputs)
+    )

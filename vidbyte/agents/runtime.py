@@ -178,6 +178,7 @@ class AgentRuntime:
         last_response: object | None = None
         last_assistant_output: str | None = None
         run_state: dict[type, Any] = {}
+        iteration_outputs: list[str] = []
 
         decision = await self.middleware.before_run(
             self._middleware_context(
@@ -331,6 +332,8 @@ class AgentRuntime:
             last_response = raw_result
             iteration_count += 1
             last_assistant_output = handle.extract_text(raw_result)
+            iteration_outputs.append(last_assistant_output or "")
+            run_state["__iteration_outputs__"] = tuple(iteration_outputs)
             runner_metadata = dict(handle.extract_metadata(raw_result))
             tokens_used = self._add_token_usage(tokens_used, token_usage_from_response(raw_result, runner_metadata))
 
@@ -713,9 +716,15 @@ class AgentRuntime:
         """Merge per-run metadata published by middleware (e.g. trace artifacts) into the result."""
         # Generic, feature-agnostic lift of run_state["__result_metadata__"]; no feature imports here.
         published = (run_state or {}).get("__result_metadata__")
-        if not isinstance(published, Mapping) or not published:
+        iteration_outputs = (run_state or {}).get("__iteration_outputs__")
+        extra: dict[str, Any] = {}
+        if isinstance(published, Mapping) and published:
+            extra.update(published)
+        if iteration_outputs is not None:
+            extra["iteration_outputs"] = iteration_outputs
+        if not extra:
             return result
-        metadata = {**dict(result.metadata), **dict(published)}
+        metadata = {**dict(result.metadata), **extra}
         return AgentResult(
             output=result.output,
             strategy_name=result.strategy_name,
@@ -1116,34 +1125,29 @@ class AgentRuntime:
     ) -> dict[str, Any]:
         # Build useful, bounded tracing inputs for the model-call child span.
         system = call_options.get("system")
-        messages = call_options.get("messages")
+        messages = list(call_options.get("messages") or [])
         tools = call_options.get("tools")
-        if not messages and iteration_count == 0:
-            messages = [{"role": "user", "content": message}]
+        # Build a full chat-style messages list so LangSmith renders system prompt and user
+        # prompt alongside the conversation context in the LLM call view.
+        trace_messages: list[dict[str, Any]] = []
+        if system is not None:
+            trace_messages.append({"role": "system", "content": _trace_text(system)})
+        trace_messages.extend(_safe_trace_value(messages))
+        trace_messages.append({"role": "user", "content": _trace_text(message)})
         inputs: dict[str, Any] = {
             "agent_name": self.agent_name,
             "provider": provider,
             "model": self._runner_model_name(handle.runner),
             "iteration": iteration_count,
             "model_call": model_call_count,
-            "prompt": _trace_text(message),
+            "messages": trace_messages,
             "metadata": _safe_trace_mapping(metadata),
         }
-        if system is not None:
-            inputs["system"] = _trace_text(system)
-        if messages:
-            inputs["messages"] = _safe_trace_value(messages)
         if tools:
-            tool_items = tuple(tools)
-            inputs["tool_count"] = len(tool_items)
-            inputs["tool_names"] = tuple(
-                str(tool.get("name") or tool.get("function", {}).get("name") or "")
-                for tool in tool_items
-                if isinstance(tool, Mapping)
-            )
+            inputs["tools"] = _safe_trace_value(list(tools))
         inputs["context_window_summary"] = (
             f"system={len(system) if system else 0}chars, "
-            f"messages={len(list(messages)) if messages else 0}, "
+            f"messages={len(messages)}, "
             f"tools={len(list(tools)) if tools else 0}"
         )
         return inputs
