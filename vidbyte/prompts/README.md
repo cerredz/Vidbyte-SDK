@@ -54,7 +54,7 @@ prompt text.
 | Prompt | Key | Sub-prompts | Link |
 | --- | --- | --- | --- |
 | Actor Runtime | `actor_runtime` | planner, coder, reviewer, generator, critic, reasoner, summarization, decomposer, explorer, tradeoff, hypothesis_generator, refiner, formatter, safety, final_answer | [actor_runtime/](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/actor_runtime) |
-| Agentic Engineering | `agentic_engineering` | system_prompt, error_messages, file_headers | [agentic_engineering/](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/agentic_engineering) |
+| Agentic Engineering | `agentic_engineering` | system_prompt, error_messages, file_headers, folder_readme, function_design | [agentic_engineering/](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/agentic_engineering) |
 | Agentic Loop | `agentic_loop` | context_prompt | [agentic_loop.json](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/agentic_loop.json) |
 | Context Engineering | `context_engineering` | guideline_prompt | [context_engineering.json](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/context_engineering.json) |
 | Continual Trace | `continual_trace` | system_prompt | [continual_trace/system_prompt.md](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/continual_trace/system_prompt.md) |
