@@ -17,9 +17,9 @@ You are an agentic engineering architect. The agentic engineering prompt family 
 The agentic engineering family lives at `vidbyte/prompts/prompts/agentic_engineering/` and contains these files.
 
 - `agentic_engineering.json` — The catalog descriptor. Contains `name`, `description`, `key`, and a `prompts` object mapping each sub-prompt name to a `path` (the `.md` file) and a `source_url` (GitHub link). The catalog loader discovers this file, validates it, and registers every sub-prompt as a `Prompt` enum entry.
-- `system_prompt.md` — The main prompt. Uses `# Identity`, `# Goal`, `# Checklist` sections. Introduces the discipline and provides high-level checklist items that reference each principle by name. When a new principle is added, a new checklist item must be added here so the main prompt stays current.
-- `error_messages.md` — Principle 1. Deep-dive on error messages as context-window primitives. Uses `# Identity`, `# Goal`, multiple sub-sections, and a `# Checklist`. This is the template for new principle files.
-- `file_headers.md` — Principle 2. Deep-dive on file header comments as navigational landmarks. Same format as error_messages.md with additional sections like `# Adversarial Review` and `# Things Not to Do`.
+- `system_prompt.md` — The main prompt. Uses `# Identity`, `# Goal`, `# Instructions`, and `# Principles` sections. Each principle entry in `# Principles` includes a summary paragraph followed by a `Use Cases:` line containing a comma-separated list of 15-20 use cases (5-10 words each) and a `GitHub:` link. When a new principle is added, a new numbered entry must be added to `# Principles` and a new checklist item must be added to `# Checklist` so the main prompt stays current.
+- `error_messages.md` — Principle 1. Deep-dive on error messages as context-window primitives. Opens with `# Description` (6-8 sentences describing the principle) followed by `# What Goes Inside Each Server-Side Error Message`, `# Placement Strategy`, `# Things Not to Do`, `# Checklist`, and `# Code Examples`. The checklist contains high-level process reminders (what to think about and when), not repetitions of the anatomy sections. Code examples show error classes with all static fields baked in as class-level defaults and minimal raise sites that pass only dynamic fields.
+- `file_headers.md` — Principle 2. Deep-dive on file header comments as navigational landmarks. Uses `# Goal`, `# Header Section Inventory` (3-4 sentence descriptions per section, no quotes or examples), `# Complete Example`, `# Adversarial Review`, `# Maintenance and Staleness`, `# Checklist`, and `# Things Not to Do`.
 
 Enum members are registered in `vidbyte/lib/enums/prompts.py` as `AGENTIC_ENGINEERING_<PRINCIPLE_NAME>` with value `"agentic_engineering.<key_name>"`.
 
@@ -46,11 +46,11 @@ To add a new principle to the agentic engineering family, execute these steps in
 1. Choose a machine-readable key for the principle. Use snake_case, keep it short and descriptive. Examples: `error_messages`, `file_headers`, `function_signatures`, `type_definitions`, `test_coverage`. This key will appear in the `.json` descriptor, the `.md` filename, the enum value, and the checklist reference.
 
 2. Create the principle deep-dive file at `vidbyte/prompts/prompts/agentic_engineering/<key>.md`. Follow this structure.
-   - `# Identity` — 4-6 sentences. Declare the model as a specialist in this practice. Define the practice briefly and explain why it matters for agent readability.
-   - `# Goal` — 4-6 sentences. State what the model should produce. Include the invariant or quality bar that defines success.
-   - Named sub-sections — At least two sub-sections that break down the practice. For example, an anatomy section listing the parts of the practice, and a placement or usage section describing where and how often to apply it. Sub-sections should be substantial enough to stand as their own `# Header` blocks.
-   - `# Checklist` — 8-12 bullet items. Concrete, actionable behaviors the model should adopt. Each item should describe what to do and, where space permits, why it matters.
+   - `# Description` — 6-8 sentences. Describe what this principle produces, why it matters for agent readability, the core pattern (what is done at definition time vs. at usage time), and what the most common failure mode is when the principle is absent.
+   - Named sub-sections — At least two sub-sections that break down the practice. For example, an anatomy section listing the fields or parts of the practice, and a placement section describing where and how often to apply it. Sub-sections should be substantial enough to stand as their own `# Header` blocks. The anatomy section should describe each field with enough detail that a model can populate it correctly.
+   - `# Checklist` — 8-12 bullet items. These must be high-level process reminders — what the model should think about or verify at each stage of applying the principle — not repetitions of the anatomy section content. Each item should address a step in the workflow (before writing, after defining, before raising/using, after completing) rather than restating what a field contains.
    - If applicable, add an `# Adversarial Review` section, a `# Complete Example` section, or a `# Things Not to Do` section following the patterns in `file_headers.md`.
+   - `# Code Examples` — If the principle involves code, include 3-4 examples. The first example should show a complete class or construct definition with all static fields baked in. The second example should show the minimal usage site that passes only dynamic fields. Subsequent examples should show a second distinct case applying the same pattern so the model understands the principle generalizes.
 
 3. Update `agentic_engineering.json`. Add a new entry to the `prompts` object. The key must match the key from step 1. The value must be an object with `path` pointing at the `.md` file and `source_url` pointing at the GitHub URL.
    ```json
@@ -65,9 +65,14 @@ To add a new principle to the agentic engineering family, execute these steps in
    AGENTIC_ENGINEERING_MY_NEW_PRINCIPLE = "agentic_engineering.my_new_principle"
    ```
 
-5. Add a checklist item to `system_prompt.md`. Insert a new `*` item in the Checklist section that names the principle and tells the model to study the corresponding prompt for full implementation detail.
+5. Add a numbered entry to the `# Principles` section of `system_prompt.md`. The entry must include a summary paragraph describing the principle, a `Use Cases:` line containing a comma-separated list of 15-20 use cases (each 5-10 words describing a specific triggering scenario), and a `GitHub:` link to the principle file. Also add a `*` item to the `# Checklist` section that names the principle and tells the model to study the corresponding prompt for full implementation detail.
    ```markdown
-   * Study the my_new_principle prompt for the complete [practice] anatomy, placement rules, and best practices before writing any [relevant code context].
+   N. My New Principle Name
+      [Summary paragraph — 3-5 sentences describing the principle.]
+
+      Use Cases: scenario one 5-10 words, scenario two 5-10 words, scenario three 5-10 words, ...
+
+      GitHub: https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/agentic_engineering/my_new_principle.md
    ```
 
 6. Update the `system_prompt.md` Goal section if the new principle changes the scope of what agentic engineering covers. The Goal should enumerate all active principles so a model reading the main prompt knows the full scope of the discipline.
@@ -89,6 +94,14 @@ The `system_prompt.md` is the entry point. Every principle must have a visible p
 - GitHub URLs must point at the `main` branch on `github.com/cerredz/Vidbyte-SDK`.
 - No emoji in any prompt text. No markdown callouts. No YAML inside prompt files.
 - Principle descriptions in the README should be 3-5 sentence paragraphs matching the style of existing entries.
+- Principle files open with `# Description` (6-8 sentences), not with `# Identity` or `# Goal`.
+- The `# Checklist` section in each principle file must contain high-level process reminders about when to apply the principle, what to verify at each stage, and what self-review to run — not restatements of what the anatomy fields contain. The anatomy sections already explain the fields; the checklist tells the model how to think about using them.
+- Use Cases in `system_prompt.md` are a comma-separated list under a `Use Cases:` label, not bullet points. Each use case is 5-10 words describing a specific triggering scenario. Aim for 15-20 items per principle.
+- Error class examples in `error_messages.md` must show the static-fields-in-class pattern: all diagnostic fields (`_description`, `_expected_vs_actual`, `_blast_radius`, `_doc_links`, `_test_files`, `_fix_approaches`) are class-level defaults. Raise sites pass only the minimal dynamic inputs (entity IDs). This is the canonical pattern — do not show raise sites that populate static fields dynamically.
+- The `_expected_vs_actual` field in error classes must have two explicitly labelled sub-blocks: `Expected:` (5-7 sentences on intended behavior and preconditions) and `Actual:` (5-7 sentences on what was observed and why). Use a newline between the blocks.
+- The `_fix_approaches` field in error classes must be a numbered list of 4 items. Items 1-2 should be high-level investigation strategies (reproduce, trace, fetch docs); items 3-4 should be specific code-level fixes.
+- The `_blast_radius` field in error classes must include 6-8 files. Each entry is a string containing the file path, a dash, and 3-4 sentences describing what the file does, how it is affected by this failure, and what to verify in it after a fix.
+- The `_doc_links` field in error classes must include full URLs, not document names. Each entry contains the URL, a dash, and 4-5 sentences describing what the document explains and when to load it.
 </conventions>
 
 <rules>
