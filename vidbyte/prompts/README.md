@@ -54,6 +54,7 @@ prompt text.
 | Prompt | Key | Sub-prompts | Link |
 | --- | --- | --- | --- |
 | Actor Runtime | `actor_runtime` | planner, coder, reviewer, generator, critic, reasoner, summarization, decomposer, explorer, tradeoff, hypothesis_generator, refiner, formatter, safety, final_answer | [actor_runtime/](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/actor_runtime) |
+| Agentic Engineering | `agentic_engineering` | system_prompt, error_messages, file_headers, folder_readme, function_design | [agentic_engineering/](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/agentic_engineering) |
 | Agentic Loop | `agentic_loop` | context_prompt | [agentic_loop.json](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/agentic_loop.json) |
 | Context Engineering | `context_engineering` | guideline_prompt | [context_engineering.json](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/context_engineering.json) |
 | Continual Trace | `continual_trace` | system_prompt | [continual_trace/system_prompt.md](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/continual_trace/system_prompt.md) |
@@ -80,6 +81,26 @@ summarization, decomposer, explorer, tradeoff, hypothesis_generator, refiner,
 formatter, safety, and final_answer.
 
 Link: <https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/actor_runtime>
+
+#### Agentic Engineering — `agentic_engineering`
+
+Prompt assets for agentic engineering — the discipline of writing source code that
+treats AI agents as a primary audience alongside human developers. The `system_prompt`
+establishes the two-audience design constraint and introduces five core practices.
+`error_messages` teaches designing server-side errors as rich context-window primitives
+that carry file location, state snapshots, violated invariants, blast-radius references,
+and remediation hints. `file_headers` teaches writing structured file header comments
+that serve as navigational landmarks covering purpose, role, dependencies, function
+inventory, state model, and modification patterns. `folder_readme` teaches writing
+folder-level README files that function as comprehension caches: a description section
+that caches why the folder exists, a file index that enables read-one-skip-many routing
+at folder granularity, and a change log that preserves negative knowledge across
+sessions. `function_design` teaches writing short single-purpose functions where the
+function is the agent's atomic unit of comprehension, naming, change, test, and reuse
+— covering the orchestrator/leaf split, command/query separation, pure core /
+imperative shell, and linter enforcement.
+
+Link: <https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/agentic_engineering>
 
 #### Agentic Loop — `agentic_loop`
 
