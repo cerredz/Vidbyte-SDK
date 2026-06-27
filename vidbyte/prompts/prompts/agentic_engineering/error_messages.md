@@ -29,12 +29,6 @@ You should have a strong bias toward creating more custom error classes and more
 * Every integration seam — files bridging between subsystems such as auth to billing, API to worker, web to DB — is a natural error-wrapping point because these are where invariants cross boundaries and where failures are most expensive to diagnose.
 * Custom error classes should proliferate. One error class per failure mode, not one generic AppError for everything. An agent that catches a SubscriptionCreationError immediately knows the failure domain. An agent that catches an AppError with message "creation failed" knows nothing.
 
-# Error Chaining
-When errors propagate and get re-wrapped at higher layers, the outermost error should carry the most actionable context. Inner errors should be linked by reference — an error_id or preceding_error field — rather than accumulated inline. Accumulation preserves debugging info but explodes verbosity. Linking by reference keeps each layer's packet compact while preserving the full chain for debug environments.
-
-# Sensitive Data and Tiering
-Full error packets should ship in development and test environments where maximum diagnostic signal is valuable and data sensitivity is low. In production, truncate or redact fields that may contain PII, tokens, or secrets — particularly current_state and input. Consider splitting the error object into a public_context block safe for logs and monitoring, and a private_context block restricted to debug environments. For high-throughput services, sample rich error packets at a configurable rate rather than paying the storage cost on every occurrence.
-
 # Things Not to Do
 * Do not create frontend or client-side error messages with this level of internal detail. The rich context packet format — with file paths, state snapshots, call traces, and internal file references — is designed for server-side agents operating inside the runtime. Exposing these details to a browser or mobile client leaks implementation internals and creates a security risk.
 * Do not fabricate any error message data. Every field in the error packet — violated_invariant, current_state, call_trace, possible_causes, fix_approaches — must reflect the actual runtime conditions at the throw site. Guessing or inventing values misdirects the agent and is worse than omitting the field.
@@ -57,52 +51,86 @@ Full error packets should ship in development and test environments where maximu
 * Every error must include a test_files reference pointing to which test suite covers the execution path that threw the error. This tells the agent exactly what to re-run after applying a fix, eliminating the guesswork of test discovery in an unfamiliar codebase.
 
 # Code Examples
-These Python snippets demonstrate the full pattern: defining a custom error class with all fields, raising it at a throw site with context populated, and wrapping an external boundary with the pattern.
+These Python snippets demonstrate the full agentic error pattern as described in the sections above. The error class is defined once in a dedicated errors file with all static boilerplate fields baked into the class as defaults — this keeps the class definition heavy and the raise sites light. Each raise site only passes the dynamic fields that change per invocation, and every raise cross-references the anatomy in the "What Goes Inside" section so the agent receiving the error can trace every field back to its documented purpose.
 
 ```python
-# Example 1: Defining a custom error class with the complete field anatomy.
-# This class serves as the template for every failure mode in the codebase.
-# Every field is optional in the constructor — populate only what is available.
-# The error_type is the class name itself, automatically captured.
+# Example 1: Defining a custom error class with all static fields baked in.
+# This class lives in a dedicated errors file (e.g., errors/billing.py) and
+# serves as the single definition for this failure mode. Static fields —
+# file, violated_invariant, expected_vs_actual, blast_radius, doc_links,
+# test_files, and common fix_approaches — are set as class-level defaults
+# because they are the same for every throw of this error. Dynamic fields
+# — rich_message, current_state, call_trace, possible_causes — are passed
+# at the raise site because they vary per invocation.
+# See the "What Goes Inside Each Server-Side Error Message" section above
+# for the full description of each field and what information it should carry.
 
-class SubscriptionCreationError(Exception):
-    def __init__(
-        self,
-        *,
-        file: str = "",
-        line: int = 0,
-        function: str = "",
-        rich_message: str = "",
-        violated_invariant: str = "",
-        expected_vs_actual: str = "",
-        current_state: dict | None = None,
-        call_trace: str = "",
-        blast_radius: list[str] | None = None,
-        possible_causes: list[str] | None = None,
-        fix_approaches: list[str] | None = None,
-        doc_links: list[str] | None = None,
-        test_files: list[str] | None = None,
-    ):
-        self.file = file
+class BillingSubscriptionCreationError(Exception):
+    # Static defaults that apply to every throw of this error. These fields
+    # describe the failure mode in general and do not change per invocation.
+    _file = "billing/subscription-manager.py"
+    _function = "create_subscription"
+    _violated_invariant = (
+        "Invariant: user.address must be non-null with a valid zip code "
+        "before billing.create_subscription(). This invariant is enforced at "
+        "the boundary between api/subscriptions.route.py and "
+        "billing/subscription-manager.py."
+    )
+    _expected_vs_actual = (
+        "Expected: user.address.zip of type str, non-empty, with a valid "
+        "postal code format. The address must be verified by the address "
+        "validation service before reaching this function."
+    )
+    _blast_radius = [
+        "billing/plans.store.py — plan lookup may fail downstream if user is incomplete",
+        "billing/invoice.generator.py — invoice requires valid billing address",
+        "users/entitlements.service.py — entitlement grant depends on subscription creation",
+        "events/billing-events.publisher.py — subscription.created event will not fire",
+        "api/subscriptions.route.py — the caller that passed the incomplete user object",
+    ]
+    _doc_links = [
+        "ADR-014: Subscription CQRS split — explains why subscription creation "
+        "is a transactional boundary",
+        "docs/runbooks/subscription-failures.md — runbook for diagnosing "
+        "billing failures including missing address errors",
+    ]
+    _test_files = [
+        "tests/billing/test_subscription_manager.py:20-85 — covers the "
+        "create_subscription path including address validation",
+    ]
+    _common_fix_approaches = [
+        "Re-fetch the full user object including address from the user service "
+        "before calling create_subscription. The user object passed by the API "
+        "layer may be a partial projection that omits the address field. See "
+        "similar resolution pattern in PR #2841.",
+        "Add an address validation step in the API handler "
+        "(api/subscriptions.route.py) before delegating to the billing service. "
+        "This catches the missing address earlier in the call chain and produces "
+        "a more specific error at the correct boundary.",
+    ]
+
+    def __init__(self, *, line: int, rich_message: str, current_state: dict,
+                 call_trace: str, possible_causes: list[str] | None = None):
+        self.file = self._file
         self.line = line
-        self.function = function
+        self.function = self._function
         self.rich_message = rich_message
-        self.violated_invariant = violated_invariant
-        self.expected_vs_actual = expected_vs_actual
-        self.current_state = current_state or {}
+        self.violated_invariant = self._violated_invariant
+        self.expected_vs_actual = self._expected_vs_actual
+        self.current_state = current_state
         self.call_trace = call_trace
-        self.blast_radius = blast_radius or []
+        self.blast_radius = self._blast_radius
         self.possible_causes = possible_causes or []
-        self.fix_approaches = fix_approaches or []
-        self.doc_links = doc_links or []
-        self.test_files = test_files or []
-        # Build the exception message from the most critical fields so
-        # that even a raw print or log line carries diagnostic signal.
+        self.fix_approaches = self._common_fix_approaches
+        self.doc_links = self._doc_links
+        self.test_files = self._test_files
         super().__init__(rich_message)
 
     def to_context_packet(self) -> dict:
         # Serializes all fields into a structured dict for logging,
-        # monitoring, or agent consumption.
+        # monitoring, or agent consumption. An agent that catches this
+        # error can call to_context_packet() to get the full diagnostic
+        # payload described in the "What Goes Inside" section above.
         return {
             "error_type": type(self).__name__,
             "file": self.file,
@@ -122,82 +150,165 @@ class SubscriptionCreationError(Exception):
 ```
 
 ```python
-# Example 2: Raising the custom error at a pre-condition check inside
-# a service function. Note how every field available at the throw site
-# is populated — the agent receiving this error can see the user state,
-# the violated invariant, the expected vs actual values, and the call
-# trace with role annotations.
+# Example 2: Raising the custom error at a pre-condition check inside a
+# service function. Note how short the raise site is compared to the
+# class definition — only the dynamic fields are passed. The static fields
+# (violated_invariant, expected_vs_actual, blast_radius, doc_links,
+# test_files, fix_approaches) are all inherited from the class defaults.
+# See the "What Goes Inside Each Server-Side Error Message" section above
+# for the field anatomy, and "Creating Custom Error Classes" above for
+# the process of defining and raising these errors.
 
 def create_subscription(plan_id: str, user: dict, payment_method_id: str) -> dict:
     # Pre-condition: the user must have a valid address before billing.
+    # The BillingSubscriptionCreationError class carries the static invariant
+    # description, expected vs actual contract, blast radius, documentation
+    # links, test file references, and common fix approaches. The raise site
+    # only provides the per-invocation details — what line failed, what the
+    # current state looked like, what the call trace was, and what specific
+    # causes are most likely for this particular failure instance.
     if not user.get("address") or not user["address"].get("zip"):
-        raise SubscriptionCreationError(
-            file="billing/subscription-manager.py",
+        raise BillingSubscriptionCreationError(
             line=45,
-            function="create_subscription",
             rich_message=(
                 f"Failed to create subscription for user_id={user.get('id')} — "
-                f"user address is missing or incomplete. Cannot proceed with billing."
-            ),
-            violated_invariant=(
-                "Invariant: user.address must be non-null with a valid zip code "
-                "before billing.create_subscription(). This invariant is enforced "
-                "at the boundary between api/subscriptions.route.py and "
-                "billing/subscription-manager.py."
-            ),
-            expected_vs_actual=(
-                "Expected: user.address.zip of type str, non-empty. "
-                f"Actual: {user.get('address')}. "
-                "Caller: api/subscriptions.route.py:120 (create_handler)."
+                f"user address is missing or incomplete. The user record passed "
+                f"to create_subscription has address={user.get('address')}, which "
+                f"is null or missing the required zip code field. Cannot proceed "
+                f"with billing because a valid billing address is required to "
+                f"generate invoices and process payments. This failure occurred "
+                f"before any database writes or external calls were made, so no "
+                f"state was modified and no cleanup is needed."
             ),
             current_state={
-                "user": {
-                    "id": user.get("id"),
-                    "email": user.get("email"),
-                    "address": user.get("address"),
-                    "subscription_status": user.get("subscription_status"),
-                },
+                "user_id": user.get("id"),
+                "user_email": user.get("email"),
+                "user_address": user.get("address"),
+                "user_subscription_status": user.get("subscription_status"),
                 "plan_id": plan_id,
                 "payment_method_id": payment_method_id,
+                "request_path": "api/subscriptions.route.py:120",
+                "request_method": "POST",
             },
             call_trace=(
                 "api/subscriptions.route.py:create_handler (entry) -> "
                 "billing/subscription-manager.py:create_subscription (orchestrator) -> "
-                "FAIL at pre-condition check (line 45)."
+                "FAIL at pre-condition check for user address validation (line 45). "
+                "The API handler passed a user object without a verified address. "
+                "The billing service rejected the request before any state mutation."
             ),
-            blast_radius=[
-                "billing/plans.store.py",
-                "billing/invoice.generator.py",
-                "users/entitlements.service.py",
-            ],
             possible_causes=[
-                "70% probability: caller (api/subscriptions.route.py:120) passed "
-                "an incomplete user object with address missing.",
-                "20% probability: data sync delay between user service and billing "
-                "service — user was created but address not yet propagated.",
-                "10% probability: user record is from pre-migration era before "
-                "address was a required field.",
-            ],
-            fix_approaches=[
-                "Typically fixed by re-fetching the full user object including "
-                "address from the user service before calling create_subscription. "
-                "See similar resolution pattern in PR #2841.",
-            ],
-            doc_links=[
-                "ADR-014: Subscription CQRS split",
-                "docs/runbooks/subscription-failures.md",
-            ],
-            test_files=[
-                "tests/billing/test_subscription_manager.py:20-85",
+                "70% probability: the API handler (api/subscriptions.route.py) "
+                "queried a partial user projection that did not include the "
+                "address field. The user service query should be updated to "
+                "include the address relation.",
+                "20% probability: data sync delay between the user service and "
+                "the billing service. The user was created in the user service "
+                "and the address was set, but the replication lag meant the "
+                "billing service saw a stale record without an address.",
+                "10% probability: the user record is from the pre-2024 migration "
+                "era before address was a required field on user creation. These "
+                "legacy users may legitimately lack an address and need to be "
+                "prompted to add one before subscribing.",
             ],
         )
 ```
 
 ```python
 # Example 3: Wrapping an external boundary (database call) with a try/catch
-# that produces a rich error packet. The database error is caught, and the
-# agentic error is raised with all available context including the query
-# that was attempted, the parameters, and the raw database error.
+# that produces a rich error packet. The PlanValidationError class is defined
+# in its own errors file (errors/billing.py) with static defaults for file,
+# violated_invariant, expected_vs_actual, blast_radius, doc_links, test_files,
+# and common fix_approaches. The raise site only passes dynamic fields.
+# See the "What Goes Inside Each Server-Side Error Message" and "Placement
+# Strategy" sections above for guidance on where to place these error sites.
+
+# -- In errors/billing.py: the static error class definition --
+class PlanValidationError(Exception):
+    _file = "billing/plans.store.py"
+    _function = "find_active_plan"
+    _violated_invariant = (
+        "Invariant: Every subscription must reference an active plan in the "
+        "plans table. The plan_id passed by the caller must resolve to a plan "
+        "with status='active' and must not be soft-deleted. Plan validation "
+        "happens at the data access boundary between the billing orchestration "
+        "layer and the plans data store."
+    )
+    _expected_vs_actual = (
+        "Expected: a plans table row with the given plan_id and status='active'. "
+        "The row must have non-null price, billing_interval, and feature_flags "
+        "columns. Actual: the query returned no rows. The plan either does not "
+        "exist, has been deactivated (status changed to 'inactive'), or was "
+        "soft-deleted."
+    )
+    _blast_radius = [
+        "billing/subscription-manager.py — subscription creation depends on "
+        "plan validation and cannot proceed without a valid plan",
+        "billing/invoice.generator.py — invoice generation requires plan "
+        "metadata (price, interval) that cannot be loaded",
+        "api/subscriptions.route.py — the caller that provided the invalid plan_id",
+        "webhooks/stripe.handler.ts — if this was triggered by a Stripe webhook, "
+        "the plan_id may have come from a stale Stripe product mapping",
+    ]
+    _doc_links = [
+        "ADR-014: Subscription CQRS split — explains why plan validation "
+        "is a distinct step in the write pipeline",
+        "docs/billing/plan-lifecycle.md — documents how plans are created, "
+        "activated, deactivated, and archived",
+    ]
+    _test_files = [
+        "tests/billing/test_plans_store.py:30-60 — covers find_active_plan "
+        "including the case where no active plan is found",
+    ]
+    _common_fix_approaches = [
+        "Verify the plan_id against the plans table admin panel before "
+        "investigating the code. If the plan was deactivated by an admin, "
+        "the fix is to reactivate it, not to change the validation logic.",
+        "If plan_id is coming from an external system (Stripe, a partner API), "
+        "check the plan ID mapping in the external integration layer — the "
+        "external system may be sending an ID format that does not match our "
+        "internal plan catalog.",
+        "Add plan_id validation at the API layer (api/subscriptions.route.py) "
+        "before entering the billing service so the error is caught earlier "
+        "with a more detailed message about which plan was requested.",
+    ]
+
+    def __init__(self, *, line: int, rich_message: str, current_state: dict,
+                 call_trace: str, possible_causes: list[str] | None = None):
+        self.file = self._file
+        self.line = line
+        self.function = self._function
+        self.rich_message = rich_message
+        self.violated_invariant = self._violated_invariant
+        self.expected_vs_actual = self._expected_vs_actual
+        self.current_state = current_state
+        self.call_trace = call_trace
+        self.blast_radius = self._blast_radius
+        self.possible_causes = possible_causes or []
+        self.fix_approaches = self._common_fix_approaches
+        self.doc_links = self._doc_links
+        self.test_files = self._test_files
+        super().__init__(rich_message)
+
+    def to_context_packet(self) -> dict:
+        return {
+            "error_type": type(self).__name__,
+            "file": self.file,
+            "line": self.line,
+            "function": self.function,
+            "rich_message": self.rich_message,
+            "violated_invariant": self.violated_invariant,
+            "expected_vs_actual": self.expected_vs_actual,
+            "current_state": self.current_state,
+            "call_trace": self.call_trace,
+            "blast_radius": self.blast_radius,
+            "possible_causes": self.possible_causes,
+            "fix_approaches": self.fix_approaches,
+            "doc_links": self.doc_links,
+            "test_files": self.test_files,
+        }
+
+# -- In billing/plans.store.py: raising the error at the data access boundary --
 
 def find_active_plan(plan_id: str) -> dict:
     try:
@@ -207,57 +318,50 @@ def find_active_plan(plan_id: str) -> dict:
         )
         if not result:
             raise PlanValidationError(
-                file="billing/plans.store.py",
                 line=52,
-                function="find_active_plan",
                 rich_message=(
-                    f"Plan validation failed: no active plan found for "
-                    f"plan_id={plan_id}. The plan either does not exist or "
-                    f"has been deactivated."
-                ),
-                violated_invariant=(
-                    "Invariant: Every subscription must reference an active plan. "
-                    "The plan_id passed by the caller must resolve to a plan with "
-                    "status='active' in the plans table."
-                ),
-                expected_vs_actual=(
-                    f"Expected: plan with id={plan_id} and status='active'. "
-                    f"Actual: no matching row returned from plans table. "
-                    "Caller: billing/subscription-manager.py:45 (create_subscription)."
+                    f"Plan validation failed at billing/plans.store.py:52 — "
+                    f"no active plan found for plan_id={plan_id}. The query "
+                    f"'SELECT * FROM plans WHERE id={plan_id} AND status=active' "
+                    f"returned zero rows. This means the plan either does not "
+                    f"exist in the database, has been deactivated (status changed "
+                    f"from 'active' to 'inactive' by an admin or an automated "
+                    f"lifecycle process), or was soft-deleted. The subscription "
+                    f"creation pipeline cannot proceed without a valid active "
+                    f"plan because plan metadata (price, billing interval, "
+                    f"feature flags) is required for invoice generation and "
+                    f"entitlement computation."
                 ),
                 current_state={
-                    "plan_id": plan_id,
-                    "query_result": None,
+                    "queried_plan_id": plan_id,
+                    "query": "SELECT * FROM plans WHERE id = %s AND status = 'active'",
+                    "query_params": [plan_id],
+                    "result_row_count": 0,
+                    "caller": "billing/subscription-manager.py:45 (create_subscription)",
                 },
                 call_trace=(
                     "api/subscriptions.route.py:create_handler (entry) -> "
                     "billing/subscription-manager.py:create_subscription (orchestrator) -> "
                     "billing/plans.store.py:find_active_plan (data access) -> "
-                    "FAIL at line 52 (query returned empty)."
+                    "FAIL at line 52 (query returned empty result set). "
+                    "The caller passed plan_id={plan_id} which did not match "
+                    "any active plan in the database."
                 ),
-                blast_radius=[
-                    "billing/subscription-manager.py",
-                    "billing/invoice.generator.py",
-                    "api/subscriptions.route.py",
-                ],
                 possible_causes=[
-                    "60% probability: plan_id is mistyped or references "
-                    "a plan that was deleted.",
-                    "30% probability: plan was deactivated (status changed "
-                    "to 'inactive') but subscription creation was still attempted.",
-                    "10% probability: database replication lag — plan exists "
-                    "on primary but not yet visible on read replica.",
-                ],
-                fix_approaches=[
-                    "Verify plan_id against the plans table before calling "
-                    "create_subscription. Validate that status='active' at the "
-                    "API layer before entering the billing service.",
-                ],
-                doc_links=[
-                    "ADR-014: Subscription CQRS split",
-                ],
-                test_files=[
-                    "tests/billing/test_plans_store.py:30-60",
+                    "50% probability: the plan_id is mistyped or references a "
+                    "plan that was deactivated or deleted by an admin. Check the "
+                    "plans admin panel to see the current status of this plan_id.",
+                    "30% probability: the plan was deactivated via an automated "
+                    "lifecycle process (plan end-of-life, pricing update, or "
+                    "compliance removal) but the API or webhook layer was not "
+                    "updated to stop sending this plan_id.",
+                    "15% probability: database replication lag — the plan exists "
+                    "and is active on the primary database but the read replica "
+                    "handling this query has not yet received the latest state.",
+                    "5% probability: a database migration altered the plans table "
+                    "schema and the status column now uses a different enum value "
+                    "than 'active', causing the query to miss the row even though "
+                    "the plan is valid in the new schema.",
                 ],
             )
         return result
@@ -265,55 +369,46 @@ def find_active_plan(plan_id: str) -> dict:
         raise
     except Exception as db_error:
         raise PlanValidationError(
-            file="billing/plans.store.py",
             line=52,
-            function="find_active_plan",
             rich_message=(
-                f"Database error while querying active plan for plan_id={plan_id}: "
-                f"{db_error}. The query may have failed due to connection issues, "
-                f"timeout, or schema mismatch."
-            ),
-            violated_invariant=(
-                "Invariant: Plan queries must succeed. Database connectivity "
-                "is required for all subscription operations."
-            ),
-            expected_vs_actual=(
-                f"Expected: successful database query for plan_id={plan_id}. "
-                f"Actual: database raised {type(db_error).__name__}: {db_error}."
+                f"Database error while querying active plan for plan_id={plan_id} "
+                f"at billing/plans.store.py:52. The database raised "
+                f"{type(db_error).__name__}: {db_error}. This is a connectivity "
+                f"or infrastructure failure, not a data validation failure — the "
+                f"query could not be executed at all. The plan_id={plan_id} may "
+                f"or may not be valid; we cannot determine that because we never "
+                f"reached the database. The subscription creation pipeline is "
+                f"blocked until database connectivity is restored."
             ),
             current_state={
                 "plan_id": plan_id,
-                "db_error": str(db_error),
+                "db_error_message": str(db_error),
                 "db_error_type": type(db_error).__name__,
+                "query": "SELECT * FROM plans WHERE id = %s AND status = 'active'",
+                "caller": "billing/subscription-manager.py:45 (create_subscription)",
             },
             call_trace=(
                 "api/subscriptions.route.py:create_handler (entry) -> "
                 "billing/subscription-manager.py:create_subscription (orchestrator) -> "
                 "billing/plans.store.py:find_active_plan (data access) -> "
-                "FAIL at line 52 (database exception)."
+                "FAIL at line 52 (database exception — query could not execute). "
+                "The database connection was established but the query failed "
+                "with a {db_error_type} error."
             ),
-            blast_radius=[
-                "billing/subscription-manager.py",
-                "api/subscriptions.route.py",
-            ],
             possible_causes=[
-                "50% probability: database connection pool exhausted or "
-                "connection timed out.",
-                "30% probability: schema mismatch between code and database "
-                "— column name or type changed in migration.",
-                "20% probability: database server under load or experiencing "
-                "a transient failure.",
-            ],
-            fix_approaches=[
-                "Check database connectivity and connection pool health. "
-                "Verify that the plans table schema matches the query. "
-                "If transient, the caller should retry with exponential backoff.",
-            ],
-            doc_links=[
-                "docs/runbooks/database-connectivity.md",
-            ],
-            test_files=[
-                "tests/billing/test_plans_store.py:30-60",
+                "40% probability: database connection pool is exhausted. The "
+                "application has reached its maximum number of concurrent "
+                "database connections and this request could not acquire one "
+                "within the connection timeout.",
+                "30% probability: transient network interruption between the "
+                "application server and the database. The connection was "
+                "established but was dropped mid-query.",
+                "20% probability: database server is under heavy load and "
+                "the query timed out waiting for a lock or resource.",
+                "10% probability: a recent database migration changed the "
+                "plans table schema in a way that is incompatible with this "
+                "query (e.g., column renamed, type changed). The query syntax "
+                "is valid but the schema no longer matches.",
             ],
         )
 ```
