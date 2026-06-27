@@ -54,6 +54,7 @@ prompt text.
 | Prompt | Key | Sub-prompts | Link |
 | --- | --- | --- | --- |
 | Actor Runtime | `actor_runtime` | planner, coder, reviewer, generator, critic, reasoner, summarization, decomposer, explorer, tradeoff, hypothesis_generator, refiner, formatter, safety, final_answer | [actor_runtime/](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/actor_runtime) |
+| Agentic Engineering | `agentic_engineering` | system_prompt, error_messages, file_headers | [agentic_engineering/](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/agentic_engineering) |
 | Agentic Loop | `agentic_loop` | context_prompt | [agentic_loop.json](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/agentic_loop.json) |
 | Context Engineering | `context_engineering` | guideline_prompt | [context_engineering.json](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/context_engineering.json) |
 | Continual Trace | `continual_trace` | system_prompt | [continual_trace/system_prompt.md](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/continual_trace/system_prompt.md) |
@@ -68,6 +69,7 @@ prompt text.
 | Reflexion | `reflexion` | agent_system_prompt, reflect_system_prompt, reflect_prompt | [reflexion/](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/reflexion) |
 | Prompt Templates | `templates` | intent_based, persona, specification | [templates/](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/templates) |
 | Trajectory Checkpoints | `trajectory_checkpoints` | agentic_summarizer | [trajectory_checkpoints_agentic_summarizer.md](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/trajectory_checkpoints_agentic_summarizer.md) |
+| Agentic Engineering Skill | `agentic_engineering_skill` | skill | [skills/agentic-engineering.md](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/skills/agentic-engineering.md) |
 | Prompt Bucket | `prompt_bucket` | skill | [skills/prompt-bucket.md](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/skills/prompt-bucket.md) |
 
 ### Descriptions
@@ -87,6 +89,21 @@ Short runtime context injected after system prompts so agents understand they ar
 executing inside a loop.
 
 Link: <https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/agentic_loop.json>
+
+#### Agentic Engineering — `agentic_engineering`
+
+Prompt assets for agentic engineering — the discipline of writing source code that
+treats AI agents as a primary audience alongside human developers. The main system
+prompt establishes the two-audience design constraint and introduces two core
+practices: designing server-side error messages as rich context-window primitives
+that carry file location, state snapshots, violated invariants, blast-radius
+references, and remediation hints; and writing structured file header comments that
+function as navigational landmarks, describing a file's purpose, role, dependencies,
+function inventory, state model, modification patterns, and known edge cases.
+Together these prompts teach a model to produce code where the source itself is a
+high-signal interface for any downstream coding agent.
+
+Link: <https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/agentic_engineering>
 
 #### Context Engineering — `context_engineering`
 
@@ -235,6 +252,18 @@ Link: <https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/
 Prompts used to generate agentic trajectory checkpoints.
 
 Link: <https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/trajectory_checkpoints_agentic_summarizer.md>
+
+#### Agentic Engineering Skill — `agentic_engineering_skill`
+
+An on-disk skill file that teaches a model how to extend the agentic engineering
+prompt family with new principles. Covers principle qualification criteria, the
+family file structure, the full 8-step procedure for adding a principle (from
+creating the `.md` deep-dive through enum registration, catalog integration, and
+system prompt updates), conventions, and verification steps. Note: this is an
+on-disk skill, not an SDK prompt string, and is not part of the import-validated
+catalog.
+
+Link: <https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/skills/agentic-engineering.md>
 
 #### Prompt Bucket — `prompt_bucket`
 
