@@ -31,6 +31,9 @@ from enum import Enum
 class Prompt(str, Enum):
     """Prompt keys for Vidbyte SDK prompt assets."""
 
+    AGENTIC_ENGINEERING_ERROR_MESSAGES = "agentic_engineering.error_messages"
+    AGENTIC_ENGINEERING_FILE_HEADERS = "agentic_engineering.file_headers"
+    AGENTIC_ENGINEERING_SYSTEM_PROMPT = "agentic_engineering.system_prompt"
     AGENTIC_LOOP_CONTEXT_PROMPT = "agentic_loop.context_prompt"
     HANDOFF_SYSTEM_PROMPT = "handoff.system_prompt"
     CONTINUAL_TRACE_SYSTEM_PROMPT = "continual_trace.system_prompt"
