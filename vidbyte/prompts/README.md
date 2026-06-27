@@ -255,15 +255,13 @@ Link: <https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/
 
 #### Agentic Engineering Skill — `agentic_engineering_skill`
 
-An on-disk skill file that teaches a model to write source code optimized for
-consumption by AI coding agents. Covers two core practices: designing server-side
-error messages as rich context-window primitives that carry file location, state
-snapshots, violated invariants, blast-radius references, and remediation hints;
-and writing structured file header comments as navigational landmarks that
-describe the file's purpose, role, dependencies, function inventory, modification
-patterns, things not to do, and known edge cases. References three catalog prompt
-assets for deep-dive instruction. Note: this is an on-disk skill, not an SDK
-prompt string, and is not part of the import-validated catalog.
+An on-disk skill file that teaches a model how to extend the agentic engineering
+prompt family with new principles. Covers principle qualification criteria, the
+family file structure, the full 8-step procedure for adding a principle (from
+creating the `.md` deep-dive through enum registration, catalog integration, and
+system prompt updates), conventions, and verification steps. Note: this is an
+on-disk skill, not an SDK prompt string, and is not part of the import-validated
+catalog.
 
 Link: <https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/skills/agentic-engineering.md>
 
