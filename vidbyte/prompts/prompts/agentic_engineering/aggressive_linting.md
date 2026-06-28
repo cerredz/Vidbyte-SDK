@@ -1,535 +1,866 @@
 # Description
-Aggressive linting is the practice of configuring your static analysis toolchain at maximum strictness and treating every rule violation as an error — not a warning — so that bad code cannot be committed, not merely flagged. For human teams, an over-strict linter is a morale problem: developers argue about rules, disable checks, or quit. For agents, none of those costs exist. An agent feels no friction, does not resent a rule, and will iterate against feedback all day. The usual human tradeoff between strictness and developer experience collapses entirely when agents are the primary authors. You can crank strictness far past what any human team would accept, because the friction is paid by something that does not feel friction.
+Linting is static analysis: a program that reads your source code without running it and rejects code that violates a rule. A linter does not care whether the code works — it cares whether the code is *shaped* the way you decided code in this repository must be shaped. Out of the box, most linters ship a polite, permissive default: a handful of rules, most of them set to "warning," most of them about formatting. That default exists to avoid annoying human developers.
 
-The deeper argument is about memory and decay. Instructions you encode in a system prompt degrade over a long context window — the model drifts from them as the conversation fills up. A linter rule is the opposite: deterministic, re-evaluated from scratch on every run, immune to context decay. The master move is to migrate correctness out of prose and into mechanism. Prose says "please use the repository layer"; a `no-restricted-imports` rule makes the direct database call not compile. The first is a hope. The second is a fact. Every rule you can express as a fail-closed check is a piece of your standards that has been permanently removed from the jurisdiction of the context window.
+We are going to use linters because a linter is the only place in a codebase where a standard can be made *deterministic*. A code review is a hope. A system-prompt instruction is a hope. A comment that says "please use the repository layer" is a hope. A linter rule that makes the direct database call fail the build is a fact. The linter is the one mechanism that re-evaluates every standard from scratch, on every run, and refuses to forget — which makes it the natural home for any rule you actually want held.
 
-Two consequences follow. First, all rules must be errors, never warnings. A warning is invisible to an agent — the agent feels no social pressure from a yellow squiggle; only a non-zero exit code changes behavior. Second, the error message is a prompt. When a lint failure is injected back into the agent's context window, it is not a diagnostic for a tired human — it is an instruction the model will act on next. Write error messages as imperatives to the agent: "Handlers must call the repository layer, not the database directly" beats "raw database access detected." Your rules folder stops being a linter config and becomes the highest-signal, lowest-decay steering channel you have.
+But we are not going to use ordinary linters — we are going to write **aggressive** linters. An aggressive linter is one configured at maximum strictness, with every rule promoted from warning to error, every off-the-shelf escape hatch closed, and a growing folder of *custom* rules that encode the specific mistakes this codebase keeps making. Where an ordinary linter flags a yellow squiggle and lets the code through, an aggressive linter deletes the wrong move from the space of programs you are allowed to express. It is not a style checker bolted on at the end; it is a wall built before the first line of a module is written.
+
+We are doing this because the primary author of the code is now an agent, and an agent is a different kind of author than a human. For a human team, an over-strict linter is a morale problem: developers argue about the rules, disable the checks, and burn out. An agent feels none of that friction — it does not resent a rule, does not argue, and will iterate against feedback all day. The entire human tradeoff between strictness and developer experience collapses, so you can crank strictness far past anything a human team would tolerate. More importantly, an agent's adherence to a prose instruction *decays* as its context window fills — the rule you wrote at token 2,000 is forgotten by token 200,000. A linter rule does not decay. Every standard you can express as a fail-closed check is a piece of your architecture that has been permanently removed from the jurisdiction of the context window. In short: an aggressive linter is a **strict, deterministic guardrail bolted onto an agent's ability to write code** — it constrains what the agent is even able to produce, so correctness stops depending on the agent remembering and starts depending on the build refusing.
+
+Two consequences follow and they govern everything below. First, all rules must be errors, never warnings. A warning is invisible to an agent — there is no social pressure from a yellow squiggle, only a non-zero exit code changes behavior. Second, the error message is a prompt. When a lint failure is fed back into the agent's context window, it is not a diagnostic for a tired human — it is an instruction the model will act on next. Write every message as an imperative to the agent ("Handlers must call the repository layer, not the database directly") rather than a description of the symptom ("raw database access detected").
 
 # Intent
-The intent of aggressive linting for agent-native codebases is to make architectural standards, security invariants, and coding conventions hold permanently — not through repeated reminders that decay, but through mechanically enforced walls that make violations non-expressible. An agent writing code should encounter constraints the same way it encounters type errors: as immediate, specific, actionable rejections that describe exactly what to do instead.
+The intent of aggressive linting for agent-native codebases is to make architectural standards, security invariants, and coding conventions hold *permanently* — not through repeated reminders that decay, but through mechanically enforced walls that make violations non-expressible. You are adding a strict, deterministic guardrail to an agent's ability to write code: an agent producing code should encounter your constraints the same way it encounters a type error — as an immediate, specific, actionable rejection that names exactly what to do instead. The guardrail is deterministic because the same input always produces the same verdict, and strict because there is no advisory middle ground for the agent to ignore.
 
-This principle is trying to close the gap between what a system prompt instructs and what code actually gets produced after many iterations. Prose instructions degrade; linter rules do not. By encoding your conventions as fail-closed rules and feeding violations back into the agent's context as imperative instructions, you transform the linter from a style guide into a correction loop — one that compounds over time as you add codebase-specific rules for every recurring mistake your agent makes.
+This principle is trying to close the gap between what a system prompt instructs and what code actually gets produced after many iterations. Prose instructions degrade; linter rules do not. By encoding your conventions as fail-closed rules whose messages read as imperative instructions, you turn the linter from a style guide into a correction surface — one that compounds over time as you add codebase-specific rules for every recurring mistake the agent makes. The failure mode this specifically addresses is *silent drift*: an agent that started the session respecting your layering, your blessed wrappers, and your error-handling discipline, and then quietly abandoned all three somewhere in a long context window, with nothing in the build to catch it.
 
-# The Three-Layer Enforcement Model
-The same set of rules should be enforced in three places, each with a different speed-authority tradeoff.
+# Goal
+You are going to use this skill file to actually **write the aggressive linters** — not to read about them in the abstract, and not to merely run a linter someone else configured. The goal is concrete authorship: given a repository (or a brand-new module inside one), you will produce the real configuration and the real custom rules that turn an ordinary, permissive toolchain into a fail-closed guardrail. That means writing the `pyproject.toml` `[tool.ruff]` and `[mypy]` blocks at maximum strictness, authoring the `.importlinter` contracts that encode the architecture, writing the custom Semgrep rules and standalone AST-based linters that ban this codebase's specific mistakes, and phrasing every message as an instruction the agent will obey on its next turn.
 
-**Layer 1 — Inside the agent loop (fastest).** Run the linter as a tool available to the harness. After the agent writes code, the harness calls the lint tool, parses the output, and injects failures into the next context turn as observations. The agent reads these as instructions and iterates. The loop cannot close until the linter exits 0. This is the layer that actually teaches the agent — it sees the failure and the correction in the same session.
+Everything that follows is in service of that authorship. The **Generalized Principles** section gives you the menu of rules to write and the reasoning for each, the **Updating Linters** section tells you how to keep those rules alive as the codebase grows under you, and the **Code Examples** section gives you complete, copy-ready linters — including a full custom architecture linter you can adapt to a real system. When you finish, the repository should contain linters *you wrote*, and the wrong move should no longer compile.
 
-**Layer 2 — Pre-commit hook (local safety net).** The same linter runs as a pre-commit hook before any commit is accepted. This catches anything that slipped through a manually invoked loop or was introduced by a human. Runs in seconds.
+# Generalized Principles to Follow for Aggressive Linters
+These are the principles to follow when writing aggressive linters. Each is a rule-authoring discipline, followed by a 2-3 sentence rationale and 5-6 concrete Python-ecosystem examples (Ruff config, mypy config, import-linter contracts, Semgrep rules scoped to `languages: [python]`, and `bandit` selectors). Treat the principles as the menu of walls to build; treat the examples as starting points you adapt to your repository's real layer names and module paths.
 
-**Layer 3 — CI (the real wall).** The linter runs server-side on every push. This is the layer that actually protects main. A developer or agent cannot bypass it with `--no-verify` on their own machine and have the code still land. CI is the canonical source of truth; the other two layers are conveniences. All three layers run identical rules from the same config so there is no divergence between local and server behavior.
-
-# Architecture and Dependency Walls
-The core idea: declare your layer order once; enforce that lower layers cannot import higher ones; and make cycles mechanically impossible. Your architecture diagram becomes a rule the build enforces, not a convention a tired agent might violate.
-
-**dependency-cruiser (JS/TS)** — `.dependency-cruiser.js`
-```js
-module.exports = {
-  forbidden: [
-    {
-      name: 'domain-cant-reach-up',
-      severity: 'error',
-      from: { path: '^src/domain' },
-      to:   { path: '^src/(api|services)' }
-    },
-    {
-      name: 'no-cycles',
-      severity: 'error',
-      from: {},
-      to: { circular: true }
-    }
-  ]
-};
+### 1. Promote Every Rule From Warning to Error
+A warning is invisible to an agent: there is no social pressure from a yellow squiggle, and the run still exits 0, so the loop closes with the violation intact. Configure the toolchain so that any violation fails the run with a non-zero exit code, and never pass an advisory flag that downgrades a failure. The single most common reason an aggressive linter fails to change agent behavior is that it was left at warning level.
+```toml
+# pyproject.toml — Ruff has no "warning" tier; a selected rule fails the run.
+[tool.ruff.lint]
+select = ["E", "F", "W", "B", "S", "C90", "PL", "TRY", "BLE", "DTZ", "PGH"]
+# Never set per-file ignores that silently downgrade a real rule to nothing.
 ```
-Principle: the cycle itself is the rejected state. An agent cannot route around a missing abstraction by reaching back.
-
-**eslint-plugin-import (JS/TS)** — layer boundaries without a dedicated tool
-```js
-'import/no-restricted-paths': ['error', { zones: [
-  { target: 'src/domain', from: 'src/api' },
-  { target: 'src/domain', from: 'src/services' }
-]}],
-'import/no-cycle': 'error',
-```
-Principle: you often already have the wall installed — `eslint-plugin-import` handles both layering and cycle-breaking before you reach for a dedicated tool.
-
-**import-linter (Python)** — `.importlinter`
 ```ini
+# pyproject equivalent for mypy — any error is a non-zero exit; nothing is advisory.
+[mypy]
+strict = true
+warn_return_any = true      # an implicit Any return is an error, not a note
+```
+```yaml
+# Semgrep: severity is always ERROR for a wall. WARNING/INFO get ignored by agents.
+rules:
+  - id: example-wall
+    severity: ERROR           # never WARNING, never INFO
+```
+```bash
+# CI / pre-commit invocation: never neutralize the exit code.
+ruff check .                  # good: fails the step on any finding
+# ruff check . || true        # forbidden: swallows the exit code
+# ruff check --exit-zero .    # forbidden: turns the wall into a no-op
+```
+```ini
+# pylint, if used alongside Ruff: make any message fail the run.
+[MASTER]
+fail-on = all
+fail-under = 10
+```
+
+### 2. Write Every Message as an Imperative to the Agent
+A lint failure is injected back into the agent's context as the next instruction it will act on, so the message must read as a command, not as a description of the symptom. Name the blessed alternative, state where the correct code belongs, and explain the consequence of the violation. "Use parameterized queries; pass values as the second argument to execute()" produces a fix; "string SQL detected" produces a guess.
+```yaml
+# Good message: states the fix and the destination.
+rules:
+  - id: no-raw-db-in-handlers
+    pattern: db.query(...)
+    paths: { include: ['app/api/**'] }
+    message: >
+      Handlers must call the repository layer, not the database directly.
+      Move this query into a method on the matching repository in app/repositories/
+      and call that method from the handler.
+    severity: ERROR
+    languages: [python]
+```
+```yaml
+# Good: name the wrapper to import instead.
+  - id: use-http-wrapper
+    pattern: requests.$METHOD(...)
+    message: >
+      Import app.lib.http and call its client instead of using requests directly.
+      The wrapper enforces timeouts, retries, and structured logging.
+    severity: ERROR
+    languages: [python]
+```
+```yaml
+# Good: explain the consequence so the agent understands the constraint.
+  - id: inject-the-clock
+    pattern: datetime.now(...)
+    paths: { include: ['app/domain/**'] }
+    message: >
+      Inject a Clock dependency and call clock.now() instead of datetime.now().
+      Domain code that reads the wall clock directly cannot be tested deterministically.
+    severity: ERROR
+    languages: [python]
+```
+```yaml
+# Bad vs good, side by side — the bad message forces the agent to guess.
+  - id: no-bare-except
+    pattern: |
+      try:
+        ...
+      except:
+        ...
+    # message: "bare except found"                          # BAD: a diagnostic
+    message: >                                              # GOOD: an instruction
+      Catch a specific exception type instead of a bare except.
+      A bare except also swallows KeyboardInterrupt and SystemExit; name the
+      exact exception this block is meant to handle.
+    severity: ERROR
+    languages: [python]
+```
+```yaml
+# Good: tell the agent the exact replacement symbol.
+  - id: no-print
+    pattern: print(...)
+    paths: { exclude: ['scripts/**', 'tests/**'] }
+    message: >
+      Replace print() with the structured logger: from app.lib.log import logger;
+      logger.info(...). print() output is lost in production and is not structured.
+    severity: ERROR
+    languages: [python]
+```
+
+### 3. Close Every Escape Hatch You Open
+A wall with an open bypass is decorative — agents reach for the suppression comment the instant a rule is inconvenient. Ban blanket, file-wide suppressions outright, and force every allowed suppression to name the specific rule it silences plus a reason, so a suppression is never wider than the single violation it covers. Closing escape hatches is the difference between a guardrail and a suggestion.
+```toml
+# Ruff: require codes on every suppression, ban blanket noqa and bare type: ignore.
+[tool.ruff.lint]
+extend-select = ["PGH003", "PGH004", "RUF100"]
+# PGH003: bare `# type: ignore` (no error code) -> error
+# PGH004: blanket `# noqa` (no rule code)      -> error
+# RUF100: an unused `# noqa` (suppresses nothing) -> error
+```
+```ini
+# mypy: a `# type: ignore` that silences nothing is itself an error.
+[mypy]
+warn_unused_ignores = true
+disallow_any_explicit = true   # close the explicit `Any` cast that defeats a typed wall
+```
+```yaml
+# Semgrep: ban the file-wide blanket disable that nukes every rule in a file.
+rules:
+  - id: no-blanket-ruff-noqa
+    pattern-regex: '#\s*ruff:\s*noqa\s*$'
+    message: >
+      Do not disable Ruff for an entire file. Suppress a single line with
+      `# noqa: <CODE>` naming the exact rule, and only with a justifying comment.
+    severity: ERROR
+    languages: [python]
+```
+```yaml
+# Semgrep: ban the module-level flake8 blanket disable.
+  - id: no-blanket-flake8-noqa
+    pattern-regex: '#\s*flake8:\s*noqa'
+    message: >
+      Do not disable flake8 for an entire file. Use `# noqa: <CODE>` per line.
+    severity: ERROR
+    languages: [python]
+```
+```yaml
+# Semgrep: require a reason next to any pragma the agent does keep.
+  - id: type-ignore-needs-reason
+    pattern-regex: '#\s*type:\s*ignore\[[A-Za-z0-9_-]+\](?!\s*#)'
+    message: >
+      A `# type: ignore[code]` must be followed by `# reason: <why>` on the same line.
+      An unexplained suppression is indistinguishable from a hidden bug.
+    severity: ERROR
+    languages: [python]
+```
+
+### 4. Make the Type Checker the First Wall
+A construct the type checker rejects never reaches the linter, never reaches CI, and never reaches a reviewer — every strict flag deletes an entire failure class at the language level, upstream of every other rule. Turn on the strictest available settings and ban the typing escape valves (`Any`, missing annotations, implicit `Optional`) in the same pass. Untyped code is an agent's preferred hiding place for drift, so make "no annotation" itself the error.
+```ini
+[mypy]
+strict = true                    # the umbrella flag; turn it on first
+disallow_untyped_defs = true     # every function must be annotated
+disallow_incomplete_defs = true  # no half-annotated signatures
+```
+```ini
+[mypy]
+disallow_any_generics = true     # ban `list` / `dict` without parameters
+no_implicit_optional = true      # `x: int = None` becomes an error
+warn_unreachable = true          # code after a return is half-rewritten logic
+```
+```ini
+[mypy]
+ignore_missing_imports = false   # a missing module is an error, surfacing hallucinated imports
+disallow_untyped_decorators = true
+warn_redundant_casts = true
+```
+```toml
+# pyright/basedpyright as the second type wall, in pyproject.
+[tool.pyright]
+typeCheckingMode = "strict"
+reportUnknownMemberType = "error"
+reportMissingTypeStubs = "error"
+```
+```toml
+# Ruff's typing-adjacent rules close gaps the checker tolerates.
+[tool.ruff.lint]
+extend-select = ["ANN", "TCH", "FA"]
+# ANN: missing type annotations; TCH: import-time typing hygiene; FA: future annotations
+```
+```toml
+# Ban the typing module's own escape hatches via flake8-tidy-imports.
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"typing.Any".msg = "Model the real type or use a Protocol/TypeVar; Any disables checking."
+"typing.cast".msg = "Avoid cast(); narrow with isinstance or fix the upstream type."
+```
+
+### 5. Ban Stub and Placeholder Code So "Looks Done" Fails the Build
+Agents declare victory prematurely — it is their single most reliable failure mode — and leave `NotImplementedError`, lone `pass`, bare `...`, and `TODO` markers that make an unfinished task pass every test trivially. Make every placeholder a hard failure outside the few places it is legitimate (abstract base methods, `Protocol` bodies, typing stubs). A stub that fails the build cannot masquerade as a completed feature.
+```toml
+# Ruff: ban TODO/FIXME/HACK/XXX markers (flake8-fixme).
+[tool.ruff.lint]
+extend-select = ["FIX"]   # FIX001 TODO, FIX002 FIXME, FIX003 XXX, FIX004 HACK
+```
+```yaml
+# Semgrep: ban NotImplementedError outside abstract bases.
+rules:
+  - id: no-not-implemented-stub
+    patterns:
+      - pattern: raise NotImplementedError(...)
+      - pattern: raise NotImplementedError
+    paths: { exclude: ['**/base.py', 'tests/**'] }
+    message: >
+      Implement this function. NotImplementedError in non-abstract code means the
+      task is incomplete. If the method is genuinely abstract, move it to a base
+      class and decorate it with @abstractmethod.
+    severity: ERROR
+    languages: [python]
+```
+```yaml
+# Semgrep: ban a function body that is only `...` outside protocols/stubs.
+  - id: no-ellipsis-body
+    pattern: |
+      def $F(...):
+        ...
+    paths: { exclude: ['**/*.pyi', '**/protocols.py'] }
+    message: >
+      Replace the `...` body with a real implementation. An ellipsis body is a stub
+      that passes type checking while doing nothing.
+    severity: ERROR
+    languages: [python]
+```
+```yaml
+# Semgrep: ban a function that only `pass`es (silent no-op).
+  - id: no-pass-only-function
+    pattern: |
+      def $F(...):
+        pass
+    paths: { exclude: ['tests/**'] }
+    message: >
+      A function whose entire body is `pass` does nothing. Implement it or delete it.
+    severity: ERROR
+    languages: [python]
+```
+```bash
+# Vulture: dead code from abandoned agent attempts, detected before it accumulates.
+vulture app/ --min-confidence 80
+```
+```yaml
+# Semgrep: ban the "return None # TODO" fake implementation.
+  - id: no-todo-return
+    pattern-regex: 'return\s+None\s*#\s*(TODO|FIXME|placeholder)'
+    message: >
+      This is a placeholder return. Implement the real return value before declaring done.
+    severity: ERROR
+    languages: [python]
+```
+
+### 6. Enforce Error-Handling Discipline
+Agents hide failures instead of solving them: bare excepts, swallowed exceptions, empty handlers, and lost stack traces. Force every caught exception to name a specific type, force every handler to either handle or re-raise with context, and ban the silent `except: pass` that turns a real failure into a green build. Error handling is where drift is least visible, so it needs the strictest walls.
+```toml
+# Ruff: ban blind and bare excepts.
+[tool.ruff.lint]
+extend-select = ["BLE", "E722"]
+# BLE001: blind `except Exception`; E722: bare `except:`
+```
+```toml
+# Ruff: tryceratops rules for handler hygiene.
+[tool.ruff.lint]
+extend-select = ["TRY"]
+# TRY002 raise vanilla Exception, TRY300 else-branch, TRY400 use logging.exception, TRY401
+```
+```toml
+# Ruff: preserve the cause chain on re-raise (flake8-bugbear).
+[tool.ruff.lint]
+extend-select = ["B904"]   # `raise X` inside `except` must use `from err` or `from None`
+```
+```yaml
+# Semgrep: ban the swallowed exception outright.
+rules:
+  - id: no-swallowed-exception
+    pattern: |
+      try:
+        ...
+      except $E:
+        pass
+    message: >
+      Do not silently swallow an exception with `pass`. Either handle it (log and
+      recover) or re-raise it. A silent except hides the failure from every caller.
+    severity: ERROR
+    languages: [python]
+```
+```yaml
+# Semgrep: ban `except ...: return None`, the agent's favorite failure-hider.
+  - id: no-except-return-none
+    pattern: |
+      try:
+        ...
+      except $E:
+        return None
+    message: >
+      Returning None on exception hides the failure mode from the caller. Raise a
+      specific exception or return an explicit Result/error object instead.
+    severity: ERROR
+    languages: [python]
+```
+
+### 7. Force Determinism in Core Layers
+Non-deterministic calls — `datetime.now()`, `random`, `uuid4`, `time.time()`, environment reads — in domain and service code make tests non-reproducible and behavior unauditable. Ban them in the core layers so clocks, RNG, and configuration must be injected as dependencies, which makes the code both testable and honest about its I/O. Scope these rules to the core paths so the edges (where wall-clock access is legitimate) are unaffected.
+```yaml
+rules:
+  - id: no-wallclock-in-domain
+    patterns:
+      - pattern: datetime.now(...)
+      - pattern: datetime.utcnow()
+    paths: { include: ['app/domain/**', 'app/services/**'] }
+    message: >
+      Inject a Clock and call clock.now(). Domain/service code must not read the
+      wall clock directly or its tests cannot be made deterministic.
+    severity: ERROR
+    languages: [python]
+```
+```yaml
+  - id: no-random-in-domain
+    patterns:
+      - pattern: random.random()
+      - pattern: random.randint(...)
+      - pattern: random.choice(...)
+    paths: { include: ['app/domain/**', 'app/services/**'] }
+    message: >
+      Inject an RNG dependency instead of calling the random module directly.
+    severity: ERROR
+    languages: [python]
+```
+```yaml
+  - id: no-uuid-in-domain
+    pattern: uuid.uuid4()
+    paths: { include: ['app/domain/**'] }
+    message: >
+      Inject an IdGenerator and call generator.new(). Calling uuid4() directly makes
+      created entities impossible to assert against in a test.
+    severity: ERROR
+    languages: [python]
+```
+```yaml
+  - id: no-time-in-domain
+    patterns:
+      - pattern: time.time()
+      - pattern: time.monotonic()
+    paths: { include: ['app/domain/**', 'app/services/**'] }
+    message: >
+      Inject a Clock. Direct time.time() reads make latency-sensitive logic untestable.
+    severity: ERROR
+    languages: [python]
+```
+```yaml
+  - id: no-env-read-in-domain
+    pattern: os.environ[...]
+    paths: { include: ['app/domain/**'] }
+    message: >
+      Domain code must receive configuration as a typed argument, not read os.environ.
+      Load config at the edge and pass it down.
+    severity: ERROR
+    languages: [python]
+```
+```toml
+# Ruff: ban naive (timezone-less) datetimes everywhere (flake8-datetimez).
+[tool.ruff.lint]
+extend-select = ["DTZ"]   # DTZ001..DTZ012: naive datetime construction and parsing
+```
+
+### 8. Guard Against Hallucinated Imports and Names
+Agents invent package names, module paths, and symbols from training data that simply do not exist in this repository. Wire checks that fail on any unresolved import, any reference to an undefined name, and any import of a package not declared in the manifest, so a hallucination is caught at lint time rather than at runtime. This is the wall that turns "the agent confidently imported a library that was never installed" into an immediate, specific failure.
+```toml
+# Ruff: undefined name and import hygiene from pyflakes.
+[tool.ruff.lint]
+extend-select = ["F821", "F401", "F811"]
+# F821 undefined name, F401 unused import (leftover hallucinated import), F811 redefinition
+```
+```bash
+# deptry: fail on imports of packages not declared as dependencies.
+deptry .
+# DEP001 missing dependency, DEP003 transitive dependency used directly
+```
+```ini
+# mypy: a module that cannot be resolved is an error, not a silent Any.
+[mypy]
+ignore_missing_imports = false
+follow_imports = normal
+```
+```toml
+# Ruff: ban relative imports that escape the package and hide bad paths.
+[tool.ruff.lint]
+extend-select = ["TID252"]   # ban relative imports above the current package
+```
+```yaml
+# Semgrep: catch a hallucinated internal module the agent assumed exists.
+rules:
+  - id: no-unknown-internal-utils
+    pattern: from app.utils.magic import $X
+    message: >
+      app.utils.magic does not exist. Import from app.lib (the real utilities package)
+      or create the helper explicitly before importing it.
+    severity: ERROR
+    languages: [python]
+```
+```bash
+# pip-audit doubles as a sanity check: a hallucinated package will not resolve.
+pip-audit --strict
+```
+
+### 9. Encode Architecture and Layer Boundaries as Contracts
+Declare the layer order once and make a lower layer importing a higher one fail the build, so the architecture diagram becomes a compile gate rather than a convention a tired agent violates. Make cycles mechanically impossible, and isolate sibling features so one feature's internals are unreachable from another even when the relative import is one `../` away. The architecture is the most expensive thing to get wrong and the cheapest thing to wall.
+```ini
+# .importlinter: a layered contract — higher layers may import lower, never the reverse.
+[importlinter]
+root_package = app
+
 [importlinter:contract:layers]
 name = Layered architecture
 type = layers
 layers =
-    myproject.api
-    myproject.services
-    myproject.domain
+    app.api
+    app.services
+    app.domain
 ```
-Principle: declare the order once. The arrow becomes a compile-gate, not a convention.
-
-**@nx/enforce-module-boundaries (Nx monorepo)** — tag-based isolation
-```json
-"@nx/enforce-module-boundaries": ["error", {
-  "depConstraints": [
-    { "sourceTag": "scope:checkout", "onlyDependOnLibsWithTags": ["scope:shared"] }
-  ]
-}]
-```
-Principle: isolate features by tag, not by folder path — a sibling feature's internals are unreachable even when the relative import is one `../` away.
-
-# Type System as Wall
-The type checker is the wall that sits above the linter. A thing the compiler rejects never reaches the linter, never reaches CI, never reaches a reviewer. Every strict flag you flip deletes an entire failure class from the expressible space.
-
-**tsconfig.json strict flags** — the cheapest walls you will ever flip
-```json
-{
-  "strict": true,
-  "noUncheckedIndexedAccess": true,
-  "exactOptionalPropertyTypes": true
-}
-```
-Principle: one config line closes the entire "I'll just optimistically index it" failure class at the language level, upstream of every other check.
-
-**@typescript-eslint/switch-exhaustiveness-check + assertNever**
-```ts
-function assertNever(x: never): never {
-  throw new Error(`Unhandled variant: ${JSON.stringify(x)}`);
-}
-// .eslintrc:
-'@typescript-eslint/switch-exhaustiveness-check': 'error'
-```
-Principle: add a union variant anywhere and every unhandled switch breaks at compile time, three files from where the agent was editing.
-
-**Branded types + no-explicit-any**
-```ts
-type UserId = string & { readonly __brand: 'UserId' };
-// no-explicit-any: 'error'  ← closes the cast that defeats the brand
-```
-Principle: a wall with an open `any` cast is decorative. Ban the bypass in the same breath as building the wall.
-
-**mypy --strict (Python)**
 ```ini
-[mypy]
-strict = true
-disallow_untyped_defs = true
-warn_return_any = true
+# .importlinter: a forbidden contract — domain may never reach back up to api.
+[importlinter:contract:domain-isolation]
+name = Domain cannot import API
+type = forbidden
+source_modules = app.domain
+forbidden_modules = app.api
 ```
-Principle: untyped code is the agent's preferred hiding place for drift. Strict mode makes "no annotation" itself the error.
-
-# Security Walls
-The shared principle: make the dangerous form of a construct not exist as an expressible option, so the agent can only ship the safe version.
-
-**Semgrep — ban a dangerous pattern outright** — `rules/no-string-sql.yaml`
+```ini
+# .importlinter: independence — sibling features cannot import each other.
+[importlinter:contract:feature-isolation]
+name = Features are independent
+type = independence
+modules =
+    app.features.billing
+    app.features.checkout
+    app.features.catalog
+```
+```toml
+# Ruff: ban the raw db client outside the repository layer (banned-api).
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"app.db.engine".msg = "Only app.repositories may import the engine. Handlers call repositories."
+```
 ```yaml
+# Semgrep: ban returning ORM models across a layer boundary.
 rules:
-  - id: no-string-sql
+  - id: no-orm-models-from-handlers
+    pattern: return $MODEL.query...
+    paths: { include: ['app/api/**'] }
+    message: >
+      Handlers must return DTOs, not ORM model instances. Map the model to a
+      response schema in app/api/schemas before returning it.
+    severity: ERROR
+    languages: [python]
+```
+```bash
+# Run the contracts as a build step.
+lint-imports   # exits non-zero on any contract violation
+```
+
+### 10. Force the Blessed Wrapper, Ban the Raw Library
+Agents reach for the raw library they learned from training data — `requests`, `psycopg2`, `boto3`, `logging` — instead of the internal wrapper that enforces retries, pooling, timeouts, and structured logging. Ban the raw import everywhere except inside the wrapper itself, and put the name of the blessed alternative directly in the message. This is one of the highest-leverage agent walls because it redirects the path of least resistance.
+```toml
+# Ruff: ban raw HTTP libraries in favor of the internal client.
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"requests".msg = "Import app.lib.http instead. The wrapper enforces timeout and retry."
+"urllib.request".msg = "Import app.lib.http instead of urllib."
+```
+```toml
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"psycopg2".msg = "Import app.lib.db instead. Direct clients bypass the pool and query logging."
+"asyncpg".msg = "Import app.lib.db instead of asyncpg."
+```
+```toml
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"boto3".msg = "Import app.lib.aws instead. The wrapper injects credentials and retries."
+```
+```toml
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"logging.getLogger".msg = "Import the configured logger: from app.lib.log import logger."
+"os.getenv".msg = "Read config from app.config.settings, not os.getenv, so types are validated."
+```
+```yaml
+# Semgrep enforces the same wrapper rule with a path exception for the wrapper itself.
+rules:
+  - id: only-wrapper-imports-requests
+    pattern: import requests
+    paths: { exclude: ['app/lib/http.py'] }
+    message: >
+      Only app/lib/http.py may import requests. Everywhere else, import app.lib.http.
+    severity: ERROR
+    languages: [python]
+```
+```yaml
+# Semgrep: ban the raw file open for config; force the typed loader.
+  - id: no-raw-config-open
+    pattern: open($PATH)
+    paths: { include: ['app/config/**'] }
+    message: >
+      Use app.config.settings (a validated, typed model) instead of open()-ing a file.
+    severity: ERROR
+    languages: [python]
+```
+
+### 11. Cap Complexity and Size, and Treat a Violation as a Design Signal
+A function over the complexity or length cap is not a style nit — it is a signal that the function is doing more than one thing and must be decomposed. Set the caps low, and when a cap fires, redesign the function rather than bumping the cap. The cap is the trigger; the decomposition is the fix, and an agent that never feels friction will happily write the 300-line god-function unless the build refuses it.
+```toml
+# Ruff: cyclomatic complexity cap (mccabe).
+[tool.ruff.lint.mccabe]
+max-complexity = 8
+```
+```toml
+[tool.ruff.lint]
+extend-select = ["PLR0913"]   # too-many-arguments: a long signature is a missing object
+[tool.ruff.lint.pylint]
+max-args = 5
+```
+```toml
+[tool.ruff.lint]
+extend-select = ["PLR0915"]   # too-many-statements: the function does too much
+[tool.ruff.lint.pylint]
+max-statements = 40
+```
+```toml
+[tool.ruff.lint]
+extend-select = ["PLR0912"]   # too-many-branches: collapse with polymorphism or a table
+[tool.ruff.lint.pylint]
+max-branches = 10
+```
+```toml
+[tool.ruff.lint]
+extend-select = ["PLR0911"]   # too-many-return-statements: a sign of tangled control flow
+[tool.ruff.lint.pylint]
+max-returns = 6
+```
+```toml
+[tool.ruff.lint]
+extend-select = ["PLR2004"]   # magic-value-comparison: name the constant
+```
+
+### 12. Ban Dangerous and Non-Auditable Constructs
+Some constructs are security holes or make code impossible for an agent to reason about statically: `eval`, `exec`, untrusted `pickle`, `shell=True`, string-built SQL, and weak crypto. Ban them outright so the unsafe form is not even expressible, and the agent can only ship the safe variant. These are the walls where a single missed case is a vulnerability, so there is no advisory tier.
+```toml
+# Ruff: the bandit security ruleset, surfaced as lint errors.
+[tool.ruff.lint]
+extend-select = ["S"]   # flake8-bandit
+```
+```toml
+# Specific high-value bans, made explicit so they are never accidentally ignored.
+[tool.ruff.lint]
+extend-select = ["S102", "S307"]   # exec / eval of dynamic input
+```
+```toml
+[tool.ruff.lint]
+extend-select = ["S301", "S302"]   # pickle / marshal loads of untrusted data
+```
+```toml
+[tool.ruff.lint]
+extend-select = ["S602", "S605"]   # subprocess / os.system with shell=True
+```
+```toml
+[tool.ruff.lint]
+extend-select = ["S324"]           # weak hash (md5, sha1) used as if secure
+```
+```yaml
+# Semgrep: ban string-interpolated SQL, the root of injection.
+rules:
+  - id: no-string-built-sql
     patterns:
       - pattern: $CUR.execute("..." % ...)
       - pattern: $CUR.execute("..." + ...)
+      - pattern: $CUR.execute(f"...")
     message: >
-      Use parameterized queries. Pass values as the second argument to execute().
-      String-interpolated SQL is the root cause of SQL injection vulnerabilities.
+      Use parameterized queries: pass values as the second argument to execute().
+      String-built SQL is the root cause of SQL injection.
     severity: ERROR
     languages: [python]
 ```
-Principle: the unsafe construction does not exist in the expressible-program space. The agent can only ship the parameterized form.
 
-**gitleaks — secret detection at commit time and CI**
+### 13. Gate Test Integrity
+Agents find the cheapest way to make a red suite look green: skip the failing test, focus a passing subset, assert nothing, or mock the very thing under test. Ban each cheat with a rule, and judge coverage on the *diff* rather than the whole repo so a new untested change cannot hide inside a well-covered file. A test suite the agent can trivially defeat provides no signal at all.
 ```yaml
-# .pre-commit-config.yaml
-repos:
-  - repo: https://github.com/gitleaks/gitleaks
-    rev: v8.18.0
-    hooks:
-      - id: gitleaks
+# Semgrep: ban skip/xfail added to silence a failing test.
+rules:
+  - id: no-skipped-tests
+    patterns:
+      - pattern: "@pytest.mark.skip"
+      - pattern: "@pytest.mark.xfail"
+    paths: { include: ['tests/**'] }
+    message: >
+      Do not skip or xfail a test to make the suite pass. Fix the code under test,
+      or delete the test if the behavior is genuinely gone.
+    severity: ERROR
+    languages: [python]
 ```
-Run it both places. `git commit --no-verify` buys nothing if CI re-checks server-side.
-
-**OSV-Scanner / npm audit — CVE gate on the dependency graph**
+```yaml
+# Semgrep: a test that asserts nothing passes trivially and proves nothing.
+  - id: test-must-assert
+    patterns:
+      - pattern: |
+          def test_$NAME(...):
+            ...
+      - pattern-not: |
+          def test_$NAME(...):
+            ...
+            assert ...
+      - pattern-not-inside: |
+          def test_$NAME(...):
+            ...
+            with pytest.raises(...): ...
+    paths: { include: ['tests/**'] }
+    message: >
+      Every test must assert something or use pytest.raises. A test with no
+      assertion only proves the code did not crash.
+    severity: ERROR
+    languages: [python]
+```
+```toml
+# Ruff: pytest-style integrity rules.
+[tool.ruff.lint]
+extend-select = ["PT"]   # flake8-pytest-style: fixtures, parametrize, raises hygiene
+```
+```toml
+# Ruff: ban `assert False` and always-false asserts that fake a failing guard.
+[tool.ruff.lint]
+extend-select = ["B011", "PT015"]
+```
 ```bash
-osv-scanner --recursive .
-# or:
-npm audit --audit-level=high
-```
-Principle: adding a dependency with a known vulnerability is a build failure, not a dismissible warning.
-
-# Test Integrity Gates
-These exist specifically because agents find the cheapest way to make a failing test suite appear green. Each rule closes a specific cheat.
-
-**eslint-plugin-jest / eslint-plugin-no-only-tests** — ban the test-skip escape
-```js
-'jest/no-focused-tests': 'error',   // bans .only
-'jest/no-disabled-tests': 'error',  // bans .skip / xit
-```
-Principle: the cheapest way to "fix" a red suite is to disable the failing assertion. This bans that exit.
-
-**jest/expect-expect (or vitest/expect-expect)** — every test must assert
-```js
-'jest/expect-expect': 'error'
-```
-Principle: catches the test that calls your code and asserts nothing — it passes trivially and proves nothing.
-
-**diff-cover — coverage on the diff, not the repo**
-```bash
+# diff-cover: coverage judged on changed lines only, regardless of repo coverage.
 diff-cover coverage.xml --compare-branch origin/main --fail-under 90
 ```
-Principle: an agent cannot hide an untested change inside a well-covered file. Only new lines are judged.
-
-**betterer — the ratchet** — `.betterer.ts`
-```ts
-import { regexp } from '@betterer/regexp';
-export default {
-  'no new console.log': () => regexp(/console\.log/).include('src/**/*.ts'),
-};
-```
-Principle: freeze today's count of a smell; old debt is grandfathered, but the agent cannot add instance N+1. This is the right pattern for codebases where you cannot fix all existing violations immediately.
-
-# API and Contract Enforcement
-**API Extractor (Microsoft)** — snapshot the exported surface
 ```bash
-# CI: fail if regen of the .api.md snapshot produces a diff
-api-extractor run --local
-git diff --exit-code
+# mutmut: a mutation-testing floor — a suite that survives mutations is not testing.
+mutmut run && mutmut results
 ```
-Principle: internals refactor freely; the public surface cannot widen or break without a deliberate, reviewed change to the snapshot.
 
-**oasdiff (OpenAPI) / buf breaking (protobuf)** — detect breaking changes as an exit code
-```bash
-oasdiff breaking base.yaml head.yaml --fail-on ERR
-buf breaking --against '.git#branch=main'
-```
-Principle: "did I break my API?" is no longer a careful human review — it is an exit code.
-
-**Runtime validators (Zod / Pydantic / OpenAPI middleware)** — validate at the boundary while running
-```ts
-app.use(OpenApiValidator.middleware({
-  apiSpec: './openapi.yaml',
-  validateRequests: true,
-  validateResponses: true
-}));
-```
-Principle: even if a handler drifts from the spec, the boundary rejects the malformed shape at runtime. The wall holds when build-time checks miss something.
-
-# Infra-as-Code Policy
-**Conftest / OPA (Rego)** — fail the plan, not the deploy
-```rego
-deny[msg] {
-  input.resource.aws_s3_bucket[name].acl == "public-read"
-  msg := sprintf("Public S3 bucket not allowed: %s. Set acl to private.", [name])
-}
-```
-Principle: a violating manifest fails `plan`, so it never reaches a cluster regardless of who or what wrote it.
-
-**Checkov / Trivy** — hundreds of misconfig rules out-of-the-box
-```bash
-checkov -d . --hard-fail-on HIGH
-trivy config .
-```
-Principle: no-public-buckets, no-root-containers, mandatory resource limits — without authoring Rego for each.
-
-# Agent-Native Walls
-This is the category most specific to harness work. These rules directly target the failure modes agents exhibit reliably.
-
-## Stub and Dead-Code Detection — make "looks done, isn't done" fail the build
-
-**no-warning-comments / Semgrep TODO ban**
-```js
-'no-warning-comments': ['error', { terms: ['TODO', 'FIXME', 'HACK', 'XXX'] }]
-```
-Principle: agents leave a `TODO` as a way to "finish" without finishing. Ban the marker, ban the incomplete work.
-
-**Semgrep — ban the literal stub pattern** — `rules/no-stubs.yaml`
+### 14. Encode Every Recurring Mistake as a Checked-In Custom Rule
+This is the one wall with no off-the-shelf equivalent and the one that compounds the most: every time the agent repeats a codebase-specific mistake, write a single Semgrep rule (or AST check) that bans exactly that pattern and commit it. A growing `rules/` folder becomes a codebase-specific immune system that a competitor cannot copy off the shelf and that decays far slower than a system-prompt reminder. Write the rule on the *second* occurrence — one occurrence is noise, two is a pattern.
 ```yaml
-rules:
-  - id: no-not-implemented
-    patterns:
-      - pattern: raise NotImplementedError(...)
-      - pattern: raise NotImplementedError
-    paths:
-      exclude: ['tests/**', 'vidbyte/tools/builtins/base.py']
-    message: >
-      Remove the NotImplementedError stub and implement the function.
-      Stub implementations in non-test code mean the task is incomplete.
-    severity: ERROR
-    languages: [python]
-```
-
-**knip (JS/TS) / Vulture (Python)** — dead export and unused code detection
-```bash
-knip                    # fails if there are unused exports or files
-vulture src/ --min-confidence 80
-```
-Principle: agents leave orphaned functions from abandoned attempts. Dead code detected at CI is removed before it accumulates.
-
-**no-unreachable** — code after a return is a classic sign of half-rewritten logic
-```js
-'no-unreachable': 'error'
-```
-
-**no-empty** — empty `{}` blocks, including the empty catch that silently eats errors
-```js
-'no-empty': ['error', { allowEmptyCatch: false }]
-```
-
-## Error-Handling Discipline — agents hide problems instead of solving them
-
-**Ruff BLE001 / flake8-blind-except** — ban bare `except:`
-```toml
-[tool.ruff.lint]
-select = ["BLE"]   # BLE001: blind exception catch
-```
-Principle: a bare `except:` catches `SystemExit` and `KeyboardInterrupt` and tells the agent nothing about the failure mode. Force a specific exception type.
-
-**@typescript-eslint/ban-ts-comment** — no `@ts-ignore` without a reason
-```js
-'@typescript-eslint/ban-ts-comment': ['error', {
-  'ts-ignore': 'allow-with-description',
-  minimumDescriptionLength: 10
-}]
-```
-Principle: `@ts-ignore` is the agent's first move when a type error is hard to fix. Closing this escape hatch forces the actual fix.
-
-**Ruff PGH003** — ban `# type: ignore` without an error code
-```toml
-select = ["PGH003"]   # type: ignore without specific error code
-```
-
-**eslint-comments/no-unlimited-disable + no-unused-disable** — close the linter's own escape hatch
-```js
-'eslint-comments/no-unlimited-disable': 'error',
-'eslint-comments/no-unused-disable': 'error'
-```
-Principle: a blanket `// eslint-disable` at the top of a file disables every rule in the file. This closes that bypass. No escape hatch should be wider than the specific violation it suppresses.
-
-**@typescript-eslint/no-floating-promises** — catch the dropped await
-```js
-'@typescript-eslint/no-floating-promises': 'error'
-```
-Principle: agents drop `await` constantly, creating silent races. This turns every un-awaited promise into a build error.
-
-## Hallucination Guards — agents invent things that do not exist
-
-**import/no-unresolved** — fails on an import that resolves to nothing
-```js
-'import/no-unresolved': 'error'
-```
-Principle: catches hallucinated package names before they reach CI.
-
-**import/no-extraneous-dependencies** — cannot import a package not in the manifest
-```js
-'import/no-extraneous-dependencies': 'error'
-```
-Principle: catches the phantom dependency the agent assumed was installed.
-
-**Ruff F821** — reference to an undefined name
-```toml
-select = ["F821"]   # undefined name
-```
-Principle: catches calls to functions the agent thinks exist but does not.
-
-## Determinism — agents write code that cannot be tested
-
-**Semgrep — ban non-deterministic primitives in core layers** — `rules/no-nondeterminism.yaml`
-```yaml
-rules:
-  - id: no-random-in-core
-    patterns:
-      - pattern: random.random()
-      - pattern: random.randint(...)
-      - pattern: datetime.now()
-      - pattern: time.time()
-    paths:
-      include: ['src/domain/**', 'src/services/**']
-    message: >
-      Inject clocks and RNG as dependencies rather than calling them directly.
-      Functions in domain and service layers must be deterministic and testable.
-    severity: ERROR
-    languages: [python]
-```
-Principle: non-deterministic calls in core logic make tests non-reproducible. Forcing them to be injected as dependencies makes the code both testable and honest about its I/O.
-
-**no-console / Ruff T201** — no debug output left in committed code
-```js
-'no-console': 'error'
-```
-```toml
-select = ["T201"]   # print statements
-```
-
-## Convention Lock-In — fight drift over long context windows
-This category is the most agent-specific. An agent's adherence to your conventions degrades as its context window fills. A rule evaluates fresh on every run and never drifts.
-
-**no-restricted-imports** — force the blessed wrapper, ban the raw library
-```js
-'no-restricted-imports': ['error', {
-  patterns: [
-    {
-      group: ['axios', 'node-fetch'],
-      message: 'Import from @/lib/http instead. The internal wrapper enforces retry and timeout behavior.'
-    },
-    {
-      group: ['pg', 'mysql2'],
-      message: 'Import from @/lib/db instead. Direct database client imports bypass the connection pool and query logging.'
-    }
-  ]
-}]
-```
-Principle: this is one of the highest-leverage agent walls. It forces the agent down your blessed path instead of reaching for the raw library it knows from training data.
-
-**no-restricted-syntax** — ban a whole construct
-```js
-'no-restricted-syntax': ['error',
-  { selector: 'TSEnumDeclaration', message: 'Use union types instead of enums. Enums are not tree-shakable and do not narrow correctly.' },
-  { selector: 'ExportDefaultDeclaration', message: 'Use named exports. Default exports are not greppable and break rename refactors.' }
-]
-```
-
-**@typescript-eslint/naming-convention** — enforce casing mechanically
-```js
-'@typescript-eslint/naming-convention': ['error',
-  { selector: 'interface', format: ['PascalCase'], prefix: ['I'] },
-  { selector: 'typeAlias', format: ['PascalCase'] },
-  { selector: 'variable', format: ['camelCase', 'UPPER_CASE'] }
-]
-```
-
-## The Failure-Mode-to-Rule Pipeline
-This is the one wall with no off-the-shelf equivalent. Every time your agent makes the same codebase-specific mistake twice, write one Semgrep rule banning exactly that pattern and commit it. A growing `rules/` folder accumulates codebase-specific lessons — cheaper and more durable than stuffing reminders into a system prompt, which the model drifts away from over a long context.
-
-```yaml
-# rules/no-raw-db-in-handlers.yaml
+# rules/no-raw-db-in-handlers.yaml — the canonical recurring-mistake rule.
 rules:
   - id: no-raw-db-in-handlers
     pattern: db.query(...)
-    paths:
-      include: ['src/api/**']
+    paths: { include: ['app/api/**'] }
     message: >
       Handlers must call the repository layer, not the database directly.
-      Move this query to the appropriate repository in src/repositories/.
+      Move this query to a repository in app/repositories/.
     severity: ERROR
     languages: [python]
 ```
-
-The rule folder compounds. Each new rule is a lesson that is permanently encoded in the codebase — not a comment that will be ignored, not a system-prompt instruction that will decay. Over time, the rules folder becomes a codebase-specific immune system that a competitor cannot copy off the shelf.
-
-# The Operational Harness Loop
-The mechanism is a generate → verify → repair loop. The linter is the verify step. Here is the complete wiring.
-
-**Step 1: Machine-readable output from a single command.** Configure the linter to emit structured JSON or SARIF — not human-formatted terminal text. Agents parse structured records reliably; they scrape prose unreliably.
-```bash
-eslint --format json src/             # JSON output
-ruff check --output-format json src/  # JSON output
-semgrep --sarif rules/ src/           # SARIF output
+```yaml
+# rules/no-private-cross-module.yaml — ban reaching into another module's privates.
+  - id: no-cross-module-private-access
+    pattern: $MOD._$NAME(...)
+    message: >
+      Do not call another module's underscore-prefixed (private) function. Add a
+      public function to that module's interface and call it instead.
+    severity: ERROR
+    languages: [python]
+```
+```yaml
+# rules/no-assert-for-validation.yaml — asserts vanish under python -O.
+  - id: no-assert-for-runtime-validation
+    pattern: assert $COND, $MSG
+    paths: { include: ['app/api/**', 'app/services/**'] }
+    message: >
+      Do not use assert for runtime validation; it is stripped under python -O.
+      Raise a specific exception (e.g. ValidationError) instead.
+    severity: ERROR
+    languages: [python]
+```
+```yaml
+# rules/no-mutable-default-arg.yaml — a classic Python footgun agents reproduce.
+  - id: no-mutable-default-arg
+    patterns:
+      - pattern: def $F(..., $ARG=[], ...): ...
+      - pattern: def $F(..., $ARG={}, ...): ...
+    message: >
+      Do not use a mutable default argument; it is shared across calls. Default to
+      None and create the list/dict inside the function body.
+    severity: ERROR
+    languages: [python]
+```
+```yaml
+# rules/no-broad-pydantic-any.yaml — codebase rule learned from a real drift.
+  - id: no-any-in-pydantic-models
+    pattern: |
+      class $M(BaseModel):
+        ...
+        $FIELD: Any
+    message: >
+      Model the real field type. An `Any` field in a Pydantic model disables the
+      validation the model exists to provide.
+    severity: ERROR
+    languages: [python]
+```
+```text
+rules/
+  no-raw-db-in-handlers.yaml
+  no-private-cross-module.yaml
+  no-assert-for-validation.yaml
+  no-mutable-default-arg.yaml
+  no-any-in-pydantic-models.yaml
+# The folder is the codebase's accumulated, permanent memory of every repeated mistake.
 ```
 
-**Step 2: Expose it as a harness tool.** In your harness, define a `lint` tool. When the agent calls `lint`, the harness runs the command, captures stdout/stderr and the exit code, parses the output, and returns structured findings.
+# Updating Linters as the Codebase Grows
+An aggressive linter is not a one-time configuration — it is a living artifact that must grow with the code the agent writes under it. As the agent adds files, folders, layers, and wrappers, the rules must be extended in lockstep, or the walls quietly stop covering the new surface area. Follow these steps whenever the codebase changes shape.
 
-**Step 3: Inject findings into the context window as observations.** This is the crux. After each edit the agent makes, the harness runs the linter and injects parsed failures back as a tool result, each formatted as an imperative instruction:
-```
-src/api/handlers.py:42 — [no-raw-db-in-handlers]
-Handlers must call the repository layer, not the database directly.
-Move this query to the appropriate repository in src/repositories/.
-```
-The agent reads this on its next turn exactly as it reads any other instruction, and acts on it.
-
-**Step 4: Tie completion to the exit code, not the agent's self-report.** Agents declare victory prematurely — this is their single most reliable failure mode. The loop may not terminate until the linter exits 0. The agent's claim that it is finished is a hypothesis; the exit code is the verdict.
-
-**Step 5: Scope findings to the diff.** A large repo can throw hundreds of pre-existing findings and blow the context budget. Lint only the files the agent touched:
-```bash
-eslint $(git diff --name-only HEAD)
-ruff check --diff   # only new violations relative to baseline
-```
-Surface the top N errors; fix the first batch; re-run. Fixing the first batch often clears cascading downstream violations.
+1. **When you add a new top-level layer or package, update the architecture contract before writing code in it.** Add the new module to the `layers` list in `.importlinter` (in the correct position in the order) and to the `LAYER_ORDER` of any custom architecture linter. Do this first so the very first file written in the new layer is already governed.
+2. **When you add a new blessed wrapper, add the matching ban for the raw library it wraps.** A new `app/lib/cache.py` wrapping Redis should arrive together with a `banned-api` entry for `redis` (excepting the wrapper file itself). A wrapper with no ban on the thing it wraps is a wrapper the agent will route around.
+3. **When the agent repeats a codebase-specific mistake for the second time, add a custom rule before fixing the instance.** Write one Semgrep rule (or extend the AST linter) that bans exactly that pattern, scope it to the right paths, phrase the message as an imperative, and commit it to `rules/`. The rule prevents the third occurrence; fixing only the instance does not.
+4. **When you add a directory that is legitimately exempt, narrow the rule's `paths`, do not weaken the rule.** Generated code, migrations, and test fixtures often need an exception. Add the path to that single rule's `exclude` (or `include`) list rather than lowering the severity or deleting the rule globally — the exemption must be as narrow as the legitimate need.
+5. **After adding or tightening any rule, run it across the whole repository once to surface pre-existing violations.** A new rule almost always finds old debt. Decide deliberately: fix it now, or record a baseline/ratchet (e.g. a `# noqa: <CODE>` with a tracking reason, or a recorded violation-count snapshot you only ever allow to shrink) that grandfathers existing instances while blocking new ones. Never let pre-existing debt become a reason to leave the rule at warning.
+6. **Keep one source of truth and never let layers diverge.** The in-loop lint command, the pre-commit hook, and the CI step must all run the same `pyproject.toml`, the same `.importlinter`, and the same `rules/` folder. When you update a rule, you update it in one place; if the configs diverge, the agent gets a green local run and a red CI run and learns to distrust the linter.
+7. **Tighten the caps as the codebase matures.** Once a hotspot is decomposed, lower the `max-complexity` or `max-args` cap so the build holds the new, better baseline. Caps are a ratchet that only ever moves toward stricter.
+8. **When you delete a wrapper, layer, or pattern, delete its rules in the same change.** A rule that references a module that no longer exists, or bans a pattern that is now the blessed path, produces confusing failures and teaches the agent that the linter is unreliable. Dead rules are as harmful as dead code.
+9. **Re-run the architecture linter after any structural refactor.** Moving files between packages changes their layer membership, which can silently create a new boundary violation or invalidate an old exemption. A refactor is not complete until the contracts pass against the new file layout.
+10. **Treat each new rule as a permanent, versioned lesson.** Commit rules with a message describing the mistake they prevent, so the `rules/` folder reads as a changelog of the codebase's hard-won conventions. The folder's value is cumulative: it is the one part of your standards that never decays and never has to be re-explained to the agent.
 
 # Things Not to Do
-* Do not use warnings. An agent does not respond to a yellow squiggle. Set every rule that matters to `error`. A warning is a suggestion the agent will never act on.
-* Do not lint only at CI. CI is the wall, but the agent cannot repair while CI is running. The in-loop lint tool is what makes the repair cycle fast. Run the same rules in all three layers.
-* Do not write error messages as diagnostics for a human. Write them as imperatives to the agent. "raw db access detected" is a description. "Handlers must call the repository layer, not the database directly. Move this query to src/repositories/" is an instruction.
-* Do not leave escape hatches open. A `// eslint-disable-file` blanket comment, a bare `# type: ignore`, an `@ts-ignore` without a reason, and an `any` cast are all bypass lanes. Each bypass makes the corresponding wall decorative. Close the escape hatch in the same PR that builds the wall.
-* Do not configure linters to check only formatting. Formatting rules are the least valuable wall. Architecture boundaries, type integrity, security patterns, and test honesty are the walls that compound. Formatting is table stakes.
-* Do not wait until after implementation to configure linting. Configure linter caps before writing the first line of a new module. A violation discovered after 400 lines are written is a design problem the agent must undo; a violation caught after 30 lines is a cheap course correction.
-* Do not treat a lint cap violation as a style inconvenience. A function that exceeds the complexity cap is not a linting problem — it is a design signal that the function is doing more than one thing and needs to be decomposed. The cap is the trigger; the design is the fix.
-* Do not write a Semgrep rule for a pattern that only occurred once. The failure-mode-to-rule pipeline pays off when the same mistake recurs. One occurrence is noise; two occurrences is a pattern worth encoding.
+* Do not use warnings. An agent does not respond to a yellow squiggle; only a non-zero exit code changes behavior. Set every rule that matters to error. A warning is a suggestion the agent will never act on.
+* Do not write linter messages as diagnostics for a human. Write them as imperatives to the agent. "blind except detected" is a description; "Catch a specific exception type; a bare except also swallows KeyboardInterrupt and SystemExit" is an instruction the agent can act on.
+* Do not leave escape hatches open. A file-wide `# ruff: noqa`, a bare `# type: ignore`, a `# noqa` with no rule code, and an explicit `Any` cast are all bypass lanes. Each open bypass makes the corresponding wall decorative. Close the escape hatch in the same change that builds the wall.
+* Do not configure linters to check only formatting. Formatting rules are the least valuable wall. Architecture boundaries, type integrity, security patterns, error-handling discipline, and test honesty are the walls that compound. Formatting is table stakes.
+* Do not wait until after implementation to write the linter. Author the strict config and the architecture contract before the first function of a new module is written. A violation discovered after 400 lines is a design problem the agent must undo; a violation caught after 30 lines is a cheap course correction.
+* Do not treat a complexity-cap violation as a style inconvenience to be silenced by raising the cap. A function over the cap is a design signal that it does more than one thing and needs decomposition. The cap is the trigger; the redesign is the fix.
+* Do not write a custom Semgrep rule for a pattern that has only occurred once. The recurring-mistake pipeline pays off when the same mistake repeats. One occurrence is noise; the second occurrence is the trigger to encode the rule.
+* Do not let the in-loop, pre-commit, and CI configurations diverge. The moment local lint and CI lint run different rules, the agent gets contradictory verdicts and stops trusting the linter. Keep a single source of truth and update it in one place.
+* Do not write a rule whose suppression is wider than the violation it covers. A suppression must name the single rule it silences and carry a reason; a blanket suppression silences walls you never meant to lower.
 
 # Checklist
-* Before writing the first function in a new module, configure the linter with caps for cyclomatic complexity, function line count, nesting depth, and positional argument count. The cap is not optional; it is how you prevent the god-function from being expressible.
-* When writing a `no-restricted-imports` rule, include the blessed alternative in the error message. An agent that sees "use @/lib/http instead" can act immediately; one that sees "axios import forbidden" must guess.
-* When adding a Semgrep rule, write the message in the imperative: describe what the agent must do, not what it did wrong.
-* After completing any module, run `knip` or `vulture` to verify there are no unused exports. Dead code from abandoned agent attempts accumulates silently.
-* After writing any async function, verify `@typescript-eslint/no-floating-promises` is configured and clean. Every un-awaited promise is a silent race.
-* After writing any try/except or try/catch block, verify no bare `except:` or empty `catch {}` was introduced. Every caught exception must be specific.
-* After adding any `@ts-ignore`, `# type: ignore`, or `// eslint-disable` comment, verify the suppression names a specific rule and an explanation. A blanket suppression closes the wall it suppresses.
-* When the same agent mistake appears for the second time, write a Semgrep rule before fixing the instance. The rule prevents the third occurrence.
-* Before opening a pull request, verify the linter exits 0 on the diff — not just on the files you remember touching, but on every file changed according to `git diff`.
-* When writing the harness lint tool, verify it returns both exit code and structured findings. The exit code is the completion gate; the findings are the repair instructions.
-* When configuring CI, verify the lint step runs the same command with the same config as the in-loop tool and the pre-commit hook. Divergence between layers produces false negatives.
+* Before writing the first function in a new module, write the strict config: set `[tool.ruff]` and `[mypy]` to maximum strictness, with caps for complexity, statements, arguments, branches, and returns. The cap is how you keep the god-function from being expressible.
+* When writing a `banned-api` or `no-restricted-import` rule, put the blessed alternative directly in the message. An agent that reads "import app.lib.http instead" acts immediately; one that reads "requests import forbidden" must guess.
+* When writing any Semgrep rule, phrase the message in the imperative: state what the agent must do and where the correct code belongs, not what it did wrong.
+* When adding a new architecture layer, update the `.importlinter` `layers` contract (and any custom architecture linter's `LAYER_ORDER`) before writing code in the new layer.
+* When introducing a new blessed wrapper, add the `banned-api` ban for the raw library it wraps — excepting only the wrapper file itself — in the same change.
+* After writing any try/except block, verify the linter forbids bare `except:`, blind `except Exception`, swallowed exceptions, and re-raises that drop the cause chain (`BLE`, `E722`, `B904`, plus the swallowed-exception Semgrep rule).
+* After adding any `# type: ignore` or `# noqa`, verify the suppression names a specific code and carries a reason, and that `PGH003`, `PGH004`, `RUF100`, and `warn_unused_ignores` are all on.
+* Before declaring a module done, verify no stub survives: run the `NotImplementedError`, `...`-body, `pass`-only, and TODO/FIXME rules, plus `vulture` for dead code from abandoned attempts.
+* When the same agent mistake appears for the second time, write a custom rule in `rules/` before fixing the instance, scoped to the right paths, then commit it with a message describing the mistake it prevents.
+* After any structural refactor that moves files between packages, re-run the architecture contracts (`lint-imports`) and the custom architecture linter against the new layout before considering the refactor complete.
+* Whenever you tighten or add a rule, run the full linter across the whole repository once to surface pre-existing violations, and decide explicitly whether to fix them now or record a ratcheted baseline.
+* Verify the in-loop lint command, the pre-commit hook, and the CI step all run the identical config and `rules/` folder. Divergence between layers produces a green local run and a red CI run.
 
 # Code Examples
 
-## Example 1: ESLint config enforcing agent-native walls
-A single `.eslintrc.js` that encodes architecture boundaries, escape-hatch closure, and convention lock-in. Every rule is set to `error`, never `warn`.
+## Example 1: A comprehensive Ruff + mypy + import-linter config
+A single `pyproject.toml` plus `.importlinter` that encodes the whole menu of walls — error-only severity, strict typing, complexity caps, security, error-handling discipline, determinism, stub bans, hallucination guards, blessed-wrapper enforcement, and escape-hatch closure. Every rule fails the run; nothing is advisory.
 
-```js
-// .eslintrc.js
-module.exports = {
-  parser: '@typescript-eslint/parser',
-  plugins: ['@typescript-eslint', 'import', 'eslint-comments', 'jest'],
-  rules: {
-    // Architecture walls
-    'import/no-cycle': 'error',
-    'import/no-restricted-paths': ['error', { zones: [
-      { target: 'src/domain', from: 'src/api' },
-      { target: 'src/domain', from: 'src/services' }
-    ]}],
-    'no-restricted-imports': ['error', { patterns: [
-      { group: ['axios'], message: 'Import from @/lib/http. The wrapper enforces retry and timeout.' },
-      { group: ['pg', 'mysql2'], message: 'Import from @/lib/db. Direct imports bypass the connection pool.' }
-    ]}],
+```toml
+# pyproject.toml
+[tool.ruff]
+target-version = "py312"
 
-    // Escape-hatch closure
-    '@typescript-eslint/ban-ts-comment': ['error', {
-      'ts-ignore': 'allow-with-description',
-      minimumDescriptionLength: 10
-    }],
-    'eslint-comments/no-unlimited-disable': 'error',
-    'eslint-comments/no-unused-disable': 'error',
-    '@typescript-eslint/no-explicit-any': 'error',
+[tool.ruff.lint]
+# One broad, strict selection. Ruff has no "warning" tier — any finding fails the run.
+select = [
+    "E", "F", "W",        # pyflakes + pycodestyle core (F821 undefined name lives here)
+    "B",                  # flake8-bugbear (B904 raise-from, B011 assert-false)
+    "S",                  # flake8-bandit (security)
+    "C90",                # mccabe complexity
+    "PL",                 # pylint (PLR0911..PLR0915 caps, PLR2004 magic values)
+    "TRY",                # tryceratops (error-handling hygiene)
+    "BLE",                # blind-except
+    "DTZ",                # naive datetimes
+    "PGH",                # blanket-suppression bans (PGH003/PGH004)
+    "RUF100",             # unused noqa
+    "ANN",                # missing type annotations
+    "PT",                 # pytest-style
+    "FIX",                # TODO/FIXME/HACK/XXX markers
+    "TID",                # banned-api + relative-import control
+    "T20",                # print / pprint left in code
+]
 
-    // Async discipline
-    '@typescript-eslint/no-floating-promises': 'error',
+[tool.ruff.lint.mccabe]
+max-complexity = 8
 
-    // Stub detection
-    'no-warning-comments': ['error', { terms: ['TODO', 'FIXME', 'HACK'] }],
-    'no-unreachable': 'error',
-    'no-empty': ['error', { allowEmptyCatch: false }],
+[tool.ruff.lint.pylint]
+max-args = 5
+max-branches = 10
+max-returns = 6
+max-statements = 40
 
-    // Test integrity
-    'jest/no-focused-tests': 'error',
-    'jest/no-disabled-tests': 'error',
-    'jest/expect-expect': 'error',
+[tool.ruff.lint.flake8-tidy-imports]
+ban-relative-imports = "parents"
 
-    // Convention
-    'import/no-default-export': 'error',
-    'no-console': 'error',
-  }
-};
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"requests".msg     = "Import app.lib.http instead; the wrapper enforces timeout and retry."
+"psycopg2".msg     = "Import app.lib.db instead; direct clients bypass the pool and logging."
+"boto3".msg        = "Import app.lib.aws instead; the wrapper injects credentials and retries."
+"os.getenv".msg    = "Read app.config.settings instead; raw getenv skips type validation."
+"typing.Any".msg   = "Model the real type or use a Protocol/TypeVar; Any disables checking."
+"app.db.engine".msg = "Only app.repositories may import the engine; handlers call repositories."
+
+[mypy]
+strict = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+disallow_any_generics = true
+disallow_any_explicit = true
+no_implicit_optional = true
+warn_unreachable = true
+warn_unused_ignores = true
+warn_return_any = true
+ignore_missing_imports = false
 ```
 
-## Example 2: The failure-mode-to-rule pipeline — a codebase-specific Semgrep rule
-When the same mistake appears twice, encode it as a rule. This example bans direct database calls in API handlers, which is a mistake that agents make because the path of least resistance is to reach for the database client directly.
+```ini
+# .importlinter
+[importlinter]
+root_package = app
+
+[importlinter:contract:layers]
+name = Layered architecture
+type = layers
+layers =
+    app.api
+    app.services
+    app.domain
+
+[importlinter:contract:feature-isolation]
+name = Features are independent
+type = independence
+modules =
+    app.features.billing
+    app.features.checkout
+    app.features.catalog
+```
+
+## Example 2: A codebase-specific Semgrep rule pack — the failure-mode-to-rule pipeline
+When the same mistake appears twice, encode it as a rule and commit it to `rules/`. This pack bans the three most common agent drifts in a layered Python service: raw database access in handlers, placeholder stubs that fake completion, and `assert` used for runtime validation (which vanishes under `python -O`). Each message is an imperative that names the fix.
 
 ```yaml
-# rules/no-raw-db-in-handlers.yaml
+# rules/agent-native.yaml
 rules:
   - id: no-raw-db-in-handlers
     pattern: db.query(...)
     paths:
-      include: ['src/api/**']
-      exclude: ['src/api/**/__tests__/**']
+      include: ['app/api/**']
+      exclude: ['app/api/**/tests/**']
     message: >
       Handlers must call the repository layer, not the database directly.
-      Move this query to the appropriate repository in src/repositories/
-      and call the repository method from the handler.
-      Direct database calls in handlers bypass query logging, retry logic,
-      and the transaction boundary enforced by the repository layer.
+      Move this query into a method on the matching repository in app/repositories/
+      and call that method from the handler. Direct calls bypass query logging,
+      retry logic, and the transaction boundary the repository enforces.
     severity: ERROR
     languages: [python]
 
@@ -538,87 +869,290 @@ rules:
       - pattern: raise NotImplementedError(...)
       - pattern: raise NotImplementedError
     paths:
-      exclude: ['tests/**', 'src/base/**']
+      exclude: ['tests/**', '**/base.py']
     message: >
-      Remove the NotImplementedError stub and implement the function.
-      Placeholder implementations mean the task is incomplete.
-      If the function is intentionally abstract, move it to the base class.
+      Implement this function. NotImplementedError in non-abstract code means the
+      task is incomplete. If the method is genuinely abstract, move it to a base
+      class and decorate it with @abstractmethod.
+    severity: ERROR
+    languages: [python]
+
+  - id: no-assert-for-runtime-validation
+    pattern: assert $COND, $MSG
+    paths:
+      include: ['app/api/**', 'app/services/**']
+    message: >
+      Do not use assert for runtime validation; it is stripped under python -O.
+      Raise a specific exception such as ValidationError instead.
     severity: ERROR
     languages: [python]
 ```
 
-## Example 3: The harness lint tool — the generate→verify→repair loop
-This Python snippet shows how a harness exposes linting as a tool and feeds violations back into the agent's context as imperative observations. The key details are: (1) JSON output for reliable parsing, (2) scoping to the diff to manage context budget, (3) formatting violations as agent instructions, and (4) tying loop completion to exit code rather than agent self-report.
+## Example 3: A complete custom architecture linter (standalone, no framework)
+Off-the-shelf tools cover the common walls, but a real system has architecture-specific rules no packaged linter knows about. This is a single-file, dependency-free linter built on Python's `ast` module that enforces a layered architecture and a set of agent-native bans across the whole tree: layer-import direction, repository-only database access, determinism in the domain layer, banned raw libraries, no bare excepts, no stub bodies, and no `print`. It emits imperative findings and exits non-zero on any violation, so it drops straight into a pre-commit hook or CI step. Adapt the `LAYER_ORDER`, `LAYER_OF`, and the ban tables to a real codebase.
 
 ```python
-import subprocess
-import json
+#!/usr/bin/env python3
+"""arch_lint.py — a custom aggressive linter for a layered Python service.
+
+Enforces, across the entire `app/` tree:
+  * layer-import direction (api -> services -> domain; never the reverse)
+  * database access only from the repository layer
+  * determinism in the domain layer (no wall clock, no RNG)
+  * banned raw libraries in favor of blessed wrappers
+  * no bare/blind excepts, no stub bodies, no leftover print()
+
+Run: python arch_lint.py app/    (exits 1 on any finding)
+"""
+from __future__ import annotations
+
+import ast
+import sys
 from dataclasses import dataclass
-from typing import Any
+from pathlib import Path
+
+# --- Architecture definition (adapt to the real system) ----------------------
+
+# Lower index = lower layer. A module may import only its own layer or lower.
+LAYER_ORDER: list[str] = ["domain", "services", "api"]
 
 
-@dataclass
-class LintFinding:
+def layer_of(module_path: str) -> str | None:
+    """Map a dotted module path (e.g. 'app.api.handlers') to its layer name."""
+    parts = module_path.split(".")
+    for part in parts:
+        if part in LAYER_ORDER:
+            return part
+    return None
+
+
+# Raw libraries that must be reached only through a blessed wrapper.
+BANNED_IMPORTS: dict[str, str] = {
+    "requests": "Import app.lib.http instead; the wrapper enforces timeout and retry.",
+    "urllib": "Import app.lib.http instead of urllib.",
+    "psycopg2": "Import app.lib.db instead; direct clients bypass the pool and logging.",
+    "boto3": "Import app.lib.aws instead; the wrapper injects credentials and retries.",
+}
+
+# Calls that must never appear in the domain layer (non-deterministic I/O).
+NONDETERMINISTIC_CALLS: set[str] = {
+    "datetime.now",
+    "datetime.utcnow",
+    "time.time",
+    "random.random",
+    "random.randint",
+    "uuid.uuid4",
+}
+
+# Only these layers/dirs may touch the database engine directly.
+DB_ALLOWED_LAYERS: set[str] = {"repositories"}
+
+
+@dataclass(frozen=True)
+class Finding:
     file: str
     line: int
     rule: str
     message: str
 
-    def to_observation(self) -> str:
-        # Format as an imperative instruction, not a diagnostic description.
-        return f"{self.file}:{self.line} — [{self.rule}]\n{self.message}"
+    def render(self) -> str:
+        # Imperative, agent-facing format: file:line — [rule] then the instruction.
+        return f"{self.file}:{self.line} — [{self.rule}]\n    {self.message}"
 
 
-class LintTool:
-    def __init__(self, max_findings: int = 20):
-        # Cap findings to avoid blowing the context budget on a large repo.
-        self._max_findings = max_findings
+def _dotted_name(node: ast.expr) -> str:
+    """Best-effort reconstruction of a dotted call/attribute name."""
+    parts: list[str] = []
+    cur: ast.expr | None = node
+    while isinstance(cur, ast.Attribute):
+        parts.append(cur.attr)
+        cur = cur.value
+    if isinstance(cur, ast.Name):
+        parts.append(cur.id)
+    return ".".join(reversed(parts))
 
-    def run(self, changed_files: list[str] | None = None) -> dict[str, Any]:
-        # Scope to changed files when provided; otherwise lint the whole src tree.
-        targets = changed_files or ["src/"]
-        result = subprocess.run(
-            ["ruff", "check", "--output-format", "json", *targets],
-            capture_output=True,
-            text=True,
-        )
-        exit_code = result.returncode
-        findings = self._parse(result.stdout)
-        return {
-            "exit_code": exit_code,
-            "passed": exit_code == 0,
-            "findings": [f.to_observation() for f in findings[: self._max_findings]],
-            "total_findings": len(findings),
-            "truncated": len(findings) > self._max_findings,
-        }
 
-    def _parse(self, raw: str) -> list[LintFinding]:
-        # Parse Ruff JSON output into structured findings.
-        try:
-            items = json.loads(raw) if raw.strip() else []
-        except json.JSONDecodeError:
-            return []
-        return [
-            LintFinding(
-                file=item.get("filename", ""),
-                line=item.get("location", {}).get("row", 0),
-                rule=item.get("code", ""),
-                message=item.get("message", ""),
+class ArchChecker(ast.NodeVisitor):
+    """Walks one module's AST and collects architecture/agent-native findings."""
+
+    def __init__(self, file_path: str, module_path: str) -> None:
+        self.file = file_path
+        self.module = module_path
+        self.layer = layer_of(module_path)
+        self.findings: list[Finding] = []
+
+    def _add(self, line: int, rule: str, message: str) -> None:
+        self.findings.append(Finding(self.file, line, rule, message))
+
+    # --- Import rules --------------------------------------------------------
+
+    def visit_Import(self, node: ast.Import) -> None:
+        for alias in node.names:
+            self._check_import(node.lineno, alias.name)
+        self.generic_visit(node)
+
+    def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
+        if node.module:
+            self._check_import(node.lineno, node.module)
+        self.generic_visit(node)
+
+    def _check_import(self, line: int, imported: str) -> None:
+        top = imported.split(".")[0]
+        # Rule 1: banned raw library (skip the wrapper files themselves).
+        if top in BANNED_IMPORTS and "lib" not in self.module:
+            self._add(line, "banned-import", BANNED_IMPORTS[top])
+        # Rule 2: layer-import direction.
+        target_layer = layer_of(imported)
+        if self.layer and target_layer and target_layer != self.layer:
+            if LAYER_ORDER.index(target_layer) > LAYER_ORDER.index(self.layer):
+                self._add(
+                    line,
+                    "layer-violation",
+                    f"{self.layer} must not import from the higher layer "
+                    f"'{target_layer}'. Invert the dependency: have {target_layer} "
+                    f"depend on {self.layer}, or move the shared code down into domain.",
+                )
+        # Rule 3: database engine reachable only from the repository layer.
+        if imported.endswith("db.engine") and self.layer not in DB_ALLOWED_LAYERS:
+            self._add(
+                line,
+                "db-access-violation",
+                "Only the repository layer may import app.db.engine. Call a "
+                "repository method from this layer instead of touching the engine.",
             )
-            for item in items
-        ]
+
+    # --- Call rules ----------------------------------------------------------
+
+    def visit_Call(self, node: ast.Call) -> None:
+        name = _dotted_name(node.func)
+        # Rule 4: determinism in the domain layer.
+        if self.layer == "domain" and name in NONDETERMINISTIC_CALLS:
+            self._add(
+                node.lineno,
+                "nondeterminism-in-domain",
+                f"Do not call {name}() in the domain layer. Inject a Clock/RNG/Id "
+                f"dependency and call it, so this code stays deterministic and testable.",
+            )
+        # Rule 5: no leftover debug print().
+        if name == "print":
+            self._add(
+                node.lineno,
+                "no-print",
+                "Replace print() with the structured logger: "
+                "from app.lib.log import logger; logger.info(...).",
+            )
+        self.generic_visit(node)
+
+    # --- Exception-handling rules -------------------------------------------
+
+    def visit_ExceptHandler(self, node: ast.ExceptHandler) -> None:
+        # Rule 6: no bare/blind except.
+        is_bare = node.type is None
+        is_blind = isinstance(node.type, ast.Name) and node.type.id in {"Exception", "BaseException"}
+        if is_bare or is_blind:
+            self._add(
+                node.lineno,
+                "broad-except",
+                "Catch a specific exception type instead of a bare/blind except. "
+                "A broad except hides the failure mode and swallows KeyboardInterrupt.",
+            )
+        # Rule 7: no silently swallowed exception.
+        if len(node.body) == 1 and isinstance(node.body[0], ast.Pass):
+            self._add(
+                node.lineno,
+                "swallowed-exception",
+                "Do not swallow an exception with `pass`. Log and recover, or re-raise.",
+            )
+        self.generic_visit(node)
+
+    # --- Stub-body rules -----------------------------------------------------
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+        self._check_stub(node)
+        self.generic_visit(node)
+
+    def _check_stub(self, node: ast.FunctionDef) -> None:
+        decorators = {_dotted_name(d) for d in node.decorator_list}
+        if "abstractmethod" in decorators or "abc.abstractmethod" in decorators:
+            return  # abstract methods are allowed to be empty
+        body = [s for s in node.body if not isinstance(s, ast.Expr) or not _is_docstring(s)]
+        if len(body) == 1:
+            only = body[0]
+            if isinstance(only, ast.Pass) or (
+                isinstance(only, ast.Expr) and isinstance(only.value, ast.Constant)
+                and only.value.value is Ellipsis
+            ):
+                self._add(
+                    node.lineno,
+                    "stub-body",
+                    f"Implement {node.name}(); a `pass`/`...` body is a stub that fakes "
+                    f"completion. If it is genuinely abstract, mark it @abstractmethod.",
+                )
+            if isinstance(only, ast.Raise) and _raises_not_implemented(only):
+                self._add(
+                    node.lineno,
+                    "stub-body",
+                    f"Implement {node.name}(); NotImplementedError means the task is "
+                    f"incomplete. If abstract, move it to a base class and mark it abstract.",
+                )
 
 
-# In the harness loop:
-#
-# lint_tool = LintTool()
-# while True:
-#     agent_response = agent.step(context)
-#     if is_done_claim(agent_response):
-#         lint_result = lint_tool.run(changed_files=get_diff_files())
-#         if lint_result["passed"]:
-#             break  # exit code 0 — loop closes
-#         # Inject findings as the next context turn, not as agent instructions.
-#         context.append({"role": "tool", "content": format_findings(lint_result)})
-#         # Agent reads findings on next step and repairs.
+def _is_docstring(stmt: ast.stmt) -> bool:
+    return (
+        isinstance(stmt, ast.Expr)
+        and isinstance(stmt.value, ast.Constant)
+        and isinstance(stmt.value.value, str)
+    )
+
+
+def _raises_not_implemented(node: ast.Raise) -> bool:
+    exc = node.exc
+    if isinstance(exc, ast.Name):
+        return exc.id == "NotImplementedError"
+    if isinstance(exc, ast.Call) and isinstance(exc.func, ast.Name):
+        return exc.func.id == "NotImplementedError"
+    return False
+
+
+def module_path_for(path: Path, root: Path) -> str:
+    rel = path.relative_to(root.parent).with_suffix("")
+    return ".".join(rel.parts)
+
+
+def lint_path(root: Path) -> list[Finding]:
+    findings: list[Finding] = []
+    for py_file in sorted(root.rglob("*.py")):
+        if any(part in {"tests", "migrations", "__pycache__"} for part in py_file.parts):
+            continue
+        try:
+            tree = ast.parse(py_file.read_text(encoding="utf-8"), filename=str(py_file))
+        except SyntaxError as err:
+            findings.append(
+                Finding(str(py_file), err.lineno or 0, "syntax-error",
+                        f"File does not parse: {err.msg}. Fix the syntax before linting.")
+            )
+            continue
+        checker = ArchChecker(str(py_file), module_path_for(py_file, root))
+        checker.visit(tree)
+        findings.extend(checker.findings)
+    return findings
+
+
+def main(argv: list[str]) -> int:
+    if len(argv) != 2:
+        print("usage: python arch_lint.py <source-dir>", file=sys.stderr)
+        return 2
+    findings = lint_path(Path(argv[1]))
+    for f in findings:
+        print(f.render())
+    if findings:
+        print(f"\narch_lint: {len(findings)} violation(s). The build cannot close until "
+              f"every one is fixed — each message above is an instruction, not a note.")
+        return 1
+    print("arch_lint: clean.")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv))
 ```
