@@ -87,7 +87,7 @@ These standard-library helpers generate or wrap the surfaces above and are often
 # Things Not to Do
 * Do not annotate with `Any` or a bare `dict`, `list`, or `tuple` when a precise type exists. `Any` switches the checker off for that value and removes the contract the agent would have read.
 * Do not implement a dunder the type does not semantically deserve. A `__len__` on a non-collection or an `__add__` on a non-quantity is a guessable-wrong operation that misleads the agent and is worse than the honest `TypeError` of its absence.
-* Do not write a `__repr__` that hides the fields or returns a generic `<object>` form. The repr is the agent's primary perception window, and a useless one blinds every traceback, log line, and test failure.
+* Do not write a `__repr__` that hides the fields or falls back to Python's default object form. The repr is the agent's primary perception window, and a useless one blinds every traceback, log line, and test failure.
 * Do not define `__eq__` without `__hash__` unless the type is intentionally unhashable. The inconsistency breaks set and dict membership in ways that surface far from the definition.
 * Do not swallow errors with a bare `except: pass`. Use `contextlib.suppress(SpecificError)` to state exactly which error is expected, so the channel reports the truth instead of hiding every failure.
 * Do not use `assert` to validate external input. `-O` strips assertions, so the check vanishes in production; raise a guard-clause exception for anything a caller controls.
