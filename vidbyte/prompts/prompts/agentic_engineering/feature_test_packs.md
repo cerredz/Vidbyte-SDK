@@ -62,6 +62,7 @@ tests/features/<feature_slug>/
 |-- test_migration_compatibility.py
 |-- test_observability.py
 |-- test_chaos_failure_injection.py
+|-- test_compatibility.py
 |-- test_accessibility.py
 |-- test_serialization_roundtrip.py
 |-- test_cli_package_smoke.py
