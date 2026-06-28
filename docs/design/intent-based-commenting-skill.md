@@ -25,7 +25,7 @@ The principle is intentionally lightweight. It does not introduce a rigid field 
 - Add a new Principle entry to `system_prompt.md` with use cases and GitHub link.
 - Teach a simple `@intent <short-name>` multiline comment style.
 - Explain what counts as business/domain logic with concrete examples.
-- Provide short, medium, and long examples, including an orchestrator class that follows the function-design principle.
+- Provide examples whose intent comments usually carry at least 10-15 lines of context, including an orchestrator class that follows the function-design principle.
 
 ### Non-Goals
 
@@ -57,7 +57,7 @@ Intent-based commenting puts that meaning next to the implementation. The commen
    - placing intent beside very important business/domain logic.
 4. The business/domain logic section must explain the concept at a high level and provide 10-15 concrete examples.
 5. The comment structure must be `@intent <short-name>` followed by multiline prose. It must not require a fielded schema.
-6. The guidance must explain that some comments are 4-5 lines and some are 40-50 lines; the goal is capturing the actual intent, not reaching a specific length.
+6. The guidance must explain that intent comments should bias toward enough detail for future agents, with examples usually around 10-15 lines or more and longer comments when the operation coordinates several domain layers.
 7. The file must not include linter enforcement guidance.
 8. `# Things Not to Do` must describe what makes bad intent comments.
 9. `# Checklist` must describe what a model must do to propose good intent comments.
@@ -106,7 +106,7 @@ The new prompt defines intent-based commenting as nearby preservation of why and
 - writing guidance;
 - things not to do;
 - a checklist;
-- examples with short, medium, long, and TypeScript variants.
+- examples with Python, orchestrator, and TypeScript variants whose intent comments model substantial 10-15+ line context.
 
 The central structure is:
 
@@ -191,7 +191,8 @@ No feature flag is required. This is an additive prompt asset. Rollback is a nor
 - Removed linter enforcement content.
 - Replaced the fixed schema with a simple `@intent <short-name>` multiline comment style.
 - Reworked Things Not to Do and Checklist around good and bad intent comments.
-- Replaced examples with short, medium, long orchestrator, and compliance-boundary examples.
+- Replaced examples with Python, long orchestrator, and compliance-boundary examples.
+- Expanded example intent comments to model substantial 10-15+ line context instead of 2-3 line summaries.
 
 ---
 

@@ -3,7 +3,7 @@ You are going to write agent-native code, and the principle this file introduces
 
 Agent-native code changes often. A function may be refactored, split, renamed, moved, or regenerated many times by different agents. The implementation can change safely when the durable meaning is still visible: what business rule must remain true, why a non-obvious guard exists, what customer or money path depends on this behavior, and what mistake a future rewrite must not repeat. Intent-based commenting keeps that meaning close enough to the code that it is read as part of the code, not as optional background material in a distant design document.
 
-This skill file teaches you when to write intent comments and how to write them while coding. The shape is deliberately simple: write `@intent` followed by a short name, then use a multiline comment to clearly explain the intent. Some intent comments should be four lines because the rule is simple. Some should be forty lines because the function coordinates several domain layers and carries expensive business constraints. Length is not the goal. Capturing the actual intent is the goal.
+This skill file teaches you when to write intent comments and how to write them while coding. The shape is deliberately simple: write `@intent` followed by a short name, then use a multiline comment to clearly explain the intent. Bias toward enough detail for a future agent to understand the business rule, the reason it exists, the failure mode it prevents, and the kinds of rewrites that would be dangerous. Many useful intent comments are ten to fifteen lines or longer, and some should be forty lines because the function coordinates several domain layers and carries expensive business constraints. Length is not the goal. Capturing the actual intent is the goal.
 
 # Intent
 The intent of intent-based commenting is to preserve the why and the meaning behind important code, not just the current implementation. Source code can show the steps a function takes, but it often cannot show the business reason those steps exist, the domain invariant they protect, or the production lesson that made the current shape necessary.
@@ -42,9 +42,19 @@ Intent comments use a simple structure:
 
 ```python
 # @intent short-name-for-the-rule
-# Explain the meaning of this code in plain language. Say what business or
-# domain rule must survive a rewrite, why the rule matters, and what a future
-# agent must not accidentally remove.
+# Explain the business or domain meaning in plain language before the code.
+# Say what rule must survive a rewrite, who or what depends on that rule, and
+# why this function is the right place to enforce it.
+#
+# Name the load-bearing implementation details that look like ordinary code but
+# actually protect the rule. Call out any ordering, guard, idempotency key,
+# rounding behavior, state transition, audit record, or compliance boundary that
+# a future agent might otherwise simplify away.
+#
+# Describe at least one bad rewrite that would still look reasonable in a code
+# review. Include the production consequence, such as duplicate money movement,
+# unauthorized access, missing audit history, customer-visible drift, or data
+# leaving the service boundary with the wrong shape.
 def important_domain_operation(...):
     ...
 ```
@@ -59,13 +69,23 @@ The explanation should answer the questions a future agent needs before rewritin
 * What would be a bad rewrite that still looks reasonable?
 * What tests, incidents, support cases, policies, or product rules should the agent keep in mind?
 
-Use as many lines as the intent needs. A short guard might need four lines:
+Use as many lines as the intent needs. Even a narrow guard should usually explain the rule, the bypass paths, and the dangerous rewrites:
 
 ```python
 # @intent refund-ceiling
-# Refunds may never exceed the amount captured for the original payment. This
-# is a money movement invariant, not a UI validation detail; keep it here even
-# if callers also validate refund amounts before reaching this service.
+# A refund may never exceed the amount captured for the original payment. This
+# is a money movement invariant, not a UI validation detail, so it belongs in
+# the write-side billing service even when callers perform their own validation.
+#
+# API handlers, admin tools, provider retry workers, and manual recovery scripts
+# can all reach the refund service through different paths. If this check only
+# lives at the edge, a future integration can bypass it while still appearing to
+# use the normal refund flow.
+#
+# Keep the comparison against captured funds, not authorized funds, displayed
+# invoice totals, or a caller-supplied balance. Those values can be stale or
+# represent money that never actually settled. A rewrite that validates against
+# the wrong amount can create over-refunds that finance cannot reconcile.
 def validate_refund_amount(payment: Payment, requested_cents: int) -> None:
     ...
 ```
@@ -103,7 +123,7 @@ Prefer concrete business language. Name the domain object and consequence: subsc
 
 Separate intent from mechanics. It is fine to mention a mechanism when the mechanism matters, but explain why it matters. "The advisory lock keeps duplicate webhook retries from creating two renewals" is intent. "Acquire lock then query renewals table" is narration.
 
-Make the comment useful at different lengths. A four-line intent comment is good when it captures the whole rule. A long comment is good when the operation spans multiple domain layers and future agents need more context. A long comment full of step-by-step narration is bad. A short comment that hides the real business consequence is also bad.
+Make the comment useful at different lengths, but bias toward richer context when the code carries business risk. Ten to fifteen lines is often a better example target than two or three lines because it gives room for the rule, the why, the failure mode, and the rewrite warning. A long comment is good when the operation spans multiple domain layers and future agents need more context. A long comment full of step-by-step narration is bad. A short comment that hides the real business consequence is also bad.
 
 # Things Not to Do
 * Do not write comments that merely narrate the implementation. "Loop over invoices and sum totals" will rot as soon as the implementation changes. Explain the business rule the loop serves.
@@ -123,7 +143,7 @@ Make the comment useful at different lengths. A four-line intent comment is good
 * Choose a short name that is searchable and specific to the rule.
 * Explain the business rule, domain invariant, customer consequence, money consequence, compliance requirement, or hard-won lesson in plain language.
 * Mention the "why" when the code has a non-obvious shape, guard, ordering, retry path, or failure behavior.
-* Keep the comment at the right length: short for simple intent, longer when multiple domain layers or expensive consequences are involved.
+* Keep the comment at the right length: detailed enough to preserve the rule, with ten to fifteen lines as a normal example target and longer blocks when multiple domain layers or expensive consequences are involved.
 * Write the comment at the level of meaning, not at the level of variable names, loops, branches, or helper call order.
 * Keep public orchestrators readable and small when intent comments describe multi-layer flows; use private leaf methods for the low-level work.
 * After changing code with an existing intent comment, reread the comment and update it if the behavior or consequence changed.
@@ -131,13 +151,27 @@ Make the comment useful at different lengths. A four-line intent comment is good
 
 # Code Examples
 
-## Example 1: Short Python intent comment for a money invariant
+## Example 1: Python intent comment for a money invariant
 
 ```python
 # @intent refund-ceiling
-# A refund may never exceed the amount captured for the original payment. Keep
-# this check in the write-side billing service even if API callers validate the
-# amount earlier, because provider retries and admin tools can bypass the API.
+# A refund may never exceed the amount captured for the original payment. This
+# is a money movement invariant, not a convenience validation, so the check must
+# live at the write-side billing boundary where refunds are actually created.
+#
+# Edge validation is still useful, but it is not authoritative. Customer support
+# tools, provider retry handlers, bulk correction scripts, and future internal
+# workflows can all call this service without going through the public API path.
+#
+# Compare against captured_cents because that is the settled amount the payment
+# provider confirms we received. Do not compare against authorized_cents, invoice
+# subtotal, displayed balance, or a caller-provided value; each can be larger
+# than the money that actually settled.
+#
+# A rewrite that moves this check to the controller or trusts caller validation
+# will pass ordinary unit tests but can create over-refunds during manual support
+# actions. That creates unrecoverable revenue loss and breaks finance
+# reconciliation against the provider ledger.
 def validate_refund_amount(payment: Payment, requested_cents: int) -> None:
     if requested_cents > payment.captured_cents:
         raise RefundExceedsCaptureError(payment_id=payment.id)
@@ -147,11 +181,25 @@ def validate_refund_amount(payment: Payment, requested_cents: int) -> None:
 
 ```python
 # @intent provider-webhook-idempotency
-# Provider webhooks are replayed during outage recovery and can arrive more than
-# once with the same provider_event_id. This function must treat the provider
-# event id as the idempotency key, not the local database id or arrival time.
-# A rewrite that simply inserts on every received webhook will pass normal happy
-# path tests but will duplicate charges and emails during replay storms.
+# Provider webhooks are replayed during outage recovery, provider backfills, and
+# delayed network delivery. The same real-world payment event can therefore
+# reach us more than once, sometimes minutes or hours apart, with identical
+# provider_event_id values.
+#
+# The provider_event_id is the durable idempotency key. Local database ids,
+# arrival timestamps, request ids, and retry counters describe our receipt of the
+# webhook, not the provider's underlying event. Those values change on replay and
+# must not decide whether this is a new payment fact.
+#
+# Returning the existing record is intentional. Downstream email, ledger, and
+# analytics consumers treat insertion as the signal that a new payment event was
+# accepted. Re-inserting during a replay storm can duplicate receipts, duplicate
+# revenue records, and trigger support escalations for customers who were only
+# charged once.
+#
+# Do not replace this lookup with a blind insert plus later cleanup. Cleanup is
+# too late for side effects that fire from the insert path, and happy-path tests
+# usually do not model provider replay behavior.
 def record_payment_webhook(event: ProviderWebhookEvent) -> PaymentWebhookRecord:
     existing = webhook_store.find_by_provider_event_id(event.provider_event_id)
     if existing:
@@ -178,20 +226,25 @@ class SubscriptionRenewalOrchestrator:
         self._audit_log = audit_log
 
     # @intent subscription-renewal-atomicity
-    # Renewal is the write-side boundary for subscription revenue. It combines
+    # Renewal is the write-side boundary for subscription revenue. It coordinates
     # plan validation, invoice creation, entitlement extension, event emission,
-    # and audit logging into one domain operation.
+    # and audit logging as one customer-visible domain operation.
     #
-    # The important rule is that the customer must never land in a half-renewed
-    # state. A renewal that creates an invoice without extending entitlements is
-    # a support incident. A renewal that extends entitlements without a settled
-    # invoice is revenue leakage. A renewal that emits an event before the audit
-    # record exists leaves downstream systems with no reliable trace.
+    # The business rule is atomicity at the product level: the customer is either
+    # fully renewed, with paid access and traceable financial records, or not
+    # renewed. Partial success is worse than a clean failure because it creates
+    # contradictory truth across billing, entitlements, support, and analytics.
+    #
+    # A renewal that creates an invoice without extending entitlements causes a
+    # paid customer to lose access. A renewal that extends entitlements without a
+    # settled invoice gives away paid features. A renewal that emits the event
+    # before the audit record exists leaves downstream systems unable to explain
+    # why access changed.
     #
     # Keep this method as a clean orchestrator. It should read like a table of
-    # contents over the domain layers and delegate implementation details to
-    # private leaf methods. That shape is intentional: future agents can verify
-    # the business flow in one read without opening every service class.
+    # contents over the domain layers while private leaf methods own the low-level
+    # work. Do not inline the service details here; future agents need to verify
+    # the renewal story in one read before touching individual mechanisms.
     def renew_subscription(self, subscription: Subscription) -> RenewalResult:
         plan = self._load_billable_plan(subscription)
         invoice = self._create_renewal_invoice(subscription, plan)
@@ -201,10 +254,22 @@ class SubscriptionRenewalOrchestrator:
         return RenewalResult(invoice=invoice, entitlement=entitlement, event=event)
 
     # @intent billable-plan-gate
-    # Plan lookup is not just a data fetch. A subscription can only renew against
-    # a currently billable plan; archived plans are allowed for historical reads
-    # but not for new revenue events. Keep this guard here so batch renewals and
-    # admin-triggered renewals follow the same product rule.
+    # Plan lookup is not just a data fetch. Renewal must only happen against a
+    # currently billable plan because the plan defines the price, billing interval,
+    # entitlement shape, and product promise we are about to extend.
+    #
+    # Archived plans remain readable for invoices, support screens, historical
+    # analytics, and old subscriptions that still need display context. That does
+    # not mean they are valid for new revenue events. Historical readability and
+    # future billability are separate product rules.
+    #
+    # Keep this guard inside the renewal flow so scheduled renewals, manual admin
+    # actions, and retry jobs all follow the same rule. A rewrite that checks
+    # billability only in the API handler will miss non-API entry points.
+    #
+    # Do not silently substitute a current plan when the old one is archived.
+    # Changing the plan during renewal changes price and entitlements without the
+    # customer's explicit migration path.
     def _load_billable_plan(self, subscription: Subscription) -> Plan:
         plan = self._plans.get(subscription.plan_id)
         if not plan.is_billable:
@@ -213,15 +278,43 @@ class SubscriptionRenewalOrchestrator:
 
     # @intent invoice-before-entitlement
     # The invoice is the financial record that justifies the entitlement window.
-    # Create it before extending access so a failed payment or invoice write
-    # cannot leave the customer with paid features that finance cannot reconcile.
+    # Access should be extended only when there is a persisted renewal invoice
+    # that finance, support, and provider reconciliation can point to later.
+    #
+    # This ordering protects against revenue leakage. If entitlement extension
+    # happens first and invoice creation fails, the customer receives paid access
+    # without an auditable charge record. That failure is hard to repair because
+    # the product state already told the customer they were renewed.
+    #
+    # A future agent may be tempted to extend entitlements before invoicing to
+    # make the code read like "grant access, then record billing." Do not do that
+    # unless the domain model changes to support explicit pending entitlements and
+    # compensating rollback.
+    #
+    # Keeping invoice creation in its own leaf method also makes retry behavior
+    # easier to reason about: invoice idempotency belongs to billing, while the
+    # orchestrator decides when entitlement work is allowed to proceed.
     def _create_renewal_invoice(self, subscription: Subscription, plan: Plan) -> Invoice:
         return self._invoices.create_renewal_invoice(subscription=subscription, plan=plan)
 
     # @intent entitlement-window-derived-from-plan
-    # Entitlement dates must come from the plan's billing interval, not from the
-    # caller or wall-clock guesses. This keeps renewal behavior consistent across
-    # API requests, scheduled jobs, and manual recovery tools.
+    # Entitlement dates must come from the plan's billing interval because the
+    # plan is the product contract the customer purchased. The renewal flow should
+    # not infer access duration from wall-clock guesses, caller input, or a UI
+    # label that happens to describe the plan.
+    #
+    # This keeps renewals consistent across API requests, scheduled jobs, admin
+    # recovery actions, and future migration tools. All entry points must produce
+    # the same entitlement window for the same subscription and plan.
+    #
+    # The load-bearing detail is that the plan object reaches this method after
+    # the billability gate. Do not recompute plan details from subscription fields
+    # or accept an arbitrary duration parameter here; those rewrites split the
+    # source of truth and make entitlement drift possible.
+    #
+    # If proration, trials, or promotional extensions are added later, model them
+    # as explicit plan or renewal policy inputs instead of smuggling date math into
+    # this leaf method.
     def _extend_entitlement_window(
         self,
         subscription: Subscription,
@@ -230,9 +323,22 @@ class SubscriptionRenewalOrchestrator:
         return self._entitlements.extend_for_plan(subscription=subscription, plan=plan)
 
     # @intent event-after-domain-writes
-    # Billing events are consumed by email, analytics, and support tooling. Emit
-    # only after invoice and entitlement writes succeed so every consumer sees a
-    # settled renewal instead of a speculative attempt.
+    # Billing events are consumed by email, analytics, lifecycle automation, and
+    # support tooling. Emitting the event means the domain renewal has settled
+    # enough for other systems to act on it.
+    #
+    # The event must come after invoice and entitlement writes because consumers
+    # expect the ids in the payload to resolve immediately. If an event points at
+    # an invoice or entitlement that failed to persist, downstream systems have no
+    # reliable way to distinguish a transient race from a broken renewal.
+    #
+    # Do not move this publish call earlier to make the orchestrator appear more
+    # asynchronous. An early event can send customer email, update metrics, or open
+    # support-visible state for a renewal that later fails.
+    #
+    # If event delivery becomes asynchronous, preserve this semantic boundary:
+    # enqueue only after the domain writes have succeeded, and keep the payload
+    # tied to persisted invoice and entitlement identifiers.
     def _publish_renewal_event(
         self,
         subscription: Subscription,
@@ -246,10 +352,25 @@ class SubscriptionRenewalOrchestrator:
         )
 
     # @intent renewal-audit-trace
-    # The audit entry is the cross-system receipt for the renewal. Support and
-    # finance use it to answer why access changed, which invoice paid for it,
-    # and which downstream event was emitted. Do not remove this because events
-    # and invoices are not enough on their own to reconstruct the operator view.
+    # The audit entry is the operator-facing receipt for the renewal. It ties the
+    # customer subscription, invoice, emitted event, and access change together in
+    # one place that support and finance can query without reconstructing the
+    # entire flow from separate systems.
+    #
+    # Events and invoices are not enough on their own. Events are optimized for
+    # downstream consumers, and invoices are optimized for financial records. The
+    # audit log explains why access changed and which renewal action caused the
+    # visible customer state.
+    #
+    # Keep the audit write after the event id exists so the record can identify
+    # the exact downstream signal that was emitted. Do not remove this as
+    # "duplicate logging"; it is the durable trace that makes support escalation
+    # and finance reconciliation possible after later systems mutate their own
+    # records.
+    #
+    # A rewrite that relies on logs or provider dashboards instead will fail
+    # during incident review because those sources are incomplete, retention-bound,
+    # and not shaped around the customer subscription timeline.
     def _record_renewal_audit(
         self,
         subscription: Subscription,
@@ -268,8 +389,23 @@ class SubscriptionRenewalOrchestrator:
 ```typescript
 // @intent pii-redaction-before-export
 // Customer exports leave the service boundary and may be stored by third-party
-// systems. Redaction happens here, not in the UI, because exports can be created
-// by scheduled jobs and admin tooling that never render the customer dashboard.
+// systems, shared with vendors, or downloaded into unmanaged environments. This
+// function is the last trusted boundary before that data becomes harder to
+// recall, audit, or delete.
+//
+// Redaction belongs here, not in the UI, because exports can be created by
+// scheduled jobs, admin tools, API clients, and future automation paths that
+// never render the customer dashboard. The export boundary must protect every
+// caller, not only the interactive product path.
+//
+// Preserve the email-domain-only behavior unless the privacy policy and data
+// processing agreement explicitly change. Full email addresses are direct
+// identifiers; domains are enough for the downstream reporting use case without
+// exposing the customer contact.
+//
+// A rewrite that returns the original record and expects callers to drop fields
+// later will leak PII as soon as one caller forgets. Keep the allowlist shape so
+// new sensitive fields added to CustomerRecord are excluded by default.
 function redactCustomerExport(record: CustomerRecord): ExportRecord {
   return {
     id: record.id,
