@@ -54,7 +54,7 @@ prompt text.
 | Prompt | Key | Sub-prompts | Link |
 | --- | --- | --- | --- |
 | Actor Runtime | `actor_runtime` | planner, coder, reviewer, generator, critic, reasoner, summarization, decomposer, explorer, tradeoff, hypothesis_generator, refiner, formatter, safety, final_answer | [actor_runtime/](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/actor_runtime) |
-| Agentic Engineering | `agentic_engineering` | system_prompt, error_messages, file_headers, folder_readme, function_design | [agentic_engineering/](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/agentic_engineering) |
+| Agentic Engineering | `agentic_engineering` | system_prompt, error_messages, file_headers, folder_readme, function_design, python_semantics | [agentic_engineering/](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/agentic_engineering) |
 | Agentic Loop | `agentic_loop` | context_prompt | [agentic_loop.json](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/agentic_loop.json) |
 | Context Engineering | `context_engineering` | guideline_prompt | [context_engineering.json](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/context_engineering.json) |
 | Continual Trace | `continual_trace` | system_prompt | [continual_trace/system_prompt.md](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/continual_trace/system_prompt.md) |
@@ -94,13 +94,15 @@ Link: <https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/
 
 Prompt assets for agentic engineering — the discipline of writing source code that
 treats AI agents as a primary audience alongside human developers. The main system
-prompt establishes the two-audience design constraint and introduces four core
+prompt establishes the two-audience design constraint and introduces five core
 practices: designing server-side error messages as rich context-window primitives
 that carry file location, state snapshots, violated invariants, blast-radius
 references, and remediation hints; writing structured file header comments that
 function as navigational landmarks; maintaining folder-level READMEs as persistent
-comprehension caches; and shaping functions into small clean interfaces that agents
-can understand, test, and reuse without loading hidden state.
+comprehension caches; shaping functions into small clean interfaces that agents
+can understand, test, and reuse without loading hidden state; and treating Python's
+semantic surface — its type system, data model, and runtime contracts — as the
+STEER/ENFORCE/WIRE channels an agent is steered by rather than optional ceremony.
 Together these prompts teach a model to produce code where the source itself is a
 high-signal interface for any downstream coding agent.
 
