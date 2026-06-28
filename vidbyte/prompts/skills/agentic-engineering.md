@@ -111,3 +111,7 @@ The `system_prompt.md` is the entry point. Every principle must have a visible p
 - Never change the structure of `agentic_engineering.json` beyond adding a new entry to the `prompts` object. The `name`, `description`, and `key` fields are stable.
 - Always verify with `python -m compileall vidbyte` before committing. A broken catalog loader blocks the entire SDK.
 </rules>
+
+<conclusion>
+This skill is meant to protect the Agentic Engineering family as a coherent discipline, not to turn every useful coding preference into a new prompt asset. The procedure, file paths, enum rules, and catalog steps are there to keep real principles discoverable and loadable, but they are not the main judgment. The main judgment is whether the proposed practice measurably reduces context-window cost for future coding agents. If a practice is too vague, too narrow, already covered, or mainly human-facing, the correct move is to reject it or fold it into an existing principle. Do not over-index on the current examples as the only acceptable shapes for future principles. Instead, preserve the pattern behind them: a concrete agent-facing failure mode, a named practice that prevents it, a deep-dive file that teaches the practice operationally, and integration points that make the practice visible from the system prompt and catalog. The family should grow only when a new principle gives agents a durable new way to navigate, diagnose, or modify code with less search. Use this skill as a qualification gate first and an implementation checklist second.
+</conclusion>
