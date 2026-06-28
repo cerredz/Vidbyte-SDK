@@ -23,7 +23,7 @@ The agentic engineering family lives at `vidbyte/prompts/prompts/agentic_enginee
 - `file_headers.md` - Principle 2. Deep-dive on file header comments as navigational landmarks. Teaches a structured header inventory, complete examples, adversarial review, maintenance, and staleness checks.
 - `folder_readme.md` - Principle 3. Deep-dive on folder-level READMEs as comprehension caches. Teaches folder description/intent, file index, logs, non-goals, blast radius, and folder-level routing.
 - `function_design.md` - Principle 4. Deep-dive on functions as clean agent-readable interfaces. Teaches one function/one thing, honest names, small reusable bodies, orchestrator/leaf split, pure core/imperative shell, argument caps, and things not to do.
-- `feature_test_packs.md` - Principle 5. Deep-dive on feature test packs as executable intent. Teaches strict feature definition, `tests/features/<feature_slug>/` organization, feature test README schema, failure inventory, good-test rubric, test type taxonomy, lens selection, anti-patterns, and examples.
+- `feature_test_packs.md` - Principle 5. Deep-dive on feature test packs as executable intent. Teaches first-class testing, strict feature definition, `tests/features/<feature_slug>/` organization, feature `FEATURE.md` schema, failure inventory, testing philosophy, broad testing-strategy selection, per-strategy examples, anti-patterns, and examples.
 
 Enum members are registered in `vidbyte/lib/enums/prompts.py` as `AGENTIC_ENGINEERING_<PRINCIPLE_NAME>` with value `"agentic_engineering.<key_name>"`.
 
@@ -34,14 +34,14 @@ The README at `vidbyte/prompts/README.md` lists the family in a quick-reference 
 Not every coding practice qualifies as an agentic engineering principle. Apply these criteria before proposing a new principle.
 
 - The practice must reduce context-window cost, debugging cost, testing ambiguity, or modification risk for an AI agent. If a human benefits but an agent would not measurably navigate, debug, test, or modify code faster or more correctly because of it, it does not belong in this family.
-- The practice must be concrete enough to encode in a checklist. "Write maintainable code" is too vague. "Create a feature test pack with a README, failure inventory, selected test lenses, and omitted-lens rationale" is concrete enough.
+- The practice must be concrete enough to encode in a checklist. "Write maintainable code" is too vague. "Create a feature test pack with `FEATURE.md`, failure inventory, selected testing strategies, and omitted-strategy rationale" is concrete enough.
 - The practice must have enough depth to fill its own `.md` file. If you cannot write at least a 30-line deep-dive covering the anatomy of the practice, placement rules, examples, anti-patterns, and a checklist, the principle is too narrow.
 - The practice must not overlap an existing principle. If a new practice is only a special case of error messages, file headers, folder READMEs, function design, or feature test packs, add it to the existing principle rather than creating a standalone file.
 - The practice must be language-agnostic or explicitly scoped. Language-specific patterns are allowed only when the scope is clear.
 
 Examples of principle-sized practices that pass: dependency declaration patterns, type definition strategies, configuration injection patterns, public API compatibility snapshots, agent-safe migration patterns, and feature test packs as executable behavior contracts.
 
-Examples that fail: "use meaningful variable names" (too narrow), "write modular code" (too vague), "add logging" (not agentic unless framed as an observability contract that agents consume), and "write unit tests" (too broad and already covered by `feature_test_packs` unless it adds a genuinely new testing lens).
+Examples that fail: "use meaningful variable names" (too narrow), "write modular code" (too vague), "add logging" (not agentic unless framed as an observability contract that agents consume), and "write unit tests" (too broad and already covered by `feature_test_packs` unless it adds a genuinely new testing strategy).
 </criteria>
 
 <procedure>
@@ -57,7 +57,7 @@ To add a new principle to the agentic engineering family, execute these steps in
    - `# Checklist` - High-level process reminders about when to apply the principle and what self-review to run.
    - `# Code Examples` - Realistic examples when the principle involves code, configuration, tests, comments, errors, or file structure.
 
-3. For testing-related principles, do not create generic "write tests" guidance. A testing principle must define the feature boundary, explain what makes a test good, include the relevant test lens taxonomy, and make the agent write or review a failure inventory before generating tests.
+3. For testing-related principles, do not create generic "write tests" guidance. A testing principle must define the feature boundary, explain that agents should make testing first-class because test generation is cheap, include a feature `FEATURE.md` schema, make the agent write or review a failure inventory before generating tests, and explain the testing strategies deeply enough that the model thinks like a good tester rather than merely chasing coverage.
 
 4. Update `agentic_engineering.json`. Add a new entry to the `prompts` object:
    ```json
@@ -101,7 +101,7 @@ The `system_prompt.md` is the entry point. Every principle must have a visible p
 - Principle files open with `# Description`, not `# Identity`.
 - The `# Checklist` section contains workflow reminders, not a duplicate of every anatomy field.
 - Use cases in `system_prompt.md` are comma-separated under a `Use Cases:` label. Aim for 15-20 concrete triggers when the principle is broad.
-- Testing principles must not imply that every feature needs every test category. They must require lens selection and omitted-lens rationale.
+- Testing principles should push the model to consider many categories of feature testing by default, then omit only categories that do not protect a real feature risk. They must require selected-strategy and omitted-strategy rationale in `FEATURE.md`.
 </conventions>
 
 <rules>

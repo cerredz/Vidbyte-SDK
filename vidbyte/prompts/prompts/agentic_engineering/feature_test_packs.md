@@ -1,12 +1,15 @@
 # Description
-Feature test packs turn testing into executable feature intent. Agents can write tests quickly, so the scarce resource is no longer the typing effort required to create tests; the scarce resource is judgment about what behavior deserves protection and what failure modes matter. The default agent failure mode is shallow confidence theater: many tests that pass, but only prove that the current implementation returns something on the happy path. This principle replaces file-based test thinking with feature-based test thinking. A feature test pack is a folder of tests organized around one durable behavior boundary, with each test file representing a different lens for attacking that feature's contract. The agent's job is not to confirm the implementation it just wrote; the agent's job is to define the feature, inventory how it can fail, and write tests that would catch a future agent violating that feature's promise.
+Feature test packs turn testing into first-class executable feature intent. Traditional developers often treated testing as an afterthought because comprehensive suites were tedious to write, but agents can draft broad test suites quickly enough that the bottleneck has moved from typing effort to testing judgment. This principle exploits that shift: testing should become one of the most robust, secure, adversarial, and behavior-defining parts of the repository, not a thin confidence layer added after implementation. A feature test pack is a folder of tests organized around one durable behavior boundary, with a `FEATURE.md` file that defines the feature and each test file acting as a different strategy for trying to break that feature's promise. The agent's job is not to confirm that its patch runs; the agent's job is to use cheap test generation to make code safer, harder to regress, and easier for future agents to modify correctly. The best test pack becomes a second implementation of intent: it explains the feature, attacks the feature, and gives future agents executable proof of what must continue to work.
 
 # Intent
-The intent of feature test packs is to make behavioral meaning executable at the same granularity users, maintainers, API consumers, and downstream agents actually care about. A codebase is not primarily a collection of files; it is a collection of capabilities, workflows, guarantees, and invariants. Tests organized only by file encourage agents to test implementation containers instead of behavior. Tests organized by feature force the agent to ask what the code promises, who relies on it, which states are allowed, which failures matter, and which observable outputs prove the feature still works.
+The intent of feature test packs is to make testing first-class in the repository because agents have changed the economics of test creation. When test writing is slow, teams underinvest in deep edge cases, security checks, stress coverage, negative paths, and realistic integration behavior. When an agent can produce suites quickly, the correct move is to spend that speed on robust, secure, complex, adversarial coverage that would have been too tedious to write by hand. The test suite should then feed back into development: future agents can read the feature definition, run the pack, see the protected contracts, and make code changes with stronger guardrails than prose documentation alone can provide.
 
-This principle closes a known agent failure mode: models can generate a large number of tests without understanding what makes a test useful. They often test only the path they just implemented, mock away the collaborator that carries the actual risk, use toy fixtures that avoid real edge cases, assert private implementation steps that should be free to change, and never try to break the code. Feature test packs turn test creation into a sequence of explicit reasoning steps: define the feature boundary, write the failure inventory, choose the test lenses, write behavior-first tests, then audit whether each test would fail for the right reason if the feature promise were broken.
+This principle closes a known agent failure mode: models can generate a large number of tests without becoming good testers. They often test only the path they just implemented, mock away the collaborator that carries the actual risk, use toy fixtures that avoid real edge cases, assert private implementation steps that should be free to change, and never try to break the code. Feature test packs make the model adopt the mindset of a hostile but constructive tester: define the feature, describe the promised behavior, search for ways to collapse the system, cover the ordinary path, cover the abusive path, and leave behind a suite that makes later coding more reliable.
 
-# What Counts as a Feature
+# Goal
+This skill file teaches you everything you need to know to write tests while coding: how to define the feature being protected, how to create a feature-owned test pack, how to think like a good tester, how to choose many complementary testing strategies, how to distinguish useful tests from easy-to-pass tests, and how to leave future agents with executable intent they can trust before changing the code.
+
+# Definition of a Feature
 * A feature is the smallest durable behavior boundary the codebase promises to preserve. It is a named capability with a trigger or caller, inputs or preconditions, observable outcomes, invariants that must remain true, meaningful failure modes, and a reason someone would care if it broke.
 * A feature is not automatically a file, class, folder, endpoint, helper function, module, or package. Those are implementation containers. A feature is the behavior those containers exist to provide.
 * A feature can be user-facing, API-facing, agent-facing, runtime-facing, or maintainer-facing. `checkout payment authorization`, `prompt enum/catalog synchronization`, `context compaction preserving required messages`, `tool permission enforcement`, `trace redaction`, and `retry policy for idempotent calls` are features because each names a behavior a caller relies on.
@@ -32,11 +35,11 @@ Use this rubric before creating a feature test pack. If most answers are yes, th
 * Would a future agent benefit from finding all tests for this behavior in one folder?
 
 # Feature Test Pack Structure
-A feature test pack lives under `tests/features/<feature_slug>/`. The folder is a menu of test lenses, not a demand that every feature must include every file. The README explains which lenses are used, which are omitted, and why.
+A feature test pack lives under `tests/features/<feature_slug>/`. The folder should begin broad: assume the feature deserves multiple testing strategies, then prune only the strategies that do not protect a real risk. The `FEATURE.md` file explains the feature being tested, which strategies are included, which strategies are intentionally omitted, and why.
 
 ```text
 tests/features/<feature_slug>/
-|-- README.md
+|-- FEATURE.md
 |-- test_acceptance.py
 |-- test_contract.py
 |-- test_unit.py
@@ -70,17 +73,20 @@ tests/features/<feature_slug>/
 `-- factories.py
 ```
 
-* `README.md` is mandatory. It defines the feature, contract, invariants, failure inventory, selected test lenses, and omitted lenses. Without it, the folder is just a pile of tests.
-* Test files are optional and selected by risk. A pure transformation feature may need unit, property, metamorphic, and edge-case tests. An agent tool policy feature may need contract, integration, security, permission, error behavior, and regression tests. A UI workflow may need acceptance, browser interaction, accessibility, smoke, and visual or snapshot checks.
+* `FEATURE.md` is mandatory. It defines the feature, its purpose, its contract, its real callers, its failure inventory, the selected testing strategies, and the omitted strategies. Without it, the folder is just a pile of tests.
+* Test files are selected by risk, but the default stance is ambitious coverage. A pure transformation feature may need unit, property, metamorphic, edge-case, fuzz, and regression tests. An agent tool policy feature may need contract, integration, security, permission, error behavior, regression, observability, concurrency, and idempotency tests. A UI workflow may need acceptance, browser interaction, accessibility, smoke, snapshot, error behavior, and negative tests.
 * `fixtures.py` and `factories.py` exist to make realistic setup cheap. Prefer named factories that encode domain meaning over anonymous dictionaries copied into every test.
-* Existing module-based tests do not have to be moved immediately. When working in a legacy repo, create the feature pack for new or touched behavior and cross-reference existing module tests in the README.
+* Existing module-based tests do not have to be moved immediately. When working in a legacy repo, create the feature pack for new or touched behavior and cross-reference existing module tests in `FEATURE.md`.
 * If the codebase uses another language, preserve the concept and adapt filenames to local convention: `*.spec.ts`, `*.test.ts`, `*_test.go`, or test suites in a nested package are all acceptable if the feature pack remains discoverable.
 
-# Feature Test Pack README
-Every feature pack README must be short enough to read before opening test files and specific enough to route an agent to the right lens.
+# Feature Test Pack FEATURE.md
+Every feature pack `FEATURE.md` must be short enough to read before opening test files and specific enough to route an agent to the right testing strategy. Its first job is to explain the actual feature being tested, not merely list files. A future agent should be able to read `FEATURE.md` and understand what behavior users, callers, maintainers, or other agents rely on before reading the implementation.
 
 ```markdown
 # Feature: <feature name>
+
+## High-Level Feature Description
+What this feature does, why it exists, who depends on it, and what would become unsafe, broken, expensive, or confusing if it regressed. Explain the behavior in product, SDK, runtime, or caller terms before naming implementation files.
 
 ## Contract
 What behavior the codebase promises to preserve. Write this in user, caller, or system terms, not implementation terms.
@@ -112,16 +118,17 @@ Bugs, review comments, production incidents, and footguns this pack now protects
 ## Test Suite Map
 Which test files exist, what each protects, and when to run them.
 
-## Omitted Test Lenses
-Which test types were intentionally not added and why the omission is acceptable.
+## Omitted Testing Strategies
+Which test strategies were intentionally not added and why the omission is acceptable.
 ```
 
 * The Contract section is the anchor. If a test does not protect something in the contract, invariants, outcomes, or failure modes, challenge whether it belongs.
-* The Omitted Test Lenses section prevents false completeness. It is acceptable to omit stress tests for a tiny pure parser; it is not acceptable to omit the rationale.
-* Keep the README stable through refactors. File paths can appear in the suite map, but the main contract should describe behavior that survives file movement.
+* The High-Level Feature Description section is the orientation layer. It should let an agent understand the feature's purpose and stakes before it decides which tests to open.
+* The Omitted Testing Strategies section prevents false completeness. It is acceptable to omit stress tests for a tiny pure parser; it is not acceptable to omit the rationale.
+* Keep `FEATURE.md` stable through refactors. File paths can appear in the suite map, but the main contract should describe behavior that survives file movement.
 
 # Failure Inventory Before Test Generation
-Before writing any tests, write a failure inventory. This is the step that forces the agent out of "test the code I see" mode and into "attack the behavior the feature promises" mode.
+Before writing tests, write the failure inventory in `FEATURE.md`. This inventory is the bridge between "I can generate tests quickly" and "I am generating the right tests." It forces the agent to name what can break before it reaches for pytest, Playwright, a fuzz harness, or a mock. The inventory should be specific enough that a future agent can look at a test and know which risk it protects.
 
 ```text
 Feature:
@@ -139,282 +146,340 @@ Concurrency and idempotency risks:
 Historical bugs:
 Resource limits:
 Observability promises:
-What a shallow generated test would miss:
+What an easy generated test would miss:
 ```
 
-* Core contract: name the promise in one or two sentences. If you cannot write the contract, you are not ready to write tests.
-* Valid inputs: include realistic normal data, not only tiny examples. Use domain-shaped fixtures.
-* Invalid inputs: include malformed, missing, stale, duplicate, unauthorized, out-of-order, and boundary values.
-* Observable outcomes: decide what proves behavior from outside the implementation. Return value alone is often not enough; inspect state, events, errors, traces, and side effects.
-* External boundaries: list what should be mocked and what should remain real. Mock outside the feature boundary, not inside the behavior being proven.
-* Security and policy risks: list who must not be able to do what. Agent systems need explicit tests for allowed tools, sandbox boundaries, approval gates, budgets, and middleware policy.
-* Concurrency and idempotency risks: list duplicate requests, retries, races, stale reads, locks, and partial writes.
-* Historical bugs: turn each bug into one test that fails against the old failure mechanism.
-* Resource limits: list large inputs, long contexts, high request counts, token/cost ceilings, provider limits, memory pressure, and file counts.
-* What a shallow generated test would miss: write the trap explicitly. Then make at least one test catch it.
+# Testing Philosophy
+A good testing agent is not trying to prove that code is fine. It is trying to break the system in every way that matters while leaving behind clear evidence of what survived. The model should look for edges, abuse cases, stale state, invalid permissions, malformed data, concurrency races, unrealistic mocks, provider failure, secret leakage, cost explosions, and regressions that a shallow happy-path test would never see. Easy tests are not a virtue. A test that always passes because it asserts only that something returned is worse than no test because it creates false confidence.
 
-# What Makes a Good Test
-A good test is not a test that passes. A good test is one that would fail for the right reason if the feature's promise were broken.
+The goal is maximum meaningful coverage, not maximum file count. A good test is not one that passes; a good test is one that would fail for the right reason if the feature promise were broken. Start by considering as many testing strategies as the feature could justify, especially negative, security, policy, regression, stress, property, fuzz, observability, and failure-injection strategies that human teams often skip because they are tedious. Then remove only the strategies that do not protect a real contract, invariant, risk, or failure mode. The correct mindset is: "How can this feature collapse, and what executable evidence would catch that collapse before users, maintainers, or future agents do?"
 
-* Behavior-first: the test names and asserts what the feature promises, not how the current implementation happens to do it. A correct refactor should keep the test green.
-* Refactor-stable: the test should survive moving code between files, extracting helper functions, renaming private methods, or changing internal algorithms.
-* Failure-seeking: the test tries to break assumptions using bad input, missing state, duplicate calls, forbidden actors, stale data, provider failures, resource limits, and policy bypass attempts.
-* Invariant-centered: the test protects rules that must always hold. If no invariant is named, the test may only be checking incidental output.
-* Observable: the test asserts return values, persisted state, emitted events, files, network payloads, logs, traces, metrics, UI state, or error packets that a caller can observe.
-* Realistic: fixtures resemble real data, including optional fields, legacy shapes, partial state, large values, invalid encodings, timezone boundaries, and messy combinations.
-* Boundary-aware: mocks sit outside the feature boundary. Do not mock the service, parser, policy, or state transition that the test claims to prove.
-* Diagnostic: the test name, setup, and assertion explain the broken promise. When it fails, the next agent should know what behavior regressed without opening the implementation first.
-* Minimal but meaningful: the test asserts the behavior that matters and avoids pinning internal steps that should be free to change.
-* Mutation-resistant: deleting the guard, flipping a condition, bypassing the policy, skipping persistence, removing redaction, or changing ordering should make at least one test fail.
-* Regression-linked: when the test covers a bug, it encodes the bug's actual failure mechanism, not just the new code path that fixes it.
-* Adversarial where needed: security, permission, parser, provider, auth, sandbox, model-tool, and error-handling features require abuse cases, not only valid calls.
-* Economical in scope: a test should be as narrow as possible while still proving the behavior. If it needs ten mocks and a fragile setup, the boundary may be wrong.
-* Honest about nondeterminism: time, randomness, provider responses, parallelism, and ordering should be controlled or asserted with stable properties rather than exact incidental values.
+# Universal Strategy Rubric
+Apply this rubric inside every testing strategy section. Each strategy has different tactics, but the difference between good and bad tests stays consistent.
 
-# Bad Test Smells
-* A test named `test_success`, `test_handles_error`, `test_works`, or `test_returns_value`.
-* A test that only asserts the result is not `None`.
-* A test that mocks the exact function or collaborator whose behavior it claims to verify.
-* A test that duplicates the implementation logic in the assertion.
-* A test that asserts private helper call order when the public behavior is the real contract.
-* A test with toy fixtures that avoid required fields, legacy state, permissions, or realistic object shape.
-* A test that only covers the happy path for security, auth, policy, parser, or payment behavior.
-* A regression test that would have passed before the bug was fixed.
-* A test that cannot explain what feature promise it protects.
-* A broad end-to-end test that fails with no diagnostic signal.
-* A snapshot that captures unstable incidental output and makes refactors expensive.
-* A coverage-increasing test that does not make any meaningful mutation fail.
+1. Name the feature promise, not the implementation mechanism.
+2. Assert observable behavior that a caller, user, system, trace, file, or downstream agent can verify.
+3. Include realistic valid inputs with domain-shaped fixtures, not only tiny toy objects.
+4. Include invalid, missing, duplicate, stale, unauthorized, malformed, or adversarial inputs when the strategy allows it.
+5. Mock outside the feature boundary, never the behavior the strategy claims to prove.
+6. Make the failure diagnostic: the name, setup, and assertion should reveal the broken promise.
+7. Ensure the test would fail if a guard were deleted, a branch inverted, a policy bypassed, state skipped, or redaction removed.
+8. Avoid pinning private steps unless the private protocol is itself the feature contract.
+9. Control nondeterminism from time, randomness, provider output, ordering, concurrency, and generated IDs.
+10. Tie regression tests to the old failure mechanism, not just the new code path.
+11. Prefer multiple narrow tests over one broad test that fails with no signal.
+12. Delete or strengthen tests that increase coverage while proving no meaningful behavior.
 
-# Test Type Taxonomy
-Use the taxonomy as a lens menu. Each test type is included when it protects a real risk in the feature inventory.
+# Testing Strategy Playbook
+Each section below describes one testing strategy. For every strategy you include, write tests that use the universal rubric, then document in `FEATURE.md` why that strategy belongs in the pack.
 
 ## Acceptance Tests
-* Protect stakeholder-visible acceptance criteria. Include them when a product owner, user, customer, or external consumer would recognize the workflow as complete or broken.
-* Agents commonly get these wrong by asserting an internal return value rather than the outcome the stakeholder cares about.
-* Example: `test_cancel_subscription_keeps_access_until_paid_period_ends`.
+Acceptance tests prove the feature satisfies a stakeholder-visible behavior. They belong when a product owner, SDK consumer, maintainer, or user could say the feature is complete or broken without knowing the implementation. Good acceptance tests follow the workflow language in the feature contract and assert final outcomes, not private calls. Bad acceptance tests click or call one thing, assert `not None`, and never prove the user-visible promise.
+
+* Good tests verify the complete behavior, realistic setup, visible outcome, allowed state transition, and failure message a stakeholder would care about.
+* Bad tests assert a helper returned, skip the final outcome, ignore permissions, and pass even if the workflow silently does the wrong thing.
+* Example feature: prompt catalog loading. Tests: `test_user_can_fetch_agentic_engineering_feature_test_pack`, `test_catalog_lists_feature_test_pack_in_family`, `test_direct_import_returns_same_prompt_text`, `test_missing_asset_blocks_catalog_load`, `test_descriptor_key_mismatch_reports_configuration_error`, `test_readme_quick_reference_matches_family_keys`, `test_system_prompt_routes_testing_tasks_to_feature_pack`, `test_packaged_distribution_includes_markdown_asset`, `test_catalog_error_names_missing_file`, `test_feature_pack_prompt_has_goal_and_conclusion`.
+* Example feature: context compaction. Tests: `test_long_trace_compacts_under_budget`, `test_required_system_message_survives_compaction`, `test_recent_user_intent_remains_visible`, `test_tool_error_context_is_not_dropped`, `test_empty_history_returns_empty_result`, `test_compaction_reports_removed_segments`, `test_compaction_preserves_message_order`, `test_budget_exact_boundary_is_allowed`, `test_oversized_required_message_returns_diagnostic_error`, `test_compacted_context_can_resume_agent_run`.
+* Why this suite exists: acceptance tests define "done" from outside the code. They prevent future agents from optimizing internals while breaking the caller's real workflow.
 
 ## Contract Tests
-* Protect stable boundaries between consumers and providers: SDK public APIs, HTTP schemas, tool schemas, provider adapters, package exports, prompt enum keys, event payloads, and CLI interfaces.
-* Include them when another module, service, agent, or external user depends on a shape or behavior remaining stable.
-* Agents commonly get these wrong by testing the producer alone and never proving that the consumer can still rely on the contract.
-* Example: `test_prompt_catalog_fails_when_enum_key_has_no_asset`.
+Contract tests protect stable boundaries between consumers and providers: SDK APIs, exported symbols, schemas, event payloads, prompt keys, CLI arguments, tool schemas, and provider adapters. They belong when another module, package, user, service, or agent relies on a shape or behavior remaining stable. Good contract tests exercise both sides of the contract when possible. Bad contract tests check only the producer and never prove the consumer can still use the interface.
+
+* Good tests assert public names, value shapes, error types, compatibility expectations, default behavior, and consumer-visible invariants.
+* Bad tests assert implementation class names, private dictionary layout, or a single happy payload while ignoring missing and extra fields.
+* Example feature: prompt enum/catalog synchronization. Tests: `test_every_prompt_enum_has_catalog_record`, `test_every_catalog_record_has_prompt_enum`, `test_direct_imports_are_exported_in_all`, `test_family_lookup_returns_registered_subprompts`, `test_missing_markdown_path_fails_fast`, `test_duplicate_prompt_value_is_rejected`, `test_source_url_is_present_for_each_record`, `test_prompt_text_is_non_empty`, `test_unknown_family_raises_configuration_error`, `test_agentic_engineering_feature_test_pack_key_is_stable`.
+* Example feature: MCP tool schema. Tests: `test_tool_schema_includes_required_name`, `test_tool_schema_rejects_unknown_argument`, `test_tool_schema_accepts_optional_description`, `test_client_payload_matches_server_protocol`, `test_server_response_roundtrips_to_client_type`, `test_missing_required_field_reports_contract_error`, `test_extra_provider_field_is_ignored_or_reported`, `test_version_field_matches_supported_protocol`, `test_error_payload_preserves_request_id`, `test_schema_export_has_no_private_fields`.
+* Why this suite exists: contract tests give future agents a hard boundary. If an implementation changes, the contract decides whether it was a valid refactor or a breaking change.
 
 ## Unit Tests
-* Protect pure logic, decision rules, validation, transformations, parsing, formatting, and small domain computations.
-* Include them when behavior can be verified without real external systems.
-* Agents commonly get these wrong by testing trivial getters or implementation helpers instead of the rule with real branches.
-* Example: `test_retry_policy_marks_post_payment_charge_non_retryable`.
+Unit tests protect isolated decision rules, validation, parsing, formatting, normalization, reducers, scoring, and pure transformations. They belong when a feature has logic that can be proven without external systems. Good unit tests cover each branch and invariant with clear inputs and outputs. Bad unit tests test trivial getters, private plumbing, or duplicated implementation logic.
+
+* Good tests isolate the rule, use branch-complete inputs, cover boundaries, and assert semantic output.
+* Bad tests mirror the implementation, use one toy input, assert only truthiness, or require unrelated services.
+* Example feature: retry classification. Tests: `test_timeout_is_retryable`, `test_auth_error_is_not_retryable`, `test_payment_charge_is_not_retried`, `test_idempotency_key_allows_safe_retry`, `test_retry_count_stops_at_limit`, `test_jitter_stays_inside_bounds`, `test_missing_status_code_is_non_retryable`, `test_rate_limit_reads_retry_after`, `test_provider_quota_error_is_reported`, `test_cancelled_request_is_not_retried`.
+* Example feature: prompt key normalization. Tests: `test_spaces_convert_to_underscore`, `test_uppercase_converts_to_lowercase`, `test_existing_snake_case_is_stable`, `test_empty_key_is_rejected`, `test_key_with_path_separator_is_rejected`, `test_duplicate_normalized_key_is_rejected`, `test_unicode_key_reports_clear_error`, `test_dot_separator_preserves_family_boundary`, `test_private_prefix_is_rejected`, `test_roundtrip_prompt_id_is_stable`.
+* Why this suite exists: unit tests make small rules cheap to verify. They should never be the whole feature pack when the feature is orchestration.
 
 ## Integration Tests
-* Protect collaborating internal components working together.
-* Include them when a feature spans multiple modules and the seam between them carries risk.
-* Agents commonly get these wrong by mocking every collaborator, leaving only the current file tested.
-* Example: `test_tool_execution_applies_policy_before_executor_call`.
+Integration tests protect collaborators working together inside the codebase. They belong when the feature's risk lives in the seam between modules. Good integration tests keep real internal collaborators and replace only expensive external systems. Bad integration tests mock every collaborator until only the current file remains.
 
-## Component or Service Tests
-* Protect one subsystem through its public boundary while replacing expensive or external dependencies.
-* Include them when the feature has a service-level API and several internal helpers.
-* Agents commonly get these wrong by reaching into private helpers instead of exercising the service boundary.
-* Example: `test_compaction_service_preserves_required_messages_under_budget`.
+* Good tests exercise the feature path through multiple real modules, assert handoff state, and verify the combined outcome.
+* Bad tests assert one mock was called, skip state after the seam, or overfit to call order.
+* Example feature: tool execution policy. Tests: `test_policy_runs_before_executor`, `test_denied_tool_never_reaches_executor`, `test_allowed_tool_receives_validated_arguments`, `test_policy_error_is_returned_to_agent`, `test_audit_log_records_denial`, `test_budget_middleware_blocks_expensive_tool`, `test_sandbox_mode_is_forwarded_to_executor`, `test_tool_result_is_serialized_for_context`, `test_executor_exception_preserves_policy_metadata`, `test_parallel_tool_calls_keep_independent_policy_results`.
+* Example feature: prompt loading through MCP. Tests: `test_prompts_list_reads_catalog_records`, `test_prompts_get_returns_markdown_text`, `test_unknown_prompt_name_reports_protocol_error`, `test_family_filter_uses_catalog_key`, `test_package_data_missing_surfaces_configuration_error`, `test_handler_does_not_duplicate_records`, `test_prompt_description_is_preserved`, `test_mcp_response_matches_expected_shape`, `test_catalog_cache_is_reused`, `test_handler_keeps_error_context`.
+* Why this suite exists: many agent-introduced bugs happen at seams. Integration tests prevent each module from being correct alone while the feature is broken together.
 
-## End-to-End Tests
-* Protect a full workflow through the highest practical boundary.
-* Include them for critical user, CLI, API, or agent workflows where multiple layers must cooperate.
-* Agents commonly get these wrong by making the test too broad without a diagnostic assertion at each important outcome.
-* Example: `test_cli_installs_package_and_lists_prompt_families`.
+## Component Or Service Tests
+Component or service tests protect one subsystem through its public boundary. They belong when the feature has a service-level API with internal helpers. Good component tests call the service like a real caller and assert the service contract. Bad component tests reach into private helpers and call that coverage.
 
-## Browser Interaction / Manual Agent Tests
-* Protect UI behavior by driving a browser: click, type, inspect DOM state, verify network behavior, capture screenshots, and check visible outcomes.
-* Include them when the feature depends on frontend state, browser APIs, layout, accessibility, or user interaction timing.
-* Agents commonly get these wrong by checking that a page loads while never exercising the actual workflow.
-* Example: `test_browser_recording_export_downloads_playable_artifact`.
+* Good tests use public methods, replace only external dependencies, assert state and outputs, and cover alternative service paths.
+* Bad tests inspect private fields, patch private methods, or require the full application when the component boundary is enough.
+* Example feature: compaction service. Tests: `test_service_preserves_required_messages`, `test_service_reports_removed_tokens`, `test_service_rejects_impossible_budget`, `test_service_handles_empty_context`, `test_service_keeps_latest_user_request`, `test_service_records_compaction_strategy`, `test_service_is_deterministic_for_same_input`, `test_service_handles_provider_summary_failure`, `test_service_does_not_mutate_original_messages`, `test_service_exposes_diagnostic_metadata`.
+* Example feature: provider client. Tests: `test_client_sends_standard_chat_payload`, `test_client_maps_provider_error_to_sdk_error`, `test_client_redacts_api_key_in_logs`, `test_client_respects_timeout`, `test_client_streams_chunks_in_order`, `test_client_handles_empty_response`, `test_client_retries_retryable_status`, `test_client_preserves_request_id`, `test_client_rejects_unsupported_model`, `test_client_records_token_usage`.
+* Why this suite exists: component tests give strong confidence without the noise of full end-to-end tests.
+
+## End-To-End Tests
+End-to-end tests protect a complete workflow through the highest practical boundary. They belong for critical user, CLI, API, package, or agent flows where many layers must cooperate. Good end-to-end tests assert several externally visible milestones. Bad end-to-end tests merely start the system and call that comprehensive.
+
+* Good tests run the real workflow, control external services, assert final artifacts, and keep failure messages diagnostic.
+* Bad tests are slow, flaky, opaque, and broad without proving the feature promise.
+* Example feature: SDK prompt access. Tests: `test_installed_sdk_loads_prompt_family`, `test_cli_lists_agentic_engineering_prompts`, `test_python_import_exposes_direct_prompt`, `test_mcp_handler_returns_prompt_text`, `test_missing_package_data_fails_during_startup`, `test_readme_example_runs_as_written`, `test_prompt_enum_access_works_after_install`, `test_wheel_contains_markdown_assets`, `test_no_network_is_required_for_prompt_access`, `test_error_output_names_missing_asset`.
+* Example feature: agent tool execution. Tests: `test_agent_selects_allowed_tool_and_gets_result`, `test_agent_denied_tool_returns_policy_error`, `test_tool_result_is_added_to_context`, `test_trace_contains_tool_call`, `test_budget_limit_stops_repeated_calls`, `test_executor_failure_reaches_final_response`, `test_parallel_tools_join_results`, `test_agent_respects_sandbox_path`, `test_audit_log_records_execution`, `test_run_finishes_without_private_secret_leak`.
+* Why this suite exists: end-to-end tests prove the feature exists as a real system behavior, not only as compatible modules.
+
+## Browser Interaction And Manual Agent Tests
+Browser interaction tests protect real UI behavior: clicks, typing, focus, DOM state, visual state, network behavior, screenshots, and downloadable artifacts. They belong when the feature depends on browser state or human workflow. Good browser tests exercise the real interaction and assert visible outcomes. Bad browser tests only assert that a page loaded.
+
+* Good tests drive the browser, wait on stable signals, assert UI state, check error text, and capture artifacts when visual regressions matter.
+* Bad tests rely on arbitrary sleeps, hidden implementation selectors, or screenshots without behavior assertions.
+* Example feature: export dialog. Tests: `test_open_export_dialog_from_toolbar`, `test_filename_input_receives_focus`, `test_empty_filename_shows_error`, `test_export_button_disabled_while_saving`, `test_network_failure_shows_retry`, `test_success_downloads_file`, `test_cancel_closes_without_request`, `test_keyboard_escape_closes_dialog`, `test_download_name_matches_input`, `test_error_message_is_announced`.
+* Example feature: trace viewer. Tests: `test_trace_list_loads_recent_runs`, `test_click_run_opens_detail_panel`, `test_filter_by_status_updates_rows`, `test_failed_step_expands_error_context`, `test_secret_value_is_redacted`, `test_copy_trace_id_writes_clipboard`, `test_empty_state_is_visible`, `test_large_trace_scrolls_without_overlap`, `test_refresh_preserves_selected_run`, `test_mobile_layout_keeps_actions_visible`.
+* Why this suite exists: browser tests catch broken workflows that unit and API tests cannot see.
 
 ## Smoke Tests
-* Protect basic boot and main-path execution.
-* Include them for package imports, CLI entrypoints, service startup, prompt family loading, and feature toggles.
-* Agents commonly overvalue smoke tests. A smoke test says the feature starts; it does not prove the feature is correct.
-* Example: `test_vidbyte_mcp_server_entrypoint_imports`.
+Smoke tests protect basic boot, import, startup, and main-path availability. They belong for packages, CLIs, servers, plugin entrypoints, prompt catalogs, and feature flags. Good smoke tests are fast and narrow. Bad smoke tests are mistaken for correctness tests.
+
+* Good tests answer "can this start and expose the main entrypoint?" with minimal setup.
+* Bad tests claim feature coverage while asserting only importability.
+* Example feature: package import. Tests: `test_import_vidbyte_package`, `test_import_prompts_module`, `test_import_prompt_enum`, `test_import_mcp_server_module`, `test_import_agent_runtime`, `test_import_tool_policy`, `test_import_context_compaction`, `test_import_provider_client`, `test_import_public_all`, `test_import_has_version`.
+* Example feature: CLI startup. Tests: `test_cli_help_runs`, `test_cli_version_runs`, `test_cli_prompts_help_runs`, `test_cli_lists_prompt_families`, `test_cli_reports_unknown_command`, `test_cli_loads_without_network`, `test_cli_uses_packaged_assets`, `test_cli_exit_code_zero_for_help`, `test_cli_exit_code_nonzero_for_bad_args`, `test_cli_error_has_actionable_text`.
+* Why this suite exists: smoke tests are early warning lights. They do not replace acceptance, contract, or failure-mode tests.
 
 ## Regression Tests
-* Protect a bug's actual failure mechanism.
-* Include one for every fixed bug, review comment, production incident, or recurring footgun.
-* Agents commonly get these wrong by testing the new implementation rather than proving the old bug would fail.
-* Example: `test_trace_export_redacts_api_key_in_error_metadata`.
+Regression tests protect a known bug's actual failure mechanism. They belong after every bug fix, review comment, incident, or recurring footgun. Good regression tests fail against the old broken behavior. Bad regression tests only cover the new happy path and would have passed before the fix.
+
+* Good tests name the bug mechanism, reproduce the old failure, and assert the repaired contract.
+* Bad tests mention "regression" but never exercise the old path.
+* Example feature: trace redaction. Tests: `test_api_key_in_error_metadata_is_redacted`, `test_nested_secret_in_tool_args_is_redacted`, `test_secret_in_provider_payload_is_redacted`, `test_redaction_preserves_nonsecret_fields`, `test_multiple_secret_values_are_all_removed`, `test_redacted_trace_still_serializes`, `test_redaction_error_does_not_emit_secret`, `test_case_insensitive_secret_key_is_redacted`, `test_secret_in_list_item_is_redacted`, `test_regression_fixture_matches_old_leak_shape`.
+* Example feature: prompt asset loading. Tests: `test_missing_markdown_asset_fails_fast`, `test_bad_descriptor_does_not_cache_partial_family`, `test_enum_value_typo_reports_prompt_id`, `test_duplicate_family_key_is_rejected`, `test_direct_import_missing_from_all_is_detected`, `test_package_data_lookup_uses_resource_api`, `test_windows_path_separator_does_not_break_lookup`, `test_empty_prompt_file_is_rejected`, `test_descriptor_without_prompts_is_rejected`, `test_old_missing_asset_fixture_fails`.
+* Why this suite exists: regression tests are memory. They keep future agents from stepping on the exact failure already discovered.
 
 ## Edge Case Tests
-* Protect boundary values and weird-but-valid states: empty, null, min, max, duplicate, ordering, timezone, encoding, pagination, limits, and legacy data.
-* Include them whenever the failure inventory has input diversity.
-* Agents commonly get these wrong by listing edge cases but writing only one empty-input test.
-* Example: `test_context_window_handles_message_exactly_at_token_budget`.
+Edge case tests protect weird but valid boundaries: empty, null, min, max, duplicate, ordering, timezone, encoding, pagination, limits, legacy data, and exact thresholds. They belong whenever the input space has meaningful edges. Good edge tests are specific about which boundary matters. Bad edge tests use one empty case and call the category done.
+
+* Good tests cover each boundary class with realistic setup and semantic assertions.
+* Bad tests list edge cases in prose but do not encode them.
+* Example feature: token budget compaction. Tests: `test_empty_messages_returns_empty`, `test_one_message_under_budget_is_unchanged`, `test_message_exactly_at_budget_is_allowed`, `test_message_one_token_over_budget_compacts`, `test_required_message_over_budget_errors`, `test_duplicate_messages_keep_order`, `test_unicode_tokens_count_correctly`, `test_large_number_of_messages_compacts`, `test_zero_budget_is_rejected`, `test_boundary_summary_preserves_latest_user_message`.
+* Example feature: pagination. Tests: `test_first_page_returns_first_items`, `test_last_page_with_partial_items`, `test_empty_collection_returns_empty_page`, `test_negative_page_is_rejected`, `test_page_size_zero_is_rejected`, `test_max_page_size_is_allowed`, `test_over_max_page_size_is_rejected`, `test_duplicate_sort_keys_keep_stable_order`, `test_cursor_after_deleted_item_recovers`, `test_unicode_filter_value_is_handled`.
+* Why this suite exists: edge cases catch the bugs agents miss when they only test the obvious path.
 
 ## Negative Tests
-* Protect invalid behavior: malformed inputs, forbidden operations, impossible states, missing dependencies, unsupported modes, and wrong permissions.
-* Include them when rejection behavior is part of the feature contract.
-* Agents commonly get these wrong by asserting that an exception is raised but not checking which contract was violated.
-* Example: `test_attach_tool_rejects_unknown_mcp_transport`.
+Negative tests protect rejection behavior: malformed inputs, forbidden actions, impossible states, unsupported modes, wrong permissions, and missing dependencies. They belong whenever "must reject" is part of the feature contract. Good negative tests assert the specific reason for rejection. Bad negative tests only assert that some exception occurred.
+
+* Good tests verify denial, no side effect, clear error, and preserved invariants.
+* Bad tests accept broad `Exception`, skip state checks, or use unrealistic invalid inputs.
+* Example feature: tool attachment. Tests: `test_unknown_transport_is_rejected`, `test_missing_server_name_is_rejected`, `test_empty_tool_schema_is_rejected`, `test_duplicate_tool_name_is_rejected`, `test_disallowed_tool_is_rejected`, `test_invalid_json_arguments_are_rejected`, `test_tool_outside_sandbox_is_rejected`, `test_permission_prompt_denial_blocks_attach`, `test_failed_attach_does_not_mutate_catalog`, `test_error_names_invalid_field`.
+* Example feature: prompt descriptor parsing. Tests: `test_missing_name_is_rejected`, `test_missing_key_is_rejected`, `test_prompts_not_object_is_rejected`, `test_prompt_without_path_is_rejected`, `test_path_outside_family_is_rejected`, `test_source_url_not_string_is_rejected`, `test_empty_markdown_file_is_rejected`, `test_duplicate_subprompt_key_is_rejected`, `test_unknown_descriptor_field_is_rejected_or_ignored`, `test_failed_descriptor_does_not_cache`.
+* Why this suite exists: negative tests prove the guardrails, not just the useful path.
 
 ## Error Behavior Tests
-* Protect error type, message, violated invariant, expected-vs-actual detail, remediation context, redaction, chaining, and test references.
-* Include them for agentic error classes and important failure paths.
-* Agents commonly get these wrong by checking only `with raises(Exception)`.
-* Example: `test_missing_prompt_asset_error_names_blast_radius_and_fix_approaches`.
+Error behavior tests protect the quality of failure output: type, message, violated invariant, expected-vs-actual detail, remediation context, redaction, chaining, and related files. They belong for important failure paths and agentic error classes. Good error tests inspect the structured context. Bad error tests check only `raises(Exception)`.
+
+* Good tests assert error class, invariant, dynamic values, redaction, actionability, and no partial state.
+* Bad tests assert a substring that could appear for the wrong reason.
+* Example feature: configuration error. Tests: `test_error_type_is_configuration_error`, `test_error_names_missing_prompt_asset`, `test_error_includes_expected_descriptor_path`, `test_error_includes_actual_missing_path`, `test_error_includes_fix_approach`, `test_error_redacts_private_root`, `test_error_links_related_files`, `test_error_preserves_original_exception`, `test_error_message_is_stable_for_agents`, `test_error_does_not_cache_partial_catalog`.
+* Example feature: provider failure. Tests: `test_timeout_error_is_retryable`, `test_auth_error_is_not_retryable`, `test_error_redacts_api_key`, `test_error_includes_provider_name`, `test_error_includes_request_id`, `test_error_preserves_status_code`, `test_error_maps_rate_limit_retry_after`, `test_error_keeps_safe_payload_excerpt`, `test_error_records_test_reference`, `test_error_does_not_drop_trace_context`.
+* Why this suite exists: good error behavior turns production failures into repairable context for future agents.
 
 ## Security Tests
-* Protect authentication, authorization, injection, path traversal, confused deputy, unsafe deserialization, secret leakage, and privilege escalation.
-* Include them for any feature that handles identity, permissions, user input, filesystem paths, tools, tokens, provider keys, or external payloads.
-* Agents commonly get these wrong by testing the allowed user and skipping the forbidden user.
-* Example: `test_workspace_file_reader_rejects_path_traversal_outside_root`.
+Security tests protect authentication, authorization, injection, path traversal, confused deputy, unsafe deserialization, secret leakage, privilege escalation, and tenant boundaries. They belong whenever the feature handles identity, permissions, user input, tools, files, secrets, or external payloads. Good security tests are adversarial. Bad security tests only prove the allowed user can do the allowed action.
 
-## Permission / Policy Tests
-* Protect agent-specific boundaries: allowed tools, sandbox modes, approvals, budgets, rate limits, provider allowlists, and middleware policy.
-* Include them whenever a model request must be constrained by deterministic code.
-* Agents commonly get these wrong by trusting the model's requested action rather than asserting the policy layer rejects it.
-* Example: `test_tool_policy_rejects_disallowed_tool_even_if_model_requests_it`.
+* Good tests attempt bypasses, assert denial, verify no side effect, and inspect audit or redaction.
+* Bad tests skip the attacker path, mock authorization, or never check data leakage.
+* Example feature: workspace file access. Tests: `test_path_traversal_is_rejected`, `test_symlink_escape_is_rejected`, `test_absolute_path_outside_root_is_rejected`, `test_allowed_relative_path_reads_file`, `test_denied_read_does_not_emit_file_contents`, `test_error_redacts_private_path`, `test_hidden_file_policy_is_enforced`, `test_null_byte_path_is_rejected`, `test_unicode_normalization_cannot_escape_root`, `test_audit_log_records_denial`.
+* Example feature: tool execution. Tests: `test_disallowed_tool_name_is_denied`, `test_tool_alias_cannot_bypass_policy`, `test_arguments_cannot_request_shell_escape`, `test_secret_arg_is_redacted_in_trace`, `test_untrusted_provider_tool_is_denied`, `test_confused_deputy_context_is_blocked`, `test_permission_denial_prevents_executor_call`, `test_policy_bypass_attempt_is_audited`, `test_budget_bypass_is_rejected`, `test_error_does_not_echo_secret`.
+* Why this suite exists: security tests are where the model should most aggressively try to break the system.
+
+## Permission And Policy Tests
+Permission and policy tests protect deterministic boundaries around model actions: allowed tools, sandbox modes, approvals, budgets, provider allowlists, rate limits, middleware gates, and user scopes. They belong in agent systems because the model's request must never be the final authority. Good policy tests assert the policy layer overrides unsafe model intent. Bad policy tests trust the model request.
+
+* Good tests cover allowed, denied, ambiguous, missing, stale, and bypass-shaped policy inputs.
+* Bad tests patch the policy function or assert only that a denial string exists.
+* Example feature: tool policy. Tests: `test_allowed_tool_executes`, `test_disallowed_tool_is_denied`, `test_unknown_tool_is_denied`, `test_case_variant_tool_name_is_denied`, `test_permission_denial_blocks_executor`, `test_budget_limit_blocks_tool`, `test_sandbox_readonly_blocks_write_tool`, `test_policy_error_reaches_agent_context`, `test_policy_denial_is_audited`, `test_policy_cache_does_not_leak_between_users`.
+* Example feature: provider policy. Tests: `test_allowed_provider_runs`, `test_disallowed_provider_is_denied`, `test_missing_model_scope_is_denied`, `test_expensive_model_requires_approval`, `test_rate_limit_blocks_run`, `test_policy_denial_has_remediation`, `test_override_token_is_validated`, `test_user_scope_is_isolated`, `test_fallback_provider_respects_allowlist`, `test_denied_provider_key_is_redacted`.
+* Why this suite exists: policy tests make model autonomy safe by proving deterministic code wins.
 
 ## Concurrency Tests
-* Protect races, locks, duplicate requests, stale reads, ordering, and simultaneous writes.
-* Include them when multiple callers, workers, tasks, threads, async calls, or retries can touch the same state.
-* Agents commonly get these wrong by writing a sequential test and calling it concurrency coverage.
-* Example: `test_actor_inbox_preserves_message_order_under_parallel_senders`.
+Concurrency tests protect races, locks, duplicate requests, stale reads, ordering, simultaneous writes, async task joins, and worker coordination. They belong when multiple callers can touch the same state. Good concurrency tests create actual overlapping operations or deterministic simulations. Bad concurrency tests run two operations sequentially and call it coverage.
+
+* Good tests force interleavings, assert final state, expose lost updates, and control timing deterministically.
+* Bad tests depend on sleeps, rely on luck, or never assert ordering and idempotent state.
+* Example feature: actor inbox. Tests: `test_parallel_senders_preserve_per_sender_order`, `test_duplicate_message_id_is_ignored`, `test_concurrent_ack_only_applies_once`, `test_stale_read_does_not_drop_message`, `test_lock_release_after_exception`, `test_parallel_pollers_do_not_double_deliver`, `test_shutdown_waits_for_inflight_message`, `test_timeout_unblocks_waiter`, `test_backpressure_limit_is_enforced`, `test_audit_log_records_concurrent_conflict`.
+* Example feature: prompt catalog cache. Tests: `test_parallel_loads_create_one_cache`, `test_failed_load_does_not_poison_cache`, `test_concurrent_family_reads_are_stable`, `test_cache_reset_during_read_is_safe`, `test_duplicate_descriptor_load_is_deduped`, `test_threaded_access_returns_same_text`, `test_partial_cache_is_never_visible`, `test_lock_releases_on_configuration_error`, `test_repeated_imports_are_stable`, `test_concurrent_missing_asset_errors_are_consistent`.
+* Why this suite exists: concurrency tests catch bugs that are invisible to single-threaded happy paths.
 
 ## Idempotency Tests
-* Protect duplicate event handling, retry safety, repeated requests, payment operations, queue workers, and at-least-once delivery semantics.
-* Include them when the same operation can run more than once.
-* Agents commonly get these wrong by checking that the second call does not crash while failing to assert state did not duplicate.
-* Example: `test_retry_does_not_repeat_non_idempotent_payment_charge`.
+Idempotency tests protect retry safety, duplicate events, repeated requests, exactly-once or at-least-once semantics, payment operations, queue workers, and repeated agent actions. They belong whenever an operation can run more than once. Good idempotency tests assert no duplicate state and the correct response on repeats. Bad idempotency tests only assert that the second call does not crash.
+
+* Good tests run the same operation multiple times and assert state, effects, emitted events, and result stability.
+* Bad tests ignore side effects or use a fake store that cannot duplicate state.
+* Example feature: retrying tool result write. Tests: `test_same_tool_call_id_writes_once`, `test_retry_returns_existing_result`, `test_duplicate_event_does_not_emit_second_trace`, `test_different_tool_call_id_writes_new_result`, `test_partial_write_recovers_without_duplicate`, `test_concurrent_duplicate_calls_coalesce`, `test_failed_first_call_can_retry`, `test_idempotency_key_expiry_is_respected`, `test_replay_preserves_original_timestamp`, `test_audit_log_records_duplicate_suppression`.
+* Example feature: payment charge. Tests: `test_same_idempotency_key_charges_once`, `test_retry_after_timeout_returns_original_charge`, `test_new_key_creates_new_charge`, `test_failed_validation_does_not_record_key`, `test_concurrent_charge_requests_create_one_charge`, `test_duplicate_webhook_is_ignored`, `test_partial_provider_response_is_reconciled`, `test_cancelled_charge_is_not_replayed`, `test_idempotency_conflict_reports_error`, `test_audit_log_links_retries`.
+* Why this suite exists: idempotency tests prevent retries from becoming duplicate work, duplicate cost, or duplicate user-visible effects.
 
 ## Stress Tests
-* Protect behavior under high volume, repeated calls, large payloads, many files, many users, long contexts, or many tool calls.
-* Include them when scale changes behavior or resource pressure can trigger bugs.
-* Agents commonly get these wrong by making a stress test indistinguishable from a normal test with ten items.
-* Example: `test_prompt_catalog_loads_all_families_repeatedly_without_record_drift`.
+Stress tests protect behavior under high volume, repeated calls, large payloads, many files, many users, long contexts, many tool calls, or large prompt catalogs. They belong when scale can change behavior. Good stress tests use realistic high-volume shapes and assert invariants. Bad stress tests use ten items and call that stress.
 
-## Load / Performance Tests
-* Protect latency, throughput, memory, DB query count, provider calls, token usage, and cost ceilings.
-* Include them when the feature has a budget that users or infrastructure rely on.
-* Agents commonly get these wrong by measuring wall-clock time without stable inputs or thresholds.
-* Example: `test_context_compaction_stays_under_token_budget_for_large_trace`.
+* Good tests push size, repetition, and resource pressure while keeping assertions deterministic.
+* Bad tests are slow without a stated limit or indistinguishable from normal examples.
+* Example feature: prompt catalog loading. Tests: `test_loads_large_number_of_prompt_records`, `test_repeated_loads_do_not_drift`, `test_many_direct_imports_are_exported`, `test_large_markdown_asset_loads`, `test_many_family_keys_keep_order`, `test_repeated_missing_asset_errors_do_not_leak_cache`, `test_many_descriptor_files_are_discovered`, `test_catalog_keys_remain_unique_at_scale`, `test_large_readme_index_matches_records`, `test_stress_run_completes_under_memory_limit`.
+* Example feature: context window. Tests: `test_compacts_thousand_message_trace`, `test_large_tool_outputs_are_summarized`, `test_many_required_messages_are_preserved_or_error`, `test_repeated_compactions_are_stable`, `test_large_unicode_content_counts_tokens`, `test_many_provider_errors_do_not_drop_recent_intent`, `test_large_trace_keeps_order`, `test_stress_budget_exact_boundary`, `test_many_parallel_compactions_do_not_share_state`, `test_stress_diagnostics_include_removed_counts`.
+* Why this suite exists: stress tests reveal scale-shaped bugs before production traffic or giant agent traces do.
+
+## Load And Performance Tests
+Load and performance tests protect latency, throughput, memory, query count, token usage, provider calls, render time, and cost ceilings. They belong when users or infrastructure rely on a budget. Good performance tests use stable inputs, thresholds, and measured units. Bad performance tests measure wall-clock casually on unstable environments.
+
+* Good tests define the budget, fix the workload, measure the right unit, and fail with actionable context.
+* Bad tests use arbitrary sleeps, vague thresholds, or no assertion.
+* Example feature: prompt catalog. Tests: `test_catalog_loads_under_expected_ms`, `test_cached_lookup_is_constant_time_enough`, `test_family_lookup_does_not_reload_assets`, `test_direct_import_has_no_network_call`, `test_large_family_memory_stays_under_budget`, `test_repeated_keys_lookup_has_stable_latency`, `test_descriptor_validation_does_not_scan_unrelated_dirs`, `test_error_path_fails_fast`, `test_package_asset_read_count_is_bounded`, `test_performance_failure_reports_record_count`.
+* Example feature: context compaction. Tests: `test_compaction_under_token_budget_has_time_ceiling`, `test_large_trace_memory_stays_bounded`, `test_provider_summary_calls_are_limited`, `test_no_extra_token_count_passes`, `test_performance_scales_with_message_count`, `test_timeout_returns_diagnostic_error`, `test_parallel_compactions_respect_worker_limit`, `test_cost_estimate_stays_under_budget`, `test_cache_reuse_reduces_tokenization_work`, `test_performance_report_names_input_size`.
+* Why this suite exists: performance tests convert "this should be cheap" into an executable budget.
 
 ## Property-Based Tests
-* Protect invariants across many generated valid inputs.
-* Include them for parsers, serializers, reducers, compaction, ranking, scheduling, calculations, and normalization logic.
-* Agents commonly get these wrong by generating arbitrary nonsense rather than valid domain-shaped data.
-* Example: `test_compaction_never_drops_system_prompt_for_valid_message_sequences`.
+Property-based tests protect invariants across generated valid inputs. They belong for parsers, serializers, reducers, compaction, ranking, scheduling, calculations, and normalization. Good property tests generate domain-valid inputs and assert universal properties. Bad property tests generate arbitrary nonsense and then blame the code for rejecting it.
+
+* Good tests define valid strategies, invariants, shrinking-friendly data, and stable properties.
+* Bad tests assert exact examples while pretending to cover the input space.
+* Example feature: context compaction. Tests: `test_required_system_prompt_is_never_dropped`, `test_output_never_exceeds_budget_when_possible`, `test_message_order_is_preserved`, `test_no_duplicate_messages_are_created`, `test_latest_user_message_survives`, `test_empty_valid_sequence_roundtrips`, `test_removed_count_matches_difference`, `test_compaction_is_deterministic`, `test_metadata_ids_remain_unique`, `test_invalid_impossible_budget_errors`.
+* Example feature: key normalization. Tests: `test_normalized_key_is_lowercase`, `test_normalization_is_idempotent`, `test_valid_keys_roundtrip`, `test_normalized_keys_do_not_contain_spaces`, `test_invalid_separator_is_rejected`, `test_distinct_valid_keys_remain_distinct_or_conflict`, `test_empty_key_is_never_valid`, `test_unicode_policy_is_consistent`, `test_family_prompt_split_roundtrips`, `test_normalization_does_not_strip_required_family`.
+* Why this suite exists: property tests let agents cover broad input spaces without hand-writing every example.
 
 ## Fuzz Tests
-* Protect parsers and boundary handlers against malformed, adversarial, random, or corrupted input.
-* Include them for JSON, Markdown, CLI args, model outputs, webhooks, file formats, and network payloads.
-* Agents commonly get these wrong by expecting all fuzz cases to succeed instead of asserting safe failure.
-* Example: `test_prompt_descriptor_loader_rejects_malformed_json_without_partial_records`.
+Fuzz tests protect parsers and boundary handlers against malformed, adversarial, random, or corrupted input. They belong for JSON, Markdown, CLI args, model outputs, webhooks, file formats, and network payloads. Good fuzz tests assert safe failure or preserved invariants. Bad fuzz tests expect every random input to succeed.
+
+* Good tests define safety properties, crash resistance, redaction, no partial state, and useful errors.
+* Bad tests accept broad failures without checking whether secrets leaked or state mutated.
+* Example feature: descriptor parser. Tests: `test_random_bytes_do_not_crash_parser`, `test_malformed_json_reports_configuration_error`, `test_deeply_nested_descriptor_is_rejected_safely`, `test_random_missing_fields_do_not_cache`, `test_weird_unicode_paths_are_rejected`, `test_huge_string_field_has_size_error`, `test_array_instead_of_object_is_rejected`, `test_fuzz_error_has_no_private_path`, `test_partial_records_are_not_exposed`, `test_valid_minimal_descriptor_still_loads`.
+* Example feature: model tool arguments. Tests: `test_random_json_arguments_do_not_execute_tool`, `test_malformed_json_returns_validation_error`, `test_nested_command_injection_is_rejected`, `test_huge_argument_value_is_rejected`, `test_unknown_argument_is_reported`, `test_null_required_argument_is_rejected`, `test_unicode_argument_is_normalized_or_rejected`, `test_fuzz_denial_does_not_call_executor`, `test_error_redacts_argument_secrets`, `test_valid_generated_arguments_execute`.
+* Why this suite exists: fuzz tests teach agents to protect boundaries where the system receives untrusted shape.
 
 ## Metamorphic Tests
-* Protect properties that should remain true after controlled input transformations.
-* Include them when exact expected output is hard but relationships are clear.
-* Agents commonly miss these because they think every test needs a single fixed expected value.
-* Example: `test_context_compaction_output_is_stable_when_irrelevant_old_messages_are_added`.
+Metamorphic tests protect relationships that should remain true after controlled input transformations. They belong when exact expected output is hard but invariants are clear. Good metamorphic tests compare related runs. Bad metamorphic tests force one brittle golden output.
 
-## Snapshot / Golden Tests
-* Protect stable generated output, serialized artifacts, prompt text bundles, schemas, CLI output, rendered files, and compatibility surfaces.
-* Include them when exact output is a public or reviewable artifact.
-* Agents commonly get these wrong by snapshotting unstable timestamps, IDs, ordering, or internal debug output.
-* Example: `test_prompt_catalog_readme_quick_reference_matches_golden_order`.
+* Good tests define transformation, preserved property, changed property, and allowed nondeterminism.
+* Bad tests use arbitrary transformations with no feature meaning.
+* Example feature: context compaction. Tests: `test_adding_irrelevant_old_message_preserves_latest_intent`, `test_reordering_unrelated_old_segments_does_not_change_required_prefix`, `test_duplicate_optional_context_does_not_duplicate_output`, `test_increasing_budget_keeps_all_previous_output`, `test_removing_optional_messages_does_not_remove_required_message`, `test_equivalent_tokenization_keeps_budget_property`, `test_summary_provider_wording_changes_do_not_drop_ids`, `test_compacting_twice_is_stable`, `test_adding_metadata_preserves_content_order`, `test_transform_failure_reports_same_invariant`.
+* Example feature: prompt lookup. Tests: `test_family_lookup_and_direct_lookup_return_same_text`, `test_descriptor_order_does_not_change_key_set`, `test_whitespace_in_markdown_preserves_nonempty_prompt`, `test_reloading_catalog_returns_same_records`, `test_source_url_change_does_not_change_prompt_text`, `test_key_case_policy_is_consistent`, `test_package_and_source_tree_lookup_match`, `test_json_field_order_does_not_change_records`, `test_adding_unrelated_family_does_not_change_existing_family`, `test_cache_reset_preserves_lookup_result`.
+* Why this suite exists: metamorphic tests let agents verify deep relationships without overspecifying exact outputs.
 
-## Migration / Backward Compatibility Tests
-* Protect old data shapes, new data shapes, mixed versions, rollback assumptions, and persisted artifacts.
-* Include them when users may already have data, config, caches, saved traces, serialized prompts, or installed packages.
-* Agents commonly get these wrong by testing only the new schema.
-* Example: `test_trace_loader_accepts_pre_redaction_trace_schema`.
+## Snapshot And Golden Tests
+Snapshot and golden tests protect stable generated output, prompt text bundles, schemas, CLI output, rendered files, and compatibility artifacts. They belong when exact output is a public or reviewable contract. Good golden tests snapshot stable artifacts and normalize unstable fields. Bad golden tests freeze timestamps, IDs, order, or debug noise.
+
+* Good tests normalize nondeterminism, review meaningful diffs, and pair snapshots with semantic assertions.
+* Bad tests approve noisy snapshots that make refactors expensive.
+* Example feature: prompt catalog docs. Tests: `test_quick_reference_matches_golden`, `test_agentic_engineering_system_prompt_matches_expected_sections`, `test_feature_pack_prompt_has_required_headers`, `test_prompt_descriptor_json_matches_golden_order`, `test_cli_prompt_list_output_matches_golden`, `test_generated_prompt_index_has_no_missing_family`, `test_snapshot_normalizes_absolute_paths`, `test_snapshot_excludes_build_timestamp`, `test_changed_prompt_requires_explicit_snapshot_update`, `test_golden_diff_names_prompt_key`.
+* Example feature: API schema. Tests: `test_tool_schema_matches_golden`, `test_error_payload_schema_matches_golden`, `test_prompt_record_schema_matches_golden`, `test_openapi_fragment_matches_golden`, `test_cli_help_matches_golden`, `test_event_payload_matches_golden`, `test_redacted_trace_artifact_matches_golden`, `test_snapshot_normalizes_uuid`, `test_schema_change_requires_compat_note`, `test_golden_is_semantically_valid_json`.
+* Why this suite exists: golden tests protect artifacts users or agents consume exactly.
+
+## Migration And Backward Compatibility Tests
+Migration and backward compatibility tests protect old data, new data, mixed versions, rollback assumptions, serialized artifacts, caches, config, and installed packages. They belong when users may already have state. Good compatibility tests load real old fixtures. Bad compatibility tests test only the new schema.
+
+* Good tests keep old fixtures, mixed-version fixtures, rollback expectations, and explicit compatibility errors.
+* Bad tests recreate old data with new factories, hiding the actual old shape.
+* Example feature: trace schema. Tests: `test_old_trace_without_tool_ids_loads`, `test_new_trace_with_tool_ids_loads`, `test_mixed_trace_versions_load`, `test_removed_field_has_default`, `test_unknown_future_field_is_ignored`, `test_old_secret_field_is_redacted`, `test_migration_preserves_run_id`, `test_failed_migration_reports_version`, `test_rollback_shape_can_be_read`, `test_old_fixture_is_not_generated_by_new_factory`.
+* Example feature: prompt descriptor. Tests: `test_descriptor_without_source_url_has_compat_error_or_default`, `test_old_family_key_still_aliases`, `test_new_subprompt_does_not_break_old_family_lookup`, `test_old_package_data_layout_loads`, `test_new_package_data_layout_loads`, `test_mixed_prompt_family_versions_are_rejected_clearly`, `test_old_enum_value_remains_supported`, `test_removed_prompt_has_migration_note`, `test_rollback_descriptor_is_valid`, `test_compat_error_names_upgrade_path`.
+* Why this suite exists: migration tests stop future agents from assuming only fresh state exists.
 
 ## Observability Tests
-* Protect logs, traces, metrics, audit records, debug artifacts, and diagnostic metadata.
-* Include them when operations teams, agents, or support workflows rely on emitted context.
-* Agents commonly get these wrong by checking that "something was logged" rather than asserting the useful fields are present and secrets are absent.
-* Example: `test_agent_run_trace_includes_tool_call_ids_and_redacts_api_keys`.
+Observability tests protect logs, traces, metrics, audit records, debug artifacts, and diagnostic metadata. They belong when operators, support workflows, or agents rely on emitted context. Good observability tests assert useful fields and secret absence. Bad observability tests assert that "something was logged."
 
-## Chaos / Failure Injection Tests
-* Protect behavior under dependency timeout, provider failure, network partition, partial write, retry exhaustion, filesystem error, or queue failure.
-* Include them when resilience and recovery are part of the contract.
-* Agents commonly get these wrong by injecting a failure but never asserting recovery, rollback, or diagnostic behavior.
-* Example: `test_provider_timeout_returns_retryable_context_packet_without_losing_history`.
+* Good tests verify event names, IDs, fields, causality, redaction, cardinality, and failure diagnostics.
+* Bad tests couple to formatting while missing whether the emitted context is useful.
+* Example feature: agent run trace. Tests: `test_trace_records_run_id`, `test_trace_records_tool_call_ids`, `test_trace_records_provider_name`, `test_trace_redacts_api_key`, `test_trace_records_policy_denial`, `test_trace_records_retry_count`, `test_trace_preserves_error_chain`, `test_trace_records_token_usage`, `test_trace_has_no_prompt_secret`, `test_trace_links_final_response`.
+* Example feature: prompt catalog loading. Tests: `test_catalog_load_metric_records_family_count`, `test_configuration_error_log_names_descriptor`, `test_missing_asset_error_has_prompt_key`, `test_success_log_has_cache_hit_flag`, `test_debug_artifact_excludes_prompt_secrets`, `test_audit_records_direct_import_generation`, `test_metric_cardinality_is_bounded`, `test_trace_records_package_lookup`, `test_error_log_has_remediation`, `test_observability_is_disabled_when_configured`.
+* Why this suite exists: observability tests make the system debuggable after it breaks.
+
+## Chaos And Failure Injection Tests
+Chaos and failure-injection tests protect behavior under dependency timeouts, provider failures, network partitions, partial writes, retry exhaustion, filesystem errors, queue failures, and clock problems. They belong when resilience and recovery are part of the contract. Good chaos tests assert recovery, rollback, or diagnostic behavior. Bad chaos tests inject failure and never inspect aftermath.
+
+* Good tests inject one controlled failure, assert containment, and verify state after failure.
+* Bad tests make random failures without stable assertions.
+* Example feature: provider call. Tests: `test_timeout_returns_retryable_error`, `test_rate_limit_uses_retry_after`, `test_partial_stream_preserves_received_chunks`, `test_provider_500_triggers_retry`, `test_retry_exhaustion_returns_context_packet`, `test_auth_failure_does_not_retry`, `test_network_partition_does_not_drop_history`, `test_cancelled_request_cleans_up`, `test_provider_failure_redacts_key`, `test_fallback_provider_respects_policy`.
+* Example feature: catalog load. Tests: `test_filesystem_read_failure_reports_path`, `test_json_parse_failure_does_not_cache`, `test_markdown_read_failure_names_prompt`, `test_importlib_resource_failure_is_wrapped`, `test_partial_descriptor_failure_blocks_family`, `test_cache_lock_releases_after_failure`, `test_failure_during_direct_import_generation_rolls_back`, `test_recovery_after_fixed_asset_loads`, `test_error_has_related_files`, `test_failure_metric_is_recorded`.
+* Why this suite exists: chaos tests prove failure handling is real, not aspirational.
 
 ## Compatibility Tests
-* Protect supported OS, Python, browser, provider, API, package, and protocol versions.
-* Include them when the feature promises compatibility across versions or environments.
-* Agents commonly get these wrong by assuming the local runtime is the whole support matrix.
-* Example: `test_mcp_prompt_list_response_matches_protocol_shape`.
+Compatibility tests protect supported OS, Python, browser, provider, API, package, and protocol versions. They belong when the feature promises to work across environments. Good compatibility tests encode the support matrix or stable protocol shape. Bad compatibility tests assume the local runtime is the whole world.
+
+* Good tests run or simulate supported environments and assert version-specific behavior.
+* Bad tests hardcode local paths, local separators, local browser behavior, or current provider quirks.
+* Example feature: package data. Tests: `test_package_data_loads_on_windows_paths`, `test_package_data_loads_on_posix_paths`, `test_python_311_imports_package`, `test_wheel_install_in_clean_env_loads_assets`, `test_editable_install_loads_assets`, `test_zip_safe_resource_lookup_works`, `test_path_separator_does_not_affect_prompt_key`, `test_case_sensitive_lookup_is_explicit`, `test_old_supported_python_version_errors_clearly`, `test_dependency_free_import_still_works`.
+* Example feature: MCP protocol. Tests: `test_prompts_list_matches_protocol_shape`, `test_prompts_get_matches_protocol_shape`, `test_unknown_prompt_error_matches_protocol`, `test_client_older_protocol_gets_compat_response`, `test_new_optional_field_is_backward_compatible`, `test_required_protocol_field_is_present`, `test_json_rpc_id_roundtrips`, `test_batch_request_behavior_is_supported_or_rejected`, `test_transport_specific_payload_is_stable`, `test_protocol_version_error_is_actionable`.
+* Why this suite exists: compatibility tests prevent future agents from coding only for their local environment.
 
 ## Accessibility Tests
-* Protect keyboard navigation, labels, focus order, semantic roles, contrast, screen reader names, and error announcements.
-* Include them for UI features and browser workflows.
-* Agents commonly get these wrong by testing pixels while ignoring whether the workflow can be used without a mouse.
-* Example: `test_export_dialog_focuses_filename_input_and_announces_errors`.
+Accessibility tests protect keyboard navigation, labels, focus order, semantic roles, contrast, screen reader names, and error announcements. They belong for UI features and browser workflows. Good accessibility tests use the interface the user experiences. Bad accessibility tests inspect pixels while ignoring whether a keyboard or screen reader can use the feature.
 
-## Serialization / Round-Trip Tests
-* Protect encode/decode behavior, persistence hydration, config loading, schema conversion, and artifact regeneration.
-* Include them when data crosses a process, file, API, queue, or storage boundary.
-* Agents commonly get these wrong by testing serialization without deserializing back and comparing semantic equality.
-* Example: `test_agent_run_probe_roundtrips_through_json_without_losing_tool_calls`.
+* Good tests assert roles, labels, focus movement, keyboard actions, announcements, and visible error recovery.
+* Bad tests use brittle selectors, skip keyboard paths, or assert only screenshot similarity.
+* Example feature: export dialog. Tests: `test_open_button_has_accessible_name`, `test_dialog_has_role_dialog`, `test_filename_input_has_label`, `test_initial_focus_moves_to_filename`, `test_tab_order_reaches_actions`, `test_escape_closes_dialog`, `test_error_is_announced`, `test_export_button_disabled_state_is_exposed`, `test_focus_returns_to_trigger`, `test_keyboard_can_complete_export`.
+* Example feature: trace viewer. Tests: `test_run_list_has_semantic_table_or_list`, `test_filter_input_has_label`, `test_failed_run_status_is_announced`, `test_expand_error_is_keyboard_accessible`, `test_focus_does_not_escape_panel`, `test_copy_button_has_accessible_name`, `test_empty_state_is_announced`, `test_color_status_has_text_label`, `test_mobile_actions_remain_reachable`, `test_error_details_are_readable_by_screen_reader`.
+* Why this suite exists: accessibility tests make UI behavior robust for users and automation.
 
-## CLI / Package / Install Smoke Tests
-* Protect importability, package data, entrypoints, extras, command startup, and installed-resource lookup.
-* Include them for SDKs, CLIs, plugin packages, and prompt catalogs.
-* Agents commonly get these wrong by testing from the source tree only, missing package-data failures after install.
-* Example: `test_installed_package_can_load_agentic_engineering_prompt_family`.
+## Serialization And Round-Trip Tests
+Serialization and round-trip tests protect encode/decode behavior, persistence hydration, config loading, schema conversion, queue payloads, and artifact regeneration. They belong when data crosses a process, file, API, queue, or storage boundary. Good round-trip tests compare semantic equality and invariants. Bad round-trip tests serialize without deserializing.
+
+* Good tests encode, decode, compare meaning, handle old fixtures, and assert lossless or explicitly lossy fields.
+* Bad tests compare raw string order when semantic equality is what matters.
+* Example feature: agent run record. Tests: `test_run_record_roundtrips_json`, `test_tool_calls_survive_roundtrip`, `test_error_context_survives_roundtrip`, `test_token_usage_survives_roundtrip`, `test_unknown_future_field_is_ignored`, `test_missing_optional_field_defaults`, `test_datetime_timezone_roundtrips`, `test_secret_is_redacted_before_serialization`, `test_binary_artifact_reference_roundtrips`, `test_semantic_equality_ignores_field_order`.
+* Example feature: prompt descriptor. Tests: `test_descriptor_roundtrips_json`, `test_prompt_paths_survive_roundtrip`, `test_source_urls_survive_roundtrip`, `test_family_key_survives_roundtrip`, `test_unknown_field_policy_is_stable`, `test_missing_optional_description_reports_error`, `test_unicode_prompt_name_roundtrips`, `test_sorted_output_is_stable`, `test_invalid_roundtrip_is_rejected`, `test_package_manifest_regeneration_matches_descriptor`.
+* Why this suite exists: round-trip tests catch silent data loss at boundaries.
+
+## CLI Package And Install Smoke Tests
+CLI, package, and install smoke tests protect importability, entrypoints, package data, extras, command startup, installed-resource lookup, and example commands. They belong for SDKs, CLIs, plugins, and prompt catalogs. Good install smoke tests run from a clean environment or installed artifact. Bad install smoke tests only run from the source tree.
+
+* Good tests prove the package works after installation, with package data present and entrypoints wired.
+* Bad tests import local files that would not exist in a wheel.
+* Example feature: SDK package. Tests: `test_wheel_installs_in_clean_env`, `test_import_vidbyte_after_install`, `test_prompt_assets_exist_after_install`, `test_direct_prompt_import_after_install`, `test_prompts_family_after_install`, `test_no_dev_dependency_required_for_import`, `test_package_version_is_available`, `test_pyproject_includes_prompt_data`, `test_readme_example_runs_after_install`, `test_missing_asset_error_is_clear_after_install`.
+* Example feature: CLI entrypoint. Tests: `test_console_script_exists`, `test_cli_help_exit_zero`, `test_cli_version_exit_zero`, `test_cli_prompts_list_exit_zero`, `test_cli_bad_command_exit_nonzero`, `test_cli_runs_outside_repo_root`, `test_cli_uses_installed_assets`, `test_cli_error_has_no_traceback_for_user_error`, `test_cli_output_is_stable`, `test_cli_does_not_require_network_for_help`.
+* Why this suite exists: install smoke tests catch packaging failures that source-tree tests miss.
 
 ## Mutation Testing
-* Mutation testing is a quality check on the tests themselves, not usually a feature test file. It intentionally mutates production logic and checks whether the test suite fails.
-* Include it for high-risk pure logic, money paths, security policy, parser behavior, and invariants where coverage percentage is not enough.
-* Agents commonly skip it because the normal tests are green; use it when you need evidence that tests catch wrong logic.
-* Example: `mutation_check_tool_policy_rejects_deleted_allowlist_guard`.
+Mutation testing checks the tests themselves by intentionally mutating production logic and requiring the suite to fail. It belongs for high-risk pure logic, money paths, security policy, parsers, reducers, and invariants where coverage percentage is not enough. Good mutation checks target meaningful logic changes. Bad mutation checks mutate irrelevant code or treat surviving mutants as acceptable without investigation.
 
-# Choosing Test Lenses
-* Start with the failure inventory, not the taxonomy. The taxonomy is a menu; the inventory tells you what to order.
-* Include acceptance tests when a user, stakeholder, or API consumer has visible acceptance criteria.
-* Include contract tests when another module, package, service, provider, CLI, or agent depends on a stable interface.
-* Include integration or component tests when the feature is an orchestration across files.
-* Include permission, policy, security, and negative tests whenever the feature constrains what an actor or model can do.
-* Include concurrency and idempotency tests when retries, duplicate events, queues, async actors, or parallel users can touch the same state.
-* Include stress, load, and performance tests when behavior changes at scale or when cost, memory, latency, token usage, or provider calls have budgets.
-* Include property, fuzz, and metamorphic tests when input space is large and invariants are clearer than individual expected examples.
-* Include observability tests when future agents, support engineers, or operators rely on logs, traces, metrics, or audit output to debug the feature.
-* Include browser interaction and accessibility tests when the feature is a real user workflow in a browser.
-* Omit a lens only after writing why it is safe to omit. "No time" is not a rationale; "pure function with no external boundary, no state transition, no policy risk, and complete property coverage" is a rationale.
+* Good checks delete guards, flip conditions, skip redaction, bypass policy, remove persistence, and confirm the test suite fails.
+* Bad checks chase a score without connecting surviving mutants to feature risk.
+* Example feature: tool policy. Mutations: `delete_disallowed_tool_guard`, `invert_allowlist_condition`, `skip_permission_check`, `remove_budget_gate`, `ignore_sandbox_mode`, `do_not_audit_denial`, `return_success_on_denial`, `drop_error_context`, `execute_before_policy`, `remove_secret_redaction`.
+* Example feature: prompt catalog. Mutations: `skip_missing_asset_check`, `ignore_duplicate_enum_value`, `return_empty_prompt_text`, `skip_direct_import_export`, `allow_descriptor_without_key`, `cache_partial_family_on_error`, `ignore_package_data_failure`, `drop_source_url_validation`, `sort_keys_inconsistently`, `swallow_configuration_error`.
+* Why this suite exists: mutation testing is the strongest check against easy-to-pass tests because it asks whether wrong code is actually caught.
 
-# Things Not to Do
+# Things Not To Do
+* Do not treat testing as post-implementation cleanup. The feature definition and failure inventory should shape implementation.
+* Do not create a feature pack that contains only happy-path unit tests unless the feature genuinely has no other meaningful risks.
 * Do not organize tests only around files when the behavior spans multiple files. File-based tests are allowed, but feature packs own feature intent.
 * Do not stop at unit tests when the feature is an orchestration. A function can be correct while the feature is broken.
 * Do not mock the behavior under test. Mock outside the feature boundary, not inside it.
 * Do not assert incidental private implementation steps unless the internal protocol itself is the feature contract.
-* Do not use toy fixtures that skip the hard fields, permissions, legacy state, or invalid combinations that make the feature risky.
+* Do not use toy fixtures that skip hard fields, permissions, legacy state, invalid combinations, or realistic object shape.
 * Do not write a regression test that would have passed before the bug was fixed.
 * Do not let coverage percentage stand in for behavioral protection. Coverage can be high while mutation resistance is low.
-* Do not write broad end-to-end tests with vague assertions and call them comprehensive.
-* Do not skip negative, security, permission, or policy tests for agent-tool features. Those tests are the feature.
-* Do not create every possible test file just because the template lists it. Unused lenses create noise and maintenance drag.
-* Do not write tests that depend on unstable time, randomness, external services, provider text, ordering, or generated IDs unless those values are controlled.
-* Do not write test names that describe mechanics instead of promises. `test_parse` is weak; `test_prompt_descriptor_rejects_missing_markdown_asset` is useful.
-* Do not leave the feature pack README stale after adding or deleting a test lens.
+* Do not skip negative, security, permission, policy, stress, fuzz, or observability tests merely because they take more thought.
+* Do not create every possible test file mechanically. Include many strategies by default, then omit only with a real feature-specific rationale.
+* Do not leave `FEATURE.md` stale after adding or deleting a testing strategy.
 
 # Checklist
-* Before writing tests, define the feature boundary in behavior terms and verify it has a trigger, inputs, outcomes, invariants, failure modes, and a reason someone would care if it broke.
-* Before creating a pack, write the failure inventory. Do not write test files until the inventory names what a shallow generated test would miss.
-* Choose test lenses from the inventory and record omitted lenses in the README with a rationale.
-* Write acceptance or contract tests before implementation-shaped unit tests when the behavior is ambiguous.
-* Place helper function tests inside the parent feature pack unless the helper owns a reusable invariant or public contract.
+* Before writing code, define the feature boundary in behavior terms and verify it has a trigger, inputs, outcomes, invariants, failure modes, and a reason someone would care if it broke.
+* Before writing tests, create or update `tests/features/<feature_slug>/FEATURE.md`.
+* Before choosing files, write the failure inventory and name what an easy generated test would miss.
+* Start by considering many testing strategies, including negative, security, policy, stress, fuzz, observability, and failure-injection coverage.
+* Omit a strategy only when `FEATURE.md` explains why the omission is safe.
+* Write acceptance or contract tests before implementation-shaped unit tests when behavior is ambiguous.
 * For every bug fix, add a regression test that fails against the old failure mechanism.
-* For every security, permission, policy, parser, provider, or tool feature, include at least one adversarial or negative test.
-* For every concurrency or retry-capable feature, decide explicitly whether idempotency and ordering need tests.
+* For every security, permission, policy, parser, provider, or tool feature, include adversarial tests.
+* For every retry-capable or concurrent feature, decide explicitly whether idempotency and ordering need tests.
 * After writing a test, ask what production mutation would make it fail. If no realistic broken code fails the test, strengthen or delete it.
 * After writing a test, verify the mock boundary: mocks must sit outside the feature boundary, never inside the behavior being proven.
-* After writing a test, verify the assertion boundary: assert observable outcomes, not incidental internal steps.
-* Before opening a pull request, read the feature pack README and confirm the Test Suite Map, Omitted Test Lenses, and Historical Regressions match the files you actually created.
+* Before opening a pull request, read `FEATURE.md` and confirm the Test Suite Map, Omitted Testing Strategies, and Historical Regressions match the files you actually created.
 
 # Code Examples
 
-## Example 1: Feature test pack README
+## Example 1: Feature test pack FEATURE.md
 
 ```markdown
 # Feature: Prompt Catalog Loading
+
+## High-Level Feature Description
+Prompt catalog loading lets SDK users, agents, and MCP handlers retrieve prompt text through stable enum keys, family keys, and direct imports. The feature matters because prompt assets are packaged Markdown files, so a missing file, enum drift, or bad descriptor can break runtime behavior after installation. A future agent modifying prompt files should understand that the feature is not "read JSON"; it is "make every promised prompt reliably available through every public access path." If this feature regresses, agents may load stale guidance, package users may receive import errors, and catalog failures may become hard to diagnose.
 
 ## Contract
 The prompt catalog loads every prompt family from packaged JSON and Markdown assets, exposes enum-keyed access through `Prompts().get(...)`, exposes family access through `Prompts().family(...)`, and fails fast when an enum value has no matching asset or a descriptor references a missing Markdown file.
@@ -448,17 +513,17 @@ None yet. Add one line per fixed bug with the test that protects it.
 * `test_error_behavior.py` protects fail-fast diagnostics for malformed descriptors.
 * `test_cli_package_smoke.py` protects installed package prompt loading.
 
-## Omitted Test Lenses
+## Omitted Testing Strategies
 * Browser interaction omitted: prompt catalog loading has no UI.
-* Concurrency omitted: class-level cache load is not currently a documented thread-safety contract.
-* Stress omitted: prompt count is small and package-data loading is already covered by smoke tests.
+* Accessibility omitted: prompt catalog loading has no user interface.
+* Load testing omitted for now: prompt count is small, but stress coverage exists for repeated catalog loading.
 ```
 
 ## Example 2: Pytest folder layout
 
 ```text
 tests/features/prompt_catalog_loading/
-|-- README.md
+|-- FEATURE.md
 |-- test_contract.py
 |-- test_error_behavior.py
 |-- test_cli_package_smoke.py
@@ -533,3 +598,6 @@ def test_compaction_never_drops_required_system_prompt(messages: list[Message]) 
 ```
 
 The exact compacted output can vary by implementation. The feature contract is not the algorithm; the contract is that required system context survives while the result stays under budget.
+
+# Conclusion
+Use this file as a way to think, not as a rigid template to copy blindly. The higher-level purpose is to make agents treat testing as first-class engineering work: define the feature, understand why it matters, search for ways it can break, choose broad and meaningful test strategies, and leave behind executable intent that future agents can rely on. If a detail in this file does not fit the codebase, adapt the detail while preserving the principle: the test pack should make the feature more robust, more secure, more diagnosable, and harder for future code changes to break accidentally.

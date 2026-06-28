@@ -100,10 +100,12 @@ writing structured file header comments as navigational landmarks, maintaining
 folder-level READMEs as persistent comprehension caches, shaping functions into
 small clean interfaces, and organizing tests as feature-level executable intent.
 `feature_test_packs` teaches models to define the smallest durable behavior
-boundary, write a failure inventory, choose appropriate test lenses, and generate
-tests that protect feature contracts instead of merely confirming implementation
-details. Together these prompts teach a model to produce code where the source
-and its tests form a high-signal interface for any downstream coding agent.
+boundary, make testing first-class instead of an afterthought, write a feature
+`FEATURE.md`, consider many testing strategies by default, and generate tests
+that actively try to break feature contracts instead of merely confirming
+implementation details. Together these prompts teach a model to produce code
+where the source and its tests form a high-signal interface for any downstream
+coding agent.
 
 Link: <https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/agentic_engineering>
 

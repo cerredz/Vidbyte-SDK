@@ -9,7 +9,7 @@
 
 ## 1. Overview
 
-Add a new agentic engineering principle prompt named `feature_test_packs` to the Vidbyte SDK prompt family. The principle teaches models to treat tests as executable feature intent, not file-adjacent confidence theater. It defines a feature as the smallest durable behavior boundary the codebase promises to preserve, requires one organized test pack per feature, gives a deep taxonomy of test types that can belong inside that pack, and formalizes what makes a generated test good enough to trust. The prompt is intended to be the most detailed testing guidance in the agentic engineering family, because testing is a known agent failure point: models can write many tests quickly, but without a precise rubric they tend to test shallow happy paths, mock away the behavior under test, miss failure modes, and produce tests that pass without protecting the product.
+Add a new agentic engineering principle prompt named `feature_test_packs` to the Vidbyte SDK prompt family. The principle teaches models to treat testing as first-class executable feature intent, not file-adjacent confidence theater or afterthought cleanup. It defines a feature as the smallest durable behavior boundary the codebase promises to preserve, requires one organized test pack per feature, uses `FEATURE.md` to explain the actual feature being tested, gives broad testing-strategy guidance, and pushes agents to think like good testers that actively try to break the system. The prompt is intended to be the most detailed testing guidance in the agentic engineering family because agents can write tests quickly, and that speed should be used to create robust, secure, complex, adversarial suites that make future coding safer.
 
 ---
 
@@ -25,7 +25,7 @@ Add a new agentic engineering principle prompt named `feature_test_packs` to the
 - Update the `system_prompt.md` goal/scope language so testing is included alongside the existing agentic engineering principles.
 - Update `vidbyte/prompts/README.md` so the quick-reference row and description include `feature_test_packs`.
 - Update `vidbyte/prompts/skills/agentic-engineering.md` so the on-disk helper skill knows the family now includes `feature_test_packs` and so future agents treat test-pack principles as valid additions to the family.
-- Follow the existing principle prompt style: `# Description`, `# Intent`, named body sections, `# Things Not to Do`, `# Checklist`, and `# Code Examples`.
+- Follow the existing principle prompt style: `# Description`, `# Intent`, `# Goal`, named body sections, `# Things Not To Do`, `# Checklist`, `# Code Examples`, and `# Conclusion`.
 
 ### Non-Goals
 
@@ -65,21 +65,21 @@ The local `main` branch was fast-forwarded to `origin/main` before this design d
 9. The prompt must define the correct granularity as the "smallest durable behavioral boundary" and provide examples of too broad, too narrow, and right-sized feature names.
 10. The prompt must explain when a helper function deserves its own feature test pack versus when it should be tested inside its parent feature's pack.
 11. The prompt must define a canonical feature test pack folder shape under `tests/features/<feature_slug>/`.
-12. The test pack shape must include a README and optional files for acceptance, contract, unit, integration, component/service, end-to-end, browser interaction, smoke, regression, edge cases, negative behavior, error behavior, security, permission/policy, concurrency, idempotency, stress, load/performance, property-based, fuzz, metamorphic, snapshot/golden, migration/backward compatibility, observability, chaos/failure injection, compatibility, accessibility where relevant, fixtures, and factories.
-13. The prompt must state that not every feature needs every test file; each pack must justify which lenses are included and which are intentionally omitted.
-14. The feature test pack README schema must include: Feature, Contract, Actors/Callers, Inputs, Preconditions, Observable Outcomes, State Transitions, Invariants, External Dependencies, Known Failure Modes, Historical Regressions, Test Suite Map, and Omitted Test Lenses.
+12. The test pack shape must include `FEATURE.md` and optional files for acceptance, contract, unit, integration, component/service, end-to-end, browser interaction, smoke, regression, edge cases, negative behavior, error behavior, security, permission/policy, concurrency, idempotency, stress, load/performance, property-based, fuzz, metamorphic, snapshot/golden, migration/backward compatibility, observability, chaos/failure injection, compatibility, accessibility where relevant, fixtures, and factories.
+13. The prompt must state that the agent should consider many feature testing strategies by default, then justify which strategies are included and which are intentionally omitted.
+14. The feature test pack `FEATURE.md` schema must include: Feature, High-Level Feature Description, Contract, Actors/Callers, Inputs, Preconditions, Observable Outcomes, State Transitions, Invariants, External Dependencies, Known Failure Modes, Historical Regressions, Test Suite Map, and Omitted Testing Strategies.
 15. The prompt must require a failure inventory before writing tests.
 16. The failure inventory must list at minimum: core contract, invariants, valid inputs, invalid inputs, state transitions, external boundaries, security/policy risks, concurrency/idempotency risks, historical bugs, expensive resource limits, observability promises, and what a shallow test would miss.
-17. The prompt must include a deep `# What Makes a Good Test` section.
-18. The good-test rubric must require tests to be behavior-first, refactor-stable, failure-seeking, invariant-centered, observable, realistic, boundary-aware, diagnostic, mutation-resistant, regression-linked when applicable, and adversarial for security/policy/parser/tooling features.
-19. The prompt must include bad-test smells, including: asserting only that something returns, testing only happy paths, mocking the exact behavior under test, asserting incidental implementation steps, using toy fixtures, duplicating source logic in assertions, vague names, and missing failure/abuse/concurrency cases.
+17. The prompt must include a `# Testing Philosophy` section that tells the model to adopt the mindset of a good tester: search for edge cases, actively try to break the system, avoid irrelevant or easy-to-pass tests, and use cheap agentic test generation to pursue broad meaningful coverage.
+18. The prompt must include a universal testing strategy rubric that requires tests to be behavior-first, observable, realistic, adversarial where needed, diagnostic, mutation-resistant, and boundary-aware.
+19. The prompt must include bad-test anti-patterns, including: asserting only that something returns, testing only happy paths, mocking the exact behavior under test, asserting incidental implementation steps, using toy fixtures, duplicating source logic in assertions, vague names, and missing failure/abuse/concurrency cases.
 20. The prompt must include the rule: a good test is not one that passes; a good test is one that would fail for the right reason if the feature promise were broken.
-21. The prompt must include a `# Test Type Taxonomy` section with enough context for each type of test: what it protects, when to include it, what agents commonly get wrong, and an example test name.
+21. The prompt must include a testing strategy playbook with enough context for each type of test: what it protects, what makes good and bad tests for that strategy, diverse example test names, and why the suite is shaped that way.
 22. The taxonomy must cover at least these test types: acceptance, contract, unit, integration, component/service, end-to-end, browser interaction/manual, smoke, regression, edge case, negative, error behavior, security, permission/policy, concurrency, idempotency, stress, load/performance, property-based, fuzz, metamorphic, snapshot/golden, migration/backward compatibility, observability, chaos/failure injection, compatibility, accessibility, serialization/round-trip, CLI/package/install smoke, and mutation testing as a quality check.
 23. The prompt must include `# Things Not to Do` with agent-specific anti-patterns.
 24. The prompt must include `# Checklist` with high-level workflow reminders, not just a repeated taxonomy list.
 25. The checklist must cover before-writing, during-writing, after-writing, and PR-review phases.
-26. The prompt must include `# Code Examples` with at least four examples: a feature test pack README, a pytest-style folder layout, a concrete contract or acceptance test, and a regression/security/error-behavior example.
+26. The prompt must include `# Code Examples` with at least four examples: a feature test pack `FEATURE.md`, a pytest-style folder layout, a concrete contract or acceptance test, and a regression/security/error-behavior example.
 27. Code examples must use realistic agentic or SDK-adjacent examples such as prompt catalog loading, tool permission enforcement, context compaction, retry/idempotency policy, or trace redaction.
 28. `agentic_engineering.json` must add a `feature_test_packs` entry with `path: "feature_test_packs.md"` and a GitHub `source_url`.
 29. `agentic_engineering.json` description should be updated only if needed to mention testing without changing the descriptor structure.
@@ -99,7 +99,7 @@ The local `main` branch was fast-forwarded to `origin/main` before this design d
 - The prompt must be more detailed than the existing function design principle and comparable in depth to the largest agentic engineering principle files.
 - The prompt must use the family style: Markdown `#` headers, `*` bullets, authoritative operational language, no emoji, no callouts, and no XML tags.
 - The prompt should avoid adding new SDK dependencies or implying that every listed test tool is installed in the repo.
-- The prompt should avoid saying every feature must include every test category. It should require an explicit lens selection and omission rationale instead.
+- The prompt should avoid saying every feature must include every test category. It should instead push agents to consider many strategies by default and require explicit selected-strategy and omitted-strategy rationale.
 - The principle must preserve catalog compatibility: every JSON prompt key must have a matching enum value, and every Markdown path must exist.
 - Reliability requirement: the new prompt should reduce agent false confidence by forcing a failure inventory before test generation.
 - Maintainability requirement: updates to system prompt, README, and helper skill must not duplicate the entire deep-dive; they should route agents to the new prompt.
@@ -110,7 +110,7 @@ The local `main` branch was fast-forwarded to `origin/main` before this design d
 
 This change adds one new Markdown-backed principle prompt to the existing `agentic_engineering` prompt family and wires it into the same catalog path as the other principles. No loader change is needed. The prompt catalog already discovers `agentic_engineering.json`, resolves Markdown files referenced by `path`, validates non-empty text, and checks enum sync.
 
-The new principle key will be `feature_test_packs`. That name is more precise than `testing` because the principle is not generic test advice. It is a feature-granularity organization model: first define the feature boundary, then create a test pack that encodes the feature's executable intent through multiple test lenses.
+The new principle key will be `feature_test_packs`. That name is more precise than `testing` because the principle is not generic test advice. It is a feature-granularity organization model: first define the feature boundary, then create a test pack that encodes the feature's executable intent through multiple testing strategies.
 
 The on-disk helper skill at `vidbyte/prompts/skills/agentic-engineering.md` will also be updated. That file is not part of the import-validated prompt catalog, but it is a repository skill that teaches agents how to extend the family. Because the user specifically asked for an "agentic engineering skill" and because this file already describes the family structure, the design updates it so future agents know `feature_test_packs` exists and so its examples of valid principles stay current.
 
@@ -141,7 +141,7 @@ The on-disk helper skill at `vidbyte/prompts/skills/agentic-engineering.md` will
 
 #### What it does
 
-Provides the deep-dive testing principle for agentic engineering. A model loads this prompt when creating, modifying, reviewing, or expanding tests for a feature. The file teaches the model to identify the feature boundary, build a feature test pack folder, enumerate failure modes before writing tests, choose appropriate test lenses, and judge whether each generated test actually protects behavior.
+Provides the deep-dive testing principle for agentic engineering. A model loads this prompt when creating, modifying, reviewing, or expanding tests for a feature. The file teaches the model to identify the feature boundary, build a feature test pack folder, explain the feature in `FEATURE.md`, enumerate failure modes before writing tests, consider many testing strategies, and judge whether each generated test actually protects behavior.
 
 #### Interface / API
 
@@ -166,22 +166,24 @@ The file will follow this section order:
 
 1. `# Description`
 2. `# Intent`
-3. `# What Counts as a Feature`
-4. `# Feature Test Pack Structure`
-5. `# Feature Test Pack README`
-6. `# Failure Inventory Before Test Generation`
-7. `# What Makes a Good Test`
-8. `# Test Type Taxonomy`
-9. `# Choosing Test Lenses`
-10. `# Things Not to Do`
-11. `# Checklist`
-12. `# Code Examples`
+3. `# Goal`
+4. `# Definition of a Feature`
+5. `# Feature Test Pack Structure`
+6. `# Feature Test Pack FEATURE.md`
+7. `# Failure Inventory Before Test Generation`
+8. `# Testing Philosophy`
+9. `# Universal Strategy Rubric`
+10. `# Testing Strategy Playbook`
+11. `# Things Not To Do`
+12. `# Checklist`
+13. `# Code Examples`
+14. `# Conclusion`
 
 `# Description` will state the principle in article-ready terms: agent-native testing is not about generating more tests; it is about making behavioral intent executable at feature granularity. It will explain that tests should map to feature intent, not files, and that agent speed makes comprehensive packs feasible while making judgment more important.
 
 `# Intent` will state that the prompt closes the failure mode where models write tests that mirror the implementation or only confirm the patch. It will say the agent's job is to attack the feature contract, not prove that its own code runs.
 
-`# What Counts as a Feature` will define a feature as:
+`# Definition of a Feature` will define a feature as:
 
 ```text
 A feature is the smallest durable behavior boundary the codebase promises to preserve.
@@ -203,7 +205,7 @@ context compaction preserving required messages
 
 ```text
 tests/features/<feature_slug>/
-├── README.md
+├── FEATURE.md
 ├── test_acceptance.py
 ├── test_contract.py
 ├── test_unit.py
@@ -236,13 +238,14 @@ tests/features/<feature_slug>/
 └── factories.py
 ```
 
-The text will explicitly say this is a menu, not a mandatory file list for every feature. The model must select lenses based on the feature's risk profile.
+The text will explicitly say this is a strategy menu, not a mandatory file list for every feature. The model must consider many strategies by default and omit only with a feature-specific rationale.
 
-`# Feature Test Pack README` will provide a schema:
+`# Feature Test Pack FEATURE.md` will provide a schema:
 
 ```markdown
 # Feature: <name>
 
+## High-Level Feature Description
 ## Contract
 ## Actors / Callers
 ## Inputs and Preconditions
@@ -253,35 +256,16 @@ The text will explicitly say this is a menu, not a mandatory file list for every
 ## Known Failure Modes
 ## Historical Regressions
 ## Test Suite Map
-## Omitted Test Lenses
+## Omitted Testing Strategies
 ```
 
 `# Failure Inventory Before Test Generation` will require the model to list failure modes before writing tests. This section is load-bearing because it converts test writing from "cover code" into "attack promises."
 
-`# What Makes a Good Test` will define:
+`# Testing Philosophy` will explain that the model needs to adopt the mindset of a good tester. It should actively think about edge cases and ways to break the system, avoid irrelevant and easy-to-pass tests, and use cheap agentic test generation to pursue meaningful coverage that would have been too tedious for humans to write manually.
 
-```text
-A good test protects a feature contract, attacks a real failure mode,
-uses realistic setup, asserts observable behavior, and produces a diagnostic
-failure when the behavior regresses.
-```
+`# Universal Strategy Rubric` will define the shared standard for every testing strategy. It will require behavior-first names, observable assertions, realistic fixtures, invalid and adversarial inputs, mocks outside the feature boundary, diagnostic failures, mutation resistance, stable nondeterminism handling, regression linkage, and deletion or strengthening of tests that prove no meaningful behavior.
 
-It will include the deeper rubric:
-
-- Behavior-first: tests public behavior, not incidental implementation steps.
-- Refactor-stable: survives correct reorganizations.
-- Failure-seeking: tries invalid inputs, missing state, duplicate calls, forbidden actors, stale data, provider failures, and policy bypasses.
-- Invariant-centered: protects rules that must always hold.
-- Observable: asserts return values, state changes, persisted records, events, errors, logs, traces, UI state, or output artifacts.
-- Realistic: fixtures resemble real data, including messy legacy and partial data.
-- Boundary-aware: mocks outside the feature boundary, not the behavior under test.
-- Diagnostic: test names and assertions explain the broken promise.
-- Minimal but meaningful: asserts the behavior that matters without overspecifying internals.
-- Mutation-resistant: deleting guards, flipping conditions, bypassing policies, or removing core logic should fail the test.
-- Regression-linked: when created for a bug, encodes the bug's actual mechanism.
-- Adversarial where needed: mandatory for security, policy, parser, auth, provider, and agent-tool features.
-
-`# Test Type Taxonomy` will include at least these categories. Each category will have: what it protects, when to include it, what agents commonly get wrong, and an example test name.
+`# Testing Strategy Playbook` will include at least these categories. Each category will have a description, good and bad test guidance, example suite names, and a short explanation of why the suite is shaped that way.
 
 | Test Type | Purpose |
 |-----------|---------|
@@ -316,8 +300,6 @@ It will include the deeper rubric:
 | CLI / Package / Install Smoke | Import, entrypoint, package data, command startup |
 | Mutation Testing | Quality check that tests fail when logic is intentionally mutated |
 
-`# Choosing Test Lenses` will teach proportionality: not all features need all tests. It will require the agent to choose lenses based on user impact, blast radius, external boundaries, security/policy risk, concurrency, cost/performance sensitivity, historical bugs, and UI/API surface.
-
 `# Things Not to Do` will include anti-patterns:
 
 - Do not make a file's tests equal a feature's tests by default.
@@ -329,13 +311,14 @@ It will include the deeper rubric:
 - Do not write vague names like `test_success` or `test_handles_error`.
 - Do not omit negative/security/policy tests for agent-tool features.
 - Do not treat coverage percentage as proof of feature protection.
-- Do not create every possible test file when the feature risk does not justify it.
+- Do not skip hard testing strategies merely because they take more thought.
+- Do not create every possible test file mechanically when the feature risk does not justify it.
 
 `# Checklist` will include workflow-stage items:
 
 - Before writing tests, define the feature boundary using the strict feature schema.
 - Before creating a pack, write the failure inventory.
-- Choose test lenses and justify omissions in the README.
+- Choose testing strategies and justify omissions in `FEATURE.md`.
 - Write acceptance/contract tests before implementation-specific unit tests when behavior is unclear.
 - Add regression tests for every fixed bug.
 - Verify each test would fail for the right reason if a key invariant were broken.
@@ -346,7 +329,7 @@ It will include the deeper rubric:
 
 `# Code Examples` will include:
 
-1. A `tests/features/prompt_catalog_loading/README.md` example.
+1. A `tests/features/prompt_catalog_loading/FEATURE.md` example.
 2. A pytest folder layout for `prompt_catalog_loading`.
 3. A contract test for prompt enum/catalog synchronization.
 4. A regression test for missing Markdown asset detection.
@@ -502,7 +485,7 @@ Modify these sections:
 - `<identity>`: update "currently has two principles" language, which is already stale after the merged PR.
 - `<structure>`: add `feature_test_packs.md` with a concise description.
 - `<criteria>` examples: include "feature test packs as executable feature intent" as a principle-sized practice.
-- `<procedure>` or `<conventions>` if needed: mention that testing principles should include feature definition, test lens taxonomy, and good-test rubric.
+- `<procedure>` or `<conventions>` if needed: mention that testing principles should include feature definition, `FEATURE.md`, broad testing-strategy guidance, and the universal strategy rubric.
 
 #### Logic / Algorithm
 
@@ -622,7 +605,7 @@ The prompt may mention external testing tools as examples, but this PR will not 
 ### Alternative 4: Create one prompt per test type
 
 - What: Add separate principle prompts for contract testing, stress testing, browser testing, property-based testing, and so on.
-- Why rejected: The agent first needs one coherent testing model that decides which lenses apply to a feature. Splitting test types into many prompts would make routing harder and would duplicate the feature-boundary and good-test rubric across files.
+- Why rejected: The agent first needs one coherent testing model that decides which strategies apply to a feature. Splitting test types into many prompts would make routing harder and would duplicate the feature-boundary, testing philosophy, and universal strategy rubric across files.
 
 ### Alternative 5: Add a generator script that creates feature test pack folders
 
