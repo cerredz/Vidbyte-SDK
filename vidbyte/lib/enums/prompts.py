@@ -33,6 +33,7 @@ class Prompt(str, Enum):
 
     AGENTIC_ENGINEERING_ERROR_MESSAGES = "agentic_engineering.error_messages"
     AGENTIC_ENGINEERING_FILE_HEADERS = "agentic_engineering.file_headers"
+    AGENTIC_ENGINEERING_INTENT_BASED_COMMENTING = "agentic_engineering.intent_based_commenting"
     AGENTIC_ENGINEERING_SYSTEM_PROMPT = "agentic_engineering.system_prompt"
     AGENTIC_LOOP_CONTEXT_PROMPT = "agentic_loop.context_prompt"
     HANDOFF_SYSTEM_PROMPT = "handoff.system_prompt"

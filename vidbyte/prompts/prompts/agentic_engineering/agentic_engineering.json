@@ -1,6 +1,6 @@
 {
   "name": "Agentic Engineering",
-  "description": "Prompt assets for agentic engineering — the discipline of writing source code that treats AI agents as a primary audience. Teaches models to produce error messages that function as context-window primitives and file headers that function as navigational landmarks, so that every source file serves as a high-signal interface for both human developers and downstream coding agents.",
+  "description": "Prompt assets for agentic engineering — the discipline of writing source code that treats AI agents as a primary audience. Teaches models to produce error messages as context-window primitives, file headers as navigational landmarks, and intent-based comment blocks that preserve the meaning of critical business logic across constant implementation churn, so that every source file serves as a high-signal interface for both human developers and downstream coding agents.",
   "key": "agentic_engineering",
   "prompts": {
     "system_prompt": {
@@ -14,6 +14,10 @@
     "file_headers": {
       "path": "file_headers.md",
       "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/agentic_engineering/file_headers.md"
+    },
+    "intent_based_commenting": {
+      "path": "intent_based_commenting.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/agentic_engineering/intent_based_commenting.md"
     }
   }
 }
