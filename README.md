@@ -238,6 +238,29 @@ agent = Agent(
 )
 ```
 
+Semantic trace profiles add SDK-owned prebuilt spans for agents, runtimes,
+context-window work, algorithms, middleware decisions, tool calls, parsers, and
+aggregate agents. The default profile keeps the current high-signal tree
+(`agent.run`, `llm.call`, `tool.call`) and adds parser/tool/stop metadata. The
+verbose profile adds runtime iteration, context-window, algorithm, aggregate,
+and middleware-decision spans.
+
+```python
+from vidbyte import Trace, TraceProfile
+
+trace = Trace.profile(
+    inner=Trace.debug(events),
+    profile=TraceProfile.verbose().with_components(middleware="decisions_only"),
+)
+
+agent = Agent(
+    name="observed-worker",
+    system_prompt="Work carefully.",
+    runner=my_runner,
+    trace=trace,
+)
+```
+
 Provider-backed tracing uses the existing optional adapters:
 
 ```python
@@ -247,6 +270,29 @@ agent = Agent(
     runner=my_runner,
     trace=Trace.langfuse(public_key="...", secret_key="..."),
 )
+```
+
+LangSmith has prebuilt semantic helpers that translate Vidbyte span kinds into
+LangSmith run types (`chain`, `llm`, `tool`, `retriever`, `embedding`, `prompt`,
+and `parser`):
+
+```python
+agent = Agent(
+    name="langsmith-agent",
+    system_prompt="Use tools when useful.",
+    runner=my_runner,
+    trace=Trace.langsmith_default(api_key="...", project="vidbyte-sdk"),
+)
+```
+
+Use session tracing when multiple agents should appear under one provider root:
+
+```python
+trace = Trace.langsmith_session(api_key="...", project="workflow", name="job-run")
+
+with trace.session("job-run"):
+    first = await agent_a.arun("Draft the plan.")
+    second = await agent_b.arun(first.content)
 ```
 
 `Trace.continual(...)` is a validated first-step capture preset for future

@@ -19,6 +19,10 @@ uses the null tracer, `Trace.debug()` keeps events in memory for local
 inspection, provider tracers are configured by the caller, and continual trace
 artifacts fail open so trace failures do not abort the main agent run.
 
+Semantic trace profiles sit above raw provider adapters. They let the SDK define
+Vidbyte concepts once, then translate them into provider-specific fields such as
+LangSmith `run_type`.
+
 ## Usage
 
 ```python
@@ -36,6 +40,47 @@ reply = await agent.arun("Explain the last tool call.")
 print(events)
 ```
 
+Use semantic profiles when you want prebuilt SDK spans instead of hand-written
+provider callbacks:
+
+```python
+from vidbyte import Trace, TraceProfile
+
+trace = Trace.profile(
+    inner=Trace.debug(events),
+    profile=TraceProfile.default(),
+)
+```
+
+LangSmith helpers wrap the optional LangSmith adapter and translate Vidbyte span
+kinds to LangSmith run types:
+
+```python
+trace = Trace.langsmith_default(api_key="...", project="sdk")
+trace = Trace.langsmith_verbose(api_key="...", project="sdk")
+trace = Trace.langsmith_session(api_key="...", project="sdk", name="workflow")
+```
+
+Profiles:
+
+- `TraceProfile.minimal()`: `agent.run`, `llm.call`, and `tool.call`.
+- `TraceProfile.default()`: minimal plus parser, tool input/output, agent stop, retriever/embedding categories, and session roots.
+- `TraceProfile.verbose()`: default plus runtime iteration, context-window summaries, algorithms, aggregate phases, and middleware decisions.
+- `TraceProfile.diagnostic()`: verbose plus diagnostic component spans and fuller metadata subject to redaction/truncation.
+
+Provider-neutral span kinds are `chain`, `llm`, `tool`, `retriever`,
+`embedding`, `prompt`, and `parser`.
+
+Session tracing groups multiple agent runs under one root:
+
+```python
+trace = Trace.session(Trace.debug(events), name="workflow", profile=TraceProfile.verbose())
+
+with trace.session("workflow"):
+    await agent_a.arun("Plan.")
+    await agent_b.arun("Execute.")
+```
+
 Configure continual trace artifacts separately from observability tracing:
 
 ```python
@@ -49,6 +94,12 @@ agent = agent.fork(trace_option=TraceOption.continual(ActionTrace))
 
 - `base.py`: public `Trace` facade.
 - `debug.py`: in-memory debug tracer.
+- `schema.py`: semantic span names, kinds, detail levels, parent policies, and contexts.
+- `profiles.py`: profile presets and redaction/truncation behavior.
+- `controller.py`: `TraceController`, the composable semantic tracer.
+- `session.py`: `SessionTraceController`, the multi-agent root grouping tracer.
+- `components/`: prebuilt span-spec factories for agents, runtimes, context, algorithms, middleware, tools, and parsers.
+- `providers/`: semantic-to-provider translators such as LangSmith run-type mapping.
 - `continual/`: continual tracer, middleware, agent, schema helpers, and prebuilt trace models.
 - `vidbyte.lib.tracing`: shared tracer base contracts.
 

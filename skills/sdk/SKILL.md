@@ -183,6 +183,12 @@ vidbyte/
 |-- trace/
 |   |-- base.py
 |   |-- debug.py
+|   |-- schema.py
+|   |-- profiles.py
+|   |-- controller.py
+|   |-- session.py
+|   |-- components/           semantic span specs for agents/runtimes/context/middleware/tools
+|   |-- providers/            semantic-to-provider translators
 |   `-- continual/
 |-- pipelines/
 |   |-- __init__.py
@@ -228,6 +234,9 @@ vidbyte/
 - Follow `skills/vidbyte-sdk/adding-prompts.md` whenever adding or changing prompt assets.
 - Keep the public `Trace` tracer client and helper factories in `vidbyte/trace/base.py`.
 - Keep concrete debug tracing implementation in `vidbyte/trace/debug.py`.
+- Keep semantic tracing schema, profiles, controllers, and session wrappers under `vidbyte/trace/`.
+- Keep Vidbyte-owned prebuilt component span specs under `vidbyte/trace/components/`.
+- Keep provider translation interfaces under `vidbyte/trace/providers/`; they translate semantic spans to provider fields but do not call external provider SDKs.
 - Keep continual tracing presets and future continual trace memory work under `vidbyte/trace/continual/`.
 - Keep provider-neutral tracer protocols under `vidbyte/lib/tracing/`.
 - Keep external tracing provider adapters under `vidbyte/providers/tracing/`.
