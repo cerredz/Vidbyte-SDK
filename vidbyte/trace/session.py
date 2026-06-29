@@ -53,7 +53,7 @@ class SessionTraceController(TraceController):
 
     def end_trace(self, context: SpanContext, *, output: str | None = None, error: BaseException | None = None) -> None:
         # Ends child agent spans as spans and root sessions as traces.
-        if context is self._session_root:
+        if self._session_root is None or context is self._session_root:
             return super().end_trace(context, output=output, error=error)
         return super().end_span(context, output=output, error=error)
 

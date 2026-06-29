@@ -195,6 +195,14 @@ class SessionTraceTests(unittest.TestCase):
             with self.assertRaises(ConfigurationError):
                 tracer.begin_session("nested")
 
+    def test_session_controller_without_active_session_closes_root_trace(self) -> None:
+        # Verifies session-capable controllers still behave like normal tracers outside sessions.
+        inner = RecordingTracer()
+        tracer = Trace.session(inner, profile=TraceProfile.default())
+        root = tracer.start_trace("agent.run", agent_name="solo")
+        tracer.end_trace(root, output="ok")
+        self.assertEqual([event["type"] for event in inner.events], ["start_trace", "end_trace"])
+
 
 class SemanticRuntimeIntegrationTests(unittest.IsolatedAsyncioTestCase):
     async def test_agent_default_profile_records_core_and_default_spans(self) -> None:
