@@ -63,6 +63,7 @@ class SearchTreeRuntimeComponent:
         self.config = config or AgentRuntimeConfig()
         self.run_id = run_id
         self._nodes: dict[str, SearchNode] = {}
+        self.tracer = tracer
 
     def build_context(self, message: str, *, base_context: StrategyContext | None, history: Sequence[AgentMessage], agent_history: Sequence[AgentMessage], agent_metadata: Mapping[str, Any], existing_tool_calls: Sequence[ToolCallContext], input_metadata: Mapping[str, Any] | None = None, modality: ModelModality | None = None, agentic_loop: bool = True, context_items: Sequence[ContextItem] = (), context_manager: ContextManager | None = None) -> BaseAgentContext:
         # Build the initial context window passed to the MCTS root node.
@@ -89,29 +90,36 @@ class SearchTreeRuntimeComponent:
 
     async def arun(self, message: str, *, handle: RunnerHandle, context: BaseAgentContext, metadata: Mapping[str, Any] | None = None, options: Mapping[str, Any] | None = None, trace_context: Any = None) -> StrategyResult:
         # Orchestrate the branching search tree, selecting nodes and executing rollbacks.
+        span = self._start_semantic_span("runtime.search.run", parent=trace_context, agent_name=self.agent_name, message=message)
         root = SearchNode(node_id=str(uuid.uuid4()), parent=None, context=context)
         self._nodes[root.node_id] = root
 
         # Conceptual execution of a non-linear path, simulating selections and rollbacks
-        current = root
-        candidates = await self._expand_and_evaluate(current)
-        if candidates:
-            best_candidate = self._select_best_node(candidates)
-            if best_candidate.value_score < 0.2:
-                current = self._rollback_to_best_alternative(root)
-            else:
-                current = best_candidate
+        try:
+            current = root
+            candidates = await self._expand_and_evaluate(current)
+            if candidates:
+                best_candidate = self._select_best_node(candidates)
+                if best_candidate.value_score < 0.2:
+                    current = self._rollback_to_best_alternative(root)
+                else:
+                    current = best_candidate
 
-        output_text = "Branching MCTS execution complete."
-        if current.context.history:
-            output_text = current.context.history[-1].content
+            output_text = "Branching MCTS execution complete."
+            if current.context.history:
+                output_text = current.context.history[-1].content
 
-        return StrategyResult(
-            output=output_text,
-            strategy_name="mcts_search",
-            calls=(),
-            metadata={"depth_reached": 1, "total_nodes": len(self._nodes)},
-        )
+            result = StrategyResult(
+                output=output_text,
+                strategy_name="mcts_search",
+                calls=(),
+                metadata={"depth_reached": 1, "total_nodes": len(self._nodes)},
+            )
+            self._end_semantic_span(span, output=output_text)
+            return result
+        except BaseException as exc:
+            self._end_semantic_span(span, error=exc)
+            raise
 
     async def _expand_and_evaluate(self, node: SearchNode) -> list[SearchNode]:
         # Branch out into multiple candidate next steps and evaluate them.
@@ -124,6 +132,8 @@ class SearchTreeRuntimeComponent:
         )
         node.children.append(child)
         self._nodes[child.node_id] = child
+        span = self._start_semantic_span("runtime.search.node", node_id=child.node_id, parent_id=node.node_id, value_score=child.value_score)
+        self._end_semantic_span(span, output=child.action_taken)
         return [child]
 
     def _select_best_node(self, nodes: Sequence[SearchNode]) -> SearchNode:
@@ -132,4 +142,22 @@ class SearchTreeRuntimeComponent:
 
     def _rollback_to_best_alternative(self, root: SearchNode) -> SearchNode:
         # Traverses the tree to find the highest-valued, unexhausted ancestor node.
+        span = self._start_semantic_span("runtime.search.rollback", node_id=root.node_id)
+        self._end_semantic_span(span, output="root")
         return root
+
+    def _start_semantic_span(self, name: str, parent: Any = None, **attributes: Any) -> Any:
+        # Opens search runtime spans only for semantic controllers.
+        if not _is_semantic_tracer(self.tracer):
+            return None
+        return self.tracer.start_span(name, parent=parent, **attributes)
+
+    def _end_semantic_span(self, span: Any, *, output: str | None = None, error: BaseException | None = None) -> None:
+        # Closes search runtime spans only when one was opened.
+        if span is not None and _is_semantic_tracer(self.tracer):
+            self.tracer.end_span(span, output=output, error=error)
+
+
+def _is_semantic_tracer(tracer: object) -> bool:
+    # Detects TraceController-like tracers without importing vidbyte.trace during runtime initialization.
+    return all(hasattr(tracer, attr) for attr in ("inner", "profile", "translator"))

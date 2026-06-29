@@ -32,6 +32,7 @@ from vidbyte.lib.dataclasses.agents import AgentMetadata
 from vidbyte.lib.dataclasses.multi_agent import AggregateConfig, ProposerSpec
 from vidbyte.lib.enums.prompts import Prompt
 from vidbyte.lib.errors import AggregateExecutionError, ConfigurationError
+from vidbyte.lib.tracing import NullTracer, SpanContext, TracerBase
 from vidbyte.middleware import AgentMiddleware
 from vidbyte.prompts import Prompts
 from vidbyte.tools.catalog import Tools
@@ -52,7 +53,7 @@ class AggregateResult:
 class MultiProviderAggregator:
     """Fans a prompt out to labeled proposer agents and synthesizes their outputs via an aggregator agent."""
 
-    def __init__(self, proposers: Sequence[tuple[str, Any]], aggregator: Any, config: AggregateConfig, prompt_template: str) -> None:
+    def __init__(self, proposers: Sequence[tuple[str, Any]], aggregator: Any, config: AggregateConfig, prompt_template: str, tracer: TracerBase | None = None) -> None:
         # Stores the labeled proposers, the aggregator agent, run config, and the validated synthesis template.
         if not proposers:
             raise ConfigurationError("MultiProviderAggregator requires at least one proposer.")
@@ -62,14 +63,22 @@ class MultiProviderAggregator:
         self._aggregator = aggregator
         self._config = config
         self._prompt_template = prompt_template
+        self._tracer = tracer or NullTracer()
 
     async def aggregate(self, prompt: str) -> AggregateResult:
         # Runs all proposers concurrently, collects survivors, and synthesizes one answer from them.
-        labeled_results = await self._run_proposers(prompt)
-        candidates, failed_labels = self._collect_candidates(labeled_results)
-        candidates_block = self._build_candidates_block(candidates)
-        reply = await self._synthesize(prompt, candidates_block)
-        return self._build_result(reply, candidates, failed_labels)
+        span = self._tracer.start_span("aggregate.run", proposer_count=len(self._proposers), min_successful=self._config.min_successful)
+        try:
+            labeled_results = await self._run_proposers(prompt)
+            candidates, failed_labels = self._collect_candidates(labeled_results)
+            candidates_block = self._build_candidates_block(candidates)
+            reply = await self._synthesize(prompt, candidates_block)
+            result = self._build_result(reply, candidates, failed_labels)
+            self._tracer.end_span(span, output=result.content)
+            return result
+        except BaseException as exc:
+            self._tracer.end_span(span, error=exc)
+            raise
 
     async def _run_proposers(self, prompt: str) -> list[tuple[str, Any]]:
         # Launches every proposer concurrently (bounded and timed if configured) and returns (label, result_or_exception).
@@ -80,10 +89,21 @@ class MultiProviderAggregator:
 
     async def _run_one_proposer(self, agent: Any, prompt: str, semaphore: asyncio.Semaphore | None) -> Any:
         # Calls one proposer under the optional concurrency semaphore and per-proposer timeout.
+        span = self._tracer.start_span("aggregate.proposer", agent_name=getattr(agent, "name", None))
         if semaphore is None:
-            return await self._call_with_timeout(agent, prompt)
+            return await self._call_one_proposer_with_trace(agent, prompt, span)
         async with semaphore:
-            return await self._call_with_timeout(agent, prompt)
+            return await self._call_one_proposer_with_trace(agent, prompt, span)
+
+    async def _call_one_proposer_with_trace(self, agent: Any, prompt: str, span: SpanContext) -> Any:
+        # Calls one proposer and closes its aggregate proposer span.
+        try:
+            result = await self._call_with_timeout(agent, prompt)
+            self._tracer.end_span(span, output=self._reply_text(result))
+            return result
+        except BaseException as exc:
+            self._tracer.end_span(span, error=exc)
+            raise
 
     async def _call_with_timeout(self, agent: Any, prompt: str) -> Any:
         # Awaits the proposer's reply, enforcing per_proposer_timeout when one is set.
@@ -116,8 +136,15 @@ class MultiProviderAggregator:
 
     async def _synthesize(self, prompt: str, candidates_block: str) -> Any:
         # Renders the synthesis message and asks the aggregator agent to compose the final answer.
+        span = self._tracer.start_span("aggregate.synthesis", candidate_chars=len(candidates_block))
         message = self._prompt_template.format(request=prompt, candidates=candidates_block)
-        return await self._aggregator.generate_reply(message)
+        try:
+            reply = await self._aggregator.generate_reply(message)
+            self._tracer.end_span(span, output=self._reply_text(reply))
+            return reply
+        except BaseException as exc:
+            self._tracer.end_span(span, error=exc)
+            raise
 
     def _build_result(self, reply: Any, candidates: Mapping[str, str], failed_labels: Sequence[str]) -> AggregateResult:
         # Wraps the aggregator reply and per-candidate detail into an AggregateResult.
@@ -169,9 +196,9 @@ class MultiProviderAggregator:
 class AggregateAgent(BaseAgent):
     """A BaseAgent whose generate_reply fans out to multiple proposer models and synthesizes one answer."""
 
-    def __init__(self, *, name: str, system_prompt: str, proposers: Sequence[ProposerSpec | tuple[str, ...] | Any], aggregator: ProposerSpec | tuple[str, ...] | Any | None = None, config: AggregateConfig | None = None, provider: str | None = None, model_name: str | None = None, api_key: str | None = None, agent_metadata: AgentMetadata | None = None, tools: Sequence[object] | Tools = (), middleware: Sequence[AgentMiddleware] = (), temperature: float | None = None, metadata: dict[str, Any] | None = None) -> None:
+    def __init__(self, *, name: str, system_prompt: str, proposers: Sequence[ProposerSpec | tuple[str, ...] | Any], aggregator: ProposerSpec | tuple[str, ...] | Any | None = None, config: AggregateConfig | None = None, provider: str | None = None, model_name: str | None = None, api_key: str | None = None, agent_metadata: AgentMetadata | None = None, tools: Sequence[object] | Tools = (), middleware: Sequence[AgentMiddleware] = (), temperature: float | None = None, metadata: dict[str, Any] | None = None, tracer: type[TracerBase] | TracerBase | None = None, trace: type[TracerBase] | TracerBase | None = None) -> None:
         # Builds proposer and aggregator child agents from specs and wires them into a MultiProviderAggregator.
-        super().__init__(name=name, system_prompt=system_prompt, agent_metadata=agent_metadata, metadata=metadata)
+        super().__init__(name=name, system_prompt=system_prompt, agent_metadata=agent_metadata, metadata=metadata, tracer=tracer, trace=trace)
         if not proposers:
             raise ConfigurationError("AggregateAgent requires at least one proposer.")
         self._proposer_inputs = tuple(proposers)
@@ -185,24 +212,31 @@ class AggregateAgent(BaseAgent):
         labeled_proposers = self._build_proposers()
         aggregator_agent = self._build_aggregator()
         template = self._config.synthesis_prompt_template or Prompts().get(Prompt.MULTI_PROVIDER_AGGREGATOR_SYNTHESIS_PROMPT)
-        self._engine = MultiProviderAggregator(labeled_proposers, aggregator_agent, self._config, template)
+        self._engine = MultiProviderAggregator(labeled_proposers, aggregator_agent, self._config, template, tracer=self._tracer)
 
     async def generate_reply(self, message: str | AgentInput, **options: Any) -> AgentMessage:
         # Runs the aggregation engine on the prompt and returns the synthesized AgentMessage.
         prompt = self._coerce_prompt(message)
         self._active_prompt = prompt
-        result = await self._engine.aggregate(prompt)
-        reply = AgentMessage(
-            sender=self.name,
-            recipient=str(options.get("recipient", "orchestrator")),
-            content=result.content,
-            metadata=dict(result.metadata),
-        )
-        self.history.append(reply)
-        self.last_prompt = prompt
-        self.last_reply = reply
-        self._active_prompt = ""
-        return reply
+        trace_ctx = self._tracer.start_trace("agent.run", agent_name=self.name, strategy="aggregate", prompt=self._safe_trace_value(prompt), system_prompt=self._safe_trace_value(self.system_prompt), metadata=self._safe_trace_value(self.metadata))
+        try:
+            result = await self._engine.aggregate(prompt)
+            reply = AgentMessage(
+                sender=self.name,
+                recipient=str(options.get("recipient", "orchestrator")),
+                content=result.content,
+                metadata=dict(result.metadata),
+            )
+            self.history.append(reply)
+            self.last_prompt = prompt
+            self.last_reply = reply
+            self._tracer.end_trace(trace_ctx, output=result.content)
+            return reply
+        except BaseException as exc:
+            self._tracer.end_trace(trace_ctx, error=exc)
+            raise
+        finally:
+            self._active_prompt = ""
 
     def fork(self, *, name: str | None = None, **_overrides: Any) -> AggregateAgent:
         # Rebuilds an equivalent AggregateAgent so as_tool() and delegation keep aggregating.
@@ -220,6 +254,7 @@ class AggregateAgent(BaseAgent):
             middleware=self._proposer_middleware,
             temperature=self._proposer_temperature,
             metadata=dict(self.metadata),
+            tracer=self._tracer,
         )
 
     def _build_proposers(self) -> list[tuple[str, Any]]:
@@ -247,6 +282,7 @@ class AggregateAgent(BaseAgent):
             tools=self._proposer_tools,
             middleware=self._proposer_middleware,
             temperature=self._proposer_temperature,
+            tracer=self._tracer,
         )
 
     def _build_aggregator(self) -> Any:
@@ -261,6 +297,7 @@ class AggregateAgent(BaseAgent):
             provider=spec.provider,
             model_name=spec.model,
             api_key=self._proposer_api_key,
+            tracer=self._tracer,
         )
 
     def _resolve_aggregator_spec(self) -> ProposerSpec:
