@@ -249,6 +249,24 @@ agent = Agent(
 )
 ```
 
+Use a session tracer when several agents should appear under one parent trace:
+
+```python
+from vidbyte import Agent, Trace
+
+trace = Trace.langsmith_session(
+    project="research",
+    default_name="research-run",
+    default_attributes={"run_id": run_id},
+)
+
+async with trace.session():
+    planner = Agent(name="planner", system_prompt="Plan the work.", runner=planner_runner, trace=trace)
+    writer = Agent(name="writer", system_prompt="Draft the answer.", runner=writer_runner, trace=trace)
+    await planner.arun("Plan the release note")
+    await writer.arun("Write the release note")
+```
+
 `Trace.continual(...)` is a validated first-step capture preset for future
 trace-to-context feedback. It records lifecycle events and stores settings, but
 does not yet inject trace memory into the agent context.
@@ -885,6 +903,7 @@ vidbyte/
 |-- trace/
 |   |-- base.py
 |   |-- debug.py
+|   |-- session.py
 |   `-- continual/
 |-- middleware/
 |   `-- builtins/

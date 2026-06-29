@@ -32,6 +32,7 @@ from vidbyte.lib.dataclasses.agents import AgentMetadata
 from vidbyte.lib.dataclasses.multi_agent import AggregateConfig, ProposerSpec
 from vidbyte.lib.enums.prompts import Prompt
 from vidbyte.lib.errors import AggregateExecutionError, ConfigurationError
+from vidbyte.lib.tracing import TracerBase
 from vidbyte.middleware import AgentMiddleware
 from vidbyte.prompts import Prompts
 from vidbyte.tools.catalog import Tools
@@ -169,9 +170,9 @@ class MultiProviderAggregator:
 class AggregateAgent(BaseAgent):
     """A BaseAgent whose generate_reply fans out to multiple proposer models and synthesizes one answer."""
 
-    def __init__(self, *, name: str, system_prompt: str, proposers: Sequence[ProposerSpec | tuple[str, ...] | Any], aggregator: ProposerSpec | tuple[str, ...] | Any | None = None, config: AggregateConfig | None = None, provider: str | None = None, model_name: str | None = None, api_key: str | None = None, agent_metadata: AgentMetadata | None = None, tools: Sequence[object] | Tools = (), middleware: Sequence[AgentMiddleware] = (), temperature: float | None = None, metadata: dict[str, Any] | None = None) -> None:
+    def __init__(self, *, name: str, system_prompt: str, proposers: Sequence[ProposerSpec | tuple[str, ...] | Any], aggregator: ProposerSpec | tuple[str, ...] | Any | None = None, config: AggregateConfig | None = None, provider: str | None = None, model_name: str | None = None, api_key: str | None = None, agent_metadata: AgentMetadata | None = None, tools: Sequence[object] | Tools = (), middleware: Sequence[AgentMiddleware] = (), temperature: float | None = None, metadata: dict[str, Any] | None = None, tracer: type[TracerBase] | TracerBase | None = None, trace: type[TracerBase] | TracerBase | None = None) -> None:
         # Builds proposer and aggregator child agents from specs and wires them into a MultiProviderAggregator.
-        super().__init__(name=name, system_prompt=system_prompt, agent_metadata=agent_metadata, metadata=metadata)
+        super().__init__(name=name, system_prompt=system_prompt, agent_metadata=agent_metadata, metadata=metadata, tracer=tracer, trace=trace)
         if not proposers:
             raise ConfigurationError("AggregateAgent requires at least one proposer.")
         self._proposer_inputs = tuple(proposers)
@@ -220,6 +221,7 @@ class AggregateAgent(BaseAgent):
             middleware=self._proposer_middleware,
             temperature=self._proposer_temperature,
             metadata=dict(self.metadata),
+            tracer=self._tracer,
         )
 
     def _build_proposers(self) -> list[tuple[str, Any]]:
@@ -247,6 +249,7 @@ class AggregateAgent(BaseAgent):
             tools=self._proposer_tools,
             middleware=self._proposer_middleware,
             temperature=self._proposer_temperature,
+            tracer=self._tracer,
         )
 
     def _build_aggregator(self) -> Any:
@@ -261,6 +264,7 @@ class AggregateAgent(BaseAgent):
             provider=spec.provider,
             model_name=spec.model,
             api_key=self._proposer_api_key,
+            tracer=self._tracer,
         )
 
     def _resolve_aggregator_spec(self) -> ProposerSpec:

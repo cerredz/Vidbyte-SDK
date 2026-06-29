@@ -6,11 +6,11 @@ provider-backed tracers, and structured continual trace artifacts.
 
 ## Role In The SDK
 
-`vidbyte.trace` exposes `Trace`, `DebugTracer`, provider tracer helpers,
-`TraceOption`, `TraceSchema`, `ActionTrace`, `ContinualTraceAgent`, and
+`vidbyte.trace` exposes `Trace`, `DebugTracer`, `SessionTracer`, provider tracer
+helpers, `TraceOption`, `TraceSchema`, `ActionTrace`, `ContinualTraceAgent`, and
 `ContinualTraceMiddleware`. Agents use this layer to start and end trace spans,
-capture metadata safely, and optionally produce structured handoff-like trace
-artifacts.
+group related agent runs into one session trace, capture metadata safely, and
+optionally produce structured handoff-like trace artifacts.
 
 ## Design Philosophy
 
@@ -36,6 +36,21 @@ reply = await agent.arun("Explain the last tool call.")
 print(events)
 ```
 
+Group several agent runs under one parent trace with `SessionTracer`:
+
+```python
+from vidbyte import Agent, Trace
+
+events = []
+trace = Trace.session(Trace.debug(events), default_name="local-workflow")
+
+with trace.session(case="smoke"):
+    planner = Agent(name="planner", system_prompt="Plan.", runner=planner_runner, trace=trace)
+    writer = Agent(name="writer", system_prompt="Write.", runner=writer_runner, trace=trace)
+    planner.run("Plan the answer")
+    writer.run("Write the answer")
+```
+
 Configure continual trace artifacts separately from observability tracing:
 
 ```python
@@ -49,6 +64,7 @@ agent = agent.fork(trace_option=TraceOption.continual(ActionTrace))
 
 - `base.py`: public `Trace` facade.
 - `debug.py`: in-memory debug tracer.
+- `session.py`: session tracer wrapper for grouping multiple agent runs.
 - `continual/`: continual tracer, middleware, agent, schema helpers, and prebuilt trace models.
 - `vidbyte.lib.tracing`: shared tracer base contracts.
 

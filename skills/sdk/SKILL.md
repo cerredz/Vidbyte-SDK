@@ -183,6 +183,7 @@ vidbyte/
 |-- trace/
 |   |-- base.py
 |   |-- debug.py
+|   |-- session.py
 |   `-- continual/
 |-- pipelines/
 |   |-- __init__.py
@@ -228,6 +229,7 @@ vidbyte/
 - Follow `skills/vidbyte-sdk/adding-prompts.md` whenever adding or changing prompt assets.
 - Keep the public `Trace` tracer client and helper factories in `vidbyte/trace/base.py`.
 - Keep concrete debug tracing implementation in `vidbyte/trace/debug.py`.
+- Keep provider-neutral session tracing wrappers in `vidbyte/trace/session.py`.
 - Keep continual tracing presets and future continual trace memory work under `vidbyte/trace/continual/`.
 - Keep provider-neutral tracer protocols under `vidbyte/lib/tracing/`.
 - Keep external tracing provider adapters under `vidbyte/providers/tracing/`.
