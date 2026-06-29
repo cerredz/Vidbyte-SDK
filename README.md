@@ -31,6 +31,7 @@ access remain outside this package.
 | [`vidbyte.lib`](vidbyte/lib/README.md) | Shared dataclasses, enums, registries, errors, runners, config, and tracing contracts |
 | [`vidbyte.mcp_server`](vidbyte/mcp_server/README.md) | Stdio MCP Studio server for exposing agents, tools, prompts, and pipelines |
 | [`vidbyte.middleware`](vidbyte/middleware/README.md) | Deterministic runtime hooks and built-in policy, safety, retry, budget, and compaction middleware |
+| [`vidbyte.paradigms`](vidbyte/paradigms/README.md) | Thin runnable paradigm harness scaffolding built from agents, tools, context, prompts, middleware, trace, pipelines, and evals |
 | [`vidbyte.pipelines`](vidbyte/pipelines/README.md) | Multi-agent pipeline topologies with a string-in/string-out contract |
 | [`vidbyte.prompts`](vidbyte/prompts/README.md) | Static prompt assets, enum-keyed lookup, direct imports, and prompt families |
 | [`vidbyte.providers`](vidbyte/providers/README.md) | Provider adapter factories for text, image, video, audio, embeddings, and streaming |
@@ -55,6 +56,7 @@ from vidbyte import VidbyteSDK
 
 sdk = VidbyteSDK()
 sdk.harnesses
+sdk.paradigms
 sdk.agents
 sdk.tools
 sdk.providers
@@ -877,6 +879,7 @@ vidbyte/
 |-- harnesses/
 |   `-- client.py
 |-- mcp_server/
+|-- paradigms/
 |-- prompts/
 |   `-- prompts/
 |-- providers/
