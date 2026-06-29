@@ -24,6 +24,9 @@ class TraceController(TracerBase):
 
     def start_trace(self, name: str, **attributes: Any) -> SemanticSpanContext:
         # Opens a root semantic trace or returns a suppressed root context.
+        if name == "agent.run" and self._has_active_provider_parent():
+            spec = self._spec_from_name(name, attributes=attributes, root=False)
+            return self.open_span(spec, as_trace=False)
         spec = self._spec_from_name(name, attributes=attributes, root=True)
         return self.open_span(spec, parent=None, as_trace=True)
 
@@ -129,6 +132,10 @@ class TraceController(TracerBase):
             if not context.suppressed and context.provider_context is not None:
                 return context.provider_context
         return None
+
+    def _has_active_provider_parent(self) -> bool:
+        # Returns whether the current async-local stack has an open provider parent.
+        return any(not context.suppressed and context.provider_context is not None for context in _SPAN_STACK.get())
 
     def _push_context(self, context: SemanticSpanContext) -> SemanticSpanContext:
         # Pushes a semantic context onto the async-local stack.

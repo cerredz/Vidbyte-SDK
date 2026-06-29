@@ -179,6 +179,19 @@ class TraceControllerTests(unittest.TestCase):
         parents = [event["parent"] for event in inner.events if event.get("name") == "llm.call"]
         self.assertEqual(set(id(parent) for parent in parents), set(id(root) for root in roots))
 
+    def test_nested_agent_run_becomes_child_span(self) -> None:
+        # Verifies SDK-built nested agents can stay inside one semantic tree.
+        inner = RecordingTracer()
+        tracer = Trace.profile(inner, TraceProfile.verbose())
+        root = tracer.start_trace("agent.run", agent_name="root")
+        aggregate = tracer.start_span("aggregate.proposer", parent=root)
+        child = tracer.start_trace("agent.run", agent_name="child")
+        tracer.end_trace(child, output="child")
+        tracer.end_span(aggregate, output="aggregate")
+        tracer.end_trace(root, output="root")
+        starts = [(event["type"], event.get("name")) for event in inner.events if event["type"].startswith("start")]
+        self.assertEqual(starts, [("start_trace", "agent.run"), ("start_span", "aggregate.proposer"), ("start_span", "agent.run")])
+
 
 async def _gather(*coroutines: Any) -> tuple[Any, ...]:
     # Runs coroutines through asyncio.gather for Python versions that reject direct gather in run().
