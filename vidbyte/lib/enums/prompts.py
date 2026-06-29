@@ -32,6 +32,7 @@ class Prompt(str, Enum):
     """Prompt keys for Vidbyte SDK prompt assets."""
 
     AGENTIC_ENGINEERING_ERROR_MESSAGES = "agentic_engineering.error_messages"
+    AGENTIC_ENGINEERING_FEATURE_TEST_PACKS = "agentic_engineering.feature_test_packs"
     AGENTIC_ENGINEERING_FILE_HEADERS = "agentic_engineering.file_headers"
     AGENTIC_ENGINEERING_FOLDER_README = "agentic_engineering.folder_readme"
     AGENTIC_ENGINEERING_FUNCTION_DESIGN = "agentic_engineering.function_design"
