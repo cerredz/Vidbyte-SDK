@@ -249,6 +249,25 @@ agent = Agent(
 )
 ```
 
+For LangSmith, use `Trace.langsmith_default(...)` as the recommended
+single-agent preset. It emits `agent.run`, `llm.call`, and `tool.call` runs
+with LangSmith-native run types and includes prompt, tool schema, tool input,
+and output fields for browser inspection.
+
+```python
+agent = Agent(
+    name="observed-agent",
+    system_prompt="Work carefully.",
+    provider="openai",
+    model_name="gpt-4.1",
+    tools=[lookup_metric],
+    trace=Trace.langsmith_default(project="vidbyte-agents"),
+)
+```
+
+Multi-agent grouping into one LangSmith trace is handled separately by session
+tracing; `Trace.langsmith_default(...)` is the default single-agent preset.
+
 `Trace.continual(...)` is a validated first-step capture preset for future
 trace-to-context feedback. It records lifecycle events and stores settings, but
 does not yet inject trace memory into the agent context.

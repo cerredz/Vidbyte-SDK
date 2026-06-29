@@ -275,6 +275,7 @@ agent = Agent(
 - `Trace.off()` disables tracing.
 - `Trace.debug()` keeps an in-memory event list for local inspection.
 - Provider helpers wrap existing tracing adapters such as Langfuse.
+- `Trace.langsmith_default(...)` is the recommended single-agent LangSmith preset. It emits `agent.run`, `llm.call`, and `tool.call` runs with LangSmith-native run types and scan-friendly prompt, tool schema, tool input, and output fields.
 - `Trace.continual(...)` records lifecycle events and stores settings for trace-to-context style workflows, but does not automatically inject hidden trace memory into the agent context.
 
 ```python
@@ -288,6 +289,17 @@ agent = Agent(
     runner=my_runner,
     tools=[lookup_metric],
     trace=Trace.debug(events),
+)
+```
+
+```python
+agent = Agent(
+    name="observed-agent",
+    system_prompt="Work carefully.",
+    provider="openai",
+    model_name="gpt-4.1",
+    tools=[lookup_metric],
+    trace=Trace.langsmith_default(project="vidbyte-agents"),
 )
 ```
 

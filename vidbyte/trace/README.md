@@ -36,6 +36,34 @@ reply = await agent.arun("Explain the last tool call.")
 print(events)
 ```
 
+Use `Trace.langsmith_default(...)` for the recommended single-agent LangSmith
+trace shape:
+
+```python
+from vidbyte import Agent, Trace
+
+agent = Agent(
+    name="observed",
+    system_prompt="Work carefully.",
+    provider="openai",
+    model_name="gpt-4.1",
+    trace=Trace.langsmith_default(project="vidbyte-agents"),
+)
+```
+
+The default LangSmith tree is:
+
+```text
+agent.run
+|-- llm.call
+`-- tool.call
+```
+
+Those names use LangSmith-native run types: `agent.run` is a chain run,
+`llm.call` is an LLM run, and `tool.call` is a tool run. Specialized LangSmith
+run types such as retriever, embedding, prompt, and parser are reserved for
+future verbose or subsystem-specific tracing work.
+
 Configure continual trace artifacts separately from observability tracing:
 
 ```python

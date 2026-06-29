@@ -78,7 +78,7 @@ The repo also has a separate draft design for `SessionTracer`. This default-trac
 11. `llm.call` inputs must include an explicit `user_prompt` field containing the current user prompt.
 12. `llm.call` inputs must include an explicit `system` field when a system string is present.
 13. `llm.call` inputs must include an explicit `system_prompt` field when a system string is present.
-14. `llm.call` inputs must continue including the full `messages` list in chat-message shape.
+14. `llm.call` inputs must continue including the full `messages` sequence in chat-message shape.
 15. `llm.call` inputs must include `input_messages` as an alias of `messages` for LangSmith scanability.
 16. `llm.call` inputs must include tool schemas when tools are present.
 17. `llm.call` inputs must include `tool_names` and `tool_count` when tools are present.
@@ -397,8 +397,8 @@ Trace.langsmith_default(...)
     "user_prompt": str,
     "system": str,              # present when available
     "system_prompt": str,       # present when available
-    "messages": list[dict[str, Any]],
-    "input_messages": list[dict[str, Any]],
+    "messages": tuple[dict[str, Any], ...],
+    "input_messages": tuple[dict[str, Any], ...],
     "tools": list[dict[str, Any]],      # present when available
     "tool_names": tuple[str, ...],      # present when available
     "metadata": dict[str, Any],
