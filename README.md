@@ -109,6 +109,14 @@ reply = await agent.arun("Draft a concise release note")
 For custom agents, pass an explicit `system_prompt`, model config, runner, and tools into `Agent` or `BaseAgent`.
 Semantic labels such as roles belong in agent metadata when callers need them.
 
+## Paradigm Harnesses
+
+`vidbyte.paradigms` reserves the SDK namespace for future thin runnable paradigm
+harnesses: high-level agentic engineering patterns that compose agents, tools,
+context, prompts, middleware, trace, pipelines, and evals into an opinionated
+execution loop. This release adds scaffolding only; no concrete paradigm
+harnesses ship yet.
+
 ## Context Objects
 
 Context dataclasses are exposed through `vidbyte.context` and centralized internally under `vidbyte.lib.dataclasses`.
