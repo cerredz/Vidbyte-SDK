@@ -98,7 +98,9 @@ class TraceProfile:
             return _DETAIL_ORDER[spec.detail] <= _DETAIL_ORDER[self.detail]
         if setting == "minimal":
             return spec.detail is TraceDetail.MINIMAL
-        if setting in {"default", "summary", "inputs_outputs", "decisions_only"}:
+        if setting == "decisions_only":
+            return spec.name == "middleware.decision" or _DETAIL_ORDER[spec.detail] <= _DETAIL_ORDER[TraceDetail.STANDARD]
+        if setting in {"default", "summary", "inputs_outputs"}:
             return _DETAIL_ORDER[spec.detail] <= _DETAIL_ORDER[TraceDetail.STANDARD]
         if setting == "verbose":
             return _DETAIL_ORDER[spec.detail] <= _DETAIL_ORDER[TraceDetail.VERBOSE]

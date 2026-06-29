@@ -89,6 +89,14 @@ class SemanticTraceProfileTests(unittest.TestCase):
         with self.assertRaises(ConfigurationError):
             TraceProfile(max_chars=0)
 
+    def test_profile_decisions_only_enables_middleware_decisions(self) -> None:
+        # Verifies the middleware decisions_only preset includes decision spans.
+        profile = TraceProfile.default().with_components(middleware="decisions_only")
+        decision = SpanSpec("middleware.decision", component="middleware", detail=TraceDetail.VERBOSE)
+        hook = SpanSpec("middleware.hook", component="middleware", detail=TraceDetail.DIAGNOSTIC)
+        self.assertTrue(profile.allows(decision))
+        self.assertFalse(profile.allows(hook))
+
     def test_registry_rejects_duplicate_and_unknown_specs(self) -> None:
         # Verifies component registry catches duplicate and missing span specs.
         registry = TraceComponentRegistry()
