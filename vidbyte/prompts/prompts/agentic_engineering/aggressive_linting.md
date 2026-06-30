@@ -585,6 +585,8 @@ max-branches = 10
 ```
 ```toml
 # Ruff/pylint: a branch condition with too many boolean operators needs a name.
+# If your Ruff version still marks PLR0916 as preview, enable preview; do not
+# silently omit this wall.
 [tool.ruff.lint]
 extend-select = ["PLR0916"]   # too-many-boolean-expressions
 [tool.ruff.lint.pylint]
