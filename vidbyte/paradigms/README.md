@@ -42,7 +42,7 @@ policies.
 
 - `base.py`: `ParadigmHarness`, the abstract runnable contract for future thin
   harnesses.
-- `client.py`: `ParadigmClient`, currently a namespace marker for future
+- `client.py`: `ParadigmClient`, the namespace client for concrete and future
   paradigm factories.
 - `context_minimal_fanout/`: the first concrete paradigm family, used to split a
   large request into multiple non-overlapping implementation prompts and run

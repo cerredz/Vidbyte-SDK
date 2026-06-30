@@ -281,10 +281,10 @@ class MultiplePromptFanoutSettings:
             raise ConfigurationError("max_concurrency must be greater than zero.")
         if (self.max_cost_usd is None) != (self.cost_per_million_tokens is None):
             raise ConfigurationError("max_cost_usd and cost_per_million_tokens must be provided together.")
-        object.__setattr__(self, "splitter_tools", tuple(self.splitter_tools))
-        object.__setattr__(self, "implementation_tools", tuple(self.implementation_tools))
-        object.__setattr__(self, "splitter_middleware", tuple(self.splitter_middleware))
-        object.__setattr__(self, "implementation_middleware", tuple(self.implementation_middleware))
+        object.__setattr__(self, "splitter_tools", self._object_tuple(self.splitter_tools))
+        object.__setattr__(self, "implementation_tools", self._object_tuple(self.implementation_tools))
+        object.__setattr__(self, "splitter_middleware", self._object_tuple(self.splitter_middleware))
+        object.__setattr__(self, "implementation_middleware", self._object_tuple(self.implementation_middleware))
         object.__setattr__(self, "splitter_agent_options", dict(self.splitter_agent_options))
         object.__setattr__(self, "implementation_agent_options", dict(self.implementation_agent_options))
 
@@ -292,6 +292,20 @@ class MultiplePromptFanoutSettings:
         # Returns a new settings object with per-run overrides applied.
         clean = {key: value for key, value in overrides.items() if value is not None}
         return replace(self, **clean)
+
+    @staticmethod
+    def _object_tuple(value: object) -> tuple[object, ...]:
+        # Normalizes single objects, sequences, and Tools-like catalogs into tuples.
+        if value is None:
+            return ()
+        all_items = getattr(value, "all", None)
+        if callable(all_items):
+            return tuple(all_items())
+        if isinstance(value, tuple):
+            return value
+        if isinstance(value, list):
+            return tuple(value)
+        return (value,)
 
 
 __all__ = [
