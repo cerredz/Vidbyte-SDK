@@ -393,6 +393,16 @@ Agents invent package names, module paths, and symbols from training data that s
 extend-select = ["F821", "F401", "F811"]
 # F821 undefined name, F401 unused import (leftover hallucinated import), F811 redefinition
 ```
+```toml
+# Ruff: wildcard imports hide where names came from and make agent edits untraceable.
+[tool.ruff.lint]
+extend-select = ["F403", "F405"]   # from x import * / name may be undefined from star import
+```
+```toml
+# Ruff: unused locals and dead commented code are failed partial edits, not harmless noise.
+[tool.ruff.lint]
+extend-select = ["F841", "ARG", "ERA001"]   # unused variable, unused args, commented-out code
+```
 ```bash
 # deptry: fail on imports of packages not declared as dependencies.
 deptry .
@@ -438,7 +448,8 @@ type = layers
 layers =
     app.api
     app.services
-    app.domain
+    app.repositories
+    app.db
 ```
 ```ini
 # .importlinter: a forbidden contract — domain may never reach back up to api.
@@ -457,6 +468,28 @@ modules =
     app.features.billing
     app.features.checkout
     app.features.catalog
+```
+```python
+# grimp: no cyclic imports. A cycle means two modules secretly form one unit; merge
+# them or split the shared abstraction, but never let the cycle land.
+import grimp
+graph = grimp.build_graph("app")
+for module in graph.modules:
+    if module in graph.find_downstream_modules(module):
+        raise SystemExit(
+            f"{module} participates in an import cycle. Break the cycle before merge."
+        )
+```
+```ini
+# import-linter: force public-API-only imports. Outside code imports app.billing,
+# never app.billing.internal.helper or any other private implementation file.
+[importlinter:contract:billing-public-api-only]
+name = Billing internals are private
+type = forbidden
+source_modules = app.*
+forbidden_modules =
+    app.billing.internal.*
+    app.billing._*
 ```
 ```toml
 # Ruff: ban the raw db client outside the repository layer (banned-api).
@@ -487,6 +520,7 @@ Agents reach for the raw library they learned from training data — `requests`,
 [tool.ruff.lint.flake8-tidy-imports.banned-api]
 "requests".msg = "Import app.lib.http instead. The wrapper enforces timeout and retry."
 "urllib.request".msg = "Import app.lib.http instead of urllib."
+"httpx".msg = "Import app.lib.http instead of raw httpx. The wrapper owns auth, timeout, and retry."
 ```
 ```toml
 [tool.ruff.lint.flake8-tidy-imports.banned-api]
@@ -550,6 +584,13 @@ extend-select = ["PLR0912"]   # too-many-branches: collapse with polymorphism or
 max-branches = 10
 ```
 ```toml
+# Ruff/pylint: a branch condition with too many boolean operators needs a name.
+[tool.ruff.lint]
+extend-select = ["PLR0916"]   # too-many-boolean-expressions
+[tool.ruff.lint.pylint]
+max-bool-expr = 4
+```
+```toml
 [tool.ruff.lint]
 extend-select = ["PLR0911"]   # too-many-return-statements: a sign of tangled control flow
 [tool.ruff.lint.pylint]
@@ -558,6 +599,43 @@ max-returns = 6
 ```toml
 [tool.ruff.lint]
 extend-select = ["PLR2004"]   # magic-value-comparison: name the constant
+```
+```python
+# Custom AST check: max nesting depth. More than three nested if/for/while/try
+# blocks is pyramid code; use early returns and extracted functions instead.
+import ast
+
+NESTING_NODES = (ast.If, ast.For, ast.AsyncFor, ast.While, ast.Try, ast.With, ast.AsyncWith)
+MAX_DEPTH = 3
+
+class NestingDepthVisitor(ast.NodeVisitor):
+    def __init__(self) -> None:
+        self.stack: list[ast.AST] = []
+
+    def generic_visit(self, node: ast.AST) -> None:
+        is_nested = isinstance(node, NESTING_NODES)
+        if is_nested:
+            self.stack.append(node)
+            if len(self.stack) > MAX_DEPTH:
+                raise SystemExit(
+                    f"{node.lineno}: Extract a function or return early; nesting depth exceeds {MAX_DEPTH}."
+                )
+        super().generic_visit(node)
+        if is_nested:
+            self.stack.pop()
+```
+```yaml
+# Semgrep: force complex boolean conditions to be named before branching.
+rules:
+  - id: name-complex-condition
+    pattern: |
+      if $A and $B or $C:
+          ...
+    message: >
+      Move this compound condition into a named boolean such as user_is_eligible.
+      A branch with mixed and/or logic hides the rule the code is enforcing.
+    severity: ERROR
+    languages: [python]
 ```
 
 ### 12. Ban Dangerous and Non-Auditable Constructs
@@ -583,6 +661,11 @@ extend-select = ["S602", "S605"]   # subprocess / os.system with shell=True
 ```toml
 [tool.ruff.lint]
 extend-select = ["S324"]           # weak hash (md5, sha1) used as if secure
+```
+```toml
+# Ruff: no print()/pprint() statements in application code. Use the structured logger.
+[tool.ruff.lint]
+extend-select = ["T20"]
 ```
 ```yaml
 # Semgrep: ban string-interpolated SQL, the root of injection.
@@ -652,6 +735,13 @@ extend-select = ["B011", "PT015"]
 diff-cover coverage.xml --compare-branch origin/main --fail-under 90
 ```
 ```bash
+# Coverage ratchet: record today's coverage as the floor. Future PRs may raise the
+# floor, but a drop fails the build even when the absolute number still looks high.
+test -f .coverage-floor || python -m coverage report --format=total > .coverage-floor
+test "$(python -m coverage report --format=total)" -ge "$(cat .coverage-floor)" \
+  || { echo "Coverage dropped below the recorded floor; add tests or raise coverage."; exit 1; }
+```
+```bash
 # mutmut: a mutation-testing floor — a suite that survives mutations is not testing.
 mutmut run && mutmut results
 ```
@@ -702,6 +792,12 @@ rules:
       None and create the list/dict inside the function body.
     severity: ERROR
     languages: [python]
+```
+```toml
+# Ruff/bugbear: catch the common mutable-default and call-in-default footguns before
+# writing a custom rule. The Semgrep rule above stays as a codebase-owned backstop.
+[tool.ruff.lint]
+extend-select = ["B006", "B008"]
 ```
 ```yaml
 # rules/no-broad-pydantic-any.yaml — codebase rule learned from a real drift.
@@ -1232,8 +1328,10 @@ CAP = 15
 for m in graph.modules:
     internal = {d for d in graph.find_modules_directly_imported_by(m) if d.startswith("app.")}
     if len(internal) > CAP:
-        print(f"{m} imports {len(internal)} internal modules (cap {CAP}). "
-              f"Split it or hide dependencies behind a facade.")
+        raise SystemExit(
+            f"{m} imports {len(internal)} internal modules (cap {CAP}). "
+            f"Split it or hide dependencies behind a facade."
+        )
 ```
 ```python
 # Freeze the edge set: any cross-subsystem import not in the recorded allow-list
@@ -1265,7 +1363,10 @@ import grimp
 graph = grimp.build_graph("app")
 for m in graph.modules:
     if len(graph.find_modules_that_directly_import(m)) > 40:
-        print(f"{m} is imported by 40+ modules — a change here is repo-wide. Split it.")
+        raise SystemExit(
+            f"{m} is imported by 40+ modules. Split this god module before a change "
+            f"here becomes repo-wide blast radius."
+        )
 ```
 ```bash
 # Ratchet a package's fan-out: the dependency count may only shrink.
@@ -1290,6 +1391,21 @@ max-module-lines = 500
 max-public-methods = 20
 max-attributes = 12
 max-parents = 4
+```
+```python
+# Custom AST check: cap total methods per class, not just public methods. A class
+# with thirty methods is a subsystem pretending to be one object.
+import ast, pathlib
+MAX_METHODS = 20
+for path in pathlib.Path("app").rglob("*.py"):
+    tree = ast.parse(path.read_text())
+    for node in [n for n in ast.walk(tree) if isinstance(n, ast.ClassDef)]:
+        methods = [n for n in node.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]
+        if len(methods) > MAX_METHODS:
+            raise SystemExit(
+                f"{path}:{node.lineno} {node.name} has {len(methods)} methods "
+                f"(cap {MAX_METHODS}). Split responsibilities into smaller classes."
+            )
 ```
 ```toml
 # Ruff: function-level size caps — a long function is a missing decomposition.
@@ -1321,6 +1437,13 @@ for pkg in pathlib.Path("app").iterdir():
 ```bash
 # Track total LOC as a budget signal (scc/tokei are fast on huge trees).
 scc --no-cocomo app/    # compare the Python line count against a recorded ceiling
+```
+```bash
+# PR volume budget: too many new files or lines in one change is itself review risk.
+added_files=$(git diff --name-only --diff-filter=A origin/main -- 'app/**/*.py' | wc -l)
+added_lines=$(git diff --numstat origin/main -- 'app/**/*.py' | awk '{s+=$1} END{print s+0}')
+test "$added_files" -le 12 -a "$added_lines" -le 800 \
+  || { echo "This PR adds too much surface area; split it before merge."; exit 1; }
 ```
 
 ### 27. Block Reinvention — Lint for Duplicates and Redirect to Existing Utilities
@@ -1451,21 +1574,21 @@ An aggressive linter is not a one-time configuration — it is a living artifact
 * Do not copy-paste lint config across packages in a monorepo. Each forked copy drifts and produces contradictory verdicts; publish one versioned base config every package extends, and shard rules by path on top of it.
 
 # Checklist
-* Before writing the first function in a new module, write the strict config: set `[tool.ruff]` and `[mypy]` to maximum strictness, with caps for complexity, statements, arguments, branches, and returns. The cap is how you keep the god-function from being expressible.
+* Before writing the first function in a new module, write the strict config: set `[tool.ruff]` and `[mypy]` to maximum strictness, with caps for complexity, statements, arguments, branches, returns, boolean expressions, nesting depth, class method count, and magic values. The cap is how you keep the god-function from being expressible.
 * When writing a `banned-api` or `no-restricted-import` rule, put the blessed alternative directly in the message. An agent that reads "import app.lib.http instead" acts immediately; one that reads "requests import forbidden" must guess.
 * When writing any Semgrep rule, phrase the message in the imperative: state what the agent must do and where the correct code belongs, not what it did wrong.
-* When adding a new architecture layer, update the `.importlinter` `layers` contract (and any custom architecture linter's `LAYER_ORDER`) before writing code in the new layer.
+* When adding a new architecture layer, update the `.importlinter` `layers` contract (and any custom architecture linter's `LAYER_ORDER`) before writing code in the new layer, then re-run cycle detection, public-API-only import checks, sibling independence contracts, and fan-in/fan-out caps.
 * When introducing a new blessed wrapper, add the `banned-api` ban for the raw library it wraps — excepting only the wrapper file itself — in the same change.
 * After writing any try/except block, verify the linter forbids bare `except:`, blind `except Exception`, swallowed exceptions, and re-raises that drop the cause chain (`BLE`, `E722`, `B904`, plus the swallowed-exception Semgrep rule).
 * After adding any `# type: ignore` or `# noqa`, verify the suppression names a specific code and carries a reason, and that `PGH003`, `PGH004`, `RUF100`, and `warn_unused_ignores` are all on.
-* Before declaring a module done, verify no stub survives: run the `NotImplementedError`, `...`-body, `pass`-only, and TODO/FIXME rules, plus `vulture` for dead code from abandoned attempts.
+* Before declaring a module done, verify no stub or stray edit survives: run the `NotImplementedError`, `...`-body, `pass`-only, TODO/FIXME/HACK, wildcard import, unused import, unused variable, dead-code, mutable-default, `print()`, and runtime-`assert` rules.
 * When the same agent mistake appears for the second time, write a custom rule in `rules/` before fixing the instance, scoped to the right paths, then commit it with a message describing the mistake it prevents.
 * After any structural refactor that moves files between packages, re-run the architecture contracts (`lint-imports`) and the custom architecture linter against the new layout before considering the refactor complete.
 * Whenever you tighten or add a rule, run the full linter across the whole repository once to surface pre-existing violations, and decide explicitly whether to fix them now or record a ratcheted baseline.
 * Verify the in-loop lint command, the pre-commit hook, and the CI step all run the identical config and `rules/` folder. Divergence between layers produces a green local run and a red CI run.
 * After excluding any path, verify `force-exclude` is on and the exclusion is as narrow as the legitimate need, and that unparseable files and ungoverned new packages still fail the build (fail-closed coverage).
 * Pin every tool, plugin, and rule pack to an exact version — `required-version` in Ruff, exact `rev`s in pre-commit, pinned linters in the lockfile — so the same code always produces the same verdict.
-* When adopting a strict rule on a non-clean repository, record a baseline and a check that the violation count only ever shrinks, so legacy debt is grandfathered while new debt is blocked.
+* When adopting a strict rule on a non-clean repository, record a baseline and a check that the violation count only ever shrinks, so legacy debt is grandfathered while new debt is blocked. Do the same for coverage: record the current coverage floor and fail any future PR that drops below it.
 * When writing async code, verify the `ASYNC` ruleset is on plus rules for blocking calls inside coroutines, missing request timeouts, and fire-and-forget tasks; and verify hardcoded-secret rules (`S105`–`S107` plus a secret scanner) are active.
 * In a large repository, verify the loop lints the diff while the merge gate runs the whole-graph contracts (cycles, fan-out caps, undeclared cross-subsystem edges, package encapsulation), and that one versioned base config is shared across packages.
 * Before declaring the linter done, add at least a few walls derived from this specific codebase — a forbidden internal coupling, a required pre-write hook, a naming or serialization invariant — that no generic principle in this file would have produced.
@@ -1498,6 +1621,8 @@ select = [
     "FIX",                # TODO/FIXME/HACK/XXX markers
     "TID",                # banned-api + relative-import control
     "T20",                # print / pprint left in code
+    "ARG",                # unused function arguments
+    "ERA",                # commented-out dead code
 ]
 
 [tool.ruff.lint.mccabe]
@@ -1506,6 +1631,7 @@ max-complexity = 8
 [tool.ruff.lint.pylint]
 max-args = 5
 max-branches = 10
+max-bool-expr = 4
 max-returns = 6
 max-statements = 40
 
@@ -1514,6 +1640,8 @@ ban-relative-imports = "parents"
 
 [tool.ruff.lint.flake8-tidy-imports.banned-api]
 "requests".msg     = "Import app.lib.http instead; the wrapper enforces timeout and retry."
+"urllib.request".msg = "Import app.lib.http instead of urllib."
+"httpx".msg        = "Import app.lib.http instead of raw httpx; the wrapper owns timeout and retry."
 "psycopg2".msg     = "Import app.lib.db instead; direct clients bypass the pool and logging."
 "boto3".msg        = "Import app.lib.aws instead; the wrapper injects credentials and retries."
 "os.getenv".msg    = "Read app.config.settings instead; raw getenv skips type validation."
