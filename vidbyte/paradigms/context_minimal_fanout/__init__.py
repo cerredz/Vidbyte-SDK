@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-from vidbyte.paradigms.base import ParadigmHarness
-from vidbyte.paradigms.client import ParadigmClient
-from vidbyte.paradigms.context_minimal_fanout import (
-    ContextMinimalFanoutClient,
+from vidbyte.paradigms.context_minimal_fanout.client import ContextMinimalFanoutClient
+from vidbyte.paradigms.context_minimal_fanout.multiple_prompts import (
     ContextMinimalFanoutResult,
     ImplementationOutput,
     MultiplePromptFanoutHarness,
@@ -18,8 +16,6 @@ __all__ = [
     "ImplementationOutput",
     "MultiplePromptFanoutHarness",
     "MultiplePromptFanoutSettings",
-    "ParadigmClient",
-    "ParadigmHarness",
     "PromptSplitPlan",
     "SplitPrompt",
 ]

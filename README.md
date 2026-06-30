@@ -111,11 +111,27 @@ Semantic labels such as roles belong in agent metadata when callers need them.
 
 ## Paradigm Harnesses
 
-`vidbyte.paradigms` reserves the SDK namespace for future thin runnable paradigm
-harnesses: high-level agentic engineering patterns that compose agents, tools,
-context, prompts, middleware, trace, pipelines, and evals into an opinionated
-execution loop. This release adds scaffolding only; no concrete paradigm
-harnesses ship yet.
+`vidbyte.paradigms` is the SDK namespace for thin runnable paradigm harnesses:
+high-level agentic engineering patterns that compose agents, tools, context,
+prompts, middleware, trace, pipelines, and evals into an opinionated execution
+loop.
+
+The first concrete paradigm is `context_minimal_fanout.multiple_prompts`, which
+splits one large implementation request into multiple non-overlapping prompts
+and runs each prompt in a fresh implementation-agent context.
+
+```python
+from vidbyte import VidbyteSDK
+
+sdk = VidbyteSDK()
+harness = sdk.paradigms.context_minimal_fanout.multiple_prompts(
+    implementation_tools=[patch_tool],
+    splitter_model_name="gpt-5",
+    implementation_model_name="gpt-5-codex",
+)
+result = await harness.arun("Implement the requested repository change.")
+print(result.plan_markdown)
+```
 
 ## Context Objects
 
@@ -888,6 +904,7 @@ vidbyte/
 |   `-- client.py
 |-- mcp_server/
 |-- paradigms/
+|   `-- context_minimal_fanout/
 |-- prompts/
 |   `-- prompts/
 |-- providers/

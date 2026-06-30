@@ -11,8 +11,8 @@ pipelines, and evals. They are not raw primitives. A paradigm harness owns a
 repeatable control flow such as "worker, critic, repair, repeat" or "decompose
 into fresh context windows, run isolated subtasks, merge, and audit."
 
-This package currently provides scaffolding only: `ParadigmHarness` and
-`ParadigmClient`. No concrete paradigm harnesses ship from this namespace yet.
+This package provides `ParadigmHarness`, `ParadigmClient`, and concrete
+paradigm harness families such as `context_minimal_fanout`.
 
 ## Design Philosophy
 
@@ -30,12 +30,13 @@ from vidbyte import VidbyteSDK
 
 sdk = VidbyteSDK()
 paradigms = sdk.paradigms
-print(type(paradigms).__name__)
+harness = paradigms.context_minimal_fanout.multiple_prompts()
+print(type(harness).__name__)
 ```
 
-Future concrete paradigm harnesses should expose an agent-like `run()` / `arun()`
-surface while accepting caller-provided tools, system prompts, models, limits,
-and policies.
+Concrete paradigm harnesses expose an agent-like `run()` / `arun()` surface
+while accepting caller-provided tools, system prompts, models, limits, and
+policies.
 
 ## Key Modules
 
@@ -43,6 +44,9 @@ and policies.
   harnesses.
 - `client.py`: `ParadigmClient`, currently a namespace marker for future
   paradigm factories.
+- `context_minimal_fanout/`: the first concrete paradigm family, used to split a
+  large request into multiple non-overlapping implementation prompts and run
+  them in fresh contexts.
 - `__init__.py`: public exports for the paradigm namespace.
 
 ## Related Layers

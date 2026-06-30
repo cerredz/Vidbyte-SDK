@@ -53,7 +53,17 @@ from vidbyte.agents import (
     ProposerSpec,
 )
 from vidbyte.client import VidbyteSDK
-from vidbyte.paradigms import ParadigmClient, ParadigmHarness
+from vidbyte.paradigms import (
+    ContextMinimalFanoutClient,
+    ContextMinimalFanoutResult,
+    ImplementationOutput,
+    MultiplePromptFanoutHarness,
+    MultiplePromptFanoutSettings,
+    ParadigmClient,
+    ParadigmHarness,
+    PromptSplitPlan,
+    SplitPrompt,
+)
 from vidbyte.evals import (
     AllOfGrader,
     AnyOfGrader,
@@ -232,8 +242,15 @@ __all__ = [
     "DebugTracer",
     "NullTracer",
     "OutputSchemaFormatter",
+    "ContextMinimalFanoutClient",
+    "ContextMinimalFanoutResult",
+    "ImplementationOutput",
+    "MultiplePromptFanoutHarness",
+    "MultiplePromptFanoutSettings",
     "ParadigmClient",
     "ParadigmHarness",
+    "PromptSplitPlan",
+    "SplitPrompt",
     "Trace",
     "TracerBase",
     "TracerConfigurationError",

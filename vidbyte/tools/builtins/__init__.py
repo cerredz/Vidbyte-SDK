@@ -18,6 +18,7 @@ Relations:
 
 from __future__ import annotations
 
+from vidbyte.tools.builtins.code_execution import CodeExecutionTool
 from vidbyte.tools.builtins.code_search import GlobTool, GrepTool, SemanticSearchTool
 from vidbyte.tools.builtins.reflexion import ReflexionTool
 from vidbyte.tools.builtins.trajectory_checkpoint import TrajectoryCheckpointTool
@@ -55,6 +56,7 @@ from vidbyte.tools.builtins.memory import (
 
 __all__ = [
     "AttachMcpServerTool",
+    "CodeExecutionTool",
     "CreateHandoffTool",
     "CompactionMode",
     "ContextCompactionTool",
