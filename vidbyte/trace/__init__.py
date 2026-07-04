@@ -8,6 +8,7 @@ Purpose:
 Architecture:
     - Trace: Tracer client namespace for built-in and provider-backed tracers.
     - DebugTracer: In-memory tracer from vidbyte.trace.debug.
+    - SessionTracer: Session wrapper that groups many agent runs under one root.
     - ContinualTracer: Continual trace capture preset from vidbyte.trace.continual.
     - ContinualTraceAgent / ContinualTraceMiddleware: Structured trace artifact agent.
     - TraceOption / TraceSchema / ActionTrace: Continual trace configuration.
@@ -22,6 +23,7 @@ from vidbyte.lib.dataclasses.trace import TraceField, TraceFieldType, TraceMode,
 from vidbyte.trace.base import Trace
 from vidbyte.trace.continual import ActionTrace, ContinualTraceAgent, ContinualTraceMiddleware, ContinualTracer
 from vidbyte.trace.debug import DebugTracer
+from vidbyte.trace.session import SessionTracer
 
 __all__ = [
     "ActionTrace",
@@ -29,6 +31,7 @@ __all__ = [
     "ContinualTraceMiddleware",
     "ContinualTracer",
     "DebugTracer",
+    "SessionTracer",
     "Trace",
     "TraceField",
     "TraceFieldType",

@@ -274,6 +274,7 @@ agent = Agent(
 
 - `Trace.off()` disables tracing.
 - `Trace.debug()` keeps an in-memory event list for local inspection.
+- `Trace.session(...)` and `Trace.langsmith_session(...)` group several agent runs under one parent trace.
 - Provider helpers wrap existing tracing adapters such as Langfuse.
 - `Trace.langsmith_default(...)` is the recommended single-agent LangSmith preset. It emits `agent.run`, `llm.call`, and `tool.call` runs with LangSmith-native run types and scan-friendly prompt, tool schema, tool input, and output fields.
 - `Trace.continual(...)` records lifecycle events and stores settings for trace-to-context style workflows, but does not automatically inject hidden trace memory into the agent context.
@@ -291,6 +292,21 @@ agent = Agent(
     trace=Trace.debug(events),
 )
 ```
+
+Use a session tracer when several agents should share one trace tree:
+
+```python
+trace = Trace.langsmith_session(project="research", default_name="research-run")
+
+async with trace.session(run_id=run_id):
+    planner = Agent(name="planner", system_prompt="Plan.", runner=planner_runner, trace=trace)
+    writer = Agent(name="writer", system_prompt="Write.", runner=writer_runner, trace=trace)
+    await planner.arun("Plan the answer")
+    await writer.arun("Write the answer")
+```
+
+Use `Trace.langsmith_default(...)` for the recommended single-agent LangSmith
+trace shape:
 
 ```python
 agent = Agent(

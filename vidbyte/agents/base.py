@@ -245,6 +245,7 @@ class BaseAgent(McpAttachableMixin):
             middleware=self.middleware,
             temperature=self.runner_config.temperature,
             metadata=dict(self.metadata),
+            tracer=self._tracer,
         )
 
     @staticmethod

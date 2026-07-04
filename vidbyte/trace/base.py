@@ -14,13 +14,14 @@ Relations:
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 from vidbyte.lib.errors import ConfigurationError
 from vidbyte.lib.tracing import NullTracer, TracerBase
 from vidbyte.trace.continual import ContinualTracer
 from vidbyte.trace.debug import DebugTracer
+from vidbyte.trace.session import SessionTracer
 
 
 class Trace:
@@ -35,6 +36,11 @@ class Trace:
     def debug(events: list[dict[str, Any]] | None = None) -> DebugTracer:
         # Returns an in-memory tracer that records trace and span lifecycle events.
         return DebugTracer(events=events)
+
+    @staticmethod
+    def session(inner: type[TracerBase] | TracerBase, *, default_name: str = "session.run", default_attributes: Mapping[str, Any] | None = None) -> SessionTracer:
+        # Wraps a tracer so multiple agent root traces can share one session root.
+        return SessionTracer(inner, default_name=default_name, default_attributes=default_attributes)
 
     @staticmethod
     def custom(tracer: type[TracerBase] | TracerBase) -> TracerBase:
@@ -65,6 +71,11 @@ class Trace:
         return LangSmithTracer(api_key=api_key, project=project, endpoint=endpoint, strict=strict, include_runtime_info=include_runtime_info)
 
     @staticmethod
+    def langsmith_session(api_key: str | None = None, project: str | None = None, endpoint: str | None = None, strict: bool = False, include_runtime_info: bool = False, *, default_name: str = "session.run", default_attributes: Mapping[str, Any] | None = None) -> SessionTracer:
+        # Builds a LangSmith tracer wrapped in a session-aware trace root.
+        return SessionTracer(Trace.langsmith(api_key=api_key, project=project, endpoint=endpoint, strict=strict, include_runtime_info=include_runtime_info), default_name=default_name, default_attributes=default_attributes)
+
+    @staticmethod
     def phoenix(endpoint: str | None = None) -> TracerBase:
         # Builds the existing Phoenix provider tracer with the forwarded endpoint.
         from vidbyte.providers.tracing import PhoenixTracer
@@ -85,4 +96,4 @@ class _TraceFactory:
         return resolved
 
 
-__all__ = ["ContinualTracer", "DebugTracer", "Trace"]
+__all__ = ["ContinualTracer", "DebugTracer", "SessionTracer", "Trace"]
