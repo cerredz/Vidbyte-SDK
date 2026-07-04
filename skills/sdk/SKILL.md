@@ -242,10 +242,12 @@ vidbyte/
 - Keep source dataclasses in `vidbyte/lib/dataclasses/sources.py`, source enums in `vidbyte/lib/enums/sources.py`, and source constants in `vidbyte/lib/config/sources.py`.
 - Keep source fetchers under `vidbyte/sources/fetches/`, caches under `vidbyte/sources/cache/`, regex helpers under `vidbyte/sources/regex/`, and concrete source-to-context loaders under `vidbyte/sources/loaders/`.
 - Keep the public `Trace` tracer client and helper factories in `vidbyte/trace/base.py`.
+- Prefer `Trace.langsmith_default(...)` for user-facing single-agent LangSmith examples; keep it as a facade helper over the existing LangSmith provider adapter.
 - Keep concrete debug tracing implementation in `vidbyte/trace/debug.py`.
 - Keep continual tracing presets and future continual trace memory work under `vidbyte/trace/continual/`.
 - Keep provider-neutral tracer protocols under `vidbyte/lib/tracing/`.
 - Keep external tracing provider adapters under `vidbyte/providers/tracing/`.
+- Keep provider-neutral trace payload enrichment such as `llm.call` and `tool.call` input fields in `vidbyte/agents/runtime.py`.
 - Keep enum presets under `vidbyte/lib/enums/`.
 - Keep internal library helpers under `vidbyte/lib/`.
 - Keep SDK dataclass definitions under `vidbyte/lib/dataclasses/`; package-local type modules should re-export those contracts when stable imports are needed.

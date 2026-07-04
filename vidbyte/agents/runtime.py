@@ -960,10 +960,16 @@ class AgentRuntime:
         trace_context: SpanContext | None = None,
     ) -> tuple[ToolCallContext, ToolResult]:
         """Resolve, authorize, validate, execute, and record one tool call."""
+        tool_input = _safe_trace_value(dict(call.arguments))
         tool_span = self._tracer.start_span(
             "tool.call",
             parent=trace_context,
             tool_name=call.tool_name,
+            tool_input=tool_input,
+            arguments=tool_input,
+            call_id=call.call_id,
+            provider=provider,
+            metadata=_safe_trace_mapping(call.metadata),
         )
         try:
             tool = self._get_tool(call)
@@ -1112,39 +1118,43 @@ class AgentRuntime:
         """Pop and normalize the initial messages list from run options."""
         return [dict(item) for item in run_options.pop("messages", ())]
 
-    def _llm_trace_inputs(
-        self,
-        handle: RunnerHandle,
-        *,
-        message: str,
-        call_options: Mapping[str, Any],
-        provider: str,
-        iteration_count: int,
-        model_call_count: int,
-        metadata: Mapping[str, Any],
-    ) -> dict[str, Any]:
+    def _llm_trace_inputs(self, handle: RunnerHandle, message: str, call_options: Mapping[str, Any], provider: str, iteration_count: int, model_call_count: int, metadata: Mapping[str, Any]) -> dict[str, Any]:
         # Build useful, bounded tracing inputs for the model-call child span.
         system = call_options.get("system")
         messages = list(call_options.get("messages") or [])
         tools = call_options.get("tools")
+        safe_prompt = _trace_text(message)
         # Build a full chat-style messages list so LangSmith renders system prompt and user
         # prompt alongside the conversation context in the LLM call view.
         trace_messages: list[dict[str, Any]] = []
         if system is not None:
             trace_messages.append({"role": "system", "content": _trace_text(system)})
         trace_messages.extend(_safe_trace_value(messages))
-        trace_messages.append({"role": "user", "content": _trace_text(message)})
+        trace_messages.append({"role": "user", "content": safe_prompt})
+        safe_messages = tuple(trace_messages)
         inputs: dict[str, Any] = {
             "agent_name": self.agent_name,
             "provider": provider,
             "model": self._runner_model_name(handle.runner),
             "iteration": iteration_count,
             "model_call": model_call_count,
-            "messages": trace_messages,
+            "prompt": safe_prompt,
+            "user_prompt": safe_prompt,
+            "messages": safe_messages,
+            "input_messages": safe_messages,
             "metadata": _safe_trace_mapping(metadata),
         }
+        if system is not None:
+            safe_system = _trace_text(system)
+            inputs["system"] = safe_system
+            inputs["system_prompt"] = safe_system
         if tools:
-            inputs["tools"] = _safe_trace_value(list(tools))
+            tool_list = list(tools)
+            inputs["tools"] = _safe_trace_value(tool_list)
+            inputs["tool_names"] = tuple(str(tool.get("name", "")) for tool in tool_list if isinstance(tool, Mapping) and tool.get("name"))
+            inputs["tool_count"] = len(tool_list)
+        if messages:
+            inputs["history_messages"] = _safe_trace_value(messages)
         inputs["context_window_summary"] = (
             f"system={len(system) if system else 0}chars, "
             f"messages={len(messages)}, "

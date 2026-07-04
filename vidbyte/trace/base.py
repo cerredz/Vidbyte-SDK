@@ -59,6 +59,12 @@ class Trace:
         return LangSmithTracer(api_key=api_key, project=project, endpoint=endpoint, strict=strict, include_runtime_info=include_runtime_info)
 
     @staticmethod
+    def langsmith_default(api_key: str | None = None, project: str | None = None, endpoint: str | None = None, strict: bool = False, include_runtime_info: bool = False) -> TracerBase:
+        # Builds the recommended single-agent LangSmith tracer preset.
+        from vidbyte.providers.tracing import LangSmithTracer
+        return LangSmithTracer(api_key=api_key, project=project, endpoint=endpoint, strict=strict, include_runtime_info=include_runtime_info)
+
+    @staticmethod
     def phoenix(endpoint: str | None = None) -> TracerBase:
         # Builds the existing Phoenix provider tracer with the forwarded endpoint.
         from vidbyte.providers.tracing import PhoenixTracer
