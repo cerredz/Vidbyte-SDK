@@ -54,7 +54,7 @@ prompt text.
 | Prompt | Key | Sub-prompts | Link |
 | --- | --- | --- | --- |
 | Actor Runtime | `actor_runtime` | planner, coder, reviewer, generator, critic, reasoner, summarization, decomposer, explorer, tradeoff, hypothesis_generator, refiner, formatter, safety, final_answer | [actor_runtime/](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/actor_runtime) |
-| Agentic Engineering | `agentic_engineering` | system_prompt, error_messages, file_headers, folder_readme, function_design | [agentic_engineering/](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/agentic_engineering) |
+| Agentic Engineering | `agentic_engineering` | system_prompt, error_messages, file_headers, folder_readme, function_design, intent_based_commenting, feature_test_packs | [agentic_engineering/](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/agentic_engineering) |
 | Agentic Loop | `agentic_loop` | context_prompt | [agentic_loop.json](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/agentic_loop.json) |
 | Context Engineering | `context_engineering` | guideline_prompt | [context_engineering.json](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/context_engineering.json) |
 | Continual Trace | `continual_trace` | system_prompt | [continual_trace/system_prompt.md](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/continual_trace/system_prompt.md) |
@@ -94,15 +94,19 @@ Link: <https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/
 
 Prompt assets for agentic engineering — the discipline of writing source code that
 treats AI agents as a primary audience alongside human developers. The main system
-prompt establishes the two-audience design constraint and introduces four core
-practices: designing server-side error messages as rich context-window primitives
-that carry file location, state snapshots, violated invariants, blast-radius
-references, and remediation hints; writing structured file header comments that
-function as navigational landmarks; maintaining folder-level READMEs as persistent
-comprehension caches; and shaping functions into small clean interfaces that agents
-can understand, test, and reuse without loading hidden state.
-Together these prompts teach a model to produce code where the source itself is a
-high-signal interface for any downstream coding agent.
+prompt establishes the two-audience design constraint and introduces six core
+practices: designing server-side error messages as rich context-window primitives,
+writing structured file header comments as navigational landmarks, maintaining
+folder-level READMEs as persistent comprehension caches, shaping functions into
+small clean interfaces, adding intent comments beside important business/domain
+logic, and organizing tests as feature-level executable intent.
+`feature_test_packs` teaches models to define the smallest durable behavior
+boundary, make testing first-class instead of an afterthought, write a feature
+`FEATURE.md`, consider many testing strategies by default, and generate tests
+that actively try to break feature contracts instead of merely confirming
+implementation details. Together these prompts teach a model to produce code
+where the source and its tests form a high-signal interface for any downstream
+coding agent.
 
 Link: <https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/agentic_engineering>
 
