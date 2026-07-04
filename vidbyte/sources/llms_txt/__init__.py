@@ -3,24 +3,32 @@
 Description:
     Public surface for the llms.txt artifact source.
 Purpose:
-    Exports the loader, its parser, and its typed IR so callers can import from
-    vidbyte.sources.llms_txt directly.
+    Exports the llms.txt parser, typed IR, and loader while keeping the concrete loader under
+    vidbyte.sources.loaders.
 Architecture:
-    - Re-exports LlmsTxtSource, parse_llms_txt, and the LlmsTxt* IR types.
+    - Re-exports LlmsTxtParser, parse_llms_txt, LlmsTxtSource, and the LlmsTxt* IR types.
 Relations:
     Aggregated into vidbyte.sources.__init__.
 """
 
 from __future__ import annotations
 
-from vidbyte.sources.llms_txt.loader import LlmsTxtSource
-from vidbyte.sources.llms_txt.parser import parse_llms_txt
-from vidbyte.sources.llms_txt.types import LlmsTxtDocument, LlmsTxtLink, LlmsTxtSection
-
+from vidbyte.lib.dataclasses.sources import LlmsTxtDocument, LlmsTxtLink, LlmsTxtSection
+from vidbyte.sources.llms_txt.parser import LlmsTxtParser, parse_llms_txt
 __all__ = [
     "LlmsTxtDocument",
     "LlmsTxtLink",
+    "LlmsTxtParser",
     "LlmsTxtSection",
     "LlmsTxtSource",
     "parse_llms_txt",
 ]
+
+
+def __getattr__(name: str) -> object:
+    # Lazily resolves the loader to avoid parser/loader import cycles.
+    if name == "LlmsTxtSource":
+        from vidbyte.sources.loaders.llms_txt import LlmsTxtSource
+
+        return LlmsTxtSource
+    raise AttributeError(name)

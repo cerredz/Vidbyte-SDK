@@ -1,145 +1,41 @@
 """Context Protocol Header
 
 Description:
-    Defines the abstract Source[T] substrate and the immutable value types that flow
-    through it.
+    Defines the abstract Source[T] lifecycle substrate.
 Purpose:
-    Owns the deterministic loader lifecycle (fetch -> pin -> parse -> filter/emit -> cache)
-    and the shared trust handling (URL allowlist, size guard, untrusted-content labeling),
-    delegating only the IR-specific parse and emit steps to concrete loaders.
+    Owns the deterministic loader lifecycle (fetch -> pin -> parse -> emit -> cache) and
+    shared trust handling while dataclasses, enums, constants, fetchers, and caches live in
+    their dedicated packages.
 Architecture:
-    - PinPolicy/ArtifactRef/Selection/SourceSnapshot/SourceResult: Immutable request/result types.
-    - Source[T]: Template-method ABC running the lifecycle; subclasses implement _parse/_emit.
-    - wrap_untrusted_content/untrusted_metadata: Shared labeling for attacker-controlled bytes.
+    - Source[T]: Template-method ABC running the shared source lifecycle.
+    - Protected trust helpers: _wrap_untrusted_content and _untrusted_metadata.
 Relations:
-    Uses vidbyte.sources._fetch seams; emits vidbyte.context.primitives.DocumentContextItem.
+    Uses vidbyte.lib source contracts, vidbyte.sources.fetches, vidbyte.sources.cache, and
+    emits vidbyte.context.primitives.DocumentContextItem.
 """
 
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
-from enum import Enum
-from fnmatch import fnmatch
 from typing import Any, Generic, TypeVar
 
 from vidbyte.context.primitives.documents import DocumentContextItem
+from vidbyte.lib.config.sources import (
+    DEFAULT_SOURCE_MAX_BYTES,
+    TEXTUAL_SOURCE_CONTENT_TYPES,
+    UNTRUSTED_CONTENT_BEGIN,
+    UNTRUSTED_CONTENT_END,
+)
+from vidbyte.lib.dataclasses.sources import ArtifactRef, Selection, SourceResult, SourceSnapshot
+from vidbyte.lib.enums import PinPolicy
 from vidbyte.lib.errors import SourcePinMismatchError, SourceSecurityError
-from vidbyte.sources._fetch import Fetcher, HttpFetcher, SnapshotCache, UrlAllowlist, sha256_hex
+from vidbyte.sources.cache import SnapshotCache
+from vidbyte.sources.fetches import Fetcher, HttpFetcher, sha256_hex
+from vidbyte.sources.security import UrlAllowlist
 
 T = TypeVar("T")
 
-DEFAULT_MAX_BYTES = 5 * 1024 * 1024  # 5 MiB
-
-UNTRUSTED_CONTENT_BEGIN = "----- BEGIN UNTRUSTED EXTERNAL CONTENT"
-UNTRUSTED_CONTENT_END = "----- END UNTRUSTED EXTERNAL CONTENT -----"
-
-
-def wrap_untrusted_content(body: str, origin: str) -> str:
-    # Wraps fetched external text in a visible boundary so a model never treats it as instructions.
-    return f"{UNTRUSTED_CONTENT_BEGIN} (source: {origin}) -----\n{body}\n{UNTRUSTED_CONTENT_END}"
-
-
-def _is_textual(content_type: str) -> bool:
-    # True for content types that plausibly carry text/markdown bodies.
-    base = content_type.split(";")[0].strip().lower()
-    return base.startswith("text/") or "markdown" in base or base in {"application/json", "application/xml"}
-
-
-def untrusted_metadata(
-    *,
-    origin: str,
-    content_hash: str,
-    source_kind: str,
-    content_type: str | None = None,
-    extra: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    # Builds the provenance/trust metadata stamped on every emitted primitive.
-    metadata: dict[str, Any] = {
-        "trust": "untrusted-external",
-        "origin": origin,
-        "content_sha256": content_hash,
-        "source_kind": source_kind,
-    }
-    if content_type is not None:
-        metadata["content_type"] = content_type
-        if not _is_textual(content_type):
-            metadata["content_type_warning"] = True
-    if extra:
-        metadata.update(extra)
-    return metadata
-
-
-class PinPolicy(str, Enum):
-    """Determines whether a load reuses a pinned snapshot or always re-fetches."""
-
-    PINNED = "pinned"
-    LIVE = "live"
-
-
-@dataclass(frozen=True, slots=True)
-class ArtifactRef:
-    """Immutable description of a remote artifact to load."""
-
-    url: str
-    expected_hash: str | None = None
-    pin: PinPolicy = PinPolicy.PINNED
-    content_type_hint: str | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class Selection:
-    """Allow/deny globs plus the progressive-disclosure expand flag."""
-
-    allow: tuple[str, ...] = ("*",)
-    deny: tuple[str, ...] = ()
-    expand: bool = False
-
-    def selects(self, *names: str) -> bool:
-        # True when any name matches an allow glob and no name matches a deny glob (case-insensitive).
-        allowed = any(self._any(self.allow, name) for name in names)
-        denied = any(self._any(self.deny, name) for name in names)
-        return allowed and not denied
-
-    def matches(self, name: str) -> bool:
-        # Convenience single-name form of selects().
-        return self.selects(name)
-
-    @property
-    def is_trivial(self) -> bool:
-        # True when allow is the default "*" with no deny entries (no narrowing requested).
-        return self.allow == ("*",) and not self.deny
-
-    @staticmethod
-    def _any(patterns: tuple[str, ...], name: str) -> bool:
-        # True when name matches any glob in patterns (case-insensitive).
-        lowered = name.lower()
-        return any(fnmatch(lowered, pattern.lower()) for pattern in patterns)
-
-
-@dataclass(frozen=True, slots=True)
-class SourceSnapshot:
-    """Immutable record of fetched bytes and their content hash."""
-
-    url: str
-    raw_bytes: bytes
-    content_hash: str
-    content_type: str | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class SourceResult(Generic[T]):
-    """The full deterministic output of one load: snapshot, IR, and emitted primitives."""
-
-    ref: ArtifactRef
-    snapshot: SourceSnapshot
-    ir: T
-    items: tuple[DocumentContextItem, ...]
-
-    @property
-    def content_hash(self) -> str:
-        # Convenience accessor for the pinned content hash of the loaded artifact.
-        return self.snapshot.content_hash
+DEFAULT_MAX_BYTES = DEFAULT_SOURCE_MAX_BYTES
 
 
 class Source(ABC, Generic[T]):
@@ -204,9 +100,42 @@ class Source(ABC, Generic[T]):
         return snapshot
 
     def _store(self, snapshot: SourceSnapshot) -> None:
-        # Persists the snapshot under its content hash when a cache is configured (else a no-op).
+        # Persists the snapshot under its content hash when a cache is configured.
         if self._cache is not None:
             self._cache.put(snapshot.content_hash, snapshot.raw_bytes)
+
+    def _wrap_untrusted_content(self, body: str, origin: str) -> str:
+        # Wraps fetched external text in a visible boundary so a model never treats it as instructions.
+        return f"{UNTRUSTED_CONTENT_BEGIN} (source: {origin}) -----\n{body}\n{UNTRUSTED_CONTENT_END}"
+
+    def _untrusted_metadata(
+        self,
+        *,
+        origin: str,
+        content_hash: str,
+        source_kind: str,
+        content_type: str | None = None,
+        extra: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        # Builds the provenance/trust metadata stamped on every emitted primitive.
+        metadata: dict[str, Any] = {
+            "trust": "untrusted-external",
+            "origin": origin,
+            "content_sha256": content_hash,
+            "source_kind": source_kind,
+        }
+        if content_type is not None:
+            metadata["content_type"] = content_type
+            if not self._is_textual(content_type):
+                metadata["content_type_warning"] = True
+        if extra:
+            metadata.update(extra)
+        return metadata
+
+    def _is_textual(self, content_type: str) -> bool:
+        # True for content types that plausibly carry text or markdown bodies.
+        base = content_type.split(";")[0].strip().lower()
+        return base.startswith("text/") or "markdown" in base or base in TEXTUAL_SOURCE_CONTENT_TYPES
 
     @abstractmethod
     def _parse(self, snapshot: SourceSnapshot) -> T:
@@ -217,3 +146,14 @@ class Source(ABC, Generic[T]):
     def _emit(self, ir: T, snapshot: SourceSnapshot, ref: ArtifactRef, selection: Selection) -> tuple[DocumentContextItem, ...]:
         # Turns the IR + selection into a deterministically ordered tuple of primitives.
         ...
+
+
+__all__ = [
+    "ArtifactRef",
+    "DEFAULT_MAX_BYTES",
+    "PinPolicy",
+    "Selection",
+    "Source",
+    "SourceResult",
+    "SourceSnapshot",
+]

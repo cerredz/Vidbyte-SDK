@@ -20,10 +20,13 @@ from pathlib import Path
 from vidbyte.lib.errors import SourcePinMismatchError, SourceSecurityError
 from vidbyte.sources import (
     ArtifactRef,
+    ChainedFetcher,
     DocumentSource,
+    FileFetcher,
     FileSnapshotCache,
     InMemoryFetcher,
     InMemorySnapshotCache,
+    NullSnapshotCache,
     PinPolicy,
     Selection,
     UrlAllowlist,
@@ -155,6 +158,27 @@ class SourcesBaseTests(unittest.TestCase):
                 [item.document_id for item in result_a.items],
                 [item.document_id for item in result_b.items],
             )
+
+    def test_nullsnapshotcache_always_misses(self) -> None:
+        # [Edge Case] NullSnapshotCache is an explicit no-cache implementation.
+        cache = NullSnapshotCache()
+        cache.put(sha256_hex(_DATA), _DATA)
+        self.assertIsNone(cache.get(sha256_hex(_DATA)))
+
+    def test_chainedfetcher_uses_first_success(self) -> None:
+        # [Edge Case] ChainedFetcher can fall back from a miss to a later fetcher.
+        fetcher = ChainedFetcher([InMemoryFetcher({}), InMemoryFetcher({"https://ex.com/x.md": _DATA})])
+        result = DocumentSource(fetcher=fetcher).load(ArtifactRef(url="https://ex.com/x.md"))
+        self.assertEqual(result.items[0].title, "Title")
+
+    def test_filefetcher_reads_explicitly_allowed_file_url(self) -> None:
+        # [Edge Case] FileFetcher supports local vendored fixtures when file:// is explicitly allowed.
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "doc.md"
+            path.write_bytes(_DATA)
+            source = DocumentSource(fetcher=FileFetcher(), allowlist=UrlAllowlist(allowed_schemes=("file",)))
+            result = source.load(ArtifactRef(url=path.as_uri()))
+            self.assertEqual(result.items[0].title, "Title")
 
 
 if __name__ == "__main__":

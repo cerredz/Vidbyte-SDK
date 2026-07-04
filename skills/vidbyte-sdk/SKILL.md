@@ -39,6 +39,13 @@ vidbyte/
 |   `-- prompts/
 |-- providers/
 |   `-- client.py
+|-- sources/
+|   |-- base.py
+|   |-- cache/
+|   |-- fetches/
+|   |-- loaders/
+|   |-- llms_txt/
+|   `-- regex/
 |-- trace/
 |   |-- base.py
 |   |-- debug.py
@@ -79,6 +86,7 @@ vidbyte/
 - Follow `skills/vidbyte-sdk/adding-context-window-algorithms.md` when adding or changing attached context-window algorithms.
 - Keep prompt templates in `vidbyte/prompts/prompts/` and expose them through `vidbyte.prompts.Prompts` plus `vidbyte.lib.enums.prompts.Prompt`; follow the JSON-descriptor-plus-Markdown format in `skills/vidbyte-sdk/adding-prompts.md` for new large prompt assets.
 - Follow `skills/vidbyte-sdk/adding-prompts.md` whenever adding or changing prompt assets.
+- Keep artifact source loaders under `vidbyte/sources/` and follow `skills/sources/SKILL.md`; source dataclasses belong in `vidbyte/lib/dataclasses/sources.py`, enums in `vidbyte/lib/enums/sources.py`, and constants in `vidbyte/lib/config/sources.py`.
 - Keep the public `Trace` tracer client and helper factories in `vidbyte/trace/base.py`.
 - Keep concrete debug tracing implementation in `vidbyte/trace/debug.py`.
 - Keep continual tracing presets and future continual trace memory work under `vidbyte/trace/continual/`.

@@ -64,6 +64,17 @@ from vidbyte.lib.dataclasses.middleware import (
 from vidbyte.lib.dataclasses.multi_agent import CandidateFailure, CandidateResult, DagNode, EvaluationDecision, NodeState, Verification
 from vidbyte.lib.dataclasses.sandbox import SandboxRequest, SandboxResult, SandboxTransport
 from vidbyte.lib.dataclasses.security import PermissionDecision, PermissionPolicy
+from vidbyte.lib.dataclasses.sources import (
+    ArtifactRef,
+    FetchResponse,
+    LlmsTxtDocument,
+    LlmsTxtLink,
+    LlmsTxtSection,
+    MarkdownDocument,
+    Selection,
+    SourceResult,
+    SourceSnapshot,
+)
 from vidbyte.lib.dataclasses.runner import RunnerHandle
 from vidbyte.lib.dataclasses.strategies import AgentResult
 from vidbyte.lib.dataclasses.trace import (
@@ -94,6 +105,7 @@ __all__ = [
     "AgentRuntimeStats",
     "AgentSpec",
     "AgentStopReason",
+    "ArtifactRef",
     "ArtifactContextItem",
     "BaseAgentContext",
     "BaseContext",
@@ -113,10 +125,15 @@ __all__ = [
     "EvaluationDecision",
     "FileContextItem",
     "FileStat",
+    "FetchResponse",
     "FileSystemToolConfig",
     "GitDiffContextItem",
     "MemoryContextItem",
     "McpToolDefinition",
+    "LlmsTxtDocument",
+    "LlmsTxtLink",
+    "LlmsTxtSection",
+    "MarkdownDocument",
     "MiddlewareAction",
     "MiddlewareContext",
     "MiddlewareDecision",
@@ -133,6 +150,9 @@ __all__ = [
     "SandboxRequest",
     "SandboxResult",
     "SandboxTransport",
+    "Selection",
+    "SourceResult",
+    "SourceSnapshot",
     "TaskContextItem",
     "TextContextItem",
     "ToolCall",
