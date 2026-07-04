@@ -1,7 +1,8 @@
 """Context Protocol Header
 
 Description:
-    Exports the root Vidbyte SDK client and top-level public tool, agent, context, and pipeline contracts.
+    Exports the root Vidbyte SDK client and top-level public tool, agent, context,
+    paradigm, and pipeline contracts.
 Purpose:
     Keeps common SDK imports concise while leaving specialized built-in tools in
     their category packages.
@@ -52,6 +53,7 @@ from vidbyte.agents import (
     ProposerSpec,
 )
 from vidbyte.client import VidbyteSDK
+from vidbyte.paradigms import ParadigmClient, ParadigmHarness
 from vidbyte.evals import (
     AllOfGrader,
     AnyOfGrader,
@@ -232,6 +234,8 @@ __all__ = [
     "SessionTracer",
     "NullTracer",
     "OutputSchemaFormatter",
+    "ParadigmClient",
+    "ParadigmHarness",
     "Trace",
     "TracerBase",
     "TracerConfigurationError",
