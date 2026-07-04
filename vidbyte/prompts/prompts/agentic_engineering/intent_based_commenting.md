@@ -415,3 +415,6 @@ function redactCustomerExport(record: CustomerRecord): ExportRecord {
   };
 }
 ```
+
+# Conclusion
+Intent comments are useful only when they preserve meaning that code structure alone cannot carry. Do not treat `@intent` as a badge for important-looking functions or as a rigid docblock schema. The comment earns its place when it tells a future agent why the behavior exists, what business or domain rule must survive, and what plausible rewrite would be dangerous even if the code still looked clean. Keep the explanation beside the operation it governs so the rule is read before the edit happens, not after a regression has already been introduced. If the intent is already obvious from the name, type, and tests, skip the comment rather than dilute the signal. If the code carries money movement, permission, compliance, idempotency, state transition, or customer consequence, make the intent explicit enough that a future refactor can change the mechanism without losing the rule. Use the examples as calibration for depth, not as text to imitate. The goal is code whose load-bearing product meaning remains visible at the exact point where an agent is most likely to change it.

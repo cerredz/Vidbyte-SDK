@@ -177,3 +177,6 @@ class SubscriptionManager:
             status=SubscriptionStatus.ACTIVE,
         )
 ```
+
+# Conclusion
+Function design for agents is not a contest to create the smallest possible functions. It is a discipline for making each callable carry one coherent behavior that can be named, read, tested, changed, and reused without hidden context. The line-count guidance, argument limit, naming test, and orchestrator-leaf split are signals that help the model notice when a function has lost that coherence. Do not split code into fragments that make the call graph harder to understand just to satisfy a number. Do not keep a large tangled function intact just because each individual line is simple. The higher-order standard is whether an agent can understand the function's contract from its name and signature, then verify the body in one pass. When the examples do not fit the language or framework exactly, preserve the semantic pattern: honest names, single responsibility, explicit inputs, and side effects pushed to the boundary. Leave this file optimizing for clear units of change, not for mechanical decomposition.

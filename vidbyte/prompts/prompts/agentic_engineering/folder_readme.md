@@ -99,3 +99,6 @@ This folder is imported by `vidbyte.tools.builtins`, `vidbyte.tools.client`, and
 * 2026-06-27 - Kept mutation tools out of code_search - prevents agents from confusing read-only discovery with patch application.
 * 2026-06-27 - Made grep.py the canonical example - avoids future tools copying older result formatting patterns.
 ```
+
+# Conclusion
+A folder README exists to make a directory legible before an agent spends context opening the files inside it. The example shape is useful, but the point is not to reproduce the sample folder or force every directory into identical prose. The point is to capture the folder's stable job, the boundaries that keep code from being misplaced, the file-level routing map, and the negative knowledge that would otherwise disappear between sessions. If a README becomes an exhaustive duplicate of source code, it has stopped being a cache and started becoming stale documentation. If it says only what an agent could infer from filenames, it has not earned its place. Write the authored parts to answer decisions that source code cannot answer, and generate the mechanical parts so they stay fresh. The Logs section should preserve lessons only until they can be graduated into stronger guards. Use this principle to make folders navigable as architectural neighborhoods, not just as filesystem containers.
