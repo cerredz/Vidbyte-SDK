@@ -19,6 +19,19 @@ not a vague best practice. A paradigm is a named execution strategy with its own
 control flow, user-facing configuration, trace shape, stopping criteria, and
 measurement story. The SDK should make these strategies easy to run while keeping
 their building blocks reusable outside the paradigm itself.
+
+This repo already uses the word "paradigm" in two narrower senses, and this skill
+covers a third. `skills/sdk/SKILL.md` uses "Paradigm" for the SDK's fundamental
+Define-Agent/Send-Prompt/Receive-Reply interaction loop, and its Framework
+Boundaries table calls `AgentRuntimeType` (linear, mcts_search, actor model) the
+"execution paradigm the agent loop runs under" (see
+`skills/agent-runtimes/SKILL.md`). A **paradigm harness**, the subject of this
+skill, is a higher-order composition on top of both: a full agentic-engineering
+strategy (worker/critic loops, context fanout, decomposition) that is typically
+built by wiring several agents, runtimes, and context-window algorithms together,
+not a single agent's execution loop. When in doubt, "paradigm" in `skills/sdk`
+and `skills/agent-runtimes` means how one agent's loop runs; "paradigm harness"
+here means how a whole multi-step strategy is orchestrated and run.
 </identity>
 
 <intent>
@@ -81,6 +94,25 @@ Paradigms compose these SDK layers.
   artifacts, or the full harness lifecycle.
 - `vidbyte.harnesses` - Owns external harness integration adapters. Do not put
   Vidbyte-owned paradigm implementations here; use `vidbyte.paradigms` instead.
+
+Paradigm harnesses are not a clean-slate idea in this repo. Skill-only paradigms
+already exist and predate `vidbyte.paradigms`:
+
+- `skills/context-minimal-fanout/SKILL.md` is a working fresh-window
+  decomposition paradigm today: split a broad request into non-overlapping
+  prompts, write a Markdown split plan, and run each prompt in an isolated
+  subagent so no branch inherits the full context window. It is the concrete,
+  already-shipped precedent for the "fresh-window decomposition" example below,
+  not a hypothetical.
+- `skills/agent-runtimes/SKILL.md` documents the MCTS Search and Actor Model
+  runtimes, which are non-linear execution paradigms at the single-agent level.
+  A paradigm harness may pick one of these runtimes for a worker or critic agent
+  it composes, but the runtime choice itself is not a paradigm harness.
+
+Read these before designing a new paradigm harness. They show the level of
+concreteness and repo-specific grounding this skill expects, and a new paradigm
+harness proposal should say explicitly how it relates to them (reuses, replaces,
+or is orthogonal to each).
 </structure>
 
 <criteria>
@@ -114,7 +146,9 @@ Examples that qualify:
 - Minimal-context debugging: implement, preserve only original instructions and
   current artifact, audit in a fresh window, repair, and repeat.
 - Fresh-window decomposition: split a task into isolated subtasks, run each in a
-  clean context, merge outputs, and audit the merged result.
+  clean context, merge outputs, and audit the merged result. Already shipped as
+  the `context-minimal-fanout` skill; a `vidbyte.paradigms` version would give it
+  a typed config, result object, and evals instead of a Markdown split plan.
 - PRD-to-subagent implementation: convert a request into a detailed spec, launch
   a specialized implementation agent, and review against the spec.
 
@@ -146,8 +180,10 @@ Use these placement rules when deciding where code belongs.
 - Put hosted API routes, persistence, dashboards, proprietary scoring, and
   private orchestration in the service/API repository, not in `vidbyte-sdk`.
 - Put zero-setup operational guidance for Codex, Claude Code, Cursor, or other
-  existing harnesses in skills. A skill is an adapter and instruction layer, not
-  the canonical SDK implementation of the paradigm.
+  existing harnesses in skills. A skill may be the only implementation of a
+  paradigm before it has a `vidbyte.paradigms` harness (see `context-minimal-fanout`);
+  once a harness exists, keep the skill as a thin adapter over it instead of a
+  second implementation.
 
 The canonical implementation order is: design the paradigm, identify primitive
 gaps, add stable primitives, then add the thin harness that composes them. Do not
@@ -167,7 +203,10 @@ To add a future paradigm harness, execute these steps in order.
 2. Name the paradigm with a stable snake_case key. Use the same key for the
    package, metadata, prompt family, docs, API route draft, and skill adapter
    when those surfaces exist. Examples: `critique_repair`,
-   `context_minimal_debugging`, `fresh_window_decomposition`.
+   `context_minimal_debugging`, `fresh_window_decomposition`. If a paradigm
+   already exists as a skill under a different name, such as
+   `context-minimal-fanout` for fresh-window decomposition, reconcile the name
+   when the harness ships instead of letting the skill and the harness diverge.
 
 3. Identify primitive gaps before writing the harness. If the paradigm needs a
    new context primitive, middleware transform, trace schema, prompt template, or
@@ -236,8 +275,11 @@ To add a future paradigm harness, execute these steps in order.
 - Never duplicate lower-level primitive behavior inside a paradigm harness when
   the behavior belongs in `context`, `middleware`, `tools`, `prompts`, `trace`,
   `evals`, or `pipelines`.
-- Never treat a skill as the canonical implementation of a paradigm. Skills are
-  adapters and operating instructions for external harnesses.
+- A skill can be the canonical implementation of a paradigm today, as
+  `context-minimal-fanout` shows; do not claim otherwise. But once a paradigm
+  gets a `vidbyte.paradigms` harness, the harness becomes canonical and the
+  skill should be rewritten as a thin adapter that calls it, not a parallel
+  implementation.
 - Never add a `ParadigmClient` factory for a harness that does not exist.
 - Never make users manually wire the internal loop of a paradigm harness. If the
   user must create the worker, critic, prompts, trace merge, and stop condition
