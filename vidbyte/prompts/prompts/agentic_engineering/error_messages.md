@@ -560,3 +560,6 @@ def find_active_plan(plan_id: str) -> dict:
     except Exception as db_error:
         raise PlanValidationError(plan_id=plan_id) from db_error
 ```
+
+# Conclusion
+A rich error packet is valuable only when it truthfully shortens the next debugging session. Do not treat the field list as a form to fill with decorative certainty. Each field should help an agent answer a concrete question about what failed, what invariant was violated, what state mattered, where to look next, and how to repair the failure without wandering through the codebase. If a value is not known, say less rather than inventing context that will send the agent in the wrong direction. If the exact examples do not match the stack you are working in, preserve the deeper structure instead of copying the syntax. The deeper rule is separation of stable diagnosis from dynamic evidence: encode what is always true in the error class and pass only invocation-specific state at the throw site. Keep the server-side safety boundary intact, because diagnostic power becomes a liability when exposed to untrusted clients. The goal is not verbose errors; it is failures that carry enough honest context for the next agent to move directly from symptom to cause to fix.
