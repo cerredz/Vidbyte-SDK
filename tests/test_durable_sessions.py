@@ -9,7 +9,7 @@ from unittest import mock
 
 from vidbyte import Agent
 from vidbyte.agents.types import AgentMessage
-from vidbyte.lib.dataclasses.sessions import (
+from vidbyte.sessions.contracts import (
     SESSION_SCHEMA_VERSION,
     Checkpoint,
     CheckpointPolicy,
@@ -17,13 +17,13 @@ from vidbyte.lib.dataclasses.sessions import (
     SessionStatus,
     TraceCapture,
 )
-from vidbyte.lib.errors import (
+from vidbyte.lib.errors import VidbyteSdkError
+from vidbyte.sessions.errors import (
     CheckpointNotFoundError,
     SessionError,
     SessionNotFoundError,
     SessionStoreError,
     SessionVersionError,
-    VidbyteSdkError,
 )
 from vidbyte.sessions import (
     FileSessionStore,
@@ -31,9 +31,9 @@ from vidbyte.sessions import (
     Session,
     SessionScope,
     SessionSerializer,
-    SessionTool,
     TraceRecorder,
 )
+from vidbyte.tools.builtins.sessions import SessionTool
 from vidbyte.tools.types import ToolCall
 
 
@@ -185,7 +185,7 @@ class SerializerTests(unittest.TestCase):
             self.s.checkpoint_from_dict(cp)
 
     def test_raises_on_missing_required_field(self) -> None:  # [Hidden Failure]
-        from vidbyte.lib.errors import SessionSerializationError
+        from vidbyte.sessions.errors import SessionSerializationError
         with self.assertRaises(SessionSerializationError):
             self.s.checkpoint_from_dict({"schema_version": SESSION_SCHEMA_VERSION})
 
