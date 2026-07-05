@@ -59,6 +59,7 @@ class Session:
             self._adopt_existing_head()
         else:
             self._write_initial_meta()
+        self._bind_session_tools()
 
     @property
     def id(self) -> str:
@@ -121,6 +122,31 @@ class Session:
     def complete(self) -> None:
         """Mark this session COMPLETED in its metadata."""
         self._store.put_meta(replace(self._store.get_meta(self._session_id), status=SessionStatus.COMPLETED, updated_at=_now()))
+
+    def adopt(self, checkpoint_id: str, *, label: str = "resume") -> str:
+        """Replace the bound agent's history with another session's checkpoint and persist a new checkpoint (resume-replace)."""
+        source = self._store.get(checkpoint_id)
+        self._restore_agent_history(source)
+        return self._persist(None, label=label).id
+
+    def append_context(self, checkpoint_id: str, *, label: str = "resume") -> str:
+        """Append another session's checkpoint history (framed) to the bound agent and persist a new checkpoint (resume-append)."""
+        source = self._store.get(checkpoint_id)
+        framed = self._frame_resumed_history(source)
+        self._agent.history = list(self._agent.history) + framed
+        return self._persist(None, label=label).id
+
+    def append_output(self, session_id: str, *, label: str = "resume") -> str:
+        """Append another session's final assistant output to the bound agent (resume-output); errors if that session is not COMPLETED."""
+        meta = self._store.get_meta(session_id)
+        if meta.status is not SessionStatus.COMPLETED:
+            raise SessionError("Cannot append output from a session that is not completed.", details={"session_id": session_id, "status": meta.status.value})
+        head = self._store.head(session_id)
+        if head is None:
+            raise SessionError("Cannot append output from a session with no checkpoints.", details={"session_id": session_id})
+        output = self._extract_last_output(head)
+        self._agent.history = list(self._agent.history) + [output]
+        return self._persist(None, label=label).id
 
     @classmethod
     def resume(cls, store: SessionStore, session_id: str, *, checkpoint_id: str | None = None, tools: Sequence[object] = (), runner: object | None = None, middleware: Sequence[object] = (), tracer: object | None = None, output_schema: object | None = None, policy: CheckpointPolicy | str = CheckpointPolicy.PER_TURN, trace: TraceCapture | str = TraceCapture.AUTO) -> "Session":
@@ -198,6 +224,40 @@ class Session:
     def _restore_agent_history(self, checkpoint: Checkpoint) -> None:
         # Reset the wrapped agent's history to a checkpoint's recorded state.
         self._agent.history = [self._serializer.message_from_dict(item) for item in checkpoint.run_state.history]
+
+    def _frame_resumed_history(self, checkpoint: Checkpoint) -> list[AgentMessage]:
+        # Render another session's history as a single framed assistant message preserving its turns.
+        messages = [self._serializer.message_from_dict(item) for item in checkpoint.run_state.history]
+        if not messages:
+            return []
+        transcript = "\n\n".join(f"[{m.sender}]: {m.content}" for m in messages)
+        framed = AgentMessage(
+            sender=checkpoint.run_state.agent_name,
+            recipient=self._agent.name,
+            content=f"<resumed_thread session_id=\"{checkpoint.session_id}\" checkpoint_id=\"{checkpoint.id}\">\n{transcript}\n</resumed_thread>",
+            metadata={"resumed_session_id": checkpoint.session_id, "resumed_checkpoint_id": checkpoint.id},
+        )
+        return [framed]
+
+    def _extract_last_output(self, checkpoint: Checkpoint) -> AgentMessage:
+        # Pull the last assistant message from a checkpoint and frame it as a self-contained output.
+        history = [self._serializer.message_from_dict(item) for item in checkpoint.run_state.history]
+        last_assistant = next((m for m in reversed(history) if m.sender == checkpoint.run_state.agent_name), None)
+        content = last_assistant.content if last_assistant is not None else ""
+        return AgentMessage(
+            sender=checkpoint.run_state.agent_name,
+            recipient=self._agent.name,
+            content=f"<resumed_output session_id=\"{checkpoint.session_id}\">\n{content}\n</resumed_output>",
+            metadata={"resumed_session_id": checkpoint.session_id, "resumed_checkpoint_id": checkpoint.id},
+        )
+
+    def _bind_session_tools(self) -> None:
+        # Attach this session to any bound session-builtin tools the agent carries.
+        tools = getattr(self._agent, "_agent_tool_items", ()) or ()
+        for tool in tools:
+            binder = getattr(tool, "bind_session", None)
+            if callable(binder):
+                binder(self)
 
     def _recorder_policy(self) -> TraceCapture:
         # Return the trace policy currently configured on this session.
