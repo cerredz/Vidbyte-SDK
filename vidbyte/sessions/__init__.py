@@ -37,6 +37,7 @@ from vidbyte.sessions.errors import (
     SessionStoreError,
     SessionVersionError,
 )
+from vidbyte.sessions.portable import export_session, import_session
 from vidbyte.sessions.scope import SessionScope
 from vidbyte.sessions.serialization import SessionSerializer
 from vidbyte.sessions.session import Session
@@ -53,6 +54,8 @@ __all__ = [
     "CheckpointPolicy",
     "FileSessionStore",
     "InMemorySessionStore",
+    "export_session",
+    "import_session",
     "RunState",
     "Session",
     "SessionClient",

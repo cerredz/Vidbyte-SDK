@@ -32,6 +32,7 @@ from vidbyte.sessions.contracts import (
 )
 from vidbyte.lib.errors import AgentExecutionError
 from vidbyte.sessions.errors import SessionError
+from vidbyte.sessions.portable import export_session
 from vidbyte.sessions.serialization import SessionSerializer
 from vidbyte.sessions.store import SessionStore
 from vidbyte.sessions.stores.memory import InMemorySessionStore
@@ -122,6 +123,10 @@ class Session:
     def complete(self) -> None:
         """Mark this session COMPLETED in its metadata."""
         self._store.put_meta(replace(self._store.get_meta(self._session_id), status=SessionStatus.COMPLETED, updated_at=_now()))
+
+    def export(self) -> bytes:
+        # Return a portable zip bundle for this session.
+        return export_session(self._store, self._session_id)
 
     def adopt(self, checkpoint_id: str, *, label: str = "resume") -> str:
         """Replace the bound agent's history with another session's checkpoint and persist a new checkpoint (resume-replace)."""

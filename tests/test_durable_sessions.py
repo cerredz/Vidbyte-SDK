@@ -4,6 +4,8 @@ import json
 import sys
 import tempfile
 import unittest
+import zipfile
+from io import BytesIO
 from pathlib import Path
 from unittest import mock
 
@@ -14,6 +16,7 @@ from vidbyte.sessions.contracts import (
     Checkpoint,
     CheckpointPolicy,
     RunState,
+    SessionMeta,
     SessionStatus,
     TraceCapture,
 )
@@ -29,9 +32,12 @@ from vidbyte.sessions import (
     FileSessionStore,
     InMemorySessionStore,
     Session,
+    SessionClient,
     SessionScope,
     SessionSerializer,
     TraceRecorder,
+    export_session,
+    import_session,
 )
 from vidbyte.tools.builtins.sessions import SessionTool
 from vidbyte.tools.types import ToolCall
@@ -280,6 +286,118 @@ class FileStoreTests(unittest.TestCase):
         remaining = {c.id for c in self.store.history("se")}
         self.assertIn(head_id, remaining)
         self.assertLessEqual(len(remaining), 2)
+
+
+# ---------------------------------------------------------------------------
+# Portable bundles
+# ---------------------------------------------------------------------------
+class PortableBundleTests(unittest.IsolatedAsyncioTestCase):
+    async def test_exports_manifest_meta_checkpoints_and_trace_payloads(self) -> None:  # [Silent Failure]
+        # Verify the bundle shape mirrors FileSessionStore and includes trace data.
+        store = InMemorySessionStore()
+        session = Session(FakeAgent(trace={"goal": "g"}), store=store)
+        await session.arun("one")
+
+        bundle = export_session(store, session.id)
+
+        with zipfile.ZipFile(BytesIO(bundle), mode="r") as archive:
+            manifest = json.loads(archive.read("manifest.json").decode("utf-8"))
+            meta = json.loads(archive.read("meta.json").decode("utf-8"))
+            checkpoint_names = [name for name in archive.namelist() if name.startswith("checkpoints/")]
+            checkpoint = json.loads(archive.read(checkpoint_names[0]).decode("utf-8"))
+        self.assertEqual(manifest["schema_version"], SESSION_SCHEMA_VERSION)
+        self.assertEqual(manifest["session_id"], session.id)
+        self.assertEqual(manifest["checkpoint_count"], 1)
+        self.assertEqual(meta["session_id"], session.id)
+        self.assertEqual(checkpoint["checkpoint"]["trace_artifact"], {"goal": "g"})
+
+    async def test_imports_memory_bundle_into_file_store_with_new_id_and_resumes(self) -> None:  # [Hidden Failure]
+        # Verify memory-to-file import preserves DAG fields and creates a resumable session.
+        source = InMemorySessionStore()
+        session = Session(FakeAgent(trace={"goal": "g"}), store=source)
+        await session.arun("one")
+        await session.arun("two")
+        original = source.history(session.id)
+
+        with tempfile.TemporaryDirectory() as root:
+            target = FileSessionStore(root)
+            imported_id = import_session(target, export_session(source, session.id), new_id="se_imported")
+            resumed = Session.resume(target, imported_id)
+            imported = target.history(imported_id)
+
+        self.assertEqual(imported_id, "se_imported")
+        self.assertEqual(resumed.id, "se_imported")
+        self.assertEqual([c.id for c in imported], [c.id for c in original])
+        self.assertEqual([c.seq for c in imported], [c.seq for c in original])
+        self.assertEqual(imported[-1].parent_id, original[-1].parent_id)
+        self.assertEqual(imported[-1].trace_artifact, {"goal": "g"})
+
+    async def test_imports_file_bundle_into_memory_store_with_same_id_when_absent(self) -> None:  # [Hidden Failure]
+        # Verify file-to-memory import preserves the original id when no collision exists.
+        with tempfile.TemporaryDirectory() as root:
+            source = FileSessionStore(root)
+            session = Session(FakeAgent(), store=source)
+            await session.arun("one")
+            imported_id = import_session(InMemorySessionStore(), export_session(source, session.id))
+        self.assertEqual(imported_id, session.id)
+
+    async def test_session_export_and_client_import_are_thin_public_surfaces(self) -> None:  # [Edge Case]
+        # Verify Session and SessionClient delegate to the module-level helpers.
+        source = InMemorySessionStore()
+        client = SessionClient()
+        session = Session(FakeAgent(), store=source)
+        await session.arun("one")
+        target = InMemorySessionStore()
+
+        imported_id = client.import_(target, session.export(), new_id="se_client")
+
+        self.assertEqual(imported_id, "se_client")
+        self.assertEqual(client.export(target, imported_id), export_session(target, imported_id))
+
+    def test_import_without_new_id_rejects_existing_session(self) -> None:  # [Hidden Assumption]
+        # Verify same-id imports fail loudly rather than clobbering existing metadata.
+        source = InMemorySessionStore()
+        source.put(_checkpoint("se", "c1"))
+        bundle = export_session(source, "se")
+
+        with self.assertRaisesRegex(SessionStoreError, "pass new_id"):
+            import_session(source, bundle)
+
+    def test_import_uses_ingest_not_put(self) -> None:  # [Hidden Failure]
+        # Verify bundle import does not call the seq-reassigning put path.
+        class PutFailingStore(InMemorySessionStore):
+            def put(self, checkpoint):
+                # Raise if import accidentally routes through put().
+                raise AssertionError("put should not be called")
+
+        source = InMemorySessionStore()
+        source.put(_checkpoint("se", "c1", seq=99))
+        target = PutFailingStore()
+
+        import_session(target, export_session(source, "se"), new_id="copy")
+
+        self.assertEqual(target.history("copy")[0].seq, 0)
+
+    def test_ingest_preserves_supplied_seq_parent_and_head_verbatim(self) -> None:  # [Silent Failure]
+        # Verify ingest writes the exact supplied DAG fields without seq/head mutation.
+        store = InMemorySessionStore()
+        c1 = _checkpoint("se", "c1", seq=7)
+        c2 = _checkpoint("se", "c2", parent="c1", seq=12)
+        meta = SessionMeta(
+            session_id="se",
+            head_id="c2",
+            parent_session_id="parent",
+            agent_name="a",
+            status=SessionStatus.ACTIVE,
+            created_at="2026-06-06T00:00:00+00:00",
+            updated_at="2026-06-06T00:00:00+00:00",
+        )
+
+        store.ingest(meta, [c2, c1])
+
+        self.assertEqual([c.seq for c in store.history("se")], [7, 12])
+        self.assertEqual(store.head("se").id, "c2")
+        self.assertEqual(store.get("c2").parent_id, "c1")
 
 
 # ---------------------------------------------------------------------------

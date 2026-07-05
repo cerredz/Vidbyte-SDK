@@ -16,6 +16,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any
 
+from vidbyte.sessions.portable import export_session, import_session
 from vidbyte.sessions.session import Session
 from vidbyte.sessions.store import SessionStore
 from vidbyte.sessions.stores.file import FileSessionStore
@@ -43,6 +44,14 @@ class SessionClient:
     def fork(self, store: SessionStore, checkpoint_id: str, **kwargs: Any) -> Session:
         # Branch a new session from any checkpoint.
         return Session.fork_from(store, checkpoint_id, **kwargs)
+
+    def export(self, store: SessionStore, session_id: str) -> bytes:
+        # Export one durable session as a portable zip bundle.
+        return export_session(store, session_id)
+
+    def import_(self, store: SessionStore, bundle: bytes, *, new_id: str | None = None) -> str:
+        # Import a portable session bundle and return the resulting session id.
+        return import_session(store, bundle, new_id=new_id)
 
     def memory_store(self) -> InMemorySessionStore:
         # Build a process-local in-memory store.
