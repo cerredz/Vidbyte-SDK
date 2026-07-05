@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import uuid
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
@@ -371,27 +372,14 @@ class BaseAgent(McpAttachableMixin):
     def tool_specs(self) -> tuple[ToolSpec, ...]:
         return self.tools.specs()
 
-    def fork(
-        self,
-        *,
-        name: str | None = None,
-        runner: object | None = None,
-        runners: Mapping[ModelModality | str, object] | None = None,
-        tools: Sequence[object] | Tools | None = None,
-        system_prompt: str | None = None,
-        modality: ModelModality | str | None = None,
-        metadata: dict[str, Any] | None = None,
-        middleware: Sequence[AgentMiddleware] | None = None,
-        context_items: Sequence[ContextItem] | None = None,
-        context_manager: ContextManager | None = None,
-        algorithm: ContextWindowAlgorithm | str | None = None,
-        include_history: bool = False,
-    ) -> BaseAgent:
+    def fork(self, *, name: str | None = None, runner: object | None = None, runners: Mapping[ModelModality | str, object] | None = None, tools: Sequence[object] | Tools | None = None, system_prompt: str | None = None, modality: ModelModality | str | None = None, metadata: dict[str, Any] | None = None, middleware: Sequence[AgentMiddleware] | None = None, context_items: Sequence[ContextItem] | None = None, context_manager: ContextManager | None = None, algorithm: ContextWindowAlgorithm | str | None = None, include_history: bool = False, inherit_mcp: bool = True, run_id: str | None = None, trace_option: TraceOption | None = None) -> BaseAgent:
+        # Builds an isolated child agent branch with cloned agent-bound tools and fresh run identity.
+        child_run_id = self._fork_run_id(run_id)
         child = BaseAgent(
             name=name or self.name,
             runner=runner if runner is not None else self.runner,
             runners=runners if runners is not None else self.runners,
-            tools=self._agent_tool_items if tools is None else tools,
+            tools=self._fork_tool_items(tools),
             permission_policy=self.permission_policy,
             agent_loop_settings=self.agent_loop_settings,
             middleware=self.middleware if middleware is None else middleware,
@@ -401,7 +389,7 @@ class BaseAgent(McpAttachableMixin):
             model_name=self.runner_config.model_name,
             modality=modality if modality is not None else self.modality,
             temperature=self.runner_config.temperature,
-            run_id=self.runner_config.run_id,
+            run_id=child_run_id,
             runner_options=dict(self.runner_config.options),
             description=self.description,
             capabilities=self.capabilities,
@@ -409,15 +397,47 @@ class BaseAgent(McpAttachableMixin):
             context_items=self.context_items if context_items is None else context_items,
             context_manager=self.context_manager if context_manager is None else context_manager,
             algorithm=self.algorithm if algorithm is None else algorithm,
-            metadata={**self.metadata, **dict(metadata or {})},
+            metadata=self._fork_metadata(child_run_id, metadata),
             tracer=self._tracer,
             output_schema=self.output_schema,
             handoff=self._handoff_spec,
-            trace_option=self._trace_option,
+            trace_option=trace_option if trace_option is not None else self._trace_option,
         )
+        if inherit_mcp:
+            child._pending_mcp_configs.extend(self._mcp_configs_for_fork())
         if include_history:
             child.history = list(self.history)
         return child
+
+    def _fork_tool_items(self, tools: Sequence[object] | Tools | None) -> tuple[object, ...]:
+        # Returns child-safe tools by removing parent MCP bridged tools and cloning agent-bound builtins.
+        selected = tools.all() if isinstance(tools, Tools) else (self._agent_tool_items if tools is None else tuple(tools))
+        parent_mcp_tools = set(self._mcp_bridged_tools_for_fork())
+        return tuple(self._clone_tool_for_fork(tool) for tool in selected if tool not in parent_mcp_tools)
+
+    def _clone_tool_for_fork(self, tool: object) -> object:
+        # Clones SDK tools that carry mutable agent bindings, preserving custom tools by identity.
+        clone = getattr(tool, "clone_for_fork", None)
+        if callable(clone):
+            return clone()
+        return tool
+
+    def _fork_run_id(self, explicit_run_id: str | None) -> str:
+        # Returns an explicit child run id or creates a lineage-friendly fork id.
+        if explicit_run_id is not None:
+            return explicit_run_id
+        suffix = uuid.uuid4().hex[:8]
+        parent_run_id = self.runner_config.run_id
+        return f"{parent_run_id}:fork:{suffix}" if parent_run_id else f"fork:{suffix}"
+
+    def _fork_metadata(self, child_run_id: str, overrides: Mapping[str, Any] | None) -> dict[str, Any]:
+        # Merges parent metadata, caller overrides, and definitive fork lineage metadata.
+        lineage = {
+            "fork_parent_agent_name": self.name,
+            "fork_parent_run_id": self.runner_config.run_id,
+            "fork_child_run_id": child_run_id,
+        }
+        return {**self.metadata, **dict(overrides or {}), **lineage}
 
     def export_state(self) -> RunState:
         """Capture a serializable RunState snapshot of this agent (no secrets, no live objects)."""
@@ -679,6 +699,7 @@ class BaseAgent(McpAttachableMixin):
             trace_ctx = self._tracer.start_trace(
                 "agent.run",
                 agent_name=self.name,
+                run_id=self.runner_config.run_id,
                 strategy="direct",
                 prompt=self._safe_trace_value(prompt),
                 system_prompt=self._safe_trace_value(self.system_prompt),

@@ -1168,6 +1168,7 @@ class AgentRuntime:
         input_messages = tuple(trace_messages)
         inputs: dict[str, Any] = {
             "agent_name": self.agent_name,
+            "run_id": self.run_id,
             "provider": provider,
             "model": self._runner_model_name(handle.runner),
             "iteration": iteration_count,

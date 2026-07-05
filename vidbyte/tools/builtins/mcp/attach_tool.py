@@ -44,6 +44,10 @@ class AttachMcpServerTool(BaseTool):
         """Store a reference to the owning agent so execute() can call attach_mcp_server()."""
         self._agent = agent
 
+    def clone_for_fork(self) -> AttachMcpServerTool:
+        # Returns a fresh unbound MCP attach tool so dynamic attachments target the fork owner.
+        return AttachMcpServerTool()
+
     def spec(self) -> ToolSpec:
         """Return the model-facing declaration for the attach_mcp_server tool."""
         return ToolSpec(
