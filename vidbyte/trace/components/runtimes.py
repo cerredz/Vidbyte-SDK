@@ -20,6 +20,21 @@ class LinearRuntimeTrace:
         # Describes a runtime stop condition.
         return SpanSpec("runtime.stop", SpanKind.CHAIN, "runtimes", TraceDetail.VERBOSE, ParentPolicy.CURRENT, attributes)
 
+    @staticmethod
+    def model_call(**attributes: Any) -> SpanSpec:
+        # Describes a model call within a linear runtime iteration.
+        return SpanSpec("runtime.linear.model_call", SpanKind.LLM, "runtimes", TraceDetail.STANDARD, ParentPolicy.RUNTIME_ITERATION, attributes)
+
+    @staticmethod
+    def tool_batch(**attributes: Any) -> SpanSpec:
+        # Describes a batch of tool calls within a linear runtime iteration.
+        return SpanSpec("runtime.linear.tool_batch", SpanKind.TOOL, "runtimes", TraceDetail.VERBOSE, ParentPolicy.RUNTIME_ITERATION, attributes)
+
+    @staticmethod
+    def stop_condition(**attributes: Any) -> SpanSpec:
+        # Describes a specific AgentStopReason that terminated the loop.
+        return SpanSpec("runtime.linear.stop_condition", SpanKind.CHAIN, "runtimes", TraceDetail.STANDARD, ParentPolicy.AGENT, attributes)
+
 
 class ActorRuntimeTrace:
     """Factory for actor runtime spans."""
@@ -44,6 +59,16 @@ class ActorRuntimeTrace:
         # Describes actor runtime termination.
         return SpanSpec("runtime.actor.completion", SpanKind.CHAIN, "actor", TraceDetail.VERBOSE, ParentPolicy.CURRENT, attributes)
 
+    @staticmethod
+    def quiescence(**attributes: Any) -> SpanSpec:
+        # Describes an actor runtime quiescence check.
+        return SpanSpec("runtime.actor.quiescence", SpanKind.CHAIN, "actor", TraceDetail.VERBOSE, ParentPolicy.CURRENT, attributes)
+
+    @staticmethod
+    def compile_prompt(**attributes: Any) -> SpanSpec:
+        # Describes an actor prompt being compiled from a message.
+        return SpanSpec("runtime.actor.compile_prompt", SpanKind.CHAIN, "actor", TraceDetail.DIAGNOSTIC, ParentPolicy.CURRENT, attributes)
+
 
 class SearchRuntimeTrace:
     """Factory for search runtime spans."""
@@ -62,6 +87,21 @@ class SearchRuntimeTrace:
     def rollback(**attributes: Any) -> SpanSpec:
         # Describes a search rollback event.
         return SpanSpec("runtime.search.rollback", SpanKind.CHAIN, "search", TraceDetail.VERBOSE, ParentPolicy.CURRENT, attributes)
+
+    @staticmethod
+    def expand(**attributes: Any) -> SpanSpec:
+        # Describes a search node expansion step.
+        return SpanSpec("runtime.search.expand", SpanKind.CHAIN, "search", TraceDetail.VERBOSE, ParentPolicy.CURRENT, attributes)
+
+    @staticmethod
+    def evaluate(**attributes: Any) -> SpanSpec:
+        # Describes a search node evaluation step.
+        return SpanSpec("runtime.search.evaluate", SpanKind.CHAIN, "search", TraceDetail.VERBOSE, ParentPolicy.CURRENT, attributes)
+
+    @staticmethod
+    def select(**attributes: Any) -> SpanSpec:
+        # Describes a best-node selection step.
+        return SpanSpec("runtime.search.select", SpanKind.CHAIN, "search", TraceDetail.VERBOSE, ParentPolicy.CURRENT, attributes)
 
 
 __all__ = ["ActorRuntimeTrace", "LinearRuntimeTrace", "SearchRuntimeTrace"]
