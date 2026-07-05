@@ -18,6 +18,8 @@ from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
 from vidbyte.agents.context_algorithms import AgentRuntimeContextAlgorithms
+from vidbyte.agents.contracts.base import OutputContract, TerminationContext
+from vidbyte.agents.contracts.gate import OutputContractGate
 from vidbyte.agents.types import AgentMessage
 from vidbyte.context.algorithms import ContextWindowAlgorithm, ToolResultAdmission
 from vidbyte.context.manager import ContextManager
@@ -63,6 +65,8 @@ class AgentRuntime:
         context_manager: ContextManager | None = None,
         recorder: RecorderBase | None = None,
         output_schema: type | Mapping[str, Any] | None = None,
+        output_contracts: Sequence[OutputContract] = (),
+        max_contract_rejections: int = 3,
     ) -> None:
         self.agent_name = agent_name
         self.system_prompt = system_prompt
@@ -78,6 +82,7 @@ class AgentRuntime:
         self.recorder: RecorderBase = recorder or NullRecorder()
         self.output_schema = output_schema
         self._schema_formatter = OutputSchemaFormatter()
+        self._gate = OutputContractGate(output_contracts, max_rejections=max_contract_rejections)
 
     def _context_window_admission_middleware(self) -> tuple[AgentMiddleware, ...]:
         # Returns compatibility middleware for legacy tool-result admission presets.
@@ -173,6 +178,7 @@ class AgentRuntime:
         call_contexts: list[ToolCallContext] = []
         iteration_count = 0
         model_call_count = 0
+        rejection_count = 0
         tokens_used: int | None = None
         started_at = self.middleware.clock()
         last_response: object | None = None
@@ -397,6 +403,43 @@ class AgentRuntime:
                         run_state=run_state,
                         model_response=raw_result,
                     )
+                if self._gate.active():
+                    candidate = last_assistant_output or ""
+                    reports = await self._gate.evaluate(
+                        self._termination_context(
+                            candidate,
+                            iteration_count=iteration_count,
+                            model_call_count=model_call_count,
+                            call_contexts=call_contexts,
+                            tokens_used=tokens_used,
+                            started_at=started_at,
+                            run_state=run_state,
+                            rejection_count=rejection_count,
+                        )
+                    )
+                    run_state["__contract_evaluations__"] = self._gate.summarize(reports, rejection_count=rejection_count)
+                    unmet = self._gate.unmet(reports)
+                    if unmet and not self._gate.exhausted(rejection_count):
+                        rejection_count += 1
+                        messages.append(self._assistant_message(candidate))
+                        messages.append({"role": "user", "content": self._gate.rejection_message(unmet)})
+                        continue
+                    if unmet:
+                        return await self._contract_unsatisfied_result(
+                            candidate,
+                            message=message,
+                            context=context,
+                            provider=provider,
+                            iteration_count=iteration_count,
+                            model_call_count=model_call_count,
+                            call_contexts=call_contexts,
+                            tokens_used=tokens_used,
+                            started_at=started_at,
+                            runtime_metadata=runtime_metadata,
+                            run_state=run_state,
+                            runner_metadata=runner_metadata,
+                            model_response=raw_result,
+                        )
                 final = self._final_result(
                     output=last_assistant_output,
                     runner_metadata=runner_metadata,
@@ -482,6 +525,41 @@ class AgentRuntime:
                     )
                 _, result = processed
                 if call.tool_name == IS_DONE_TOOL_NAME:
+                    if self._gate.active():
+                        reports = await self._gate.evaluate(
+                            self._termination_context(
+                                result.output or "",
+                                iteration_count=iteration_count,
+                                model_call_count=model_call_count,
+                                call_contexts=call_contexts,
+                                tokens_used=tokens_used,
+                                started_at=started_at,
+                                run_state=run_state,
+                                rejection_count=rejection_count,
+                            )
+                        )
+                        run_state["__contract_evaluations__"] = self._gate.summarize(reports, rejection_count=rejection_count)
+                        unmet = self._gate.unmet(reports)
+                        if unmet and not self._gate.exhausted(rejection_count):
+                            rejection_count += 1
+                            messages.append(dict(ToolsFormatter.format_tool_result(call, ToolResult.error(call.tool_name, self._gate.rejection_message(unmet)), provider)))
+                            break
+                        if unmet:
+                            return await self._contract_unsatisfied_result(
+                                result.output or "",
+                                message=message,
+                                context=context,
+                                provider=provider,
+                                iteration_count=iteration_count,
+                                model_call_count=model_call_count,
+                                call_contexts=call_contexts,
+                                tokens_used=tokens_used,
+                                started_at=started_at,
+                                runtime_metadata=runtime_metadata,
+                                run_state=run_state,
+                                runner_metadata=runner_metadata,
+                                model_response=raw_result,
+                            )
                     decision = await self.middleware.after_iteration(
                         self._middleware_context(
                             MiddlewareHook.AFTER_ITERATION,
@@ -717,11 +795,14 @@ class AgentRuntime:
         # Generic, feature-agnostic lift of run_state["__result_metadata__"]; no feature imports here.
         published = (run_state or {}).get("__result_metadata__")
         iteration_outputs = (run_state or {}).get("__iteration_outputs__")
+        contract_evaluations = (run_state or {}).get("__contract_evaluations__")
         extra: dict[str, Any] = {}
         if isinstance(published, Mapping) and published:
             extra.update(published)
         if iteration_outputs is not None:
             extra["iteration_outputs"] = iteration_outputs
+        if contract_evaluations is not None:
+            extra["contract_evaluations"] = contract_evaluations
         if not extra:
             return result
         metadata = {**dict(result.metadata), **extra}
@@ -1381,6 +1462,43 @@ class AgentRuntime:
             result.tool_name,
             f"[Output of '{call.tool_name}' stored in primitive '{primitive_id}']",
             metadata={**dict(result.metadata), "primitive_id": primitive_id},
+        )
+
+    def _termination_context(self, output: str, *, iteration_count: int, model_call_count: int, call_contexts: Sequence[ToolCallContext], tokens_used: int | None, started_at: float, run_state: Mapping[Any, Any], rejection_count: int) -> TerminationContext:
+        # Packages live runtime counters into the read-only snapshot contracts evaluate against.
+        return TerminationContext(
+            output=output,
+            iteration_count=iteration_count,
+            model_call_count=model_call_count,
+            tool_call_count=len(call_contexts),
+            tokens_used=tokens_used,
+            elapsed_seconds=max(0.0, self.middleware.clock() - started_at),
+            rejection_count=rejection_count,
+            run_state=run_state,
+        )
+
+    async def _contract_unsatisfied_result(self, output: str, *, message: str, context: BaseAgentContext, provider: str, iteration_count: int, model_call_count: int, call_contexts: Sequence[ToolCallContext], tokens_used: int | None, started_at: float, runtime_metadata: Mapping[str, Any], run_state: dict[type, Any], runner_metadata: dict[str, Any], model_response: object | None) -> AgentResult:
+        # Builds and finalizes a CONTRACT_UNSATISFIED result once the rejection budget is spent.
+        unsatisfied = self._final_result(
+            output=output,
+            runner_metadata=runner_metadata,
+            contexts=call_contexts,
+            iteration_count=iteration_count,
+            tokens_used=tokens_used,
+            stop_reason=AgentStopReason.CONTRACT_UNSATISFIED,
+        )
+        return await self._finish_result(
+            unsatisfied,
+            message=message,
+            context=context,
+            provider=provider,
+            iteration_count=iteration_count,
+            model_call_count=model_call_count,
+            tokens_used=tokens_used,
+            started_at=started_at,
+            metadata=runtime_metadata,
+            run_state=run_state,
+            model_response=model_response,
         )
 
     def _budget_stop(
