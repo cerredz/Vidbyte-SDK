@@ -23,6 +23,7 @@ from vidbyte.tools.builtins.code_search import GlobTool, GrepTool, SemanticSearc
 from vidbyte.tools.builtins.output_schema import (
     AppendOutputTool,
     DeclareOutputSchemaTool,
+    ExtendOutputSchemaTool,
     OutputSchemaBuilder,
     OutputSchemaField,
 )
@@ -72,6 +73,7 @@ __all__ = [
     "ContextRemoveTool",
     "ContextUpsertTool",
     "DeclareOutputSchemaTool",
+    "ExtendOutputSchemaTool",
     "GlobTool",
     "GrepTool",
     "OutputSchemaBuilder",
