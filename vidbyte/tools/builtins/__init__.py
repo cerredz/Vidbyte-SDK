@@ -46,6 +46,7 @@ from vidbyte.tools.builtins.providers import (
     ProviderUpdateRowsTool,
 )
 from vidbyte.tools.builtins.sessions import (
+    BatchForkTool,
     CheckpointTool,
     ForkTool,
     ResumeAppendTool,
@@ -78,6 +79,7 @@ from vidbyte.tools.builtins.memory import (
 
 __all__ = [
     "AttachMcpServerTool",
+    "BatchForkTool",
     "CreateHandoffTool",
     "CheckpointTool",
     "CompactionMode",

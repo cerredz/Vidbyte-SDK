@@ -56,6 +56,15 @@ FORK_TOOL_DESCRIPTION = (
     "The tool returns the new session id as a plain string."
 )
 
+BATCH_FORK_TOOL_DESCRIPTION = (
+    "Branch multiple new durable sessions from the current bound thread. "
+    "Each branch is equivalent to calling the fork tool once from the same checkpoint. "
+    "The source session is not mutated by any branch creation. "
+    "Individual branch failures are counted without stopping the remaining fork attempts. "
+    "The tool only creates sessions; it does not run the branches. "
+    "The tool returns JSON with created session ids and a failed count."
+)
+
 REWIND_TOOL_DESCRIPTION = (
     "Move the current bound session's head back to an earlier checkpoint. "
     "The next agent run will branch from that checkpoint instead of the previous head. "
@@ -106,6 +115,7 @@ __all__ = [
     "CHECKPOINT_ID_DESCRIPTION",
     "LABEL_DESCRIPTION",
     "OPERATION_DESCRIPTION",
+    "BATCH_FORK_TOOL_DESCRIPTION",
     "CHECKPOINT_TOOL_DESCRIPTION",
     "FORK_TOOL_DESCRIPTION",
     "REWIND_TOOL_DESCRIPTION",

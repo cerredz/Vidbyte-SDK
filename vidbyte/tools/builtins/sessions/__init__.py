@@ -8,7 +8,7 @@ Purpose:
     + SessionScope primitives from vidbyte.sessions.
 Architecture:
     - SessionTool: central combined tool (create_checkpoint / fork_current / list_my_runs / read_run).
-    - CheckpointTool / ForkTool / RewindTool: granular per-verb tools.
+    - CheckpointTool / ForkTool / BatchForkTool / RewindTool: granular per-verb tools.
     - ResumeReplaceTool / ResumeAppendTool / ResumeOutputTool: three cross-thread resume modes.
 Relations:
     All subclass _SessionBuiltinTool and bind to a Session via bind_session(); the
@@ -18,6 +18,7 @@ Relations:
 from __future__ import annotations
 
 from vidbyte.tools.builtins.sessions._base import _SessionBuiltinTool
+from vidbyte.tools.builtins.sessions.batch_fork import BatchForkTool
 from vidbyte.tools.builtins.sessions.checkpoint import CheckpointTool
 from vidbyte.tools.builtins.sessions.fork import ForkTool
 from vidbyte.tools.builtins.sessions.resume_append import ResumeAppendTool
@@ -27,6 +28,7 @@ from vidbyte.tools.builtins.sessions.rewind import RewindTool
 from vidbyte.tools.builtins.sessions.session import SessionTool
 
 __all__ = [
+    "BatchForkTool",
     "CheckpointTool",
     "ForkTool",
     "ResumeAppendTool",

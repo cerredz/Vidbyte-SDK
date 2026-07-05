@@ -39,7 +39,7 @@ from vidbyte.sessions.errors import (
 )
 from vidbyte.sessions.scope import SessionScope
 from vidbyte.sessions.serialization import SessionSerializer
-from vidbyte.sessions.session import Session
+from vidbyte.sessions.session import ForkOutcome, Session
 from vidbyte.sessions.store import BaseSessionStore, SessionStore
 from vidbyte.sessions.stores import FileSessionStore, InMemorySessionStore
 from vidbyte.sessions.trace_capture import CapturedTrace, TraceRecorder
@@ -52,6 +52,7 @@ __all__ = [
     "CheckpointNotFoundError",
     "CheckpointPolicy",
     "FileSessionStore",
+    "ForkOutcome",
     "InMemorySessionStore",
     "RunState",
     "Session",
