@@ -413,61 +413,45 @@ class ContextMinimalFanoutResult:
 
 
 @dataclass(frozen=True, slots=True)
+class AgentRoleSettings:
+    """Per-role configuration for one pipeline stage agent."""
+
+    name: str = ""
+    system_prompt: str | None = None
+    runner: object | None = None
+    provider: str | None = None
+    model_name: str | Sequence[str] | None = None
+    api_key: str | None = None
+    temperature: float | None = None
+    tools: tuple[object, ...] = ()
+    middleware: tuple[object, ...] = ()
+    agent_options: Mapping[str, Any] = field(default_factory=dict)
+    max_tokens: int | None = None
+
+    def __post_init__(self) -> None:
+        # Normalizes tuple and mapping fields.
+        object.__setattr__(self, "tools", _object_tuple(self.tools))
+        object.__setattr__(self, "middleware", _object_tuple(self.middleware))
+        object.__setattr__(self, "agent_options", dict(self.agent_options))
+
+    def with_overrides(self, **overrides: Any) -> "AgentRoleSettings":
+        # Returns a new settings object with per-run overrides applied.
+        clean = {key: value for key, value in overrides.items() if value is not None}
+        return replace(self, **clean)
+
+
+@dataclass(frozen=True, slots=True)
 class ContextMinimalFanoutSettings:
     """Per-role configuration for the four-stage context-minimal fanout pipeline."""
 
-    # Context agent.
-    context_agent_name: str = "context-minimal-context"
-    context_system_prompt: str | None = None
-    context_runner: object | None = None
-    context_provider: str | None = None
-    context_model_name: str | Sequence[str] | None = None
-    context_api_key: str | None = None
-    context_temperature: float | None = None
-    context_tools: tuple[object, ...] = ()
-    context_middleware: tuple[object, ...] = ()
-    context_agent_options: Mapping[str, Any] = field(default_factory=dict)
-    max_context_tokens: int | None = None
+    # Per-role agent settings.
+    context: AgentRoleSettings = field(default_factory=lambda: AgentRoleSettings(name="context-minimal-context"))
+    splitter: AgentRoleSettings = field(default_factory=lambda: AgentRoleSettings(name="context-minimal-splitter"))
+    adversarial: AgentRoleSettings = field(default_factory=lambda: AgentRoleSettings(name="context-minimal-adversarial"))
+    implementation: AgentRoleSettings = field(default_factory=lambda: AgentRoleSettings(name="context-minimal-implementation"))
 
-    # Splitter agent.
-    splitter_name: str = "context-minimal-splitter"
-    splitter_system_prompt: str | None = None
-    splitter_runner: object | None = None
-    splitter_provider: str | None = None
-    splitter_model_name: str | Sequence[str] | None = None
-    splitter_api_key: str | None = None
-    splitter_temperature: float | None = None
-    splitter_tools: tuple[object, ...] = ()
-    splitter_middleware: tuple[object, ...] = ()
-    splitter_agent_options: Mapping[str, Any] = field(default_factory=dict)
-    max_splitter_tokens: int | None = None
-
-    # Adversarial agent.
-    adversarial_name: str = "context-minimal-adversarial"
-    adversarial_system_prompt: str | None = None
-    adversarial_runner: object | None = None
-    adversarial_provider: str | None = None
-    adversarial_model_name: str | Sequence[str] | None = None
-    adversarial_api_key: str | None = None
-    adversarial_temperature: float | None = None
-    adversarial_tools: tuple[object, ...] = ()
-    adversarial_middleware: tuple[object, ...] = ()
-    adversarial_agent_options: Mapping[str, Any] = field(default_factory=dict)
-    max_adversarial_tokens: int | None = None
+    # Adversarial loop control.
     max_adversarial_rounds: int = 2
-
-    # Implementation agents.
-    implementation_name_prefix: str = "context-minimal-implementation"
-    implementation_system_prompt: str | None = None
-    implementation_runner: object | None = None
-    implementation_provider: str | None = None
-    implementation_model_name: str | Sequence[str] | None = None
-    implementation_api_key: str | None = None
-    implementation_temperature: float | None = None
-    implementation_tools: tuple[object, ...] = ()
-    implementation_middleware: tuple[object, ...] = ()
-    implementation_agent_options: Mapping[str, Any] = field(default_factory=dict)
-    max_implementation_tokens: int | None = None
 
     # Shared toolset controls.
     include_minimal_toolset: bool = True
@@ -484,7 +468,7 @@ class ContextMinimalFanoutSettings:
     plan_output_path: str | Path | None = None
 
     def __post_init__(self) -> None:
-        # Normalizes tuple-like settings and validates numeric limits.
+        # Validates numeric limits and normalizes the default_tool_root path.
         if self.max_prompt_count <= 0:
             raise ConfigurationError("max_prompt_count must be greater than zero.")
         if self.max_concurrency <= 0:
@@ -493,10 +477,6 @@ class ContextMinimalFanoutSettings:
             raise ConfigurationError("max_adversarial_rounds must be greater than zero.")
         if (self.max_cost_usd is None) != (self.cost_per_million_tokens is None):
             raise ConfigurationError("max_cost_usd and cost_per_million_tokens must be provided together.")
-        for tuple_field in ("context_tools", "splitter_tools", "adversarial_tools", "implementation_tools", "context_middleware", "splitter_middleware", "adversarial_middleware", "implementation_middleware"):
-            object.__setattr__(self, tuple_field, _object_tuple(getattr(self, tuple_field)))
-        for map_field in ("context_agent_options", "splitter_agent_options", "adversarial_agent_options", "implementation_agent_options"):
-            object.__setattr__(self, map_field, dict(getattr(self, map_field)))
 
     def with_overrides(self, **overrides: Any) -> "ContextMinimalFanoutSettings":
         # Returns a new settings object with per-run overrides applied.

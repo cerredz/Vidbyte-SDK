@@ -54,6 +54,7 @@ from vidbyte.agents import (
 )
 from vidbyte.client import VidbyteSDK
 from vidbyte.paradigms import (
+    AgentRoleSettings,
     ContextFile,
     ContextMinimalFanoutClient,
     ContextMinimalFanoutParadigm,
@@ -255,6 +256,7 @@ __all__ = [
     "NullTracer",
     "OutputSchemaFormatter",
     "AppendOutputTool",
+    "AgentRoleSettings",
     "ContextFile",
     "ContextMinimalFanoutClient",
     "ContextMinimalFanoutParadigm",

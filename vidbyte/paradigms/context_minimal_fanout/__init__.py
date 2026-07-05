@@ -18,6 +18,7 @@ from __future__ import annotations
 from vidbyte.paradigms.context_minimal_fanout.client import ContextMinimalFanoutClient
 from vidbyte.paradigms.context_minimal_fanout.paradigm import ContextMinimalFanoutParadigm
 from vidbyte.paradigms.context_minimal_fanout.types import (
+    AgentRoleSettings,
     ContextFile,
     ContextMinimalFanoutResult,
     ContextMinimalFanoutSettings,
@@ -28,6 +29,7 @@ from vidbyte.paradigms.context_minimal_fanout.types import (
 )
 
 __all__ = [
+    "AgentRoleSettings",
     "ContextFile",
     "ContextMinimalFanoutClient",
     "ContextMinimalFanoutParadigm",

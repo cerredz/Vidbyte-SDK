@@ -3,6 +3,7 @@ from __future__ import annotations
 from vidbyte.paradigms.base import ParadigmHarness
 from vidbyte.paradigms.client import ParadigmClient
 from vidbyte.paradigms.context_minimal_fanout import (
+    AgentRoleSettings,
     ContextFile,
     ContextMinimalFanoutClient,
     ContextMinimalFanoutParadigm,
@@ -15,6 +16,7 @@ from vidbyte.paradigms.context_minimal_fanout import (
 )
 
 __all__ = [
+    "AgentRoleSettings",
     "ContextFile",
     "ContextMinimalFanoutClient",
     "ContextMinimalFanoutParadigm",
