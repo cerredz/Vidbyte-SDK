@@ -1,12 +1,53 @@
 # Vidbyte SDK
 
-`vidbyte-sdk` is the root-level home for Vidbyte's Python SDK surface.
+Vidbyte is an agent engineering platform for building, evaluating, instrumenting,
+and distributing AI workflows. The Vidbyte SDK is the Python package surface for
+that platform: it gives developers composable agents, tools, middleware, context
+management, MCP server integration, prompts, evals, provider adapters, pipelines,
+and tracing primitives.
 
-This package is intentionally minimal right now. It establishes the SDK package identity and namespace layout without including private Vidbyte service logic.
+This repository is intentionally focused on reusable SDK abstractions. Private
+Vidbyte service logic, proprietary learning systems, hosted scoring, and database
+access remain outside this package.
+
+## What You Can Build
+
+- Agent applications with explicit system prompts, runners, tools, context, and trace behavior.
+- Tool-using agents with local Python functions, MCP-backed tools, permission policies, and provider-native schemas.
+- Runtime policies with deterministic middleware for rate limits, budgets, retries, audit logs, compaction, and safety checks.
+- MCP Studio servers that expose Vidbyte agents, tools, prompts, and pipelines to MCP-compatible clients.
+- Local eval suites with reusable graders, concurrency controls, and run registries.
+- Agent pipelines that compose specialized agents through sequential, parallel, conditional, and map-reduce topologies.
+- Prompt libraries, context-window algorithms, and trace artifacts that make long-running agent work easier to inspect.
+
+## Layer Guide
+
+| Layer | Role |
+|-------|------|
+| [`vidbyte.agents`](vidbyte/agents/README.md) | Executable agent actors, runtimes, modality routing, handoff, and agent registries |
+| [`vidbyte.context`](vidbyte/context/README.md) | Structured context items, context windows, compaction, algorithms, and handoff models |
+| [`vidbyte.evals`](vidbyte/evals/README.md) | Local eval cases, suites, runners, graders, registries, and result summaries |
+| [`vidbyte.harnesses`](vidbyte/harnesses/README.md) | Namespace boundary for custom harness integrations |
+| [`vidbyte.lib`](vidbyte/lib/README.md) | Shared dataclasses, enums, registries, errors, runners, config, and tracing contracts |
+| [`vidbyte.mcp_server`](vidbyte/mcp_server/README.md) | Stdio MCP Studio server for exposing agents, tools, prompts, and pipelines |
+| [`vidbyte.middleware`](vidbyte/middleware/README.md) | Deterministic runtime hooks and built-in policy, safety, retry, budget, and compaction middleware |
+| [`vidbyte.paradigms`](vidbyte/paradigms/README.md) | Thin runnable paradigm harness scaffolding built from agents, tools, context, prompts, middleware, trace, pipelines, and evals |
+| [`vidbyte.pipelines`](vidbyte/pipelines/README.md) | Multi-agent pipeline topologies with a string-in/string-out contract |
+| [`vidbyte.prompts`](vidbyte/prompts/README.md) | Static prompt assets, enum-keyed lookup, direct imports, and prompt families |
+| [`vidbyte.providers`](vidbyte/providers/README.md) | Provider adapter factories for text, image, video, audio, embeddings, and streaming |
+| [`vidbyte.shared`](vidbyte/shared/README.md) | Reserved shared namespace; currently no stable public symbols |
+| [`vidbyte.tools`](vidbyte/tools/README.md) | Tool contracts, decorators, catalogs, execution, MCP bridges, and permissions |
+| [`vidbyte.trace`](vidbyte/trace/README.md) | Trace facade, debug tracer, provider tracers, and continual trace artifacts |
 
 ## Status
 
-This package is not published. It is marked `UNLICENSED` until Vidbyte's release, licensing, and open-source strategy are finalized.
+> **Alpha — active development.** APIs may change between minor versions.
+
+Install from PyPI:
+
+```bash
+pip install vidbyte-sdk
+```
 
 ## Usage
 
@@ -15,6 +56,7 @@ from vidbyte import VidbyteSDK
 
 sdk = VidbyteSDK()
 sdk.harnesses
+sdk.paradigms
 sdk.agents
 sdk.tools
 sdk.providers
@@ -66,6 +108,14 @@ reply = await agent.arun("Draft a concise release note")
 
 For custom agents, pass an explicit `system_prompt`, model config, runner, and tools into `Agent` or `BaseAgent`.
 Semantic labels such as roles belong in agent metadata when callers need them.
+
+## Paradigm Harnesses
+
+`vidbyte.paradigms` reserves the SDK namespace for future thin runnable paradigm
+harnesses: high-level agentic engineering patterns that compose agents, tools,
+context, prompts, middleware, trace, pipelines, and evals into an opinionated
+execution loop. This release adds scaffolding only; no concrete paradigm
+harnesses ship yet.
 
 ## Context Objects
 
@@ -142,6 +192,26 @@ agent = Agent(
 )
 ```
 
+Two reasoning algorithms periodically pause a direct loop to reflect on the run
+so far. `problem_space_search` runs an explorer pass every N iterations
+(default 5) that surfaces angles the agent has not yet considered — blind spots,
+unexplored approaches, and next directions — and injects them as a bounded note.
+`error_correction` runs an auditor pass every N iterations (default 4) that
+treats the original system prompt as ground truth, flags context that
+contradicts it, prunes its own stale managed primitives, and writes a single
+authoritative correction notice. Both update the context window through managed
+primitives only; they never rewrite prior conversation history.
+
+```python
+agent = Agent(
+    name="repo-analyst",
+    system_prompt="Use tools when they help answer precisely.",
+    runner=my_runner,
+    tools=[lookup_metric],
+    algorithm=ContextWindow.preset.problem_space_search,  # or ContextWindow.preset.error_correction
+)
+```
+
 Per-call context can be supplied with `AgentInput` without mutating the agent's
 default context:
 
@@ -187,6 +257,43 @@ agent = Agent(
     runner=my_runner,
     trace=Trace.langfuse(public_key="...", secret_key="..."),
 )
+```
+
+For LangSmith, use `Trace.langsmith_default(...)` as the recommended
+single-agent preset. It emits `agent.run`, `llm.call`, and `tool.call` runs
+with LangSmith-native run types and includes prompt, tool schema, tool input,
+and output fields for browser inspection.
+
+```python
+agent = Agent(
+    name="observed-agent",
+    system_prompt="Work carefully.",
+    provider="openai",
+    model_name="gpt-4.1",
+    tools=[lookup_metric],
+    trace=Trace.langsmith_default(project="vidbyte-agents"),
+)
+```
+
+Multi-agent grouping into one LangSmith trace is handled separately by session
+tracing; `Trace.langsmith_default(...)` is the default single-agent preset.
+
+Use a session tracer when several agents should appear under one parent trace:
+
+```python
+from vidbyte import Agent, Trace
+
+trace = Trace.langsmith_session(
+    project="research",
+    default_name="research-run",
+    default_attributes={"run_id": run_id},
+)
+
+async with trace.session():
+    planner = Agent(name="planner", system_prompt="Plan the work.", runner=planner_runner, trace=trace)
+    writer = Agent(name="writer", system_prompt="Draft the answer.", runner=writer_runner, trace=trace)
+    await planner.arun("Plan the release note")
+    await writer.arun("Write the release note")
 ```
 
 `Trace.continual(...)` is a validated first-step capture preset for future
@@ -343,7 +450,7 @@ agent = Agent(
 )
 ```
 
-Subclass `AgentMiddleware` and override only the hooks you need, such as `before_run`, `before_iteration`, `before_model_call`, `after_model_response`, `on_model_error`, `before_tool_call`, `after_tool_call`, `after_iteration`, or `after_run`. Built-ins are available from `vidbyte.middleware.builtins`, including `TokenRateLimitMiddleware`, `RuntimeLimitMiddleware`, `ToolPolicyMiddleware`, `AuditLogMiddleware`, `ModelRetryMiddleware`, `ToolResultCompactionMiddleware`, `MessageHistoryCompactionMiddleware`, and `SummaryCompactionMiddleware`.
+Subclass `AgentMiddleware` and override only the hooks you need, such as `before_run`, `before_iteration`, `before_model_call`, `after_model_response`, `on_model_error`, `before_tool_call`, `after_tool_call`, `after_iteration`, or `after_run`. Built-ins are available from `vidbyte.middleware.builtins`, including `TokenBudgetMiddleware`, `TokenRateLimitMiddleware`, `RuntimeLimitMiddleware`, `ToolPolicyMiddleware`, `AuditLogMiddleware`, `ModelRetryMiddleware`, `ToolResultCompactionMiddleware`, `MessageHistoryCompactionMiddleware`, `SummaryCompactionMiddleware`, and `TraceReplacementCompactionMiddleware` (folds a continual-trace artifact back into history; e.g. `TraceReplacementCompactionMiddleware.keep_recent_tail(keep_last_groups=2)`). `TokenBudgetMiddleware(max_tokens=...)` is a hard cap by default; set `allow_final_response_over_budget=True` to permit one final over-budget model call with an injected instruction to answer immediately. This is separate from `Agent(max_tokens=...)`, which remains a runtime hard cap.
 
 Compaction middleware supports deterministic provider-message pruning without hidden model calls. Examples include `trim_to_token_budget`, `trim_with_provider_boundaries`, `delete_messages`, `tool_output_sliding_window`, `clear_tool_results_except`, `head_tail_tool_preview`, `scrub_bloat`, `summary_with_backrefs`, `selective_prune`, `salience_score_eviction`, `query_relevance_filter`, and `context_snapshot_branch_trim`.
 
@@ -717,6 +824,36 @@ Built-in graders cover common script-writing needs:
 | `LLMJudgeGrader` | Model-judged open-ended outputs using an injected judge runner. |
 | `RubricGrader` | Weighted rubric scoring using an injected judge runner. |
 
+Eval cases can also use prebuilt templates: reusable bundles made from one or
+more graders. `grader` remains the low-level escape hatch; when `grader` is not
+set, `templates` are resolved before the runner falls back to `default_grader`.
+
+```python
+from vidbyte.evals import EvalCase, EvalSuite, templates as T
+
+suite = EvalSuite("support-smoke", [
+    EvalCase(
+        prompt="What is our refund window?",
+        expected="30 days",
+        templates=(T.short_answer_fact(), T.safe_customer_support()),
+    ),
+    EvalCase(
+        prompt="Return routing JSON.",
+        expected={"category": "billing"},
+        templates=(T.structured_json(schema={
+            "type": "object",
+            "required": ["category"],
+            "properties": {"category": {"type": "string"}},
+        }),),
+    ),
+])
+```
+
+Built-in template bundles include `short_answer_fact`, `multiple_choice`,
+`structured_json`, `classification`, `numeric_answer`,
+`concise_grounded_answer`, and `safe_customer_support`. Custom templates can
+subclass `EvalTemplate` and return any `BaseGrader` from `build_grader()`.
+
 Suites can be loaded from JSON or CSV files and filtered by tags:
 
 ```python
@@ -725,6 +862,26 @@ from vidbyte.evals import EvalSuite
 suite = EvalSuite.from_json("evals/smoke.json")
 focused = suite.filter(["geography"])
 result = await runner.arun(focused)
+```
+
+JSON suites can specify templates by name or by name plus options:
+
+```json
+{
+  "name": "support-smoke",
+  "cases": [
+    {
+      "prompt": "Pick the best option.",
+      "expected": "B",
+      "templates": [
+        {
+          "name": "multiple_choice",
+          "options": { "choices": ["A", "B", "C", "D"] }
+        }
+      ]
+    }
+  ]
+}
 ```
 
 Use `EvalClient` through `VidbyteSDK.evals` when you want a convenience factory and
@@ -822,6 +979,7 @@ vidbyte/
 |-- harnesses/
 |   `-- client.py
 |-- mcp_server/
+|-- paradigms/
 |-- prompts/
 |   `-- prompts/
 |-- providers/
@@ -830,6 +988,7 @@ vidbyte/
 |-- trace/
 |   |-- base.py
 |   |-- debug.py
+|   |-- session.py
 |   `-- continual/
 |-- middleware/
 |   `-- builtins/

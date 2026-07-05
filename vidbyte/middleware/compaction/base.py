@@ -24,6 +24,7 @@ class CompactionMode(str, Enum):
     SUMMARIZE_BY_TOPIC_BLOCKS = "summarize_by_topic_blocks"
     TRUNCATE_TOOL_RESULTS = "truncate_tool_results"
     HIDE_TOOL_RESULTS = "hide_tool_results"
+    REPLACE_WITH_TRACE = "replace_with_trace"
     TRIM_TO_TOKEN_BUDGET = "trim_to_token_budget"
     TRIM_WITH_PROVIDER_BOUNDARIES = "trim_with_provider_boundaries"
     DELETE_MESSAGES_BY_ID_OR_RANGE = "delete_messages_by_id_or_range"
@@ -38,15 +39,15 @@ class CompactionMode(str, Enum):
     CONTEXT_SNAPSHOT_BRANCH_TRIM = "context_snapshot_branch_trim"
 
 
-TokenCounter = Callable[[str], int]
-
-
 class Summarizer(Protocol):
     """Protocol for optional async model-backed summarizers."""
 
     async def summarize(self, messages: Sequence[ContextMessage]) -> str:
         # Returns a compact summary of the supplied messages.
         ...
+
+
+TokenCounter = Callable[[str], int]
 
 
 @dataclass(frozen=True, slots=True)

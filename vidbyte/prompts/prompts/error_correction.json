@@ -1,0 +1,11 @@
+{
+  "name": "Error Correction",
+  "description": "Prompts used to audit and correct an agent context window.",
+  "key": "error_correction",
+  "prompts": {
+    "auditor": {
+      "path": "error_correction_auditor.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/error_correction_auditor.md"
+    }
+  }
+}

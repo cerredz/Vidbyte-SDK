@@ -178,6 +178,7 @@ class AgentRuntime:
         last_response: object | None = None
         last_assistant_output: str | None = None
         run_state: dict[type, Any] = {}
+        iteration_outputs: list[str] = []
 
         decision = await self.middleware.before_run(
             self._middleware_context(
@@ -290,7 +291,16 @@ class AgentRuntime:
                     model_response=last_response,
                 )
 
-            call_options = self._build_iteration_call_options(run_options, context, tool_schemas, messages, provider)
+            call_options = self._build_iteration_call_options(
+                run_options,
+                context,
+                tool_schemas,
+                messages,
+                provider,
+                iteration_count=iteration_count,
+                tokens_used=tokens_used,
+                tool_call_count=len(call_contexts),
+            )
             raw_result, model_call_count = await self._invoke_with_middleware(
                 handle,
                 message,
@@ -322,6 +332,8 @@ class AgentRuntime:
             last_response = raw_result
             iteration_count += 1
             last_assistant_output = handle.extract_text(raw_result)
+            iteration_outputs.append(last_assistant_output or "")
+            run_state["__iteration_outputs__"] = tuple(iteration_outputs)
             runner_metadata = dict(handle.extract_metadata(raw_result))
             tokens_used = self._add_token_usage(tokens_used, token_usage_from_response(raw_result, runner_metadata))
 
@@ -434,6 +446,9 @@ class AgentRuntime:
                     model_response=raw_result,
                 )
 
+            assistant_tool_msg = ToolsFormatter.format_assistant_tool_calls(raw_result, provider)
+            if assistant_tool_msg is not None:
+                messages.append(dict(assistant_tool_msg))
             for call in tool_calls:
                 processed = await self._process_tool_call(
                     call,
@@ -599,7 +614,15 @@ class AgentRuntime:
             llm_span = self._tracer.start_span(
                 "llm.call",
                 parent=trace_context,
-                **self._llm_trace_inputs(handle, message, current_call_options, provider, iteration_count, model_call_count, metadata),
+                **self._llm_trace_inputs(
+                    handle,
+                    message=message,
+                    call_options=current_call_options,
+                    provider=provider,
+                    iteration_count=iteration_count,
+                    model_call_count=model_call_count,
+                    metadata=metadata,
+                ),
             )
             try:
                 raw_result = await handle.invoke(message, **current_call_options)
@@ -638,6 +661,11 @@ class AgentRuntime:
                         ),
                         model_call_count,
                     )
+                raise
+            except BaseException as exc:
+                # Catches CancelledError and other BaseException subclasses so the
+                # llm.call span is always finalized before propagating.
+                self._tracer.end_span(llm_span, error=exc)
                 raise
 
     async def _finish_result(
@@ -688,9 +716,15 @@ class AgentRuntime:
         """Merge per-run metadata published by middleware (e.g. trace artifacts) into the result."""
         # Generic, feature-agnostic lift of run_state["__result_metadata__"]; no feature imports here.
         published = (run_state or {}).get("__result_metadata__")
-        if not isinstance(published, Mapping) or not published:
+        iteration_outputs = (run_state or {}).get("__iteration_outputs__")
+        extra: dict[str, Any] = {}
+        if isinstance(published, Mapping) and published:
+            extra.update(published)
+        if iteration_outputs is not None:
+            extra["iteration_outputs"] = iteration_outputs
+        if not extra:
             return result
-        metadata = {**dict(result.metadata), **dict(published)}
+        metadata = {**dict(result.metadata), **extra}
         return AgentResult(
             output=result.output,
             strategy_name=result.strategy_name,
@@ -789,32 +823,6 @@ class AgentRuntime:
         if not isinstance(raw_messages, Sequence) or isinstance(raw_messages, (str, bytes)):
             return ()
         return tuple(dict(message) for message in raw_messages if isinstance(message, Mapping))
-
-    def _llm_trace_inputs(self, handle: RunnerHandle, message: str, call_options: Mapping[str, Any], provider: str, iteration_count: int, model_call_count: int, metadata: Mapping[str, Any]) -> dict[str, Any]:
-        # Builds sanitized, inspectable model-call inputs for trace providers.
-        system = call_options.get("system")
-        messages = self._provider_messages_from_options(call_options)
-        visible_messages = self._provider_visible_trace_messages(system, messages, message)
-        tools = tuple(call_options.get("tools", ()) or ())
-        inputs: dict[str, Any] = {
-            "agent_name": self.agent_name,
-            "provider": provider,
-            "model": self._runner_model_name(handle.runner),
-            "iteration": iteration_count,
-            "model_call": model_call_count,
-            "prompt": self._safe_trace_value(message),
-            "metadata": self._safe_trace_value(metadata),
-            "messages": self._safe_trace_value(visible_messages),
-            "input_messages": self._safe_trace_value(visible_messages),
-        }
-        if system is not None:
-            inputs["system"] = self._safe_trace_value(str(system))
-        if messages:
-            inputs["history_messages"] = self._safe_trace_value(messages)
-        if tools:
-            inputs["tool_count"] = len(tools)
-            inputs["tool_names"] = tuple(str(tool.get("name") or tool.get("function", {}).get("name") or "") for tool in tools if isinstance(tool, Mapping))
-        return inputs
 
     def _provider_visible_trace_messages(self, system: object | None, messages: Sequence[Mapping[str, Any]], prompt: str) -> tuple[Mapping[str, Any], ...]:
         # Mirrors the provider-visible message order for trace inspection.
@@ -952,10 +960,16 @@ class AgentRuntime:
         trace_context: SpanContext | None = None,
     ) -> tuple[ToolCallContext, ToolResult]:
         """Resolve, authorize, validate, execute, and record one tool call."""
+        tool_input = _safe_trace_value(dict(call.arguments))
         tool_span = self._tracer.start_span(
             "tool.call",
             parent=trace_context,
             tool_name=call.tool_name,
+            tool_input=tool_input,
+            arguments=tool_input,
+            call_id=call.call_id,
+            provider=provider,
+            metadata=_safe_trace_mapping(call.metadata),
         )
         try:
             tool = self._get_tool(call)
@@ -1104,10 +1118,75 @@ class AgentRuntime:
         """Pop and normalize the initial messages list from run options."""
         return [dict(item) for item in run_options.pop("messages", ())]
 
-    def _build_iteration_call_options(self, run_options: dict[str, Any], context: BaseAgentContext, tool_schemas: Sequence[dict[str, Any]], messages: list[dict[str, Any]], provider: str = "") -> dict[str, Any]:
-        """Assemble per-iteration call options with system prompt, primitives zone, tools, messages, and response format."""
+    def _llm_trace_inputs(self, handle: RunnerHandle, message: str, call_options: Mapping[str, Any], provider: str, iteration_count: int, model_call_count: int, metadata: Mapping[str, Any]) -> dict[str, Any]:
+        # Build useful, bounded tracing inputs for the model-call child span.
+        system = call_options.get("system")
+        messages = list(call_options.get("messages") or [])
+        tools = call_options.get("tools")
+        safe_prompt = _trace_text(message)
+        # Build a full chat-style messages list so LangSmith renders system prompt and user
+        # prompt alongside the conversation context in the LLM call view.
+        trace_messages: list[dict[str, Any]] = []
+        if system is not None:
+            trace_messages.append({"role": "system", "content": _trace_text(system)})
+        trace_messages.extend(_safe_trace_value(messages))
+        trace_messages.append({"role": "user", "content": safe_prompt})
+        safe_messages = tuple(trace_messages)
+        inputs: dict[str, Any] = {
+            "agent_name": self.agent_name,
+            "provider": provider,
+            "model": self._runner_model_name(handle.runner),
+            "iteration": iteration_count,
+            "model_call": model_call_count,
+            "prompt": safe_prompt,
+            "user_prompt": safe_prompt,
+            "messages": safe_messages,
+            "input_messages": safe_messages,
+            "metadata": _safe_trace_mapping(metadata),
+        }
+        if system is not None:
+            safe_system = _trace_text(system)
+            inputs["system"] = safe_system
+            inputs["system_prompt"] = safe_system
+        if tools:
+            tool_list = list(tools)
+            inputs["tools"] = _safe_trace_value(tool_list)
+            inputs["tool_names"] = tuple(str(tool.get("name", "")) for tool in tool_list if isinstance(tool, Mapping) and tool.get("name"))
+            inputs["tool_count"] = len(tool_list)
+        if messages:
+            inputs["history_messages"] = _safe_trace_value(messages)
+        inputs["context_window_summary"] = (
+            f"system={len(system) if system else 0}chars, "
+            f"messages={len(messages)}, "
+            f"tools={len(list(tools)) if tools else 0}"
+        )
+        return inputs
+
+    @staticmethod
+    def _runner_model_name(runner: object) -> str | None:
+        config = getattr(runner, "_config", None)
+        model = getattr(config, "model", None)
+        if model is not None:
+            return str(model)
+        model_name = getattr(runner, "model_name", None)
+        if callable(model_name):
+            try:
+                return str(model_name())
+            except Exception:
+                return None
+        if model_name is not None:
+            return str(model_name)
+        return None
+
+    def _build_iteration_call_options(self, run_options: dict[str, Any], context: BaseAgentContext, tool_schemas: Sequence[dict[str, Any]], messages: list[dict[str, Any]], provider: str = "", *, iteration_count: int = 0, tokens_used: int | None = None, tool_call_count: int = 0) -> dict[str, Any]:
+        """Assemble per-iteration call options with system prompt, loop settings, primitives zone, tools, messages, and response format."""
         call_options = dict(run_options)
-        system = self._build_system_string(context)
+        loop_settings_block = self._render_loop_settings_block(
+            iteration_count=iteration_count,
+            tokens_used=tokens_used,
+            tool_call_count=tool_call_count,
+        )
+        system = self._build_system_string(context, loop_settings_block=loop_settings_block)
         call_options.setdefault("system", system)
         if tool_schemas:
             call_options.setdefault("tools", tool_schemas)
@@ -1129,13 +1208,38 @@ class AgentRuntime:
         end = self.context_manager.render_conversation_messages(ContextWindowPlacement.END_OF_CONVERSATION)
         return (*top, *tuple(messages), *end)
 
-    def _build_system_string(self, context: BaseAgentContext) -> str:
-        """Assemble the system string with fixed header, primitives zone, and body in order."""
+    def _build_system_string(self, context: BaseAgentContext, *, loop_settings_block: str = "") -> str:
+        """Assemble the system string with fixed header, loop settings, primitives zone, and body in order."""
+        # loop_settings_block is placed directly after the fixed system-prompt header so the agent
+        # always sees its live loop budgets (current usage / configured limit) near the top of context.
         fixed = context.build_context_fixed()
         primitives_zone = self.context_manager.render_primitives_zone() if self.context_manager else ""
         body = context.build_context_body()
-        parts = [p for p in (fixed, primitives_zone, body) if p]
+        parts = [p for p in (fixed, loop_settings_block, primitives_zone, body) if p]
         return "\n\n".join(parts)
+
+    def _render_loop_settings_block(self, *, iteration_count: int, tokens_used: int | None, tool_call_count: int) -> str:
+        """Render the agent-loop-settings context block as 'current usage / configured limit' lines.
+
+        Only the budgets that are both numerically calculable and tracked by the runtime loop are
+        injected (max_iterations, max_tokens, max_tool_calls). Settings without a live runtime
+        measurement (max_retries, timeout_seconds, allowed_tools, etc.) are intentionally excluded.
+        Returns an empty string when no relevant budget is configured.
+        """
+        lines: list[str] = []
+        if self.config.max_iterations is not None:
+            lines.append(f"- max_iterations: {iteration_count}/{self.config.max_iterations}")
+        if self.config.max_tokens is not None:
+            lines.append(f"- max_tokens: {tokens_used or 0}/{self.config.max_tokens}")
+        if self.config.max_tool_calls is not None:
+            lines.append(f"- max_tool_calls: {tool_call_count}/{self.config.max_tool_calls}")
+        if not lines:
+            return ""
+        header = (
+            "Below are your agent loop settings, shown as current usage / configured limit. "
+            "Stay within these limits:"
+        )
+        return header + "\n" + "\n".join(lines)
 
     def _final_result(
         self,
@@ -1302,6 +1406,14 @@ class AgentRuntime:
                 tokens_used=tokens_used,
                 contexts=contexts,
             )
+        if self.config.max_tool_calls is not None and len(contexts) >= self.config.max_tool_calls:
+            return self._stopped_result(
+                "Agent runtime stopped after reaching max_tool_calls.",
+                stop_reason=AgentStopReason.MAX_TOOL_CALLS,
+                iteration_count=iteration_count,
+                tokens_used=tokens_used,
+                contexts=contexts,
+            )
         return None
 
     def _stopped_result(
@@ -1350,6 +1462,36 @@ class AgentRuntime:
         if delta is None:
             return current
         return (current or 0) + delta
+
+
+def _trace_text(value: object, *, max_chars: int = 12000) -> str:
+    # Keep trace payloads useful without letting very large prompts dominate requests.
+    text = str(value)
+    if len(text) <= max_chars:
+        return text
+    return f"{text[:max_chars]}...[truncated]"
+
+
+def _safe_trace_mapping(metadata: Mapping[str, Any] | None) -> dict[str, Any]:
+    # Removes env/credential-like fields before sending user metadata to tracing backends.
+    safe: dict[str, Any] = {}
+    for key, value in dict(metadata or {}).items():
+        key_text = str(key)
+        upper = key_text.upper()
+        if upper.startswith("LANGSMITH_") or any(token in upper for token in ("API_KEY", "TOKEN", "SECRET", "PASSWORD", "CREDENTIAL", "AUTH")):
+            continue
+        safe[key_text] = _safe_trace_value(value)
+    return safe
+
+
+def _safe_trace_value(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return _safe_trace_mapping(value)
+    if isinstance(value, (list, tuple)):
+        return tuple(_safe_trace_value(item) for item in value)
+    if isinstance(value, str):
+        return _trace_text(value)
+    return value
 
 
 __all__ = ["AgentRuntime"]

@@ -39,9 +39,17 @@ vidbyte/
 |   `-- prompts/
 |-- providers/
 |   `-- client.py
+|-- sources/
+|   |-- base.py
+|   |-- cache/
+|   |-- fetches/
+|   |-- loaders/
+|   |-- llms_txt/
+|   `-- regex/
 |-- trace/
 |   |-- base.py
 |   |-- debug.py
+|   |-- session.py
 |   `-- continual/
 |-- pipelines/
 |   |-- base.py
@@ -79,11 +87,15 @@ vidbyte/
 - Follow `skills/vidbyte-sdk/adding-context-window-algorithms.md` when adding or changing attached context-window algorithms.
 - Keep prompt templates in `vidbyte/prompts/prompts/` and expose them through `vidbyte.prompts.Prompts` plus `vidbyte.lib.enums.prompts.Prompt`; follow the JSON-descriptor-plus-Markdown format in `skills/vidbyte-sdk/adding-prompts.md` for new large prompt assets.
 - Follow `skills/vidbyte-sdk/adding-prompts.md` whenever adding or changing prompt assets.
+- Keep artifact source loaders under `vidbyte/sources/` and follow `skills/sources/SKILL.md`; source dataclasses belong in `vidbyte/lib/dataclasses/sources.py`, enums in `vidbyte/lib/enums/sources.py`, and constants in `vidbyte/lib/config/sources.py`.
 - Keep the public `Trace` tracer client and helper factories in `vidbyte/trace/base.py`.
+- Prefer `Trace.langsmith_default(...)` for user-facing single-agent LangSmith examples; keep it as a facade helper over the existing LangSmith provider adapter.
 - Keep concrete debug tracing implementation in `vidbyte/trace/debug.py`.
+- Keep provider-neutral session tracing wrappers in `vidbyte/trace/session.py`.
 - Keep continual tracing presets and future continual trace memory work under `vidbyte/trace/continual/`.
 - Keep provider-neutral tracer protocols under `vidbyte/lib/tracing/`.
 - Keep external tracing provider adapters under `vidbyte/providers/tracing/`.
+- Keep provider-neutral trace payload enrichment such as `llm.call` and `tool.call` input fields in `vidbyte/agents/runtime.py`.
 - Keep enum presets under `vidbyte/lib/enums/`.
 - Keep internal library helpers under `vidbyte/lib/`.
 - Keep SDK dataclass definitions under `vidbyte/lib/dataclasses/`; package-local type modules should re-export those contracts when stable imports are needed.
@@ -111,3 +123,5 @@ vidbyte/
 - Custom middleware should subclass `AgentMiddleware` and override only needed lifecycle hooks. Middleware should return `MiddlewareDecision` values instead of mutating runtime state directly.
 - Concrete `TextModelRunner`, `ImageModelRunner`, and `VideoModelRunner` classes are internal/advanced implementation details in user-facing docs. Prefer `Agent`/`BaseAgent` or harness composition in examples.
 - Do not add provider network calls, remote protocol transports, or private Vidbyte service logic without a separate approved design.
+- Keep agent behavior predicates under `vidbyte/evals/behavior/` with one category file per
+  behavior group and the `Behavior` facade composing them. Follow `skills/vidbyte-sdk/agent-behavior.md`.

@@ -20,6 +20,7 @@ from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
 from vidbyte.agents.mixins import McpAttachableMixin
+from vidbyte.agents.settings import AgentLoopSettings
 from vidbyte.agents.types import AgentCard, AgentInput, AgentMessage
 from vidbyte.context.manager import ContextManager
 from vidbyte.context.window import ContextWindow, ContextWindowAlgorithm
@@ -27,6 +28,7 @@ from vidbyte.context.primitives import ContextItem
 from vidbyte.context.handoff import Handoff, MinimalHandoff
 from vidbyte.lib.agents import ModalityDetector
 from vidbyte.lib.dataclasses.agents import AgentMetadata, AgentRunnerConfig, AgentRuntimeConfig
+from vidbyte.lib.dataclasses.multi_agent import AggregateConfig, ProposerSpec
 from vidbyte.lib.dataclasses.runner import RunnerHandle
 from vidbyte.lib.dataclasses.sessions import SESSION_SCHEMA_VERSION, RunState
 from vidbyte.lib.dataclasses.strategies import AgentResult
@@ -61,6 +63,7 @@ class BaseAgent(McpAttachableMixin):
         runners: Mapping[ModelModality | str, object] | None = None,
         tools: Sequence[object] | Tools = (),
         permission_policy: PermissionPolicy | None = None,
+        agent_loop_settings: AgentLoopSettings | None = None,
         max_tool_rounds: int | None = None,
         max_iterations: int | None = None,
         max_tokens: int | None = None,
@@ -69,7 +72,10 @@ class BaseAgent(McpAttachableMixin):
         middleware: Sequence[AgentMiddleware] = (),
         api_key: str | None = None,
         provider: ModelProvider | str | None = None,
-        model_name: str | None = None,
+        model_name: str | Sequence[str] | None = None,
+        proposers: Sequence[Any] | None = None,
+        aggregator: Any | None = None,
+        aggregate: AggregateConfig | None = None,
         modality: ModelModality | str = ModelModality.AUTO,
         temperature: float | None = None,
         run_id: str | None = None,
@@ -123,9 +129,23 @@ class BaseAgent(McpAttachableMixin):
                         "which does not support in-context learning algorithms."
                     )
 
+        provider_str = str(provider.value if isinstance(provider, ModelProvider) else provider) if provider is not None else None
+        self._aggregate_agent: BaseAgent | None = None
+        self._aggregate_plan, model_name = self._resolve_aggregate_plan(model_name, provider_str, proposers, aggregator, aggregate)
+        if self._aggregate_plan is not None and self.runtime_type in (
+            AgentRuntimeType.MCTS_SEARCH,
+            AgentRuntimeType.ACTOR_MODEL,
+            AgentRuntimeType.ACTOR_MODEL_P2P,
+            AgentRuntimeType.ACTOR_MODEL_BROADCAST,
+        ):
+            raise ConfigurationError(
+                f"Agent {name} uses non-linear runtime {self.runtime_type.value}, "
+                "which does not support multi-model aggregation."
+            )
+
         self.runner_config = AgentRunnerConfig(
             api_key=api_key,
-            provider=str(provider.value if isinstance(provider, ModelProvider) else provider) if provider is not None else None,
+            provider=provider_str,
             model_name=model_name,
             modality=modality,
             temperature=temperature,
@@ -143,13 +163,15 @@ class BaseAgent(McpAttachableMixin):
         self.tools = tools if isinstance(tools, Tools) else self._catalog_from_agent_tools(self._agent_tool_items)
         self.permission_policy = permission_policy or PermissionPolicy()
         effective_max_iterations = max_iterations if max_iterations is not None else max_tool_rounds
-        self.runtime_config = AgentRuntimeConfig(
+        self.agent_loop_settings = self._resolve_loop_settings(
+            agent_loop_settings,
             max_iterations=effective_max_iterations,
             max_tokens=max_tokens,
             compaction_trigger_tokens=compaction_trigger_tokens,
             compaction_target_tokens=compaction_target_tokens,
         )
-        self.max_tool_rounds = effective_max_iterations
+        self.runtime_config = self.agent_loop_settings.to_runtime_config()
+        self.max_tool_rounds = self.agent_loop_settings.max_iterations
         self.system_prompt = system_prompt
         self.middleware = tuple(middleware)
         self.description = description or "General purpose agent."
@@ -165,10 +187,12 @@ class BaseAgent(McpAttachableMixin):
         self._active_prompt: str = ""
         self._handoff_spec: Handoff | None = handoff
         self.last_handoff: Handoff | None = None
+        self.handoffs: list[Handoff] = []
         self._trace_option: TraceOption | None = trace_option
         self.last_trace: dict[str, Any] | None = None
         self.last_prompt: str = ""
         self.last_reply: AgentMessage | None = None
+        self._behavior_view: Any = None
         for _tool in self._agent_tool_items:
             self._bind_agent_tool_context(_tool)
 
@@ -178,9 +202,84 @@ class BaseAgent(McpAttachableMixin):
         self._mcp_handles = []
         self._pending_mcp_configs = []
 
+        if self._aggregate_plan is not None:
+            self._aggregate_agent = self._build_aggregate_agent()
+
+    def _resolve_aggregate_plan(self, model_name: str | Sequence[str] | None, provider_str: str | None, proposers: Sequence[Any] | None, aggregator: Any | None, aggregate: AggregateConfig | None) -> tuple[dict[str, Any] | None, str | None]:
+        # Detects a multi-model aggregation request and returns (plan_or_None, normalized single host model name).
+        is_sequence = isinstance(model_name, (list, tuple)) and not isinstance(model_name, str)
+        if proposers:
+            specs = list(proposers)
+            host_model = model_name if isinstance(model_name, str) else None
+        elif is_sequence and len(model_name) >= 2:
+            if not provider_str:
+                raise ConfigurationError("A list of model names requires a provider for multi-model aggregation.")
+            specs = [ProposerSpec(provider=provider_str, model=str(m)) for m in model_name]
+            host_model = str(model_name[0])
+        else:
+            normalized = str(model_name[0]) if is_sequence and len(model_name) == 1 else (None if is_sequence else model_name)
+            return None, normalized
+        plan = {
+            "proposers": specs,
+            "aggregator": aggregator,
+            "config": aggregate,
+            "provider": provider_str,
+            "model": host_model or self._first_spec_model(specs),
+        }
+        return plan, None
+
+    def _build_aggregate_agent(self) -> BaseAgent:
+        # Constructs the internal AggregateAgent that generate_reply delegates to when a plan is present.
+        from vidbyte.agents.aggregation import AggregateAgent
+        plan = self._aggregate_plan or {}
+        return AggregateAgent(
+            name=self.name,
+            system_prompt=self.system_prompt,
+            proposers=plan["proposers"],
+            aggregator=plan["aggregator"],
+            config=plan["config"],
+            provider=plan["provider"],
+            model_name=plan["model"],
+            api_key=self.runner_config.api_key,
+            agent_metadata=self.agent_metadata,
+            tools=self._agent_tool_items,
+            middleware=self.middleware,
+            temperature=self.runner_config.temperature,
+            metadata=dict(self.metadata),
+            tracer=self._tracer,
+        )
+
+    @staticmethod
+    def _first_spec_model(specs: Sequence[Any]) -> str | None:
+        # Returns the model name of the first proposer that is a ProposerSpec or (provider, model) tuple.
+        for spec in specs:
+            if isinstance(spec, ProposerSpec):
+                return spec.model
+            if isinstance(spec, tuple) and len(spec) >= 2 and isinstance(spec[1], str):
+                return spec[1]
+        return None
+
     @classmethod
     def from_run_id(cls, run_id: str, *, name: str, system_prompt: str, **kwargs: Any) -> BaseAgent:
         return cls(name=name, system_prompt=system_prompt, run_id=run_id, **kwargs)
+
+    @staticmethod
+    def _resolve_loop_settings(agent_loop_settings: AgentLoopSettings | None, *, max_iterations: int | None, max_tokens: int | None, compaction_trigger_tokens: int | None, compaction_target_tokens: int | None) -> AgentLoopSettings:
+        # Resolves the final AgentLoopSettings from either a pre-built object or flat kwargs.
+        flat_params = {
+            "max_iterations": max_iterations,
+            "max_tokens": max_tokens,
+            "compaction_trigger_tokens": compaction_trigger_tokens,
+            "compaction_target_tokens": compaction_target_tokens,
+        }
+        active_flat = {k: v for k, v in flat_params.items() if v is not None}
+        if agent_loop_settings is not None and active_flat:
+            raise ConfigurationError(
+                f"Pass either agent_loop_settings= or individual loop params ({', '.join(active_flat)}), not both."
+            )
+        if agent_loop_settings is not None:
+            return agent_loop_settings
+        return AgentLoopSettings(**flat_params)
 
     @staticmethod
     def _resolve_tracer(tracer: type[TracerBase] | TracerBase | None, trace: type[TracerBase] | TracerBase | None) -> TracerBase:
@@ -237,14 +336,26 @@ class BaseAgent(McpAttachableMixin):
 
         return AgentTool(self)
 
+    @property
+    def behavior(self) -> Any:
+        # Lazily builds and caches a Behavior facade over the agent's last run.
+        from vidbyte.evals.behavior import Behavior
+
+        if self._behavior_view is None:
+            self._behavior_view = Behavior(self)
+        return self._behavior_view
+
     def _bind_agent_tool_context(self, tool: object) -> None:
         """Bind this agent's live context getter to AgentTool instances."""
         from vidbyte.tools.agent_tool import AgentTool
+        from vidbyte.tools.builtins.handoff import CreateHandoffTool
         from vidbyte.tools.builtins.mcp import AttachMcpServerTool
 
         if isinstance(tool, AgentTool):
             tool.bind_context_getter(lambda: (self._active_prompt, list(self.history)))
         if isinstance(tool, AttachMcpServerTool):
+            tool.bind_agent(self)
+        if isinstance(tool, CreateHandoffTool):
             tool.bind_agent(self)
 
     def tool_specs(self) -> tuple[ToolSpec, ...]:
@@ -272,10 +383,7 @@ class BaseAgent(McpAttachableMixin):
             runners=runners if runners is not None else self.runners,
             tools=self._agent_tool_items if tools is None else tools,
             permission_policy=self.permission_policy,
-            max_tool_rounds=self.max_tool_rounds,
-            max_tokens=self.runtime_config.max_tokens,
-            compaction_trigger_tokens=self.runtime_config.compaction_trigger_tokens,
-            compaction_target_tokens=self.runtime_config.compaction_target_tokens,
+            agent_loop_settings=self.agent_loop_settings,
             middleware=self.middleware if middleware is None else middleware,
             system_prompt=self.system_prompt if system_prompt is None else system_prompt,
             api_key=self.runner_config.api_key,
@@ -407,6 +515,8 @@ class BaseAgent(McpAttachableMixin):
         recipient: str = "orchestrator",
         **options: Any,
     ) -> AgentMessage:
+        if self._aggregate_agent is not None:
+            return await self._aggregate_agent.generate_reply(message, recipient=recipient, **options)
         await self._ensure_mcp_connected()
         trace_ctx = None
         try:
@@ -414,6 +524,7 @@ class BaseAgent(McpAttachableMixin):
             prompt, input_modality, input_metadata = self._normalize_input(message)
             input_context_items, input_context_manager = self._normalize_input_context(message)
             self._active_prompt = prompt
+            self._behavior_view = None
             selected_modality = ModalityDetector.resolve(
                 requested=modality,
                 input_modality=input_modality,
@@ -429,6 +540,8 @@ class BaseAgent(McpAttachableMixin):
                 agent_name=self.name,
                 strategy="direct",
                 prompt=self._safe_trace_value(prompt),
+                system_prompt=self._safe_trace_value(self.system_prompt),
+                tools=self._safe_trace_value(self._trace_tool_specs()),
                 provider=self._runner_provider(runner),
                 model=self._runner_model_name(runner),
                 metadata=self._safe_trace_value({**self.metadata, **dict(input_metadata), **trace_metadata}),
@@ -453,7 +566,7 @@ class BaseAgent(McpAttachableMixin):
                 **options,
             )
             if trace_ctx is not None:
-                self._tracer.end_trace(trace_ctx, output=result.output)
+                self._tracer.end_trace(trace_ctx, output=_format_trace_output(result))
         except Exception as exc:
             if trace_ctx is not None:
                 self._tracer.end_trace(trace_ctx, error=exc)
@@ -462,6 +575,13 @@ class BaseAgent(McpAttachableMixin):
                 f"Agent '{self.name}' failed to generate a reply.",
                 details={"agent": self.name, "error_type": type(exc).__name__},
             ) from exc
+        except BaseException as exc:
+            # Catches CancelledError and other BaseException subclasses that bypass
+            # the Exception handler, ensuring the root trace is always finalized.
+            if trace_ctx is not None:
+                self._tracer.end_trace(trace_ctx, error=exc)
+            self._active_prompt = ""
+            raise
         self._active_prompt = ""
         metadata: dict[str, Any] = {
             "strategy": result.strategy_name,
@@ -499,6 +619,22 @@ class BaseAgent(McpAttachableMixin):
             return asyncio.run(self.generate_reply(message, **options))
         raise AgentExecutionError("BaseAgent.run() cannot be called from an active event loop; use await arun().")
 
+    async def arun_sequentially(self, prompts: Sequence[str | AgentInput], **options: Any) -> list[AgentMessage]:
+        # Runs each prompt through generate_reply in order, preserving self.history across all calls.
+        results: list[AgentMessage] = []
+        for prompt in prompts:
+            reply = await self.generate_reply(prompt, **options)
+            results.append(reply)
+        return results
+
+    def run_sequentially(self, prompts: Sequence[str | AgentInput], **options: Any) -> list[AgentMessage]:
+        # Synchronous entry point for sequential prompt execution; mirrors run()'s event-loop guard.
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return asyncio.run(self.arun_sequentially(prompts, **options))
+        raise AgentExecutionError("BaseAgent.run_sequentially() cannot be called from an active event loop; use await arun_sequentially().")
+
     async def handoff(self, spec: Handoff | None = None, *, by: "BaseAgent | None" = None) -> Handoff:
         """Produce a structured handoff document describing this agent's most recent run."""
         from vidbyte.agents.handoff import HandoffAgent
@@ -506,12 +642,27 @@ class BaseAgent(McpAttachableMixin):
         generator = by or HandoffAgent.from_source_agent(self, resolved)
         return await generator.generate_handoff(HandoffAgent.render_source_run(self))
 
+    def record_handoff(self, handoff: Handoff) -> None:
+        """Append a produced handoff to the run's collection and sync it to the context registry."""
+        self.handoffs.append(handoff)
+        self.last_handoff = handoff
+        self._sync_handoff_primitive(handoff)
+
+    def _sync_handoff_primitive(self, handoff: Handoff) -> None:
+        """Upsert the handoff into the context manager when one is configured and an id exists."""
+        if self.context_manager is None or not handoff.primitive_id:
+            return
+        try:
+            self.context_manager.upsert(handoff)
+        except ValueError:
+            return
+
     async def _run_auto_handoff(self, metadata: dict[str, Any]) -> None:
         # Generate the configured handoff after a run and record it without breaking the primary reply.
         from vidbyte.agents.handoff import HandoffAgent
         try:
             produced = await HandoffAgent.run_auto_handoff(self, self._handoff_spec)
-            self.last_handoff = produced
+            self.record_handoff(produced)
             metadata["handoff"] = produced
         except Exception as exc:
             metadata["handoff_error"] = repr(exc)
@@ -899,3 +1050,99 @@ class BaseAgent(McpAttachableMixin):
             if name:
                 return str(name)
         return tool.__class__.__name__
+
+    def _trace_tool_specs(self) -> list[dict[str, Any]]:
+        """Build a list of full tool specs (name, description, parameters) for tracing."""
+        try:
+            builtin_specs = self.tools.specs()
+        except Exception:
+            builtin_specs = ()
+        result: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for spec in builtin_specs:
+            name = getattr(spec, "name", None)
+            if name and name not in seen:
+                seen.add(name)
+                result.append(self._tool_spec_to_dict(spec))
+        for tool in self._agent_tool_items:
+            name = self._tool_name(tool)
+            if name in seen:
+                continue
+            seen.add(name)
+            spec_attr = getattr(tool, "spec", None)
+            if spec_attr is not None:
+                try:
+                    real_spec = spec_attr() if callable(spec_attr) else spec_attr
+                    result.append(self._tool_spec_to_dict(real_spec))
+                    continue
+                except Exception:
+                    pass
+            result.append({"name": name})
+        return result
+
+    @staticmethod
+    def _tool_spec_to_dict(spec: object) -> dict[str, Any]:
+        """Convert a ToolSpec-like object to a dict safe for trace backends."""
+        entry: dict[str, Any] = {}
+        entry["name"] = getattr(spec, "name", "")
+        entry["description"] = getattr(spec, "description", "")
+        params = getattr(spec, "parameters", ())
+        if params:
+            entry["parameters"] = [
+                {"name": getattr(p, "name", ""), "type": getattr(p, "type", ""),
+                 "description": getattr(p, "description", ""), "required": getattr(p, "required", False)}
+                for p in params
+            ]
+        return entry
+
+
+def _trace_text(value: object, *, max_chars: int = 12000) -> str:
+    # Keep trace payloads useful without letting very large prompts dominate requests.
+    text = str(value)
+    if len(text) <= max_chars:
+        return text
+    return f"{text[:max_chars]}...[truncated]"
+
+
+def _safe_trace_mapping(metadata: Mapping[str, Any] | None) -> dict[str, Any]:
+    # Removes env/credential-like fields before sending user metadata to tracing backends.
+    safe: dict[str, Any] = {}
+    for key, value in dict(metadata or {}).items():
+        key_text = str(key)
+        upper = key_text.upper()
+        if upper.startswith("LANGSMITH_") or any(token in upper for token in ("API_KEY", "TOKEN", "SECRET", "PASSWORD", "CREDENTIAL", "AUTH")):
+            continue
+        safe[key_text] = _safe_trace_value(value)
+    return safe
+
+
+def _safe_trace_value(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return _safe_trace_mapping(value)
+    if isinstance(value, (list, tuple)):
+        return tuple(_safe_trace_value(item) for item in value)
+    if isinstance(value, str):
+        return _trace_text(value)
+    return value
+
+
+def _format_trace_output(result: Any) -> str:
+    """Format agent.run output for tracing: wraps each agentic loop iteration in XML tags.
+
+    When iteration_outputs are present in result metadata, produces:
+        <iteration_1>...<iteration_1>
+        <iteration_2>...<iteration_2>
+        ...
+    This makes the full agentic loop visible in LangSmith instead of only the final output.
+    Falls back to result.output when no iteration data is available (e.g. single-shot agents).
+    """
+    iteration_outputs = None
+    metadata = getattr(result, "metadata", None)
+    if isinstance(metadata, Mapping):
+        iteration_outputs = metadata.get("iteration_outputs")
+    if not iteration_outputs:
+        return str(getattr(result, "output", result) or "")
+    return "\n".join(
+        f"<iteration_{i + 1}>\n{out}\n</iteration_{i + 1}>"
+        for i, out in enumerate(iteration_outputs)
+    )

@@ -22,6 +22,7 @@ Agents own their execution context: tools, runtime, context-window algorithm, mi
 | **Middleware** | Deterministic runtime policy code injected into the agent loop; not model-visible | `AgentMiddleware`, `MiddlewareDecision`, built-in middleware under `vidbyte/middleware/builtins/` |
 | **Prompt** | Repository-backed text assets, enum-keyed, importable as constants | `Prompts`, `Prompt`, direct string imports |
 | **Context** | Runtime budget, permissions, history, artifacts per agent execution | `BaseContext`, `ContextBudget`, `ContextPermissions` |
+| **Sources** | Deterministic artifact-to-context loaders for public documents such as `llms.txt` | `Source`, `DocumentSource`, `LlmsTxtSource`, `ArtifactRef`, `Selection` |
 | **Provider** | Model provider adapters (OpenAI, Anthropic, Gemini, xAI, DeepSeek, GLM, MiniMax, OpenRouter, ElevenLabs, PlayAI) | `ModelProvider`, provider adapters |
 
 ## Core Use Cases
@@ -30,6 +31,7 @@ Agents own their execution context: tools, runtime, context-window algorithm, mi
 - **Swappable runtimes**: Run an agent under a linear loop, an MCTS tree search, or an actor-model swarm via `runtime=...`.
 - **Pipelined workflows**: Chain agents sequentially, run them in parallel, route conditionally, or fan-out/fan-in with map-reduce.
 - **Context-window algorithms**: Attach runtime behaviors like reflexion retries or trajectory checkpoints via `algorithm=ContextWindow.preset.<name>`.
+- **Artifact sources**: Turn public, pinned documents such as `llms.txt` into `DocumentContextItem` primitives via `vidbyte.sources`.
 - **Handoffs**: Produce structured handoff documents so another agent (or human) can continue work cold.
 - **Middleware injection**: Inject deterministic runtime policies (budgets, guardrails, security, context compaction) via `middleware=[...]` on agents.
 - **MCP integration**: Attach external MCP servers as tools to any agent.
@@ -123,6 +125,8 @@ For step-by-step instructions on specific SDK operations, see the usage skill fi
 | Create Pipeline | [`skills/usage/create_pipeline.md`](../usage/create_pipeline.md) | Sequential, parallel, conditional, map-reduce pipelines, nesting |
 | Available Tools | [`skills/usage/available_tools.md`](../usage/available_tools.md) | Complete catalog of built-in tools (code search, filesystem, context primitives, memory, MCP) |
 | Available Features | [`skills/usage/available_features.md`](../usage/available_features.md) | Runtimes, pipelines, middleware, modalities, budgets, providers, MCP, prompts |
+| Agent Behavior | [`skills/usage/agent-behavior.md`](../usage/agent-behavior.md) | Post-run behavior predicates via `agent.behavior`, `PredicateGrader` in eval suites |
+| Artifact Sources | [`skills/sources/SKILL.md`](../sources/SKILL.md) | Source loaders, fetchers, caches, regex helpers, and trust boundaries |
 
 ## SDK Developer Reference
 
@@ -138,6 +142,8 @@ For step-by-step instructions on specific SDK operations, see the usage skill fi
 | Context Primitives | [`skills/vidbyte-sdk/context-primitives.md`](../vidbyte-sdk/context-primitives.md) | Context primitives package, `ContextManager`, and context tools |
 | Memory Tools | [`skills/vidbyte-sdk/memory-tools.md`](../vidbyte-sdk/memory-tools.md) | Cognee, Letta, Mem0, Supermemory, Zep memory tools |
 | Evals | [`skills/vidbyte-sdk/evals.md`](../vidbyte-sdk/evals.md) | Eval suites, graders, and runner |
+| Agent Behavior | [`skills/vidbyte-sdk/agent-behavior.md`](../vidbyte-sdk/agent-behavior.md) | Post-run behavior predicates (`agent.behavior`), `RunProbe`, `PredicateGrader` |
+| Artifact Sources | [`skills/sources/SKILL.md`](../sources/SKILL.md) | Source package layout, parser/fetch/cache conventions, and verification |
 | Adding Prompts | [`skills/vidbyte-sdk/adding-prompts.md`](../vidbyte-sdk/adding-prompts.md) | How to add prompt JSON assets, enums, and imports |
 | Full SDK Reference | [`skills/vidbyte-sdk-doc/SKILL.md`](../vidbyte-sdk-doc/SKILL.md) | Exhaustive reference for all subsystems |
 
@@ -181,7 +187,16 @@ vidbyte/
 |-- trace/
 |   |-- base.py
 |   |-- debug.py
+|   |-- session.py
 |   `-- continual/
+|-- sources/
+|   |-- base.py
+|   |-- security.py
+|   |-- cache/
+|   |-- fetches/
+|   |-- loaders/
+|   |-- llms_txt/
+|   `-- regex/
 |-- pipelines/
 |   |-- __init__.py
 |   |-- base.py
@@ -217,15 +232,24 @@ vidbyte/
 - Keep context-window algorithm runtime adapters in `vidbyte/agents/algorithms/` and public config under `vidbyte/context/algorithms/`. Follow `skills/vidbyte-sdk/adding-context-window-algorithms.md`.
 - Keep the handoff primitive family under `vidbyte/context/handoff/` and `HandoffAgent` in `vidbyte/agents/handoff.py`. Follow `skills/vidbyte-sdk/handoff.md`.
 - Keep eval suites, graders, and the runner under `vidbyte/evals/`. Follow `skills/vidbyte-sdk/evals.md`.
+- Keep agent behavior predicates under `vidbyte/evals/behavior/` with one category file per
+  behavior group (tool, tool_arguments, stop, handoff) and the `Behavior` facade composing them.
+  Follow `skills/vidbyte-sdk/agent-behavior.md` when adding or changing behavior predicates.
 - Keep agent-to-agent wiring topologies (pipeline compositions) in `vidbyte/pipelines/`. Pipelines move strings between agents; they do not manage context, budget, or artifacts. Follow `skills/vidbyte-sdk/pipelines.md` when adding or modifying pipeline topology types.
 - Keep public context objects in `vidbyte/context/`, but define dataclasses centrally under `vidbyte/lib/dataclasses/`.
 - Keep prompt templates in `vidbyte/prompts/prompts/` and expose them through `vidbyte.prompts.Prompts` plus `vidbyte.lib.enums.prompts.Prompt`.
 - Follow `skills/vidbyte-sdk/adding-prompts.md` whenever adding or changing prompt assets.
+- Keep artifact source loaders under `vidbyte/sources/` and follow `skills/sources/SKILL.md`.
+- Keep source dataclasses in `vidbyte/lib/dataclasses/sources.py`, source enums in `vidbyte/lib/enums/sources.py`, and source constants in `vidbyte/lib/config/sources.py`.
+- Keep source fetchers under `vidbyte/sources/fetches/`, caches under `vidbyte/sources/cache/`, regex helpers under `vidbyte/sources/regex/`, and concrete source-to-context loaders under `vidbyte/sources/loaders/`.
 - Keep the public `Trace` tracer client and helper factories in `vidbyte/trace/base.py`.
+- Prefer `Trace.langsmith_default(...)` for user-facing single-agent LangSmith examples; keep it as a facade helper over the existing LangSmith provider adapter.
 - Keep concrete debug tracing implementation in `vidbyte/trace/debug.py`.
+- Keep provider-neutral session tracing wrappers in `vidbyte/trace/session.py`.
 - Keep continual tracing presets and future continual trace memory work under `vidbyte/trace/continual/`.
 - Keep provider-neutral tracer protocols under `vidbyte/lib/tracing/`.
 - Keep external tracing provider adapters under `vidbyte/providers/tracing/`.
+- Keep provider-neutral trace payload enrichment such as `llm.call` and `tool.call` input fields in `vidbyte/agents/runtime.py`.
 - Keep enum presets under `vidbyte/lib/enums/`.
 - Keep internal library helpers under `vidbyte/lib/`.
 - Keep SDK dataclass definitions under `vidbyte/lib/dataclasses/`; package-local type modules should re-export those contracts when stable imports are needed.

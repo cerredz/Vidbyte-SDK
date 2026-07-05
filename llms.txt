@@ -1,0 +1,987 @@
+﻿# Vidbyte SDK Documentation for LLMs
+
+This file is an agent-oriented documentation bundle for the Vidbyte SDK repository. It includes the public SDK docs and the Vidbyte MCP Server docs because both surfaces live in this repository.
+
+# Vidbyte SDK
+
+Source repository: https://github.com/cerredz/Vidbyte-SDK
+
+Primary README reference:
+
+- [Vidbyte SDK README](https://github.com/cerredz/Vidbyte-SDK/blob/main/README.md)
+
+## Overview
+
+Vidbyte SDK is the Python SDK surface for building agent workflows with tools, managed context, structured output, tracing, middleware, pipelines, prompt assets, evals, MCP integration, provider registries, and swappable runtimes. It is designed for developers who want to build the agent itself: the loop, tool execution, context window, trace artifact, runtime policy, and multi-agent composition.
+
+The SDK package imports as `vidbyte`. The repository currently identifies the package as version `0.1.0` and pre-release; its README says it is intentionally minimal as a public SDK namespace and does not include private Vidbyte service logic. Public docs should preserve that boundary: document the reusable developer-facing abstractions, and do not imply that proprietary Vidbyte learning models, backend data access, private scoring logic, or production platform internals ship inside this package.
+
+The core mental model is:
+
+1. Create an `Agent` or `BaseAgent`.
+2. Give it a system prompt, model/provider config, optional runner, optional tools, optional context manager, optional middleware, optional trace settings, and optional runtime choice.
+3. Run it with `run()` or `arun()`.
+4. Let the SDK handle message assembly, context primitives, tool schemas, tool calls, tool results, iteration limits, trace hooks, and pipeline composition.
+
+## Description
+
+Vidbyte SDK is the developer-facing agent framework in the Vidbyte ecosystem. It packages the reusable infrastructure needed to build agent applications: model execution, agent-local tools, context objects, context-window algorithms, middleware, prompt catalogs, evals, pipelines, MCP adapters, and runtime registries. It is intentionally separate from private Vidbyte platform services. The SDK should be documented as a local Python package for agent builders, not as a backend API client for unpublished Vidbyte internals.
+
+## Use Cases
+
+- Build a tool-using agent that can inspect files, call functions, and iterate until a stopping condition.
+- Build a coding agent with workspace-bounded file tools, shell/test verification, and a continual trace report.
+- Build a research workflow with planner, researcher, and synthesizer stages.
+- Build a support agent with grounded tools, policy middleware, escalation, and audit logs.
+- Build eval suites that compare agent behavior across prompts, models, and graders.
+- Expose local Vidbyte agents to MCP clients.
+- Attach third-party MCP servers such as GitHub, Linear, filesystem, search, or database tools to an agent.
+
+## Feature Summary
+
+- Agents and modality-aware model execution.
+- Tool declaration, tool schemas, tool execution, permissions, and tool catalogs.
+- Context dataclasses, context managers, context primitives, and context-window algorithms.
+- Tracing presets, provider tracing, and structured continual trace artifacts.
+- Middleware hooks for policy, retry, audit, limits, and compaction.
+- Swappable runtimes including linear, MCTS search, and actor model patterns.
+- Registries for agents, providers, runtimes, prompts, tools, and actors.
+- MCP Studio server support and third-party MCP server attachment.
+- Prompt asset discovery and direct prompt imports.
+- Eval cases, suites, runners, graders, and a local eval registry.
+- Sequential, parallel, conditional, and map-reduce pipelines.
+
+## How To Install And Use
+
+Install from a checkout while the package is pre-release, then import from `vidbyte`. Start with `Agent` or `BaseAgent`, pass a provider/model or runner, add tools and context when needed, and call `run()` or `arun()`. For MCP use, install the same package in the Python environment launched by the MCP host and use `vidbyte-mcp-server` or a custom `McpStudioServer` launcher.
+
+## Who This Is For
+
+Use Vidbyte SDK when you are:
+
+- Building a Python agent that needs local tools, typed outputs, and a controllable execution loop.
+- Creating multi-agent flows where planner, researcher, coder, reviewer, judge, or summarizer agents pass text between stages.
+- Experimenting with context-window strategies such as compaction, trajectory checkpoints, and structured context primitives.
+- Building a coding agent, research agent, support agent, tutor, evaluator, or workflow agent that needs more structure than a single prompt.
+- Exposing Vidbyte agents and tools to external MCP-capable clients.
+- Attaching third-party MCP servers to an agent so the agent can use external tools.
+- Writing eval scripts for local agent quality checks.
+- Reusing repository-backed prompt assets.
+
+Do not use the SDK docs to describe private Vidbyte product internals. The public package boundary should stay focused on reusable abstractions and local agent infrastructure.
+
+## Installation
+
+During local development, install from the repository checkout:
+
+```bash
+git clone https://github.com/cerredz/Vidbyte-SDK.git
+cd Vidbyte-SDK
+pip install -e .
+```
+
+The cookbook README references `pip install vidbyte-sdk` for notebook examples. Confirm package publication status before using that command in final public docs, because the SDK README currently says the package is not published and licensing is not finalized.
+
+After installation, verify imports:
+
+```bash
+python -c "from vidbyte import Agent, BaseAgent, VidbyteSDK, tool; print(Agent, BaseAgent, VidbyteSDK, callable(tool))"
+```
+
+Local verification from the README:
+
+```bash
+python -m compileall vidbyte
+python -m unittest discover -s tests
+python -c "from vidbyte import Agent, Tools, VidbyteSDK, tool; sdk = VidbyteSDK(); print(Agent.__name__, Tools.__name__, type(sdk.agents).__name__, callable(tool))"
+```
+
+## Quickstart
+
+The root `VidbyteSDK` object exposes namespace clients for high-level access:
+
+```python
+from vidbyte import VidbyteSDK
+
+sdk = VidbyteSDK()
+sdk.harnesses
+sdk.agents
+sdk.tools
+sdk.providers
+```
+
+For direct model execution, use an agent:
+
+```python
+from vidbyte import BaseAgent
+
+agent = BaseAgent(
+    name="researcher",
+    system_prompt="Answer directly and cite uncertainty.",
+    provider="openai",
+    model_name="gpt-4.1",
+)
+
+reply = await agent.arun("Draft a concise release note")
+print(reply.content)
+```
+
+For a tool-using agent:
+
+```python
+from vidbyte import Agent, tool
+
+@tool
+def lookup_metric(user_id: int) -> dict[str, int]:
+    """Look up one user's metric."""
+    return {"user_id": user_id, "score": 94}
+
+agent = Agent(
+    name="repo-analyst",
+    system_prompt="Use tools when they help answer precisely.",
+    runner=my_runner,
+    tools=[lookup_metric],
+    max_iterations=8,
+    max_tokens=16000,
+)
+
+reply = await agent.arun("Find the current metric for user 123.")
+```
+
+## Core Features
+
+### Agents and Modalities
+
+Agents are the public entry point for model execution. The SDK supports ordinary text agents and modality-aware execution. Agents can infer execution modality from the configured model name when possible; if the model is unknown and no override is provided, execution falls back to text instead of trying to semantically classify the prompt.
+
+Example image-oriented agent:
+
+```python
+from vidbyte import VidbyteSDK
+
+sdk = VidbyteSDK()
+
+image_agent = sdk.agents.base(
+    name="asset-generator",
+    system_prompt="Create useful product assets.",
+    provider="openai",
+    model_name="gpt-image-1",
+)
+
+reply = image_agent.run("A clean product mockup on a white desk")
+print(reply.content)
+```
+
+### Multi-Agent Orchestration
+
+Multi-agent execution is modeled as composition. The SDK includes `BaseAgent`, `AgentInput`, and `AgentRegistry`; custom harnesses should stay outside the base SDK until public contracts are explicit.
+
+Use metadata for semantic labels such as role. Use explicit system prompts, model config, runners, and tools for behavior.
+
+### Context Objects
+
+Context dataclasses are exposed through `vidbyte.context` and centralized internally under `vidbyte.lib.dataclasses`. These are useful when you need to model context budget, permissions, file paths, run metadata, and context construction rather than concatenating raw strings.
+
+```python
+from vidbyte.context import BaseContext, ContextBudget, ContextPermissions
+from vidbyte.lib.enums import BudgetPreset, PermissionPreset
+
+context = BaseContext(
+    file_paths=["README.md"],
+    run_metadata={"phase": "draft"},
+    budget=ContextBudget.from_preset(BudgetPreset.BALANCED),
+    permissions=ContextPermissions.from_preset(PermissionPreset.READ_ONLY),
+)
+
+context.build_context()
+```
+
+### Context Management
+
+Use `ContextManager` and context items when agents need reusable structured context. Use `ContextWindow` presets when an agent should run with an SDK-provided context-window algorithm.
+
+```python
+from vidbyte import Agent, ContextManager
+from vidbyte.context.primitives import FileContextItem, TaskContextItem
+
+context = ContextManager([
+    TaskContextItem(
+        goal="Fix failing tests",
+        progress="Reviewed the runtime context builder.",
+        deterministic_checks=("python -m unittest discover -s tests",),
+    ),
+    FileContextItem.from_path("README.md", include_content=True),
+])
+
+agent = Agent(
+    name="repo-analyst",
+    system_prompt="Use the supplied context before answering.",
+    runner=my_runner,
+    context_manager=context,
+)
+```
+
+Per-call context can be passed with `AgentInput` without mutating the agent's default context:
+
+```python
+from vidbyte import AgentInput
+from vidbyte.context.primitives import TextContextItem
+
+reply = await agent.arun(
+    AgentInput(
+        "Review the current task.",
+        context_items=(
+            TextContextItem(
+                title="Reviewer note",
+                content="Focus on public API compatibility.",
+            ),
+        ),
+    )
+)
+```
+
+### Context-Window Algorithms
+
+Context-window algorithms are attached as a single agent option. The default preserves existing behavior. Presets can change how runtime context grows between model calls.
+
+```python
+from vidbyte import ContextWindow
+
+agent = Agent(
+    name="repo-analyst",
+    system_prompt="Use tools when they help answer precisely.",
+    runner=my_runner,
+    tools=[lookup_metric],
+    algorithm=ContextWindow.preset.no_raw_tool_outputs,
+)
+```
+
+Trajectory checkpoints periodically write a bounded runtime checkpoint into the context window through managed context primitives. The checkpoint summarizes observable runtime state only; its score is deterministic heuristic state, not an external correctness grade.
+
+```python
+agent = Agent(
+    name="repo-analyst",
+    system_prompt="Use tools when they help answer precisely.",
+    runner=my_runner,
+    tools=[lookup_metric],
+    algorithm=ContextWindow.preset.trajectory_checkpoints,
+)
+```
+
+### Tracing and Continual Trace Artifacts
+
+`Trace` presets emit trace spans without wiring provider adapters manually.
+
+- `Trace.off()` disables tracing.
+- `Trace.debug()` keeps an in-memory event list for local inspection.
+- `Trace.session(...)` and `Trace.langsmith_session(...)` group several agent runs under one parent trace.
+- Provider helpers wrap existing tracing adapters such as Langfuse.
+- `Trace.langsmith_default(...)` is the recommended single-agent LangSmith preset. It emits `agent.run`, `llm.call`, and `tool.call` runs with LangSmith-native run types and scan-friendly prompt, tool schema, tool input, and output fields.
+- `Trace.continual(...)` records lifecycle events and stores settings for trace-to-context style workflows, but does not automatically inject hidden trace memory into the agent context.
+
+```python
+from vidbyte import Agent, Trace
+
+events = []
+
+agent = Agent(
+    name="repo-analyst",
+    system_prompt="Use tools when they help answer precisely.",
+    runner=my_runner,
+    tools=[lookup_metric],
+    trace=Trace.debug(events),
+)
+```
+
+Use a session tracer when several agents should share one trace tree:
+
+```python
+trace = Trace.langsmith_session(project="research", default_name="research-run")
+
+async with trace.session(run_id=run_id):
+    planner = Agent(name="planner", system_prompt="Plan.", runner=planner_runner, trace=trace)
+    writer = Agent(name="writer", system_prompt="Write.", runner=writer_runner, trace=trace)
+    await planner.arun("Plan the answer")
+    await writer.arun("Write the answer")
+```
+
+Use `Trace.langsmith_default(...)` for the recommended single-agent LangSmith
+trace shape:
+
+```python
+agent = Agent(
+    name="observed-agent",
+    system_prompt="Work carefully.",
+    provider="openai",
+    model_name="gpt-4.1",
+    tools=[lookup_metric],
+    trace=Trace.langsmith_default(project="vidbyte-agents"),
+)
+```
+
+For a structured continually updated handoff artifact, use `TraceOption.continual(schema)`. A dedicated `ContinualTraceAgent` updates the artifact during the main run, appending array fields, deep-merging object fields, replacing scalar fields, and dropping unknown keys. The artifact is returned through `reply.metadata["trace"]` and `agent.last_trace`; it is not written into the main agent context window by default.
+
+```python
+from vidbyte import Agent, TraceOption
+from vidbyte.trace.continual import ActionTrace
+
+agent = Agent(
+    name="worker",
+    system_prompt="Work carefully.",
+    runner=my_runner,
+    trace_option=TraceOption.continual(
+        ActionTrace,
+        every_n_iterations=5,
+        max_trace_iterations=3,
+    ),
+)
+
+reply = await agent.arun("Fix the failing tests")
+trace_artifact = reply.metadata["trace"]
+```
+
+Continual tracing is fail-open: trace failures do not abort the main run. It is currently supported on the default linear runtime.
+
+### Swappable Agent Runtimes
+
+The SDK decouples the core `BaseAgent` from the execution loop. Developers can select runtime loop paradigms at initialization:
+
+- Linear runtime for ordinary agent loops.
+- MCTS search for non-linear tree search over parallel reasoning paths.
+- Actor model runtime for asynchronous concurrent message-passing loops, including point-to-point and broadcast topologies.
+
+```python
+from vidbyte import BaseAgent
+from vidbyte.lib.enums import AgentRuntimeType
+from vidbyte.agents.runtimes.configs import ActorRuntime
+
+search_agent = BaseAgent(
+    name="search-agent",
+    system_prompt="Explore reasoning branches.",
+    runtime=AgentRuntimeType.MCTS_SEARCH,
+)
+
+actor_swarm = BaseAgent(
+    name="swarm-coordinator",
+    system_prompt="Coordinate parallel specialized sub-actors.",
+    runtime=ActorRuntime(
+        worker_model="gpt-4o-mini",
+        dynamic_actors=True,
+        max_loop=30,
+        termination_mode="quiescence",
+    ),
+)
+```
+
+### Tools
+
+The SDK's tool path is agent-local. Create or import tools, pass them to an agent, and the SDK describes, formats, and executes them when the model asks for a tool call.
+
+The runtime builds the context window, appends an agentic loop prompt after the system prompt, sends tool schemas to the model, executes permitted tool calls, appends tool results into ordered message history, and repeats until the model calls the internal `isDone` tool. If the model returns ordinary text without a tool call, that text is preserved as assistant history and the loop continues.
+
+Advanced built-ins are grouped by category:
+
+- `vidbyte.tools.builtins.code_search`: `GlobTool`, `GrepTool`, `SemanticSearchTool`.
+- `vidbyte.tools.builtins.editing`: `PatchTool`.
+- `vidbyte.tools.builtins.context`: `ContextCompactionTool` for legacy/manual compaction use.
+- `vidbyte.tools.mcp`: `McpClient`, `McpStdioTransport`, `McpBridgedTool`.
+- `vidbyte.tools.security`: `PermissionPolicy`, `ToolPermission`, sandbox transport protocols.
+
+`Tools` is the catalog and inspection helper for showing developers or models which tools are available:
+
+```python
+from vidbyte.tools import Tools
+
+catalog = Tools([lookup_metric])
+print(catalog.describe())
+openai_tools = catalog.provider_schemas("openai")
+```
+
+The default permission policy allows `SAFE` and `READ` tools. Mutating or executable tools require an explicit permission policy:
+
+```python
+from vidbyte import Agent
+from vidbyte.tools.security import PermissionPolicy
+
+agent = Agent(
+    name="trusted-worker",
+    system_prompt="Work inside the configured sandbox.",
+    runner=my_runner,
+    tools=[write_tool],
+    permission_policy=PermissionPolicy.allow_all(),
+)
+```
+
+### Middleware
+
+Middleware gives direct text agents deterministic runtime hooks for authorization, rate limiting, retry, audit logging, compaction, and policy enforcement. Middleware is not model-visible and does not appear in tool specs or agent cards.
+
+Hooks include `before_run`, `before_iteration`, `before_model_call`, `after_model_response`, `on_model_error`, `before_tool_call`, `after_tool_call`, `after_iteration`, and `after_run`.
+
+Built-ins include:
+
+- `TokenRateLimitMiddleware`
+- `RuntimeLimitMiddleware`
+- `ToolPolicyMiddleware`
+- `AuditLogMiddleware`
+- `ModelRetryMiddleware`
+- `ToolResultCompactionMiddleware`
+- `MessageHistoryCompactionMiddleware`
+- `SummaryCompactionMiddleware`
+- `TraceReplacementCompactionMiddleware`
+
+Example:
+
+```python
+from vidbyte import Agent, AgentMiddleware, MiddlewareDecision
+from vidbyte.middleware.builtins import ToolPolicyMiddleware, ToolResultCompactionMiddleware
+
+class TenantPermissionMiddleware(AgentMiddleware):
+    def __init__(self, db):
+        self.db = db
+
+    async def before_run(self, ctx):
+        if not await self.db.can_start_agent(ctx.metadata["tenant_id"], ctx.agent_name):
+            return MiddlewareDecision.abort("tenant_cannot_start_agent")
+        return MiddlewareDecision.continue_()
+
+    async def before_tool_call(self, ctx):
+        if not await self.db.can_call_tool(ctx.metadata["tenant_id"], ctx.tool_call.tool_name):
+            return MiddlewareDecision.deny_tool("tenant_cannot_call_tool")
+        return MiddlewareDecision.continue_()
+
+agent = Agent(
+    name="repo-analyst",
+    system_prompt="Use tools when they help answer precisely.",
+    runner=my_runner,
+    tools=[lookup_metric],
+    middleware=[
+        TenantPermissionMiddleware(db),
+        ToolPolicyMiddleware(allow_tools={"lookup_metric"}),
+        ToolResultCompactionMiddleware.truncate(max_chars=600),
+    ],
+)
+```
+
+### Registries
+
+The SDK keeps discovery and compatibility catalogs under `vidbyte.lib.registries`.
+
+| Registry | Purpose |
+|---|---|
+| `AgentRegistry` | Registers live agents and finds them by name, capability, tool name, or metadata. |
+| `ProviderModelRegistry` | Centralizes provider defaults, API key env vars, endpoints, model validation, and active provider resolution. |
+| `Prompts` / `PromptRecord` | Loads prompt assets and exposes prompt text, descriptions, families, and direct import names. |
+| `RuntimeRegistry` | Resolves `AgentRuntimeType` enum values to concrete runtime classes. |
+| `ToolRegistry` | Thread-safe compatibility wrapper around the newer agent-local `Tools` catalog. |
+| `ActorRegistry` / `actor_registry` | Registers and discovers actor-runtime role classes. |
+
+### MCP Support
+
+Vidbyte supports MCP in two directions:
+
+- Expose Vidbyte agents and tools to an external MCP client.
+- Attach third-party MCP servers as tools on a Vidbyte agent.
+
+For the first direction, install the SDK and use:
+
+```bash
+vidbyte-mcp-server
+```
+
+or:
+
+```bash
+python -m vidbyte.mcp_server
+```
+
+For project-specific agents, create a launcher script that instantiates `McpStudioServer`. The Studio server exposes built-in MCP tools such as `studio.agents.list`, `studio.agents.run`, `studio.tools.list`, `studio.strategies.list`, `studio.strategies.run`, `studio.prompts.list`, `studio.prompts.get`, and `studio.pipelines.list`.
+
+For the second direction, use `McpPresetRegistry` to discover and build third-party MCP server configs. Presets define command templates and required environment variables; they do not store secrets or guarantee host packages are installed. Raw MCP server configs are still supported when custom commands are needed.
+
+The README lists a large preset catalog across search, dev tools, databases, productivity, document parsing, communication, cloud, AI platforms, reference sources, native utilities, e-commerce, and workflow automation.
+
+### Prompts
+
+Prompts are repository-backed text assets exposed through an enum-keyed accessor and direct Python imports. The README describes 34 prompt assets across 13 families, including handoff, reflexion, evals, prompt templates, goals, actor-runtime personas, and trajectory checkpoints.
+
+```python
+from vidbyte.prompts import Prompts
+from vidbyte.lib.enums.prompts import Prompt
+
+prompts = Prompts()
+prompt_text = prompts.get(Prompt.REFLEXION_AGENT_SYSTEM_PROMPT)
+```
+
+Prompt lookup accepts `Prompt` enum members, not raw strings. Runtime prompt overrides should be passed through the agent or runner API that consumes the text.
+
+### Evals
+
+`vidbyte.evals` provides building blocks for local eval scripts:
+
+- `EvalCase` defines prompts and expectations.
+- `EvalSuite` groups cases.
+- `EvalRunner` executes targets with concurrency controls.
+- Graders score outputs.
+- Eval templates provide reusable multi-grader bundles through `EvalCase.templates`.
+- `EvalClient` through `VidbyteSDK.evals` provides convenience factories and a local SQLite-backed registry for comparing runs.
+
+Built-in graders include exact match, contains, regex, JSON schema, LLM judge, and weighted rubric graders.
+Built-in template bundles include short factual answers, multiple-choice answers, structured JSON responses, classification, numeric answers, concise grounded answers, and safe customer support answers.
+
+Use templates when a case should apply several deterministic checks without manually composing graders:
+
+```python
+from vidbyte.evals import EvalCase, templates as T
+
+case = EvalCase(
+    prompt="What is our refund window?",
+    expected="30 days",
+    templates=(T.short_answer_fact(), T.safe_customer_support()),
+)
+```
+
+### Pipelines
+
+Pipelines compose agents across agent boundaries. The contract is string-in and string-out: one stage's output becomes another stage's prompt. Each agent keeps its own tools, middleware, context, and history. The pipeline layer does not add shared context, budgets, artifacts, streaming, retries, or voting.
+
+Pipeline types include:
+
+- `SequentialPipeline` for chain workflows.
+- `ParallelPipeline` when every stage should receive the same prompt.
+- `ConditionalPipeline` to route by synchronous predicate.
+- `MapReducePipeline` for fan-out followed by a reducer.
+
+Pipelines can be nested because every pipeline is also a valid pipeline stage.
+
+## Use Cases
+
+### Autonomous Coding Agent
+
+Use `Agent`, file/shell/code-search tools, permission policy, middleware, `max_iterations`, and `TraceOption.continual(ActionTrace)` to build a coding agent that explores a repository, reproduces a failing test, applies a patch, verifies results, and returns a structured run report.
+
+### Deep Research Pipeline
+
+Use typed stage boundaries with `output_schema`, search/read tools, a planner agent, multiple researcher agents, and a synthesizer agent in a pipeline. The cookbook's deep research notebook uses this pattern.
+
+### Guardrailed Support Agent
+
+Use tools as grounded actions, middleware for deterministic policy checks, structured escalation, and audit logging. The cookbook's Sierra-style support notebook demonstrates the pattern.
+
+### Tool-Using Repository Analyst
+
+Use `GrepTool`, `GlobTool`, `PatchTool`, context primitives, and compaction middleware to answer questions about a repository while keeping tool output within a budget.
+
+### Agent Evaluation Harness
+
+Use `EvalCase`, `EvalSuite`, `EvalRunner`, built-in graders, and the eval registry to measure prompt/agent behavior over time.
+
+### MCP-Connected Studio
+
+Use `McpStudioServer` to expose local Vidbyte agents, tools, prompts, strategies, and pipelines to MCP clients such as Claude Code, Cursor, Codex, or another MCP-compatible host.
+
+## Package Map
+
+The README describes this public package structure:
+
+```text
+vidbyte/
+|-- client.py
+|-- agents/
+|-- context/
+|-- evals/
+|-- harnesses/
+|-- mcp_server/
+|-- prompts/
+|-- providers/
+|-- pipelines/
+|-- trace/
+|-- middleware/
+|-- tools/
+|-- shared/
+`-- lib/
+```
+
+## Docs-to-MCP Submission Notes
+
+Recommended indexing:
+
+- `README.md`
+- `skills/vidbyte-sdk/`
+- `skills/usage/`
+- `skills/docs/`
+- selected stable design docs only after public review
+
+Recommended exclusions:
+
+- `.claude/`
+- `.pytest_cache/`
+- `tests/`
+- `scripts/`
+- internal PR-resolution docs
+- unstable design docs that should not be treated as public API
+
+Suggested Context7 rules:
+
+- Use imports from `vidbyte` for public examples.
+- Use `Agent` or `BaseAgent` as the main execution surface.
+- Use `ContextManager` and context primitives for structured context.
+- Use `output_schema` for typed structured outputs when documented.
+- Do not invent private Vidbyte platform APIs or undocumented service calls.
+- Preserve the pre-release status until final release messaging changes.
+
+## Vidbyte Website
+
+Vidbyte lives at https://vidbyte.pro. The website is the public product surface for the Vidbyte learning platform, account flows, and API-key/account-linked features. SDK docs should point users there for product context, platform access, and account-linked workflows, while keeping SDK examples focused on the local Python package.
+
+---
+# Vidbyte MCP Server
+
+Source repository: https://github.com/cerredz/Vidbyte-SDK
+
+Primary README references:
+
+- [Vidbyte SDK README](https://github.com/cerredz/Vidbyte-SDK/blob/main/README.md)
+- [Installing Vidbyte SDK as an MCP Server](https://github.com/cerredz/Vidbyte-SDK/blob/main/installing-vidbyte-sdk-as-mcp.md)
+- [MCP Server Skill Reference](https://github.com/cerredz/Vidbyte-SDK/tree/main/skills/mcp-server)
+
+## Overview
+
+Vidbyte MCP Server exposes Vidbyte SDK capabilities as Model Context Protocol tools and prompts. It lets external MCP-capable hosts discover and run Vidbyte agents, tools, prompt templates, strategies, and pipelines through a standard stdio JSON-RPC process.
+
+The key distinction is that this document is about Vidbyte as an MCP server, not about doc aggregation. A developer uses this when they want Claude Code, Cursor, Windsurf, Codex, or another MCP-compatible client to launch a local Vidbyte process and access a Vidbyte Studio as native MCP tools.
+
+The server speaks stdio JSON-RPC. It is meant to be launched and terminated by the MCP client. Users should not run the stdio loop indefinitely in a background shell.
+
+## Description
+
+Vidbyte MCP Server is the bridge between a local Vidbyte SDK Studio and MCP-capable clients. It turns configured Vidbyte agents, tools, prompts, strategies, and pipelines into discoverable MCP capabilities. The server is local-process oriented: a host launches the command, sends JSON-RPC over stdin, receives JSON-RPC over stdout, and closes the process when the session ends.
+
+## Use Cases
+
+- Connect a Vidbyte agent studio to Claude Code, Cursor, Windsurf, Codex, or another MCP host.
+- Expose project-specific coding, research, support, or analysis agents as MCP tools.
+- Serve Vidbyte prompt assets through MCP prompt endpoints.
+- Let an external coding agent call `studio.agents.run` against local Vidbyte agents.
+- Standardize integration across multiple AI IDEs without writing separate plugins.
+- Debug MCP initialization, tool listing, and tool-call dispatch for a local Studio server.
+
+## Feature Summary
+
+- Stdio JSON-RPC MCP transport.
+- `initialize`, `tools/list`, `tools/call`, `prompts/list`, and `prompts/get` handling.
+- Built-in Studio tools for agents, tools, strategies, prompts, and pipelines.
+- MCP-native prompt discovery.
+- Custom launcher support with `McpStudioServer`.
+- Schema helpers through `McpSchema` so extensions avoid hand-built JSON-RPC dictionaries.
+- Clear separation between protocol handlers and Studio tools.
+
+## How To Install And Use
+
+Install the Vidbyte SDK in the Python environment your MCP host launches. Use `vidbyte-mcp-server` for the default Studio, or write a `run_studio.py` launcher that imports project-specific agents/tools and instantiates `McpStudioServer`. Configure the host with the command and args, using absolute paths while troubleshooting.
+
+## What It Provides
+
+Vidbyte MCP Server has two layers:
+
+1. Protocol layer: JSON-RPC methods such as `initialize`, `tools/list`, `tools/call`, `prompts/list`, and `prompts/get`.
+2. Studio layer: Vidbyte tools and prompt assets exposed through the protocol, including agent list/run, tool list, strategy list/run, prompt list/get, and pipeline list.
+
+The Studio server exposes these built-in MCP tools:
+
+- `studio.agents.list`
+- `studio.agents.run`
+- `studio.tools.list`
+- `studio.strategies.list`
+- `studio.strategies.run`
+- `studio.prompts.list`
+- `studio.prompts.get`
+- `studio.pipelines.list`
+
+It also supports MCP-native `prompts/list` and `prompts/get` for clients that use the prompt protocol directly.
+
+## Use Cases
+
+### Expose a Local Agent Studio to an IDE
+
+Connect Claude Code, Cursor, Windsurf, Codex, or another MCP-capable host to a local Vidbyte studio. The host can discover tools and prompts automatically and invoke Vidbyte agents from a conversation.
+
+### Share Project-Specific Agents
+
+Create a small launcher script that imports project-specific agents and tools, then instantiates `McpStudioServer`. The external client launches the script and sees the configured agents and tools as MCP capabilities.
+
+### Provide Prompt Assets to MCP Hosts
+
+Use the Vidbyte prompt catalog to expose prompt text through MCP-native prompt endpoints. This is useful when the host supports prompt discovery separately from tool discovery.
+
+### Connect Agent Infrastructure Without Rebuilding Host Integrations
+
+Instead of writing a custom plugin for each editor or agent host, expose Vidbyte through MCP once and configure each host with a command and arguments.
+
+## Installation
+
+Install the SDK in the Python environment that the MCP client will launch:
+
+```bash
+git clone https://github.com/cerredz/Vidbyte-SDK.git
+cd Vidbyte-SDK
+pip install -e .
+```
+
+The default server command is:
+
+```bash
+vidbyte-mcp-server
+```
+
+The equivalent Python module command is:
+
+```bash
+python -m vidbyte.mcp_server
+```
+
+For custom studios, create a launcher script and point the MCP client at the script.
+
+## Quickstart
+
+If you only need to explore built-in SDK capabilities or retrieve standard prompt templates from the `Prompts()` catalog, configure the host to run:
+
+```bash
+vidbyte-mcp-server
+```
+
+For a project-specific Studio:
+
+```python
+import asyncio
+from vidbyte import McpStudioServer, Prompts
+from my_project.agents import code_agent, research_agent
+from my_project.tools import database_tool
+
+async def main() -> None:
+    prompts = Prompts()
+    server = McpStudioServer(
+        name="my-vidbyte-studio",
+        agents={"coder": code_agent, "researcher": research_agent},
+        tools=[database_tool],
+        pipeline_names=["sequential", "parallel", "map-reduce"],
+        prompt_content={key.value: text for key, text in prompts.all().items()},
+    )
+    await server.run()
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+Then configure the MCP client to launch:
+
+```bash
+python path/to/run_studio.py
+```
+
+Use an absolute path while troubleshooting.
+
+## Client Configuration
+
+### Claude Code
+
+Add an MCP server entry to the Claude Code config:
+
+```json
+{
+  "mcpServers": {
+    "vidbyte-sdk-studio": {
+      "command": "python",
+      "args": ["path/to/run_studio.py"]
+    }
+  }
+}
+```
+
+### Cursor
+
+In Cursor:
+
+1. Open Cursor Settings.
+2. Go to Features, then MCP.
+3. Add a new MCP server.
+4. Set the server type to command.
+5. Use `python path/to/run_studio.py` or the `vidbyte-mcp-server` command.
+6. Save and wait for the server status to turn green.
+
+### Windsurf
+
+Add a server definition to the Windsurf MCP config:
+
+```json
+{
+  "mcpServers": {
+    "vidbyte-sdk-studio": {
+      "command": "python",
+      "args": ["path/to/run_studio.py"]
+    }
+  }
+}
+```
+
+### Codex / OpenCode
+
+Configure a server in the Codex config:
+
+```json
+{
+  "mcp": {
+    "servers": {
+      "vidbyte-sdk-studio": {
+        "command": "python",
+        "args": ["path/to/run_studio.py"]
+      }
+    }
+  }
+}
+```
+
+Or launch with an attached server command if the host supports it:
+
+```bash
+codex --mcp-server "python path/to/run_studio.py"
+```
+
+## Architecture
+
+The MCP server uses a layered architecture:
+
+```text
+stdin bytes
+  |
+  v
+McpStudioServer._read_input()
+  |
+  v
+McpStudioServer._dispatch()
+  |
+  +-- InitializeHandler
+  +-- ToolsListHandler
+  +-- ToolsCallHandler
+  +-- PromptsListHandler
+  +-- PromptsGetHandler
+  |
+  v
+McpStudioServer._write_response()
+```
+
+Important files from the MCP server skill reference:
+
+| File | Responsibility |
+|---|---|
+| `vidbyte/mcp_server/__init__.py` | Public re-export of `McpStudioServer`. |
+| `vidbyte/mcp_server/__main__.py` | CLI entry point for `python -m vidbyte.mcp_server`. |
+| `vidbyte/mcp_server/schema.py` | `McpSchema` helpers for JSON-RPC serialization. |
+| `vidbyte/mcp_server/handlers.py` | Studio tool registry and Studio `BaseTool` wrappers. |
+| `vidbyte/mcp_server/server/core.py` | Main server I/O loop and dispatch. |
+| `vidbyte/mcp_server/server/handlers/*.py` | Protocol-level JSON-RPC method handlers. |
+
+## Two Handler Concepts
+
+Do not confuse Studio tools with JSON-RPC method handlers.
+
+`vidbyte/mcp_server/handlers.py` contains Studio tools such as agent list/run, tool list, strategy list/run, prompt list/get, and pipeline list. These are called when the client sends `tools/call`.
+
+`vidbyte/mcp_server/server/handlers/*.py` contains protocol handlers for MCP methods such as `initialize`, `tools/list`, `tools/call`, `prompts/list`, and `prompts/get`.
+
+The `ToolsCallHandler` is the protocol handler that delegates to Studio tools.
+
+## Schema Rules
+
+All JSON-RPC serialization should go through `McpSchema`:
+
+```python
+from vidbyte.mcp_server.schema import McpSchema
+
+McpSchema.mcp_result_response(request_id, {"key": "value"})
+McpSchema.mcp_error_response(request_id, -32601, "Method not found: foo")
+McpSchema.mcp_tool_success_result(request_id, content_list)
+McpSchema.mcp_tool_error_result(request_id, "Something went wrong")
+McpSchema.tool_spec_to_mcp_tool(tool.spec())
+McpSchema.tool_result_to_mcp_content(tool_result)
+```
+
+Do not build raw JSON-RPC dictionaries by hand when extending the server.
+
+## Runtime Flow
+
+When an external client connects:
+
+1. The client starts the configured command.
+2. The client sends MCP initialization over stdio.
+3. Vidbyte returns protocol capabilities.
+4. The client requests `tools/list`.
+5. Vidbyte returns available Studio tools and schemas.
+6. The client may request `prompts/list` or `prompts/get`.
+7. The model decides to call a Studio tool.
+8. The client sends a `tools/call` JSON-RPC message.
+9. Vidbyte dispatches the call, runs the relevant agent/tool/prompt/strategy/pipeline logic, and writes a JSON-RPC response to stdout.
+10. When the host exits or closes stdin, the server shuts down.
+
+## Troubleshooting
+
+### Server Does Not Start
+
+Run the launcher directly:
+
+```bash
+python path/to/run_studio.py
+```
+
+Import errors or syntax errors will print to stderr and may prevent the MCP handshake.
+
+### Client Cannot Discover Tools
+
+Check:
+
+- The command path is absolute.
+- The Python environment has `vidbyte` installed.
+- The script imports project agents/tools successfully.
+- The server writes protocol JSON-RPC to stdout and logs/errors to stderr.
+- The client config uses the correct command and args.
+
+### Manual Handshake Test
+
+Run the server and send an initialize request:
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}}}
+```
+
+If the server is healthy, it should return a JSON-RPC response containing tool and prompt capabilities.
+
+## Docs-to-MCP Submission Notes
+
+Recommended indexing:
+
+- `README.md`, especially the "MCP Servers" section.
+- `installing-vidbyte-sdk-as-mcp.md`.
+- `skills/mcp-server/`.
+- selected source files under `vidbyte/mcp_server/` for architecture references.
+
+Recommended exclusions:
+
+- tests
+- private project launchers
+- temporary local configs
+- internal design docs not meant for public API docs
+
+Suggested Context7 rules:
+
+- Treat `vidbyte-mcp-server` and `python -m vidbyte.mcp_server` as default entry points.
+- Document stdio JSON-RPC transport only unless another transport is explicitly added.
+- Recommend custom `run_studio.py` launchers for project-specific agents and tools.
+- Distinguish Studio tools from protocol handlers.
+- Use absolute paths when troubleshooting client configs.
+
+## Vidbyte Website
+
+Vidbyte lives at https://vidbyte.pro. MCP server docs should point users there for Vidbyte account and product context, while keeping local MCP setup focused on the SDK process, client configuration, and project-specific Studio launchers.
+
+
+

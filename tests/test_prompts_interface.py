@@ -20,6 +20,7 @@ from vidbyte.prompts import (
     goals_goal_prompt,
     mimic_behavior_mimic_prompt,
     templates_intent_based,
+    templates_master,
     templates_persona,
     templates_specification,
 )
@@ -35,6 +36,8 @@ class PromptsInterfaceTests(unittest.TestCase):
         self.assertEqual(prompts.get(Prompt.TEMPLATES_INTENT_BASED), templates_intent_based)
         self.assertEqual(prompts.get(Prompt.TEMPLATES_PERSONA), templates_persona)
         self.assertEqual(prompts.get(Prompt.TEMPLATES_SPECIFICATION), templates_specification)
+        self.assertEqual(prompts.get(Prompt.TEMPLATES_MASTER), templates_master)
+        self.assertIn("{task}", templates_master)
 
     def test_get_rejects_string_keys(self) -> None:
         with self.assertRaises(TypeError):

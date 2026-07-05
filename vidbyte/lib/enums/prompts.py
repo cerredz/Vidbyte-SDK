@@ -31,6 +31,13 @@ from enum import Enum
 class Prompt(str, Enum):
     """Prompt keys for Vidbyte SDK prompt assets."""
 
+    AGENTIC_ENGINEERING_ERROR_MESSAGES = "agentic_engineering.error_messages"
+    AGENTIC_ENGINEERING_FEATURE_TEST_PACKS = "agentic_engineering.feature_test_packs"
+    AGENTIC_ENGINEERING_FILE_HEADERS = "agentic_engineering.file_headers"
+    AGENTIC_ENGINEERING_FOLDER_README = "agentic_engineering.folder_readme"
+    AGENTIC_ENGINEERING_FUNCTION_DESIGN = "agentic_engineering.function_design"
+    AGENTIC_ENGINEERING_INTENT_BASED_COMMENTING = "agentic_engineering.intent_based_commenting"
+    AGENTIC_ENGINEERING_SYSTEM_PROMPT = "agentic_engineering.system_prompt"
     AGENTIC_LOOP_CONTEXT_PROMPT = "agentic_loop.context_prompt"
     HANDOFF_SYSTEM_PROMPT = "handoff.system_prompt"
     CONTINUAL_TRACE_SYSTEM_PROMPT = "continual_trace.system_prompt"
@@ -47,9 +54,12 @@ class Prompt(str, Enum):
     MULTI_PROVIDER_AGENTIC_GRADER_AGENT_SYSTEM_PROMPT = "multi_provider_agentic_grader.agent_system_prompt"
     MULTI_PROVIDER_AGENTIC_GRADER_GRADER_SYSTEM_PROMPT = "multi_provider_agentic_grader.grader_system_prompt"
     MULTI_PROVIDER_AGENTIC_GRADER_GRADER_PROMPT = "multi_provider_agentic_grader.grader_prompt"
+    MULTI_PROVIDER_AGGREGATOR_SYNTHESIS_SYSTEM_PROMPT = "multi_provider_aggregator.synthesis_system_prompt"
+    MULTI_PROVIDER_AGGREGATOR_SYNTHESIS_PROMPT = "multi_provider_aggregator.synthesis_prompt"
     TEMPLATES_INTENT_BASED = "templates.intent_based"
     TEMPLATES_PERSONA = "templates.persona"
     TEMPLATES_SPECIFICATION = "templates.specification"
+    TEMPLATES_MASTER = "templates.master"
     ACTOR_RUNTIME_PLANNER = "actor_runtime.planner"
     ACTOR_RUNTIME_CODER = "actor_runtime.coder"
     ACTOR_RUNTIME_REVIEWER = "actor_runtime.reviewer"
@@ -66,6 +76,8 @@ class Prompt(str, Enum):
     ACTOR_RUNTIME_SAFETY = "actor_runtime.safety"
     ACTOR_RUNTIME_FINAL_ANSWER = "actor_runtime.final_answer"
     TRAJECTORY_CHECKPOINTS_AGENTIC_SUMMARIZER = "trajectory_checkpoints.agentic_summarizer"
+    PROBLEM_SPACE_SEARCH_EXPLORER = "problem_space_search.explorer"
+    ERROR_CORRECTION_AUDITOR = "error_correction.auditor"
 
 __all__ = [
     "Prompt",

@@ -22,6 +22,11 @@ Architecture:
     - ProviderRequestError: Raised when a provider request fails or returns an invalid response.
     - ProviderConfigurationError: Raised when a provider adapter is missing required configuration.
     - ProviderResponseError: Raised when a provider response cannot be normalized.
+    - SourceError: Base exception for artifact-source loader failures.
+    - SourceFetchError: Raised when fetching a remote artifact fails or returns a non-2xx response.
+    - SourcePinMismatchError: Raised when fetched content does not match the pinned hash.
+    - SourceParseError: Raised when an artifact cannot be parsed into a valid typed IR.
+    - SourceSecurityError: Raised when a URL is disallowed or a response violates a guard.
 Relations:
     Related to vidbyte.tools.executor, vidbyte.tools.registry, and vidbyte.tools.mcp.client.
 """
@@ -64,6 +69,10 @@ class AgentExecutionError(VidbyteSdkError):
 
 class AgentRegistryError(VidbyteSdkError):
     """Raised when local agent discovery fails."""
+
+
+class AggregateExecutionError(AgentExecutionError):
+    """Raised when an aggregate (mixture-of-agents) run cannot produce a synthesis."""
 
 
 class McpError(VidbyteSdkError):
@@ -166,25 +175,21 @@ class TracerConfigurationError(VidbyteSdkError):
     """Raised when a tracing provider cannot be configured (missing credentials or SDK)."""
 
 
-class SessionError(VidbyteSdkError):
-    """Base class for durable-session failures."""
+class SourceError(VidbyteSdkError):
+    """Base class for all artifact-source loader failures."""
 
 
-class SessionNotFoundError(SessionError):
-    """Raised when a session id is not present in the store."""
+class SourceFetchError(SourceError):
+    """Raised when fetching a remote artifact fails or returns a non-2xx response."""
 
 
-class CheckpointNotFoundError(SessionError):
-    """Raised when a checkpoint id is not present in the store."""
+class SourcePinMismatchError(SourceError):
+    """Raised when fetched content hash does not match the pinned expected hash."""
 
 
-class SessionSerializationError(SessionError):
-    """Raised when a session payload cannot be serialized or parsed."""
+class SourceParseError(SourceError):
+    """Raised when an artifact cannot be parsed into a valid typed IR (fail closed)."""
 
 
-class SessionStoreError(SessionError):
-    """Raised when a session store read/write fails or returns corrupt data."""
-
-
-class SessionVersionError(SessionError):
-    """Raised when a persisted session payload has an unsupported schema version."""
+class SourceSecurityError(SourceError):
+    """Raised when a URL is disallowed or a response violates a size/scheme guard."""

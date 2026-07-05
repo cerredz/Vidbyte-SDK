@@ -47,6 +47,8 @@ from vidbyte.middleware.builtins import (
     TokenRateLimitMiddleware,
     ToolResultCompactionMiddleware,
     ToolPolicyMiddleware,
+    TraceReplacementCompactionMiddleware,
+    TraceSummaryTailCompactionMiddleware,
 )
 from vidbyte.middleware.pipeline import MiddlewarePipeline
 
@@ -76,4 +78,6 @@ __all__ = [
     "TokenRateLimitMiddleware",
     "ToolResultCompactionMiddleware",
     "ToolPolicyMiddleware",
+    "TraceReplacementCompactionMiddleware",
+    "TraceSummaryTailCompactionMiddleware",
 ]
