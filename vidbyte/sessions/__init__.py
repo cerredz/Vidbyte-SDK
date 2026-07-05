@@ -44,9 +44,11 @@ from vidbyte.sessions.session import ForkOutcome, Session
 from vidbyte.sessions.store import BaseSessionStore, SessionStore
 from vidbyte.sessions.stores import FileSessionStore, InMemorySessionStore
 from vidbyte.sessions.trace_capture import CapturedTrace, TraceRecorder
+from vidbyte.sessions.usage import AgentUsage, UsageRollup
 
 __all__ = [
     "SESSION_SCHEMA_VERSION",
+    "AgentUsage",
     "BaseSessionStore",
     "CapturedTrace",
     "Checkpoint",
@@ -72,4 +74,5 @@ __all__ = [
     "SessionVersionError",
     "TraceCapture",
     "TraceRecorder",
+    "UsageRollup",
 ]

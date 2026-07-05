@@ -16,7 +16,7 @@ Relations:
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
@@ -37,6 +37,7 @@ from vidbyte.sessions.serialization import SessionSerializer
 from vidbyte.sessions.store import SessionStore
 from vidbyte.sessions.stores.memory import InMemorySessionStore
 from vidbyte.sessions.trace_capture import TraceRecorder
+from vidbyte.sessions.usage import SessionUsageBuilder, UsageRollup
 
 if TYPE_CHECKING:
     from vidbyte.agents.base import BaseAgent
@@ -156,6 +157,13 @@ class Session:
         self._tags = tags
         return self
 
+    def usage(self, *, prices: Mapping[str, float] | None = None) -> UsageRollup:
+        # Fold the head checkpoint's cumulative history into a typed usage rollup.
+        head = self._store.head(self._session_id)
+        if head is None:
+            return UsageRollup.empty()
+        return SessionUsageBuilder(head.run_state.history, model_name=head.run_state.model_name, latency=self._session_latency(), prices=prices).build()
+
     def export(self) -> bytes:
         # Return a portable zip bundle for this session.
         return SessionBundleExporter(self._store).export(self._session_id)
@@ -258,6 +266,28 @@ class Session:
         # Point this session at the stored head when resuming an existing session.
         existing = self._store.head(self._session_id)
         self._head_id = existing.id if existing is not None else None
+
+    def _session_latency(self) -> float | None:
+        # Return checkpoint wall-clock span in seconds, or None when unavailable.
+        checkpoints = self._store.history(self._session_id)
+        if len(checkpoints) < 2:
+            return None
+        first = self._parse_checkpoint_time(checkpoints[0].created_at)
+        last = self._parse_checkpoint_time(checkpoints[-1].created_at)
+        if first is None or last is None:
+            return None
+        return max((last - first).total_seconds(), 0.0)
+
+    @staticmethod
+    def _parse_checkpoint_time(value: str) -> datetime | None:
+        # Parse stored ISO-8601 timestamps defensively for latency rollups.
+        try:
+            parsed = datetime.fromisoformat(value)
+        except (TypeError, ValueError):
+            return None
+        if parsed.tzinfo is None:
+            return parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
 
     def _restore_agent_history(self, checkpoint: Checkpoint) -> None:
         # Reset the wrapped agent's history to a checkpoint's recorded state.
