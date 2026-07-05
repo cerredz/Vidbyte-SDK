@@ -115,6 +115,18 @@ class EchoRunner:
         return _Resp(_fc("isDone", '{"final_answer": "answer-%d"}' % self.calls, "c%d" % self.calls))
 
 
+class SessionBindingProbe:
+    """Tool-like probe that records the session passed through bind_session()."""
+
+    def __init__(self) -> None:
+        # Initialize without a bound session so tests can observe the bind transition.
+        self.session = None
+
+    def bind_session(self, session) -> None:
+        # Capture the durable session passed through the agent binding seam.
+        self.session = session
+
+
 def _run_state(name: str = "a", history: tuple = ()) -> RunState:
     return RunState(
         schema_version=SESSION_SCHEMA_VERSION,
@@ -478,6 +490,26 @@ class SessionFacadeTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(session.id)
         self.assertEqual(store.get_meta(session.id).status, SessionStatus.ACTIVE)
 
+    def test_agent_persist_delegates_to_session_and_binds_property(self) -> None:  # [Edge Case]
+        # Verify agent.persist() is pure Session construction plus public session binding.
+        store = InMemorySessionStore()
+        agent = Agent(name="worker", system_prompt="Work.", runner=EchoRunner())
+        self.assertIsNone(agent.session)
+
+        session = agent.persist(store=store, policy=CheckpointPolicy.MANUAL, tags=("native",))
+
+        self.assertIs(session.agent, agent)
+        self.assertIs(agent.session, session)
+        self.assertEqual(store.get_meta(session.id).tags, ("native",))
+
+    def test_bind_session_binds_carried_session_tools(self) -> None:  # [Silent Failure]
+        # Verify Session binds tools through BaseAgent.bind_session() instead of private writes.
+        tool = SessionBindingProbe()
+        agent = Agent(name="worker", system_prompt="Work.", runner=EchoRunner(), tools=[tool])
+        session = Session(agent, store=InMemorySessionStore())
+
+        self.assertIs(tool.session, session)
+
     def test_tag_merges_names_and_returns_session(self) -> None:  # [Silent Failure]
         store = InMemorySessionStore()
         session = Session(FakeAgent(), store=store, tags=("alpha",))
@@ -695,6 +727,63 @@ class SessionFacadeTests(unittest.IsolatedAsyncioTestCase):
 # Integration: real agent + scripted runner over a real store
 # ---------------------------------------------------------------------------
 class SessionIntegrationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_bound_agent_arun_writes_one_checkpoint(self) -> None:  # [Silent Failure]
+        # Verify running a bound agent directly records the completed turn exactly once.
+        store = InMemorySessionStore()
+        agent = Agent(name="worker", system_prompt="Work.", runner=EchoRunner())
+        session = Session(agent, store=store)
+
+        reply = await agent.arun("first")
+
+        self.assertEqual(reply.content, "answer-1")
+        self.assertEqual(len(store.history(session.id)), 1)
+        self.assertEqual(store.get(session.head).run_state.history[-1]["content"], "answer-1")
+
+    async def test_session_arun_does_not_double_persist_agent_hook(self) -> None:  # [Silent Failure]
+        # Verify Session.arun() delegates to the agent hook without writing a second checkpoint.
+        store = InMemorySessionStore()
+        agent = Agent(name="worker", system_prompt="Work.", runner=EchoRunner())
+        session = Session(agent, store=store)
+
+        await session.arun("first")
+
+        self.assertEqual(len(store.history(session.id)), 1)
+
+    async def test_agent_arun_respects_manual_session_policy(self) -> None:  # [Hidden Assumption]
+        # Verify the session policy still owns whether agent-side turn recording persists.
+        store = InMemorySessionStore()
+        agent = Agent(name="worker", system_prompt="Work.", runner=EchoRunner())
+        session = Session(agent, store=store, policy=CheckpointPolicy.MANUAL)
+
+        await agent.arun("first")
+
+        self.assertIsNone(session.head)
+        self.assertEqual(store.history(session.id), [])
+
+    async def test_agent_arun_persistence_failure_is_fail_open(self) -> None:  # [Hidden Failure]
+        # Verify a store failure reached from BaseAgent._notify_session annotates the reply.
+        class FailingStore(InMemorySessionStore):
+            def put(self, checkpoint):
+                # Simulate a checkpoint write failure after session metadata is already valid.
+                raise SessionStoreError("disk full")
+
+        agent = Agent(name="worker", system_prompt="Work.", runner=EchoRunner())
+        Session(agent, store=FailingStore())
+
+        reply = await agent.arun("first")
+
+        self.assertEqual(reply.content, "answer-1")
+        self.assertIn("__session_error__", reply.metadata)
+
+    def test_internal_agent_constructions_do_not_create_sessions(self) -> None:  # [Hidden Assumption]
+        # Verify fork, restore, and aggregate helper agents start without eager session binding.
+        agent = Agent(name="worker", system_prompt="Work.", provider="openai", model_name=("gpt-4.1", "gpt-4.1-mini"))
+
+        self.assertIsNone(agent.session)
+        self.assertIsNone(agent.fork().session)
+        self.assertIsNone(Agent.restore(agent.export_state()).session)
+        self.assertIsNone(agent._aggregate_agent.session)
+
     async def test_resume_continues_history_cold(self) -> None:  # [Hidden Failure]
         store = InMemorySessionStore()
         agent = Agent(name="worker", system_prompt="Work.", runner=EchoRunner())

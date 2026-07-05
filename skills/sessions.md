@@ -15,7 +15,15 @@ reply = await session.arun("Investigate the failing test")
 print(session.id, session.head)         # se_…  ck_…
 ```
 
-`sdk.harnesses.sessions.attach(agent, store=...)` is the namespace-client equivalent. `session.run(...)` is the synchronous form.
+Agents also expose the same entry point natively:
+
+```python
+session = agent.persist(store=store)
+reply = await agent.arun("Investigate the failing test")
+print(agent.session is session)          # True
+```
+
+`agent.persist(...)` delegates to `Session(agent, ...)`; it does not move persistence into the agent constructor. Once bound, `agent.arun(...)`, `agent.run(...)`, `session.arun(...)`, and `session.run(...)` all record one checkpoint per turn under the same policy. `sdk.harnesses.sessions.attach(agent, store=...)` is the namespace-client equivalent.
 
 ## Stores
 
@@ -50,7 +58,7 @@ cid = session.checkpoint(label="milestone")      # manual checkpoint
 session.complete()                               # mark COMPLETED
 ```
 
-`CheckpointPolicy.PER_TURN` (default) writes a checkpoint after each run; `MANUAL` writes only on `checkpoint()`. Persistence is fail-open: a store write failure is recorded in `reply.metadata["__session_error__"]` and never ends the run.
+`CheckpointPolicy.PER_TURN` (default) writes a checkpoint after each run, including direct `agent.arun(...)` calls after the agent is bound to a session. `MANUAL` writes only on `checkpoint()`. Persistence is fail-open: a store write failure is recorded in `reply.metadata["__session_error__"]` and never ends the run.
 
 ## Trace capture
 
@@ -92,7 +100,7 @@ session = Session(agent, store=store)   # auto-binds the tools
 
 ## Rules of thumb
 
-- The agent's only session seam is `BaseAgent.export_state()` / `BaseAgent.restore(state, *, tools, runner, middleware)` — pure, no I/O.
+- The agent's state seam is `BaseAgent.export_state()` / `BaseAgent.restore(state, *, tools, runner, middleware)` - pure, no I/O. `agent.persist()` and `agent.session` are entry points into the external `Session` wrapper.
 - Persist raw history; re-supply tools/runner/middleware at resume.
 - Never persist secrets; the serializer scrubs credential-like keys and `api_key`.
 - Remote/DB stores are adapters behind `SessionStore`; add new ones under `vidbyte/lib/providers/`.
