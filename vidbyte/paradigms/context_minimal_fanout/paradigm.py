@@ -24,6 +24,7 @@ from vidbyte.middleware.builtins import CostBudgetMiddleware, TokenBudgetMiddlew
 from vidbyte.paradigms.base import ParadigmHarness
 from vidbyte.paradigms.context_minimal_fanout.prompts import ContextMinimalFanoutPrompts
 from vidbyte.paradigms.context_minimal_fanout.types import (
+    AgentRoleSettings,
     ContextMinimalFanoutResult,
     ContextMinimalFanoutSettings,
     EnvironmentContext,
@@ -31,7 +32,7 @@ from vidbyte.paradigms.context_minimal_fanout.types import (
     PromptSplitPlan,
     SplitPrompt,
 )
-from vidbyte.tools.builtins.output_schema import AppendOutputTool, DeclareOutputSchemaTool, OutputSchemaBuilder
+from vidbyte.tools.builtins.output_schema import AppendOutputTool, DeclareOutputSchemaTool, ExtendOutputSchemaTool, OutputSchemaBuilder
 from vidbyte.tools.toolsets import ParadigmMinimalToolset
 
 
@@ -65,20 +66,20 @@ class ContextMinimalFanoutParadigm(ParadigmHarness):
     async def _run_context_agent(self, prompt: str, settings: ContextMinimalFanoutSettings) -> EnvironmentContext:
         # Runs the context-extraction agent and maps its snapshot to EnvironmentContext.
         builder = OutputSchemaBuilder()
-        tools = (*self._read_only_toolset(settings), *settings.context_tools, *self._output_schema_tools(builder))
-        middleware = self._with_budget_middleware(settings.context_middleware, settings.max_context_tokens, settings)
+        tools = (*self._read_only_toolset(settings), *settings.context.tools, *self._output_schema_tools(builder))
+        middleware = self._with_budget_middleware(settings.context.middleware, settings.context.max_tokens, settings)
         agent = BaseAgent(
-            name=settings.context_agent_name,
-            system_prompt=settings.context_system_prompt or self._prompts.context(),
-            runner=settings.context_runner,
+            name=settings.context.name,
+            system_prompt=settings.context.system_prompt or self._prompts.for_role("context"),
+            runner=settings.context.runner,
             tools=tools,
             middleware=middleware,
-            api_key=settings.context_api_key,
-            provider=settings.context_provider,
-            model_name=settings.context_model_name,
-            temperature=settings.context_temperature,
+            api_key=settings.context.api_key,
+            provider=settings.context.provider,
+            model_name=settings.context.model_name,
+            temperature=settings.context.temperature,
             metadata={"role": "context"},
-            **dict(settings.context_agent_options),
+            **dict(settings.context.agent_options),
         )
         reply = await agent.arun(self._build_context_message(prompt))
         return EnvironmentContext.from_snapshot(builder.snapshot(), fallback_text=reply.content)
@@ -86,7 +87,7 @@ class ContextMinimalFanoutParadigm(ParadigmHarness):
     async def _run_splitter(self, prompt: str, environment: EnvironmentContext, settings: ContextMinimalFanoutSettings) -> PromptSplitPlan:
         # Runs the splitter agent and maps its snapshot to a PromptSplitPlan.
         builder = OutputSchemaBuilder()
-        agent = self._build_planning_agent(settings.splitter_name, settings.splitter_system_prompt or self._prompts.splitter(), "splitter", settings.splitter_runner, settings.splitter_provider, settings.splitter_model_name, settings.splitter_api_key, settings.splitter_temperature, settings.splitter_tools, settings.splitter_middleware, settings.max_splitter_tokens, settings.splitter_agent_options, builder, settings)
+        agent = self._build_planning_agent(settings.splitter, "splitter", builder, settings)
         message = self._build_splitter_message(prompt, environment)
         await agent.arun(message)
         return PromptSplitPlan.from_snapshot(builder.snapshot())
@@ -96,7 +97,7 @@ class ContextMinimalFanoutParadigm(ParadigmHarness):
         current = plan
         for _ in range(settings.max_adversarial_rounds):
             builder = OutputSchemaBuilder()
-            agent = self._build_planning_agent(settings.adversarial_name, settings.adversarial_system_prompt or self._prompts.adversarial(), "adversarial", settings.adversarial_runner, settings.adversarial_provider, settings.adversarial_model_name, settings.adversarial_api_key, settings.adversarial_temperature, settings.adversarial_tools, settings.adversarial_middleware, settings.max_adversarial_tokens, settings.adversarial_agent_options, builder, settings)
+            agent = self._build_planning_agent(settings.adversarial, "adversarial", builder, settings)
             message = self._build_adversarial_message(prompt, current, environment)
             await agent.arun(message)
             current = PromptSplitPlan.from_snapshot(builder.snapshot())
@@ -127,40 +128,40 @@ class ContextMinimalFanoutParadigm(ParadigmHarness):
                 raise
             return ImplementationOutput(prompt_id=split_prompt.id, title=split_prompt.title, content="", error=repr(exc), metadata={"exception_type": exc.__class__.__name__})
 
-    def _build_planning_agent(self, name: str, system_prompt: str, role: str, runner: object | None, provider: str | None, model_name: object, api_key: str | None, temperature: float | None, extra_tools: tuple[object, ...], middleware_in: tuple[object, ...], max_tokens: int | None, agent_options: Any, builder: OutputSchemaBuilder, settings: ContextMinimalFanoutSettings) -> BaseAgent:
+    def _build_planning_agent(self, role_settings: AgentRoleSettings, role: str, builder: OutputSchemaBuilder, settings: ContextMinimalFanoutSettings) -> BaseAgent:
         # Constructs a splitter/adversarial planning agent with output-schema tools.
-        tools = (*self._read_only_toolset(settings), *extra_tools, *self._output_schema_tools(builder))
-        middleware = self._with_budget_middleware(middleware_in, max_tokens, settings)
+        tools = (*self._read_only_toolset(settings), *role_settings.tools, *self._output_schema_tools(builder))
+        middleware = self._with_budget_middleware(role_settings.middleware, role_settings.max_tokens, settings)
         return BaseAgent(
-            name=name,
-            system_prompt=system_prompt,
-            runner=runner,
+            name=role_settings.name,
+            system_prompt=role_settings.system_prompt or self._prompts.for_role(role),
+            runner=role_settings.runner,
             tools=tools,
             middleware=middleware,
-            api_key=api_key,
-            provider=provider,
-            model_name=model_name,
-            temperature=temperature,
+            api_key=role_settings.api_key,
+            provider=role_settings.provider,
+            model_name=role_settings.model_name,
+            temperature=role_settings.temperature,
             metadata={"role": role},
-            **dict(agent_options),
+            **dict(role_settings.agent_options),
         )
 
     def _build_implementation_agent(self, split_prompt: SplitPrompt, settings: ContextMinimalFanoutSettings) -> BaseAgent:
         # Constructs a fresh implementation agent for one split prompt.
-        tools = (*self._implementation_toolset(settings), *settings.implementation_tools)
-        middleware = self._with_budget_middleware(settings.implementation_middleware, settings.max_implementation_tokens, settings)
+        tools = (*self._implementation_toolset(settings), *settings.implementation.tools)
+        middleware = self._with_budget_middleware(settings.implementation.middleware, settings.implementation.max_tokens, settings)
         return BaseAgent(
-            name=f"{settings.implementation_name_prefix}-{split_prompt.id}",
-            system_prompt=settings.implementation_system_prompt or self._prompts.implementation(),
-            runner=settings.implementation_runner,
+            name=f"{settings.implementation.name}-{split_prompt.id}",
+            system_prompt=settings.implementation.system_prompt or self._prompts.for_role("implementation"),
+            runner=settings.implementation.runner,
             tools=tools,
             middleware=middleware,
-            api_key=settings.implementation_api_key,
-            provider=settings.implementation_provider,
-            model_name=settings.implementation_model_name,
-            temperature=settings.implementation_temperature,
+            api_key=settings.implementation.api_key,
+            provider=settings.implementation.provider,
+            model_name=settings.implementation.model_name,
+            temperature=settings.implementation.temperature,
             metadata={"role": "implementation", "split_prompt_id": split_prompt.id},
-            **dict(settings.implementation_agent_options),
+            **dict(settings.implementation.agent_options),
         )
 
     def _read_only_toolset(self, settings: ContextMinimalFanoutSettings) -> tuple[object, ...]:
@@ -178,8 +179,8 @@ class ContextMinimalFanoutParadigm(ParadigmHarness):
         return toolset.all()
 
     def _output_schema_tools(self, builder: OutputSchemaBuilder) -> tuple[object, ...]:
-        # Binds the declare/append output-schema tools to a run-local builder.
-        return (DeclareOutputSchemaTool(builder), AppendOutputTool(builder))
+        # Binds the declare/extend/append output-schema tools to a run-local builder.
+        return (DeclareOutputSchemaTool(builder), ExtendOutputSchemaTool(builder), AppendOutputTool(builder))
 
     def _build_context_message(self, prompt: str) -> str:
         # Wraps the caller request in a stable context-agent input envelope.
