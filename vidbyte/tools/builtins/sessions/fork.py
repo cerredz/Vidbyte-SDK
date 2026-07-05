@@ -58,7 +58,7 @@ class ForkTool(_SessionBuiltinTool):
             return self._fork_bound(checkpoint_id)
         if not self._scope.permits(session_id):
             return self._denied(_TOOL_NAME, session_id)
-        return self._fork_other(checkpoint_id)
+        return self._fork_other(session_id, checkpoint_id)
 
     def _fork_bound(self, checkpoint_id: str | None) -> ToolResult:
         # Fork the bound session from its head (or a named in-session checkpoint).
@@ -69,15 +69,20 @@ class ForkTool(_SessionBuiltinTool):
         self._scope.allow(branch.id)
         return ToolResult.success(_TOOL_NAME, branch.id)
 
-    def _fork_other(self, checkpoint_id: str | None) -> ToolResult:
+    def _fork_other(self, session_id: str, checkpoint_id: str | None) -> ToolResult:
         # Fork another session's checkpoint (or its head) into a new session via Session.fork_from.
-        source_id = checkpoint_id
+        source_id = checkpoint_id or self._target_head_id(session_id)
         if source_id is None:
-            return ToolResult.error(_TOOL_NAME, "fork of another session requires a checkpoint_id.")
+            return ToolResult.error(_TOOL_NAME, f"Unknown or empty session: {session_id}.")
         from vidbyte.sessions.session import Session
         branch = Session.fork_from(self._store, source_id)
         self._scope.allow(branch.id)
         return ToolResult.success(_TOOL_NAME, branch.id)
+
+    def _target_head_id(self, session_id: str) -> str | None:
+        # Return the target session's head checkpoint id, or None when empty.
+        head = self._store.head(session_id)
+        return head.id if head is not None else None
 
 
 __all__ = ["ForkTool"]

@@ -253,6 +253,10 @@ class Session:
 
     def _bind_session_tools(self) -> None:
         # Attach this session to any bound session-builtin tools the agent carries.
+        try:
+            self._agent._active_session = self  # noqa: SLF001
+        except Exception:
+            pass
         tools = getattr(self._agent, "_agent_tool_items", ()) or ()
         for tool in tools:
             binder = getattr(tool, "bind_session", None)
