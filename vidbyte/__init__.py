@@ -142,6 +142,15 @@ from vidbyte.tools.builtins.context_primitives import (
     ContextUpsertTool,
 )
 from vidbyte.tools.builtins.handoff import CreateHandoffTool
+from vidbyte.tools.builtins.sessions import (
+    CheckpointTool,
+    ForkTool,
+    ResumeAppendTool,
+    ResumeOutputTool,
+    ResumeReplaceTool,
+    RewindTool,
+    SessionTool,
+)
 from vidbyte.lib.enums import BudgetPreset, ModelModality, PermissionPreset, Prompt
 from vidbyte.lib.errors import (
     McpAttachmentError,
@@ -295,6 +304,7 @@ __all__ = [
     "ContextRemoveTool",
     "ContextUpsertTool",
     "CreateHandoffTool",
+    "CheckpointTool",
     "ContextWindow",
     "ContextWindowAlgorithm",
     "ContextWindowPlacement",
@@ -367,6 +377,12 @@ __all__ = [
     "SessionStore",
     "SessionStoreError",
     "SessionVersionError",
+    "ForkTool",
+    "ResumeAppendTool",
+    "ResumeOutputTool",
+    "ResumeReplaceTool",
+    "RewindTool",
+    "SessionTool",
     "TraceCapture",
     "TaskContextItem",
     "TextContextItem",

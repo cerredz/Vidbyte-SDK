@@ -357,6 +357,16 @@ class BaseAgent(McpAttachableMixin):
             tool.bind_agent(self)
         if isinstance(tool, CreateHandoffTool):
             tool.bind_agent(self)
+        self._bind_session_tool(tool)
+
+    def _bind_session_tool(self, tool: object) -> None:
+        # Bind a session-builtin tool to this agent's active session when one is attached.
+        binder = getattr(tool, "bind_session", None)
+        if not callable(binder):
+            return
+        session = getattr(self, "_active_session", None)
+        if session is not None:
+            binder(session)
 
     def tool_specs(self) -> tuple[ToolSpec, ...]:
         return self.tools.specs()

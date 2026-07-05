@@ -31,6 +31,15 @@ from vidbyte.tools.builtins.context_primitives import ContextListTool, ContextRe
 from vidbyte.tools.builtins.editing import PatchTool
 from vidbyte.tools.builtins.handoff import CreateHandoffTool
 from vidbyte.tools.builtins.mcp import AttachMcpServerTool, SearchMcpServersTool
+from vidbyte.tools.builtins.sessions import (
+    CheckpointTool,
+    ForkTool,
+    ResumeAppendTool,
+    ResumeOutputTool,
+    ResumeReplaceTool,
+    RewindTool,
+    SessionTool,
+)
 from vidbyte.tools.builtins.memory import (
     CogneeAddTool,
     CogneeCognifyTool,
@@ -56,6 +65,7 @@ from vidbyte.tools.builtins.memory import (
 __all__ = [
     "AttachMcpServerTool",
     "CreateHandoffTool",
+    "CheckpointTool",
     "CompactionMode",
     "ContextCompactionTool",
     "ContextListTool",
@@ -64,11 +74,17 @@ __all__ = [
     "ContextUpsertTool",
     "GlobTool",
     "GrepTool",
+    "ForkTool",
     "PatchTool",
     "ProgressLog",
     "ReflexionTool",
+    "ResumeAppendTool",
+    "ResumeOutputTool",
+    "ResumeReplaceTool",
+    "RewindTool",
     "SearchMcpServersTool",
     "SemanticSearchTool",
+    "SessionTool",
     "TrajectoryCheckpointTool",
     # Memory providers
     "CogneeAddTool",
