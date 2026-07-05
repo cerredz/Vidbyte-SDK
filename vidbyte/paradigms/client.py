@@ -3,12 +3,10 @@
 Description:
     Defines the Vidbyte paradigms namespace client.
 Purpose:
-    Reserves the public client surface for future paradigm harness factories
-    without shipping any concrete paradigm implementations in this scaffolding
-    change.
+    Owns public factories for concrete paradigm harness families while keeping the
+    direct paradigm classes as the primary documented entry point.
 Architecture:
-    - ParadigmClient: Namespace marker for future factories such as
-      critique-repair or fresh-window decomposition harness constructors.
+    - ParadigmClient: Exposes context-minimal fanout and future paradigm families.
 Relations:
     Instantiated by vidbyte.client.VidbyteSDK and exported through
     vidbyte.paradigms.
@@ -16,9 +14,15 @@ Relations:
 
 from __future__ import annotations
 
+from vidbyte.paradigms.context_minimal_fanout import ContextMinimalFanoutClient
+
 
 class ParadigmClient:
-    """Namespace client for future paradigm harness factories."""
+    """Namespace client for paradigm harness factories."""
+
+    def __init__(self) -> None:
+        # Attaches concrete paradigm family clients to the root paradigm namespace.
+        self.context_minimal_fanout = ContextMinimalFanoutClient()
 
 
 __all__ = ["ParadigmClient"]

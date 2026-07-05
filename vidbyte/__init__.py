@@ -53,7 +53,26 @@ from vidbyte.agents import (
     ProposerSpec,
 )
 from vidbyte.client import VidbyteSDK
-from vidbyte.paradigms import ParadigmClient, ParadigmHarness
+from vidbyte.paradigms import (
+    ContextFile,
+    ContextMinimalFanoutClient,
+    ContextMinimalFanoutParadigm,
+    ContextMinimalFanoutResult,
+    ContextMinimalFanoutSettings,
+    EnvironmentContext,
+    ImplementationOutput,
+    ParadigmClient,
+    ParadigmHarness,
+    PromptSplitPlan,
+    SplitPrompt,
+)
+from vidbyte.tools.builtins.output_schema import (
+    AppendOutputTool,
+    DeclareOutputSchemaTool,
+    OutputSchemaBuilder,
+    OutputSchemaField,
+)
+from vidbyte.tools.toolsets import ParadigmMinimalToolset
 from vidbyte.evals import (
     AllOfGrader,
     AnyOfGrader,
@@ -234,8 +253,22 @@ __all__ = [
     "SessionTracer",
     "NullTracer",
     "OutputSchemaFormatter",
+    "AppendOutputTool",
+    "ContextFile",
+    "ContextMinimalFanoutClient",
+    "ContextMinimalFanoutParadigm",
+    "ContextMinimalFanoutResult",
+    "ContextMinimalFanoutSettings",
+    "DeclareOutputSchemaTool",
+    "EnvironmentContext",
+    "ImplementationOutput",
+    "OutputSchemaBuilder",
+    "OutputSchemaField",
     "ParadigmClient",
     "ParadigmHarness",
+    "ParadigmMinimalToolset",
+    "PromptSplitPlan",
+    "SplitPrompt",
     "Trace",
     "TracerBase",
     "TracerConfigurationError",
