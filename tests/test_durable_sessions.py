@@ -29,6 +29,7 @@ from vidbyte.sessions.errors import (
 from vidbyte.sessions import (
     AgentUsage,
     FileSessionStore,
+    ForkOutcome,
     InMemorySessionStore,
     Session,
     SessionScope,
@@ -36,8 +37,7 @@ from vidbyte.sessions import (
     TraceRecorder,
     UsageRollup,
 )
-from vidbyte.tools.builtins.sessions import SessionTool
-from vidbyte.tools.builtins.sessions import ForkTool
+from vidbyte.tools.builtins.sessions import BatchForkTool, ForkTool, SessionTool
 from vidbyte.tools.types import ToolCall
 
 
@@ -465,6 +465,43 @@ class SessionFacadeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(store.history(session.id)), parent_len)
         self.assertNotEqual(branch.id, session.id)
 
+    async def test_batch_fork_returns_one_outcome_per_attempt(self) -> None:  # [Silent Failure]
+        # Verifies every requested branch produces an indexed successful outcome.
+        store = InMemorySessionStore()
+        session = Session(FakeAgent(), store=store)
+        await session.arun("one")
+        outcomes = session.batch_fork(3)
+        self.assertEqual([outcome.index for outcome in outcomes], [0, 1, 2])
+        self.assertTrue(all(outcome.session is not None for outcome in outcomes))
+        branch_ids = [outcome.session.id for outcome in outcomes if outcome.session is not None]
+        self.assertEqual(len(set(branch_ids)), 3)
+        self.assertTrue(all(store.get_meta(branch_id).parent_session_id == session.id for branch_id in branch_ids))
+        self.assertTrue(all(store.head(branch_id).label == "fork" for branch_id in branch_ids))
+
+    async def test_batch_fork_isolates_branch_creation_failures(self) -> None:  # [Hidden Failure]
+        # Verifies one failed fork attempt does not prevent later attempts from running.
+        store = InMemorySessionStore()
+        session = Session(FakeAgent(), store=store)
+        await session.arun("one")
+        original_fork = session.fork
+        attempts = 0
+
+        def flaky_fork(*, at=None, tools=None, runner=None, middleware=None):
+            # Fails only the second fork attempt while delegating the rest to the real fork.
+            nonlocal attempts
+            attempts += 1
+            if attempts == 2:
+                raise SessionError("boom")
+            return original_fork(at=at, tools=tools, runner=runner, middleware=middleware)
+
+        with mock.patch.object(session, "fork", side_effect=flaky_fork):
+            outcomes = session.batch_fork(3)
+        self.assertEqual(len(outcomes), 3)
+        self.assertIsNotNone(outcomes[0].session)
+        self.assertIsNone(outcomes[1].session)
+        self.assertEqual(outcomes[1].error, "SessionError: boom")
+        self.assertIsNotNone(outcomes[2].session)
+
     async def test_trace_artifact_persisted_on_checkpoint(self) -> None:  # [Silent Failure]
         store = InMemorySessionStore()
         session = Session(FakeAgent(trace={"goal": "g"}), store=store)
@@ -584,6 +621,65 @@ class SessionToolTests(unittest.IsolatedAsyncioTestCase):
         tool = SessionTool(InMemorySessionStore())
         result = await tool.execute(ToolCall(tool_name="session", arguments={"operation": "explode"}))
         self.assertEqual(result.status.value, "error")
+
+
+# ---------------------------------------------------------------------------
+# BatchForkTool
+# ---------------------------------------------------------------------------
+class BatchForkToolTests(unittest.IsolatedAsyncioTestCase):
+    async def test_spec_requires_bounded_count(self) -> None:  # [Hidden Assumption]
+        # Verifies the model-facing schema requires and bounds the fan-out count.
+        spec = BatchForkTool(InMemorySessionStore()).spec()
+        self.assertEqual(spec.input_schema["required"], ["count"])
+        self.assertEqual(spec.input_schema["properties"]["count"]["minimum"], 1)
+        self.assertEqual(spec.input_schema["properties"]["count"]["maximum"], 64)
+
+    async def test_execute_creates_branches_and_grants_scope(self) -> None:  # [Silent Failure]
+        # Verifies successful tool-created branches are returned and allowed in scope.
+        store = InMemorySessionStore()
+        scope = SessionScope.own_runs()
+        session = Session(FakeAgent(), store=store)
+        await session.arun("one")
+        tool = BatchForkTool(store, scope=scope)
+        tool.bind_session(session)
+        result = await tool.execute(ToolCall(tool_name="batch_fork", arguments={"count": 2}))
+        payload = json.loads(result.output)
+        self.assertEqual(result.status.value, "success")
+        self.assertEqual(payload["failed"], 0)
+        self.assertEqual(len(payload["created"]), 2)
+        self.assertTrue(all(scope.permits(session_id) for session_id in payload["created"]))
+
+    async def test_execute_reports_partial_failures_without_raising(self) -> None:  # [Hidden Failure]
+        # Verifies mixed outcomes produce a success result with created ids and failed count.
+        store = InMemorySessionStore()
+        session = Session(FakeAgent(), store=store)
+        await session.arun("one")
+        branch = session.fork()
+        tool = BatchForkTool(store)
+        tool.bind_session(session)
+        outcomes = [ForkOutcome(index=0, session=branch, error=None), ForkOutcome(index=1, session=None, error="RuntimeError: boom")]
+        with mock.patch.object(session, "batch_fork", return_value=outcomes):
+            result = await tool.execute(ToolCall(tool_name="batch_fork", arguments={"count": 2}))
+        payload = json.loads(result.output)
+        self.assertEqual(result.status.value, "success")
+        self.assertEqual(payload, {"created": [branch.id], "failed": 1})
+
+    async def test_execute_rejects_invalid_count_as_error_result(self) -> None:  # [Edge Case]
+        # Verifies out-of-range count values are returned as tool errors.
+        tool = BatchForkTool(InMemorySessionStore())
+        result = await tool.execute(ToolCall(tool_name="batch_fork", arguments={"count": 65}))
+        self.assertEqual(result.status.value, "error")
+
+    async def test_execute_converts_unexpected_errors_to_error_result(self) -> None:  # [Hidden Failure]
+        # Verifies the tool contract never lets unexpected exceptions escape.
+        store = InMemorySessionStore()
+        session = Session(FakeAgent(), store=store)
+        tool = BatchForkTool(store)
+        tool.bind_session(session)
+        with mock.patch.object(session, "batch_fork", side_effect=RuntimeError("boom")):
+            result = await tool.execute(ToolCall(tool_name="batch_fork", arguments={"count": 1}))
+        self.assertEqual(result.status.value, "error")
+        self.assertIn("RuntimeError: boom", result.output)
 
 
 # ---------------------------------------------------------------------------

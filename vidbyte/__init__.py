@@ -143,6 +143,7 @@ from vidbyte.tools.builtins.context_primitives import (
 )
 from vidbyte.tools.builtins.handoff import CreateHandoffTool
 from vidbyte.tools.builtins.sessions import (
+    BatchForkTool,
     CheckpointTool,
     ForkTool,
     ResumeAppendTool,
@@ -217,6 +218,7 @@ from vidbyte.sessions import (
     Checkpoint,
     CheckpointPolicy,
     FileSessionStore,
+    ForkOutcome,
     InMemorySessionStore,
     RunState,
     Session,
@@ -310,6 +312,7 @@ __all__ = [
     "BaseContext",
     "BasePipeline",
     "BaseTool",
+    "BatchForkTool",
     "BudgetPreset",
     "ContextBudget",
     "CompactionMode",
@@ -382,6 +385,7 @@ __all__ = [
     "Checkpoint",
     "CheckpointPolicy",
     "FileSessionStore",
+    "ForkOutcome",
     "InMemorySessionStore",
     "RunState",
     "Session",

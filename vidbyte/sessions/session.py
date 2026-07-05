@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
@@ -40,6 +40,15 @@ from vidbyte.sessions.usage import SessionUsageBuilder, UsageRollup
 
 if TYPE_CHECKING:
     from vidbyte.agents.base import BaseAgent
+
+
+@dataclass(frozen=True, slots=True)
+class ForkOutcome:
+    """Result of one attempted Session fork inside a batch."""
+
+    index: int
+    session: Session | None
+    error: str | None
 
 
 class Session:
@@ -103,6 +112,21 @@ class Session:
         if checkpoint_id is None:
             raise SessionError("Cannot fork a session with no checkpoints.", details={"session_id": self._session_id})
         return self.fork_from(self._store, checkpoint_id, tools=tools or (), runner=runner, middleware=middleware or (), policy=self._policy, trace=self._recorder_policy(), tags=self._tags)
+
+    def batch_fork(self, count: int, *, at: str | None = None, tools: Sequence[object] | None = None, runner: object | None = None, middleware: Sequence[object] | None = None) -> list[ForkOutcome]:
+        # Attempt count independent forks from the same checkpoint, isolating branch creation failures.
+        outcomes: list[ForkOutcome] = []
+        for index in range(count):
+            outcomes.append(self._attempt_batch_fork(index, at=at, tools=tools, runner=runner, middleware=middleware))
+        return outcomes
+
+    def _attempt_batch_fork(self, index: int, *, at: str | None, tools: Sequence[object] | None, runner: object | None, middleware: Sequence[object] | None) -> ForkOutcome:
+        # Run one fork attempt and convert any creation error into a structured outcome record.
+        try:
+            branch = self.fork(at=at, tools=tools, runner=runner, middleware=middleware)
+        except Exception as exc:
+            return ForkOutcome(index=index, session=None, error=f"{type(exc).__name__}: {exc}")
+        return ForkOutcome(index=index, session=branch, error=None)
 
     def rewind(self, *, to: str) -> "Session":
         """Move the head to an ancestor checkpoint so the next run branches from it."""
@@ -323,4 +347,4 @@ def _empty_reply(agent_name: str) -> AgentMessage:
     return AgentMessage(sender=agent_name, recipient="orchestrator", content="", metadata={})
 
 
-__all__ = ["Session"]
+__all__ = ["ForkOutcome", "Session"]
