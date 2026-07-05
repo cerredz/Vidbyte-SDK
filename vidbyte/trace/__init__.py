@@ -21,9 +21,12 @@ from __future__ import annotations
 
 from vidbyte.lib.dataclasses.trace import TraceField, TraceFieldType, TraceMode, TraceOption, TraceSchema
 from vidbyte.trace.base import Trace
+from vidbyte.trace.controller import TraceController
 from vidbyte.trace.continual import ActionTrace, ContinualTraceAgent, ContinualTraceMiddleware, ContinualTracer
 from vidbyte.trace.debug import DebugTracer
-from vidbyte.trace.session import SessionTracer
+from vidbyte.trace.profiles import TraceComponentSettings, TraceProfile
+from vidbyte.trace.schema import ParentPolicy, SemanticSpanContext, SpanKind, SpanSpec, TraceDetail
+from vidbyte.trace.session import SessionTraceController, SessionTracer
 
 __all__ = [
     "ActionTrace",
@@ -31,11 +34,20 @@ __all__ = [
     "ContinualTraceMiddleware",
     "ContinualTracer",
     "DebugTracer",
+    "ParentPolicy",
+    "SemanticSpanContext",
+    "SessionTraceController",
     "SessionTracer",
+    "SpanKind",
+    "SpanSpec",
     "Trace",
+    "TraceComponentSettings",
+    "TraceController",
+    "TraceDetail",
     "TraceField",
     "TraceFieldType",
     "TraceMode",
     "TraceOption",
+    "TraceProfile",
     "TraceSchema",
 ]

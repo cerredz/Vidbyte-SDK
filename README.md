@@ -248,6 +248,29 @@ agent = Agent(
 )
 ```
 
+Semantic trace profiles add SDK-owned prebuilt spans for agents, runtimes,
+context-window work, algorithms, middleware decisions, tool calls, parsers, and
+aggregate agents. The default profile keeps the current high-signal tree
+(`agent.run`, `llm.call`, `tool.call`) and adds parser/tool/stop metadata. The
+verbose profile adds runtime iteration, context-window, algorithm, aggregate,
+and middleware-decision spans.
+
+```python
+from vidbyte import Trace, TraceProfile
+
+trace = Trace.profile(
+    inner=Trace.debug(events),
+    profile=TraceProfile.verbose().with_components(middleware="decisions_only"),
+)
+
+agent = Agent(
+    name="observed-worker",
+    system_prompt="Work carefully.",
+    runner=my_runner,
+    trace=trace,
+)
+```
+
 Provider-backed tracing uses the existing optional adapters:
 
 ```python
@@ -262,7 +285,9 @@ agent = Agent(
 For LangSmith, use `Trace.langsmith_default(...)` as the recommended
 single-agent preset. It emits `agent.run`, `llm.call`, and `tool.call` runs
 with LangSmith-native run types and includes prompt, tool schema, tool input,
-and output fields for browser inspection.
+and output fields for browser inspection. `Trace.langsmith_verbose(...)` uses
+the verbose semantic profile for runtime iteration, context-window, algorithm,
+aggregate, parser, and middleware-decision spans.
 
 ```python
 agent = Agent(
@@ -275,21 +300,24 @@ agent = Agent(
 )
 ```
 
-Multi-agent grouping into one LangSmith trace is handled separately by session
-tracing; `Trace.langsmith_default(...)` is the default single-agent preset.
+Semantic LangSmith helpers translate Vidbyte span kinds into LangSmith run
+types (`chain`, `llm`, `tool`, `retriever`, `embedding`, `prompt`, and
+`parser`). Multi-agent grouping into one LangSmith trace is handled separately
+by session tracing; `Trace.langsmith_default(...)` is the default single-agent
+preset.
 
-Use a session tracer when several agents should appear under one parent trace:
+Use a semantic session tracer when several agents should appear under one
+provider root:
 
 ```python
 from vidbyte import Agent, Trace
 
 trace = Trace.langsmith_session(
     project="research",
-    default_name="research-run",
-    default_attributes={"run_id": run_id},
+    name="research-run",
 )
 
-async with trace.session():
+async with trace.async_session(run_id=run_id):
     planner = Agent(name="planner", system_prompt="Plan the work.", runner=planner_runner, trace=trace)
     writer = Agent(name="writer", system_prompt="Draft the answer.", runner=writer_runner, trace=trace)
     await planner.arun("Plan the release note")

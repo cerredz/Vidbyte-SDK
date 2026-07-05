@@ -274,9 +274,11 @@ agent = Agent(
 
 - `Trace.off()` disables tracing.
 - `Trace.debug()` keeps an in-memory event list for local inspection.
+- `Trace.profile(inner, profile=TraceProfile.default())` wraps any `TracerBase` in Vidbyte semantic tracing.
 - `Trace.session(...)` and `Trace.langsmith_session(...)` group several agent runs under one parent trace.
 - Provider helpers wrap existing tracing adapters such as Langfuse.
 - `Trace.langsmith_default(...)` is the recommended single-agent LangSmith preset. It emits `agent.run`, `llm.call`, and `tool.call` runs with LangSmith-native run types and scan-friendly prompt, tool schema, tool input, and output fields.
+- `Trace.langsmith_verbose(...)` uses the verbose semantic profile for runtime iteration, context-window, algorithm, aggregate, parser, and middleware-decision spans.
 - `Trace.continual(...)` records lifecycle events and stores settings for trace-to-context style workflows, but does not automatically inject hidden trace memory into the agent context.
 
 ```python
@@ -293,12 +295,35 @@ agent = Agent(
 )
 ```
 
-Use a session tracer when several agents should share one trace tree:
+Semantic trace profiles are available through `TraceProfile`:
+
+- `TraceProfile.minimal()`: core spans only: `agent.run`, `llm.call`, and `tool.call`.
+- `TraceProfile.default()`: minimal spans plus parser spans, tool input/output metadata, agent stop metadata, retriever/embedding categories, and session roots.
+- `TraceProfile.verbose()`: default spans plus runtime iteration, context-window summaries, context-window algorithms, aggregate phases, and middleware decisions.
+- `TraceProfile.diagnostic()`: verbose spans plus diagnostic component spans and fuller metadata subject to redaction and truncation.
 
 ```python
-trace = Trace.langsmith_session(project="research", default_name="research-run")
+from vidbyte import Trace, TraceProfile
 
-async with trace.session(run_id=run_id):
+trace = Trace.profile(
+    inner=Trace.debug(events),
+    profile=TraceProfile.verbose().with_components(middleware="decisions_only"),
+)
+
+agent = Agent(
+    name="observed-worker",
+    system_prompt="Work carefully.",
+    runner=my_runner,
+    trace=trace,
+)
+```
+
+Use a semantic session tracer when several agents should share one trace tree:
+
+```python
+trace = Trace.langsmith_session(project="research", name="research-run")
+
+async with trace.async_session(run_id=run_id):
     planner = Agent(name="planner", system_prompt="Plan.", runner=planner_runner, trace=trace)
     writer = Agent(name="writer", system_prompt="Write.", runner=writer_runner, trace=trace)
     await planner.arun("Plan the answer")
@@ -318,6 +343,18 @@ agent = Agent(
     trace=Trace.langsmith_default(project="vidbyte-agents"),
 )
 ```
+
+`vidbyte/trace/components/` contains Vidbyte semantic span-spec factories:
+
+- `agents.py`: agent, stop, aggregate, proposer, synthesis, and failure spans.
+- `runtimes.py`: linear iteration, actor runtime, and search runtime spans.
+- `context.py`: context-window build, primitive render, compaction, and update spans.
+- `algorithms.py`: context-window algorithm spans such as reflexion, grading, trajectory checkpoints, problem-space search, and error correction.
+- `middleware.py`: middleware hook and decision spans.
+- `tools.py`: tool call, permission, arguments, result, and error spans.
+- `parsers.py`: tool-call parsing and structured-output validation spans.
+
+When adding or changing an agent, runtime, context-window algorithm, middleware, tool surface, parser, or aggregate-agent behavior, check whether `vidbyte/trace/components/` needs a matching span-spec update.
 
 For a structured continually updated handoff artifact, use `TraceOption.continual(schema)`. A dedicated `ContinualTraceAgent` updates the artifact during the main run, appending array fields, deep-merging object fields, replacing scalar fields, and dropping unknown keys. The artifact is returned through `reply.metadata["trace"]` and `agent.last_trace`; it is not written into the main agent context window by default.
 

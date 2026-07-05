@@ -27,6 +27,8 @@ from vidbyte import (
     BaseAgent,
     MultiProviderAggregator,
     ProposerSpec,
+    Trace,
+    TraceProfile,
 )
 from vidbyte.lib.dataclasses.agents import AgentMessage, AgentMetadata
 from vidbyte.lib.enums import AgentRuntimeType
@@ -138,6 +140,17 @@ class MultiProviderAggregatorTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("good", result.content)
         self.assertEqual(result.metadata["aggregate"]["failed_labels"], ["bad"])
         self.assertEqual(result.metadata["aggregate"]["successful_labels"], ["ok"])
+
+    async def test_engine_records_aggregate_spans_with_semantic_tracer(self) -> None:
+        # [Silent Failure] Aggregate prebuilt tracing should expose run/proposer/synthesis phases.
+        events: list[dict[str, object]] = []
+        tracer = Trace.profile(Trace.debug(events), TraceProfile.verbose())
+        engine = MultiProviderAggregator([("a", FakeAgent("a", "alpha"))], EchoAggregator(), AggregateConfig(), _TEMPLATE, tracer=tracer)
+        await engine.aggregate("q")
+        names = [event.get("name") for event in events if event["type"] == "start_span"]
+        self.assertIn("aggregate.run", names)
+        self.assertIn("aggregate.proposer", names)
+        self.assertIn("aggregate.synthesis", names)
 
     async def test_all_proposers_failing_raises(self) -> None:
         # [Edge Case] When every proposer fails, AggregateExecutionError is raised.

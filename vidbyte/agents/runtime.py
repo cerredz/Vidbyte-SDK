@@ -179,6 +179,7 @@ class AgentRuntime:
         last_assistant_output: str | None = None
         run_state: dict[type, Any] = {}
         iteration_outputs: list[str] = []
+        active_trace_context = trace_context
 
         decision = await self.middleware.before_run(
             self._middleware_context(
@@ -291,6 +292,16 @@ class AgentRuntime:
                     model_response=last_response,
                 )
 
+            iteration_span = self._start_semantic_span(
+                "runtime.iteration",
+                parent=trace_context,
+                agent_name=self.agent_name,
+                iteration=iteration_count,
+                model_call_count=model_call_count,
+                tool_call_count=len(call_contexts),
+                tokens_used=tokens_used,
+            )
+            active_trace_context = iteration_span or trace_context
             call_options = self._build_iteration_call_options(
                 run_options,
                 context,
@@ -301,20 +312,25 @@ class AgentRuntime:
                 tokens_used=tokens_used,
                 tool_call_count=len(call_contexts),
             )
-            raw_result, model_call_count = await self._invoke_with_middleware(
-                handle,
-                message,
-                call_options,
-                context=context,
-                iteration_count=iteration_count,
-                model_call_count=model_call_count,
-                call_contexts=call_contexts,
-                tokens_used=tokens_used,
-                started_at=started_at,
-                metadata=runtime_metadata,
-                run_state=run_state,
-                trace_context=trace_context,
-            )
+            try:
+                raw_result, model_call_count = await self._invoke_with_middleware(
+                    handle,
+                    message,
+                    call_options,
+                    context=context,
+                    iteration_count=iteration_count,
+                    model_call_count=model_call_count,
+                    call_contexts=call_contexts,
+                    tokens_used=tokens_used,
+                    started_at=started_at,
+                    metadata=runtime_metadata,
+                    run_state=run_state,
+                    trace_context=active_trace_context,
+                )
+            except BaseException as exc:
+                self._end_semantic_span(iteration_span, error=exc)
+                raise
+            self._end_semantic_span(iteration_span, output=handle.extract_text(raw_result))
             if isinstance(raw_result, AgentResult):
                 return await self._finish_result(
                     raw_result,
@@ -375,6 +391,12 @@ class AgentRuntime:
                 )
 
             tool_calls = ToolsFormatter.parse_tool_calls(raw_result, provider)
+            self._record_parser_span(
+                "parser.tool_calls",
+                parent=active_trace_context,
+                provider=provider,
+                tool_call_count=len(tool_calls),
+            )
             if not tool_calls:
                 if self.config.max_tokens is not None and tokens_used is not None and tokens_used >= self.config.max_tokens:
                     token_stop = self._stopped_result(
@@ -464,7 +486,7 @@ class AgentRuntime:
                     metadata=runtime_metadata,
                     run_state=run_state,
                     model_response=raw_result,
-                    trace_context=trace_context,
+                    trace_context=active_trace_context,
                 )
                 if isinstance(processed, AgentResult):
                     return await self._finish_result(
@@ -742,6 +764,12 @@ class AgentRuntime:
             return
         if self.context_manager is None:
             return
+        algorithm_span = self._start_semantic_span(
+            f"algorithm.{getattr(algorithm, 'name', algorithm.__class__.__name__)}",
+            message=message,
+            provider=provider,
+            iteration=iteration_count,
+        )
         iteration = None
         if iteration_count > 0:
             iteration = self._iteration_snapshot(
@@ -753,22 +781,27 @@ class AgentRuntime:
                 tokens_used=tokens_used,
                 metadata=metadata,
             )
-        await algorithm.after_tool_calls(
-            ContextWindowRunContext(
-                context_manager=self.context_manager,
-                recorder=self.recorder,
-                state=state,
-                iteration=iteration,
-                runner=runner,
-                provider=provider,
-                invoke_runner=invoke_runner,
-                runner_output_text=runner_output_text,
-                runner_output_metadata=runner_output_metadata,
-                options=options,
-                messages=messages,
-                system_prompt=system_prompt,
+        try:
+            await algorithm.after_tool_calls(
+                ContextWindowRunContext(
+                    context_manager=self.context_manager,
+                    recorder=self.recorder,
+                    state=state,
+                    iteration=iteration,
+                    runner=runner,
+                    provider=provider,
+                    invoke_runner=invoke_runner,
+                    runner_output_text=runner_output_text,
+                    runner_output_metadata=runner_output_metadata,
+                    options=options,
+                    messages=messages,
+                    system_prompt=system_prompt,
+                )
             )
-        )
+            self._end_semantic_span(algorithm_span, output="completed")
+        except BaseException as exc:
+            self._end_semantic_span(algorithm_span, error=exc)
+            raise
 
     @staticmethod
     async def _invoke_context_window_runner(runner: object, prompt: str, **options: Any) -> object:
@@ -942,6 +975,7 @@ class AgentRuntime:
 
     def _with_middleware_metadata(self, result: AgentResult) -> AgentResult:
         """Attach latest middleware metadata to a AgentResult."""
+        self._record_middleware_spans()
         metadata = dict(result.metadata)
         metadata["middleware"] = self.middleware.metadata()
         return AgentResult(
@@ -1121,7 +1155,7 @@ class AgentRuntime:
     def _llm_trace_inputs(self, handle: RunnerHandle, message: str, call_options: Mapping[str, Any], provider: str, iteration_count: int, model_call_count: int, metadata: Mapping[str, Any]) -> dict[str, Any]:
         # Build useful, bounded tracing inputs for the model-call child span.
         system = call_options.get("system")
-        messages = list(call_options.get("messages") or [])
+        history_messages = tuple(_safe_trace_value(list(call_options.get("messages") or [])))
         tools = call_options.get("tools")
         safe_prompt = _trace_text(message)
         # Build a full chat-style messages list so LangSmith renders system prompt and user
@@ -1129,9 +1163,9 @@ class AgentRuntime:
         trace_messages: list[dict[str, Any]] = []
         if system is not None:
             trace_messages.append({"role": "system", "content": _trace_text(system)})
-        trace_messages.extend(_safe_trace_value(messages))
+        trace_messages.extend(history_messages)
         trace_messages.append({"role": "user", "content": safe_prompt})
-        safe_messages = tuple(trace_messages)
+        input_messages = tuple(trace_messages)
         inputs: dict[str, Any] = {
             "agent_name": self.agent_name,
             "provider": provider,
@@ -1140,24 +1174,23 @@ class AgentRuntime:
             "model_call": model_call_count,
             "prompt": safe_prompt,
             "user_prompt": safe_prompt,
-            "messages": safe_messages,
-            "input_messages": safe_messages,
+            "system": _trace_text(system) if system is not None else None,
+            "messages": input_messages,
+            "input_messages": input_messages,
             "metadata": _safe_trace_mapping(metadata),
         }
         if system is not None:
-            safe_system = _trace_text(system)
-            inputs["system"] = safe_system
-            inputs["system_prompt"] = safe_system
+            inputs["system_prompt"] = _trace_text(system)
+        if history_messages:
+            inputs["history_messages"] = history_messages
         if tools:
             tool_list = list(tools)
             inputs["tools"] = _safe_trace_value(tool_list)
             inputs["tool_names"] = tuple(str(tool.get("name", "")) for tool in tool_list if isinstance(tool, Mapping) and tool.get("name"))
             inputs["tool_count"] = len(tool_list)
-        if messages:
-            inputs["history_messages"] = _safe_trace_value(messages)
         inputs["context_window_summary"] = (
             f"system={len(system) if system else 0}chars, "
-            f"messages={len(messages)}, "
+            f"messages={len(history_messages)}, "
             f"tools={len(list(tools)) if tools else 0}"
         )
         return inputs
@@ -1216,6 +1249,7 @@ class AgentRuntime:
         primitives_zone = self.context_manager.render_primitives_zone() if self.context_manager else ""
         body = context.build_context_body()
         parts = [p for p in (fixed, loop_settings_block, primitives_zone, body) if p]
+        self._record_context_build_span(system_chars=len(fixed), primitive_chars=len(primitives_zone), body_chars=len(body))
         return "\n\n".join(parts)
 
     def _render_loop_settings_block(self, *, iteration_count: int, tokens_used: int | None, tool_call_count: int) -> str:
@@ -1254,7 +1288,12 @@ class AgentRuntime:
         """Build the final AgentResult, populating structured when output_schema is set."""
         structured: Any = None
         if self.output_schema is not None:
-            structured, _ = self._schema_formatter.validate(output, self.output_schema)
+            span = self._start_semantic_span("parser.structured_output", output_chars=len(output or ""))
+            structured, validation_error = self._schema_formatter.validate(output, self.output_schema)
+            if validation_error:
+                self._end_semantic_span(span, error=ValueError(validation_error))
+            else:
+                self._end_semantic_span(span, output="validated")
         return AgentResult(
             output=output,
             strategy_name="direct_runner",
@@ -1463,6 +1502,41 @@ class AgentRuntime:
             return current
         return (current or 0) + delta
 
+    def _start_semantic_span(self, name: str, parent: SpanContext | None = None, **attributes: Any) -> SpanContext | None:
+        # Opens optional semantic-only spans when the active tracer is a TraceController.
+        if not _is_semantic_tracer(self._tracer):
+            return None
+        return self._tracer.start_span(name, parent=parent, **attributes)
+
+    def _end_semantic_span(self, context: SpanContext | None, *, output: str | None = None, error: BaseException | None = None) -> None:
+        # Closes optional semantic-only spans when one was opened.
+        if context is None:
+            return
+        self._tracer.end_span(context, output=output, error=error)
+
+    def _record_parser_span(self, name: str, parent: SpanContext | None = None, **attributes: Any) -> None:
+        # Records a short parser span without affecting parser behavior.
+        span = self._start_semantic_span(name, parent=parent, **attributes)
+        self._end_semantic_span(span, output="ok")
+
+    def _record_context_build_span(self, **attributes: Any) -> None:
+        # Records a context-window build summary when semantic tracing is active.
+        span = self._start_semantic_span("context.window.build", **attributes)
+        self._end_semantic_span(span, output="built")
+
+    def _record_middleware_spans(self) -> None:
+        # Emits spans for middleware decisions captured by the middleware pipeline.
+        for event in self.middleware.events:
+            span = self._start_semantic_span(
+                "middleware.decision",
+                middleware_name=event.middleware_name,
+                hook=event.hook.value,
+                action=event.action.value,
+                reason=event.reason,
+                metadata=dict(event.metadata),
+            )
+            self._end_semantic_span(span, output=event.action.value)
+
 
 def _trace_text(value: object, *, max_chars: int = 12000) -> str:
     # Keep trace payloads useful without letting very large prompts dominate requests.
@@ -1492,6 +1566,11 @@ def _safe_trace_value(value: Any) -> Any:
     if isinstance(value, str):
         return _trace_text(value)
     return value
+
+
+def _is_semantic_tracer(tracer: TracerBase) -> bool:
+    # Detects TraceController-like tracers without importing vidbyte.trace during agent initialization.
+    return all(hasattr(tracer, attr) for attr in ("inner", "profile", "translator"))
 
 
 __all__ = ["AgentRuntime"]

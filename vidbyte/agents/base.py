@@ -471,6 +471,7 @@ class BaseAgent(McpAttachableMixin):
                 runtime_metadata={**self.metadata, **dict(input_metadata), **trace_metadata},
                 **options,
             )
+            self._record_agent_stop(trace_ctx, result)
             if trace_ctx is not None:
                 self._tracer.end_trace(trace_ctx, output=_format_trace_output(result))
         except Exception as exc:
@@ -986,6 +987,22 @@ class BaseAgent(McpAttachableMixin):
             result.append({"name": name})
         return result
 
+    def _record_agent_stop(self, parent: object | None, result: AgentResult) -> None:
+        # Records a semantic agent stop span when using TraceController-backed tracing.
+        if not _is_semantic_tracer(self._tracer):
+            return
+        metadata = dict(result.metadata)
+        span = self._tracer.start_span(
+            "agent.stop",
+            parent=parent,
+            stop_reason=metadata.get("stop_reason"),
+            strategy=result.strategy_name,
+            iteration_count=metadata.get("iteration_count"),
+            tokens_used=metadata.get("tokens_used"),
+            tool_call_count=metadata.get("tool_call_count"),
+        )
+        self._tracer.end_span(span, output=str(result.output))
+
     @staticmethod
     def _tool_spec_to_dict(spec: object) -> dict[str, Any]:
         """Convert a ToolSpec-like object to a dict safe for trace backends."""
@@ -1052,3 +1069,8 @@ def _format_trace_output(result: Any) -> str:
         f"<iteration_{i + 1}>\n{out}\n</iteration_{i + 1}>"
         for i, out in enumerate(iteration_outputs)
     )
+
+
+def _is_semantic_tracer(tracer: TracerBase) -> bool:
+    # Detects TraceController-like tracers without importing vidbyte.trace during agent initialization.
+    return all(hasattr(tracer, attr) for attr in ("inner", "profile", "translator"))
