@@ -30,6 +30,11 @@ _COMPONENTS = {
     "embeddings",
     "sessions",
     "core",
+    "pipelines",
+    "handoff",
+    "sources",
+    "evals",
+    "mcp",
 }
 _SETTING_VALUES = {"off", "minimal", "default", "summary", "decisions_only", "inputs_outputs", "verbose", "diagnostic"}
 
