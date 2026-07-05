@@ -65,7 +65,7 @@ class LangfuseTracer(TracerBase):
         context: SpanContext,
         *,
         output: str | None = None,
-        error: Exception | None = None,
+        error: BaseException | None = None,
     ) -> None:
         if not isinstance(context, LangfuseSpanContext) or context.handle is None:
             return
@@ -107,7 +107,7 @@ class LangfuseTracer(TracerBase):
         context: SpanContext,
         *,
         output: str | None = None,
-        error: Exception | None = None,
+        error: BaseException | None = None,
     ) -> None:
         if not isinstance(context, LangfuseSpanContext) or context.handle is None:
             return

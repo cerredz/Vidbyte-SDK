@@ -49,7 +49,12 @@ vidbyte/
 |-- trace/
 |   |-- base.py
 |   |-- debug.py
+|   |-- schema.py
+|   |-- profiles.py
+|   |-- controller.py
 |   |-- session.py
+|   |-- components/
+|   |-- providers/
 |   `-- continual/
 |-- pipelines/
 |   |-- base.py
@@ -91,7 +96,9 @@ vidbyte/
 - Keep the public `Trace` tracer client and helper factories in `vidbyte/trace/base.py`.
 - Prefer `Trace.langsmith_default(...)` for user-facing single-agent LangSmith examples; keep it as a facade helper over the existing LangSmith provider adapter.
 - Keep concrete debug tracing implementation in `vidbyte/trace/debug.py`.
-- Keep provider-neutral session tracing wrappers in `vidbyte/trace/session.py`.
+- Keep semantic tracing schema, profiles, controllers, and session wrappers under `vidbyte/trace/`.
+- Keep Vidbyte-owned prebuilt component span specs under `vidbyte/trace/components/`.
+- Keep provider translation interfaces under `vidbyte/trace/providers/`; they translate semantic spans to provider fields but do not call external provider SDKs.
 - Keep continual tracing presets and future continual trace memory work under `vidbyte/trace/continual/`.
 - Keep provider-neutral tracer protocols under `vidbyte/lib/tracing/`.
 - Keep external tracing provider adapters under `vidbyte/providers/tracing/`.
@@ -125,3 +132,17 @@ vidbyte/
 - Do not add provider network calls, remote protocol transports, or private Vidbyte service logic without a separate approved design.
 - Keep agent behavior predicates under `vidbyte/evals/behavior/` with one category file per
   behavior group and the `Behavior` facade composing them. Follow `skills/vidbyte-sdk/agent-behavior.md`.
+
+## Semantic Trace Components
+
+`vidbyte/trace/components/` holds Vidbyte-owned span-spec factories. These files define stable SDK semantic spans and payload contracts; provider-specific translation stays in `vidbyte/trace/providers/`.
+
+- `agents.py`: `agent.run`, `agent.stop`, aggregate agent, proposer, synthesis, and failure span specs.
+- `runtimes.py`: linear runtime iteration plus actor and search runtime span specs.
+- `context.py`: context-window build, context primitive render summary, compaction, and update span specs.
+- `algorithms.py`: context-window algorithm spans such as reflexion, multi-provider grading, trajectory checkpoints, problem-space search, and error correction.
+- `middleware.py`: middleware hook and decision spans, including retry, abort, deny-tool, sleep, and fail-open/fail-closed decisions.
+- `tools.py`: tool-call, permission, argument, result, and error span specs.
+- `parsers.py`: tool-call parsing and structured-output validation span specs.
+
+When adding or changing an agent runtime, context-window algorithm, middleware class, tool surface, parser, or aggregate-agent behavior, check whether `vidbyte/trace/components/` needs a new or updated span spec in the same change. Update README or `llms.txt` examples when public tracing behavior changes.

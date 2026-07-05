@@ -14,7 +14,7 @@ class SpanContext:
 
 
 class TracerBase(ABC):
-    """Abstract tracing contract all platform adapters must implement."""
+    """Abstract tracing contract all platform and semantic adapters must implement."""
 
     @abstractmethod
     def start_trace(self, name: str, **attributes: Any) -> SpanContext:

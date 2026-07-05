@@ -13,7 +13,7 @@ from vidbyte.lib.dataclasses.agents import AgentRuntimeConfig
 from vidbyte.lib.dataclasses.runner import RunnerHandle
 from vidbyte.lib.errors import ConfigurationError, TracerConfigurationError
 from vidbyte.lib.tracing import NullTracer, SpanContext, TracerBase
-from vidbyte.trace import Trace
+from vidbyte.trace import Trace, TraceProfile
 from vidbyte.tools import BaseTool, ToolCall, ToolPermission, ToolResult, ToolSpec, Tools
 from vidbyte.tools.security import PermissionPolicy
 
@@ -429,6 +429,24 @@ class AgentRuntimeSpanTests(unittest.IsolatedAsyncioTestCase):
         )
         tool_spans = [s for s in tracer.spans_started if s["name"] == "tool.call"]
         self.assertGreaterEqual(len(tool_spans), 1)
+
+    async def test_semantic_tool_span_attributes_include_arguments(self) -> None:
+        # Verifies prebuilt default tracing includes tool name, input, call id, and metadata.
+        events: list[dict[str, Any]] = []
+        tracer = Trace.profile(Trace.debug(events), TraceProfile.default())
+        runtime = AgentRuntime(
+            agent_name="rt-agent",
+            system_prompt="sys",
+            tools=Tools(),
+            permission_policy=PermissionPolicy(),
+            tracer=tracer,
+        )
+        call = ToolCall(tool_name="isDone", arguments={"final_answer": "done"}, call_id="call-1")
+        await runtime.execute_tool_call(call, provider="openai")
+        tool_event = next(event for event in events if event.get("name") == "tool.call")
+        self.assertEqual(tool_event["attributes"]["tool_name"], "isDone")
+        self.assertEqual(tool_event["attributes"]["tool_input"], {"final_answer": "done"})
+        self.assertEqual(tool_event["attributes"]["call_id"], "call-1")
 
     async def test_tool_span_closed_even_when_tool_raises(self) -> None:
         tracer = RecordingTracer()
