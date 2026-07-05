@@ -20,6 +20,7 @@ from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
 from vidbyte.agents.mixins import McpAttachableMixin
+from vidbyte.agents.contracts import ContractSettingsValidator, OutputContract
 from vidbyte.agents.settings import AgentLoopSettings
 from vidbyte.agents.types import AgentCard, AgentInput, AgentMessage
 from vidbyte.context.manager import ContextManager
@@ -89,6 +90,7 @@ class BaseAgent(McpAttachableMixin):
         tracer: type[TracerBase] | TracerBase | None = None,
         trace: type[TracerBase] | TracerBase | None = None,
         output_schema: type | Mapping[str, Any] | None = None,
+        output_contracts: Sequence[OutputContract] = (),
         handoff: Handoff | None = None,
         trace_option: TraceOption | None = None,
     ) -> None:
@@ -114,6 +116,11 @@ class BaseAgent(McpAttachableMixin):
                 raise ConfigurationError(
                     f"Agent {name} uses non-linear runtime {self.runtime_type.value}, "
                     "which does not support middleware."
+                )
+            if output_contracts:
+                raise ConfigurationError(
+                    f"Agent {name} uses non-linear runtime {self.runtime_type.value}, "
+                    "which does not support output contracts."
                 )
             if trace_option is not None and trace_option.enabled:
                 raise ConfigurationError(
@@ -170,6 +177,8 @@ class BaseAgent(McpAttachableMixin):
             compaction_target_tokens=compaction_target_tokens,
         )
         self.runtime_config = self.agent_loop_settings.to_runtime_config()
+        self.output_contracts = tuple(output_contracts)
+        ContractSettingsValidator(self.agent_loop_settings, self.output_contracts).validate()
         self.max_tool_rounds = self.agent_loop_settings.max_iterations
         self.system_prompt = system_prompt
         self.middleware = tuple(middleware)
@@ -696,6 +705,9 @@ class BaseAgent(McpAttachableMixin):
         runtime_cls = RuntimeRegistry.resolve(self.runtime_type)
 
         kwargs: dict[str, Any] = {}
+        if self.runtime_type is AgentRuntimeType.LINEAR:
+            kwargs["output_contracts"] = self.output_contracts
+            kwargs["max_contract_rejections"] = self.agent_loop_settings.max_contract_rejections
         if self.runtime_type in (
             AgentRuntimeType.ACTOR_MODEL,
             AgentRuntimeType.ACTOR_MODEL_P2P,
