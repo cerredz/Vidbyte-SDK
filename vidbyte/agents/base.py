@@ -30,6 +30,7 @@ from vidbyte.lib.agents import ModalityDetector
 from vidbyte.lib.dataclasses.agents import AgentMetadata, AgentRunnerConfig, AgentRuntimeConfig
 from vidbyte.lib.dataclasses.multi_agent import AggregateConfig, ProposerSpec
 from vidbyte.lib.dataclasses.runner import RunnerHandle
+from vidbyte.lib.dataclasses.sessions import SESSION_SCHEMA_VERSION, RunState
 from vidbyte.lib.dataclasses.strategies import AgentResult
 from vidbyte.lib.dataclasses.trace import TraceOption
 from vidbyte.lib.enums import AgentRuntimeType, ModelModality, ModelProvider
@@ -356,6 +357,16 @@ class BaseAgent(McpAttachableMixin):
             tool.bind_agent(self)
         if isinstance(tool, CreateHandoffTool):
             tool.bind_agent(self)
+        self._bind_session_tool(tool)
+
+    def _bind_session_tool(self, tool: object) -> None:
+        # Bind a session-builtin tool to this agent's active session when one is attached.
+        binder = getattr(tool, "bind_session", None)
+        if not callable(binder):
+            return
+        session = getattr(self, "_active_session", None)
+        if session is not None:
+            binder(session)
 
     def tool_specs(self) -> tuple[ToolSpec, ...]:
         return self.tools.specs()
@@ -407,6 +418,230 @@ class BaseAgent(McpAttachableMixin):
         if include_history:
             child.history = list(self.history)
         return child
+
+    def export_state(self) -> RunState:
+        """Capture a serializable RunState snapshot of this agent (no secrets, no live objects)."""
+        from vidbyte.sessions.serialization import SessionSerializer
+        serializer = SessionSerializer()
+        return RunState(
+            schema_version=SESSION_SCHEMA_VERSION,
+            agent_name=self.name,
+            system_prompt=self.system_prompt,
+            description=self.description,
+            capabilities=tuple(self.capabilities),
+            provider=self.runner_config.provider,
+            model_name=self.runner_config.model_name,
+            modality=self.modality.value,
+            temperature=self.runner_config.temperature,
+            runner_options=dict(self.runner_config.options),
+            runtime_type=self.runtime_type.value,
+            runtime_config=self._export_runtime_config(),
+            algorithm=self.algorithm.name,
+            metadata=dict(self.metadata),
+            agent_metadata=self._export_agent_metadata(),
+            tool_names=tuple(self._tool_name(tool) for tool in self._agent_tool_items),
+            history=tuple(serializer.message_to_dict(message) for message in self.history),
+            run_id=self.runner_config.run_id,
+            loop_settings=self._export_loop_settings(),
+            aggregate_plan=self._export_aggregate_plan(),
+            context_summary=self._export_context_summary(),
+            trace_option=self._export_trace_option(),
+            output_schema=self._export_output_schema(),
+        )
+
+    @classmethod
+    def restore(cls, state: RunState, *, tools: Sequence[object] = (), runner: object | None = None, middleware: Sequence[AgentMiddleware] = (), tracer: object | None = None, trace: object | None = None, output_schema: object | None = None) -> BaseAgent:
+        """Rebuild a live agent from a RunState, re-supplying non-serializable parts (the rehydration contract)."""
+        from vidbyte.sessions.serialization import SessionSerializer
+        serializer = SessionSerializer()
+        agent_metadata = AgentMetadata(**{key: str(state.agent_metadata.get(key, "")) for key in ("name", "description", "use_cases")})
+        child = cls(
+            name=state.agent_name,
+            system_prompt=state.system_prompt,
+            runtime=cls._restore_runtime(state),
+            runner=runner,
+            tools=tools,
+            middleware=middleware,
+            provider=state.provider,
+            model_name=state.model_name,
+            modality=state.modality,
+            temperature=state.temperature,
+            run_id=state.run_id,
+            runner_options=dict(state.runner_options),
+            agent_loop_settings=cls._restore_loop_settings(state),
+            description=state.description,
+            capabilities=tuple(state.capabilities),
+            agent_metadata=agent_metadata,
+            algorithm=None if state.algorithm in ("", "default") else state.algorithm,
+            metadata=dict(state.metadata),
+            tracer=tracer,
+            trace=trace,
+            output_schema=output_schema,
+        )
+        child.history = [serializer.message_from_dict(item) for item in state.history]
+        cls._record_resume_tool_mismatch(child, state.tool_names)
+        return child
+
+    def _export_runtime_config(self) -> dict[str, Any]:
+        # Capture runtime budgets plus actor-runtime settings when present.
+        config: dict[str, Any] = {
+            "max_iterations": self.runtime_config.max_iterations,
+            "max_tokens": self.runtime_config.max_tokens,
+            "max_tool_calls": self.runtime_config.max_tool_calls,
+            "compaction_trigger_tokens": self.runtime_config.compaction_trigger_tokens,
+            "compaction_target_tokens": self.runtime_config.compaction_target_tokens,
+        }
+        if isinstance(self.runtime_config_obj, ActorRuntime):
+            config.update(
+                {
+                    "dynamic_actors": self.runtime_config_obj.dynamic_actors,
+                    "max_loop": self.runtime_config_obj.max_loop,
+                    "termination_mode": self.runtime_config_obj.termination_mode,
+                    "worker_model": self.runtime_config_obj.worker_model,
+                }
+            )
+        return config
+
+    def _export_loop_settings(self) -> dict[str, Any]:
+        # Preserve every current AgentLoopSettings field, including those not understood by AgentRuntimeConfig.
+        fields = (
+            "max_iterations",
+            "max_tokens",
+            "max_tool_calls",
+            "max_parallel_tool_calls",
+            "max_retries",
+            "timeout_seconds",
+            "context_window_budget",
+            "compaction_trigger_tokens",
+            "compaction_target_tokens",
+            "allowed_tools",
+        )
+        values = {name: getattr(self.agent_loop_settings, name, None) for name in fields}
+        if isinstance(values.get("allowed_tools"), tuple):
+            values["allowed_tools"] = list(values["allowed_tools"])
+        return {key: value for key, value in values.items() if value is not None}
+
+    def _export_aggregate_plan(self) -> dict[str, Any]:
+        # Persist only serializable aggregate settings; live proposer/aggregator objects are re-supplied by callers.
+        if self._aggregate_plan is None:
+            return {}
+        plan = dict(self._aggregate_plan)
+        specs = []
+        for spec in tuple(plan.get("proposers") or ()):
+            if isinstance(spec, ProposerSpec):
+                specs.append(
+                    {
+                        "provider": spec.provider,
+                        "model": spec.model,
+                        "label": spec.label,
+                        "system_prompt": spec.system_prompt,
+                    }
+                )
+            else:
+                specs.append({"repr": repr(spec)})
+        config = plan.get("config")
+        return {
+            "proposers": specs,
+            "provider": plan.get("provider"),
+            "model": plan.get("model"),
+            "aggregator": type(plan.get("aggregator")).__name__ if plan.get("aggregator") is not None else None,
+            "config": self._aggregate_config_to_dict(config),
+        }
+
+    def _export_context_summary(self) -> dict[str, Any]:
+        # Record resumable context metadata without serializing live context objects.
+        return {
+            "context_item_count": len(self.context_items),
+            "has_context_manager": self.context_manager is not None,
+            "algorithm": self.algorithm.name,
+        }
+
+    def _export_trace_option(self) -> dict[str, Any]:
+        # Capture trace-option primitives when the object exposes them; omit live tracer state.
+        option = self._trace_option
+        if option is None:
+            return {}
+        return {
+            "mode": option.mode.value,
+            "schema_name": option.schema.name,
+            "schema_description": option.schema.description,
+            "schema_fields": {
+                name: {"description": field.description, "type": field.type.value}
+                for name, field in option.schema.fields.items()
+            },
+            "every_n_iterations": option.every_n_iterations,
+            "max_trace_iterations": option.max_trace_iterations,
+        }
+
+    def _export_output_schema(self) -> dict[str, Any] | None:
+        # Store a marker for output_schema so restore callers know whether to re-supply one.
+        if self.output_schema is None:
+            return None
+        if isinstance(self.output_schema, Mapping):
+            return {"kind": "mapping", "schema": dict(self.output_schema)}
+        return {"kind": "type", "name": getattr(self.output_schema, "__name__", type(self.output_schema).__name__)}
+
+    @staticmethod
+    def _aggregate_config_to_dict(config: Any) -> dict[str, Any]:
+        if not isinstance(config, AggregateConfig):
+            return {}
+        return {
+            "synthesis_system_prompt": config.synthesis_system_prompt,
+            "synthesis_prompt_template": config.synthesis_prompt_template,
+            "max_candidate_chars": config.max_candidate_chars,
+            "max_concurrency": config.max_concurrency,
+            "per_proposer_timeout": config.per_proposer_timeout,
+            "min_successful": config.min_successful,
+        }
+
+    @staticmethod
+    def _restore_loop_settings(state: RunState) -> AgentLoopSettings:
+        # Prefer the current structured settings payload; fall back to older runtime_config-only checkpoints.
+        values = dict(state.loop_settings or {})
+        if not values:
+            values = {
+                "max_iterations": state.runtime_config.get("max_iterations"),
+                "max_tokens": state.runtime_config.get("max_tokens"),
+                "max_tool_calls": state.runtime_config.get("max_tool_calls"),
+                "compaction_trigger_tokens": state.runtime_config.get("compaction_trigger_tokens"),
+                "compaction_target_tokens": state.runtime_config.get("compaction_target_tokens"),
+            }
+        if values.get("allowed_tools") is not None:
+            values["allowed_tools"] = tuple(values["allowed_tools"])
+        return AgentLoopSettings(**{key: value for key, value in values.items() if value is not None})
+
+    @staticmethod
+    def _restore_runtime(state: RunState) -> AgentRuntimeType | str | ActorRuntime:
+        # Rebuild actor runtime config when checkpointed; linear and MCTS can use the enum value directly.
+        runtime_type = AgentRuntimeType(state.runtime_type)
+        if runtime_type in (
+            AgentRuntimeType.ACTOR_MODEL,
+            AgentRuntimeType.ACTOR_MODEL_P2P,
+            AgentRuntimeType.ACTOR_MODEL_BROADCAST,
+        ):
+            return ActorRuntime(
+                topology=runtime_type,
+                dynamic_actors=bool(state.runtime_config.get("dynamic_actors", False)),
+                max_loop=int(state.runtime_config.get("max_loop", 20)),
+                termination_mode=str(state.runtime_config.get("termination_mode", "coordinator")),
+                worker_model=state.runtime_config.get("worker_model"),
+            )
+        return runtime_type
+
+    def _export_agent_metadata(self) -> dict[str, str]:
+        # Render the agent-as-tool metadata into a plain dict.
+        return {
+            "name": self.agent_metadata.name,
+            "description": self.agent_metadata.description,
+            "use_cases": self.agent_metadata.use_cases,
+        }
+
+    @staticmethod
+    def _record_resume_tool_mismatch(child: BaseAgent, expected: Sequence[str]) -> None:
+        # Record a non-fatal marker when restored tools differ from the persisted set.
+        got = tuple(child._tool_name(tool) for tool in child._agent_tool_items)
+        if set(expected) != set(got):
+            child.metadata["__resume_tool_mismatch__"] = {"expected": list(expected), "got": list(got)}
 
     async def receive(self, message: AgentMessage) -> None:
         self.history.append(message)
