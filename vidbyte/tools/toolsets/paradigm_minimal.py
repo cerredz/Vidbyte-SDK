@@ -23,7 +23,7 @@ from vidbyte.tools.builtins.code_execution import CodeExecutionTool
 from vidbyte.tools.builtins.code_search import GlobTool, GrepTool
 from vidbyte.tools.builtins.editing import PatchTool
 from vidbyte.tools.catalog import Tools
-from vidbyte.tools.filesystem import ListDirTool, ReadLinesTool, ReadTextTool
+from vidbyte.tools.filesystem import ListDirTool, ReadLinesTool, ReadTextTool, StatTool, TreeTool
 
 
 class ParadigmMinimalToolset:
@@ -52,6 +52,8 @@ class ParadigmMinimalToolset:
             ReadTextTool(fs_config),
             ReadLinesTool(fs_config),
             ListDirTool(fs_config),
+            TreeTool(fs_config),
+            StatTool(fs_config),
         ]
         if self._include_execution:
             tools.append(CodeExecutionTool())
