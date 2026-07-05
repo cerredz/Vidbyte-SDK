@@ -86,6 +86,146 @@ class TraceProfile:
         # Builds the highest-detail profile for local debugging and diagnostics.
         return cls(detail=TraceDetail.DIAGNOSTIC, components=_base_components("diagnostic"))
 
+    @classmethod
+    def production(cls) -> TraceProfile:
+        # Safe default for live traffic: errors and aborts without internal noise.
+        return cls(
+            detail=TraceDetail.STANDARD,
+            components={
+                "agents": True,
+                "middleware": "decisions_only",
+                "tools": True,
+                "parsers": "default",
+                "core": "default",
+                "context": "off",
+                "algorithms": "off",
+                "runtimes": "off",
+                "aggregate": "off",
+                "pipelines": "off",
+                "handoff": "off",
+                "sources": "off",
+                "evals": "off",
+                "mcp": "off",
+                "sessions": "off",
+                "actor": "off",
+                "search": "off",
+                "retrievers": "off",
+                "embeddings": "off",
+            },
+        )
+
+    @classmethod
+    def cost_monitoring(cls) -> TraceProfile:
+        # Focus on token/cost budget middleware and tool usage for cost attribution.
+        return cls(
+            detail=TraceDetail.STANDARD,
+            components={
+                "agents": "summary",
+                "middleware": "verbose",
+                "tools": "inputs_outputs",
+                "runtimes": "default",
+                "core": "default",
+                "context": "off",
+                "algorithms": "off",
+                "parsers": "off",
+                "aggregate": "off",
+                "pipelines": "off",
+                "handoff": "off",
+                "sources": "off",
+                "evals": "off",
+                "mcp": "off",
+                "sessions": "off",
+                "actor": "off",
+                "search": "off",
+                "retrievers": "off",
+                "embeddings": "off",
+            },
+        )
+
+    @classmethod
+    def developer(cls) -> TraceProfile:
+        # Good local development defaults with runtime iteration visibility.
+        return cls(
+            detail=TraceDetail.VERBOSE,
+            components={
+                "agents": True,
+                "middleware": "decisions_only",
+                "tools": True,
+                "context": "summary",
+                "algorithms": "default",
+                "runtimes": True,
+                "parsers": "default",
+                "aggregate": "default",
+                "pipelines": "default",
+                "handoff": "default",
+                "sessions": "default",
+                "core": "default",
+                "sources": "off",
+                "evals": "off",
+                "mcp": "off",
+                "actor": "off",
+                "search": "off",
+                "retrievers": "off",
+                "embeddings": "off",
+            },
+        )
+
+    @classmethod
+    def multi_agent(cls) -> TraceProfile:
+        # Verbose aggregate, pipeline, and handoff tracing with minimal tool noise.
+        return cls(
+            detail=TraceDetail.VERBOSE,
+            components={
+                "agents": True,
+                "middleware": "decisions_only",
+                "tools": "minimal",
+                "aggregate": True,
+                "pipelines": True,
+                "handoff": True,
+                "sessions": True,
+                "runtimes": "default",
+                "actor": "default",
+                "search": "default",
+                "core": "default",
+                "context": "off",
+                "algorithms": "off",
+                "parsers": "off",
+                "sources": "off",
+                "evals": "off",
+                "mcp": "off",
+                "retrievers": "off",
+                "embeddings": "off",
+            },
+        )
+
+    @classmethod
+    def algorithm_debug(cls) -> TraceProfile:
+        # Verbose algorithm and context spans for in-context learning debugging.
+        return cls(
+            detail=TraceDetail.VERBOSE,
+            components={
+                "agents": True,
+                "middleware": "decisions_only",
+                "tools": "default",
+                "context": True,
+                "algorithms": True,
+                "runtimes": True,
+                "parsers": "default",
+                "core": "default",
+                "aggregate": "off",
+                "pipelines": "off",
+                "handoff": "off",
+                "sources": "off",
+                "evals": "off",
+                "mcp": "off",
+                "sessions": "off",
+                "actor": "off",
+                "search": "off",
+                "retrievers": "off",
+                "embeddings": "off",
+            },
+        )
+
     def with_components(self, **components: str | bool) -> TraceProfile:
         # Returns a copy with selected component settings overridden.
         merged = {**dict(self.components)}
