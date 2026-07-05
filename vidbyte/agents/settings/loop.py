@@ -48,6 +48,7 @@ class AgentLoopSettings:
         compaction_trigger_tokens: int | None = None,
         compaction_target_tokens: int | None = None,
         allowed_tools: tuple[str, ...] | None = None,
+        max_contract_rejections: int = 3,
     ) -> None:
         # Stores all loop parameters as instance attributes, then validates them immediately.
         self.max_iterations = max_iterations
@@ -60,6 +61,7 @@ class AgentLoopSettings:
         self.compaction_trigger_tokens = compaction_trigger_tokens
         self.compaction_target_tokens = compaction_target_tokens
         self.allowed_tools = allowed_tools
+        self.max_contract_rejections = max_contract_rejections
         self._validate()
 
     def _validate(self) -> None:
@@ -67,6 +69,14 @@ class AgentLoopSettings:
         self._validate_positive_int_fields()
         self._validate_timeout_seconds()
         self._validate_compaction_pair()
+        self._validate_contract_rejections()
+
+    def _validate_contract_rejections(self) -> None:
+        # max_contract_rejections must be a positive int; it bounds the contract reject-and-continue loop.
+        if not isinstance(self.max_contract_rejections, int) or self.max_contract_rejections <= 0:
+            raise ConfigurationError(
+                f"AgentLoopSettings.max_contract_rejections must be a positive integer, got {self.max_contract_rejections}."
+            )
 
     def _validate_positive_int_fields(self) -> None:
         # Each integer field must be strictly positive when provided.
@@ -122,6 +132,7 @@ class AgentLoopSettings:
                 "compaction_trigger_tokens",
                 "compaction_target_tokens",
                 "allowed_tools",
+                "max_contract_rejections",
             )
             if getattr(self, name) is not None
         }
