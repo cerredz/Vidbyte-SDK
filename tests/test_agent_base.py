@@ -2,19 +2,26 @@ from __future__ import annotations
 
 import unittest
 
-from vidbyte.agents import AgentInput, BaseAgent
+from vidbyte.agents import AgentInput, AgentMessage, BaseAgent
 from vidbyte.agents.base import ConfiguredAgentRunner
 from vidbyte.context import ContextManager, ContextWindow, TaskContextItem, TextContextItem
 from vidbyte.lib.config import ModelProvider
 from vidbyte.middleware import AgentMiddleware
 from vidbyte.lib.errors import AgentExecutionError
 from vidbyte.lib.runners import TextModelResponse
+from vidbyte.context.handoff import MinimalHandoff
 from vidbyte.tools import ToolSpec
+from vidbyte.tools.types import ToolCallContext
 
 
 class FakeTool:
+    def __init__(self, name: str = "lookup") -> None:
+        # Stores the test tool name used by spec().
+        self._name = name
+
     def spec(self) -> ToolSpec:
-        return ToolSpec(name="lookup", description="Lookup things")
+        # Returns a minimal model-facing tool spec.
+        return ToolSpec(name=self._name, description=f"{self._name} things")
 
 
 class EchoRunner:
@@ -121,6 +128,8 @@ class AgentBaseTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(forked.name, "researcher-copy")
         self.assertEqual(forked.metadata["role"], "custom_researcher")
         self.assertEqual(forked.metadata["branch"], "copy")
+        self.assertEqual(forked.metadata["forked_from"], "run-123")
+        self.assertEqual(forked.metadata["fork_depth"], 1)
 
     async def test_agent_fork_preserves_middleware(self) -> None:
         middleware = FakeMiddleware()
@@ -137,6 +146,44 @@ class AgentBaseTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(forked.middleware, (middleware,))
         self.assertEqual(replaced.middleware, (replacement,))
+
+    async def test_agent_fork_rebuilds_runner_for_model_overrides(self) -> None:
+        # Model-ish overrides must discard the live parent runner so child config can build a fresh runner lazily.
+        parent = BaseAgent(name="worker", system_prompt="Work carefully.", runner=EchoRunner(), provider="openai", model_name="model-a")
+        child = parent.fork(name="child", model_name="model-b", temperature=0.7, runner_options={"reasoning": "low"})
+
+        self.assertIsInstance(child.runner, ConfiguredAgentRunner)
+        self.assertEqual(child.runner_config.model_name, "model-b")
+        self.assertEqual(child.runner_config.temperature, 0.7)
+        self.assertEqual(child.runner_config.options, {"reasoning": "low"})
+        self.assertEqual(child.runners, {})
+
+    async def test_agent_fork_applies_tool_deltas_by_name(self) -> None:
+        # Fork tool deltas should compose with inherited tools and leave the parent catalog untouched.
+        parent = BaseAgent(name="worker", system_prompt="Work carefully.", runner=EchoRunner(), tools=[FakeTool("keep"), FakeTool("drop")])
+        child = parent.fork(name="child", add_tools=[FakeTool("add")], drop_tools=["drop"])
+
+        self.assertEqual(parent.tools.names(), ("keep", "drop"))
+        self.assertEqual(child.tools.names(), ("keep", "add"))
+
+    async def test_agent_fork_explicit_history_wins_and_can_copy_run_state(self) -> None:
+        # Explicit history should override include_history, while include_run_state copies handoffs and tool contexts.
+        parent = BaseAgent(name="worker", system_prompt="Work carefully.", runner=EchoRunner())
+        parent.history.append(AgentMessage(sender="parent", recipient="worker", content="parent-history"))
+        explicit = [AgentMessage(sender="explicit", recipient="worker", content="explicit-history")]
+        handoff = MinimalHandoff(primitive_id="handoff:1")
+        context = ToolCallContext(tool_name="lookup")
+        parent.record_handoff(handoff)
+        parent._tool_call_contexts.append(context)
+
+        child = parent.fork(name="child", include_history=True, history=explicit, include_run_state=True)
+
+        self.assertEqual(child.history, explicit)
+        self.assertEqual(child.handoffs, [handoff])
+        self.assertIs(child.last_handoff, handoff)
+        self.assertEqual(child._tool_call_contexts, [context])
+        self.assertEqual(child.last_prompt, "")
+        self.assertIsNone(child.last_reply)
 
     async def test_agent_accepts_context_window_algorithm_preset(self) -> None:
         agent = BaseAgent(

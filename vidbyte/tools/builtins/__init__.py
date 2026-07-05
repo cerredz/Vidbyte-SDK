@@ -29,6 +29,7 @@ from vidbyte.tools.builtins.context import (
 )
 from vidbyte.tools.builtins.context_primitives import ContextListTool, ContextRemoveTool, ContextUpsertTool
 from vidbyte.tools.builtins.editing import PatchTool
+from vidbyte.tools.builtins.fork import ForkConversationTool
 from vidbyte.tools.builtins.handoff import CreateHandoffTool
 from vidbyte.tools.builtins.mcp import AttachMcpServerTool, SearchMcpServersTool
 from vidbyte.tools.builtins.providers import (
@@ -88,6 +89,7 @@ __all__ = [
     "ContextMessage",
     "ContextRemoveTool",
     "ContextUpsertTool",
+    "ForkConversationTool",
     "GlobTool",
     "GrepTool",
     "ForkTool",
