@@ -110,6 +110,34 @@ class SessionMeta:
     tags: tuple[str, ...] = field(default_factory=tuple)
 
 
+@dataclass(frozen=True, slots=True)
+class AgentUsage:
+    """Usage totals for one agent within a durable session."""
+
+    agent_name: str
+    tokens: int
+    tool_calls: int
+    turns: int
+    cost: float | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class UsageRollup:
+    """Usage totals for a durable session, with a per-agent breakdown."""
+
+    tokens: int
+    tool_calls: int
+    turns: int
+    latency: float | None
+    cost: float | None
+    per_agent: tuple[AgentUsage, ...]
+
+    @classmethod
+    def empty(cls) -> "UsageRollup":
+        """Return the zero-value rollup for sessions with no head checkpoint."""
+        return cls(tokens=0, tool_calls=0, turns=0, latency=None, cost=None, per_agent=())
+
+
 __all__ = [
     "SESSION_SCHEMA_VERSION",
     "CheckpointPolicy",
@@ -118,4 +146,6 @@ __all__ = [
     "RunState",
     "Checkpoint",
     "SessionMeta",
+    "AgentUsage",
+    "UsageRollup",
 ]

@@ -66,12 +66,14 @@ from vidbyte.lib.dataclasses.sandbox import SandboxRequest, SandboxResult, Sandb
 from vidbyte.lib.dataclasses.security import PermissionDecision, PermissionPolicy
 from vidbyte.lib.dataclasses.sessions import (
     SESSION_SCHEMA_VERSION,
+    AgentUsage,
     Checkpoint,
     CheckpointPolicy,
     RunState,
     SessionMeta,
     SessionStatus,
     TraceCapture,
+    UsageRollup,
 )
 from vidbyte.lib.dataclasses.sources import (
     ArtifactRef,
@@ -114,6 +116,7 @@ __all__ = [
     "AgentRuntimeStats",
     "AgentSpec",
     "AgentStopReason",
+    "AgentUsage",
     "ArtifactRef",
     "ArtifactContextItem",
     "BaseAgentContext",
@@ -186,5 +189,6 @@ __all__ = [
     "TraceOption",
     "TraceCapture",
     "TraceSchema",
+    "UsageRollup",
     "Verification",
 ]
