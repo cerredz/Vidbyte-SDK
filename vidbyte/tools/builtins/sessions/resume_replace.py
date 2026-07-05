@@ -56,9 +56,12 @@ class ResumeReplaceTool(_SessionBuiltinTool):
         checkpoint_id = str(arguments.get("checkpoint_id", "")).strip() or None
         if not session_id or (self._session is not None and session_id == self._session.id):
             return self._replace_own(checkpoint_id)
-        if not self._scope.permits(session_id):
+        resolved_session_id = self._resolve_session_id(session_id)
+        if self._session is not None and resolved_session_id == self._session.id:
+            return self._replace_own(checkpoint_id)
+        if not self._scope.permits(resolved_session_id):
             return self._denied(_TOOL_NAME, session_id)
-        return self._replace_other(session_id, checkpoint_id)
+        return self._replace_other(resolved_session_id, checkpoint_id)
 
     def _replace_own(self, checkpoint_id: str | None) -> ToolResult:
         # Rewind the bound session to the named checkpoint (own-thread time-travel).

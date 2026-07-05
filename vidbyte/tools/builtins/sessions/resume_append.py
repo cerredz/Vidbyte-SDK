@@ -56,12 +56,13 @@ class ResumeAppendTool(_SessionBuiltinTool):
         checkpoint_id = str(arguments.get("checkpoint_id", "")).strip() or None
         if not session_id:
             return ToolResult.error(_TOOL_NAME, "resume_append requires a session_id.")
-        if not self._scope.permits(session_id):
+        resolved_session_id = self._resolve_session_id(session_id)
+        if not self._scope.permits(resolved_session_id):
             return self._denied(_TOOL_NAME, session_id)
         session = self._require_bound(_TOOL_NAME)
         if session is None:
             return ToolResult.error(_TOOL_NAME, "No active session is bound to this tool.")
-        target = checkpoint_id or self._target_head_id(session_id)
+        target = checkpoint_id or self._target_head_id(resolved_session_id)
         if target is None:
             return ToolResult.error(_TOOL_NAME, f"Unknown or empty session: {session_id}.")
         new_head = session.append_context(target)

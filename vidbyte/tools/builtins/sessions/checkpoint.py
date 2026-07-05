@@ -57,9 +57,10 @@ class CheckpointTool(_SessionBuiltinTool):
         session_id = str(arguments.get("session_id", "")).strip()
         if not session_id:
             return self._checkpoint_bound(label)
-        if not self._scope.permits(session_id):
+        resolved_session_id = self._resolve_session_id(session_id)
+        if not self._scope.permits(resolved_session_id):
             return self._denied(_TOOL_NAME, session_id)
-        return self._checkpoint_other(session_id, label)
+        return self._checkpoint_other(resolved_session_id, label)
 
     def _checkpoint_bound(self, label: str) -> ToolResult:
         # Snapshot the bound session via Session.checkpoint().

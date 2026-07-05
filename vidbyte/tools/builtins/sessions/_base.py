@@ -45,6 +45,10 @@ class _SessionBuiltinTool(BaseTool):
         # Return a denied result for an out-of-scope session id.
         return ToolResult.error(name, f"Access denied for session: {session_id}.")
 
+    def _resolve_session_id(self, identifier: str) -> str:
+        # Resolve a concrete session id or tag/name through the bound store.
+        return self._store.resolve(identifier)
+
     def _require_bound(self, name: str) -> "Session | None":
         # Return the bound session, or None when no session is attached (caller returns an error result).
         if self._session is None:

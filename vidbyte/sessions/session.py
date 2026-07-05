@@ -123,6 +123,14 @@ class Session:
         """Mark this session COMPLETED in its metadata."""
         self._store.put_meta(replace(self._store.get_meta(self._session_id), status=SessionStatus.COMPLETED, updated_at=_now()))
 
+    def tag(self, *names: str) -> "Session":
+        """Attach one or more human-friendly names to this session and return self."""
+        meta = self._store.get_meta(self._session_id)
+        tags = tuple(dict.fromkeys((*meta.tags, *names)))
+        self._store.put_meta(replace(meta, tags=tags, updated_at=_now()))
+        self._tags = tags
+        return self
+
     def adopt(self, checkpoint_id: str, *, label: str = "resume") -> str:
         """Replace the bound agent's history with another session's checkpoint and persist a new checkpoint (resume-replace)."""
         source = self._store.get(checkpoint_id)
@@ -138,6 +146,7 @@ class Session:
 
     def append_output(self, session_id: str, *, label: str = "resume") -> str:
         """Append another session's final assistant output to the bound agent (resume-output); errors if that session is not COMPLETED."""
+        session_id = self._store.resolve(session_id)
         meta = self._store.get_meta(session_id)
         if meta.status is not SessionStatus.COMPLETED:
             raise SessionError("Cannot append output from a session that is not completed.", details={"session_id": session_id, "status": meta.status.value})
@@ -151,7 +160,7 @@ class Session:
     @classmethod
     def resume(cls, store: SessionStore, session_id: str, *, checkpoint_id: str | None = None, tools: Sequence[object] = (), runner: object | None = None, middleware: Sequence[object] = (), tracer: object | None = None, output_schema: object | None = None, policy: CheckpointPolicy | str = CheckpointPolicy.PER_TURN, trace: TraceCapture | str = TraceCapture.AUTO) -> "Session":
         """Reconstruct a live session from a checkpoint, re-supplying non-serializable parts."""
-        store.get_meta(session_id)
+        session_id = store.resolve(session_id)
         source = store.get(checkpoint_id) if checkpoint_id else store.head(session_id)
         if source is None:
             raise SessionError("Cannot resume a session with no checkpoints.", details={"session_id": session_id})
