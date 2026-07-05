@@ -22,9 +22,14 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from vidbyte.lib.errors import ConfigurationError
+
+if TYPE_CHECKING:
+    # Avoids a runtime circular import; ContextManager is only used as a type hint
+    # and inside from_manager where it is imported lazily.
+    from vidbyte.context.manager import ContextManager
 
 
 @dataclass(frozen=True, slots=True)
@@ -54,19 +59,45 @@ class ContextFile:
         return cls(path=text) if text else None
 
 
+_KNOWN_FIELDS: frozenset[str] = frozenset({
+    "summary", "files", "commands", "conventions", "dependencies",
+    "entry_points", "tests", "risks", "constraints", "glossary",
+    "open_questions", "notes",
+})
+
+
 @dataclass(frozen=True, slots=True)
 class EnvironmentContext:
     """Compressed structured context extracted by the context agent."""
 
     summary: str
     files: tuple[ContextFile, ...] = ()
+    commands: tuple[str, ...] = ()
+    conventions: tuple[str, ...] = ()
+    dependencies: tuple[str, ...] = ()
+    entry_points: tuple[str, ...] = ()
+    tests: tuple[str, ...] = ()
+    risks: tuple[str, ...] = ()
+    constraints: tuple[str, ...] = ()
+    glossary: tuple[str, ...] = ()
+    open_questions: tuple[str, ...] = ()
     notes: tuple[str, ...] = ()
     entries: Mapping[str, Any] = field(default_factory=dict)
+    manager: ContextManager | None = None
 
     def __post_init__(self) -> None:
-        # Normalizes the summary and freezes the entries mapping.
+        # Normalizes the summary, text tuples, and freezes the entries mapping.
         object.__setattr__(self, "summary", self.summary.strip())
         object.__setattr__(self, "files", tuple(self.files))
+        object.__setattr__(self, "commands", _entry_tuple(self.commands))
+        object.__setattr__(self, "conventions", _entry_tuple(self.conventions))
+        object.__setattr__(self, "dependencies", _entry_tuple(self.dependencies))
+        object.__setattr__(self, "entry_points", _entry_tuple(self.entry_points))
+        object.__setattr__(self, "tests", _entry_tuple(self.tests))
+        object.__setattr__(self, "risks", _entry_tuple(self.risks))
+        object.__setattr__(self, "constraints", _entry_tuple(self.constraints))
+        object.__setattr__(self, "glossary", _entry_tuple(self.glossary))
+        object.__setattr__(self, "open_questions", _entry_tuple(self.open_questions))
         object.__setattr__(self, "notes", _text_tuple(self.notes))
         object.__setattr__(self, "entries", dict(self.entries))
 
@@ -76,23 +107,124 @@ class EnvironmentContext:
         values = dict(snapshot.get("values", {}))
         summary = str(values.get("summary") or "").strip() or fallback_text.strip()
         files = tuple(f for f in (ContextFile.from_value(item) for item in _as_list(values.get("files"))) if f is not None)
-        notes = _text_tuple(values.get("notes"))
-        return cls(summary=summary, files=files, notes=notes, entries=values)
+        return cls(
+            summary=summary,
+            files=files,
+            commands=_entry_tuple(values.get("commands")),
+            conventions=_entry_tuple(values.get("conventions")),
+            dependencies=_entry_tuple(values.get("dependencies")),
+            entry_points=_entry_tuple(values.get("entry_points")),
+            tests=_entry_tuple(values.get("tests")),
+            risks=_entry_tuple(values.get("risks")),
+            constraints=_entry_tuple(values.get("constraints")),
+            glossary=_entry_tuple(values.get("glossary")),
+            open_questions=_entry_tuple(values.get("open_questions")),
+            notes=_text_tuple(values.get("notes")),
+            entries=values,
+        )
+
+    @classmethod
+    def from_manager(cls, manager: ContextManager, *, fallback_text: str = "") -> "EnvironmentContext":
+        # Builds an EnvironmentContext from a ContextManager's primitives, mapping by kind.
+        from vidbyte.context.primitives import FileContextItem, MemoryContextItem, TextContextItem
+        items = list(manager.items())
+        files = tuple(ContextFile(path=item.path, notes=getattr(item, "excerpt", "") or "") for item in items if isinstance(item, FileContextItem))
+        notes = tuple(item.to_context_text() for item in items if isinstance(item, MemoryContextItem))
+        kind_map = {
+            "commands": "commands", "conventions": "conventions", "dependencies": "dependencies",
+            "entry_points": "entry_points", "tests": "tests", "risks": "risks",
+            "constraints": "constraints", "glossary": "glossary", "open_questions": "open_questions",
+        }
+        field_values: dict[str, tuple[str, ...]] = {name: () for name in kind_map.values()}
+        entries: dict[str, Any] = {}
+        summary = fallback_text
+        for item in items:
+            if isinstance(item, TextContextItem):
+                kind = item.kind
+                text = item.to_context_text()
+                if kind == "summary":
+                    summary = summary or text
+                elif kind in kind_map:
+                    field_name = kind_map[kind]
+                    field_values[field_name] = (*field_values[field_name], text)
+                else:
+                    entries.setdefault(kind, []).append(text)
+        return cls(
+            summary=summary,
+            files=files,
+            notes=notes,
+            commands=field_values["commands"],
+            conventions=field_values["conventions"],
+            dependencies=field_values["dependencies"],
+            entry_points=field_values["entry_points"],
+            tests=field_values["tests"],
+            risks=field_values["risks"],
+            constraints=field_values["constraints"],
+            glossary=field_values["glossary"],
+            open_questions=field_values["open_questions"],
+            entries=entries,
+            manager=manager,
+        )
 
     def to_prompt_block(self) -> str:
         # Renders the environment context as a stable prompt block for later agents.
-        lines = ["<environment_context>", "<summary>", self.summary or "N/A", "</summary>", "", "<files>"]
+        lines = ["<environment_context>"]
+        lines.extend(self._render_summary_section())
+        lines.extend(self._render_files_section())
+        lines.extend(self._render_text_section("commands", self.commands))
+        lines.extend(self._render_text_section("conventions", self.conventions))
+        lines.extend(self._render_text_section("dependencies", self.dependencies))
+        lines.extend(self._render_text_section("entry_points", self.entry_points))
+        lines.extend(self._render_text_section("tests", self.tests))
+        lines.extend(self._render_text_section("risks", self.risks))
+        lines.extend(self._render_text_section("constraints", self.constraints))
+        lines.extend(self._render_text_section("glossary", self.glossary))
+        lines.extend(self._render_text_section("open_questions", self.open_questions))
+        lines.extend(self._render_text_section("notes", self.notes))
+        lines.extend(self._render_dynamic_sections())
+        lines.append("</environment_context>")
+        return "\n".join(lines)
+
+    def _render_summary_section(self) -> list[str]:
+        # Renders the summary as a tagged block; placeholder if absent.
+        return ["<summary>", self.summary or "N/A", "</summary>", ""]
+
+    def _render_files_section(self) -> list[str]:
+        # Renders the files list; placeholder if absent.
+        lines = ["<files>"]
         if self.files:
             for item in self.files:
                 suffix = f" — {item.notes}" if item.notes else ""
                 lines.append(f"- {item.path}{suffix}")
         else:
             lines.append("- N/A")
-        lines.extend(["</files>", "", "<notes>"])
-        lines.extend([f"- {note}" for note in self.notes] or ["- N/A"])
-        lines.append("</notes>")
-        lines.append("</environment_context>")
-        return "\n".join(lines)
+        lines.extend(["</files>", ""])
+        return lines
+
+    @staticmethod
+    def _render_text_section(tag: str, entries: tuple[str, ...]) -> list[str]:
+        # Renders a text-entry tuple as a tagged bullet list.
+        if not entries:
+            return [f"<{tag}>", "- N/A", f"</{tag}>", ""]
+        lines = [f"<{tag}>"]
+        lines.extend(f"- {entry}" for entry in entries)
+        lines.extend([f"</{tag}>", ""])
+        return lines
+
+    def _render_dynamic_sections(self) -> list[str]:
+        # Renders any entries keys not in the well-known set as generic tagged sections.
+        lines: list[str] = []
+        for name in self.entries:
+            if name in _KNOWN_FIELDS:
+                continue
+            value = self.entries[name]
+            lines.append(f"<{name}>")
+            if isinstance(value, list):
+                lines.extend(f"- {entry}" for entry in value)
+            else:
+                lines.append(f"- {value}")
+            lines.extend([f"</{name}>", ""])
+        return lines
 
 
 @dataclass(frozen=True, slots=True)
@@ -383,6 +515,35 @@ def _text_tuple(value: object) -> tuple[str, ...]:
     return (str(value).strip(),) if str(value).strip() else ()
 
 
+def _render_mapping(m: Mapping[str, Any]) -> str:
+    # Renders a mapping as a readable "key: value — key: value" string.
+    return " — ".join(f"{k}: {v}" for k, v in m.items() if str(v).strip())
+
+
+def _entry_tuple(value: object) -> tuple[str, ...]:
+    # Converts strings, sequences, or mappings into a clean tuple of rendered strings.
+    if value is None:
+        return ()
+    if isinstance(value, str):
+        return (value.strip(),) if value.strip() else ()
+    if isinstance(value, Mapping):
+        rendered = _render_mapping(value)
+        return (rendered,) if rendered else ()
+    if isinstance(value, Sequence):
+        entries: list[str] = []
+        for item in value:
+            if isinstance(item, Mapping):
+                rendered = _render_mapping(item)
+                if rendered:
+                    entries.append(rendered)
+            else:
+                text = str(item).strip()
+                if text:
+                    entries.append(text)
+        return tuple(entries)
+    return (str(value).strip(),) if str(value).strip() else ()
+
+
 def _as_list(value: object) -> tuple[Any, ...]:
     # Normalizes a possibly-scalar snapshot value into a tuple of items.
     if value is None:
@@ -421,6 +582,7 @@ def _object_tuple(value: object) -> tuple[object, ...]:
 
 
 __all__ = [
+    "AgentRoleSettings",
     "ContextFile",
     "ContextMinimalFanoutResult",
     "ContextMinimalFanoutSettings",
