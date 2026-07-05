@@ -299,6 +299,7 @@ class PortableBundleTests(unittest.IsolatedAsyncioTestCase):
         await session.arun("one")
 
         bundle = export_session(store, session.id)
+        stored = store.history(session.id)[0]
 
         with zipfile.ZipFile(BytesIO(bundle), mode="r") as archive:
             manifest = json.loads(archive.read("manifest.json").decode("utf-8"))
@@ -308,7 +309,9 @@ class PortableBundleTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(manifest["schema_version"], SESSION_SCHEMA_VERSION)
         self.assertEqual(manifest["session_id"], session.id)
         self.assertEqual(manifest["checkpoint_count"], 1)
+        self.assertIn("exported_at", manifest)
         self.assertEqual(meta["session_id"], session.id)
+        self.assertEqual(checkpoint_names, [f"checkpoints/{stored.seq:08d}-{stored.id}.json"])
         self.assertEqual(checkpoint["checkpoint"]["trace_artifact"], {"goal": "g"})
 
     async def test_imports_memory_bundle_into_file_store_with_new_id_and_resumes(self) -> None:  # [Hidden Failure]
@@ -377,6 +380,18 @@ class PortableBundleTests(unittest.IsolatedAsyncioTestCase):
         import_session(target, export_session(source, "se"), new_id="copy")
 
         self.assertEqual(target.history("copy")[0].seq, 0)
+
+    def test_export_scrubs_secret_keys_inside_trace_payloads(self) -> None:  # [Hidden Assumption]
+        # Verify trace payloads reuse serializer secret scrubbing before entering a bundle.
+        store = InMemorySessionStore()
+        checkpoint = Checkpoint(id="c1", session_id="se", parent_id=None, seq=3, created_at="t", run_state=_run_state(), trace_artifact={"api_key": "secret", "ok": 1})
+        meta = SessionMeta(session_id="se", head_id="c1", parent_session_id=None, agent_name="a", status=SessionStatus.ACTIVE, created_at="t", updated_at="t")
+        store.ingest(meta, [checkpoint])
+
+        with zipfile.ZipFile(BytesIO(export_session(store, "se")), mode="r") as archive:
+            checkpoint_payload = json.loads(archive.read("checkpoints/00000003-c1.json").decode("utf-8"))
+
+        self.assertEqual(checkpoint_payload["checkpoint"]["trace_artifact"], {"ok": 1})
 
     def test_ingest_preserves_supplied_seq_parent_and_head_verbatim(self) -> None:  # [Silent Failure]
         # Verify ingest writes the exact supplied DAG fields without seq/head mutation.

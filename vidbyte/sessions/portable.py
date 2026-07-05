@@ -106,9 +106,7 @@ class SessionBundleImporter:
     def _read_manifest(self, archive: zipfile.ZipFile) -> Mapping[str, Any]:
         # Read and validate manifest.json from the bundle.
         manifest = self._read_json(archive, "manifest.json")
-        version = manifest.get("schema_version")
-        if version is None:
-            raise SessionSerializationError("Session bundle manifest missing schema_version.", details={"path": "manifest.json"})
+        version = self._read_manifest_int(manifest, "schema_version")
         if int(version) != SESSION_SCHEMA_VERSION:
             raise SessionVersionError(f"Unsupported session schema version: {version}.", details={"found": version, "expected": SESSION_SCHEMA_VERSION})
         return manifest
@@ -139,8 +137,19 @@ class SessionBundleImporter:
         # Check manifest counts and ids against the deserialized bundle records.
         if manifest.get("session_id") != meta.session_id:
             raise SessionSerializationError("Session bundle manifest session_id does not match meta.json.", details={"manifest_session_id": manifest.get("session_id"), "meta_session_id": meta.session_id})
-        if int(manifest.get("checkpoint_count", -1)) != len(checkpoints):
+        if self._read_manifest_int(manifest, "checkpoint_count") != len(checkpoints):
             raise SessionSerializationError("Session bundle checkpoint_count does not match checkpoint files.", details={"manifest_count": manifest.get("checkpoint_count"), "actual_count": len(checkpoints)})
+
+    @staticmethod
+    def _read_manifest_int(manifest: Mapping[str, Any], field: str) -> int:
+        # Read an integer manifest field, raising a typed session error on malformed data.
+        value = manifest.get(field)
+        if value is None:
+            raise SessionSerializationError(f"Session bundle manifest missing {field}.", details={"path": "manifest.json", "field": field})
+        try:
+            return int(value)
+        except (TypeError, ValueError) as exc:
+            raise SessionSerializationError(f"Session bundle manifest field must be an integer: {field}.", details={"path": "manifest.json", "field": field}) from exc
 
     @staticmethod
     def _rewrite_session_id(meta: SessionMeta, checkpoints: Sequence[Checkpoint], new_id: str) -> tuple[SessionMeta, list[Checkpoint]]:
