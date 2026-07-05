@@ -706,7 +706,6 @@ Source repository: https://github.com/cerredz/Vidbyte-SDK
 Primary README references:
 
 - [Vidbyte SDK README](https://github.com/cerredz/Vidbyte-SDK/blob/main/README.md)
-- [Installing Vidbyte SDK as an MCP Server](https://github.com/cerredz/Vidbyte-SDK/blob/main/installing-vidbyte-sdk-as-mcp.md)
 - [MCP Server Skill Reference](https://github.com/cerredz/Vidbyte-SDK/tree/main/skills/mcp-server)
 
 ## Overview
@@ -1024,7 +1023,6 @@ If the server is healthy, it should return a JSON-RPC response containing tool a
 Recommended indexing:
 
 - `README.md`, especially the "MCP Servers" section.
-- `installing-vidbyte-sdk-as-mcp.md`.
 - `skills/mcp-server/`.
 - selected source files under `vidbyte/mcp_server/` for architecture references.
 
