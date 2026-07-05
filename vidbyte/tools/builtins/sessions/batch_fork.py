@@ -15,11 +15,14 @@ Relations:
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from vidbyte.tools.builtins.sessions._base import _SessionBuiltinTool
 from vidbyte.tools.builtins.sessions.descriptions import BATCH_FORK_TOOL_DESCRIPTION, CHECKPOINT_ID_DESCRIPTION
 from vidbyte.tools.types import ToolCall, ToolPermission, ToolResult, ToolSpec
+
+if TYPE_CHECKING:
+    from vidbyte.sessions.session import ForkOutcome
 
 _TOOL_NAME = "batch_fork"
 _MAX_COUNT = 64
@@ -72,7 +75,7 @@ class BatchForkTool(_SessionBuiltinTool):
             return None
         return value
 
-    def _format_outcomes(self, outcomes: list[Any]) -> ToolResult:
+    def _format_outcomes(self, outcomes: list[ForkOutcome]) -> ToolResult:
         # Grant created child sessions in scope and serialize the compact model-facing payload.
         created: list[str] = []
         failed = 0
