@@ -37,6 +37,7 @@ from vidbyte.sessions.errors import (
     SessionStoreError,
     SessionVersionError,
 )
+from vidbyte.sessions.portable import SessionBundleExporter, SessionBundleImporter
 from vidbyte.sessions.scope import SessionScope
 from vidbyte.sessions.serialization import SessionSerializer
 from vidbyte.sessions.session import ForkOutcome, Session
@@ -58,6 +59,8 @@ __all__ = [
     "InMemorySessionStore",
     "RunState",
     "Session",
+    "SessionBundleExporter",
+    "SessionBundleImporter",
     "SessionClient",
     "SessionError",
     "SessionMeta",

@@ -32,6 +32,7 @@ from vidbyte.sessions.contracts import (
 )
 from vidbyte.lib.errors import AgentExecutionError
 from vidbyte.sessions.errors import SessionError
+from vidbyte.sessions.portable import SessionBundleExporter
 from vidbyte.sessions.serialization import SessionSerializer
 from vidbyte.sessions.store import SessionStore
 from vidbyte.sessions.stores.memory import InMemorySessionStore
@@ -162,6 +163,10 @@ class Session:
         if head is None:
             return UsageRollup.empty()
         return SessionUsageBuilder(head.run_state.history, model_name=head.run_state.model_name, latency=self._session_latency(), prices=prices).build()
+
+    def export(self) -> bytes:
+        # Return a portable zip bundle for this session.
+        return SessionBundleExporter(self._store).export(self._session_id)
 
     def adopt(self, checkpoint_id: str, *, label: str = "resume") -> str:
         """Replace the bound agent's history with another session's checkpoint and persist a new checkpoint (resume-replace)."""

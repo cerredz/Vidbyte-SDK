@@ -17,6 +17,7 @@ Relations:
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Sequence
 from dataclasses import replace
 from datetime import datetime, timezone
 from typing import Protocol, runtime_checkable
@@ -33,6 +34,7 @@ class SessionStore(Protocol):
     def get(self, checkpoint_id: str) -> Checkpoint: ...
     def head(self, session_id: str) -> Checkpoint | None: ...
     def history(self, session_id: str) -> list[Checkpoint]: ...
+    def ingest(self, meta: SessionMeta, checkpoints: Sequence[Checkpoint]) -> None: ...
     def put_meta(self, meta: SessionMeta) -> None: ...
     def get_meta(self, session_id: str) -> SessionMeta: ...
     def resolve(self, identifier: str) -> str: ...
@@ -67,6 +69,12 @@ class BaseSessionStore(ABC):
     def history(self, session_id: str) -> list[Checkpoint]:
         # Return all checkpoints for a session ordered by seq.
         return sorted(self._read_session_checkpoints(session_id), key=lambda item: item.seq)
+
+    def ingest(self, meta: SessionMeta, checkpoints: Sequence[Checkpoint]) -> None:
+        # Write supplied checkpoint and metadata records verbatim without reseq/head changes.
+        for checkpoint in sorted(checkpoints, key=lambda item: item.seq):
+            self._write_checkpoint(checkpoint)
+        self._write_meta(meta)
 
     def put_meta(self, meta: SessionMeta) -> None:
         # Persist session metadata as supplied by the caller.
