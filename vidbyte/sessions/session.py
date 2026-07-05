@@ -331,8 +331,18 @@ class Session:
             binder = getattr(self._agent, "bind_session", None)
             if callable(binder):
                 binder(self)
+                return
+            self._bind_compatible_agent_tools()
         except Exception:
             pass
+
+    def _bind_compatible_agent_tools(self) -> None:
+        # Bind session-aware tools on compatible agents that do not expose BaseAgent.bind_session().
+        tools = getattr(self._agent, "_agent_tool_items", ()) or ()
+        for tool in tools:
+            binder = getattr(tool, "bind_session", None)
+            if callable(binder):
+                binder(self)
 
     def _agent_records_turns(self) -> bool:
         # Detect agents that already notify this Session from their run path.
