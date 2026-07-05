@@ -69,6 +69,7 @@ from vidbyte.paradigms import (
 from vidbyte.tools.builtins.output_schema import (
     AppendOutputTool,
     DeclareOutputSchemaTool,
+    ExtendOutputSchemaTool,
     OutputSchemaBuilder,
     OutputSchemaField,
 )
@@ -260,6 +261,7 @@ __all__ = [
     "ContextMinimalFanoutResult",
     "ContextMinimalFanoutSettings",
     "DeclareOutputSchemaTool",
+    "ExtendOutputSchemaTool",
     "EnvironmentContext",
     "ImplementationOutput",
     "OutputSchemaBuilder",
