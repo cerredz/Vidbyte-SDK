@@ -50,6 +50,7 @@ Vidbyte SDK is the developer-facing agent framework in the Vidbyte ecosystem. It
 - Prompt asset discovery and direct prompt imports.
 - Eval cases, suites, runners, graders, and a local eval registry.
 - Sequential, parallel, conditional, and map-reduce pipelines.
+- Durable sessions with continue/resume/fork over a checkpoint DAG, pluggable stores (memory, file, SQLite, Postgres, MongoDB, Supabase), and prebuilt Checkpoint/Fork/Rewind/Resume agent tools.
 
 ## How To Install And Use
 
@@ -554,6 +555,28 @@ Pipeline types include:
 
 Pipelines can be nested because every pipeline is also a valid pipeline stage.
 
+### Durable Sessions
+
+Durable sessions make any agent persistent with `continue`, `resume`, and `fork` over an append-only checkpoint DAG. The agent stays pure — persistence lives in a `Session` wrapper — so sessions work for every runtime (linear, MCTS, actor). All session logic (facade, `SessionStore` protocol, `SessionScope`, serialization, trace capture, local stores, contracts, and errors) lives under `vidbyte/sessions/`; database-backed stores live under `vidbyte/lib/providers/`.
+
+Attach an agent in one line:
+
+```python
+from vidbyte import Agent, Session, FileSessionStore
+
+store = FileSessionStore(root="./.vidbyte/sessions")
+agent = Agent(name="researcher", system_prompt="Investigate carefully.", provider="openai", model_name="gpt-4.1")
+session = Session(agent, store=store)
+reply = await session.arun("Investigate the failing test")
+print(session.id, session.head)
+```
+
+Verbs: `Session.resume(store, session_id, tools=, runner=)` reconstructs a live session from a checkpoint (re-supplying non-serializable parts — the rehydration contract); `Session.continue_(...)` resumes the head; `Session.fork_from(store, checkpoint_id, ...)` branches a new session with parent lineage; `session.rewind(to=checkpoint_id)` time-travels the head; `session.edit(transform)` rewrites history as a new checkpoint; `session.checkpoint(label=)` writes a manual checkpoint; `session.complete()` marks the session COMPLETED.
+
+Stores implement one `SessionStore` protocol and are interchangeable: `InMemorySessionStore`, `FileSessionStore` (atomic JSON), `SqliteSessionStore` (stdlib sqlite3, no driver), and `PostgresSessionStore`/`MongoDbSessionStore`/`SupabaseSessionStore` (lazy driver imports). `CheckpointPolicy.PER_TURN` (default) writes a checkpoint after each run; `MANUAL` writes only on `checkpoint()`. Persistence is fail-open: a store write failure is recorded in `reply.metadata["__session_error__"]` and never ends the run. The serializer scrubs `api_key` and credential-like keys and stamps a `schema_version` on every payload.
+
+Prebuilt agent-facing tools in `vidbyte/tools/builtins/sessions/` let an agent operate on its own or another agent's thread, gated by `SessionScope` (default own runs): `CheckpointTool`, `ForkTool`, `RewindTool`, and three resume modes — `ResumeReplaceTool` (override the current context window with another thread's state), `ResumeAppendTool` (append the other thread's context window into the current one), `ResumeOutputTool` (append only the other thread's final output; errors if that thread is not COMPLETED). A central `SessionTool` exposes `create_checkpoint`/`fork_current`/`list_my_runs`/`read_run`. `Session` auto-binds any of these tools found on the wrapped agent.
+
 ## Use Cases
 
 ### Autonomous Coding Agent
@@ -598,8 +621,12 @@ vidbyte/
 |-- trace/
 |-- middleware/
 |-- tools/
+|   `-- builtins/
+|       `-- sessions/   # Checkpoint/Fork/Rewind/Resume* + central SessionTool
+|-- sessions/           # Session facade, SessionStore, SessionScope, serializer, trace capture, local stores, contracts, errors
 |-- shared/
 `-- lib/
+    `-- providers/      # SqliteSessionStore + Postgres/Mongo/Supabase session stores (lazy drivers)
 ```
 
 ## Docs-to-MCP Submission Notes
