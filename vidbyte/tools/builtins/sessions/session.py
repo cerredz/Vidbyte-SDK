@@ -88,9 +88,10 @@ class SessionTool(_SessionBuiltinTool):
         session_id = str(arguments.get("session_id", "")).strip()
         if not session_id:
             return ToolResult.error(_TOOL_NAME, "read_run requires a session_id.")
-        if not self._scope.permits(session_id):
+        resolved_session_id = self._resolve_session_id(session_id)
+        if not self._scope.permits(resolved_session_id):
             return self._denied(_TOOL_NAME, session_id)
-        head = self._store.head(session_id)
+        head = self._store.head(resolved_session_id)
         if head is None:
             return ToolResult.error(_TOOL_NAME, f"Unknown or empty session: {session_id}.")
         return ToolResult.success(_TOOL_NAME, json.dumps(dict(head.trace_artifact or {})))

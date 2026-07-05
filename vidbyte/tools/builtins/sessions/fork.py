@@ -53,9 +53,10 @@ class ForkTool(_SessionBuiltinTool):
         session_id = str(arguments.get("session_id", "")).strip()
         if not session_id:
             return self._fork_bound(checkpoint_id)
-        if not self._scope.permits(session_id):
+        resolved_session_id = self._resolve_session_id(session_id)
+        if not self._scope.permits(resolved_session_id):
             return self._denied(_TOOL_NAME, session_id)
-        return self._fork_other(session_id, checkpoint_id)
+        return self._fork_other(resolved_session_id, checkpoint_id)
 
     def _fork_bound(self, checkpoint_id: str | None) -> ToolResult:
         # Fork the bound session from its head (or a named in-session checkpoint).

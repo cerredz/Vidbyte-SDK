@@ -35,6 +35,7 @@ class SessionStore(Protocol):
     def history(self, session_id: str) -> list[Checkpoint]: ...
     def put_meta(self, meta: SessionMeta) -> None: ...
     def get_meta(self, session_id: str) -> SessionMeta: ...
+    def resolve(self, identifier: str) -> str: ...
     def list_sessions(self, *, agent_name: str | None = None, tag: str | None = None, status: SessionStatus | None = None) -> list[SessionMeta]: ...
     def prune(self, session_id: str, *, keep: int | None = None) -> None: ...
 
@@ -77,6 +78,15 @@ class BaseSessionStore(ABC):
         if meta is None:
             raise SessionNotFoundError(f"Unknown session id: {session_id}.", details={"session_id": session_id})
         return meta
+
+    def resolve(self, identifier: str) -> str:
+        # Resolve a concrete session id or tag/name to a concrete session id.
+        if self._read_meta(identifier) is not None:
+            return identifier
+        matches = [meta for meta in self._read_all_meta() if identifier in meta.tags]
+        if not matches:
+            raise SessionNotFoundError(f"No session id or tag: {identifier}.", details={"identifier": identifier})
+        return max(matches, key=lambda meta: (meta.updated_at, meta.session_id)).session_id
 
     def list_sessions(self, *, agent_name: str | None = None, tag: str | None = None, status: SessionStatus | None = None) -> list[SessionMeta]:
         # Return all session metadata records matching the optional filters.

@@ -4,6 +4,7 @@ import json
 import sys
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 from unittest import mock
 
@@ -34,6 +35,7 @@ from vidbyte.sessions import (
     TraceRecorder,
 )
 from vidbyte.tools.builtins.sessions import SessionTool
+from vidbyte.tools.builtins.sessions import ForkTool
 from vidbyte.tools.types import ToolCall
 
 
@@ -240,6 +242,23 @@ class InMemoryStoreTests(unittest.TestCase):
         self.assertEqual(len(self.store.list_sessions(agent_name="a")), 1)
         self.assertEqual(len(self.store.list_sessions(agent_name="missing")), 0)
 
+    def test_resolve_exact_id_wins_over_matching_tag(self) -> None:  # [Hidden Assumption]
+        self.store.put(_checkpoint("se_exact", "c1"))
+        self.store.put(_checkpoint("se_other", "c2"))
+        self.store.put_meta(replace(self.store.get_meta("se_other"), tags=("se_exact",)))
+        self.assertEqual(self.store.resolve("se_exact"), "se_exact")
+
+    def test_resolve_tag_returns_latest_updated_match(self) -> None:  # [Silent Failure]
+        self.store.put(_checkpoint("se_old", "c1"))
+        self.store.put(_checkpoint("se_new", "c2"))
+        self.store.put_meta(replace(self.store.get_meta("se_old"), tags=("nightly",), updated_at="2026-01-01T00:00:00+00:00"))
+        self.store.put_meta(replace(self.store.get_meta("se_new"), tags=("nightly",), updated_at="2026-01-02T00:00:00+00:00"))
+        self.assertEqual(self.store.resolve("nightly"), "se_new")
+
+    def test_resolve_unknown_identifier_raises(self) -> None:  # [Edge Case]
+        with self.assertRaises(SessionNotFoundError):
+            self.store.resolve("missing-name")
+
     def test_seq_is_monotonic(self) -> None:  # [Hidden Failure]
         for i in range(5):
             self.store.put(_checkpoint("se", f"c{i}"))
@@ -317,6 +336,12 @@ class SessionFacadeTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(session.id)
         self.assertEqual(store.get_meta(session.id).status, SessionStatus.ACTIVE)
 
+    def test_tag_merges_names_and_returns_session(self) -> None:  # [Silent Failure]
+        store = InMemorySessionStore()
+        session = Session(FakeAgent(), store=store, tags=("alpha",))
+        self.assertIs(session.tag("beta", "alpha", "gamma"), session)
+        self.assertEqual(store.get_meta(session.id).tags, ("alpha", "beta", "gamma"))
+
     async def test_arun_writes_checkpoint_with_parent_chain(self) -> None:  # [Silent Failure]
         store = InMemorySessionStore()
         session = Session(FakeAgent(), store=store)
@@ -385,6 +410,15 @@ class SessionFacadeTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(SessionNotFoundError):
             Session.resume(InMemorySessionStore(), "ghost")
 
+    async def test_resume_accepts_tag_name(self) -> None:  # [Silent Failure]
+        store = InMemorySessionStore()
+        session = Session(FakeAgent(), store=store)
+        await session.arun("one")
+        session.tag("nightly-eval")
+        resumed = Session.resume(store, "nightly-eval")
+        self.assertEqual(resumed.id, session.id)
+        self.assertEqual(len(resumed.agent.history), 1)
+
     async def test_persistence_failure_is_fail_open(self) -> None:  # [Hidden Failure]
         class FailingStore(InMemorySessionStore):
             def put(self, checkpoint):
@@ -429,6 +463,16 @@ class SessionIntegrationTests(unittest.IsolatedAsyncioTestCase):
 # SessionTool
 # ---------------------------------------------------------------------------
 class SessionToolTests(unittest.IsolatedAsyncioTestCase):
+    async def test_fork_tool_accepts_session_tag(self) -> None:  # [Silent Failure]
+        store = InMemorySessionStore()
+        source = Session(FakeAgent(), store=store)
+        await source.arun("one")
+        source.tag("source-name")
+        tool = ForkTool(store, scope=SessionScope.all_runs())
+        result = await tool.execute(ToolCall(tool_name="fork", arguments={"session_id": "source-name"}))
+        self.assertEqual(result.status.value, "success")
+        self.assertEqual(store.get_meta(result.output).parent_session_id, source.id)
+
     async def test_read_run_out_of_scope_is_denied_not_raised(self) -> None:  # [Hidden Assumption]
         store = InMemorySessionStore()
         store.put(_checkpoint("secret-session", "c1"))

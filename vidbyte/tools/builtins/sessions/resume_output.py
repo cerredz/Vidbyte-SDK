@@ -54,12 +54,13 @@ class ResumeOutputTool(_SessionBuiltinTool):
         session_id = str(arguments.get("session_id", "")).strip()
         if not session_id:
             return ToolResult.error(_TOOL_NAME, "resume_output requires a session_id.")
-        if not self._scope.permits(session_id):
+        resolved_session_id = self._resolve_session_id(session_id)
+        if not self._scope.permits(resolved_session_id):
             return self._denied(_TOOL_NAME, session_id)
         session = self._require_bound(_TOOL_NAME)
         if session is None:
             return ToolResult.error(_TOOL_NAME, "No active session is bound to this tool.")
-        new_head = session.append_output(session_id)
+        new_head = session.append_output(resolved_session_id)
         return ToolResult.success(_TOOL_NAME, new_head)
 
 
