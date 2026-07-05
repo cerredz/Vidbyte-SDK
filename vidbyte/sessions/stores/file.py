@@ -18,8 +18,8 @@ import os
 import tempfile
 from pathlib import Path
 
-from vidbyte.lib.dataclasses.sessions import Checkpoint, SessionMeta
-from vidbyte.lib.errors import SessionStoreError
+from vidbyte.sessions.contracts import Checkpoint, SessionMeta
+from vidbyte.sessions.errors import SessionStoreError
 from vidbyte.sessions.serialization import SessionSerializer
 from vidbyte.sessions.store import BaseSessionStore
 

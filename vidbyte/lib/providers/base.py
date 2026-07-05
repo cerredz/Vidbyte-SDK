@@ -17,7 +17,7 @@ from __future__ import annotations
 from abc import abstractmethod
 from typing import Any
 
-from vidbyte.lib.dataclasses.sessions import Checkpoint, SessionMeta
+from vidbyte.sessions.contracts import Checkpoint, SessionMeta
 from vidbyte.sessions.serialization import SessionSerializer
 from vidbyte.sessions.store import BaseSessionStore
 

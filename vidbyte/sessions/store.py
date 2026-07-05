@@ -21,8 +21,8 @@ from dataclasses import replace
 from datetime import datetime, timezone
 from typing import Protocol, runtime_checkable
 
-from vidbyte.lib.dataclasses.sessions import Checkpoint, SessionMeta, SessionStatus
-from vidbyte.lib.errors import CheckpointNotFoundError, SessionNotFoundError
+from vidbyte.sessions.contracts import Checkpoint, SessionMeta, SessionStatus
+from vidbyte.sessions.errors import CheckpointNotFoundError, SessionNotFoundError
 
 
 @runtime_checkable

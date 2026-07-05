@@ -4,7 +4,9 @@ Description:
     Defines the serializable data contracts for durable agent sessions.
 Purpose:
     Provides the RunState snapshot, Checkpoint DAG node, and SessionMeta records
-    persisted by the sessions abstraction, plus the policy/status enums.
+    persisted by the sessions abstraction, plus the policy/status enums. These
+    contracts live inside vidbyte/sessions/ so the entire resume/checkpoint/fork
+    surface — data, errors, scope, store, serializer, facade — is self-contained.
 Architecture:
     - CheckpointPolicy / SessionStatus / TraceCapture: behavior + lifecycle enums.
     - RunState: serializable agent snapshot (config-by-value + history, no secrets).
@@ -12,7 +14,7 @@ Architecture:
     - SessionMeta: per-session head pointer, lineage, and listing metadata.
 Relations:
     Consumed by vidbyte.sessions (serialization, stores, session facade) and by
-    vidbyte.agents.base export_state()/restore().
+    vidbyte.agents.base export_state()/restore(). Re-exported from vidbyte.sessions.
 """
 
 from __future__ import annotations

@@ -23,14 +23,15 @@ from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 from vidbyte.agents.types import AgentMessage
-from vidbyte.lib.dataclasses.sessions import (
+from vidbyte.sessions.contracts import (
     Checkpoint,
     CheckpointPolicy,
     SessionMeta,
     SessionStatus,
     TraceCapture,
 )
-from vidbyte.lib.errors import AgentExecutionError, SessionError
+from vidbyte.lib.errors import AgentExecutionError
+from vidbyte.sessions.errors import SessionError
 from vidbyte.sessions.serialization import SessionSerializer
 from vidbyte.sessions.store import SessionStore
 from vidbyte.sessions.stores.memory import InMemorySessionStore

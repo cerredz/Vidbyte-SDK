@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from vidbyte.agents.types import AgentMessage
-from vidbyte.lib.dataclasses.sessions import TraceCapture
+from vidbyte.sessions.contracts import TraceCapture
 
 if TYPE_CHECKING:
     from vidbyte.agents.base import BaseAgent

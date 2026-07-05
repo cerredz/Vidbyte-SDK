@@ -12,7 +12,7 @@ Relations:
 
 from __future__ import annotations
 
-from vidbyte.lib.dataclasses.sessions import Checkpoint, SessionMeta
+from vidbyte.sessions.contracts import Checkpoint, SessionMeta
 from vidbyte.sessions.store import BaseSessionStore
 
 

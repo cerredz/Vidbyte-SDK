@@ -16,7 +16,8 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from vidbyte.lib.errors import ConfigurationError, SessionStoreError
+from vidbyte.lib.errors import ConfigurationError
+from vidbyte.sessions.errors import SessionStoreError
 from vidbyte.lib.providers.base import ProviderSessionStore
 
 

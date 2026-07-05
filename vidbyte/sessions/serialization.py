@@ -18,14 +18,14 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from vidbyte.agents.types import AgentMessage
-from vidbyte.lib.dataclasses.sessions import (
+from vidbyte.sessions.contracts import (
     SESSION_SCHEMA_VERSION,
     Checkpoint,
     RunState,
     SessionMeta,
     SessionStatus,
 )
-from vidbyte.lib.errors import SessionSerializationError, SessionVersionError
+from vidbyte.sessions.errors import SessionSerializationError, SessionVersionError
 
 _SECRET_TOKENS = ("API_KEY", "TOKEN", "SECRET", "PASSWORD", "CREDENTIAL", "AUTH")
 _TRACE_WHITELIST = ("trace", "trace_metadata")

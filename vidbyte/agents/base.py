@@ -30,7 +30,7 @@ from vidbyte.lib.agents import ModalityDetector
 from vidbyte.lib.dataclasses.agents import AgentMetadata, AgentRunnerConfig, AgentRuntimeConfig
 from vidbyte.lib.dataclasses.multi_agent import AggregateConfig, ProposerSpec
 from vidbyte.lib.dataclasses.runner import RunnerHandle
-from vidbyte.lib.dataclasses.sessions import SESSION_SCHEMA_VERSION, RunState
+from vidbyte.sessions.contracts import SESSION_SCHEMA_VERSION, RunState
 from vidbyte.lib.dataclasses.strategies import AgentResult
 from vidbyte.lib.dataclasses.trace import TraceOption
 from vidbyte.lib.enums import AgentRuntimeType, ModelModality, ModelProvider
