@@ -4,9 +4,9 @@ from __future__ import annotations
 
 SESSION_ID_DESCRIPTION = (
     "The session_id identifies one durable agent session stored in the bound SessionStore. "
-    "It is the stable id returned by Session.id or by a fork/resume tool result. "
+    "It may be the stable id returned by Session.id, the id returned by a fork/resume tool result, or a tag/name added with Session.tag(). "
     "Use it when the tool should read, fork, or incorporate a session other than the current bound thread. "
-    "The tool checks SessionScope before it uses the id. "
+    "The tool resolves tags to concrete session ids before checking SessionScope. "
     "Omit it only on tools whose documentation says the current bound session is the default target. "
     "Unknown or out-of-scope ids return an error result instead of raising into the agent loop."
 )

@@ -112,6 +112,9 @@ from vidbyte.trace.continual import ActionTrace
 agent = agent.fork(trace_option=TraceOption.continual(ActionTrace))
 ```
 
+Omitting `trace_option` on `fork()` preserves the parent agent's continual trace
+option; passing a new option overrides it for the forked agent only.
+
 ## Key Modules
 
 - `base.py`: public `Trace` facade.
