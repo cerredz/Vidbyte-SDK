@@ -88,10 +88,10 @@ class Session:
         return self._agent
 
     async def arun(self, message: str | AgentInput, **options: Any) -> AgentMessage:
-        """Run the agent, then persist a checkpoint per policy; persistence never ends the run."""
+        """Run the agent, persisting from the agent hook when available."""
         reply = await self._agent.arun(message, **options)
-        if self._policy is not CheckpointPolicy.MANUAL:
-            self._persist_fail_open(reply, label="")
+        if not self._agent_records_turns():
+            self.record_turn(reply)
         return reply
 
     def run(self, message: str | AgentInput, **options: Any) -> AgentMessage:
@@ -106,6 +106,12 @@ class Session:
         """Write a checkpoint of the current state on demand and return its id."""
         stored = self._persist(self._agent.last_reply, label=label)
         return stored.id
+
+    def record_turn(self, reply: AgentMessage) -> None:
+        # Persist one completed agent turn according to this session's checkpoint policy.
+        if self._policy is CheckpointPolicy.MANUAL:
+            return
+        self._persist_fail_open(reply, label="")
 
     def fork(self, *, at: str | None = None, tools: Sequence[object] | None = None, runner: object | None = None, middleware: Sequence[object] | None = None) -> "Session":
         """Branch a new session from a checkpoint (defaults to head), recording lineage."""
@@ -320,16 +326,30 @@ class Session:
         )
 
     def _bind_session_tools(self) -> None:
-        # Attach this session to any bound session-builtin tools the agent carries.
+        # Attach this session through the agent's public binding seam when available.
         try:
-            self._agent._active_session = self  # noqa: SLF001
+            binder = getattr(self._agent, "bind_session", None)
+            if callable(binder):
+                binder(self)
+                return
+            self._bind_compatible_agent_tools()
         except Exception:
             pass
+
+    def _bind_compatible_agent_tools(self) -> None:
+        # Bind session-aware tools on compatible agents that do not expose BaseAgent.bind_session().
         tools = getattr(self._agent, "_agent_tool_items", ()) or ()
         for tool in tools:
             binder = getattr(tool, "bind_session", None)
             if callable(binder):
                 binder(self)
+
+    def _agent_records_turns(self) -> bool:
+        # Detect agents that already notify this Session from their run path.
+        try:
+            return getattr(self._agent, "session", None) is self and callable(getattr(self._agent, "bind_session", None))
+        except Exception:
+            return False
 
     def _recorder_policy(self) -> TraceCapture:
         # Return the trace policy currently configured on this session.

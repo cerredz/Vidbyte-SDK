@@ -57,6 +57,21 @@ reply = await agent.arun(
 )
 ```
 
+## Durable Sessions
+
+Agents can opt into durable sessions without moving persistence into the agent constructor:
+
+```python
+from vidbyte import FileSessionStore
+
+store = FileSessionStore("./.vidbyte/sessions")
+session = agent.persist(store=store)
+reply = await agent.arun("Continue the investigation.")
+print(agent.session is session)
+```
+
+`agent.persist(...)` delegates to `vidbyte.sessions.Session(agent, ...)`. Once bound, direct `agent.arun(...)` and `agent.run(...)` calls record checkpoints with the same policy as `session.arun(...)` and `session.run(...)`; `agent.session` returns the current session or `None`.
+
 ## Key Modules
 
 - `base.py`: `BaseAgent`, runner normalization, tool binding, context assembly, trace setup, and runtime dispatch.

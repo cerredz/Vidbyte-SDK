@@ -18,7 +18,7 @@ import asyncio
 import inspect
 import uuid
 from collections.abc import Callable, Mapping, Sequence
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from vidbyte.agents.mixins import McpAttachableMixin
 from vidbyte.agents.settings import AgentLoopSettings
@@ -42,6 +42,10 @@ from vidbyte.middleware import AgentMiddleware
 from vidbyte.tools.catalog import Tools
 from vidbyte.tools.security import PermissionPolicy
 from vidbyte.tools.types import ToolCallContext, ToolSpec
+
+if TYPE_CHECKING:
+    from vidbyte.sessions.session import Session
+    from vidbyte.sessions.store import SessionStore
 
 
 class ConfiguredAgentRunner:
@@ -194,6 +198,7 @@ class BaseAgent(McpAttachableMixin):
         self.last_prompt: str = ""
         self.last_reply: AgentMessage | None = None
         self._behavior_view: Any = None
+        self._active_session: Session | None = None
         for _tool in self._agent_tool_items:
             self._bind_agent_tool_context(_tool)
 
@@ -346,6 +351,24 @@ class BaseAgent(McpAttachableMixin):
             self._behavior_view = Behavior(self)
         return self._behavior_view
 
+    @property
+    def session(self) -> Session | None:
+        # Return the durable session currently bound to this agent, if any.
+        return self._active_session
+
+    def persist(self, *, store: SessionStore | None = None, **kwargs: Any) -> Session:
+        # Attach this agent to a durable Session using the agent-native entry point.
+        from vidbyte.sessions.session import Session
+
+        return Session(self, store=store, **kwargs)
+
+    def bind_session(self, session: Session) -> BaseAgent:
+        # Bind this agent and all carried session-builtin tools to a durable session.
+        self._active_session = session
+        for tool in self._agent_tool_items:
+            self._bind_session_tool(tool)
+        return self
+
     def _bind_agent_tool_context(self, tool: object) -> None:
         """Bind this agent's live context getter to AgentTool instances."""
         from vidbyte.tools.agent_tool import AgentTool
@@ -365,9 +388,22 @@ class BaseAgent(McpAttachableMixin):
         binder = getattr(tool, "bind_session", None)
         if not callable(binder):
             return
-        session = getattr(self, "_active_session", None)
-        if session is not None:
-            binder(session)
+        if self._active_session is not None:
+            binder(self._active_session)
+
+    def _notify_session(self, reply: AgentMessage) -> None:
+        # Ask the bound session to record this completed turn without letting persistence alter the reply path.
+        session = self._active_session
+        if session is None:
+            return
+        record_turn = getattr(session, "record_turn", None)
+        if not callable(record_turn):
+            return
+        try:
+            record_turn(reply)
+        except Exception as exc:
+            if isinstance(reply.metadata, dict):
+                reply.metadata["__session_error__"] = f"{type(exc).__name__}: {exc}"
 
     def tool_specs(self) -> tuple[ToolSpec, ...]:
         return self.tools.specs()
@@ -677,7 +713,9 @@ class BaseAgent(McpAttachableMixin):
         **options: Any,
     ) -> AgentMessage:
         if self._aggregate_agent is not None:
-            return await self._aggregate_agent.generate_reply(message, recipient=recipient, **options)
+            reply = await self._aggregate_agent.generate_reply(message, recipient=recipient, **options)
+            self._notify_session(reply)
+            return reply
         await self._ensure_mcp_connected()
         trace_ctx = None
         try:
@@ -768,6 +806,7 @@ class BaseAgent(McpAttachableMixin):
             self.last_trace = dict(trace_artifact) if isinstance(trace_artifact, Mapping) else None
         if self._handoff_spec is not None:
             await self._run_auto_handoff(metadata)
+        self._notify_session(reply)
         return reply
 
     async def arun(self, message: str | AgentInput, **options: Any) -> AgentMessage:
