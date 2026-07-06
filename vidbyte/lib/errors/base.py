@@ -175,6 +175,14 @@ class TracerConfigurationError(VidbyteSdkError):
     """Raised when a tracing provider cannot be configured (missing credentials or SDK)."""
 
 
+class SessionUsageError(VidbyteSdkError):
+    """Raised when durable-session usage rollup data cannot be interpreted."""
+
+
+class SessionUsageValidationError(SessionUsageError):
+    """Raised when persisted usage rollup inputs have an invalid shape."""
+
+
 class SourceError(VidbyteSdkError):
     """Base class for all artifact-source loader failures."""
 

@@ -4,7 +4,9 @@ import json
 import sys
 import tempfile
 import unittest
+import zipfile
 from dataclasses import replace
+from io import BytesIO
 from pathlib import Path
 from unittest import mock
 
@@ -15,10 +17,11 @@ from vidbyte.sessions.contracts import (
     Checkpoint,
     CheckpointPolicy,
     RunState,
+    SessionMeta,
     SessionStatus,
     TraceCapture,
 )
-from vidbyte.lib.errors import VidbyteSdkError
+from vidbyte.lib.errors import SessionUsageValidationError, VidbyteSdkError
 from vidbyte.sessions.errors import (
     CheckpointNotFoundError,
     SessionError,
@@ -27,13 +30,18 @@ from vidbyte.sessions.errors import (
     SessionVersionError,
 )
 from vidbyte.sessions import (
+    AgentUsage,
     FileSessionStore,
     ForkOutcome,
     InMemorySessionStore,
     Session,
+    SessionClient,
     SessionScope,
     SessionSerializer,
+    SessionBundleExporter,
+    SessionBundleImporter,
     TraceRecorder,
+    UsageRollup,
 )
 from vidbyte.tools.builtins.sessions import BatchForkTool, ForkTool, SessionTool
 from vidbyte.tools.types import ToolCall
@@ -180,6 +188,13 @@ class SerializerTests(unittest.TestCase):
         self.assertEqual(out["metadata"]["trace"], {"k": 1})
         self.assertEqual(out["metadata"]["trace_metadata"], {"n": 2})
 
+    def test_whitelists_usage_keys(self) -> None:  # [Silent Failure]
+        # Verify persisted history keeps the runtime usage fields that Session.usage() folds.
+        message = AgentMessage(sender="a", recipient="o", content="c", metadata={"tokens_used": 12, "tool_call_count": 3})
+        out = self.s.message_to_dict(message)
+        self.assertEqual(out["metadata"]["tokens_used"], 12)
+        self.assertEqual(out["metadata"]["tool_call_count"], 3)
+
     def test_raises_on_unknown_schema_version(self) -> None:  # [Hidden Assumption]
         cp = self.s.checkpoint_to_dict(_checkpoint("se", "ck"))
         cp["schema_version"] = 999
@@ -302,6 +317,133 @@ class FileStoreTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# Portable bundles
+# ---------------------------------------------------------------------------
+class PortableBundleTests(unittest.IsolatedAsyncioTestCase):
+    async def test_exports_manifest_meta_checkpoints_and_trace_payloads(self) -> None:  # [Silent Failure]
+        # Verify the bundle shape mirrors FileSessionStore and includes trace data.
+        store = InMemorySessionStore()
+        session = Session(FakeAgent(trace={"goal": "g"}), store=store)
+        await session.arun("one")
+
+        bundle = SessionBundleExporter(store).export(session.id)
+        stored = store.history(session.id)[0]
+
+        with zipfile.ZipFile(BytesIO(bundle), mode="r") as archive:
+            manifest = json.loads(archive.read("manifest.json").decode("utf-8"))
+            meta = json.loads(archive.read("meta.json").decode("utf-8"))
+            checkpoint_names = [name for name in archive.namelist() if name.startswith("checkpoints/")]
+            checkpoint = json.loads(archive.read(checkpoint_names[0]).decode("utf-8"))
+        self.assertEqual(manifest["schema_version"], SESSION_SCHEMA_VERSION)
+        self.assertEqual(manifest["session_id"], session.id)
+        self.assertEqual(manifest["checkpoint_count"], 1)
+        self.assertIn("exported_at", manifest)
+        self.assertEqual(meta["session_id"], session.id)
+        self.assertEqual(checkpoint_names, [f"checkpoints/{stored.seq:08d}-{stored.id}.json"])
+        self.assertEqual(checkpoint["checkpoint"]["trace_artifact"], {"goal": "g"})
+
+    async def test_imports_memory_bundle_into_file_store_with_new_id_and_resumes(self) -> None:  # [Hidden Failure]
+        # Verify memory-to-file import preserves DAG fields and creates a resumable session.
+        source = InMemorySessionStore()
+        session = Session(FakeAgent(trace={"goal": "g"}), store=source)
+        await session.arun("one")
+        await session.arun("two")
+        original = source.history(session.id)
+
+        with tempfile.TemporaryDirectory() as root:
+            target = FileSessionStore(root)
+            imported_id = SessionBundleImporter(target).import_bundle(SessionBundleExporter(source).export(session.id), new_id="se_imported")
+            resumed = Session.resume(target, imported_id)
+            imported = target.history(imported_id)
+
+        self.assertEqual(imported_id, "se_imported")
+        self.assertEqual(resumed.id, "se_imported")
+        self.assertEqual([c.id for c in imported], [c.id for c in original])
+        self.assertEqual([c.seq for c in imported], [c.seq for c in original])
+        self.assertEqual(imported[-1].parent_id, original[-1].parent_id)
+        self.assertEqual(imported[-1].trace_artifact, {"goal": "g"})
+
+    async def test_imports_file_bundle_into_memory_store_with_same_id_when_absent(self) -> None:  # [Hidden Failure]
+        # Verify file-to-memory import preserves the original id when no collision exists.
+        with tempfile.TemporaryDirectory() as root:
+            source = FileSessionStore(root)
+            session = Session(FakeAgent(), store=source)
+            await session.arun("one")
+            imported_id = SessionBundleImporter(InMemorySessionStore()).import_bundle(SessionBundleExporter(source).export(session.id))
+        self.assertEqual(imported_id, session.id)
+
+    async def test_session_export_and_client_import_are_thin_public_surfaces(self) -> None:  # [Edge Case]
+        # Verify Session and SessionClient delegate through the bundle classes.
+        source = InMemorySessionStore()
+        client = SessionClient()
+        session = Session(FakeAgent(), store=source)
+        await session.arun("one")
+        target = InMemorySessionStore()
+
+        imported_id = client.import_(target, session.export(), new_id="se_client")
+
+        self.assertEqual(imported_id, "se_client")
+        self.assertEqual(client.export(target, imported_id), SessionBundleExporter(target).export(imported_id))
+
+    def test_import_without_new_id_rejects_existing_session(self) -> None:  # [Hidden Assumption]
+        # Verify same-id imports fail loudly rather than clobbering existing metadata.
+        source = InMemorySessionStore()
+        source.put(_checkpoint("se", "c1"))
+        bundle = SessionBundleExporter(source).export("se")
+
+        with self.assertRaisesRegex(SessionStoreError, "pass new_id"):
+            SessionBundleImporter(source).import_bundle(bundle)
+
+    def test_import_uses_ingest_not_put(self) -> None:  # [Hidden Failure]
+        # Verify bundle import does not call the seq-reassigning put path.
+        class PutFailingStore(InMemorySessionStore):
+            def put(self, checkpoint):
+                # Raise if import accidentally routes through put().
+                raise AssertionError("put should not be called")
+
+        source = InMemorySessionStore()
+        source.put(_checkpoint("se", "c1", seq=99))
+        target = PutFailingStore()
+
+        SessionBundleImporter(target).import_bundle(SessionBundleExporter(source).export("se"), new_id="copy")
+
+        self.assertEqual(target.history("copy")[0].seq, 0)
+
+    def test_export_scrubs_secret_keys_inside_trace_payloads(self) -> None:  # [Hidden Assumption]
+        # Verify trace payloads reuse serializer secret scrubbing before entering a bundle.
+        store = InMemorySessionStore()
+        checkpoint = Checkpoint(id="c1", session_id="se", parent_id=None, seq=3, created_at="t", run_state=_run_state(), trace_artifact={"api_key": "secret", "ok": 1})
+        meta = SessionMeta(session_id="se", head_id="c1", parent_session_id=None, agent_name="a", status=SessionStatus.ACTIVE, created_at="t", updated_at="t")
+        store.ingest(meta, [checkpoint])
+
+        with zipfile.ZipFile(BytesIO(SessionBundleExporter(store).export("se")), mode="r") as archive:
+            checkpoint_payload = json.loads(archive.read("checkpoints/00000003-c1.json").decode("utf-8"))
+
+        self.assertEqual(checkpoint_payload["checkpoint"]["trace_artifact"], {"ok": 1})
+
+    def test_ingest_preserves_supplied_seq_parent_and_head_verbatim(self) -> None:  # [Silent Failure]
+        # Verify ingest writes the exact supplied DAG fields without seq/head mutation.
+        store = InMemorySessionStore()
+        c1 = _checkpoint("se", "c1", seq=7)
+        c2 = _checkpoint("se", "c2", parent="c1", seq=12)
+        meta = SessionMeta(
+            session_id="se",
+            head_id="c2",
+            parent_session_id="parent",
+            agent_name="a",
+            status=SessionStatus.ACTIVE,
+            created_at="2026-06-06T00:00:00+00:00",
+            updated_at="2026-06-06T00:00:00+00:00",
+        )
+
+        store.ingest(meta, [c2, c1])
+
+        self.assertEqual([c.seq for c in store.history("se")], [7, 12])
+        self.assertEqual(store.head("se").id, "c2")
+        self.assertEqual(store.get("c2").parent_id, "c1")
+
+
+# ---------------------------------------------------------------------------
 # TraceRecorder
 # ---------------------------------------------------------------------------
 class TraceRecorderTests(unittest.TestCase):
@@ -341,6 +483,88 @@ class SessionFacadeTests(unittest.IsolatedAsyncioTestCase):
         session = Session(FakeAgent(), store=store, tags=("alpha",))
         self.assertIs(session.tag("beta", "alpha", "gamma"), session)
         self.assertEqual(store.get_meta(session.id).tags, ("alpha", "beta", "gamma"))
+
+    def test_usage_empty_session_returns_zero_rollup(self) -> None:  # [Edge Case]
+        # Verify usage() is safe before any checkpoint exists.
+        session = Session(FakeAgent(), store=InMemorySessionStore())
+        self.assertEqual(session.usage(), UsageRollup(tokens=0, tool_calls=0, turns=0, latency=None, cost=None, per_agent=()))
+
+    def test_usage_folds_head_history_once_per_agent(self) -> None:  # [Silent Failure]
+        # Verify usage() reads the cumulative head history without summing parent checkpoints.
+        store = InMemorySessionStore()
+        session = Session(FakeAgent(), store=store)
+        planner = AgentMessage(sender="planner", recipient="o", content="plan", metadata={"tokens_used": 5, "tool_call_count": 1})
+        coder_missing_tokens = AgentMessage(sender="coder", recipient="o", content="code", metadata={"tokens_used": None, "tool_call_count": 2})
+        coder_missing_tools = AgentMessage(sender="coder", recipient="o", content="more", metadata={"tokens_used": 7})
+        ignored_user = AgentMessage(sender="user", recipient="planner", content="input", metadata={})
+        session.agent.history = [planner]
+        session.checkpoint(label="first")
+        session.agent.history = [planner, ignored_user, coder_missing_tokens, coder_missing_tools]
+        session.checkpoint(label="second")
+
+        rollup = session.usage(prices={"gpt-4.1": 0.5})
+
+        self.assertEqual(rollup.tokens, 12)
+        self.assertEqual(rollup.tool_calls, 3)
+        self.assertEqual(rollup.turns, 3)
+        self.assertEqual(rollup.per_agent, (
+            AgentUsage(agent_name="planner", tokens=5, tool_calls=1, turns=1, cost=2.5),
+            AgentUsage(agent_name="coder", tokens=7, tool_calls=2, turns=2, cost=3.5),
+        ))
+        self.assertEqual(rollup.cost, 6.0)
+
+    def test_usage_cost_is_none_without_matching_price(self) -> None:  # [Hidden Assumption]
+        # Verify usage() does not invent costs when the caller omits this session's model.
+        store = InMemorySessionStore()
+        session = Session(FakeAgent(), store=store)
+        session.agent.history = [AgentMessage(sender="agent", recipient="o", content="reply", metadata={"tokens_used": 10, "tool_call_count": 0})]
+        session.checkpoint(label="usage")
+
+        rollup = session.usage(prices={"other-model": 99.0})
+
+        self.assertIsNone(rollup.cost)
+        self.assertIsNone(rollup.per_agent[0].cost)
+
+    def test_usage_latency_uses_checkpoint_timestamp_delta(self) -> None:  # [Silent Failure]
+        # Verify latency comes from first/last checkpoint timestamps, not per-turn metadata.
+        store = InMemorySessionStore()
+        history = ({"sender": "agent", "recipient": "o", "content": "reply", "message_type": "response", "metadata": {"tokens_used": 1}},)
+        state = _run_state(name="agent", history=history)
+        store.put(Checkpoint(id="c1", session_id="se", parent_id=None, seq=0, created_at="2026-07-05T00:00:00+00:00", run_state=state))
+        store.put(Checkpoint(id="c2", session_id="se", parent_id="c1", seq=1, created_at="2026-07-05T00:00:05+00:00", run_state=state))
+        session = Session(FakeAgent(), store=store, session_id="se", _existing=True)
+
+        self.assertEqual(session.usage().latency, 5.0)
+
+    def test_usage_latency_degrades_to_none_for_partial_timestamps(self) -> None:  # [Hidden Failure]
+        # Verify malformed checkpoint timestamps do not make usage() fail.
+        store = InMemorySessionStore()
+        state = _run_state(name="agent", history=({"sender": "agent", "metadata": {"tokens_used": 1}},))
+        store.put(Checkpoint(id="c1", session_id="se", parent_id=None, seq=0, created_at="bad", run_state=state))
+        store.put(Checkpoint(id="c2", session_id="se", parent_id="c1", seq=1, created_at="2026-07-05T00:00:05+00:00", run_state=state))
+        session = Session(FakeAgent(), store=store, session_id="se", _existing=True)
+
+        self.assertIsNone(session.usage().latency)
+
+    def test_usage_raises_on_invalid_usage_metadata(self) -> None:  # [Hidden Failure]
+        # Verify corrupt persisted usage values fail with an SDK-scoped error.
+        store = InMemorySessionStore()
+        state = _run_state(name="agent", history=({"sender": "agent", "metadata": {"tokens_used": "bad"}},))
+        store.put(Checkpoint(id="c1", session_id="se", parent_id=None, seq=0, created_at="2026-07-05T00:00:00+00:00", run_state=state))
+        session = Session(FakeAgent(), store=store, session_id="se", _existing=True)
+
+        with self.assertRaises(SessionUsageValidationError):
+            session.usage()
+
+    def test_usage_raises_on_invalid_price(self) -> None:  # [Hidden Failure]
+        # Verify caller-supplied pricing errors do not silently produce bogus costs.
+        store = InMemorySessionStore()
+        state = _run_state(name="agent", history=({"sender": "agent", "metadata": {"tokens_used": 1}},))
+        store.put(Checkpoint(id="c1", session_id="se", parent_id=None, seq=0, created_at="2026-07-05T00:00:00+00:00", run_state=state))
+        session = Session(FakeAgent(), store=store, session_id="se", _existing=True)
+
+        with self.assertRaises(SessionUsageValidationError):
+            session.usage(prices={"gpt-4.1": "bad"})
 
     async def test_arun_writes_checkpoint_with_parent_chain(self) -> None:  # [Silent Failure]
         store = InMemorySessionStore()
