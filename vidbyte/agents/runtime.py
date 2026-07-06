@@ -31,7 +31,7 @@ from vidbyte.providers.output_schema import OutputSchemaFormatter
 from vidbyte.lib.enums import ModelModality
 from vidbyte.lib.errors import PermissionDeniedError, ToolExecutionError, ToolRegistryError
 from vidbyte.lib.token_usage import token_usage_from_response
-from vidbyte.lib.tools import ToolsFormatter
+from vidbyte.lib.tools import ToolErrorRenderOptions, ToolsFormatter
 from vidbyte.context.templates import NullRecorder, RecorderBase
 from vidbyte.lib.tracing import NullTracer, SpanContext, TracerBase
 from vidbyte.middleware import AgentMiddleware, MiddlewarePipeline
@@ -1355,30 +1355,36 @@ class AgentRuntime:
                 tokens_used=tokens_used,
                 contexts=call_contexts,
             )
-        if decision.action is MiddlewareAction.DENY_TOOL:
-            context_record, result = self._middleware_denied_tool(call, provider, decision)
-        else:
-            context_record, result = await self.execute_tool_call(call, provider=provider, trace_context=trace_context)
-        call_contexts.append(context_record)
-        after_decision = await self.middleware.after_tool_call(
-            self._middleware_context(
-                MiddlewareHook.AFTER_TOOL_CALL,
-                message=message,
-                context=context,
-                provider=provider,
-                iteration_count=iteration_count,
-                model_call_count=model_call_count,
-                tool_call_count=len(call_contexts),
-                tokens_used=tokens_used,
-                started_at=started_at,
-                metadata=metadata,
-                run_state=run_state,
-                tool_call=call,
-                tool_result=result,
-                tool_is_internal=tool_is_internal,
-                model_response=model_response,
+        after_decision = MiddlewareDecision.continue_()
+        while True:
+            if decision.action is MiddlewareAction.DENY_TOOL:
+                context_record, result = self._middleware_denied_tool(call, provider, decision)
+            else:
+                context_record, result = await self.execute_tool_call(call, provider=provider, trace_context=trace_context)
+            after_decision = await self.middleware.after_tool_call(
+                self._middleware_context(
+                    MiddlewareHook.AFTER_TOOL_CALL,
+                    message=message,
+                    context=context,
+                    provider=provider,
+                    iteration_count=iteration_count,
+                    model_call_count=model_call_count,
+                    tool_call_count=len(call_contexts) + 1,
+                    tokens_used=tokens_used,
+                    started_at=started_at,
+                    metadata=self._tool_call_middleware_metadata(metadata, call),
+                    run_state=run_state,
+                    tool_call=call,
+                    tool_result=result,
+                    tool_is_internal=tool_is_internal,
+                    model_response=model_response,
+                )
             )
-        )
+            if after_decision.action is not MiddlewareAction.RETRY:
+                break
+            if after_decision.sleep_seconds:
+                await self.middleware.sleep(after_decision.sleep_seconds)
+        call_contexts.append(context_record)
         if after_decision.action is MiddlewareAction.ABORT_RUN:
             return self._middleware_abort_result(
                 after_decision,
@@ -1390,8 +1396,29 @@ class AgentRuntime:
             visible_result = self._apply_primitive_binding(call, result)
             if visible_result is result and after_decision.transform is not None and after_decision.transform.model_visible_tool_result is not None:
                 visible_result = after_decision.transform.model_visible_tool_result
-            messages.append(dict(ToolsFormatter.format_tool_result(call, visible_result, provider)))
+            messages.append(dict(ToolsFormatter.format_tool_result(call, visible_result, provider, self._tool_error_render_options(after_decision))))
         return context_record, result
+
+    def _tool_call_middleware_metadata(self, metadata: Mapping[str, Any], call: ToolCall) -> dict[str, Any]:
+        # Adds per-call tool permission facts to middleware metadata without changing run metadata.
+        return {**dict(metadata), "tool_permission": self._tool_permission_value(call)}
+
+    def _tool_permission_value(self, call: ToolCall) -> str | None:
+        # Resolves the target tool permission for idempotency-gated middleware decisions.
+        try:
+            spec = self.tools._get(call.tool_name).spec()
+        except Exception:
+            return None
+        permission = getattr(spec, "permission", None)
+        return str(getattr(permission, "value", permission)) if permission is not None else None
+
+    @staticmethod
+    def _tool_error_render_options(decision: MiddlewareDecision) -> ToolErrorRenderOptions | None:
+        # Extracts formatter options from a middleware transform when present.
+        if decision.transform is None:
+            return None
+        options = dict(decision.transform.metadata).get("tool_error_render_options")
+        return options if isinstance(options, ToolErrorRenderOptions) else None
 
     def _apply_primitive_binding(self, call: ToolCall, result: ToolResult) -> ToolResult:
         """Route a successful tool result into its bound primitive and return an acknowledgment result."""

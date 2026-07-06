@@ -171,6 +171,16 @@ class BaseAgent(McpAttachableMixin):
             compaction_trigger_tokens=compaction_trigger_tokens,
             compaction_target_tokens=compaction_target_tokens,
         )
+        if self.agent_loop_settings.tool_error_policy is not None and self.runtime_type in (
+            AgentRuntimeType.MCTS_SEARCH,
+            AgentRuntimeType.ACTOR_MODEL,
+            AgentRuntimeType.ACTOR_MODEL_P2P,
+            AgentRuntimeType.ACTOR_MODEL_BROADCAST,
+        ):
+            raise ConfigurationError(
+                f"Agent {name} uses non-linear runtime {self.runtime_type.value}, "
+                "which does not support tool_error_policy middleware."
+            )
         self.runtime_config = self.agent_loop_settings.to_runtime_config()
         self.max_tool_rounds = self.agent_loop_settings.max_iterations
         self.system_prompt = system_prompt
@@ -991,11 +1001,15 @@ class BaseAgent(McpAttachableMixin):
         )
 
     def _runtime_middleware(self) -> tuple[AgentMiddleware, ...]:
-        # Appends the continual trace middleware to the user middleware when tracing is enabled.
+        # Appends settings-driven and tracing middleware to the user middleware.
+        middleware = self.middleware
+        if self.agent_loop_settings.tool_error_policy is not None:
+            from vidbyte.middleware.builtins import ToolErrorPolicyMiddleware
+            middleware = (*middleware, ToolErrorPolicyMiddleware(self.agent_loop_settings.tool_error_policy))
         if self._trace_option is None or not self._trace_option.enabled:
-            return self.middleware
+            return middleware
         from vidbyte.middleware.continual_trace import ContinualTraceMiddleware
-        return (*self.middleware, ContinualTraceMiddleware(self._trace_option, source_agent=self))
+        return (*middleware, ContinualTraceMiddleware(self._trace_option, source_agent=self))
 
     def _catalog_from_agent_tools(self, tools: Sequence[object]) -> Tools:
         catalog = Tools()
