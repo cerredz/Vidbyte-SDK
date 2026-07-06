@@ -28,8 +28,9 @@ from vidbyte.lib.dataclasses.agents import AgentIterationSnapshot, AgentRuntimeC
 from vidbyte.lib.dataclasses.middleware import MiddlewareAction, MiddlewareContext, MiddlewareDecision, MiddlewareHook
 from vidbyte.lib.dataclasses.runner import RunnerHandle
 from vidbyte.providers.output_schema import OutputSchemaFormatter
+from vidbyte.lib.dataclasses.tools import ToolErrorKind
 from vidbyte.lib.enums import ModelModality
-from vidbyte.lib.errors import PermissionDeniedError, ToolExecutionError, ToolRegistryError
+from vidbyte.lib.errors import McpToolExecutionError, PermissionDeniedError, ToolExecutionError, ToolRegistryError
 from vidbyte.lib.token_usage import token_usage_from_response
 from vidbyte.lib.tools import ToolsFormatter
 from vidbyte.context.templates import NullRecorder, RecorderBase
@@ -41,6 +42,7 @@ from vidbyte.lib.dataclasses.context import BaseAgentContext, BaseContext
 from vidbyte.lib.dataclasses.strategies import AgentResult
 from vidbyte.tools._internal import IS_DONE_TOOL_NAME, with_internal_agent_tools
 from vidbyte.tools.catalog import Tools
+from vidbyte.tools.errors import ToolError, ToolErrorNormalizer
 from vidbyte.tools.security import PermissionDecision, PermissionPolicy
 from vidbyte.tools.types import ToolCall, ToolCallContext, ToolCallState, ToolResult
 
@@ -1017,39 +1019,46 @@ class AgentRuntime:
                     result = ToolResult.error(
                         call.tool_name,
                         f"tool call error: output shape mismatch: {error}",
-                        metadata={"error": "output_schema_violation", "detail": error},
+                        metadata={"error": ToolErrorKind.OUTPUT_SCHEMA.value, "detail": error},
                     )
             state = ToolCallState.SUCCEEDED if result.status.value == "success" else ToolCallState.FAILED
+            if result.error_kind is not None:
+                tool_span.metadata["tool_error_kind"] = result.error_kind.value
             self._tracer.end_span(tool_span, output=result.output)
         except ToolRegistryError as exc:
-            result = ToolResult.error(call.tool_name, str(exc), metadata={"error": "unknown_tool", "detail": str(exc)})
+            result = ToolResult.error(call.tool_name, str(exc), metadata={"error": ToolErrorKind.UNKNOWN_TOOL.value, "detail": str(exc)})
             state = ToolCallState.FAILED
+            tool_span.metadata["tool_error_kind"] = ToolErrorKind.UNKNOWN_TOOL.value
             self._tracer.end_span(tool_span, error=exc)
         except PermissionDeniedError as exc:
             permission = exc.details.get("permission", "")
             result = ToolResult.error(
                 call.tool_name,
                 str(exc),
-                metadata={"error": "permission_denied", "permission": permission},
+                metadata={"error": ToolErrorKind.PERMISSION_DENIED.value, "permission": permission},
             )
             state = ToolCallState.DENIED
+            tool_span.metadata["tool_error_kind"] = ToolErrorKind.PERMISSION_DENIED.value
             self._tracer.end_span(tool_span, error=exc)
         except ToolExecutionError as exc:
             error_type = exc.details.get("error_type", type(exc).__name__)
+            error_kind = _tool_error_kind_from_details(exc.details.get("error"))
             result = ToolResult.error(
                 call.tool_name,
                 str(exc),
-                metadata={"error": "execution_error", "error_type": error_type},
+                metadata=ToolErrorNormalizer.metadata_for(error_kind, extra={"error_type": error_type}),
             )
             state = ToolCallState.FAILED
+            tool_span.metadata["tool_error_kind"] = error_kind.value
             self._tracer.end_span(tool_span, error=exc)
         except Exception as exc:
             result = ToolResult.error(
                 call.tool_name,
                 f"Tool execution failed: {exc}",
-                metadata={"error": "execution_error", "error_type": type(exc).__name__},
+                metadata={"error": ToolErrorKind.EXECUTION_FAILED.value, "error_type": type(exc).__name__},
             )
             state = ToolCallState.FAILED
+            tool_span.metadata["tool_error_kind"] = ToolErrorKind.EXECUTION_FAILED.value
             self._tracer.end_span(tool_span, error=exc)
 
         return (
@@ -1076,7 +1085,7 @@ class AgentRuntime:
             call.tool_name,
             f"Tool denied by middleware: {decision.reason or 'middleware_denied'}",
             metadata={
-                "error": "middleware_denied",
+                "error": ToolErrorKind.MIDDLEWARE_DENIED.value,
                 "reason": decision.reason,
                 **dict(decision.metadata),
             },
@@ -1130,18 +1139,21 @@ class AgentRuntime:
         if validation_error:
             raise ToolExecutionError(
                 validation_error,
-                details={"tool_name": call.tool_name, "error": "validation_error"},
+                details={"tool_name": call.tool_name, "error": ToolErrorKind.INVALID_ARGUMENTS.value},
             )
 
     async def _execute_tool(self, tool: object, call: ToolCall) -> ToolResult:
-        """Execute the tool and return its result, raising ToolExecutionError on failure."""
+        """Execute the tool and return its result, normalizing known failures."""
+        spec = tool.spec()
+        normalizer = ToolErrorNormalizer(spec)
         try:
             return await tool.execute(call)
+        except ToolError as exc:
+            return normalizer.from_tool_error(spec.name, exc)
+        except McpToolExecutionError as exc:
+            return normalizer.from_mcp_tool_execution_error(spec.name, exc)
         except Exception as exc:
-            raise ToolExecutionError(
-                f"Tool execution failed: {exc}",
-                details={"tool_name": call.tool_name, "error_type": type(exc).__name__},
-            ) from exc
+            return normalizer.from_plain_exception(spec.name, exc)
 
     def _resolve_tool_schemas(self, provider: str) -> Sequence[dict[str, Any]]:
         """Return provider-native tool schemas when the toolkit is non-empty."""
@@ -1545,6 +1557,20 @@ def _trace_text(value: object, *, max_chars: int = 12000) -> str:
     if len(text) <= max_chars:
         return text
     return f"{text[:max_chars]}...[truncated]"
+
+
+def _tool_error_kind_from_details(raw_error: object) -> ToolErrorKind:
+    # Coerces legacy execution details into the stable tool error taxonomy.
+    if raw_error == "validation_error":
+        return ToolErrorKind.INVALID_ARGUMENTS
+    if isinstance(raw_error, ToolErrorKind):
+        return raw_error
+    if isinstance(raw_error, str):
+        try:
+            return ToolErrorKind(raw_error)
+        except ValueError:
+            return ToolErrorKind.EXECUTION_FAILED
+    return ToolErrorKind.EXECUTION_FAILED
 
 
 def _safe_trace_mapping(metadata: Mapping[str, Any] | None) -> dict[str, Any]:

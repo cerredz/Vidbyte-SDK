@@ -25,6 +25,7 @@ from vidbyte.tools.base import BaseTool, ToolLike
 from vidbyte.tools.catalog import Tools
 from vidbyte.tools.client import ToolsClient
 from vidbyte.tools.decorators import tool, vidbyte_tool
+from vidbyte.tools.errors import ToolError
 from vidbyte.tools.executor import ToolExecutor
 from vidbyte.tools.function_tool import FunctionTool
 from vidbyte.lib.tools import ToolsFormatter
@@ -33,6 +34,7 @@ from vidbyte.tools.types import (
     ToolCall,
     ToolCallContext,
     ToolCallState,
+    ToolErrorKind,
     ToolParameter,
     ToolPermission,
     ToolResult,
@@ -47,6 +49,8 @@ __all__ = [
     "ToolCall",
     "ToolCallContext",
     "ToolCallState",
+    "ToolError",
+    "ToolErrorKind",
     "ToolExecutor",
     "ToolInput",
     "ToolLike",

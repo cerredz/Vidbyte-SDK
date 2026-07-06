@@ -17,8 +17,10 @@ import json
 import re
 
 from typing import TYPE_CHECKING
-from vidbyte.lib.errors import ToolRegistryError
+from vidbyte.lib.dataclasses.tools import ToolErrorKind
+from vidbyte.lib.errors import McpToolExecutionError, ToolRegistryError
 from vidbyte.tools.catalog import Tools
+from vidbyte.tools.errors import ToolError, ToolErrorNormalizer
 from vidbyte.tools.security import PermissionDecision, PermissionPolicy
 from vidbyte.tools.types import ToolCall, ToolResult
 
@@ -45,33 +47,30 @@ class ToolExecutor:
             get_tool = getattr(self.registry, "get", None)
             tool = get_tool(call.tool_name) if callable(get_tool) else self.registry._get(call.tool_name)
         except ToolRegistryError as exc:
-            return ToolResult.error(call.tool_name, str(exc), metadata={"error": "unknown_tool"})
+            return ToolResult.error(call.tool_name, str(exc), metadata={"error": ToolErrorKind.UNKNOWN_TOOL.value})
 
         spec = tool.spec()
+        normalizer = ToolErrorNormalizer(spec)
         decision = self.permission_policy.check(spec, call)
         if decision is PermissionDecision.DENY:
             return ToolResult.error(
                 spec.name,
                 f"Permission denied for tool '{spec.name}' requiring {spec.permission.value}",
-                metadata={"error": "permission_denied", "permission": spec.permission.value},
+                metadata={"error": ToolErrorKind.PERMISSION_DENIED.value, "permission": spec.permission.value},
             )
 
         validation_error = tool.validate_call(call)
         if validation_error:
-            return ToolResult.error(
-                spec.name,
-                validation_error,
-                metadata={"error": "validation_error"},
-            )
+            return normalizer.from_validation_error(spec.name, validation_error)
 
         try:
             return await tool.execute(call)
+        except ToolError as exc:
+            return normalizer.from_tool_error(spec.name, exc)
+        except McpToolExecutionError as exc:
+            return normalizer.from_mcp_tool_execution_error(spec.name, exc)
         except Exception as exc:  # pragma: no cover - exact concrete failures vary.
-            return ToolResult.error(
-                spec.name,
-                f"Tool execution failed: {exc}",
-                metadata={"error": "execution_error", "error_type": type(exc).__name__},
-            )
+            return normalizer.from_plain_exception(spec.name, exc)
 
     async def execute(self, text: str) -> ToolResult:
         """Parse an Action/Action Input block from text and execute the named tool."""

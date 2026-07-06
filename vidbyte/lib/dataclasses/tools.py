@@ -32,6 +32,23 @@ class ToolStatus(str, Enum):
     ERROR = "error"
 
 
+class ToolErrorKind(str, Enum):
+    """Stable machine-readable categories for tool failures."""
+
+    UNKNOWN_TOOL = "unknown_tool"
+    PERMISSION_DENIED = "permission_denied"
+    INVALID_ARGUMENTS = "invalid_arguments"
+    EXECUTION_FAILED = "execution_error"
+    OUTPUT_SCHEMA = "output_schema_violation"
+    TIMEOUT = "timeout"
+    RATE_LIMITED = "rate_limited"
+    UPSTREAM_ERROR = "upstream_error"
+    NOT_FOUND = "not_found"
+    CONFLICT = "conflict"
+    CANCELLED = "cancelled"
+    MIDDLEWARE_DENIED = "middleware_denied"
+
+
 class ToolPermission(str, Enum):
     """Risk level used by permission policies before execution."""
 
@@ -80,6 +97,7 @@ class ToolSpec:
     input_schema: Mapping[str, Any] | None = None
     binds_to_primitive: str | None = None
     output_schema: type | Mapping[str, Any] | None = None
+    default_error_hint: str | None = None
 
     def __post_init__(self) -> None:
         """Validate the tool name and description."""
@@ -174,6 +192,31 @@ class ToolResult:
     ) -> "ToolResult":
         """Alias for error() — build a failed result."""
         return cls.error(tool_name, output, metadata=metadata)
+
+    @property
+    def error_kind(self) -> ToolErrorKind | None:
+        """Return the normalized error kind from metadata when present."""
+        raw_error = self.metadata.get("error")
+        if isinstance(raw_error, ToolErrorKind):
+            return raw_error
+        if isinstance(raw_error, str):
+            try:
+                return ToolErrorKind(raw_error)
+            except ValueError:
+                return None
+        return None
+
+    @property
+    def hint(self) -> str | None:
+        """Return the model-facing remediation hint from metadata when present."""
+        raw_hint = self.metadata.get("hint")
+        return raw_hint if isinstance(raw_hint, str) and raw_hint else None
+
+    @property
+    def retryable(self) -> bool | None:
+        """Return the retryability override from metadata when present."""
+        raw_retryable = self.metadata.get("retryable")
+        return raw_retryable if isinstance(raw_retryable, bool) else None
 
 
 @dataclass(frozen=True, slots=True)

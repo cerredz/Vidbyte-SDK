@@ -9,7 +9,7 @@ from typing import Any, get_type_hints
 from pydantic import BaseModel, ValidationError, create_model
 
 from vidbyte.tools.base import BaseTool
-from vidbyte.tools.types import ToolCall, ToolParameter, ToolPermission, ToolResult, ToolSpec
+from vidbyte.tools.types import ToolCall, ToolErrorKind, ToolParameter, ToolPermission, ToolResult, ToolSpec
 
 
 class FunctionTool(BaseTool):
@@ -52,7 +52,11 @@ class FunctionTool(BaseTool):
         try:
             model = self.args_model.model_validate(dict(call.arguments))
         except ValidationError as exc:
-            return ToolResult.failure(self.name, _validation_message(exc), metadata={"error_type": "validation"})
+            return ToolResult.failure(
+                self.name,
+                _validation_message(exc),
+                metadata={"error": ToolErrorKind.INVALID_ARGUMENTS.value, "error_type": "validation"},
+            )
 
         kwargs = model.model_dump()
         try:
@@ -61,7 +65,11 @@ class FunctionTool(BaseTool):
             else:
                 value = await asyncio.to_thread(self.func, **kwargs)
         except Exception as exc:
-            return ToolResult.failure(self.name, str(exc), metadata={"error_type": exc.__class__.__name__})
+            return ToolResult.failure(
+                self.name,
+                str(exc),
+                metadata={"error": ToolErrorKind.EXECUTION_FAILED.value, "error_type": exc.__class__.__name__},
+            )
 
         return ToolResult.success(
             self.name,
