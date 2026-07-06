@@ -6,7 +6,8 @@ Purpose:
     Keeps provider schema formatting separate from tool execution contracts so
     OpenAI, Anthropic, Grok, and Gemini adapters can share one SDK utility.
 Architecture:
-    - ToolsFormatter: Static provider conversion and parse helpers.
+    - ToolsFormatter: Static provider conversion, parse, and result rendering helpers.
+    - ToolErrorRenderOptions: Provider-visible error verbosity and redaction controls.
 Relations:
     Related to vidbyte.lib.dataclasses.tools and future provider clients.
 """
@@ -15,9 +16,38 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterable, Mapping
+from dataclasses import dataclass
+from enum import Enum
 from typing import Any
 
-from vidbyte.lib.dataclasses.tools import ToolCall, ToolParameter, ToolResult, ToolSpec
+from vidbyte.lib.dataclasses.tools import ToolCall, ToolParameter, ToolResult, ToolSpec, ToolStatus
+
+
+class ErrorVerbosity(str, Enum):
+    """Controls how much tool-error detail is rendered into model-visible content."""
+
+    MINIMAL = "minimal"
+    STANDARD = "standard"
+    FULL = "full"
+
+
+@dataclass(frozen=True, slots=True)
+class ToolErrorRenderOptions:
+    """Options used when formatting failed tool results for model providers."""
+
+    error_verbosity: ErrorVerbosity | str = ErrorVerbosity.FULL
+    include_remediation_hint: bool = True
+    mark_provider_error_flag: bool = True
+    redact_exception_details: bool = False
+
+    def normalized_verbosity(self) -> ErrorVerbosity:
+        # Coerces string values from settings into the formatter enum.
+        if isinstance(self.error_verbosity, ErrorVerbosity):
+            return self.error_verbosity
+        try:
+            return ErrorVerbosity(str(self.error_verbosity).lower())
+        except ValueError:
+            return ErrorVerbosity.FULL
 
 
 class ToolsFormatter:
@@ -174,30 +204,198 @@ class ToolsFormatter:
         call: ToolCall,
         result: ToolResult,
         provider_or_model: str,
+        options: ToolErrorRenderOptions | None = None,
     ) -> Mapping[str, Any]:
         """Format a local tool result for a follow-up provider request."""
         provider = ToolsFormatter.provider_from_model(provider_or_model)
         call_id = call.call_id or call.tool_name
+        if result.status is ToolStatus.ERROR:
+            render_options = options or ToolErrorRenderOptions()
+            return ToolsFormatter._format_tool_error_result(call, result, provider, call_id, render_options)
+        return ToolsFormatter._format_tool_success_result(call, result, provider, call_id)
+
+    @staticmethod
+    def _format_tool_success_result(
+        call: ToolCall,
+        result: ToolResult,
+        provider: str,
+        call_id: str,
+    ) -> Mapping[str, Any]:
         if provider == "anthropic":
-            return {"role": "user", "content": [{"type": "tool_result", "tool_use_id": call_id, "content": result.output}]}
+            return ToolsFormatter._format_anthropic_tool_result(call_id, result.output)
         if provider == "gemini":
-            return {
-                "role": "function",
-                "parts": [
-                    {
-                        "functionResponse": {
-                            "name": call.tool_name,
-                            "response": {"output": result.output, "status": result.status.value},
-                        }
+            response = {"output": result.output, "status": result.status.value}
+            return ToolsFormatter._format_gemini_tool_result(call.tool_name, response)
+        return ToolsFormatter._format_openai_tool_result(call, call_id, result.output)
+
+    @staticmethod
+    def _format_tool_error_result(
+        call: ToolCall,
+        result: ToolResult,
+        provider: str,
+        call_id: str,
+        options: ToolErrorRenderOptions,
+    ) -> Mapping[str, Any]:
+        envelope = ToolsFormatter._render_error_envelope(result, options)
+        if provider == "anthropic":
+            return ToolsFormatter._format_anthropic_tool_result(call_id, envelope, is_error=True, options=options)
+        if provider == "gemini":
+            error_parts = ToolsFormatter._error_parts(result, options)
+            return ToolsFormatter._format_gemini_tool_result(
+                call.tool_name,
+                ToolsFormatter._gemini_error_response(error_parts),
+            )
+        if ToolsFormatter._is_openai_responses_call(call):
+            return ToolsFormatter._format_openai_responses_tool_result(call_id, envelope)
+        return ToolsFormatter._format_openai_tool_result(call, call_id, envelope)
+
+    @staticmethod
+    def _format_anthropic_tool_result(
+        call_id: str,
+        content: str,
+        *,
+        is_error: bool = False,
+        options: ToolErrorRenderOptions | None = None,
+    ) -> Mapping[str, Any]:
+        block: dict[str, Any] = {
+            "type": "tool_result",
+            "tool_use_id": call_id,
+            "content": content,
+        }
+        if is_error and (options is None or options.mark_provider_error_flag):
+            block["is_error"] = True
+        return {"role": "user", "content": [block]}
+
+    @staticmethod
+    def _format_gemini_tool_result(tool_name: str, response: Mapping[str, Any]) -> Mapping[str, Any]:
+        return {
+            "role": "function",
+            "parts": [
+                {
+                    "functionResponse": {
+                        "name": tool_name,
+                        "response": dict(response),
                     }
-                ],
-            }
+                }
+            ],
+        }
+
+    @staticmethod
+    def _format_openai_responses_tool_result(call_id: str, output: str) -> Mapping[str, Any]:
+        return {"type": "function_call_output", "call_id": call_id, "output": output}
+
+    @staticmethod
+    def _format_openai_tool_result(call: ToolCall, call_id: str, content: str) -> Mapping[str, Any]:
         return {
             "role": "tool",
             "tool_call_id": call_id,
             "name": call.tool_name,
-            "content": result.output,
+            "content": content,
         }
+
+    @staticmethod
+    def _render_error_envelope(result: ToolResult, options: ToolErrorRenderOptions) -> str:
+        # Renders the canonical compact text envelope shared by provider branches.
+        parts = ToolsFormatter._error_parts(result, options)
+        first_line = ToolsFormatter._error_envelope_header(parts)
+        if options.normalized_verbosity() is ErrorVerbosity.MINIMAL:
+            return f"{first_line}\nTool failed."
+        lines = [first_line, parts["message"]]
+        if options.include_remediation_hint and parts.get("hint"):
+            lines.append(f"Hint: {parts['hint']}")
+        if options.normalized_verbosity() is ErrorVerbosity.FULL and parts.get("detail"):
+            lines.append(f"Detail: {parts['detail']}")
+        return "\n".join(lines)
+
+    @staticmethod
+    def _error_parts(result: ToolResult, options: ToolErrorRenderOptions) -> dict[str, Any]:
+        # Extracts stable error fields from ToolResult metadata with legacy fallbacks.
+        metadata = dict(result.metadata or {})
+        kind = ToolsFormatter._normalized_error_kind(metadata.get("error") or metadata.get("error_type"))
+        retryable = ToolsFormatter._normalized_retryable(metadata.get("retryable"))
+        return {
+            "kind": kind,
+            "message": ToolsFormatter._model_visible_error_message(result.output, kind, metadata, options),
+            "hint": ToolsFormatter._clean_text(metadata.get("hint")),
+            "retryable": retryable,
+            "detail": ToolsFormatter._detail_text(metadata, options),
+        }
+
+    @staticmethod
+    def _gemini_error_response(parts: Mapping[str, Any]) -> dict[str, Any]:
+        # Builds Gemini's structured functionResponse.response object for errors.
+        response: dict[str, Any] = {"error": parts["kind"], "message": parts["message"], "status": "error"}
+        if parts.get("hint"):
+            response["hint"] = parts["hint"]
+        if parts.get("retryable") is not None:
+            response["retryable"] = parts["retryable"]
+        return response
+
+    @staticmethod
+    def _error_envelope_header(parts: Mapping[str, Any]) -> str:
+        # Builds the machine-parseable first line for text-only provider error channels.
+        tokens = [f"kind={parts['kind']}"]
+        if parts.get("retryable") is not None:
+            tokens.append(f"retryable={str(parts['retryable']).lower()}")
+        return f"[tool_error {' '.join(tokens)}]"
+
+    @staticmethod
+    def _normalized_error_kind(raw_kind: object) -> str:
+        # Normalizes legacy metadata names into stable model-visible error kinds.
+        raw = str(raw_kind or "execution_error").strip().lower()
+        aliases = {
+            "validation": "invalid_arguments",
+            "validation_error": "invalid_arguments",
+            "argument_error": "invalid_arguments",
+            "arguments_error": "invalid_arguments",
+        }
+        return aliases.get(raw, raw or "execution_error")
+
+    @staticmethod
+    def _normalized_retryable(raw_retryable: object) -> bool | None:
+        # Coerces retryable metadata into a bool while preserving an unspecified value.
+        if isinstance(raw_retryable, bool):
+            return raw_retryable
+        if isinstance(raw_retryable, str):
+            lowered = raw_retryable.strip().lower()
+            if lowered in {"true", "1", "yes"}:
+                return True
+            if lowered in {"false", "0", "no"}:
+                return False
+        return None
+
+    @staticmethod
+    def _model_visible_error_message(output: str, kind: str, metadata: Mapping[str, Any], options: ToolErrorRenderOptions) -> str:
+        # Selects the message text while redacting generic execution exception internals by default.
+        safe_message = ToolsFormatter._clean_text(metadata.get("safe_message"))
+        if safe_message:
+            return safe_message
+        if options.redact_exception_details and kind in {"execution_error", "execution_failed"}:
+            return "Tool execution failed."
+        cleaned = ToolsFormatter._clean_text(output)
+        return cleaned or "Tool failed."
+
+    @staticmethod
+    def _detail_text(metadata: Mapping[str, Any], options: ToolErrorRenderOptions) -> str | None:
+        # Returns optional diagnostic detail only when redaction policy allows it.
+        if options.redact_exception_details:
+            return None
+        return ToolsFormatter._clean_text(metadata.get("detail") or metadata.get("exception") or metadata.get("traceback"))
+
+    @staticmethod
+    def _clean_text(value: object, *, max_chars: int = 1000) -> str | None:
+        # Converts optional metadata values into bounded one-line-ish text.
+        if value is None:
+            return None
+        text = str(value).strip()
+        if not text:
+            return None
+        return text[:max_chars]
+
+    @staticmethod
+    def _is_openai_responses_call(call: ToolCall) -> bool:
+        # Detects tool calls parsed from the OpenAI Responses API output shape.
+        return str(dict(call.metadata or {}).get("provider_shape", "")).lower() == "openai_responses"
 
     @staticmethod
     def parse_openai_tool_call(raw_call: Mapping[str, Any]) -> ToolCall:

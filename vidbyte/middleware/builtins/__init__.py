@@ -9,6 +9,7 @@ Architecture:
     - TokenRateLimitMiddleware: Limits request tokens.
     - RuntimeLimitMiddleware: Places constraints on execution loops and elapsed time.
     - ToolPolicyMiddleware: Filters allowed tools.
+    - ToolErrorPolicyMiddleware: Retries and renders failed tool calls.
     - AuditLogMiddleware: Logs agent and tool interactions.
     - ModelRetryMiddleware: Retries failed model calls.
     - TokenBudgetMiddleware: Controls token usage.
@@ -43,6 +44,7 @@ from vidbyte.middleware.builtins.rate_limit import TokenRateLimitMiddleware
 from vidbyte.middleware.builtins.retry import ModelRetryMiddleware
 from vidbyte.middleware.builtins.runtime_limits import RuntimeLimitMiddleware
 from vidbyte.middleware.builtins.token_budget import TokenBudgetMiddleware
+from vidbyte.middleware.builtins.tool_error_policy import ToolErrorPolicyMiddleware
 from vidbyte.middleware.builtins.tool_policy import ToolPolicyMiddleware
 
 __all__ = [
@@ -62,6 +64,7 @@ __all__ = [
     "TokenBudgetMiddleware",
     "TokenRateLimitMiddleware",
     "ToolResultCompactionMiddleware",
+    "ToolErrorPolicyMiddleware",
     "ToolPolicyMiddleware",
     "TraceReplacementCompactionMiddleware",
     "TraceSummaryTailCompactionMiddleware",
