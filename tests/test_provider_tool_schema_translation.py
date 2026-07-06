@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 
 from vidbyte.providers import tool_spec_to_provider_schema
-from vidbyte.tools import ToolsFormatter, tool, vidbyte_tool
+from vidbyte.tools import ErrorVerbosity, ToolCall, ToolErrorRenderOptions, ToolResult, ToolsFormatter, tool, vidbyte_tool
 
 
 class ProviderToolSchemaTranslationTests(unittest.TestCase):
@@ -73,6 +73,102 @@ class ProviderToolSchemaTranslationTests(unittest.TestCase):
         schema = tool_spec_to_provider_schema(fetch_user_metrics.spec(), "xai")
 
         self.assertEqual(schema["function"]["name"], "fetch_user_metrics")
+
+
+class ProviderAwareToolErrorRenderingTests(unittest.TestCase):
+    def test_success_result_shapes_are_unchanged(self) -> None:
+        call = ToolCall("lookup", {"topic": "sdk"}, call_id="call-1")
+        result = ToolResult.success("lookup", "ok")
+
+        self.assertEqual(
+            ToolsFormatter.format_tool_result(call, result, "anthropic"),
+            {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "call-1", "content": "ok"}]},
+        )
+        self.assertEqual(
+            ToolsFormatter.format_tool_result(call, result, "gemini"),
+            {"role": "function", "parts": [{"functionResponse": {"name": "lookup", "response": {"output": "ok", "status": "success"}}}]},
+        )
+        self.assertEqual(
+            ToolsFormatter.format_tool_result(call, result, "openai"),
+            {"role": "tool", "tool_call_id": "call-1", "name": "lookup", "content": "ok"},
+        )
+
+    def test_anthropic_error_sets_native_error_flag_and_envelope(self) -> None:
+        call = ToolCall("lookup", call_id="tu-1")
+        result = ToolResult.error(
+            "lookup",
+            "missing topic",
+            metadata={"error": "invalid_arguments", "hint": "Pass topic.", "retryable": False},
+        )
+
+        formatted = ToolsFormatter.format_tool_result(call, result, "anthropic")
+        block = formatted["content"][0]
+
+        self.assertTrue(block["is_error"])
+        self.assertEqual(block["tool_use_id"], "tu-1")
+        self.assertIn("[tool_error kind=invalid_arguments retryable=false]", block["content"])
+        self.assertIn("Hint: Pass topic.", block["content"])
+
+    def test_gemini_error_uses_structured_response(self) -> None:
+        call = ToolCall("lookup", call_id="fn-1")
+        result = ToolResult.error(
+            "lookup",
+            "rate limited",
+            metadata={"error": "rate_limited", "hint": "Wait and retry.", "retryable": True},
+        )
+
+        formatted = ToolsFormatter.format_tool_result(call, result, "gemini")
+        response = formatted["parts"][0]["functionResponse"]["response"]
+
+        self.assertEqual(response["status"], "error")
+        self.assertEqual(response["error"], "rate_limited")
+        self.assertEqual(response["message"], "rate limited")
+        self.assertEqual(response["hint"], "Wait and retry.")
+        self.assertTrue(response["retryable"])
+
+    def test_openai_error_encodes_envelope_in_content(self) -> None:
+        call = ToolCall("lookup", call_id="call-1")
+        result = ToolResult.error("lookup", "bad args", metadata={"error_type": "validation", "retryable": "false"})
+
+        formatted = ToolsFormatter.format_tool_result(call, result, "openai")
+
+        self.assertEqual(formatted["role"], "tool")
+        self.assertEqual(formatted["tool_call_id"], "call-1")
+        self.assertIn("[tool_error kind=invalid_arguments retryable=false]", formatted["content"])
+        self.assertIn("bad args", formatted["content"])
+
+    def test_openai_responses_error_uses_function_call_output_shape(self) -> None:
+        call = ToolCall("lookup", call_id="fc-1", metadata={"provider_shape": "openai_responses"})
+        result = ToolResult.error("lookup", "upstream failed", metadata={"error": "upstream_error", "retryable": True})
+
+        formatted = ToolsFormatter.format_tool_result(call, result, "openai")
+
+        self.assertEqual(formatted["type"], "function_call_output")
+        self.assertEqual(formatted["call_id"], "fc-1")
+        self.assertIn("[tool_error kind=upstream_error retryable=true]", formatted["output"])
+
+    def test_render_options_control_hint_flag_and_redaction(self) -> None:
+        call = ToolCall("shell", call_id="call-1")
+        result = ToolResult.error("shell", "Tool execution failed: secret path C:/private", metadata={"error": "execution_error", "hint": "Check cwd.", "detail": "traceback"})
+
+        minimal = ToolsFormatter.format_tool_result(
+            call,
+            result,
+            "anthropic",
+            ToolErrorRenderOptions(error_verbosity=ErrorVerbosity.MINIMAL, include_remediation_hint=False, mark_provider_error_flag=False),
+        )
+        full = ToolsFormatter.format_tool_result(
+            call,
+            result,
+            "openai",
+            ToolErrorRenderOptions(error_verbosity=ErrorVerbosity.FULL, redact_exception_details=False),
+        )
+
+        self.assertNotIn("is_error", minimal["content"][0])
+        self.assertNotIn("Check cwd.", minimal["content"][0]["content"])
+        self.assertIn("Tool failed.", minimal["content"][0]["content"])
+        self.assertIn("secret path", full["content"])
+        self.assertIn("Detail: traceback", full["content"])
 
 
 class AssistantToolCallHistoryFormatterTests(unittest.TestCase):
