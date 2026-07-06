@@ -1355,30 +1355,40 @@ class AgentRuntime:
                 tokens_used=tokens_used,
                 contexts=call_contexts,
             )
-        if decision.action is MiddlewareAction.DENY_TOOL:
-            context_record, result = self._middleware_denied_tool(call, provider, decision)
-        else:
-            context_record, result = await self.execute_tool_call(call, provider=provider, trace_context=trace_context)
-        call_contexts.append(context_record)
-        after_decision = await self.middleware.after_tool_call(
-            self._middleware_context(
-                MiddlewareHook.AFTER_TOOL_CALL,
-                message=message,
-                context=context,
-                provider=provider,
-                iteration_count=iteration_count,
-                model_call_count=model_call_count,
-                tool_call_count=len(call_contexts),
-                tokens_used=tokens_used,
-                started_at=started_at,
-                metadata=metadata,
-                run_state=run_state,
-                tool_call=call,
-                tool_result=result,
-                tool_is_internal=tool_is_internal,
-                model_response=model_response,
+        after_decision = MiddlewareDecision.continue_()
+        while True:
+            # Run the tool behind a retry-aware loop so middleware can silently
+            # retry transient, idempotent failures. Only the final result escapes
+            # this loop into call_contexts/messages, keeping intermediate failure
+            # attempts out of the model-visible conversation history.
+            if decision.action is MiddlewareAction.DENY_TOOL:
+                context_record, result = self._middleware_denied_tool(call, provider, decision)
+            else:
+                context_record, result = await self.execute_tool_call(call, provider=provider, trace_context=trace_context)
+            after_decision = await self.middleware.after_tool_call(
+                self._middleware_context(
+                    MiddlewareHook.AFTER_TOOL_CALL,
+                    message=message,
+                    context=context,
+                    provider=provider,
+                    iteration_count=iteration_count,
+                    model_call_count=model_call_count,
+                    tool_call_count=len(call_contexts) + 1,
+                    tokens_used=tokens_used,
+                    started_at=started_at,
+                    metadata=self._tool_call_middleware_metadata(metadata, call),
+                    run_state=run_state,
+                    tool_call=call,
+                    tool_result=result,
+                    tool_is_internal=tool_is_internal,
+                    model_response=model_response,
+                )
             )
-        )
+            if after_decision.action is not MiddlewareAction.RETRY:
+                break
+            if after_decision.sleep_seconds:
+                await self.middleware.sleep(after_decision.sleep_seconds)
+        call_contexts.append(context_record)
         if after_decision.action is MiddlewareAction.ABORT_RUN:
             return self._middleware_abort_result(
                 after_decision,
@@ -1387,11 +1397,54 @@ class AgentRuntime:
                 contexts=call_contexts,
             )
         if call.tool_name != IS_DONE_TOOL_NAME:
-            visible_result = self._apply_primitive_binding(call, result)
-            if visible_result is result and after_decision.transform is not None and after_decision.transform.model_visible_tool_result is not None:
-                visible_result = after_decision.transform.model_visible_tool_result
-            messages.append(dict(ToolsFormatter.format_tool_result(call, visible_result, provider)))
+            self._append_tool_result_message(messages, call, result, provider, after_decision)
         return context_record, result
+
+    def _append_tool_result_message(
+        self,
+        messages: list[dict[str, Any]],
+        call: ToolCall,
+        result: ToolResult,
+        provider: str,
+        decision: MiddlewareDecision,
+    ) -> None:
+        visible_result = self._model_visible_tool_result(call, result, decision)
+        # Provider-specific result formatting remains the single place that
+        # knows how Anthropic, Gemini, OpenAI Responses, and OpenAI-compatible
+        # chat messages represent tool failures.
+        formatted = ToolsFormatter.format_tool_result(call, visible_result, provider)
+        messages.append(dict(formatted))
+
+    def _model_visible_tool_result(
+        self,
+        call: ToolCall,
+        result: ToolResult,
+        decision: MiddlewareDecision,
+    ) -> ToolResult:
+        # Primitive binding is applied before any middleware-visible transform so
+        # successful tool outputs can still be stored as primitives. Error results
+        # bypass primitive binding and keep their full details for formatter output.
+        primitive_result = self._apply_primitive_binding(call, result)
+        if primitive_result is not result:
+            return primitive_result
+        if decision.transform is None:
+            return result
+        return decision.transform.model_visible_tool_result or result
+
+    def _tool_call_middleware_metadata(self, metadata: Mapping[str, Any], call: ToolCall) -> dict[str, Any]:
+        call_metadata = dict(metadata)
+        call_metadata["tool_permission"] = self._tool_permission_for_call(call)
+        return call_metadata
+
+    def _tool_permission_for_call(self, call: ToolCall) -> str | None:
+        try:
+            spec = self.tools._get(call.tool_name).spec()
+        except Exception:
+            return None
+        permission = getattr(spec, "permission", None)
+        if permission is None:
+            return None
+        return str(getattr(permission, "value", permission))
 
     def _apply_primitive_binding(self, call: ToolCall, result: ToolResult) -> ToolResult:
         """Route a successful tool result into its bound primitive and return an acknowledgment result."""

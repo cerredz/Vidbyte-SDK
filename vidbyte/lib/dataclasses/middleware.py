@@ -139,7 +139,7 @@ class MiddlewareDecision:
         sleep_seconds: float = 0,
         metadata: Mapping[str, Any] | None = None,
     ) -> "MiddlewareDecision":
-        """Retry the failed model call."""
+        """Retry the failed runtime operation after an optional sleep."""
         return cls(
             action=MiddlewareAction.RETRY,
             reason=reason,
