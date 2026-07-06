@@ -3,6 +3,7 @@ from __future__ import annotations
 import unittest
 from unittest.mock import patch
 
+from vidbyte.agents import AgentLoopSettings, ToolErrorPolicy
 from vidbyte.lib.config import ImageModelConfig, ModelProvider, TextModelConfig, VideoModelConfig
 from vidbyte.lib.errors import ConfigurationError, UnsupportedProviderError
 
@@ -49,6 +50,14 @@ class ConfigValidationTests(unittest.TestCase):
 
         with self.assertRaises(UnsupportedProviderError):
             config.validate()
+
+    def test_tool_error_policy_rejects_invalid_retry_values(self) -> None:
+        with self.assertRaises(ConfigurationError):
+            ToolErrorPolicy(max_retries_per_tool_call=-1)
+        with self.assertRaises(ConfigurationError):
+            ToolErrorPolicy(retry_backoff_base_seconds=2, retry_backoff_cap_seconds=1)
+        with self.assertRaises(ConfigurationError):
+            AgentLoopSettings(tool_error_policy=object())
 
 
 if __name__ == "__main__":
