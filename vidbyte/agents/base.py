@@ -445,7 +445,7 @@ class BaseAgent(McpAttachableMixin):
         selected = tools.all() if isinstance(tools, Tools) else (self._agent_tool_items if tools is None else tuple(tools))
         parent_mcp_tools = set(self._mcp_bridged_tools_for_fork())
         child_items = [self._clone_tool_for_fork(tool) for tool in selected if tool not in parent_mcp_tools]
-        child_items.extend(tuple(add_tools))
+        child_items.extend(self._clone_tool_for_fork(tool) for tool in add_tools)
         if not drop_tools:
             return tuple(child_items)
         dropped = {str(name) for name in drop_tools}

@@ -11,6 +11,7 @@ from vidbyte.lib.errors import AgentExecutionError
 from vidbyte.lib.runners import TextModelResponse
 from vidbyte.context.handoff import MinimalHandoff
 from vidbyte.tools import ToolSpec
+from vidbyte.tools.builtins.handoff import CreateHandoffTool
 from vidbyte.tools.types import ToolCallContext
 
 
@@ -165,6 +166,18 @@ class AgentBaseTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(parent.tools.names(), ("keep", "drop"))
         self.assertEqual(child.tools.names(), ("keep", "add"))
+
+    async def test_agent_fork_clones_stateful_add_tools(self) -> None:
+        # Stateful add_tools entries should be cloned before the child binds them.
+        parent = BaseAgent(name="worker", system_prompt="Work carefully.", runner=EchoRunner())
+        added = CreateHandoffTool()
+
+        child = parent.fork(name="child", add_tools=[added])
+        child_tool = child.tools._get("create_handoff")
+
+        self.assertIsNot(child_tool, added)
+        self.assertIsNone(added._agent)
+        self.assertIs(child_tool._agent, child)
 
     async def test_agent_fork_explicit_history_wins_and_can_copy_run_state(self) -> None:
         # Explicit history should override include_history, while include_run_state copies handoffs and tool contexts.
