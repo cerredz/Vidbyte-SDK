@@ -372,6 +372,7 @@ class BaseAgent(McpAttachableMixin):
     def _bind_agent_tool_context(self, tool: object) -> None:
         """Bind this agent's live context getter to AgentTool instances."""
         from vidbyte.tools.agent_tool import AgentTool
+        from vidbyte.tools.builtins.fork import ForkConversationTool
         from vidbyte.tools.builtins.handoff import CreateHandoffTool
         from vidbyte.tools.builtins.mcp import AttachMcpServerTool
 
@@ -380,6 +381,8 @@ class BaseAgent(McpAttachableMixin):
         if isinstance(tool, AttachMcpServerTool):
             tool.bind_agent(self)
         if isinstance(tool, CreateHandoffTool):
+            tool.bind_agent(self)
+        if isinstance(tool, ForkConversationTool):
             tool.bind_agent(self)
         self._bind_session_tool(tool)
 
@@ -408,25 +411,27 @@ class BaseAgent(McpAttachableMixin):
     def tool_specs(self) -> tuple[ToolSpec, ...]:
         return self.tools.specs()
 
-    def fork(self, *, name: str | None = None, runner: object | None = None, runners: Mapping[ModelModality | str, object] | None = None, tools: Sequence[object] | Tools | None = None, system_prompt: str | None = None, modality: ModelModality | str | None = None, metadata: dict[str, Any] | None = None, middleware: Sequence[AgentMiddleware] | None = None, context_items: Sequence[ContextItem] | None = None, context_manager: ContextManager | None = None, algorithm: ContextWindowAlgorithm | str | None = None, include_history: bool = False, inherit_mcp: bool = True, run_id: str | None = None, trace_option: TraceOption | None = None) -> BaseAgent:
-        # Builds an isolated child agent branch with cloned agent-bound tools and fresh run identity.
+    def fork(self, *, name: str | None = None, runner: object | None = None, runners: Mapping[ModelModality | str, object] | None = None, tools: Sequence[object] | Tools | None = None, system_prompt: str | None = None, modality: ModelModality | str | None = None, metadata: dict[str, Any] | None = None, middleware: Sequence[AgentMiddleware] | None = None, context_items: Sequence[ContextItem] | None = None, context_manager: ContextManager | None = None, algorithm: ContextWindowAlgorithm | str | None = None, include_history: bool = False, history: Sequence[AgentMessage] | None = None, add_tools: Sequence[object] = (), drop_tools: Sequence[str] = (), trace_option: TraceOption | None = None, include_run_state: bool = False, output_schema: type | Mapping[str, Any] | None = None, agent_loop_settings: AgentLoopSettings | None = None, max_iterations: int | None = None, handoff: Handoff | None = None, runtime: AgentRuntimeType | str | LinearRuntime | MctsSearchRuntime | ActorRuntime | None = None, run_id: str | None = None, model_name: str | Sequence[str] | None = None, provider: ModelProvider | str | None = None, temperature: float | None = None, runner_options: dict[str, Any] | None = None, mcp: bool = True, inherit_mcp: bool | None = None) -> BaseAgent:
+        # Builds an isolated child agent branch with resolved config, copied state, and fresh lineage.
         child_run_id = self._fork_run_id(run_id)
+        resolved_runner, resolved_runners = self._fork_runners(runner, runners, model_name, provider, temperature, runner_options)
         child = BaseAgent(
             name=name or self.name,
-            runner=runner if runner is not None else self.runner,
-            runners=runners if runners is not None else self.runners,
-            tools=self._fork_tool_items(tools),
+            runtime=runtime if runtime is not None else (self.runtime_config_obj or self.runtime_type),
+            runner=resolved_runner,
+            runners=resolved_runners,
+            tools=self._fork_tool_items(tools, add_tools=add_tools, drop_tools=drop_tools),
             permission_policy=self.permission_policy,
-            agent_loop_settings=self.agent_loop_settings,
+            agent_loop_settings=self._fork_loop_settings(agent_loop_settings, max_iterations),
             middleware=self.middleware if middleware is None else middleware,
             system_prompt=self.system_prompt if system_prompt is None else system_prompt,
             api_key=self.runner_config.api_key,
-            provider=self.runner_config.provider,
-            model_name=self.runner_config.model_name,
+            provider=self.runner_config.provider if provider is None else provider,
+            model_name=self.runner_config.model_name if model_name is None else model_name,
             modality=modality if modality is not None else self.modality,
-            temperature=self.runner_config.temperature,
+            temperature=self.runner_config.temperature if temperature is None else temperature,
             run_id=child_run_id,
-            runner_options=dict(self.runner_config.options),
+            runner_options=dict(self.runner_config.options if runner_options is None else runner_options),
             description=self.description,
             capabilities=self.capabilities,
             agent_metadata=self.agent_metadata,
@@ -435,21 +440,52 @@ class BaseAgent(McpAttachableMixin):
             algorithm=self.algorithm if algorithm is None else algorithm,
             metadata=self._fork_metadata(child_run_id, metadata),
             tracer=self._tracer,
-            output_schema=self.output_schema,
-            handoff=self._handoff_spec,
+            output_schema=self.output_schema if output_schema is None else output_schema,
+            handoff=self._handoff_spec if handoff is None else handoff,
             trace_option=trace_option if trace_option is not None else self._trace_option,
         )
-        if inherit_mcp:
+        if mcp if inherit_mcp is None else inherit_mcp:
             child._pending_mcp_configs.extend(self._mcp_configs_for_fork())
-        if include_history:
-            child.history = list(self.history)
+        self._copy_fork_run_state(child, include_history=include_history, history=history, include_run_state=include_run_state)
         return child
 
-    def _fork_tool_items(self, tools: Sequence[object] | Tools | None) -> tuple[object, ...]:
-        # Returns child-safe tools by removing parent MCP bridged tools and cloning agent-bound builtins.
+    def _fork_runners(self, runner: object | None, runners: Mapping[ModelModality | str, object] | None, model_name: str | Sequence[str] | None, provider: ModelProvider | str | None, temperature: float | None, runner_options: dict[str, Any] | None) -> tuple[object | None, Mapping[ModelModality | str, object]]:
+        # Resolves runner inheritance, forcing lazy runner rebuilds when model-like config changes.
+        if any(value is not None for value in (model_name, provider, temperature, runner_options)):
+            return None, {}
+        return runner if runner is not None else self.runner, runners if runners is not None else self.runners
+
+    def _fork_loop_settings(self, agent_loop_settings: AgentLoopSettings | None, max_iterations: int | None) -> AgentLoopSettings:
+        # Resolves inherited or overridden loop settings, with max_iterations as a shallow delta.
+        if agent_loop_settings is not None and max_iterations is not None:
+            raise ConfigurationError("Pass either agent_loop_settings= or max_iterations=, not both.")
+        if agent_loop_settings is not None:
+            return agent_loop_settings
+        if max_iterations is None:
+            return self.agent_loop_settings
+        return AgentLoopSettings(
+            max_iterations=max_iterations,
+            max_tokens=self.agent_loop_settings.max_tokens,
+            max_tool_calls=self.agent_loop_settings.max_tool_calls,
+            max_parallel_tool_calls=self.agent_loop_settings.max_parallel_tool_calls,
+            max_retries=self.agent_loop_settings.max_retries,
+            timeout_seconds=self.agent_loop_settings.timeout_seconds,
+            context_window_budget=self.agent_loop_settings.context_window_budget,
+            compaction_trigger_tokens=self.agent_loop_settings.compaction_trigger_tokens,
+            compaction_target_tokens=self.agent_loop_settings.compaction_target_tokens,
+            allowed_tools=self.agent_loop_settings.allowed_tools,
+        )
+
+    def _fork_tool_items(self, tools: Sequence[object] | Tools | None, *, add_tools: Sequence[object] = (), drop_tools: Sequence[str] = ()) -> tuple[object, ...]:
+        # Returns child-safe tools by removing parent MCP bridged tools, cloning bound builtins, and applying deltas.
         selected = tools.all() if isinstance(tools, Tools) else (self._agent_tool_items if tools is None else tuple(tools))
         parent_mcp_tools = set(self._mcp_bridged_tools_for_fork())
-        return tuple(self._clone_tool_for_fork(tool) for tool in selected if tool not in parent_mcp_tools)
+        child_items = [self._clone_tool_for_fork(tool) for tool in selected if tool not in parent_mcp_tools]
+        child_items.extend(self._clone_tool_for_fork(tool) for tool in add_tools)
+        if not drop_tools:
+            return tuple(child_items)
+        dropped = {str(name) for name in drop_tools}
+        return tuple(tool for tool in child_items if self._tool_name(tool) not in dropped)
 
     def _clone_tool_for_fork(self, tool: object) -> object:
         # Clones SDK tools that carry mutable agent bindings, preserving custom tools by identity.
@@ -468,12 +504,27 @@ class BaseAgent(McpAttachableMixin):
 
     def _fork_metadata(self, child_run_id: str, overrides: Mapping[str, Any] | None) -> dict[str, Any]:
         # Merges parent metadata, caller overrides, and definitive fork lineage metadata.
+        fork_depth = int(self.metadata.get("fork_depth", 0) or 0) + 1
+        parent_identity = self.runner_config.run_id or self.name
         lineage = {
+            "forked_from": parent_identity,
+            "fork_depth": fork_depth,
             "fork_parent_agent_name": self.name,
             "fork_parent_run_id": self.runner_config.run_id,
             "fork_child_run_id": child_run_id,
         }
         return {**self.metadata, **dict(overrides or {}), **lineage}
+
+    def _copy_fork_run_state(self, child: BaseAgent, *, include_history: bool, history: Sequence[AgentMessage] | None, include_run_state: bool) -> None:
+        # Copies optional transcript and lifecycle state while leaving last-run artifacts reset.
+        if history is not None:
+            child.history = list(history)
+        elif include_history:
+            child.history = list(self.history)
+        if include_run_state:
+            child.handoffs = list(self.handoffs)
+            child.last_handoff = child.handoffs[-1] if child.handoffs else None
+            child._tool_call_contexts = list(self._tool_call_contexts)
 
     def export_state(self) -> RunState:
         """Capture a serializable RunState snapshot of this agent (no secrets, no live objects)."""

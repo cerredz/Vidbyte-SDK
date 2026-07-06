@@ -240,6 +240,9 @@ class AggregateAgent(BaseAgent):
 
     def fork(self, *, name: str | None = None, **_overrides: Any) -> AggregateAgent:
         # Rebuilds an equivalent AggregateAgent so as_tool() and delegation keep aggregating.
+        if _overrides:
+            unsupported = ", ".join(sorted(_overrides))
+            raise ConfigurationError(f"AggregateAgent.fork does not support override keys: {unsupported}.")
         return AggregateAgent(
             name=name or self.name,
             system_prompt=self.system_prompt,
