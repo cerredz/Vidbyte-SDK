@@ -5,6 +5,7 @@ from typing import Any
 
 from vidbyte.agents import AgentMessage, BaseAgent
 from vidbyte.agents.settings import AgentLoopSettings
+from vidbyte.context.handoff import EngineeringHandoff
 from vidbyte.lib.config import ModelProvider
 from vidbyte.lib.runners import TextModelResponse
 from vidbyte.tools.base import BaseTool
@@ -118,6 +119,74 @@ class ForkConversationToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.status, ToolStatus.SUCCESS)
         self.assertEqual([msg.content for msg in agent.captured["history"]], ["two", "three"])
         self.assertEqual(agent.captured["tools"].names(), ("beta", "gamma"))
+
+    async def test_sdk_native_fork_options_translate_to_fork_kwargs(self) -> None:
+        # The model-facing tool should expose Vidbyte-native fork knobs, not only generic prompt/tools/model.
+        agent = StubAgent()
+        tool = ForkConversationTool(allowed_models=("gpt-4.1-mini",), extra_toolsets={"extra": Tools([NamedTool("gamma")])})
+        tool.bind_agent(agent)
+
+        result = await tool.execute(_call(
+            prompt="branch",
+            context_window={
+                "history_mode": "none",
+                "algorithm": "compact_tool_outputs",
+                "budget_tokens": 1000,
+                "compaction_trigger_tokens": 900,
+                "compaction_target_tokens": 400,
+            },
+            extra_toolset_names=["extra"],
+            drop_tool_names=["beta"],
+            model="gpt-4.1-mini",
+            provider="openai",
+            modality="text",
+            temperature=0.4,
+            runtime="linear",
+            loop_settings={"max_tool_calls": 2, "allowed_tools": ["alpha"]},
+            handoff={"preset": "engineering", "title": "Child Handoff"},
+            output_schema={"type": "object"},
+            runner_options={"reasoning": "low"},
+            include_run_state=True,
+            mcp=False,
+            metadata={"branch": "sdk-native"},
+            run_id="child-run-explicit",
+        ))
+
+        self.assertEqual(result.status, ToolStatus.SUCCESS)
+        self.assertEqual(agent.captured["history"], [])
+        self.assertEqual(agent.captured["tools"].names(), ("alpha", "gamma"))
+        self.assertEqual(agent.captured["model_name"], "gpt-4.1-mini")
+        self.assertEqual(agent.captured["provider"], "openai")
+        self.assertEqual(agent.captured["modality"], "text")
+        self.assertEqual(agent.captured["temperature"], 0.4)
+        self.assertEqual(agent.captured["runtime"], "linear")
+        self.assertEqual(agent.captured["algorithm"], "compact_tool_outputs")
+        self.assertIsInstance(agent.captured["handoff"], EngineeringHandoff)
+        self.assertEqual(agent.captured["handoff"].title, "Child Handoff")
+        self.assertEqual(agent.captured["output_schema"], {"type": "object"})
+        self.assertEqual(agent.captured["runner_options"], {"reasoning": "low"})
+        self.assertTrue(agent.captured["include_run_state"])
+        self.assertFalse(agent.captured["mcp"])
+        self.assertEqual(agent.captured["metadata"], {"branch": "sdk-native"})
+        self.assertEqual(agent.captured["run_id"], "child-run-explicit")
+        settings = agent.captured["agent_loop_settings"]
+        self.assertEqual(settings.max_iterations, 3)
+        self.assertEqual(settings.max_tool_calls, 2)
+        self.assertEqual(settings.allowed_tools, ("alpha",))
+        self.assertEqual(settings.context_window_budget, 1000)
+        self.assertEqual(settings.compaction_trigger_tokens, 900)
+        self.assertEqual(settings.compaction_target_tokens, 400)
+
+    async def test_unknown_context_algorithm_returns_tool_error(self) -> None:
+        # SDK-native preset inputs should be constrained to names Vidbyte recognizes.
+        agent = StubAgent()
+        tool = ForkConversationTool()
+        tool.bind_agent(agent)
+
+        result = await tool.execute(_call(prompt="branch", context_algorithm="not-a-preset"))
+
+        self.assertEqual(result.status, ToolStatus.ERROR)
+        self.assertIn("context_algorithm", result.output)
 
     async def test_disallowed_model_returns_tool_error(self) -> None:
         # Model overrides must be rejected unless explicitly allow-listed by the developer.
