@@ -1,10 +1,10 @@
 """Context Protocol Header
 
 Description:
-    Provides retry, circuit-break, and rendering policy for failed tool calls.
+    Provides retry and circuit-break policy for failed tool calls.
 Purpose:
     Lets agent loops silently retry transient idempotent tool errors while
-    surfacing terminal errors with policy-selected provider render options.
+    surfacing terminal errors through the formatter's full-detail rendering.
 Architecture:
     - ToolErrorPolicyMiddleware: Classifies tool errors and returns retry,
       abort, or continue decisions.
@@ -18,10 +18,9 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Any
 
 from vidbyte.agents.settings import ToolErrorPolicy, UnrecoverableAction
-from vidbyte.lib.dataclasses.middleware import MiddlewareContext, MiddlewareDecision, MiddlewareTransform
+from vidbyte.lib.dataclasses.middleware import MiddlewareContext, MiddlewareDecision
 from vidbyte.lib.dataclasses.tools import ToolStatus
 from vidbyte.middleware.base import AgentMiddleware
 
@@ -37,7 +36,7 @@ class _ToolErrorPolicyRunState:
 
 
 class ToolErrorPolicyMiddleware(AgentMiddleware):
-    """Apply retry, abort, and render-option policy to failed tool calls."""
+    """Apply retry and abort policy to failed tool calls."""
 
     def __init__(self, policy: ToolErrorPolicy) -> None:
         # Stores the validated policy; per-run counters live in ctx.run_state.
@@ -49,7 +48,9 @@ class ToolErrorPolicyMiddleware(AgentMiddleware):
         return MiddlewareDecision.continue_()
 
     async def after_tool_call(self, ctx: MiddlewareContext) -> MiddlewareDecision:
-        # Chooses whether a failed tool call should retry, abort, or continue to the model.
+        # This hook is policy-only: retry decisions happen before the failed
+        # result reaches the model, while terminal errors fall through so the
+        # formatter can always render the full tool-error details.
         if ctx.tool_call is None or ctx.tool_result is None or ctx.tool_result.status is not ToolStatus.ERROR:
             return MiddlewareDecision.continue_()
         state = self._state_for(ctx)
@@ -62,7 +63,7 @@ class ToolErrorPolicyMiddleware(AgentMiddleware):
             return self._retry_decision(ctx, kind, state)
         if self.policy.on_unrecoverable is UnrecoverableAction.ABORT_RUN:
             return self._abort_for_unrecoverable(ctx, kind, state)
-        return self._continue_with_render_options(kind, state)
+        return self._continue_with_error_metadata(kind, state)
 
     def _state_for(self, ctx: MiddlewareContext) -> _ToolErrorPolicyRunState:
         # Returns existing run state or creates it for direct hook-level tests.
@@ -104,11 +105,11 @@ class ToolErrorPolicyMiddleware(AgentMiddleware):
             },
         )
 
-    def _continue_with_render_options(self, kind: str, state: _ToolErrorPolicyRunState) -> MiddlewareDecision:
-        # Continues the run while handing formatter options to the runtime.
+    def _continue_with_error_metadata(self, kind: str, state: _ToolErrorPolicyRunState) -> MiddlewareDecision:
+        # Continue without formatter options. Tool-error detail is no longer a
+        # policy knob; every terminal failure is rendered fully by ToolsFormatter.
         return MiddlewareDecision.continue_(
             metadata={"tool_error": kind, "total_tool_errors": state.total_errors},
-            transform=MiddlewareTransform(metadata={"tool_error_render_options": self.policy.to_render_options()}),
         )
 
     def _abort_for_circuit(self, ctx: MiddlewareContext, kind: str, state: _ToolErrorPolicyRunState) -> MiddlewareDecision:

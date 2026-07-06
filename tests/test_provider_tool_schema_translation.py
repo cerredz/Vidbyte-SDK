@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 
 from vidbyte.providers import tool_spec_to_provider_schema
-from vidbyte.tools import ErrorVerbosity, ToolCall, ToolErrorRenderOptions, ToolResult, ToolsFormatter, tool, vidbyte_tool
+from vidbyte.tools import ToolCall, ToolResult, ToolsFormatter, tool, vidbyte_tool
 
 
 class ProviderToolSchemaTranslationTests(unittest.TestCase):
@@ -160,28 +160,24 @@ class ProviderAwareToolErrorRenderingTests(unittest.TestCase):
         self.assertIn("Tool execution failed: command exited 2", formatted["content"])
         self.assertIn("Detail: stderr: missing file", formatted["content"])
 
-    def test_render_options_control_hint_flag_and_redaction(self) -> None:
+    def test_error_rendering_always_includes_full_available_details(self) -> None:
         call = ToolCall("shell", call_id="call-1")
-        result = ToolResult.error("shell", "Tool execution failed: secret path C:/private", metadata={"error": "execution_error", "hint": "Check cwd.", "detail": "traceback"})
-
-        minimal = ToolsFormatter.format_tool_result(
-            call,
-            result,
-            "anthropic",
-            ToolErrorRenderOptions(error_verbosity=ErrorVerbosity.MINIMAL, include_remediation_hint=False, mark_provider_error_flag=False),
-        )
-        full = ToolsFormatter.format_tool_result(
-            call,
-            result,
-            "openai",
-            ToolErrorRenderOptions(error_verbosity=ErrorVerbosity.FULL, redact_exception_details=False),
+        result = ToolResult.error(
+            "shell",
+            "Tool execution failed: secret path C:/private",
+            metadata={"error": "execution_error", "hint": "Check cwd.", "detail": "traceback"},
         )
 
-        self.assertNotIn("is_error", minimal["content"][0])
-        self.assertNotIn("Check cwd.", minimal["content"][0]["content"])
-        self.assertIn("Tool failed.", minimal["content"][0]["content"])
-        self.assertIn("secret path", full["content"])
-        self.assertIn("Detail: traceback", full["content"])
+        anthropic = ToolsFormatter.format_tool_result(call, result, "anthropic")
+        openai = ToolsFormatter.format_tool_result(call, result, "openai")
+
+        self.assertTrue(anthropic["content"][0]["is_error"])
+        self.assertIn("secret path", anthropic["content"][0]["content"])
+        self.assertIn("Hint: Check cwd.", anthropic["content"][0]["content"])
+        self.assertIn("Detail: traceback", anthropic["content"][0]["content"])
+        self.assertIn("secret path", openai["content"])
+        self.assertIn("Hint: Check cwd.", openai["content"])
+        self.assertIn("Detail: traceback", openai["content"])
 
 
 class AssistantToolCallHistoryFormatterTests(unittest.TestCase):

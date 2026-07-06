@@ -7,7 +7,8 @@ Purpose:
     OpenAI, Anthropic, Grok, and Gemini adapters can share one SDK utility.
 Architecture:
     - ToolsFormatter: Static provider conversion, parse, and result rendering helpers.
-    - ToolErrorRenderOptions: Provider-visible error verbosity and redaction controls.
+    - Tool errors are always rendered with full model-visible detail; callers do
+      not choose a reduced verbosity tier.
 Relations:
     Related to vidbyte.lib.dataclasses.tools and future provider clients.
 """
@@ -16,38 +17,9 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
-from enum import Enum
 from typing import Any
 
 from vidbyte.lib.dataclasses.tools import ToolCall, ToolParameter, ToolResult, ToolSpec, ToolStatus
-
-
-class ErrorVerbosity(str, Enum):
-    """Controls how much tool-error detail is rendered into model-visible content."""
-
-    MINIMAL = "minimal"
-    STANDARD = "standard"
-    FULL = "full"
-
-
-@dataclass(frozen=True, slots=True)
-class ToolErrorRenderOptions:
-    """Options used when formatting failed tool results for model providers."""
-
-    error_verbosity: ErrorVerbosity | str = ErrorVerbosity.FULL
-    include_remediation_hint: bool = True
-    mark_provider_error_flag: bool = True
-    redact_exception_details: bool = False
-
-    def normalized_verbosity(self) -> ErrorVerbosity:
-        # Coerces string values from settings into the formatter enum.
-        if isinstance(self.error_verbosity, ErrorVerbosity):
-            return self.error_verbosity
-        try:
-            return ErrorVerbosity(str(self.error_verbosity).lower())
-        except ValueError:
-            return ErrorVerbosity.FULL
 
 
 class ToolsFormatter:
@@ -204,14 +176,12 @@ class ToolsFormatter:
         call: ToolCall,
         result: ToolResult,
         provider_or_model: str,
-        options: ToolErrorRenderOptions | None = None,
     ) -> Mapping[str, Any]:
         """Format a local tool result for a follow-up provider request."""
         provider = ToolsFormatter.provider_from_model(provider_or_model)
         call_id = call.call_id or call.tool_name
         if result.status is ToolStatus.ERROR:
-            render_options = options or ToolErrorRenderOptions()
-            return ToolsFormatter._format_tool_error_result(call, result, provider, call_id, render_options)
+            return ToolsFormatter._format_tool_error_result(call, result, provider, call_id)
         return ToolsFormatter._format_tool_success_result(call, result, provider, call_id)
 
     @staticmethod
@@ -234,13 +204,12 @@ class ToolsFormatter:
         result: ToolResult,
         provider: str,
         call_id: str,
-        options: ToolErrorRenderOptions,
     ) -> Mapping[str, Any]:
-        envelope = ToolsFormatter._render_error_envelope(result, options)
+        envelope = ToolsFormatter._render_error_envelope(result)
         if provider == "anthropic":
-            return ToolsFormatter._format_anthropic_tool_result(call_id, envelope, is_error=True, options=options)
+            return ToolsFormatter._format_anthropic_tool_result(call_id, envelope, is_error=True)
         if provider == "gemini":
-            error_parts = ToolsFormatter._error_parts(result, options)
+            error_parts = ToolsFormatter._error_parts(result)
             return ToolsFormatter._format_gemini_tool_result(
                 call.tool_name,
                 ToolsFormatter._gemini_error_response(error_parts),
@@ -255,14 +224,13 @@ class ToolsFormatter:
         content: str,
         *,
         is_error: bool = False,
-        options: ToolErrorRenderOptions | None = None,
     ) -> Mapping[str, Any]:
         block: dict[str, Any] = {
             "type": "tool_result",
             "tool_use_id": call_id,
             "content": content,
         }
-        if is_error and (options is None or options.mark_provider_error_flag):
+        if is_error:
             block["is_error"] = True
         return {"role": "user", "content": [block]}
 
@@ -294,31 +262,33 @@ class ToolsFormatter:
         }
 
     @staticmethod
-    def _render_error_envelope(result: ToolResult, options: ToolErrorRenderOptions) -> str:
-        # Renders the canonical compact text envelope shared by provider branches.
-        parts = ToolsFormatter._error_parts(result, options)
+    def _render_error_envelope(result: ToolResult) -> str:
+        # Keep every provider's text channel on the same full-detail contract:
+        # the first line is machine-parseable, and every available human-facing
+        # message, hint, and diagnostic detail follows in a stable order.
+        parts = ToolsFormatter._error_parts(result)
         first_line = ToolsFormatter._error_envelope_header(parts)
-        if options.normalized_verbosity() is ErrorVerbosity.MINIMAL:
-            return f"{first_line}\nTool failed."
         lines = [first_line, parts["message"]]
-        if options.include_remediation_hint and parts.get("hint"):
+        if parts.get("hint"):
             lines.append(f"Hint: {parts['hint']}")
-        if options.normalized_verbosity() is ErrorVerbosity.FULL and parts.get("detail"):
+        if parts.get("detail"):
             lines.append(f"Detail: {parts['detail']}")
         return "\n".join(lines)
 
     @staticmethod
-    def _error_parts(result: ToolResult, options: ToolErrorRenderOptions) -> dict[str, Any]:
-        # Extracts stable error fields from ToolResult metadata with legacy fallbacks.
+    def _error_parts(result: ToolResult) -> dict[str, Any]:
+        # Extract structured error metadata without applying a secrecy or verbosity
+        # policy here; tool authors control the public message and metadata they
+        # attach, and the formatter always forwards all of it to the model.
         metadata = dict(result.metadata or {})
         kind = ToolsFormatter._normalized_error_kind(metadata.get("error") or metadata.get("error_type"))
         retryable = ToolsFormatter._normalized_retryable(metadata.get("retryable"))
         return {
             "kind": kind,
-            "message": ToolsFormatter._model_visible_error_message(result.output, kind, metadata, options),
+            "message": ToolsFormatter._model_visible_error_message(result.output, metadata),
             "hint": ToolsFormatter._clean_text(metadata.get("hint")),
             "retryable": retryable,
-            "detail": ToolsFormatter._detail_text(metadata, options),
+            "detail": ToolsFormatter._detail_text(metadata),
         }
 
     @staticmethod
@@ -365,21 +335,18 @@ class ToolsFormatter:
         return None
 
     @staticmethod
-    def _model_visible_error_message(output: str, kind: str, metadata: Mapping[str, Any], options: ToolErrorRenderOptions) -> str:
-        # Selects the message text while redacting generic execution exception internals by default.
-        safe_message = ToolsFormatter._clean_text(metadata.get("safe_message"))
-        if safe_message:
-            return safe_message
-        if options.redact_exception_details and kind in {"execution_error", "execution_failed"}:
-            return "Tool execution failed."
+    def _model_visible_error_message(output: str, metadata: Mapping[str, Any]) -> str:
+        # Preserve ToolResult.output whenever it exists so execution failures stay
+        # fully visible to the next model turn. safe_message remains only a
+        # compatibility fallback for older structured-error payloads with no output.
         cleaned = ToolsFormatter._clean_text(output)
-        return cleaned or "Tool failed."
+        return cleaned or ToolsFormatter._clean_text(metadata.get("safe_message")) or "Tool failed."
 
     @staticmethod
-    def _detail_text(metadata: Mapping[str, Any], options: ToolErrorRenderOptions) -> str | None:
-        # Returns optional diagnostic detail only when redaction policy allows it.
-        if options.redact_exception_details:
-            return None
+    def _detail_text(metadata: Mapping[str, Any]) -> str | None:
+        # Preserve the most specific diagnostic detail field available. This is
+        # intentionally unconditional: the current SDK behavior is full tool-error
+        # detail for the model on every failed tool result.
         return ToolsFormatter._clean_text(metadata.get("detail") or metadata.get("exception") or metadata.get("traceback"))
 
     @staticmethod

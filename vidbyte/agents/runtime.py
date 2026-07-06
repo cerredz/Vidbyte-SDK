@@ -31,7 +31,7 @@ from vidbyte.providers.output_schema import OutputSchemaFormatter
 from vidbyte.lib.enums import ModelModality
 from vidbyte.lib.errors import PermissionDeniedError, ToolExecutionError, ToolRegistryError
 from vidbyte.lib.token_usage import token_usage_from_response
-from vidbyte.lib.tools import ToolErrorRenderOptions, ToolsFormatter
+from vidbyte.lib.tools import ToolsFormatter
 from vidbyte.context.templates import NullRecorder, RecorderBase
 from vidbyte.lib.tracing import NullTracer, SpanContext, TracerBase
 from vidbyte.middleware import AgentMiddleware, MiddlewarePipeline
@@ -1357,6 +1357,10 @@ class AgentRuntime:
             )
         after_decision = MiddlewareDecision.continue_()
         while True:
+            # Run the tool behind a retry-aware loop so middleware can silently
+            # retry transient, idempotent failures. Only the final result escapes
+            # this loop into call_contexts/messages, keeping intermediate failure
+            # attempts out of the model-visible conversation history.
             if decision.action is MiddlewareAction.DENY_TOOL:
                 context_record, result = self._middleware_denied_tool(call, provider, decision)
             else:
@@ -1405,8 +1409,10 @@ class AgentRuntime:
         decision: MiddlewareDecision,
     ) -> None:
         visible_result = self._model_visible_tool_result(call, result, decision)
-        render_options = self._tool_error_render_options_from(decision)
-        formatted = ToolsFormatter.format_tool_result(call, visible_result, provider, render_options)
+        # Provider-specific result formatting remains the single place that
+        # knows how Anthropic, Gemini, OpenAI Responses, and OpenAI-compatible
+        # chat messages represent tool failures.
+        formatted = ToolsFormatter.format_tool_result(call, visible_result, provider)
         messages.append(dict(formatted))
 
     def _model_visible_tool_result(
@@ -1415,6 +1421,9 @@ class AgentRuntime:
         result: ToolResult,
         decision: MiddlewareDecision,
     ) -> ToolResult:
+        # Primitive binding is applied before any middleware-visible transform so
+        # successful tool outputs can still be stored as primitives. Error results
+        # bypass primitive binding and keep their full details for formatter output.
         primitive_result = self._apply_primitive_binding(call, result)
         if primitive_result is not result:
             return primitive_result
@@ -1436,13 +1445,6 @@ class AgentRuntime:
         if permission is None:
             return None
         return str(getattr(permission, "value", permission))
-
-    @staticmethod
-    def _tool_error_render_options_from(decision: MiddlewareDecision) -> ToolErrorRenderOptions | None:
-        if decision.transform is None:
-            return None
-        options = dict(decision.transform.metadata).get("tool_error_render_options")
-        return options if isinstance(options, ToolErrorRenderOptions) else None
 
     def _apply_primitive_binding(self, call: ToolCall, result: ToolResult) -> ToolResult:
         """Route a successful tool result into its bound primitive and return an acknowledgment result."""

@@ -29,7 +29,7 @@ from vidbyte.tools.client import ToolsClient
 from vidbyte.tools.decorators import tool, vidbyte_tool
 from vidbyte.tools.executor import ToolExecutor
 from vidbyte.tools.function_tool import FunctionTool
-from vidbyte.lib.tools import ErrorVerbosity, ToolErrorRenderOptions, ToolsFormatter
+from vidbyte.lib.tools import ToolsFormatter
 from vidbyte.tools.mixins import ToolMixin
 from vidbyte.tools.types import (
     ToolCall,
@@ -45,7 +45,6 @@ from vidbyte.tools.types import (
 __all__ = [
     "AgentTool",
     "BaseTool",
-    "ErrorVerbosity",
     "FunctionTool",
     "ToolCall",
     "ToolCallContext",
@@ -54,7 +53,6 @@ __all__ = [
     "ToolInput",
     "ToolLike",
     "ToolMixin",
-    "ToolErrorRenderOptions",
     "ToolParameter",
     "ToolPermission",
     "ToolRegistry",

@@ -14,10 +14,8 @@ Relations:
 
 from __future__ import annotations
 
-from vidbyte.lib.tools.formatter import ErrorVerbosity, ToolErrorRenderOptions, ToolsFormatter
+from vidbyte.lib.tools.formatter import ToolsFormatter
 
 __all__ = [
-    "ErrorVerbosity",
-    "ToolErrorRenderOptions",
     "ToolsFormatter",
 ]

@@ -10,7 +10,7 @@
 > 2. **`provider-aware-tool-error-rendering`** (this doc) — the *render* layer. Turns a structured error `ToolResult` into a model-visible message shaped correctly for each provider's tool-result protocol.
 > 3. `tool-error-policy-and-retry` — the *decide* layer (settings + middleware). Consumes this doc's rendering.
 >
-> **This is the doc that owns the user's explicit requirement: "each provider takes in tools in a specific way."** Depends on Doc 1's structured error being present on `ToolResult`. Verbosity/redaction *knobs* are defined in Doc 3; this doc implements the *rendering mechanics* those knobs drive and provides sane defaults so it is useful even before Doc 3 lands.
+> **This is the doc that owns the user's explicit requirement: "each provider takes in tools in a specific way."** Depends on Doc 1's structured error being present on `ToolResult`. Tool-error rendering is intentionally full-detail by default and does not expose a verbosity enum or redaction tier.
 
 ---
 
@@ -45,10 +45,10 @@ When a tool fails, the agent loop already appends the result to the conversation
   ```
   [tool_error kind=invalid_arguments retryable=false]
   <message>
-  Hint: <hint>            # only if include_remediation_hint and hint present
+  Hint: <hint>            # when a hint is present
   ```
   This gives the model a stable, parseable first line plus prose, and mirrors the repo's existing `<tool>...</tool>` compact-rendering aesthetic (`ToolSpec.to_prompt_str`, `tools.py:95`).
-- **Verbosity and redaction are policy-driven but default-safe.** Doc 3 defines `error_verbosity` (MINIMAL/STANDARD/FULL), `include_remediation_hint`, `mark_provider_error_flag`, `redact_exception_details`. This doc implements the rendering that honors them, and picks defaults (STANDARD, hints on, provider error flag on, redaction on) so it behaves well even if Doc 3 isn't merged yet. The plumbing of settings → formatter is Doc 3's responsibility; here we accept them as parameters/defaults.
+- **Full detail is the only rendering mode.** Tool errors always include the structured header, model-visible message, hint when present, and diagnostic detail when present. The settings layer controls retry/abort decisions, not the amount of error detail shown to the model.
 
 ### Rejected Alternatives
 
@@ -58,7 +58,7 @@ When a tool fails, the agent loop already appends the result to the conversation
 
 ### Constraints & Assumptions
 
-- **`format_tool_result` is a pure `@staticmethod`** taking `(call, result, provider_or_model)` and returning a `Mapping`. To honor verbosity/hint/redaction settings it needs those inputs. Two options: (a) add optional keyword params with safe defaults (`error_verbosity`, `include_hint`, `mark_provider_error_flag`, `redact`), or (b) pass a small `ToolErrorRenderOptions` value object. Prefer (b) — one optional param, defaulted, avoids a long signature and lets Doc 3 pass a policy-derived object. Keep the default behavior sensible when the param is omitted.
+- **`format_tool_result` is a pure `@staticmethod`** taking `(call, result, provider_or_model)` and returning a `Mapping`. It keeps a simple signature because rendering full tool-error detail is unconditional rather than policy-selected.
 - **Provider adapters forward `messages` verbatim.** Confirmed by audit: the Anthropic adapter leaves tool blocks in raw content and passes messages through (`providers/anthropic.py:117-123`); the formatter's output dicts are provider-native and go straight to the API. So getting the shape right in `format_tool_result` is sufficient — no per-adapter change needed (except possibly the Responses-API branch, see Open Questions).
 - Success-path rendering MUST be unchanged; only `result.status is ERROR` triggers the envelope.
 - Must not break `_apply_primitive_binding` (`runtime.py:1346`) which rewrites *successful* results into acknowledgments before formatting — errors never go through primitive binding (`result.status.value != "success"` guard at `:1348`), so ordering is fine.
@@ -109,7 +109,7 @@ When a tool fails, the agent loop already appends the result to the conversation
 - Render tool-error `ToolResult`s into provider-native error envelopes in `format_tool_result`, one branch per provider family.
 - Set Anthropic `is_error: true`, populate Gemini structured `response`/`status`, and content-encode for OpenAI/xAI.
 - Provide a single canonical text envelope helper reused across providers.
-- Accept verbosity/hint/redaction options (defaulted) so the renderer is correct standalone and configurable by Doc 3.
+- Render full message, hint, and diagnostic detail whenever those fields are present; no verbosity or redaction options are exposed.
 - Resolve or explicitly document the OpenAI Responses API tool-output shape.
 
 ### Non-Goals
@@ -135,7 +135,7 @@ The user's explicit instruction for this decomposition was to "take into conside
 3. Gemini error results MUST populate `functionResponse.response` with a structured object containing at least `error` (kind), `message`, and (when present/allowed) `hint`, and set an error `status`.
 4. OpenAI / xAI / compatible error results MUST encode the structured error legibly within `content`, leading with a stable machine-parseable first line.
 5. A single canonical envelope helper MUST format the `kind`/`message`/`hint`/`retryable` from `ToolResult.metadata` (the Doc 1 keys), used consistently across providers.
-6. Rendering MUST honor verbosity (MINIMAL/STANDARD/FULL), hint inclusion, provider-error-flag, and redaction options, with safe defaults when unspecified.
+6. Rendering MUST always include full model-visible detail: the error header, message, hint when present, retryability when present, and diagnostic detail when present.
 7. The OpenAI Responses API tool-output path MUST be verified; if it requires `function_call_output` shaping, a branch MUST be added; otherwise the finding MUST be documented in the implementation.
 8. No change to inbound tool-schema formatters or to success-path primitive binding.
 
@@ -144,7 +144,7 @@ The user's explicit instruction for this decomposition was to "take into conside
 ## 7. Non-Functional Requirements
 
 - **Correctness/compat:** wrong shape = provider API error or model confusion. Per-provider tests are mandatory. The default (no options) path must be safe for every provider.
-- **Security:** honor `redact_exception_details` — when redaction is on and the error came from the generic `except Exception` fallback (raw `{exc}`), the envelope MUST NOT include raw exception internals beyond a bounded, sanitized message. (The knob is Doc 3's; the enforcement point is here.)
+- **Security:** the formatter does not redact tool-error details. Tool authors and execution layers must avoid placing secrets in `ToolResult.output` or error metadata because those fields are intentionally model-visible on failure.
 - **Observability:** none new; the tracer already records the error at the pipeline (Doc 1). Optionally include the rendered envelope in trace output for debugging.
 - **Performance:** error path only; negligible.
 
@@ -152,7 +152,7 @@ The user's explicit instruction for this decomposition was to "take into conside
 
 ## 8. High-Level Design
 
-Concentrate all changes in `ToolsFormatter.format_tool_result`. Add a private `_render_error_envelope(result, options)` that reads the Doc 1 metadata keys and produces the canonical text (verbosity- and hint-aware, redaction-aware). Then, inside each provider branch, when the result is an error, emit the provider's native error shape: Anthropic adds `is_error: true` and uses the envelope as `content`; Gemini writes a structured `response` object plus an error `status`; the OpenAI-family default uses the envelope as `content`. Introduce a small optional `ToolErrorRenderOptions` parameter (defaulted) so Doc 3 can pass policy-derived verbosity/redaction without changing the call convention elsewhere. Investigate the OpenAI Responses API tool-output shape and add a `function_call_output` branch if required, or document why the existing `role: tool` shape suffices.
+Concentrate all changes in `ToolsFormatter.format_tool_result`. Add a private `_render_error_envelope(result)` that reads the Doc 1 metadata keys and produces the canonical full-detail text. Then, inside each provider branch, when the result is an error, emit the provider's native error shape: Anthropic adds `is_error: true` and uses the envelope as `content`; Gemini writes a structured `response` object plus an error `status`; the OpenAI-family default uses the envelope as `content`. Investigate the OpenAI Responses API tool-output shape and add a `function_call_output` branch if required, or document why the existing `role: tool` shape suffices.
 
 Data flow: Doc 1 produces an error `ToolResult` with structured metadata → the runtime hands it (possibly after a Doc 3 middleware transform) to `format_tool_result` at `runtime.py:1343` → the formatter selects the provider branch via `provider_from_model` → `_render_error_envelope` builds the shared text → the branch wraps it in the provider-native error structure → the provider adapter forwards the message verbatim to the model API. The model now receives a first-class error signal in the form its provider understands.
 
@@ -160,9 +160,9 @@ Data flow: Doc 1 produces an error `ToolResult` with structured metadata → the
 error ToolResult (kind, message, hint, retryable)   [from Doc 1]
         |
         v
-ToolsFormatter.format_tool_result(call, result, provider, options?)   (formatter.py:172)
+ToolsFormatter.format_tool_result(call, result, provider)   (formatter.py:172)
         |
-        |-- _render_error_envelope(result, options) -> "[tool_error kind=... retryable=...]\n<msg>\nHint: ..."
+        |-- _render_error_envelope(result) -> "[tool_error kind=... retryable=...]\n<msg>\nHint: ..."
         |
         +-- provider == anthropic -> tool_result block + "is_error": true
         +-- provider == gemini    -> functionResponse.response{error,message,hint,retryable,status:"error"}

@@ -293,7 +293,7 @@ class AgentMiddlewareTests(unittest.IsolatedAsyncioTestCase):
                 FakeResponse("", {"output": [{"type": "function_call", "name": "isDone", "arguments": '{"final_answer": "done"}', "call_id": "fc_done"}]}),
             ]
         )
-        middleware = ToolErrorPolicyMiddleware(ToolErrorPolicy(max_retries_per_tool_call=1, retry_backoff_base_seconds=0, include_remediation_hint=False))
+        middleware = ToolErrorPolicyMiddleware(ToolErrorPolicy(max_retries_per_tool_call=1, retry_backoff_base_seconds=0))
         runtime = self._runtime(tools=Tools([failing]), middleware=(middleware,), permission_policy=PermissionPolicy.allow_all())
 
         result = await runtime.arun(
@@ -305,7 +305,7 @@ class AgentMiddlewareTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.output, "done")
         self.assertEqual(failing.executions, 1)
         self.assertEqual(result.metadata["tool_call_states"], ("failed", "succeeded"))
-        self.assertNotIn("Hint: Wait briefly.", str(runner.calls[1]["kwargs"]["messages"]))
+        self.assertIn("Hint: Wait briefly.", str(runner.calls[1]["kwargs"]["messages"]))
 
     async def test_tool_error_policy_circuit_breaker_aborts_after_total_errors(self) -> None:
         failing = AlwaysFailingTool(permission=ToolPermission.READ)
