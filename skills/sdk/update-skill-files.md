@@ -25,6 +25,70 @@ When you change the Vidbyte SDK repository, you must update the corresponding sk
 | `skills/usage/available_features.md` | Reference in the Tools section linking to the tools catalog |
 | `skills/sdk/SKILL.md` | Add the category name to the "built-in tool categories" rule; update Framework Boundaries if the tools introduce a new concept |
 
+### Add or Change Durable Sessions
+
+**Example:** Adding `Session.batch_fork`, portable session bundles, usage rollups, or tag lookup.
+
+**Files to update:**
+
+| File | What to add |
+|------|-------------|
+| `skills/sessions.md` | Public API, code examples, checkpoint policy, tool binding, tags, usage, export/import, and rules of thumb |
+| `skills/forking.md` | Fork/resume semantics, lineage, batch fork behavior, and cross-agent patterns |
+| `skills/usage/available_features.md` | Durable Sessions feature summary and key APIs |
+| `skills/usage/available_tools.md` | Session tools table if model-callable tools changed |
+| `skills/usage/create_agent.md` | `agent.persist(...)`, `agent.session`, or constructor-related session entry points |
+| `README.md` | Central durable-session examples and package/layer guide |
+| `llms.txt` | Agent-facing summary, imports, feature map, and design-doc links |
+| `skills/sdk/SKILL.md` | Framework boundary, package rules, and built-in tool category rules |
+| `skills/vidbyte-sdk-doc/SKILL.md` | Public import surface, package map, design-doc references, and test map |
+
+### Add or Change Agent Forking
+
+**Example:** Adding `ForkConversationTool` or changing `BaseAgent.fork(...)` non-escalation rules.
+
+**Files to update:**
+
+| File | What to add |
+|------|-------------|
+| `skills/forking.md` | Distinguish immediate agent-native forks from durable session DAG forks |
+| `skills/usage/available_tools.md` | Agent Forking tool section and safety boundaries |
+| `skills/usage/create_agent_with_tools.md` | Code example attaching `ForkConversationTool` |
+| `skills/usage/available_features.md` | Agent Forking feature notes |
+| `README.md` | Tool catalog or agent-forking overview |
+| `llms.txt` | Agent-facing summary and imports |
+| `skills/sdk/SKILL.md` | Built-in tool category and non-escalation rules |
+
+### Add or Change Tool Error Policy
+
+**Example:** Adding `ToolErrorPolicyMiddleware` or changing `AgentLoopSettings.tool_error_policy`.
+
+**Files to update:**
+
+| File | What to add |
+|------|-------------|
+| `skills/vidbyte-sdk/middleware.md` | Built-in catalog entry, count, arguments, and rendering semantics |
+| `skills/usage/available_features.md` | Middleware summary and code example |
+| `skills/usage/create_agent.md` | `AgentLoopSettings` example and constructor docs |
+| `README.md` | Middleware overview and loop-settings example |
+| `llms.txt` | Agent-facing feature summary and correct import paths |
+| `skills/sdk/SKILL.md` | Middleware rules and removed/stable API notes |
+| `skills/vidbyte-sdk-doc/SKILL.md` | Public import surface and tests/design docs |
+
+### Add or Change Repository Artifacts
+
+**Example:** Adding or regenerating `artifacts/file_index.md`.
+
+**Files to update:**
+
+| File | What to add |
+|------|-------------|
+| `artifacts/file_index.md` | Regenerated or newly documented artifact content |
+| `README.md` | Central reference for why the artifact exists and who uses it |
+| `llms.txt` | Agent-facing retrieval/navigation guidance |
+| `skills/sdk/SKILL.md` | Repository-artifact maintenance rule |
+| `skills/vidbyte-sdk-doc/SKILL.md` | Package map or playbook entry |
+
 ### Add a New Individual Tool (within existing category)
 
 **Example:** Adding a `SummarizeTool` to `vidbyte/tools/builtins/context/`.
@@ -268,6 +332,10 @@ After updating skill files, verify:
 - [ ] All `Prompt.<X>` enum names and direct imports resolve (13 families / 34 prompts)
 - [ ] No skill references the removed `vidbyte/strategies/` package, `sdk.strategies`, removed Strategy classes, or the old `MiddlewareDecision.ALLOW/BLOCK/SKIP` API
 - [ ] All tool names match the current tool files
+- [ ] Session changes mention `agent.persist`, session tools, `BatchForkTool`, tag lookup, usage rollups, and portable export/import where applicable
+- [ ] Agent-forking changes distinguish durable session forks from immediate `ForkConversationTool` execution and preserve non-escalation rules
+- [ ] Tool-error-policy docs use `AgentLoopSettings(tool_error_policy=ToolErrorPolicy(...))` and do not mention removed verbosity/render-options APIs
+- [ ] Repository artifacts such as `artifacts/file_index.md` are listed in README/llms when they are agent-facing
 - [ ] The Usage Skill Files table in `skills/sdk/SKILL.md` lists all usage files
 - [ ] The SDK Developer Reference table in `skills/sdk/SKILL.md` lists all reference docs (including evals, memory-tools, context-primitives, middleware, agent-runtimes)
 

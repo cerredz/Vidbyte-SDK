@@ -25,6 +25,18 @@ Or fork from any checkpoint in the store directly (no live parent session needed
 branch = Session.fork_from(store, "ck_abc123", tools=[grep], runner=my_runner, tags=["exploration"])
 ```
 
+## Batch fork - create many durable branches
+
+Use `Session.batch_fork(count, at=...)` when a parent should create several independent child sessions from the same checkpoint. Each result is a `ForkOutcome` with `index`, `session`, and `error`, so one failed branch creation does not hide the successful branches.
+
+```python
+outcomes = session.batch_fork(4, at=session.head, tools=[grep], runner=my_runner)
+created = [outcome.session for outcome in outcomes if outcome.session is not None]
+failed = [outcome.error for outcome in outcomes if outcome.error is not None]
+```
+
+The model-callable equivalent is `BatchForkTool(store)`. It accepts `count` (1-64) and optional `checkpoint_id`, grants created child ids into the tool scope, and returns a compact JSON result with `created` and `failed`. It only creates branches; it does not spend tokens running the children.
+
 The fork records `parent_session_id` on its metadata — first-class lineage for subagent flows. Mutating the fork never alters the parent's stored state.
 
 ## Rewind — time-travel the head
@@ -49,6 +61,27 @@ def redact(messages):
 
 session.edit(redact, label="redacted")
 ```
+
+## Agent-native conversation fork - run an isolated child now
+
+`ForkConversationTool` is separate from durable-session DAG fork tools. It is an agent-bound builtin that calls `BaseAgent.fork(...)`, runs the child branch on a focused prompt immediately, and returns the child answer as a normal tool result.
+
+```python
+from vidbyte import Agent
+from vidbyte.tools.builtins import ForkConversationTool
+
+agent = Agent(
+    name="planner",
+    system_prompt="Plan carefully and fork isolated checks when useful.",
+    provider="openai",
+    model_name="gpt-4.1",
+    tools=[ForkConversationTool(allowed_models=["gpt-4.1-mini"])],
+)
+```
+
+Use it when the current agent needs an isolated scratch branch with SDK-native parts swapped: system prompt, selected tools, parent history mode (`full`, `none`, `last_n`), provider/model allowlisted by the developer, modality, runtime/actor runtime, context-window algorithm and budget, loop settings, handoff preset/spec, output schema, runner options, metadata, run-state carry, and MCP carry.
+
+The fork tool is non-escalating. The model cannot grant itself credentials or permissions, model changes must be in `allowed_models`, extra tools must come from developer-configured `extra_toolsets`, `max_iterations` cannot exceed the parent cap, and permission policy is inherited. Child state is isolated from the parent unless the tool result is explicitly incorporated into the parent conversation.
 
 The original checkpoint is retained; `edit` writes a new one with the transformed history.
 
