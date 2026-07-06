@@ -501,15 +501,73 @@ LangSmith exporter over a common base. These realize the provider-backed tracing
 ### Repository tooling
 
 #### `skills/`
-Agent-usable skill guides for working with the SDK, one folder per skill. Covers
-`agent-runtimes`, `agentic-loop-settings`, `docs`, `mcp-server`, `paradigm`, `sdk`,
-`sources`, `usage`, `vidbyte-sdk`, and `vidbyte-sdk-doc`, each a `SKILL.md` reference. They
-are documentation-and-workflow assets, not shipped Python.
+Agent-usable skill guides for working with the SDK, one folder per skill. Each is a
+documentation-and-workflow asset (mostly `SKILL.md` plus supporting how-to pages), not
+shipped Python. The subfolders below cover runtimes, loop settings, the MCP server,
+paradigms, sources, usage recipes, and the SDK reference itself.
+
+#### `skills/agent-runtimes/`
+Skill reference for the swappable agent runtimes. Explains selecting and configuring the
+linear, MCTS search, and actor-model loops at agent initialization. The guide behind the
+runtime examples in the README.
+
+#### `skills/agentic-loop-settings/`
+Ground-truth reference for every agentic loop setting in the SDK. Documents the knobs that
+shape the agent loop — iteration and token caps and related controls — in one place.
+Keeps loop configuration authoritative and consistent.
+
+#### `skills/docs/`
+Longer-form documentation and worked prose rather than a single skill file. Holds
+reference material such as a map-reduce pipeline write-up and a prompt-engineering master
+prompt. Supporting docs surfaced through the skills tree.
+
+#### `skills/mcp-server/`
+Guide to building on the MCP Studio server. Covers adding protocol handlers, adding Studio
+tools, and the tool request/response shapes, distinguishing Studio tools from JSON-RPC
+handlers. The companion to the `vidbyte/mcp_server` package.
+
+#### `skills/paradigm/`
+Explains what a paradigm is in the SDK — a thin, runnable, high-level harness that composes
+primitives into one opinionated control flow — and how to build one. Pairs with the
+scaffolding in `vidbyte/paradigms`. Conceptual guidance more than API reference.
+
+#### `skills/sdk/`
+The meta index of the skills tree plus rules for maintaining it. Catalogs the available
+skills and documents how to update skill files. A directory-of-directories for
+contributors.
+
+#### `skills/sources/`
+Development rules for the artifact-sources layer. Documents the conventions and guardrails
+for adding fetchers, loaders, caches, and parsers under `vidbyte/sources`. The design
+contract behind that subsystem.
+
+#### `skills/usage/`
+Task-oriented usage recipes for common SDK operations. Includes create-agent,
+create-agent-with-tools, create-tool, create-pipeline, import-prompt, and agent-behavior
+walkthroughs, plus lists of available features and tools. The quickest path to a working
+snippet.
+
+#### `skills/vidbyte-sdk/`
+The master directory rule file and layout reference for the SDK, and the largest skill.
+Bundles per-subsystem how-to pages spanning context algorithms, prompts, agent behavior,
+context primitives, continual tracing, evals, handoff, memory tools, middleware, pipelines,
+and sessions. The broadest single entry point into SDK skills.
+
+#### `skills/vidbyte-sdk-doc/`
+A comprehensive reference for the repository as a whole. Covers public APIs, package layout,
+design docs, subsystem responsibilities, contribution guardrails, and verification commands
+in one place. The doc-index counterpart to this file index.
 
 #### `docs/`
-Repository design documentation. Its `design/` subfolder holds the design docs that
-precede non-trivial features (including this artifact's own design doc). These are internal
-engineering records, not public API surface.
+Repository design documentation. Holds the engineering records that precede non-trivial
+features; its contents are internal notes, not public API surface. See the `design/`
+subfolder below.
+
+#### `docs/design/`
+The concrete design docs written before implementing SDK features, including this artifact's
+own design doc (`artifact-file-index.md`). Each captures goals, requirements, detailed
+design, and a file-change manifest for one change. They are historical engineering
+artifacts rather than user-facing documentation.
 
 #### `scripts/`
 Standalone verification and demonstration scripts, largely `test-*.py` and `test_*.py`
