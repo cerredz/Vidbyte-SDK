@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from vidbyte.agents import BaseAgent
+from vidbyte.agents import AgentForkSettings, BaseAgent
 from vidbyte.context import ContextManager
 from vidbyte.context.handoff import Handoff, MinimalHandoff
 from vidbyte.lib.config import ModelProvider
@@ -215,7 +215,7 @@ class BaseAgentHandoffRecordingTests(unittest.IsolatedAsyncioTestCase):
     def test_forked_agent_starts_with_empty_handoffs(self) -> None:
         agent = self._agent()
         agent.record_handoff(MinimalHandoff(primitive_id="handoff:1"))
-        child = agent.fork(name="child")
+        child = agent.fork(AgentForkSettings(name="child"))
         self.assertEqual(child.handoffs, [])
 
 

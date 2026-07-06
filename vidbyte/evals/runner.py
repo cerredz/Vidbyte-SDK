@@ -27,7 +27,7 @@ import asyncio
 from datetime import datetime
 from typing import Any, Sequence
 from vidbyte.agents.base import BaseAgent
-from vidbyte.agents.types import AgentInput
+from vidbyte.agents.types import AgentForkSettings, AgentInput
 from vidbyte.evals.behavior.probe import RunProbe
 from vidbyte.evals.types import EvalCase, EvalResult, EvalSuiteResult, GraderResult
 from vidbyte.evals.base import BaseGrader
@@ -121,7 +121,7 @@ class EvalRunner:
         target = self.target
 
         if isinstance(target, BaseAgent):
-            forked = target.fork(name=f"{target.name}_eval")
+            forked = target.fork(AgentForkSettings(name=f"{target.name}_eval"))
             reply = await forked.arun(
                 AgentInput(prompt=case.prompt),
                 trace_metadata=self._case_trace_metadata(case, case_index=case_index, suite_name=suite_name),
