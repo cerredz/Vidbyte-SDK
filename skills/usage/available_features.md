@@ -1,6 +1,6 @@
 # Available Features
 
-Features, strategies, middleware, pipelines, tools, and orchestration primitives included out of the box in the Vidbyte SDK.
+Features, runtimes, middleware, pipelines, tools, durable sessions, artifact sources, and orchestration primitives included out of the box in the Vidbyte SDK.
 
 ## Root SDK Client
 
@@ -18,9 +18,9 @@ sdk = VidbyteSDK()
 
 ## Pipelines
 
-Pipelines wire agents together by connecting outputs to inputs. Each pipeline stage is a fully-configured agent or another pipeline. Pipelines move strings between stages and do not manage shared context, budget, or artifacts — each agent carries its own configuration, strategy, tools, and history.
+Pipelines wire agents together by connecting outputs to inputs. Each pipeline stage is a fully-configured agent or another pipeline. Pipelines move strings between stages and do not manage shared context, budget, or artifacts — each agent carries its own configuration, runtime, tools, and history.
 
-Use pipelines to compose multi-agent workflows where one agent's full output (including its strategy and tool calls) feeds into the next agent.
+Use pipelines to compose multi-agent workflows where one agent's full output (including runtime/tool-call results) feeds into the next agent.
 
 ### Pipeline Types
 
@@ -80,9 +80,28 @@ Decisions: `MiddlewareDecision.continue_()`, `abort(reason)`, `deny_tool(reason)
 
 ### Built-in Middleware
 
-Built-in middleware lives under `vidbyte/middleware/builtins/`. Security/defense: `CanaryTripwireMiddleware`, `ConfusedDeputyGuardMiddleware`, `HoneypotToolMiddleware`. Budgets: `TokenBudgetMiddleware`, `CostBudgetMiddleware`. Reliability: `ModelRetryMiddleware`, `ExponentialBackoffRetryMiddleware`, `CircuitBreakerMiddleware`. Safety/observability: `LoopDetectionMiddleware`, `RuntimeLimitMiddleware`, `ToolPolicyMiddleware`, `TokenRateLimitMiddleware`, `AuditLogMiddleware`. Compaction: `ToolResultCompactionMiddleware`, `MessageHistoryCompactionMiddleware`, `SummaryCompactionMiddleware`. See [`skills/vidbyte-sdk/middleware.md`](../vidbyte-sdk/middleware.md) for the full catalog and arguments.
+Built-in middleware lives under `vidbyte/middleware/builtins/`. Security/defense: `CanaryTripwireMiddleware`, `ConfusedDeputyGuardMiddleware`, `HoneypotToolMiddleware`. Budgets: `TokenBudgetMiddleware`, `CostBudgetMiddleware`. Reliability: `ModelRetryMiddleware`, `ExponentialBackoffRetryMiddleware`, `CircuitBreakerMiddleware`, `ToolErrorPolicyMiddleware`. Safety/observability: `LoopDetectionMiddleware`, `RuntimeLimitMiddleware`, `ToolPolicyMiddleware`, `TokenRateLimitMiddleware`, `AuditLogMiddleware`. Compaction: `ToolResultCompactionMiddleware`, `MessageHistoryCompactionMiddleware`, `SummaryCompactionMiddleware`. See [`skills/vidbyte-sdk/middleware.md`](../vidbyte-sdk/middleware.md) for the full catalog and arguments.
 
 > Context compaction is **middleware**, not a tool. Use the compaction middlewares above; the legacy `ContextCompactionTool` is for manual/legacy flows only.
+
+### Tool Error Policy
+
+`AgentLoopSettings(tool_error_policy=ToolErrorPolicy(...))` auto-registers `ToolErrorPolicyMiddleware` on compatible agent loops. The policy retries transient tool failures, gates retries to idempotent tools by default, applies exponential backoff, enforces optional max total tool errors, and can continue or abort on terminal failures. Terminal tool errors are rendered with full detail; there is no separate verbosity/render-options API.
+
+```python
+from vidbyte import Agent
+from vidbyte.agents import AgentLoopSettings, ToolErrorPolicy
+
+agent = Agent(
+    name="robust-worker",
+    system_prompt="Use tools carefully.",
+    provider="openai",
+    model_name="gpt-4.1",
+    agent_loop_settings=AgentLoopSettings(
+        tool_error_policy=ToolErrorPolicy(max_retries_per_tool_call=2),
+    ),
+)
+```
 
 ### Building Custom Middleware
 
@@ -142,6 +161,32 @@ class StockPriceTool(BaseTool):
     async def execute(self, call: ToolCall) -> ToolResult:
         return ToolResult.success(self.name, fetch_from_api(call.arguments["symbol"]))
 ```
+
+## Durable Sessions
+
+Durable sessions persist agent state as a checkpoint DAG through `Session`, `SessionStore`, and `SessionScope`. They support per-turn or manual checkpoints, cold-process resume, rewind/edit, single and batch fork, cross-thread resume, tags/name resolution, usage rollups, trace capture, and portable zip export/import.
+
+```python
+from vidbyte import Agent, FileSessionStore
+
+store = FileSessionStore("./.vidbyte/sessions")
+agent = Agent(name="researcher", system_prompt="...", provider="openai", model_name="gpt-4.1")
+session = agent.persist(store=store)
+
+await session.arun("start the research")
+branches = session.batch_fork(3)
+session.tag("research-main")
+bundle = session.export()
+usage = session.usage()
+```
+
+Attach session tools such as `CheckpointTool`, `ForkTool`, `BatchForkTool`, `RewindTool`, `ResumeAppendTool`, `ResumeOutputTool`, `ResumeReplaceTool`, and `SessionTool` when the model itself should manipulate durable threads.
+
+## Artifact Sources and Repository Artifacts
+
+The `vidbyte.sources` package provides deterministic artifact-to-context loaders and fetchers for public documents such as `llms.txt`. Repository artifacts also include `artifacts/file_index.md`, a generated source map for fast agent navigation across SDK packages, tests, skills, prompts, and design docs.
+
+Use sources when a caller needs explicit trust boundaries, content hashing, caching, or selection over external or repository-backed documents.
 
 ## Prompt Collection
 
@@ -252,6 +297,8 @@ Create variant agents from a base without re-declaring all configuration. Forkin
 child = agent.fork(name="child", temperature=0.1)                # override any kwarg
 child_with_context = agent.fork(include_history=True, name="ctx") # copies message history
 ```
+
+`ForkConversationTool` exposes immediate child execution to the model while keeping the same non-escalation rules as `BaseAgent.fork(...)`: model changes must be allowlisted, extra tools must come from developer-provided toolsets, permission policy is inherited, and child state stays isolated unless its returned answer is incorporated into the parent.
 
 ## MCP Server Attachment
 
