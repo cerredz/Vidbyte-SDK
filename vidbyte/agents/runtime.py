@@ -1024,7 +1024,10 @@ class AgentRuntime:
             state = ToolCallState.SUCCEEDED if result.status.value == "success" else ToolCallState.FAILED
             if result.error_kind is not None:
                 tool_span.metadata["tool_error_kind"] = result.error_kind.value
-            self._tracer.end_span(tool_span, output=result.output)
+            if result.status.value == "error":
+                self._tracer.end_span(tool_span, output=result.output, error=ToolExecutionError(result.output, details=result.metadata))
+            else:
+                self._tracer.end_span(tool_span, output=result.output)
         except ToolRegistryError as exc:
             result = ToolResult.error(call.tool_name, str(exc), metadata={"error": ToolErrorKind.UNKNOWN_TOOL.value, "detail": str(exc)})
             state = ToolCallState.FAILED

@@ -14,9 +14,11 @@ Relations:
 from __future__ import annotations
 
 import unittest
+from typing import Any
 
 from vidbyte.agents import AgentRuntime
 from vidbyte.lib.errors import McpToolExecutionError
+from vidbyte.lib.tracing import SpanContext, TracerBase
 from vidbyte.tools import BaseTool, ToolCall, ToolError, ToolErrorKind, ToolExecutor, ToolParameter, ToolResult, ToolSpec, Tools
 from vidbyte.tools.function_tool import FunctionTool
 from vidbyte.tools.security import PermissionPolicy
@@ -75,6 +77,31 @@ class McpFailureTool(BaseTool):
         raise McpToolExecutionError("remote tool failed")
 
 
+class CapturingTracer(TracerBase):
+    """Tracer fixture that records span contexts passed to end_span."""
+
+    def __init__(self) -> None:
+        # Stores ended span payloads for assertions.
+        self.ended_spans: list[dict[str, Any]] = []
+
+    def start_trace(self, name: str, **attributes: Any) -> SpanContext:
+        # Opens a fake root trace with captured attributes.
+        return SpanContext(metadata=dict(attributes))
+
+    def end_trace(self, context: SpanContext, *, output: str | None = None, error: BaseException | None = None) -> None:
+        # Ignores root trace completion because these tests only inspect tool spans.
+        return None
+
+    def start_span(self, name: str, parent: SpanContext | None = None, **attributes: Any) -> SpanContext:
+        # Opens a fake child span with captured attributes.
+        del name, parent
+        return SpanContext(metadata=dict(attributes))
+
+    def end_span(self, context: SpanContext, *, output: str | None = None, error: BaseException | None = None) -> None:
+        # Records span completion output and error for assertions.
+        self.ended_spans.append({"context": context, "output": output, "error": error})
+
+
 class ToolErrorTaxonomyTests(unittest.IsolatedAsyncioTestCase):
     """Verifies the structured tool error taxonomy end to end."""
 
@@ -128,6 +155,17 @@ class ToolErrorTaxonomyTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.hint, "check the input environment")
         self.assertEqual(result.metadata["error_type"], "ValueError")
         self.assertIn("Tool execution failed: boom", result.output)
+
+    async def test_runtime_records_tool_error_kind_on_error_span(self) -> None:
+        # Verifies normalized tool failures still appear as errored classified spans.
+        tracer = CapturingTracer()
+        runtime = AgentRuntime(agent_name="agent", system_prompt="Work.", tools=Tools([PlainFailureTool()]), permission_policy=PermissionPolicy(), tracer=tracer)
+
+        await runtime.execute_tool_call(ToolCall("plain_failure", {}), provider="openai")
+
+        ended = tracer.ended_spans[-1]
+        self.assertIsNotNone(ended["error"])
+        self.assertEqual(ended["context"].metadata["tool_error_kind"], ToolErrorKind.EXECUTION_FAILED.value)
 
     async def test_executor_maps_mcp_execution_failure_to_upstream_error(self) -> None:
         # Verifies runtime MCP execution errors keep an upstream, retryable classification.
