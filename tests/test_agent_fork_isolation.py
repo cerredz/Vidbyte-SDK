@@ -4,7 +4,7 @@ import unittest
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
-from vidbyte.agents import AgentMessage, BaseAgent
+from vidbyte.agents import AgentForkSettings, AgentMessage, BaseAgent
 from vidbyte.lib.dataclasses.agents import AgentMetadata
 from vidbyte.lib.dataclasses.trace import TraceOption
 from vidbyte.lib.tracing import SpanContext, TracerBase
@@ -114,7 +114,7 @@ class AgentForkIsolationTests(unittest.IsolatedAsyncioTestCase):
         # Parent and child create_handoff tools must record on their own owning agents.
         parent_tool = CreateHandoffTool()
         parent = self._agent(tools=[parent_tool])
-        child = parent.fork(name="child")
+        child = parent.fork(AgentForkSettings(name="child"))
         child_tool = _tool_of_type(child, CreateHandoffTool)
 
         self.assertIsNot(parent_tool, child_tool)
@@ -130,7 +130,7 @@ class AgentForkIsolationTests(unittest.IsolatedAsyncioTestCase):
         # Parent and child attach_mcp_server tools must call attach_mcp_server on their own agents.
         parent_tool = AttachMcpServerTool()
         parent = self._agent(tools=[parent_tool])
-        child = parent.fork(name="child")
+        child = parent.fork(AgentForkSettings(name="child"))
         child_tool = _tool_of_type(child, AttachMcpServerTool)
         parent.attach_mcp_server = AsyncMock(return_value=parent)  # type: ignore[method-assign]
         child.attach_mcp_server = AsyncMock(return_value=child)  # type: ignore[method-assign]
@@ -154,7 +154,7 @@ class AgentForkIsolationTests(unittest.IsolatedAsyncioTestCase):
         )
         parent_tool = delegate.as_tool()
         parent = self._agent(tools=[parent_tool])
-        child = parent.fork(name="child")
+        child = parent.fork(AgentForkSettings(name="child"))
         child_tool = _tool_of_type(child, AgentTool)
         parent._active_prompt = "parent prompt"
         child._active_prompt = "child prompt"
@@ -174,7 +174,7 @@ class AgentForkIsolationTests(unittest.IsolatedAsyncioTestCase):
         # Lazy MCP configs should be copied to child pending configs without live handles.
         parent = self._agent()
         parent.with_mcp_server(["lazyserver"], name="lazy")
-        child = parent.fork(name="child")
+        child = parent.fork(AgentForkSettings(name="child"))
 
         self.assertEqual(len(parent._pending_mcp_configs), 1)
         self.assertEqual(len(child._pending_mcp_configs), 1)
@@ -185,7 +185,7 @@ class AgentForkIsolationTests(unittest.IsolatedAsyncioTestCase):
         # inherit_mcp=False should leave child pending configs empty.
         parent = self._agent()
         parent.with_mcp_server(["lazyserver"], name="lazy")
-        child = parent.fork(name="child", inherit_mcp=False)
+        child = parent.fork(AgentForkSettings(name="child", inherit_mcp=False))
 
         self.assertEqual(len(parent._pending_mcp_configs), 1)
         self.assertEqual(child._pending_mcp_configs, [])
@@ -197,7 +197,7 @@ class AgentForkIsolationTests(unittest.IsolatedAsyncioTestCase):
         parent = self._agent()
         await parent.attach_mcp_server(["server1"])
         parent_bridged_tool = parent.mcp_servers()[0].bridged_tools[0]
-        child = parent.fork(name="child")
+        child = parent.fork(AgentForkSettings(name="child"))
 
         self.assertEqual(child.mcp_servers(), ())
         self.assertNotIn(parent_bridged_tool, child._agent_tool_items)
@@ -213,7 +213,7 @@ class AgentForkIsolationTests(unittest.IsolatedAsyncioTestCase):
     def test_fork_run_id_is_distinct_and_records_lineage(self) -> None:
         # Default fork run ids should differ from the parent and record lineage metadata.
         parent = self._agent(run_id="run-123")
-        child = parent.fork(name="child")
+        child = parent.fork(AgentForkSettings(name="child"))
 
         self.assertNotEqual(child.runner_config.run_id, parent.runner_config.run_id)
         self.assertTrue(str(child.runner_config.run_id).startswith("run-123:fork:"))
@@ -224,7 +224,7 @@ class AgentForkIsolationTests(unittest.IsolatedAsyncioTestCase):
     def test_fork_explicit_run_id_is_used(self) -> None:
         # Explicit child run ids should be preserved exactly.
         parent = self._agent(run_id="run-123")
-        child = parent.fork(name="child", run_id="child-run")
+        child = parent.fork(AgentForkSettings(name="child", run_id="child-run"))
 
         self.assertEqual(child.runner_config.run_id, "child-run")
         self.assertEqual(child.metadata["fork_child_run_id"], "child-run")
@@ -233,7 +233,7 @@ class AgentForkIsolationTests(unittest.IsolatedAsyncioTestCase):
         # fork(trace_option=...) should set the child continual trace option as documented.
         parent = self._agent()
         option = TraceOption.continual(ActionTrace)
-        child = parent.fork(name="child", trace_option=option)
+        child = parent.fork(AgentForkSettings(name="child", trace_option=option))
 
         self.assertIs(child._trace_option, option)
 
@@ -241,7 +241,7 @@ class AgentForkIsolationTests(unittest.IsolatedAsyncioTestCase):
         # Root trace attributes should include the forked child run id.
         tracer = RecordingTracer()
         parent = self._agent(run_id="run-123", tracer=tracer)
-        child = parent.fork(name="child")
+        child = parent.fork(AgentForkSettings(name="child"))
 
         await child.generate_reply("task")
 

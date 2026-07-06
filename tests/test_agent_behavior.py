@@ -20,7 +20,7 @@ import unittest
 from typing import Any
 
 from vidbyte.agents.base import BaseAgent
-from vidbyte.agents.types import AgentInput
+from vidbyte.agents.types import AgentForkSettings, AgentInput
 from vidbyte.context.handoff.base import Handoff
 from vidbyte.evals import Behavior, ContainsGrader, EvalCase, EvalRunner, EvalSuite, PredicateGrader, RunProbe
 from vidbyte.evals.behavior.efficiency import EfficiencyBehavior
@@ -92,7 +92,7 @@ class MockAgent(BaseAgent):
         self._reply_metadata = reply_metadata or {}
         self._reply_content = reply_content
 
-    def fork(self, **kwargs: Any) -> MockAgent:
+    def fork(self, settings: AgentForkSettings | None = None) -> MockAgent:
         return self
 
     async def arun(self, message: str | AgentInput, **options: Any) -> AgentMessage:

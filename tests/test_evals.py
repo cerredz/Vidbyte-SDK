@@ -21,7 +21,7 @@ import json
 import unittest
 from datetime import datetime
 from typing import Any
-from vidbyte.agents.types import AgentInput
+from vidbyte.agents.types import AgentForkSettings, AgentInput
 from vidbyte.agents.base import BaseAgent
 from vidbyte.evals import (
     AllOfGrader,
@@ -89,10 +89,10 @@ class MockAgent(BaseAgent):
         self.last_name = ""
         self.last_options: dict[str, Any] = {}
 
-    def fork(self, **kwargs: Any) -> MockAgent:
+    def fork(self, settings: AgentForkSettings | None = None) -> MockAgent:
         # Custom fork that counts clone invocations and returns self for simplified testing.
         self.fork_count += 1
-        self.last_name = kwargs.get("name", "")
+        self.last_name = (settings.name or "") if settings is not None else ""
         return self
 
     async def arun(self, message: str | AgentInput, **options: Any) -> Any:

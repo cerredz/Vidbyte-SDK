@@ -30,7 +30,7 @@ from vidbyte import (
     Trace,
     TraceProfile,
 )
-from vidbyte.lib.dataclasses.agents import AgentMessage, AgentMetadata
+from vidbyte.lib.dataclasses.agents import AgentForkSettings, AgentMessage, AgentMetadata
 from vidbyte.lib.enums import AgentRuntimeType
 from vidbyte.lib.errors import AggregateExecutionError, ConfigurationError
 from vidbyte.tools.types import ToolCall, ToolStatus
@@ -255,6 +255,12 @@ class AggregateAgentTests(unittest.IsolatedAsyncioTestCase):
         child = self._agent().fork()
         reply = await child.generate_reply("q")
         self.assertTrue(reply.content.startswith("SYNTH::"))
+
+    def test_fork_rejects_unsupported_overrides(self) -> None:
+        # [Hidden Failure] Unsupported AggregateAgent fork overrides must not be silently ignored.
+        with self.assertRaises(ConfigurationError) as ctx:
+            self._agent().fork(AgentForkSettings(system_prompt="different"))
+        self.assertIn("system_prompt", str(ctx.exception))
 
     def test_as_tool_requires_metadata(self) -> None:
         # [Hidden Assumption] as_tool() refuses to expose an agent without agent_metadata.

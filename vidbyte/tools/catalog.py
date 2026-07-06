@@ -83,6 +83,15 @@ class Tools(Sequence[BaseTool]):
         removed = set(tools)
         return Tools(tool for tool in self._tools if tool not in removed)
 
+    def subset(self, names: Iterable[str]) -> "Tools":
+        """Return a new catalog containing exactly the requested names in catalog order."""
+        requested = tuple(str(name) for name in names)
+        unknown = tuple(name for name in requested if name not in self._by_name)
+        if unknown:
+            raise ToolRegistryError(f"Tool not found in registry: {', '.join(repr(name) for name in unknown)}")
+        requested_set = set(requested)
+        return Tools(tool for tool in self._tools if tool.name in requested_set)
+
     def _get(self, name: str) -> BaseTool:
         """Return a tool by name for internal agent execution."""
         try:

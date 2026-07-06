@@ -23,12 +23,12 @@ from __future__ import annotations
 import asyncio
 import string
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from typing import Any
 
 from vidbyte.agents.base import BaseAgent
 from vidbyte.agents.types import AgentInput, AgentMessage
-from vidbyte.lib.dataclasses.agents import AgentMetadata
+from vidbyte.lib.dataclasses.agents import AgentForkSettings, AgentMetadata
 from vidbyte.lib.dataclasses.multi_agent import AggregateConfig, ProposerSpec
 from vidbyte.lib.enums.prompts import Prompt
 from vidbyte.lib.errors import AggregateExecutionError, ConfigurationError
@@ -238,10 +238,19 @@ class AggregateAgent(BaseAgent):
         finally:
             self._active_prompt = ""
 
-    def fork(self, *, name: str | None = None, **_overrides: Any) -> AggregateAgent:
+    def fork(self, settings: AgentForkSettings | None = None) -> AggregateAgent:
         # Rebuilds an equivalent AggregateAgent so as_tool() and delegation keep aggregating.
+        settings = settings if settings is not None else AgentForkSettings()
+        defaults = AgentForkSettings()
+        unsupported = sorted(
+            spec.name
+            for spec in fields(settings)
+            if spec.name != "name" and getattr(settings, spec.name) != getattr(defaults, spec.name)
+        )
+        if unsupported:
+            raise ConfigurationError(f"AggregateAgent.fork does not support override keys: {', '.join(unsupported)}.")
         return AggregateAgent(
-            name=name or self.name,
+            name=settings.name or self.name,
             system_prompt=self.system_prompt,
             proposers=self._proposer_inputs,
             aggregator=self._aggregator_input,

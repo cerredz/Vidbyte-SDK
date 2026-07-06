@@ -6,6 +6,7 @@ import unittest
 from typing import Any
 from unittest.mock import patch
 
+from vidbyte.agents import AgentForkSettings
 from vidbyte.agents.base import BaseAgent
 from vidbyte.agents.types import AgentInput
 from vidbyte.agents import AgentRuntime
@@ -208,7 +209,7 @@ class BaseAgentTracerWiringTests(unittest.IsolatedAsyncioTestCase):
     def test_fork_propagates_tracer_instance(self) -> None:
         tracer = RecordingTracer()
         parent = self._make_agent(tracer=tracer)
-        child = parent.fork(name="child-agent")
+        child = parent.fork(AgentForkSettings(name="child-agent"))
         self.assertIs(child._tracer, tracer)
 
     def test_trace_alias_accepts_off_preset(self) -> None:
@@ -242,7 +243,7 @@ class BaseAgentTracerWiringTests(unittest.IsolatedAsyncioTestCase):
         # Verifies forking keeps the resolved trace alias tracer instance.
         tracer = RecordingTracer()
         parent = self._make_agent_with_trace(trace=tracer)
-        child = parent.fork(name="child-agent")
+        child = parent.fork(AgentForkSettings(name="child-agent"))
         self.assertIs(child._tracer, tracer)
 
     async def test_start_trace_attributes_include_agent_name(self) -> None:
