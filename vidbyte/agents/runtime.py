@@ -1022,18 +1022,30 @@ class AgentRuntime:
                         metadata={"error": ToolErrorKind.OUTPUT_SCHEMA.value, "detail": error},
                     )
             state = ToolCallState.SUCCEEDED if result.status.value == "success" else ToolCallState.FAILED
+            # Surface the structured error kind on the trace span itself so LangSmith (and any
+            # other tracer backend) can group/filter tool failures by a stable taxonomy value
+            # instead of parsing the free-form output string.
             if result.error_kind is not None:
                 tool_span.metadata["tool_error_kind"] = result.error_kind.value
+            # Only attach a synthetic ToolExecutionError to the span when the call actually
+            # failed; a successful result keeps the plain output-only end_span call so
+            # successful spans are untouched by this change.
             if result.status.value == "error":
                 self._tracer.end_span(tool_span, output=result.output, error=ToolExecutionError(result.output, details=result.metadata))
             else:
                 self._tracer.end_span(tool_span, output=result.output)
         except ToolRegistryError as exc:
+            # Tool name never resolved in the registry (typo, unregistered tool, etc.) — this
+            # is always terminal, so it is classified UNKNOWN_TOOL rather than a generic
+            # execution failure.
             result = ToolResult.error(call.tool_name, str(exc), metadata={"error": ToolErrorKind.UNKNOWN_TOOL.value, "detail": str(exc)})
             state = ToolCallState.FAILED
             tool_span.metadata["tool_error_kind"] = ToolErrorKind.UNKNOWN_TOOL.value
             self._tracer.end_span(tool_span, error=exc)
         except PermissionDeniedError as exc:
+            # Policy denied the call before it ever executed. This is intentionally its own
+            # kind (PERMISSION_DENIED, not EXECUTION_FAILED) since retrying the identical call
+            # can never succeed — downstream retry policy should treat it as terminal.
             permission = exc.details.get("permission", "")
             result = ToolResult.error(
                 call.tool_name,
@@ -1044,6 +1056,10 @@ class AgentRuntime:
             tool_span.metadata["tool_error_kind"] = ToolErrorKind.PERMISSION_DENIED.value
             self._tracer.end_span(tool_span, error=exc)
         except ToolExecutionError as exc:
+            # Recover the real failure category from details["error"] instead of hardcoding
+            # EXECUTION_FAILED here. This is the fix for the taxonomy bug: without this lookup,
+            # a validation failure raised by _validate_tool_call below would have its
+            # INVALID_ARGUMENTS label thrown away and be mislabeled as a generic execution error.
             error_type = exc.details.get("error_type", type(exc).__name__)
             error_kind = _tool_error_kind_from_details(exc.details.get("error"))
             result = ToolResult.error(
@@ -1055,6 +1071,10 @@ class AgentRuntime:
             tool_span.metadata["tool_error_kind"] = error_kind.value
             self._tracer.end_span(tool_span, error=exc)
         except Exception as exc:
+            # Backward-compatible catch-all: a tool that raises a bare exception (never adopted
+            # ToolError) still lands here and yields the same EXECUTION_FAILED classification
+            # tools got before this taxonomy existed, so no tool needs to migrate to avoid
+            # breaking.
             result = ToolResult.error(
                 call.tool_name,
                 f"Tool execution failed: {exc}",
@@ -1087,6 +1107,9 @@ class AgentRuntime:
         result = ToolResult.error(
             call.tool_name,
             f"Tool denied by middleware: {decision.reason or 'middleware_denied'}",
+            # Route the middleware-deny path through the same ToolErrorKind taxonomy as every
+            # execution failure path above, so consumers of metadata["error"] never need a
+            # special case for middleware denials.
             metadata={
                 "error": ToolErrorKind.MIDDLEWARE_DENIED.value,
                 "reason": decision.reason,
@@ -1140,6 +1163,10 @@ class AgentRuntime:
         """Validate tool call arguments, raising ToolExecutionError on failure."""
         validation_error = tool.validate_call(call)
         if validation_error:
+            # Label this failure INVALID_ARGUMENTS at the source (rather than leaving it to be
+            # inferred later) so the except ToolExecutionError handler in execute_tool_call can
+            # recover the correct kind via _tool_error_kind_from_details instead of collapsing
+            # every validation failure into EXECUTION_FAILED.
             raise ToolExecutionError(
                 validation_error,
                 details={"tool_name": call.tool_name, "error": ToolErrorKind.INVALID_ARGUMENTS.value},
@@ -1151,10 +1178,19 @@ class AgentRuntime:
         normalizer = ToolErrorNormalizer(spec)
         try:
             return await tool.execute(call)
+        # A tool author explicitly raised a structured ToolError; hand it to the normalizer so
+        # its kind/message/hint/retryable fields are preserved verbatim on the ToolResult
+        # instead of being flattened into a generic exception string.
         except ToolError as exc:
             return normalizer.from_tool_error(spec.name, exc)
+        # A bridged MCP tool failed inside its own remote call. Map it to UPSTREAM_ERROR
+        # (retryable) rather than letting the generic Exception branch below flatten it, since
+        # an upstream MCP failure is usually transient and worth retrying.
         except McpToolExecutionError as exc:
             return normalizer.from_mcp_tool_execution_error(spec.name, exc)
+        # Any other bare exception: fall back to EXECUTION_FAILED, optionally enriched with the
+        # tool's static default_error_hint, preserving the pre-taxonomy behavior for tools that
+        # never adopted ToolError.
         except Exception as exc:
             return normalizer.from_plain_exception(spec.name, exc)
 
@@ -1563,7 +1599,10 @@ def _trace_text(value: object, *, max_chars: int = 12000) -> str:
 
 
 def _tool_error_kind_from_details(raw_error: object) -> ToolErrorKind:
-    # Coerces legacy execution details into the stable tool error taxonomy.
+    # Coerces legacy execution details into the stable tool error taxonomy: normalize the
+    # historical "validation_error" string, pass through an already-typed kind unchanged,
+    # upgrade a bare taxonomy string into its enum member, and fall back to EXECUTION_FAILED
+    # for anything unrecognized so an unknown value can never escape as an exception here.
     if raw_error == "validation_error":
         return ToolErrorKind.INVALID_ARGUMENTS
     if isinstance(raw_error, ToolErrorKind):
