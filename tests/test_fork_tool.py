@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 from typing import Any
 
-from vidbyte.agents import AgentMessage, BaseAgent
+from vidbyte.agents import AgentForkSettings, AgentMessage, BaseAgent
 from vidbyte.agents.settings import AgentLoopSettings
 from vidbyte.context.handoff import EngineeringHandoff
 from vidbyte.lib.config import ModelProvider
@@ -68,12 +68,12 @@ class StubAgent:
         self.metadata = {"fork_depth": 0}
         self.agent_loop_settings = AgentLoopSettings(max_iterations=3)
         self.tools = Tools([NamedTool("alpha"), NamedTool("beta")])
-        self.captured: dict[str, Any] = {}
+        self.captured: AgentForkSettings | None = None
         self.child = StubChild()
 
-    def fork(self, **kwargs: Any) -> StubChild:
-        # Captures the requested fork parameters and returns a fake runnable child.
-        self.captured = dict(kwargs)
+    def fork(self, settings: AgentForkSettings) -> StubChild:
+        # Captures the requested fork settings and returns a fake runnable child.
+        self.captured = settings
         return self.child
 
 
@@ -117,8 +117,8 @@ class ForkConversationToolTests(unittest.IsolatedAsyncioTestCase):
         result = await tool.execute(_call(prompt="branch", history_mode="last_n", last_n=2, tool_names=["beta", "gamma"]))
 
         self.assertEqual(result.status, ToolStatus.SUCCESS)
-        self.assertEqual([msg.content for msg in agent.captured["history"]], ["two", "three"])
-        self.assertEqual(agent.captured["tools"].names(), ("beta", "gamma"))
+        self.assertEqual([msg.content for msg in agent.captured.history], ["two", "three"])
+        self.assertEqual(agent.captured.tools.names(), ("beta", "gamma"))
 
     async def test_sdk_native_fork_options_translate_to_fork_kwargs(self) -> None:
         # The model-facing tool should expose Vidbyte-native fork knobs, not only generic prompt/tools/model.
@@ -153,23 +153,23 @@ class ForkConversationToolTests(unittest.IsolatedAsyncioTestCase):
         ))
 
         self.assertEqual(result.status, ToolStatus.SUCCESS)
-        self.assertEqual(agent.captured["history"], [])
-        self.assertEqual(agent.captured["tools"].names(), ("alpha", "gamma"))
-        self.assertEqual(agent.captured["model_name"], "gpt-4.1-mini")
-        self.assertEqual(agent.captured["provider"], "openai")
-        self.assertEqual(agent.captured["modality"], "text")
-        self.assertEqual(agent.captured["temperature"], 0.4)
-        self.assertEqual(agent.captured["runtime"], "linear")
-        self.assertEqual(agent.captured["algorithm"], "compact_tool_outputs")
-        self.assertIsInstance(agent.captured["handoff"], EngineeringHandoff)
-        self.assertEqual(agent.captured["handoff"].title, "Child Handoff")
-        self.assertEqual(agent.captured["output_schema"], {"type": "object"})
-        self.assertEqual(agent.captured["runner_options"], {"reasoning": "low"})
-        self.assertTrue(agent.captured["include_run_state"])
-        self.assertFalse(agent.captured["mcp"])
-        self.assertEqual(agent.captured["metadata"], {"branch": "sdk-native"})
-        self.assertEqual(agent.captured["run_id"], "child-run-explicit")
-        settings = agent.captured["agent_loop_settings"]
+        self.assertEqual(agent.captured.history, [])
+        self.assertEqual(agent.captured.tools.names(), ("alpha", "gamma"))
+        self.assertEqual(agent.captured.model_name, "gpt-4.1-mini")
+        self.assertEqual(agent.captured.provider, "openai")
+        self.assertEqual(agent.captured.modality, "text")
+        self.assertEqual(agent.captured.temperature, 0.4)
+        self.assertEqual(agent.captured.runtime, "linear")
+        self.assertEqual(agent.captured.algorithm, "compact_tool_outputs")
+        self.assertIsInstance(agent.captured.handoff, EngineeringHandoff)
+        self.assertEqual(agent.captured.handoff.title, "Child Handoff")
+        self.assertEqual(agent.captured.output_schema, {"type": "object"})
+        self.assertEqual(agent.captured.runner_options, {"reasoning": "low"})
+        self.assertTrue(agent.captured.include_run_state)
+        self.assertFalse(agent.captured.mcp)
+        self.assertEqual(agent.captured.metadata, {"branch": "sdk-native"})
+        self.assertEqual(agent.captured.run_id, "child-run-explicit")
+        settings = agent.captured.agent_loop_settings
         self.assertEqual(settings.max_iterations, 3)
         self.assertEqual(settings.max_tool_calls, 2)
         self.assertEqual(settings.allowed_tools, ("alpha",))
@@ -221,7 +221,7 @@ class ForkConversationToolTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result.status, ToolStatus.ERROR)
         self.assertIn("depth cap", result.output)
-        self.assertEqual(agent.captured, {})
+        self.assertIsNone(agent.captured)
 
     async def test_missing_prompt_returns_tool_error(self) -> None:
         # Required-argument validation should return ToolResult.error instead of raising.

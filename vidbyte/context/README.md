@@ -22,7 +22,7 @@ what should be compacted or omitted.
 ## Usage
 
 ```python
-from vidbyte import ContextManager
+from vidbyte import AgentForkSettings, ContextManager
 from vidbyte.context.primitives import FileContextItem, TaskContextItem
 
 context = ContextManager([
@@ -33,7 +33,7 @@ context = ContextManager([
     FileContextItem.from_path("README.md", include_content=True),
 ])
 
-agent = agent.fork(context_manager=context)
+agent = agent.fork(AgentForkSettings(context_manager=context))
 reply = await agent.arun("Summarize the current task state.")
 ```
 

@@ -13,6 +13,8 @@ Architecture:
     - McpProtocolError: Raised when an MCP transport returns malformed data.
     - AgentExecutionError: Raised when an agent cannot generate a reply.
     - AgentRegistryError: Raised when local agent discovery fails.
+    - AgentForkError: Base exception for agent fork pipeline failures.
+    - AgentForkConfigurationError: Raised when fork settings are invalid or out of range.
     - McpError: Base exception for all developer attachment and execution failures.
     - McpConnectionError: Raised when an MCP server subprocess fails to start.
     - McpInitializeError: Raised when an MCP connection handshake fails or times out.
@@ -73,6 +75,14 @@ class AgentRegistryError(VidbyteSdkError):
 
 class AggregateExecutionError(AgentExecutionError):
     """Raised when an aggregate (mixture-of-agents) run cannot produce a synthesis."""
+
+
+class AgentForkError(VidbyteSdkError):
+    """Base class for agent fork failures raised by the fork pipeline."""
+
+
+class AgentForkConfigurationError(AgentForkError):
+    """Raised when fork settings are internally inconsistent or out of range."""
 
 
 class McpError(VidbyteSdkError):

@@ -41,7 +41,7 @@ from vidbyte.lib.dataclasses.agents import (
     AgentRuntimeStats,
     AgentStopReason,
 )
-from vidbyte.agents.types import AgentCard, AgentInput, AgentMessage, AgentSpec, ModelModality
+from vidbyte.agents.types import AgentCard, AgentForkSettings, AgentInput, AgentMessage, AgentSpec, ModelModality
 
 Agent = BaseAgent
 
@@ -53,6 +53,7 @@ __all__ = [
     "AgentClient",
     "AgentLoopSettings",
     "AgentCard",
+    "AgentForkSettings",
     "AgentInput",
     "AgentMessage",
     "MultiProviderAggregator",

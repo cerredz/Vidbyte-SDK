@@ -11,7 +11,7 @@ from vidbyte import (
     ResearchHandoff,
     VidbyteSDK,
 )
-from vidbyte.agents import BaseAgent
+from vidbyte.agents import AgentForkSettings, BaseAgent
 from vidbyte.context import ContextManager
 from vidbyte.context.primitives import ContextItem
 from vidbyte.lib.enums.prompts import Prompt
@@ -235,7 +235,7 @@ class BaseAgentHandoffIntegrationTests(unittest.IsolatedAsyncioTestCase):
 
     def test_fork_propagates_handoff_spec(self) -> None:
         agent = self._agent("x", handoff=EngineeringHandoff())
-        child = agent.fork(name="child")
+        child = agent.fork(AgentForkSettings(name="child"))
         self.assertIsInstance(child._handoff_spec, EngineeringHandoff)
 
     async def test_handoff_reuses_self_runner_by_default(self) -> None:

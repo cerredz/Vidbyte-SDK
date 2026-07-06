@@ -106,10 +106,10 @@ with trace.session("workflow"):
 Configure continual trace artifacts separately from observability tracing:
 
 ```python
-from vidbyte import TraceOption
+from vidbyte import AgentForkSettings, TraceOption
 from vidbyte.trace.continual import ActionTrace
 
-agent = agent.fork(trace_option=TraceOption.continual(ActionTrace))
+agent = agent.fork(AgentForkSettings(trace_option=TraceOption.continual(ActionTrace)))
 ```
 
 Omitting `trace_option` on `fork()` preserves the parent agent's continual trace

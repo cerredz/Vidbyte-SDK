@@ -23,6 +23,7 @@ from vidbyte.agents.runtimes.configs import ActorRuntime
 from vidbyte.agents.settings import AgentLoopSettings
 from vidbyte.context.handoff import EngineeringHandoff, Handoff, MinimalHandoff, ResearchHandoff
 from vidbyte.context.window import ContextWindow
+from vidbyte.lib.dataclasses.agents import AgentForkSettings
 from vidbyte.lib.enums import AgentRuntimeType, ModelModality, ModelProvider
 from vidbyte.tools.base import BaseTool
 from vidbyte.tools.catalog import Tools
@@ -156,7 +157,7 @@ class ForkConversationTool(BaseTool):
         metadata = dict(request.get("metadata") or {})
         if request.get("purpose"):
             metadata["fork_purpose"] = request["purpose"]
-        return self._agent.fork(
+        settings = AgentForkSettings(
             name=request.get("name"),
             system_prompt=request.get("system_prompt"),
             tools=request.get("tools"),
@@ -176,6 +177,7 @@ class ForkConversationTool(BaseTool):
             mcp=bool(request.get("mcp")),
             run_id=request.get("run_id"),
         )
+        return self._agent.fork(settings)
 
     def _build_success(self, child: Any, output: str) -> ToolResult:
         # Builds the successful tool result with child lineage metadata.

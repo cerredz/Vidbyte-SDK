@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from vidbyte.agents import AgentInput, AgentMessage, BaseAgent
+from vidbyte.agents import AgentForkSettings, AgentInput, AgentMessage, BaseAgent
 from vidbyte.agents.base import ConfiguredAgentRunner
 from vidbyte.context import ContextManager, ContextWindow, TaskContextItem, TextContextItem
 from vidbyte.lib.config import ModelProvider
@@ -125,7 +125,7 @@ class AgentBaseTests(unittest.IsolatedAsyncioTestCase):
         agent.add_tool(object())
         self.assertEqual(agent.card().tool_names, ("lookup", "object"))
 
-        forked = agent.fork(name="researcher-copy", metadata={"branch": "copy"})
+        forked = agent.fork(AgentForkSettings(name="researcher-copy", metadata={"branch": "copy"}))
         self.assertEqual(forked.name, "researcher-copy")
         self.assertEqual(forked.metadata["role"], "custom_researcher")
         self.assertEqual(forked.metadata["branch"], "copy")
@@ -142,8 +142,8 @@ class AgentBaseTests(unittest.IsolatedAsyncioTestCase):
             middleware=[middleware],
         )
 
-        forked = agent.fork(name="worker-copy")
-        replaced = agent.fork(name="worker-replaced", middleware=[replacement])
+        forked = agent.fork(AgentForkSettings(name="worker-copy"))
+        replaced = agent.fork(AgentForkSettings(name="worker-replaced", middleware=[replacement]))
 
         self.assertEqual(forked.middleware, (middleware,))
         self.assertEqual(replaced.middleware, (replacement,))
@@ -151,7 +151,7 @@ class AgentBaseTests(unittest.IsolatedAsyncioTestCase):
     async def test_agent_fork_rebuilds_runner_for_model_overrides(self) -> None:
         # Model-ish overrides must discard the live parent runner so child config can build a fresh runner lazily.
         parent = BaseAgent(name="worker", system_prompt="Work carefully.", runner=EchoRunner(), provider="openai", model_name="model-a")
-        child = parent.fork(name="child", model_name="model-b", temperature=0.7, runner_options={"reasoning": "low"})
+        child = parent.fork(AgentForkSettings(name="child", model_name="model-b", temperature=0.7, runner_options={"reasoning": "low"}))
 
         self.assertIsInstance(child.runner, ConfiguredAgentRunner)
         self.assertEqual(child.runner_config.model_name, "model-b")
@@ -162,7 +162,7 @@ class AgentBaseTests(unittest.IsolatedAsyncioTestCase):
     async def test_agent_fork_applies_tool_deltas_by_name(self) -> None:
         # Fork tool deltas should compose with inherited tools and leave the parent catalog untouched.
         parent = BaseAgent(name="worker", system_prompt="Work carefully.", runner=EchoRunner(), tools=[FakeTool("keep"), FakeTool("drop")])
-        child = parent.fork(name="child", add_tools=[FakeTool("add")], drop_tools=["drop"])
+        child = parent.fork(AgentForkSettings(name="child", add_tools=[FakeTool("add")], drop_tools=["drop"]))
 
         self.assertEqual(parent.tools.names(), ("keep", "drop"))
         self.assertEqual(child.tools.names(), ("keep", "add"))
@@ -172,7 +172,7 @@ class AgentBaseTests(unittest.IsolatedAsyncioTestCase):
         parent = BaseAgent(name="worker", system_prompt="Work carefully.", runner=EchoRunner())
         added = CreateHandoffTool()
 
-        child = parent.fork(name="child", add_tools=[added])
+        child = parent.fork(AgentForkSettings(name="child", add_tools=[added]))
         child_tool = child.tools._get("create_handoff")
 
         self.assertIsNot(child_tool, added)
@@ -189,7 +189,7 @@ class AgentBaseTests(unittest.IsolatedAsyncioTestCase):
         parent.record_handoff(handoff)
         parent._tool_call_contexts.append(context)
 
-        child = parent.fork(name="child", include_history=True, history=explicit, include_run_state=True)
+        child = parent.fork(AgentForkSettings(name="child", include_history=True, history=explicit, include_run_state=True))
 
         self.assertEqual(child.history, explicit)
         self.assertEqual(child.handoffs, [handoff])
@@ -206,8 +206,8 @@ class AgentBaseTests(unittest.IsolatedAsyncioTestCase):
             algorithm=ContextWindow.preset.no_raw_tool_outputs,
         )
 
-        forked = agent.fork(name="worker-copy")
-        replaced = agent.fork(name="worker-compact", algorithm="compact_tool_outputs")
+        forked = agent.fork(AgentForkSettings(name="worker-copy"))
+        replaced = agent.fork(AgentForkSettings(name="worker-compact", algorithm="compact_tool_outputs"))
 
         self.assertEqual(agent.algorithm.name, "hide_tool_outputs")
         self.assertEqual(forked.algorithm.name, "hide_tool_outputs")
