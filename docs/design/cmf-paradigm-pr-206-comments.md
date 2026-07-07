@@ -16,28 +16,28 @@ commit separately but share the `context_minimal_fanout` package:
    Identity / Goal / Environment / Instructions sections (Comment 2); add a
    "More Information" section to the context prompt explaining `ExtendOutputSchemaTool`
    (Comment 4).
-3. Extend the `EnvironmentContext` dataclass with well-known typed fields beyond
-   `summary` / `files` / `notes` (Comment 3).
+3. Keep the `EnvironmentContext` dataclass to `summary`, `files`, and `notes`, while
+   making `summary` and each file entry rich enough to carry subfields, connections,
+   full file content, and model comments (Comment 3 and PR #219 review).
 4. Add `ExtendOutputSchemaTool` — a third output-schema tool for mid-run schema
    extension.
-5. Integrate `ContextManager` + context primitives as an optional attached builder on
-   `EnvironmentContext`.
-6. Make `EnvironmentContext.from_snapshot` / `to_prompt_block` handle dynamic fields
-   the agent declares beyond the well-known set.
+5. Keep a `from_manager` bridge that maps context primitives into the same
+   `summary` / `files` / `notes` shape without adding more top-level fields.
+6. Make `EnvironmentContext.from_snapshot` fold any dynamic fields the agent declares
+   into notes so the stable object shape remains narrow.
 7. Destructure `ContextMinimalFanoutSettings` into per-role sub-configs so the
    `_build_planning_agent` call collapses to one line (Comment 5).
 
 ## Goals
 
 - Resolve every comment the user left on PR #206 with no comment unaddressed.
-- Give the context agent a richer, more descriptive output schema so downstream
-  splitter and implementation agents receive structured context by name rather than
-  parsing free-form `notes`.
+- Give the context agent richer descriptions for the three stable output fields so
+  downstream splitter and implementation agents receive a compact object with
+  structured summary subfields, relevant files, and notes.
 - Give the agent a visible, documented mechanism to extend its output schema mid-run
   when the prompt warrants fields the well-known set does not cover.
-- Wire the existing `vidbyte/context` stack (`ContextManager`, primitives, `Handoff`)
-  into the paradigm so the typed dataclass and the primitive/registry architecture are
-  bridged, not duplicated.
+- Bridge the existing `vidbyte/context` stack (`ContextManager`, primitives,
+  `Handoff`) into the paradigm without widening the public environment object.
 - Collapse the 14-argument `_build_planning_agent` call into a one-liner by splitting
   the flat settings object into per-role sub-configs.
 
@@ -51,8 +51,8 @@ commit separately but share the `context_minimal_fanout` package:
 - Not removing `OutputSchemaBuilder` or the existing `declare_output_schema` /
   `append_output` tools. `ExtendOutputSchemaTool` is additive.
 - Not forcing `ContextManager` as the only build path. `from_snapshot` remains the
-  primary builder used by the paradigm; `from_manager` is an alternative entry point
-  for callers who want the full primitive/registry/placement machinery.
+  primary builder used by the paradigm; `from_manager` is an alternative input bridge
+  that still returns the same `summary` / `files` / `notes` contract.
 
 ## Background
 
@@ -159,7 +159,16 @@ anatomy.
 
 ### R3 — EnvironmentContext extension (Comment 3)
 
-- Add well-known typed fields to `EnvironmentContext` beyond `summary` / `files` /
+- PR #219 review resolution supersedes the original field-widening plan below. The
+  final `EnvironmentContext` remains exactly `summary`, `files`, and `notes`.
+  `summary` is a structured `EnvironmentSummary` with subfields for overview,
+  objective, domain, major details, connections, constraints, open questions, and
+  additional domain-neutral details. `files` entries carry path, notes, full content
+  when practical, and model comments. Any dynamic fields declared during a run are
+  folded into notes rather than becoming new top-level object fields.
+
+- Original plan, retained for historical context: Add well-known typed fields to
+  `EnvironmentContext` beyond `summary` / `files` /
   `notes`. Each field is `tuple[str, ...]` (free-form text entries, rendered as bullet
   lists in `to_prompt_block`). `files` stays `tuple[ContextFile, ...]` (structured).
 - New well-known fields:

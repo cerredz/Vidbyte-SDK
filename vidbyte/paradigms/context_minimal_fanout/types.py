@@ -38,6 +38,8 @@ class ContextFile:
 
     path: str
     notes: str = ""
+    content: str = ""
+    model_comments: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         # Normalizes and validates the file path.
@@ -45,6 +47,8 @@ class ContextFile:
             raise ConfigurationError("ContextFile path cannot be empty.")
         object.__setattr__(self, "path", self.path.strip())
         object.__setattr__(self, "notes", self.notes.strip())
+        object.__setattr__(self, "content", self.content.strip())
+        object.__setattr__(self, "model_comments", _text_tuple(self.model_comments))
 
     @classmethod
     def from_value(cls, value: Any) -> "ContextFile | None":
@@ -54,116 +58,119 @@ class ContextFile:
             if not path:
                 return None
             notes = str(value.get("notes", value.get("excerpt", ""))).strip()
-            return cls(path=path, notes=notes)
+            content = str(value.get("content", value.get("full_file", value.get("full_text", "")))).strip()
+            comments = value.get("model_comments", value.get("comments", ()))
+            return cls(path=path, notes=notes, content=content, model_comments=_text_tuple(comments))
         text = str(value).strip()
         return cls(path=text) if text else None
 
 
-_KNOWN_FIELDS: frozenset[str] = frozenset({
-    "summary", "files", "commands", "conventions", "dependencies",
-    "entry_points", "tests", "risks", "constraints", "glossary",
-    "open_questions", "notes",
-})
+@dataclass(frozen=True, slots=True)
+class EnvironmentSummary:
+    """Domain-neutral summary of the environment and request shape."""
+
+    overview: str
+    objective: str = ""
+    domain: str = ""
+    major_details: tuple[str, ...] = ()
+    connections: tuple[str, ...] = ()
+    constraints: tuple[str, ...] = ()
+    open_questions: tuple[str, ...] = ()
+    additional: Mapping[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        # Normalizes all summary subfields while preserving unknown summary details.
+        object.__setattr__(self, "overview", self.overview.strip())
+        object.__setattr__(self, "objective", self.objective.strip())
+        object.__setattr__(self, "domain", self.domain.strip())
+        object.__setattr__(self, "major_details", _entry_tuple(self.major_details))
+        object.__setattr__(self, "connections", _entry_tuple(self.connections))
+        object.__setattr__(self, "constraints", _entry_tuple(self.constraints))
+        object.__setattr__(self, "open_questions", _entry_tuple(self.open_questions))
+        object.__setattr__(self, "additional", dict(self.additional))
+
+    @classmethod
+    def from_value(cls, value: Any, *, fallback_text: str = "") -> "EnvironmentSummary":
+        # Builds an EnvironmentSummary from either a mapping or a legacy scalar summary.
+        if isinstance(value, Mapping):
+            known = {"overview", "summary", "objective", "domain", "major_details", "connections", "constraints", "open_questions"}
+            overview = str(value.get("overview", value.get("summary", ""))).strip() or fallback_text.strip()
+            additional = {str(key): raw for key, raw in value.items() if str(key) not in known}
+            return cls(
+                overview=overview,
+                objective=str(value.get("objective", "")).strip(),
+                domain=str(value.get("domain", "")).strip(),
+                major_details=_entry_tuple(value.get("major_details")),
+                connections=_entry_tuple(value.get("connections")),
+                constraints=_entry_tuple(value.get("constraints")),
+                open_questions=_entry_tuple(value.get("open_questions")),
+                additional=additional,
+            )
+        overview = str(value or "").strip() or fallback_text.strip()
+        return cls(overview=overview)
 
 
 @dataclass(frozen=True, slots=True)
 class EnvironmentContext:
     """Compressed structured context extracted by the context agent."""
 
-    summary: str
+    summary: EnvironmentSummary
     files: tuple[ContextFile, ...] = ()
-    commands: tuple[str, ...] = ()
-    conventions: tuple[str, ...] = ()
-    dependencies: tuple[str, ...] = ()
-    entry_points: tuple[str, ...] = ()
-    tests: tuple[str, ...] = ()
-    risks: tuple[str, ...] = ()
-    constraints: tuple[str, ...] = ()
-    glossary: tuple[str, ...] = ()
-    open_questions: tuple[str, ...] = ()
     notes: tuple[str, ...] = ()
-    entries: Mapping[str, Any] = field(default_factory=dict)
-    manager: ContextManager | None = None
 
     def __post_init__(self) -> None:
-        # Normalizes the summary, text tuples, and freezes the entries mapping.
-        object.__setattr__(self, "summary", self.summary.strip())
+        # Normalizes the summary, file list, and notes.
+        summary = self.summary if isinstance(self.summary, EnvironmentSummary) else EnvironmentSummary.from_value(self.summary)
+        object.__setattr__(self, "summary", summary)
         object.__setattr__(self, "files", tuple(self.files))
-        object.__setattr__(self, "commands", _entry_tuple(self.commands))
-        object.__setattr__(self, "conventions", _entry_tuple(self.conventions))
-        object.__setattr__(self, "dependencies", _entry_tuple(self.dependencies))
-        object.__setattr__(self, "entry_points", _entry_tuple(self.entry_points))
-        object.__setattr__(self, "tests", _entry_tuple(self.tests))
-        object.__setattr__(self, "risks", _entry_tuple(self.risks))
-        object.__setattr__(self, "constraints", _entry_tuple(self.constraints))
-        object.__setattr__(self, "glossary", _entry_tuple(self.glossary))
-        object.__setattr__(self, "open_questions", _entry_tuple(self.open_questions))
         object.__setattr__(self, "notes", _text_tuple(self.notes))
-        object.__setattr__(self, "entries", dict(self.entries))
 
     @classmethod
     def from_snapshot(cls, snapshot: Mapping[str, Any], *, fallback_text: str = "") -> "EnvironmentContext":
         # Maps an OutputSchemaBuilder snapshot into typed environment context.
         values = dict(snapshot.get("values", {}))
-        summary = str(values.get("summary") or "").strip() or fallback_text.strip()
+        summary = EnvironmentSummary.from_value(values.get("summary"), fallback_text=fallback_text)
         files = tuple(f for f in (ContextFile.from_value(item) for item in _as_list(values.get("files"))) if f is not None)
+        notes = [*_text_tuple(values.get("notes"))]
+        for name, value in values.items():
+            if name not in {"summary", "files", "notes"}:
+                notes.extend(f"{name}: {entry}" for entry in _entry_tuple(value))
         return cls(
             summary=summary,
             files=files,
-            commands=_entry_tuple(values.get("commands")),
-            conventions=_entry_tuple(values.get("conventions")),
-            dependencies=_entry_tuple(values.get("dependencies")),
-            entry_points=_entry_tuple(values.get("entry_points")),
-            tests=_entry_tuple(values.get("tests")),
-            risks=_entry_tuple(values.get("risks")),
-            constraints=_entry_tuple(values.get("constraints")),
-            glossary=_entry_tuple(values.get("glossary")),
-            open_questions=_entry_tuple(values.get("open_questions")),
-            notes=_text_tuple(values.get("notes")),
-            entries=values,
+            notes=tuple(notes),
         )
 
     @classmethod
     def from_manager(cls, manager: ContextManager, *, fallback_text: str = "") -> "EnvironmentContext":
-        # Builds an EnvironmentContext from a ContextManager's primitives, mapping by kind.
+        # Builds an EnvironmentContext from a ContextManager's primitives.
         from vidbyte.context.primitives import FileContextItem, MemoryContextItem, TextContextItem
         items = list(manager.items())
-        files = tuple(ContextFile(path=item.path, notes=getattr(item, "excerpt", "") or "") for item in items if isinstance(item, FileContextItem))
+        files = tuple(
+            ContextFile(
+                path=item.path,
+                notes=getattr(item, "excerpt", "") or "",
+                content=getattr(item, "content", None) or "",
+                model_comments=_text_tuple(getattr(item, "metadata", {}).get("model_comments", ())),
+            )
+            for item in items
+            if isinstance(item, FileContextItem)
+        )
         notes = tuple(item.to_context_text() for item in items if isinstance(item, MemoryContextItem))
-        kind_map = {
-            "commands": "commands", "conventions": "conventions", "dependencies": "dependencies",
-            "entry_points": "entry_points", "tests": "tests", "risks": "risks",
-            "constraints": "constraints", "glossary": "glossary", "open_questions": "open_questions",
-        }
-        field_values: dict[str, tuple[str, ...]] = {name: () for name in kind_map.values()}
-        entries: dict[str, Any] = {}
-        summary = fallback_text
+        summary_text = fallback_text
+        extra_notes: list[str] = []
         for item in items:
             if isinstance(item, TextContextItem):
                 kind = item.kind
                 text = item.to_context_text()
                 if kind == "summary":
-                    summary = summary or text
-                elif kind in kind_map:
-                    field_name = kind_map[kind]
-                    field_values[field_name] = (*field_values[field_name], text)
+                    summary_text = summary_text or text
                 else:
-                    entries.setdefault(kind, []).append(text)
+                    extra_notes.append(f"{kind}: {text}")
         return cls(
-            summary=summary,
+            summary=EnvironmentSummary.from_value(summary_text),
             files=files,
-            notes=notes,
-            commands=field_values["commands"],
-            conventions=field_values["conventions"],
-            dependencies=field_values["dependencies"],
-            entry_points=field_values["entry_points"],
-            tests=field_values["tests"],
-            risks=field_values["risks"],
-            constraints=field_values["constraints"],
-            glossary=field_values["glossary"],
-            open_questions=field_values["open_questions"],
-            entries=entries,
-            manager=manager,
+            notes=(*notes, *extra_notes),
         )
 
     def to_prompt_block(self) -> str:
@@ -171,33 +178,40 @@ class EnvironmentContext:
         lines = ["<environment_context>"]
         lines.extend(self._render_summary_section())
         lines.extend(self._render_files_section())
-        lines.extend(self._render_text_section("commands", self.commands))
-        lines.extend(self._render_text_section("conventions", self.conventions))
-        lines.extend(self._render_text_section("dependencies", self.dependencies))
-        lines.extend(self._render_text_section("entry_points", self.entry_points))
-        lines.extend(self._render_text_section("tests", self.tests))
-        lines.extend(self._render_text_section("risks", self.risks))
-        lines.extend(self._render_text_section("constraints", self.constraints))
-        lines.extend(self._render_text_section("glossary", self.glossary))
-        lines.extend(self._render_text_section("open_questions", self.open_questions))
         lines.extend(self._render_text_section("notes", self.notes))
-        lines.extend(self._render_dynamic_sections())
         lines.append("</environment_context>")
         return "\n".join(lines)
 
     def _render_summary_section(self) -> list[str]:
-        # Renders the summary as a tagged block; placeholder if absent.
-        return ["<summary>", self.summary or "N/A", "</summary>", ""]
+        # Renders the structured summary subfields as a tagged block.
+        lines = ["<summary>", "<overview>", self.summary.overview or "N/A", "</overview>", ""]
+        if self.summary.objective:
+            lines.extend(["<objective>", self.summary.objective, "</objective>", ""])
+        if self.summary.domain:
+            lines.extend(["<domain>", self.summary.domain, "</domain>", ""])
+        lines.extend(self._render_text_section("major_details", self.summary.major_details))
+        lines.extend(self._render_text_section("connections", self.summary.connections))
+        lines.extend(self._render_text_section("constraints", self.summary.constraints))
+        lines.extend(self._render_text_section("open_questions", self.summary.open_questions))
+        for name, value in self.summary.additional.items():
+            lines.extend(self._render_text_section(name, _entry_tuple(value)))
+        lines.extend(["</summary>", ""])
+        return lines
 
     def _render_files_section(self) -> list[str]:
-        # Renders the files list; placeholder if absent.
+        # Renders each relevant file with model comments and captured content.
         lines = ["<files>"]
         if self.files:
             for item in self.files:
-                suffix = f" — {item.notes}" if item.notes else ""
-                lines.append(f"- {item.path}{suffix}")
-        else:
-            lines.append("- N/A")
+                lines.append(f"<file path=\"{_escape_attr(item.path)}\">")
+                if item.notes:
+                    lines.extend(["<notes>", item.notes, "</notes>"])
+                lines.extend(self._render_text_section("model_comments", item.model_comments))
+                lines.extend(["<content>", item.content or "N/A", "</content>"])
+                lines.append("</file>")
+            lines.extend(["</files>", ""])
+            return lines
+        lines.append("- N/A")
         lines.extend(["</files>", ""])
         return lines
 
@@ -209,21 +223,6 @@ class EnvironmentContext:
         lines = [f"<{tag}>"]
         lines.extend(f"- {entry}" for entry in entries)
         lines.extend([f"</{tag}>", ""])
-        return lines
-
-    def _render_dynamic_sections(self) -> list[str]:
-        # Renders any entries keys not in the well-known set as generic tagged sections.
-        lines: list[str] = []
-        for name in self.entries:
-            if name in _KNOWN_FIELDS:
-                continue
-            value = self.entries[name]
-            lines.append(f"<{name}>")
-            if isinstance(value, list):
-                lines.extend(f"- {entry}" for entry in value)
-            else:
-                lines.append(f"- {value}")
-            lines.extend([f"</{name}>", ""])
         return lines
 
 
@@ -547,6 +546,11 @@ def _normalize_path(path: str) -> str:
     return path.strip().replace("\\", "/").lower()
 
 
+def _escape_attr(value: str) -> str:
+    # Escapes the small subset needed for XML-style attribute rendering.
+    return value.replace("&", "&amp;").replace('"', "&quot;").replace("<", "&lt;")
+
+
 def _object_tuple(value: object) -> tuple[object, ...]:
     # Normalizes single objects, sequences, and Tools-like catalogs into tuples.
     if value is None:
@@ -567,6 +571,7 @@ __all__ = [
     "ContextMinimalFanoutResult",
     "ContextMinimalFanoutSettings",
     "EnvironmentContext",
+    "EnvironmentSummary",
     "ImplementationOutput",
     "PromptSplitPlan",
     "SplitPrompt",
