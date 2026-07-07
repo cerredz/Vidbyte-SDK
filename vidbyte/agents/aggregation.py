@@ -14,8 +14,8 @@ Architecture:
       agents from ProposerSpecs and runs the engine inside generate_reply.
 Relations:
     Sibling of vidbyte/agents/algorithms/multi_provider_agentic_grader.py, which
-    selects a winning candidate instead of synthesizing a new answer. Reused by
-    BaseAgent's native multi-model overload.
+    selects a winning candidate instead of synthesizing a new answer. This module
+    is the explicit SDK surface for proposer/aggregator execution.
 """
 
 from __future__ import annotations

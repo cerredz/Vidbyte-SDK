@@ -6,7 +6,7 @@ import unittest
 from typing import Any
 from unittest.mock import patch
 
-from vidbyte import Agent, Trace, TraceController, TraceProfile
+from vidbyte import Agent, AggregateAgent, ProposerSpec, Trace, TraceController, TraceProfile
 from vidbyte.agents.types import AgentMessage
 from vidbyte.lib.errors import ConfigurationError
 from vidbyte.lib.tracing import SpanContext, TracerBase
@@ -264,19 +264,19 @@ class SemanticRuntimeIntegrationTests(unittest.IsolatedAsyncioTestCase):
         # Verifies SDK-built aggregate children share the aggregate tracer.
         events: list[dict[str, Any]] = []
         tracer = Trace.profile(Trace.debug(events), TraceProfile.verbose())
-        agent = Agent(
+        agent = AggregateAgent(
             name="agg",
             system_prompt="Synthesize.",
-            provider="xai",
-            model_name=("model-a", "model-b"),
+            proposers=[ProposerSpec("xai", "model-a"), ProposerSpec("xai", "model-b")],
+            aggregator=ProposerSpec("xai", "model-c"),
             trace=tracer,
         )
-        self.assertIs(agent._aggregate_agent._tracer, tracer)
+        for _label, child in agent._engine._proposers:
+            self.assertIs(child._tracer, tracer)
+        self.assertIs(agent._engine._aggregator._tracer, tracer)
 
     async def test_aggregate_external_agent_like_objects_are_not_mutated(self) -> None:
         # Verifies external proposer objects are not assigned tracer state.
-        from vidbyte.agents.aggregation import AggregateAgent
-
         proposer = EchoAgent()
         aggregator = EchoAgent()
         agent = AggregateAgent(name="agg", system_prompt="Synthesize.", proposers=[proposer], aggregator=aggregator, trace=Trace.profile(Trace.debug([]), TraceProfile.verbose()))
