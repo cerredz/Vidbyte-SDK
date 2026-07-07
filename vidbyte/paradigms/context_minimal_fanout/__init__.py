@@ -18,22 +18,26 @@ from __future__ import annotations
 from vidbyte.paradigms.context_minimal_fanout.client import ContextMinimalFanoutClient
 from vidbyte.paradigms.context_minimal_fanout.paradigm import ContextMinimalFanoutParadigm
 from vidbyte.paradigms.context_minimal_fanout.types import (
+    AgentRoleSettings,
     ContextFile,
     ContextMinimalFanoutResult,
     ContextMinimalFanoutSettings,
     EnvironmentContext,
+    EnvironmentSummary,
     ImplementationOutput,
     PromptSplitPlan,
     SplitPrompt,
 )
 
 __all__ = [
+    "AgentRoleSettings",
     "ContextFile",
     "ContextMinimalFanoutClient",
     "ContextMinimalFanoutParadigm",
     "ContextMinimalFanoutResult",
     "ContextMinimalFanoutSettings",
     "EnvironmentContext",
+    "EnvironmentSummary",
     "ImplementationOutput",
     "PromptSplitPlan",
     "SplitPrompt",

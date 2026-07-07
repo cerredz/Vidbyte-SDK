@@ -54,12 +54,14 @@ from vidbyte.agents import (
 )
 from vidbyte.client import VidbyteSDK
 from vidbyte.paradigms import (
+    AgentRoleSettings,
     ContextFile,
     ContextMinimalFanoutClient,
     ContextMinimalFanoutParadigm,
     ContextMinimalFanoutResult,
     ContextMinimalFanoutSettings,
     EnvironmentContext,
+    EnvironmentSummary,
     ImplementationOutput,
     ParadigmClient,
     ParadigmHarness,
@@ -69,6 +71,7 @@ from vidbyte.paradigms import (
 from vidbyte.tools.builtins.output_schema import (
     AppendOutputTool,
     DeclareOutputSchemaTool,
+    ExtendOutputSchemaTool,
     OutputSchemaBuilder,
     OutputSchemaField,
 )
@@ -254,13 +257,16 @@ __all__ = [
     "NullTracer",
     "OutputSchemaFormatter",
     "AppendOutputTool",
+    "AgentRoleSettings",
     "ContextFile",
     "ContextMinimalFanoutClient",
     "ContextMinimalFanoutParadigm",
     "ContextMinimalFanoutResult",
     "ContextMinimalFanoutSettings",
     "DeclareOutputSchemaTool",
+    "ExtendOutputSchemaTool",
     "EnvironmentContext",
+    "EnvironmentSummary",
     "ImplementationOutput",
     "OutputSchemaBuilder",
     "OutputSchemaField",
