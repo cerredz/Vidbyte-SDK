@@ -65,6 +65,15 @@ Shared command reference:
 - `__init__.py`: public imports for `Skill`, `SkillRecord`, and `Skills`.
 - `__main__.py`: small `python -m vidbyte.skills` wrapper for list and install.
 
+## Adding Future Paradigm Skills
+
+Each paradigm that ships skills should place a `skills/skills.json` manifest
+inside an importable `vidbyte.paradigms.<family>` package. The catalog keeps its
+public API stable while adding future families by appending their package names
+to `Skills._manifest_packages`. Each manifest remains package-local so future
+paradigms can add assets without changing existing skill keys or materialize
+behavior.
+
 ## Related Layers
 
 Skills currently ship from [`paradigms`](../paradigms/README.md). Existing

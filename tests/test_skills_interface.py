@@ -15,6 +15,7 @@ import unittest
 from pathlib import Path
 
 from vidbyte.lib.enums.skills import Skill
+from vidbyte.lib.errors import ConfigurationError
 from vidbyte.skills import SkillRecord, Skills
 from vidbyte.skills.__main__ import main as skills_main
 
@@ -89,6 +90,12 @@ class SkillsInterfaceTests(unittest.TestCase):
             self.assertTrue(root.joinpath("decompose-fanout", "SKILL.md").is_file())
             self.assertTrue(root.joinpath("references", "harness-commands.md").is_file())
             self.assertIn("Decompose Fanout", root.joinpath("decompose-fanout", "SKILL.md").read_text(encoding="utf-8"))
+
+    def test_materialize_refuses_paths_outside_destination(self) -> None:
+        # Verifies the materializer rejects unsafe relative paths before writing.
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            with self.assertRaises(ConfigurationError):
+                Skills._safe_materialize_target(Path(tmp_dir).resolve(), "../escape.md")
 
     def test_module_cli_list_and_install(self) -> None:
         # Exercises the lightweight python -m vidbyte.skills command handlers.
