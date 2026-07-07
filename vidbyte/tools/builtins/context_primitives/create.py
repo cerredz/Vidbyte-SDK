@@ -55,8 +55,9 @@ class CreateContextPrimitiveTool(BaseTool):
         args.pop("placement", None)
         try:
             item = self._definition.builder(args)
+            # Future registry-size or rendered-token guardrails belong here before all create upserts.
             self._manager.upsert(item, placement=placement_result)
-        except (TypeError, ValueError) as exc:
+        except Exception as exc:
             return ToolResult.error(call.tool_name, self._format_builder_error(exc))
         return ToolResult.success(
             call.tool_name,

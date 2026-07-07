@@ -50,7 +50,11 @@ class ContextStatsTool(BaseTool):
             placement = self._manager.placement_for(primitive_id) or ContextWindowPlacement.END_OF_CONTEXT
             frozen = "true" if getattr(item, "primitive_frozen", False) else "false"
             title = str(item.title).replace("\n", " ")
-            lines.append(f"[{primitive_id}] kind={item.kind} title={title} placement={placement.value} frozen={frozen} chars={len(item.to_context_text())}")
+            try:
+                char_count = len(item.to_context_text())
+            except Exception as exc:
+                return ToolResult.error(call.tool_name, f"Primitive '{primitive_id}' could not be rendered for stats: {exc}")
+            lines.append(f"[{primitive_id}] kind={item.kind} title={title} placement={placement.value} frozen={frozen} chars={char_count}")
         return ToolResult.success(call.tool_name, "\n".join(lines))
 
 

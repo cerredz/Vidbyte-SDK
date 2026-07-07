@@ -65,11 +65,11 @@ class ContextEditTool(BaseTool):
             return ToolResult.error(call.tool_name, f"old_string was not found in primitive '{primitive_id}'. Use context_view first and pass an exact substring.")
         if match_count > 1:
             return ToolResult.error(call.tool_name, f"old_string appears {match_count} times in primitive '{primitive_id}'. Use a longer exact string that appears once.")
-        updated = dataclasses.replace(item, content=content.replace(old_string, new_string, 1))
-        placement = self._manager.placement_for(primitive_id) or ContextWindowPlacement.END_OF_CONTEXT
         try:
+            updated = dataclasses.replace(item, content=content.replace(old_string, new_string, 1))
+            placement = self._manager.placement_for(primitive_id) or ContextWindowPlacement.END_OF_CONTEXT
             self._manager.upsert(updated, placement=placement)
-        except ValueError as exc:
+        except (TypeError, ValueError) as exc:
             return ToolResult.error(call.tool_name, str(exc))
         return ToolResult.success(call.tool_name, f"Primitive '{primitive_id}' content edited successfully.", metadata={"primitive_id": primitive_id})
 

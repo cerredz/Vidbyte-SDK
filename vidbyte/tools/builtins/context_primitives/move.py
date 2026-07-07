@@ -54,7 +54,10 @@ class ContextMoveTool(BaseTool):
         placement_result = self._parse_placement(str(call.arguments.get("placement", "")).strip())
         if not isinstance(placement_result, ContextWindowPlacement):
             return ToolResult.error(call.tool_name, placement_result)
-        self._manager.set_placement(primitive_id, placement_result)
+        try:
+            self._manager.set_placement(primitive_id, placement_result)
+        except ValueError as exc:
+            return ToolResult.error(call.tool_name, str(exc))
         return ToolResult.success(call.tool_name, f"Primitive '{primitive_id}' moved to placement '{placement_result.value}'.", metadata={"primitive_id": primitive_id, "placement": placement_result.value})
 
     def _parse_placement(self, placement_raw: str) -> ContextWindowPlacement | str:

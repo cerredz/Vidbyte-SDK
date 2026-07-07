@@ -55,7 +55,10 @@ class ContextViewTool(BaseTool):
         item = self._manager.get_by_id(primitive_id)
         if item is None:
             return ToolResult.error(call.tool_name, f"Primitive '{primitive_id}' does not exist. Use context_stats or context_list to inspect available ids.")
-        output = _truncate_text(item.to_context_text(), _MAX_VIEW_CHARS)
+        try:
+            output = _truncate_text(item.to_context_text(), _MAX_VIEW_CHARS)
+        except Exception as exc:
+            return ToolResult.error(call.tool_name, f"Primitive '{primitive_id}' could not be rendered: {exc}")
         return ToolResult.success(call.tool_name, output, metadata={"primitive_id": primitive_id, "kind": item.kind})
 
 
