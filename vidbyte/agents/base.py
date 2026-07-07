@@ -21,6 +21,8 @@ from typing import TYPE_CHECKING, Any
 
 from vidbyte.agents.mixins import McpAttachableMixin
 from vidbyte.agents.settings import AgentLoopSettings
+from vidbyte.agents.contract import AgentOutputContract
+from vidbyte.agents.contracts import OutputContract
 from vidbyte.agents.types import AgentCard, AgentInput, AgentMessage
 from vidbyte.context.manager import ContextManager
 from vidbyte.context.window import ContextWindow, ContextWindowAlgorithm
@@ -94,6 +96,7 @@ class BaseAgent(McpAttachableMixin):
         tracer: type[TracerBase] | TracerBase | None = None,
         trace: type[TracerBase] | TracerBase | None = None,
         output_schema: type | Mapping[str, Any] | None = None,
+        output_contracts: Sequence[OutputContract] = (),
         handoff: Handoff | None = None,
         trace_option: TraceOption | None = None,
     ) -> None:
@@ -132,6 +135,11 @@ class BaseAgent(McpAttachableMixin):
                         f"Agent {name} uses non-linear runtime {self.runtime_type.value}, "
                         "which does not support in-context learning algorithms."
                     )
+            if output_contracts:
+                raise ConfigurationError(
+                    f"Agent {name} uses non-linear runtime {self.runtime_type.value}, "
+                    "which does not support output contracts."
+                )
 
         provider_str = str(provider.value if isinstance(provider, ModelProvider) else provider) if provider is not None else None
         self._aggregate_agent: BaseAgent | None = None
@@ -185,6 +193,11 @@ class BaseAgent(McpAttachableMixin):
                 "which does not support tool_error_policy middleware."
             )
         self.runtime_config = self.agent_loop_settings.to_runtime_config()
+        self.output_contract = AgentOutputContract(
+            output_contracts,
+            self.agent_loop_settings,
+            max_rejections=self.agent_loop_settings.max_contract_rejections,
+        )
         self.max_tool_rounds = self.agent_loop_settings.max_iterations
         self.system_prompt = system_prompt
         self.middleware = tuple(middleware)
@@ -964,6 +977,8 @@ class BaseAgent(McpAttachableMixin):
                     "worker_model": None,
                     "include_actors": None,
                 }
+        if self.runtime_type is AgentRuntimeType.LINEAR:
+            kwargs["output_contract"] = self.output_contract
 
         return runtime_cls(
             agent_name=self.name,
