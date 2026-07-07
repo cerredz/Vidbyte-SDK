@@ -30,6 +30,7 @@ _POSITIVE_INT_FIELDS = (
     "context_window_budget",
     "compaction_trigger_tokens",
     "compaction_target_tokens",
+    "max_contract_rejections",
 )
 
 
@@ -50,6 +51,7 @@ class AgentLoopSettings:
         compaction_target_tokens: int | None = None,
         allowed_tools: tuple[str, ...] | None = None,
         tool_error_policy: ToolErrorPolicy | None = None,
+        max_contract_rejections: int = 3,
     ) -> None:
         # Stores all loop parameters as instance attributes, then validates them immediately.
         self.max_iterations = max_iterations
@@ -63,6 +65,7 @@ class AgentLoopSettings:
         self.compaction_target_tokens = compaction_target_tokens
         self.allowed_tools = allowed_tools
         self.tool_error_policy = tool_error_policy
+        self.max_contract_rejections = max_contract_rejections
         self._validate()
 
     def _validate(self) -> None:
@@ -132,6 +135,7 @@ class AgentLoopSettings:
                 "compaction_target_tokens",
                 "allowed_tools",
                 "tool_error_policy",
+                "max_contract_rejections",
             )
             if getattr(self, name) is not None
         }
