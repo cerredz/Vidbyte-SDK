@@ -233,7 +233,7 @@ if isinstance(tool, RunPromptsSequentiallyTool):
 
 (local import alongside the existing `CreateHandoffTool` / `AttachMcpServerTool` local imports).
 
-`generate_reply()` epilogue — insert after the `_run_auto_handoff` block (base.py:511-512), before `return reply`:
+`generate_reply()` epilogue — insert after the `_run_auto_handoff` block and after `_notify_session(reply)` (so an attached session receives the primary reply before any drained-run replies, keeping session ordering chronological), before `return reply`:
 
 ```python
 if self._queued_prompts and not self._draining_queued_prompts:
