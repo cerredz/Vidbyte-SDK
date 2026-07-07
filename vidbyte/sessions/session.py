@@ -113,24 +113,24 @@ class Session:
             return
         self._persist_fail_open(reply, label="")
 
-    def fork(self, *, at: str | None = None, tools: Sequence[object] | None = None, runner: object | None = None, middleware: Sequence[object] | None = None) -> "Session":
+    def fork(self, *, at: str | None = None, tools: Sequence[object] | None = None, middleware: Sequence[object] | None = None) -> "Session":
         """Branch a new session from a checkpoint (defaults to head), recording lineage."""
         checkpoint_id = at or self._head_id
         if checkpoint_id is None:
             raise SessionError("Cannot fork a session with no checkpoints.", details={"session_id": self._session_id})
-        return self.fork_from(self._store, checkpoint_id, tools=tools or (), runner=runner, middleware=middleware or (), policy=self._policy, trace=self._recorder_policy(), tags=self._tags)
+        return self.fork_from(self._store, checkpoint_id, tools=tools or (), middleware=middleware or (), policy=self._policy, trace=self._recorder_policy(), tags=self._tags)
 
-    def batch_fork(self, count: int, *, at: str | None = None, tools: Sequence[object] | None = None, runner: object | None = None, middleware: Sequence[object] | None = None) -> list[ForkOutcome]:
+    def batch_fork(self, count: int, *, at: str | None = None, tools: Sequence[object] | None = None, middleware: Sequence[object] | None = None) -> list[ForkOutcome]:
         # Attempt count independent forks from the same checkpoint, isolating branch creation failures.
         outcomes: list[ForkOutcome] = []
         for index in range(count):
-            outcomes.append(self._attempt_batch_fork(index, at=at, tools=tools, runner=runner, middleware=middleware))
+            outcomes.append(self._attempt_batch_fork(index, at=at, tools=tools, middleware=middleware))
         return outcomes
 
-    def _attempt_batch_fork(self, index: int, *, at: str | None, tools: Sequence[object] | None, runner: object | None, middleware: Sequence[object] | None) -> ForkOutcome:
+    def _attempt_batch_fork(self, index: int, *, at: str | None, tools: Sequence[object] | None, middleware: Sequence[object] | None) -> ForkOutcome:
         # Run one fork attempt and convert any creation error into a structured outcome record.
         try:
-            branch = self.fork(at=at, tools=tools, runner=runner, middleware=middleware)
+            branch = self.fork(at=at, tools=tools, middleware=middleware)
         except Exception as exc:
             return ForkOutcome(index=index, session=None, error=f"{type(exc).__name__}: {exc}")
         return ForkOutcome(index=index, session=branch, error=None)
@@ -201,13 +201,13 @@ class Session:
         return self._persist(None, label=label).id
 
     @classmethod
-    def resume(cls, store: SessionStore, session_id: str, *, checkpoint_id: str | None = None, tools: Sequence[object] = (), runner: object | None = None, middleware: Sequence[object] = (), tracer: object | None = None, output_schema: object | None = None, policy: CheckpointPolicy | str = CheckpointPolicy.PER_TURN, trace: TraceCapture | str = TraceCapture.AUTO) -> "Session":
+    def resume(cls, store: SessionStore, session_id: str, *, checkpoint_id: str | None = None, tools: Sequence[object] = (), middleware: Sequence[object] = (), tracer: object | None = None, output_schema: object | None = None, policy: CheckpointPolicy | str = CheckpointPolicy.PER_TURN, trace: TraceCapture | str = TraceCapture.AUTO) -> "Session":
         """Reconstruct a live session from a checkpoint, re-supplying non-serializable parts."""
         session_id = store.resolve(session_id)
         source = store.get(checkpoint_id) if checkpoint_id else store.head(session_id)
         if source is None:
             raise SessionError("Cannot resume a session with no checkpoints.", details={"session_id": session_id})
-        agent = cls._restore_agent(source, tools=tools, runner=runner, middleware=middleware, tracer=tracer, output_schema=output_schema)
+        agent = cls._restore_agent(source, tools=tools, middleware=middleware, tracer=tracer, output_schema=output_schema)
         return cls(agent, store=store, session_id=session_id, policy=policy, trace=trace, _existing=True)
 
     @classmethod
@@ -216,10 +216,10 @@ class Session:
         return cls.resume(store, session_id, **kwargs)
 
     @classmethod
-    def fork_from(cls, store: SessionStore, checkpoint_id: str, *, tools: Sequence[object] = (), runner: object | None = None, middleware: Sequence[object] = (), tracer: object | None = None, output_schema: object | None = None, policy: CheckpointPolicy | str = CheckpointPolicy.PER_TURN, trace: TraceCapture | str = TraceCapture.AUTO, tags: Sequence[str] = ()) -> "Session":
+    def fork_from(cls, store: SessionStore, checkpoint_id: str, *, tools: Sequence[object] = (), middleware: Sequence[object] = (), tracer: object | None = None, output_schema: object | None = None, policy: CheckpointPolicy | str = CheckpointPolicy.PER_TURN, trace: TraceCapture | str = TraceCapture.AUTO, tags: Sequence[str] = ()) -> "Session":
         """Create a new session branched from any checkpoint, copying its state as the root."""
         source = store.get(checkpoint_id)
-        agent = cls._restore_agent(source, tools=tools, runner=runner, middleware=middleware, tracer=tracer, output_schema=output_schema)
+        agent = cls._restore_agent(source, tools=tools, middleware=middleware, tracer=tracer, output_schema=output_schema)
         session = cls(agent, store=store, session_id=f"se_{uuid4().hex}", policy=policy, trace=trace, tags=tags, parent_session_id=source.session_id)
         session._persist(None, label="fork")
         return session
@@ -356,10 +356,10 @@ class Session:
         return self._recorder._policy
 
     @staticmethod
-    def _restore_agent(source: Checkpoint, *, tools: Sequence[object], runner: object | None, middleware: Sequence[object], tracer: object | None, output_schema: object | None) -> "BaseAgent":
+    def _restore_agent(source: Checkpoint, *, tools: Sequence[object], middleware: Sequence[object], tracer: object | None, output_schema: object | None) -> "BaseAgent":
         # Rebuild a BaseAgent from a checkpoint's RunState via the rehydration contract.
         from vidbyte.agents.base import BaseAgent
-        return BaseAgent.restore(source.run_state, tools=tools, runner=runner, middleware=middleware, tracer=tracer, output_schema=output_schema)
+        return BaseAgent.restore(source.run_state, tools=tools, middleware=middleware, tracer=tracer, output_schema=output_schema)
 
 
 def _now() -> str:

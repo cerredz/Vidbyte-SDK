@@ -25,7 +25,7 @@ import re
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-from vidbyte.agents.base import BaseAgent, ConfiguredAgentRunner
+from vidbyte.agents.base import BaseAgent
 from vidbyte.agents.types import AgentMessage
 from vidbyte.context.handoff import Handoff, MinimalHandoff
 from vidbyte.lib.enums.prompts import Prompt
@@ -49,11 +49,8 @@ class HandoffAgent(BaseAgent):
     @classmethod
     def from_source_agent(cls, source_agent: BaseAgent, spec: Handoff) -> "HandoffAgent":
         """Build a handoff agent that reuses a source agent's runner and provider configuration."""
-        real_runner = source_agent.runner if not isinstance(source_agent.runner, ConfiguredAgentRunner) else None
         return cls(
             spec,
-            runner=real_runner,
-            runners=dict(source_agent.runners),
             provider=source_agent.runner_config.provider,
             model_name=source_agent.runner_config.model_name,
             api_key=source_agent.runner_config.api_key,

@@ -35,12 +35,9 @@ class AgentForker:
     def fork(cls, agent: BaseAgent, settings: AgentForkSettings) -> BaseAgent:
         # Builds an isolated child agent branch with resolved config, copied state, and fresh lineage.
         child_run_id = cls._run_id(agent, settings.run_id)
-        resolved_runner, resolved_runners = cls._runners(agent, settings)
         child = BaseAgent(
             name=settings.name or agent.name,
             runtime=settings.runtime if settings.runtime is not None else (agent.runtime_config_obj or agent.runtime_type),
-            runner=resolved_runner,
-            runners=resolved_runners,
             tools=cls._tool_items(agent, settings),
             permission_policy=agent.permission_policy,
             agent_loop_settings=cls._loop_settings(agent, settings),
@@ -49,10 +46,8 @@ class AgentForker:
             api_key=agent.runner_config.api_key,
             provider=agent.runner_config.provider if settings.provider is None else settings.provider,
             model_name=agent.runner_config.model_name if settings.model_name is None else settings.model_name,
-            modality=settings.modality if settings.modality is not None else agent.modality,
             temperature=agent.runner_config.temperature if settings.temperature is None else settings.temperature,
             run_id=child_run_id,
-            runner_options=dict(agent.runner_config.options if settings.runner_options is None else settings.runner_options),
             description=agent.description,
             capabilities=agent.capabilities,
             agent_metadata=agent.agent_metadata,
@@ -69,15 +64,6 @@ class AgentForker:
             child._pending_mcp_configs.extend(agent._mcp_configs_for_fork())
         cls._copy_run_state(agent, child, settings)
         return child
-
-    @staticmethod
-    def _runners(agent: BaseAgent, settings: AgentForkSettings) -> tuple[object | None, Mapping[Any, object]]:
-        # Resolves runner inheritance, forcing lazy runner rebuilds when model-like config changes.
-        if any(value is not None for value in (settings.model_name, settings.provider, settings.temperature, settings.runner_options)):
-            return None, {}
-        resolved_runner = agent.runner if settings.runner is None else settings.runner
-        resolved_runners = agent.runners if settings.runners is None else settings.runners
-        return resolved_runner, resolved_runners
 
     @staticmethod
     def _loop_settings(agent: BaseAgent, settings: AgentForkSettings) -> AgentLoopSettings:

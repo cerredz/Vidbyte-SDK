@@ -17,7 +17,7 @@ Similar Files:
 
 from __future__ import annotations
 
-from vidbyte.agents.base import BaseAgent, ConfiguredAgentRunner
+from vidbyte.agents.base import BaseAgent
 from vidbyte.agents.aggregation import AggregateAgent, AggregateResult, MultiProviderAggregator
 from vidbyte.agents.client import AgentClient
 from vidbyte.agents.continual_trace import ContinualTraceAgent
@@ -41,7 +41,7 @@ from vidbyte.lib.dataclasses.agents import (
     AgentRuntimeStats,
     AgentStopReason,
 )
-from vidbyte.agents.types import AgentCard, AgentForkSettings, AgentInput, AgentMessage, AgentSpec, ModelModality
+from vidbyte.agents.types import AgentCard, AgentForkSettings, AgentInput, AgentMessage, AgentSpec
 
 Agent = BaseAgent
 
@@ -68,10 +68,8 @@ __all__ = [
     "AgentSpec",
     "AgentStopReason",
     "BaseAgent",
-    "ConfiguredAgentRunner",
     "ContinualTraceAgent",
     "HandoffAgent",
-    "ModelModality",
     "AgentRuntime",
     "SearchTreeRuntimeComponent",
     "PointToPointActorRuntime",

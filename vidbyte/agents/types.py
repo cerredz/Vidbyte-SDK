@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from vidbyte.lib.dataclasses.agents import AgentCard, AgentForkSettings, AgentInput, AgentMessage, AgentSpec
-from vidbyte.lib.enums import ModelModality
 
 __all__ = [
     "AgentCard",
@@ -9,5 +8,4 @@ __all__ = [
     "AgentInput",
     "AgentMessage",
     "AgentSpec",
-    "ModelModality",
 ]

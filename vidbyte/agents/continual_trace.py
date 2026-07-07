@@ -21,7 +21,7 @@ import json
 from collections.abc import Mapping
 from typing import Any
 
-from vidbyte.agents.base import BaseAgent, ConfiguredAgentRunner
+from vidbyte.agents.base import BaseAgent
 from vidbyte.lib.dataclasses.trace import TraceSchema
 from vidbyte.lib.enums.prompts import Prompt
 from vidbyte.prompts.catalog import Prompts
@@ -47,13 +47,10 @@ class ContinualTraceAgent(BaseAgent):
     @classmethod
     def from_source_agent(cls, source_agent: BaseAgent, schema: TraceSchema | type | Mapping[str, Any], *, trace_so_far: Mapping[str, Any] | None = None, max_trace_iterations: int = 3) -> "ContinualTraceAgent":
         """Build a trace agent that reuses a source agent's runner and provider configuration."""
-        real_runner = source_agent.runner if not isinstance(source_agent.runner, ConfiguredAgentRunner) else None
         return cls(
             schema,
             trace_so_far=trace_so_far,
             max_trace_iterations=max_trace_iterations,
-            runner=real_runner,
-            runners=dict(source_agent.runners),
             provider=source_agent.runner_config.provider,
             model_name=source_agent.runner_config.model_name,
             api_key=source_agent.runner_config.api_key,

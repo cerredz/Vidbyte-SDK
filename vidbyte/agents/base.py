@@ -1,13 +1,12 @@
 """Context Protocol Header
 
 Description:
-    Defines the baseline agent implementation (BaseAgent) and configured runner wrappers.
+    Defines the baseline agent implementation (BaseAgent).
 Purpose:
     Combines prompting, tool registration, runtime state tracking, and execution
     into a unified developer-facing executable actor (the agent).
 Architecture:
     - BaseAgent: Primary agent class inheriting MCP attachment capabilities.
-    - ConfiguredAgentRunner: Simple payload carrier for backend runner parameters.
 Relations:
     Inherits from McpAttachableMixin. Used by registries, harnesses, and multi-agent orchestration.
 """
@@ -26,15 +25,16 @@ from vidbyte.context.manager import ContextManager
 from vidbyte.context.window import ContextWindow, ContextWindowAlgorithm
 from vidbyte.context.primitives import ContextItem
 from vidbyte.context.handoff import Handoff, MinimalHandoff
-from vidbyte.lib.agents import ModalityDetector
 from vidbyte.lib.dataclasses.agents import AgentForkSettings, AgentMetadata, AgentRunnerConfig, AgentRuntimeConfig
 from vidbyte.lib.dataclasses.multi_agent import AggregateConfig, ProposerSpec
 from vidbyte.lib.dataclasses.runner import RunnerHandle
 from vidbyte.lib.dataclasses.sessions import SESSION_SCHEMA_VERSION, RunState
 from vidbyte.lib.dataclasses.strategies import AgentResult
 from vidbyte.lib.dataclasses.trace import TraceOption
-from vidbyte.lib.enums import AgentRuntimeType, ModelModality, ModelProvider
+from vidbyte.lib.constants import RUNNER_TYPE_TEXT
+from vidbyte.lib.enums import AgentRuntimeType, ModelProvider
 from vidbyte.lib.errors import AgentExecutionError, ConfigurationError
+from vidbyte.lib.runners import Runner
 from vidbyte.lib.tracing import NullTracer, TracerBase
 from vidbyte.agents.runtimes.configs import ActorRuntime, LinearRuntime, MctsSearchRuntime
 from vidbyte.middleware import AgentMiddleware
@@ -47,15 +47,8 @@ if TYPE_CHECKING:
     from vidbyte.sessions.store import SessionStore
 
 
-class ConfiguredAgentRunner:
-    """Runner placeholder created from primitive agent configuration."""
-
-    def __init__(self, config: AgentRunnerConfig) -> None:
-        self.config = config
-
-
 class BaseAgent(McpAttachableMixin):
-    """Reusable actor combining a system prompt, runner, and tools."""
+    """Reusable actor combining a system prompt, model identity, and tools."""
 
     def __init__(
         self,
@@ -63,8 +56,6 @@ class BaseAgent(McpAttachableMixin):
         name: str,
         system_prompt: str,
         runtime: AgentRuntimeType | str = AgentRuntimeType.LINEAR,
-        runner: object | None = None,
-        runners: Mapping[ModelModality | str, object] | None = None,
         tools: Sequence[object] | Tools = (),
         permission_policy: PermissionPolicy | None = None,
         agent_loop_settings: AgentLoopSettings | None = None,
@@ -80,10 +71,8 @@ class BaseAgent(McpAttachableMixin):
         proposers: Sequence[Any] | None = None,
         aggregator: Any | None = None,
         aggregate: AggregateConfig | None = None,
-        modality: ModelModality | str = ModelModality.AUTO,
         temperature: float | None = None,
         run_id: str | None = None,
-        runner_options: dict[str, Any] | None = None,
         description: str = "",
         capabilities: Sequence[str] = (),
         agent_metadata: AgentMetadata | None = None,
@@ -151,18 +140,11 @@ class BaseAgent(McpAttachableMixin):
             api_key=api_key,
             provider=provider_str,
             model_name=model_name,
-            modality=modality,
             temperature=temperature,
             run_id=run_id,
-            options=dict(runner_options or {}),
         )
         self.name = name
-        self.runner = runner if runner is not None else self._create_runner()
-        self.runners = {
-            ModalityDetector.coerce(runner_modality): runner_item
-            for runner_modality, runner_item in dict(runners or {}).items()
-        }
-        self.modality = ModalityDetector.coerce(modality)
+        self._runner_cache: dict[str, object] = {}
         self._agent_tool_items = tools.all() if isinstance(tools, Tools) else tuple(tools)
         self.tools = tools if isinstance(tools, Tools) else self._catalog_from_agent_tools(self._agent_tool_items)
         self.permission_policy = permission_policy or PermissionPolicy()
@@ -317,7 +299,6 @@ class BaseAgent(McpAttachableMixin):
             tool_names=tuple(self._tool_name(tool) for tool in self._agent_tool_items),
             mcp_tool_names=self.mcp_tool_names(),
             mcp_server_names=tuple(handle.name for handle in self.mcp_servers()),
-            modalities=self._card_modalities(),
             metadata=dict(self.metadata),
         )
 
@@ -438,9 +419,7 @@ class BaseAgent(McpAttachableMixin):
             capabilities=tuple(self.capabilities),
             provider=self.runner_config.provider,
             model_name=self.runner_config.model_name,
-            modality=self.modality.value,
             temperature=self.runner_config.temperature,
-            runner_options=dict(self.runner_config.options),
             runtime_type=self.runtime_type.value,
             runtime_config=self._export_runtime_config(),
             algorithm=self.algorithm.name,
@@ -457,7 +436,7 @@ class BaseAgent(McpAttachableMixin):
         )
 
     @classmethod
-    def restore(cls, state: RunState, *, tools: Sequence[object] = (), runner: object | None = None, middleware: Sequence[AgentMiddleware] = (), tracer: object | None = None, trace: object | None = None, output_schema: object | None = None) -> BaseAgent:
+    def restore(cls, state: RunState, *, tools: Sequence[object] = (), middleware: Sequence[AgentMiddleware] = (), tracer: object | None = None, trace: object | None = None, output_schema: object | None = None) -> BaseAgent:
         """Rebuild a live agent from a RunState, re-supplying non-serializable parts (the rehydration contract)."""
         from vidbyte.sessions.serialization import SessionSerializer
         serializer = SessionSerializer()
@@ -466,15 +445,12 @@ class BaseAgent(McpAttachableMixin):
             name=state.agent_name,
             system_prompt=state.system_prompt,
             runtime=cls._restore_runtime(state),
-            runner=runner,
             tools=tools,
             middleware=middleware,
             provider=state.provider,
             model_name=state.model_name,
-            modality=state.modality,
             temperature=state.temperature,
             run_id=state.run_id,
-            runner_options=dict(state.runner_options),
             agent_loop_settings=cls._restore_loop_settings(state),
             description=state.description,
             capabilities=tuple(state.capabilities),
@@ -657,7 +633,6 @@ class BaseAgent(McpAttachableMixin):
         self,
         message: str | AgentInput,
         *,
-        modality: ModelModality | str | None = None,
         context: BaseContext | None = None,
         history: Sequence[AgentMessage] = (),
         recipient: str = "orchestrator",
@@ -671,20 +646,11 @@ class BaseAgent(McpAttachableMixin):
         trace_ctx = None
         try:
             trace_metadata = dict(options.pop("trace_metadata", {}) or {})
-            prompt, input_modality, input_metadata = self._normalize_input(message)
+            prompt, input_metadata = self._normalize_input(message)
             input_context_items, input_context_manager = self._normalize_input_context(message)
             self._active_prompt = prompt
             self._behavior_view = None
-            selected_modality = ModalityDetector.resolve(
-                requested=modality,
-                input_modality=input_modality,
-                default=self.modality,
-            )
-            if selected_modality is ModelModality.AUTO and self.runner_config.model_name:
-                selected_modality = ModalityDetector.detect_modality(self.runner_config.model_name)
-            if selected_modality is ModelModality.AUTO:
-                selected_modality = ModelModality.TEXT
-            runner = self._runner_for_modality(selected_modality)
+            runner, runner_type = self._runner_for_model()
             trace_ctx = self._tracer.start_trace(
                 "agent.run",
                 agent_name=self.name,
@@ -702,7 +668,6 @@ class BaseAgent(McpAttachableMixin):
                 context=context,
                 history=history,
                 input_metadata=input_metadata,
-                modality=selected_modality,
                 agentic_loop=True,
                 input_context_items=input_context_items,
                 input_context_manager=input_context_manager,
@@ -711,7 +676,7 @@ class BaseAgent(McpAttachableMixin):
                 prompt,
                 agent_context,
                 runner=runner,
-                modality=selected_modality,
+                runner_type=runner_type,
                 trace_context=trace_ctx,
                 runtime_metadata={**self.metadata, **dict(input_metadata), **trace_metadata},
                 **options,
@@ -737,7 +702,9 @@ class BaseAgent(McpAttachableMixin):
         self._active_prompt = ""
         metadata: dict[str, Any] = {
             "strategy": result.strategy_name,
-            "modality": selected_modality.value,
+            "runner_type": runner_type,
+            "provider": self.runner_config.provider,
+            "model_name": self.runner_config.model_name,
             **dict(input_metadata),
             **dict(result.metadata),
         }
@@ -828,7 +795,6 @@ class BaseAgent(McpAttachableMixin):
         context: BaseContext | None,
         history: Sequence[AgentMessage],
         input_metadata: Mapping[str, Any] | None = None,
-        modality: ModelModality | None = None,
         agentic_loop: bool = True,
         input_context_items: Sequence[ContextItem] = (),
         input_context_manager: ContextManager | None = None,
@@ -841,25 +807,10 @@ class BaseAgent(McpAttachableMixin):
             agent_metadata=self.metadata,
             existing_tool_calls=self._tool_call_contexts,
             input_metadata=input_metadata,
-            modality=modality,
             agentic_loop=agentic_loop,
             context_items=self._merged_context_items(input_context_items),
             context_manager=self._merged_context_manager(input_context_manager),
         )
-
-    def _create_runner(self) -> object | None:
-        if any(
-            (
-                self.runner_config.api_key,
-                self.runner_config.provider,
-                self.runner_config.model_name,
-                self.runner_config.temperature is not None,
-                self.runner_config.run_id,
-                self.runner_config.options,
-            )
-        ):
-            return ConfiguredAgentRunner(self.runner_config)
-        return None
 
     async def _run_direct(
         self,
@@ -867,18 +818,14 @@ class BaseAgent(McpAttachableMixin):
         context: BaseAgentContext,
         *,
         runner: object | None = None,
-        modality: ModelModality = ModelModality.TEXT,
+        runner_type: str = RUNNER_TYPE_TEXT,
         trace_context: object | None = None,
         runtime_metadata: Mapping[str, Any] | None = None,
         **options: Any,
     ) -> AgentResult:
         if runner is None:
             raise AgentExecutionError("Agent requires a runner.")
-        if isinstance(runner, ConfiguredAgentRunner):
-            raise AgentExecutionError(
-                "ConfiguredAgentRunner stores primitive settings only; pass an executable runner."
-            )
-        if modality is not ModelModality.TEXT:
+        if runner_type != RUNNER_TYPE_TEXT:
             raw_result = await self._call_runner_once(runner, message, context=context, **options)
             return AgentResult(
                 output=self._runner_output_text(raw_result),
@@ -1118,10 +1065,10 @@ class BaseAgent(McpAttachableMixin):
     def _normalize_input(
         self,
         message: str | AgentInput,
-    ) -> tuple[str, ModelModality | str | None, Mapping[str, Any]]:
+    ) -> tuple[str, Mapping[str, Any]]:
         if isinstance(message, AgentInput):
-            return message.prompt, message.modality, message.metadata
-        return message, None, {}
+            return message.prompt, message.metadata
+        return message, {}
 
     def _normalize_input_context(
         self,
@@ -1144,36 +1091,18 @@ class BaseAgent(McpAttachableMixin):
             manager.extend(input_context_manager.items())
         return manager
 
-    def _runner_for_modality(self, modality: ModelModality) -> object | None:
-        if modality in self.runners:
-            return self.runners[modality]
-        if self.runner is not None and not isinstance(self.runner, ConfiguredAgentRunner):
-            return self.runner
-        provider = self.runner_config.provider
-        model_name = self.runner_config.model_name
-        if provider and model_name:
-            runner = ModalityDetector.create_runner(
-                modality,
-                provider=provider,
-                model=model_name,
-                api_key=self.runner_config.api_key,
-                temperature=self.runner_config.temperature,
-                **dict(self.runner_config.options),
-            )
-            self.runners[modality] = runner
-            return runner
-        return self.runner
-
-    def _card_modalities(self) -> tuple[ModelModality, ...]:
-        modalities = set(self.runners)
-        if self.modality is not ModelModality.AUTO:
-            modalities.add(self.modality)
-        elif self.runner_config.provider and self.runner_config.model_name:
-            detected = ModalityDetector.detect_modality(self.runner_config.model_name)
-            modalities.add(detected if detected is not ModelModality.AUTO else ModelModality.TEXT)
-        elif self.runner is not None or self.runner_config.provider or self.runner_config.model_name:
-            modalities.add(ModelModality.TEXT)
-        return tuple(sorted(modalities, key=lambda item: item.value))
+    def _runner_for_model(self) -> tuple[object, str]:
+        # Resolve and cache the executable runner for this agent's provider/model identity.
+        utility = Runner.from_model(
+            provider=self.runner_config.provider,
+            model_name=self.runner_config.model_name,
+            api_key=self.runner_config.api_key,
+            temperature=self.runner_config.temperature,
+        )
+        runner_type = utility.resolve_runner_type()
+        if runner_type not in self._runner_cache:
+            self._runner_cache[runner_type] = utility.build()
+        return self._runner_cache[runner_type], runner_type
 
     @staticmethod
     def _call_with_supported_kwargs(

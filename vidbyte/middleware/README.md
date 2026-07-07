@@ -33,7 +33,8 @@ class TenantPolicy(AgentMiddleware):
 agent = Agent(
     name="guarded",
     system_prompt="Use tools only when they help.",
-    runner=my_runner,
+    provider="openai",
+    model_name="gpt-4.1",
     tools=[lookup_metric],
     middleware=[TenantPolicy()],
     metadata={"tenant_id": "demo"},
