@@ -20,7 +20,7 @@ The core mental model is:
 
 1. Create an `Agent` or `BaseAgent`.
 2. Give it a system prompt, model/provider config, optional runner, optional tools, optional context manager, optional middleware, optional trace settings, and optional runtime choice.
-3. Run it with `run()` or `arun()`.
+3. Run it with `run()`.
 4. Let the SDK handle message assembly, context primitives, tool schemas, tool calls, tool results, iteration limits, trace hooks, and pipeline composition.
 
 ## Description
@@ -56,7 +56,7 @@ Vidbyte SDK is the developer-facing agent framework in the Vidbyte ecosystem. It
 
 ## How To Install And Use
 
-Install from a checkout while the package is pre-release, then import from `vidbyte`. Start with `Agent` or `BaseAgent`, pass a provider/model or runner, add tools and context when needed, and call `run()` or `arun()`. For MCP use, install the same package in the Python environment launched by the MCP host and use `vidbyte-mcp-server` or a custom `McpStudioServer` launcher.
+Install from a checkout while the package is pre-release, then import from `vidbyte`. Start with `Agent` or `BaseAgent`, pass a provider/model or runner, add tools and context when needed, and call `run()`. Public `Agent` / `BaseAgent` and `Session` `arun()` methods are deprecated and raise errors. For MCP use, install the same package in the Python environment launched by the MCP host and use `vidbyte-mcp-server` or a custom `McpStudioServer` launcher.
 
 ## Who This Is For
 
@@ -125,7 +125,7 @@ agent = BaseAgent(
     model_name="gpt-4.1",
 )
 
-reply = await agent.arun("Draft a concise release note")
+reply = agent.run("Draft a concise release note")
 print(reply.content)
 ```
 
@@ -148,7 +148,7 @@ agent = Agent(
     max_tokens=16000,
 )
 
-reply = await agent.arun("Find the current metric for user 123.")
+reply = agent.run("Find the current metric for user 123.")
 ```
 
 ## Core Features
@@ -230,7 +230,7 @@ Per-call context can be passed with `AgentInput` without mutating the agent's de
 from vidbyte import AgentInput
 from vidbyte.context.primitives import TextContextItem
 
-reply = await agent.arun(
+reply = agent.run(
     AgentInput(
         "Review the current task.",
         context_items=(
@@ -332,11 +332,11 @@ Use a semantic session tracer when several agents should share one trace tree:
 ```python
 trace = Trace.langsmith_session(project="research", name="research-run")
 
-async with trace.async_session(run_id=run_id):
+with trace.session(run_id=run_id):
     planner = Agent(name="planner", system_prompt="Plan.", runner=planner_runner, trace=trace)
     writer = Agent(name="writer", system_prompt="Write.", runner=writer_runner, trace=trace)
-    await planner.arun("Plan the answer")
-    await writer.arun("Write the answer")
+    planner.run("Plan the answer")
+    writer.run("Write the answer")
 ```
 
 Use `Trace.langsmith_default(...)` for the recommended single-agent LangSmith
@@ -382,7 +382,7 @@ agent = Agent(
     ),
 )
 
-reply = await agent.arun("Fix the failing tests")
+reply = agent.run("Fix the failing tests")
 trace_artifact = reply.metadata["trace"]
 ```
 
@@ -638,11 +638,11 @@ from vidbyte import Agent, Session, FileSessionStore
 store = FileSessionStore(root="./.vidbyte/sessions")
 agent = Agent(name="researcher", system_prompt="Investigate carefully.", provider="openai", model_name="gpt-4.1")
 session = agent.persist(store=store)  # equivalent persistence path: Session(agent, store=store)
-reply = await session.arun("Investigate the failing test")
+reply = session.run("Investigate the failing test")
 print(session.id, session.head)
 ```
 
-The same attach path is available from the agent: `session = agent.persist(store=store, policy=...)`. After binding, `agent.session` returns the current `Session`, and direct `agent.arun(...)` / `agent.run(...)` calls persist through the same checkpoint policy as `session.arun(...)` / `session.run(...)` without double-writing.
+The same attach path is available from the agent: `session = agent.persist(store=store, policy=...)`. After binding, `agent.session` returns the current `Session`, and direct `agent.run(...)` calls persist through the same checkpoint policy as `session.run(...)` without double-writing.
 
 Verbs: `Session.resume(store, session_id, tools=, runner=)` reconstructs a live session from a checkpoint (re-supplying non-serializable parts — the rehydration contract); `Session.continue_(...)` resumes the head; `Session.fork_from(store, checkpoint_id, ...)` branches a new session with parent lineage; `session.batch_fork(count, at=...)` creates several child records without running them; `session.rewind(to=checkpoint_id)` time-travels the head; `session.edit(transform)` rewrites history as a new checkpoint; `session.checkpoint(label=)` writes a manual checkpoint; `session.complete()` marks the session COMPLETED.
 

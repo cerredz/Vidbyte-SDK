@@ -134,7 +134,7 @@ class HandoffAgent(BaseAgent):
 
     async def generate_handoff(self, source: str) -> Handoff:
         # Run the agent over the source-run digest and return a filled Handoff of the spec's subclass.
-        reply = await self.arun(source)
+        reply = await self.generate_reply(source)
         payload = self._structured_payload(reply)
         sections, extra = self._sections_from_payload(payload) if payload is not None else self._split_sections(reply.content)
         return self._build_filled(reply.content, sections, extra)

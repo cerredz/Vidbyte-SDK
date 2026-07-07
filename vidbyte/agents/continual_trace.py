@@ -70,7 +70,7 @@ class ContinualTraceAgent(BaseAgent):
     async def update(self, *, context_window: str, runtime_metadata: Mapping[str, Any] | None = None) -> dict[str, Any]:
         """Run the bounded internal loop and return the latest accepted trace artifact."""
         try:
-            await self.arun(self._render_prompt(context_window, runtime_metadata))
+            await self.generate_reply(self._render_prompt(context_window, runtime_metadata))
         except Exception as exc:
             self.last_error = f"{type(exc).__name__}: {exc}"
             return self._tool.current_trace()

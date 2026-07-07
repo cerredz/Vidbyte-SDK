@@ -88,8 +88,12 @@ class Session:
         return self._agent
 
     async def arun(self, message: str | AgentInput, **options: Any) -> AgentMessage:
+        """Deprecated async alias; use run() from public code."""
+        raise AgentExecutionError("Session.arun() is deprecated; use run() instead.")
+
+    async def _run_async(self, message: str | AgentInput, **options: Any) -> AgentMessage:
         """Run the agent, persisting from the agent hook when available."""
-        reply = await self._agent.arun(message, **options)
+        reply = await self._agent.generate_reply(message, **options)
         if not self._agent_records_turns():
             self.record_turn(reply)
         return reply
@@ -99,8 +103,8 @@ class Session:
         try:
             asyncio.get_running_loop()
         except RuntimeError:
-            return asyncio.run(self.arun(message, **options))
-        raise AgentExecutionError("Session.run() cannot be called from an active event loop; use await arun().")
+            return asyncio.run(self._run_async(message, **options))
+        raise AgentExecutionError("Session.run() cannot be called from an active event loop.")
 
     def checkpoint(self, *, label: str = "") -> str:
         """Write a checkpoint of the current state on demand and return its id."""

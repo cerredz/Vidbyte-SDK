@@ -69,9 +69,12 @@ sdk.providers
 
 Use agents as the public entry point for model execution. Agents infer execution
 modality from the configured model name when possible, so callers normally pass
-plain strings to `run()` and `arun()`. If the model name is unknown and no
+plain strings to `run()`. If the model name is unknown and no
 explicit override is provided, execution falls back to text; prompt text is not
 semantically classified.
+
+Public `Agent` / `BaseAgent` and `Session` objects should be executed with `run()`;
+their `arun()` methods are deprecated and raise an error.
 
 ```python
 from vidbyte import VidbyteSDK
@@ -106,7 +109,7 @@ agent = BaseAgent(
     model_name="gpt-4.1",
 )
 
-reply = await agent.arun("Draft a concise release note")
+reply = agent.run("Draft a concise release note")
 ```
 
 For custom agents, pass an explicit `system_prompt`, model config, runner, and tools into `Agent` or `BaseAgent`.
@@ -222,7 +225,7 @@ default context:
 from vidbyte import AgentInput
 from vidbyte.context.primitives import TextContextItem
 
-reply = await agent.arun(
+reply = agent.run(
     AgentInput(
         "Review the current task.",
         context_items=(TextContextItem(title="Reviewer note", content="Focus on public API compatibility."),),
@@ -326,11 +329,11 @@ trace = Trace.langsmith_session(
     name="research-run",
 )
 
-async with trace.async_session(run_id=run_id):
+with trace.session(run_id=run_id):
     planner = Agent(name="planner", system_prompt="Plan the work.", runner=planner_runner, trace=trace)
     writer = Agent(name="writer", system_prompt="Draft the answer.", runner=writer_runner, trace=trace)
-    await planner.arun("Plan the release note")
-    await writer.arun("Write the release note")
+    planner.run("Plan the release note")
+    writer.run("Write the release note")
 ```
 
 `Trace.continual(...)` is a validated first-step capture preset for future
@@ -370,7 +373,7 @@ agent = Agent(
     runner=my_runner,
     trace_option=TraceOption.continual(ActionTrace, every_n_iterations=5, max_trace_iterations=3),
 )
-reply = await agent.arun("Fix the failing tests")
+reply = agent.run("Fix the failing tests")
 trace_artifact = reply.metadata["trace"]   # {"goal": ..., "actions_taken": [...], "mistakes": [...], "current_status": ...}
 ```
 
@@ -448,7 +451,7 @@ agent = Agent(
     max_tokens=16_000,
 )
 
-reply = await agent.arun("Find where tools are formatted.")
+reply = agent.run("Find where tools are formatted.")
 ```
 
 The runtime builds the context window, appends a short agentic-loop prompt after the system prompt, sends tool schemas to the model, executes permitted tool calls, appends tool results back into the ordered message context, and repeats until the model calls the internal `isDone` tool. If the model returns ordinary text without a tool call, that text is preserved as assistant history and the loop continues. `max_iterations` and `max_tokens` are optional safeguards; `max_tokens` uses provider-reported usage when available.
@@ -758,7 +761,7 @@ from vidbyte import Agent, FileSessionStore, Session
 agent = Agent(name="researcher", system_prompt="Investigate carefully.", provider="openai", model_name="gpt-4.1")
 store = FileSessionStore(root="./.vidbyte/sessions")
 session = agent.persist(store=store)          # equivalent persistence path: Session(agent, store=store)
-reply = await session.arun("Investigate the failing test")
+reply = session.run("Investigate the failing test")
 print(session.id, session.head)              # session id + latest checkpoint id
 assert agent.session is session
 ```
@@ -773,7 +776,7 @@ from vidbyte.sessions import FileSessionStore
 
 store = FileSessionStore(root="./.vidbyte/sessions")
 session = Session(agent, store=store)
-await session.arun("first step")
+session.run("first step")
 
 # later / cold process — re-supply non-serializable parts
 session = Session.resume(store, session_id, tools=[grep], runner=my_runner)

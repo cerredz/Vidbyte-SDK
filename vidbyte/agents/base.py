@@ -761,8 +761,8 @@ class BaseAgent(McpAttachableMixin):
         return reply
 
     async def arun(self, message: str | AgentInput, **options: Any) -> AgentMessage:
-        """Async ergonomic alias for generate_reply()."""
-        return await self.generate_reply(message, **options)
+        """Deprecated async alias; use run() from public code."""
+        raise AgentExecutionError("BaseAgent.arun() is deprecated; use run() instead.")
 
     def run(self, message: str | AgentInput, **options: Any) -> AgentMessage:
         """Run the agent from synchronous code."""
@@ -770,9 +770,13 @@ class BaseAgent(McpAttachableMixin):
             asyncio.get_running_loop()
         except RuntimeError:
             return asyncio.run(self.generate_reply(message, **options))
-        raise AgentExecutionError("BaseAgent.run() cannot be called from an active event loop; use await arun().")
+        raise AgentExecutionError("BaseAgent.run() cannot be called from an active event loop.")
 
     async def arun_sequentially(self, prompts: Sequence[str | AgentInput], **options: Any) -> list[AgentMessage]:
+        # Deprecated async alias; use run_sequentially() from public code.
+        raise AgentExecutionError("BaseAgent.arun_sequentially() is deprecated; use run_sequentially() instead.")
+
+    async def _run_sequentially_async(self, prompts: Sequence[str | AgentInput], **options: Any) -> list[AgentMessage]:
         # Runs each prompt through generate_reply in order, preserving self.history across all calls.
         results: list[AgentMessage] = []
         for prompt in prompts:
@@ -785,8 +789,8 @@ class BaseAgent(McpAttachableMixin):
         try:
             asyncio.get_running_loop()
         except RuntimeError:
-            return asyncio.run(self.arun_sequentially(prompts, **options))
-        raise AgentExecutionError("BaseAgent.run_sequentially() cannot be called from an active event loop; use await arun_sequentially().")
+            return asyncio.run(self._run_sequentially_async(prompts, **options))
+        raise AgentExecutionError("BaseAgent.run_sequentially() cannot be called from an active event loop.")
 
     async def handoff(self, spec: Handoff | None = None, *, by: "BaseAgent | None" = None) -> Handoff:
         """Produce a structured handoff document describing this agent's most recent run."""
