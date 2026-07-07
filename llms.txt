@@ -637,12 +637,14 @@ from vidbyte import Agent, Session, FileSessionStore
 
 store = FileSessionStore(root="./.vidbyte/sessions")
 agent = Agent(name="researcher", system_prompt="Investigate carefully.", provider="openai", model_name="gpt-4.1")
-session = agent.persist(store=store)  # equivalent persistence path: Session(agent, store=store)
+session = agent.persist(store=store, policy=Session.PER_TURN_POLICY)  # equivalent persistence path: Session(agent, store=store)
 reply = await session.arun("Investigate the failing test")
 print(session.id, session.head)
 ```
 
 The same attach path is available from the agent: `session = agent.persist(store=store, policy=...)`. After binding, `agent.session` returns the current `Session`, and direct `agent.arun(...)` / `agent.run(...)` calls persist through the same checkpoint policy as `session.arun(...)` / `session.run(...)` without double-writing.
+
+For hard string discovery, use `Session.policy_options()` / `Session.trace_options()` or constants such as `Session.PER_TURN_POLICY`, `Session.MANUAL_POLICY`, and `Session.AUTO_TRACE`.
 
 Verbs: `Session.resume(store, session_id, tools=, runner=)` reconstructs a live session from a checkpoint (re-supplying non-serializable parts — the rehydration contract); `Session.continue_(...)` resumes the head; `Session.fork_from(store, checkpoint_id, ...)` branches a new session with parent lineage; `session.batch_fork(count, at=...)` creates several child records without running them; `session.rewind(to=checkpoint_id)` time-travels the head; `session.edit(transform)` rewrites history as a new checkpoint; `session.checkpoint(label=)` writes a manual checkpoint; `session.complete()` marks the session COMPLETED.
 

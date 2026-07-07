@@ -757,7 +757,7 @@ from vidbyte import Agent, FileSessionStore, Session
 
 agent = Agent(name="researcher", system_prompt="Investigate carefully.", provider="openai", model_name="gpt-4.1")
 store = FileSessionStore(root="./.vidbyte/sessions")
-session = agent.persist(store=store)          # equivalent persistence path: Session(agent, store=store)
+session = agent.persist(store=store, policy=Session.PER_TURN_POLICY)
 reply = await session.arun("Investigate the failing test")
 print(session.id, session.head)              # session id + latest checkpoint id
 assert agent.session is session
@@ -767,6 +767,11 @@ Sessions are also reachable through the harness namespace
 (`sdk.harnesses.sessions.attach(agent, store=...)`). Resuming reconstructs the
 agent from a checkpoint; because live runners, tools, and middleware cannot be
 serialized, you re-supply them at resume time (the rehydration contract):
+
+`Session.policy_options()` and `Session.trace_options()` list the accepted hard
+strings for `policy=` and `trace=`. The same strings are available as class
+constants such as `Session.PER_TURN_POLICY`, `Session.MANUAL_POLICY`, and
+`Session.AUTO_TRACE`.
 
 ```python
 from vidbyte.sessions import FileSessionStore

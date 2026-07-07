@@ -28,6 +28,21 @@ print(agent.session is session)          # True
 
 `agent.persist(...)` delegates to `Session(agent, ...)`; it does not move persistence into the agent constructor. Once bound, `agent.arun(...)`, `agent.run(...)`, `session.arun(...)`, and `session.run(...)` all record one checkpoint per turn under the same policy. `sdk.harnesses.sessions.attach(agent, store=...)` is the namespace-client equivalent.
 
+## Discover string options
+
+`Session` exposes constants and helpers for the string-backed settings accepted by `policy=` and `trace=`:
+
+```python
+session = Session(agent, policy=Session.PER_TURN_POLICY, trace=Session.AUTO_TRACE)
+
+print(Session.policy_options())          # ("per_turn", "per_step", "manual")
+print(Session.trace_options())           # ("off", "auto", "artifact", "full")
+print(Session.string_options())          # grouped by parameter name
+print(Session.describe_string_options()) # grouped by Session constant name
+```
+
+The typed enums remain valid: `CheckpointPolicy.PER_TURN` and `TraceCapture.AUTO` are the canonical contracts, while `Session.PER_TURN_POLICY` and related constants are convenient aliases for developers who want discoverable strings from the class.
+
 ## Stores
 
 | Store | Import | Notes |
