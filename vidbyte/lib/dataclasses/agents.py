@@ -19,7 +19,6 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Mapping, Sequence
 
-from vidbyte.lib.enums import ModelModality
 from vidbyte.lib.errors import AgentForkConfigurationError
 
 if TYPE_CHECKING:
@@ -103,18 +102,15 @@ class AgentRunnerConfig:
     api_key: str | None = None
     provider: str | None = None
     model_name: str | None = None
-    modality: ModelModality | str = ModelModality.AUTO
     temperature: float | None = None
     run_id: str | None = None
-    options: Mapping[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
 class AgentInput:
-    """Typed agent input for reliable modality routing."""
+    """Typed agent input for prompt metadata and per-call context."""
 
     prompt: str
-    modality: ModelModality | str = ModelModality.AUTO
     metadata: Mapping[str, Any] = field(default_factory=dict)
     context_items: tuple[ContextItem, ...] = ()
     context_manager: ContextManager | None = None
@@ -131,7 +127,6 @@ class AgentCard:
     tool_names: tuple[str, ...] = ()
     mcp_tool_names: tuple[str, ...] = ()
     mcp_server_names: tuple[str, ...] = ()
-    modalities: tuple[ModelModality, ...] = ()
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
 
@@ -180,13 +175,10 @@ class AgentForkSettings:
     """
 
     name: str | None = None
-    runner: object | None = None
-    runners: Mapping[ModelModality | str, object] | None = None
     tools: Sequence[object] | Tools | None = None
     add_tools: Sequence[object] = ()
     drop_tools: Sequence[str] = ()
     system_prompt: str | None = None
-    modality: ModelModality | str | None = None
     metadata: dict[str, Any] | None = None
     middleware: Sequence[AgentMiddleware] | None = None
     context_items: Sequence[ContextItem] | None = None
@@ -205,7 +197,6 @@ class AgentForkSettings:
     model_name: str | None = None
     provider: ModelProvider | str | None = None
     temperature: float | None = None
-    runner_options: dict[str, Any] | None = None
     mcp: bool = True
     inherit_mcp: bool | None = None
 

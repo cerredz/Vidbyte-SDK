@@ -61,9 +61,7 @@ class RunState:
     capabilities: tuple[str, ...]
     provider: str | None
     model_name: str | None
-    modality: str
     temperature: float | None
-    runner_options: Mapping[str, Any]
     runtime_type: str
     runtime_config: Mapping[str, Any]
     algorithm: str
