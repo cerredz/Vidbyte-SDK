@@ -1,75 +1,46 @@
 # Middleware
 
-Middleware in the Vidbyte SDK is deterministic runtime policy around the agent
-loop. It lets developers authorize runs, deny tools, compact context, retry
-models, enforce budgets, and record audit events without making those controls
-model-visible tools.
+## Folder Intent
 
-## Role In The SDK
+This folder owns deterministic runtime policy around agent loops: lifecycle hooks, middleware decisions, built-in safety controls, and compaction integration.
 
-`vidbyte.middleware` exposes `AgentMiddleware`, `MiddlewarePipeline`, structured
-decisions, context payloads, events, transforms, and built-in middleware. Agents
-pass middleware into compatible runtimes, which call lifecycle hooks before and
-after model calls, tool calls, iterations, and whole runs.
+## Non-Goals
 
-## Design Philosophy
-
-Policies should be explicit, ordered, and inspectable. Middleware returns
-structured `MiddlewareDecision` objects instead of mutating hidden global state.
-By default middleware fails closed, while individual middleware can opt into
-fail-open behavior when policy failure should not abort the run.
+Do not put model provider calls, tool implementation details, or agent construction policy here. Middleware should observe, transform, delay, abort, or annotate runtime flow.
 
 ## Usage
 
 ```python
-from vidbyte import Agent, AgentMiddleware, MiddlewareDecision
+from vidbyte.middleware import AgentMiddleware
+from vidbyte.lib.dataclasses.middleware import MiddlewareDecision
 
-class TenantPolicy(AgentMiddleware):
+class StopOnEmptyPrompt(AgentMiddleware):
     async def before_run(self, ctx):
-        if ctx.metadata.get("tenant_id") is None:
-            return MiddlewareDecision.abort("missing_tenant")
-        return MiddlewareDecision.continue_(metadata={"tenant_checked": True})
-
-agent = Agent(
-    name="guarded",
-    system_prompt="Use tools only when they help.",
-    runner=my_runner,
-    tools=[lookup_metric],
-    middleware=[TenantPolicy()],
-    metadata={"tenant_id": "demo"},
-)
+        if not str(ctx.message).strip():
+            return MiddlewareDecision.abort("empty_prompt")
+        return MiddlewareDecision.continue_()
 ```
 
-Built-ins are available from `vidbyte.middleware.builtins` and include rate
-limits, token and cost budgets, runtime limits, retry, circuit breaker, audit,
-tool policy, tool-result compaction, message-history compaction, canary tripwire,
-confused-deputy guard, and honeypot tool checks.
+## File Index
 
-`TokenBudgetMiddleware(max_tokens=...)` is a hard cap by default: once
-provider-reported cumulative usage reaches the limit, the run stops before the
-next iteration. Set `allow_final_response_over_budget=True` to allow one final
-over-budget model call with an injected instruction to answer immediately:
+- `__init__.py`: Exports public agent runtime middleware contracts and built-ins. Gives SDK users a concise import path for creating and attaching runtime middleware to direct text agents. Key symbols: AgentMiddleware, AuditLogMiddleware, CanaryTripwireMiddleware, CircuitBreakerMiddleware, CircuitState, ConfusedDeputyGuardMiddleware.
+- `base.py`: Defines the public base class for agent runtime middleware. Lets SDK users create middleware by subclassing one class and overriding only the runtime lifecycle hooks they need. Key symbols: AgentMiddleware.
+- `continual_trace.py`: Implements continual trace scheduling as agent runtime middleware. Injects continual trace updates at fixed lifecycle points (every N iterations and once at run end), accumulating the artifact in run_state and publishing it for the runtime to surface, while never writing the trace into the context window. Key symbols: ContinualTraceMiddleware, RESULT_METADATA_KEY.
+- `pipeline.py`: Implements ordered middleware hook dispatch for agent runtime middleware. Centralizes middleware decision handling, sleeps, exception policy, and metadata events so AgentRuntime remains focused on the model/tool loop. Key symbols: MiddlewarePipeline.
 
-```python
-from vidbyte.middleware.builtins import TokenBudgetMiddleware
+## Subfolder Routing
 
-middleware = [
-    TokenBudgetMiddleware(max_tokens=50_000, allow_final_response_over_budget=True),
-]
-```
+- `builtins/`: Ready-made runtime policies such as budgets, retry, circuit breaking, and safety filters.
+- `compaction/`: Context compaction engine, strategies, and trace rendering.
 
-This soft-overrun mode depends on provider-reported token usage. It is separate
-from `Agent(max_tokens=...)`, which remains a runtime hard cap and can stop the
-run before middleware gets a chance to request the final response.
+## Logs
 
-## Key Modules
-
-- `base.py`: hook base class for custom middleware.
-- `pipeline.py`: ordered hook dispatcher and decision handling.
-- `builtins/`: ready-made policy, safety, retry, budget, and compaction middleware.
-- `compaction/`: deterministic context and trace-backed compaction helpers.
+- 2026-07-07: Fail-open and fail-closed behavior in the pipeline is a runtime safety boundary.
+- 2026-07-07: This README is part of the agentic-engineering documentation pass described in `docs/design/agentic-engineering-principles-agents-middleware-tools.md`.
 
 ## Related Layers
 
-Middleware is attached to [`agents`](../agents/README.md), often controls
-[`tools`](../tools/README.md), and can shape [`context`](../context/README.md).
+- `vidbyte/agents`: executable agent construction and runtime selection.
+- `vidbyte/middleware`: deterministic runtime policy around agent loops.
+- `vidbyte/tools`: model-callable tool contracts and execution helpers.
+- `vidbyte/lib`: shared dataclasses, registries, enums, errors, and low-level utilities.

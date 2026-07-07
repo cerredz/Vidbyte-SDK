@@ -1,87 +1,56 @@
 # Agents
 
-The Vidbyte SDK uses agents as the executable actor abstraction for AI workflows.
-An agent combines a system prompt, a runner or provider configuration, optional
-tools, structured context, tracing, runtime configuration, and handoff behavior.
+## Folder Intent
 
-## Role In The SDK
+This folder owns executable agent construction, runtime selection, session restoration, handoff/fork helpers, context-window algorithm wiring, and agent-facing state contracts.
 
-`vidbyte.agents` is the layer most application code touches first. It exposes
-`Agent` / `BaseAgent`, `AgentInput`, agent messages, local registries, handoff
-agents, and swappable runtime implementations. Agents normalize input, build a
-context window, select a model modality, invoke a runner, execute tools when the
-runtime requests them, and return an `AgentMessage`.
+## Non-Goals
 
-## Design Philosophy
-
-Agents are explicit composition objects rather than hidden global state. The SDK
-keeps the prompt, tools, context manager, middleware, trace settings, and runner
-visible at construction time so developers can reason about what the model sees
-and what local capabilities it can call.
-
-The default linear runtime is the compatibility path for middleware and continual
-trace artifacts. Non-linear runtimes such as search and actor-model execution are
-separate runtime choices with narrower compatibility rules.
+Do not place provider transport, low-level dataclasses, or concrete tool implementations here. Keep this layer focused on agent orchestration and public agent APIs.
 
 ## Usage
 
 ```python
-from vidbyte import Agent, tool
-
-@tool
-def lookup_metric(user_id: int) -> dict[str, int]:
-    return {"user_id": user_id, "score": 94}
+from vidbyte import Agent
 
 agent = Agent(
-    name="analyst",
-    system_prompt="Answer directly and cite uncertainty.",
+    name="assistant",
+    system_prompt="Answer directly and use tools when useful.",
     runner=my_runner,
-    tools=[lookup_metric],
 )
 
-reply = await agent.arun("Summarize user 42.")
-print(reply.content)
+result = await agent.arun("Summarize the current project state.")
+print(result.output)
 ```
 
-Use `AgentInput` when a single run needs additional metadata or context items:
+## File Index
 
-```python
-from vidbyte import AgentInput
-from vidbyte.context.primitives import TextContextItem
+- `__init__.py`: Exposes agents and orchestration primitives for Vidbyte SDK. Allows easy package-level import of BaseAgent, registries, client schemas, and swappable execution runtimes. Key symbols: Agent, AggregateAgent, AggregateConfig, AggregateResult, AgentClient, AgentLoopSettings.
+- `aggregation.py`: Implements the Multi-Provider Aggregator (Mixture-of-Agents) engine and the AggregateAgent class that exposes it as a first-class SDK agent. Fans a request out to several proposer models concurrently and routes their candidate answers to a final aggregator model that synthesizes a new response grounded in all of them (it composes its own answer, it does not select one). Key symbols: AggregateResult, MultiProviderAggregator, AggregateAgent.
+- `base.py`: Defines the baseline agent implementation (BaseAgent) and configured runner wrappers. Combines prompting, tool registration, runtime state tracking, and execution into a unified developer-facing executable actor (the agent). Key symbols: ConfiguredAgentRunner, BaseAgent.
+- `client.py`: Owns client behavior inside the vidbyte/agents layer. Key symbols: AgentClient.
+- `context_algorithms.py`: Owns context algorithms behavior inside the vidbyte/agents layer. Key symbols: AgentRuntimeContextAlgorithms.
+- `continual_trace.py`: Defines ContinualTraceAgent, a dedicated BaseAgent that fills a trace schema. Performs one continual trace update pass over a read-only snapshot of a main agent run, filling a typed trace schema through the updateTrace tool. Mirrors the HandoffAgent pattern so trace updates use normal SDK agent and tool primitives. Key symbols: ContinualTraceAgent.
+- `fork.py`: Houses AgentForker, the utility class that owns all BaseAgent fork logic. Keeps base.py focused on agent execution by extracting fork config resolution, tool cloning, lineage metadata, and run-state carry into one cohesive place driven entirely by a validated AgentForkSettings. Key symbols: AgentForker.
+- `handoff.py`: Defines HandoffAgent, a thin configuration over BaseAgent that produces structured handoff documents from a completed agent run. Turns the comprehensive handoff system prompt plus a Handoff spec into an executable agent whose generate_handoff() returns a filled Handoff document. Key symbols: HandoffAgent.
+- `mixins.py`: Defines mixins that equip agents and harnesses with lifecycle-managed and preset MCP servers. Enforces identical APIs and automated cleanup routines for attached subprocesses without duplicating logic across agents and harnesses. Key symbols: McpAttachableMixin.
+- `runtime.py`: Defines the internal direct execution runtime for Vidbyte agents. Keeps agent loop execution, context-window construction, tool execution, permission checks, and provider-reported token accounting out of BaseAgent. Key symbols: AgentRuntime.
+- `types.py`: Owns types behavior inside the vidbyte/agents layer. Key symbols: AgentCard, AgentForkSettings, AgentInput, AgentMessage, AgentSpec, ModelModality.
 
-reply = await agent.arun(
-    AgentInput(
-        "Review this change.",
-        context_items=(TextContextItem(title="Reviewer note", content="Focus on API compatibility."),),
-    )
-)
-```
+## Subfolder Routing
 
-## Durable Sessions
+- `algorithms/`: Compatibility shims for context-window algorithms.
+- `runtimes/`: Runtime configuration exports and concrete linear/search/actor runtime code.
+- `settings/`: Agent-loop configuration models and tool-error policy settings.
 
-Agents can opt into durable sessions without moving persistence into the agent constructor:
+## Logs
 
-```python
-from vidbyte import FileSessionStore
-
-store = FileSessionStore("./.vidbyte/sessions")
-session = agent.persist(store=store)
-reply = await agent.arun("Continue the investigation.")
-print(agent.session is session)
-```
-
-`agent.persist(...)` delegates to `vidbyte.sessions.Session(agent, ...)`. Once bound, direct `agent.arun(...)` and `agent.run(...)` calls record checkpoints with the same policy as `session.arun(...)` and `session.run(...)`; `agent.session` returns the current session or `None`.
-
-## Key Modules
-
-- `base.py`: `BaseAgent`, runner normalization, tool binding, context assembly, trace setup, and runtime dispatch.
-- `client.py`: namespace client used by `VidbyteSDK().agents`.
-- `runtimes/`: linear, search, and actor-model runtime components.
-- `handoff.py`: structured handoff generation from a completed agent run.
-- `types.py`: agent messages, input envelopes, cards, specs, and modality types.
+- 2026-07-07: Runtime compatibility checks are load-bearing because non-linear runtimes do not support every linear-loop extension.
+- 2026-07-07: This README is part of the agentic-engineering documentation pass described in `docs/design/agentic-engineering-principles-agents-middleware-tools.md`.
 
 ## Related Layers
 
-Agents compose with [`context`](../context/README.md), [`tools`](../tools/README.md),
-[`middleware`](../middleware/README.md), [`providers`](../providers/README.md),
-[`pipelines`](../pipelines/README.md), and [`trace`](../trace/README.md).
+- `vidbyte/agents`: executable agent construction and runtime selection.
+- `vidbyte/middleware`: deterministic runtime policy around agent loops.
+- `vidbyte/tools`: model-callable tool contracts and execution helpers.
+- `vidbyte/lib`: shared dataclasses, registries, enums, errors, and low-level utilities.
