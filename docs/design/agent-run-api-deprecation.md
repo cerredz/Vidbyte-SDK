@@ -9,7 +9,7 @@
 
 ## 1. Overview
 
-This change makes the public Vidbyte agent execution examples and agent object API prefer `run()` over `arun()`. The public `BaseAgent` / `Agent` `arun()` methods will no longer execute agent runs; they will raise a clear deprecation error telling callers to use `run()` instead. Internal async SDK flows will call `generate_reply()` directly so they do not depend on the deprecated public alias.
+This change makes the public Vidbyte agent and durable session execution examples prefer `run()` over `arun()`. The public `BaseAgent` / `Agent` and `Session` `arun()` methods will no longer execute runs; they will raise clear deprecation errors telling callers to use `run()` instead. Internal async SDK flows will call `generate_reply()` directly so they do not depend on the deprecated public alias.
 
 ---
 
@@ -20,8 +20,10 @@ This change makes the public Vidbyte agent execution examples and agent object A
 - Make public `Agent` / `BaseAgent` usage run through `run()` instead of `arun()`.
 - Change the public agent object's `arun()` method to raise a clear deprecation error message.
 - Change the public agent object's sequential async alias, `arun_sequentially()`, to raise a clear deprecation error message for consistency.
+- Make public `Session` usage run through `run()` instead of `arun()`.
+- Change the public session object's `arun()` method to raise a clear deprecation error message.
 - Update internal SDK code that currently calls public agent `arun()` to use `generate_reply()` instead.
-- Update the main `README.md` and root `llms.txt` to document `run()` as the public execution method and to note that agent `arun()` is deprecated.
+- Update the main `README.md` and root `llms.txt` to document `run()` as the public execution method and to note that agent/session `arun()` methods are deprecated.
 
 ### Non-Goals
 
@@ -38,7 +40,7 @@ The active repository is a Python SDK package (`pyproject.toml`) with public exp
 
 The current `run()` implementation refuses to run inside an already running event loop and tells callers to use `await arun()`. If `arun()` becomes deprecated, this message must change so it no longer points callers to the deprecated method. Internal async SDK flows currently use public `arun()` in handoff generation, continual trace updates, and the context-minimal-fanout paradigm harness. These call sites need to move to `generate_reply()` so the public alias can fail without breaking SDK internals.
 
-I did not find an active first-class `Session` class or `vidbyte/sessions` package in the current package tree. The only active "session" object found is `McpServerHandle`, described as a live MCP server connection session, and it has `close()`, `name`, and `tool_names`, not `run()` or `arun()`. There are untracked nested worktree directories under this checkout that contain a `vidbyte/sessions` package, but those are not part of the active package tree and should not be edited as part of this change.
+After updating the implementation worktree from `origin/main`, the active package includes `vidbyte/sessions/session.py`. `Session.arun()` currently delegates to `self._agent.arun(...)`, and `Session.run()` wraps `self.arun(...)`. This file is now part of the implementation scope because the original request explicitly named session objects.
 
 ---
 
@@ -52,9 +54,12 @@ I did not find an active first-class `Session` class or `vidbyte/sessions` packa
 4. Calling `BaseAgent.run(...)` from inside an active event loop must raise `AgentExecutionError` without recommending `arun()`.
 5. Calling `BaseAgent.run_sequentially(...)` from normal synchronous code must continue to execute prompts sequentially and return `list[AgentMessage]`.
 6. Calling `BaseAgent.run_sequentially(...)` from inside an active event loop must raise `AgentExecutionError` without recommending `arun_sequentially()`.
-7. Internal async SDK flows in `HandoffAgent`, `ContinualTraceAgent`, and `MultiplePromptFanoutHarness` must not call deprecated public agent `arun()` methods.
-8. The main `README.md` must show agent examples using `run()` and mention that `arun()` is deprecated for public agent objects.
-9. The root `llms.txt` must show agent examples using `run()` and mention that `arun()` is deprecated for public agent objects.
+7. Calling `Session.arun(...)` must raise `AgentExecutionError` with a message that says the function is deprecated and instructs the caller to use `run()` instead.
+8. Calling `Session.run(...)` from normal synchronous code must continue to execute the wrapped agent, persist according to the session checkpoint policy, and return `AgentMessage`.
+9. Calling `Session.run(...)` from inside an active event loop must raise `AgentExecutionError` without recommending `arun()`.
+10. Internal async SDK flows in `HandoffAgent`, `ContinualTraceAgent`, and `MultiplePromptFanoutHarness` must not call deprecated public agent `arun()` methods.
+11. The main `README.md` must show agent and session examples using `run()` and mention that `arun()` is deprecated for public agent/session objects.
+12. The root `llms.txt` must show agent and session examples using `run()` and mention that `arun()` is deprecated for public agent/session objects.
 
 ### Non-Functional Requirements
 
@@ -83,9 +88,17 @@ Public caller
 
 Internal async SDK flow
   -> await agent.generate_reply(...)
+
+Public caller
+  -> session.run(...)
+      -> asyncio.run(session._run_async(...))
+
+Public caller
+  -> await session.arun(...)
+      -> AgentExecutionError("Session.arun() is deprecated; use run() instead.")
 ```
 
-The root README and LLM documentation bundle will be updated so public agent examples no longer recommend `await agent.arun(...)`.
+The root README and LLM documentation bundle will be updated so public agent and session examples no longer recommend `await agent.arun(...)` or `await session.arun(...)`.
 
 ---
 
@@ -131,7 +144,42 @@ def run_sequentially(self, prompts: Sequence[str | AgentInput], **options: Any) 
 - `run()` inside an active event loop still fails because nested `asyncio.run()` is invalid; the message should recommend calling `generate_reply()` only if the caller is already in SDK-internal async code, or phrase the error without recommending deprecated `arun()`.
 - `run_sequentially()` must not call deprecated `arun_sequentially()`.
 
-### 6.2 Handoff Agent Internal Call
+### 6.2 Public Session Execution Alias
+
+**File(s):** `vidbyte/sessions/session.py`
+**Type:** Modified
+
+#### What it does
+
+`Session` owns the durable wrapper around an agent. This change makes `Session.arun()` a deprecated error surface while keeping `Session.run()` working from synchronous code and preserving checkpoint persistence.
+
+#### Interface / API
+
+```python
+async def arun(self, message: str | AgentInput, **options: Any) -> AgentMessage:
+    # Raises AgentExecutionError explaining that Session.arun is deprecated and run should be used.
+
+def run(self, message: str | AgentInput, **options: Any) -> AgentMessage:
+    # Runs the wrapped agent from synchronous code and persists according to policy.
+
+async def _run_async(self, message: str | AgentInput, **options: Any) -> AgentMessage:
+    # Internal async implementation used by run().
+```
+
+#### Logic / Algorithm
+
+1. Replace `Session.arun()` implementation with `raise AgentExecutionError("Session.arun() is deprecated; use run() instead.")`.
+2. Add a private `_run_async(...)` helper containing the previous async persistence logic, but call `self._agent.generate_reply(...)` instead of `self._agent.arun(...)`.
+3. Change `Session.run()` to call `_run_async(...)` with `asyncio.run(...)` from synchronous code.
+4. Update the active-loop error message so it does not recommend `arun()`.
+
+#### Edge Cases & Error Handling
+
+- Session checkpoint behavior remains unchanged for `Session.run()`.
+- `Session.run()` inside an active event loop still fails because nested `asyncio.run()` is invalid; the message should not recommend deprecated `arun()`.
+- Bound-agent persistence still works because `BaseAgent.generate_reply()` already notifies a bound session through `_notify_session(...)`.
+
+### 6.3 Handoff Agent Internal Call
 
 **File(s):** `vidbyte/agents/handoff.py`
 **Type:** Modified
@@ -157,7 +205,7 @@ async def generate_handoff(self, source: str) -> Handoff:
 - Handoff failures continue to propagate through the existing `generate_handoff()` path.
 - Automatic handoff generation from `BaseAgent._run_auto_handoff()` remains fail-open as currently implemented there.
 
-### 6.3 Continual Trace Agent Internal Call
+### 6.4 Continual Trace Agent Internal Call
 
 **File(s):** `vidbyte/agents/continual_trace.py`
 **Type:** Modified
@@ -184,14 +232,14 @@ async def update(self, *, context_window: str, runtime_metadata: Mapping[str, An
 - Trace update failures remain fail-open and return the current trace artifact.
 - The deprecation error for public `arun()` must not be captured as a trace update failure because this internal path no longer calls it.
 
-### 6.4 Context Minimal Fanout Internal Agent Calls
+### 6.5 Context Minimal Fanout Internal Agent Calls
 
 **File(s):** `vidbyte/paradigms/context_minimal_fanout/multiple_prompts/harness.py`
 **Type:** Modified
 
 #### What it does
 
-The fanout harness is async internally and currently awaits public agent `arun()` for splitter and implementation agents. Those call sites must use `generate_reply()` instead.
+The fanout harness was present during the initial audit but is not present on updated `origin/main`. If the file exists in the implementation worktree, its public-agent `arun()` call sites must use `generate_reply()` instead. If it does not exist, this component is N/A for implementation.
 
 #### Interface / API
 
@@ -214,14 +262,14 @@ async def _run_one_implementation_prompt(self, split_prompt: SplitPrompt, plan: 
 - The harness still has its own `arun()` method inherited from `ParadigmHarness`; this design intentionally does not deprecate paradigm harness `arun()` because the user asked for agent/session objects and because root docs show harness `arun()` separately.
 - If public harness deprecation is desired too, that should be a separate explicit scope expansion.
 
-### 6.5 Main README Updates
+### 6.6 Main README Updates
 
 **File(s):** `README.md`
 **Type:** Modified
 
 #### What it does
 
-The root README will document `run()` as the public agent execution method and note that agent `arun()` is deprecated.
+The root README will document `run()` as the public agent and session execution method and note that `arun()` is deprecated on public agent and session objects.
 
 #### Interface / API
 
@@ -232,23 +280,24 @@ reply = agent.run("Draft a concise release note")
 #### Logic / Algorithm
 
 1. Update "Agents and Modalities" text from "run() and arun()" to "run()".
-2. Add a short deprecation note for public agent objects.
+2. Add a short deprecation note for public agent and session objects.
 3. Convert root README public agent examples from `await agent.arun(...)` to `agent.run(...)`.
-4. Leave non-agent async examples such as MCP server `await server.run()` and paradigm/eval runner examples unchanged unless they explicitly describe public agent objects.
+4. Convert root README public session examples from `await session.arun(...)` to `session.run(...)`.
+5. Leave non-agent async examples such as MCP server `await server.run()` and eval runner examples unchanged unless they explicitly describe public agent or session objects.
 
 #### Edge Cases & Error Handling
 
 - Do not rewrite unrelated `run` words or internal MCP server examples.
 - Keep examples syntactically coherent after removing `await`.
 
-### 6.6 LLM Documentation Bundle Updates
+### 6.7 LLM Documentation Bundle Updates
 
 **File(s):** `llms.txt`
 **Type:** Modified
 
 #### What it does
 
-The root LLM documentation bundle will mirror the README guidance so downstream LLMs learn `run()` as the public agent-object execution method.
+The root LLM documentation bundle will mirror the README guidance so downstream LLMs learn `run()` as the public agent/session object execution method.
 
 #### Interface / API
 
@@ -259,9 +308,10 @@ reply = agent.run("Draft a concise release note")
 #### Logic / Algorithm
 
 1. Update the core mental model and "How To Install And Use" sections to say public agents use `run()`.
-2. Add a short warning that public agent `arun()` is deprecated and raises an error.
+2. Add a short warning that public agent and session `arun()` methods are deprecated and raise errors.
 3. Convert public agent examples from `await agent.arun(...)` to `agent.run(...)`.
-4. Leave non-agent async examples such as `await server.run()` unchanged.
+4. Convert public session examples from `await session.arun(...)` to `session.run(...)`.
+5. Leave non-agent async examples such as `await server.run()` unchanged.
 
 #### Edge Cases & Error Handling
 
@@ -347,6 +397,35 @@ N/A
 |--------|-----------|
 | N/A | Python method raises `AgentExecutionError` for all public `arun_sequentially()` calls |
 
+### 8.3 Public Session Object Execution Method
+
+**Change type:** Deprecated
+
+**Request:**
+
+```json
+{
+  "method": "Session.arun",
+  "message": "str | AgentInput",
+  "options": "keyword arguments"
+}
+```
+
+**Response:**
+
+```json
+{
+  "raises": "AgentExecutionError",
+  "message": "Session.arun() is deprecated; use run() instead."
+}
+```
+
+**Error cases:**
+
+| Status | Condition |
+|--------|-----------|
+| N/A | Python method raises `AgentExecutionError` for all public `Session.arun()` calls |
+
 ---
 
 ## 9. File Change Manifest
@@ -357,10 +436,11 @@ Complete list of every file that will be created, modified, or deleted:
 |--------|-----------|--------|
 | CREATE | `docs/design/agent-run-api-deprecation.md` | Design doc for the requested API/docs change |
 | MODIFY | `vidbyte/agents/base.py` | Deprecate public agent `arun()` aliases, keep `run()`/`run_sequentially()` working, and update error messages |
+| MODIFY | `vidbyte/sessions/session.py` | Deprecate public session `arun()`, keep `run()` working, and preserve checkpoint persistence |
 | MODIFY | `vidbyte/agents/handoff.py` | Replace internal public `arun()` call with `generate_reply()` |
 | MODIFY | `vidbyte/agents/continual_trace.py` | Replace internal public `arun()` call with `generate_reply()` |
-| MODIFY | `vidbyte/paradigms/context_minimal_fanout/multiple_prompts/harness.py` | Replace internal public agent `arun()` calls with `generate_reply()` |
-| MODIFY | `README.md` | Document `run()` as public agent execution and note `arun()` deprecation |
+| MODIFY | `vidbyte/paradigms/context_minimal_fanout/multiple_prompts/harness.py` | Replace internal public agent `arun()` calls with `generate_reply()` if this file exists in the implementation worktree |
+| MODIFY | `README.md` | Document `run()` as public agent/session execution and note `arun()` deprecation |
 | MODIFY | `llms.txt` | Mirror README guidance for LLM-facing documentation |
 
 ---
@@ -385,7 +465,6 @@ Complete list of every file that will be created, modified, or deleted:
 
 ## 12. Open Questions
 
-- [ ] The active package tree does not contain a first-class `Session` object with `run()` / `arun()`. Did "session object" refer to an unmerged `vidbyte/sessions` package in another branch, an MCP connection session, or only agent conversation state?
 - [ ] Should public async agent callers have a supported replacement such as `generate_reply()` documented, or should the public API intentionally be sync-only for agents after this change?
 - [ ] Should this deprecation also apply to paradigm harnesses, eval runners, provider runners, tools, or internal runtime classes that have methods named `arun()`? This design assumes no because the request named session and agent objects and asked only for main README plus `llms.txt`.
 
@@ -407,4 +486,3 @@ Complete list of every file that will be created, modified, or deleted:
 
 - What: Change all runtime, runner, tool, paradigm, eval, and provider `arun()` methods to errors.
 - Why rejected: Many `arun()` methods are internal contracts or non-agent public APIs. Changing them would greatly expand the blast radius beyond "session and agent objects" and break async runtime internals.
-
