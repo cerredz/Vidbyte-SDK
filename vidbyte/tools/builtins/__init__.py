@@ -12,6 +12,7 @@ Architecture:
     - MCP discovery tools from builtins.mcp.
     - Memory provider tools from builtins.memory.
     - Context algorithm tools from builtins.trajectory_checkpoint and builtins.reflexion.
+    - Sequential continuation tool from builtins.run_prompts_sequentially.
 Relations:
     Related to vidbyte.tools.client and vidbyte.tools.registry.
 """
@@ -32,6 +33,7 @@ from vidbyte.tools.builtins.editing import PatchTool
 from vidbyte.tools.builtins.fork import ForkConversationTool
 from vidbyte.tools.builtins.handoff import CreateHandoffTool
 from vidbyte.tools.builtins.mcp import AttachMcpServerTool, SearchMcpServersTool
+from vidbyte.tools.builtins.run_prompts_sequentially import RunPromptsSequentiallyTool
 from vidbyte.tools.builtins.providers import (
     MongoCreateCollectionTool,
     MongoCreateIndexTool,
@@ -100,6 +102,7 @@ __all__ = [
     "ResumeOutputTool",
     "ResumeReplaceTool",
     "RewindTool",
+    "RunPromptsSequentiallyTool",
     "SearchMcpServersTool",
     "SemanticSearchTool",
     "SessionTool",
