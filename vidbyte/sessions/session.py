@@ -19,7 +19,7 @@ import asyncio
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
 from uuid import uuid4
 
 from vidbyte.agents.types import AgentInput, AgentMessage
@@ -54,6 +54,47 @@ class ForkOutcome:
 
 class Session:
     """Durable wrapper that persists an agent's run state as a checkpoint DAG."""
+
+    PER_TURN_POLICY: ClassVar[str] = CheckpointPolicy.PER_TURN.value
+    PER_STEP_POLICY: ClassVar[str] = CheckpointPolicy.PER_STEP.value
+    MANUAL_POLICY: ClassVar[str] = CheckpointPolicy.MANUAL.value
+
+    OFF_TRACE: ClassVar[str] = TraceCapture.OFF.value
+    AUTO_TRACE: ClassVar[str] = TraceCapture.AUTO.value
+    ARTIFACT_TRACE: ClassVar[str] = TraceCapture.ARTIFACT.value
+    FULL_TRACE: ClassVar[str] = TraceCapture.FULL.value
+
+    @classmethod
+    def policy_options(cls) -> tuple[str, ...]:
+        # Return accepted strings for the policy= parameter in stable order.
+        return (cls.PER_TURN_POLICY, cls.PER_STEP_POLICY, cls.MANUAL_POLICY)
+
+    @classmethod
+    def trace_options(cls) -> tuple[str, ...]:
+        # Return accepted strings for the trace= parameter in stable order.
+        return (cls.OFF_TRACE, cls.AUTO_TRACE, cls.ARTIFACT_TRACE, cls.FULL_TRACE)
+
+    @classmethod
+    def string_options(cls) -> dict[str, tuple[str, ...]]:
+        # Return accepted string options grouped by Session parameter name.
+        return {"policy": cls.policy_options(), "trace": cls.trace_options()}
+
+    @classmethod
+    def describe_string_options(cls) -> dict[str, dict[str, str]]:
+        # Return named Session string constants grouped by parameter name.
+        return {
+            "policy": {
+                "PER_TURN_POLICY": cls.PER_TURN_POLICY,
+                "PER_STEP_POLICY": cls.PER_STEP_POLICY,
+                "MANUAL_POLICY": cls.MANUAL_POLICY,
+            },
+            "trace": {
+                "OFF_TRACE": cls.OFF_TRACE,
+                "AUTO_TRACE": cls.AUTO_TRACE,
+                "ARTIFACT_TRACE": cls.ARTIFACT_TRACE,
+                "FULL_TRACE": cls.FULL_TRACE,
+            },
+        }
 
     def __init__(self, agent: "BaseAgent", *, store: SessionStore | None = None, session_id: str | None = None, policy: CheckpointPolicy | str = CheckpointPolicy.PER_TURN, trace: TraceCapture | str = TraceCapture.AUTO, tags: Sequence[str] = (), parent_session_id: str | None = None, _existing: bool = False) -> None:
         # Bind the agent/store/id and either record initial meta or adopt an existing session.
