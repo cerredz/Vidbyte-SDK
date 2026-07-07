@@ -106,7 +106,7 @@ Create `ToolSettings` as a sibling to the existing loop settings class under `vi
 
 Add a new built-in `ToolSettingsMiddleware` to enforce the tool-specific policy at runtime. It uses `before_tool_call` for `denied_tools`, `max_calls`, and `max_calls_per_tool`, and `after_tool_call` for `result_max_chars`. The middleware stores per-run call counters in `ctx.run_state[ToolSettingsMiddleware]`, following the concurrency-safe middleware pattern already used elsewhere in the repo.
 
-`BaseAgent._runtime_middleware()` auto-inserts `ToolSettingsMiddleware` when `agent_loop_settings.tool_settings` exists. It should be placed before user middleware because settings are baseline agent construction policy, not optional model behavior. The runtime still appends context-window admission middleware afterward, so explicit algorithm-based compaction remains later in the pipeline and can override earlier result transforms if configured.
+`BaseAgent._runtime_middleware()` auto-inserts `ToolSettingsMiddleware` when `agent_loop_settings.tool_settings` exists. It should run before user middleware because settings are baseline agent construction policy, not optional model behavior. When `ToolErrorPolicyMiddleware` is also configured, it runs ahead of `ToolSettingsMiddleware` so silent retry attempts do not consume per-tool execution budgets before the final result is known. The runtime still appends context-window admission middleware afterward, so explicit algorithm-based compaction remains later in the pipeline and can override earlier result transforms if configured.
 
 ```text
 AgentLoopSettings(tool_settings=ToolSettings(...))
@@ -231,16 +231,18 @@ class ToolSettingsMiddleware(AgentMiddleware):
 4. If the tool name is in `settings.denied_tools`, return `MiddlewareDecision.deny_tool("tool_settings_denied", metadata={"tool_name": name})`.
 5. If `settings.max_calls` is set and `ctx.tool_call_count >= settings.max_calls`, return `MiddlewareDecision.abort("tool_settings_max_calls", metadata={"max_calls": settings.max_calls})`.
 6. If `settings.max_calls_per_tool` has a limit for the tool and the per-run count is already at that limit, return `MiddlewareDecision.deny_tool("tool_settings_max_calls_per_tool", metadata={...})`.
-7. If the tool will be allowed to proceed, increment the per-tool counter in run state.
-8. `after_tool_call` returns continue when `result_max_chars` is `None`, when the tool is internal, or when no tool result exists.
-9. `after_tool_call` slices `ctx.tool_result.output` when its length exceeds `result_max_chars`, appends a clear truncation indicator, and returns `MiddlewareTransform(model_visible_tool_result=...)`.
-10. The transformed result keeps the original status and metadata, adding metadata such as `tool_settings_truncated=True`, `original_chars`, and `visible_chars`.
+7. If the tool is allowed to proceed, return continue without incrementing yet.
+8. `after_tool_call` increments the per-tool counter only after a non-middleware-denied final result reaches the hook. This avoids counting settings/user denials and avoids counting silent retry attempts that `ToolErrorPolicyMiddleware` will retry before the model sees them.
+9. `after_tool_call` returns continue when `result_max_chars` is `None`, when the tool is internal, or when no tool result exists.
+10. `after_tool_call` slices `ctx.tool_result.output` when its length exceeds `result_max_chars`, appends a clear truncation indicator, and returns `MiddlewareTransform(model_visible_tool_result=...)`.
+11. The transformed result keeps the original status and metadata, adding metadata such as `tool_settings_truncated=True`, `original_chars`, and `visible_chars`.
 
 #### Edge Cases & Error Handling
 
 - Middleware hook-level tests may call `before_tool_call` without `before_run`; `_state_for(ctx)` must initialize missing state defensively.
-- A denied call from this middleware does not increment per-tool execution counters.
+- A denied call from this middleware or another middleware does not increment per-tool execution counters.
 - A per-tool over-limit denial does not execute the tool.
+- Silent retry attempts do not increment per-tool execution counters; only the final non-retried result does.
 - Total `max_calls` aborts the run instead of denying a single tool, because the total run budget has been exhausted.
 - Later middleware transforms may override the model-visible result; this is acceptable and follows existing middleware ordering rules.
 
@@ -266,14 +268,14 @@ class BaseAgent:
 
 1. After resolving `self.agent_loop_settings`, reject non-linear runtimes when `tool_settings` is present, matching the existing middleware restriction.
 2. In `_runtime_middleware()`, create `ToolSettingsMiddleware(self.agent_loop_settings.tool_settings)` when settings are present.
-3. Return middleware in this order: settings middleware, user middleware, continual-trace middleware when enabled.
+3. Return middleware in this order: tool-error policy middleware if present, tool-settings middleware if present, user middleware, continual-trace middleware when enabled.
 4. Preserve `fork()` behavior by passing the existing `agent_loop_settings` object to the child.
 
 #### Edge Cases & Error Handling
 
 - Existing agents with no `tool_settings` see no middleware insertion.
 - If a user also passes explicit `ToolPolicyMiddleware` or `ToolResultCompactionMiddleware`, both compose through normal middleware order.
-- Settings middleware is first so team-level hard guards run before user middleware side effects.
+- Tool-error policy middleware is ordered first only to let retry decisions short-circuit intermediate attempts; tool settings still run before user middleware for normal allowed/denied tool calls.
 
 ---
 

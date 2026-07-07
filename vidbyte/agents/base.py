@@ -184,6 +184,16 @@ class BaseAgent(McpAttachableMixin):
                 f"Agent {name} uses non-linear runtime {self.runtime_type.value}, "
                 "which does not support tool_error_policy middleware."
             )
+        if self.agent_loop_settings.tool_settings is not None and self.runtime_type in (
+            AgentRuntimeType.MCTS_SEARCH,
+            AgentRuntimeType.ACTOR_MODEL,
+            AgentRuntimeType.ACTOR_MODEL_P2P,
+            AgentRuntimeType.ACTOR_MODEL_BROADCAST,
+        ):
+            raise ConfigurationError(
+                f"Agent {name} uses non-linear runtime {self.runtime_type.value}, "
+                "which does not support tool_settings middleware."
+            )
         self.runtime_config = self.agent_loop_settings.to_runtime_config()
         self.max_tool_rounds = self.agent_loop_settings.max_iterations
         self.system_prompt = system_prompt
@@ -981,11 +991,14 @@ class BaseAgent(McpAttachableMixin):
         )
 
     def _runtime_middleware(self) -> tuple[AgentMiddleware, ...]:
-        # Appends settings-driven and tracing middleware to the user middleware.
+        # Combines settings-driven, user-provided, and tracing middleware in runtime order.
         middleware = self.middleware
+        if self.agent_loop_settings.tool_settings is not None:
+            from vidbyte.middleware.builtins import ToolSettingsMiddleware
+            middleware = (ToolSettingsMiddleware(self.agent_loop_settings.tool_settings), *middleware)
         if self.agent_loop_settings.tool_error_policy is not None:
             from vidbyte.middleware.builtins import ToolErrorPolicyMiddleware
-            middleware = (*middleware, ToolErrorPolicyMiddleware(self.agent_loop_settings.tool_error_policy))
+            middleware = (ToolErrorPolicyMiddleware(self.agent_loop_settings.tool_error_policy), *middleware)
         if self._trace_option is None or not self._trace_option.enabled:
             return middleware
         from vidbyte.middleware.continual_trace import ContinualTraceMiddleware

@@ -41,6 +41,7 @@ from vidbyte.agents import (
     AgentCard,
     AgentForkSettings,
     AgentInput,
+    AgentLoopSettings,
     AgentMessage,
     AgentRegistry,
     AgentRunnerConfig,
@@ -52,6 +53,7 @@ from vidbyte.agents import (
     HandoffAgent,
     MultiProviderAggregator,
     ProposerSpec,
+    ToolSettings,
 )
 from vidbyte.client import VidbyteSDK
 from vidbyte.paradigms import ParadigmClient, ParadigmHarness
@@ -205,6 +207,7 @@ from vidbyte.middleware import (
     TokenRateLimitMiddleware,
     ToolResultCompactionMiddleware,
     ToolPolicyMiddleware,
+    ToolSettingsMiddleware,
 )
 from vidbyte.pipelines import (
     BasePipeline,
@@ -295,6 +298,7 @@ __all__ = [
     "AgentClient",
     "AgentForkSettings",
     "AgentInput",
+    "AgentLoopSettings",
     "AgentMiddleware",
     "MultiProviderAggregator",
     "ProposerSpec",
@@ -427,6 +431,8 @@ __all__ = [
     "TokenRateLimitMiddleware",
     "ToolResultCompactionMiddleware",
     "ToolPolicyMiddleware",
+    "ToolSettings",
+    "ToolSettingsMiddleware",
     "Tools",
     "ToolsFormatter",
     "VidbyteSDK",

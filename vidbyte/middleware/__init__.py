@@ -10,7 +10,7 @@ Architecture:
     - MiddlewarePipeline: Ordered hook dispatcher used by AgentRuntime.
     - Dataclass re-exports: hooks, actions, contexts, decisions, events.
     - Built-ins: AuditLogMiddleware, ModelRetryMiddleware, RuntimeLimitMiddleware,
-      TokenRateLimitMiddleware, ToolPolicyMiddleware, TokenBudgetMiddleware,
+      TokenRateLimitMiddleware, ToolPolicyMiddleware, ToolSettingsMiddleware, TokenBudgetMiddleware,
       CostBudgetMiddleware, ExponentialBackoffRetryMiddleware,
       LoopDetectionMiddleware, CircuitBreakerMiddleware, CircuitState,
       CanaryTripwireMiddleware, ConfusedDeputyGuardMiddleware, and HoneypotToolMiddleware.
@@ -47,6 +47,7 @@ from vidbyte.middleware.builtins import (
     TokenRateLimitMiddleware,
     ToolResultCompactionMiddleware,
     ToolPolicyMiddleware,
+    ToolSettingsMiddleware,
     TraceReplacementCompactionMiddleware,
     TraceSummaryTailCompactionMiddleware,
 )
@@ -78,6 +79,7 @@ __all__ = [
     "TokenRateLimitMiddleware",
     "ToolResultCompactionMiddleware",
     "ToolPolicyMiddleware",
+    "ToolSettingsMiddleware",
     "TraceReplacementCompactionMiddleware",
     "TraceSummaryTailCompactionMiddleware",
 ]

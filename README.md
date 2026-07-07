@@ -511,6 +511,29 @@ agent = Agent(
 
 The default policy retries idempotent transient tool failures and renders terminal tool errors with full detail.
 
+Use `ToolSettings` for simple universal tool guardrails:
+
+```python
+from vidbyte import Agent, AgentLoopSettings, ToolSettings
+
+agent = Agent(
+    name="guarded-worker",
+    system_prompt="Use tools carefully.",
+    runner=my_runner,
+    tools=[lookup_metric],
+    agent_loop_settings=AgentLoopSettings(
+        tool_settings=ToolSettings(
+            denied_tools={"delete_file"},
+            max_calls=20,
+            max_calls_per_tool={"lookup_metric": 5},
+            result_max_chars=8000,
+        ),
+    ),
+)
+```
+
+`denied_tools` is useful even when the agent's initial tool list is explicit: it records team policy, acts as a hard reminder, and blocks dynamically attached tools by name. `result_max_chars` only truncates what the model sees; raw tool results remain in runtime tool-call metadata.
+
 Compaction middleware supports deterministic provider-message pruning without hidden model calls. Examples include `trim_to_token_budget`, `trim_with_provider_boundaries`, `delete_messages`, `tool_output_sliding_window`, `clear_tool_results_except`, `head_tail_tool_preview`, `scrub_bloat`, `summary_with_backrefs`, `selective_prune`, `salience_score_eviction`, `query_relevance_filter`, and `context_snapshot_branch_trim`.
 
 ```python
