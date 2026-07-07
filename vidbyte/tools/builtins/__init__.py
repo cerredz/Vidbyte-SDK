@@ -11,6 +11,7 @@ Architecture:
     - Context compaction tools from builtins.context.
     - MCP discovery tools from builtins.mcp.
     - Memory provider tools from builtins.memory.
+    - Context primitive editing tools from builtins.context_primitives.
     - Context algorithm tools from builtins.trajectory_checkpoint and builtins.reflexion.
 Relations:
     Related to vidbyte.tools.client and vidbyte.tools.registry.
@@ -27,7 +28,19 @@ from vidbyte.tools.builtins.context import (
     ContextMessage,
     ProgressLog,
 )
-from vidbyte.tools.builtins.context_primitives import ContextListTool, ContextRemoveTool, ContextUpsertTool
+from vidbyte.tools.builtins.context_primitives import (
+    CREATE_TOOL_REGISTRY,
+    CreateContextPrimitiveTool,
+    ContextEditTool,
+    ContextListTool,
+    ContextMoveTool,
+    ContextRemoveTool,
+    ContextStatsTool,
+    ContextUpsertTool,
+    ContextViewTool,
+    PrimitiveToolDefinition,
+    context_window_tools,
+)
 from vidbyte.tools.builtins.editing import PatchTool
 from vidbyte.tools.builtins.fork import ForkConversationTool
 from vidbyte.tools.builtins.handoff import CreateHandoffTool
@@ -85,10 +98,18 @@ __all__ = [
     "CheckpointTool",
     "CompactionMode",
     "ContextCompactionTool",
+    "CREATE_TOOL_REGISTRY",
+    "CreateContextPrimitiveTool",
+    "ContextEditTool",
     "ContextListTool",
     "ContextMessage",
+    "ContextMoveTool",
     "ContextRemoveTool",
+    "ContextStatsTool",
     "ContextUpsertTool",
+    "ContextViewTool",
+    "PrimitiveToolDefinition",
+    "context_window_tools",
     "ForkConversationTool",
     "GlobTool",
     "GrepTool",

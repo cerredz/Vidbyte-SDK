@@ -61,14 +61,24 @@ from vidbyte.tools.builtins.context import ContextCompactionTool
 Context-primitive tools let the model read and write structured items in the agent's context window through the shared `ContextManager`. They are `SAFE` (no filesystem, network, or external state).
 
 ```python
-from vidbyte.tools.builtins.context_primitives import ContextUpsertTool, ContextListTool, ContextRemoveTool
+from vidbyte import ContextManager
+from vidbyte.tools.builtins.context_primitives import context_window_tools
+
+ctx = ContextManager()
+tools = context_window_tools(ctx)
 ```
 
 | Tool | Description |
 |------|-------------|
-| `ContextUpsertTool(context_manager)` | Insert or update a structured context item in the context window. |
+| `context_window_tools(context_manager, include=None, management=True)` | Mount per-primitive create tools plus list/remove/view/stats/edit/move management tools. |
+| `context_create_<key>` | Typed create/upsert tools for `text`, `document`, `memory`, `plan`, `task`, `progress`, `artifact`, `environment`, and `git_diff`. |
 | `ContextListTool(context_manager)` | List the current context items. |
-| `ContextRemoveTool(context_manager)` | Remove a context item by id. |
+| `ContextRemoveTool(context_manager)` | Remove a non-frozen context item by id. |
+| `ContextViewTool(context_manager)` | View one primitive's rendered text by id. |
+| `ContextStatsTool(context_manager)` | Inspect id, kind, title, placement, frozen flag, and char count. |
+| `ContextEditTool(context_manager)` | Replace one exact, unique string in a primitive's `content` field. |
+| `ContextMoveTool(context_manager)` | Move a non-frozen primitive to a different context placement. |
+| `ContextUpsertTool(context_manager)` | Legacy flattened insert/update tool retained for compatibility. |
 
 See [`skills/vidbyte-sdk/context-primitives.md`](../vidbyte-sdk/context-primitives.md).
 

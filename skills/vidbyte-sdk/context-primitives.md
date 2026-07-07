@@ -10,7 +10,7 @@ Purpose:
 Architecture:
     - vidbyte/context/primitives/: ContextItem dataclasses (one module per group).
     - ContextManager: runtime-scoped collection + placement + rendering.
-    - context_primitives tools: model-callable upsert/list/remove.
+    - context_primitives tools: model-callable create/list/remove/view/stats/edit/move.
 Relations:
     See skills/vidbyte-sdk/context-algorithm-to-tool.md (algorithm/tool forms),
     skills/vidbyte-sdk/adding-context-window-algorithms.md, and
@@ -65,6 +65,9 @@ context items, their placement in the context window, and rendering. It is insta
 | `place_after_system_prompt(item) -> str` | Render the item at the top of the context zone; mints a `primitive_id`. |
 | `place_after_tools(item) -> str` | Render the item at the end of the context zone; mints a `primitive_id`. |
 | `get_by_id(primitive_id)` / `remove_by_id(primitive_id)` | Look up / remove by id. |
+| `registry_items()` | Ordered, read-only view of managed registry entries. |
+| `set_placement(primitive_id, placement)` | Move an existing managed primitive to a new render placement. |
+| `set_frozen(primitive_id, frozen)` | Mark an existing managed primitive developer-owned or agent-editable. |
 | `items()` / `by_kind(kind)` | Inspect the current items. |
 | `render_primitives_zone()` | Render the primitives zone to text. |
 | `clear()` / `clear_registry()` | Reset. |
@@ -75,29 +78,35 @@ see `skills/vidbyte-sdk/adding-context-window-algorithms.md`.
 
 ## Model-Callable Context Tools
 
-The `context_primitives` tool family lets the model manage its own context window. Each tool is
-constructed with the live `ContextManager` and is `ToolPermission.SAFE`:
+The `context_primitives` tool family lets the model manage its own context window. Each tool is constructed with the same live `ContextManager` that is passed to `BaseAgent(context_manager=...)` and is `ToolPermission.SAFE`:
 
 ```python
-from vidbyte.tools.builtins.context_primitives import ContextUpsertTool, ContextListTool, ContextRemoveTool
+from vidbyte import Agent, ContextManager
+from vidbyte.tools.builtins.context_primitives import context_window_tools
 
-# context_manager comes from the agent runtime; never pass it into execute()
-tools = [
-    ContextUpsertTool(context_manager),
-    ContextListTool(context_manager),
-    ContextRemoveTool(context_manager),
-]
+ctx = ContextManager()
+agent = Agent(
+    name="context-editor",
+    runner=my_runner,
+    context_manager=ctx,
+    tools=context_window_tools(ctx),
+)
 ```
 
 | Tool | Action |
 |------|--------|
-| `ContextUpsertTool` | Model inserts/updates a structured context item. |
+| `context_window_tools(context_manager, include=None, management=True)` | Factory returning per-primitive create tools plus management tools. |
+| `CreateContextPrimitiveTool` | Registry-backed generic class used to instantiate `context_create_<key>` tools. |
+| `context_create_text`, `context_create_document`, `context_create_memory`, `context_create_plan`, `context_create_task`, `context_create_progress`, `context_create_artifact`, `context_create_environment`, `context_create_git_diff` | Typed create/upsert tools for supported primitive keys. Reusing `primitive_id` overwrites unless the existing primitive is frozen. |
 | `ContextListTool` | Model lists current context items. |
-| `ContextRemoveTool` | Model removes a context item by id. |
+| `ContextRemoveTool` | Model removes a non-frozen context item by id. |
+| `ContextViewTool` | Model views the rendered text for one primitive by id. |
+| `ContextStatsTool` | Model lists id, kind, title, placement, frozen flag, and rendered character count. |
+| `ContextEditTool` | Model performs an exact, unique string replacement on primitives with a string `content` field. |
+| `ContextMoveTool` | Model changes the placement for one non-frozen primitive. |
+| `ContextUpsertTool` | Legacy flattened insert/update tool retained for compatibility. |
 
-These tools share the same `ContextManager.upsert()` path that context-window algorithms use.
-The difference is who triggers the write (model vs. runtime) — see
-`skills/vidbyte-sdk/context-algorithm-to-tool.md`.
+These tools share the same `ContextManager.upsert()` path that context-window algorithms use. The difference is who triggers the write: model vs. runtime. Supported create keys intentionally exclude filesystem-backed `file`, event-record primitives (`response`, `tool_call`), and algorithm-owned primitives (`reflexion`, `trajectory_checkpoint`, `error_correction`, `problem_space_search`). Keep one shared manager instance everywhere; tools mutate that manager, and the linear runtime re-renders its registry on the next iteration.
 
 ## Adding a New Primitive
 

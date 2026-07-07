@@ -52,6 +52,12 @@ class ContextRemoveTool(BaseTool):
     async def execute(self, call: ToolCall) -> ToolResult:
         """Remove the primitive with the given id from the manager."""
         primitive_id = str(call.arguments.get("primitive_id", "")).strip()
+        item = self._manager.get_by_id(primitive_id)
+        if item is not None and getattr(item, "primitive_frozen", False):
+            return ToolResult.error(
+                call.tool_name,
+                f"Primitive '{primitive_id}' is frozen; it cannot be removed. Create a new primitive with a different id instead.",
+            )
         self._manager.remove_by_id(primitive_id)
         return ToolResult.success(
             call.tool_name,
