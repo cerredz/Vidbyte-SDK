@@ -127,14 +127,6 @@ class SessionBindingProbe:
         self.session = session
 
 
-class AggregateDelegateProbe:
-    """Aggregate-agent-like probe that returns one scripted reply."""
-
-    async def generate_reply(self, message, *, recipient="orchestrator", **_options):
-        # Return a reply through the aggregate-delegate early-return path.
-        return AgentMessage(sender="worker", recipient=recipient, content=f"aggregate:{message}", metadata={})
-
-
 def _run_state(name: str = "a", history: tuple = ()) -> RunState:
     return RunState(
         schema_version=SESSION_SCHEMA_VERSION,
@@ -757,18 +749,6 @@ class SessionIntegrationTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(len(store.history(session.id)), 1)
 
-    async def test_aggregate_delegate_path_records_one_checkpoint(self) -> None:  # [Silent Failure]
-        # Verify the generate_reply aggregate early return still notifies the bound session.
-        store = InMemorySessionStore()
-        agent = Agent(name="worker", system_prompt="Work.", runner=EchoRunner())
-        agent._aggregate_agent = AggregateDelegateProbe()
-        session = Session(agent, store=store)
-
-        reply = await agent.arun("first")
-
-        self.assertEqual(reply.content, "aggregate:first")
-        self.assertEqual(len(store.history(session.id)), 1)
-
     async def test_agent_arun_respects_manual_session_policy(self) -> None:  # [Hidden Assumption]
         # Verify the session policy still owns whether agent-side turn recording persists.
         store = InMemorySessionStore()
@@ -796,13 +776,12 @@ class SessionIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("__session_error__", reply.metadata)
 
     def test_internal_agent_constructions_do_not_create_sessions(self) -> None:  # [Hidden Assumption]
-        # Verify fork, restore, and aggregate helper agents start without eager session binding.
-        agent = Agent(name="worker", system_prompt="Work.", provider="openai", model_name=("gpt-4.1", "gpt-4.1-mini"))
+        # Verify fork and restore helper agents start without eager session binding.
+        agent = Agent(name="worker", system_prompt="Work.", provider="openai", model_name="gpt-4.1")
 
         self.assertIsNone(agent.session)
         self.assertIsNone(agent.fork().session)
         self.assertIsNone(Agent.restore(agent.export_state()).session)
-        self.assertIsNone(agent._aggregate_agent.session)
 
     async def test_resume_continues_history_cold(self) -> None:  # [Hidden Failure]
         store = InMemorySessionStore()

@@ -202,7 +202,7 @@ class AgentForkSettings:
     handoff: Handoff | None = None
     runtime: AgentRuntimeType | str | LinearRuntime | MctsSearchRuntime | ActorRuntime | None = None
     run_id: str | None = None
-    model_name: str | Sequence[str] | None = None
+    model_name: str | None = None
     provider: ModelProvider | str | None = None
     temperature: float | None = None
     runner_options: dict[str, Any] | None = None
@@ -217,3 +217,7 @@ class AgentForkSettings:
             raise AgentForkConfigurationError("max_iterations must be greater than zero when provided.")
         if self.temperature is not None and not 0.0 <= self.temperature <= 2.0:
             raise AgentForkConfigurationError("temperature must be between 0 and 2 when provided.")
+        if self.model_name is not None and not isinstance(self.model_name, str):
+            raise AgentForkConfigurationError(
+                "model_name must be a single model name string; use AggregateAgent for multi-model aggregation."
+            )
