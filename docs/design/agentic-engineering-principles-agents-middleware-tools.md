@@ -50,6 +50,7 @@ Repository audit findings:
 - Existing code already favors classes in most non-trivial areas, but there are long orchestration methods, multi-line signatures, and helper functions whose agent readability can be improved without changing behavior.
 - Error handling currently uses centralized safe SDK exceptions from `vidbyte.lib.errors.base`, with optional `details` mappings. The target pass should enrich those existing details where appropriate rather than creating a second error framework inside `agents`, `middleware`, or `tools`.
 - The local checkout is dirty on branch `feat/context-minimal-fanout-trace` with unrelated untracked design docs and worktree folders. Implementation must happen only after approval, in a fresh worktree, without touching unrelated files.
+- The implementation worktree is based on `main` at `d5183cf`, which includes three additional in-scope files that were not present during the first audit branch: `vidbyte/agents/fork.py`, `vidbyte/agents/settings/tool_error.py`, and `vidbyte/middleware/builtins/tool_error_policy.py`.
 - The repository does not contain `docs/design/references/design-doc-template.md`; this design uses the template bundled with the selected local skill at `C:/Users/422mi/.codex/skills/design-doc-no-tests/references/design-doc-template.md`.
 
 Reference sources loaded through web search:
@@ -348,6 +349,7 @@ Complete list of every file that will be created, modified, or deleted:
 | MODIFY | `vidbyte/agents/client.py` | Add or upgrade structured file header and public client inventory. |
 | MODIFY | `vidbyte/agents/context_algorithms.py` | Add agentic header and document context-window routing responsibilities. |
 | MODIFY | `vidbyte/agents/continual_trace.py` | Add agentic header and intent comments for continual trace behavior. |
+| MODIFY | `vidbyte/agents/fork.py` | Add agentic header and document fork/session-boundary responsibilities. |
 | MODIFY | `vidbyte/agents/handoff.py` | Add agentic header, intent comments, and safe parse/error context where appropriate. |
 | MODIFY | `vidbyte/agents/mixins.py` | Add agentic header and document MCP attachment responsibilities. |
 | MODIFY | `vidbyte/agents/runtime.py` | Add agentic header, intent comments, function documentation cleanup, and safe error context where appropriate. |
@@ -362,6 +364,7 @@ Complete list of every file that will be created, modified, or deleted:
 | MODIFY | `vidbyte/agents/runtimes/search.py` | Add agentic header and intent comments for search runtime constraints. |
 | MODIFY | `vidbyte/agents/settings/__init__.py` | Add or upgrade structured file header and export inventory. |
 | MODIFY | `vidbyte/agents/settings/loop.py` | Add agentic header and safe configuration error context. |
+| MODIFY | `vidbyte/agents/settings/tool_error.py` | Add agentic header and tool error policy contract notes. |
 | MODIFY | `vidbyte/agents/types.py` | Add or upgrade structured file header for compatibility re-exports. |
 | MODIFY | `vidbyte/middleware/README.md` | Expand folder README into agentic comprehension cache. |
 | MODIFY | `vidbyte/middleware/__init__.py` | Add or upgrade structured file header and export inventory. |
@@ -380,6 +383,7 @@ Complete list of every file that will be created, modified, or deleted:
 | MODIFY | `vidbyte/middleware/builtins/retry.py` | Add agentic header and intent comments for model retry behavior. |
 | MODIFY | `vidbyte/middleware/builtins/runtime_limits.py` | Add agentic header and safe validation error context where appropriate. |
 | MODIFY | `vidbyte/middleware/builtins/token_budget.py` | Add agentic header and intent comments for final-response-over-budget behavior. |
+| MODIFY | `vidbyte/middleware/builtins/tool_error_policy.py` | Add agentic header and intent comments for retry/circuit behavior after tool failures. |
 | MODIFY | `vidbyte/middleware/builtins/tool_policy.py` | Add agentic header and intent comments for tool allow/deny decisions. |
 | MODIFY | `vidbyte/middleware/compaction/__init__.py` | Add or upgrade structured file header and export inventory. |
 | MODIFY | `vidbyte/middleware/compaction/base.py` | Add agentic header and compaction contract inventory. |
