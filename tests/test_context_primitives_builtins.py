@@ -19,7 +19,7 @@ from vidbyte.tools.builtins.context_primitives import (
     ContextRemoveTool,
     ContextStatsTool,
     ContextUpsertTool,
-    ContextViewTool,
+    ContextWindowFactory,
     context_window_tools,
 )
 from vidbyte.tools.types import ToolCall
@@ -104,27 +104,6 @@ class ContextRemoveToolTests(unittest.IsolatedAsyncioTestCase):
 
 
 class ContextManagementToolTests(unittest.IsolatedAsyncioTestCase):
-    async def test_view_returns_rendered_primitive_text(self) -> None:
-        """Verify context_view returns the target primitive's rendered text."""
-        manager = ContextManager()
-        manager.upsert(TextContextItem(primitive_id="note:1", title="Note", content="body"))
-        tool = ContextViewTool(manager)
-
-        result = await tool.execute(ToolCall(tool_name="context_view", arguments={"primitive_id": "note:1"}))
-
-        self.assertIn("body", result.output)
-        self.assertEqual(result.metadata["primitive_id"], "note:1")
-
-    async def test_view_errors_for_missing_primitive(self) -> None:
-        """Verify context_view gives an actionable error for an unknown id."""
-        manager = ContextManager()
-        tool = ContextViewTool(manager)
-
-        result = await tool.execute(ToolCall(tool_name="context_view", arguments={"primitive_id": "missing"}))
-
-        self.assertEqual(result.status.value, "error")
-        self.assertIn("does not exist", result.output)
-
     async def test_stats_lists_placement_frozen_and_char_count(self) -> None:
         """Verify context_stats includes placement, frozen status, and rendered size."""
         manager = ContextManager()
@@ -237,7 +216,27 @@ class ContextManagementToolTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(
             tuple(tool.name for tool in tools),
-            ("context_create_text", "context_list", "context_remove", "context_view", "context_stats", "context_edit", "context_move"),
+            ("context_create_text", "context_list", "context_remove", "context_stats", "context_edit", "context_move"),
+        )
+
+    async def test_context_window_factory_build_matches_convenience_wrapper(self) -> None:
+        """Verify ContextWindowFactory is the canonical mount surface."""
+        manager = ContextManager()
+
+        via_class = ContextWindowFactory(manager).build(include=("text",), management=True)
+        via_func = context_window_tools(manager, include=("text",), management=True)
+
+        self.assertEqual(tuple(tool.name for tool in via_class), tuple(tool.name for tool in via_func))
+
+    async def test_context_window_factory_management_tools_only(self) -> None:
+        """Verify management_tools returns the non-create management surface."""
+        manager = ContextManager()
+
+        tools = ContextWindowFactory(manager).management_tools()
+
+        self.assertEqual(
+            tuple(tool.name for tool in tools),
+            ("context_list", "context_remove", "context_stats", "context_edit", "context_move"),
         )
 
     async def test_context_window_tools_rejects_unknown_include_key(self) -> None:
@@ -334,7 +333,7 @@ class ContextUpsertToolTests(unittest.IsolatedAsyncioTestCase):
         from vidbyte import ContextRemoveTool as RootRemove
         from vidbyte import ContextStatsTool as RootStats
         from vidbyte import ContextUpsertTool as RootUpsert
-        from vidbyte import ContextViewTool as RootView
+        from vidbyte import ContextWindowFactory as RootFactory
         from vidbyte import context_window_tools as root_context_window_tools
 
         self.assertIs(RootList, ContextListTool)
@@ -342,7 +341,7 @@ class ContextUpsertToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertIs(RootRemove, ContextRemoveTool)
         self.assertIs(RootStats, ContextStatsTool)
         self.assertIs(RootUpsert, ContextUpsertTool)
-        self.assertIs(RootView, ContextViewTool)
+        self.assertIs(RootFactory, ContextWindowFactory)
         self.assertIs(root_context_window_tools, context_window_tools)
 
 

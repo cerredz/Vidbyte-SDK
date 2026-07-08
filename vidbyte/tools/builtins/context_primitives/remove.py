@@ -35,14 +35,21 @@ class ContextRemoveTool(BaseTool):
         return ToolSpec(
             name="context_remove",
             description=(
-                "Remove a named primitive from the context window. "
-                "No-op if the primitive does not exist."
+                "context_remove is the management tool for deleting managed context window "
+                "primitives the agent no longer needs. context_remove does remove one "
+                "non-frozen primitive by primitive_id from the shared ContextManager registry "
+                "(no-op if the id is already absent) so the rendered context window zone "
+                "stops including that entry on the next loop iteration."
             ),
             parameters=(
                 ToolParameter(
                     name="primitive_id",
                     type="string",
-                    description="The id of the primitive to remove, e.g. 'plan:current'.",
+                    description=(
+                        "primitive_id is the registry key of the managed primitive to delete "
+                        "(for example 'plan:current'). primitive_id does select the slot to "
+                        "remove; frozen primitives cannot be deleted through this tool."
+                    ),
                     required=True,
                 ),
             ),

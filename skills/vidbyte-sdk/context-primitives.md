@@ -82,25 +82,25 @@ The `context_primitives` tool family lets the model manage its own context windo
 
 ```python
 from vidbyte import Agent, ContextManager
-from vidbyte.tools.builtins.context_primitives import context_window_tools
+from vidbyte.tools.builtins.context_primitives import ContextWindowFactory
 
 ctx = ContextManager()
 agent = Agent(
     name="context-editor",
     runner=my_runner,
     context_manager=ctx,
-    tools=context_window_tools(ctx),
+    tools=ContextWindowFactory(ctx).build(),
 )
 ```
 
 | Tool | Action |
 |------|--------|
-| `context_window_tools(context_manager, include=None, management=True)` | Factory returning per-primitive create tools plus management tools. |
+| `ContextWindowFactory(context_manager).build(include=None, management=True)` | Class factory mounting per-primitive create tools plus management tools. |
+| `context_window_tools(...)` | Thin convenience wrapper around `ContextWindowFactory(...).build(...)`. |
 | `CreateContextPrimitiveTool` | Registry-backed generic class used to instantiate `context_create_<key>` tools. |
-| `context_create_text`, `context_create_document`, `context_create_memory`, `context_create_plan`, `context_create_task`, `context_create_progress`, `context_create_artifact`, `context_create_environment`, `context_create_git_diff` | Typed create/upsert tools for supported primitive keys. Reusing `primitive_id` overwrites unless the existing primitive is frozen. |
+| `context_create_text`, `context_create_document`, `context_create_memory`, `context_create_plan`, `context_create_task`, `context_create_progress`, `context_create_artifact`, `context_create_environment`, `context_create_git_diff` | Typed create/upsert tools for supported primitive keys. Tool strings live on each primitive's `TOOL_CREATE_META`. Reusing `primitive_id` overwrites unless the existing primitive is frozen. |
 | `ContextListTool` | Model lists current context items. |
 | `ContextRemoveTool` | Model removes a non-frozen context item by id. |
-| `ContextViewTool` | Model views the rendered text for one primitive by id. |
 | `ContextStatsTool` | Model lists id, kind, title, placement, frozen flag, and rendered character count. |
 | `ContextEditTool` | Model performs an exact, unique string replacement on primitives with a string `content` field. |
 | `ContextMoveTool` | Model changes the placement for one non-frozen primitive. |
@@ -113,9 +113,14 @@ These tools share the same `ContextManager.upsert()` path that context-window al
 1. Add the dataclass to the appropriate module under `vidbyte/context/primitives/`
    (or a new module), `@dataclass(frozen=True, slots=True)` with a `primitive_id` and a
    `to_context_text()` that bounds output with `_truncate_text`.
-2. Export it from `vidbyte/context/primitives/__init__.py` (and `vidbyte/context/__init__.py` /
+2. If the primitive should be model-creatable, add a `TOOL_CREATE_META` ClassVar dictionary
+   on the dataclass with `key`, `tool_name`, `default_title`, a detailed
+   `{tool_name} is ... {tool_name} does ...` description, and a `fields` map of detailed
+   parameter strings/schemas. Then register a builder row in
+   `vidbyte/tools/builtins/context_primitives/registry.py`.
+3. Export it from `vidbyte/context/primitives/__init__.py` (and `vidbyte/context/__init__.py` /
    `vidbyte/__init__.py` if public).
-3. If the primitive backs a context-window algorithm and a tool, follow
+4. If the primitive backs a context-window algorithm and a tool, follow
    `skills/vidbyte-sdk/context-algorithm-to-tool.md` so both forms share the one dataclass.
 4. Add tests (`tests/test_context_management.py`, `tests/test_context_primitives_*`).
 

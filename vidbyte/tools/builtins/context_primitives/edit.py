@@ -8,7 +8,7 @@ Purpose:
 Architecture:
     - ContextEditTool: BaseTool that dataclasses.replace()s the content field.
 Relations:
-    Used via context_window_tools and vidbyte.tools.builtins.context_primitives.
+    Used via ContextWindowFactory and vidbyte.tools.builtins.context_primitives.
     Depends on ContextManager and frozen primitive semantics.
 """
 
@@ -36,11 +36,43 @@ class ContextEditTool(BaseTool):
         """Return the model-facing declaration for this tool."""
         return ToolSpec(
             name="context_edit",
-            description="Edit one non-frozen content-bearing context primitive by replacing one exact, unique old_string with new_string.",
+            description=(
+                "context_edit is the management tool for surgical updates to content-bearing "
+                "managed context window primitives. context_edit does replace exactly one unique "
+                "occurrence of old_string with new_string on a non-frozen primitive that has a "
+                "string content field, preserving placement and other fields; it refuses zero "
+                "matches, multiple matches, frozen primitives, and primitives without editable content."
+            ),
             parameters=(
-                ToolParameter(name="primitive_id", type="string", description="The id of the primitive to edit.", required=True),
-                ToolParameter(name="old_string", type="string", description="Exact existing content string to replace. It must appear exactly once.", required=True),
-                ToolParameter(name="new_string", type="string", description="Replacement string.", required=True),
+                ToolParameter(
+                    name="primitive_id",
+                    type="string",
+                    description=(
+                        "primitive_id is the registry key of the managed primitive to edit. "
+                        "primitive_id does select which slot is patched; use context_stats or "
+                        "context_list if you need to discover available ids."
+                    ),
+                    required=True,
+                ),
+                ToolParameter(
+                    name="old_string",
+                    type="string",
+                    description=(
+                        "old_string is the exact existing substring to replace inside the primitive "
+                        "content field. old_string does identify the patch target and must appear "
+                        "exactly once — expand the substring if it is missing or ambiguous."
+                    ),
+                    required=True,
+                ),
+                ToolParameter(
+                    name="new_string",
+                    type="string",
+                    description=(
+                        "new_string is the replacement text written in place of the single old_string "
+                        "match. new_string does become the updated content fragment after a successful edit."
+                    ),
+                    required=True,
+                ),
             ),
             permission=ToolPermission.SAFE,
         )
@@ -62,7 +94,10 @@ class ContextEditTool(BaseTool):
             return ToolResult.error(call.tool_name, "old_string must be a non-empty exact string that appears once in the primitive content.")
         match_count = content.count(old_string)
         if match_count == 0:
-            return ToolResult.error(call.tool_name, f"old_string was not found in primitive '{primitive_id}'. Use context_view first and pass an exact substring.")
+            return ToolResult.error(
+                call.tool_name,
+                f"old_string was not found in primitive '{primitive_id}'. Read the primitive from the rendered context window zone and pass an exact substring that appears once.",
+            )
         if match_count > 1:
             return ToolResult.error(call.tool_name, f"old_string appears {match_count} times in primitive '{primitive_id}'. Use a longer exact string that appears once.")
         try:

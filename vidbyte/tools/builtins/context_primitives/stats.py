@@ -8,7 +8,7 @@ Purpose:
 Architecture:
     - ContextStatsTool: BaseTool that reads ContextManager.registry_items().
 Relations:
-    Used via context_window_tools and vidbyte.tools.builtins.context_primitives.
+    Used via ContextWindowFactory and vidbyte.tools.builtins.context_primitives.
     Depends on ContextManager placement metadata.
 """
 
@@ -35,7 +35,12 @@ class ContextStatsTool(BaseTool):
         """Return the model-facing declaration for this tool."""
         return ToolSpec(
             name="context_stats",
-            description="List context window primitive ids, kinds, titles, placements, frozen flags, and rendered character counts.",
+            description=(
+                "context_stats is the management tool for a compact inventory of every managed "
+                "context window primitive. context_stats does return one line per registry entry "
+                "with id, kind, title, placement, frozen flag, and rendered character count so the "
+                "agent can decide what to edit, move, or remove without dumping full primitive bodies."
+            ),
             parameters=(),
             permission=ToolPermission.SAFE,
         )

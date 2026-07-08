@@ -8,7 +8,7 @@ Purpose:
 Architecture:
     - ContextMoveTool: BaseTool that routes to ContextManager.set_placement().
 Relations:
-    Used via context_window_tools and vidbyte.tools.builtins.context_primitives.
+    Used via ContextWindowFactory and vidbyte.tools.builtins.context_primitives.
     Depends on ContextWindowPlacement and frozen primitive semantics.
 """
 
@@ -35,10 +35,33 @@ class ContextMoveTool(BaseTool):
         """Return the model-facing declaration for this tool."""
         return ToolSpec(
             name="context_move",
-            description="Move one non-frozen context window primitive to another placement without changing content.",
+            description=(
+                "context_move is the management tool for reordering managed context window "
+                "primitives without rewriting their content. context_move does change the "
+                "placement of one non-frozen primitive among top_of_context, end_of_context, "
+                "top_of_conversation, and end_of_conversation so the agent can prioritize what "
+                "the model sees first on the next loop iteration."
+            ),
             parameters=(
-                ToolParameter(name="primitive_id", type="string", description="The id of the primitive to move.", required=True),
-                ToolParameter(name="placement", type="string", description="One of: top_of_context, end_of_context, top_of_conversation, end_of_conversation.", required=True),
+                ToolParameter(
+                    name="primitive_id",
+                    type="string",
+                    description=(
+                        "primitive_id is the registry key of the managed primitive to move. "
+                        "primitive_id does select which slot's placement metadata is updated."
+                    ),
+                    required=True,
+                ),
+                ToolParameter(
+                    name="placement",
+                    type="string",
+                    description=(
+                        "placement is the new render position for the primitive. placement does "
+                        "accept top_of_context, end_of_context, top_of_conversation, or "
+                        "end_of_conversation and leaves content unchanged."
+                    ),
+                    required=True,
+                ),
             ),
             permission=ToolPermission.SAFE,
         )

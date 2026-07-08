@@ -37,7 +37,7 @@ from vidbyte.tools.builtins.context_primitives import (
     ContextRemoveTool,
     ContextStatsTool,
     ContextUpsertTool,
-    ContextViewTool,
+    ContextWindowFactory,
     PrimitiveToolDefinition,
     context_window_tools,
 )
@@ -107,7 +107,7 @@ __all__ = [
     "ContextRemoveTool",
     "ContextStatsTool",
     "ContextUpsertTool",
-    "ContextViewTool",
+    "ContextWindowFactory",
     "PrimitiveToolDefinition",
     "context_window_tools",
     "ForkConversationTool",

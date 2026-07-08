@@ -36,8 +36,10 @@ class ContextListTool(BaseTool):
         return ToolSpec(
             name="context_list",
             description=(
-                "List all named primitives currently in the context window registry. "
-                "Returns id, type, title, and character count for each primitive."
+                "context_list is the management tool for enumerating managed context window "
+                "primitives currently in the registry. context_list does return each primitive's "
+                "id, kind, title, frozen marker, and rendered character count so the agent can "
+                "inspect what is online before creating, editing, moving, or removing entries."
             ),
             parameters=(),
             permission=ToolPermission.SAFE,

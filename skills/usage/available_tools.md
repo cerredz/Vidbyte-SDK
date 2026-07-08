@@ -62,19 +62,19 @@ Context-primitive tools let the model read and write structured items in the age
 
 ```python
 from vidbyte import ContextManager
-from vidbyte.tools.builtins.context_primitives import context_window_tools
+from vidbyte.tools.builtins.context_primitives import ContextWindowFactory
 
 ctx = ContextManager()
-tools = context_window_tools(ctx)
+tools = ContextWindowFactory(ctx).build()
 ```
 
 | Tool | Description |
 |------|-------------|
-| `context_window_tools(context_manager, include=None, management=True)` | Mount per-primitive create tools plus list/remove/view/stats/edit/move management tools. |
+| `ContextWindowFactory(context_manager).build(include=None, management=True)` | Mount per-primitive create tools plus list/remove/stats/edit/move management tools. |
+| `context_window_tools(...)` | Convenience wrapper around `ContextWindowFactory(...).build(...)`. |
 | `context_create_<key>` | Typed create/upsert tools for `text`, `document`, `memory`, `plan`, `task`, `progress`, `artifact`, `environment`, and `git_diff`. |
 | `ContextListTool(context_manager)` | List the current context items. |
 | `ContextRemoveTool(context_manager)` | Remove a non-frozen context item by id. |
-| `ContextViewTool(context_manager)` | View one primitive's rendered text by id. |
 | `ContextStatsTool(context_manager)` | Inspect id, kind, title, placement, frozen flag, and char count. |
 | `ContextEditTool(context_manager)` | Replace one exact, unique string in a primitive's `content` field. |
 | `ContextMoveTool(context_manager)` | Move a non-frozen primitive to a different context placement. |

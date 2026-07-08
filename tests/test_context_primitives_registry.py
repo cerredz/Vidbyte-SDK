@@ -14,7 +14,12 @@ from vidbyte.context.primitives import (
     TextContextItem,
 )
 from vidbyte.lib.dataclasses import ContextItem, ContextResponse, ContextArtifact
-from vidbyte.tools.builtins.context_primitives import CREATE_TOOL_REGISTRY, CreateContextPrimitiveTool, context_window_tools
+from vidbyte.tools.builtins.context_primitives import (
+    CREATE_TOOL_REGISTRY,
+    CreateContextPrimitiveTool,
+    ContextWindowFactory,
+    context_window_tools,
+)
 from vidbyte.tools.types import ToolCall
 
 
@@ -373,6 +378,23 @@ class CreateToolRegistryTests(unittest.IsolatedAsyncioTestCase):
         tools = context_window_tools(manager, include=("text", "plan"), management=False)
 
         self.assertEqual(tuple(tool.name for tool in tools), ("context_create_text", "context_create_plan"))
+        self.assertEqual(
+            tuple(tool.name for tool in ContextWindowFactory(manager).create_tools(include=("text", "plan"))),
+            ("context_create_text", "context_create_plan"),
+        )
+
+    def test_create_tool_descriptions_come_from_primitive_meta(self) -> None:
+        """Verify registry tool strings are owned by each primitive's TOOL_CREATE_META."""
+        for definition in CREATE_TOOL_REGISTRY.values():
+            meta = definition.primitive_cls.TOOL_CREATE_META
+            tool_name = definition.tool_name
+            self.assertEqual(definition.description, meta["description"])
+            self.assertIn(f"{tool_name} is ", definition.description)
+            self.assertIn(f"{tool_name} does ", definition.description)
+            for field_name, field_spec in meta["fields"].items():
+                schema = definition.input_schema["properties"][field_name]
+                self.assertEqual(schema["description"], field_spec["description"])
+                self.assertTrue(len(str(field_spec["description"])) > 40)
 
 
 class PlanContextItemTests(unittest.TestCase):
