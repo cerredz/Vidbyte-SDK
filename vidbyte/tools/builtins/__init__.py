@@ -11,7 +11,9 @@ Architecture:
     - Context compaction tools from builtins.context.
     - MCP discovery tools from builtins.mcp.
     - Memory provider tools from builtins.memory.
+    - Context primitive editing tools from builtins.context_primitives.
     - Context algorithm tools from builtins.trajectory_checkpoint and builtins.reflexion.
+    - Sequential continuation tool from builtins.run_prompts_sequentially.
 Relations:
     Related to vidbyte.tools.client and vidbyte.tools.registry.
 """
@@ -27,11 +29,24 @@ from vidbyte.tools.builtins.context import (
     ContextMessage,
     ProgressLog,
 )
-from vidbyte.tools.builtins.context_primitives import ContextListTool, ContextRemoveTool, ContextUpsertTool
+from vidbyte.tools.builtins.context_primitives import (
+    CREATE_TOOL_REGISTRY,
+    CreateContextPrimitiveTool,
+    ContextEditTool,
+    ContextListTool,
+    ContextMoveTool,
+    ContextRemoveTool,
+    ContextStatsTool,
+    ContextUpsertTool,
+    ContextWindowFactory,
+    PrimitiveToolDefinition,
+    context_window_tools,
+)
 from vidbyte.tools.builtins.editing import PatchTool
 from vidbyte.tools.builtins.fork import ForkConversationTool
 from vidbyte.tools.builtins.handoff import CreateHandoffTool
 from vidbyte.tools.builtins.mcp import AttachMcpServerTool, SearchMcpServersTool
+from vidbyte.tools.builtins.run_prompts_sequentially import RunPromptsSequentiallyTool
 from vidbyte.tools.builtins.providers import (
     MongoCreateCollectionTool,
     MongoCreateIndexTool,
@@ -85,10 +100,18 @@ __all__ = [
     "CheckpointTool",
     "CompactionMode",
     "ContextCompactionTool",
+    "CREATE_TOOL_REGISTRY",
+    "CreateContextPrimitiveTool",
+    "ContextEditTool",
     "ContextListTool",
     "ContextMessage",
+    "ContextMoveTool",
     "ContextRemoveTool",
+    "ContextStatsTool",
     "ContextUpsertTool",
+    "ContextWindowFactory",
+    "PrimitiveToolDefinition",
+    "context_window_tools",
     "ForkConversationTool",
     "GlobTool",
     "GrepTool",
@@ -100,6 +123,7 @@ __all__ = [
     "ResumeOutputTool",
     "ResumeReplaceTool",
     "RewindTool",
+    "RunPromptsSequentiallyTool",
     "SearchMcpServersTool",
     "SemanticSearchTool",
     "SessionTool",

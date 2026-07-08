@@ -116,6 +116,27 @@ class ContextManager:
         """Return the managed primitive with the given id, or None if not found."""
         return self._registry.get(primitive_id)
 
+    def registry_items(self) -> tuple[tuple[str, ContextItem], ...]:
+        """Return an ordered, read-only view of managed primitive registry entries."""
+        return tuple(self._registry.items())
+
+    def set_placement(self, primitive_id: str, placement: ContextWindowPlacement) -> "ContextManager":
+        """Update the render placement for an existing managed primitive."""
+        if primitive_id not in self._registry:
+            raise ValueError(f"Primitive '{primitive_id}' does not exist in the context window registry.")
+        self._placements[primitive_id] = ContextWindowPlacement(placement)
+        return self
+
+    def set_frozen(self, primitive_id: str, frozen: bool) -> "ContextManager":
+        """Update the frozen flag for an existing managed primitive."""
+        item = self._registry.get(primitive_id)
+        if item is None:
+            raise ValueError(f"Primitive '{primitive_id}' does not exist in the context window registry.")
+        if not dataclasses.is_dataclass(item):
+            raise ValueError(f"Primitive '{primitive_id}' is not a dataclass and cannot be frozen.")
+        self._registry[primitive_id] = dataclasses.replace(item, primitive_frozen=bool(frozen))
+        return self
+
     def remove_by_id(self, primitive_id: str) -> "ContextManager":
         """Remove the managed primitive with the given id; silently ignores missing ids."""
         self._registry.pop(primitive_id, None)

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import unittest
 
+from vidbyte.context import ContextWindowPlacement
 from vidbyte.context.manager import ContextManager
 from vidbyte.context.primitives import (
     DocumentContextItem,
@@ -11,7 +12,16 @@ from vidbyte.context.primitives import (
     TaskContextItem,
     TextContextItem,
 )
-from vidbyte.tools.builtins.context_primitives import ContextListTool, ContextRemoveTool, ContextUpsertTool
+from vidbyte.tools.builtins.context_primitives import (
+    ContextEditTool,
+    ContextListTool,
+    ContextMoveTool,
+    ContextRemoveTool,
+    ContextStatsTool,
+    ContextUpsertTool,
+    ContextWindowFactory,
+    context_window_tools,
+)
 from vidbyte.tools.types import ToolCall
 
 
@@ -79,6 +89,162 @@ class ContextRemoveToolTests(unittest.IsolatedAsyncioTestCase):
         result = await tool.execute(call)
 
         self.assertIn("ghost:id", result.output)
+
+    async def test_remove_refuses_frozen_primitive(self) -> None:
+        """Verify the agent-facing remove tool cannot delete developer-owned primitives."""
+        manager = ContextManager()
+        manager.upsert(TextContextItem(primitive_id="locked", title="L", content="c", primitive_frozen=True))
+        tool = ContextRemoveTool(manager)
+        call = ToolCall(tool_name="context_remove", arguments={"primitive_id": "locked"})
+
+        result = await tool.execute(call)
+
+        self.assertEqual(result.status.value, "error")
+        self.assertIsNotNone(manager.get_by_id("locked"))
+
+
+class ContextManagementToolTests(unittest.IsolatedAsyncioTestCase):
+    async def test_stats_lists_placement_frozen_and_char_count(self) -> None:
+        """Verify context_stats includes placement, frozen status, and rendered size."""
+        manager = ContextManager()
+        manager.upsert(TextContextItem(primitive_id="note:1", title="Note", content="body", primitive_frozen=True), placement=ContextWindowPlacement.TOP_OF_CONTEXT)
+        tool = ContextStatsTool(manager)
+
+        result = await tool.execute(ToolCall(tool_name="context_stats", arguments={}))
+
+        self.assertIn("note:1", result.output)
+        self.assertIn("placement=top_of_context", result.output)
+        self.assertIn("frozen=true", result.output)
+        self.assertIn("chars=", result.output)
+
+    async def test_edit_replaces_unique_content_string(self) -> None:
+        """Verify context_edit performs one exact replacement on content fields."""
+        manager = ContextManager()
+        manager.upsert(TextContextItem(primitive_id="note:1", title="Note", content="old body"), placement=ContextWindowPlacement.TOP_OF_CONTEXT)
+        tool = ContextEditTool(manager)
+
+        result = await tool.execute(ToolCall(tool_name="context_edit", arguments={"primitive_id": "note:1", "old_string": "old", "new_string": "new"}))
+
+        self.assertEqual(result.status.value, "success")
+        stored = manager.get_by_id("note:1")
+        assert stored is not None
+        self.assertIn("new body", stored.to_context_text())
+        self.assertEqual(manager.placement_for("note:1"), ContextWindowPlacement.TOP_OF_CONTEXT)
+
+    async def test_edit_errors_when_old_string_is_absent(self) -> None:
+        """Verify context_edit refuses a patch when the old string is not present."""
+        manager = ContextManager()
+        manager.upsert(TextContextItem(primitive_id="note:1", title="Note", content="body"))
+        tool = ContextEditTool(manager)
+
+        result = await tool.execute(ToolCall(tool_name="context_edit", arguments={"primitive_id": "note:1", "old_string": "missing", "new_string": "new"}))
+
+        self.assertEqual(result.status.value, "error")
+        self.assertIn("not found", result.output)
+
+    async def test_edit_errors_when_old_string_is_ambiguous(self) -> None:
+        """Verify context_edit refuses a patch when the old string appears multiple times."""
+        manager = ContextManager()
+        manager.upsert(TextContextItem(primitive_id="note:1", title="Note", content="same same"))
+        tool = ContextEditTool(manager)
+
+        result = await tool.execute(ToolCall(tool_name="context_edit", arguments={"primitive_id": "note:1", "old_string": "same", "new_string": "new"}))
+
+        self.assertEqual(result.status.value, "error")
+        self.assertIn("appears 2 times", result.output)
+
+    async def test_edit_errors_for_primitive_without_content_field(self) -> None:
+        """Verify context_edit does not pretend non-content primitives are editable."""
+        manager = ContextManager()
+        manager.upsert(PlanContextItem(primitive_id="plan:1", steps=("a",)))
+        tool = ContextEditTool(manager)
+
+        result = await tool.execute(ToolCall(tool_name="context_edit", arguments={"primitive_id": "plan:1", "old_string": "a", "new_string": "b"}))
+
+        self.assertEqual(result.status.value, "error")
+        self.assertIn("no editable string content", result.output)
+
+    async def test_edit_refuses_frozen_primitive(self) -> None:
+        """Verify context_edit cannot modify frozen primitives."""
+        manager = ContextManager()
+        manager.upsert(TextContextItem(primitive_id="locked", title="Locked", content="body", primitive_frozen=True))
+        tool = ContextEditTool(manager)
+
+        result = await tool.execute(ToolCall(tool_name="context_edit", arguments={"primitive_id": "locked", "old_string": "body", "new_string": "new"}))
+
+        self.assertEqual(result.status.value, "error")
+        self.assertIn("frozen", result.output)
+
+    async def test_move_updates_placement(self) -> None:
+        """Verify context_move changes placement without touching content."""
+        manager = ContextManager()
+        manager.upsert(TextContextItem(primitive_id="note:1", title="Note", content="body"))
+        tool = ContextMoveTool(manager)
+
+        result = await tool.execute(ToolCall(tool_name="context_move", arguments={"primitive_id": "note:1", "placement": "top_of_context"}))
+
+        self.assertEqual(result.status.value, "success")
+        self.assertEqual(manager.placement_for("note:1"), ContextWindowPlacement.TOP_OF_CONTEXT)
+
+    async def test_move_refuses_frozen_primitive(self) -> None:
+        """Verify context_move cannot move frozen primitives."""
+        manager = ContextManager()
+        manager.upsert(TextContextItem(primitive_id="locked", title="Locked", content="body", primitive_frozen=True))
+        tool = ContextMoveTool(manager)
+
+        result = await tool.execute(ToolCall(tool_name="context_move", arguments={"primitive_id": "locked", "placement": "top_of_context"}))
+
+        self.assertEqual(result.status.value, "error")
+        self.assertIn("frozen", result.output)
+
+    async def test_move_rejects_invalid_placement(self) -> None:
+        """Verify context_move rejects unknown placement strings."""
+        manager = ContextManager()
+        manager.upsert(TextContextItem(primitive_id="note:1", title="Note", content="body"))
+        tool = ContextMoveTool(manager)
+
+        result = await tool.execute(ToolCall(tool_name="context_move", arguments={"primitive_id": "note:1", "placement": "middle"}))
+
+        self.assertEqual(result.status.value, "error")
+        self.assertIn("Invalid placement", result.output)
+
+    async def test_context_window_tools_returns_create_and_management_tools(self) -> None:
+        """Verify the factory returns generated create tools plus management tools."""
+        manager = ContextManager()
+
+        tools = context_window_tools(manager, include=("text",))
+
+        self.assertEqual(
+            tuple(tool.name for tool in tools),
+            ("context_create_text", "context_list", "context_remove", "context_stats", "context_edit", "context_move"),
+        )
+
+    async def test_context_window_factory_build_matches_convenience_wrapper(self) -> None:
+        """Verify ContextWindowFactory is the canonical mount surface."""
+        manager = ContextManager()
+
+        via_class = ContextWindowFactory(manager).build(include=("text",), management=True)
+        via_func = context_window_tools(manager, include=("text",), management=True)
+
+        self.assertEqual(tuple(tool.name for tool in via_class), tuple(tool.name for tool in via_func))
+
+    async def test_context_window_factory_management_tools_only(self) -> None:
+        """Verify management_tools returns the non-create management surface."""
+        manager = ContextManager()
+
+        tools = ContextWindowFactory(manager).management_tools()
+
+        self.assertEqual(
+            tuple(tool.name for tool in tools),
+            ("context_list", "context_remove", "context_stats", "context_edit", "context_move"),
+        )
+
+    async def test_context_window_tools_rejects_unknown_include_key(self) -> None:
+        """Verify the factory reports unknown primitive include keys."""
+        manager = ContextManager()
+
+        with self.assertRaises(ValueError):
+            context_window_tools(manager, include=("missing",))
 
 
 class ContextUpsertToolTests(unittest.IsolatedAsyncioTestCase):
@@ -163,12 +329,20 @@ class ContextUpsertToolTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_public_imports_accessible_from_root(self) -> None:
         from vidbyte import ContextListTool as RootList
+        from vidbyte import ContextMoveTool as RootMove
         from vidbyte import ContextRemoveTool as RootRemove
+        from vidbyte import ContextStatsTool as RootStats
         from vidbyte import ContextUpsertTool as RootUpsert
+        from vidbyte import ContextWindowFactory as RootFactory
+        from vidbyte import context_window_tools as root_context_window_tools
 
         self.assertIs(RootList, ContextListTool)
+        self.assertIs(RootMove, ContextMoveTool)
         self.assertIs(RootRemove, ContextRemoveTool)
+        self.assertIs(RootStats, ContextStatsTool)
         self.assertIs(RootUpsert, ContextUpsertTool)
+        self.assertIs(RootFactory, ContextWindowFactory)
+        self.assertIs(root_context_window_tools, context_window_tools)
 
 
 if __name__ == "__main__":
