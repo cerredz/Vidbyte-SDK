@@ -198,6 +198,9 @@ class BaseAgent(McpAttachableMixin):
         self.last_reply: AgentMessage | None = None
         self._behavior_view: Any = None
         self._active_session: Session | None = None
+        self._queued_prompts: list[str] = []
+        self._draining_queued_prompts: bool = False
+        self.last_queued_replies: list[AgentMessage] = []
         for _tool in self._agent_tool_items:
             self._bind_agent_tool_context(_tool)
 
@@ -317,6 +320,7 @@ class BaseAgent(McpAttachableMixin):
         from vidbyte.tools.builtins.fork import ForkConversationTool
         from vidbyte.tools.builtins.handoff import CreateHandoffTool
         from vidbyte.tools.builtins.mcp import AttachMcpServerTool
+        from vidbyte.tools.builtins.run_prompts_sequentially import RunPromptsSequentiallyTool
 
         if isinstance(tool, AgentTool):
             tool.bind_context_getter(lambda: (self._active_prompt, list(self.history)))
@@ -325,6 +329,8 @@ class BaseAgent(McpAttachableMixin):
         if isinstance(tool, CreateHandoffTool):
             tool.bind_agent(self)
         if isinstance(tool, ForkConversationTool):
+            tool.bind_agent(self)
+        if isinstance(tool, RunPromptsSequentiallyTool):
             tool.bind_agent(self)
         self._bind_session_tool(tool)
 
@@ -448,6 +454,7 @@ class BaseAgent(McpAttachableMixin):
             "max_iterations",
             "max_tokens",
             "max_tool_calls",
+            "max_queued_prompts",
             "max_parallel_tool_calls",
             "max_retries",
             "timeout_seconds",
@@ -647,6 +654,8 @@ class BaseAgent(McpAttachableMixin):
         if self._handoff_spec is not None:
             await self._run_auto_handoff(metadata)
         self._notify_session(reply)
+        if self._queued_prompts and not self._draining_queued_prompts:
+            await self._drain_queued_prompts(metadata)
         return reply
 
     async def arun(self, message: str | AgentInput, **options: Any) -> AgentMessage:
@@ -676,6 +685,49 @@ class BaseAgent(McpAttachableMixin):
         except RuntimeError:
             return asyncio.run(self.arun_sequentially(prompts, **options))
         raise AgentExecutionError("BaseAgent.run_sequentially() cannot be called from an active event loop; use await arun_sequentially().")
+
+    def enqueue_prompts(self, prompts: Sequence[str]) -> int:
+        """Append prompts to the pending sequential-run queue and return the queue length."""
+        if isinstance(prompts, str):
+            raise ValueError("'prompts' must be a JSON array of strings, not a single string.")
+        if not isinstance(prompts, (list, tuple)) or not prompts:
+            raise ValueError("run_prompts_sequentially requires a non-empty 'prompts' array of strings.")
+        max_queued_prompts = self.agent_loop_settings.max_queued_prompts
+        if len(self._queued_prompts) + len(prompts) > max_queued_prompts:
+            raise ValueError(
+                f"Too many queued prompts: {len(self._queued_prompts) + len(prompts)} exceeds the limit of {max_queued_prompts}."
+            )
+        cleaned: list[str] = []
+        for index, prompt in enumerate(prompts):
+            if not isinstance(prompt, str) or not prompt.strip():
+                raise ValueError(f"Prompt at index {index} must be a non-empty string.")
+            cleaned.append(prompt.strip())
+        self._queued_prompts.extend(cleaned)
+        return len(self._queued_prompts)
+
+    async def _drain_queued_prompts(self, metadata: dict[str, Any]) -> None:
+        """Run queued prompts in order after the primary run, recording outcomes into metadata."""
+        self._draining_queued_prompts = True
+        self.last_queued_replies = []
+        completed = 0
+        try:
+            # Pop-one loop so prompts queued by drained runs join the same bounded drain.
+            while self._queued_prompts and completed < self.agent_loop_settings.max_queued_prompts:
+                prompt = self._queued_prompts.pop(0)
+                reply = await self.generate_reply(prompt)
+                self.last_queued_replies.append(reply)
+                completed += 1
+            if self._queued_prompts:
+                metadata["queued_prompts_truncated"] = len(self._queued_prompts)
+                self._queued_prompts.clear()
+        except Exception as exc:
+            # A drained-run failure must not fail the already-successful primary reply.
+            metadata["queued_prompt_error"] = repr(exc)
+            self._queued_prompts.clear()
+        finally:
+            self._draining_queued_prompts = False
+            if completed:
+                metadata["queued_prompt_runs"] = completed
 
     async def handoff(self, spec: Handoff | None = None, *, by: "BaseAgent | None" = None) -> Handoff:
         """Produce a structured handoff document describing this agent's most recent run."""

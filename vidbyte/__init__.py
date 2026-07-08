@@ -143,6 +143,7 @@ from vidbyte.tools.builtins.context_primitives import (
     ContextUpsertTool,
 )
 from vidbyte.tools.builtins.handoff import CreateHandoffTool
+from vidbyte.tools.builtins.run_prompts_sequentially import RunPromptsSequentiallyTool
 from vidbyte.tools.builtins.sessions import (
     BatchForkTool,
     CheckpointTool,
@@ -328,6 +329,7 @@ __all__ = [
     "ContextUpsertTool",
     "CreateHandoffTool",
     "CheckpointTool",
+    "RunPromptsSequentiallyTool",
     "ContextWindow",
     "ContextWindowAlgorithm",
     "ContextWindowPlacement",
