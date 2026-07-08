@@ -18,6 +18,10 @@ Similar Files:
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
+from vidbyte.agents.contract import AgentLoopSettingsOutputContract
+from vidbyte.agents.contracts import OutputContract
 from vidbyte.agents.settings.tool import ToolSettings
 from vidbyte.agents.settings.tool_error import ToolErrorPolicy
 from vidbyte.lib.errors import ConfigurationError
@@ -32,6 +36,7 @@ _POSITIVE_INT_FIELDS = (
     "context_window_budget",
     "compaction_trigger_tokens",
     "compaction_target_tokens",
+    "max_contract_rejections",
 )
 
 
@@ -54,6 +59,8 @@ class AgentLoopSettings:
         allowed_tools: tuple[str, ...] | None = None,
         tool_error_policy: ToolErrorPolicy | None = None,
         tool_settings: ToolSettings | None = None,
+        output_contracts: Sequence[OutputContract] = (),
+        max_contract_rejections: int = 3,
     ) -> None:
         # Stores all loop parameters as instance attributes, then validates them immediately.
         self.max_iterations = max_iterations
@@ -69,6 +76,9 @@ class AgentLoopSettings:
         self.allowed_tools = allowed_tools
         self.tool_error_policy = tool_error_policy
         self.tool_settings = tool_settings
+        self.max_contract_rejections = max_contract_rejections
+        self._output_contracts = tuple(output_contracts)
+        self.output_contract = AgentLoopSettingsOutputContract(self._output_contracts, max_rejections=max_contract_rejections)
         self._validate()
 
     def _validate(self) -> None:
@@ -78,6 +88,7 @@ class AgentLoopSettings:
         self._validate_compaction_pair()
         self._validate_tool_error_policy()
         self._validate_tool_settings()
+        self._validate_output_contracts()
 
     def _validate_positive_int_fields(self) -> None:
         # Each integer field must be strictly positive when provided.
@@ -121,6 +132,23 @@ class AgentLoopSettings:
         if self.tool_settings.max_calls != self.max_tool_calls:
             raise ConfigurationError("AgentLoopSettings.max_tool_calls and ToolSettings.max_calls must match when both are provided.")
 
+    def _validate_output_contracts(self) -> None:
+        # Rejects any effort floor whose minimum meets or exceeds its paired ceiling (an unreachable floor).
+        for contract in self._output_contracts:
+            self._validate_contract_ceiling(contract)
+
+    def _validate_contract_ceiling(self, contract: OutputContract) -> None:
+        # Enforces the strict floor < ceiling invariant against this settings object's own ceiling fields.
+        if not contract.ceiling_key:
+            return
+        ceiling = getattr(self, contract.ceiling_key, None)
+        if ceiling is not None and contract.minimum >= ceiling:
+            raise ConfigurationError(
+                f"{contract.name}(minimum={contract.minimum}) conflicts with "
+                f"AgentLoopSettings.{contract.ceiling_key}={ceiling}: the floor is unreachable "
+                "(require minimum < ceiling)."
+            )
+
     def to_runtime_config(self) -> "AgentRuntimeConfig":
         # Converts the subset of fields understood by the internal runtime into AgentRuntimeConfig.
         from vidbyte.lib.dataclasses.agents import AgentRuntimeConfig
@@ -152,8 +180,11 @@ class AgentLoopSettings:
                 "allowed_tools",
                 "tool_error_policy",
                 "tool_settings",
+                "max_contract_rejections",
             )
             if getattr(self, name) is not None
         }
+        if self._output_contracts:
+            fields["output_contracts"] = [contract.name for contract in self._output_contracts]
         pairs = ", ".join(f"{k}={v!r}" for k, v in fields.items())
         return f"AgentLoopSettings({pairs})"
