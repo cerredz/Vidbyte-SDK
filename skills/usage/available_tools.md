@@ -61,14 +61,24 @@ from vidbyte.tools.builtins.context import ContextCompactionTool
 Context-primitive tools let the model read and write structured items in the agent's context window through the shared `ContextManager`. They are `SAFE` (no filesystem, network, or external state).
 
 ```python
-from vidbyte.tools.builtins.context_primitives import ContextUpsertTool, ContextListTool, ContextRemoveTool
+from vidbyte import ContextManager
+from vidbyte.tools.builtins.context_primitives import ContextWindowFactory
+
+ctx = ContextManager()
+tools = ContextWindowFactory(ctx).build()
 ```
 
 | Tool | Description |
 |------|-------------|
-| `ContextUpsertTool(context_manager)` | Insert or update a structured context item in the context window. |
+| `ContextWindowFactory(context_manager).build(include=None, management=True)` | Mount per-primitive create tools plus list/remove/stats/edit/move management tools. |
+| `context_window_tools(...)` | Convenience wrapper around `ContextWindowFactory(...).build(...)`. |
+| `context_create_<key>` | Typed create/upsert tools for `text`, `document`, `memory`, `plan`, `task`, `progress`, `artifact`, `environment`, and `git_diff`. |
 | `ContextListTool(context_manager)` | List the current context items. |
-| `ContextRemoveTool(context_manager)` | Remove a context item by id. |
+| `ContextRemoveTool(context_manager)` | Remove a non-frozen context item by id. |
+| `ContextStatsTool(context_manager)` | Inspect id, kind, title, placement, frozen flag, and char count. |
+| `ContextEditTool(context_manager)` | Replace one exact, unique string in a primitive's `content` field. |
+| `ContextMoveTool(context_manager)` | Move a non-frozen primitive to a different context placement. |
+| `ContextUpsertTool(context_manager)` | Legacy flattened insert/update tool retained for compatibility. |
 
 See [`skills/vidbyte-sdk/context-primitives.md`](../vidbyte-sdk/context-primitives.md).
 
@@ -85,6 +95,48 @@ from vidbyte.tools.builtins.trajectory_checkpoint import TrajectoryCheckpointToo
 |------|-------------|
 | `ReflexionTool(context_manager)` | Record a self-critique and correction plan when the model detects a reasoning error. |
 | `TrajectoryCheckpointTool(context_manager)` | Record a compressed checkpoint of reasoning, trajectory, output, score, and feedback. |
+
+## Agent Forking
+
+`ForkConversationTool` lets a model ask its current agent to run an isolated child conversation immediately. It calls `BaseAgent.fork(...)`, runs the child branch on a focused prompt, and returns the child answer as a normal tool result.
+
+```python
+from vidbyte.tools.builtins import ForkConversationTool
+```
+
+| Tool | Description |
+|------|-------------|
+| `ForkConversationTool(allowed_models=..., extra_toolsets=...)` | Agent-bound fork tool for immediate isolated child execution. Model swaps are allowlisted, extra tools must come from developer-provided toolsets, permission policy is inherited, and child state does not mutate the parent. |
+
+Use this for live scratch work inside an agent run. Use durable session fork tools when you only need to create checkpoint-DAG branches for later execution.
+
+## Session Tools
+
+Durable session tools bind to a live `Session` and operate through a `SessionStore`. Cross-session reads are gated by `SessionScope`.
+
+```python
+from vidbyte.tools.builtins.sessions import (
+    BatchForkTool,
+    CheckpointTool,
+    ForkTool,
+    ResumeAppendTool,
+    ResumeOutputTool,
+    ResumeReplaceTool,
+    RewindTool,
+    SessionTool,
+)
+```
+
+| Tool | Description |
+|------|-------------|
+| `CheckpointTool(store)` | Snapshot the current thread or copy an in-scope session head as a labeled checkpoint. |
+| `ForkTool(store)` | Create one durable child session from the current head or an in-scope checkpoint. |
+| `BatchForkTool(store)` | Create 1-64 durable child sessions from the same checkpoint and return compact created/failed results. It does not run the children. |
+| `RewindTool(store)` | Move the current session head back to an earlier checkpoint. |
+| `ResumeReplaceTool(store)` | Replace the current context with another in-scope checkpoint. |
+| `ResumeAppendTool(store)` | Append another in-scope checkpoint history as a framed resumed thread. |
+| `ResumeOutputTool(store)` | Append only the final assistant output from a completed in-scope session. |
+| `SessionTool(store)` | Combined session utility for checkpoint, fork, list, and read operations. |
 
 ## Memory
 

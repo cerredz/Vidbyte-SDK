@@ -3,14 +3,18 @@
 Description:
     Public exports for the vidbyte.agents.settings sub-package.
 Purpose:
-    Exposes AgentLoopSettings as the developer-facing configuration object
-    for all agentic loop parameters.
+    Exposes AgentLoopSettings and nested settings objects for agentic loop
+    parameters.
 Architecture:
-    - AgentLoopSettings: The only public export from this sub-package.
+    - AgentLoopSettings: Main loop settings object.
+    - ToolErrorPolicy: Nested policy for tool-error retry/render behavior.
+    - ToolSettings: Nested universal tool-use constraints.
 Relations:
     Re-exported from vidbyte.agents.__init__.
 """
 
 from vidbyte.agents.settings.loop import AgentLoopSettings
+from vidbyte.agents.settings.tool import ToolSettings
+from vidbyte.agents.settings.tool_error import ToolErrorPolicy, UnrecoverableAction
 
-__all__ = ["AgentLoopSettings"]
+__all__ = ["AgentLoopSettings", "ToolErrorPolicy", "ToolSettings", "UnrecoverableAction"]

@@ -101,9 +101,11 @@ class BaseActorRuntime(ABC):
 
     async def spawn_instance(self, actor: AgentActor) -> AgentActor:
         """Registers an instantiated AgentActor and schedules its reactive loop."""
+        span = self._start_semantic_span("runtime.actor.spawn", actor_id=actor.actor_id, actor_type=actor.__class__.__name__)
         self._actors[actor.actor_id] = actor
         task = asyncio.create_task(actor.start())
         self._tasks.append(task)
+        self._end_semantic_span(span, output=actor.actor_id)
         return actor
 
     def build_context(
@@ -145,6 +147,7 @@ class BaseActorRuntime(ABC):
 
     async def invoke_actor_completion(self, actor: AgentActor, prompt: str) -> str:
         """Executes LLM completions on behalf of registered actors."""
+        span = self._start_semantic_span("runtime.actor.llm", actor_id=actor.actor_id, prompt=prompt)
         actor_context = self.build_context(
             prompt,
             base_context=None,
@@ -160,56 +163,63 @@ class BaseActorRuntime(ABC):
             call_options["model_name"] = target_model
 
         assert self._handle is not None
-        raw_result = await self._handle.invoke(prompt, context=actor_context, **call_options)
-        return self._handle.extract_text(raw_result)
+        try:
+            raw_result = await self._handle.invoke(prompt, context=actor_context, **call_options)
+            output = self._handle.extract_text(raw_result)
+            self._end_semantic_span(span, output=output)
+            return output
+        except BaseException as exc:
+            self._end_semantic_span(span, error=exc)
+            raise
 
     async def arun(self, message: str, *, handle: RunnerHandle, context: BaseAgentContext, metadata: Mapping[str, Any] | None = None, options: Mapping[str, Any] | None = None, trace_context: Any = None) -> StrategyResult:
         """Launches prebuilt/dynamic networks and runs asynchronous message-passing loops."""
+        span = self._start_semantic_span("runtime.actor.run", parent=trace_context, agent_name=self.agent_name, termination_mode=self.termination_mode)
         self._handle = handle
         self._options = options or {}
         self._message_count = 0
         self._completion_future = asyncio.get_running_loop().create_future()
 
-        # Spawn prebuilt actors based on include_actors list
-        actor_classes = self.include_actors
-        if actor_classes is None:
-            from vidbyte.agents.runtimes.actor.actor import (
-                PlannerActor,
-                CoderActor,
-                ReviewerActor,
-                GeneratorActor,
-                CriticActor,
-                ReasonerActor,
-            )
-            actor_classes = [
-                PlannerActor,
-                CoderActor,
-                ReviewerActor,
-                GeneratorActor,
-                CriticActor,
-                ReasonerActor,
-            ]
-
-        for actor_cls in actor_classes:
-            try:
-                actor_inst = actor_cls(broker=self, model_name=self.worker_model)
-                await self.spawn_instance(actor_inst)
-            except Exception:
-                pass  # Ignore catalog errors in non-test fallback environments
-
-        # Attach dynamic actor tools if configured
-        if self.dynamic_actors:
-            from vidbyte.tools.dynamic_actor import DynamicActorTool
-            self.tools = self.tools.add(DynamicActorTool(self))
-
-        # Root orchestrator actor
-        root_actor = await self.spawn(self.agent_name, self.system_prompt, model_name=None)
-
-        # Boot message
-        await self.send("system", self.agent_name, message)
-
-        # Execution tracking and termination safeguards
         try:
+            # Spawn prebuilt actors based on include_actors list
+            actor_classes = self.include_actors
+            if actor_classes is None:
+                from vidbyte.agents.runtimes.actor.actor import (
+                    PlannerActor,
+                    CoderActor,
+                    ReviewerActor,
+                    GeneratorActor,
+                    CriticActor,
+                    ReasonerActor,
+                )
+                actor_classes = [
+                    PlannerActor,
+                    CoderActor,
+                    ReviewerActor,
+                    GeneratorActor,
+                    CriticActor,
+                    ReasonerActor,
+                ]
+
+            for actor_cls in actor_classes:
+                try:
+                    actor_inst = actor_cls(broker=self, model_name=self.worker_model)
+                    await self.spawn_instance(actor_inst)
+                except Exception:
+                    pass  # Ignore catalog errors in non-test fallback environments
+
+            # Attach dynamic actor tools if configured
+            if self.dynamic_actors:
+                from vidbyte.tools.dynamic_actor import DynamicActorTool
+                self.tools = self.tools.add(DynamicActorTool(self))
+
+            # Root orchestrator actor
+            await self.spawn(self.agent_name, self.system_prompt, model_name=None)
+
+            # Boot message
+            await self.send("system", self.agent_name, message)
+
+            # Execution tracking and termination safeguards
             if self.termination_mode == "quiescence":
                 # Option B: Quiescence monitor
                 while not self._completion_future.done():
@@ -222,6 +232,10 @@ class BaseActorRuntime(ABC):
                 await self._completion_future
 
             output_text = self._completion_future.result()
+            self._end_semantic_span(span, output=output_text)
+        except BaseException as exc:
+            self._end_semantic_span(span, error=exc)
+            raise
         finally:
             # Clean up concurrent tasks
             for task in self._tasks:
@@ -235,6 +249,17 @@ class BaseActorRuntime(ABC):
             calls=(),
             metadata={"message_count": self._message_count, "active_actors": len(self._actors)},
         )
+
+    def _start_semantic_span(self, name: str, parent: Any = None, **attributes: Any) -> Any:
+        # Opens actor runtime spans only for semantic controllers.
+        if not _is_semantic_tracer(self.tracer):
+            return None
+        return self.tracer.start_span(name, parent=parent, **attributes)
+
+    def _end_semantic_span(self, span: Any, *, output: str | None = None, error: BaseException | None = None) -> None:
+        # Closes actor runtime spans only when one was opened.
+        if span is not None and _is_semantic_tracer(self.tracer):
+            self.tracer.end_span(span, output=output, error=error)
 
     def _check_quiescence(self) -> bool:
         """Returns True if all mailboxes are empty and no worker tasks are active."""
@@ -252,16 +277,19 @@ class PointToPointActorRuntime(BaseActorRuntime):
 
     async def send(self, sender: str, recipient: str, content: str, parent_task_id: str | None = None) -> None:
         self._message_count += 1
+        span = self._start_semantic_span("runtime.actor.message", sender=sender, recipient=recipient, content=content)
 
         # Max loop safety gate
         if self._message_count >= self.max_loop:
             if self._completion_future and not self._completion_future.done():
                 self._completion_future.set_result(f"Execution terminated. Max loops ({self.max_loop}) reached.")
+            self._end_semantic_span(span, output="max_loop")
             return
 
         if recipient == "system" or recipient == "orchestrator":
             if self._completion_future and not self._completion_future.done():
                 self._completion_future.set_result(content)
+            self._end_semantic_span(span, output="completion")
             return
 
         target = self._actors.get(recipient)
@@ -274,6 +302,7 @@ class PointToPointActorRuntime(BaseActorRuntime):
                 parent_task_id=parent_task_id,
             )
             await target.inbox.put(msg)
+        self._end_semantic_span(span, output="queued" if target else "missing_recipient")
 
 
 class BroadcastActorRuntime(BaseActorRuntime):
@@ -281,16 +310,19 @@ class BroadcastActorRuntime(BaseActorRuntime):
 
     async def send(self, sender: str, recipient: str, content: str, parent_task_id: str | None = None) -> None:
         self._message_count += 1
+        span = self._start_semantic_span("runtime.actor.message", sender=sender, recipient=recipient, content=content)
 
         # Max loop safety gate
         if self._message_count >= self.max_loop:
             if self._completion_future and not self._completion_future.done():
                 self._completion_future.set_result(f"Execution terminated. Max loops ({self.max_loop}) reached.")
+            self._end_semantic_span(span, output="max_loop")
             return
 
         if recipient == "system" or recipient == "orchestrator":
             if self._completion_future and not self._completion_future.done():
                 self._completion_future.set_result(content)
+            self._end_semantic_span(span, output="completion")
             return
 
         # Broadcast to all registered actors (excluding the sender)
@@ -305,3 +337,9 @@ class BroadcastActorRuntime(BaseActorRuntime):
                     parent_task_id=parent_task_id,
                 )
                 await actor.inbox.put(msg)
+        self._end_semantic_span(span, output="broadcast")
+
+
+def _is_semantic_tracer(tracer: object) -> bool:
+    # Detects TraceController-like tracers without importing vidbyte.trace during runtime initialization.
+    return all(hasattr(tracer, attr) for attr in ("inner", "profile", "translator"))

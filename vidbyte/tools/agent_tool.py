@@ -31,6 +31,10 @@ class AgentTool(BaseTool):
         """Bind a callable that returns (active_prompt, history) at call time."""
         self._context_getter = getter
 
+    def clone_for_fork(self) -> AgentTool:
+        # Returns an unbound wrapper around the same delegate agent for a forked parent.
+        return AgentTool(self._agent)
+
     def spec(self) -> ToolSpec:
         return ToolSpec(
             name=self._name,

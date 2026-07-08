@@ -1,7 +1,7 @@
 # Agents
 
 The Vidbyte SDK uses agents as the executable actor abstraction for AI workflows.
-An agent combines a system prompt, a runner or provider configuration, optional
+An agent combines a system prompt, provider/model configuration, optional
 tools, structured context, tracing, runtime configuration, and handoff behavior.
 
 ## Role In The SDK
@@ -9,14 +9,14 @@ tools, structured context, tracing, runtime configuration, and handoff behavior.
 `vidbyte.agents` is the layer most application code touches first. It exposes
 `Agent` / `BaseAgent`, `AgentInput`, agent messages, local registries, handoff
 agents, and swappable runtime implementations. Agents normalize input, build a
-context window, select a model modality, invoke a runner, execute tools when the
+context window, infer the runner from provider/model configuration, execute tools when the
 runtime requests them, and return an `AgentMessage`.
 
 ## Design Philosophy
 
 Agents are explicit composition objects rather than hidden global state. The SDK
 keeps the prompt, tools, context manager, middleware, trace settings, and runner
-visible at construction time so developers can reason about what the model sees
+inference visible at construction time so developers can reason about what the model sees
 and what local capabilities it can call.
 
 The default linear runtime is the compatibility path for middleware and continual
@@ -35,7 +35,8 @@ def lookup_metric(user_id: int) -> dict[str, int]:
 agent = Agent(
     name="analyst",
     system_prompt="Answer directly and cite uncertainty.",
-    runner=my_runner,
+    provider="openai",
+    model_name="gpt-4.1",
     tools=[lookup_metric],
 )
 
@@ -57,13 +58,28 @@ reply = await agent.arun(
 )
 ```
 
+## Durable Sessions
+
+Agents can opt into durable sessions without moving persistence into the agent constructor:
+
+```python
+from vidbyte import FileSessionStore
+
+store = FileSessionStore("./.vidbyte/sessions")
+session = agent.persist(store=store)
+reply = await agent.arun("Continue the investigation.")
+print(agent.session is session)
+```
+
+`agent.persist(...)` delegates to `vidbyte.sessions.Session(agent, ...)`. Once bound, direct `agent.arun(...)` and `agent.run(...)` calls record checkpoints with the same policy as `session.arun(...)` and `session.run(...)`; `agent.session` returns the current session or `None`.
+
 ## Key Modules
 
-- `base.py`: `BaseAgent`, runner normalization, tool binding, context assembly, trace setup, and runtime dispatch.
+- `base.py`: `BaseAgent`, inferred runner construction, tool binding, context assembly, trace setup, and runtime dispatch.
 - `client.py`: namespace client used by `VidbyteSDK().agents`.
 - `runtimes/`: linear, search, and actor-model runtime components.
 - `handoff.py`: structured handoff generation from a completed agent run.
-- `types.py`: agent messages, input envelopes, cards, specs, and modality types.
+- `types.py`: agent messages, input envelopes, cards, and specs.
 
 ## Related Layers
 

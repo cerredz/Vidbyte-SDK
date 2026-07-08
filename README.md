@@ -12,9 +12,10 @@ access remain outside this package.
 
 ## What You Can Build
 
-- Agent applications with explicit system prompts, runners, tools, context, and trace behavior.
+- Agent applications with explicit system prompts, provider/model configuration, tools, context, and trace behavior.
 - Tool-using agents with local Python functions, MCP-backed tools, permission policies, and provider-native schemas.
 - Runtime policies with deterministic middleware for rate limits, budgets, retries, audit logs, compaction, and safety checks.
+- Durable agent sessions that checkpoint, resume, fork, batch fork, tag, export/import, and summarize usage across long-running work.
 - MCP Studio servers that expose Vidbyte agents, tools, prompts, and pipelines to MCP-compatible clients.
 - Local eval suites with reusable graders, concurrency controls, and run registries.
 - Agent pipelines that compose specialized agents through sequential, parallel, conditional, and map-reduce topologies.
@@ -24,7 +25,8 @@ access remain outside this package.
 
 | Layer | Role |
 |-------|------|
-| [`vidbyte.agents`](vidbyte/agents/README.md) | Executable agent actors, runtimes, modality routing, handoff, and agent registries |
+| [`vidbyte.agents`](vidbyte/agents/README.md) | Executable agent actors, runtimes, inferred runner selection, handoff, and agent registries |
+| [`vidbyte.cli`](vidbyte/cli/README.md) | Unified console command for SDK developer surfaces, currently `vidbyte-sdk skills` |
 | [`vidbyte.context`](vidbyte/context/README.md) | Structured context items, context windows, compaction, algorithms, and handoff models |
 | [`vidbyte.evals`](vidbyte/evals/README.md) | Local eval cases, suites, runners, graders, registries, and result summaries |
 | [`vidbyte.harnesses`](vidbyte/harnesses/README.md) | Namespace boundary for custom harness integrations |
@@ -35,6 +37,8 @@ access remain outside this package.
 | [`vidbyte.pipelines`](vidbyte/pipelines/README.md) | Multi-agent pipeline topologies with a string-in/string-out contract |
 | [`vidbyte.prompts`](vidbyte/prompts/README.md) | Static prompt assets, enum-keyed lookup, direct imports, and prompt families |
 | [`vidbyte.providers`](vidbyte/providers/README.md) | Provider adapter factories for text, image, video, audio, embeddings, and streaming |
+| `vidbyte.sessions` | Durable checkpoint-DAG persistence, stores, scope, usage rollups, and portable bundles |
+| `vidbyte.sources` | Artifact-to-context loaders for public documents, llms.txt, fetch/cache, hashing, and selection |
 | [`vidbyte.shared`](vidbyte/shared/README.md) | Reserved shared namespace; currently no stable public symbols |
 | [`vidbyte.tools`](vidbyte/tools/README.md) | Tool contracts, decorators, catalogs, execution, MCP bridges, and permissions |
 | [`vidbyte.trace`](vidbyte/trace/README.md) | Trace facade, debug tracer, provider tracers, and continual trace artifacts |
@@ -62,13 +66,12 @@ sdk.tools
 sdk.providers
 ```
 
-## Agents and Modalities
+## Agents and Runner Inference
 
-Use agents as the public entry point for model execution. Agents infer execution
-modality from the configured model name when possible, so callers normally pass
-plain strings to `run()` and `arun()`. If the model name is unknown and no
-explicit override is provided, execution falls back to text; prompt text is not
-semantically classified.
+Use agents as the public entry point for model execution. Agents infer the
+concrete runner type from the configured provider and model name, so callers
+normally pass plain strings to `run()` and `arun()` without configuring runner
+objects or modalities.
 
 ```python
 from vidbyte import VidbyteSDK
@@ -106,7 +109,7 @@ agent = BaseAgent(
 reply = await agent.arun("Draft a concise release note")
 ```
 
-For custom agents, pass an explicit `system_prompt`, model config, runner, and tools into `Agent` or `BaseAgent`.
+For custom agents, pass an explicit `system_prompt`, provider/model config, and tools into `Agent` or `BaseAgent`.
 Semantic labels such as roles belong in agent metadata when callers need them.
 
 ## Paradigm Harnesses
@@ -174,7 +177,8 @@ context = ContextManager([
 agent = Agent(
     name="repo-analyst",
     system_prompt="Use the supplied context before answering.",
-    runner=my_runner,
+    provider="openai",
+    model_name="gpt-4.1",
     context_manager=context,
 )
 ```
@@ -189,7 +193,8 @@ from vidbyte import ContextWindow
 agent = Agent(
     name="repo-analyst",
     system_prompt="Use tools when they help answer precisely.",
-    runner=my_runner,
+    provider="openai",
+    model_name="gpt-4.1",
     tools=[lookup_metric],
     algorithm=ContextWindow.preset.no_raw_tool_outputs,
 )
@@ -204,7 +209,8 @@ a deterministic heuristic, not an external correctness grade.
 agent = Agent(
     name="repo-analyst",
     system_prompt="Use tools when they help answer precisely.",
-    runner=my_runner,
+    provider="openai",
+    model_name="gpt-4.1",
     tools=[lookup_metric],
     algorithm=ContextWindow.preset.trajectory_checkpoints,
 )
@@ -224,7 +230,8 @@ primitives only; they never rewrite prior conversation history.
 agent = Agent(
     name="repo-analyst",
     system_prompt="Use tools when they help answer precisely.",
-    runner=my_runner,
+    provider="openai",
+    model_name="gpt-4.1",
     tools=[lookup_metric],
     algorithm=ContextWindow.preset.problem_space_search,  # or ContextWindow.preset.error_correction
 )
@@ -245,6 +252,12 @@ reply = await agent.arun(
 )
 ```
 
+## Sources and Repository Artifacts
+
+Use `vidbyte.sources` when a public document or repository artifact should become explicit context with fetch/caching policy, content hashing, selection, and trust boundaries. `llms.txt` support is built in for agent-facing documentation bundles.
+
+The repository also includes [`artifacts/file_index.md`](artifacts/file_index.md), a generated source map for fast navigation across SDK packages, tests, skills, prompts, and design docs. Update it when structure changes materially.
+
 ## Tracing
 
 Use `Trace` presets when you want agent runs to emit trace spans without wiring
@@ -260,9 +273,34 @@ events = []
 agent = Agent(
     name="repo-analyst",
     system_prompt="Use tools when they help answer precisely.",
-    runner=my_runner,
+    provider="openai",
+    model_name="gpt-4.1",
     tools=[lookup_metric],
     trace=Trace.debug(events),
+)
+```
+
+Semantic trace profiles add SDK-owned prebuilt spans for agents, runtimes,
+context-window work, algorithms, middleware decisions, tool calls, parsers, and
+aggregate agents. The default profile keeps the current high-signal tree
+(`agent.run`, `llm.call`, `tool.call`) and adds parser/tool/stop metadata. The
+verbose profile adds runtime iteration, context-window, algorithm, aggregate,
+and middleware-decision spans.
+
+```python
+from vidbyte import Trace, TraceProfile
+
+trace = Trace.profile(
+    inner=Trace.debug(events),
+    profile=TraceProfile.verbose().with_components(middleware="decisions_only"),
+)
+
+agent = Agent(
+    name="observed-worker",
+    system_prompt="Work carefully.",
+    provider="openai",
+    model_name="gpt-4.1",
+    trace=trace,
 )
 ```
 
@@ -272,7 +310,8 @@ Provider-backed tracing uses the existing optional adapters:
 agent = Agent(
     name="observed-agent",
     system_prompt="Work carefully.",
-    runner=my_runner,
+    provider="openai",
+    model_name="gpt-4.1",
     trace=Trace.langfuse(public_key="...", secret_key="..."),
 )
 ```
@@ -280,7 +319,9 @@ agent = Agent(
 For LangSmith, use `Trace.langsmith_default(...)` as the recommended
 single-agent preset. It emits `agent.run`, `llm.call`, and `tool.call` runs
 with LangSmith-native run types and includes prompt, tool schema, tool input,
-and output fields for browser inspection.
+and output fields for browser inspection. `Trace.langsmith_verbose(...)` uses
+the verbose semantic profile for runtime iteration, context-window, algorithm,
+aggregate, parser, and middleware-decision spans.
 
 ```python
 agent = Agent(
@@ -293,23 +334,26 @@ agent = Agent(
 )
 ```
 
-Multi-agent grouping into one LangSmith trace is handled separately by session
-tracing; `Trace.langsmith_default(...)` is the default single-agent preset.
+Semantic LangSmith helpers translate Vidbyte span kinds into LangSmith run
+types (`chain`, `llm`, `tool`, `retriever`, `embedding`, `prompt`, and
+`parser`). Multi-agent grouping into one LangSmith trace is handled separately
+by session tracing; `Trace.langsmith_default(...)` is the default single-agent
+preset.
 
-Use a session tracer when several agents should appear under one parent trace:
+Use a semantic session tracer when several agents should appear under one
+provider root:
 
 ```python
 from vidbyte import Agent, Trace
 
 trace = Trace.langsmith_session(
     project="research",
-    default_name="research-run",
-    default_attributes={"run_id": run_id},
+    name="research-run",
 )
 
-async with trace.session():
-    planner = Agent(name="planner", system_prompt="Plan the work.", runner=planner_runner, trace=trace)
-    writer = Agent(name="writer", system_prompt="Draft the answer.", runner=writer_runner, trace=trace)
+async with trace.async_session(run_id=run_id):
+    planner = Agent(name="planner", system_prompt="Plan the work.", provider="openai", model_name="gpt-4.1", trace=trace)
+    writer = Agent(name="writer", system_prompt="Draft the answer.", provider="openai", model_name="gpt-4.1", trace=trace)
     await planner.arun("Plan the release note")
     await writer.arun("Write the release note")
 ```
@@ -322,7 +366,8 @@ does not yet inject trace memory into the agent context.
 agent = Agent(
     name="continual-agent",
     system_prompt="Preserve useful run context.",
-    runner=my_runner,
+    provider="openai",
+    model_name="gpt-4.1",
     trace=Trace.continual(["tool_calls", "failures"], max_memory_chars=1200),
 )
 ```
@@ -348,7 +393,8 @@ from vidbyte.trace.continual import ActionTrace
 agent = Agent(
     name="worker",
     system_prompt="Work carefully.",
-    runner=my_runner,
+    provider="openai",
+    model_name="gpt-4.1",
     trace_option=TraceOption.continual(ActionTrace, every_n_iterations=5, max_trace_iterations=3),
 )
 reply = await agent.arun("Fix the failing tests")
@@ -412,6 +458,7 @@ The SDK tool path is agent-local: create or import tools, pass them into an agen
 
 ```python
 from vidbyte import Agent, tool
+from vidbyte.tools.builtins import ForkConversationTool
 from vidbyte.tools.builtins.code_search import GrepTool
 
 @tool
@@ -422,8 +469,9 @@ def lookup_metric(user_id: int) -> dict[str, int]:
 agent = Agent(
     name="repo-analyst",
     system_prompt="Use tools when they help answer precisely.",
-    runner=my_runner,
-    tools=[GrepTool(root_dir="."), lookup_metric],
+    provider="openai",
+    model_name="gpt-4.1",
+    tools=[GrepTool(root_dir="."), ForkConversationTool(allowed_models=["gpt-4.1-mini"]), lookup_metric],
     max_iterations=8,
     max_tokens=16_000,
 )
@@ -432,6 +480,8 @@ reply = await agent.arun("Find where tools are formatted.")
 ```
 
 The runtime builds the context window, appends a short agentic-loop prompt after the system prompt, sends tool schemas to the model, executes permitted tool calls, appends tool results back into the ordered message context, and repeats until the model calls the internal `isDone` tool. If the model returns ordinary text without a tool call, that text is preserved as assistant history and the loop continues. `max_iterations` and `max_tokens` are optional safeguards; `max_tokens` uses provider-reported usage when available.
+
+`ForkConversationTool` is agent-native: it lets the model ask the current agent to run an isolated child conversation immediately through `BaseAgent.fork(...)`. It is separate from durable session forks, inherits permission policy, requires allowlisted model swaps, and only exposes developer-provided extra toolsets.
 
 ### Middleware
 
@@ -458,7 +508,8 @@ class TenantPermissionMiddleware(AgentMiddleware):
 agent = Agent(
     name="repo-analyst",
     system_prompt="Use tools when they help answer precisely.",
-    runner=my_runner,
+    provider="openai",
+    model_name="gpt-4.1",
     tools=[lookup_metric],
     middleware=[
         TenantPermissionMiddleware(db),
@@ -468,7 +519,52 @@ agent = Agent(
 )
 ```
 
-Subclass `AgentMiddleware` and override only the hooks you need, such as `before_run`, `before_iteration`, `before_model_call`, `after_model_response`, `on_model_error`, `before_tool_call`, `after_tool_call`, `after_iteration`, or `after_run`. Built-ins are available from `vidbyte.middleware.builtins`, including `TokenBudgetMiddleware`, `TokenRateLimitMiddleware`, `RuntimeLimitMiddleware`, `ToolPolicyMiddleware`, `AuditLogMiddleware`, `ModelRetryMiddleware`, `ToolResultCompactionMiddleware`, `MessageHistoryCompactionMiddleware`, `SummaryCompactionMiddleware`, and `TraceReplacementCompactionMiddleware` (folds a continual-trace artifact back into history; e.g. `TraceReplacementCompactionMiddleware.keep_recent_tail(keep_last_groups=2)`). `TokenBudgetMiddleware(max_tokens=...)` is a hard cap by default; set `allow_final_response_over_budget=True` to permit one final over-budget model call with an injected instruction to answer immediately. This is separate from `Agent(max_tokens=...)`, which remains a runtime hard cap.
+Subclass `AgentMiddleware` and override only the hooks you need, such as `before_run`, `before_iteration`, `before_model_call`, `after_model_response`, `on_model_error`, `before_tool_call`, `after_tool_call`, `after_iteration`, or `after_run`. Built-ins are available from `vidbyte.middleware.builtins`, including `TokenBudgetMiddleware`, `TokenRateLimitMiddleware`, `RuntimeLimitMiddleware`, `ToolPolicyMiddleware`, `AuditLogMiddleware`, `ModelRetryMiddleware`, `ToolErrorPolicyMiddleware`, `ToolResultCompactionMiddleware`, `MessageHistoryCompactionMiddleware`, `SummaryCompactionMiddleware`, and `TraceReplacementCompactionMiddleware` (folds a continual-trace artifact back into history; e.g. `TraceReplacementCompactionMiddleware.keep_recent_tail(keep_last_groups=2)`). `TokenBudgetMiddleware(max_tokens=...)` is a hard cap by default; set `allow_final_response_over_budget=True` to permit one final over-budget model call with an injected instruction to answer immediately. This is separate from `Agent(max_tokens=...)`, which remains a runtime hard cap.
+
+Use structured loop settings for tool-error retry/abort policy:
+
+```python
+from vidbyte import Agent
+from vidbyte.agents import AgentLoopSettings, ToolErrorPolicy
+
+agent = Agent(
+    name="resilient-worker",
+    system_prompt="Use tools and recover from transient failures.",
+    provider="openai",
+    model_name="gpt-4.1",
+    tools=[lookup_metric],
+    agent_loop_settings=AgentLoopSettings(
+        tool_error_policy=ToolErrorPolicy(max_retries_per_tool_call=2, max_total_tool_errors=5),
+    ),
+)
+```
+
+The default policy retries idempotent transient tool failures and renders terminal tool errors with full detail.
+
+Use `ToolSettings` for simple, universal tool-use guardrails. These are enforced directly by the runtime (not middleware), the same way loop budgets like `max_tool_calls` are:
+
+```python
+from vidbyte import Agent
+from vidbyte.agents import AgentLoopSettings, ToolSettings
+
+agent = Agent(
+    name="repo-worker",
+    system_prompt="Use tools carefully.",
+    runner=my_runner,
+    tools=[search, delete_file],
+    agent_loop_settings=AgentLoopSettings(
+        tool_settings=ToolSettings(
+            denied_tools={"delete_file"},   # blocked by name, incl. dynamically attached tools
+            max_calls=20,                   # total tool-call budget for the run
+            max_calls_per_tool={"search": 5},
+            result_max_chars=8000,          # cap model-visible tool output; raw result is preserved
+            on_deny="continue",             # "continue" injects a denial the model sees; "abort" stops the run
+        ),
+    ),
+)
+```
+
+`denied_tools` is useful even when tools are passed explicitly: it documents team policy and blocks tools acquired dynamically by name. Internal runtime tools (such as the completion tool) are never blocked. With `on_deny="continue"` (default), a denied or over-per-tool-budget call is recorded as a denied tool result the model sees, and the run continues; with `on_deny="abort"` the run stops with stop reason `tool_settings_denied`. Reaching `max_calls` stops the run with stop reason `max_tool_calls`. `result_max_chars` truncates only the model-visible tool result while the raw `ToolResult` remains available in runtime metadata. `ToolSettings.max_calls` and `AgentLoopSettings.max_tool_calls` map to the same budget and must match if both are set. `ToolSettings` complements, and does not replace, `PermissionPolicy`.
 
 Compaction middleware supports deterministic provider-message pruning without hidden model calls. Examples include `trim_to_token_budget`, `trim_with_provider_boundaries`, `delete_messages`, `tool_output_sliding_window`, `clear_tool_results_except`, `head_tail_tool_preview`, `scrub_bloat`, `summary_with_backrefs`, `selective_prune`, `salience_score_eviction`, `query_relevance_filter`, and `context_snapshot_branch_trim`.
 
@@ -478,7 +574,8 @@ from vidbyte.middleware.builtins import MessageHistoryCompactionMiddleware
 agent = Agent(
     name="bounded-agent",
     system_prompt="Keep working context compact.",
-    runner=my_runner,
+    provider="openai",
+    model_name="gpt-4.1",
     tools=[lookup_metric],
     middleware=[
         MessageHistoryCompactionMiddleware.trim_to_token_budget(max_tokens=8000),
@@ -492,6 +589,10 @@ Advanced built-ins are grouped by category:
 - `vidbyte.tools.builtins.code_search`: `GlobTool`, `GrepTool`, `SemanticSearchTool`
 - `vidbyte.tools.builtins.editing`: `PatchTool`
 - `vidbyte.tools.builtins.context`: `ContextCompactionTool` for legacy/manual compaction tool use; new agent code should prefer compaction middleware.
+- `vidbyte.tools.builtins.fork`: `ForkConversationTool`
+- `vidbyte.tools.builtins.handoff`: `CreateHandoffTool`
+- `vidbyte.tools.builtins.sessions`: `CheckpointTool`, `ForkTool`, `BatchForkTool`, `RewindTool`, `ResumeReplaceTool`, `ResumeAppendTool`, `ResumeOutputTool`, `SessionTool`
+- `vidbyte.tools.builtins.providers`: provider/database helper tools
 - `vidbyte.tools.mcp`: `McpClient`, `McpStdioTransport`, `McpBridgedTool`
 - `vidbyte.tools.security`: `PermissionPolicy`, `ToolPermission`, sandbox transport protocols
 
@@ -514,7 +615,8 @@ from vidbyte.tools.security import PermissionPolicy
 agent = Agent(
     name="trusted-worker",
     system_prompt="Work inside the configured sandbox.",
-    runner=my_runner,
+    provider="openai",
+    model_name="gpt-4.1",
     tools=[write_tool],
     permission_policy=PermissionPolicy.allow_all(),
 )
@@ -699,6 +801,132 @@ The current preset catalog contains 201 presets:
 | Native System & Utilities | `base64-tools`, `csv-parser`, `datetime`, `env-inspector`, `git`, `hashing-tools`, `http-client`, `json-validator`, `local-filesystem`, `markdown-linter`, `os-command`, `process-manager`, `python-sandbox`, `regex-tester`, `sequential-thinking`, `sqlite-sandbox`, `system-diagnostics`, `toml-parser`, `uuid-generator`, `webhook-sender`, `xml-parser`, `yaml-validator` |
 | E-Commerce & Payments | `paypal`, `shopify`, `square`, `stripe`, `woocommerce` |
 | Automation & Workflow | `n8n`, `zapier` |
+
+## CLI
+
+The SDK installs a unified `vidbyte-sdk` command. Its first command group wraps the
+packaged skills registry:
+
+```bash
+vidbyte-sdk --version
+vidbyte-sdk skills list
+vidbyte-sdk skills show decompose-fanout
+vidbyte-sdk skills install decompose-fanout --dest .claude/skills
+```
+
+`vidbyte-sdk skills install` writes the selected skill folder under the destination
+directory and refuses to overwrite an existing non-empty skill folder unless
+`--force` is passed.
+
+## Durable Sessions
+
+Durable sessions are a harness-level primitive that make any agent persistent
+with `continue`, `resume`, and `fork` over an append-only checkpoint DAG. The
+agent stays pure — persistence lives in a `Session` wrapper, so it works for
+every runtime. Attach an agent in one line:
+
+```python
+from vidbyte import Agent, FileSessionStore, Session
+
+agent = Agent(name="researcher", system_prompt="Investigate carefully.", provider="openai", model_name="gpt-4.1")
+store = FileSessionStore(root="./.vidbyte/sessions")
+session = agent.persist(store=store, policy=Session.PER_TURN_POLICY)
+reply = await session.arun("Investigate the failing test")
+print(session.id, session.head)              # session id + latest checkpoint id
+assert agent.session is session
+```
+
+Sessions are also reachable through the harness namespace
+(`sdk.harnesses.sessions.attach(agent, store=...)`). Resuming reconstructs the
+agent from a checkpoint; because live tools and middleware cannot be serialized,
+you re-supply them at resume time (the rehydration contract):
+
+`Session.policy_options()` and `Session.trace_options()` list the accepted hard
+strings for `policy=` and `trace=`. The same strings are available as class
+constants such as `Session.PER_TURN_POLICY`, `Session.MANUAL_POLICY`, and
+`Session.AUTO_TRACE`.
+
+```python
+from vidbyte.sessions import FileSessionStore
+
+store = FileSessionStore(root="./.vidbyte/sessions")
+session = Session(agent, store=store)
+await session.arun("first step")
+
+# later / cold process - re-supply non-serializable parts
+session = Session.resume(store, session_id, tools=[grep])
+session = Session.continue_(store, session_id)           # == resume(head)
+branch = Session.fork_from(store, checkpoint_id)         # new id + parent lineage
+branches = session.batch_fork(3)                                   # child records only
+session.rewind(to=checkpoint_id)                                    # time-travel
+session.edit(lambda history: history[:-1])                         # state editing
+```
+
+Tags, usage rollups, and portable bundles are first-class:
+
+```python
+from vidbyte import VidbyteSDK
+
+sdk = VidbyteSDK()
+session.tag("research-main", "july-release")
+resolved_id = store.resolve("research-main")
+recent = store.list_sessions(agent_name="researcher", tag="july-release")
+
+rollup = session.usage(prices={"gpt-4.1": 0.00001})
+print(rollup.tokens, rollup.tool_calls, rollup.cost)
+
+bundle = session.export()
+copy_id = sdk.harnesses.sessions.import_(store, bundle, new_id="se_copy")
+```
+
+Importing with `new_id=` rewrites only session ids; checkpoint ids and parent links stay intact.
+
+Stores are pluggable behind one `SessionStore` protocol. The local stores
+(`InMemorySessionStore`, `FileSessionStore` with atomic JSON writes) ship in
+`vidbyte.sessions`; database-backed stores (`SqliteSessionStore` using stdlib
+`sqlite3`, plus `MongoDbSessionStore`, `SupabaseSessionStore`,
+`PostgresSessionStore`) live in `vidbyte.lib.providers` and import their drivers
+lazily (SQLite excepted, since `sqlite3` is stdlib), so the SDK core needs no
+database dependency.
+
+When saving, a session reads the agent's existing trace settings and persists the
+continual-trace artifact onto each checkpoint. Control it with the `trace`
+option: `TraceCapture.AUTO` (default — capture when the agent has tracing
+enabled), `OFF`, `ARTIFACT`, or `FULL` (artifact plus raw span events). Trace
+data is a derived observation stored alongside the checkpoint; it never feeds
+`resume`, which always restores the agent's raw history as source of truth.
+
+### Prebuilt session tools
+
+Prebuilt tools under `vidbyte/tools/builtins/sessions/` let an agent
+checkpoint, fork, rewind, and resume its own or another agent's thread, gated by
+`SessionScope` (own runs by default). `Session` auto-binds any of these found on
+the wrapped agent.
+
+```python
+from vidbyte.tools.builtins import (
+    BatchForkTool, CheckpointTool, ForkTool, RewindTool,
+    ResumeReplaceTool, ResumeAppendTool, ResumeOutputTool, SessionTool,
+)
+
+agent = Agent(name="researcher", system_prompt="...", provider="openai", model_name="gpt-4.1",
+              tools=[CheckpointTool(store), ForkTool(store), BatchForkTool(store), RewindTool(store),
+                     ResumeReplaceTool(store), ResumeAppendTool(store), ResumeOutputTool(store),
+                     SessionTool(store)])
+session = Session(agent, store=store)
+```
+
+- `CheckpointTool` — snapshot the current thread (or copy an in-scope session's head as a labeled checkpoint).
+- `ForkTool` — branch a new session from the current head or any in-scope checkpoint.
+- `BatchForkTool` — create 1-64 child sessions from the same checkpoint without running those children.
+- `RewindTool` — time-travel the current session's head to an earlier checkpoint.
+- `ResumeReplaceTool` — replace the current context window with another agent's thread state (own-thread: rewind).
+- `ResumeAppendTool` — append another agent's full context window into the current one.
+- `ResumeOutputTool` — append only another agent's final output; errors if that thread is not `COMPLETED`.
+- `SessionTool` — central combined tool: `create_checkpoint` / `fork_current` / `list_my_runs` / `read_run`.
+
+Persisting a checkpoint is fail-open: a store write failure is recorded in the
+reply metadata but never ends the run.
 
 ## Prompts
 
@@ -934,9 +1162,12 @@ result = pipeline.run_sync("Draft a release plan")
 ## Package Structure
 
 ```text
+artifacts/
+|-- file_index.md
 vidbyte/
 |-- client.py
 |-- agents/
+|-- cli/
 |-- context/
 |-- evals/
 |-- harnesses/
@@ -948,6 +1179,8 @@ vidbyte/
 |-- providers/
 |   `-- client.py
 |-- pipelines/
+|-- sessions/
+|-- sources/
 |-- trace/
 |   |-- base.py
 |   |-- debug.py

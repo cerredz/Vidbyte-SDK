@@ -15,7 +15,10 @@ Relations:
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from vidbyte.agents.settings.tool import ToolSettings
 
 from vidbyte.agents.context_algorithms import AgentRuntimeContextAlgorithms
 from vidbyte.agents.types import AgentMessage
@@ -179,6 +182,7 @@ class AgentRuntime:
         last_assistant_output: str | None = None
         run_state: dict[type, Any] = {}
         iteration_outputs: list[str] = []
+        active_trace_context = trace_context
 
         decision = await self.middleware.before_run(
             self._middleware_context(
@@ -291,6 +295,16 @@ class AgentRuntime:
                     model_response=last_response,
                 )
 
+            iteration_span = self._start_semantic_span(
+                "runtime.iteration",
+                parent=trace_context,
+                agent_name=self.agent_name,
+                iteration=iteration_count,
+                model_call_count=model_call_count,
+                tool_call_count=len(call_contexts),
+                tokens_used=tokens_used,
+            )
+            active_trace_context = iteration_span or trace_context
             call_options = self._build_iteration_call_options(
                 run_options,
                 context,
@@ -301,20 +315,25 @@ class AgentRuntime:
                 tokens_used=tokens_used,
                 tool_call_count=len(call_contexts),
             )
-            raw_result, model_call_count = await self._invoke_with_middleware(
-                handle,
-                message,
-                call_options,
-                context=context,
-                iteration_count=iteration_count,
-                model_call_count=model_call_count,
-                call_contexts=call_contexts,
-                tokens_used=tokens_used,
-                started_at=started_at,
-                metadata=runtime_metadata,
-                run_state=run_state,
-                trace_context=trace_context,
-            )
+            try:
+                raw_result, model_call_count = await self._invoke_with_middleware(
+                    handle,
+                    message,
+                    call_options,
+                    context=context,
+                    iteration_count=iteration_count,
+                    model_call_count=model_call_count,
+                    call_contexts=call_contexts,
+                    tokens_used=tokens_used,
+                    started_at=started_at,
+                    metadata=runtime_metadata,
+                    run_state=run_state,
+                    trace_context=active_trace_context,
+                )
+            except BaseException as exc:
+                self._end_semantic_span(iteration_span, error=exc)
+                raise
+            self._end_semantic_span(iteration_span, output=handle.extract_text(raw_result))
             if isinstance(raw_result, AgentResult):
                 return await self._finish_result(
                     raw_result,
@@ -375,6 +394,12 @@ class AgentRuntime:
                 )
 
             tool_calls = ToolsFormatter.parse_tool_calls(raw_result, provider)
+            self._record_parser_span(
+                "parser.tool_calls",
+                parent=active_trace_context,
+                provider=provider,
+                tool_call_count=len(tool_calls),
+            )
             if not tool_calls:
                 if self.config.max_tokens is not None and tokens_used is not None and tokens_used >= self.config.max_tokens:
                     token_stop = self._stopped_result(
@@ -464,7 +489,7 @@ class AgentRuntime:
                     metadata=runtime_metadata,
                     run_state=run_state,
                     model_response=raw_result,
-                    trace_context=trace_context,
+                    trace_context=active_trace_context,
                 )
                 if isinstance(processed, AgentResult):
                     return await self._finish_result(
@@ -742,6 +767,12 @@ class AgentRuntime:
             return
         if self.context_manager is None:
             return
+        algorithm_span = self._start_semantic_span(
+            f"algorithm.{getattr(algorithm, 'name', algorithm.__class__.__name__)}",
+            message=message,
+            provider=provider,
+            iteration=iteration_count,
+        )
         iteration = None
         if iteration_count > 0:
             iteration = self._iteration_snapshot(
@@ -753,22 +784,27 @@ class AgentRuntime:
                 tokens_used=tokens_used,
                 metadata=metadata,
             )
-        await algorithm.after_tool_calls(
-            ContextWindowRunContext(
-                context_manager=self.context_manager,
-                recorder=self.recorder,
-                state=state,
-                iteration=iteration,
-                runner=runner,
-                provider=provider,
-                invoke_runner=invoke_runner,
-                runner_output_text=runner_output_text,
-                runner_output_metadata=runner_output_metadata,
-                options=options,
-                messages=messages,
-                system_prompt=system_prompt,
+        try:
+            await algorithm.after_tool_calls(
+                ContextWindowRunContext(
+                    context_manager=self.context_manager,
+                    recorder=self.recorder,
+                    state=state,
+                    iteration=iteration,
+                    runner=runner,
+                    provider=provider,
+                    invoke_runner=invoke_runner,
+                    runner_output_text=runner_output_text,
+                    runner_output_metadata=runner_output_metadata,
+                    options=options,
+                    messages=messages,
+                    system_prompt=system_prompt,
+                )
             )
-        )
+            self._end_semantic_span(algorithm_span, output="completed")
+        except BaseException as exc:
+            self._end_semantic_span(algorithm_span, error=exc)
+            raise
 
     @staticmethod
     async def _invoke_context_window_runner(runner: object, prompt: str, **options: Any) -> object:
@@ -942,6 +978,7 @@ class AgentRuntime:
 
     def _with_middleware_metadata(self, result: AgentResult) -> AgentResult:
         """Attach latest middleware metadata to a AgentResult."""
+        self._record_middleware_spans()
         metadata = dict(result.metadata)
         metadata["middleware"] = self.middleware.metadata()
         return AgentResult(
@@ -1032,33 +1069,16 @@ class AgentRuntime:
         )
 
     @staticmethod
-    def _middleware_denied_tool(
-        call: ToolCall,
-        provider: str,
-        decision: MiddlewareDecision,
-    ) -> tuple[ToolCallContext, ToolResult]:
-        """Convert a deny_tool middleware decision into normal tool-call context."""
-        result = ToolResult.error(
-            call.tool_name,
-            f"Tool denied by middleware: {decision.reason or 'middleware_denied'}",
-            metadata={
-                "error": "middleware_denied",
-                "reason": decision.reason,
-                **dict(decision.metadata),
-            },
-        )
-        return (
-            ToolCallContext(
-                tool_name=call.tool_name,
-                arguments=call.arguments,
-                state=ToolCallState.DENIED,
-                call_id=call.call_id,
-                result=result,
-                provider=provider,
-                metadata=dict(call.metadata),
-            ),
-            result,
-        )
+    def _middleware_denied_tool(call: ToolCall, provider: str, decision: MiddlewareDecision) -> tuple[ToolCallContext, ToolResult]:
+        # Converts a deny_tool middleware decision into a denied tool-call context.
+        return AgentRuntime._denied_tool_result(call, provider, message=f"Tool denied by middleware: {decision.reason or 'middleware_denied'}", error="middleware_denied", reason=decision.reason, metadata=decision.metadata)
+
+    @staticmethod
+    def _denied_tool_result(call: ToolCall, provider: str, *, message: str, error: str, reason: str | None, metadata: Mapping[str, Any]) -> tuple[ToolCallContext, ToolResult]:
+        # Builds a DENIED tool-call context and matching model-visible error result.
+        result = ToolResult.error(call.tool_name, message, metadata={"error": error, "reason": reason, **dict(metadata)})
+        context = ToolCallContext(tool_name=call.tool_name, arguments=call.arguments, state=ToolCallState.DENIED, call_id=call.call_id, result=result, provider=provider, metadata=dict(call.metadata))
+        return context, result
 
     def _tool_is_internal(self, call: ToolCall) -> bool:
         """Return whether a call targets a runtime-only internal tool."""
@@ -1121,7 +1141,7 @@ class AgentRuntime:
     def _llm_trace_inputs(self, handle: RunnerHandle, message: str, call_options: Mapping[str, Any], provider: str, iteration_count: int, model_call_count: int, metadata: Mapping[str, Any]) -> dict[str, Any]:
         # Build useful, bounded tracing inputs for the model-call child span.
         system = call_options.get("system")
-        messages = list(call_options.get("messages") or [])
+        history_messages = tuple(_safe_trace_value(list(call_options.get("messages") or [])))
         tools = call_options.get("tools")
         safe_prompt = _trace_text(message)
         # Build a full chat-style messages list so LangSmith renders system prompt and user
@@ -1129,35 +1149,35 @@ class AgentRuntime:
         trace_messages: list[dict[str, Any]] = []
         if system is not None:
             trace_messages.append({"role": "system", "content": _trace_text(system)})
-        trace_messages.extend(_safe_trace_value(messages))
+        trace_messages.extend(history_messages)
         trace_messages.append({"role": "user", "content": safe_prompt})
-        safe_messages = tuple(trace_messages)
+        input_messages = tuple(trace_messages)
         inputs: dict[str, Any] = {
             "agent_name": self.agent_name,
+            "run_id": self.run_id,
             "provider": provider,
             "model": self._runner_model_name(handle.runner),
             "iteration": iteration_count,
             "model_call": model_call_count,
             "prompt": safe_prompt,
             "user_prompt": safe_prompt,
-            "messages": safe_messages,
-            "input_messages": safe_messages,
+            "system": _trace_text(system) if system is not None else None,
+            "messages": input_messages,
+            "input_messages": input_messages,
             "metadata": _safe_trace_mapping(metadata),
         }
         if system is not None:
-            safe_system = _trace_text(system)
-            inputs["system"] = safe_system
-            inputs["system_prompt"] = safe_system
+            inputs["system_prompt"] = _trace_text(system)
+        if history_messages:
+            inputs["history_messages"] = history_messages
         if tools:
             tool_list = list(tools)
             inputs["tools"] = _safe_trace_value(tool_list)
             inputs["tool_names"] = tuple(str(tool.get("name", "")) for tool in tool_list if isinstance(tool, Mapping) and tool.get("name"))
             inputs["tool_count"] = len(tool_list)
-        if messages:
-            inputs["history_messages"] = _safe_trace_value(messages)
         inputs["context_window_summary"] = (
             f"system={len(system) if system else 0}chars, "
-            f"messages={len(messages)}, "
+            f"messages={len(history_messages)}, "
             f"tools={len(list(tools)) if tools else 0}"
         )
         return inputs
@@ -1216,6 +1236,7 @@ class AgentRuntime:
         primitives_zone = self.context_manager.render_primitives_zone() if self.context_manager else ""
         body = context.build_context_body()
         parts = [p for p in (fixed, loop_settings_block, primitives_zone, body) if p]
+        self._record_context_build_span(system_chars=len(fixed), primitive_chars=len(primitives_zone), body_chars=len(body))
         return "\n\n".join(parts)
 
     def _render_loop_settings_block(self, *, iteration_count: int, tokens_used: int | None, tool_call_count: int) -> str:
@@ -1254,7 +1275,12 @@ class AgentRuntime:
         """Build the final AgentResult, populating structured when output_schema is set."""
         structured: Any = None
         if self.output_schema is not None:
-            structured, _ = self._schema_formatter.validate(output, self.output_schema)
+            span = self._start_semantic_span("parser.structured_output", output_chars=len(output or ""))
+            structured, validation_error = self._schema_formatter.validate(output, self.output_schema)
+            if validation_error:
+                self._end_semantic_span(span, error=ValueError(validation_error))
+            else:
+                self._end_semantic_span(span, output="validated")
         return AgentResult(
             output=output,
             strategy_name="direct_runner",
@@ -1290,6 +1316,9 @@ class AgentRuntime:
     ) -> tuple[ToolCallContext, ToolResult] | AgentResult:
         """Execute one tool call, record its context, and append it to messages."""
         tool_is_internal = self._tool_is_internal(call)
+        settings_outcome = self._enforce_tool_settings(call, provider, messages, call_contexts, tool_is_internal, iteration_count=iteration_count, tokens_used=tokens_used)
+        if settings_outcome is not None:
+            return settings_outcome
         decision = await self.middleware.before_tool_call(
             self._middleware_context(
                 MiddlewareHook.BEFORE_TOOL_CALL,
@@ -1315,30 +1344,40 @@ class AgentRuntime:
                 tokens_used=tokens_used,
                 contexts=call_contexts,
             )
-        if decision.action is MiddlewareAction.DENY_TOOL:
-            context_record, result = self._middleware_denied_tool(call, provider, decision)
-        else:
-            context_record, result = await self.execute_tool_call(call, provider=provider, trace_context=trace_context)
-        call_contexts.append(context_record)
-        after_decision = await self.middleware.after_tool_call(
-            self._middleware_context(
-                MiddlewareHook.AFTER_TOOL_CALL,
-                message=message,
-                context=context,
-                provider=provider,
-                iteration_count=iteration_count,
-                model_call_count=model_call_count,
-                tool_call_count=len(call_contexts),
-                tokens_used=tokens_used,
-                started_at=started_at,
-                metadata=metadata,
-                run_state=run_state,
-                tool_call=call,
-                tool_result=result,
-                tool_is_internal=tool_is_internal,
-                model_response=model_response,
+        after_decision = MiddlewareDecision.continue_()
+        while True:
+            # Run the tool behind a retry-aware loop so middleware can silently
+            # retry transient, idempotent failures. Only the final result escapes
+            # this loop into call_contexts/messages, keeping intermediate failure
+            # attempts out of the model-visible conversation history.
+            if decision.action is MiddlewareAction.DENY_TOOL:
+                context_record, result = self._middleware_denied_tool(call, provider, decision)
+            else:
+                context_record, result = await self.execute_tool_call(call, provider=provider, trace_context=trace_context)
+            after_decision = await self.middleware.after_tool_call(
+                self._middleware_context(
+                    MiddlewareHook.AFTER_TOOL_CALL,
+                    message=message,
+                    context=context,
+                    provider=provider,
+                    iteration_count=iteration_count,
+                    model_call_count=model_call_count,
+                    tool_call_count=len(call_contexts) + 1,
+                    tokens_used=tokens_used,
+                    started_at=started_at,
+                    metadata=self._tool_call_middleware_metadata(metadata, call),
+                    run_state=run_state,
+                    tool_call=call,
+                    tool_result=result,
+                    tool_is_internal=tool_is_internal,
+                    model_response=model_response,
+                )
             )
-        )
+            if after_decision.action is not MiddlewareAction.RETRY:
+                break
+            if after_decision.sleep_seconds:
+                await self.middleware.sleep(after_decision.sleep_seconds)
+        call_contexts.append(context_record)
         if after_decision.action is MiddlewareAction.ABORT_RUN:
             return self._middleware_abort_result(
                 after_decision,
@@ -1347,11 +1386,105 @@ class AgentRuntime:
                 contexts=call_contexts,
             )
         if call.tool_name != IS_DONE_TOOL_NAME:
-            visible_result = self._apply_primitive_binding(call, result)
-            if visible_result is result and after_decision.transform is not None and after_decision.transform.model_visible_tool_result is not None:
-                visible_result = after_decision.transform.model_visible_tool_result
-            messages.append(dict(ToolsFormatter.format_tool_result(call, visible_result, provider)))
+            self._append_tool_result_message(messages, call, result, provider, after_decision)
         return context_record, result
+
+    def _enforce_tool_settings(self, call: ToolCall, provider: str, messages: list[dict[str, Any]], call_contexts: list[ToolCallContext], tool_is_internal: bool, *, iteration_count: int, tokens_used: int | None) -> tuple[ToolCallContext, ToolResult] | AgentResult | None:
+        # Applies ToolSettings before local execution: stop on budget/abort, deny-and-continue, or allow.
+        settings = self.config.tool_settings
+        if settings is None or tool_is_internal:
+            return None
+        budget_stop = self._tool_settings_budget_stop(settings, call_contexts, iteration_count=iteration_count, tokens_used=tokens_used)
+        if budget_stop is not None:
+            return budget_stop
+        denial = settings.denial(call.tool_name, self._executed_counts(call_contexts))
+        if denial is None:
+            return None
+        return self._apply_tool_denial(settings, call, provider, messages, call_contexts, denial, iteration_count=iteration_count, tokens_used=tokens_used)
+
+    def _tool_settings_budget_stop(self, settings: ToolSettings, call_contexts: list[ToolCallContext], *, iteration_count: int, tokens_used: int | None) -> AgentResult | None:
+        # Stops the run before executing a call that would exceed the total tool-call budget mid-iteration.
+        if settings.max_calls is None or len(call_contexts) < settings.max_calls:
+            return None
+        return self._stopped_result("Agent runtime stopped after reaching max_tool_calls.", stop_reason=AgentStopReason.MAX_TOOL_CALLS, iteration_count=iteration_count, tokens_used=tokens_used, contexts=call_contexts)
+
+    def _apply_tool_denial(self, settings: ToolSettings, call: ToolCall, provider: str, messages: list[dict[str, Any]], call_contexts: list[ToolCallContext], denial: tuple[str, dict], *, iteration_count: int, tokens_used: int | None) -> tuple[ToolCallContext, ToolResult] | AgentResult:
+        # Aborts the run or records an in-context denial according to the on_deny policy.
+        reason, meta = denial
+        if settings.aborts_on_deny:
+            return self._stopped_result(f"Agent runtime stopped by tool settings: {reason}", stop_reason=AgentStopReason.TOOL_SETTINGS_DENIED, iteration_count=iteration_count, tokens_used=tokens_used, contexts=call_contexts)
+        context_record, result = self._denied_tool_result(call, provider, message=f"Tool denied by tool settings: {reason}", error=reason, reason=reason, metadata=meta)
+        call_contexts.append(context_record)
+        self._append_tool_result_message(messages, call, result, provider, MiddlewareDecision.continue_(), truncate=False)
+        return context_record, result
+
+    @staticmethod
+    def _executed_counts(call_contexts: Sequence[ToolCallContext]) -> dict[str, int]:
+        # Counts prior executed (non-denied) tool calls per tool name for per-tool budgets.
+        counts: dict[str, int] = {}
+        for ctx in call_contexts:
+            if ctx.state is ToolCallState.DENIED:
+                continue
+            counts[ctx.tool_name] = counts.get(ctx.tool_name, 0) + 1
+        return counts
+
+    def _append_tool_result_message(
+        self,
+        messages: list[dict[str, Any]],
+        call: ToolCall,
+        result: ToolResult,
+        provider: str,
+        decision: MiddlewareDecision,
+        *,
+        truncate: bool = True,
+    ) -> None:
+        visible_result = self._model_visible_tool_result(call, result, decision, truncate=truncate)
+        # Provider-specific result formatting remains the single place that
+        # knows how Anthropic, Gemini, OpenAI Responses, and OpenAI-compatible
+        # chat messages represent tool failures.
+        formatted = ToolsFormatter.format_tool_result(call, visible_result, provider)
+        messages.append(dict(formatted))
+
+    def _model_visible_tool_result(
+        self,
+        call: ToolCall,
+        result: ToolResult,
+        decision: MiddlewareDecision,
+        *,
+        truncate: bool = True,
+    ) -> ToolResult:
+        # Primitive binding is applied before any middleware-visible transform so
+        # successful tool outputs can still be stored as primitives. Error results
+        # bypass primitive binding and keep their full details for formatter output.
+        primitive_result = self._apply_primitive_binding(call, result)
+        if primitive_result is not result:
+            return primitive_result
+        visible = result if decision.transform is None else (decision.transform.model_visible_tool_result or result)
+        if not truncate:
+            return visible
+        return self._truncate_for_tool_settings(call, visible)
+
+    def _truncate_for_tool_settings(self, call: ToolCall, result: ToolResult) -> ToolResult:
+        # Caps executed, non-internal tool output to ToolSettings.result_max_chars, leaving raw ToolResult intact.
+        settings = self.config.tool_settings
+        if settings is None or self._tool_is_internal(call):
+            return result
+        return settings.truncate(result)
+
+    def _tool_call_middleware_metadata(self, metadata: Mapping[str, Any], call: ToolCall) -> dict[str, Any]:
+        call_metadata = dict(metadata)
+        call_metadata["tool_permission"] = self._tool_permission_for_call(call)
+        return call_metadata
+
+    def _tool_permission_for_call(self, call: ToolCall) -> str | None:
+        try:
+            spec = self.tools._get(call.tool_name).spec()
+        except Exception:
+            return None
+        permission = getattr(spec, "permission", None)
+        if permission is None:
+            return None
+        return str(getattr(permission, "value", permission))
 
     def _apply_primitive_binding(self, call: ToolCall, result: ToolResult) -> ToolResult:
         """Route a successful tool result into its bound primitive and return an acknowledgment result."""
@@ -1463,6 +1596,41 @@ class AgentRuntime:
             return current
         return (current or 0) + delta
 
+    def _start_semantic_span(self, name: str, parent: SpanContext | None = None, **attributes: Any) -> SpanContext | None:
+        # Opens optional semantic-only spans when the active tracer is a TraceController.
+        if not _is_semantic_tracer(self._tracer):
+            return None
+        return self._tracer.start_span(name, parent=parent, **attributes)
+
+    def _end_semantic_span(self, context: SpanContext | None, *, output: str | None = None, error: BaseException | None = None) -> None:
+        # Closes optional semantic-only spans when one was opened.
+        if context is None:
+            return
+        self._tracer.end_span(context, output=output, error=error)
+
+    def _record_parser_span(self, name: str, parent: SpanContext | None = None, **attributes: Any) -> None:
+        # Records a short parser span without affecting parser behavior.
+        span = self._start_semantic_span(name, parent=parent, **attributes)
+        self._end_semantic_span(span, output="ok")
+
+    def _record_context_build_span(self, **attributes: Any) -> None:
+        # Records a context-window build summary when semantic tracing is active.
+        span = self._start_semantic_span("context.window.build", **attributes)
+        self._end_semantic_span(span, output="built")
+
+    def _record_middleware_spans(self) -> None:
+        # Emits spans for middleware decisions captured by the middleware pipeline.
+        for event in self.middleware.events:
+            span = self._start_semantic_span(
+                "middleware.decision",
+                middleware_name=event.middleware_name,
+                hook=event.hook.value,
+                action=event.action.value,
+                reason=event.reason,
+                metadata=dict(event.metadata),
+            )
+            self._end_semantic_span(span, output=event.action.value)
+
 
 def _trace_text(value: object, *, max_chars: int = 12000) -> str:
     # Keep trace payloads useful without letting very large prompts dominate requests.
@@ -1492,6 +1660,11 @@ def _safe_trace_value(value: Any) -> Any:
     if isinstance(value, str):
         return _trace_text(value)
     return value
+
+
+def _is_semantic_tracer(tracer: TracerBase) -> bool:
+    # Detects TraceController-like tracers without importing vidbyte.trace during agent initialization.
+    return all(hasattr(tracer, attr) for attr in ("inner", "profile", "translator"))
 
 
 __all__ = ["AgentRuntime"]

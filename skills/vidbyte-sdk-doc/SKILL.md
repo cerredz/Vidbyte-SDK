@@ -53,6 +53,8 @@ vidbyte/
 |-- pipelines/           String-in/string-out agent wiring: sequential, parallel, conditional, map_reduce.
 |-- prompts/             JSON/Markdown-backed prompt catalog and prompt bundles.
 |-- providers/           Provider adapters and provider selection helpers.
+|-- sessions/            Durable checkpoint-DAG persistence, stores, scope, usage, export/import.
+|-- sources/             Artifact-to-context loaders, llms.txt parsing, fetchers, caches, regex selection.
 |-- trace/               Tracer client, debug tracer, continual tracing.
 |-- tools/               Tool contracts, catalog, registry/executor, decorators, built-ins, filesystem, MCP, security.
 |-- shared/              Shared SDK namespace placeholder.
@@ -69,13 +71,16 @@ Keep central contracts under `vidbyte/lib/` when they are shared by multiple pac
 
 - Root client: `VidbyteSDK`.
 - Agents: `Agent`, `BaseAgent`, `AgentClient`, `AgentInput`, `AgentCard`, `AgentMessage`, `AgentRegistry`, `AgentRunnerConfig`, `AgentSpec`.
+- Agent settings (`vidbyte.agents`): `AgentLoopSettings`, `ToolErrorPolicy`, `UnrecoverableAction`.
 - Contexts: `BaseContext`, `BaseAgentContext`, `ContextBudget`, `ContextPermissions`, `ContextManager`, `ContextWindow`, `ContextWindowAlgorithm`, `ToolResultAdmission`, `ContextItem`, `TextContextItem`, `FileContextItem`, `GitDiffContextItem`, `TaskContextItem`, `DocumentContextItem`, `EnvironmentContextItem`, `MemoryContextItem`, `ProgressContextItem`, `ArtifactContextItem`, `ResponseContextItem`, `ToolCallContextItem`, `TrajectoryCheckpointContextItem`, `PlanContextItem`.
 - Context-window algorithms: `ReflexionAlgorithm`, `TrajectoryCheckpointAlgorithm`, `MultiProviderAgenticGraderAlgorithm`, `InnerContextWindowAlgorithm`.
 - Handoffs: `Handoff`, `EngineeringHandoff`, `ResearchHandoff`, `MinimalHandoff`, `HandoffAgent`.
 - Runtime config: `AgentRuntimeConfig`, `AgentRuntimeStats`.
 - Pipelines: `BasePipeline`, `SequentialPipeline`, `ParallelPipeline`, `ConditionalPipeline`, `MapReducePipeline`, `PipelineNode`, `PipelineExecutionError`.
-- Middleware (root exports): `AgentMiddleware`, `MiddlewarePipeline`, `MiddlewareContext`, `MiddlewareDecision`, `MiddlewareAction`, `MiddlewareEvent`, `MiddlewareHook`, `MiddlewareTransform`, plus built-ins `AuditLogMiddleware`, `ModelRetryMiddleware`, `RuntimeLimitMiddleware`, `TokenRateLimitMiddleware`, `ToolPolicyMiddleware`, `CanaryTripwireMiddleware`, `ConfusedDeputyGuardMiddleware`, `HoneypotToolMiddleware`, `ToolResultCompactionMiddleware`, `MessageHistoryCompactionMiddleware`, `SummaryCompactionMiddleware`. Other built-ins (`TokenBudgetMiddleware`, `CostBudgetMiddleware`, `CircuitBreakerMiddleware`/`CircuitState`, `LoopDetectionMiddleware`, `ExponentialBackoffRetryMiddleware`) are imported from `vidbyte.middleware`.
+- Middleware (root exports): `AgentMiddleware`, `MiddlewarePipeline`, `MiddlewareContext`, `MiddlewareDecision`, `MiddlewareAction`, `MiddlewareEvent`, `MiddlewareHook`, `MiddlewareTransform`, plus built-ins `AuditLogMiddleware`, `ModelRetryMiddleware`, `RuntimeLimitMiddleware`, `TokenRateLimitMiddleware`, `ToolPolicyMiddleware`, `CanaryTripwireMiddleware`, `ConfusedDeputyGuardMiddleware`, `HoneypotToolMiddleware`, `ToolResultCompactionMiddleware`, `MessageHistoryCompactionMiddleware`, `SummaryCompactionMiddleware`. Other root middleware exports include `TokenBudgetMiddleware`, `CostBudgetMiddleware`, `CircuitBreakerMiddleware`/`CircuitState`, `LoopDetectionMiddleware`, and `ExponentialBackoffRetryMiddleware`; `ToolErrorPolicyMiddleware` is imported from `vidbyte.middleware.builtins`.
 - Compaction middleware includes deterministic, code-only modes such as `trim_to_token_budget`, `trim_with_provider_boundaries`, `delete_messages_by_id_or_range`, `tool_output_sliding_window`, `tool_result_clearing_with_exclusions`, `head_tail_tool_preview`, `mechanical_bloat_scrubber`, `summary_with_backrefs`, `selective_context_pruning`, `salience_score_eviction`, `query_relevance_filter`, and `context_snapshot_branch_trim`. Model-backed summary modes still require an injected summarizer.
+- Sessions: `Session`, `SessionStore`, `FileSessionStore`, `InMemorySessionStore`, `SessionScope`, `Checkpoint`, `CheckpointPolicy`, `SessionMeta`, `SessionStatus`, `ForkOutcome`, `RunState`, `TraceCapture`, and session errors.
+- Tracing: `Trace`, `TraceProfile`, `TraceOption`, `TraceSchema`, `TraceController`, `TraceComponentSettings`, `TraceDetail`, `SpanKind`, `SpanSpec`, semantic span context, session/debug/continual tracers, and continual trace middleware/agent helpers.
 - Evals: `BaseGrader`, `ContainsGrader`, `ExactMatchGrader`, `RegexMatchGrader`, `JSONSchemaGrader`, `LLMJudgeGrader`, `RubricGrader`, `GraderResult`.
 - Enums: `BudgetPreset`, `PermissionPreset`, `Prompt`, `ModelModality`. (`AgentRuntimeType` is imported from `vidbyte.lib.enums`.)
 - Prompts: `Prompts`.
@@ -93,6 +98,7 @@ Root exports are meant for common imports. More specialized built-ins should sti
 
 - `sdk.agents`: `AgentClient`.
 - `sdk.harnesses`: `HarnessClient`.
+- `sdk.harnesses.sessions`: `SessionClient` namespace for attach/export/import helpers.
 - `sdk.tools`: `ToolsClient`.
 - `sdk.providers`: `ProvidersClient`.
 
@@ -121,6 +127,7 @@ Primary concepts:
 - `AgentCard` exposes local capability metadata: description, system prompt, capabilities, tool names, MCP server/tool names, modalities, and metadata.
 - `AgentSpec` is a construction-friendly description block.
 - `AgentRunnerConfig` captures primitive runner configuration for provider, model, modality, temperature, run ID, API key, and extra options.
+- `AgentLoopSettings` captures structured loop controls, including `ToolErrorPolicy` for automatic tool-error retry/abort middleware.
 - `AgentRegistry` registers agents by name, returns all agents/cards, and can find agents by capability.
 
 Agent execution:
@@ -260,9 +267,15 @@ Built-in tool groups:
 - `vidbyte.tools.builtins.editing`: `PatchTool`
 - `vidbyte.tools.builtins.context`: `ContextCompactionTool`, compaction modes and related types — **legacy/manual** only; prefer compaction middleware (`vidbyte/middleware/compaction/`)
 - `vidbyte.tools.builtins.context_primitives`: `ContextUpsertTool`, `ContextListTool`, `ContextRemoveTool`
+- `vidbyte.tools.builtins.fork`: `ForkConversationTool`
+- `vidbyte.tools.builtins.handoff`: `CreateHandoffTool`
 - `vidbyte.tools.builtins.reflexion.ReflexionTool`, `vidbyte.tools.builtins.trajectory_checkpoint.TrajectoryCheckpointTool` (model-callable forms of the context-window algorithms)
 - `vidbyte.tools.builtins.memory`: Cognee, Letta, Mem0, Supermemory, and Zep memory tools — see `skills/vidbyte-sdk/memory-tools.md`
 - `vidbyte.tools.builtins.mcp`: `AttachMcpServerTool`, `SearchMcpServersTool`
+- `vidbyte.tools.builtins.providers`: provider/database helper tools such as SQL-style provider table operations and Mongo document operations
+- `vidbyte.tools.builtins.sessions`: `CheckpointTool`, `ForkTool`, `BatchForkTool`, `RewindTool`, `ResumeReplaceTool`, `ResumeAppendTool`, `ResumeOutputTool`, `SessionTool`
+
+`ForkConversationTool` runs an immediate isolated child conversation through `BaseAgent.fork(...)`. It is not a durable session DAG operation. Session tools create and manipulate persistent checkpoints and are gated by `SessionScope`.
 
 ## Filesystem Tools
 
@@ -344,6 +357,53 @@ Lifecycle expectations:
 - Attach MCP servers explicitly to agents or other mixin owners.
 - Close server handles after use.
 - Treat remote tools as tools with permission requirements; do not bypass SDK permission policy.
+
+## Durable Sessions
+
+Primary files:
+
+- `vidbyte/sessions/session.py`
+- `vidbyte/sessions/store.py`
+- `vidbyte/sessions/scope.py`
+- `vidbyte/sessions/usage.py`
+- `vidbyte/sessions/portable.py`
+- `vidbyte/sessions/client.py`
+- `vidbyte/sessions/stores/`
+- `vidbyte/tools/builtins/sessions/`
+- `vidbyte/lib/dataclasses/sessions.py`
+
+Primary concepts:
+
+- `Session` wraps an agent and writes checkpoints according to `CheckpointPolicy`.
+- `agent.persist(store=...)` delegates to `Session(agent, ...)`; `agent.session` returns the bound session.
+- `SessionStore` is the persistence protocol; `FileSessionStore` and `InMemorySessionStore` are built-in local stores.
+- `SessionScope` gates cross-session reads for model-callable session tools.
+- `Checkpoint` records the persisted run state, parent checkpoint, trace capture, and lineage metadata.
+- `Session.batch_fork(...)` and `BatchForkTool` create 1-64 child sessions from a checkpoint without running the children.
+- `Session.tag`, `SessionStore.resolve`, and `list_sessions(...)` provide human/model-friendly lookup.
+- `Session.usage(prices=...)` returns a typed usage rollup from stored message usage metadata.
+- `Session.export()` and `sdk.harnesses.sessions.export/import_` move store-neutral zip bundles between stores.
+
+Session tools: `CheckpointTool`, `ForkTool`, `BatchForkTool`, `RewindTool`, `ResumeReplaceTool`, `ResumeAppendTool`, `ResumeOutputTool`, and `SessionTool`.
+
+## Sources And Repository Artifacts
+
+Primary files:
+
+- `vidbyte/sources/base.py`
+- `vidbyte/sources/document.py`
+- `vidbyte/sources/loaders/`
+- `vidbyte/sources/llms_txt/`
+- `vidbyte/sources/fetches/`
+- `vidbyte/sources/cache/`
+- `vidbyte/sources/regex/`
+- `vidbyte/lib/dataclasses/sources.py`
+- `vidbyte/lib/enums/sources.py`
+- `artifacts/file_index.md`
+
+Sources turn public, pinned documents into context items with explicit trust boundaries, fetch/caching behavior, hashing, and selection. `llms.txt` support is a first-class source family.
+
+`artifacts/file_index.md` is a generated repository source map for fast agent navigation. Update it and central docs when package structure, tests, skills, prompts, or design docs move materially.
 
 ## Providers, Configs, Runners, And HTTP
 
@@ -566,11 +626,16 @@ Use these docs for background and intent. Confirm current implementation before 
 - `docs/design/non-linear-agent-runtimes.md`, `docs/design/actor-model-runtime-redesign.md`, `docs/design/feat-advanced-runtimes-and-registries.md`: the agent-runtime model (linear, MCTS, actor).
 - `docs/design/agent-runtime-middleware.md`, `docs/design/middleware-builtins-expansion.md`, `docs/design/concurrent-middleware-safety.md`, `docs/design/security-middleware-tripwire-deputy-honeypot.md`: the middleware subsystem and built-ins.
 - `docs/design/context-compaction-middleware.md`, `docs/design/truncate-tool-results-compaction.md`: compaction moved from tools to middleware.
+- `docs/design/tool-error-policy-and-retry.md`, `docs/design/provider-aware-tool-error-rendering.md`: structured tool-error retry/circuit-break policy and provider-aware terminal error rendering.
+- `docs/design/durable-sessions.md`, `docs/design/durable-sessions-refresh.md`, `docs/design/agent-session-entrypoints.md`: durable session checkpoint DAGs, attach/persist entry points, and current session API shape.
+- `docs/design/session-batch-fork.md`, `docs/design/session-tagging-and-name-resolution.md`, `docs/design/session-usage-rollup.md`, `docs/design/session-export-import-bundles.md`: batch fork, tags/lookup, usage rollups, and portable bundles.
+- `docs/design/fork-tool-interchangeable-parts.md`, `docs/design/agent-fork-isolation.md`: `ForkConversationTool`, `BaseAgent.fork(...)` configuration overrides, and child isolation/non-escalation rules.
 - `docs/design/handoff-agent.md`: handoff documents and the handoff agent.
 - `docs/design/context-window-primitives.md`, `docs/design/context-window-templates.md`, `docs/design/context-algorithms-as-tools.md`, `docs/design/agentic-trajectory-checkpoints.md`, `docs/design/multi-provider-agentic-grader.md`: context primitives and context-window algorithms.
+- `docs/design/artifact-context-sources.md`, `docs/design/artifact-file-index.md`: source loaders and generated repository source-map artifacts.
 - `docs/design/sdk-evals.md`: eval suites, graders, and runner.
 - `docs/design/memory-provider-tools.md`: memory tool providers (Cognee, Letta, Mem0, Supermemory, Zep).
-- `docs/design/structured-output.md`, `docs/design/new-runners.md`, `docs/design/agent-tracing-observability.md`, `docs/design/trace-facade.md`: structured output, new runners (audio/embedding/streaming), and tracing.
+- `docs/design/structured-output.md`, `docs/design/new-runners.md`, `docs/design/agent-tracing-observability.md`, `docs/design/trace-facade.md`, `docs/design/semantic-trace-profiles.md`, `docs/design/session-tracer.md`: structured output, new runners (audio/embedding/streaming), tracing, semantic trace profiles, and session tracing.
 - `docs/design/advanced-tool-ecosystem.md`: dependency-free tool foundation, code search, MCP bridge, permissions/sandbox, patch/edit tools, and context compaction. Its own supersession note says later tool API docs update the public mental model.
 - `docs/design/custom-function-tools.md`: decorator-first function tool API with Pydantic validation and integration into registries, strategies, agents, providers, and harnesses. Superseded in public examples by `@tool`, `Tools`, and agent-local tools.
 - `docs/design/mcp-server-attachment.md`: attaching MCP servers to agents and harnesses, lifecycle management, and bridged remote tools.
@@ -596,7 +661,9 @@ The `tests/` directory is authoritative; representative files include:
 - MCP: `test_mcp_attachment.py`, `test_mcp_bridge.py`, `test_mcp_studio_server.py`.
 - Providers/runners: `test_text_model_runner.py`, `test_streaming_text_runner.py`, `test_image_video_runners.py`, `test_audio_runner.py`, `test_embedding_runner.py`, `test_openrouter_provider.py`, `test_provider_tool_schema_translation.py`, `test_model_registry.py`, `test_config_validation.py`.
 - Prompts: `test_prompts_interface.py`.
-- Tracing: `test_tracing.py`, `test_trace_facade.py`.
+- Sessions/forking: `test_durable_sessions.py`, `test_fork_tool.py`, `test_agent_fork_isolation.py`.
+- Sources/artifacts: `test_sources_base.py`, `test_sources_document.py`, `test_sources_llms_txt.py`.
+- Tracing: `test_tracing.py`, `test_trace_facade.py`, `test_semantic_tracing.py`, `test_continual_trace.py`, `test_trace_replacement_compaction.py`.
 
 Run `ls tests/` for the complete, current list.
 
@@ -694,6 +761,38 @@ Adding an agent-facing capability:
 3. Preserve direct runner and runtime delegation behavior.
 4. Preserve tool loop permission checks and structured context records.
 5. Add tests around sync/async calls, modality, tools, and metadata.
+
+Adding or changing durable sessions:
+
+1. Keep session storage behind the `SessionStore` protocol and session dataclasses under `vidbyte/lib/dataclasses/sessions.py`.
+2. Preserve raw history as the persisted source of truth; re-supply tools, runner, and middleware at resume/fork.
+3. Keep model-callable session tools scoped through `SessionScope`.
+4. Update `skills/sessions.md`, `skills/forking.md`, README, and `llms.txt`.
+5. Add or update `tests/test_durable_sessions.py`.
+
+Adding or changing `ForkConversationTool`:
+
+1. Preserve the distinction between immediate agent-native child execution and durable session DAG forking.
+2. Enforce non-escalation rules for models, tools, iteration caps, and permission policy.
+3. Keep child state isolated unless the returned tool result is incorporated by the parent.
+4. Update tool catalogs, forking docs, README, and `llms.txt`.
+5. Add or update `tests/test_fork_tool.py` and `tests/test_agent_fork_isolation.py`.
+
+Adding or changing tool-error policy:
+
+1. Put developer-facing configuration on `ToolErrorPolicy` / `AgentLoopSettings`.
+2. Keep retry/abort behavior in `ToolErrorPolicyMiddleware`.
+3. Render terminal tool errors with full detail; do not add or document separate verbosity/render-options APIs unless a design approves them.
+4. Update middleware docs, create-agent docs, README, and `llms.txt`.
+5. Add or update `tests/test_agent_middleware.py`.
+
+Adding or changing source artifacts:
+
+1. Keep loaders/fetchers/caches under `vidbyte/sources/` and shared contracts under `vidbyte/lib/dataclasses/sources.py`.
+2. Preserve explicit trust boundaries, hashing, and selection behavior.
+3. Regenerate or update `artifacts/file_index.md` when repository navigation materially changes.
+4. Update README, `llms.txt`, and `skills/sdk/SKILL.md`.
+5. Add or update source tests under `tests/test_sources_*.py`.
 
 Adding a dataclass:
 

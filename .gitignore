@@ -6,3 +6,6 @@ build/
 .pytest_cache/
 .env
 *.egg
+
+# Local eval database
+.vidbyte_evals.db

@@ -34,6 +34,7 @@ Vidbyte SDK is the developer-facing agent framework in the Vidbyte ecosystem. It
 - Build a research workflow with planner, researcher, and synthesizer stages.
 - Build a support agent with grounded tools, policy middleware, escalation, and audit logs.
 - Build eval suites that compare agent behavior across prompts, models, and graders.
+- Install packaged Vidbyte skills into a local coding harness through the `vidbyte-sdk` CLI.
 - Expose local Vidbyte agents to MCP clients.
 - Attach third-party MCP servers such as GitHub, Linear, filesystem, search, or database tools to an agent.
 
@@ -41,15 +42,19 @@ Vidbyte SDK is the developer-facing agent framework in the Vidbyte ecosystem. It
 
 - Agents and modality-aware model execution.
 - Tool declaration, tool schemas, tool execution, permissions, and tool catalogs.
+- Agent-native fork tooling through `ForkConversationTool` for immediate isolated child execution.
 - Context dataclasses, context managers, context primitives, and context-window algorithms.
+- Artifact sources for public documents such as `llms.txt`, plus generated repository artifacts such as `artifacts/file_index.md`.
 - Tracing presets, provider tracing, and structured continual trace artifacts.
-- Middleware hooks for policy, retry, audit, limits, and compaction.
+- Middleware hooks for policy, retry, audit, limits, tool-error retry/abort policy, and compaction.
 - Swappable runtimes including linear, MCTS search, and actor model patterns.
 - Registries for agents, providers, runtimes, prompts, tools, and actors.
+- Unified `vidbyte-sdk` CLI with `skills list`, `skills show`, and `skills install`.
 - MCP Studio server support and third-party MCP server attachment.
 - Prompt asset discovery and direct prompt imports.
 - Eval cases, suites, runners, graders, and a local eval registry.
 - Sequential, parallel, conditional, and map-reduce pipelines.
+- Durable sessions with continue/resume/fork/batch-fork over a checkpoint DAG, pluggable stores (memory, file, SQLite, Postgres, MongoDB, Supabase), tags/name lookup, usage rollups, portable export/import bundles, and prebuilt Checkpoint/Fork/BatchFork/Rewind/Resume agent tools.
 
 ## How To Install And Use
 
@@ -80,7 +85,7 @@ cd Vidbyte-SDK
 pip install -e .
 ```
 
-The cookbook README references `pip install vidbyte-sdk` for notebook examples. Confirm package publication status before using that command in final public docs, because the SDK README currently says the package is not published and licensing is not finalized.
+The README currently lists `pip install vidbyte-sdk`. For local development from a checkout, `pip install -e .` remains the editable install path.
 
 After installation, verify imports:
 
@@ -268,15 +273,23 @@ agent = Agent(
 )
 ```
 
+### Sources and Repository Artifacts
+
+`vidbyte.sources` turns public, pinned documents into context items with explicit trust boundaries, fetch/cache behavior, hashing, and selection. Use it for `llms.txt`, document sources, and repository-backed artifacts that should enter an agent context deterministically.
+
+`artifacts/file_index.md` is a generated repository source map for fast agent navigation across package files, tests, skills, prompts, and design docs. When SDK structure changes materially, update this artifact and reference it from central docs.
+
 ### Tracing and Continual Trace Artifacts
 
 `Trace` presets emit trace spans without wiring provider adapters manually.
 
 - `Trace.off()` disables tracing.
 - `Trace.debug()` keeps an in-memory event list for local inspection.
+- `Trace.profile(inner, profile=TraceProfile.default())` wraps any `TracerBase` in Vidbyte semantic tracing.
 - `Trace.session(...)` and `Trace.langsmith_session(...)` group several agent runs under one parent trace.
 - Provider helpers wrap existing tracing adapters such as Langfuse.
 - `Trace.langsmith_default(...)` is the recommended single-agent LangSmith preset. It emits `agent.run`, `llm.call`, and `tool.call` runs with LangSmith-native run types and scan-friendly prompt, tool schema, tool input, and output fields.
+- `Trace.langsmith_verbose(...)` uses the verbose semantic profile for runtime iteration, context-window, algorithm, aggregate, parser, and middleware-decision spans.
 - `Trace.continual(...)` records lifecycle events and stores settings for trace-to-context style workflows, but does not automatically inject hidden trace memory into the agent context.
 
 ```python
@@ -293,12 +306,35 @@ agent = Agent(
 )
 ```
 
-Use a session tracer when several agents should share one trace tree:
+Semantic trace profiles are available through `TraceProfile`:
+
+- `TraceProfile.minimal()`: core spans only: `agent.run`, `llm.call`, and `tool.call`.
+- `TraceProfile.default()`: minimal spans plus parser spans, tool input/output metadata, agent stop metadata, retriever/embedding categories, and session roots.
+- `TraceProfile.verbose()`: default spans plus runtime iteration, context-window summaries, context-window algorithms, aggregate phases, and middleware decisions.
+- `TraceProfile.diagnostic()`: verbose spans plus diagnostic component spans and fuller metadata subject to redaction and truncation.
 
 ```python
-trace = Trace.langsmith_session(project="research", default_name="research-run")
+from vidbyte import Trace, TraceProfile
 
-async with trace.session(run_id=run_id):
+trace = Trace.profile(
+    inner=Trace.debug(events),
+    profile=TraceProfile.verbose().with_components(middleware="decisions_only"),
+)
+
+agent = Agent(
+    name="observed-worker",
+    system_prompt="Work carefully.",
+    runner=my_runner,
+    trace=trace,
+)
+```
+
+Use a semantic session tracer when several agents should share one trace tree:
+
+```python
+trace = Trace.langsmith_session(project="research", name="research-run")
+
+async with trace.async_session(run_id=run_id):
     planner = Agent(name="planner", system_prompt="Plan.", runner=planner_runner, trace=trace)
     writer = Agent(name="writer", system_prompt="Write.", runner=writer_runner, trace=trace)
     await planner.arun("Plan the answer")
@@ -318,6 +354,18 @@ agent = Agent(
     trace=Trace.langsmith_default(project="vidbyte-agents"),
 )
 ```
+
+`vidbyte/trace/components/` contains Vidbyte semantic span-spec factories:
+
+- `agents.py`: agent, stop, aggregate, proposer, synthesis, and failure spans.
+- `runtimes.py`: linear iteration, actor runtime, and search runtime spans.
+- `context.py`: context-window build, primitive render, compaction, and update spans.
+- `algorithms.py`: context-window algorithm spans such as reflexion, grading, trajectory checkpoints, problem-space search, and error correction.
+- `middleware.py`: middleware hook and decision spans.
+- `tools.py`: tool call, permission, arguments, result, and error spans.
+- `parsers.py`: tool-call parsing and structured-output validation spans.
+
+When adding or changing an agent, runtime, context-window algorithm, middleware, tool surface, parser, or aggregate-agent behavior, check whether `vidbyte/trace/components/` needs a matching span-spec update.
 
 For a structured continually updated handoff artifact, use `TraceOption.continual(schema)`. A dedicated `ContinualTraceAgent` updates the artifact during the main run, appending array fields, deep-merging object fields, replacing scalar fields, and dropping unknown keys. The artifact is returned through `reply.metadata["trace"]` and `agent.last_trace`; it is not written into the main agent context window by default.
 
@@ -384,8 +432,14 @@ Advanced built-ins are grouped by category:
 - `vidbyte.tools.builtins.code_search`: `GlobTool`, `GrepTool`, `SemanticSearchTool`.
 - `vidbyte.tools.builtins.editing`: `PatchTool`.
 - `vidbyte.tools.builtins.context`: `ContextCompactionTool` for legacy/manual compaction use.
+- `vidbyte.tools.builtins.fork`: `ForkConversationTool` for immediate isolated child execution through `BaseAgent.fork(...)`.
+- `vidbyte.tools.builtins.handoff`: `CreateHandoffTool`.
+- `vidbyte.tools.builtins.sessions`: `CheckpointTool`, `ForkTool`, `BatchForkTool`, `RewindTool`, `ResumeReplaceTool`, `ResumeAppendTool`, `ResumeOutputTool`, `SessionTool`.
+- `vidbyte.tools.builtins.providers`: provider/database helper tools.
 - `vidbyte.tools.mcp`: `McpClient`, `McpStdioTransport`, `McpBridgedTool`.
 - `vidbyte.tools.security`: `PermissionPolicy`, `ToolPermission`, sandbox transport protocols.
+
+`ForkConversationTool` is not a durable session fork. It runs a child now and returns the child answer as a tool result. Model changes are allowlisted, extra tools come from developer-configured toolsets, and permission policy is inherited.
 
 `Tools` is the catalog and inspection helper for showing developers or models which tools are available:
 
@@ -425,10 +479,30 @@ Built-ins include:
 - `ToolPolicyMiddleware`
 - `AuditLogMiddleware`
 - `ModelRetryMiddleware`
+- `ToolErrorPolicyMiddleware`
 - `ToolResultCompactionMiddleware`
 - `MessageHistoryCompactionMiddleware`
 - `SummaryCompactionMiddleware`
 - `TraceReplacementCompactionMiddleware`
+
+For tool-error retry/abort policy, prefer the structured agent loop setting:
+
+```python
+from vidbyte import Agent
+from vidbyte.agents import AgentLoopSettings, ToolErrorPolicy
+
+agent = Agent(
+    name="resilient-worker",
+    system_prompt="Use tools and recover from transient failures.",
+    runner=my_runner,
+    tools=[lookup_metric],
+    agent_loop_settings=AgentLoopSettings(
+        tool_error_policy=ToolErrorPolicy(max_retries_per_tool_call=2, max_total_tool_errors=5),
+    ),
+)
+```
+
+The default retry gate only retries idempotent transient failures. Terminal tool errors are rendered with full detail; do not document `ErrorVerbosity` or separate render-options APIs.
 
 Example:
 
@@ -501,6 +575,10 @@ For the second direction, use `McpPresetRegistry` to discover and build third-pa
 
 The README lists a large preset catalog across search, dev tools, databases, productivity, document parsing, communication, cloud, AI platforms, reference sources, native utilities, e-commerce, and workflow automation.
 
+### CLI
+
+The SDK installs a unified `vidbyte-sdk` command. Current commands are `vidbyte-sdk --version`, `vidbyte-sdk skills list`, `vidbyte-sdk skills show <key>`, and `vidbyte-sdk skills install <key> --dest <dir>`. The skills command group wraps `vidbyte.skills.Skills` and writes packaged skill folders into user-selected harness directories.
+
 ### Prompts
 
 Prompts are repository-backed text assets exposed through an enum-keyed accessor and direct Python imports. The README describes 34 prompt assets across 13 families, including handoff, reflexion, evals, prompt templates, goals, actor-runtime personas, and trajectory checkpoints.
@@ -554,6 +632,36 @@ Pipeline types include:
 
 Pipelines can be nested because every pipeline is also a valid pipeline stage.
 
+### Durable Sessions
+
+Durable sessions make any agent persistent with `continue`, `resume`, and `fork` over an append-only checkpoint DAG. The agent stays pure — persistence lives in a `Session` wrapper — so sessions work for every runtime (linear, MCTS, actor). All session logic (facade, `SessionStore` protocol, `SessionScope`, serialization, trace capture, local stores, contracts, and errors) lives under `vidbyte/sessions/`; database-backed stores live under `vidbyte/lib/providers/`.
+
+Attach an agent in one line:
+
+```python
+from vidbyte import Agent, Session, FileSessionStore
+
+store = FileSessionStore(root="./.vidbyte/sessions")
+agent = Agent(name="researcher", system_prompt="Investigate carefully.", provider="openai", model_name="gpt-4.1")
+session = agent.persist(store=store, policy=Session.PER_TURN_POLICY)  # equivalent persistence path: Session(agent, store=store)
+reply = await session.arun("Investigate the failing test")
+print(session.id, session.head)
+```
+
+The same attach path is available from the agent: `session = agent.persist(store=store, policy=...)`. After binding, `agent.session` returns the current `Session`, and direct `agent.arun(...)` / `agent.run(...)` calls persist through the same checkpoint policy as `session.arun(...)` / `session.run(...)` without double-writing.
+
+For hard string discovery, use `Session.policy_options()` / `Session.trace_options()` or constants such as `Session.PER_TURN_POLICY`, `Session.MANUAL_POLICY`, and `Session.AUTO_TRACE`.
+
+Verbs: `Session.resume(store, session_id, tools=, runner=)` reconstructs a live session from a checkpoint (re-supplying non-serializable parts — the rehydration contract); `Session.continue_(...)` resumes the head; `Session.fork_from(store, checkpoint_id, ...)` branches a new session with parent lineage; `session.batch_fork(count, at=...)` creates several child records without running them; `session.rewind(to=checkpoint_id)` time-travels the head; `session.edit(transform)` rewrites history as a new checkpoint; `session.checkpoint(label=)` writes a manual checkpoint; `session.complete()` marks the session COMPLETED.
+
+Names and movement: `session.tag(...)` adds lookup labels; `store.resolve(identifier)` checks exact session id first and then newest matching tag; `store.list_sessions(agent_name=..., tag=..., status=...)` filters metadata. `session.usage(prices=...)` returns token/tool/turn/latency/cost rollups from stored message usage metadata. `session.export()` and `sdk.harnesses.sessions.export/import_` move store-neutral zip bundles; `new_id=` rewrites session ids only.
+
+Stores implement one `SessionStore` protocol and are interchangeable: `InMemorySessionStore`, `FileSessionStore` (atomic JSON), `SqliteSessionStore` (stdlib sqlite3, no driver), and `PostgresSessionStore`/`MongoDbSessionStore`/`SupabaseSessionStore` (lazy driver imports). `CheckpointPolicy.PER_TURN` (default) writes a checkpoint after each run; `MANUAL` writes only on `checkpoint()`. Persistence is fail-open: a store write failure is recorded in `reply.metadata["__session_error__"]` and never ends the run. The serializer scrubs `api_key` and credential-like keys and stamps a `schema_version` on every payload.
+
+Prebuilt agent-facing tools in `vidbyte/tools/builtins/sessions/` let an agent operate on its own or another agent's thread, gated by `SessionScope` (default own runs): `CheckpointTool`, `ForkTool`, `BatchForkTool`, `RewindTool`, and three resume modes — `ResumeReplaceTool` (override the current context window with another thread's state), `ResumeAppendTool` (append the other thread's context window into the current one), `ResumeOutputTool` (append only the other thread's final output; errors if that thread is not COMPLETED). A central `SessionTool` exposes `create_checkpoint`/`fork_current`/`list_my_runs`/`read_run`. `Session` auto-binds any of these tools found on the wrapped agent.
+
+`BatchForkTool` accepts 1-64 branches and returns compact created/failed results. It only creates branches; execution and comparison of children remains explicit caller work.
+
 ## Use Cases
 
 ### Autonomous Coding Agent
@@ -585,9 +693,12 @@ Use `McpStudioServer` to expose local Vidbyte agents, tools, prompts, strategies
 The README describes this public package structure:
 
 ```text
+artifacts/
+|-- file_index.md
 vidbyte/
 |-- client.py
 |-- agents/
+|-- cli/
 |-- context/
 |-- evals/
 |-- harnesses/
@@ -595,11 +706,16 @@ vidbyte/
 |-- prompts/
 |-- providers/
 |-- pipelines/
+|-- sources/
 |-- trace/
 |-- middleware/
 |-- tools/
+|   `-- builtins/
+|       `-- sessions/   # Checkpoint/Fork/BatchFork/Rewind/Resume* + central SessionTool
+|-- sessions/           # Session facade, SessionStore, SessionScope, usage, export/import, serializer, trace capture, local stores, contracts, errors
 |-- shared/
 `-- lib/
+    `-- providers/      # SqliteSessionStore + Postgres/Mongo/Supabase session stores (lazy drivers)
 ```
 
 ## Docs-to-MCP Submission Notes
@@ -626,7 +742,9 @@ Suggested Context7 rules:
 - Use imports from `vidbyte` for public examples.
 - Use `Agent` or `BaseAgent` as the main execution surface.
 - Use `ContextManager` and context primitives for structured context.
+- Use `vidbyte.sources` and `artifacts/file_index.md` when repository-backed docs/artifacts need deterministic context.
 - Use `output_schema` for typed structured outputs when documented.
+- Use `agent.persist(...)` / `Session` for durable work and `ForkConversationTool` only for immediate isolated child execution.
 - Do not invent private Vidbyte platform APIs or undocumented service calls.
 - Preserve the pre-release status until final release messaging changes.
 
@@ -642,7 +760,6 @@ Source repository: https://github.com/cerredz/Vidbyte-SDK
 Primary README references:
 
 - [Vidbyte SDK README](https://github.com/cerredz/Vidbyte-SDK/blob/main/README.md)
-- [Installing Vidbyte SDK as an MCP Server](https://github.com/cerredz/Vidbyte-SDK/blob/main/installing-vidbyte-sdk-as-mcp.md)
 - [MCP Server Skill Reference](https://github.com/cerredz/Vidbyte-SDK/tree/main/skills/mcp-server)
 
 ## Overview
@@ -960,7 +1077,6 @@ If the server is healthy, it should return a JSON-RPC response containing tool a
 Recommended indexing:
 
 - `README.md`, especially the "MCP Servers" section.
-- `installing-vidbyte-sdk-as-mcp.md`.
 - `skills/mcp-server/`.
 - selected source files under `vidbyte/mcp_server/` for architecture references.
 

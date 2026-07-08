@@ -1,6 +1,6 @@
 ﻿# Create Agent
 
-Create a single `Agent` instance and run it with a prompt. The `Agent` is the core building block of the Vidbyte SDK â€” it wraps a model provider with a system prompt, optional tools, strategy, middleware, permissions, and history. Every interaction follows the same pattern: define an agent, send a prompt, receive an `AgentMessage` reply.
+Create a single `Agent` instance and run it with a prompt. The `Agent` is the core building block of the Vidbyte SDK: it wraps a model provider with a system prompt, optional tools, runtime settings, context-window algorithm, middleware, permissions, and history. Every interaction follows the same pattern: define an agent, send a prompt, receive an `AgentMessage` reply.
 
 ## Minimum Agent
 
@@ -38,6 +38,7 @@ Agent(
     max_tool_rounds: int | None = None,  # max tool-calling iterations before returning
     max_iterations: int | None = None,   # max total agent loop iterations
     max_tokens: int | None = None,       # max output tokens per model call
+    agent_loop_settings: AgentLoopSettings | None = None,  # structured loop settings, including tool error policy
     description: str = "",               # human-readable description for registries and cards
     capabilities: Sequence[str] = (),    # tags for registry discovery (e.g., ["code_generation", "refactoring"])
     metadata: dict[str, Any] | None = None,  # arbitrary key-value metadata for discovery
@@ -88,7 +89,7 @@ from vidbyte import AgentMessage
 # reply.sender: str     â€” name of the agent that produced this message
 # reply.recipient: str  â€” intended recipient (usually "user")
 # reply.content: str    â€” the model's text response
-# reply.metadata: dict  â€” any extra metadata attached by the agent or strategy
+# reply.metadata: dict  â€” any extra metadata attached by the agent or runtime
 ```
 
 ## Inspect the Agent
@@ -126,6 +127,48 @@ agent = Agent(
 
 Decisions: `MiddlewareDecision.continue_()` proceeds; `abort(reason)` terminates the run with `AgentExecutionError`; `deny_tool(reason)` blocks a tool in `before_tool_call`; `retry(reason)` retries a failed model call in `on_model_error`; `sleep(seconds)` throttles before proceeding.
 
+### Tool-error policy
+
+Use `AgentLoopSettings(tool_error_policy=ToolErrorPolicy(...))` when failed tool calls should be retried or circuit-broken by runtime policy instead of prompt instructions. Compatible agents auto-register `ToolErrorPolicyMiddleware`.
+
+```python
+from vidbyte.agents import AgentLoopSettings, ToolErrorPolicy
+
+agent = Agent(
+    name="resilient-tool-user",
+    system_prompt="Use tools and recover from transient failures.",
+    provider="openai",
+    model_name="gpt-4.1",
+    agent_loop_settings=AgentLoopSettings(
+        tool_error_policy=ToolErrorPolicy(
+            max_retries_per_tool_call=2,
+            max_total_tool_errors=5,
+        ),
+    ),
+)
+```
+
+The default retry gate only retries idempotent transient failures. Terminal tool errors are rendered back to the model with full detail; there is no `ErrorVerbosity` or render-options layer.
+
+## Durable Agent Sessions
+
+Bind an agent to a durable session when its turns need to survive process restarts, branch, rewind, or resume from checkpoints.
+
+```python
+from vidbyte import Agent, FileSessionStore
+
+store = FileSessionStore("./.vidbyte/sessions")
+agent = Agent(name="researcher", system_prompt="...", provider="openai", model_name="gpt-4.1")
+
+session = agent.persist(store=store)
+await agent.arun("start")       # writes one checkpoint through the bound session
+await session.arun("continue")  # same persistence path
+
+assert agent.session is session
+```
+
+`agent.persist(...)` delegates to `Session(agent, ...)`; persistence is not an agent-constructor side effect. Use `Session.resume(...)` or `sdk.harnesses.sessions.attach(...)` for explicit restore/namespace-client flows.
+
 ## Fork an Agent
 
 Create variant agents from a base without re-declaring all configuration. Forking copies the parent's configuration while allowing overrides â€” useful for creating specialized agents that share the same foundation:
@@ -135,7 +178,7 @@ child = agent.fork(name="child-agent", temperature=0.2)            # override an
 child_with_history = agent.fork(include_history=True, name="child") # copies parent message history
 ```
 
-The parent's tools, strategy, middleware, and permissions are inherited by the child unless explicitly overridden.
+The parent's tools, runtime settings, middleware, and permissions are inherited by the child unless explicitly overridden.
 
 ## Sync Run Caveat
 
@@ -144,7 +187,7 @@ The parent's tools, strategy, middleware, and permissions are inherited by the c
 ## Next Steps
 
 - **Add tools**: See [`skills/usage/create_agent_with_tools.md`](create_agent_with_tools.md)
-- **Add a strategy**: See [`skills/usage/available_features.md`](available_features.md)
+- **Pick a runtime or feature**: See [`skills/usage/available_features.md`](available_features.md)
 - **Manage multiple agents**: See [`skills/usage/create_agents.md`](create_agents.md)
 - **Build pipelines**: See [`skills/usage/create_pipeline.md`](create_pipeline.md)
 

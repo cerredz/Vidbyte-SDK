@@ -15,6 +15,8 @@ from __future__ import annotations
 
 from vidbyte.lib.errors.base import (
     AgentExecutionError,
+    AgentForkConfigurationError,
+    AgentForkError,
     AgentRegistryError,
     AggregateExecutionError,
     ConfigurationError,
@@ -31,6 +33,8 @@ from vidbyte.lib.errors.base import (
     ProviderRequestError,
     ProviderResponseError,
     ProviderSelectionError,
+    SessionUsageError,
+    SessionUsageValidationError,
     SourceError,
     SourceFetchError,
     SourceParseError,
@@ -46,6 +50,8 @@ from vidbyte.lib.errors.base import (
 
 __all__ = [
     "AgentExecutionError",
+    "AgentForkConfigurationError",
+    "AgentForkError",
     "AgentRegistryError",
     "AggregateExecutionError",
     "ConfigurationError",
@@ -62,6 +68,8 @@ __all__ = [
     "ProviderRequestError",
     "ProviderResponseError",
     "ProviderSelectionError",
+    "SessionUsageError",
+    "SessionUsageValidationError",
     "SourceError",
     "SourceFetchError",
     "SourceParseError",

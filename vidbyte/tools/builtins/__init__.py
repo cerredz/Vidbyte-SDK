@@ -11,7 +11,9 @@ Architecture:
     - Context compaction tools from builtins.context.
     - MCP discovery tools from builtins.mcp.
     - Memory provider tools from builtins.memory.
+    - Context primitive editing tools from builtins.context_primitives.
     - Context algorithm tools from builtins.trajectory_checkpoint and builtins.reflexion.
+    - Sequential continuation tool from builtins.run_prompts_sequentially.
 Relations:
     Related to vidbyte.tools.client and vidbyte.tools.registry.
 """
@@ -35,10 +37,48 @@ from vidbyte.tools.builtins.context import (
     ContextMessage,
     ProgressLog,
 )
-from vidbyte.tools.builtins.context_primitives import ContextListTool, ContextRemoveTool, ContextUpsertTool
+from vidbyte.tools.builtins.context_primitives import (
+    CREATE_TOOL_REGISTRY,
+    CreateContextPrimitiveTool,
+    ContextEditTool,
+    ContextListTool,
+    ContextMoveTool,
+    ContextRemoveTool,
+    ContextStatsTool,
+    ContextUpsertTool,
+    ContextWindowFactory,
+    PrimitiveToolDefinition,
+    context_window_tools,
+)
 from vidbyte.tools.builtins.editing import PatchTool
+from vidbyte.tools.builtins.fork import ForkConversationTool
 from vidbyte.tools.builtins.handoff import CreateHandoffTool
 from vidbyte.tools.builtins.mcp import AttachMcpServerTool, SearchMcpServersTool
+from vidbyte.tools.builtins.run_prompts_sequentially import RunPromptsSequentiallyTool
+from vidbyte.tools.builtins.providers import (
+    MongoCreateCollectionTool,
+    MongoCreateIndexTool,
+    MongoDeleteDocumentsTool,
+    MongoFindDocumentsTool,
+    MongoInsertDocumentTool,
+    MongoUpdateDocumentsTool,
+    ProviderCreateSchemaTool,
+    ProviderCreateTableTool,
+    ProviderDeleteRowsTool,
+    ProviderInsertRowTool,
+    ProviderSelectRowsTool,
+    ProviderUpdateRowsTool,
+)
+from vidbyte.tools.builtins.sessions import (
+    BatchForkTool,
+    CheckpointTool,
+    ForkTool,
+    ResumeAppendTool,
+    ResumeOutputTool,
+    ResumeReplaceTool,
+    RewindTool,
+    SessionTool,
+)
 from vidbyte.tools.builtins.memory import (
     CogneeAddTool,
     CogneeCognifyTool,
@@ -64,25 +104,43 @@ from vidbyte.tools.builtins.memory import (
 __all__ = [
     "AppendOutputTool",
     "AttachMcpServerTool",
+    "BatchForkTool",
     "CodeExecutionTool",
     "CreateHandoffTool",
+    "CheckpointTool",
     "CompactionMode",
     "ContextCompactionTool",
+    "CREATE_TOOL_REGISTRY",
+    "CreateContextPrimitiveTool",
+    "ContextEditTool",
     "ContextListTool",
     "ContextMessage",
+    "ContextMoveTool",
     "ContextRemoveTool",
+    "ContextStatsTool",
     "ContextUpsertTool",
+    "ContextWindowFactory",
     "DeclareOutputSchemaTool",
     "ExtendOutputSchemaTool",
+    "PrimitiveToolDefinition",
+    "context_window_tools",
+    "ForkConversationTool",
     "GlobTool",
     "GrepTool",
+    "ForkTool",
     "OutputSchemaBuilder",
     "OutputSchemaField",
     "PatchTool",
     "ProgressLog",
     "ReflexionTool",
+    "ResumeAppendTool",
+    "ResumeOutputTool",
+    "ResumeReplaceTool",
+    "RewindTool",
+    "RunPromptsSequentiallyTool",
     "SearchMcpServersTool",
     "SemanticSearchTool",
+    "SessionTool",
     "TrajectoryCheckpointTool",
     # Memory providers
     "CogneeAddTool",
@@ -97,6 +155,18 @@ __all__ = [
     "Mem0DeleteMemoryTool",
     "Mem0GetMemoriesTool",
     "Mem0SearchMemoryTool",
+    "MongoCreateCollectionTool",
+    "MongoCreateIndexTool",
+    "MongoDeleteDocumentsTool",
+    "MongoFindDocumentsTool",
+    "MongoInsertDocumentTool",
+    "MongoUpdateDocumentsTool",
+    "ProviderCreateSchemaTool",
+    "ProviderCreateTableTool",
+    "ProviderDeleteRowsTool",
+    "ProviderInsertRowTool",
+    "ProviderSelectRowsTool",
+    "ProviderUpdateRowsTool",
     "SupermemoryAddMemoryTool",
     "SupermemoryDeleteMemoryTool",
     "SupermemorySearchMemoryTool",

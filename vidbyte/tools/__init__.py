@@ -19,6 +19,8 @@ Relations:
 
 from __future__ import annotations
 
+from typing import Any
+
 from vidbyte.tools.adapters import ToolInput, ensure_tool, ensure_tools
 from vidbyte.tools.agent_tool import AgentTool
 from vidbyte.tools.base import BaseTool, ToolLike

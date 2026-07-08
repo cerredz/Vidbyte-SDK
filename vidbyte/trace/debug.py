@@ -39,7 +39,7 @@ class DebugTracer(TracerBase):
         )
         return context
 
-    def end_trace(self, context: SpanContext, *, output: str | None = None, error: Exception | None = None) -> None:
+    def end_trace(self, context: SpanContext, *, output: str | None = None, error: BaseException | None = None) -> None:
         self.events.append(
             {
                 "type": "end_trace",
@@ -67,7 +67,7 @@ class DebugTracer(TracerBase):
         )
         return context
 
-    def end_span(self, context: SpanContext, *, output: str | None = None, error: Exception | None = None) -> None:
+    def end_span(self, context: SpanContext, *, output: str | None = None, error: BaseException | None = None) -> None:
         self.events.append(
             {
                 "type": "end_span",
@@ -85,7 +85,7 @@ class DebugTracer(TracerBase):
         return SpanContext(metadata={"id": self._counter, "kind": kind, "name": name})
 
     @staticmethod
-    def _error_text(error: Exception | None) -> str | None:
+    def _error_text(error: BaseException | None) -> str | None:
         return str(error) if error is not None else None
 
 

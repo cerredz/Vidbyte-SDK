@@ -5,7 +5,7 @@
 - **Architecture**:
   - Outlines the 9 lifecycle hooks exposed by `AgentRuntime`.
   - Details the 5 discrete middleware actions (`CONTINUE`, `SLEEP`, `ABORT_RUN`, `DENY_TOOL`, `RETRY`).
-  - Categorizes all 13 built-in middlewares (Security, Reliability, Safety, Budgets).
+  - Categorizes all 14 built-in middlewares (Security, Reliability, Safety, Budgets).
   - Guides custom middleware creation with design patterns and best practices.
 - **Relations**: Relates to `skills/vidbyte-sdk/SKILL.md` (root SDK directory structure), `vidbyte/middleware/` (implementation package), and `vidbyte/middleware/builtins/` (standard built-ins).
 - **Similar Files**: `skills/vidbyte-sdk/pipelines.md`, `skills/vidbyte-sdk/adding-context-window-algorithms.md`.
@@ -16,7 +16,7 @@
 
 ## 1. What Middleware Is
 
-Middleware in the Vidbyte SDK consists of deterministic, out-of-band runtime interceptor policies injected into the agent's execution loop. While **pipelines** connect separate agents together and **strategies** manage reasoning loops, **middleware** controls the agent runtime's safety, reliability, budgets, and security borders without modifying the prompt context or being visible to the underlying LLM.
+Middleware in the Vidbyte SDK consists of deterministic, out-of-band runtime interceptor policies injected into the agent's execution loop. While **pipelines** connect separate agents together and **runtimes/context-window algorithms** shape reasoning loops, **middleware** controls the agent runtime's safety, reliability, budgets, and security borders without modifying the prompt context or being visible to the underlying LLM.
 
 All middleware classes subclass the abstract base `AgentMiddleware` and override specific asynchronous lifecycle hooks. They receive a read-only `MiddlewareContext` containing granular execution facts and return a `MiddlewareDecision` determining the runtime's next action.
 
@@ -59,7 +59,7 @@ A middleware hook MUST return a `MiddlewareDecision` object. The runtime interce
 
 ## 4. Built-in Middleware Catalog
 
-The Vidbyte SDK includes 13 built-in middlewares designed to guard and govern agent execution out of the box. Five additional **compaction** middlewares (`ToolResultCompactionMiddleware`, `MessageHistoryCompactionMiddleware`, `SummaryCompactionMiddleware`, `TraceReplacementCompactionMiddleware`, `TraceSummaryTailCompactionMiddleware`) are covered separately in §5.1, bringing the public total to 18. Compaction implementations live in `vidbyte/middleware/compaction/` and are re-exported through `vidbyte/middleware/builtins/context_compaction.py`.
+The Vidbyte SDK includes 14 built-in middlewares designed to guard and govern agent execution out of the box. Five additional **compaction** middlewares (`ToolResultCompactionMiddleware`, `MessageHistoryCompactionMiddleware`, `SummaryCompactionMiddleware`, `TraceReplacementCompactionMiddleware`, `TraceSummaryTailCompactionMiddleware`) are covered separately in §5.1, bringing the public total to 19. Compaction implementations live in `vidbyte/middleware/compaction/` and are re-exported through `vidbyte/middleware/builtins/context_compaction.py`.
 
 ### A. Security & Defense
 
@@ -149,11 +149,21 @@ The Vidbyte SDK includes 13 built-in middlewares designed to guard and govern ag
     *   `error_threshold: int = 3` (Failures needed to open circuit)
     *   `recovery_time_seconds: float = 30.0` (Time spent in OPEN state before HALF_OPEN probe)
 
+#### 9. `ToolErrorPolicyMiddleware`
+*   **Class**: `ToolErrorPolicyMiddleware`
+*   **Module**: `vidbyte.middleware.builtins.tool_error_policy`
+*   **Purpose**: Applies developer-configured retry, backoff, and abort policy to failed tool calls.
+*   **How it works**: Reads `ToolResult` failures after tool execution, classifies retryable transient kinds (`timeout`, `rate_limited`, `upstream_error` by default), retries idempotent calls when allowed, records tool-call state metadata, and can abort when `max_total_tool_errors` is exceeded. `AgentLoopSettings(tool_error_policy=...)` auto-registers this middleware for compatible linear agents.
+*   **Arguments**:
+    *   `policy: ToolErrorPolicy`
+    *   Policy fields: `max_retries_per_tool_call`, `retry_on`, `retry_backoff_base_seconds`, `retry_backoff_multiplier`, `retry_backoff_cap_seconds`, `retry_only_idempotent`, `on_unrecoverable`, `max_total_tool_errors`
+*   **Rendering**: Terminal tool errors are returned to the model with full detail. Do not document or invent `ErrorVerbosity` / tool-error render-options APIs.
+
 ---
 
 ### D. Safety & Observability
 
-#### 9. `LoopDetectionMiddleware`
+#### 10. `LoopDetectionMiddleware`
 *   **Class**: `LoopDetectionMiddleware`
 *   **Module**: `vidbyte.middleware.builtins.loop_detection`
 *   **Purpose**: Interrupts repeating, circular model reasoning sequences (e.g., repeated tool calls with identical parameters).
@@ -162,7 +172,7 @@ The Vidbyte SDK includes 13 built-in middlewares designed to guard and govern ag
     *   `max_repeats: int = 3`
     *   `abort_reason: str = "repetitive_loop_detected"`
 
-#### 10. `RuntimeLimitMiddleware`
+#### 11. `RuntimeLimitMiddleware`
 *   **Class**: `RuntimeLimitMiddleware`
 *   **Module**: `vidbyte.middleware.builtins.runtime_limits`
 *   **Purpose**: Places absolute safety rails on agent iteration count and execution duration.
@@ -172,7 +182,7 @@ The Vidbyte SDK includes 13 built-in middlewares designed to guard and govern ag
     *   `max_elapsed_seconds: float | None = None`
     *   `abort_reason: str = "runtime_limit_exceeded"`
 
-#### 11. `ToolPolicyMiddleware`
+#### 12. `ToolPolicyMiddleware`
 *   **Class**: `ToolPolicyMiddleware`
 *   **Module**: `vidbyte.middleware.builtins.tool_policy`
 *   **Purpose**: Implements strict, dynamic whitelisting/blacklisting policies on tool execution.
@@ -181,7 +191,7 @@ The Vidbyte SDK includes 13 built-in middlewares designed to guard and govern ag
     *   `allowed_tools: Iterable[str] | None = None` (Whitelisted tools)
     *   `denied_tools: Iterable[str] | None = None` (Blacklisted tools)
 
-#### 12. `TokenRateLimitMiddleware`
+#### 13. `TokenRateLimitMiddleware`
 *   **Class**: `TokenRateLimitMiddleware`
 *   **Module**: `vidbyte.middleware.builtins.rate_limit`
 *   **Purpose**: Complies with provider rate-limiting policies (TPM).
@@ -190,7 +200,7 @@ The Vidbyte SDK includes 13 built-in middlewares designed to guard and govern ag
     *   `limit: int` (Tokens per period)
     *   `period_seconds: float = 60.0`
 
-#### 13. `AuditLogMiddleware`
+#### 14. `AuditLogMiddleware`
 *   **Class**: `AuditLogMiddleware`
 *   **Module**: `vidbyte.middleware.builtins.audit`
 *   **Purpose**: Provides full compliance, observability, and structured logging of agent steps.
@@ -227,6 +237,22 @@ agent = Agent(
         HoneypotToolMiddleware(trap_tool_names=["delete_database", "bypass_sandbox"]),
         CanaryTripwireMiddleware(inject_probability=0.5),
     ],
+)
+```
+
+For tool-error policy, prefer the structured loop setting so the agent registers `ToolErrorPolicyMiddleware` consistently:
+
+```python
+from vidbyte import Agent
+from vidbyte.agents import AgentLoopSettings, ToolErrorPolicy
+
+agent = Agent(
+    name="resilient-tool-user",
+    system_prompt="Use tools and recover from transient failures.",
+    tools=[lookup],
+    agent_loop_settings=AgentLoopSettings(
+        tool_error_policy=ToolErrorPolicy(max_retries_per_tool_call=2),
+    ),
 )
 ```
 

@@ -1,26 +1,19 @@
-"""Context Protocol Header
-
-Description:
-    Implements session-aware tracer wrapping for grouping many agent runs.
-Purpose:
-    Lets callers place multiple BaseAgent traces under one parent trace without
-    changing the provider-neutral TracerBase runtime contract.
-Architecture:
-    - SessionTracer: TracerBase wrapper that stores an active root in ContextVar state.
-    - TraceSession: Sync/async context manager for session lifecycle.
-Relations:
-    Used by vidbyte.trace.Trace session helpers and any Agent(trace=...) caller.
-"""
+"""Session tracing wrappers for grouping multiple agent runs."""
 
 from __future__ import annotations
 
 from collections.abc import Mapping
+from contextlib import AbstractAsyncContextManager, AbstractContextManager
 from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Any
 
 from vidbyte.lib.errors import ConfigurationError
 from vidbyte.lib.tracing import SpanContext, TracerBase
+from vidbyte.trace.controller import TraceController
+from vidbyte.trace.profiles import TraceProfile
+from vidbyte.trace.providers import ProviderTraceTranslator
+from vidbyte.trace.schema import ParentPolicy, SpanKind, SpanSpec, TraceDetail
 
 
 @dataclass(frozen=True, slots=True)
@@ -144,6 +137,111 @@ class TraceSession:
         return False
 
 
+class SessionTraceController(TraceController):
+    """Trace controller that groups multiple agent runs under one semantic session root."""
+
+    def __init__(self, inner: TracerBase | None, profile: TraceProfile | None = None, translator: ProviderTraceTranslator | None = None, name: str | None = None) -> None:
+        # Initializes the controller and optional default session name.
+        super().__init__(inner, profile=profile, translator=translator)
+        self.default_name = name or "session.run"
+        self._session_root: ContextVar[SpanContext | None] = ContextVar(f"vidbyte_semantic_session_{id(self)}", default=None)
+
+    @property
+    def root_context(self) -> SpanContext | None:
+        # Returns the active semantic session root for this execution context.
+        return self._session_root.get()
+
+    def begin_session(self, name: str | None = None, **attributes: Any) -> SpanContext:
+        # Opens the shared session root trace.
+        if self.root_context is not None:
+            raise ConfigurationError("A trace session is already active on this controller.")
+        spec = SpanSpec(
+            name=name or self.default_name,
+            kind=SpanKind.CHAIN,
+            component="sessions",
+            detail=TraceDetail.STANDARD,
+            parent_policy=ParentPolicy.ROOT,
+            attributes=attributes,
+        )
+        root = self.open_span(spec, as_trace=True)
+        self._session_root.set(root)
+        return root
+
+    def end_session(self, *, output: str | None = None, error: BaseException | None = None) -> None:
+        # Closes the active session root and clears session state.
+        root = self.root_context
+        if root is None:
+            return
+        try:
+            self.end_trace(root, output=output, error=error)
+        finally:
+            self._session_root.set(None)
+
+    def start_trace(self, name: str, **attributes: Any) -> SpanContext:
+        # Converts child agent root traces into child spans while a session is active.
+        root = self.root_context
+        if root is not None and name == "agent.run":
+            return self.start_span(name, parent=root, **attributes)
+        return super().start_trace(name, **attributes)
+
+    def end_trace(self, context: SpanContext, *, output: str | None = None, error: BaseException | None = None) -> None:
+        # Ends child agent traces as spans while the session root remains open.
+        root = self.root_context
+        if root is None or context is root:
+            return super().end_trace(context, output=output, error=error)
+        return super().end_span(context, output=output, error=error)
+
+    def session(self, name: str | None = None, **attributes: Any) -> _SessionContext:
+        # Returns a sync context manager for one active session root.
+        return _SessionContext(self, name=name, attributes=attributes)
+
+    def async_session(self, name: str | None = None, **attributes: Any) -> _AsyncSessionContext:
+        # Returns an async context manager for one active session root.
+        return _AsyncSessionContext(self, name=name, attributes=attributes)
+
+
+class _SessionContext(AbstractContextManager[SessionTraceController]):
+    """Sync context manager for SessionTraceController."""
+
+    def __init__(self, controller: SessionTraceController, *, name: str | None, attributes: dict[str, Any]) -> None:
+        # Stores session construction data until context entry.
+        self._controller = controller
+        self._name = name
+        self._attributes = attributes
+
+    def __enter__(self) -> SessionTraceController:
+        # Begins a session and returns its controller.
+        self._controller.begin_session(self._name, **self._attributes)
+        return self._controller
+
+    def __exit__(self, exc_type: type[BaseException] | None, exc: BaseException | None, traceback: object | None) -> bool | None:
+        # Ends the session with either success or the raised error.
+        del exc_type, traceback
+        self._controller.end_session(error=exc)
+        return None
+
+
+class _AsyncSessionContext(AbstractAsyncContextManager[SessionTraceController]):
+    """Async context manager for SessionTraceController."""
+
+    def __init__(self, controller: SessionTraceController, *, name: str | None, attributes: dict[str, Any]) -> None:
+        # Stores session construction data until async context entry.
+        self._controller = controller
+        self._name = name
+        self._attributes = attributes
+
+    async def __aenter__(self) -> SessionTraceController:
+        # Begins a session and returns its controller.
+        self._controller.begin_session(self._name, **self._attributes)
+        return self._controller
+
+    async def __aexit__(self, exc_type: type[BaseException] | None, exc: BaseException | None, traceback: object | None) -> bool | None:
+        # Ends the session with either success or the raised error.
+        del exc_type, traceback
+        self._controller.end_session(error=exc)
+        return None
+
+
 class _SessionTracerFactory:
     """Validation helper for session tracer construction."""
 
@@ -163,4 +261,4 @@ class _SessionTracerFactory:
         return resolved
 
 
-__all__ = ["SessionTracer", "TraceSession"]
+__all__ = ["SessionTraceController", "SessionTracer", "TraceSession"]

@@ -2,14 +2,14 @@
 
 import unittest
 
-from vidbyte.agents import AgentRuntime
+from vidbyte.agents import AgentLoopSettings, AgentRuntime, BaseAgent, ToolErrorPolicy
 from vidbyte.lib.dataclasses.agents import AgentRuntimeConfig
 from vidbyte.lib.dataclasses.middleware import MiddlewareContext, MiddlewareDecision
 from vidbyte.lib.dataclasses.runner import RunnerHandle
 from vidbyte.middleware import AgentMiddleware
-from vidbyte.middleware.builtins import ModelRetryMiddleware, ToolPolicyMiddleware
+from vidbyte.middleware.builtins import ModelRetryMiddleware, ToolErrorPolicyMiddleware, ToolPolicyMiddleware
 from vidbyte.lib.dataclasses.context import BaseContext as StrategyContext
-from vidbyte.tools import BaseTool, ToolCall, ToolResult, ToolSpec, Tools, tool
+from vidbyte.tools import BaseTool, ToolCall, ToolPermission, ToolResult, ToolSpec, Tools, tool
 from vidbyte.tools.security import PermissionPolicy
 
 
@@ -52,6 +52,34 @@ class ExecutableTool(BaseTool):
     async def execute(self, call: ToolCall) -> ToolResult:
         self.executed = True
         return ToolResult.success("lookup", "found")
+
+
+class FlakyTool(BaseTool):
+    def __init__(self, *, permission: ToolPermission = ToolPermission.READ) -> None:
+        self.executions = 0
+        self.permission = permission
+
+    def spec(self) -> ToolSpec:
+        return ToolSpec(name="lookup", description="Lookup a value.", permission=self.permission)
+
+    async def execute(self, call: ToolCall) -> ToolResult:
+        self.executions += 1
+        if self.executions == 1:
+            return ToolResult.error("lookup", "temporary upstream error", metadata={"error": "upstream_error", "retryable": True})
+        return ToolResult.success("lookup", "found after retry")
+
+
+class AlwaysFailingTool(BaseTool):
+    def __init__(self, *, permission: ToolPermission = ToolPermission.READ) -> None:
+        self.executions = 0
+        self.permission = permission
+
+    def spec(self) -> ToolSpec:
+        return ToolSpec(name="lookup", description="Lookup a value.", permission=self.permission)
+
+    async def execute(self, call: ToolCall) -> ToolResult:
+        self.executions += 1
+        return ToolResult.error("lookup", "temporary upstream error", metadata={"error": "upstream_error", "retryable": True, "hint": "Wait briefly."})
 
 
 class AbortBeforeRunMiddleware(AgentMiddleware):
@@ -109,12 +137,12 @@ class ExplodingMiddleware(AgentMiddleware):
 
 
 class AgentMiddlewareTests(unittest.IsolatedAsyncioTestCase):
-    def _runtime(self, *, tools: Tools | None = None, middleware: tuple[AgentMiddleware, ...] = ()) -> AgentRuntime:
+    def _runtime(self, *, tools: Tools | None = None, middleware: tuple[AgentMiddleware, ...] = (), permission_policy: PermissionPolicy | None = None) -> AgentRuntime:
         return AgentRuntime(
             agent_name="worker",
             system_prompt="Work.",
             tools=tools or Tools(),
-            permission_policy=PermissionPolicy(),
+            permission_policy=permission_policy or PermissionPolicy(),
             middleware=middleware,
         )
 
@@ -234,6 +262,78 @@ class AgentMiddlewareTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.output, "done")
         self.assertEqual(len(runner.calls), 2)
         self.assertEqual(result.metadata["middleware"]["events"][0]["action"], "retry")
+
+    async def test_tool_error_policy_retries_idempotent_transient_tool_error(self) -> None:
+        flaky = FlakyTool(permission=ToolPermission.READ)
+        runner = FakeRunner(
+            [
+                FakeResponse("", {"output": [{"type": "function_call", "name": "lookup", "arguments": "{}", "call_id": "fc_lookup"}]}),
+                FakeResponse("", {"output": [{"type": "function_call", "name": "isDone", "arguments": '{"final_answer": "done"}', "call_id": "fc_done"}]}),
+            ]
+        )
+        middleware = ToolErrorPolicyMiddleware(ToolErrorPolicy(max_retries_per_tool_call=1, retry_backoff_base_seconds=0))
+        runtime = self._runtime(tools=Tools([flaky]), middleware=(middleware,))
+
+        result = await runtime.arun(
+            "task",
+            handle=RunnerHandle(runner=runner, provider="openai", invoke=invoke_runner, extract_text=runner_output_text, extract_metadata=runner_output_metadata),
+            context=self._context(runtime),
+        )
+
+        self.assertEqual(result.output, "done")
+        self.assertEqual(flaky.executions, 2)
+        self.assertEqual(result.metadata["tool_call_states"], ("succeeded", "succeeded"))
+        self.assertEqual(result.metadata["middleware"]["events"][0]["reason"], "tool_error_retry")
+
+    async def test_tool_error_policy_does_not_retry_write_tool_when_idempotency_gate_enabled(self) -> None:
+        failing = AlwaysFailingTool(permission=ToolPermission.WRITE)
+        runner = FakeRunner(
+            [
+                FakeResponse("", {"output": [{"type": "function_call", "name": "lookup", "arguments": "{}", "call_id": "fc_lookup"}]}),
+                FakeResponse("", {"output": [{"type": "function_call", "name": "isDone", "arguments": '{"final_answer": "done"}', "call_id": "fc_done"}]}),
+            ]
+        )
+        middleware = ToolErrorPolicyMiddleware(ToolErrorPolicy(max_retries_per_tool_call=1, retry_backoff_base_seconds=0))
+        runtime = self._runtime(tools=Tools([failing]), middleware=(middleware,), permission_policy=PermissionPolicy.allow_all())
+
+        result = await runtime.arun(
+            "task",
+            handle=RunnerHandle(runner=runner, provider="openai", invoke=invoke_runner, extract_text=runner_output_text, extract_metadata=runner_output_metadata),
+            context=self._context(runtime),
+        )
+
+        self.assertEqual(result.output, "done")
+        self.assertEqual(failing.executions, 1)
+        self.assertEqual(result.metadata["tool_call_states"], ("failed", "succeeded"))
+        self.assertIn("Hint: Wait briefly.", str(runner.calls[1]["kwargs"]["messages"]))
+
+    async def test_tool_error_policy_circuit_breaker_aborts_after_total_errors(self) -> None:
+        failing = AlwaysFailingTool(permission=ToolPermission.READ)
+        runner = FakeRunner(
+            [FakeResponse("", {"output": [{"type": "function_call", "name": "lookup", "arguments": "{}", "call_id": "fc_lookup"}]})]
+        )
+        middleware = ToolErrorPolicyMiddleware(ToolErrorPolicy(max_total_tool_errors=1))
+        runtime = self._runtime(tools=Tools([failing]), middleware=(middleware,))
+
+        result = await runtime.arun(
+            "task",
+            handle=RunnerHandle(runner=runner, provider="openai", invoke=invoke_runner, extract_text=runner_output_text, extract_metadata=runner_output_metadata),
+            context=self._context(runtime),
+        )
+
+        self.assertEqual(result.metadata["stop_reason"], "middleware_abort")
+        self.assertEqual(result.metadata["middleware_abort_reason"], "tool_error_circuit_break")
+        self.assertEqual(failing.executions, 1)
+
+    async def test_agent_loop_settings_auto_registers_tool_error_policy_middleware(self) -> None:
+        agent = BaseAgent(
+            name="worker",
+            system_prompt="Work.",
+            runner=object(),
+            agent_loop_settings=AgentLoopSettings(tool_error_policy=ToolErrorPolicy(max_retries_per_tool_call=1)),
+        )
+
+        self.assertTrue(any(isinstance(item, ToolErrorPolicyMiddleware) for item in agent._runtime_middleware()))
 
     async def test_fail_closed_middleware_exception_aborts(self) -> None:
         runner = FakeRunner([FakeResponse("unused")])

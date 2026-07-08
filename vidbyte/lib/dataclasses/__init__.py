@@ -64,6 +64,17 @@ from vidbyte.lib.dataclasses.middleware import (
 from vidbyte.lib.dataclasses.multi_agent import CandidateFailure, CandidateResult, DagNode, EvaluationDecision, NodeState, Verification
 from vidbyte.lib.dataclasses.sandbox import SandboxRequest, SandboxResult, SandboxTransport
 from vidbyte.lib.dataclasses.security import PermissionDecision, PermissionPolicy
+from vidbyte.lib.dataclasses.sessions import (
+    SESSION_SCHEMA_VERSION,
+    AgentUsage,
+    Checkpoint,
+    CheckpointPolicy,
+    RunState,
+    SessionMeta,
+    SessionStatus,
+    TraceCapture,
+    UsageRollup,
+)
 from vidbyte.lib.dataclasses.sources import (
     ArtifactRef,
     FetchResponse,
@@ -105,6 +116,7 @@ __all__ = [
     "AgentRuntimeStats",
     "AgentSpec",
     "AgentStopReason",
+    "AgentUsage",
     "ArtifactRef",
     "ArtifactContextItem",
     "BaseAgentContext",
@@ -147,10 +159,16 @@ __all__ = [
     "ProgressLog",
     "ResponseContextItem",
     "RunnerHandle",
+    "SESSION_SCHEMA_VERSION",
     "SandboxRequest",
     "SandboxResult",
     "SandboxTransport",
     "Selection",
+    "Checkpoint",
+    "CheckpointPolicy",
+    "RunState",
+    "SessionMeta",
+    "SessionStatus",
     "SourceResult",
     "SourceSnapshot",
     "TaskContextItem",
@@ -169,6 +187,8 @@ __all__ = [
     "TraceFieldType",
     "TraceMode",
     "TraceOption",
+    "TraceCapture",
     "TraceSchema",
+    "UsageRollup",
     "Verification",
 ]

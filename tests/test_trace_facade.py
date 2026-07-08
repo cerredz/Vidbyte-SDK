@@ -7,7 +7,7 @@ from unittest.mock import patch
 from vidbyte import Trace as RootTrace
 from vidbyte.lib.errors import ConfigurationError, TracerConfigurationError
 from vidbyte.lib.tracing import NullTracer, SpanContext, TracerBase
-from vidbyte.trace import ContinualTracer, DebugTracer, Trace
+from vidbyte.trace import ContinualTracer, DebugTracer, Trace, TraceController, TraceProfile
 
 
 class RecordingTracer(TracerBase):
@@ -162,6 +162,20 @@ class TraceFacadeTests(unittest.TestCase):
         self.assertIn("Trace", trace_package.__all__)
         self.assertIn("DebugTracer", trace_package.__all__)
         self.assertIn("ContinualTracer", trace_package.__all__)
+        self.assertIn("TraceProfile", trace_package.__all__)
+        self.assertIn("TraceController", trace_package.__all__)
+
+    def test_profile_helper_wraps_inner_tracer(self) -> None:
+        # Verifies the semantic profile helper returns a TraceController.
+        inner = RecordingTracer()
+        tracer = Trace.profile(inner, TraceProfile.default())
+        self.assertIsInstance(tracer, TraceController)
+        self.assertIs(tracer.inner, inner)
+
+    def test_session_helper_wraps_inner_tracer(self) -> None:
+        # Verifies the semantic session helper returns a session-capable controller.
+        tracer = Trace.session(RecordingTracer(), profile=TraceProfile.default())
+        self.assertTrue(hasattr(tracer, "session"))
 
     def test_tracer_implementations_live_in_dedicated_modules(self) -> None:
         # Verifies base.py stays the facade while implementations live in split modules.

@@ -17,14 +17,22 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Mapping
+from typing import TYPE_CHECKING, Any, Mapping, Sequence
 
-from vidbyte.lib.enums import ModelModality
+from vidbyte.lib.errors import AgentForkConfigurationError
 
 if TYPE_CHECKING:
+    from vidbyte.agents.runtimes.configs import ActorRuntime, LinearRuntime, MctsSearchRuntime
+    from vidbyte.agents.settings import AgentLoopSettings
+    from vidbyte.agents.settings.tool import ToolSettings
+    from vidbyte.context.handoff import Handoff
     from vidbyte.context.manager import ContextManager
     from vidbyte.context.primitives import ContextItem
     from vidbyte.context.window import ContextWindowAlgorithm
+    from vidbyte.lib.dataclasses.trace import TraceOption
+    from vidbyte.lib.enums import AgentRuntimeType, ModelProvider
+    from vidbyte.middleware import AgentMiddleware
+    from vidbyte.tools.catalog import Tools
     from vidbyte.tools.types import ToolCallContext
 
 
@@ -37,6 +45,7 @@ class AgentStopReason(str, Enum):
     MAX_TOKENS = "max_tokens"
     MAX_TOOL_CALLS = "max_tool_calls"
     MIDDLEWARE_ABORT = "middleware_abort"
+    TOOL_SETTINGS_DENIED = "tool_settings_denied"
     TOOL_LOOP_LIMIT = "tool_loop_limit"
     ERROR = "error"
 
@@ -50,6 +59,7 @@ class AgentRuntimeConfig:
     max_tool_calls: int | None = None
     compaction_trigger_tokens: int | None = None
     compaction_target_tokens: int | None = None
+    tool_settings: "ToolSettings | None" = None
 
     def __post_init__(self) -> None:
         """Validate optional budget values."""
@@ -95,18 +105,15 @@ class AgentRunnerConfig:
     api_key: str | None = None
     provider: str | None = None
     model_name: str | None = None
-    modality: ModelModality | str = ModelModality.AUTO
     temperature: float | None = None
     run_id: str | None = None
-    options: Mapping[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
 class AgentInput:
-    """Typed agent input for reliable modality routing."""
+    """Typed agent input for prompt metadata and per-call context."""
 
     prompt: str
-    modality: ModelModality | str = ModelModality.AUTO
     metadata: Mapping[str, Any] = field(default_factory=dict)
     context_items: tuple[ContextItem, ...] = ()
     context_manager: ContextManager | None = None
@@ -123,7 +130,6 @@ class AgentCard:
     tool_names: tuple[str, ...] = ()
     mcp_tool_names: tuple[str, ...] = ()
     mcp_server_names: tuple[str, ...] = ()
-    modalities: tuple[ModelModality, ...] = ()
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
 
@@ -159,3 +165,53 @@ class AgentSpec:
     context_items: tuple[ContextItem, ...] = ()
     context_manager: ContextManager | None = None
     algorithm: ContextWindowAlgorithm | str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class AgentForkSettings:
+    """Validated, self-describing bundle of every BaseAgent.fork override.
+
+    Each field defaults to a value that means "inherit from the parent agent".
+    Passing an explicit value overrides that single part of the child branch.
+    Validation happens eagerly in __post_init__ so an invalid fork request fails
+    at settings-construction time rather than deep inside the fork pipeline.
+    """
+
+    name: str | None = None
+    tools: Sequence[object] | Tools | None = None
+    add_tools: Sequence[object] = ()
+    drop_tools: Sequence[str] = ()
+    system_prompt: str | None = None
+    metadata: dict[str, Any] | None = None
+    middleware: Sequence[AgentMiddleware] | None = None
+    context_items: Sequence[ContextItem] | None = None
+    context_manager: ContextManager | None = None
+    algorithm: ContextWindowAlgorithm | str | None = None
+    include_history: bool = False
+    history: Sequence[AgentMessage] | None = None
+    trace_option: TraceOption | None = None
+    include_run_state: bool = False
+    output_schema: type | Mapping[str, Any] | None = None
+    agent_loop_settings: AgentLoopSettings | None = None
+    max_iterations: int | None = None
+    handoff: Handoff | None = None
+    runtime: AgentRuntimeType | str | LinearRuntime | MctsSearchRuntime | ActorRuntime | None = None
+    run_id: str | None = None
+    model_name: str | None = None
+    provider: ModelProvider | str | None = None
+    temperature: float | None = None
+    mcp: bool = True
+    inherit_mcp: bool | None = None
+
+    def __post_init__(self) -> None:
+        """Reject internally inconsistent or out-of-range fork requests."""
+        if self.agent_loop_settings is not None and self.max_iterations is not None:
+            raise AgentForkConfigurationError("Pass either agent_loop_settings or max_iterations, not both.")
+        if self.max_iterations is not None and self.max_iterations <= 0:
+            raise AgentForkConfigurationError("max_iterations must be greater than zero when provided.")
+        if self.temperature is not None and not 0.0 <= self.temperature <= 2.0:
+            raise AgentForkConfigurationError("temperature must be between 0 and 2 when provided.")
+        if self.model_name is not None and not isinstance(self.model_name, str):
+            raise AgentForkConfigurationError(
+                "model_name must be a single model name string; use AggregateAgent for multi-model aggregation."
+            )

@@ -17,11 +17,11 @@ Similar Files:
 
 from __future__ import annotations
 
-from vidbyte.agents.base import BaseAgent, ConfiguredAgentRunner
+from vidbyte.agents.base import BaseAgent
 from vidbyte.agents.aggregation import AggregateAgent, AggregateResult, MultiProviderAggregator
 from vidbyte.agents.client import AgentClient
 from vidbyte.agents.continual_trace import ContinualTraceAgent
-from vidbyte.agents.settings import AgentLoopSettings
+from vidbyte.agents.settings import AgentLoopSettings, ToolErrorPolicy, ToolSettings, UnrecoverableAction
 from vidbyte.agents.handoff import HandoffAgent
 from vidbyte.agents.context_algorithms import AgentRuntimeContextAlgorithms
 from vidbyte.lib.dataclasses.multi_agent import AggregateConfig, ProposerSpec
@@ -41,7 +41,7 @@ from vidbyte.lib.dataclasses.agents import (
     AgentRuntimeStats,
     AgentStopReason,
 )
-from vidbyte.agents.types import AgentCard, AgentInput, AgentMessage, AgentSpec, ModelModality
+from vidbyte.agents.types import AgentCard, AgentForkSettings, AgentInput, AgentMessage, AgentSpec
 
 Agent = BaseAgent
 
@@ -52,7 +52,11 @@ __all__ = [
     "AggregateResult",
     "AgentClient",
     "AgentLoopSettings",
+    "ToolErrorPolicy",
+    "ToolSettings",
+    "UnrecoverableAction",
     "AgentCard",
+    "AgentForkSettings",
     "AgentInput",
     "AgentMessage",
     "MultiProviderAggregator",
@@ -65,10 +69,8 @@ __all__ = [
     "AgentSpec",
     "AgentStopReason",
     "BaseAgent",
-    "ConfiguredAgentRunner",
     "ContinualTraceAgent",
     "HandoffAgent",
-    "ModelModality",
     "AgentRuntime",
     "SearchTreeRuntimeComponent",
     "PointToPointActorRuntime",

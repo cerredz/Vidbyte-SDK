@@ -9,6 +9,7 @@ from vidbyte.lib.runners.types import (
     VideoModelJob,
 )
 from vidbyte.lib.runners.router import coerce_modality, create_runner_for_modality, resolve_modality
+from vidbyte.lib.runners.utility import Runner
 from vidbyte.lib.agents import ModalityDetector
 
 __all__ = [
@@ -21,6 +22,7 @@ __all__ = [
     "ImageModelResponse",
     "ImageModelRunner",
     "ModalityDetector",
+    "Runner",
     "StreamingTextModelRunner",
     "TextModelResponse",
     "TextModelRunner",

@@ -62,7 +62,7 @@ class PhoenixTracer(TracerBase):
         context: SpanContext,
         *,
         output: str | None = None,
-        error: Exception | None = None,
+        error: BaseException | None = None,
     ) -> None:
         if not isinstance(context, PhoenixSpanContext) or context.span is None:
             return
@@ -89,10 +89,13 @@ class PhoenixTracer(TracerBase):
             span = self._tracer.start_span(name, context=ctx)
             for key, value in attributes.items():
                 span.set_attribute(key, str(value))
-            if name.startswith("llm."):
+            run_type = str(attributes.get("run_type", ""))
+            if name.startswith("llm.") or run_type == "llm":
                 span.set_attribute("openinference.span.kind", "LLM")
-            elif name.startswith("tool."):
+            elif name.startswith("tool.") or run_type == "tool":
                 span.set_attribute("openinference.span.kind", "TOOL")
+            elif run_type:
+                span.set_attribute("openinference.span.kind", run_type.upper())
             return PhoenixSpanContext(span=span)
         except Exception:
             return PhoenixSpanContext()
@@ -102,7 +105,7 @@ class PhoenixTracer(TracerBase):
         context: SpanContext,
         *,
         output: str | None = None,
-        error: Exception | None = None,
+        error: BaseException | None = None,
     ) -> None:
         if not isinstance(context, PhoenixSpanContext) or context.span is None:
             return

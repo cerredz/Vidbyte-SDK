@@ -1,0 +1,49 @@
+{
+  "name": "Context Minimal Fanout Skills",
+  "description": "Distributable harness-agnostic skills for context-minimal decomposition, design, and fanout workflows.",
+  "key": "context_minimal_fanout",
+  "skills": [
+    {
+      "key": "context_minimal_fanout.decompose_then_implement",
+      "name": "Decompose Then Implement",
+      "description": "Gather focused context, decompose the task into persisted subtasks, then implement each subtask sequentially.",
+      "folder": "decompose-then-implement",
+      "entry": "SKILL.md",
+      "files": [
+        "decompose-then-implement/SKILL.md"
+      ]
+    },
+    {
+      "key": "context_minimal_fanout.decompose_design_then_implement",
+      "name": "Decompose, Design, Then Implement",
+      "description": "Gather context, decompose into subtasks, write a short solution design for each subtask, then implement the designs sequentially.",
+      "folder": "decompose-design-then-implement",
+      "entry": "SKILL.md",
+      "files": [
+        "decompose-design-then-implement/SKILL.md"
+      ]
+    },
+    {
+      "key": "context_minimal_fanout.decompose_design_fanout",
+      "name": "Decompose, Design, Fanout",
+      "description": "Gather context, decompose into subtasks, write per-subtask design docs, then launch one subagent per design doc.",
+      "folder": "decompose-design-fanout",
+      "entry": "SKILL.md",
+      "files": [
+        "decompose-design-fanout/SKILL.md",
+        "references/harness-commands.md"
+      ]
+    },
+    {
+      "key": "context_minimal_fanout.decompose_fanout",
+      "name": "Decompose Fanout",
+      "description": "Decompose one large task into non-overlapping subtasks, launch one subagent per subtask, then merge and report.",
+      "folder": "decompose-fanout",
+      "entry": "SKILL.md",
+      "files": [
+        "decompose-fanout/SKILL.md",
+        "references/harness-commands.md"
+      ]
+    }
+  ]
+}

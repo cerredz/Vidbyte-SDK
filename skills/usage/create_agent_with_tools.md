@@ -43,6 +43,7 @@ from vidbyte.tools.builtins.code_search import GrepTool, GlobTool, SemanticSearc
 from vidbyte.tools.builtins.editing import PatchTool
 from vidbyte.tools.builtins.calculator import CalculatorTool
 from vidbyte.tools.builtins.code_execution import CodeExecutionTool
+from vidbyte.tools.builtins import ForkConversationTool
 
 agent = Agent(
     name="dev-agent",
@@ -53,6 +54,7 @@ agent = Agent(
         SemanticSearchTool(),         # semantic code search
         CalculatorTool(),             # evaluate math expressions
         CodeExecutionTool(),          # execute Python in sandbox
+        ForkConversationTool(),       # run an isolated child conversation now
     ],
     provider="openai",
     model_name="gpt-4.1",
@@ -60,6 +62,64 @@ agent = Agent(
 ```
 
 For a complete catalog of every built-in tool, see [`skills/usage/available_tools.md`](available_tools.md).
+
+## Agent Forking Tool
+
+`ForkConversationTool` lets the model ask the current agent to fork itself and run a focused child branch immediately. It is separate from durable session fork tools: it spends model tokens now, returns the child answer as a tool result, and keeps child state isolated unless the parent incorporates that answer.
+
+```python
+from vidbyte import Agent
+from vidbyte.tools.builtins import ForkConversationTool
+
+agent = Agent(
+    name="planner",
+    system_prompt="Fork isolated checks when useful.",
+    tools=[ForkConversationTool(allowed_models=["gpt-4.1-mini"])],
+    provider="openai",
+    model_name="gpt-4.1",
+)
+```
+
+The tool is non-escalating: model swaps must be allowlisted, extra tools must come from developer-provided `extra_toolsets`, `max_iterations` cannot exceed the parent cap, and permission policy is inherited.
+
+## Session Tools
+
+Session tools let a model checkpoint, fork, rewind, or resume durable threads through a `SessionStore`. They auto-bind to the active `Session`.
+
+```python
+from vidbyte import Agent, FileSessionStore, Session
+from vidbyte.tools.builtins.sessions import (
+    BatchForkTool,
+    CheckpointTool,
+    ForkTool,
+    ResumeAppendTool,
+    ResumeOutputTool,
+    ResumeReplaceTool,
+    RewindTool,
+    SessionTool,
+)
+
+store = FileSessionStore("./.vidbyte/sessions")
+agent = Agent(
+    name="durable-worker",
+    system_prompt="Use session tools for durable thread operations.",
+    tools=[
+        CheckpointTool(store),
+        ForkTool(store),
+        BatchForkTool(store),
+        RewindTool(store),
+        ResumeReplaceTool(store),
+        ResumeAppendTool(store),
+        ResumeOutputTool(store),
+        SessionTool(store),
+    ],
+    provider="openai",
+    model_name="gpt-4.1",
+)
+session = Session(agent, store=store)
+```
+
+Cross-session reads are gated by `SessionScope`; grant access explicitly when one agent should resume another agent's thread.
 
 ## Filesystem Tools
 
@@ -156,3 +216,4 @@ The internal `isDone` tool is injected automatically so the model can signal whe
 - **Use the most restrictive permission policy possible.** Only grant `WRITE` or `EXECUTE` access when your use case requires it.
 - **Group tools into a `Tools` catalog** when attaching to multiple agents to avoid duplication and ensure consistency.
 - **Use MCP tools** for integrating external systems rather than building custom SDK tools for every API.
+- **Use session tools for durable thread operations** and `ForkConversationTool` for immediate isolated child execution.

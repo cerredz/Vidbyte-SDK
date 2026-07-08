@@ -108,7 +108,7 @@ class LangSmithTracer(TracerBase):
             self._call_langsmith("update_run", self._client.update_run, context.run_id, error=str(error), end_time=_now())
         else:
             self._call_langsmith("update_run", self._client.update_run, context.run_id, outputs={"output": output}, end_time=_now())
-        self._call_langsmith("flush", self._client.flush)
+        self._flush()
 
     def start_span(self, name: str, parent: SpanContext | None = None, **attributes: Any) -> LangSmithSpanContext:
         # Opens a child LangSmith run under the parent trace when available.
@@ -124,6 +124,8 @@ class LangSmithTracer(TracerBase):
             parent_run_id=parent_run_id,
             project_name=self._project,
         )
+        if trace_id is not None:
+            create_kwargs["trace_id"] = trace_id
         self._call_langsmith("create_run", self._client.create_run, **create_kwargs)
         return LangSmithSpanContext(run_id=run_id, parent_run_id=parent_run_id, trace_id=trace_id)
 
@@ -135,7 +137,7 @@ class LangSmithTracer(TracerBase):
             self._call_langsmith("update_run", self._client.update_run, context.run_id, error=str(error), end_time=_now())
         else:
             self._call_langsmith("update_run", self._client.update_run, context.run_id, outputs={"output": output}, end_time=_now())
-        self._call_langsmith("flush", self._client.flush)
+        self._flush()
 
     @staticmethod
     def _resolve_run_type(name: str, explicit: str | None) -> str:
@@ -147,6 +149,12 @@ class LangSmithTracer(TracerBase):
         if name.startswith("tool."):
             return "tool"
         return "chain"
+
+    def _flush(self) -> None:
+        # Flushes clients that expose flush while tolerating lightweight test doubles.
+        flush = getattr(self._client, "flush", None)
+        if callable(flush):
+            self._call_langsmith("flush", flush)
 
 
 def _now() -> Any:

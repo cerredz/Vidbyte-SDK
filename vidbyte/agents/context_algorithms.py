@@ -79,14 +79,37 @@ class AgentRuntimeContextAlgorithms:
         algorithm = self.return_algorithm()
         if algorithm is None:
             return None
-        return await algorithm.arun(
-            message,
-            handle=handle,
-            context=context,
-            metadata=metadata,
-            options=options,
-            trace_context=trace_context,
-        )
+        span = self._start_algorithm_span(trace_context, algorithm=self.detect_algorithm() or "unknown", message=message)
+        try:
+            result = await algorithm.arun(
+                message,
+                handle=handle,
+                context=context,
+                metadata=metadata,
+                options=options,
+                trace_context=span or trace_context,
+            )
+            self._end_algorithm_span(span, output=result.output)
+            return result
+        except BaseException as exc:
+            self._end_algorithm_span(span, error=exc)
+            raise
+
+    def _start_algorithm_span(self, parent: SpanContext | None, **attributes: Any) -> SpanContext | None:
+        # Opens an algorithm span only when semantic tracing is active.
+        if not _is_semantic_tracer(self.runtime._tracer):
+            return None
+        return self.runtime._tracer.start_span("algorithm." + str(attributes.get("algorithm", "unknown")), parent=parent, **attributes)
+
+    def _end_algorithm_span(self, span: SpanContext | None, *, output: str | None = None, error: BaseException | None = None) -> None:
+        # Closes an algorithm span only when one was opened.
+        if span is not None:
+            self.runtime._tracer.end_span(span, output=output, error=error)
+
+
+def _is_semantic_tracer(tracer: object) -> bool:
+    # Detects TraceController-like tracers without importing vidbyte.trace during agent initialization.
+    return all(hasattr(tracer, attr) for attr in ("inner", "profile", "translator"))
 
 
 __all__ = [
