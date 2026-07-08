@@ -16,6 +16,7 @@ from vidbyte.tools.builtins.context_primitives import (
     ContextEditTool,
     ContextListTool,
     ContextMoveTool,
+    ContextReciteTool,
     ContextRemoveTool,
     ContextStatsTool,
     ContextUpsertTool,
@@ -153,16 +154,18 @@ class ContextManagementToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.status.value, "error")
         self.assertIn("appears 2 times", result.output)
 
-    async def test_edit_errors_for_primitive_without_content_field(self) -> None:
-        """Verify context_edit does not pretend non-content primitives are editable."""
+    async def test_edit_replaces_unique_plan_step(self) -> None:
+        """Verify context_edit can patch a unique string inside plan step tuples."""
         manager = ContextManager()
-        manager.upsert(PlanContextItem(primitive_id="plan:1", steps=("a",)))
+        manager.upsert(PlanContextItem(primitive_id="plan:1", steps=("scaffold", "wrong step", "ship")))
         tool = ContextEditTool(manager)
 
-        result = await tool.execute(ToolCall(tool_name="context_edit", arguments={"primitive_id": "plan:1", "old_string": "a", "new_string": "b"}))
+        result = await tool.execute(ToolCall(tool_name="context_edit", arguments={"primitive_id": "plan:1", "old_string": "wrong step", "new_string": "implement"}))
 
-        self.assertEqual(result.status.value, "error")
-        self.assertIn("no editable string content", result.output)
+        self.assertEqual(result.status.value, "success")
+        stored = manager.get_by_id("plan:1")
+        assert stored is not None
+        self.assertEqual(stored.steps, ("scaffold", "implement", "ship"))
 
     async def test_edit_refuses_frozen_primitive(self) -> None:
         """Verify context_edit cannot modify frozen primitives."""
@@ -216,7 +219,15 @@ class ContextManagementToolTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(
             tuple(tool.name for tool in tools),
-            ("context_create_text", "context_list", "context_remove", "context_stats", "context_edit", "context_move"),
+            (
+                "context_create_text",
+                "context_list",
+                "context_remove",
+                "context_stats",
+                "context_edit",
+                "context_recite",
+                "context_move",
+            ),
         )
 
     async def test_context_window_factory_build_matches_convenience_wrapper(self) -> None:
@@ -236,7 +247,14 @@ class ContextManagementToolTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(
             tuple(tool.name for tool in tools),
-            ("context_list", "context_remove", "context_stats", "context_edit", "context_move"),
+            (
+                "context_list",
+                "context_remove",
+                "context_stats",
+                "context_edit",
+                "context_recite",
+                "context_move",
+            ),
         )
 
     async def test_context_window_tools_rejects_unknown_include_key(self) -> None:
@@ -328,16 +346,20 @@ class ContextUpsertToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("old body", stored.to_context_text())
 
     async def test_public_imports_accessible_from_root(self) -> None:
+        from vidbyte import ContextEditTool as RootEdit
         from vidbyte import ContextListTool as RootList
         from vidbyte import ContextMoveTool as RootMove
+        from vidbyte import ContextReciteTool as RootRecite
         from vidbyte import ContextRemoveTool as RootRemove
         from vidbyte import ContextStatsTool as RootStats
         from vidbyte import ContextUpsertTool as RootUpsert
         from vidbyte import ContextWindowFactory as RootFactory
         from vidbyte import context_window_tools as root_context_window_tools
 
+        self.assertIs(RootEdit, ContextEditTool)
         self.assertIs(RootList, ContextListTool)
         self.assertIs(RootMove, ContextMoveTool)
+        self.assertIs(RootRecite, ContextReciteTool)
         self.assertIs(RootRemove, ContextRemoveTool)
         self.assertIs(RootStats, ContextStatsTool)
         self.assertIs(RootUpsert, ContextUpsertTool)

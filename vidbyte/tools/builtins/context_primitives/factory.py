@@ -23,6 +23,7 @@ from vidbyte.tools.builtins.context_primitives.create import CreateContextPrimit
 from vidbyte.tools.builtins.context_primitives.edit import ContextEditTool
 from vidbyte.tools.builtins.context_primitives.list_tool import ContextListTool
 from vidbyte.tools.builtins.context_primitives.move import ContextMoveTool
+from vidbyte.tools.builtins.context_primitives.recite import ContextReciteTool
 from vidbyte.tools.builtins.context_primitives.registry import CREATE_TOOL_REGISTRY
 from vidbyte.tools.builtins.context_primitives.remove import ContextRemoveTool
 from vidbyte.tools.builtins.context_primitives.stats import ContextStatsTool
@@ -48,7 +49,7 @@ class ContextWindowFactory:
         Args:
             include: Optional ordered sequence of primitive keys to mount as create tools.
                 When None, all keys in CREATE_TOOL_REGISTRY are mounted.
-            management: When True, append list/remove/stats/edit/move tools after creates.
+            management: When True, append list/remove/stats/edit/recite/move tools after creates.
 
         Returns:
             A tuple of BaseTool instances ready for BaseAgent(tools=...).
@@ -70,6 +71,7 @@ class ContextWindowFactory:
             ContextRemoveTool(self._manager),
             ContextStatsTool(self._manager),
             ContextEditTool(self._manager),
+            ContextReciteTool(self._manager),
             ContextMoveTool(self._manager),
         )
 
@@ -78,12 +80,13 @@ class ContextWindowFactory:
         return self.build(include=include, management=False)
 
     def management_tools(self) -> tuple[BaseTool, ...]:
-        """Return only the management tools (list/remove/stats/edit/move)."""
+        """Return only the management tools (list/remove/stats/edit/recite/move)."""
         return (
             ContextListTool(self._manager),
             ContextRemoveTool(self._manager),
             ContextStatsTool(self._manager),
             ContextEditTool(self._manager),
+            ContextReciteTool(self._manager),
             ContextMoveTool(self._manager),
         )
 

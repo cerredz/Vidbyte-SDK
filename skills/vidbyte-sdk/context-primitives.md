@@ -68,6 +68,8 @@ context items, their placement in the context window, and rendering. It is insta
 | `registry_items()` | Ordered, read-only view of managed registry entries. |
 | `set_placement(primitive_id, placement)` | Move an existing managed primitive to a new render placement. |
 | `set_frozen(primitive_id, frozen)` | Mark an existing managed primitive developer-owned or agent-editable. |
+| `upsert_preserving_placement(item)` | Re-upsert using the id's prior placement (default `END_OF_CONTEXT`). |
+| `recite(primitive_id, *, slot_id=None) -> str` | Copy a primitive to `END_OF_CONVERSATION` under `slot_id` or `recite:{id}`. |
 | `items()` / `by_kind(kind)` | Inspect the current items. |
 | `render_primitives_zone()` | Render the primitives zone to text. |
 | `clear()` / `clear_registry()` | Reset. |
@@ -102,7 +104,8 @@ agent = Agent(
 | `ContextListTool` | Model lists current context items. |
 | `ContextRemoveTool` | Model removes a non-frozen context item by id. |
 | `ContextStatsTool` | Model lists id, kind, title, placement, frozen flag, and rendered character count. |
-| `ContextEditTool` | Model performs an exact, unique string replacement on primitives with a string `content` field. |
+| `ContextEditTool` | Model performs an exact, unique string replacement across editable string/tuple fields (`content`, `goal`, `steps`, etc.). |
+| `ContextReciteTool` | Model re-emits a named primitive at `END_OF_CONVERSATION` (copy id `recite:{id}` or optional `slot_id`) for recent attention. |
 | `ContextMoveTool` | Model changes the placement for one non-frozen primitive. |
 | `ContextUpsertTool` | Legacy flattened insert/update tool retained for compatibility. |
 
