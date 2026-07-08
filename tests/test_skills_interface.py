@@ -3,7 +3,7 @@
 # Description: Unit tests for the Skill catalog public interfaces.
 # Purpose: Ensures packaged skill assets are enum-synced, readable, and materializable.
 # Architecture & Functions:
-#   - SkillsInterfaceTests: validates registry accessors, frontmatter, files, and CLI.
+#   - SkillsInterfaceTests: validates registry accessors, frontmatter, and files.
 # Codebase Relation:
 #   - Mirrors tests/test_prompts_interface.py for multi-file skill assets.
 # ==============================================================================
@@ -17,7 +17,6 @@ from pathlib import Path
 from vidbyte.lib.enums.skills import ContextMinimalFanoutSkill, Skills as SkillEnums
 from vidbyte.lib.errors import ConfigurationError
 from vidbyte.skills import SkillRecord, Skills
-from vidbyte.skills.__main__ import main as skills_main
 
 
 class SkillsInterfaceTests(unittest.TestCase):
@@ -97,16 +96,6 @@ class SkillsInterfaceTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             with self.assertRaises(ConfigurationError):
                 Skills._safe_materialize_target(Path(tmp_dir).resolve(), "../escape.md")
-
-    def test_module_cli_list_and_install(self) -> None:
-        # Exercises the lightweight python -m vidbyte.skills command handlers.
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            self.assertEqual(skills_main(["list"]), 0)
-            self.assertEqual(
-                skills_main(["install", "context_minimal_fanout.decompose_fanout", "--dest", tmp_dir]),
-                0,
-            )
-            self.assertTrue(Path(tmp_dir).joinpath("decompose-fanout", "SKILL.md").is_file())
 
 
 if __name__ == "__main__":

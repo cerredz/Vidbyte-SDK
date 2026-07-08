@@ -37,6 +37,7 @@ Source = "https://github.com/cerredz/Vidbyte-SDK"
 include = ["vidbyte*"]
 
 [project.scripts]
+vidbyte-sdk = "vidbyte.cli:main"
 vidbyte-mcp-server = "vidbyte.mcp_server.__main__:main"
 
 [tool.setuptools.package-data]

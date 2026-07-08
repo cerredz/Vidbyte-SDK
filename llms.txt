@@ -34,6 +34,7 @@ Vidbyte SDK is the developer-facing agent framework in the Vidbyte ecosystem. It
 - Build a research workflow with planner, researcher, and synthesizer stages.
 - Build a support agent with grounded tools, policy middleware, escalation, and audit logs.
 - Build eval suites that compare agent behavior across prompts, models, and graders.
+- Install packaged Vidbyte skills into a local coding harness through the `vidbyte-sdk` CLI.
 - Expose local Vidbyte agents to MCP clients.
 - Attach third-party MCP servers such as GitHub, Linear, filesystem, search, or database tools to an agent.
 
@@ -48,6 +49,7 @@ Vidbyte SDK is the developer-facing agent framework in the Vidbyte ecosystem. It
 - Middleware hooks for policy, retry, audit, limits, tool-error retry/abort policy, and compaction.
 - Swappable runtimes including linear, MCTS search, and actor model patterns.
 - Registries for agents, providers, runtimes, prompts, tools, and actors.
+- Unified `vidbyte-sdk` CLI with `skills list`, `skills show`, and `skills install`.
 - MCP Studio server support and third-party MCP server attachment.
 - Prompt asset discovery and direct prompt imports.
 - Eval cases, suites, runners, graders, and a local eval registry.
@@ -573,6 +575,10 @@ For the second direction, use `McpPresetRegistry` to discover and build third-pa
 
 The README lists a large preset catalog across search, dev tools, databases, productivity, document parsing, communication, cloud, AI platforms, reference sources, native utilities, e-commerce, and workflow automation.
 
+### CLI
+
+The SDK installs a unified `vidbyte-sdk` command. Current commands are `vidbyte-sdk --version`, `vidbyte-sdk skills list`, `vidbyte-sdk skills show <key>`, and `vidbyte-sdk skills install <key> --dest <dir>`. The skills command group wraps `vidbyte.skills.Skills` and writes packaged skill folders into user-selected harness directories.
+
 ### Prompts
 
 Prompts are repository-backed text assets exposed through an enum-keyed accessor and direct Python imports. The README describes 34 prompt assets across 13 families, including handoff, reflexion, evals, prompt templates, goals, actor-runtime personas, and trajectory checkpoints.
@@ -692,6 +698,7 @@ artifacts/
 vidbyte/
 |-- client.py
 |-- agents/
+|-- cli/
 |-- context/
 |-- evals/
 |-- harnesses/
