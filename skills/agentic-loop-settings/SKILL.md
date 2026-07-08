@@ -14,6 +14,7 @@ Relations:
     BaseAgent wiring lives in vidbyte/agents/base.py.
 Similar Files:
     - skills/agent-runtimes/SKILL.md: Covers swappable runtime topologies.
+    - skills/tool-settings/SKILL.md: Process guide for ToolSettings creation and extension.
     - skills/vidbyte-sdk/SKILL.md: Root SDK structure reference.
 -->
 
@@ -94,6 +95,33 @@ These parameters are stored on `AgentLoopSettings`, validated at construction ti
 | `compaction_trigger_tokens` | `int \| None` | `None` | Token usage level at which context compaction triggers. Must be greater than `compaction_target_tokens`. |
 | `compaction_target_tokens` | `int \| None` | `None` | Target token usage after compaction completes. Must be less than `compaction_trigger_tokens`. |
 
+### 3.1.1 Nested settings objects
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `tool_settings` | `ToolSettings \| None` | `None` | Nested universal tool-use constraints (`denied_tools`, `max_calls`, `max_calls_per_tool`, `result_max_chars`, `on_deny`). Enforced **inline by the direct runtime** (not middleware). `ToolSettings.max_calls` maps to the same budget as `max_tool_calls` and must match if both are set. Non-linear runtimes reject `tool_settings` at construction. |
+
+To **configure** tool settings, nest them on `AgentLoopSettings`. To **add or extend** tool settings fields, follow the process skill:
+
+- **Process guide:** `skills/tool-settings/SKILL.md`
+- **Architecture design:** `docs/design/tool-settings-runtime-enforcement.md`
+
+```python
+from vidbyte.agents import AgentLoopSettings, ToolSettings
+
+settings = AgentLoopSettings(
+    max_iterations=10,
+    tool_settings=ToolSettings(
+        denied_tools={"delete_file"},
+        max_calls=20,
+        result_max_chars=8000,
+        on_deny="continue",
+    ),
+)
+```
+
+> `tool_error_policy` is a separate nested object for tool-error retry/render behavior (middleware-oriented). Do not confuse it with `tool_settings`.
+
 ### 3.2 Validated but Reserved (Not Yet Enforced at Runtime)
 
 These parameters are accepted and validated on `AgentLoopSettings` at construction time, but the execution loop does not yet read or enforce them. They are stored on the settings object for introspection and documented here so that future runtime implementations have a stable API to target.
@@ -117,6 +145,8 @@ These parameters are accepted and validated on `AgentLoopSettings` at constructi
 | Any integer field is `0` or negative | `{field} must be greater than zero when provided` |
 | `timeout_seconds` is `0.0` or negative | `timeout_seconds must be greater than zero when provided` |
 | `compaction_target_tokens >= compaction_trigger_tokens` (when both set) | `compaction_target_tokens must be less than compaction_trigger_tokens` |
+| `tool_settings` is not a `ToolSettings` instance | `tool_settings must be a ToolSettings instance when provided` |
+| `max_tool_calls` and `ToolSettings.max_calls` both set and differ | must match when both are provided |
 | Both `agent_loop_settings=` and flat params passed to `BaseAgent` | `Pass either agent_loop_settings= or individual loop params (...), not both.` |
 
 ---
@@ -129,7 +159,8 @@ When the runtime stops due to an `AgentLoopSettings` budget, the `AgentResult.me
 |-------------|-------------|
 | `"max_iterations"` | `max_iterations` reached |
 | `"max_tokens"` | `max_tokens` reached |
-| `"max_tool_calls"` | `max_tool_calls` reached |
+| `"max_tool_calls"` | `max_tool_calls` / `ToolSettings.max_calls` reached |
+| `"tool_settings_denied"` | `ToolSettings` denial with `on_deny="abort"` |
 | `"final_response"` | Agent completed normally (no budget hit) |
 | `"is_done"` | Agent called the `isDone` tool explicitly |
 
@@ -171,9 +202,11 @@ A budget that is not configured (`None`) is omitted from the block. When none of
 agent.agent_loop_settings.max_iterations   # int | None
 agent.agent_loop_settings.max_tool_calls   # int | None
 agent.agent_loop_settings.timeout_seconds  # float | None
+agent.agent_loop_settings.tool_settings    # ToolSettings | None
 
 # Check if a budget is set:
 has_tool_limit = agent.agent_loop_settings.max_tool_calls is not None
+has_tool_policy = agent.agent_loop_settings.tool_settings is not None
 ```
 
 ---
