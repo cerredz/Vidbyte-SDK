@@ -12,7 +12,7 @@ access remain outside this package.
 
 ## What You Can Build
 
-- Agent applications with explicit system prompts, runners, tools, context, and trace behavior.
+- Agent applications with explicit system prompts, provider/model configuration, tools, context, and trace behavior.
 - Tool-using agents with local Python functions, MCP-backed tools, permission policies, and provider-native schemas.
 - Runtime policies with deterministic middleware for rate limits, budgets, retries, audit logs, compaction, and safety checks.
 - Durable agent sessions that checkpoint, resume, fork, batch fork, tag, export/import, and summarize usage across long-running work.
@@ -25,7 +25,7 @@ access remain outside this package.
 
 | Layer | Role |
 |-------|------|
-| [`vidbyte.agents`](vidbyte/agents/README.md) | Executable agent actors, runtimes, modality routing, handoff, and agent registries |
+| [`vidbyte.agents`](vidbyte/agents/README.md) | Executable agent actors, runtimes, inferred runner selection, handoff, and agent registries |
 | [`vidbyte.cli`](vidbyte/cli/README.md) | Unified console command for SDK developer surfaces, currently `vidbyte-sdk skills` |
 | [`vidbyte.context`](vidbyte/context/README.md) | Structured context items, context windows, compaction, algorithms, and handoff models |
 | [`vidbyte.evals`](vidbyte/evals/README.md) | Local eval cases, suites, runners, graders, registries, and result summaries |
@@ -66,13 +66,12 @@ sdk.tools
 sdk.providers
 ```
 
-## Agents and Modalities
+## Agents and Runner Inference
 
-Use agents as the public entry point for model execution. Agents infer execution
-modality from the configured model name when possible, so callers normally pass
-plain strings to `run()` and `arun()`. If the model name is unknown and no
-explicit override is provided, execution falls back to text; prompt text is not
-semantically classified.
+Use agents as the public entry point for model execution. Agents infer the
+concrete runner type from the configured provider and model name, so callers
+normally pass plain strings to `run()` and `arun()` without configuring runner
+objects or modalities.
 
 ```python
 from vidbyte import VidbyteSDK
@@ -110,7 +109,7 @@ agent = BaseAgent(
 reply = await agent.arun("Draft a concise release note")
 ```
 
-For custom agents, pass an explicit `system_prompt`, model config, runner, and tools into `Agent` or `BaseAgent`.
+For custom agents, pass an explicit `system_prompt`, provider/model config, and tools into `Agent` or `BaseAgent`.
 Semantic labels such as roles belong in agent metadata when callers need them.
 
 ## Paradigm Harnesses
@@ -160,7 +159,8 @@ context = ContextManager([
 agent = Agent(
     name="repo-analyst",
     system_prompt="Use the supplied context before answering.",
-    runner=my_runner,
+    provider="openai",
+    model_name="gpt-4.1",
     context_manager=context,
 )
 ```
@@ -175,7 +175,8 @@ from vidbyte import ContextWindow
 agent = Agent(
     name="repo-analyst",
     system_prompt="Use tools when they help answer precisely.",
-    runner=my_runner,
+    provider="openai",
+    model_name="gpt-4.1",
     tools=[lookup_metric],
     algorithm=ContextWindow.preset.no_raw_tool_outputs,
 )
@@ -190,7 +191,8 @@ a deterministic heuristic, not an external correctness grade.
 agent = Agent(
     name="repo-analyst",
     system_prompt="Use tools when they help answer precisely.",
-    runner=my_runner,
+    provider="openai",
+    model_name="gpt-4.1",
     tools=[lookup_metric],
     algorithm=ContextWindow.preset.trajectory_checkpoints,
 )
@@ -210,7 +212,8 @@ primitives only; they never rewrite prior conversation history.
 agent = Agent(
     name="repo-analyst",
     system_prompt="Use tools when they help answer precisely.",
-    runner=my_runner,
+    provider="openai",
+    model_name="gpt-4.1",
     tools=[lookup_metric],
     algorithm=ContextWindow.preset.problem_space_search,  # or ContextWindow.preset.error_correction
 )
@@ -252,7 +255,8 @@ events = []
 agent = Agent(
     name="repo-analyst",
     system_prompt="Use tools when they help answer precisely.",
-    runner=my_runner,
+    provider="openai",
+    model_name="gpt-4.1",
     tools=[lookup_metric],
     trace=Trace.debug(events),
 )
@@ -276,7 +280,8 @@ trace = Trace.profile(
 agent = Agent(
     name="observed-worker",
     system_prompt="Work carefully.",
-    runner=my_runner,
+    provider="openai",
+    model_name="gpt-4.1",
     trace=trace,
 )
 ```
@@ -287,7 +292,8 @@ Provider-backed tracing uses the existing optional adapters:
 agent = Agent(
     name="observed-agent",
     system_prompt="Work carefully.",
-    runner=my_runner,
+    provider="openai",
+    model_name="gpt-4.1",
     trace=Trace.langfuse(public_key="...", secret_key="..."),
 )
 ```
@@ -328,8 +334,8 @@ trace = Trace.langsmith_session(
 )
 
 async with trace.async_session(run_id=run_id):
-    planner = Agent(name="planner", system_prompt="Plan the work.", runner=planner_runner, trace=trace)
-    writer = Agent(name="writer", system_prompt="Draft the answer.", runner=writer_runner, trace=trace)
+    planner = Agent(name="planner", system_prompt="Plan the work.", provider="openai", model_name="gpt-4.1", trace=trace)
+    writer = Agent(name="writer", system_prompt="Draft the answer.", provider="openai", model_name="gpt-4.1", trace=trace)
     await planner.arun("Plan the release note")
     await writer.arun("Write the release note")
 ```
@@ -342,7 +348,8 @@ does not yet inject trace memory into the agent context.
 agent = Agent(
     name="continual-agent",
     system_prompt="Preserve useful run context.",
-    runner=my_runner,
+    provider="openai",
+    model_name="gpt-4.1",
     trace=Trace.continual(["tool_calls", "failures"], max_memory_chars=1200),
 )
 ```
@@ -368,7 +375,8 @@ from vidbyte.trace.continual import ActionTrace
 agent = Agent(
     name="worker",
     system_prompt="Work carefully.",
-    runner=my_runner,
+    provider="openai",
+    model_name="gpt-4.1",
     trace_option=TraceOption.continual(ActionTrace, every_n_iterations=5, max_trace_iterations=3),
 )
 reply = await agent.arun("Fix the failing tests")
@@ -443,7 +451,8 @@ def lookup_metric(user_id: int) -> dict[str, int]:
 agent = Agent(
     name="repo-analyst",
     system_prompt="Use tools when they help answer precisely.",
-    runner=my_runner,
+    provider="openai",
+    model_name="gpt-4.1",
     tools=[GrepTool(root_dir="."), ForkConversationTool(allowed_models=["gpt-4.1-mini"]), lookup_metric],
     max_iterations=8,
     max_tokens=16_000,
@@ -481,7 +490,8 @@ class TenantPermissionMiddleware(AgentMiddleware):
 agent = Agent(
     name="repo-analyst",
     system_prompt="Use tools when they help answer precisely.",
-    runner=my_runner,
+    provider="openai",
+    model_name="gpt-4.1",
     tools=[lookup_metric],
     middleware=[
         TenantPermissionMiddleware(db),
@@ -502,7 +512,8 @@ from vidbyte.agents import AgentLoopSettings, ToolErrorPolicy
 agent = Agent(
     name="resilient-worker",
     system_prompt="Use tools and recover from transient failures.",
-    runner=my_runner,
+    provider="openai",
+    model_name="gpt-4.1",
     tools=[lookup_metric],
     agent_loop_settings=AgentLoopSettings(
         tool_error_policy=ToolErrorPolicy(max_retries_per_tool_call=2, max_total_tool_errors=5),
@@ -545,7 +556,8 @@ from vidbyte.middleware.builtins import MessageHistoryCompactionMiddleware
 agent = Agent(
     name="bounded-agent",
     system_prompt="Keep working context compact.",
-    runner=my_runner,
+    provider="openai",
+    model_name="gpt-4.1",
     tools=[lookup_metric],
     middleware=[
         MessageHistoryCompactionMiddleware.trim_to_token_budget(max_tokens=8000),
@@ -585,7 +597,8 @@ from vidbyte.tools.security import PermissionPolicy
 agent = Agent(
     name="trusted-worker",
     system_prompt="Work inside the configured sandbox.",
-    runner=my_runner,
+    provider="openai",
+    model_name="gpt-4.1",
     tools=[write_tool],
     permission_policy=PermissionPolicy.allow_all(),
 )
@@ -807,8 +820,8 @@ assert agent.session is session
 
 Sessions are also reachable through the harness namespace
 (`sdk.harnesses.sessions.attach(agent, store=...)`). Resuming reconstructs the
-agent from a checkpoint; because live runners, tools, and middleware cannot be
-serialized, you re-supply them at resume time (the rehydration contract):
+agent from a checkpoint; because live tools and middleware cannot be serialized,
+you re-supply them at resume time (the rehydration contract):
 
 `Session.policy_options()` and `Session.trace_options()` list the accepted hard
 strings for `policy=` and `trace=`. The same strings are available as class
@@ -822,10 +835,10 @@ store = FileSessionStore(root="./.vidbyte/sessions")
 session = Session(agent, store=store)
 await session.arun("first step")
 
-# later / cold process — re-supply non-serializable parts
-session = Session.resume(store, session_id, tools=[grep], runner=my_runner)
-session = Session.continue_(store, session_id, runner=my_runner)   # == resume(head)
-branch = Session.fork_from(store, checkpoint_id, runner=my_runner) # new id + parent lineage
+# later / cold process - re-supply non-serializable parts
+session = Session.resume(store, session_id, tools=[grep])
+session = Session.continue_(store, session_id)           # == resume(head)
+branch = Session.fork_from(store, checkpoint_id)         # new id + parent lineage
 branches = session.batch_fork(3)                                   # child records only
 session.rewind(to=checkpoint_id)                                    # time-travel
 session.edit(lambda history: history[:-1])                         # state editing

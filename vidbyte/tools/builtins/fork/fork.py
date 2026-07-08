@@ -24,7 +24,7 @@ from vidbyte.agents.settings import AgentLoopSettings
 from vidbyte.context.handoff import EngineeringHandoff, Handoff, MinimalHandoff, ResearchHandoff
 from vidbyte.context.window import ContextWindow
 from vidbyte.lib.dataclasses.agents import AgentForkSettings
-from vidbyte.lib.enums import AgentRuntimeType, ModelModality, ModelProvider
+from vidbyte.lib.enums import AgentRuntimeType, ModelProvider
 from vidbyte.tools.base import BaseTool
 from vidbyte.tools.catalog import Tools
 from vidbyte.tools.types import ToolCall, ToolPermission, ToolResult, ToolSpec
@@ -64,8 +64,8 @@ _STATIC_DESCRIPTION = """\
 Fork the current Vidbyte agent run into a child branch with interchangeable SDK-native parts, run the \
 child on a focused prompt, and return the child answer here. Use this when the next step should be \
 isolated from the parent run, or when a different combination of Vidbyte agent parts is better for \
-the branch: system prompt, model/provider, modality, tools, runtime, context-window algorithm, context \
-budget/compaction settings, handoff spec, output schema, runner options, MCP carry, history slice, or \
+the branch: system prompt, model/provider, tools, runtime, context-window algorithm, context \
+budget/compaction settings, handoff spec, output schema, MCP carry, history slice, or \
 run-state carry.
 
 This is a Vidbyte-native fork, not a generic subprocess or delegation wrapper. Inputs use the SDK names \
@@ -135,7 +135,6 @@ class ForkConversationTool(BaseTool):
             "history": self._resolve_history(history_mode, args.get("last_n", context_window.get("last_n"))),
             "model": self._resolve_model(args.get("model")),
             "provider": self._resolve_provider(args.get("provider")),
-            "modality": self._resolve_modality(args.get("modality")),
             "temperature": self._resolve_temperature(args.get("temperature")),
             "agent_loop_settings": self._resolve_loop_settings(args.get("loop_settings"), args.get("max_iterations"), context_window),
             "name": self._optional_string(args.get("name")),
@@ -145,7 +144,6 @@ class ForkConversationTool(BaseTool):
             "algorithm": self._resolve_context_algorithm(args.get("context_algorithm", context_window.get("algorithm"))),
             "handoff": self._resolve_handoff(args.get("handoff")),
             "output_schema": self._resolve_json_object(args.get("output_schema"), "output_schema"),
-            "runner_options": self._resolve_json_object(args.get("runner_options"), "runner_options"),
             "include_run_state": self._resolve_bool(args.get("include_run_state"), default=False, field_name="include_run_state"),
             "mcp": self._resolve_bool(args.get("mcp"), default=True, field_name="mcp"),
             "run_id": self._optional_string(args.get("run_id")),
@@ -164,7 +162,6 @@ class ForkConversationTool(BaseTool):
             history=request.get("history"),
             model_name=request.get("model"),
             provider=request.get("provider"),
-            modality=request.get("modality"),
             temperature=request.get("temperature"),
             agent_loop_settings=request.get("agent_loop_settings"),
             metadata=metadata or None,
@@ -172,7 +169,6 @@ class ForkConversationTool(BaseTool):
             algorithm=request.get("algorithm"),
             handoff=request.get("handoff"),
             output_schema=request.get("output_schema"),
-            runner_options=request.get("runner_options"),
             include_run_state=bool(request.get("include_run_state")),
             mcp=bool(request.get("mcp")),
             run_id=request.get("run_id"),
@@ -257,17 +253,6 @@ class ForkConversationTool(BaseTool):
         except ValueError as exc:
             allowed = ", ".join(provider.value for provider in ModelProvider)
             raise ValueError(f"provider must be one of: {allowed}.") from exc
-
-    def _resolve_modality(self, raw_modality: Any) -> str | None:
-        # Validates modality swaps against Vidbyte's modality enum.
-        modality = self._optional_string(raw_modality)
-        if modality is None:
-            return None
-        try:
-            return ModelModality(modality).value
-        except ValueError as exc:
-            allowed = ", ".join(modality.value for modality in ModelModality)
-            raise ValueError(f"modality must be one of: {allowed}.") from exc
 
     def _resolve_temperature(self, raw_temperature: Any) -> float | None:
         # Validates the optional child temperature override.
@@ -428,7 +413,6 @@ class ForkConversationTool(BaseTool):
                 "context_algorithm": {"type": "string", "enum": list(_CONTEXT_ALGORITHM_PRESETS), "description": "Direct ContextWindow preset override for the child. Prefer context_window.algorithm when grouping context edits."},
                 "model": {"type": "string", "description": "Optional model_name override. The value must appear in the developer-configured allowed_models list."},
                 "provider": {"type": "string", "enum": [provider.value for provider in ModelProvider], "description": "Optional Vidbyte ModelProvider override. API keys and credentials are still inherited and are never model-controlled."},
-                "modality": {"type": "string", "enum": [modality.value for modality in ModelModality], "description": "Optional ModelModality override for the child, such as text, image, video, audio, or embedding."},
                 "temperature": {"type": "number", "minimum": 0, "maximum": 2, "description": "Optional child runner temperature override."},
                 "runtime": {"type": "string", "enum": [runtime.value for runtime in AgentRuntimeType], "description": "Optional AgentRuntimeType override, such as linear, mcts_search, actor_model_p2p, or actor_model_broadcast."},
                 "actor_runtime": {
@@ -473,7 +457,6 @@ class ForkConversationTool(BaseTool):
                     },
                 },
                 "output_schema": {"type": "object", "description": "Optional structured output schema mapping for the child runtime."},
-                "runner_options": {"type": "object", "description": "Optional JSON-serializable runner options for the child runner config."},
                 "include_run_state": {"type": "boolean", "default": False, "description": "When true, carry handoffs and prior tool-call contexts into the child lifecycle state."},
                 "mcp": {"type": "boolean", "default": True, "description": "Whether to carry MCP server configs as pending child attachments without sharing live parent handles."},
                 "metadata": {"type": "object", "description": "Additional child metadata merged with fork lineage metadata."},

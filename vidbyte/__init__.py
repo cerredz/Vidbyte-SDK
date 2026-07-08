@@ -163,7 +163,7 @@ from vidbyte.tools.builtins.sessions import (
     RewindTool,
     SessionTool,
 )
-from vidbyte.lib.enums import BudgetPreset, ModelModality, PermissionPreset, Prompt
+from vidbyte.lib.enums import BudgetPreset, PermissionPreset, Prompt
 from vidbyte.lib.errors import (
     McpAttachmentError,
     McpConnectionError,
@@ -387,7 +387,6 @@ __all__ = [
     "ErrorCorrectionAlgorithm",
     "ErrorCorrectionContextItem",
     "MapReducePipeline",
-    "ModelModality",
     "ParallelPipeline",
     "PermissionPreset",
     "PipelineExecutionError",

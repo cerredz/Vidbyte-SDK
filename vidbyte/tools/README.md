@@ -31,7 +31,8 @@ catalog = Tools([lookup_user])
 agent = Agent(
     name="tool-user",
     system_prompt="Use tools when they help.",
-    runner=my_runner,
+    provider="openai",
+    model_name="gpt-4.1",
     tools=catalog,
 )
 

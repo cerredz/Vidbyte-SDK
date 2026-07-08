@@ -32,7 +32,8 @@ events = []
 agent = Agent(
     name="debugged",
     system_prompt="Work carefully.",
-    runner=my_runner,
+    provider="openai",
+    model_name="gpt-4.1",
     trace=Trace.debug(events),
 )
 
