@@ -85,10 +85,14 @@ AgentRuntime._process_tool_call
         |
         +--> _enforce_tool_settings          # BEFORE middleware / execute
         |       max_calls mid-iteration stop
+        |       budget_stop() hard budgets
         |       denial() -> continue | abort
         |
         +--> middleware + execute_tool_call
+        |       asyncio.wait_for if tool_timeout_seconds
         |
+        +--> append context (iteration_count tagged)
+        +--> failure_budget_stop() after FAILED tools
         +--> _append_tool_result_message
                 _truncate_for_tool_settings  # model-visible only
 ```
@@ -97,11 +101,12 @@ AgentRuntime._process_tool_call
 
 | Concern | Owner |
 |---------|--------|
-| Policy values + pure decisions (`denial`, `truncate`) | `ToolSettings` |
-| Per-run executed counts | `AgentRuntime` via `_executed_counts(call_contexts)` |
+| Policy values + pure decisions (`denial`, `truncate`, `budget_stop`, `failure_budget_stop`, `fingerprint`) | `ToolSettings` |
+| Per-run executed counts / iteration tags | `AgentRuntime` via `call_contexts` |
 | Inject denial into model context | `AgentRuntime._denied_tool_result` + message append |
 | Stop the run | `AgentRuntime._stopped_result` |
 | Truncate model-visible tool output | `ToolSettings.truncate` called from runtime post-exec path |
+| Per-call timeout | `AgentRuntime._run_tool_execute` reading `tool_timeout_seconds` |
 
 **Concurrency rule:** Never store per-run counters on the shared `ToolSettings`
 instance. Multiple concurrent runs of one agent share the same settings object.
@@ -113,10 +118,17 @@ instance. Multiple concurrent runs of one agent share the same settings object.
 | Field | Type | Default | Runtime effect |
 |-------|------|---------|----------------|
 | `denied_tools` | `Iterable[str]` → `frozenset[str]` | `()` | Pre-exec: name denied; model sees denied result (`on_deny="continue"`) or run stops (`abort`) |
-| `max_calls` | `int \| None` | `None` | Maps into `AgentRuntimeConfig.max_tool_calls`; mid-iteration guard stops before over-budget call with `stop_reason=max_tool_calls` |
+| `max_calls` | `int \| None` | `None` | Maps into `AgentRuntimeConfig.max_tool_calls`; mid-iteration guard **hard-stops** before over-budget call with `stop_reason=max_tool_calls` |
 | `max_calls_per_tool` | `Mapping[str, int] \| None` → `dict[str, int]` | `{}` | Pre-exec: over limit → same deny/abort path as `denied_tools` |
+| `max_calls_per_iteration` | `int \| None` | `None` | Pre-exec **hard-stop** when non-denied non-internal calls already recorded for the current iteration ≥ limit (`stop_reason=max_calls_per_iteration`) |
+| `max_identical_calls` | `int \| None` | `None` | Pre-exec **hard-stop** when the same tool+args fingerprint already appears ≥ N times across the run (`stop_reason=max_identical_calls`) |
+| `max_consecutive_failures` | `int \| None` | `None` | Post-exec **hard-stop** after a trailing streak of `FAILED` (non-denied, non-internal) contexts ≥ N (`stop_reason=max_consecutive_failures`) |
+| `max_error_calls` | `int \| None` | `None` | Post-exec **hard-stop** when total `FAILED` (non-denied, non-internal) contexts ≥ N (`stop_reason=max_error_calls`) |
+| `tool_timeout_seconds` | `float \| None` | `None` | Per non-internal tool call: `asyncio.wait_for`; timeout → `FAILED` with `metadata.error=timeout`; counts toward failure budgets |
+| `sliding_window_max_calls` | `int \| None` | `None` | Pre-exec **hard-stop** when non-denied non-internal calls in the last K iterations ≥ limit (`stop_reason=sliding_window_max_calls`). Requires `sliding_window_iterations`. |
+| `sliding_window_iterations` | `int \| None` | `None` | Window size K for `sliding_window_max_calls`. Must be set with it. |
 | `result_max_chars` | `int \| None` | `None` | Post-exec: truncate **model-visible** output only; raw `ToolResult` in `ToolCallContext` unchanged; `0` is valid |
-| `on_deny` | `"continue" \| "abort"` | `"continue"` | Global policy for deny-class decisions |
+| `on_deny` | `"continue" \| "abort"` | `"continue"` | Global policy for **deny-class** decisions only (`denied_tools`, `max_calls_per_tool`). Does **not** soft-continue hard budgets. |
 
 ### Decision methods on `ToolSettings`
 
@@ -126,6 +138,15 @@ def denial(self, tool_name: str, executed_counts: Mapping[str, int]) -> tuple[st
 
 def truncate(self, result: ToolResult) -> ToolResult:
     # Caps model-visible output; callers keep the raw ToolResult.
+
+def fingerprint(self, tool_name: str, arguments: Mapping[str, object] | None) -> str:
+    # Stable tool+args fingerprint for identical-call budgets.
+
+def budget_stop(self, *, tool_name: str, arguments: Mapping[str, object] | None, call_contexts: Sequence[ToolCallContext], iteration_count: int) -> tuple[str, dict] | None:
+    # Pre-exec hard budgets: per-iteration, sliding window, identical calls.
+
+def failure_budget_stop(self, call_contexts: Sequence[ToolCallContext]) -> tuple[str, dict] | None:
+    # Post-exec hard budgets: consecutive failures, then total errors.
 
 @property
 def aborts_on_deny(self) -> bool:
@@ -138,7 +159,13 @@ def aborts_on_deny(self) -> bool:
 |---------|---------|
 | `reply.metadata["stop_reason"] == "tool_settings_denied"` | `on_deny="abort"` stopped the run |
 | `reply.metadata["stop_reason"] == "max_tool_calls"` | Total `max_calls` budget stopped the run |
-| `ToolCallContext.state == DENIED` | Deny-and-continue; excluded from `_executed_counts` |
+| `reply.metadata["stop_reason"] == "max_calls_per_iteration"` | Per-iteration call budget hard-stop |
+| `reply.metadata["stop_reason"] == "max_identical_calls"` | Identical tool+args thrash hard-stop |
+| `reply.metadata["stop_reason"] == "max_consecutive_failures"` | Consecutive failure hard-stop |
+| `reply.metadata["stop_reason"] == "max_error_calls"` | Run-wide failed-call hard-stop |
+| `reply.metadata["stop_reason"] == "sliding_window_max_calls"` | Sliding-window call budget hard-stop |
+| `ToolCallContext.state == DENIED` | Deny-and-continue; excluded from budget counts |
+| `ToolCallContext.iteration_count` | Iteration tag used by per-iteration / sliding-window budgets |
 
 ### Usage (developer-facing)
 
@@ -156,6 +183,13 @@ agent = Agent(
             denied_tools={"delete_file"},
             max_calls=20,
             max_calls_per_tool={"search": 5},
+            max_calls_per_iteration=4,
+            max_identical_calls=3,
+            max_consecutive_failures=5,
+            max_error_calls=20,
+            tool_timeout_seconds=30.0,
+            sliding_window_max_calls=10,
+            sliding_window_iterations=3,
             result_max_chars=8000,
             on_deny="continue",
         ),
@@ -246,7 +280,9 @@ Choose the chokepoint by effect type:
 
 | Effect type | Where | Helpers |
 |-------------|-------|---------|
-| Deny / stop / total budget before execution | Pre-exec in `_process_tool_call` via `_enforce_tool_settings` | `_tool_settings_budget_stop`, `settings.denial`, `_apply_tool_denial`, `_stopped_result`, `_denied_tool_result` |
+| Deny / hard-stop budgets before execution | Pre-exec in `_process_tool_call` via `_enforce_tool_settings` | `_tool_settings_budget_stop`, `settings.budget_stop`, `_tool_settings_hard_budget_stop`, `settings.denial`, `_apply_tool_denial` |
+| Per-call timeout | During `execute_tool_call` / `_run_tool_execute` | `asyncio.wait_for`, `ToolExecutionError` with `error=timeout` |
+| Failure budgets after a failed tool | Post-exec after context append | `settings.failure_budget_stop`, `_enforce_tool_settings_after_failure` |
 | Transform model-visible tool output after execution | Post-exec message path | `_append_tool_result_message` → `_model_visible_tool_result` → `_truncate_for_tool_settings` |
 
 Rules:
@@ -414,5 +450,6 @@ workflows; full suites when behavior changes):
 | `README.md` | Developer-facing example |
 | `docs/design/tool-settings-runtime-enforcement.md` | Original architecture design |
 | `docs/design/tool-settings-skill.md` | Design for this skill |
+| `docs/design/tool-settings-guardrail-budgets.md` | Guardrail budget fields design |
 | `skills/agentic-loop-settings/SKILL.md` | Loop budgets reference |
 | `skills/sdk/update-skill-files.md` | Change-type → skill matrix |

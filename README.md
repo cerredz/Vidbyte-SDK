@@ -557,6 +557,13 @@ agent = Agent(
             denied_tools={"delete_file"},   # blocked by name, incl. dynamically attached tools
             max_calls=20,                   # total tool-call budget for the run
             max_calls_per_tool={"search": 5},
+            max_calls_per_iteration=4,      # hard-stop if a single model turn fans out too many tools
+            max_identical_calls=3,          # hard-stop when the same tool+args fingerprint repeats
+            max_consecutive_failures=5,     # hard-stop after N failed tools in a row
+            max_error_calls=20,             # run-wide hard-stop on failed tool executions
+            tool_timeout_seconds=30.0,      # per-call timeout; timeouts count as failures
+            sliding_window_max_calls=10,    # hard-stop if too many tools in the last K iterations
+            sliding_window_iterations=3,    # K for the sliding window (required with max above)
             result_max_chars=8000,          # cap model-visible tool output; raw result is preserved
             on_deny="continue",             # "continue" injects a denial the model sees; "abort" stops the run
         ),
@@ -564,7 +571,7 @@ agent = Agent(
 )
 ```
 
-`denied_tools` is useful even when tools are passed explicitly: it documents team policy and blocks tools acquired dynamically by name. Internal runtime tools (such as the completion tool) are never blocked. With `on_deny="continue"` (default), a denied or over-per-tool-budget call is recorded as a denied tool result the model sees, and the run continues; with `on_deny="abort"` the run stops with stop reason `tool_settings_denied`. Reaching `max_calls` stops the run with stop reason `max_tool_calls`. `result_max_chars` truncates only the model-visible tool result while the raw `ToolResult` remains available in runtime metadata. `ToolSettings.max_calls` and `AgentLoopSettings.max_tool_calls` map to the same budget and must match if both are set. `ToolSettings` complements, and does not replace, `PermissionPolicy`.
+`denied_tools` is useful even when tools are passed explicitly: it documents team policy and blocks tools acquired dynamically by name. Internal runtime tools (such as the completion tool) are never blocked. With `on_deny="continue"` (default), a denied or over-per-tool-budget call is recorded as a denied tool result the model sees, and the run continues; with `on_deny="abort"` the run stops with stop reason `tool_settings_denied`. Budget-class limits hard-stop the run with dedicated stop reasons: `max_calls` / `max_tool_calls`, `max_calls_per_iteration`, `max_identical_calls`, `max_consecutive_failures`, `max_error_calls`, and `sliding_window_max_calls`. `on_deny` does **not** soft-continue those budgets. `tool_timeout_seconds` cancels hung tool awaits best-effort via `asyncio.wait_for` and records a failed tool result that counts toward failure budgets. `sliding_window_max_calls` and `sliding_window_iterations` must both be set or both omitted. `result_max_chars` truncates only the model-visible tool result while the raw `ToolResult` remains available in runtime metadata. `ToolSettings.max_calls` and `AgentLoopSettings.max_tool_calls` map to the same budget and must match if both are set. `ToolSettings` complements, and does not replace, `PermissionPolicy`.
 
 Compaction middleware supports deterministic provider-message pruning without hidden model calls. Examples include `trim_to_token_budget`, `trim_with_provider_boundaries`, `delete_messages`, `tool_output_sliding_window`, `clear_tool_results_except`, `head_tail_tool_preview`, `scrub_bloat`, `summary_with_backrefs`, `selective_prune`, `salience_score_eviction`, `query_relevance_filter`, and `context_snapshot_branch_trim`.
 

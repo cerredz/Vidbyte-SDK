@@ -99,7 +99,7 @@ These parameters are stored on `AgentLoopSettings`, validated at construction ti
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `tool_settings` | `ToolSettings \| None` | `None` | Nested universal tool-use constraints (`denied_tools`, `max_calls`, `max_calls_per_tool`, `result_max_chars`, `on_deny`). Enforced **inline by the direct runtime** (not middleware). `ToolSettings.max_calls` maps to the same budget as `max_tool_calls` and must match if both are set. Non-linear runtimes reject `tool_settings` at construction. |
+| `tool_settings` | `ToolSettings \| None` | `None` | Nested universal tool-use constraints (deny/truncate plus hard budgets: per-iteration, identical-call, consecutive/total failures, per-call timeout, sliding window). Enforced **inline by the direct runtime** (not middleware). `ToolSettings.max_calls` maps to the same budget as `max_tool_calls` and must match if both are set. Non-linear runtimes reject `tool_settings` at construction. See `skills/tool-settings/SKILL.md`. |
 
 To **configure** tool settings, nest them on `AgentLoopSettings`. To **add or extend** tool settings fields, follow the process skill:
 
@@ -160,6 +160,11 @@ When the runtime stops due to an `AgentLoopSettings` budget, the `AgentResult.me
 | `"max_iterations"` | `max_iterations` reached |
 | `"max_tokens"` | `max_tokens` reached |
 | `"max_tool_calls"` | `max_tool_calls` / `ToolSettings.max_calls` reached |
+| `"max_calls_per_iteration"` | `ToolSettings.max_calls_per_iteration` hard-stop |
+| `"max_identical_calls"` | `ToolSettings.max_identical_calls` hard-stop |
+| `"max_consecutive_failures"` | `ToolSettings.max_consecutive_failures` hard-stop |
+| `"max_error_calls"` | `ToolSettings.max_error_calls` hard-stop |
+| `"sliding_window_max_calls"` | `ToolSettings` sliding-window hard-stop |
 | `"tool_settings_denied"` | `ToolSettings` denial with `on_deny="abort"` |
 | `"final_response"` | Agent completed normally (no budget hit) |
 | `"is_done"` | Agent called the `isDone` tool explicitly |
