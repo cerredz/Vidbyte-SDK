@@ -36,11 +36,12 @@ skills.materialize(
 )
 ```
 
-Module CLI:
+Terminal CLI (via the unified `vidbyte` command in `vidbyte.cli`):
 
 ```bash
-python -m vidbyte.skills list
-python -m vidbyte.skills install context_minimal_fanout.decompose_fanout --dest .claude/skills
+vidbyte skills list
+vidbyte skills show decompose-fanout
+vidbyte skills install decompose-fanout --dest .claude/skills
 ```
 
 ## Available Skills
@@ -63,7 +64,8 @@ Shared command reference:
 - `catalog.py`: skill manifest loading, validation, file access, and
   materialization.
 - `__init__.py`: public imports for `Skill`, `SkillRecord`, and `Skills`.
-- `__main__.py`: small `python -m vidbyte.skills` wrapper for list and install.
+
+Terminal install/list/show UX lives in [`vidbyte.cli`](../cli/README.md).
 
 ## Adding Future Paradigm Skills
 
