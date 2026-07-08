@@ -4,26 +4,6 @@ from typing import Any
 
 from vidbyte.lib.agents import ModalityDetector
 from vidbyte.lib.enums import ModelModality, ModelProvider
-from vidbyte.lib.runners.utility import Runner
-
-
-def create_runner_for_model(
-    *,
-    provider: ModelProvider | str | None,
-    model_name: str | None,
-    transport: object | None = None,
-    api_key: str | None = None,
-    temperature: float | None = None,
-    **options: Any,
-) -> object:
-    """Create a concrete runner from provider/model identity."""
-    return Runner.from_model(
-        provider=provider,
-        model_name=model_name,
-        api_key=api_key,
-        temperature=temperature,
-        options=options,
-    ).build(transport=transport)
 
 
 def coerce_modality(value: ModelModality | str | None) -> ModelModality:
@@ -65,7 +45,6 @@ def create_runner_for_modality(
 
 __all__ = [
     "coerce_modality",
-    "create_runner_for_model",
     "create_runner_for_modality",
     "resolve_modality",
 ]

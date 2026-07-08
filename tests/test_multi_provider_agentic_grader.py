@@ -73,6 +73,8 @@ class MultiProviderAgenticGraderTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
         # Setup clean test context before each run.
         self.original_env = dict(os.environ)
+        for env_var in API_KEY_ENV_VARS.values():
+            os.environ.pop(env_var, None)
 
     def tearDown(self) -> None:
         # Restore environment variables after each run.

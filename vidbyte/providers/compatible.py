@@ -182,9 +182,14 @@ class MiniMaxProvider(OpenAICompatibleProvider):
     provider = ModelProvider.MINIMAX
 
 
+class KimiProvider(OpenAICompatibleProvider):
+    provider = ModelProvider.KIMI
+
+
 __all__ = [
     "DeepSeekProvider",
     "GLMProvider",
+    "KimiProvider",
     "MiniMaxProvider",
     "OpenAICompatibleProvider",
 ]
