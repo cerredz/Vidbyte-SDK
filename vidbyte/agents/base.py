@@ -174,6 +174,16 @@ class BaseAgent(McpAttachableMixin):
                 f"Agent {name} uses non-linear runtime {self.runtime_type.value}, "
                 "which does not support tool_error_policy middleware."
             )
+        if self.agent_loop_settings.tool_settings is not None and self.runtime_type in (
+            AgentRuntimeType.MCTS_SEARCH,
+            AgentRuntimeType.ACTOR_MODEL,
+            AgentRuntimeType.ACTOR_MODEL_P2P,
+            AgentRuntimeType.ACTOR_MODEL_BROADCAST,
+        ):
+            raise ConfigurationError(
+                f"Agent {name} uses non-linear runtime {self.runtime_type.value}, "
+                "which does not support tool_settings."
+            )
         self.runtime_config = self.agent_loop_settings.to_runtime_config()
         self.max_tool_rounds = self.agent_loop_settings.max_iterations
         self.system_prompt = system_prompt
