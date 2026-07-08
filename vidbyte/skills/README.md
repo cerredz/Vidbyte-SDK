@@ -36,12 +36,12 @@ skills.materialize(
 )
 ```
 
-Terminal CLI (via the unified `vidbyte` command in `vidbyte.cli`):
+Terminal CLI (via the unified `vidbyte-sdk` command in `vidbyte.cli`):
 
 ```bash
-vidbyte skills list
-vidbyte skills show decompose-fanout
-vidbyte skills install decompose-fanout --dest .claude/skills
+vidbyte-sdk skills list
+vidbyte-sdk skills show decompose-fanout
+vidbyte-sdk skills install decompose-fanout --dest .claude/skills
 ```
 
 ## Available Skills

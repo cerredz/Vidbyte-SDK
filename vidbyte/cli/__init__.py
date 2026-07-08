@@ -80,7 +80,7 @@ class VidbyteCli:
 
     def _build_parser(self) -> ReturningArgumentParser:
         # Builds the root parser and attaches every explicit subcommand group.
-        parser = ReturningArgumentParser(prog="vidbyte")
+        parser = ReturningArgumentParser(prog="vidbyte-sdk")
         parser.add_argument("--version", action="version", version=f"%(prog)s {VersionResolver().resolve()}")
         subparsers = parser.add_subparsers(dest="command", required=True)
         self._register_subcommand_groups(subparsers)

@@ -26,7 +26,7 @@ access remain outside this package.
 | Layer | Role |
 |-------|------|
 | [`vidbyte.agents`](vidbyte/agents/README.md) | Executable agent actors, runtimes, modality routing, handoff, and agent registries |
-| [`vidbyte.cli`](vidbyte/cli/README.md) | Unified console command for SDK developer surfaces, currently `vidbyte skills` |
+| [`vidbyte.cli`](vidbyte/cli/README.md) | Unified console command for SDK developer surfaces, currently `vidbyte-sdk skills` |
 | [`vidbyte.context`](vidbyte/context/README.md) | Structured context items, context windows, compaction, algorithms, and handoff models |
 | [`vidbyte.evals`](vidbyte/evals/README.md) | Local eval cases, suites, runners, graders, registries, and result summaries |
 | [`vidbyte.harnesses`](vidbyte/harnesses/README.md) | Namespace boundary for custom harness integrations |
@@ -748,17 +748,17 @@ The current preset catalog contains 201 presets:
 
 ## CLI
 
-The SDK installs a unified `vidbyte` command. Its first command group wraps the
+The SDK installs a unified `vidbyte-sdk` command. Its first command group wraps the
 packaged skills registry:
 
 ```bash
-vidbyte --version
-vidbyte skills list
-vidbyte skills show decompose-fanout
-vidbyte skills install decompose-fanout --dest .claude/skills
+vidbyte-sdk --version
+vidbyte-sdk skills list
+vidbyte-sdk skills show decompose-fanout
+vidbyte-sdk skills install decompose-fanout --dest .claude/skills
 ```
 
-`vidbyte skills install` writes the selected skill folder under the destination
+`vidbyte-sdk skills install` writes the selected skill folder under the destination
 directory and refuses to overwrite an existing non-empty skill folder unless
 `--force` is passed.
 

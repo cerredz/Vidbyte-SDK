@@ -6,7 +6,7 @@ Purpose:
     Lets terminal users list, inspect, and install packaged Vidbyte skills
     without writing Python code.
 Architecture:
-    - register attaches vidbyte skills list/show/install to the root parser.
+    - register attaches vidbyte-sdk skills list/show/install to the root parser.
     - SkillsCommandGroup lazily imports and calls vidbyte.skills.Skills.
     - SkillKeyResolver accepts full enum values and unambiguous short forms.
 Relations:
@@ -69,7 +69,7 @@ class SkillKeyResolver:
 
 
 class SkillsCommandGroup:
-    """Registers and handles the vidbyte skills subcommand group."""
+    """Registers and handles the vidbyte-sdk skills subcommand group."""
 
     def register(self, subparsers: argparse._SubParsersAction[Any]) -> None:
         # Attaches the skills command group and its list, show, and install actions.
@@ -80,18 +80,18 @@ class SkillsCommandGroup:
         self._register_install(action_parsers)
 
     def _register_list(self, subparsers: argparse._SubParsersAction[Any]) -> None:
-        # Registers vidbyte skills list.
+        # Registers vidbyte-sdk skills list.
         parser = subparsers.add_parser("list", help="List packaged Vidbyte skills.")
         parser.set_defaults(handler=self.list_skills)
 
     def _register_show(self, subparsers: argparse._SubParsersAction[Any]) -> None:
-        # Registers vidbyte skills show <key>.
+        # Registers vidbyte-sdk skills show <key>.
         parser = subparsers.add_parser("show", help="Print a packaged skill's SKILL.md.")
         parser.add_argument("key", help="Full key or unambiguous short name, for example decompose-fanout.")
         parser.set_defaults(handler=self.show_skill)
 
     def _register_install(self, subparsers: argparse._SubParsersAction[Any]) -> None:
-        # Registers vidbyte skills install <key> --dest <dir> [--force].
+        # Registers vidbyte-sdk skills install <key> --dest <dir> [--force].
         parser = subparsers.add_parser("install", help="Materialize a packaged skill under a destination directory.")
         parser.add_argument("key", help="Full key or unambiguous short name, for example decompose-fanout.")
         parser.add_argument("--dest", required=True, help="Destination directory, for example .claude/skills.")
@@ -155,7 +155,7 @@ class SkillsCommandGroup:
 
 
 def register(subparsers: argparse._SubParsersAction[Any]) -> None:
-    # Registers the skills command group with the root vidbyte parser.
+    # Registers the skills command group with the root vidbyte-sdk parser.
     SkillsCommandGroup().register(subparsers)
 
 

@@ -3,7 +3,7 @@
 Description:
     Module entry point for running the unified Vidbyte SDK CLI.
 Purpose:
-    Provides `python -m vidbyte.cli` parity with the installed `vidbyte` command.
+    Provides `python -m vidbyte.cli` parity with the installed `vidbyte-sdk` command.
 Architecture:
     - Imports vidbyte.cli.main and exits with its returned process status.
 Relations:

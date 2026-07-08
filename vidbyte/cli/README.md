@@ -19,10 +19,10 @@ instantiate catalogs until a handler runs.
 ## Usage
 
 ```bash
-vidbyte --version
-vidbyte skills list
-vidbyte skills show decompose-fanout
-vidbyte skills install decompose-fanout --dest .claude/skills
+vidbyte-sdk --version
+vidbyte-sdk skills list
+vidbyte-sdk skills show decompose-fanout
+vidbyte-sdk skills install decompose-fanout --dest .claude/skills
 ```
 
 Equivalent module command:

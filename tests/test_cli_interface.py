@@ -1,7 +1,7 @@
 # ==============================================================================
 # CONTEXT PROTOCOL HEADER
 # Description: Unit tests for the unified Vidbyte CLI public interface.
-# Purpose: Ensures vidbyte skills commands dispatch in-process with stable output.
+# Purpose: Ensures vidbyte-sdk skills commands dispatch in-process with stable output.
 # Architecture & Functions:
 #   - VidbyteCliInterfaceTests: verifies list/show/install, key parsing, and errors.
 # Codebase Relation:
@@ -36,7 +36,7 @@ class VidbyteCliInterfaceTests(unittest.TestCase):
         code, stdout, stderr = self.run_cli(["--version"])
 
         self.assertEqual(code, 0)
-        self.assertIn("vidbyte ", stdout)
+        self.assertIn("vidbyte-sdk ", stdout)
         self.assertEqual(stderr, "")
 
     def test_help_does_not_instantiate_skills_catalog(self) -> None:
