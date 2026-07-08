@@ -75,6 +75,32 @@ When you change the Vidbyte SDK repository, you must update the corresponding sk
 | `skills/sdk/SKILL.md` | Middleware rules and removed/stable API notes |
 | `skills/vidbyte-sdk-doc/SKILL.md` | Public import surface and tests/design docs |
 
+### Add or Change Tool Settings
+
+**Example:** Adding a new field to `ToolSettings`, changing denial/abort/truncate
+semantics, or wiring new enforcement in `AgentRuntime`.
+
+**Do not confuse with Tool Error Policy** — `ToolSettings` is runtime-enforced
+universal tool-use policy (deny/cap/truncate). `ToolErrorPolicy` is
+middleware-oriented retry/render for tool *failures*.
+
+**Files to update:**
+
+| File | What to add |
+|------|-------------|
+| `skills/tool-settings/SKILL.md` | Process steps, field table, invariants, NOT-to-do rules |
+| `skills/agentic-loop-settings/SKILL.md` | Nested `tool_settings` pointer / stop reasons if budgets change |
+| `README.md` | Developer-facing `ToolSettings` example if public behavior changes |
+| `docs/design/tool-settings-runtime-enforcement.md` or a new design doc | Non-trivial architecture changes |
+| `vidbyte/agents/settings/tool.py` | Field, validation, pure decision methods |
+| `vidbyte/agents/settings/loop.py` | Nesting, reconcile with `max_tool_calls`, `to_runtime_config()` |
+| `vidbyte/lib/dataclasses/agents.py` | `AgentRuntimeConfig` / `AgentStopReason` when needed |
+| `vidbyte/agents/runtime.py` | Pre-exec / post-exec enforcement helpers |
+| `vidbyte/agents/base.py` | Non-linear runtime construction guard when policy is linear-only |
+| `vidbyte/agents/settings/__init__.py`, `vidbyte/agents/__init__.py`, `vidbyte/__init__.py` | Public exports for new symbols |
+
+**Process skill:** follow `skills/tool-settings/SKILL.md` end-to-end before opening a PR.
+
 ### Add or Change Repository Artifacts
 
 **Example:** Adding or regenerating `artifacts/file_index.md`.
