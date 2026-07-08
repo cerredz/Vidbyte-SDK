@@ -1415,7 +1415,7 @@ class AgentRuntime:
             return self._stopped_result(f"Agent runtime stopped by tool settings: {reason}", stop_reason=AgentStopReason.TOOL_SETTINGS_DENIED, iteration_count=iteration_count, tokens_used=tokens_used, contexts=call_contexts)
         context_record, result = self._denied_tool_result(call, provider, message=f"Tool denied by tool settings: {reason}", error=reason, reason=reason, metadata=meta)
         call_contexts.append(context_record)
-        self._append_tool_result_message(messages, call, result, provider, MiddlewareDecision.continue_())
+        self._append_tool_result_message(messages, call, result, provider, MiddlewareDecision.continue_(), truncate=False)
         return context_record, result
 
     @staticmethod
@@ -1435,8 +1435,10 @@ class AgentRuntime:
         result: ToolResult,
         provider: str,
         decision: MiddlewareDecision,
+        *,
+        truncate: bool = True,
     ) -> None:
-        visible_result = self._model_visible_tool_result(call, result, decision)
+        visible_result = self._model_visible_tool_result(call, result, decision, truncate=truncate)
         # Provider-specific result formatting remains the single place that
         # knows how Anthropic, Gemini, OpenAI Responses, and OpenAI-compatible
         # chat messages represent tool failures.
@@ -1448,6 +1450,8 @@ class AgentRuntime:
         call: ToolCall,
         result: ToolResult,
         decision: MiddlewareDecision,
+        *,
+        truncate: bool = True,
     ) -> ToolResult:
         # Primitive binding is applied before any middleware-visible transform so
         # successful tool outputs can still be stored as primitives. Error results
@@ -1456,12 +1460,14 @@ class AgentRuntime:
         if primitive_result is not result:
             return primitive_result
         visible = result if decision.transform is None else (decision.transform.model_visible_tool_result or result)
+        if not truncate:
+            return visible
         return self._truncate_for_tool_settings(call, visible)
 
     def _truncate_for_tool_settings(self, call: ToolCall, result: ToolResult) -> ToolResult:
-        # Caps successful, non-internal tool output to ToolSettings.result_max_chars, leaving raw ToolResult intact.
+        # Caps executed, non-internal tool output to ToolSettings.result_max_chars, leaving raw ToolResult intact.
         settings = self.config.tool_settings
-        if settings is None or self._tool_is_internal(call) or result.status.value != "success":
+        if settings is None or self._tool_is_internal(call):
             return result
         return settings.truncate(result)
 
