@@ -22,7 +22,21 @@ from vidbyte.agents.aggregation import AggregateAgent, AggregateResult, MultiPro
 from vidbyte.agents.client import AgentClient
 from vidbyte.agents.continual_trace import ContinualTraceAgent
 from vidbyte.agents.settings import AgentLoopSettings, ToolErrorPolicy, ToolSettings, UnrecoverableAction
-from vidbyte.agents.contracts import MinElapsedSeconds, MinIterations, MinTokens, MinToolCalls, OutputContract
+from vidbyte.agents.contracts import (
+    MinCompactions,
+    MinCostSpent,
+    MinDistinctTools,
+    MinElapsedSeconds,
+    MinFinalOutputChars,
+    MinFinalOutputTokens,
+    MinIterations,
+    MinSuccessfulToolCalls,
+    MinTimeTaken,
+    MinTokens,
+    MinToolCalls,
+    MinToolCallsById,
+    OutputContract,
+)
 from vidbyte.agents.handoff import HandoffAgent
 from vidbyte.agents.context_algorithms import AgentRuntimeContextAlgorithms
 from vidbyte.lib.dataclasses.multi_agent import AggregateConfig, ProposerSpec
@@ -61,6 +75,14 @@ __all__ = [
     "MinTokens",
     "MinIterations",
     "MinElapsedSeconds",
+    "MinTimeTaken",
+    "MinSuccessfulToolCalls",
+    "MinDistinctTools",
+    "MinFinalOutputChars",
+    "MinFinalOutputTokens",
+    "MinToolCallsById",
+    "MinCompactions",
+    "MinCostSpent",
     "AgentCard",
     "AgentForkSettings",
     "AgentInput",
