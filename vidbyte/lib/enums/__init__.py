@@ -21,11 +21,13 @@ from vidbyte.lib.enums.model_modality import ModelModality, ModelNameModality
 from vidbyte.lib.enums.model_provider import ModelProvider
 from vidbyte.lib.enums.platform import Platform
 from vidbyte.lib.enums.prompts import Prompt
+from vidbyte.lib.enums.skills import ContextMinimalFanoutSkill, Skill, Skills as SkillEnums
 from vidbyte.lib.enums.sources import PinPolicy
 
 __all__ = [
     "AgentRuntimeType",
     "BudgetPreset",
+    "ContextMinimalFanoutSkill",
     "ModelModality",
     "ModelNameModality",
     "ModelProvider",
@@ -33,4 +35,6 @@ __all__ = [
     "PinPolicy",
     "Platform",
     "Prompt",
+    "Skill",
+    "SkillEnums",
 ]

@@ -11,8 +11,9 @@ pipelines, and evals. They are not raw primitives. A paradigm harness owns a
 repeatable control flow such as "worker, critic, repair, repeat" or "decompose
 into fresh context windows, run isolated subtasks, merge, and audit."
 
-This package currently provides scaffolding only: `ParadigmHarness` and
-`ParadigmClient`. No concrete paradigm harnesses ship from this namespace yet.
+This package currently provides `ParadigmHarness`, `ParadigmClient`, and
+package-local distributable skill assets for the first context-minimal fanout
+paradigm family. Runnable Python harness factories can be added separately.
 
 ## Design Philosophy
 
@@ -37,12 +38,22 @@ Future concrete paradigm harnesses should expose an agent-like `run()` / `arun()
 surface while accepting caller-provided tools, system prompts, models, limits,
 and policies.
 
+Distributable skills are available through the sibling registry:
+
+```python
+from vidbyte.skills import ContextMinimalFanoutSkill, Skills
+
+skill_text = Skills().text(ContextMinimalFanoutSkill.DECOMPOSE_FANOUT)
+```
+
 ## Key Modules
 
 - `base.py`: `ParadigmHarness`, the abstract runnable contract for future thin
   harnesses.
 - `client.py`: `ParadigmClient`, currently a namespace marker for future
   paradigm factories.
+- `context_minimal_fanout/`: packaged external-harness skills for decomposing,
+  designing, and fanning out broad implementation tasks.
 - `__init__.py`: public exports for the paradigm namespace.
 
 ## Related Layers
