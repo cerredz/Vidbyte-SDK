@@ -188,6 +188,7 @@ class ToolCallContext:
     provider: str | None = None
     model: str | None = None
     metadata: Mapping[str, Any] = field(default_factory=dict)
+    iteration_count: int | None = None
 
     @property
     def name(self) -> str:
