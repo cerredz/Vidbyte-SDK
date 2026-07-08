@@ -266,7 +266,7 @@ Built-in tool groups:
 - `vidbyte.tools.builtins.code_search`: `GlobTool`, `GrepTool`, `SemanticSearchTool`
 - `vidbyte.tools.builtins.editing`: `PatchTool`
 - `vidbyte.tools.builtins.context`: `ContextCompactionTool`, compaction modes and related types — **legacy/manual** only; prefer compaction middleware (`vidbyte/middleware/compaction/`)
-- `vidbyte.tools.builtins.context_primitives`: `ContextUpsertTool`, `ContextListTool`, `ContextRemoveTool`
+- `vidbyte.tools.builtins.context_primitives`: `ContextUpsertTool`, `ContextListTool`, `ContextRemoveTool`, `ContextEditTool`, `ContextReciteTool`, `ContextMoveTool`, `ContextStatsTool`, `ContextWindowFactory`
 - `vidbyte.tools.builtins.fork`: `ForkConversationTool`
 - `vidbyte.tools.builtins.handoff`: `CreateHandoffTool`
 - `vidbyte.tools.builtins.reflexion.ReflexionTool`, `vidbyte.tools.builtins.trajectory_checkpoint.TrajectoryCheckpointTool` (model-callable forms of the context-window algorithms)

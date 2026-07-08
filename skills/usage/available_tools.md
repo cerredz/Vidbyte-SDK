@@ -76,7 +76,8 @@ tools = ContextWindowFactory(ctx).build()
 | `ContextListTool(context_manager)` | List the current context items. |
 | `ContextRemoveTool(context_manager)` | Remove a non-frozen context item by id. |
 | `ContextStatsTool(context_manager)` | Inspect id, kind, title, placement, frozen flag, and char count. |
-| `ContextEditTool(context_manager)` | Replace one exact, unique string in a primitive's `content` field. |
+| `ContextEditTool(context_manager)` | Replace one exact, unique string across editable string/tuple fields. |
+| `ContextReciteTool(context_manager)` | Re-emit a primitive at end-of-conversation attention via a recitation copy. |
 | `ContextMoveTool(context_manager)` | Move a non-frozen primitive to a different context placement. |
 | `ContextUpsertTool(context_manager)` | Legacy flattened insert/update tool retained for compatibility. |
 
