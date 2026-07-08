@@ -1,4 +1,4 @@
-ï»¿# Design Doc: Minimal `vidbyte` CLI (skills subcommand)
+# Design Doc: Minimal `vidbyte-sdk` CLI (skills subcommand)
 
 **Status:** Implemented
 **Author:** Claude
@@ -9,15 +9,15 @@
 
 ## 1. Overview
 
-Add a unified `vidbyte` console command to the SDK, implemented as a small stdlib-argparse package at `vidbyte/cli/`, wired through a single `[project.scripts]` entry point in `pyproject.toml`. Its first and only subcommand group is `skills` (`vidbyte skills list|show|install`), a thin wrapper over the `Skills` registry designed in `docs/pre-design/paradigm-skills-and-registry.md`. The CLI is deliberately minimal (~100Î“Ã‡Ã´150 lines, zero new dependencies) but structured with a subcommand-registration seam so future groups Î“Ã‡Ã¶ e.g. commands that talk to the main Vidbyte backend Î“Ã‡Ã¶ slot in without restructuring.
+Add a unified `vidbyte-sdk` console command to the SDK, implemented as a small stdlib-argparse package at `vidbyte/cli/`, wired through a single `[project.scripts]` entry point in `pyproject.toml`. Its first and only subcommand group is `skills` (`vidbyte-sdk skills list|show|install`), a thin wrapper over the `Skills` registry designed in `docs/pre-design/paradigm-skills-and-registry.md`. The CLI is deliberately minimal (~100GÇô150 lines, zero new dependencies) but structured with a subcommand-registration seam so future groups GÇö e.g. commands that talk to the main Vidbyte backend GÇö slot in without restructuring.
 
-**Dependency note for the implementer:** this design depends on the skills registry design doc. Read `docs/pre-design/paradigm-skills-and-registry.md` (it is promoted to `docs/design/` once implemented) and look for these files in the repo: `vidbyte/skills/catalog.py` (`Skills`, `SkillRecord`), `vidbyte/lib/enums/skills.py` (`Skill` enum), and `vidbyte/paradigms/context_minimal_fanout/skills/` (assets + `skills.json`). If they do not exist yet, implement that doc first Î“Ã‡Ã¶ this CLI has nothing to wrap without it.
+**Dependency note for the implementer:** this design depends on the skills registry design doc. Read `docs/pre-design/paradigm-skills-and-registry.md` (it is promoted to `docs/design/` once implemented) and look for these files in the repo: `vidbyte/skills/catalog.py` (`Skills`, `SkillRecord`), `vidbyte/lib/enums/skills.py` (`Skill` enum), and `vidbyte/paradigms/context_minimal_fanout/skills/` (assets + `skills.json`). If they do not exist yet, implement that doc first GÇö this CLI has nothing to wrap without it.
 
 ---
 
 ## 2. Original User Prompts
 
-Prompts 1Î“Ã‡Ã´3 established the paradigm skills + registry feature and are recorded verbatim in `docs/pre-design/paradigm-skills-and-registry.md` â”¬Âº2. Copied here again for self-containment:
+Prompts 1GÇô3 established the paradigm skills + registry feature and are recorded verbatim in `docs/pre-design/paradigm-skills-and-registry.md` -º2. Copied here again for self-containment:
 
 **Prompt 1** (via `/talk`):
 
@@ -40,7 +40,7 @@ Prompts 1Î“Ã‡Ã´3 established the paradigm skills + registry feature and are reco
 
 **Prompt 4** (this design's driving prompt):
 
-> I think that the cleanest way we can do it is this:   2. One line in pyproject Î“Ã‡Ã¶ a real command. Add vidbyte-skills =
+> I think that the cleanest way we can do it is this:   2. One line in pyproject GÇö a real command. Add vidbyte-skills =
 >   "vidbyte.skills.__main__:main" (or better, a unified vidbyte =
 >   "vidbyte.cli:main" with skills as a subcommand, since you'll
 >   likely want more subcommands later). The "CLI" is ~100 lines of
@@ -53,26 +53,26 @@ Prompts 1Î“Ã‡Ã´3 established the paradigm skills + registry feature and are reco
 
 ### Key Decisions
 
-1. **Unified `vidbyte` command, not `vidbyte-skills`.** The user chose the unified entry point (`vidbyte = "vidbyte.cli:main"`) with `skills` as the first subcommand group, explicitly because the SDK may later hook up to the main Vidbyte backend and more subcommands are expected. One brand command that grows beats a constellation of `vidbyte-*` binaries.
-2. **CLI lives at `vidbyte/cli/` (inside the package), not repo-top-level `cli/`.** This is the software-engineering-best-practice answer the user asked for, for three hard reasons: (a) `[project.scripts]` entry points must reference an *importable module path* Î“Ã‡Ã¶ `vidbyte.cli:main` only resolves if the code is inside the `vidbyte` package; (b) `pyproject.toml` packaging uses `[tool.setuptools.packages.find] include = ["vidbyte*"]`, so a top-level `cli/` directory would silently not ship in the wheel; (c) even if force-included, installing a top-level package literally named `cli` into site-packages would squat a generic name and collide with other distributions Î“Ã‡Ã¶ a known packaging anti-pattern. Precedent in-repo: the existing console script `vidbyte-mcp-server = "vidbyte.mcp_server.__main__:main"` already follows the inside-the-package pattern.
+1. **unified `vidbyte-sdk` command, not `vidbyte-skills`.** The user chose the unified entry point (`vidbyte-sdk = "vidbyte.cli:main"`) with `skills` as the first subcommand group, explicitly because the SDK may later hook up to the main Vidbyte backend and more subcommands are expected. One brand command that grows beats a constellation of `vidbyte-*` binaries.
+2. **CLI lives at `vidbyte/cli/` (inside the package), not repo-top-level `cli/`.** This is the software-engineering-best-practice answer the user asked for, for three hard reasons: (a) `[project.scripts]` entry points must reference an *importable module path* GÇö `vidbyte.cli:main` only resolves if the code is inside the `vidbyte` package; (b) `pyproject.toml` packaging uses `[tool.setuptools.packages.find] include = ["vidbyte*"]`, so a top-level `cli/` directory would silently not ship in the wheel; (c) even if force-included, installing a top-level package literally named `cli` into site-packages would squat a generic name and collide with other distributions GÇö a known packaging anti-pattern. Precedent in-repo: the existing console script `vidbyte-mcp-server = "vidbyte.mcp_server.__main__:main"` already follows the inside-the-package pattern.
 3. **stdlib argparse only.** No click/typer/rich. The SDK's dependency surface is deliberately tiny (`pydantic`, `httpx`); a ~100-line CLI does not justify a framework. User approved this explicitly.
-4. **Minimal command surface for v1**: `vidbyte skills list`, `vidbyte skills show <key>`, `vidbyte skills install <key> --dest <dir>`. The user said "very minimalistic CLI for this one command" Î“Ã‡Ã¶ the load-bearing command is `install`; `list` is required for discoverability; `show` is cheap and lets users read a skill before installing. Nothing else.
-5. **Subcommand-registration seam for growth.** Each subcommand group is its own module (`vidbyte/cli/skills.py`) exposing a `register(subparsers)` function; `vidbyte/cli/__init__.py`'s `main()` builds the root parser and calls each group's `register`. Adding a future `backend`/`auth`/`prompts` group = one new module + one register call. No plugin machinery, no dynamic discovery Î“Ã‡Ã¶ an explicit list is fine at this scale.
-6. **The CLI is a thin adapter over the registry Î“Ã‡Ã¶ zero business logic.** All listing/reading/materializing behavior lives in `Skills` (per the registry design doc). The CLI translates argv Î“Ã¥Ã† catalog calls Î“Ã¥Ã† stdout/exit codes. If the CLI needs a capability the catalog lacks, the capability goes in the catalog.
+4. **Minimal command surface for v1**: `vidbyte-sdk skills list`, `vidbyte-sdk skills show <key>`, `vidbyte-sdk skills install <key> --dest <dir>`. The user said "very minimalistic CLI for this one command" GÇö the load-bearing command is `install`; `list` is required for discoverability; `show` is cheap and lets users read a skill before installing. Nothing else.
+5. **Subcommand-registration seam for growth.** Each subcommand group is its own module (`vidbyte/cli/skills.py`) exposing a `register(subparsers)` function; `vidbyte/cli/__init__.py`'s `main()` builds the root parser and calls each group's `register`. Adding a future `backend`/`auth`/`prompts` group = one new module + one register call. No plugin machinery, no dynamic discovery GÇö an explicit list is fine at this scale.
+6. **The CLI is a thin adapter over the registry GÇö zero business logic.** All listing/reading/materializing behavior lives in `Skills` (per the registry design doc). The CLI translates argv GåÆ catalog calls GåÆ stdout/exit codes. If the CLI needs a capability the catalog lacks, the capability goes in the catalog.
 7. **This doc supersedes the registry doc's stretch requirement 11** (`vidbyte/skills/__main__.py` with its own argparse). Instead, add `vidbyte/cli/__main__.py` (two lines) so `python -m vidbyte.cli` works for users who somehow lack PATH shims. Do not build a parallel argparse in `vidbyte.skills`.
 
 ### Rejected Alternatives
 
-- **`vidbyte-skills` as a separate console script** Î“Ã‡Ã¶ rejected by the user in favor of the unified command (Prompt 4 quotes both options and picks unified).
-- **Repo-top-level `cli/` directory** Î“Ã‡Ã¶ rejected; see Key Decision 2 (not importable as `vidbyte.cli`, not shipped by `packages.find`, generic-name squatting).
-- **click / typer** Î“Ã‡Ã¶ rejected; unnecessary dependency for this surface.
-- **A separate `vidbyte-sdk-skills` PyPI package** Î“Ã‡Ã¶ rejected earlier in the conversation: nothing to escape (SDK deps are only pydantic + httpx), and a second package means version-sync drift. `pip install <name>` only installs files; the command comes from the entry point either way.
-- **`python -m vidbyte.skills` as the primary interface** (option 1 from the conversation) Î“Ã‡Ã¶ superseded by the real entry point; keeping both argparse surfaces would duplicate code.
-- **Harness-aware install (`--harness claude --scope user` auto-resolving paths like `~/.claude/skills/`)** Î“Ã‡Ã¶ deferred to keep v1 minimal; `--dest` is explicit and universal. Recorded as future work (see Open Questions), since the harness path table already exists conceptually in the prompts README / PR #154 work.
+- **`vidbyte-skills` as a separate console script** GÇö rejected by the user in favor of the unified command (Prompt 4 quotes both options and picks unified).
+- **Repo-top-level `cli/` directory** GÇö rejected; see Key Decision 2 (not importable as `vidbyte.cli`, not shipped by `packages.find`, generic-name squatting).
+- **click / typer** GÇö rejected; unnecessary dependency for this surface.
+- **A separate `vidbyte-sdk-skills` PyPI package** GÇö rejected earlier in the conversation: nothing to escape (SDK deps are only pydantic + httpx), and a second package means version-sync drift. `pip install <name>` only installs files; the command comes from the entry point either way.
+- **`python -m vidbyte.skills` as the primary interface** (option 1 from the conversation) GÇö superseded by the real entry point; keeping both argparse surfaces would duplicate code.
+- **Harness-aware install (`--harness claude --scope user` auto-resolving paths like `~/.claude/skills/`)** GÇö deferred to keep v1 minimal; `--dest` is explicit and universal. Recorded as future work (see Open Questions), since the harness path table already exists conceptually in the prompts README / PR #154 work.
 
 ### Constraints & Assumptions
 
-- **Assumes the skills registry exists** per `docs/pre-design/paradigm-skills-and-registry.md`: `Skills` with `keys()`, `descriptions()`, `get()`, `text()`, `files()`, `materialize(key, dest_dir)`; `Skill` str-Enum; `ConfigurationError` on invalid assets. If the implemented API drifted from that doc, wrap what actually exists Î“Ã‡Ã¶ do not re-implement.
+- **Assumes the skills registry exists** per `docs/pre-design/paradigm-skills-and-registry.md`: `Skills` with `keys()`, `descriptions()`, `get()`, `text()`, `files()`, `materialize(key, dest_dir)`; `Skill` str-Enum; `ConfigurationError` on invalid assets. If the implemented API drifted from that doc, wrap what actually exists GÇö do not re-implement.
 - Python >= 3.11, stdlib only for the CLI; no new `[project.dependencies]`.
 - House style applies: Context Protocol Header comment at the top of each new module (copy the format from `vidbyte/prompts/__init__.py` or `vidbyte/mcp_server/__main__.py`), folder README following the repo's Role-In-The-SDK/Usage/Key-Modules format.
 - Windows is the primary dev environment: use `pathlib`, never assume POSIX paths; output must not rely on ANSI color.
@@ -80,40 +80,40 @@ Prompts 1Î“Ã‡Ã´3 established the paradigm skills + registry feature and are reco
 
 ### Clarifications & Answers
 
-- Q (user): `vidbyte-sdk/cli` or `vidbyte-sdk/vidbyte/cli` Î“Ã‡Ã¶ which is best practice? A: `vidbyte-sdk/vidbyte/cli` (inside the package), for the three reasons in Key Decision 2. This doc treats that as settled.
-- Q (user, from Prompt 2): do we need "an entire CLI"? A: no framework needed Î“Ã‡Ã¶ one entry-point line in pyproject plus an argparse `main()`. This doc is that answer made concrete.
-- Assumption made without asking: `show` prints the SKILL.md body to stdout; `list` prints one `key Î“Ã‡Ã¶ description` line per skill. If the user wants different output shapes, it's a trivial change at implementation review time.
+- Q (user): `vidbyte-sdk/cli` or `vidbyte-sdk/vidbyte/cli` GÇö which is best practice? A: `vidbyte-sdk/vidbyte/cli` (inside the package), for the three reasons in Key Decision 2. This doc treats that as settled.
+- Q (user, from Prompt 2): do we need "an entire CLI"? A: no framework needed GÇö one entry-point line in pyproject plus an argparse `main()`. This doc is that answer made concrete.
+- Assumption made without asking: `show` prints the SKILL.md body to stdout; `list` prints one `key GÇö description` line per skill. If the user wants different output shapes, it's a trivial change at implementation review time.
 
 ### Terminology / Glossary
 
 - **Entry point / console script**: the `[project.scripts]` table in `pyproject.toml`; pip generates a PATH executable per entry that imports and calls the referenced function.
 - **Subcommand group**: first positional token after `vidbyte` (e.g. `skills`), owning its own argparse subparser and actions.
-- **Materialize / install**: `Skills.materialize(key, dest_dir)` Î“Ã‡Ã¶ write the skill folder (SKILL.md + any shared references) under `dest_dir`. The CLI verb is `install`; the catalog verb is `materialize`.
+- **Materialize / install**: `Skills.materialize(key, dest_dir)` GÇö write the skill folder (SKILL.md + any shared references) under `dest_dir`. The CLI verb is `install`; the catalog verb is `materialize`.
 - **Registry / catalog**: `vidbyte.skills.Skills`, the enum-keyed loader from the companion design doc.
 
 ### Implementation Hints for the Downstream Model
 
 - **Read first**: `docs/pre-design/paradigm-skills-and-registry.md` (or its promoted copy in `docs/design/`), then the actual implemented files: `vidbyte/skills/catalog.py`, `vidbyte/lib/enums/skills.py`, `tests/test_skills_interface.py`. The CLI must call what exists, not what this doc guesses.
-- **Entry-point precedent**: `pyproject.toml` `[project.scripts]` already has `vidbyte-mcp-server = "vidbyte.mcp_server.__main__:main"`. Add `vidbyte = "vidbyte.cli:main"` beside it. Look at `vidbyte/mcp_server/__main__.py` for the house style of a `main()` module.
+- **Entry-point precedent**: `pyproject.toml` `[project.scripts]` already has `vidbyte-mcp-server = "vidbyte.mcp_server.__main__:main"`. Add `vidbyte-sdk = "vidbyte.cli:main"` beside it. Look at `vidbyte/mcp_server/__main__.py` for the house style of a `main()` module.
 - **Suggested file layout** (3 files + README):
-  - `vidbyte/cli/__init__.py` Î“Ã‡Ã¶ `main(argv: list[str] | None = None) -> int`: builds root parser (`prog="vidbyte"`, `--version` from package metadata via `importlib.metadata.version("vidbyte-sdk")`), attaches subparsers, calls each group's `register`, dispatches to the selected handler, returns exit code.
-  - `vidbyte/cli/skills.py` Î“Ã‡Ã¶ `register(subparsers)` adding `skills` with actions `list`, `show <key>`, `install <key> --dest <dir> [--force]`; handlers instantiate `Skills()` lazily (inside handlers, not at import) so `vidbyte --help` stays fast and never trips catalog validation.
-  - `vidbyte/cli/__main__.py` Î“Ã‡Ã¶ `raise SystemExit(main())` so `python -m vidbyte.cli` works.
-  - `vidbyte/cli/README.md` Î“Ã‡Ã¶ folder README in house format.
-- **`main()` must accept an argv parameter** and return an int rather than calling `sys.exit` internally (except in `__main__.py`) Î“Ã‡Ã¶ this is what makes the CLI unit-testable without subprocesses.
+  - `vidbyte/cli/__init__.py` GÇö `main(argv: list[str] | None = None) -> int`: builds root parser (`prog="vidbyte-sdk"`, `--version` from package metadata via `importlib.metadata.version("vidbyte-sdk")`), attaches subparsers, calls each group's `register`, dispatches to the selected handler, returns exit code.
+  - `vidbyte/cli/skills.py` GÇö `register(subparsers)` adding `skills` with actions `list`, `show <key>`, `install <key> --dest <dir> [--force]`; handlers instantiate `Skills()` lazily (inside handlers, not at import) so `vidbyte-sdk --help` stays fast and never trips catalog validation.
+  - `vidbyte/cli/__main__.py` GÇö `raise SystemExit(main())` so `python -m vidbyte.cli` works.
+  - `vidbyte/cli/README.md` GÇö folder README in house format.
+- **`main()` must accept an argv parameter** and return an int rather than calling `sys.exit` internally (except in `__main__.py`) GÇö this is what makes the CLI unit-testable without subprocesses.
 - **Key parsing UX**: accept both the enum value (`context_minimal_fanout.decompose_fanout`) and the bare kebab/snake skill name (`decompose-fanout` / `decompose_fanout`) when unambiguous; on unknown key, print the valid keys (from `Skills().keys()`) to stderr and exit 2. Do not make users type Python enum member names.
 - **Error handling**: catch `ConfigurationError` (from `vidbyte.lib.errors`) and OS errors at the dispatch boundary; print `error: <message>` to stderr; exit 1. Argparse usage errors keep argparse's default exit 2. Never print a traceback for expected failures.
-- **`install` behavior**: default `--dest` to the current directory's `.claude/skills/` only if you can do it without harness-specific logic Î“Ã‡Ã¶ otherwise make `--dest` required and let the help text show an example (`vidbyte skills install decompose-fanout --dest .claude/skills`). Refuse to overwrite an existing non-empty target unless `--force` is passed. Print the final written path on success.
+- **`install` behavior**: default `--dest` to the current directory's `.claude/skills/` only if you can do it without harness-specific logic GÇö otherwise make `--dest` required and let the help text show an example (`vidbyte-sdk skills install decompose-fanout --dest .claude/skills`). Refuse to overwrite an existing non-empty target unless `--force` is passed. Print the final written path on success.
 - **Tests** (`tests/test_cli_interface.py`): call `main([...])` directly with tmp_path destinations; assert exit codes, stdout contents for `list`/`show`, files-on-disk for `install`, unknown-key behavior, and `--force` overwrite semantics. Mirror the style of existing tests (plain pytest, no subprocess).
 - **Docs to touch**: root `README.md` (a short "CLI" section with the three commands), `vidbyte/skills/README.md` (point at the CLI as the non-Python install path), `llms.txt` if it indexes developer surfaces.
-- **Do NOT touch**: `vidbyte/mcp_server/`, the paradigm packages, the prompts catalog, or the `Skills` catalog itself (unless a missing capability forces a catalog addition Î“Ã‡Ã¶ in which case add it there, with tests, not in the CLI).
+- **Do NOT touch**: `vidbyte/mcp_server/`, the paradigm packages, the prompts catalog, or the `Skills` catalog itself (unless a missing capability forces a catalog addition GÇö in which case add it there, with tests, not in the CLI).
 
 ### Open Questions
 
-1. **Harness-aware install** (`--harness claude|codex|opencode|antigravity --scope user|project` resolving destination paths automatically) Î“Ã‡Ã¶ future work; the path table exists in the prompts README / PR #154 context. v1 ships `--dest` only.
+1. **Harness-aware install** (`--harness claude|codex|opencode|antigravity --scope user|project` resolving destination paths automatically) GÇö future work; the path table exists in the prompts README / PR #154 context. v1 ships `--dest` only.
 2. Should `vidbyte mcp-server` become an alias for the existing `vidbyte-mcp-server` script later? Out of scope; keep both scripts independent for now.
-3. `--json` output flag on `list`/`show` for scripting Î“Ã‡Ã¶ cheap, but omitted from v1 requirements; add only if the implementer finds it trivial.
-4. Command name collision check: `vidbyte` as a console script is assumed free on the user's PATH (it is the brand name). No known conflict; if PyPI/PATH conflicts surface, fall back to `vidbyte-cli` Î“Ã‡Ã¶ user decision at that point.
+3. `--json` output flag on `list`/`show` for scripting GÇö cheap, but omitted from v1 requirements; add only if the implementer finds it trivial.
+4. Command name collision check: `vidbyte` as a console script is assumed free on the user's PATH (it is the brand name). No known conflict; if PyPI/PATH conflicts surface, fall back to `vidbyte-cli` GÇö user decision at that point.
 
 ---
 
@@ -121,11 +121,11 @@ Prompts 1Î“Ã‡Ã´3 established the paradigm skills + registry feature and are reco
 
 ### Goals
 
-- A `vidbyte` console command installed with `pip install vidbyte-sdk`, via one `[project.scripts]` line.
-- `vidbyte skills list` Î“Ã‡Ã¶ enumerate all registry skills with descriptions.
-- `vidbyte skills show <key>` Î“Ã‡Ã¶ print a skill's SKILL.md to stdout.
-- `vidbyte skills install <key> --dest <dir>` Î“Ã‡Ã¶ materialize a skill folder to disk via `Skills.materialize`.
-- `python -m vidbyte.cli` parity; `vidbyte --version`; testable `main(argv) -> int`.
+- A `vidbyte-sdk` console command installed with `pip install vidbyte-sdk`, via one `[project.scripts]` line.
+- `vidbyte-sdk skills list` GÇö enumerate all registry skills with descriptions.
+- `vidbyte-sdk skills show <key>` GÇö print a skill's SKILL.md to stdout.
+- `vidbyte-sdk skills install <key> --dest <dir>` GÇö materialize a skill folder to disk via `Skills.materialize`.
+- `python -m vidbyte.cli` parity; `vidbyte-sdk --version`; testable `main(argv) -> int`.
 - A growth seam (per-group `register(subparsers)` modules) for future backend-connected subcommands.
 - Tests + README/docs updates.
 
@@ -135,43 +135,43 @@ Prompts 1Î“Ã‡Ã´3 established the paradigm skills + registry feature and are reco
 - No harness-aware path resolution (`--harness`/`--scope`) in v1.
 - No backend/API commands, no auth, no networking of any kind.
 - No changes to the `Skills` catalog contract, the paradigm assets, prompts, or the MCP server.
-- No `vidbyte/skills/__main__.py` (explicitly superseded Î“Ã‡Ã¶ see Key Decision 7).
+- No `vidbyte/skills/__main__.py` (explicitly superseded GÇö see Key Decision 7).
 - No shell completions, no color output, no interactive prompts.
 
 ---
 
 ## 5. Background & Context
 
-- **Why now:** the companion design (`paradigm-skills-and-registry.md`) gives Python developers programmatic access to distributable paradigm skills, but the primary install audience is a developer at a terminal who wants a skill dropped into `.claude/skills/` without writing a script. The conversation established that pip alone cannot provide a command Î“Ã‡Ã¶ `[project.scripts]` entry points can, with ~100 lines of argparse.
+- **Why now:** the companion design (`paradigm-skills-and-registry.md`) gives Python developers programmatic access to distributable paradigm skills, but the primary install audience is a developer at a terminal who wants a skill dropped into `.claude/skills/` without writing a script. The conversation established that pip alone cannot provide a command GÇö `[project.scripts]` entry points can, with ~100 lines of argparse.
 - **Why a unified command:** the user anticipates hooking the SDK to the main Vidbyte backend; starting with `vidbyte <group> <action>` now means future capabilities extend an existing surface instead of introducing one.
-- **Current state:** the repo has one console script (`vidbyte-mcp-server`) proving the entry-point path works end-to-end. There is no `vidbyte/cli/` package and (as of this doc) the skills registry itself is not yet implemented Î“Ã‡Ã¶ implementation order is registry first, CLI second.
+- **Current state:** the repo has one console script (`vidbyte-mcp-server`) proving the entry-point path works end-to-end. There is no `vidbyte/cli/` package and (as of this doc) the skills registry itself is not yet implemented GÇö implementation order is registry first, CLI second.
 
 ---
 
 ## 6. Requirements
 
-1. `pyproject.toml` gains `vidbyte = "vidbyte.cli:main"` under `[project.scripts]`; the existing `vidbyte-mcp-server` entry is unchanged.
+1. `pyproject.toml` gains `vidbyte-sdk = "vidbyte.cli:main"` under `[project.scripts]`; the existing `vidbyte-mcp-server` entry is unchanged.
 2. `vidbyte/cli/` is an importable package containing `__init__.py` (with `main`), `skills.py`, `__main__.py`, and `README.md`; it ships in the wheel via the existing `packages.find` include (`vidbyte*`) with no extra package-data config.
 3. `main(argv: list[str] | None = None) -> int` parses argv (defaulting to `sys.argv[1:]`), dispatches, and returns an exit code; it never calls `sys.exit` itself.
-4. `vidbyte --version` prints the installed `vidbyte-sdk` version (via `importlib.metadata`) and exits 0.
-5. `vidbyte skills list` prints one line per registry skill Î“Ã‡Ã¶ key plus description Î“Ã‡Ã¶ sourced from `Skills`; exits 0.
-6. `vidbyte skills show <key>` prints the skill's SKILL.md text to stdout; exits 0.
-7. `vidbyte skills install <key> --dest <dir>` calls `Skills.materialize`, creating `<dir>` if needed, and prints the written skill path; exits 0. With an existing non-empty target it exits 1 with an error unless `--force` is given.
+4. `vidbyte-sdk --version` prints the installed `vidbyte-sdk` version (via `importlib.metadata`) and exits 0.
+5. `vidbyte-sdk skills list` prints one line per registry skill GÇö key plus description GÇö sourced from `Skills`; exits 0.
+6. `vidbyte-sdk skills show <key>` prints the skill's SKILL.md text to stdout; exits 0.
+7. `vidbyte-sdk skills install <key> --dest <dir>` calls `Skills.materialize`, creating `<dir>` if needed, and prints the written skill path; exits 0. With an existing non-empty target it exits 1 with an error unless `--force` is given.
 8. `<key>` accepts the full enum value and unambiguous short forms (kebab or snake skill name); an unknown key prints the valid keys to stderr and exits 2.
-9. Expected failures (`ConfigurationError`, filesystem errors, unknown keys) produce a one-line stderr message and a nonzero exit Î“Ã‡Ã¶ never a traceback.
-10. `Skills` is instantiated only inside command handlers, so `vidbyte --help` and `vidbyte skills --help` succeed even if catalog assets are broken.
+9. Expected failures (`ConfigurationError`, filesystem errors, unknown keys) produce a one-line stderr message and a nonzero exit GÇö never a traceback.
+10. `Skills` is instantiated only inside command handlers, so `vidbyte-sdk --help` and `vidbyte-sdk skills --help` succeed even if catalog assets are broken.
 11. `python -m vidbyte.cli <args>` behaves identically to `vidbyte <args>`.
-12. `tests/test_cli_interface.py` covers requirements 3Î“Ã‡Ã´11 by invoking `main()` in-process (no subprocesses), using `tmp_path` for installs and `capsys` for output.
+12. `tests/test_cli_interface.py` covers requirements 3GÇô11 by invoking `main()` in-process (no subprocesses), using `tmp_path` for installs and `capsys` for output.
 13. Root `README.md` documents the three commands; `vidbyte/cli/README.md` follows the house folder-README format.
 
 ---
 
 ## 7. Non-Functional Requirements
 
-- **Performance:** `vidbyte --help` must not import or validate the skills catalog (lazy handler-level instantiation); target sub-200ms help output on a warm interpreter.
-- **Scalability:** adding a subcommand group must require only a new module with `register(subparsers)` plus one call in `main()` Î“Ã‡Ã¶ no refactor.
+- **Performance:** `vidbyte-sdk --help` must not import or validate the skills catalog (lazy handler-level instantiation); target sub-200ms help output on a warm interpreter.
+- **Scalability:** adding a subcommand group must require only a new module with `register(subparsers)` plus one call in `main()` GÇö no refactor.
 - **Security:** `install` writes only under the user-supplied `--dest` (path-traversal safety is owned by `Skills.materialize` per the registry doc; the CLI must not bypass it). No network access. No secrets handling.
-- **Observability:** N/A Î“Ã‡Ã¶ stdout/stderr and exit codes are the whole interface; keep stderr messages one-line and prefixed `error:`.
+- **Observability:** N/A GÇö stdout/stderr and exit codes are the whole interface; keep stderr messages one-line and prefixed `error:`.
 - **Reliability:** deterministic exit codes (0 success, 1 expected failure, 2 usage/unknown-key); identical behavior on Windows and POSIX (pathlib everywhere, no ANSI codes).
 - **Compatibility:** stdlib only; Python >= 3.11; no change to existing scripts or public SDK imports.
 
@@ -179,15 +179,15 @@ Prompts 1Î“Ã‡Ã´3 established the paradigm skills + registry feature and are reco
 
 ## 8. High-Level Design
 
-The CLI is a three-module adapter in front of the skills registry. `vidbyte/cli/__init__.py` owns the root argparse parser: program name, `--version`, and a subparsers object it passes to each subcommand group's `register()` function. `vidbyte/cli/skills.py` is the first and only group: `register()` declares the `skills` subparser with `list`/`show`/`install` actions and binds each to a handler function; handlers construct `Skills()` on demand, call the corresponding catalog method (`keys()` + `descriptions()`, `text()`, `materialize()`), print results, and return exit codes. `vidbyte/cli/__main__.py` bridges `python -m vidbyte.cli`. The single pyproject entry point (`vidbyte = "vidbyte.cli:main"`) makes pip generate the PATH executable at install time.
+The CLI is a three-module adapter in front of the skills registry. `vidbyte/cli/__init__.py` owns the root argparse parser: program name, `--version`, and a subparsers object it passes to each subcommand group's `register()` function. `vidbyte/cli/skills.py` is the first and only group: `register()` declares the `skills` subparser with `list`/`show`/`install` actions and binds each to a handler function; handlers construct `Skills()` on demand, call the corresponding catalog method (`keys()` + `descriptions()`, `text()`, `materialize()`), print results, and return exit codes. `vidbyte/cli/__main__.py` bridges `python -m vidbyte.cli`. The single pyproject entry point (`vidbyte-sdk = "vidbyte.cli:main"`) makes pip generate the PATH executable at install time.
 
-Key design decisions: all skill knowledge stays in the catalog (the CLI never touches `importlib.resources`, manifests, or file trees directly); handlers are lazy so a broken asset tree cannot break `--help`; `main()` takes argv and returns int so the whole surface is unit-testable in-process; and the explicit `register()` seam Î“Ã‡Ã¶ rather than plugin discovery Î“Ã‡Ã¶ keeps growth cheap while the command count is small.
+Key design decisions: all skill knowledge stays in the catalog (the CLI never touches `importlib.resources`, manifests, or file trees directly); handlers are lazy so a broken asset tree cannot break `--help`; `main()` takes argv and returns int so the whole surface is unit-testable in-process; and the explicit `register()` seam GÇö rather than plugin discovery GÇö keeps growth cheap while the command count is small.
 
 ```
  pip install vidbyte-sdk
-        |  [project.scripts] vidbyte = "vidbyte.cli:main"
+        |  [project.scripts] vidbyte-sdk = "vidbyte.cli:main"
         v
- $ vidbyte skills install decompose-fanout --dest .claude/skills
+ $ vidbyte-sdk skills install decompose-fanout --dest .claude/skills
         |
         v
  vidbyte/cli/__init__.py   main(argv) -> int
@@ -199,7 +199,7 @@ Key design decisions: all skill knowledge stays in the catalog (the CLI never to
  vidbyte/skills/catalog.py Skills.keys()/descriptions()/text()/materialize()
         |                  (from paradigm-skills-and-registry.md)
         v
- vidbyte/paradigms/context_minimal_fanout/skills/Î“Ã‡Âª  packaged assets
+ vidbyte/paradigms/context_minimal_fanout/skills/GÇª  packaged assets
         |
         v
  .claude/skills/decompose-fanout/SKILL.md (+ references/) written to disk

@@ -9,7 +9,7 @@
 
 ## 1. Overview
 
-PR [#253](https://github.com/cerredz/Vidbyte-SDK/pull/253) (`feat/vidbyte-cli`, title "feat: Minimal Vidbyte CLI") was intended to ship only the minimal unified `vidbyte` CLI (`vidbyte skills list|show|install`). Because it was branched before the skills registry landed, the branch also contains the full paradigm skills + registry implementation. That registry is now on `main` via [#256](https://github.com/cerredz/Vidbyte-SDK/pull/256) (resolver for closed [#251](https://github.com/cerredz/Vidbyte-SDK/pull/251)). This change rewrites the PR #253 branch on top of current `main` so its diff is **CLI-only**, reusing the existing CLI implementation with small adaptations to the merged registry API.
+PR [#253](https://github.com/cerredz/Vidbyte-SDK/pull/253) (`feat/vidbyte-cli`, title "feat: Minimal Vidbyte CLI") was intended to ship only the minimal unified `vidbyte-sdk` CLI (`vidbyte-sdk skills list|show|install`). Because it was branched before the skills registry landed, the branch also contains the full paradigm skills + registry implementation. That registry is now on `main` via [#256](https://github.com/cerredz/Vidbyte-SDK/pull/256) (resolver for closed [#251](https://github.com/cerredz/Vidbyte-SDK/pull/251)). This change rewrites the PR #253 branch on top of current `main` so its diff is **CLI-only**, reusing the existing CLI implementation with small adaptations to the merged registry API.
 
 ---
 
@@ -17,7 +17,7 @@ PR [#253](https://github.com/cerredz/Vidbyte-SDK/pull/253) (`feat/vidbyte-cli`, 
 
 ### Goals
 - Make PR #253's diff against `main` contain only the minimal CLI surface and its docs.
-- Preserve the intentional CLI behavior already implemented on `feat/vidbyte-cli` (stdlib argparse, `vidbyte skills list|show|install`, short-key resolution, exit codes, lazy catalog import).
+- Preserve the intentional CLI behavior already implemented on `feat/vidbyte-cli` (stdlib argparse, `vidbyte-sdk skills list|show|install`, short-key resolution, exit codes, lazy catalog import).
 - Base the cleaned branch on current `origin/main` so the PR is mergeable without skills-registry conflicts.
 - Adapt CLI code/tests to the **merged** skills enum shape from #256 (grouped `ContextMinimalFanoutSkill` + `Skill` type alias), not the older flat `Skill` enum that lived only on the contaminated branch.
 - Supersede `python -m vidbyte.skills` with the unified CLI as specified by the original CLI design (delete `vidbyte/skills/__main__.py` and retarget its tests/docs).
@@ -48,7 +48,7 @@ PR #253 is open, marked conflicting with `main`, and its file list mixes two fea
 | `vidbyte/lib/enums/skills.py` grouped enums | Yes (#256) | Flat `Skill` enum only |
 | `vidbyte/skills/__main__.py` module CLI | Yes (#256) | Deleted by CLI commit |
 | `vidbyte/cli/*` unified CLI | No | Yes |
-| `[project.scripts] vidbyte = ...` | No | Yes |
+| `[project.scripts] vidbyte-sdk = ...` | No | Yes |
 
 ### Root cause
 The CLI branch was cut (or stacked) with the unmerged skills registry work included. Three-dot history still shows registry files as "added" relative to the old merge-base, and two-dot tree diff against current `main` is polluted with unrelated behind-main drift.
@@ -63,20 +63,20 @@ The CLI branch was cut (or stacked) with the unmerged skills registry work inclu
 ## 4. Requirements
 
 ### Functional Requirements
-1. PR #253 (after rewrite) must introduce the unified console entry point `vidbyte = "vidbyte.cli:main"` in `pyproject.toml` without removing `vidbyte-mcp-server`.
+1. PR #253 (after rewrite) must introduce the unified console entry point `vidbyte-sdk = "vidbyte.cli:main"` in `pyproject.toml` without removing `vidbyte-mcp-server`.
 2. Users can run:
-   - `vidbyte --version`
-   - `vidbyte skills list`
-   - `vidbyte skills show <key>`
-   - `vidbyte skills install <key> --dest <dir> [--force]`
+   - `vidbyte-sdk --version`
+   - `vidbyte-sdk skills list`
+   - `vidbyte-sdk skills show <key>`
+   - `vidbyte-sdk skills install <key> --dest <dir> [--force]`
 3. Keys accept full enum values (e.g. `context_minimal_fanout.decompose_fanout`) and unambiguous short forms (`decompose_fanout` / `decompose-fanout`).
 4. `list` prints stable `key - description` lines from `Skills().keys()` / `descriptions()`.
 5. `show` prints SKILL.md text for the resolved skill.
 6. `install` materializes via `Skills().materialize`, refuses non-empty existing skill folders unless `--force`, and prints the installed path.
 7. Exit codes: `0` success; `2` usage/unknown-key; `1` expected catalog/OS failures (no traceback for `ConfigurationError` / `OSError`).
-8. Help paths (`vidbyte --help`, `vidbyte skills --help`) must not instantiate the Skills catalog.
+8. Help paths (`vidbyte-sdk --help`, `vidbyte-sdk skills --help`) must not instantiate the Skills catalog.
 9. `python -m vidbyte.cli` works via `vidbyte/cli/__main__.py`.
-10. `vidbyte/skills/__main__.py` is removed; skills tests no longer import that module CLI; skills README points at `vidbyte skills ...`.
+10. `vidbyte/skills/__main__.py` is removed; skills tests no longer import that module CLI; skills README points at `vidbyte-sdk skills ...`.
 11. The PR diff vs `main` must **not** re-introduce or rewrite registry/assets/design-doc content for paradigm skills beyond CLI-required doc touch-ups.
 12. Existing CLI unit tests (`tests/test_cli_interface.py`) ship with the PR and pass against main's Skills API.
 
@@ -176,7 +176,7 @@ git push --force-with-lease origin HEAD:feat/vidbyte-cli
 **Type:** New files (relative to main)
 
 #### What it does
-Provides the root `vidbyte` command and the `skills` subcommand group as a thin adapter over `vidbyte.skills.Skills`.
+Provides the root `vidbyte-sdk` command and the `skills` subcommand group as a thin adapter over `vidbyte.skills.Skills`.
 
 #### Interface / API
 ```python
@@ -229,7 +229,7 @@ Registers the console script.
 #### Interface / API
 ```toml
 [project.scripts]
-vidbyte = "vidbyte.cli:main"
+vidbyte-sdk = "vidbyte.cli:main"
 vidbyte-mcp-server = "vidbyte.mcp_server.__main__:main"
 ```
 
@@ -278,7 +278,7 @@ class VidbyteCliInterfaceTests(unittest.TestCase):
 **Type:** Deleted / Modified
 
 #### What it does
-Removes the interim module CLI that #256 shipped as stretch UX, matching the original CLI design decision that the unified `vidbyte` command is the terminal interface.
+Removes the interim module CLI that #256 shipped as stretch UX, matching the original CLI design decision that the unified `vidbyte-sdk` command is the terminal interface.
 
 #### Interface / API
 ```python
@@ -295,7 +295,7 @@ from vidbyte.skills.__main__ import main as skills_main
 1. Delete `vidbyte/skills/__main__.py`.
 2. Remove `test_module_cli_list_and_install` and the `__main__` import from `tests/test_skills_interface.py`.
 3. Update skills README:
-   - Command examples → `vidbyte skills ...`
+   - Command examples → `vidbyte-sdk skills ...`
    - Drop `__main__.py` from Key Modules
    - Optionally one-line note that terminal UX lives under `vidbyte.cli`
 
@@ -356,16 +356,16 @@ N/A — no database, schema, or SkillRecord shape changes. CLI consumes existing
 
 ## 8. API Changes
 
-### 8.1 Console: `vidbyte` (new)
+### 8.1 Console: `vidbyte-sdk` (new)
 
 **Change type:** New
 
 **Request (argv):**
 ```text
-vidbyte --version
-vidbyte skills list
-vidbyte skills show <key>
-vidbyte skills install <key> --dest <dir> [--force]
+vidbyte-sdk --version
+vidbyte-sdk skills list
+vidbyte-sdk skills show <key>
+vidbyte-sdk skills install <key> --dest <dir> [--force]
 ```
 
 **Response:**
@@ -389,7 +389,7 @@ context_minimal_fanout.decompose_fanout - <description>
 
 **Change type:** Deprecated / Deleted
 
-Replaced by `vidbyte skills ...` and `python -m vidbyte.cli`.
+Replaced by `vidbyte-sdk skills ...` and `python -m vidbyte.cli`.
 
 ### 8.3 HTTP APIs
 
@@ -408,10 +408,10 @@ N/A — no network API changes.
 | CREATE | `vidbyte/cli/skills.py` | skills subcommand group |
 | CREATE | `vidbyte/cli/README.md` | CLI package docs |
 | CREATE | `tests/test_cli_interface.py` | CLI interface tests (adapted) |
-| MODIFY | `pyproject.toml` | Add `vidbyte` console script |
+| MODIFY | `pyproject.toml` | Add `vidbyte-sdk` console script |
 | MODIFY | `README.md` | CLI section + package table row only |
 | MODIFY | `llms.txt` | CLI capability note only |
-| MODIFY | `vidbyte/skills/README.md` | Point terminal UX at `vidbyte skills` |
+| MODIFY | `vidbyte/skills/README.md` | Point terminal UX at `vidbyte-sdk skills` |
 | MODIFY | `tests/test_skills_interface.py` | Remove module-CLI test + import |
 | DELETE | `vidbyte/skills/__main__.py` | Superseded by unified CLI |
 
@@ -465,7 +465,7 @@ No new PyPI dependencies.
 - **Why rejected as default:** Loses PR #253 comment/review continuity. Acceptable fallback if force-push is disallowed.
 
 ### Alternative 3: Leave skills `__main__.py` and only add unified CLI
-- **What:** Two terminal surfaces (`python -m vidbyte.skills` and `vidbyte skills`).
+- **What:** Two terminal surfaces (`python -m vidbyte.skills` and `vidbyte-sdk skills`).
 - **Why rejected:** Original CLI design explicitly supersedes the module CLI to avoid dual argparse surfaces; user asked for minimal CLI only, not dual maintenance.
 
 ### Alternative 4: Soft-reset contaminated branch and recommit without worktree
