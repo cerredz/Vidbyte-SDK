@@ -47,7 +47,7 @@ print(catalog.provider_schemas("openai"))
 - `executor.py`: local tool call execution.
 - `security/`: permission policies and sandbox contracts.
 - `mcp/`: MCP clients, transports, presets, and bridged tools.
-- `builtins/`: code search, context, editing, memory, MCP, handoff, and utility tools.
+- `builtins/`: code search, context, context primitives, editing, memory, MCP, handoff, and utility tools.
 
 ## Related Layers
 

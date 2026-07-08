@@ -7,7 +7,7 @@ Purpose:
     Lets agents inspect what is in the context window registry before deciding
     to create, update, or remove primitives.
 Architecture:
-    - ContextListTool: BaseTool that reads from ContextManager._registry.
+    - ContextListTool: BaseTool that reads from ContextManager.registry_items().
 Relations:
     Used via vidbyte.tools.builtins.context_primitives. Depends on
     vidbyte.context.manager.
@@ -36,8 +36,10 @@ class ContextListTool(BaseTool):
         return ToolSpec(
             name="context_list",
             description=(
-                "List all named primitives currently in the context window registry. "
-                "Returns id, type, title, and character count for each primitive."
+                "context_list is the management tool for enumerating managed context window "
+                "primitives currently in the registry. context_list does return each primitive's "
+                "id, kind, title, frozen marker, and rendered character count so the agent can "
+                "inspect what is online before creating, editing, moving, or removing entries."
             ),
             parameters=(),
             permission=ToolPermission.SAFE,
@@ -45,11 +47,11 @@ class ContextListTool(BaseTool):
 
     async def execute(self, call: ToolCall) -> ToolResult:
         """Return a summary of every primitive in the manager registry."""
-        registry = self._manager._registry
+        registry = self._manager.registry_items()
         if not registry:
             return ToolResult.success(call.tool_name, "No active context window primitives.")
         lines = [f"Active context window primitives ({len(registry)} total):"]
-        for primitive_id, item in registry.items():
+        for primitive_id, item in registry:
             frozen_marker = " [frozen]" if getattr(item, "primitive_frozen", False) else ""
             char_count = len(item.to_context_text())
             lines.append(f"  [{primitive_id}] ({item.kind}) {item.title}{frozen_marker} — {char_count} chars")
