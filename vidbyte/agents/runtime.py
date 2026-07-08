@@ -1428,9 +1428,10 @@ class AgentRuntime:
         return self._stopped_result("Agent runtime stopped after reaching max_tool_calls.", stop_reason=AgentStopReason.MAX_TOOL_CALLS, iteration_count=iteration_count, tokens_used=tokens_used, contexts=call_contexts)
 
     def _tool_settings_hard_budget_stop(self, reason: str, meta: Mapping[str, Any], *, iteration_count: int, tokens_used: int | None, contexts: Sequence[ToolCallContext]) -> AgentResult:
-        # Maps a ToolSettings hard-budget reason string to AgentStopReason and stops the run.
+        # Maps a ToolSettings hard-budget reason string to AgentStopReason and stops the run with budget metadata.
         stop_reason = self._agent_stop_reason_for_tool_budget(reason)
-        return self._stopped_result(f"Agent runtime stopped by tool settings budget: {reason}", stop_reason=stop_reason, iteration_count=iteration_count, tokens_used=tokens_used, contexts=contexts)
+        result = self._stopped_result(f"Agent runtime stopped by tool settings budget: {reason}", stop_reason=stop_reason, iteration_count=iteration_count, tokens_used=tokens_used, contexts=contexts)
+        return AgentResult(output=result.output, strategy_name=result.strategy_name, structured=result.structured, metadata={**dict(result.metadata), "tool_settings_budget": reason, **dict(meta)})
 
     @staticmethod
     def _agent_stop_reason_for_tool_budget(reason: str) -> AgentStopReason:
