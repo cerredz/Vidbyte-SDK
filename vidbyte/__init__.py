@@ -52,6 +52,7 @@ from vidbyte.agents import (
     HandoffAgent,
     MultiProviderAggregator,
     ProposerSpec,
+    ToolSettings,
 )
 from vidbyte.client import VidbyteSDK
 from vidbyte.paradigms import ParadigmClient, ParadigmHarness
@@ -317,6 +318,7 @@ __all__ = [
     "AgentRuntimeStats",
     "AgentSpec",
     "AgentStopReason",
+    "ToolSettings",
     "ArtifactContextItem",
     "BaseAgent",
     "BaseAgentContext",

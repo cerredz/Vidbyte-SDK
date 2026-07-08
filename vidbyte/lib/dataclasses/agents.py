@@ -25,6 +25,7 @@ from vidbyte.lib.errors import AgentForkConfigurationError
 if TYPE_CHECKING:
     from vidbyte.agents.runtimes.configs import ActorRuntime, LinearRuntime, MctsSearchRuntime
     from vidbyte.agents.settings import AgentLoopSettings
+    from vidbyte.agents.settings.tool import ToolSettings
     from vidbyte.context.handoff import Handoff
     from vidbyte.context.manager import ContextManager
     from vidbyte.context.primitives import ContextItem
@@ -45,6 +46,7 @@ class AgentStopReason(str, Enum):
     MAX_TOKENS = "max_tokens"
     MAX_TOOL_CALLS = "max_tool_calls"
     MIDDLEWARE_ABORT = "middleware_abort"
+    TOOL_SETTINGS_DENIED = "tool_settings_denied"
     TOOL_LOOP_LIMIT = "tool_loop_limit"
     ERROR = "error"
 
@@ -58,6 +60,7 @@ class AgentRuntimeConfig:
     max_tool_calls: int | None = None
     compaction_trigger_tokens: int | None = None
     compaction_target_tokens: int | None = None
+    tool_settings: "ToolSettings | None" = None
 
     def __post_init__(self) -> None:
         """Validate optional budget values."""

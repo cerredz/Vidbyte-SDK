@@ -8,11 +8,13 @@ Purpose:
 Architecture:
     - AgentLoopSettings: Main loop settings object.
     - ToolErrorPolicy: Nested policy for tool-error retry/render behavior.
+    - ToolSettings: Nested universal tool-use constraints.
 Relations:
     Re-exported from vidbyte.agents.__init__.
 """
 
 from vidbyte.agents.settings.loop import AgentLoopSettings
+from vidbyte.agents.settings.tool import ToolSettings
 from vidbyte.agents.settings.tool_error import ToolErrorPolicy, UnrecoverableAction
 
-__all__ = ["AgentLoopSettings", "ToolErrorPolicy", "UnrecoverableAction"]
+__all__ = ["AgentLoopSettings", "ToolErrorPolicy", "ToolSettings", "UnrecoverableAction"]

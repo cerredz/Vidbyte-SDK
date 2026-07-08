@@ -15,7 +15,10 @@ Relations:
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from vidbyte.agents.settings.tool import ToolSettings
 
 from vidbyte.agents.context_algorithms import AgentRuntimeContextAlgorithms
 from vidbyte.agents.types import AgentMessage
@@ -1066,33 +1069,16 @@ class AgentRuntime:
         )
 
     @staticmethod
-    def _middleware_denied_tool(
-        call: ToolCall,
-        provider: str,
-        decision: MiddlewareDecision,
-    ) -> tuple[ToolCallContext, ToolResult]:
-        """Convert a deny_tool middleware decision into normal tool-call context."""
-        result = ToolResult.error(
-            call.tool_name,
-            f"Tool denied by middleware: {decision.reason or 'middleware_denied'}",
-            metadata={
-                "error": "middleware_denied",
-                "reason": decision.reason,
-                **dict(decision.metadata),
-            },
-        )
-        return (
-            ToolCallContext(
-                tool_name=call.tool_name,
-                arguments=call.arguments,
-                state=ToolCallState.DENIED,
-                call_id=call.call_id,
-                result=result,
-                provider=provider,
-                metadata=dict(call.metadata),
-            ),
-            result,
-        )
+    def _middleware_denied_tool(call: ToolCall, provider: str, decision: MiddlewareDecision) -> tuple[ToolCallContext, ToolResult]:
+        # Converts a deny_tool middleware decision into a denied tool-call context.
+        return AgentRuntime._denied_tool_result(call, provider, message=f"Tool denied by middleware: {decision.reason or 'middleware_denied'}", error="middleware_denied", reason=decision.reason, metadata=decision.metadata)
+
+    @staticmethod
+    def _denied_tool_result(call: ToolCall, provider: str, *, message: str, error: str, reason: str | None, metadata: Mapping[str, Any]) -> tuple[ToolCallContext, ToolResult]:
+        # Builds a DENIED tool-call context and matching model-visible error result.
+        result = ToolResult.error(call.tool_name, message, metadata={"error": error, "reason": reason, **dict(metadata)})
+        context = ToolCallContext(tool_name=call.tool_name, arguments=call.arguments, state=ToolCallState.DENIED, call_id=call.call_id, result=result, provider=provider, metadata=dict(call.metadata))
+        return context, result
 
     def _tool_is_internal(self, call: ToolCall) -> bool:
         """Return whether a call targets a runtime-only internal tool."""
@@ -1330,6 +1316,9 @@ class AgentRuntime:
     ) -> tuple[ToolCallContext, ToolResult] | AgentResult:
         """Execute one tool call, record its context, and append it to messages."""
         tool_is_internal = self._tool_is_internal(call)
+        settings_outcome = self._enforce_tool_settings(call, provider, messages, call_contexts, tool_is_internal, iteration_count=iteration_count, tokens_used=tokens_used)
+        if settings_outcome is not None:
+            return settings_outcome
         decision = await self.middleware.before_tool_call(
             self._middleware_context(
                 MiddlewareHook.BEFORE_TOOL_CALL,
@@ -1400,6 +1389,45 @@ class AgentRuntime:
             self._append_tool_result_message(messages, call, result, provider, after_decision)
         return context_record, result
 
+    def _enforce_tool_settings(self, call: ToolCall, provider: str, messages: list[dict[str, Any]], call_contexts: list[ToolCallContext], tool_is_internal: bool, *, iteration_count: int, tokens_used: int | None) -> tuple[ToolCallContext, ToolResult] | AgentResult | None:
+        # Applies ToolSettings before local execution: stop on budget/abort, deny-and-continue, or allow.
+        settings = self.config.tool_settings
+        if settings is None or tool_is_internal:
+            return None
+        budget_stop = self._tool_settings_budget_stop(settings, call_contexts, iteration_count=iteration_count, tokens_used=tokens_used)
+        if budget_stop is not None:
+            return budget_stop
+        denial = settings.denial(call.tool_name, self._executed_counts(call_contexts))
+        if denial is None:
+            return None
+        return self._apply_tool_denial(settings, call, provider, messages, call_contexts, denial, iteration_count=iteration_count, tokens_used=tokens_used)
+
+    def _tool_settings_budget_stop(self, settings: ToolSettings, call_contexts: list[ToolCallContext], *, iteration_count: int, tokens_used: int | None) -> AgentResult | None:
+        # Stops the run before executing a call that would exceed the total tool-call budget mid-iteration.
+        if settings.max_calls is None or len(call_contexts) < settings.max_calls:
+            return None
+        return self._stopped_result("Agent runtime stopped after reaching max_tool_calls.", stop_reason=AgentStopReason.MAX_TOOL_CALLS, iteration_count=iteration_count, tokens_used=tokens_used, contexts=call_contexts)
+
+    def _apply_tool_denial(self, settings: ToolSettings, call: ToolCall, provider: str, messages: list[dict[str, Any]], call_contexts: list[ToolCallContext], denial: tuple[str, dict], *, iteration_count: int, tokens_used: int | None) -> tuple[ToolCallContext, ToolResult] | AgentResult:
+        # Aborts the run or records an in-context denial according to the on_deny policy.
+        reason, meta = denial
+        if settings.aborts_on_deny:
+            return self._stopped_result(f"Agent runtime stopped by tool settings: {reason}", stop_reason=AgentStopReason.TOOL_SETTINGS_DENIED, iteration_count=iteration_count, tokens_used=tokens_used, contexts=call_contexts)
+        context_record, result = self._denied_tool_result(call, provider, message=f"Tool denied by tool settings: {reason}", error=reason, reason=reason, metadata=meta)
+        call_contexts.append(context_record)
+        self._append_tool_result_message(messages, call, result, provider, MiddlewareDecision.continue_(), truncate=False)
+        return context_record, result
+
+    @staticmethod
+    def _executed_counts(call_contexts: Sequence[ToolCallContext]) -> dict[str, int]:
+        # Counts prior executed (non-denied) tool calls per tool name for per-tool budgets.
+        counts: dict[str, int] = {}
+        for ctx in call_contexts:
+            if ctx.state is ToolCallState.DENIED:
+                continue
+            counts[ctx.tool_name] = counts.get(ctx.tool_name, 0) + 1
+        return counts
+
     def _append_tool_result_message(
         self,
         messages: list[dict[str, Any]],
@@ -1407,8 +1435,10 @@ class AgentRuntime:
         result: ToolResult,
         provider: str,
         decision: MiddlewareDecision,
+        *,
+        truncate: bool = True,
     ) -> None:
-        visible_result = self._model_visible_tool_result(call, result, decision)
+        visible_result = self._model_visible_tool_result(call, result, decision, truncate=truncate)
         # Provider-specific result formatting remains the single place that
         # knows how Anthropic, Gemini, OpenAI Responses, and OpenAI-compatible
         # chat messages represent tool failures.
@@ -1420,6 +1450,8 @@ class AgentRuntime:
         call: ToolCall,
         result: ToolResult,
         decision: MiddlewareDecision,
+        *,
+        truncate: bool = True,
     ) -> ToolResult:
         # Primitive binding is applied before any middleware-visible transform so
         # successful tool outputs can still be stored as primitives. Error results
@@ -1427,9 +1459,17 @@ class AgentRuntime:
         primitive_result = self._apply_primitive_binding(call, result)
         if primitive_result is not result:
             return primitive_result
-        if decision.transform is None:
+        visible = result if decision.transform is None else (decision.transform.model_visible_tool_result or result)
+        if not truncate:
+            return visible
+        return self._truncate_for_tool_settings(call, visible)
+
+    def _truncate_for_tool_settings(self, call: ToolCall, result: ToolResult) -> ToolResult:
+        # Caps executed, non-internal tool output to ToolSettings.result_max_chars, leaving raw ToolResult intact.
+        settings = self.config.tool_settings
+        if settings is None or self._tool_is_internal(call):
             return result
-        return decision.transform.model_visible_tool_result or result
+        return settings.truncate(result)
 
     def _tool_call_middleware_metadata(self, metadata: Mapping[str, Any], call: ToolCall) -> dict[str, Any]:
         call_metadata = dict(metadata)

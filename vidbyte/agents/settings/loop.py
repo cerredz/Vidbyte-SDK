@@ -18,6 +18,7 @@ Similar Files:
 
 from __future__ import annotations
 
+from vidbyte.agents.settings.tool import ToolSettings
 from vidbyte.agents.settings.tool_error import ToolErrorPolicy
 from vidbyte.lib.errors import ConfigurationError
 
@@ -52,6 +53,7 @@ class AgentLoopSettings:
         compaction_target_tokens: int | None = None,
         allowed_tools: tuple[str, ...] | None = None,
         tool_error_policy: ToolErrorPolicy | None = None,
+        tool_settings: ToolSettings | None = None,
     ) -> None:
         # Stores all loop parameters as instance attributes, then validates them immediately.
         self.max_iterations = max_iterations
@@ -66,6 +68,7 @@ class AgentLoopSettings:
         self.compaction_target_tokens = compaction_target_tokens
         self.allowed_tools = allowed_tools
         self.tool_error_policy = tool_error_policy
+        self.tool_settings = tool_settings
         self._validate()
 
     def _validate(self) -> None:
@@ -74,6 +77,7 @@ class AgentLoopSettings:
         self._validate_timeout_seconds()
         self._validate_compaction_pair()
         self._validate_tool_error_policy()
+        self._validate_tool_settings()
 
     def _validate_positive_int_fields(self) -> None:
         # Each integer field must be strictly positive when provided.
@@ -108,15 +112,26 @@ class AgentLoopSettings:
         if self.tool_error_policy is not None and not isinstance(self.tool_error_policy, ToolErrorPolicy):
             raise ConfigurationError("AgentLoopSettings.tool_error_policy must be a ToolErrorPolicy instance when provided.")
 
+    def _validate_tool_settings(self) -> None:
+        # Ensures nested tool settings are valid and do not conflict with the legacy call-budget field.
+        if self.tool_settings is not None and not isinstance(self.tool_settings, ToolSettings):
+            raise ConfigurationError("AgentLoopSettings.tool_settings must be a ToolSettings instance when provided.")
+        if self.tool_settings is None or self.tool_settings.max_calls is None or self.max_tool_calls is None:
+            return
+        if self.tool_settings.max_calls != self.max_tool_calls:
+            raise ConfigurationError("AgentLoopSettings.max_tool_calls and ToolSettings.max_calls must match when both are provided.")
+
     def to_runtime_config(self) -> "AgentRuntimeConfig":
         # Converts the subset of fields understood by the internal runtime into AgentRuntimeConfig.
         from vidbyte.lib.dataclasses.agents import AgentRuntimeConfig
+        max_tool_calls = self.tool_settings.max_calls if self.tool_settings is not None and self.tool_settings.max_calls is not None else self.max_tool_calls
         return AgentRuntimeConfig(
             max_iterations=self.max_iterations,
             max_tokens=self.max_tokens,
-            max_tool_calls=self.max_tool_calls,
+            max_tool_calls=max_tool_calls,
             compaction_trigger_tokens=self.compaction_trigger_tokens,
             compaction_target_tokens=self.compaction_target_tokens,
+            tool_settings=self.tool_settings,
         )
 
     def __repr__(self) -> str:
@@ -136,6 +151,7 @@ class AgentLoopSettings:
                 "compaction_target_tokens",
                 "allowed_tools",
                 "tool_error_policy",
+                "tool_settings",
             )
             if getattr(self, name) is not None
         }
