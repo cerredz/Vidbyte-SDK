@@ -114,11 +114,29 @@ Semantic labels such as roles belong in agent metadata when callers need them.
 
 ## Paradigm Harnesses
 
-`vidbyte.paradigms` reserves the SDK namespace for future thin runnable paradigm
-harnesses: high-level agentic engineering patterns that compose agents, tools,
-context, prompts, middleware, trace, pipelines, and evals into an opinionated
-execution loop. This release adds scaffolding only; no concrete paradigm
-harnesses ship yet.
+`vidbyte.paradigms` is the SDK namespace for thin runnable paradigm harnesses:
+high-level agentic engineering patterns that compose agents, tools, context,
+prompts, middleware, trace, pipelines, and evals into an opinionated execution
+loop.
+
+The first concrete paradigm is `ContextMinimalFanoutParadigm`. It runs a
+four-stage pipeline — a context-extraction agent, a splitter agent, an
+adversarial de-overlap agent, and parallel implementation agents — so one large
+request is turned into non-overlapping, context-rich prompts that each run in a
+fresh, smaller agent context.
+
+```python
+from vidbyte import ContextMinimalFanoutParadigm
+
+harness = ContextMinimalFanoutParadigm(
+    default_tool_root=".",
+    implementation_tools=[my_patch_tool],
+    splitter_model_name="claude-opus-4-8",
+    implementation_model_name="claude-sonnet-5",
+    max_concurrency=4,
+)
+result = harness.run("Implement the requested repo change.")
+```
 
 ## Context Objects
 

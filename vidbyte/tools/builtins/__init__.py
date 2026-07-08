@@ -20,7 +20,15 @@ Relations:
 
 from __future__ import annotations
 
+from vidbyte.tools.builtins.code_execution import CodeExecutionTool
 from vidbyte.tools.builtins.code_search import GlobTool, GrepTool, SemanticSearchTool
+from vidbyte.tools.builtins.output_schema import (
+    AppendOutputTool,
+    DeclareOutputSchemaTool,
+    ExtendOutputSchemaTool,
+    OutputSchemaBuilder,
+    OutputSchemaField,
+)
 from vidbyte.tools.builtins.reflexion import ReflexionTool
 from vidbyte.tools.builtins.trajectory_checkpoint import TrajectoryCheckpointTool
 from vidbyte.tools.builtins.context import (
@@ -94,8 +102,10 @@ from vidbyte.tools.builtins.memory import (
 )
 
 __all__ = [
+    "AppendOutputTool",
     "AttachMcpServerTool",
     "BatchForkTool",
+    "CodeExecutionTool",
     "CreateHandoffTool",
     "CheckpointTool",
     "CompactionMode",
@@ -110,12 +120,16 @@ __all__ = [
     "ContextStatsTool",
     "ContextUpsertTool",
     "ContextWindowFactory",
+    "DeclareOutputSchemaTool",
+    "ExtendOutputSchemaTool",
     "PrimitiveToolDefinition",
     "context_window_tools",
     "ForkConversationTool",
     "GlobTool",
     "GrepTool",
     "ForkTool",
+    "OutputSchemaBuilder",
+    "OutputSchemaField",
     "PatchTool",
     "ProgressLog",
     "ReflexionTool",

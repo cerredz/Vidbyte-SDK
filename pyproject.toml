@@ -42,4 +42,10 @@ vidbyte-mcp-server = "vidbyte.mcp_server.__main__:main"
 
 [tool.setuptools.package-data]
 "vidbyte.prompts.prompts" = ["*.json", "*/*.json", "*/*.md"]
-"vidbyte.paradigms.context_minimal_fanout" = ["skills/*/*.md", "skills/references/*.md", "skills/skills.json"]
+"vidbyte.paradigms.context_minimal_fanout" = [
+  "*.md",
+  "prompts/*.md",
+  "skills/*/*.md",
+  "skills/references/*.md",
+  "skills/skills.json",
+]
