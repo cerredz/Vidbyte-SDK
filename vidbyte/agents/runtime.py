@@ -40,6 +40,7 @@ from vidbyte.lib.tracing import NullTracer, SpanContext, TracerBase
 from vidbyte.middleware import AgentMiddleware, MiddlewarePipeline
 from vidbyte.middleware.builtins.context_compaction import ToolResultCompactionMiddleware
 from vidbyte.prompts.agentic_loop import append_agentic_loop_prompt
+from vidbyte.agents.contract import AgentLoopSettingsOutputContract
 from vidbyte.lib.dataclasses.context import BaseAgentContext, BaseContext
 from vidbyte.lib.dataclasses.strategies import AgentResult
 from vidbyte.tools._internal import IS_DONE_TOOL_NAME, with_internal_agent_tools
@@ -66,6 +67,7 @@ class AgentRuntime:
         context_manager: ContextManager | None = None,
         recorder: RecorderBase | None = None,
         output_schema: type | Mapping[str, Any] | None = None,
+        output_contract: "AgentLoopSettingsOutputContract | None" = None,
     ) -> None:
         self.agent_name = agent_name
         self.system_prompt = system_prompt
@@ -81,6 +83,7 @@ class AgentRuntime:
         self.recorder: RecorderBase = recorder or NullRecorder()
         self.output_schema = output_schema
         self._schema_formatter = OutputSchemaFormatter()
+        self.output_contract = output_contract or AgentLoopSettingsOutputContract(())
 
     def _context_window_admission_middleware(self) -> tuple[AgentMiddleware, ...]:
         # Returns compatibility middleware for legacy tool-result admission presets.
@@ -176,6 +179,7 @@ class AgentRuntime:
         call_contexts: list[ToolCallContext] = []
         iteration_count = 0
         model_call_count = 0
+        rejections = 0
         tokens_used: int | None = None
         started_at = self.middleware.clock()
         last_response: object | None = None
@@ -422,6 +426,19 @@ class AgentRuntime:
                         run_state=run_state,
                         model_response=raw_result,
                     )
+                if self.output_contract.active():
+                    counters = self._contract_counters(iteration_count=iteration_count, model_call_count=model_call_count, call_contexts=call_contexts, tokens_used=tokens_used, started_at=started_at)
+                    self._publish_contract_evaluations(run_state, counters)
+                    unmet = self.output_contract.unmet(counters)
+                    if unmet and self.output_contract.exhausted(rejections):
+                        return await self._finish_result(
+                            self._stopped_result(last_assistant_output or "", stop_reason=AgentStopReason.CONTRACT_UNSATISFIED, iteration_count=iteration_count, tokens_used=tokens_used, contexts=call_contexts),
+                            message=message, context=context, provider=provider, iteration_count=iteration_count, model_call_count=model_call_count, tokens_used=tokens_used, started_at=started_at, metadata=runtime_metadata, run_state=run_state, model_response=raw_result,
+                        )
+                    if unmet:
+                        rejections += 1
+                        messages.append({"role": "user", "content": self.output_contract.feedback(unmet, counters)})
+                        continue
                 final = self._final_result(
                     output=last_assistant_output,
                     runner_metadata=runner_metadata,
@@ -474,6 +491,7 @@ class AgentRuntime:
             assistant_tool_msg = ToolsFormatter.format_assistant_tool_calls(raw_result, provider)
             if assistant_tool_msg is not None:
                 messages.append(dict(assistant_tool_msg))
+            contract_rejected = False
             for call in tool_calls:
                 processed = await self._process_tool_call(
                     call,
@@ -543,6 +561,20 @@ class AgentRuntime:
                             run_state=run_state,
                             model_response=raw_result,
                         )
+                    if self.output_contract.active():
+                        counters = self._contract_counters(iteration_count=iteration_count, model_call_count=model_call_count, call_contexts=call_contexts, tokens_used=tokens_used, started_at=started_at)
+                        self._publish_contract_evaluations(run_state, counters)
+                        unmet = self.output_contract.unmet(counters)
+                        if unmet and self.output_contract.exhausted(rejections):
+                            return await self._finish_result(
+                                self._stopped_result(result.output or "", stop_reason=AgentStopReason.CONTRACT_UNSATISFIED, iteration_count=iteration_count, tokens_used=tokens_used, contexts=call_contexts),
+                                message=message, context=context, provider=provider, iteration_count=iteration_count, model_call_count=model_call_count, tokens_used=tokens_used, started_at=started_at, metadata=runtime_metadata, run_state=run_state, model_response=raw_result,
+                            )
+                        if unmet:
+                            rejections += 1
+                            self._append_tool_result_message(messages, call, ToolResult.error(call.tool_name, self.output_contract.feedback(unmet, counters)), provider, MiddlewareDecision.continue_())
+                            contract_rejected = True
+                            break
                     final = self._final_result(
                         output=result.output,
                         runner_metadata=runner_metadata,
@@ -564,6 +596,9 @@ class AgentRuntime:
                         run_state=run_state,
                         model_response=raw_result,
                     )
+
+            if contract_rejected:
+                continue
 
             decision = await self.middleware.after_iteration(
                 self._middleware_context(
@@ -1082,10 +1117,14 @@ class AgentRuntime:
 
     def _tool_is_internal(self, call: ToolCall) -> bool:
         """Return whether a call targets a runtime-only internal tool."""
-        if call.tool_name == IS_DONE_TOOL_NAME:
+        return self._tool_name_is_internal(call.tool_name)
+
+    def _tool_name_is_internal(self, tool_name: str) -> bool:
+        # Name-based internal check shared by _tool_is_internal and the contract counters.
+        if tool_name == IS_DONE_TOOL_NAME:
             return True
         try:
-            spec = self.tools._get(call.tool_name).spec()
+            spec = self.tools._get(tool_name).spec()
         except Exception:
             return False
         metadata = getattr(spec, "metadata", {})
@@ -1585,6 +1624,21 @@ class AgentRuntime:
             "tool_call_states": tuple(context.state.value for context in contexts),
             "tool_calls": tuple(contexts),
         }
+
+    def _contract_counters(self, *, iteration_count: int, model_call_count: int, call_contexts: Sequence[ToolCallContext], tokens_used: int | None, started_at: float) -> dict[str, Any]:
+        # Packages the live runtime counters into the dict output contracts read by key.
+        # Internal tools (e.g. isDone) are excluded so effort floors count only real work.
+        return {
+            "iteration_count": iteration_count,
+            "model_call_count": model_call_count,
+            "tool_call_count": sum(1 for context in call_contexts if not self._tool_name_is_internal(context.tool_name)),
+            "tokens_used": tokens_used or 0,
+            "elapsed_seconds": self.middleware.clock() - started_at,
+        }
+
+    def _publish_contract_evaluations(self, run_state: dict[type, Any], counters: Mapping[str, Any]) -> None:
+        # Records each contract's evaluation into run_state so _with_run_state_metadata lifts it into the result.
+        run_state.setdefault("__result_metadata__", {})["contract_evaluations"] = self.output_contract.report(counters)
 
     @staticmethod
     def _assistant_message(output: str) -> dict[str, Any]:

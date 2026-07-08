@@ -176,6 +176,11 @@ class BaseAgent(McpAttachableMixin):
                 f"Agent {name} uses non-linear runtime {self.runtime_type.value}, "
                 "which does not support tool_settings."
             )
+        if self.agent_loop_settings.output_contract.active() and self.runtime_type is not AgentRuntimeType.LINEAR:
+            raise ConfigurationError(
+                f"Agent {name} uses non-linear runtime {self.runtime_type.value}, "
+                "which does not support output contracts."
+            )
         self.runtime_config = self.agent_loop_settings.to_runtime_config()
         self.max_tool_rounds = self.agent_loop_settings.max_iterations
         self.system_prompt = system_prompt
@@ -973,6 +978,9 @@ class BaseAgent(McpAttachableMixin):
                     "worker_model": None,
                     "include_actors": None,
                 }
+
+        if self.runtime_type is AgentRuntimeType.LINEAR:
+            kwargs["output_contract"] = self.agent_loop_settings.output_contract
 
         return runtime_cls(
             agent_name=self.name,

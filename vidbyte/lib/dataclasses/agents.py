@@ -47,6 +47,7 @@ class AgentStopReason(str, Enum):
     MIDDLEWARE_ABORT = "middleware_abort"
     TOOL_SETTINGS_DENIED = "tool_settings_denied"
     TOOL_LOOP_LIMIT = "tool_loop_limit"
+    CONTRACT_UNSATISFIED = "contract_unsatisfied"
     ERROR = "error"
 
 
