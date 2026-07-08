@@ -14,6 +14,7 @@ Relations:
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Callable, Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
@@ -989,14 +990,8 @@ class AgentRuntime:
             structured=result.structured,
         )
 
-    async def execute_tool_call(
-        self,
-        call: ToolCall,
-        *,
-        provider: str,
-        trace_context: SpanContext | None = None,
-    ) -> tuple[ToolCallContext, ToolResult]:
-        """Resolve, authorize, validate, execute, and record one tool call."""
+    async def execute_tool_call(self, call: ToolCall, *, provider: str, trace_context: SpanContext | None = None, iteration_count: int | None = None, tool_is_internal: bool = False) -> tuple[ToolCallContext, ToolResult]:
+        # Resolves, authorizes, validates, executes, and records one tool call with optional timeout.
         tool_input = _safe_trace_value(dict(call.arguments))
         tool_span = self._tracer.start_span(
             "tool.call",
@@ -1013,7 +1008,7 @@ class AgentRuntime:
             spec = tool.spec()
             self._check_permission(spec, call)
             self._validate_tool_call(tool, call)
-            result = await self._execute_tool(tool, call)
+            result = await self._execute_tool(tool, call, tool_is_internal=tool_is_internal)
             if spec.output_schema is not None and result.status.value == "success":
                 _, error = self._schema_formatter.validate(result.output, spec.output_schema)
                 if error:
@@ -1038,11 +1033,12 @@ class AgentRuntime:
             state = ToolCallState.DENIED
             self._tracer.end_span(tool_span, error=exc)
         except ToolExecutionError as exc:
+            error_code = str(exc.details.get("error", "execution_error"))
             error_type = exc.details.get("error_type", type(exc).__name__)
             result = ToolResult.error(
                 call.tool_name,
                 str(exc),
-                metadata={"error": "execution_error", "error_type": error_type},
+                metadata={"error": error_code, "error_type": error_type},
             )
             state = ToolCallState.FAILED
             self._tracer.end_span(tool_span, error=exc)
@@ -1056,29 +1052,29 @@ class AgentRuntime:
             self._tracer.end_span(tool_span, error=exc)
 
         return (
-            ToolCallContext(
-                tool_name=call.tool_name,
-                arguments=call.arguments,
-                state=state,
-                call_id=call.call_id,
-                result=result,
-                provider=provider,
-                metadata=dict(call.metadata),
-            ),
+            self._build_tool_call_context(call, provider=provider, state=state, result=result, iteration_count=iteration_count, tool_is_internal=tool_is_internal),
             result,
         )
 
     @staticmethod
-    def _middleware_denied_tool(call: ToolCall, provider: str, decision: MiddlewareDecision) -> tuple[ToolCallContext, ToolResult]:
+    def _middleware_denied_tool(call: ToolCall, provider: str, decision: MiddlewareDecision, *, iteration_count: int | None = None) -> tuple[ToolCallContext, ToolResult]:
         # Converts a deny_tool middleware decision into a denied tool-call context.
-        return AgentRuntime._denied_tool_result(call, provider, message=f"Tool denied by middleware: {decision.reason or 'middleware_denied'}", error="middleware_denied", reason=decision.reason, metadata=decision.metadata)
+        return AgentRuntime._denied_tool_result(call, provider, message=f"Tool denied by middleware: {decision.reason or 'middleware_denied'}", error="middleware_denied", reason=decision.reason, metadata=decision.metadata, iteration_count=iteration_count)
 
     @staticmethod
-    def _denied_tool_result(call: ToolCall, provider: str, *, message: str, error: str, reason: str | None, metadata: Mapping[str, Any]) -> tuple[ToolCallContext, ToolResult]:
+    def _denied_tool_result(call: ToolCall, provider: str, *, message: str, error: str, reason: str | None, metadata: Mapping[str, Any], iteration_count: int | None = None, tool_is_internal: bool = False) -> tuple[ToolCallContext, ToolResult]:
         # Builds a DENIED tool-call context and matching model-visible error result.
         result = ToolResult.error(call.tool_name, message, metadata={"error": error, "reason": reason, **dict(metadata)})
-        context = ToolCallContext(tool_name=call.tool_name, arguments=call.arguments, state=ToolCallState.DENIED, call_id=call.call_id, result=result, provider=provider, metadata=dict(call.metadata))
+        context = AgentRuntime._build_tool_call_context(call, provider=provider, state=ToolCallState.DENIED, result=result, iteration_count=iteration_count, tool_is_internal=tool_is_internal)
         return context, result
+
+    @staticmethod
+    def _build_tool_call_context(call: ToolCall, *, provider: str, state: ToolCallState, result: ToolResult, iteration_count: int | None = None, tool_is_internal: bool = False) -> ToolCallContext:
+        # Builds a ToolCallContext stamped with iteration index and internal marker when needed.
+        metadata = dict(call.metadata)
+        if tool_is_internal:
+            metadata["internal"] = True
+        return ToolCallContext(tool_name=call.tool_name, arguments=call.arguments, state=state, call_id=call.call_id, result=result, provider=provider, metadata=metadata, iteration_count=iteration_count)
 
     def _tool_is_internal(self, call: ToolCall) -> bool:
         """Return whether a call targets a runtime-only internal tool."""
@@ -1119,14 +1115,30 @@ class AgentRuntime:
                 details={"tool_name": call.tool_name, "error": "validation_error"},
             )
 
-    async def _execute_tool(self, tool: object, call: ToolCall) -> ToolResult:
-        """Execute the tool and return its result, raising ToolExecutionError on failure."""
+    async def _execute_tool(self, tool: object, call: ToolCall, *, tool_is_internal: bool = False) -> ToolResult:
+        # Executes the tool, optionally under tool_timeout_seconds, raising ToolExecutionError on failure.
         try:
-            return await tool.execute(call)
+            return await self._run_tool_execute(tool, call, tool_is_internal=tool_is_internal)
+        except ToolExecutionError:
+            raise
         except Exception as exc:
             raise ToolExecutionError(
                 f"Tool execution failed: {exc}",
                 details={"tool_name": call.tool_name, "error_type": type(exc).__name__},
+            ) from exc
+
+    async def _run_tool_execute(self, tool: object, call: ToolCall, *, tool_is_internal: bool) -> ToolResult:
+        # Runs tool.execute, wrapping non-internal calls with ToolSettings.tool_timeout_seconds when set.
+        settings = self.config.tool_settings
+        timeout = None if tool_is_internal or settings is None else settings.tool_timeout_seconds
+        if timeout is None:
+            return await tool.execute(call)
+        try:
+            return await asyncio.wait_for(tool.execute(call), timeout=timeout)
+        except asyncio.TimeoutError as exc:
+            raise ToolExecutionError(
+                f"Tool '{call.tool_name}' timed out after {timeout}s",
+                details={"tool_name": call.tool_name, "error": "timeout", "error_type": "timeout"},
             ) from exc
 
     def _resolve_tool_schemas(self, provider: str) -> Sequence[dict[str, Any]]:
@@ -1351,9 +1363,9 @@ class AgentRuntime:
             # this loop into call_contexts/messages, keeping intermediate failure
             # attempts out of the model-visible conversation history.
             if decision.action is MiddlewareAction.DENY_TOOL:
-                context_record, result = self._middleware_denied_tool(call, provider, decision)
+                context_record, result = self._middleware_denied_tool(call, provider, decision, iteration_count=iteration_count)
             else:
-                context_record, result = await self.execute_tool_call(call, provider=provider, trace_context=trace_context)
+                context_record, result = await self.execute_tool_call(call, provider=provider, trace_context=trace_context, iteration_count=iteration_count, tool_is_internal=tool_is_internal)
             after_decision = await self.middleware.after_tool_call(
                 self._middleware_context(
                     MiddlewareHook.AFTER_TOOL_CALL,
@@ -1387,16 +1399,23 @@ class AgentRuntime:
             )
         if call.tool_name != IS_DONE_TOOL_NAME:
             self._append_tool_result_message(messages, call, result, provider, after_decision)
+        failure_stop = self._enforce_tool_settings_after_failure(context_record, tool_is_internal, call_contexts, iteration_count=iteration_count, tokens_used=tokens_used)
+        if failure_stop is not None:
+            return failure_stop
         return context_record, result
 
     def _enforce_tool_settings(self, call: ToolCall, provider: str, messages: list[dict[str, Any]], call_contexts: list[ToolCallContext], tool_is_internal: bool, *, iteration_count: int, tokens_used: int | None) -> tuple[ToolCallContext, ToolResult] | AgentResult | None:
-        # Applies ToolSettings before local execution: stop on budget/abort, deny-and-continue, or allow.
+        # Applies ToolSettings before local execution: hard budgets first, then deny-class rules.
         settings = self.config.tool_settings
         if settings is None or tool_is_internal:
             return None
         budget_stop = self._tool_settings_budget_stop(settings, call_contexts, iteration_count=iteration_count, tokens_used=tokens_used)
         if budget_stop is not None:
             return budget_stop
+        hard_budget = settings.budget_stop(tool_name=call.tool_name, arguments=dict(call.arguments), call_contexts=call_contexts, iteration_count=iteration_count)
+        if hard_budget is not None:
+            reason, meta = hard_budget
+            return self._tool_settings_hard_budget_stop(reason, meta, iteration_count=iteration_count, tokens_used=tokens_used, contexts=call_contexts)
         denial = settings.denial(call.tool_name, self._executed_counts(call_contexts))
         if denial is None:
             return None
@@ -1408,12 +1427,40 @@ class AgentRuntime:
             return None
         return self._stopped_result("Agent runtime stopped after reaching max_tool_calls.", stop_reason=AgentStopReason.MAX_TOOL_CALLS, iteration_count=iteration_count, tokens_used=tokens_used, contexts=call_contexts)
 
+    def _tool_settings_hard_budget_stop(self, reason: str, meta: Mapping[str, Any], *, iteration_count: int, tokens_used: int | None, contexts: Sequence[ToolCallContext]) -> AgentResult:
+        # Maps a ToolSettings hard-budget reason string to AgentStopReason and stops the run.
+        stop_reason = self._agent_stop_reason_for_tool_budget(reason)
+        return self._stopped_result(f"Agent runtime stopped by tool settings budget: {reason}", stop_reason=stop_reason, iteration_count=iteration_count, tokens_used=tokens_used, contexts=contexts)
+
+    @staticmethod
+    def _agent_stop_reason_for_tool_budget(reason: str) -> AgentStopReason:
+        # Converts pure ToolSettings budget reason keys into AgentStopReason enum values.
+        mapping = {
+            "max_calls_per_iteration": AgentStopReason.MAX_CALLS_PER_ITERATION,
+            "max_identical_calls": AgentStopReason.MAX_IDENTICAL_CALLS,
+            "max_consecutive_failures": AgentStopReason.MAX_CONSECUTIVE_FAILURES,
+            "max_error_calls": AgentStopReason.MAX_ERROR_CALLS,
+            "sliding_window_max_calls": AgentStopReason.SLIDING_WINDOW_MAX_CALLS,
+        }
+        return mapping.get(reason, AgentStopReason.TOOL_SETTINGS_DENIED)
+
+    def _enforce_tool_settings_after_failure(self, context_record: ToolCallContext, tool_is_internal: bool, call_contexts: Sequence[ToolCallContext], *, iteration_count: int, tokens_used: int | None) -> AgentResult | None:
+        # Hard-stops after a failed non-internal tool when consecutive or total error budgets are hit.
+        settings = self.config.tool_settings
+        if settings is None or tool_is_internal or context_record.state is not ToolCallState.FAILED:
+            return None
+        failure_stop = settings.failure_budget_stop(call_contexts)
+        if failure_stop is None:
+            return None
+        reason, meta = failure_stop
+        return self._tool_settings_hard_budget_stop(reason, meta, iteration_count=iteration_count, tokens_used=tokens_used, contexts=call_contexts)
+
     def _apply_tool_denial(self, settings: ToolSettings, call: ToolCall, provider: str, messages: list[dict[str, Any]], call_contexts: list[ToolCallContext], denial: tuple[str, dict], *, iteration_count: int, tokens_used: int | None) -> tuple[ToolCallContext, ToolResult] | AgentResult:
         # Aborts the run or records an in-context denial according to the on_deny policy.
         reason, meta = denial
         if settings.aborts_on_deny:
             return self._stopped_result(f"Agent runtime stopped by tool settings: {reason}", stop_reason=AgentStopReason.TOOL_SETTINGS_DENIED, iteration_count=iteration_count, tokens_used=tokens_used, contexts=call_contexts)
-        context_record, result = self._denied_tool_result(call, provider, message=f"Tool denied by tool settings: {reason}", error=reason, reason=reason, metadata=meta)
+        context_record, result = self._denied_tool_result(call, provider, message=f"Tool denied by tool settings: {reason}", error=reason, reason=reason, metadata=meta, iteration_count=iteration_count)
         call_contexts.append(context_record)
         self._append_tool_result_message(messages, call, result, provider, MiddlewareDecision.continue_(), truncate=False)
         return context_record, result
