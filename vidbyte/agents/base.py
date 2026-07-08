@@ -46,11 +46,6 @@ if TYPE_CHECKING:
     from vidbyte.sessions.store import SessionStore
 
 
-# Hard cap on runs drained from the sequential-prompt queue per outer run,
-# bounding self-continuation chains where drained runs queue further prompts.
-_MAX_QUEUED_PROMPT_RUNS = 25
-
-
 class ConfiguredAgentRunner:
     """Runner placeholder created from primitive agent configuration."""
 
@@ -459,6 +454,7 @@ class BaseAgent(McpAttachableMixin):
             "max_iterations",
             "max_tokens",
             "max_tool_calls",
+            "max_queued_prompts",
             "max_parallel_tool_calls",
             "max_retries",
             "timeout_seconds",
@@ -692,7 +688,21 @@ class BaseAgent(McpAttachableMixin):
 
     def enqueue_prompts(self, prompts: Sequence[str]) -> int:
         """Append prompts to the pending sequential-run queue and return the queue length."""
-        self._queued_prompts.extend(str(prompt) for prompt in prompts)
+        if isinstance(prompts, str):
+            raise ValueError("'prompts' must be a JSON array of strings, not a single string.")
+        if not isinstance(prompts, (list, tuple)) or not prompts:
+            raise ValueError("run_prompts_sequentially requires a non-empty 'prompts' array of strings.")
+        max_queued_prompts = self.agent_loop_settings.max_queued_prompts
+        if len(self._queued_prompts) + len(prompts) > max_queued_prompts:
+            raise ValueError(
+                f"Too many queued prompts: {len(self._queued_prompts) + len(prompts)} exceeds the limit of {max_queued_prompts}."
+            )
+        cleaned: list[str] = []
+        for index, prompt in enumerate(prompts):
+            if not isinstance(prompt, str) or not prompt.strip():
+                raise ValueError(f"Prompt at index {index} must be a non-empty string.")
+            cleaned.append(prompt.strip())
+        self._queued_prompts.extend(cleaned)
         return len(self._queued_prompts)
 
     async def _drain_queued_prompts(self, metadata: dict[str, Any]) -> None:
@@ -702,7 +712,7 @@ class BaseAgent(McpAttachableMixin):
         completed = 0
         try:
             # Pop-one loop so prompts queued by drained runs join the same bounded drain.
-            while self._queued_prompts and completed < _MAX_QUEUED_PROMPT_RUNS:
+            while self._queued_prompts and completed < self.agent_loop_settings.max_queued_prompts:
                 prompt = self._queued_prompts.pop(0)
                 reply = await self.generate_reply(prompt)
                 self.last_queued_replies.append(reply)

@@ -20,7 +20,6 @@ Similar Files:
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from typing import Any
 
 from vidbyte.tools.base import BaseTool
@@ -38,10 +37,9 @@ _DESCRIPTION = (
 class RunPromptsSequentiallyTool(BaseTool):
     """Builtin tool that queues follow-up prompts to run sequentially after the current run."""
 
-    def __init__(self, max_prompts_per_call: int = 10) -> None:
+    def __init__(self) -> None:
         # Starts unbound; BaseAgent attaches the live agent via bind_agent().
         self._agent: Any = None
-        self._max_prompts_per_call = max_prompts_per_call
 
     def bind_agent(self, agent: Any) -> None:
         """Attach the live agent whose queue receives the prompts."""
@@ -61,31 +59,16 @@ class RunPromptsSequentiallyTool(BaseTool):
         if self._agent is None:
             return ToolResult.error("run_prompts_sequentially", "run_prompts_sequentially is not bound to an agent.")
         try:
-            prompts = self._validate_prompts(call.arguments)
+            raw_prompts = call.arguments.get("prompts")
+            queue_size = self._agent.enqueue_prompts(raw_prompts)
         except ValueError as exc:
             return ToolResult.error("run_prompts_sequentially", str(exc))
-        queue_size = self._agent.enqueue_prompts(prompts)
+        prompts = [prompt.strip() for prompt in raw_prompts]
         return ToolResult.success(
             "run_prompts_sequentially",
             self._render_confirmation(prompts, queue_size),
             metadata={"queued": len(prompts), "queue_size": queue_size},
         )
-
-    def _validate_prompts(self, args: Mapping[str, Any]) -> list[str]:
-        """Return cleaned prompt strings or raise ValueError describing the problem."""
-        prompts = args.get("prompts")
-        if isinstance(prompts, str):
-            raise ValueError("'prompts' must be a JSON array of strings, not a single string.")
-        if not isinstance(prompts, (list, tuple)) or not prompts:
-            raise ValueError("run_prompts_sequentially requires a non-empty 'prompts' array of strings.")
-        if len(prompts) > self._max_prompts_per_call:
-            raise ValueError(f"Too many prompts: {len(prompts)} exceeds the per-call limit of {self._max_prompts_per_call}.")
-        cleaned: list[str] = []
-        for index, prompt in enumerate(prompts):
-            if not isinstance(prompt, str) or not prompt.strip():
-                raise ValueError(f"Prompt at index {index} must be a non-empty string.")
-            cleaned.append(prompt.strip())
-        return cleaned
 
     def _render_confirmation(self, prompts: list[str], queue_size: int) -> str:
         """Render the queued-prompts confirmation the model reads back."""

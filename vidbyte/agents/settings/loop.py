@@ -25,6 +25,7 @@ _POSITIVE_INT_FIELDS = (
     "max_iterations",
     "max_tokens",
     "max_tool_calls",
+    "max_queued_prompts",
     "max_parallel_tool_calls",
     "max_retries",
     "context_window_budget",
@@ -42,6 +43,7 @@ class AgentLoopSettings:
         max_iterations: int | None = None,
         max_tokens: int | None = None,
         max_tool_calls: int | None = None,
+        max_queued_prompts: int = 25,
         max_parallel_tool_calls: int | None = None,
         max_retries: int | None = None,
         timeout_seconds: float | None = None,
@@ -55,6 +57,7 @@ class AgentLoopSettings:
         self.max_iterations = max_iterations
         self.max_tokens = max_tokens
         self.max_tool_calls = max_tool_calls
+        self.max_queued_prompts = max_queued_prompts
         self.max_parallel_tool_calls = max_parallel_tool_calls
         self.max_retries = max_retries
         self.timeout_seconds = timeout_seconds
@@ -124,6 +127,7 @@ class AgentLoopSettings:
                 "max_iterations",
                 "max_tokens",
                 "max_tool_calls",
+                "max_queued_prompts",
                 "max_parallel_tool_calls",
                 "max_retries",
                 "timeout_seconds",
