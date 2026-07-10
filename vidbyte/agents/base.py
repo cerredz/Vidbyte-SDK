@@ -1,14 +1,101 @@
-"""Context Protocol Header
+"""
+FILE: vidbyte/agents/base.py
 
-Description:
-    Defines the baseline agent implementation (BaseAgent).
-Purpose:
-    Combines prompting, tool registration, runtime state tracking, and execution
-    into a unified developer-facing executable actor (the agent).
-Architecture:
-    - BaseAgent: Primary agent class inheriting MCP attachment capabilities.
-Relations:
-    Inherits from McpAttachableMixin. Used by registries, harnesses, and multi-agent orchestration.
+PURPOSE:
+    Defines BaseAgent, the public composition root for executable Vidbyte agents.
+    It owns construction-time compatibility checks, provider/model runner
+    inference, local tool attachment, context and trace setup, durable-session
+    integration, handoff state, and dispatch into the selected runtime. It does
+    not implement the direct model/tool loop itself.
+
+ROLE IN CODEBASE:
+    vidbyte/agents/__init__.py exports BaseAgent as Agent for SDK callers.
+    BaseAgent delegates direct text execution to runtime.py through the runtime
+    registry, composes ContextManager data from vidbyte/context, attaches policy
+    middleware from vidbyte/middleware, and supplies local tools from
+    vidbyte/tools. sessions/session.py binds durable checkpoints around its
+    public run methods without making persistence part of the constructor.
+
+ARCHITECTURE NOTE:
+    This is the imperative shell around agent configuration and a run request.
+    The public methods should read as orchestration; provider protocol details,
+    tool execution, context-window loops, and middleware dispatch belong to
+    their dedicated collaborators. Compatibility guards here prevent options
+    intended for the linear runtime from silently reaching a non-linear runtime.
+
+FUNCTION INVENTORY:
+    - BaseAgent.__init__(...): validates compatible construction options and
+      initializes observable agent, MCP, trace, session, and queue state.
+    - BaseAgent.generate_reply(...): executes one public agent request, records
+      the reply, and preserves trace/session/handoff terminal behavior.
+    - BaseAgent.arun/run(...): async and guarded synchronous entry points.
+    - BaseAgent.fork/export_state/restore(...): clone and durable-session state
+      boundaries; preserve public configuration rather than live execution state.
+    - BaseAgent._runtime(...): resolves the selected runtime and passes only
+      runtime-owned configuration.
+    - BaseAgent._runner_for_model(...): infers and caches the executable runner
+      for the configured provider/model pair.
+    - BaseAgent._safe_trace_value(...): recursively excludes secret-like keys
+      before trace data crosses an observability boundary.
+
+COMMON MODIFICATION PATTERNS:
+    - Add a construction option by updating the constructor, AgentForkSettings,
+      state export/restore, this inventory, and the agents README when the
+      option changes public ownership.
+    - Add a linear-only capability by rejecting it with a dedicated diagnostic
+      error before runtime construction and by documenting its non-linear rule.
+    - Add a run lifecycle phase by keeping root trace cleanup and session
+      notification correct on success, exception, and cancellation paths.
+
+WHAT NOT TO DO IN THIS FILE:
+    1. Do not add model/tool loop mechanics; runtime.py owns direct execution.
+    2. Do not implement provider adapters or embed provider credentials; use
+       lib.runners and vidbyte/providers through the existing inference path.
+    3. Do not bypass permission policy, middleware, or runtime compatibility
+       guards by invoking a tool or runner directly from this façade.
+    4. Do not put prompt text, tool arguments, secrets, or raw provider output
+       in diagnostic errors, session markers, or tracing metadata.
+    5. Do not make optional handoff/session bookkeeping hide a primary result.
+
+KNOWN EDGE CASES:
+    - The linear runtime supports middleware, continual tracing, tool settings,
+      output contracts, and non-default context algorithms; non-linear runtimes
+      intentionally reject incompatible combinations before execution.
+    - Aggregate requests delegate to AggregateAgent before normal direct-run
+      setup, so changes to the normal path must retain that early branch.
+    - Cancellation is a BaseException path: traces must close, but cancellation
+      must not be wrapped as an ordinary AgentExecutionError.
+    - Queued prompt and automatic handoff failures are non-fatal after a primary
+      reply has succeeded; their metadata is diagnostic rather than a retry API.
+
+COMMON ERRORS RAISED BY THIS FILE:
+    - AgentNameRequiredError and AgentSystemPromptRequiredError: construction
+      lacks the identity or instruction required for an executable agent.
+    - NonLinearRuntimeFeatureError: a linear-only feature was combined with a
+      search or actor runtime.
+    - AgentExecutionFailureError: a non-cancellation failure escaped the public
+      execution boundary after trace finalization.
+    - AgentRunnerRequiredError and RunnerProtocolError: runner inference or the
+      selected runner cannot satisfy direct execution.
+
+RELATED DOCS:
+    - https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/agents/README.md
+    - https://github.com/cerredz/Vidbyte-SDK/blob/main/docs/design/agentic-engineering-base-agent-runtime.md
+    - https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/agentic_engineering/file_headers.md
+    - https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/agentic_engineering/function_design.md
+    - https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/agentic_engineering/intent_based_commenting.md
+
+TEST FILES:
+    - tests/test_agent_base.py: public construction, execution, and wrappers.
+    - tests/test_agent_runtime.py: runtime dispatch and compatibility guards.
+    - tests/test_agent_tool_loop.py: direct loop behavior reached through agents.
+    - tests/test_tracing.py: root trace cleanup and agent/runtime spans.
+
+CONCURRENCY MODEL:
+    BaseAgent keeps mutable history, tool contexts, session state, and queued
+    prompts. One instance should not service concurrent callers without external
+    coordination. MCP attachment and runner inference are lifecycle operations;
+    the runtime owns per-run loop state.
 """
 
 from __future__ import annotations
@@ -16,9 +103,11 @@ from __future__ import annotations
 import asyncio
 import inspect
 from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from vidbyte.agents.mixins import McpAttachableMixin
+from vidbyte.agents.errors import ActiveEventLoopExecutionError, AgentExecutionFailureError, AgentNameRequiredError, AgentRunnerRequiredError, AgentSystemPromptRequiredError, AgentToolMetadataRequiredError, AggregationProviderRequiredError, LoopSettingsConflictError, NonLinearRuntimeFeatureError, RunnerProtocolError, TracerAliasConflictError
 from vidbyte.agents.settings import AgentLoopSettings
 from vidbyte.agents.types import AgentCard, AgentInput, AgentMessage
 from vidbyte.context.manager import ContextManager
@@ -45,6 +134,27 @@ from vidbyte.tools.types import ToolCallContext, ToolSpec
 if TYPE_CHECKING:
     from vidbyte.sessions.session import Session
     from vidbyte.sessions.store import SessionStore
+
+
+@dataclass(slots=True)
+class _PreparedAgentRun:
+    """Private input bundle passed between BaseAgent's public execution leaves."""
+
+    prompt: str
+    input_metadata: Mapping[str, Any]
+    trace_metadata: dict[str, Any]
+    input_context_items: tuple[ContextItem, ...]
+    input_context_manager: ContextManager | None
+    runner: object
+    runner_type: str
+
+
+@dataclass(slots=True)
+class _AgentReplyOutcome:
+    """Private completed-reply bundle that keeps mutable metadata paired with its message."""
+
+    reply: AgentMessage
+    metadata: dict[str, Any]
 
 
 class BaseAgent(McpAttachableMixin):
@@ -86,10 +196,11 @@ class BaseAgent(McpAttachableMixin):
         handoff: Handoff | None = None,
         trace_option: TraceOption | None = None,
     ) -> None:
+        # Validates construction invariants before configuring mutable runtime, trace, and session state.
         if not name:
-            raise AgentExecutionError("Agent name cannot be empty.")
+            raise AgentNameRequiredError()
         if not system_prompt:
-            raise AgentExecutionError("Agent system_prompt is required.")
+            raise AgentSystemPromptRequiredError()
 
         if isinstance(runtime, (LinearRuntime, MctsSearchRuntime, ActorRuntime)):
             self.runtime_type = runtime.runtime_type
@@ -98,6 +209,13 @@ class BaseAgent(McpAttachableMixin):
             self.runtime_type = AgentRuntimeType(runtime)
             self.runtime_config_obj = None
 
+        # @intent linear-runtime-feature-boundary
+        # Middleware, continual trace, context algorithms, aggregation, tool settings, and output
+        # contracts change the semantics of the linear execution loop. Search and actor runtimes
+        # do not implement the same hook and state contracts, so accepting these settings would
+        # create a configuration that appears protected but silently omits a policy at runtime.
+        # Keep this check at construction rather than relying on individual runtimes to ignore an
+        # option; a future runtime-specific fallback would make safety and observability ambiguous.
         if self.runtime_type in (
             AgentRuntimeType.MCTS_SEARCH,
             AgentRuntimeType.ACTOR_MODEL,
@@ -105,22 +223,13 @@ class BaseAgent(McpAttachableMixin):
             AgentRuntimeType.ACTOR_MODEL_BROADCAST,
         ):
             if middleware:
-                raise ConfigurationError(
-                    f"Agent {name} uses non-linear runtime {self.runtime_type.value}, "
-                    "which does not support middleware."
-                )
+                raise NonLinearRuntimeFeatureError(dynamic_context={"runtime_type": self.runtime_type.value, "feature": "middleware"})
             if trace_option is not None and trace_option.enabled:
-                raise ConfigurationError(
-                    f"Agent {name} uses non-linear runtime {self.runtime_type.value}, "
-                    "which does not support continual tracing."
-                )
+                raise NonLinearRuntimeFeatureError(dynamic_context={"runtime_type": self.runtime_type.value, "feature": "continual_trace"})
             if algorithm is not None:
                 resolved_algo = ContextWindow.resolve_algorithm(algorithm)
                 if resolved_algo.name != "default":
-                    raise ConfigurationError(
-                        f"Agent {name} uses non-linear runtime {self.runtime_type.value}, "
-                        "which does not support in-context learning algorithms."
-                    )
+                    raise NonLinearRuntimeFeatureError(dynamic_context={"runtime_type": self.runtime_type.value, "feature": "context_algorithm"})
 
         provider_str = str(provider.value if isinstance(provider, ModelProvider) else provider) if provider is not None else None
         self._aggregate_agent: BaseAgent | None = None
@@ -131,10 +240,7 @@ class BaseAgent(McpAttachableMixin):
             AgentRuntimeType.ACTOR_MODEL_P2P,
             AgentRuntimeType.ACTOR_MODEL_BROADCAST,
         ):
-            raise ConfigurationError(
-                f"Agent {name} uses non-linear runtime {self.runtime_type.value}, "
-                "which does not support multi-model aggregation."
-            )
+            raise NonLinearRuntimeFeatureError(dynamic_context={"runtime_type": self.runtime_type.value, "feature": "multi_model_aggregation"})
 
         self.runner_config = AgentRunnerConfig(
             api_key=api_key,
@@ -162,25 +268,16 @@ class BaseAgent(McpAttachableMixin):
             AgentRuntimeType.ACTOR_MODEL_P2P,
             AgentRuntimeType.ACTOR_MODEL_BROADCAST,
         ):
-            raise ConfigurationError(
-                f"Agent {name} uses non-linear runtime {self.runtime_type.value}, "
-                "which does not support tool_error_policy middleware."
-            )
+            raise NonLinearRuntimeFeatureError(dynamic_context={"runtime_type": self.runtime_type.value, "feature": "tool_error_policy"})
         if self.agent_loop_settings.tool_settings is not None and self.runtime_type in (
             AgentRuntimeType.MCTS_SEARCH,
             AgentRuntimeType.ACTOR_MODEL,
             AgentRuntimeType.ACTOR_MODEL_P2P,
             AgentRuntimeType.ACTOR_MODEL_BROADCAST,
         ):
-            raise ConfigurationError(
-                f"Agent {name} uses non-linear runtime {self.runtime_type.value}, "
-                "which does not support tool_settings."
-            )
+            raise NonLinearRuntimeFeatureError(dynamic_context={"runtime_type": self.runtime_type.value, "feature": "tool_settings"})
         if self.agent_loop_settings.output_contract.active() and self.runtime_type is not AgentRuntimeType.LINEAR:
-            raise ConfigurationError(
-                f"Agent {name} uses non-linear runtime {self.runtime_type.value}, "
-                "which does not support output contracts."
-            )
+            raise NonLinearRuntimeFeatureError(dynamic_context={"runtime_type": self.runtime_type.value, "feature": "output_contract"})
         self.runtime_config = self.agent_loop_settings.to_runtime_config()
         self.max_tool_rounds = self.agent_loop_settings.max_iterations
         self.system_prompt = system_prompt
@@ -228,7 +325,7 @@ class BaseAgent(McpAttachableMixin):
             host_model = model_name if isinstance(model_name, str) else None
         elif is_sequence and len(model_name) >= 2:
             if not provider_str:
-                raise ConfigurationError("A list of model names requires a provider for multi-model aggregation.")
+                raise AggregationProviderRequiredError()
             specs = [ProposerSpec(provider=provider_str, model=str(m)) for m in model_name]
             host_model = str(model_name[0])
         else:
@@ -289,9 +386,7 @@ class BaseAgent(McpAttachableMixin):
         }
         active_flat = {k: v for k, v in flat_params.items() if v is not None}
         if agent_loop_settings is not None and active_flat:
-            raise ConfigurationError(
-                f"Pass either agent_loop_settings= or individual loop params ({', '.join(active_flat)}), not both."
-            )
+            raise LoopSettingsConflictError(dynamic_context={"conflicting_options": ",".join(active_flat)})
         if agent_loop_settings is not None:
             return agent_loop_settings
         return AgentLoopSettings(**flat_params)
@@ -300,7 +395,7 @@ class BaseAgent(McpAttachableMixin):
     def _resolve_tracer(tracer: type[TracerBase] | TracerBase | None, trace: type[TracerBase] | TracerBase | None) -> TracerBase:
         # Normalizes the legacy tracer= argument and the public trace= alias.
         if tracer is not None and trace is not None:
-            raise ConfigurationError("Pass either trace= or tracer=, not both.")
+            raise TracerAliasConflictError()
         selected = trace if trace is not None else tracer
         if selected is None:
             return NullTracer()
@@ -336,16 +431,7 @@ class BaseAgent(McpAttachableMixin):
         """
         meta = self.agent_metadata
         if not meta.name or not meta.description or not meta.use_cases:
-            raise ConfigurationError(
-                "You need to fill in agent metadata (name, description, use_cases) "
-                "if you want to use the agent as a tool.",
-                details={
-                    "agent": self.name,
-                    "missing_name": not meta.name,
-                    "missing_description": not meta.description,
-                    "missing_use_cases": not meta.use_cases,
-                },
-            )
+            raise AgentToolMetadataRequiredError(dynamic_context={"agent_name": self.name, "missing_name": not meta.name, "missing_description": not meta.description, "missing_use_cases": not meta.use_cases})
         from vidbyte.tools.agent_tool import AgentTool
 
         return AgentTool(self)
@@ -651,6 +737,12 @@ class BaseAgent(McpAttachableMixin):
     async def receive(self, message: AgentMessage) -> None:
         self.history.append(message)
 
+    # @intent public-run-terminal-bookkeeping
+    # A successful public agent run must leave one coherent observable record: the reply joins
+    # history, the root trace is finalized, optional trace/handoff artifacts are attached, and a
+    # bound session is notified. These are not cosmetic side effects—sessions and operators use
+    # them to explain what happened after a run. Do not move optional bookkeeping ahead of the
+    # primary result or make a handoff/queue failure erase an already-successful reply.
     async def generate_reply(
         self,
         message: str | AgentInput,
@@ -660,6 +752,7 @@ class BaseAgent(McpAttachableMixin):
         recipient: str = "orchestrator",
         **options: Any,
     ) -> AgentMessage:
+        # Orchestrates one public run while leaves own preparation, dispatch, reply construction, and bookkeeping.
         if self._aggregate_agent is not None:
             reply = await self._aggregate_agent.generate_reply(message, recipient=recipient, **options)
             self._notify_session(reply)
@@ -667,89 +760,68 @@ class BaseAgent(McpAttachableMixin):
         await self._ensure_mcp_connected()
         trace_ctx = None
         try:
-            trace_metadata = dict(options.pop("trace_metadata", {}) or {})
-            prompt, input_metadata = self._normalize_input(message)
-            input_context_items, input_context_manager = self._normalize_input_context(message)
-            self._active_prompt = prompt
-            self._behavior_view = None
-            runner, runner_type = self._runner_for_model()
-            trace_ctx = self._tracer.start_trace(
-                "agent.run",
-                agent_name=self.name,
-                run_id=self.runner_config.run_id,
-                strategy="direct",
-                prompt=self._safe_trace_value(prompt),
-                system_prompt=self._safe_trace_value(self.system_prompt),
-                tools=self._safe_trace_value(self._trace_tool_specs()),
-                provider=self._runner_provider(runner),
-                model=self._runner_model_name(runner),
-                metadata=self._safe_trace_value({**self.metadata, **dict(input_metadata), **trace_metadata}),
-            )
-            agent_context = self._build_context(
-                prompt,
-                context=context,
-                history=history,
-                input_metadata=input_metadata,
-                agentic_loop=True,
-                input_context_items=input_context_items,
-                input_context_manager=input_context_manager,
-            )
-            result = await self._run_direct(
-                prompt,
-                agent_context,
-                runner=runner,
-                runner_type=runner_type,
-                trace_context=trace_ctx,
-                runtime_metadata={**self.metadata, **dict(input_metadata), **trace_metadata},
-                **options,
-            )
+            prepared = self._prepare_direct_run(message, options)
+            trace_ctx = self._start_direct_trace(prepared)
+            result = await self._execute_prepared_run(prepared, context, history, trace_ctx, options)
             self._record_agent_stop(trace_ctx, result)
             if trace_ctx is not None:
                 self._tracer.end_trace(trace_ctx, output=_format_trace_output(result))
         except Exception as exc:
             if trace_ctx is not None:
                 self._tracer.end_trace(trace_ctx, error=exc)
-            self._active_prompt = ""
-            raise AgentExecutionError(
-                f"Agent '{self.name}' failed to generate a reply.",
-                details={"agent": self.name, "error_type": type(exc).__name__},
-            ) from exc
+            raise AgentExecutionFailureError(dynamic_context={"agent_name": self.name, "phase": "generate_reply", "cause_type": type(exc).__name__}) from exc
         except BaseException as exc:
             # Catches CancelledError and other BaseException subclasses that bypass
             # the Exception handler, ensuring the root trace is always finalized.
             if trace_ctx is not None:
                 self._tracer.end_trace(trace_ctx, error=exc)
-            self._active_prompt = ""
             raise
-        self._active_prompt = ""
-        metadata: dict[str, Any] = {
-            "strategy": result.strategy_name,
-            "runner_type": runner_type,
-            "provider": self.runner_config.provider,
-            "model_name": self.runner_config.model_name,
-            **dict(input_metadata),
-            **dict(result.metadata),
-        }
+        finally:
+            self._active_prompt = ""
+        outcome = self._build_reply_outcome(result, prepared, recipient)
+        await self._complete_reply(outcome)
+        return outcome.reply
+
+    def _prepare_direct_run(self, message: str | AgentInput, options: dict[str, Any]) -> _PreparedAgentRun:
+        # Normalizes one public input and resolves the executable runner before tracing begins.
+        trace_metadata = dict(options.pop("trace_metadata", {}) or {})
+        prompt, input_metadata = self._normalize_input(message)
+        input_context_items, input_context_manager = self._normalize_input_context(message)
+        self._active_prompt = prompt
+        self._behavior_view = None
+        runner, runner_type = self._runner_for_model()
+        return _PreparedAgentRun(prompt=prompt, input_metadata=input_metadata, trace_metadata=trace_metadata, input_context_items=input_context_items, input_context_manager=input_context_manager, runner=runner, runner_type=runner_type)
+
+    def _start_direct_trace(self, prepared: _PreparedAgentRun) -> object:
+        # Starts the root agent trace with redacted configuration and per-run metadata.
+        return self._tracer.start_trace("agent.run", agent_name=self.name, run_id=self.runner_config.run_id, strategy="direct", prompt=self._safe_trace_value(prepared.prompt), system_prompt=self._safe_trace_value(self.system_prompt), tools=self._safe_trace_value(self._trace_tool_specs()), provider=self._runner_provider(prepared.runner), model=self._runner_model_name(prepared.runner), metadata=self._safe_trace_value({**self.metadata, **dict(prepared.input_metadata), **prepared.trace_metadata}))
+
+    async def _execute_prepared_run(self, prepared: _PreparedAgentRun, context: BaseContext | None, history: Sequence[AgentMessage], trace_context: object | None, options: Mapping[str, Any]) -> AgentResult:
+        # Builds the invocation context and delegates the prepared request to the selected runtime path.
+        agent_context = self._build_context(prepared.prompt, context=context, history=history, input_metadata=prepared.input_metadata, agentic_loop=True, input_context_items=prepared.input_context_items, input_context_manager=prepared.input_context_manager)
+        return await self._run_direct(prepared.prompt, agent_context, runner=prepared.runner, runner_type=prepared.runner_type, trace_context=trace_context, runtime_metadata={**self.metadata, **dict(prepared.input_metadata), **prepared.trace_metadata}, **dict(options))
+
+    def _build_reply_outcome(self, result: AgentResult, prepared: _PreparedAgentRun, recipient: str) -> _AgentReplyOutcome:
+        # Creates and records the public message before optional post-run artifacts are attached.
+        metadata: dict[str, Any] = {"strategy": result.strategy_name, "runner_type": prepared.runner_type, "provider": self.runner_config.provider, "model_name": self.runner_config.model_name, **dict(prepared.input_metadata), **dict(result.metadata)}
         if result.structured is not None:
             metadata["structured"] = result.structured
-        reply = AgentMessage(
-            sender=self.name,
-            recipient=recipient,
-            content=result.output,
-            metadata=metadata,
-        )
+        reply = AgentMessage(sender=self.name, recipient=recipient, content=result.output, metadata=metadata)
         self.history.append(reply)
-        self.last_prompt = prompt
+        self.last_prompt = prepared.prompt
         self.last_reply = reply
+        return _AgentReplyOutcome(reply=reply, metadata=metadata)
+
+    async def _complete_reply(self, outcome: _AgentReplyOutcome) -> None:
+        # Records optional artifacts after the reply exists without making those artifacts primary-run prerequisites.
         if self._trace_option is not None and self._trace_option.enabled:
-            trace_artifact = metadata.get("trace")
+            trace_artifact = outcome.metadata.get("trace")
             self.last_trace = dict(trace_artifact) if isinstance(trace_artifact, Mapping) else None
         if self._handoff_spec is not None:
-            await self._run_auto_handoff(metadata)
-        self._notify_session(reply)
+            await self._run_auto_handoff(outcome.metadata)
+        self._notify_session(outcome.reply)
         if self._queued_prompts and not self._draining_queued_prompts:
-            await self._drain_queued_prompts(metadata)
-        return reply
+            await self._drain_queued_prompts(outcome.metadata)
 
     async def arun(self, message: str | AgentInput, **options: Any) -> AgentMessage:
         """Async ergonomic alias for generate_reply()."""
@@ -761,7 +833,7 @@ class BaseAgent(McpAttachableMixin):
             asyncio.get_running_loop()
         except RuntimeError:
             return asyncio.run(self.generate_reply(message, **options))
-        raise AgentExecutionError("BaseAgent.run() cannot be called from an active event loop; use await arun().")
+        raise ActiveEventLoopExecutionError(dynamic_context={"entrypoint": "run"})
 
     async def arun_sequentially(self, prompts: Sequence[str | AgentInput], **options: Any) -> list[AgentMessage]:
         # Runs each prompt through generate_reply in order, preserving self.history across all calls.
@@ -777,7 +849,7 @@ class BaseAgent(McpAttachableMixin):
             asyncio.get_running_loop()
         except RuntimeError:
             return asyncio.run(self.arun_sequentially(prompts, **options))
-        raise AgentExecutionError("BaseAgent.run_sequentially() cannot be called from an active event loop; use await arun_sequentially().")
+        raise ActiveEventLoopExecutionError(dynamic_context={"entrypoint": "run_sequentially"})
 
     def enqueue_prompts(self, prompts: Sequence[str]) -> int:
         """Append prompts to the pending sequential-run queue and return the queue length."""
@@ -798,6 +870,12 @@ class BaseAgent(McpAttachableMixin):
         self._queued_prompts.extend(cleaned)
         return len(self._queued_prompts)
 
+    # @intent queued-follow-up-isolation
+    # Queued prompts are follow-up work created after a primary reply succeeds. Their failure must
+    # be recorded for diagnosis but cannot retroactively fail that primary customer-visible reply.
+    # The bounded pop-one loop also admits prompts added during draining without allowing an
+    # unbounded recursive execution chain. Do not replace this with a bulk gather: ordering and
+    # history accumulation are part of the sequential prompt contract.
     async def _drain_queued_prompts(self, metadata: dict[str, Any]) -> None:
         """Run queued prompts in order after the primary run, recording outcomes into metadata."""
         self._draining_queued_prompts = True
@@ -844,6 +922,11 @@ class BaseAgent(McpAttachableMixin):
         except ValueError:
             return
 
+    # @intent handoff-fail-open
+    # A handoff is a continuation artifact derived from a completed run, not a condition for the
+    # original answer to exist. If generation fails, callers must still receive the primary reply
+    # and an observable error marker. Converting this failure into a run failure would make an
+    # optional summarization feature less reliable than the work it describes.
     async def _run_auto_handoff(self, metadata: dict[str, Any]) -> None:
         # Generate the configured handoff after a run and record it without breaking the primary reply.
         from vidbyte.agents.handoff import HandoffAgent
@@ -890,8 +973,9 @@ class BaseAgent(McpAttachableMixin):
         runtime_metadata: Mapping[str, Any] | None = None,
         **options: Any,
     ) -> AgentResult:
+        # Routes text execution through the canonical runtime and non-text execution through the inferred runner.
         if runner is None:
-            raise AgentExecutionError("Agent requires a runner.")
+            raise AgentRunnerRequiredError(dynamic_context={"runner_type": runner_type})
         if runner_type != RUNNER_TYPE_TEXT:
             raw_result = await self._call_runner_once(runner, message, context=context, **options)
             return AgentResult(
@@ -1040,7 +1124,7 @@ class BaseAgent(McpAttachableMixin):
             elif callable(runner):
                 result = self._call_with_supported_kwargs(runner, message, call_options)
             else:
-                raise AgentExecutionError("Runner must define run(), arun(), or be callable.")
+                raise RunnerProtocolError(dynamic_context={"runner_class": runner.__class__.__name__})
         if inspect.isawaitable(result):
             result = await result
         return result
@@ -1097,6 +1181,11 @@ class BaseAgent(McpAttachableMixin):
                 return None
         return str(model_name) if model_name is not None else None
 
+    # @intent trace-redaction-before-observability
+    # Trace metadata can cross the process boundary into third-party observability systems. Agent
+    # configuration and tool metadata may carry credentials through nested mappings even when the
+    # immediate call site looks harmless. Keep this recursive key filter before any trace emission;
+    # a rewrite that redacts only selected callers will eventually leak through a new trace path.
     @classmethod
     def _safe_trace_value(cls, value: Any) -> Any:
         if isinstance(value, Mapping):

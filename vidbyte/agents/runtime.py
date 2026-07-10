@@ -1,15 +1,101 @@
-"""Context Protocol Header
+"""
+FILE: vidbyte/agents/runtime.py
 
-Description:
-    Defines the internal direct execution runtime for Vidbyte agents.
-Purpose:
-    Keeps agent loop execution, context-window construction, tool execution,
-    permission checks, and provider-reported token accounting out of BaseAgent.
-Architecture:
-    - AgentRuntime: Builds BaseAgentContext and runs direct model/tool loops.
-Relations:
-    Used by vidbyte.agents.base. Depends on shared context, tool, security, and
-    strategy dataclasses without owning modality routing or runner construction.
+PURPOSE:
+    Defines AgentRuntime, the canonical direct text model/tool loop for
+    BaseAgent. It builds the context delivered to a runner, executes ordered
+    middleware and context-window hooks, invokes models, validates and executes
+    permitted tools, applies tool settings, records trace spans, and produces
+    the final AgentResult with stop and contract metadata.
+
+ROLE IN CODEBASE:
+    base.py constructs this runtime through the RuntimeRegistry for linear runs.
+    The runtime consumes ContextManager and context-window contracts from
+    vidbyte/context, middleware decisions from vidbyte/middleware, tool schemas
+    and permission policy from vidbyte/tools, and RunnerHandle extraction
+    functions provided by BaseAgent. runtimes/linear.py is a compatibility
+    re-export; provider selection belongs above this file.
+
+ARCHITECTURE NOTE:
+    AgentRuntime is the imperative execution boundary, not a provider adapter.
+    Middleware remains non-model-visible, permission checks remain ahead of
+    validation and execution, and the ordered provider conversation is the
+    durable contract for tool calling. Inner context-window algorithms observe
+    a bounded snapshot after completed tool calls rather than rewriting history.
+
+FUNCTION INVENTORY:
+    - AgentRuntime.build_context(...): merges base, agent, and per-call context
+      while selecting user versus internal tool schemas.
+    - AgentRuntime.arun/_arun_once(...): run the direct loop or delegate to a
+      selected context-window algorithm before the normal loop.
+    - AgentRuntime._invoke_with_middleware(...): invokes a model with retry and
+      model-call trace semantics.
+    - AgentRuntime.execute_tool_call(...): resolves, authorizes, validates,
+      executes, schema-checks, and records one tool call.
+    - AgentRuntime._process_tool_call(...): applies middleware and tool settings
+      before placing a model-visible result in conversation history.
+    - AgentRuntime._budget_stop/_final_result(...): create terminal results with
+      stable stop reason, counter, and output-contract metadata.
+
+COMMON MODIFICATION PATTERNS:
+    - Add a middleware boundary by preserving hook order in _arun_once and
+      updating the middleware context passed to every affected phase.
+    - Add a tool failure mode by adding one agents/errors.py class, converting
+      it to a model-safe ToolResult summary, and updating this header.
+    - Add a context-window capability by preserving the initial and
+      post-tool-call hook timing and keeping private run state out of results.
+
+WHAT NOT TO DO IN THIS FILE:
+    1. Do not infer providers or construct provider clients; BaseAgent and
+       lib.runners own provider/model selection.
+    2. Do not run a tool before PermissionPolicy has approved it, even if its
+       arguments look valid or it is called by a trusted model.
+    3. Do not inject middleware state, error packets, or raw tool output into a
+       model-visible message unless the relevant policy explicitly permits it.
+    4. Do not alter assistant-tool-result ordering; providers use that order to
+       associate tool-call identifiers with results.
+    5. Do not expose prompts, raw provider responses, credentials, or tool
+       arguments through trace, error, or result metadata without redaction.
+
+KNOWN EDGE CASES:
+    - A plain text response is terminal unless an inner context-window algorithm
+      requests another iteration after its post-iteration hook.
+    - Internal isDone terminates without adding a normal tool-result message.
+    - Model failures reach retry middleware before escaping; BaseException still
+      finalizes a trace span and propagates for cancellation correctness.
+    - A failed tool becomes a ToolCallContext and ToolResult so later model turns
+      can adapt; policy denial remains distinct from execution failure.
+    - Tool settings can deny, cap, or truncate non-internal calls without
+      changing the agent-local tool catalog.
+
+COMMON ERRORS RAISED BY THIS FILE:
+    - ContextWindowRunnerTypeError: an inner algorithm received something other
+      than the RunnerHandle needed to preserve model invocation behavior.
+    - RuntimeUnknownToolError: parsed model tool name is absent from the catalog.
+    - RuntimeToolPermissionError: policy denied the call before validation.
+    - RuntimeToolValidationError, RuntimeToolExecutionError, and
+      RuntimeToolTimeoutError: a registered tool could not complete safely.
+    - RuntimeToolOutputSchemaError: a successful result violated its schema.
+
+RELATED DOCS:
+    - https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/agents/README.md
+    - https://github.com/cerredz/Vidbyte-SDK/blob/main/docs/design/agentic-engineering-base-agent-runtime.md
+    - https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/agentic_engineering/error_messages.md
+    - https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/agentic_engineering/function_design.md
+    - https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/agentic_engineering/intent_based_commenting.md
+
+TEST FILES:
+    - tests/test_agent_runtime.py: context construction, stop paths, and loop.
+    - tests/test_agent_tool_loop.py: provider conversation and tool-call order.
+    - tests/test_agent_middleware.py: lifecycle order, retry, deny, and abort.
+    - tests/test_tracing.py: direct-runtime and model/tool span behavior.
+
+CONCURRENCY MODEL:
+    Each arun invocation owns local counters, messages, and call contexts, but
+    ContextManager and middleware instances may be shared mutable collaborators.
+    The runtime does not introduce locks; callers must avoid sharing one mutable
+    agent/context manager across concurrent runs unless the collaborator's own
+    contract guarantees safety.
 """
 
 from __future__ import annotations
@@ -22,6 +108,7 @@ if TYPE_CHECKING:
     from vidbyte.agents.settings.tool import ToolSettings
 
 from vidbyte.agents.context_algorithms import AgentRuntimeContextAlgorithms
+from vidbyte.agents.errors import ContextWindowRunnerTypeError, RuntimeToolExecutionError, RuntimeToolOutputSchemaError, RuntimeToolPermissionError, RuntimeToolTimeoutError, RuntimeToolValidationError, RuntimeUnknownToolError
 from vidbyte.agents.types import AgentMessage
 from vidbyte.context.algorithms import ContextWindowAlgorithm, ToolResultAdmission
 from vidbyte.context.manager import ContextManager
@@ -162,6 +249,12 @@ class AgentRuntime:
             trace_context=trace_context,
         )
 
+    # @intent direct-loop-policy-order
+    # The direct loop is the semantic boundary where model output becomes agent action. Middleware
+    # must observe the run before calls, model failures before retry decisions, tool calls before
+    # execution, and final state after completion so authorization, budgets, and audit policy have
+    # one authoritative order. Reordering these phases can execute a denied tool, skip a retry, or
+    # publish a result that claims an operation completed before its policy hooks ran.
     async def _arun_once(self, message: str, *, handle: RunnerHandle, context: BaseAgentContext, metadata: Mapping[str, Any] | None = None, options: Mapping[str, Any] | None = None, trace_context: SpanContext | None = None) -> AgentResult:
         """Run one direct model/tool attempt until isDone or a budget stop."""
         provider = handle.provider
@@ -638,6 +731,12 @@ class AgentRuntime:
                     model_response=raw_result,
                 )
 
+    # @intent retry-before-model-failure-escape
+    # Provider calls can fail transiently, and retry middleware is the policy owner that decides
+    # whether another attempt is safe. The runtime must offer every exception to that policy before
+    # it escapes to BaseAgent, while still closing the LLM span for each failed attempt. Bypassing
+    # this order turns a configured retry policy into an unreliable best effort and leaves trace
+    # trees with open spans during the failures operators most need to inspect.
     async def _invoke_with_middleware(self, handle: RunnerHandle, message: str, call_options: Mapping[str, Any], *, context: BaseAgentContext, iteration_count: int, model_call_count: int, call_contexts: Sequence[ToolCallContext], tokens_used: int | None, started_at: float, metadata: Mapping[str, Any], run_state: dict[type, Any] | None = None, trace_context: SpanContext | None = None) -> tuple[object | AgentResult, int]:
         """Invoke the runner, allowing middleware to retry model errors."""
         provider = handle.provider
@@ -846,7 +945,7 @@ class AgentRuntime:
     async def _invoke_context_window_runner(runner: object, prompt: str, **options: Any) -> object:
         """Invoke the current RunnerHandle for an inner-loop context-window algorithm."""
         if not isinstance(runner, RunnerHandle):
-            raise TypeError("Inner context-window runner must be a RunnerHandle.")
+            raise ContextWindowRunnerTypeError(dynamic_context={"runner_class": runner.__class__.__name__})
         return await runner.invoke(prompt, **options)
 
     @staticmethod
@@ -1025,6 +1124,12 @@ class AgentRuntime:
             structured=result.structured,
         )
 
+    # @intent permission-before-tool-execution
+    # Tools are model-requested capabilities, not trusted internal calls. Permission policy must
+    # reject a call before validation or execution so a denied write tool cannot reveal validation
+    # details, consume timeout budget, or create a side effect. Preserve the denied ToolCallContext
+    # rather than raising out of the loop: the model needs a bounded explanation to choose a safe
+    # alternative, while the complete diagnostic packet stays outside model-visible content.
     async def execute_tool_call(self, call: ToolCall, *, provider: str, trace_context: SpanContext | None = None, iteration_count: int | None = None, tool_is_internal: bool = False) -> tuple[ToolCallContext, ToolResult]:
         # Resolves, authorizes, validates, executes, and records one tool call with optional timeout.
         tool_input = _safe_trace_value(dict(call.arguments))
@@ -1047,10 +1152,11 @@ class AgentRuntime:
             if spec.output_schema is not None and result.status.value == "success":
                 _, error = self._schema_formatter.validate(result.output, spec.output_schema)
                 if error:
+                    diagnostic = RuntimeToolOutputSchemaError(dynamic_context={"tool_name": call.tool_name})
                     result = ToolResult.error(
                         call.tool_name,
-                        f"tool call error: output shape mismatch: {error}",
-                        metadata={"error": "output_schema_violation", "detail": error},
+                        str(diagnostic),
+                        metadata={"error": "output_schema_violation", "diagnostic_error": type(diagnostic).__name__},
                     )
             state = ToolCallState.SUCCEEDED if result.status.value == "success" else ToolCallState.FAILED
             self._tracer.end_span(tool_span, output=result.output)
@@ -1078,10 +1184,11 @@ class AgentRuntime:
             state = ToolCallState.FAILED
             self._tracer.end_span(tool_span, error=exc)
         except Exception as exc:
+            diagnostic = RuntimeToolExecutionError(dynamic_context={"tool_name": call.tool_name, "cause_type": type(exc).__name__})
             result = ToolResult.error(
                 call.tool_name,
-                f"Tool execution failed: {exc}",
-                metadata={"error": "execution_error", "error_type": type(exc).__name__},
+                str(diagnostic),
+                metadata={"error": "execution_error", "diagnostic_error": type(diagnostic).__name__},
             )
             state = ToolCallState.FAILED
             self._tracer.end_span(tool_span, error=exc)
@@ -1131,28 +1238,19 @@ class AgentRuntime:
         try:
             return self.tools._get(call.tool_name)
         except Exception as exc:
-            raise ToolRegistryError(
-                f"Tool '{call.tool_name}' is not registered.",
-                details={"tool_name": call.tool_name, "error": str(exc)},
-            ) from exc
+            raise RuntimeUnknownToolError(dynamic_context={"tool_name": call.tool_name, "cause_type": type(exc).__name__}) from exc
 
     def _check_permission(self, spec: object, call: ToolCall) -> None:
         """Raise PermissionDeniedError when the policy rejects the call."""
         decision = self.permission_policy.check(spec, call)
         if decision is PermissionDecision.DENY:
-            raise PermissionDeniedError(
-                f"Permission denied for tool '{spec.name}' requiring {spec.permission.value}",
-                details={"tool_name": spec.name, "permission": spec.permission.value},
-            )
+            raise RuntimeToolPermissionError(dynamic_context={"tool_name": spec.name, "permission": spec.permission.value})
 
     def _validate_tool_call(self, tool: object, call: ToolCall) -> None:
         """Validate tool call arguments, raising ToolExecutionError on failure."""
         validation_error = tool.validate_call(call)
         if validation_error:
-            raise ToolExecutionError(
-                validation_error,
-                details={"tool_name": call.tool_name, "error": "validation_error"},
-            )
+            raise RuntimeToolValidationError(dynamic_context={"tool_name": call.tool_name, "validation_error_type": type(validation_error).__name__})
 
     async def _execute_tool(self, tool: object, call: ToolCall, *, tool_is_internal: bool = False) -> ToolResult:
         # Executes the tool, optionally under tool_timeout_seconds, raising ToolExecutionError on failure.
@@ -1161,10 +1259,7 @@ class AgentRuntime:
         except ToolExecutionError:
             raise
         except Exception as exc:
-            raise ToolExecutionError(
-                f"Tool execution failed: {exc}",
-                details={"tool_name": call.tool_name, "error_type": type(exc).__name__},
-            ) from exc
+            raise RuntimeToolExecutionError(dynamic_context={"tool_name": call.tool_name, "cause_type": type(exc).__name__}) from exc
 
     async def _run_tool_execute(self, tool: object, call: ToolCall, *, tool_is_internal: bool) -> ToolResult:
         # Runs tool.execute, wrapping non-internal calls with ToolSettings.tool_timeout_seconds when set.
@@ -1175,10 +1270,7 @@ class AgentRuntime:
         try:
             return await asyncio.wait_for(tool.execute(call), timeout=timeout)
         except asyncio.TimeoutError as exc:
-            raise ToolExecutionError(
-                f"Tool '{call.tool_name}' timed out after {timeout}s",
-                details={"tool_name": call.tool_name, "error": "timeout", "error_type": "timeout"},
-            ) from exc
+            raise RuntimeToolTimeoutError(dynamic_context={"tool_name": call.tool_name, "timeout_seconds": timeout}) from exc
 
     def _resolve_tool_schemas(self, provider: str) -> Sequence[dict[str, Any]]:
         """Return provider-native tool schemas when the toolkit is non-empty."""
@@ -1347,6 +1439,12 @@ class AgentRuntime:
             },
         )
 
+    # @intent provider-tool-message-order
+    # Provider conversation history is an externally visible protocol: the assistant's tool call
+    # must precede its tool result, and isDone must finalize without injecting a normal result turn.
+    # Breaking that order can make otherwise valid tool results unmatchable by a provider or cause
+    # a completed agent to continue looping. Keep message placement here, after policy decisions
+    # and before the next model call, instead of delegating it to individual tool implementations.
     async def _process_tool_call(
         self,
         call: ToolCall,
@@ -1573,6 +1671,12 @@ class AgentRuntime:
             return None
         return str(getattr(permission, "value", permission))
 
+    # @intent bounded-tool-output-in-context
+    # Tools explicitly bound to a context primitive store their full successful output outside the
+    # next provider message and return an acknowledgement instead. This protects context budgets
+    # while retaining a named, inspectable source of truth for later algorithms and agents. Do not
+    # silently bind failed outputs or replace the result when persistence rejects the primitive;
+    # callers need the original failure to decide whether to retry.
     def _apply_primitive_binding(self, call: ToolCall, result: ToolResult) -> ToolResult:
         """Route a successful tool result into its bound primitive and return an acknowledgment result."""
         if self.context_manager is None or result.status.value != "success":
