@@ -1,22 +1,31 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77.0.3"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "vidbyte-sdk"
 version = "0.1.0"
-description = "Python SDK for building, evaluating, and distributing AI agent workflows."
+description = "Python SDK for building, evaluating, and debugging reliable AI agent harnesses."
 readme = "README.md"
 requires-python = ">=3.11"
-license = { file = "LICENSE" }
+license = "MIT"
+license-files = ["LICENSE"]
 authors = [
   { name = "Vidbyte", email = "hello@vidbyte.ai" }
 ]
-keywords = ["ai", "agents", "llm", "sdk", "mcp", "pipelines", "evals"]
+keywords = [
+  "ai-agents",
+  "agent-harnesses",
+  "harness-engineering",
+  "llm",
+  "mcp",
+  "context-engineering",
+  "evals",
+  "observability",
+]
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Intended Audience :: Developers",
-  "License :: OSI Approved :: MIT License",
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
@@ -30,8 +39,10 @@ dependencies = [
 
 [project.urls]
 Homepage = "https://vidbyte.ai"
-Source = "https://github.com/cerredz/Vidbyte-SDK"
-"Bug Tracker" = "https://github.com/cerredz/Vidbyte-SDK/issues"
+Documentation = "https://github.com/cerredz/Vidbyte-SDK/tree/main/docs"
+Repository = "https://github.com/cerredz/Vidbyte-SDK"
+Issues = "https://github.com/cerredz/Vidbyte-SDK/issues"
+Changelog = "https://github.com/cerredz/Vidbyte-SDK/releases"
 
 [tool.setuptools.packages.find]
 include = ["vidbyte*"]
@@ -41,7 +52,7 @@ vidbyte-sdk = "vidbyte.cli:main"
 vidbyte-mcp-server = "vidbyte.mcp_server.__main__:main"
 
 [tool.setuptools.package-data]
-"vidbyte.prompts.prompts" = ["*.json", "*/*.json", "*/*.md"]
+"vidbyte.prompts.prompts" = ["*.json", "*.md", "*/*.json", "*/*.md"]
 "vidbyte.paradigms.context_minimal_fanout" = [
   "*.md",
   "prompts/*.md",
