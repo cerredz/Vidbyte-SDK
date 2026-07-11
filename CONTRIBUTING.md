@@ -14,12 +14,26 @@ Vidbyte SDK requires Python 3.11 or newer.
 git clone https://github.com/cerredz/Vidbyte-SDK.git
 cd Vidbyte-SDK
 python -m venv .venv
+```
+
+Activate the environment in PowerShell:
+
+```powershell
+.venv\Scripts\Activate.ps1
+```
+
+Or activate it on macOS and Linux:
+
+```bash
+source .venv/bin/activate
+```
+
+Then install the SDK into the active environment:
+
+```bash
 python -m pip install --upgrade pip
 python -m pip install -e .
 ```
-
-Activate the environment with `.venv\Scripts\Activate.ps1` in PowerShell or
-`source .venv/bin/activate` on macOS and Linux.
 
 ## Making a Change
 
