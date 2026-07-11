@@ -1,5 +1,10 @@
 # Vidbyte SDK
 
+[![PyPI version](https://img.shields.io/pypi/v/vidbyte-sdk.svg)](https://pypi.org/project/vidbyte-sdk/)
+[![Python versions](https://img.shields.io/pypi/pyversions/vidbyte-sdk.svg)](https://pypi.org/project/vidbyte-sdk/)
+[![Publish to PyPI](https://github.com/cerredz/Vidbyte-SDK/actions/workflows/publish.yml/badge.svg)](https://github.com/cerredz/Vidbyte-SDK/actions/workflows/publish.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 Vidbyte is an agent engineering platform for building, evaluating, instrumenting,
 and distributing AI workflows. The Vidbyte SDK is the Python package surface for
 that platform: it gives developers composable agents, tools, middleware, context
@@ -47,10 +52,22 @@ access remain outside this package.
 
 > **Alpha — active development.** APIs may change between minor versions.
 
-Install from PyPI:
+Install the latest alpha from PyPI:
 
 ```bash
 pip install vidbyte-sdk
+```
+
+Pin the first public release when reproducibility matters:
+
+```bash
+pip install vidbyte-sdk==0.1.0
+```
+
+Verify the installed distribution and prompt assets:
+
+```bash
+python -c "from importlib.metadata import version; import vidbyte; from vidbyte import Prompts; print(version('vidbyte-sdk'), vidbyte.__version__, len(Prompts().keys()))"
 ```
 
 ## Usage
@@ -1227,3 +1244,15 @@ python -m compileall vidbyte
 python -m unittest discover -s tests
 python -c "from vidbyte import Agent, Tools, VidbyteSDK, tool; sdk = VidbyteSDK(); print(Agent.__name__, Tools.__name__, type(sdk.agents).__name__, callable(tool))"
 ```
+
+## Contributing and Support
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and pull-request guidance. Use the
+[bug report](https://github.com/cerredz/Vidbyte-SDK/issues/new?template=bug_report.yml) or
+[feature request](https://github.com/cerredz/Vidbyte-SDK/issues/new?template=feature_request.yml)
+forms for public project feedback.
+
+Please report vulnerabilities privately according to [SECURITY.md](SECURITY.md). Participation in
+the project is governed by [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md). Release history is available
+from [GitHub Releases](https://github.com/cerredz/Vidbyte-SDK/releases), and design documentation is
+kept under [docs](docs/).
