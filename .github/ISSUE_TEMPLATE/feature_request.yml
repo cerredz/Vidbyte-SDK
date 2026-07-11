@@ -1,0 +1,63 @@
+name: Feature request
+description: Propose an improvement to the public Vidbyte SDK
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Describe the developer problem first. Clear use cases and compatibility constraints make
+        proposals easier to evaluate.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What developer workflow or limitation should this address?
+    validations:
+      required: true
+
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Desired outcome
+      description: Describe the behavior you want without assuming a specific implementation.
+    validations:
+      required: true
+
+  - type: textarea
+    id: api
+    attributes:
+      label: Intended API or example
+      description: Show a short usage sketch if the request affects the public Python, CLI, or MCP surface.
+      render: python
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: What workarounds or competing approaches have you tried?
+    validations:
+      required: true
+
+  - type: dropdown
+    id: contribution
+    attributes:
+      label: Would you like to contribute this change?
+      options:
+        - "Yes"
+        - "Maybe, with guidance"
+        - "No"
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Checklist
+      options:
+        - label: I searched existing issues for a similar request.
+          required: true
+        - label: This request concerns the reusable public SDK rather than private hosted services.
+          required: true

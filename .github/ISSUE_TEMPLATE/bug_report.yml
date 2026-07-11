@@ -1,0 +1,89 @@
+name: Bug report
+description: Report reproducible behavior in the public Vidbyte SDK
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping improve Vidbyte SDK. Do not include credentials, private prompts,
+        customer data, or security vulnerabilities in this public report. Follow SECURITY.md for
+        private security disclosure.
+
+  - type: input
+    id: version
+    attributes:
+      label: Vidbyte SDK version
+      description: Run python -c "from importlib.metadata import version; print(version('vidbyte-sdk'))".
+      placeholder: 0.1.0
+    validations:
+      required: true
+
+  - type: input
+    id: python
+    attributes:
+      label: Python version
+      placeholder: Python 3.11.9
+    validations:
+      required: true
+
+  - type: input
+    id: operating_system
+    attributes:
+      label: Operating system
+      placeholder: Windows 11, macOS 15, or Ubuntu 24.04
+    validations:
+      required: true
+
+  - type: dropdown
+    id: installation
+    attributes:
+      label: Installation source
+      options:
+        - PyPI
+        - Git checkout
+        - Editable install
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Minimal reproduction
+      description: Provide the smallest code sample and exact commands that reproduce the problem.
+      render: python
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or traceback
+      description: Redact credentials and private data before posting.
+      render: shell
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Checklist
+      options:
+        - label: I searched existing issues for this problem.
+          required: true
+        - label: This report does not contain credentials, private data, or an undisclosed vulnerability.
+          required: true
