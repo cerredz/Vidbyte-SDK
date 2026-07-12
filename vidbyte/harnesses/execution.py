@@ -208,6 +208,21 @@ class HarnessContext:
                 self._event_count += 1
             return event
 
+    async def _emit_terminal(self, event_type: str, payload: Mapping[str, Any]) -> HarnessEvent:
+        # Appends the final lifecycle event and seals context mutation under one lock.
+        normalized_type = self._required_text(event_type, "event_type")
+        async with self._emit_lock:
+            self._assert_open()
+            event = self._build_event(normalized_type, payload)
+            try:
+                persisted = await self._coordinator.append_event(event)
+            finally:
+                self._closed = True
+            if persisted:
+                self._next_sequence += 1
+                self._event_count += 1
+            return event
+
     def add_artifact(self, uri: str, *, media_type: str | None = None, sha256: str | None = None, metadata: Mapping[str, Any] | None = None) -> HarnessArtifactRef:
         # Registers an external artifact reference without reading or copying its content.
         self._assert_open()
@@ -261,11 +276,6 @@ class HarnessContext:
         if value is None:
             return None
         return self._required_text(value, field)
-
-    async def _close(self) -> None:
-        # Seals implementation-facing mutation before the terminal snapshot is built.
-        async with self._emit_lock:
-            self._closed = True
 
     def _assert_open(self) -> None:
         # Rejects evidence contributed after the wrapper has begun terminalization.
@@ -361,13 +371,11 @@ class LoadedHarness:
     async def _complete_success(self, output: Any, running: HarnessRun, context: HarnessContext, coordinator: HarnessPersistenceCoordinator) -> HarnessExecutionResult:
         # Records the success boundary, writes the terminal snapshot, and returns raw output.
         try:
-            await context.emit("harness.run.succeeded", {"status": HarnessRunStatus.SUCCEEDED.value})
+            await context._emit_terminal("harness.run.succeeded", {"status": HarnessRunStatus.SUCCEEDED.value})
         except HarnessStoreError:
-            await context._close()
             terminal = self._terminal_run(running, context, coordinator, HarnessRunStatus.SUCCEEDED, response=output)
             await self._finish_without_masking(coordinator, terminal)
             raise
-        await context._close()
         terminal = self._terminal_run(running, context, coordinator, HarnessRunStatus.SUCCEEDED, response=output)
         await coordinator.finish_run(terminal)
         terminal = replace(terminal, persistence_errors=coordinator.errors)
@@ -375,8 +383,7 @@ class LoadedHarness:
 
     async def _complete_problem(self, running: HarnessRun, context: HarnessContext, coordinator: HarnessPersistenceCoordinator, status: HarnessRunStatus, error: BaseException, event_type: str) -> HarnessRun:
         # Finalizes failure evidence without allowing cleanup errors to mask the primary cause.
-        await self._emit_without_masking(context, event_type, {"status": status.value, "exception_type": type(error).__name__})
-        await context._close()
+        await self._emit_terminal_without_masking(context, event_type, {"status": status.value, "exception_type": type(error).__name__})
         record = HarnessErrorRecord(exception_type=type(error).__name__, message=self._serializer.safe_error_message(error))
         terminal = self._terminal_run(running, context, coordinator, status, error=record)
         await self._finish_without_masking(coordinator, terminal)
@@ -391,10 +398,10 @@ class LoadedHarness:
         except asyncio.CancelledError:
             return
 
-    async def _emit_without_masking(self, context: HarnessContext, event_type: str, payload: Mapping[str, Any]) -> None:
+    async def _emit_terminal_without_masking(self, context: HarnessContext, event_type: str, payload: Mapping[str, Any]) -> None:
         # Suppresses only persistence cleanup errors after a primary execution failure.
         try:
-            await context.emit(event_type, payload)
+            await context._emit_terminal(event_type, payload)
         except HarnessStoreError:
             return
 
