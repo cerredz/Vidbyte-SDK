@@ -103,13 +103,14 @@ class HarnessSecretPolicy:
     def is_secret_key(cls, key: str) -> bool:
         # Matches exact normalized credential names without misclassifying words such as author.
         normalized = re.sub(r"[^a-z0-9]+", "_", str(key).lower()).strip("_")
-        return normalized in cls._SECRET_KEYS or normalized.endswith(("_api_key", "_token", "_secret", "_password"))
+        suffixes = ("_api_key", "_private_key", "_secret_key", "_access_key", "_access_key_id", "_token", "_secret", "_password")
+        return normalized in cls._SECRET_KEYS or normalized.endswith(suffixes)
 
 
 class HarnessSerializer:
     """Versioned JSON-safe codec shared by harness stores and dataset exports."""
 
-    _ERROR_ASSIGNMENT = re.compile(r"(?i)\b(api[_-]?key|access[_-]?token|refresh[_-]?token|token|password|secret|credential|authorization)\s*[:=]\s*([^\s,;]+)")
+    _ERROR_ASSIGNMENT = re.compile(r"(?i)\b(api[_-]?key|private[_-]?key|secret[_-]?key|access[_-]?key|access[_-]?token|refresh[_-]?token|token|password|secret|credential|authorization)\s*[:=]\s*([^\s,;]+)")
 
     def spec_to_dict(self, spec: HarnessSpec) -> dict[str, Any]:
         # Serializes one exact behavior specification inside a versioned envelope.
