@@ -9,7 +9,7 @@ Vidbyte is an agent engineering platform for building, evaluating, instrumenting
 and distributing AI workflows. The Vidbyte SDK is the Python package surface for
 that platform: it gives developers composable agents, tools, middleware, context
 management, MCP server integration, prompts, evals, provider adapters, pipelines,
-and tracing primitives.
+validated workflows, and tracing primitives.
 
 This repository is intentionally focused on reusable SDK abstractions. Private
 Vidbyte service logic, proprietary learning systems, hosted scoring, and database
@@ -24,6 +24,7 @@ access remain outside this package.
 - MCP Studio servers that expose Vidbyte agents, tools, prompts, and pipelines to MCP-compatible clients.
 - Local eval suites with reusable graders, concurrency controls, and run registries.
 - Agent pipelines that compose specialized agents through sequential, parallel, conditional, and map-reduce topologies.
+- Typed state-machine workflows with validation gates, conditional branches, cycles, retries, and declared jumps.
 - Prompt libraries, context-window algorithms, and trace artifacts that make long-running agent work easier to inspect.
 
 ## Layer Guide
@@ -47,6 +48,7 @@ access remain outside this package.
 | [`vidbyte.shared`](vidbyte/shared/README.md) | Reserved shared namespace; currently no stable public symbols |
 | [`vidbyte.tools`](vidbyte/tools/README.md) | Tool contracts, decorators, catalogs, execution, MCP bridges, and permissions |
 | [`vidbyte.trace`](vidbyte/trace/README.md) | Trace facade, debug tracer, provider tracers, and continual trace artifacts |
+| [`vidbyte.workflows`](vidbyte/workflows/README.md) | Typed state graphs with validate-before-commit stages, branches, guards, and execution records |
 
 ## Status
 
@@ -111,6 +113,8 @@ print(reply.content)
 Multi-agent execution is modeled as composition:
 
 - `vidbyte.agents` contains actor objects such as `BaseAgent`, `AgentInput`, and `AgentRegistry`.
+- `vidbyte.pipelines` composes simple string-producing agents through fixed topologies.
+- `vidbyte.workflows` enforces typed, gated, non-linear stage transitions in Python code.
 - Custom harnesses stay outside the base SDK until their public contracts are explicitly defined.
 
 ```python
@@ -1112,6 +1116,76 @@ result = await runner.arun(suite)
 sdk.evals.registry.record(result)
 ```
 
+## Validated Workflows
+
+Use `vidbyte.workflows` when Python code must control which stages are legal,
+validate typed candidate state before it becomes committed state, and support
+bounded loops, branches, retries, and jumps. This is the control-flow layer for
+harnesses such as context -> spec -> implementation -> verification.
+
+Stages and validators return semantic outcome codes; only the compiled graph
+maps those codes to destinations. A deterministic schema check and a
+probabilistic verifier agent therefore use the same gate contract without giving
+either one permission to choose an arbitrary next stage.
+
+```python
+from dataclasses import dataclass, replace
+
+from vidbyte import CallableStage, CallableValidator, MachineStatus
+from vidbyte import StageResult, StateGraph, ValidationResult
+
+
+@dataclass(frozen=True)
+class HarnessState:
+    request: str
+    context: str = ""
+    spec: str = ""
+
+
+async def gather_context(ctx):
+    ctx.ledger.setdefault("files_visited", set()).add("vidbyte/agents/base.py")
+    return StageResult(replace(ctx.state, context="relevant SDK contracts"))
+
+
+def context_is_sufficient(ctx):
+    if ctx.candidate_state.context:
+        return ValidationResult.passed()
+    return ValidationResult.rejected("needs_more_context", "Collect more repository evidence.")
+
+
+async def write_spec(ctx):
+    return StageResult(replace(ctx.state, spec=f"Use {ctx.state.context}"))
+
+
+graph = StateGraph(HarnessState, name="software-engineering-harness")
+graph.add_stage(
+    "context",
+    CallableStage(gather_context),
+    validators=(CallableValidator(context_is_sufficient),),
+)
+graph.add_stage("spec", CallableStage(write_spec))
+graph.add_terminal("done", status=MachineStatus.SUCCEEDED)
+graph.set_entry("context")
+graph.add_transition("context", "spec")
+graph.add_transition("context", "context", on="needs_more_context")
+graph.add_transition("spec", "done")
+
+result = await graph.compile().arun(HarnessState(request="Add a state machine"))
+```
+
+Candidate state is cloned and committed only after stage validators and selected
+transition guards pass. Rejected candidates are discarded; structured feedback
+and the explicitly non-transactional run ledger remain available to the recovery
+stage. This in-memory transaction does not roll back filesystem, network, model,
+or tool side effects, so stages that perform external work still need idempotency,
+candidate artifacts, or compensation.
+
+Use `AgentStage` to adapt a `BaseAgent`, and `AgentValidator` for a verifier agent
+whose Pydantic verdict maps to `ValidationResult`. Verifier failures block by
+default, but an LLM judgment remains probabilistic. See the
+[`vidbyte.workflows` guide](vidbyte/workflows/README.md) for adapters, guard and
+branch APIs, retry/error policies, records, and the full layer boundary.
+
 ## Pipelines
 
 Pipelines compose agents across agent boundaries. The contract is string-in and
@@ -1203,6 +1277,7 @@ vidbyte/
 |-- providers/
 |   `-- client.py
 |-- pipelines/
+|-- workflows/
 |-- sessions/
 |-- sources/
 |-- trace/
