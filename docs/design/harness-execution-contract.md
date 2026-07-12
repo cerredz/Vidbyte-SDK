@@ -556,7 +556,7 @@ class BaseHarnessStore(ABC):
 
 ### 6.5 In-Memory and Filesystem Stores
 
-**File(s):** `vidbyte/harnesses/stores/__init__.py`, `vidbyte/harnesses/stores/memory.py`, `vidbyte/harnesses/stores/file.py`
+**File(s):** `vidbyte/harnesses/stores/README.md`, `vidbyte/harnesses/stores/__init__.py`, `vidbyte/harnesses/stores/memory.py`, `vidbyte/harnesses/stores/file.py`
 **Type:** New files
 
 #### What it does
@@ -1024,6 +1024,7 @@ Complete list of every file that will be created, modified, or deleted:
 | CREATE | `vidbyte/harnesses/store.py` | Async `HarnessStore` protocol and shared store invariants |
 | CREATE | `vidbyte/harnesses/execution.py` | `HarnessContext` and `LoadedHarness` execution lifecycle |
 | CREATE | `vidbyte/harnesses/dataset.py` | Raw specification/run/event JSONL exporter |
+| CREATE | `vidbyte/harnesses/stores/README.md` | Folder intent, routing index, non-goals, and durable implementation notes for local stores |
 | CREATE | `vidbyte/harnesses/stores/__init__.py` | Public local-store exports |
 | CREATE | `vidbyte/harnesses/stores/memory.py` | Default concurrent in-memory harness store |
 | CREATE | `vidbyte/harnesses/stores/file.py` | Atomic inspectable filesystem harness store |
