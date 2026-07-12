@@ -222,11 +222,17 @@ class HarnessSerializer:
 
     def safe(self, value: Any) -> Any:
         # Projects arbitrary capture data into a recursively scrubbed JSON-safe value.
-        return self._safe(value, set())
+        try:
+            return self._safe(value, set())
+        except Exception:
+            return {"__dropped__": type(value).__name__}
 
     def safe_error_message(self, error: BaseException | str, *, max_chars: int = 1000) -> str:
         # Redacts common credential assignments and bounds persisted failure text.
-        message = str(error)
+        try:
+            message = str(error)
+        except Exception:
+            message = ""
         redacted = self._ERROR_ASSIGNMENT.sub(lambda match: f"{match.group(1)}=<redacted>", message)
         fallback = f"{type(error).__name__} raised without a message." if not redacted.strip() else redacted
         return fallback[:max_chars]
