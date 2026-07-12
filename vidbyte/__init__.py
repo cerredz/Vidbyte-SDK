@@ -2,7 +2,7 @@
 
 Description:
     Exports the root Vidbyte SDK client and top-level public tool, agent, context,
-    paradigm, and pipeline contracts.
+    harness, paradigm, and pipeline contracts.
 Purpose:
     Keeps common SDK imports concise while leaving specialized built-in tools in
     their category packages.
@@ -14,6 +14,7 @@ Architecture:
     - Context exports: BaseAgentContext, BaseContext, ContextBudget, ContextPermissions.
     - Preset exports: BudgetPreset, PermissionPreset.
     - Pipeline exports: BasePipeline, ConditionalPipeline, ParallelPipeline, PipelineNode, SequentialPipeline.
+    - Harness exports: exact specifications, execution envelopes, stores, policies, records, and typed failures.
     - Error exports: McpError, McpConnectionError, McpInitializeError, McpToolDiscoveryError, McpToolExecutionError, McpAttachmentError, PipelineExecutionError.
 Key Functions / Exports:
     - VidbyteSDK: Main SDK entry point.
@@ -55,6 +56,31 @@ from vidbyte.agents import (
     ToolSettings,
 )
 from vidbyte.client import VidbyteSDK
+from vidbyte.harnesses import (
+    HARNESS_SCHEMA_VERSION,
+    FileHarnessStore,
+    HarnessArtifactRef,
+    HarnessCaptureLevel,
+    HarnessCaptureScope,
+    HarnessClient,
+    HarnessConfigurationError,
+    HarnessContext,
+    HarnessDatasetExporter,
+    HarnessError,
+    HarnessEvent,
+    HarnessExecutionError,
+    HarnessExecutionResult,
+    HarnessImplementation,
+    HarnessPersistenceMode,
+    HarnessRun,
+    HarnessRunStatus,
+    HarnessSpec,
+    HarnessStore,
+    HarnessStoreError,
+    HarnessTimeoutError,
+    InMemoryHarnessStore,
+    LoadedHarness,
+)
 from vidbyte.paradigms import (
     AgentRoleSettings,
     ContextFile,
@@ -296,6 +322,7 @@ from vidbyte.tools.mcp import (
 )
 
 __all__ = [
+    "HARNESS_SCHEMA_VERSION",
     "Agent",
     "ActionTrace",
     "ContinualTraceAgent",
@@ -398,6 +425,28 @@ __all__ = [
     "GitDiffContextItem",
     "Handoff",
     "HandoffAgent",
+    "HarnessArtifactRef",
+    "HarnessCaptureLevel",
+    "HarnessCaptureScope",
+    "HarnessClient",
+    "HarnessConfigurationError",
+    "HarnessContext",
+    "HarnessDatasetExporter",
+    "HarnessError",
+    "HarnessEvent",
+    "HarnessExecutionError",
+    "HarnessExecutionResult",
+    "HarnessImplementation",
+    "HarnessPersistenceMode",
+    "HarnessRun",
+    "HarnessRunStatus",
+    "HarnessSpec",
+    "HarnessStore",
+    "HarnessStoreError",
+    "HarnessTimeoutError",
+    "InMemoryHarnessStore",
+    "FileHarnessStore",
+    "LoadedHarness",
     "MemoryContextItem",
     "MinimalHandoff",
     "PlanContextItem",
