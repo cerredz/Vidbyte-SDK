@@ -46,3 +46,4 @@ reference semantics for `HarnessStore`.
 
 - 2026-07-12 - Created local store package around the shared async contract - keeps backend code separate from harness algorithms and Session checkpoints.
 - 2026-07-12 - Documented single-process filesystem semantics - prevents future callers from assuming JSONL append is a distributed concurrency mechanism.
+- 2026-07-12 - Isolated in-memory records with defensive copies - prevents nested caller mutation from rewriting canonical evidence.

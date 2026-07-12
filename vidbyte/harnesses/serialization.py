@@ -33,6 +33,7 @@ KNOWN EDGE CASES:
     Unsupported objects and recursive references become explicit dropped markers.
     Full string-content secret detection is impossible; key scrubbing and common
     assignment redaction reduce risk but callers still own capture governance.
+    Unknown record versions fail on both encoding and decoding.
 
 COMMON ERRORS:
     HarnessSerializationError for malformed fields; HarnessVersionError for an
@@ -85,6 +86,12 @@ class HarnessSecretPolicy:
         "token",
         "secret",
         "client_secret",
+        "private_key",
+        "secret_key",
+        "access_key",
+        "access_key_id",
+        "session_token",
+        "bearer_token",
         "password",
         "credential",
         "credentials",
@@ -106,6 +113,7 @@ class HarnessSerializer:
 
     def spec_to_dict(self, spec: HarnessSpec) -> dict[str, Any]:
         # Serializes one exact behavior specification inside a versioned envelope.
+        self._assert_contract_version(spec.schema_version, "spec")
         return {
             "schema_version": HARNESS_SCHEMA_VERSION,
             "spec": {
@@ -137,6 +145,7 @@ class HarnessSerializer:
 
     def run_to_dict(self, run: HarnessRun) -> dict[str, Any]:
         # Serializes one running or terminal execution snapshot.
+        self._assert_contract_version(run.schema_version, "run")
         return {
             "schema_version": HARNESS_SCHEMA_VERSION,
             "run": {
@@ -184,6 +193,7 @@ class HarnessSerializer:
 
     def event_to_dict(self, event: HarnessEvent) -> dict[str, Any]:
         # Serializes one ordered event inside a versioned envelope.
+        self._assert_contract_version(event.schema_version, "event")
         return {
             "schema_version": HARNESS_SCHEMA_VERSION,
             "event": {
@@ -368,9 +378,13 @@ class HarnessSerializer:
     def _record_version(self, payload: Mapping[str, Any], record: str) -> int:
         # Requires the nested record version to agree with its supported envelope.
         version = self._integer(payload, "schema_version")
-        if version != HARNESS_SCHEMA_VERSION:
-            raise HarnessVersionError("Unsupported harness record schema version.", details={"found": version, "expected": HARNESS_SCHEMA_VERSION, "record": record})
+        self._assert_contract_version(version, record)
         return version
+
+    def _assert_contract_version(self, version: Any, record: str) -> None:
+        # Rejects caller-constructed records that cannot be written and read as schema one.
+        if isinstance(version, bool) or not isinstance(version, int) or version != HARNESS_SCHEMA_VERSION:
+            raise HarnessVersionError("Unsupported harness record schema version.", details={"found": version, "expected": HARNESS_SCHEMA_VERSION, "record": record})
 
     def _enum(self, enum_type: type[E], value: Any, field: str) -> E:
         # Converts one persisted string into the requested enum with a typed error.

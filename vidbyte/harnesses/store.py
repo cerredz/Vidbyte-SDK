@@ -37,7 +37,8 @@ KNOWN EDGE CASES:
 
 COMMON ERRORS:
     HarnessSpecCollisionError, HarnessRunConflictError,
-    HarnessRunTransitionError, HarnessEventSequenceError, HarnessStoreError.
+    HarnessRunTransitionError, HarnessEventSequenceError, HarnessStoreError,
+    HarnessVersionError.
 
 RELATED DOCS:
     https://github.com/cerredz/Vidbyte-SDK/blob/main/docs/design/harness-execution-contract.md
@@ -57,13 +58,14 @@ import asyncio
 from abc import ABC, abstractmethod
 from typing import Protocol, runtime_checkable
 
-from vidbyte.harnesses.contracts import HarnessEvent, HarnessRun, HarnessRunStatus, HarnessSpec
+from vidbyte.harnesses.contracts import HARNESS_SCHEMA_VERSION, HarnessEvent, HarnessRun, HarnessRunStatus, HarnessSpec
 from vidbyte.harnesses.errors import (
     HarnessEventSequenceError,
     HarnessRunConflictError,
     HarnessRunTransitionError,
     HarnessSpecCollisionError,
     HarnessStoreError,
+    HarnessVersionError,
 )
 
 _TERMINAL_STATUSES = frozenset({
@@ -120,6 +122,7 @@ class BaseHarnessStore(ABC):
 
     async def put_spec(self, spec: HarnessSpec) -> HarnessSpec:
         # Writes a new spec or returns the existing semantically identical record.
+        self._assert_schema_version(spec.schema_version, "spec")
         async with self._operation_lock:
             existing = await self._read_spec(spec.spec_id)
             if existing is None:
@@ -139,6 +142,7 @@ class BaseHarnessStore(ABC):
 
     async def begin_run(self, run: HarnessRun) -> HarnessRun:
         # Validates and creates one unique RUNNING execution record.
+        self._assert_schema_version(run.schema_version, "run")
         async with self._operation_lock:
             await self._assert_spec_exists(run.spec_id)
             self._assert_running_shape(run)
@@ -149,6 +153,7 @@ class BaseHarnessStore(ABC):
 
     async def append_event(self, event: HarnessEvent) -> HarnessEvent:
         # Enforces run identity, RUNNING state, and exact next event sequence.
+        self._assert_schema_version(event.schema_version, "event")
         async with self._operation_lock:
             run = await self._require_run(event.run_id)
             if run.status is not HarnessRunStatus.RUNNING:
@@ -162,6 +167,7 @@ class BaseHarnessStore(ABC):
 
     async def finish_run(self, run: HarnessRun) -> HarnessRun:
         # Validates and persists the only allowed RUNNING-to-terminal transition.
+        self._assert_schema_version(run.schema_version, "run")
         async with self._operation_lock:
             existing = await self._require_run(run.run_id)
             self._assert_terminal_transition(existing, run)
@@ -230,6 +236,11 @@ class BaseHarnessStore(ABC):
         # Rejects boolean, negative, and non-integer run-list limits.
         if limit is not None and (isinstance(limit, bool) or not isinstance(limit, int) or limit < 0):
             raise HarnessStoreError("Harness run list limit must be a non-negative integer or null.", details={"actual_type": type(limit).__name__, "value": str(limit)})
+
+    def _assert_schema_version(self, version: object, record: str) -> None:
+        # Rejects unsupported caller-constructed records before any backend mutation.
+        if isinstance(version, bool) or not isinstance(version, int) or version != HARNESS_SCHEMA_VERSION:
+            raise HarnessVersionError("Unsupported harness record schema version.", details={"found": version, "expected": HARNESS_SCHEMA_VERSION, "record": record})
 
     @abstractmethod
     async def _write_spec(self, spec: HarnessSpec) -> None:

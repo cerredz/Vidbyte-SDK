@@ -32,6 +32,7 @@ WHAT NOT TO DO IN THIS FILE:
 KNOWN EDGE CASES:
     Structural validation proves only that execute is callable; implementation
     correctness is observed inside the execution envelope and recorded as a run.
+    Factories receive a defensive copy so construction cannot mutate spec identity.
 
 COMMON ERRORS:
     HarnessDuplicateRegistrationError for key collisions;
@@ -48,6 +49,7 @@ TESTS:
 
 from __future__ import annotations
 
+from copy import deepcopy
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from vidbyte.harnesses.contracts import HarnessSpec
@@ -132,7 +134,7 @@ class HarnessRegistry:
     def _create_from_factory(self, factory: HarnessFactory, spec: HarnessSpec) -> HarnessImplementation:
         # Converts factory construction failures into configuration context at load time.
         try:
-            return factory.create(spec)
+            return factory.create(deepcopy(spec))
         except Exception as exc:
             raise HarnessConfigurationError("Harness factory could not construct its implementation.", details={"harness_type": spec.harness_type, "harness_version": spec.harness_version, "factory_type": type(factory).__name__}) from exc
 

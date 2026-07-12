@@ -30,7 +30,7 @@ WHAT NOT TO DO IN THIS FILE:
 
 KNOWN EDGE CASES:
     Records are retained for the lifetime of this store instance with no pruning.
-    Frozen dataclasses contain mapping values that callers should treat as immutable.
+    Defensive deep copies isolate the canonical maps from nested caller mutation.
 
 RELATED DOCS:
     https://github.com/cerredz/Vidbyte-SDK/blob/main/docs/design/harness-execution-contract.md
@@ -44,6 +44,8 @@ CONCURRENCY MODEL:
 """
 
 from __future__ import annotations
+
+from copy import deepcopy
 
 from vidbyte.harnesses.contracts import HarnessEvent, HarnessRun, HarnessSpec
 from vidbyte.harnesses.store import BaseHarnessStore
@@ -61,32 +63,34 @@ class InMemoryHarnessStore(BaseHarnessStore):
 
     async def _write_spec(self, spec: HarnessSpec) -> None:
         # Stores one specification by its deterministic identifier.
-        self._specs[spec.spec_id] = spec
+        self._specs[spec.spec_id] = deepcopy(spec)
 
     async def _read_spec(self, spec_id: str) -> HarnessSpec | None:
         # Returns one specification or None without applying lookup policy.
-        return self._specs.get(spec_id)
+        spec = self._specs.get(spec_id)
+        return None if spec is None else deepcopy(spec)
 
     async def _write_run(self, run: HarnessRun) -> None:
         # Stores one running or terminal snapshot by its unique run id.
-        self._runs[run.run_id] = run
+        self._runs[run.run_id] = deepcopy(run)
         self._run_events.setdefault(run.run_id, [])
 
     async def _read_run(self, run_id: str) -> HarnessRun | None:
         # Returns one run snapshot or None without applying lookup policy.
-        return self._runs.get(run_id)
+        run = self._runs.get(run_id)
+        return None if run is None else deepcopy(run)
 
     async def _read_all_runs(self) -> list[HarnessRun]:
         # Returns a detached list of every current run snapshot.
-        return list(self._runs.values())
+        return deepcopy(list(self._runs.values()))
 
     async def _write_event(self, event: HarnessEvent) -> None:
         # Appends one already-validated event to its run-local list.
-        self._run_events.setdefault(event.run_id, []).append(event)
+        self._run_events.setdefault(event.run_id, []).append(deepcopy(event))
 
     async def _read_events(self, run_id: str) -> list[HarnessEvent]:
         # Returns a detached list so callers cannot mutate internal event state.
-        return list(self._run_events.get(run_id, ()))
+        return deepcopy(list(self._run_events.get(run_id, ())))
 
 
 __all__ = ["InMemoryHarnessStore"]

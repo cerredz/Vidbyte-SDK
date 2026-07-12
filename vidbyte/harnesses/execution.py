@@ -36,7 +36,8 @@ KNOWN EDGE CASES:
     Synchronous implementations run inline and therefore cannot be interrupted by
     an asyncio timeout while blocking. Cancellation and timeout cannot fence side
     effects already started. Best-effort stores can retain partial records and
-    report every failed operation on the returned terminal run.
+    report every failed operation on the returned terminal run. Context mutation
+    is sealed before terminal snapshots so retained background tasks fail closed.
 
 COMMON ERRORS:
     HarnessExecutionError for implementation failures; HarnessTimeoutError for
@@ -59,6 +60,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 from collections.abc import Awaitable, Callable, Mapping
+from copy import deepcopy
 from dataclasses import replace
 from datetime import datetime, timezone
 from typing import Any, TypeVar
@@ -77,7 +79,7 @@ from vidbyte.harnesses.contracts import (
     HarnessRunStatus,
     HarnessSpec,
 )
-from vidbyte.harnesses.errors import HarnessConfigurationError, HarnessExecutionError, HarnessStoreError, HarnessTimeoutError
+from vidbyte.harnesses.errors import HarnessConfigurationError, HarnessExecutionError, HarnessRunTransitionError, HarnessStoreError, HarnessTimeoutError
 from vidbyte.harnesses.registry import HarnessImplementation
 from vidbyte.harnesses.serialization import HarnessSerializer
 from vidbyte.harnesses.store import HarnessStore
@@ -150,7 +152,7 @@ class HarnessContext:
 
     def __init__(self, spec: HarnessSpec, run_id: str, coordinator: HarnessPersistenceCoordinator, serializer: HarnessSerializer, capture_level: HarnessCaptureLevel) -> None:
         # Initializes isolated event, artifact, and session-link state for one run.
-        self._spec = spec
+        self._spec = deepcopy(spec)
         self._run_id = run_id
         self._coordinator = coordinator
         self._serializer = serializer
@@ -160,11 +162,12 @@ class HarnessContext:
         self._artifacts: list[HarnessArtifactRef] = []
         self._session_ids: list[str] = []
         self._emit_lock = asyncio.Lock()
+        self._closed = False
 
     @property
     def spec(self) -> HarnessSpec:
         # Exposes the exact resolved specification used to construct the implementation.
-        return self._spec
+        return deepcopy(self._spec)
 
     @property
     def run_id(self) -> str:
@@ -197,6 +200,7 @@ class HarnessContext:
         if payload is not None and not isinstance(payload, Mapping):
             raise HarnessConfigurationError("Harness event payload must be a mapping or null.", details={"actual_type": type(payload).__name__})
         async with self._emit_lock:
+            self._assert_open()
             event = self._build_event(normalized_type, payload or {})
             persisted = await self._coordinator.append_event(event)
             if persisted:
@@ -206,6 +210,7 @@ class HarnessContext:
 
     def add_artifact(self, uri: str, *, media_type: str | None = None, sha256: str | None = None, metadata: Mapping[str, Any] | None = None) -> HarnessArtifactRef:
         # Registers an external artifact reference without reading or copying its content.
+        self._assert_open()
         normalized_uri = self._required_text(uri, "uri")
         if metadata is not None and not isinstance(metadata, Mapping):
             raise HarnessConfigurationError("Harness artifact metadata must be a mapping or null.", details={"actual_type": type(metadata).__name__})
@@ -221,6 +226,7 @@ class HarnessContext:
 
     def link_session(self, session_id: str) -> None:
         # Links one durable Session by identifier while retaining first-seen order.
+        self._assert_open()
         normalized = self._required_text(session_id, "session_id")
         if normalized not in self._session_ids:
             self._session_ids.append(normalized)
@@ -256,6 +262,16 @@ class HarnessContext:
             return None
         return self._required_text(value, field)
 
+    async def _close(self) -> None:
+        # Seals implementation-facing mutation before the terminal snapshot is built.
+        async with self._emit_lock:
+            self._closed = True
+
+    def _assert_open(self) -> None:
+        # Rejects evidence contributed after the wrapper has begun terminalization.
+        if self._closed:
+            raise HarnessRunTransitionError("Harness context is closed after terminalization.", details={"run_id": self._run_id})
+
 
 class LoadedHarness:
     """Executable harness implementation bound to exact behavior and run policy."""
@@ -264,7 +280,7 @@ class LoadedHarness:
         # Binds immutable load-time choices while leaving implementation behavior opaque.
         if metadata is not None and not isinstance(metadata, Mapping):
             raise HarnessConfigurationError("Harness default metadata must be a mapping or null.", details={"actual_type": type(metadata).__name__})
-        self._spec = spec
+        self._spec = deepcopy(spec)
         self._implementation = implementation
         self._store = store
         self._serializer = serializer or HarnessSerializer()
@@ -276,7 +292,7 @@ class LoadedHarness:
     @property
     def spec(self) -> HarnessSpec:
         # Returns the deterministic behavior identity shared by repeated runs.
-        return self._spec
+        return deepcopy(self._spec)
 
     @property
     def implementation(self) -> HarnessImplementation:
@@ -347,9 +363,11 @@ class LoadedHarness:
         try:
             await context.emit("harness.run.succeeded", {"status": HarnessRunStatus.SUCCEEDED.value})
         except HarnessStoreError:
+            await context._close()
             terminal = self._terminal_run(running, context, coordinator, HarnessRunStatus.SUCCEEDED, response=output)
             await self._finish_without_masking(coordinator, terminal)
             raise
+        await context._close()
         terminal = self._terminal_run(running, context, coordinator, HarnessRunStatus.SUCCEEDED, response=output)
         await coordinator.finish_run(terminal)
         terminal = replace(terminal, persistence_errors=coordinator.errors)
@@ -358,6 +376,7 @@ class LoadedHarness:
     async def _complete_problem(self, running: HarnessRun, context: HarnessContext, coordinator: HarnessPersistenceCoordinator, status: HarnessRunStatus, error: BaseException, event_type: str) -> HarnessRun:
         # Finalizes failure evidence without allowing cleanup errors to mask the primary cause.
         await self._emit_without_masking(context, event_type, {"status": status.value, "exception_type": type(error).__name__})
+        await context._close()
         record = HarnessErrorRecord(exception_type=type(error).__name__, message=self._serializer.safe_error_message(error))
         terminal = self._terminal_run(running, context, coordinator, status, error=record)
         await self._finish_without_masking(coordinator, terminal)
