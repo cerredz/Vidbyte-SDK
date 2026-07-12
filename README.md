@@ -188,7 +188,9 @@ Config contains only `schema_version`, `harness`, `agents`, and `params` at the
 top level; the nested agent and parameter fields remain implementation-defined.
 Changing any resolved behavior value, including referenced prompt-file content,
 changes `spec_id`. Store choice, capture policy, timestamps, and run metadata do
-not. Credential-like config keys are rejected before hashing or persistence.
+not. The SDK does not hash implementation source, so code changes require a
+`harness.version` bump and behavior-affecting runtime tweaks belong in config.
+Credential-like config keys are rejected before hashing or persistence.
 
 This layer captures its request/response boundary plus evidence explicitly sent
 through `HarnessContext`; it cannot automatically observe arbitrary model, tool,

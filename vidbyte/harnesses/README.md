@@ -53,6 +53,11 @@ Credentials are not behavior hyperparameters. Credential-like config keys are
 rejected before hashing or persistence; inject secrets through environments or
 provider objects instead.
 
+The SDK does not hash Python source or inspect hidden implementation state. Put
+every behavior-affecting runtime tweak in `agents`/`params`, and bump
+`harness.version` whenever implementation code changes. Run request and metadata
+are intentionally per-invocation data and do not change `spec_id`.
+
 ```text
 implementation code + resolved config -> reusable hspec_...
 reusable hspec_... + one invocation   -> unique hrun_...
@@ -148,6 +153,11 @@ invisible unless the implementation emits evidence or uses another instrumented
 SDK component. Timeouts cannot forcibly terminate synchronous Python code or
 undo side effects already started. Retention, deletion, licensing, and sensitive
 data policy remain the caller's responsibility.
+
+The context closes when terminalization starts. Implementations should await
+their own child tasks before returning; a retained background task cannot append
+late evidence after the canonical run has ended. Separate `execute()` calls may
+run concurrently, so a stateful implementation owns its own concurrency policy.
 
 ## Raw dataset export
 
