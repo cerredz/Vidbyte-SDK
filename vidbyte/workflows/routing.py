@@ -45,6 +45,8 @@ class CallableRouter(Generic[StateT]):
 
     def __init__(self, callback: Callable[[RoutingContext[StateT]], str | Awaitable[str]], *, name: str | None = None) -> None:
         # Stores one branch callback and a stable diagnostic name.
+        if not callable(callback):
+            raise WorkflowDefinitionError("CallableRouter callback must be callable.", details={"actual_type": type(callback).__name__})
         self._callback = callback
         candidate = name or getattr(callback, "__name__", None) or "callable_router"
         self._name = str(candidate).strip()

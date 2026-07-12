@@ -56,6 +56,8 @@ class CallableStage(Generic[StateT]):
 
     def __init__(self, callback: Callable[[StageContext[StateT]], StageResult[StateT] | Awaitable[StageResult[StateT]]], *, name: str | None = None) -> None:
         # Stores the callback and a stable diagnostic name.
+        if not callable(callback):
+            raise WorkflowDefinitionError("CallableStage callback must be callable.", details={"actual_type": type(callback).__name__})
         self._callback = callback
         self._name = _resolved_name(name, callback, "callable_stage")
 
@@ -75,6 +77,14 @@ class AgentStage(Generic[StateT]):
 
     def __init__(self, agent: BaseAgent | Callable[[StageContext[StateT]], BaseAgent], prompt_builder: Callable[[StageContext[StateT]], str | AgentInput], result_builder: Callable[[AgentMessage, StageContext[StateT]], StageResult[StateT] | Awaitable[StageResult[StateT]]], *, fresh_fork: bool = True, fork_settings: AgentForkSettings | None = None, name: str | None = None) -> None:
         # Validates isolation settings and stores the agent input/output adapters.
+        if not isinstance(agent, BaseAgent) and not callable(agent):
+            raise WorkflowDefinitionError("AgentStage agent must be BaseAgent or a callable factory.", details={"actual_type": type(agent).__name__})
+        if not callable(prompt_builder) or not callable(result_builder):
+            raise WorkflowDefinitionError("AgentStage prompt_builder and result_builder must be callable.", details={"prompt_builder_type": type(prompt_builder).__name__, "result_builder_type": type(result_builder).__name__})
+        if not isinstance(fresh_fork, bool):
+            raise WorkflowDefinitionError("AgentStage fresh_fork must be a boolean.", details={"actual_type": type(fresh_fork).__name__})
+        if fork_settings is not None and not isinstance(fork_settings, AgentForkSettings):
+            raise WorkflowDefinitionError("AgentStage fork_settings must be AgentForkSettings when provided.", details={"actual_type": type(fork_settings).__name__})
         if fresh_fork and fork_settings is not None and (fork_settings.include_history or fork_settings.history is not None):
             raise WorkflowDefinitionError("AgentStage fresh forks cannot include parent or explicit history.", details={"adapter": name or "agent_stage", "include_history": fork_settings.include_history, "explicit_history": fork_settings.history is not None})
         self._agent_source = agent

@@ -238,6 +238,8 @@ class _WorkflowRun(Generic[StateT]):
         # Initializes run-local collaborators without validating user state yet.
         if ledger is not None and not isinstance(ledger, MutableMapping):
             raise WorkflowExecutionError("StateMachine ledger must be a mutable mapping.", details={"run_id": run_id, "actual_type": type(ledger).__name__})
+        if metadata is not None and not isinstance(metadata, Mapping):
+            raise WorkflowExecutionError("StateMachine metadata must be a mapping.", details={"run_id": run_id, "actual_type": type(metadata).__name__})
         self._definition = definition
         self._initial_state = initial_state
         self._run_id = run_id
@@ -249,8 +251,8 @@ class _WorkflowRun(Generic[StateT]):
 
     async def execute(self) -> StateMachineResult[StateT]:
         # Runs from initial-state isolation through a declared terminal result.
-        await self._recorder.emit(WorkflowEventType.RUN_STARTED, stage=self._definition.entry, payload={"workflow": self._definition.name, "entry": self._definition.entry})
         try:
+            await self._recorder.emit(WorkflowEventType.RUN_STARTED, stage=self._definition.entry, payload={"workflow": self._definition.name, "entry": self._definition.entry})
             committed = self._normalize_clone(self._initial_state, boundary="initial_state")
             self._runtime = _RunState(committed_state=committed, current_stage=self._definition.entry, ledger=self._ledger, metadata=self._metadata)
             return await self._execute_stages()
@@ -381,7 +383,12 @@ class _WorkflowRun(Generic[StateT]):
         while True:
             started = time.perf_counter()
             selected = await self._select_route(decision)
-            sequence = self._consume_transition(decision, selected)
+            sequence = self._consume_transition()
+            await self._emit_transition_selected(decision, selected, sequence)
+            if sequence > self._definition.settings.max_transitions:
+                validation = _ValidationDecision(passed=False, result=None, records=())
+                self._append_transition_record(sequence, decision, selected=selected, validation=validation, accepted=False, started=started)
+                self._raise_transition_limit(decision, selected, sequence)
             guard_decision = await self._run_guards(decision, selected)
             if guard_decision.must_raise:
                 self._append_transition_record(sequence, decision, selected=selected, validation=guard_decision, accepted=False, started=started)
@@ -418,18 +425,23 @@ class _WorkflowRun(Generic[StateT]):
             raise WorkflowRoutingError(f"Router '{router_name}' returned undeclared branch key '{key or '<empty>'}'.", details={"run_id": self._run_id, "stage": decision.source, "outcome": decision.outcome, "router": router_name, "branch_key": key, "available_keys": tuple(route.routes)})
         return _SelectedRoute(target=destination.target, guards=destination.guards, branch_key=key, router=router_name)
 
-    def _consume_transition(self, decision: _StageDecision[StateT], selected: _SelectedRoute[StateT]) -> int:
+    def _consume_transition(self) -> int:
         # Counts every target selection before guards so redirect loops stay bounded.
         runtime = self._require_runtime()
         runtime.transition_count += 1
-        if runtime.transition_count > self._definition.settings.max_transitions:
-            raise TransitionLimitError(f"Workflow '{self._definition.name}' exceeded max_transitions={self._definition.settings.max_transitions}.", details={"run_id": self._run_id, "stage": decision.source, "outcome": decision.outcome, "target": selected.target, "transition_count": runtime.transition_count, "max_transitions": self._definition.settings.max_transitions})
         return runtime.transition_count
+
+    async def _emit_transition_selected(self, decision: _StageDecision[StateT], selected: _SelectedRoute[StateT], sequence: int) -> None:
+        # Emits every counted selection, including the attempt that exceeds the budget.
+        await self._recorder.emit(WorkflowEventType.TRANSITION_SELECTED, stage=decision.source, payload={"sequence": sequence, "outcome": decision.outcome, "target": selected.target, "branch_key": selected.branch_key, "router": selected.router, "trigger": decision.trigger})
+
+    def _raise_transition_limit(self, decision: _StageDecision[StateT], selected: _SelectedRoute[StateT], sequence: int) -> None:
+        # Raises after selection evidence is recorded without invoking target guards.
+        raise TransitionLimitError(f"Workflow '{self._definition.name}' exceeded max_transitions={self._definition.settings.max_transitions}.", details={"run_id": self._run_id, "stage": decision.source, "outcome": decision.outcome, "target": selected.target, "transition_count": sequence, "max_transitions": self._definition.settings.max_transitions})
 
     async def _run_guards(self, decision: _StageDecision[StateT], selected: _SelectedRoute[StateT]) -> _ValidationDecision:
         # Runs target-specific guards against the selected candidate before commit.
         runtime = self._require_runtime()
-        await self._recorder.emit(WorkflowEventType.TRANSITION_SELECTED, stage=decision.source, payload={"sequence": runtime.transition_count, "outcome": decision.outcome, "target": selected.target, "branch_key": selected.branch_key, "router": selected.router, "trigger": decision.trigger})
         inspection_result = self._inspection_result(decision.stage_result, boundary=f"stage:{decision.source}:guard_candidate")
         state_before = self._normalize_clone(runtime.committed_state, boundary=f"stage:{decision.source}:guard_before")
         context = ValidationContext(run_id=self._run_id, phase=ValidationPhase.TRANSITION, stage=decision.source, state_before=state_before, candidate_state=inspection_result.state, stage_result=inspection_result, outcome=decision.outcome, target=selected.target, feedback=decision.feedback, ledger=runtime.ledger, metadata=runtime.metadata)
@@ -575,7 +587,9 @@ class StateMachine(Generic[StateT]):
 
     async def arun(self, initial_state: StateT, *, run_id: str | None = None, ledger: MutableMapping[str, Any] | None = None, metadata: Mapping[str, Any] | None = None, observers: Sequence[WorkflowObserver] = ()) -> StateMachineResult[StateT]:
         # Executes one isolated run and converts machine-level timeouts/failures.
-        resolved_run_id = str(run_id or uuid4()).strip()
+        if run_id is not None and not isinstance(run_id, str):
+            raise WorkflowExecutionError("StateMachine run_id must be a string when provided.", details={"workflow": self.name, "actual_type": type(run_id).__name__})
+        resolved_run_id = str(uuid4()) if run_id is None else run_id.strip()
         if not resolved_run_id:
             raise WorkflowExecutionError("StateMachine run_id cannot be empty.", details={"workflow": self.name})
         try:

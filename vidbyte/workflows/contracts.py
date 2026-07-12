@@ -52,6 +52,7 @@ from collections.abc import Mapping, MutableMapping
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
+from math import isfinite
 from types import MappingProxyType
 from typing import Any, Generic, Protocol, TypeVar, runtime_checkable
 
@@ -115,15 +116,20 @@ class RetryPolicy:
 
     def __post_init__(self) -> None:
         # Rejects invalid retry bounds before a workflow can begin execution.
-        if self.max_attempts <= 0:
-            raise ValueError("RetryPolicy.max_attempts must be greater than zero.")
-        if self.delay_seconds < 0:
-            raise ValueError("RetryPolicy.delay_seconds cannot be negative.")
-        if self.backoff_multiplier <= 0:
-            raise ValueError("RetryPolicy.backoff_multiplier must be greater than zero.")
-        retry_for = tuple(self.retry_for)
+        if not isinstance(self.max_attempts, int) or isinstance(self.max_attempts, bool) or self.max_attempts <= 0:
+            raise ValueError("RetryPolicy.max_attempts must be an integer greater than zero.")
+        if not isinstance(self.delay_seconds, (int, float)) or isinstance(self.delay_seconds, bool) or not isfinite(self.delay_seconds) or self.delay_seconds < 0:
+            raise ValueError("RetryPolicy.delay_seconds must be a finite non-negative number.")
+        if not isinstance(self.backoff_multiplier, (int, float)) or isinstance(self.backoff_multiplier, bool) or not isfinite(self.backoff_multiplier) or self.backoff_multiplier <= 0:
+            raise ValueError("RetryPolicy.backoff_multiplier must be a finite number greater than zero.")
+        try:
+            retry_for = tuple(self.retry_for)
+        except TypeError as exc:
+            raise ValueError("RetryPolicy.retry_for must contain one or more Exception subclasses.") from exc
         if not retry_for or any(not isinstance(item, type) or not issubclass(item, Exception) for item in retry_for):
             raise ValueError("RetryPolicy.retry_for must contain one or more Exception subclasses.")
+        object.__setattr__(self, "delay_seconds", float(self.delay_seconds))
+        object.__setattr__(self, "backoff_multiplier", float(self.backoff_multiplier))
         object.__setattr__(self, "retry_for", retry_for)
 
 
@@ -137,9 +143,15 @@ class StagePolicy:
 
     def __post_init__(self) -> None:
         # Normalizes the optional recovery outcome and rejects invalid timeouts.
-        if self.timeout_seconds is not None and self.timeout_seconds <= 0:
-            raise ValueError("StagePolicy.timeout_seconds must be greater than zero when provided.")
+        if not isinstance(self.retry, RetryPolicy):
+            raise TypeError("StagePolicy.retry must be a RetryPolicy instance.")
+        if self.timeout_seconds is not None:
+            if not isinstance(self.timeout_seconds, (int, float)) or isinstance(self.timeout_seconds, bool) or not isfinite(self.timeout_seconds) or self.timeout_seconds <= 0:
+                raise ValueError("StagePolicy.timeout_seconds must be a finite number greater than zero when provided.")
+            object.__setattr__(self, "timeout_seconds", float(self.timeout_seconds))
         if self.error_outcome is not None:
+            if not isinstance(self.error_outcome, str):
+                raise TypeError("StagePolicy.error_outcome must be a string when provided.")
             outcome = self.error_outcome.strip()
             if not outcome:
                 raise ValueError("StagePolicy.error_outcome cannot be empty when provided.")
@@ -158,11 +170,17 @@ class StateMachineSettings:
 
     def __post_init__(self) -> None:
         # Validates global limits and normalizes enum and outcome values.
-        if self.max_transitions <= 0:
-            raise ValueError("StateMachineSettings.max_transitions must be greater than zero.")
-        if self.timeout_seconds is not None and self.timeout_seconds <= 0:
-            raise ValueError("StateMachineSettings.timeout_seconds must be greater than zero when provided.")
+        if not isinstance(self.max_transitions, int) or isinstance(self.max_transitions, bool) or self.max_transitions <= 0:
+            raise ValueError("StateMachineSettings.max_transitions must be an integer greater than zero.")
+        if self.timeout_seconds is not None:
+            if not isinstance(self.timeout_seconds, (int, float)) or isinstance(self.timeout_seconds, bool) or not isfinite(self.timeout_seconds) or self.timeout_seconds <= 0:
+                raise ValueError("StateMachineSettings.timeout_seconds must be a finite number greater than zero when provided.")
+            object.__setattr__(self, "timeout_seconds", float(self.timeout_seconds))
+        if not isinstance(self.record_state_snapshots, bool):
+            raise TypeError("StateMachineSettings.record_state_snapshots must be a boolean.")
         policy = self.validator_error_policy if isinstance(self.validator_error_policy, ValidatorErrorPolicy) else ValidatorErrorPolicy(self.validator_error_policy)
+        if not isinstance(self.validation_error_outcome, str):
+            raise TypeError("StateMachineSettings.validation_error_outcome must be a string.")
         outcome = self.validation_error_outcome.strip()
         if not outcome:
             raise ValueError("StateMachineSettings.validation_error_outcome cannot be empty.")
@@ -185,6 +203,8 @@ class WorkflowFeedback:
         object.__setattr__(self, "kind", _required_text(self.kind, "WorkflowFeedback.kind"))
         object.__setattr__(self, "source", _required_text(self.source, "WorkflowFeedback.source"))
         object.__setattr__(self, "code", _required_text(self.code, "WorkflowFeedback.code"))
+        if not isinstance(self.message, str):
+            raise TypeError("WorkflowFeedback.message must be a string.")
         object.__setattr__(self, "message", self.message.strip())
         object.__setattr__(self, "details", _freeze_mapping(self.details))
 
@@ -216,9 +236,13 @@ class ValidationResult:
     def __post_init__(self) -> None:
         # Normalizes statuses and validates the code and optional unit score.
         status = self.status if isinstance(self.status, ValidationStatus) else ValidationStatus(self.status)
+        if not isinstance(self.code, str) or not isinstance(self.feedback, str):
+            raise TypeError("ValidationResult.code and feedback must be strings.")
         code = self.code.strip() or status.value
-        if self.score is not None and not 0.0 <= self.score <= 1.0:
-            raise ValueError("ValidationResult.score must be between 0.0 and 1.0 when provided.")
+        if self.score is not None:
+            if not isinstance(self.score, (int, float)) or isinstance(self.score, bool) or not isfinite(self.score) or not 0.0 <= self.score <= 1.0:
+                raise ValueError("ValidationResult.score must be a finite number between 0.0 and 1.0 when provided.")
+            object.__setattr__(self, "score", float(self.score))
         object.__setattr__(self, "status", status)
         object.__setattr__(self, "code", code)
         object.__setattr__(self, "feedback", self.feedback.strip())
@@ -507,11 +531,15 @@ class RouteTarget(Generic[StateT]):
 
 def _freeze_mapping(value: Mapping[str, Any] | None) -> Mapping[str, Any]:
     # Copies a mapping into a read-only top-level view for durable evidence.
+    if value is not None and not isinstance(value, Mapping):
+        raise TypeError(f"Workflow mapping fields require Mapping values, got {type(value).__name__}.")
     return MappingProxyType(dict(value or {}))
 
 
 def _required_text(value: str, field_name: str) -> str:
     # Normalizes a required identifier and reports the precise empty field.
+    if not isinstance(value, str):
+        raise TypeError(f"{field_name} must be a string, got {type(value).__name__}.")
     text = value.strip()
     if not text:
         raise ValueError(f"{field_name} cannot be empty.")

@@ -50,6 +50,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 from collections.abc import Awaitable, Callable, Mapping, Sequence
+from math import isfinite
 from typing import Any, Generic, TypeVar
 
 from pydantic import BaseModel, TypeAdapter, ValidationError
@@ -68,6 +69,10 @@ class CallableValidator(Generic[StateT]):
 
     def __init__(self, callback: Callable[[ValidationContext[StateT]], ValidationResult | bool | Awaitable[ValidationResult | bool]], *, name: str | None = None, reject_code: str = "validation_failed", reject_feedback: str = "Validator returned false.") -> None:
         # Stores one callback and the deterministic false-result mapping.
+        if not callable(callback):
+            raise WorkflowDefinitionError("CallableValidator callback must be callable.", details={"actual_type": type(callback).__name__})
+        if not isinstance(reject_feedback, str):
+            raise WorkflowDefinitionError("CallableValidator.reject_feedback must be a string.", details={"actual_type": type(reject_feedback).__name__})
         self._callback = callback
         self._name = _resolved_name(name, callback, "callable_validator")
         self._reject_code = _required_code(reject_code, "CallableValidator.reject_code")
@@ -93,6 +98,10 @@ class SchemaValidator(Generic[StateT]):
 
     def __init__(self, schema: Any, *, selector: Callable[[ValidationContext[StateT]], Any] | None = None, strict: bool = True, name: str | None = None, reject_code: str = "invalid_schema") -> None:
         # Compiles the schema once and stores an optional candidate selector.
+        if selector is not None and not callable(selector):
+            raise WorkflowDefinitionError("SchemaValidator.selector must be callable when provided.", details={"actual_type": type(selector).__name__})
+        if not isinstance(strict, bool):
+            raise WorkflowDefinitionError("SchemaValidator.strict must be a boolean.", details={"actual_type": type(strict).__name__})
         try:
             self._adapter = TypeAdapter(schema)
         except Exception as exc:
@@ -150,19 +159,25 @@ class AgentValidator(Generic[StateT, VerdictT]):
 
     def __init__(self, agent: BaseAgent | Callable[[ValidationContext[StateT]], BaseAgent], prompt_builder: Callable[[ValidationContext[StateT]], str | AgentInput], verdict_schema: type[VerdictT], verdict_mapper: Callable[[VerdictT, ValidationContext[StateT]], ValidationResult], *, fresh_fork: bool = True, max_attempts: int = 1, timeout_seconds: float | None = None, fail_closed: bool = True, error_code: str = "agent_validator_error", name: str | None = None) -> None:
         # Validates verifier policy and stores the agent-to-result mapping boundary.
+        if not isinstance(agent, BaseAgent) and not callable(agent):
+            raise WorkflowDefinitionError("AgentValidator agent must be BaseAgent or a callable factory.", details={"actual_type": type(agent).__name__})
+        if not callable(prompt_builder) or not callable(verdict_mapper):
+            raise WorkflowDefinitionError("AgentValidator prompt_builder and verdict_mapper must be callable.", details={"prompt_builder_type": type(prompt_builder).__name__, "verdict_mapper_type": type(verdict_mapper).__name__})
         if not isinstance(verdict_schema, type) or not issubclass(verdict_schema, BaseModel):
             raise WorkflowDefinitionError("AgentValidator.verdict_schema must be a Pydantic BaseModel subclass.", details={"schema_type": type(verdict_schema).__name__})
-        if max_attempts <= 0:
-            raise WorkflowDefinitionError("AgentValidator.max_attempts must be greater than zero.", details={"max_attempts": max_attempts})
-        if timeout_seconds is not None and timeout_seconds <= 0:
-            raise WorkflowDefinitionError("AgentValidator.timeout_seconds must be greater than zero when provided.", details={"timeout_seconds": timeout_seconds})
+        if not isinstance(fresh_fork, bool) or not isinstance(fail_closed, bool):
+            raise WorkflowDefinitionError("AgentValidator fresh_fork and fail_closed must be booleans.", details={"fresh_fork_type": type(fresh_fork).__name__, "fail_closed_type": type(fail_closed).__name__})
+        if not isinstance(max_attempts, int) or isinstance(max_attempts, bool) or max_attempts <= 0:
+            raise WorkflowDefinitionError("AgentValidator.max_attempts must be an integer greater than zero.", details={"actual_type": type(max_attempts).__name__})
+        if timeout_seconds is not None and (not isinstance(timeout_seconds, (int, float)) or isinstance(timeout_seconds, bool) or not isfinite(timeout_seconds) or timeout_seconds <= 0):
+            raise WorkflowDefinitionError("AgentValidator.timeout_seconds must be a finite number greater than zero when provided.", details={"actual_type": type(timeout_seconds).__name__})
         self._agent_source = agent
         self._prompt_builder = prompt_builder
         self._verdict_schema = verdict_schema
         self._verdict_mapper = verdict_mapper
         self._fresh_fork = fresh_fork
         self._max_attempts = max_attempts
-        self._timeout_seconds = timeout_seconds
+        self._timeout_seconds = float(timeout_seconds) if timeout_seconds is not None else None
         self._fail_closed = fail_closed
         self._error_code = _required_code(error_code, "AgentValidator.error_code")
         self._name = _resolved_name(name, agent, "agent_validator")
@@ -281,13 +296,16 @@ class WeightedValidator(Generic[StateT]):
 
     def __init__(self, validators: Sequence[tuple[float, Validator[StateT]]], *, threshold: float, name: str | None = None, reject_code: str = "weighted_threshold_not_met") -> None:
         # Validates positive child weights and a unit-interval threshold.
-        weighted = tuple((float(weight), validator) for weight, validator in validators)
-        if not weighted or any(weight <= 0 for weight, _ in weighted):
+        try:
+            weighted = tuple((float(weight), validator) for weight, validator in validators)
+        except (TypeError, ValueError) as exc:
+            raise WorkflowDefinitionError("WeightedValidator entries must be (numeric weight, validator) pairs.") from exc
+        if not weighted or any(not isfinite(weight) or weight <= 0 for weight, _ in weighted):
             raise WorkflowDefinitionError("WeightedValidator requires one or more positive validator weights.", details={"validator_count": len(weighted)})
-        if not 0.0 <= threshold <= 1.0:
-            raise WorkflowDefinitionError("WeightedValidator.threshold must be between 0.0 and 1.0.", details={"threshold": threshold})
+        if not isinstance(threshold, (int, float)) or isinstance(threshold, bool) or not isfinite(threshold) or not 0.0 <= threshold <= 1.0:
+            raise WorkflowDefinitionError("WeightedValidator.threshold must be a finite number between 0.0 and 1.0.", details={"actual_type": type(threshold).__name__})
         self._validators = weighted
-        self._threshold = threshold
+        self._threshold = float(threshold)
         self._name = _required_code(name, "WeightedValidator.name") if name is not None else "weighted"
         self._reject_code = _required_code(reject_code, "WeightedValidator.reject_code")
 
@@ -350,6 +368,8 @@ def _resolved_name(name: str | None, source: Any, fallback: str) -> str:
 
 def _required_code(value: str, field_name: str) -> str:
     # Normalizes a semantic code and reports its exact configuration field.
+    if not isinstance(value, str):
+        raise WorkflowDefinitionError(f"{field_name} must be a string.", details={"field": field_name, "actual_type": type(value).__name__})
     code = value.strip()
     if not code:
         raise WorkflowDefinitionError(f"{field_name} cannot be empty.", details={"field": field_name})

@@ -128,11 +128,88 @@ graph.add_transition("spec", "done")
 result = await graph.compile().arun(HarnessState(request="Add a state machine"))
 ```
 
-An agent verifier uses the same boundary. Configure its `BaseAgent` with a
-Pydantic verdict model through `AgentValidator`; map that model to
-`ValidationResult.passed()` or `ValidationResult.rejected(...)`; then declare
-the rejection code as a normal graph transition. The verifier never receives a
-method that changes the machine's current stage.
+## Agent-Verifier Guardrail
+
+An agent verifier uses the same boundary. Its structured verdict maps to a
+semantic validation result, and the graph maps that result to a recovery stage.
+The verifier never receives a method that changes the machine's current stage.
+
+```python
+from dataclasses import dataclass
+from typing import Literal
+
+from pydantic import BaseModel, Field
+
+from vidbyte import AgentStage, AgentValidator, SchemaValidator
+from vidbyte import StageResult, StateGraph, StateMachineSettings, ValidationResult
+
+
+@dataclass(frozen=True)
+class EngineeringState:
+    request: str
+    context: str = ""
+    spec: str = ""
+    implementation: str = ""
+
+
+class ContextVerdict(BaseModel):
+    decision: Literal["enough_context", "needs_more_context"]
+    feedback: str
+    missing: list[str] = Field(default_factory=list)
+
+
+context_verifier = AgentValidator(
+    verifier_agent,
+    prompt_builder=build_context_check_prompt,
+    verdict_schema=ContextVerdict,
+    verdict_mapper=lambda verdict, _: (
+        ValidationResult.passed(feedback=verdict.feedback)
+        if verdict.decision == "enough_context"
+        else ValidationResult.rejected(
+            "needs_more_context",
+            verdict.feedback,
+            details={"missing": tuple(verdict.missing)},
+        )
+    ),
+)
+
+context_schema = SchemaValidator(
+    str,
+    selector=lambda ctx: ctx.candidate_state.context,
+)
+
+graph = StateGraph(EngineeringState, name="software-engineering-harness")
+graph.add_stage(
+    "context",
+    AgentStage(context_agent_factory, build_context_prompt, build_context_result),
+    validators=(context_schema, context_verifier),
+)
+graph.add_stage("spec", AgentStage(spec_agent, build_spec_prompt, build_spec_result))
+graph.add_stage(
+    "implementation",
+    AgentStage(implementation_agent, build_implementation_prompt, build_implementation_result),
+)
+graph.add_stage("verify", AgentStage(verification_agent, build_verification_prompt, build_verification_result))
+graph.add_terminal("done")
+graph.set_entry("context")
+graph.add_transition("context", "spec")
+graph.add_transition("context", "context", on="needs_more_context")
+graph.add_transition("spec", "implementation")
+graph.add_transition("implementation", "verify")
+graph.add_transition("verify", "done", on="approved")
+graph.add_transition("verify", "implementation", on="revise")
+
+machine = graph.compile(settings=StateMachineSettings(max_transitions=12))
+result = await machine.arun(
+    EngineeringState(request="Add a state machine"),
+    ledger={"files_visited": set()},
+)
+```
+
+The names ending in `_agent`, `_prompt`, and `_result` above are application
+components. A result builder converts the agent reply into a typed `StageResult`
+and a semantic outcome such as `approved` or `revise`; it does not choose a
+destination.
 
 For a context-gathering harness, construct the context agent through an
 `AgentStage` factory that closes tracking read tools over
@@ -182,4 +259,3 @@ existing `ContextManager` when the agent's active model context needs pruning.
 - [Paradigms](../paradigms/README.md)
 - [Harnesses](../harnesses/README.md)
 - [Middleware](../middleware/README.md)
-

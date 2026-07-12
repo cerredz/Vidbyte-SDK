@@ -162,7 +162,7 @@ class StateGraph(Generic[StateT]):
         if not callable(getattr(stage, "run", None)):
             raise WorkflowDefinitionError("Workflow stage must provide a callable run(context) method.", details={"stage": stage_name, "actual_type": type(stage).__name__})
         resolved_validators = _validated_guards(validators, owner=f"stage:{stage_name}")
-        resolved_policy = policy or StagePolicy()
+        resolved_policy = StagePolicy() if policy is None else policy
         if not isinstance(resolved_policy, StagePolicy):
             raise WorkflowDefinitionError("StateGraph.add_stage policy must be StagePolicy.", details={"stage": stage_name, "actual_type": type(resolved_policy).__name__})
         self._stages[stage_name] = _StageDefinition(stage=stage, validators=resolved_validators, policy=resolved_policy)
@@ -177,7 +177,10 @@ class StateGraph(Generic[StateT]):
         # Declares one named terminal and its success or failure result status.
         terminal = _required_text(name, "terminal name")
         self._assert_name_is_available(terminal)
-        resolved_status = status if isinstance(status, MachineStatus) else MachineStatus(status)
+        try:
+            resolved_status = status if isinstance(status, MachineStatus) else MachineStatus(status)
+        except (TypeError, ValueError) as exc:
+            raise WorkflowDefinitionError("StateGraph terminal status must be 'succeeded' or 'failed'.", details={"terminal": terminal, "actual_type": type(status).__name__}) from exc
         self._terminals[terminal] = resolved_status
         return self
 
@@ -195,6 +198,8 @@ class StateGraph(Generic[StateT]):
         self._assert_route_is_available(key)
         if not callable(getattr(router, "route", None)):
             raise WorkflowDefinitionError("Workflow router must provide a callable route(context) method.", details={"source": key[0], "outcome": key[1], "actual_type": type(router).__name__})
+        if not isinstance(routes, Mapping):
+            raise WorkflowDefinitionError("StateGraph.add_branch routes must be a mapping of branch keys to targets.", details={"source": key[0], "outcome": key[1], "actual_type": type(routes).__name__})
         normalized_routes = self._normalize_branch_routes(key, routes)
         self._routes[key] = _BranchRoute(router=router, routes=MappingProxyType(normalized_routes))
         return self
@@ -203,7 +208,7 @@ class StateGraph(Generic[StateT]):
         # Validates the complete declaration and returns an immutable runtime.
         from vidbyte.workflows.machine import StateMachine
 
-        resolved_settings = settings or StateMachineSettings()
+        resolved_settings = StateMachineSettings() if settings is None else settings
         if not isinstance(resolved_settings, StateMachineSettings):
             raise WorkflowDefinitionError("StateGraph.compile settings must be StateMachineSettings.", details={"actual_type": type(resolved_settings).__name__})
         definition = _GraphCompiler(self, resolved_settings).compile()
@@ -345,6 +350,8 @@ def _route_targets(route: _DirectRoute[StateT] | _BranchRoute[StateT]) -> tuple[
 
 def _required_text(value: str, field_name: str) -> str:
     # Normalizes one graph identifier without changing its case semantics.
+    if not isinstance(value, str):
+        raise WorkflowDefinitionError(f"Workflow {field_name} must be a string.", details={"field": field_name, "actual_type": type(value).__name__})
     text = value.strip()
     if not text:
         raise WorkflowDefinitionError(f"Workflow {field_name} cannot be empty.", details={"field": field_name})
