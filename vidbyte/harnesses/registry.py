@@ -32,7 +32,8 @@ WHAT NOT TO DO IN THIS FILE:
 KNOWN EDGE CASES:
     Structural validation proves only that execute is callable; implementation
     correctness is observed inside the execution envelope and recorded as a run.
-    Factories receive a defensive copy so construction cannot mutate spec identity.
+    Factories receive a defensive copy and mutation is rejected so construction
+    cannot silently diverge from the recorded specification.
 
 COMMON ERRORS:
     HarnessDuplicateRegistrationError for key collisions;
@@ -133,10 +134,14 @@ class HarnessRegistry:
 
     def _create_from_factory(self, factory: HarnessFactory, spec: HarnessSpec) -> HarnessImplementation:
         # Converts factory construction failures into configuration context at load time.
+        factory_spec = deepcopy(spec)
         try:
-            return factory.create(deepcopy(spec))
+            implementation = factory.create(factory_spec)
         except Exception as exc:
             raise HarnessConfigurationError("Harness factory could not construct its implementation.", details={"harness_type": spec.harness_type, "harness_version": spec.harness_version, "factory_type": type(factory).__name__}) from exc
+        if factory_spec != spec:
+            raise HarnessConfigurationError("Harness factory mutated its immutable specification during construction.", details={"harness_type": spec.harness_type, "harness_version": spec.harness_version, "factory_type": type(factory).__name__})
+        return implementation
 
 
 __all__ = ["HarnessFactory", "HarnessImplementation", "HarnessRegistry"]
