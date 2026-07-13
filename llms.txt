@@ -55,7 +55,7 @@ Vidbyte SDK is the developer-facing agent framework in the Vidbyte ecosystem. It
 - Prompt asset discovery and direct prompt imports.
 - Eval cases, suites, runners, graders, and a local eval registry.
 - Sequential, parallel, conditional, and map-reduce pipelines.
-- Typed state-machine workflows with stage validators, transition guards, conditional branches, cycles, declared jumps, retries, execution limits, and structured records.
+- Event-sourced state-machine workflows with typed reducers, guarded/conditional cycles, phase capabilities, layered budgets, approvals, detours, isolated child graphs, checkpoints, cold resume, and time-travel replay.
 - Durable sessions with continue/resume/fork/batch-fork over a checkpoint DAG, pluggable stores (memory, file, SQLite, Postgres, MongoDB, Supabase), tags/name lookup, usage rollups, portable export/import bundles, and prebuilt Checkpoint/Fork/BatchFork/Rewind/Resume agent tools.
 
 ## How To Install And Use
@@ -621,22 +621,32 @@ case = EvalCase(
 )
 ```
 
-### Validated Workflows
+### Agent-Harness Workflows
 
-`vidbyte.workflows` is the reusable control-flow layer for harnesses where code, rather than prompt instructions, must own legal stage progression. A `StateGraph[StateT]` declares stages, terminals, semantic outcomes, bounded conditional branches, and transition guards. `compile()` validates the definition and returns an immutable `StateMachine[StateT]`; each `arun()` keeps counters and records local so the compiled machine can serve concurrent independent runs.
+`vidbyte.workflows` is the reusable control plane for harnesses where code, rather than prompt instructions, must own legal phases, transitions, permissions, budgets, suspensions, and recovery. A `StateGraph[StateT]` declares executable stages, normal terminals, typed state channels and reducers, semantic outcome edges, bounded conditional branches, guarded command edges, approval gates, signal detours, and isolated child graphs. `compile()` validates and fingerprints the definition; the resulting immutable `StateMachine[StateT]` is safe to reuse across concurrent independent runs.
 
-Core invariants:
+Workflow position and execution lifecycle are orthogonal. The projected stage may be `implement` while lifecycle is `RUNNING`, `WAITING_FOR_CONFIRMATION`, `INTERRUPTED`, `FINISHED`, or `ERROR`. Normal terminals separately report `SUCCEEDED` or `FAILED`.
 
-- A stage receives a clone of the latest committed typed state and returns `StageResult(candidate_state, outcome=...)`.
-- Stage validators run before routing. The selected transition's guards run after routing. Candidate state commits only if both boundaries pass.
-- A validator returns `ValidationResult` with `PASS`, `REJECT`, `ABSTAIN`, or `ERROR`. Rejection codes are semantic labels; only the compiled graph maps labels or router keys to targets.
-- Rejection and handled stage errors route with unchanged committed state plus `WorkflowFeedback`.
-- Every selected transition attempt, including a guard rejection, consumes `StateMachineSettings.max_transitions`.
-- The mutable run ledger is deliberately not transactional. It is suitable for mechanical evidence such as every file visited, while compact selected context belongs in candidate state.
-- State rollback is in-memory only. Filesystem, network, tool, and model side effects require idempotency, candidate artifacts, or explicit compensation.
-- `AgentValidator` is fail-closed by default and requires a Pydantic verdict model, but its substantive LLM judgment is still probabilistic.
+Core invariants and APIs:
 
-Primary imports include `StateGraph`, `StateMachine`, `StageResult`, `ValidationResult`, `CallableStage`, `AgentStage`, `CallableValidator`, `SchemaValidator`, `GraderValidator`, `AgentValidator`, `CallableRouter`, `RouteTarget`, `RetryPolicy`, `StagePolicy`, `StateMachineSettings`, `WorkflowObserver`, typed records, statuses, and workflow errors. They are available from both `vidbyte.workflows` and the root `vidbyte` package.
+- A stage receives an isolated state snapshot plus a stable stage-visit `idempotency_key`. `WorkflowCommand.update` applies only declared writes through per-channel reducers; whole-state `StageResult` is the root-schema compatibility path.
+- `StateChannel` selects a reducer and `ON_TRANSITION` or `IMMEDIATE` commit mode. Immediate evidence is appended through `await StageContext.observe(...)`; `observations` and the compatibility `ledger` alias are read-only projections.
+- Stage validators run before routing. The selected transition's guards run after routing. Candidate state commits only after both boundaries and any approval gate pass.
+- A validator returns `ValidationResult` with `PASS`, `REJECT`, `ABSTAIN`, or `ERROR`. Rejection codes, router keys, command gotos, interrupt values, and child results never gain undeclared destination authority.
+- Conditional routes are finite branch maps. Cycles and backward edges are legal and bounded rather than rejected as DAG violations.
+- `StageCapabilities` separates model-visible `ToolVisibility` from pre-execution `ActionPolicy`. Built-in guards support command prefix/deny patterns, path globs, and per-invocation changed-line budgets. Neither layer replaces host sandboxing.
+- `AgentModelRoute` can override provider, model, temperature, runner options, model retries, middleware factories, and loop limits for one stage fork.
+- `StagePolicy` owns stage retries, timeouts, and visit caps. `WorkflowBudget` owns super-step, transition, model-call, tool-call, token, cost, execution-time, child-concurrency, recursion, and detour ceilings. Human wait time is excluded from execution timeout.
+- `AgentStage` installs five-pattern stuck detection: repeated action/observation, repeated action/error, repeated no-tool monologue, action ping-pong, and repeated context-window error. A threshold terminates lifecycle with `WorkflowStuckError`.
+- `ApprovalGate` declares both confirmation behavior and a bounded rejection outcome. `NeverConfirm`, `AlwaysConfirm`, and `ConfirmRisky` select policy only on confirmation-capable edges. Approval resumes the persisted candidate without rerunning its source.
+- `StageContext.interrupt(WorkflowInterrupt(...))` persists a call ordinal and replays the stage with the response injected by `ResumeCommand.resume(...)`. A command-level interrupt resumes a persisted candidate without rerunning the source.
+- `DetourRule` maps bounded signals to declared validation/remediation stages. Tool-bound file-change detours stop the current `AgentStage` after a successful tool call and retry its source after explicit `return_from_detour`; external tool effects are not rolled back.
+- `Send` fans out isolated child machines with deterministic parent-visit/send run IDs, separate event logs, state, and intersected budgets. Parent crash replay reuses an existing child lineage; joins preserve send order. A suspended child suspends its parent and resumes without relaunching completed siblings.
+- All control changes are append-only `WorkflowEvent` records whose nested containers are immutable. `WorkflowProjection` is derived state; `WorkflowCheckpoint` is a disposable per-boundary cache. `inspect(..., through_sequence=N)` performs read-only time-travel replay without invoking executable components.
+- `InMemoryWorkflowStore` is process-local. `FileWorkflowStore` persists immutable JSON records with optimistic sequence checks. Durable stores require an explicit graph version and the same re-supplied compiled definition for cold resume.
+- Filesystem, network, model, and tool effects are outside candidate-state transactions. Replayed stages must make external writes idempotent or use candidate artifacts/compensation.
+
+Primary workflow imports live under `vidbyte.workflows`; the root `vidbyte` package re-exports the common ergonomic surface. See `vidbyte/workflows/README.md` for complete examples and security boundaries.
 
 ```python
 from dataclasses import dataclass, replace
@@ -652,7 +662,6 @@ class HarnessState:
 
 
 async def gather_context(ctx):
-    ctx.ledger.setdefault("files_visited", set()).add("vidbyte/agents/base.py")
     return StageResult(replace(ctx.state, context="relevant contracts"))
 
 
@@ -671,7 +680,7 @@ graph.add_transition("context", "context", on="needs_more_context")
 result = await graph.compile().arun(HarnessState(request="Inspect the SDK"))
 ```
 
-Use `AgentStage` for work performed by `BaseAgent`. Use `AgentValidator` with a developer-supplied prompt builder, Pydantic verdict model, and verdict mapper for an agent guardrail. The mapper can emit a semantic rejection code such as `needs_more_context`, but cannot select a target stage. Use `SchemaValidator` or `CallableValidator` before an agent verifier when deterministic checks can establish shape or invariants cheaply.
+Use `AgentStage` for work performed by `BaseAgent`. Use `AgentValidator` with a developer-supplied prompt builder, Pydantic verdict model, and verdict mapper for an agent guardrail. The mapper can emit a semantic rejection code such as `needs_more_context`, but cannot select a target stage. Use `SchemaValidator` or `CallableValidator` before an agent verifier when deterministic checks can establish shape or invariants cheaply. Workflow persistence and agent `Session` persistence are separate contracts: the former stores graph control-plane events, while the latter stores one agent's conversation/checkpoint DAG.
 
 ### Pipelines
 

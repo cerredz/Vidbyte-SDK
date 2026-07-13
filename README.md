@@ -24,7 +24,7 @@ access remain outside this package.
 - MCP Studio servers that expose Vidbyte agents, tools, prompts, and pipelines to MCP-compatible clients.
 - Local eval suites with reusable graders, concurrency controls, and run registries.
 - Agent pipelines that compose specialized agents through sequential, parallel, conditional, and map-reduce topologies.
-- Typed state-machine workflows with validation gates, conditional branches, cycles, retries, and declared jumps.
+- Event-sourced state-machine workflows with typed reducers, guarded/conditional cycles, phase capabilities, budgets, approvals, detours, isolated subgraphs, checkpoints, and resume.
 - Prompt libraries, context-window algorithms, and trace artifacts that make long-running agent work easier to inspect.
 
 ## Layer Guide
@@ -48,7 +48,7 @@ access remain outside this package.
 | [`vidbyte.shared`](vidbyte/shared/README.md) | Reserved shared namespace; currently no stable public symbols |
 | [`vidbyte.tools`](vidbyte/tools/README.md) | Tool contracts, decorators, catalogs, execution, MCP bridges, and permissions |
 | [`vidbyte.trace`](vidbyte/trace/README.md) | Trace facade, debug tracer, provider tracers, and continual trace artifacts |
-| [`vidbyte.workflows`](vidbyte/workflows/README.md) | Typed state graphs with validate-before-commit stages, branches, guards, and execution records |
+| [`vidbyte.workflows`](vidbyte/workflows/README.md) | Event-sourced agent-harness graphs with typed state, policy gates, budgets, suspensions, and durable resume |
 
 ## Status
 
@@ -1118,15 +1118,21 @@ sdk.evals.registry.record(result)
 
 ## Validated Workflows
 
-Use `vidbyte.workflows` when Python code must control which stages are legal,
-validate typed candidate state before it becomes committed state, and support
-bounded loops, branches, retries, and jumps. This is the control-flow layer for
-harnesses such as context -> spec -> implementation -> verification.
+Use `vidbyte.workflows` when Python code must control which stages and tools are
+legal, validate typed reducer updates before commit, and support bounded loops,
+branches, approvals, detours, child graphs, crash resume, and time-travel
+inspection. This is the control-flow layer for harnesses such as context -> spec
+-> implementation -> verification.
 
 Stages and validators return semantic outcome codes; only the compiled graph
 maps those codes to destinations. A deterministic schema check and a
 probabilistic verifier agent therefore use the same gate contract without giving
 either one permission to choose an arbitrary next stage.
+
+Workflow position and execution lifecycle are separate. Every control change is
+appended to a run event stream; checkpoints cache the projected state at step
+boundaries. `AgentStage` can apply a different visible tool catalog, action
+guards, model, reasoning options, and loop policy to each named phase.
 
 ```python
 from dataclasses import dataclass, replace
@@ -1143,7 +1149,6 @@ class HarnessState:
 
 
 async def gather_context(ctx):
-    ctx.ledger.setdefault("files_visited", set()).add("vidbyte/agents/base.py")
     return StageResult(replace(ctx.state, context="relevant SDK contracts"))
 
 
@@ -1173,18 +1178,19 @@ graph.add_transition("spec", "done")
 result = await graph.compile().arun(HarnessState(request="Add a state machine"))
 ```
 
-Candidate state is cloned and committed only after stage validators and selected
-transition guards pass. Rejected candidates are discarded; structured feedback
-and the explicitly non-transactional run ledger remain available to the recovery
-stage. This in-memory transaction does not roll back filesystem, network, model,
-or tool side effects, so stages that perform external work still need idempotency,
-candidate artifacts, or compensation.
+Candidate state is cloned and committed only after stage validators, the
+selected route's guards, and any approval gate pass. Immediate observations use
+declared reducer channels and `await ctx.observe(...)`; their projected views
+are read-only. External filesystem, network, model, and tool side effects are
+not rolled back, so replayable stages still need idempotency keys, candidate
+artifacts, or compensation.
 
 Use `AgentStage` to adapt a `BaseAgent`, and `AgentValidator` for a verifier agent
 whose Pydantic verdict maps to `ValidationResult`. Verifier failures block by
 default, but an LLM judgment remains probabilistic. See the
-[`vidbyte.workflows` guide](vidbyte/workflows/README.md) for adapters, guard and
-branch APIs, retry/error policies, records, and the full layer boundary.
+[`vidbyte.workflows` guide](vidbyte/workflows/README.md) for typed channels,
+capability profiles, action guards, budgets, approval/resume, event stores,
+detours, subgraphs, and the full security/idempotency boundary.
 
 ## Pipelines
 

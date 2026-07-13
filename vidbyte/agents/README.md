@@ -73,9 +73,35 @@ print(agent.session is session)
 
 `agent.persist(...)` delegates to `vidbyte.sessions.Session(agent, ...)`. Once bound, direct `agent.arun(...)` and `agent.run(...)` calls record checkpoints with the same policy as `session.arun(...)` and `session.run(...)`; `agent.session` returns the current session or `None`.
 
+## Runner options and workflow model routing
+
+Provider-specific runner settings can be supplied without widening the common
+agent constructor. They are preserved by forks and session serialization.
+
+```python
+agent = Agent(
+    name="planner",
+    system_prompt="Produce a bounded implementation plan.",
+    provider="openai",
+    model_name="gpt-5",
+    runner_options={"reasoning_effort": "high"},
+)
+```
+
+`vidbyte.workflows.AgentStage` can override provider, model, temperature,
+runner options, model retry, middleware factories, and loop settings for one
+named phase through `AgentModelRoute`. Each stage invocation uses an isolated
+fork, so a cheap reconnaissance phase and a high-reasoning implementation phase
+can share the same base agent without sharing mutable conversation history.
+
+Runner options are provider-owned and are passed through without semantic
+interpretation by the agent layer. Credential-like keys are omitted from
+portable session exports and workflow definition fingerprints; callers should
+still keep secrets out of ordinary metadata and persisted workflow state.
+
 ## Key Modules
 
-- `base.py`: `BaseAgent`, inferred runner construction, tool binding, context assembly, trace setup, and runtime dispatch.
+- `base.py`: `BaseAgent`, inferred runner construction, runner options, tool binding, context assembly, trace setup, and runtime dispatch.
 - `client.py`: namespace client used by `VidbyteSDK().agents`.
 - `runtimes/`: linear, search, and actor-model runtime components.
 - `handoff.py`: structured handoff generation from a completed agent run.

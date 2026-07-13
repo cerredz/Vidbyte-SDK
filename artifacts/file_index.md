@@ -43,7 +43,7 @@ Structurally, the package is layered. `vidbyte/lib` holds the shared substrate â
 dataclasses, enums, errors, config, runners, registries, persistence providers, and
 low-level tool/HTTP/tracing contracts. On top of that substrate sit the user-facing
 domains: `agents`, `context`, `tools`, `middleware`, `providers`, `prompts`, `evals`,
-`pipelines`, `sessions`, `sources`, `trace`, and `mcp_server`. Above those sit the
+`pipelines`, `workflows`, `sessions`, `sources`, `trace`, and `mcp_server`. Above those sit the
 composition layers: `paradigms` for opinionated end-to-end control flows and `harnesses`
 as the namespace boundary for custom integrations. This file indexes every one of those
 folders so the topology is legible at a glance.
@@ -303,6 +303,23 @@ output becomes the next stage's prompt. Ships sequential, parallel, conditional,
 map-reduce pipelines, and because every pipeline is itself a valid stage, they nest
 freely. The pipeline layer deliberately adds no shared context, budgets, retries, or
 voting â€” each agent keeps its own tools, middleware, context, and history.
+
+### Workflows
+
+#### `vidbyte/workflows/`
+The event-sourced agent-harness control plane. It compiles typed, cyclic state graphs whose
+named stages own reducer read/write sets, visible tools, action guards, model routes,
+budgets, transition guards, human approval, replayable interrupts, signal detours, and
+isolated child graphs. Append-only events are canonical; projections and per-step
+checkpoints support crash resume and time-travel inspection through in-memory or file
+stores. Workflow persistence is separate from agent sessions, and external tool/workspace
+effects remain caller-owned idempotency boundaries.
+
+#### `vidbyte/workflows/stores/`
+Storage adapters for workflow definitions, canonical event streams, and immutable
+projection checkpoints. Includes concurrent process-local memory storage and a JSON file
+adapter with atomic record creation plus optimistic sequence checks; distributed writers
+require a transactional database implementation of the `WorkflowStore` protocol.
 
 ### Prompts
 
@@ -567,7 +584,8 @@ subfolder below.
 The concrete design docs written before implementing SDK features, including this artifact's
 own design doc (`artifact-file-index.md`). Each captures goals, requirements, detailed
 design, and a file-change manifest for one change. They are historical engineering
-artifacts rather than user-facing documentation.
+artifacts rather than user-facing documentation. The agent-harness runtime architecture is
+recorded in `agent-harness-state-machine-runtime.md`.
 
 #### `scripts/`
 Standalone verification and demonstration scripts, largely `test-*.py` and `test_*.py`

@@ -136,8 +136,8 @@ The implementation should be a follow-up to PR #268 after that PR lands on `main
 35. When a stuck signature reaches its threshold, the injected agent middleware must abort at the next safe agent boundary, append `STUCK_DETECTED`, set lifecycle `ERROR`, persist a checkpoint, and raise `WorkflowStuckError` carrying the run snapshot.
 36. A required transition approval must always suspend regardless of the run's optional risk-confirmation policy.
 37. `NeverConfirm` must auto-continue optional risk checks but may not bypass a required approval edge.
-38. `AlwaysConfirm` must suspend before every otherwise-valid transition.
-39. `ConfirmRisky` must suspend only transitions whose declared risk meets or exceeds its configured threshold.
+38. `AlwaysConfirm` must suspend before every otherwise-valid confirmation-capable transition.
+39. `ConfirmRisky` must suspend only confirmation-capable transitions whose declared risk meets or exceeds its configured threshold.
 40. Suspension must append an approval request with a unique request ID, persist the pending candidate/edge in a checkpoint, set lifecycle `WAITING_FOR_CONFIRMATION`, and return a nonterminal `StateMachineResult`.
 41. `ResumeCommand.approve(...)` must continue the exact pending edge without rerunning the completed source stage; rejection must route its declared rejection outcome with unchanged committed state.
 42. A stale, duplicate, mismatched, or wrong-kind approval response must fail without appending a state commit.
@@ -171,7 +171,7 @@ The implementation should be a follow-up to PR #268 after that PR lands on `main
 70. Runner options must survive `BaseAgent.fork()`, export/restore, and durable Session serialization; old Session payloads without the additive field must default to an empty mapping.
 71. State-machine-injected middleware instances must be created per agent invocation. Caller-provided custom middleware concurrency safety remains caller-owned and documented.
 72. `StateGraph.add_subgraph(...)` must bind a named compiled child machine, input mapper, summary mapper, allowed parent update channels, and child budget policy.
-73. A child run must use a distinct run ID/event stream/checkpoint lineage and receive only the mapped state slice plus explicit metadata; it must not receive parent stage history or event payloads.
+73. A child run must use a distinct deterministic parent-visit/send run ID, event stream, and checkpoint lineage, receive only the mapped state slice plus explicit metadata, and reuse that lineage after parent crash replay; it must not receive parent stage history or event payloads.
 74. The parent and child may share the external workspace, but the workflow API must not claim filesystem isolation or rollback.
 75. Parent events must store child run IDs, terminal/lifecycle summaries, usage, and the declared summary only; full child events remain in the child stream.
 76. `Send` fan-out must honor a concurrency limit, isolate every child, collect failures according to an explicit fail-fast or collect policy, and apply successful join updates in original send order rather than completion order.
@@ -1265,7 +1265,7 @@ No new package dependency, hosted service, credential, database schema, network 
 
 ## 11. Rollout & Deployment
 
-- PR #268 is the prerequisite baseline. Recommended path: review and merge it, update `main`, then implement this design as a follow-up. If it remains open, Phase 3 must stop unless the user explicitly approves a superseding branch strategy.
+- PR #268 was squash-merged into `main` as `ef36015f6a9125382a55661bf5f896427f1bd21e`; this implementation is the approved follow-up.
 - After explicit design approval and baseline availability, create `feat/agent-harness-state-machine-runtime` from the latest clean `main` in an isolated worktree.
 - Commit this design document before implementation code, as required by the selected workflow.
 - Implement in logical commits: event/state foundation; graph/contracts; runtime/checkpoint/resume; capability/model policy; stuck/approval/detours; subgraphs/Send; docs/exports.
@@ -1289,14 +1289,20 @@ No new package dependency, hosted service, credential, database schema, network 
 
 ---
 
-## 12. Open Questions
+## 12. Resolved Questions
 
-- [ ] **Implementation baseline:** Approve merging PR #268 first and building this as a follow-up from `main` (recommended), or explicitly request a superseding PR based on #268's head?
-- [ ] **Mutable ledger compatibility:** Approve replacing in-stage mutable ledger access with event-backed immediate observation channels while keeping only input/result compatibility aliases (recommended)? This is required for honest append-only replay.
-- [ ] **Custom stage enforcement:** Approve compile-time rejection when a custom stage receives capabilities/model policy but does not declare policy-aware enforcement (recommended), rather than accepting a policy that might be ignored?
-- [ ] **Persistence boundary:** Approve a dedicated `WorkflowStore` with bundled memory/file stores (recommended), rather than coupling graph checkpoints to agent-specific `SessionStore` or the unimplemented harness-run store?
-- [ ] **Definition versioning:** Approve requiring an explicit graph version for durable stores (recommended), because live callable/prompt code cannot be fingerprinted safely from Python objects alone?
-- [ ] **No-tests risk:** Confirm that the explicitly selected no-tests workflow still applies to this unusually large runtime change; approval means relying on the existing suite plus inline smoke evidence rather than adding feature test files.
+- [x] **Implementation baseline:** PR #268 was merged first; implementation uses a clean follow-up worktree from that merge.
+- [x] **Mutable ledger compatibility:** In-stage mutation is replaced by event-backed immediate observations; only read-only input/result aliases remain.
+- [x] **Custom stage enforcement:** Compilation rejects capabilities/model policy on a stage that does not declare policy-aware enforcement.
+- [x] **Persistence boundary:** Workflows use a dedicated `WorkflowStore` with bundled memory/file stores.
+- [x] **Definition versioning:** Durable stores require an explicit graph version.
+- [x] **No-tests risk:** The approved no-tests workflow uses the existing suite plus inline smoke evidence and adds no test files or verification scripts.
+
+Post-approval reconciliation: run-level confirmation policies apply only to an edge
+with an `ApprovalGate`. The edge must own its denial outcome; a run policy cannot
+invent a recovery destination. `AlwaysConfirm` therefore means every
+confirmation-capable edge, while a required gate still suspends under
+`NeverConfirm`.
 
 ---
 

@@ -40,6 +40,27 @@ print(catalog.names())
 print(catalog.provider_schemas("openai"))
 ```
 
+## Workflow capability boundaries
+
+`vidbyte.workflows.AgentStage` applies two independent layers to tools:
+
+1. `ToolVisibility` derives the exact catalog whose schemas are sent to the
+   model for that stage (`inherit`, `none`, `read_only`, or an exact name set).
+2. `ActionPolicy` evaluates every visible call immediately before execution.
+   Built-in guards can constrain command prefixes and deny patterns, path
+   globs, and estimated changed lines per stage invocation.
+
+Removing a schema is stronger than asking the model not to use a tool, but it
+is not a host sandbox. Action guards are defense in depth and do not replace
+workspace, filesystem, process, or network isolation. Unknown mutating-tool
+impact fails closed in strict edit-budget mode.
+
+Successful workflow agent calls emit bounded authorization evidence. Successful
+`patch_file`, `replace_text`, and `write_text` calls can also trigger a declared
+file-change detour, which stops the current agent invocation after the tool
+boundary and transfers control to a validation stage. External effects are not
+rolled back; replay-safe tools should honor the workflow stage idempotency key.
+
 ## Key Modules
 
 - `decorators.py`: `@tool` and `vidbyte_tool` function wrappers.
