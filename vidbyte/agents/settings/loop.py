@@ -1,19 +1,22 @@
 """Context Protocol Header
 
-Description:
-    Defines AgentLoopSettings, the canonical configuration object for all parameters
-    that govern the agentic execution loop.
-Purpose:
-    Consolidates loop budget and behavioral constraints into a single validated class,
-    replacing scattered flat kwargs with a structured developer-facing abstraction.
-Architecture:
-    - AgentLoopSettings: Plain class with __init__-level validation.
-    - to_runtime_config(): Converts to the internal AgentRuntimeConfig contract.
-Relations:
-    Imported by vidbyte.agents.base. Exported from vidbyte.agents.settings.
-Similar Files:
-    - vidbyte/agents/runtimes/configs.py: ActorRuntime follows the same plain-class pattern.
-    - vidbyte/lib/dataclasses/agents.py: AgentRuntimeConfig is the internal contract this converts to.
+PURPOSE:
+    Defines AgentLoopSettings, the canonical configuration object for every
+    parameter that governs the agentic execution loop. It consolidates loop
+    budgets and behavioral constraints into one validated class, replacing
+    scattered flat kwargs with a structured developer-facing abstraction.
+ROLE IN CODEBASE:
+    Imported by vidbyte.agents.base (which resolves it against flat kwargs) and
+    exported from vidbyte.agents.settings. Converts to the internal
+    AgentRuntimeConfig contract in vidbyte/lib/dataclasses/agents.py that the
+    runtime consumes.
+ARCHITECTURE:
+    - AgentLoopSettings: plain class with __init__-level validation of budgets,
+      tool settings, tool-error policy, and the output contract.
+    - Floor-vs-ceiling validation lives here; the runtime owns the live counters.
+FUNCTION INVENTORY:
+    - AgentLoopSettings.__init__: validates and stores every loop parameter.
+    - AgentLoopSettings.to_runtime_config(): converts to AgentRuntimeConfig.
 """
 
 from __future__ import annotations
@@ -138,7 +141,13 @@ class AgentLoopSettings:
             self._validate_contract_ceiling(contract)
 
     def _validate_contract_ceiling(self, contract: OutputContract) -> None:
-        # Enforces the strict floor < ceiling invariant against this settings object's own ceiling fields.
+        # @intent catch-unreachable-floors-at-construction-not-at-run-end
+        # An output contract sets a minimum effort (a floor); a loop budget like max_iterations sets a
+        # ceiling. If the floor is >= the ceiling, the loop can never satisfy the contract and would burn
+        # the entire budget only to fail its final check — a slow, expensive, confusing failure. Validate
+        # the floor < ceiling invariant here, at construction, where the ceiling lives, so the caller learns
+        # the configuration is impossible immediately instead of after a full run. The ceilings are owned by
+        # this settings object, which is why the contract defers the check to here rather than self-checking.
         if not contract.ceiling_key:
             return
         ceiling = getattr(self, contract.ceiling_key, None)

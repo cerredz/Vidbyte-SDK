@@ -1,18 +1,20 @@
 """Context Protocol Header
 
-Description:
-    Exposes agents and orchestration primitives for Vidbyte SDK.
-Purpose:
-    Allows easy package-level import of BaseAgent, registries, client schemas,
-    and swappable execution runtimes.
-Architecture:
-    - BaseAgent: Client-facing agent coordinator.
-    - AgentRegistry: Local/shared memory storage registry.
-    - Swappable Runtimes: LinearAgentRuntime, SearchTreeRuntimeComponent, PointToPointActorRuntime, BroadcastActorRuntime.
-Relations:
-    Imported by main client and evaluator harnesses.
-Similar Files:
-    - vidbyte/agents/base.py: Agent controller core.
+PURPOSE:
+    Package-level export surface for the SDK's agents and orchestration
+    primitives, letting callers import BaseAgent, registries, client schemas, and
+    swappable execution runtimes without reaching into module internals.
+ROLE IN CODEBASE:
+    Imported by the main SDK client and evaluator harnesses; re-exports BaseAgent
+    (as Agent) from base.py and the runtime/registry surfaces below it.
+ARCHITECTURE:
+    - BaseAgent: client-facing agent coordinator.
+    - AgentRegistry: local/shared in-memory agent registry.
+    - Swappable runtimes: LinearAgentRuntime, SearchTreeRuntimeComponent,
+      PointToPointActorRuntime, BroadcastActorRuntime.
+FUNCTION INVENTORY:
+    - (package init) binds and re-exports the public agent names; no callable
+      logic lives here.
 """
 
 from __future__ import annotations

@@ -1,18 +1,20 @@
 """Context Protocol Header
 
-Description:
-    Defines ContinualTraceAgent, a dedicated BaseAgent that fills a trace schema.
-Purpose:
-    Performs one continual trace update pass over a read-only snapshot of a main
-    agent run, filling a typed trace schema through the updateTrace tool. Mirrors the
-    HandoffAgent pattern so trace updates use normal SDK agent and tool primitives.
-Architecture:
-    - ContinualTraceAgent: BaseAgent subclass exposing a single updateTrace tool.
-Relations:
-    Subclasses vidbyte.agents.base.BaseAgent, used by
-    vidbyte.middleware.continual_trace.ContinualTraceMiddleware.
-Similar Files:
-    - vidbyte/agents/handoff.py: The handoff agent this mirrors.
+PURPOSE:
+    Defines ContinualTraceAgent, a dedicated BaseAgent that fills a typed trace
+    schema. It performs one continual trace update pass over a read-only snapshot
+    of a main agent run through the updateTrace tool, mirroring the HandoffAgent
+    pattern so trace updates use normal SDK agent and tool primitives.
+ROLE IN CODEBASE:
+    Subclasses vidbyte.agents.base.BaseAgent and is driven by
+    vidbyte.middleware.continual_trace.ContinualTraceMiddleware; mirrors the peer
+    agent in vidbyte/agents/handoff.py.
+ARCHITECTURE:
+    - ContinualTraceAgent: BaseAgent subclass exposing a single updateTrace tool
+      and composing its system prompt from the trace schema.
+FUNCTION INVENTORY:
+    - ContinualTraceAgent construction: builds the updateTrace tool and prompt.
+    - The trace-update pass that fills the schema from a read-only run snapshot.
 """
 
 from __future__ import annotations

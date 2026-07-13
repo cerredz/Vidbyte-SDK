@@ -1,20 +1,24 @@
 """Context Protocol Header
 
-Description:
-    Defines AgentLoopSettingsOutputContract, the runtime-facing owner of an agent's output contracts.
-Purpose:
-    Holds the configured contracts and the reject-and-continue budget, and exposes the one-line
-    methods the linear runtime calls at each termination boundary. Immutable and stateless across
-    runs — the rejection counter lives in the runtime loop. Floor-vs-ceiling validation is performed
-    by AgentLoopSettings (which owns the ceilings), not here.
-Architecture:
-    - AgentLoopSettingsOutputContract: active/unmet/exhausted/feedback/report over a counters mapping.
-Relations:
-    Constructed by vidbyte.agents.settings.loop.AgentLoopSettings and threaded into the linear
-    AgentRuntime, which consults it at the IS_DONE and no-tool-calls finalization boundaries.
-Similar Files:
-    - vidbyte/agents/runtime.py: AgentRuntime, the peer loop-owner that consults this class.
-    - vidbyte/agents/contracts/__init__.py: OutputContract base these are built from.
+PURPOSE:
+    Defines AgentLoopSettingsOutputContract, the runtime-facing owner of an
+    agent's output contracts. It holds the configured contracts and the
+    reject-and-continue budget and exposes the one-line methods the linear runtime
+    calls at each termination boundary. Immutable and stateless across runs — the
+    rejection counter lives in the runtime loop, and floor-vs-ceiling validation is
+    performed by AgentLoopSettings (which owns the ceilings), not here.
+ROLE IN CODEBASE:
+    Constructed by vidbyte.agents.settings.loop.AgentLoopSettings and threaded
+    into the linear AgentRuntime, which consults it at the IS_DONE and
+    no-tool-calls finalization boundaries. Built from the OutputContract base in
+    vidbyte/agents/contracts/__init__.py.
+ARCHITECTURE:
+    - AgentLoopSettingsOutputContract: active/unmet/exhausted/feedback/report
+      queries over a runtime-owned counters mapping.
+FUNCTION INVENTORY:
+    - active(): whether any contract is configured.
+    - unmet(...)/exhausted(...): termination-boundary checks against the budget.
+    - feedback(...)/report(...): model-visible feedback and terminal report.
 """
 
 from __future__ import annotations

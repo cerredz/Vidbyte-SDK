@@ -1,15 +1,18 @@
 ﻿"""Context Protocol Header
 
-Description:
-    Dispatches attached context-window algorithms for AgentRuntime.
-Purpose:
-    Keeps AgentRuntime focused on the generic model/tool loop while providing a
-    clean detection and adapter surface for runtime context-window algorithms.
-Architecture:
-    - AgentRuntimeContextAlgorithms: Detects configured algorithms and returns
-      per-algorithm runtime implementations.
-Relations:
-    Used by vidbyte.agents.runtime.
+PURPOSE:
+    Dispatches attached context-window algorithms for AgentRuntime, keeping the
+    runtime focused on the generic model/tool loop while providing a clean
+    detection and adapter surface for runtime context-window algorithms.
+ROLE IN CODEBASE:
+    Used by vidbyte.agents.runtime to resolve the configured context-window
+    algorithm into an executable per-algorithm runtime before the normal loop.
+ARCHITECTURE:
+    - AgentRuntimeContextAlgorithms: detects the configured algorithm and returns
+      the matching per-algorithm runtime implementation.
+FUNCTION INVENTORY:
+    - AgentRuntimeContextAlgorithms detection/adapter helpers that map a
+      configured ContextWindowAlgorithm to its runtime implementation.
 """
 
 from __future__ import annotations

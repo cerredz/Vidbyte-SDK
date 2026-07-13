@@ -1,3 +1,20 @@
+"""Context Protocol Header
+
+PURPOSE:
+    Defines AgentClient, a small namespace that exposes ergonomic constructors for
+    the SDK's agent types so callers can build a base or handoff agent through one
+    discoverable entry point instead of importing each class directly.
+ROLE IN CODEBASE:
+    Thin façade over vidbyte.agents.base.BaseAgent and
+    vidbyte.agents.handoff.HandoffAgent; consumed by the top-level SDK client.
+ARCHITECTURE:
+    - AgentClient: stateless namespace whose methods forward keyword configuration
+      to the underlying agent constructors.
+FUNCTION INVENTORY:
+    - AgentClient.base(**kwargs): construct a standard BaseAgent.
+    - AgentClient.handoff(handoff, **kwargs): construct a HandoffAgent.
+"""
+
 from __future__ import annotations
 
 from typing import Any

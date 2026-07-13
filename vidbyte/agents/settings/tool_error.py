@@ -1,15 +1,17 @@
 """Context Protocol Header
 
-Description:
-    Defines tool-error retry policy settings for agent loops.
-Purpose:
-    Gives AgentLoopSettings a validated nested policy for deciding when failed
-    tool calls should retry, continue, or abort the run.
-Architecture:
-    - UnrecoverableAction: Runtime action for terminal tool errors.
-    - ToolErrorPolicy: Validated developer-facing policy object.
-Relations:
-    Used by vidbyte.agents.settings.loop and ToolErrorPolicyMiddleware.
+PURPOSE:
+    Defines the tool-error retry policy for agent loops: a validated nested policy
+    that decides when a failed tool call should retry, continue, or abort the run.
+ROLE IN CODEBASE:
+    Constructed by vidbyte.agents.settings.loop and consumed by
+    ToolErrorPolicyMiddleware, which applies its decision inside the linear loop.
+ARCHITECTURE:
+    - UnrecoverableAction: enum of runtime actions for terminal tool errors.
+    - ToolErrorPolicy: validated developer-facing policy object.
+FUNCTION INVENTORY:
+    - ToolErrorPolicy.__init__: validates retry counts and the unrecoverable action.
+    - Policy decision helpers used by the middleware to classify a tool failure.
 """
 
 from __future__ import annotations

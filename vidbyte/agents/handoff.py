@@ -1,21 +1,23 @@
 """Context Protocol Header
 
-Description:
-    Defines HandoffAgent, a thin configuration over BaseAgent that produces structured
-    handoff documents from a completed agent run.
-Purpose:
-    Turns the comprehensive handoff system prompt plus a Handoff spec into an executable
+PURPOSE:
+    Defines HandoffAgent, a thin configuration over BaseAgent that produces
+    structured handoff documents from a completed agent run. It turns the
+    comprehensive handoff system prompt plus a Handoff spec into an executable
     agent whose generate_handoff() returns a filled Handoff document.
-Architecture:
-    - HandoffAgent: BaseAgent subclass that composes its system prompt from the handoff
-      prompt asset and the spec's section brief, then parses model output back into sections.
-Relations:
+ROLE IN CODEBASE:
     Subclasses vidbyte.agents.base.BaseAgent, consumes vidbyte.context.handoff.Handoff,
-    reads Prompt.HANDOFF_SYSTEM_PROMPT through vidbyte.prompts.Prompts. Constructed by
-    AgentClient.handoff() and by BaseAgent.handoff().
-Similar Files:
-    - vidbyte/agents/base.py: The base agent this configures.
-    - vidbyte/context/handoff/base.py: The Handoff spec/primitive this fills.
+    and reads Prompt.HANDOFF_SYSTEM_PROMPT through vidbyte.prompts.Prompts.
+    Constructed by AgentClient.handoff() and by BaseAgent.handoff(); fills the
+    Handoff spec/primitive from vidbyte/context/handoff/base.py.
+ARCHITECTURE:
+    - HandoffAgent: BaseAgent subclass that composes its system prompt from the
+      handoff prompt asset and the spec's section brief, then parses model output
+      back into sections.
+FUNCTION INVENTORY:
+    - HandoffAgent.generate_handoff(...): runs the agent and returns a filled Handoff.
+    - HandoffAgent.from_source_agent/render_source_run/run_auto_handoff: build a
+      generator and render a completed run into handoff input.
 """
 
 from __future__ import annotations
