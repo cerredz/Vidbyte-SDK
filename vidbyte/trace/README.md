@@ -88,7 +88,7 @@ Profiles:
 
 - `TraceProfile.minimal()`: `agent.run`, `llm.call`, and `tool.call`.
 - `TraceProfile.default()`: minimal plus parser, tool input/output, agent stop, retriever/embedding categories, and session roots.
-- `TraceProfile.verbose()`: default plus runtime iteration, context-window summaries, algorithms, aggregate phases, and middleware decisions.
+- `TraceProfile.verbose()`: default plus runtime iteration, context-window summaries, algorithms, aggregate phases, multi-agent ledger updates, and middleware decisions.
 - `TraceProfile.diagnostic()`: verbose plus diagnostic component spans and fuller metadata subject to redaction/truncation.
 
 Provider-neutral span kinds are `chain`, `llm`, `tool`, `retriever`,
@@ -125,6 +125,7 @@ option; passing a new option overrides it for the forked agent only.
 - `controller.py`: `TraceController`, the composable semantic tracer.
 - `session.py`: legacy `SessionTracer` plus `SessionTraceController` for multi-agent root grouping.
 - `components/`: prebuilt span-spec factories for agents, runtimes, context, algorithms, middleware, tools, and parsers.
+- `components/agents.py`: includes `multi_agent.run`, manager, worker, ledger-update, replan, and finalize span contracts with no raw task payloads.
 - `providers/`: semantic-to-provider translators such as LangSmith run-type mapping.
 - `continual/`: continual tracer, middleware, agent, schema helpers, and prebuilt trace models.
 - `vidbyte.lib.tracing`: shared tracer base contracts.

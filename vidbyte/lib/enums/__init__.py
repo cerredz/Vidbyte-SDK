@@ -19,6 +19,7 @@ from vidbyte.lib.enums.agent_runtime import AgentRuntimeType
 from vidbyte.lib.enums.context import BudgetPreset, PermissionPreset
 from vidbyte.lib.enums.model_modality import ModelModality, ModelNameModality
 from vidbyte.lib.enums.model_provider import ModelProvider
+from vidbyte.lib.enums.multi_agent import MultiAgentStopReason, OrchestratorAction, TaskStatus
 from vidbyte.lib.enums.platform import Platform
 from vidbyte.lib.enums.prompts import Prompt
 from vidbyte.lib.enums.skills import ContextMinimalFanoutSkill, Skill, Skills as SkillEnums
@@ -31,10 +32,13 @@ __all__ = [
     "ModelModality",
     "ModelNameModality",
     "ModelProvider",
+    "MultiAgentStopReason",
+    "OrchestratorAction",
     "PermissionPreset",
     "PinPolicy",
     "Platform",
     "Prompt",
     "Skill",
     "SkillEnums",
+    "TaskStatus",
 ]

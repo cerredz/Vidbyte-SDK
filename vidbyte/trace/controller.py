@@ -1,4 +1,14 @@
-"""Composable semantic trace controller."""
+"""Context Protocol Header
+
+Description:
+    Implements the composable semantic trace controller and span-name routing for Vidbyte subsystems.
+Purpose:
+    Filters semantic spans through profiles, preserves parent context, sanitizes attributes, and translates spans for an inner tracer.
+Architecture:
+    `TraceController` maps names to component factories, including `multi_agent.*`, then delegates provider translation and tracer lifecycle calls.
+Relations:
+    Wraps `TracerBase`, consumes trace profiles/components, and is used by agents, runtimes, tools, sessions, and orchestration controllers.
+"""
 
 from __future__ import annotations
 
@@ -100,6 +110,9 @@ class TraceController(TracerBase):
         elif name.startswith("aggregate."):
             detail = TraceDetail.VERBOSE
             component = "aggregate"
+        elif name.startswith("multi_agent."):
+            detail = TraceDetail.VERBOSE if name == "multi_agent.ledger_update" else TraceDetail.STANDARD
+            component = "multi_agent"
         elif name.startswith("session."):
             detail = TraceDetail.STANDARD
             component = "sessions"

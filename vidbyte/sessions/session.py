@@ -1,7 +1,7 @@
 """Context Protocol Header
 
 Description:
-    Implements the Session facade that makes any agent durable in one line.
+    Implements the Session facade for agents that explicitly support durable export and restore.
 Purpose:
     Binds an agent, a store, and a session id, owning the continue/resume/fork/
     rewind/edit verbs over an append-only checkpoint DAG.
@@ -10,7 +10,7 @@ Architecture:
       after each run and exposes lineage operations as DAG queries.
 Relations:
     Uses vidbyte.sessions.store.SessionStore, TraceRecorder, SessionSerializer, and
-    vidbyte.agents.base.BaseAgent export_state()/restore().
+    compatible agent export_state()/restore(); rejects non-persistable facades such as MultiAgent before store mutation.
 """
 
 from __future__ import annotations
@@ -98,6 +98,8 @@ class Session:
 
     def __init__(self, agent: "BaseAgent", *, store: SessionStore | None = None, session_id: str | None = None, policy: CheckpointPolicy | str = CheckpointPolicy.PER_TURN, trace: TraceCapture | str = TraceCapture.AUTO, tags: Sequence[str] = (), parent_session_id: str | None = None, _existing: bool = False) -> None:
         # Bind the agent/store/id and either record initial meta or adopt an existing session.
+        if not getattr(agent, "session_persistence_supported", True):
+            raise SessionError("This agent type does not support durable session persistence.", details={"agent_type": type(agent).__name__})
         self._agent = agent
         self._store = store or InMemorySessionStore()
         self._session_id = session_id or f"se_{uuid4().hex}"

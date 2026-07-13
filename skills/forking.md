@@ -4,6 +4,12 @@ Use this skill when you need to branch, time-travel, or incorporate another agen
 
 Forking and resuming are queries over a session's checkpoint DAG. Every `Checkpoint` carries `(id, session_id, parent_id, seq, run_state, trace_*)`, so branching, time-travel, and cross-thread incorporation are all first-class. See [sessions.md](./sessions.md) for the attach/store/verb baseline.
 
+`MultiAgent.fork(...)` is a different, non-durable operation: it rebuilds the
+team facade, calls the orchestrator and worker subtype fork seams, optionally
+copies history, and never shares a run-local `TaskLedger`. Only name, system
+prompt, metadata, and history controls are supported. A multi-agent team cannot
+be resumed or restored through the session checkpoint DAG.
+
 ## Fork — branch without touching the parent
 
 ```python

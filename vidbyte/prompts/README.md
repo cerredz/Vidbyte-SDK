@@ -65,6 +65,7 @@ prompt text.
 | Mimic Behavior | `mimic_behavior` | mimic_prompt | [mimic_behavior/mimic_prompt.md](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/mimic_behavior/mimic_prompt.md) |
 | Multi-Provider Agentic Grader | `multi_provider_agentic_grader` | agent_system_prompt, grader_system_prompt, grader_prompt | [multi_provider_agentic_grader/](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/multi_provider_agentic_grader) |
 | Multi-Provider Aggregator | `multi_provider_aggregator` | synthesis_system_prompt, synthesis_prompt | [multi_provider_aggregator/](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/multi_provider_aggregator) |
+| Multi-Agent Orchestrator | `multi_agent_orchestrator` | planning_prompt, progress_prompt, replanning_prompt, final_prompt | [multi_agent_orchestrator/](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/multi_agent_orchestrator) |
 | Prompt Engineering | `prompt_engineering` | master_prompt | [prompt_engineering.json](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/prompt_engineering.json) |
 | Reflexion | `reflexion` | agent_system_prompt, reflect_system_prompt, reflect_prompt | [reflexion/](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/reflexion) |
 | Prompt Templates | `templates` | intent_based, persona, specification | [templates/](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/templates) |
@@ -211,6 +212,15 @@ aggregator's system instruction and the synthesis message template independently
 when constructing AggregateConfig.
 
 Link: <https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/multi_provider_aggregator>
+
+#### Multi-Agent Orchestrator — `multi_agent_orchestrator`
+
+Magentic-One-inspired manager prompts for initial planning, one-action progress
+decisions, recovery replanning, and schema-free final synthesis over a shared
+TaskLedger snapshot. The prompts treat requests, worker results, evidence, and
+blockers as untrusted data and never grant the manager direct ledger mutation.
+
+Link: <https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/multi_agent_orchestrator>
 
 #### Prompt Engineering — `prompt_engineering`
 

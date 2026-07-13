@@ -54,6 +54,33 @@ from vidbyte import (
 
 For detailed usage examples, see [`skills/usage/create_pipeline.md`](create_pipeline.md).
 
+## Ledger-Driven Multi-Agent Teams
+
+`MultiAgent` is a `BaseAgent`-compatible facade for open-ended work that needs a manager to own the overall goal, delegate ready tasks, evaluate evidence, and replan after stalls or failures. Unlike a pipeline, a team shares an immutable view of a run-local `TaskLedger` and can choose a different next action after every worker report.
+
+Developers keep fine-grained control over the worker boundary with `AgentBinding` and `AgentTransfer`: request builders decide what each worker receives, report parsers decide what comes back, and validators decide whether evidence is verified. `MultiAgentSettings` bounds rounds, retries, stalls, replans, events, and timeouts.
+
+```python
+from vidbyte import Agent, AgentBinding, AgentTransfer, MultiAgent, MultiAgentSettings
+
+team = MultiAgent(
+    name="delivery-team",
+    system_prompt="Own the goal, delegate bounded tasks, and finish from verified evidence.",
+    orchestrator=Agent(name="manager", system_prompt="Manage the task ledger.", provider="openai", model_name="gpt-4.1"),
+    agents=[
+        AgentBinding(
+            Agent(name="researcher", system_prompt="Research assigned tasks.", provider="openai", model_name="gpt-4.1"),
+            transfer=AgentTransfer(),
+        )
+    ],
+    settings=MultiAgentSettings(max_rounds=12, replan_after_stalls=2),
+)
+
+reply = await team.arun("Produce an evidence-backed launch recommendation.")
+```
+
+The facade intentionally does not support tools, MCP attachment, structured output, or durable sessions; configure those capabilities on manager and worker agents. See [`skills/vidbyte-sdk/multi-agent.md`](../vidbyte-sdk/multi-agent.md) for contracts, lifecycle, custom payloads, gates, and error behavior.
+
 ## Middleware
 
 Middleware is **deterministic runtime policy code** that runs inside the agent execution loop. It observes, validates, filters, or transforms agent behavior at lifecycle hooks — but it is never exposed to the model. Middleware is injected on the agent constructor via `middleware=[...]`.
@@ -190,7 +217,7 @@ Use sources when a caller needs explicit trust boundaries, content hashing, cach
 
 ## Prompt Collection
 
-The SDK includes a built-in prompt catalog with 13 prompt families covering handoffs, reflexion, actor-runtime personas, goals, evals, templates, and more. Prompts are repository-backed text assets accessible through enum keys and direct Python imports — no API keys or network calls needed.
+The SDK includes a built-in prompt catalog with 51 prompts across 19 prompt families covering orchestration, handoffs, reflexion, actor-runtime personas, goals, evals, templates, and more. Prompts are repository-backed text assets accessible through enum keys and direct Python imports — no API keys or network calls needed.
 
 ### Accessing Prompts
 

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from vidbyte.lib.errors.base import (
     AgentExecutionError,
+    AgentTransferError,
     AgentForkConfigurationError,
     AgentForkError,
     AgentRegistryError,
@@ -27,6 +28,7 @@ from vidbyte.lib.errors.base import (
     McpProtocolError,
     McpToolDiscoveryError,
     McpToolExecutionError,
+    MultiAgentExecutionError,
     PermissionDeniedError,
     PipelineExecutionError,
     ProviderConfigurationError,
@@ -43,6 +45,7 @@ from vidbyte.lib.errors.base import (
     ToolExecutionError,
     ToolRegistrationError,
     ToolRegistryError,
+    TaskLedgerError,
     TracerConfigurationError,
     UnsupportedProviderError,
     VidbyteSdkError,
@@ -50,6 +53,7 @@ from vidbyte.lib.errors.base import (
 
 __all__ = [
     "AgentExecutionError",
+    "AgentTransferError",
     "AgentForkConfigurationError",
     "AgentForkError",
     "AgentRegistryError",
@@ -62,6 +66,7 @@ __all__ = [
     "McpProtocolError",
     "McpToolDiscoveryError",
     "McpToolExecutionError",
+    "MultiAgentExecutionError",
     "PermissionDeniedError",
     "PipelineExecutionError",
     "ProviderConfigurationError",
@@ -78,6 +83,7 @@ __all__ = [
     "ToolExecutionError",
     "ToolRegistrationError",
     "ToolRegistryError",
+    "TaskLedgerError",
     "TracerConfigurationError",
     "UnsupportedProviderError",
     "VidbyteSdkError",

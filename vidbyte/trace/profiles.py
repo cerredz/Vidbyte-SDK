@@ -1,4 +1,14 @@
-"""Trace profile presets and component filtering."""
+"""Context Protocol Header
+
+Description:
+    Defines trace-profile presets, component filtering, detail levels, and safe trace-value normalization.
+Purpose:
+    Lets callers control semantic trace volume consistently across SDK subsystems without changing feature code.
+Architecture:
+    `TraceProfile` validates component settings and applies per-component policies, including the `multi_agent` component.
+Relations:
+    Consumed by `TraceController`; component names correspond to factories under `vidbyte.trace.components`.
+"""
 
 from __future__ import annotations
 
@@ -18,6 +28,7 @@ _DETAIL_ORDER = {
 _COMPONENTS = {
     "agents",
     "aggregate",
+    "multi_agent",
     "runtimes",
     "actor",
     "search",

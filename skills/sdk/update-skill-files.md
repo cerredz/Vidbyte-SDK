@@ -139,6 +139,25 @@ middleware-oriented retry/render for tool *failures*.
 | `skills/vidbyte-sdk/pipelines.md` | New topology subsection under Topology Types with description, code example, composability notes, and error handling; add entry to Error Handling table; update Module Layout |
 | `skills/sdk/SKILL.md` | Add the new file to Current Layout tree; update the pipelines rule if the new type introduces a new pattern |
 
+### Add or Change Ledger-Driven Multi-Agent Orchestration
+
+**Example:** Changing `MultiAgent`, `TaskLedger`, `MagenticOneOrchestrator`, transfer callbacks, completion gates, or controller limits.
+
+**Files to update:**
+
+| File | What to add |
+|------|-------------|
+| `skills/vidbyte-sdk/multi-agent.md` | Public contracts, lifecycle, invariants, extension seams, limits, errors, and unsupported facade behavior |
+| `skills/usage/create_agents.md` | Team construction and custom transfer examples |
+| `skills/usage/available_features.md` | Feature summary, pipeline distinction, key imports, and minimal example |
+| `skills/usage/create_pipeline.md` | Preserve the fixed-topology pipeline versus adaptive ledger-team decision rule |
+| `skills/vidbyte-sdk/pipelines.md` | Preserve the package boundary and cross-link the multi-agent reference |
+| `skills/sdk/SKILL.md` | Framework boundary, core use cases, and routing table |
+| `skills/vidbyte-sdk/SKILL.md` | Package layout, ownership rules, and trace-impact guidance |
+| `skills/vidbyte-sdk-doc/SKILL.md` | Package map, public surface, namespace client, architecture, prompts, and verification map |
+| `README.md`, `llms.txt`, `vidbyte/agents/README.md`, `vidbyte/trace/README.md` | User- and agent-facing imports, boundaries, lifecycle, and trace semantics |
+| `artifacts/file_index.md` | New or moved multi-agent source, prompt, skill, and design-doc paths |
+
 ### Add a New Context-Window Algorithm
 
 **Example:** Creating `vidbyte/context/algorithms/graph_reflexion.py` + `vidbyte/agents/algorithms/graph_reflexion.py` with a `ContextWindow.preset.graph_reflexion`.
@@ -174,7 +193,7 @@ middleware-oriented retry/render for tool *failures*.
 |------|-------------|
 | `skills/usage/import_prompt.md` | Add the new family section to the Complete Prompt Listing; add enum names + direct imports; update the family/prompt counts in the header |
 | `skills/vidbyte-sdk/adding-prompts.md` | (This doc is the process reference; confirm the steps are still accurate) |
-| `skills/sdk/SKILL.md` | Update the prompt-family count in Core Use Cases (currently 13) |
+| `skills/sdk/SKILL.md` | Update the prompt and family counts in Core Use Cases (currently 51 prompts across 19 families) |
 | `skills/usage/available_features.md` | Update the prompt-family count in the Prompt Collection section |
 | `skills/vidbyte-sdk-doc/SKILL.md` | Update the "Current prompt families" list |
 
@@ -355,7 +374,7 @@ After updating skill files, verify:
 - [ ] Every `from vidbyte import ...` example compiles against the current SDK
 - [ ] All constructor signatures match the current `BaseAgent.__init__` parameter list
 - [ ] All provider names match the current `ModelProvider` enum (10 members: openai, anthropic, gemini, xai, deepseek, glm, minimax, openrouter, elevenlabs, playai)
-- [ ] All `Prompt.<X>` enum names and direct imports resolve (13 families / 34 prompts)
+- [ ] All `Prompt.<X>` enum names and direct imports resolve (19 families / 51 prompts)
 - [ ] No skill references the removed `vidbyte/strategies/` package, `sdk.strategies`, removed Strategy classes, or the old `MiddlewareDecision.ALLOW/BLOCK/SKIP` API
 - [ ] All tool names match the current tool files
 - [ ] Session changes mention `agent.persist`, session tools, `BatchForkTool`, tag lookup, usage rollups, and portable export/import where applicable
