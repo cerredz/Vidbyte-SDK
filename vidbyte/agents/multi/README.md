@@ -10,7 +10,7 @@ This folder is not a general workflow engine, a concurrent fan-out engine, or a 
 
 ## Blast Radius
 
-The public package is exported through `vidbyte.agents`, `vidbyte.AgentClient`, and the root `vidbyte` namespace. It depends on central contracts in `vidbyte/lib/dataclasses/multi_agent.py`, enum/error surfaces in `vidbyte/lib`, prompt assets in `vidbyte/prompts`, and trace component routing in `vidbyte/trace`.
+The public package is exported through `vidbyte.agents`, `vidbyte.AgentClient`, and the root `vidbyte` namespace. It depends on central contracts in `vidbyte/lib/dataclasses/multi_agent.py`, context construction and primitives in `vidbyte/context`, enum/error surfaces in `vidbyte/lib`, prompt assets in `vidbyte/prompts`, and trace component routing in `vidbyte/trace`.
 
 ## Non-Goals
 
@@ -26,13 +26,27 @@ The public package is exported through `vidbyte.agents`, `vidbyte.AgentClient`, 
 ## File Index
 
 - `__init__.py` - Re-exports the supported multi-agent public surface. Open this when adding a developer-facing controller, ledger, transfer, or contract type; keep the root and agent package exports aligned.
-- `agent.py` - Implements the `MultiAgent` `BaseAgent` facade and bounded controller loop. Open this for run lifecycle, finish gates, limits, cleanup, queue behavior, or facade compatibility; do not place graph-validation logic here.
+- `agent.py` - Implements the small `MultiAgent` `BaseAgent` facade and initializes its class-based collaborators. Open this for public compatibility or dependency wiring; keep controller policy in the focused runtime modules.
+- `cleanup.py` - Closes run-local participants and selectively resets workers after replanning. Open this for cancellation-safe cleanup or worker reset isolation.
+- `dispatcher.py` - Executes the sequential approve/build/invoke/parse/validate/commit worker boundary. Open this for dispatch containment and worker invocation retry policy.
 - `ledger.py` - Implements the sole mutable structural authority for goals, tasks, revisions, events, retries, blockers, evidence, and replan carry-over. Open this for state transition invariants; do not invoke model agents from this file.
+- `ledger_controller.py` - Coordinates manager policy, context snapshots, ledger commits, finish gates, replans, and event callbacks. Open this for controller-to-ledger policy.
+- `ledger_reports.py` - Reduces accepted terminal reports into immutable task-record replacements. Open this for evidence/blocker merge semantics.
+- `ledger_validation.py` - Validates ledger configuration, dispatches, replans, ownership, and dependency DAGs. Open this for structural guards.
+- `lifecycle.py` - Owns the single top-level run exception boundary, cleanup, and trace closure. Open this for success/failure/cancellation lifecycle policy.
 - `orchestrator.py` - Defines the orchestrator protocol and the Magentic-One-inspired adapter over a manager `BaseAgent`. Open this for manager prompts, structured phase parsing, renderer hooks, and manager lifecycle; do not mutate a ledger here.
+- `orchestrator_runtime.py` - Applies timeout and trace policy to each run-local manager phase. Open this for phase invocation behavior.
+- `post_run.py` - Produces terminal synthesis, public results, replies, history, and queued-prompt updates. Open this for terminal SDK boundary behavior.
+- `pre_run.py` - Creates the isolated manager, fresh ledger, and subtype-preserving worker forks. Open this for setup ordering and ledger factories.
+- `runner.py` - Presents the one-level initialize/plan/rounds/finalize controller protocol. Open this for round action ordering and finite stop reasons.
+- `tracing.py` - Encapsulates safe control-only span and run summaries. Open this for trace formatting and handle closure.
 - `transfer.py` - Defines agent bindings and developer-controlled request/report/validation/fork/close seams. Open this when changing what crosses the worker boundary or how worker subtypes are preserved; keep arbitrary payloads out of the default JSON renderer.
-- `types.py` - Hosts callback protocols and aliases shared by the other modules. Open this when extending a seam that would otherwise create import cycles; keep stateful implementations out of this file.
+- `validation.py` - Centralizes facade/runtime `validate_*` guards and safe boundary errors. Open this for configuration, fork, input, and run-resource validation.
+
+Shared callback aliases and run-state contracts live in `vidbyte/lib/dataclasses/multi_agent.py`. Multi-agent context construction and prompt primitives live in `vidbyte/context/multi_agent.py` and `vidbyte/context/primitives/multi_agent.py`.
 
 ## Logs
 
 - 2026-07-13 - Chose serial ledger commits with run-local forks - makes retries and evidence attribution deterministic while preserving specialized agent behavior through explicit factories.
 - 2026-07-13 - Kept the team facade schema-free and non-persistable - prevents a restored or structured facade from silently changing orchestration semantics.
+- 2026-07-13 - Decomposed the facade into constructor-owned collaborators and moved prompt context into `vidbyte/context` - keeps each control path shallow, class-owned, and independently testable.

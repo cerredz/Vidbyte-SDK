@@ -10,6 +10,7 @@ Architecture:
     - documents: Text/File/GitDiff/Document/Environment/Memory primitives.
     - tasks: Task/Progress/Plan primitives.
     - records: Artifact/Response/ToolCall primitives for existing context records.
+    - multi_agent: Request/team/ledger/report/limits/terminal orchestration primitives.
     - checkpoints: ReflexionContextItem and TrajectoryCheckpointContextItem for context algorithms.
     - All concrete types support primitive_id and primitive_frozen for registry management.
 Relations:
@@ -35,6 +36,15 @@ from vidbyte.context.primitives.records import (
     ResponseContextItem,
     ToolCallContextItem,
 )
+from vidbyte.context.primitives.multi_agent import (
+    MultiAgentContextSerializer,
+    MultiAgentLedgerContextItem,
+    MultiAgentLimitsContextItem,
+    MultiAgentReportContextItem,
+    MultiAgentRequestContextItem,
+    MultiAgentTeamContextItem,
+    MultiAgentTerminalContextItem,
+)
 from vidbyte.context.primitives.tasks import (
     PlanContextItem,
     ProgressContextItem,
@@ -50,6 +60,13 @@ __all__ = [
     "FileContextItem",
     "GitDiffContextItem",
     "MemoryContextItem",
+    "MultiAgentContextSerializer",
+    "MultiAgentLedgerContextItem",
+    "MultiAgentLimitsContextItem",
+    "MultiAgentReportContextItem",
+    "MultiAgentRequestContextItem",
+    "MultiAgentTeamContextItem",
+    "MultiAgentTerminalContextItem",
     "PlanContextItem",
     "ProblemSpaceSearchContextItem",
     "ProgressContextItem",

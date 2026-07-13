@@ -7,9 +7,9 @@ Purpose:
     evidence record, blocker, revision, and bounded event exposed to the controller.
 Architecture:
     - TaskLedger: Mutable authority with immutable snapshots at every boundary.
-    - Pure validation helpers: Check plan identity, ownership, dependencies, and cycles.
+    - Validation methods: Check plan identity, ownership, dependencies, and cycles.
 Relations:
-    Mutated only by vidbyte.agents.multi.agent; read by orchestrators and transfer callbacks.
+    Mutated by multi-agent runtime collaborators; read by orchestrators and transfers.
 """
 
 from __future__ import annotations
@@ -18,7 +18,9 @@ from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from typing import Any
 
-from vidbyte.lib.dataclasses.multi_agent import AgentDispatch, AgentReport, LedgerEvent, MultiAgentSettings, OrchestratorPlan, TaskBlocker, TaskEvidence, TaskLedgerSnapshot, TaskRecord, TaskSpec
+from vidbyte.agents.multi.ledger_reports import TaskLedgerReportReducer
+from vidbyte.agents.multi.ledger_validation import TaskLedgerValidator
+from vidbyte.lib.dataclasses.multi_agent import AgentDispatch, AgentReport, LedgerEvent, MultiAgentSettings, OrchestratorPlan, TaskBlocker, TaskLedgerSnapshot, TaskRecord, TaskSpec
 from vidbyte.lib.enums.multi_agent import TaskStatus
 from vidbyte.lib.errors import TaskLedgerError
 
@@ -28,18 +30,12 @@ class TaskLedger:
 
     def __init__(self, *, run_id: str, goal: str, owners: Sequence[str], settings: MultiAgentSettings, metadata: Mapping[str, Any] | None = None) -> None:
         # Creates an empty ledger whose first legal structural operation is apply_plan().
-        if not isinstance(run_id, str) or not run_id.strip() or not isinstance(goal, str) or not goal.strip():
-            raise TaskLedgerError("TaskLedger requires non-empty run_id and goal.")
-        if not isinstance(settings, MultiAgentSettings):
-            raise TaskLedgerError("TaskLedger.settings must be MultiAgentSettings.", details={"actual_type": type(settings).__name__})
-        if not owners or any(not isinstance(owner, str) or not owner.strip() for owner in owners):
-            raise TaskLedgerError("TaskLedger owners must contain only non-empty strings.")
-        cleaned_owners = tuple(owner.strip() for owner in owners)
-        if len(cleaned_owners) != len(set(cleaned_owners)):
-            raise TaskLedgerError("TaskLedger owners must be non-empty and unique.", details={"owner_count": len(cleaned_owners)})
+        cleaned_owners = TaskLedgerValidator.validate_configuration(run_id, goal, owners, settings)
         self._run_id = run_id.strip()
         self._goal = goal.strip()
         self._owners = frozenset(cleaned_owners)
+        self._validator = TaskLedgerValidator(self._owners)
+        self._reports = TaskLedgerReportReducer()
         self._settings = settings
         self._metadata = dict(metadata or {})
         self._tasks: dict[str, TaskRecord] = {}
@@ -77,7 +73,7 @@ class TaskLedger:
         if not plan.tasks:
             raise TaskLedgerError("An initial orchestrator plan must contain at least one task.")
         candidate = {spec.task_id: self._new_record(spec) for spec in self._unique_specs(plan.tasks)}
-        self._validate_candidate(candidate)
+        self._validator.validate_candidate(candidate)
         self._commit_plan(plan, candidate, "plan_applied")
         return self.snapshot()
 
@@ -101,14 +97,14 @@ class TaskLedger:
             elif existing.status is TaskStatus.SUPERSEDED:
                 raise TaskLedgerError("A superseded task id cannot be revived; replanned work requires a new task id.", details={"task_id": task_id})
             elif existing.status is TaskStatus.COMPLETED:
-                self._validate_completed_identity(existing, spec)
+                self._validator.validate_completed_identity(existing, spec)
                 candidate[task_id] = existing
             else:
                 candidate[task_id] = self._update_unfinished_record(existing, spec)
         for task_id, record in self._tasks.items():
             if task_id not in specs:
                 candidate[task_id] = record if record.status is TaskStatus.COMPLETED else replace(record, status=TaskStatus.SUPERSEDED)
-        self._validate_candidate(candidate)
+        self._validator.validate_candidate(candidate)
         self._commit_plan(plan, candidate, "plan_replaced")
         return self.snapshot()
 
@@ -118,17 +114,8 @@ class TaskLedger:
     # replan changed readiness, ownership, or retry state underneath that decision.
     def start_task(self, dispatch: AgentDispatch) -> TaskLedgerSnapshot:
         # Atomically marks one ready task in progress and consumes one task attempt.
-        if dispatch.base_revision != self._revision:
-            raise TaskLedgerError("Dispatch base_revision is stale.", details={"task_id": dispatch.task_id, "expected_revision": self._revision, "actual_revision": dispatch.base_revision})
         record = self.task(dispatch.task_id)
-        if dispatch.owner not in self._owners:
-            raise TaskLedgerError("Dispatch owner is not a configured worker.", details={"task_id": dispatch.task_id, "owner": dispatch.owner})
-        if record.owner is not None and record.owner != dispatch.owner:
-            raise TaskLedgerError("Dispatch owner does not match the planned owner.", details={"task_id": dispatch.task_id, "expected_owner": record.owner, "actual_owner": dispatch.owner})
-        if not self.is_ready(dispatch.task_id):
-            raise TaskLedgerError("Task is not ready for dispatch.", details={"task_id": dispatch.task_id, "status": record.status.value, "attempts": record.attempts})
-        if dispatch.attempt != record.attempts + 1:
-            raise TaskLedgerError("Dispatch attempt does not match the next ledger attempt.", details={"task_id": dispatch.task_id, "expected_attempt": record.attempts + 1, "actual_attempt": dispatch.attempt})
+        self._validator.validate_dispatch(dispatch, record, self._revision, self.is_ready)
         self._tasks[dispatch.task_id] = replace(record, owner=dispatch.owner, status=TaskStatus.IN_PROGRESS, attempts=dispatch.attempt)
         self._commit_event("task_started", task_id=dispatch.task_id, owner=dispatch.owner, metadata={"attempt": dispatch.attempt})
         return self.snapshot()
@@ -140,23 +127,8 @@ class TaskLedger:
     def apply_report(self, report: AgentReport, *, owner: str) -> tuple[TaskLedgerSnapshot, bool]:
         # Commits one accepted worker report and returns whether substantive completion occurred.
         record = self.task(report.task_id)
-        self._require_in_progress_owner(record, owner)
-        if report.status is TaskStatus.COMPLETED:
-            evidence = self._merge_evidence(record.evidence, report.evidence)
-            blockers = self._merge_blockers(tuple(blocker for blocker in record.blockers if not blocker.retryable), tuple(blocker for blocker in report.blockers if not blocker.retryable))
-            updated = replace(record, status=TaskStatus.COMPLETED, result=report.result, evidence=evidence, blockers=blockers, next_action=report.next_action)
-            progress = True
-        elif report.status is TaskStatus.FAILED:
-            status = TaskStatus.FAILED if record.attempts < record.max_attempts else TaskStatus.BLOCKED
-            evidence = self._merge_evidence(record.evidence, report.evidence)
-            blockers = self._merge_blockers(record.blockers, report.blockers)
-            updated = replace(record, status=status, result=report.result, evidence=evidence, blockers=blockers, next_action=report.next_action)
-            progress = len(evidence) > len(record.evidence) or len(blockers) > len(record.blockers) or report.next_action != record.next_action
-        else:
-            evidence = self._merge_evidence(record.evidence, report.evidence)
-            blockers = self._merge_blockers(record.blockers, report.blockers)
-            updated = replace(record, status=TaskStatus.BLOCKED, result=report.result, evidence=evidence, blockers=blockers, next_action=report.next_action)
-            progress = len(evidence) > len(record.evidence) or len(blockers) > len(record.blockers) or report.next_action != record.next_action
+        self._validator.require_in_progress_owner(record, owner)
+        updated, progress = self._reports.apply(record, report)
         self._tasks[report.task_id] = updated
         self._commit_event("task_reported", task_id=report.task_id, owner=owner, metadata={"status": updated.status.value, "attempt": updated.attempts})
         return self.snapshot(), progress
@@ -164,7 +136,7 @@ class TaskLedger:
     def record_dispatch_failure(self, task_id: str, *, owner: str, blocker: TaskBlocker, blocked: bool = False) -> TaskLedgerSnapshot:
         # Converts a post-start gate, builder, worker, parser, or validator failure into a retryable ledger state.
         record = self.task(task_id)
-        self._require_in_progress_owner(record, owner)
+        self._validator.require_in_progress_owner(record, owner)
         retryable = not blocked and blocker.retryable and record.attempts < record.max_attempts
         status = TaskStatus.FAILED if retryable else TaskStatus.BLOCKED
         self._tasks[task_id] = replace(record, status=status, blockers=(*record.blockers, blocker))
@@ -211,18 +183,9 @@ class TaskLedger:
         if self.all_required_complete():
             return False
         needed: set[str] = set()
-
-        def collect(task_id: str) -> None:
-            # Adds one required task and every active dependency that could advance it.
-            if task_id in needed:
-                return
-            needed.add(task_id)
-            for dependency in self.task(task_id).depends_on:
-                collect(dependency)
-
         for task in self._tasks.values():
             if task.required and task.status is not TaskStatus.SUPERSEDED:
-                collect(task.task_id)
+                self._collect_required_dependency(task.task_id, needed)
         return not any(self.is_ready(task_id) for task_id in needed)
 
     def snapshot(self) -> TaskLedgerSnapshot:
@@ -240,80 +203,9 @@ class TaskLedger:
             raise TaskLedgerError("Orchestrator plan contains duplicate task ids.", details={"task_count": len(ids), "unique_task_count": len(set(ids))})
         return tuple(specs)
 
-    def _validate_completed_identity(self, record: TaskRecord, spec: TaskSpec) -> None:
-        # Prevents a replan from rewriting the identity of already completed work.
-        expected = (record.goal, record.depends_on, record.acceptance_criteria, record.required)
-        actual = (spec.goal, spec.depends_on, spec.acceptance_criteria, spec.required)
-        owner_changed = spec.owner is not None and spec.owner != record.owner
-        if expected != actual or owner_changed:
-            raise TaskLedgerError("Replan cannot change the structural identity of a completed task.", details={"task_id": record.task_id})
-
     def _update_unfinished_record(self, record: TaskRecord, spec: TaskSpec) -> TaskRecord:
         # Applies revised future-work structure while preserving attempts, evidence, blockers, and intermediate result.
         return replace(record, goal=spec.goal, owner=spec.owner, status=TaskStatus.PENDING, depends_on=spec.depends_on, required=spec.required, acceptance_criteria=spec.acceptance_criteria, payload=spec.payload, max_attempts=spec.max_attempts or self._settings.max_task_attempts, next_action=None, metadata=spec.metadata)
-
-    def _merge_evidence(self, existing: tuple[TaskEvidence, ...], incoming: tuple[TaskEvidence, ...]) -> tuple[TaskEvidence, ...]:
-        # Deduplicates evidence only when simple identity fields and value equality are safely decidable.
-        merged = list(existing)
-        for candidate in incoming:
-            if not any(self._evidence_matches(item, candidate) for item in merged):
-                merged.append(candidate)
-        return tuple(merged)
-
-    def _evidence_matches(self, left: TaskEvidence, right: TaskEvidence) -> bool:
-        # Avoids trusting arbitrary equality implementations that raise or return non-boolean objects.
-        if (left.source, left.kind, left.verified) != (right.source, right.kind, right.verified):
-            return False
-        try:
-            equal = left.value == right.value
-        except Exception:
-            return False
-        return equal if isinstance(equal, bool) else False
-
-    def _merge_blockers(self, existing: tuple[TaskBlocker, ...], incoming: tuple[TaskBlocker, ...]) -> tuple[TaskBlocker, ...]:
-        # Retains one safe control record per blocker code/message/retryability tuple.
-        merged = list(existing)
-        seen = {(item.code, item.message, item.retryable) for item in merged}
-        for blocker in incoming:
-            key = (blocker.code, blocker.message, blocker.retryable)
-            if key not in seen:
-                merged.append(blocker)
-                seen.add(key)
-        return tuple(merged)
-
-    def _validate_candidate(self, candidate: dict[str, TaskRecord]) -> None:
-        # Validates owners, references, self-dependencies, duplicate edges, and cycles as one graph.
-        for record in candidate.values():
-            if record.status is TaskStatus.SUPERSEDED:
-                continue
-            if record.owner is not None and record.owner not in self._owners:
-                raise TaskLedgerError("Plan references an unknown task owner.", details={"task_id": record.task_id, "owner": record.owner})
-            if len(record.depends_on) != len(set(record.depends_on)):
-                raise TaskLedgerError("Task dependencies must be unique.", details={"task_id": record.task_id})
-            for dependency in record.depends_on:
-                if dependency == record.task_id or dependency not in candidate:
-                    raise TaskLedgerError("Task dependency is missing or self-referential.", details={"task_id": record.task_id, "dependency": dependency})
-                if candidate[dependency].status is TaskStatus.SUPERSEDED:
-                    raise TaskLedgerError("Active tasks cannot depend on superseded work.", details={"task_id": record.task_id, "dependency": dependency})
-        self._validate_acyclic(candidate)
-
-    def _validate_acyclic(self, candidate: dict[str, TaskRecord]) -> None:
-        # Uses depth-first coloring to reject dependency cycles before state commit.
-        colors: dict[str, int] = {}
-
-        def visit(task_id: str) -> None:
-            # Marks one dependency chain and raises when it reaches an active ancestor.
-            if colors.get(task_id) == 1:
-                raise TaskLedgerError("Task plan contains a dependency cycle.", details={"task_id": task_id})
-            if colors.get(task_id) == 2:
-                return
-            colors[task_id] = 1
-            for dependency in candidate[task_id].depends_on:
-                visit(dependency)
-            colors[task_id] = 2
-        for task_id, record in candidate.items():
-            if record.status is not TaskStatus.SUPERSEDED:
-                visit(task_id)
 
     def _commit_plan(self, plan: OrchestratorPlan, candidate: dict[str, TaskRecord], kind: str) -> None:
         # Swaps the validated candidate and all planner facts before recording one revision event.
@@ -335,10 +227,12 @@ class TaskLedger:
         if len(self._events) > self._settings.max_events:
             self._events = self._events[-self._settings.max_events :]
 
-    def _require_in_progress_owner(self, record: TaskRecord, owner: str) -> None:
-        # Ensures a report or failure closes only the attempt started for the same worker.
-        if record.status is not TaskStatus.IN_PROGRESS or record.owner != owner:
-            raise TaskLedgerError("Task report does not match an in-progress owner.", details={"task_id": record.task_id, "status": record.status.value, "expected_owner": record.owner, "actual_owner": owner})
-
+    def _collect_required_dependency(self, task_id: str, needed: set[str]) -> None:
+        # Add one required task and every active dependency that could advance it.
+        if task_id in needed:
+            return
+        needed.add(task_id)
+        for dependency in self.task(task_id).depends_on:
+            self._collect_required_dependency(dependency, needed)
 
 __all__ = ["TaskLedger"]

@@ -82,10 +82,11 @@ history.
 
 #### `vidbyte/agents/multi/`
 Ledger-driven multi-agent team orchestration. Contains the `MultiAgent` facade,
-run-local `TaskLedger`, Magentic-One-inspired manager protocol/adapter, and the
-developer-controlled transfer seams for dispatch approval, request/report shape,
-validation, subtype-preserving forks, and cleanup. Use it for manager-owned progress
-and replanning, not fixed pipeline flow or code-owned workflow transitions.
+run-local `TaskLedger`, constructor-owned lifecycle/runner/dispatch/cleanup collaborators,
+Magentic-One-inspired manager protocol/adapter, and developer-controlled transfer seams.
+Shared types live in `vidbyte/lib`; manager context construction and primitives live in
+`vidbyte/context`. Use it for manager-owned progress and replanning, not fixed pipeline
+flow or code-owned workflow transitions.
 
 #### `vidbyte/agents/runtimes/`
 Swappable execution-loop paradigms that decouple `BaseAgent` from a single control flow.
@@ -109,9 +110,10 @@ across runtimes.
 
 #### `vidbyte/context/`
 The structured context subsystem: context managers, context windows, and the public
-context dataclasses (budget, permissions, base context). Use it when you want reusable,
-typed context instead of assembling raw prompt strings by hand. It is the developer-facing
-front of the lower-level dataclasses in `vidbyte/lib`.
+context dataclasses (budget, permissions, base context), including multi-agent context
+composition and prompt primitives. Use it when you want reusable, typed context instead
+of assembling raw prompt strings by hand. It is the developer-facing front of the
+lower-level dataclasses in `vidbyte/lib`.
 
 #### `vidbyte/context/algorithms/`
 Context-window growth strategies exposed as `ContextWindow` presets. Includes behaviors

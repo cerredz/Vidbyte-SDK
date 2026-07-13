@@ -1,9 +1,9 @@
 # Design Doc: Magentic-One-Inspired Multi-Agent Orchestration
 
-**Status:** Draft
+**Status:** Implemented; review-remediation architecture recorded
 **Author:** Codex
 **Created:** 2026-07-12
-**Last Updated:** 2026-07-12
+**Last Updated:** 2026-07-13
 
 ---
 
@@ -14,6 +14,8 @@ Add a first-class `MultiAgent` under `vidbyte/agents/multi/`. Like `BaseAgent`, 
 The control loop is adapted from [Magentic-One](https://arxiv.org/abs/2411.04468): an outer loop creates or revises a plan and task ledger, while an inner loop assesses progress, chooses one worker, gives that worker a bounded assignment, records the result, and detects stalls. Repeated failure or lack of progress returns control to the outer loop for reflection and replanning. Completion and all resource limits are enforced by code, not left solely to a model prompt.
 
 Vidbyte extends the paper's natural-language ledgers with explicit SDK records for goals, subtasks, dependencies, owners, statuses, evidence, blockers, attempts, next actions, decisions, and ordered events. This extension is intentional: those fields are requested product behavior, not a claim about the paper's exact data structure.
+
+Review remediation decomposed the original controller implementation into constructor-owned pre-run, runner, dispatcher, ledger-policy, tracing, cleanup, validation, and post-run classes. Multi-agent callback aliases and mutable run state now live in `vidbyte/lib/dataclasses/multi_agent.py`; orchestration context construction and prompt primitives live in `vidbyte/context`. These decisions supersede original references below to a feature-local `types.py` or context rendering inside the orchestrator module.
 
 The central API principle is controlled information flow. Developers may replace the orchestrator as a whole and configure an `AgentTransfer` for every worker. A transfer defines the exact `str` or `AgentInput` delivered to a worker, may gate dispatch through a fail-closed approval/policy callback, converts the worker's `AgentMessage` into a proposed `AgentReport`, and may validate/filter that report before commit. The default transfer sends only the selected task's identity, goal, acceptance criteria, instruction, and explicitly supplied JSON-safe payload. It never broadcasts the whole ledger, other workers' messages, or team history. Only the controller mutates the authoritative ledger; orchestrators and workers receive structurally read-only snapshots or developer-selected projections.
 
@@ -56,7 +58,7 @@ The central API principle is controlled information flow. Developers may replace
 - Do not silently retry potentially irreversible worker calls. Invocation retries are opt-in and require caller-owned idempotency or approval controls.
 - Do not add a new dependency on AutoGen or copy its prompt text. The SDK will implement the pattern using existing Vidbyte primitives and newly authored prompts.
 - Do not remove or rename the existing legacy multi-agent/aggregate dataclasses in `vidbyte/lib/dataclasses/multi_agent.py`.
-- Do not add test files or verification scripts in this no-tests workflow. Implementation will still run existing checks and ephemeral inline smoke commands.
+- Do not add standalone verification scripts. Focused regression tests may cover review-driven lifecycle, dispatch, context, and source-structure constraints.
 
 ---
 
@@ -84,7 +86,7 @@ The design targets `origin/main` at `d575a3f`, not the stale checked-out feature
 - `AgentRegistry` and `AgentCard` already provide local team discovery/capability descriptions; no second registry is necessary.
 - Pipelines deliberately have no shared state, evidence, blockers, retry ledger, or dynamic replanning. A `MultiAgent` may be a pipeline node because its final boundary is still `AgentMessage`, but pipelines do not become the orchestration engine.
 - The actor runtime provides mailbox-based point-to-point and broadcast execution inside one agent runtime. It does not provide task planning, ledger ownership, evidence, completion gates, or typed transfer adapters, and the new subsystem must remain independent of it.
-- `vidbyte/lib/dataclasses/multi_agent.py` already holds aggregate and unused legacy DAG records. It is the right central home for new frozen value contracts, while `vidbyte/agents/multi/types.py` provides feature-local re-exports.
+- `vidbyte/lib/dataclasses/multi_agent.py` already holds aggregate and legacy DAG records. It is the central home for multi-agent value contracts, callback aliases, and mutable run state; the feature package imports those types directly.
 - Semantic tracing already separates aggregate, agent, runtime, session, and other components. Multi-agent orchestration warrants its own filterable `multi_agent` component.
 - Sessions serialize a generic `RunState` and restore it through `BaseAgent.restore()`. That state has no discriminator or codec for a live team and its callbacks. Inherited team persistence would silently lose semantics.
 - Prompt assets are catalogued and packaged through existing setuptools package-data rules. `origin/main` currently has 47 prompt enum members across 18 families even though several docs still report older totals; four new phase prompts will make the actual total 51 prompts across 19 families.
@@ -242,8 +244,8 @@ This design intentionally keeps execution serial. A ledger revision therefore ha
 
 ### 6.1 Public Enums and Structurally Read-Only Value Contracts
 
-**File(s):** `vidbyte/lib/enums/multi_agent.py`, `vidbyte/lib/enums/__init__.py`, `vidbyte/lib/dataclasses/multi_agent.py`, `vidbyte/lib/dataclasses/__init__.py`, `vidbyte/lib/__init__.py`, `vidbyte/agents/multi/types.py`
-**Type:** New enum file; modified central exports; new feature re-export file
+**File(s):** `vidbyte/lib/enums/multi_agent.py`, `vidbyte/lib/enums/__init__.py`, `vidbyte/lib/dataclasses/multi_agent.py`, `vidbyte/lib/dataclasses/__init__.py`, `vidbyte/lib/__init__.py`
+**Type:** New enum file and modified central contracts/exports
 
 #### What it does
 
@@ -1063,7 +1065,7 @@ team = sdk.agents.multi(name="team", system_prompt="...", orchestrator=manager, 
 
 ## 9. File Change Manifest
 
-### Files to Create (15)
+### Files to Create (33)
 
 | File | Purpose |
 |---|---|
@@ -1071,10 +1073,24 @@ team = sdk.agents.multi(name="team", system_prompt="...", orchestrator=manager, 
 | `vidbyte/agents/multi/__init__.py` | Stable feature exports |
 | `vidbyte/agents/multi/README.md` | Package architecture, invariants, and usage |
 | `vidbyte/agents/multi/agent.py` | `MultiAgent` facade and controller loop |
+| `vidbyte/agents/multi/cleanup.py` | Shielded participant cleanup and worker reset |
+| `vidbyte/agents/multi/dispatcher.py` | Sequential worker transfer and report commit boundary |
+| `vidbyte/agents/multi/ledger_controller.py` | Manager policy, context, finish gates, replanning, and event callbacks |
+| `vidbyte/agents/multi/ledger_reports.py` | Accepted report reduction into task records |
+| `vidbyte/agents/multi/ledger_validation.py` | Ledger configuration, dispatch, ownership, and DAG validation |
+| `vidbyte/agents/multi/lifecycle.py` | Single top-level run exception, cleanup, and trace boundary |
 | `vidbyte/agents/multi/orchestrator.py` | Protocol and `MagenticOneOrchestrator` default |
+| `vidbyte/agents/multi/orchestrator_runtime.py` | Manager phase timeout and tracing boundary |
+| `vidbyte/agents/multi/post_run.py` | Terminal synthesis, results, replies, and history updates |
+| `vidbyte/agents/multi/pre_run.py` | Isolated manager, ledger, and worker initialization |
+| `vidbyte/agents/multi/runner.py` | One-level bounded controller protocol |
+| `vidbyte/agents/multi/tracing.py` | Control-only trace formatting and handle closure |
+| `vidbyte/agents/multi/validation.py` | Facade and runtime validation guards |
 | `vidbyte/agents/multi/ledger.py` | Mutable run-local ledger authority |
 | `vidbyte/agents/multi/transfer.py` | `AgentBinding`, `AgentTransfer`, and default codecs |
-| `vidbyte/agents/multi/types.py` | Feature-local stable type re-exports |
+| `vidbyte/context/multi_agent.py` | Orchestration context builder and primitive composer |
+| `vidbyte/context/primitives/multi_agent.py` | Request/team/ledger/report/limit/terminal context primitives |
+| `vidbyte/context/primitives/README.md` | Context primitive ownership and file index |
 | `vidbyte/lib/enums/multi_agent.py` | Task/action/stop enums |
 | `vidbyte/prompts/prompts/multi_agent_orchestrator/multi_agent_orchestrator.json` | Prompt-family descriptor |
 | `vidbyte/prompts/prompts/multi_agent_orchestrator/planning_prompt.md` | Initial planning instructions |
@@ -1082,8 +1098,12 @@ team = sdk.agents.multi(name="team", system_prompt="...", orchestrator=manager, 
 | `vidbyte/prompts/prompts/multi_agent_orchestrator/replanning_prompt.md` | Reflection/replan instructions |
 | `vidbyte/prompts/prompts/multi_agent_orchestrator/final_prompt.md` | Final/partial synthesis instructions |
 | `skills/vidbyte-sdk/multi-agent.md` | Dedicated implementation and usage guide |
+| `tests/multi_agent/README.md` | Multi-agent test-pack scope and index |
+| `tests/multi_agent/__init__.py` | Test package marker |
+| `tests/multi_agent/test_behavior.py` | Dispatch, containment, context, and finalization regressions |
+| `tests/multi_agent/test_structure.py` | Class ownership, size, type placement, and lifecycle regressions |
 
-### Files to Modify (34)
+### Files to Modify (37)
 
 | File | Purpose |
 |---|---|
@@ -1097,6 +1117,9 @@ team = sdk.agents.multi(name="team", system_prompt="...", orchestrator=manager, 
 | `vidbyte/agents/__init__.py` | Export primary multi-agent API |
 | `vidbyte/agents/client.py` | Add `sdk.agents.multi(...)` factory |
 | `vidbyte/__init__.py` | Add root convenience exports and header inventory |
+| `vidbyte/context/__init__.py` | Export multi-agent context builder and primitives |
+| `vidbyte/context/README.md` | Document multi-agent context ownership |
+| `vidbyte/context/primitives/__init__.py` | Export multi-agent context primitives |
 | `vidbyte/trace/components/agents.py` | Add `MultiAgentTrace` factories |
 | `vidbyte/trace/components/__init__.py` | Export trace factories |
 | `vidbyte/trace/profiles.py` | Add filterable `multi_agent` component |
@@ -1122,9 +1145,9 @@ team = sdk.agents.multi(name="team", system_prompt="...", orchestrator=manager, 
 | `skills/sessions.md` | Document v1 persistence exclusion and fail-fast behavior |
 | `skills/forking.md` | Document subtype/team fork and worker isolation semantics |
 
-### Files to Delete (0)
+### Files to Delete (1)
 
-No files are deleted.
+- `vidbyte/agents/multi/types.py`: callback aliases moved into the shared `vidbyte/lib/dataclasses/multi_agent.py` contract module.
 
 ### Explicit No-Change Areas
 
@@ -1135,7 +1158,7 @@ No files are deleted.
 - Session dataclasses, serializer, and stores: no lossy team schema is introduced.
 - `pyproject.toml`: existing `vidbyte*` discovery and nested prompt package-data globs cover the additions.
 - `.github/workflows/publish.yml`: current build/install checks remain; no workflow mutation is required.
-- `tests/*` and verification scripts: none are created or modified by the selected no-tests workflow.
+- Standalone verification scripts: no new script is required; focused tests live in `tests/multi_agent/`.
 
 ---
 
@@ -1174,26 +1197,26 @@ This is a library-only additive feature. There is no database migration, service
 3. Add `TaskLedger` and validate plans, dependencies, transitions, attempts, replans, and snapshots.
 4. Add transfers/bindings with safe defaults and run-local worker-fork lifecycle.
 5. Add the orchestrator protocol, private Pydantic schemas, prompt assets, and model-backed implementation.
-6. Add `MultiAgent.generate_reply()`, completion/limit behavior, subtype fork, card, factory, session fail-fast boundary, and root exports.
-7. Add semantic trace component/factories and safe correlation metadata.
-8. Update package/root docs, `llms.txt`, file index, prompt inventory/counts, and all manifest skills.
-9. Run existing verification and review the final diff against this manifest before committing.
+6. Add constructor-owned pre-run, runner, dispatcher, ledger-policy, validation, tracing, cleanup, and post-run collaborators behind the `MultiAgent` facade.
+7. Add multi-agent context construction and prompt primitives under `vidbyte/context`.
+8. Add semantic trace component/factories and safe correlation metadata.
+9. Add focused review-regression tests, update docs/inventories, and review the final diff before committing.
 
-### Verification Without New Tests or Scripts
+### Verification
 
 The implementation PR must still run:
 
 - `python -m compileall vidbyte`
 - The repository's existing standard-library test discovery suite.
 - Public import/factory smoke checks for every primary export.
-- Ephemeral inline fake-orchestrator/fake-worker cases covering plan -> completion, failure -> retry, stalls -> replan, premature finish rejection, limit -> partial result, cancellation propagation, non-JSON payload failure, custom transfer success, and subtype-preserving `as_tool()` fork.
+- Focused fake-orchestrator/fake-worker tests covering linear dispatch ordering, successful completion, transfer failure containment, context trust boundaries, and lifecycle/source structure.
 - Ephemeral inline trust-boundary cases covering unverified evidence, verified-evidence gating, report filtering, and a denied/erroring `before_dispatch` gate with no worker invocation.
 - Ephemeral fork/resource cases covering subtype-erasure rejection, custom worker/manager factories, schema-free finalization, post-start adapter failure recovery, hard-timeout candidate/no-candidate behavior, and MCP close calls on replan/success/failure/cancellation.
 - Existing session checks plus an inline check that `Session(MultiAgent(...))` fails before writing state while `Session(BaseAgent(...))` remains valid.
 - `python -m build`, `twine check`, clean-environment wheel install/import, and wheel inspection confirming all five prompt-family assets are packaged and no bytecode artifacts are included.
 - Documentation inventory checks ensuring all stated prompt counts and exported names match the source.
 
-The absence of committed feature tests is a material risk accepted by this no-tests workflow; it does not waive runtime validation before PR creation.
+Committed feature tests cover the review-driven regression surface; broader existing and packaging checks remain required before PR creation.
 
 ### Rollback
 

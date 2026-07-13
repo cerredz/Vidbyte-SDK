@@ -1,25 +1,34 @@
 """Context Protocol Header
 
 Description:
-    Defines immutable contracts for aggregate candidates and ledger-driven multi-agent orchestration.
+    Defines shared contracts for aggregate candidates and ledger-driven multi-agent orchestration.
 Purpose:
-    Makes goals, tasks, evidence, blockers, plans, decisions, dispatches, reports, limits, contexts, and results explicit at package boundaries.
+    Makes goals, tasks, evidence, blockers, plans, decisions, dispatches, reports,
+    callbacks, run state, limits, contexts, and results explicit at package boundaries.
 Architecture:
-    Frozen dataclasses normalize collections to tuples or read-only mappings and validate identifiers and finite controller limits at construction.
+    - Frozen public dataclasses normalize collections and validate controller limits.
+    - MultiAgentRunState owns mutable resources for one isolated invocation.
+    - Callback aliases keep all multi-agent boundary types in vidbyte.lib.
 Relations:
-    Mutated only through `vidbyte.agents.multi.TaskLedger`; consumed by the controller, orchestrator, transfers, tracing, and public exports.
+    Mutated only through `vidbyte.agents.multi.TaskLedger` and runtime collaborators;
+    consumed by the controller, context layer, orchestrator, transfers, and public exports.
 """
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from types import MappingProxyType
-from typing import Any
+from typing import TYPE_CHECKING, Any, TypeAlias
 
-from vidbyte.lib.dataclasses.agents import AgentCard, AgentInput, AgentMessage
+from vidbyte.lib.dataclasses.agents import AgentCard, AgentForkSettings, AgentInput, AgentMessage
 from vidbyte.lib.dataclasses.context import BaseContext
 from vidbyte.lib.enums.multi_agent import MultiAgentStopReason, OrchestratorAction, TaskStatus
+
+if TYPE_CHECKING:
+    from vidbyte.agents.base import BaseAgent
+    from vidbyte.agents.multi.ledger import TaskLedger
+    from vidbyte.agents.multi.orchestrator import MultiAgentOrchestrator
 
 
 def _freeze_mapping(value: Mapping[str, Any] | None) -> Mapping[str, Any]:
@@ -409,6 +418,29 @@ class MultiAgentSettings:
                 raise ValueError(f"MultiAgentSettings.{name} must be positive when provided.")
 
 
+@dataclass(slots=True)
+class MultiAgentRunState:
+    """Mutable participants and counters owned by one isolated controller invocation."""
+
+    run_id: str
+    request: AgentInput
+    context: BaseContext | None
+    history: tuple[AgentMessage, ...]
+    orchestrator: MultiAgentOrchestrator | None = None
+    ledger: TaskLedger | None = None
+    workers: dict[str, BaseAgent] = field(default_factory=dict)
+    rounds: int = 0
+    replans: int = 0
+    stalls: int = 0
+    last_report: AgentReport | None = None
+    candidate_answer: str | None = None
+    finish_decision: OrchestratorDecision | None = None
+    unrecoverable: bool = False
+    last_emitted_event_index: int = -1
+    cleanup_error_types: tuple[str, ...] = ()
+    event_error_types: list[str] = field(default_factory=list)
+
+
 @dataclass(frozen=True, slots=True)
 class OrchestrationContext:
     """Explicit context passed to every orchestrator phase."""
@@ -480,3 +512,19 @@ class MultiAgentResult:
         if self.rounds < 0 or self.replans < 0:
             raise ValueError("MultiAgentResult rounds and replans must be non-negative.")
         object.__setattr__(self, "metadata", _freeze_mapping(self.metadata))
+
+
+BeforeDispatch: TypeAlias = Callable[[AgentDispatch, TaskLedgerSnapshot], TaskBlocker | None | Awaitable[TaskBlocker | None]]
+RequestBuilder: TypeAlias = Callable[[AgentDispatch, TaskLedgerSnapshot], str | AgentInput | Awaitable[str | AgentInput]]
+ReportParser: TypeAlias = Callable[[AgentMessage, AgentDispatch, TaskLedgerSnapshot], AgentReport | Awaitable[AgentReport]]
+ReportValidator: TypeAlias = Callable[[AgentReport, AgentDispatch, TaskLedgerSnapshot], AgentReport | Awaitable[AgentReport]]
+WorkerForkFactory: TypeAlias = Callable[["BaseAgent", AgentForkSettings], "BaseAgent"]
+WorkerCloser: TypeAlias = Callable[["BaseAgent"], None | Awaitable[None]]
+LedgerFactory: TypeAlias = Callable[[str, AgentInput, tuple[str, ...], MultiAgentSettings], "TaskLedger"]
+CompletionCheck: TypeAlias = Callable[[OrchestrationContext, OrchestratorDecision], bool | Awaitable[bool]]
+EventHandler: TypeAlias = Callable[[LedgerEvent, TaskLedgerSnapshot], None | Awaitable[None]]
+MultiAgentEventCallback: TypeAlias = EventHandler
+ManagerAgentFactory: TypeAlias = Callable[["BaseAgent", str, AgentForkSettings], "BaseAgent"]
+ManagerAgentCloser: TypeAlias = Callable[["BaseAgent", str], None | Awaitable[None]]
+OrchestrationRenderer: TypeAlias = Callable[[OrchestrationContext], str]
+FinalizationRenderer: TypeAlias = Callable[[FinalizationContext], str]
