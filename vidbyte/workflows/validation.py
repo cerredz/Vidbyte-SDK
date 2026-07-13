@@ -7,6 +7,8 @@ ARCHITECTURE NOTE:
     Declaration order is preserved so callers can place cheap deterministic
     checks before model-backed verification. Agent verdicts require a Pydantic
     model and remain probabilistic even though their invocation is enforced.
+    Immediate observations are read-only evidence and never become part of the
+    transition-bound candidate unless a declared reducer writes them.
 
 PUBLIC API INVENTORY:
     CallableValidator: Adapts a sync/async callback returning bool or ValidationResult.
@@ -38,7 +40,7 @@ COMMON ERRORS:
     exceptions are normalized by machine.py according to validator policy.
 
 RELATED DOCS:
-    https://github.com/cerredz/Vidbyte-SDK/blob/main/docs/design/validated-state-machine-workflows.md
+    https://github.com/cerredz/Vidbyte-SDK/blob/main/docs/design/agent-harness-state-machine-runtime.md
 
 TESTS:
     No feature-specific test file is added by the approved no-tests design.
@@ -50,13 +52,16 @@ from __future__ import annotations
 import asyncio
 import inspect
 from collections.abc import Awaitable, Callable, Mapping, Sequence
+from dataclasses import replace
 from math import isfinite
+from types import MappingProxyType
 from typing import Any, Generic, TypeVar
 
 from pydantic import BaseModel, TypeAdapter, ValidationError
 
 from vidbyte.agents import AgentForkSettings, AgentInput, BaseAgent
 from vidbyte.evals import BaseGrader, EvalCase, GraderResult
+from vidbyte.workflows.budget import UsageReport
 from vidbyte.workflows.contracts import StateT, ValidationContext, ValidationResult, ValidationStatus, Validator
 from vidbyte.workflows.errors import WorkflowDefinitionError
 
@@ -82,6 +87,11 @@ class CallableValidator(Generic[StateT]):
     def name(self) -> str:
         # Returns the stable identifier used by validation records.
         return self._name
+
+    @property
+    def definition_fingerprint(self) -> Mapping[str, Any]:
+        # Includes all built-in false-result behavior without inspecting callback code.
+        return MappingProxyType({"adapter": "callable_validator:v1", "name": self._name, "reject_code": self._reject_code, "reject_feedback": self._reject_feedback})
 
     async def validate(self, context: ValidationContext[StateT]) -> ValidationResult:
         # Invokes the callback and converts a boolean into a structured decision.
@@ -110,11 +120,18 @@ class SchemaValidator(Generic[StateT]):
         self._strict = strict
         self._name = _resolved_name(name, schema, "schema_validator")
         self._reject_code = _required_code(reject_code, "SchemaValidator.reject_code")
+        self._schema_identity = _component_identity(schema)
+        self._selector_identity = _component_identity(selector) if selector is not None else None
 
     @property
     def name(self) -> str:
         # Returns the stable identifier used by validation records.
         return self._name
+
+    @property
+    def definition_fingerprint(self) -> Mapping[str, Any]:
+        # Binds schema identity and strict/rejection policy to durable graph identity.
+        return MappingProxyType({"adapter": "schema_validator:v1", "name": self._name, "schema": self._schema_identity, "selector": self._selector_identity, "strict": self._strict, "reject_code": self._reject_code})
 
     async def validate(self, context: ValidationContext[StateT]) -> ValidationResult:
         # Validates the selected value and converts Pydantic evidence to safe details.
@@ -143,15 +160,21 @@ class GraderValidator(Generic[StateT]):
         # Returns the stable identifier used by validation records.
         return self._name
 
+    @property
+    def definition_fingerprint(self) -> Mapping[str, Any]:
+        # Records the stable grader and projection identities plus rejection policy.
+        return MappingProxyType({"adapter": "grader_validator:v1", "name": self._name, "grader": _component_identity(self._grader), "case_builder": _component_identity(self._case_builder), "actual_builder": _component_identity(self._actual_builder), "reject_code": self._reject_code})
+
     async def validate(self, context: ValidationContext[StateT]) -> ValidationResult:
         # Grades the projected candidate and preserves score and reason.
         result = await self._grader.agrade(self._case_builder(context), self._actual_builder(context))
         if not isinstance(result, GraderResult):
             raise TypeError(f"GraderValidator '{self.name}' expected GraderResult, got {type(result).__name__}.")
         details = {"grader": getattr(self._grader, "name", type(self._grader).__name__)}
+        usage = _usage_from_metadata(getattr(result, "metadata", None))
         if result.passed:
-            return ValidationResult.passed(feedback=result.reason, score=result.score, details=details)
-        return ValidationResult.rejected(self._reject_code, result.reason or "Grader rejected the candidate.", score=result.score, details=details)
+            return ValidationResult.passed(feedback=result.reason, score=result.score, details=details, usage=usage)
+        return ValidationResult.rejected(self._reject_code, result.reason or "Grader rejected the candidate.", score=result.score, details=details, usage=usage)
 
 
 class AgentValidator(Generic[StateT, VerdictT]):
@@ -187,6 +210,11 @@ class AgentValidator(Generic[StateT, VerdictT]):
         # Returns the stable identifier used by validation records.
         return self._name
 
+    @property
+    def definition_fingerprint(self) -> Mapping[str, Any]:
+        # Captures verifier boundaries and retry/failure policy without credentials.
+        return MappingProxyType({"adapter": "agent_validator:v1", "name": self._name, "agent": _component_identity(self._agent_source), "prompt_builder": _component_identity(self._prompt_builder), "verdict_schema": _component_identity(self._verdict_schema), "verdict_mapper": _component_identity(self._verdict_mapper), "fresh_fork": self._fresh_fork, "max_attempts": self._max_attempts, "timeout_seconds": self._timeout_seconds, "fail_closed": self._fail_closed, "error_code": self._error_code})
+
     async def validate(self, context: ValidationContext[StateT]) -> ValidationResult:
         # Retries verifier infrastructure failures within the declared attempt bound.
         last_error: Exception | None = None
@@ -214,7 +242,9 @@ class AgentValidator(Generic[StateT, VerdictT]):
         result = self._verdict_mapper(verdict, context)
         if not isinstance(result, ValidationResult):
             raise TypeError(f"AgentValidator verdict_mapper must return ValidationResult, got {type(result).__name__}.")
-        return result
+        usage = _usage_from_metadata(reply.metadata)
+        combined = result.usage.combined_with(usage) if result.usage is not None and usage is not None else (result.usage or usage)
+        return replace(result, usage=combined)
 
     def _resolve_agent(self, context: ValidationContext[StateT]) -> BaseAgent:
         # Resolves a fixed verifier or a context-aware verifier factory per attempt.
@@ -245,15 +275,22 @@ class AllOfValidator(Generic[StateT]):
         # Returns the stable identifier used by validation records.
         return self._name
 
+    @property
+    def definition_fingerprint(self) -> Mapping[str, Any]:
+        # Preserves ordered child validator identities for conjunction semantics.
+        return MappingProxyType({"adapter": "all_of_validator:v1", "name": self._name, "validators": tuple(_validator_fingerprint(item) for item in self._validators)})
+
     async def validate(self, context: ValidationContext[StateT]) -> ValidationResult:
         # Stops at the first non-pass while preserving evaluated child evidence.
         children: list[Mapping[str, Any]] = []
+        results: list[ValidationResult] = []
         for validator in self._validators:
             result = await _invoke_child(validator, context)
+            results.append(result)
             children.append(_result_payload(validator, result))
             if result.status is not ValidationStatus.PASS:
-                return _with_children(result, children)
-        return ValidationResult.passed(score=_mean_score(children, 1.0), details={"children": tuple(children)})
+                return replace(_with_children(result, children), usage=_combined_usage(results))
+        return ValidationResult.passed(score=_mean_score(children, 1.0), details={"children": tuple(children)}, usage=_combined_usage(results))
 
 
 class AnyOfValidator(Generic[StateT]):
@@ -270,6 +307,11 @@ class AnyOfValidator(Generic[StateT]):
         # Returns the stable identifier used by validation records.
         return self._name
 
+    @property
+    def definition_fingerprint(self) -> Mapping[str, Any]:
+        # Preserves ordered child identities and aggregate rejection behavior.
+        return MappingProxyType({"adapter": "any_of_validator:v1", "name": self._name, "validators": tuple(_validator_fingerprint(item) for item in self._validators), "reject_code": self._reject_code})
+
     async def validate(self, context: ValidationContext[StateT]) -> ValidationResult:
         # Returns the first pass or a deterministic aggregate non-pass result.
         results: list[ValidationResult] = []
@@ -279,8 +321,8 @@ class AnyOfValidator(Generic[StateT]):
             results.append(result)
             children.append(_result_payload(validator, result))
             if result.status is ValidationStatus.PASS:
-                return ValidationResult.passed(feedback=result.feedback, score=result.score, details={"children": tuple(children)})
-        return self._aggregate_non_pass(results, children)
+                return ValidationResult.passed(feedback=result.feedback, score=result.score, details={"children": tuple(children)}, usage=_combined_usage(results))
+        return replace(self._aggregate_non_pass(results, children), usage=_combined_usage(results))
 
     def _aggregate_non_pass(self, results: Sequence[ValidationResult], children: Sequence[Mapping[str, Any]]) -> ValidationResult:
         # Gives errors precedence, then all-abstain, then aggregate rejection.
@@ -314,18 +356,24 @@ class WeightedValidator(Generic[StateT]):
         # Returns the stable identifier used by validation records.
         return self._name
 
+    @property
+    def definition_fingerprint(self) -> Mapping[str, Any]:
+        # Binds child order, weights, threshold, and rejection code to graph identity.
+        return MappingProxyType({"adapter": "weighted_validator:v1", "name": self._name, "validators": tuple({"weight": weight, "validator": _validator_fingerprint(validator)} for weight, validator in self._validators), "threshold": self._threshold, "reject_code": self._reject_code})
+
     async def validate(self, context: ValidationContext[StateT]) -> ValidationResult:
         # Evaluates every child and compares the normalized weighted mean.
         evaluated = [(weight, validator, await _invoke_child(validator, context)) for weight, validator in self._validators]
         children = tuple(_result_payload(validator, result, weight=weight) for weight, validator, result in evaluated)
+        usage = _combined_usage([result for _, _, result in evaluated])
         if any(result.status is ValidationStatus.ERROR for _, _, result in evaluated):
-            return ValidationResult.errored("child_validator_error", "A weighted child validator errored.", details={"children": children})
+            return ValidationResult.errored("child_validator_error", "A weighted child validator errored.", details={"children": children}, usage=usage)
         if any(result.status is ValidationStatus.ABSTAIN for _, _, result in evaluated):
-            return ValidationResult.abstained("child_validator_abstained", "A weighted child validator abstained.", details={"children": children})
+            return ValidationResult.abstained("child_validator_abstained", "A weighted child validator abstained.", details={"children": children}, usage=usage)
         score = self._weighted_score(evaluated)
         if score >= self._threshold:
-            return ValidationResult.passed(score=score, details={"threshold": self._threshold, "children": children})
-        return ValidationResult.rejected(self._reject_code, f"Weighted validation score {score:.3f} is below threshold {self._threshold:.3f}.", score=score, details={"threshold": self._threshold, "children": children})
+            return ValidationResult.passed(score=score, details={"threshold": self._threshold, "children": children}, usage=usage)
+        return ValidationResult.rejected(self._reject_code, f"Weighted validation score {score:.3f} is below threshold {self._threshold:.3f}.", score=score, details={"threshold": self._threshold, "children": children}, usage=usage)
 
     def _weighted_score(self, evaluated: Sequence[tuple[float, Validator[StateT], ValidationResult]]) -> float:
         # Computes a normalized mean using pass=1 and reject=0 when score is absent.
@@ -385,6 +433,26 @@ def _validator_name(validator: Validator[Any]) -> str:
     return str(name).strip() or type(validator).__name__
 
 
+def _component_identity(value: Any) -> str:
+    # Derives a stable caller-controlled/class identity without object repr or secrets.
+    if value is None:
+        return ""
+    explicit = getattr(value, "name", None)
+    if isinstance(explicit, str) and explicit.strip():
+        return explicit.strip()
+    module = getattr(value, "__module__", value.__class__.__module__)
+    qualified = getattr(value, "__qualname__", value.__class__.__qualname__)
+    return f"{module}.{qualified}"
+
+
+def _validator_fingerprint(validator: Validator[Any]) -> Mapping[str, Any]:
+    # Uses a validator's declared stable policy or falls back to its component identity.
+    declared = getattr(validator, "definition_fingerprint", None)
+    if callable(declared):
+        declared = declared()
+    return dict(declared) if isinstance(declared, Mapping) else {"component": _component_identity(validator)}
+
+
 def _result_payload(validator: Validator[Any], result: ValidationResult, *, weight: float | None = None) -> Mapping[str, Any]:
     # Builds compact ordered child evidence without candidate inputs.
     payload: dict[str, Any] = {"validator": _validator_name(validator), "status": result.status.value, "code": result.code, "feedback": result.feedback, "score": result.score, "details": dict(result.details)}
@@ -396,7 +464,41 @@ def _result_payload(validator: Validator[Any], result: ValidationResult, *, weig
 def _with_children(result: ValidationResult, children: Sequence[Mapping[str, Any]]) -> ValidationResult:
     # Returns the same semantic decision with composite child evidence attached.
     details = {**dict(result.details), "children": tuple(children)}
-    return ValidationResult(result.status, code=result.code, feedback=result.feedback, score=result.score, details=details)
+    return ValidationResult(result.status, code=result.code, feedback=result.feedback, score=result.score, details=details, usage=result.usage)
+
+
+def _combined_usage(results: Sequence[ValidationResult]) -> UsageReport | None:
+    # Aggregates only usage-bearing child decisions without inventing provider data.
+    reports = [result.usage for result in results if result.usage is not None]
+    if not reports:
+        return None
+    combined = reports[0]
+    for report in reports[1:]:
+        combined = combined.combined_with(report)
+    return combined
+
+
+def _usage_from_metadata(metadata: Any) -> UsageReport | None:
+    # Maps provider-independent verifier counters when the underlying actor exposes them.
+    if not isinstance(metadata, Mapping):
+        return None
+    usage_keys = {"iteration_count", "tool_call_count", "input_tokens", "output_tokens", "tokens_used", "cost_usd"}
+    if not any(key in metadata for key in usage_keys):
+        return None
+    iterations = metadata.get("iteration_count", 0)
+    tools = metadata.get("tool_call_count", 0)
+    tokens = metadata.get("tokens_used")
+    cost = metadata.get("cost_usd")
+    return UsageReport(
+        model_calls=int(iterations) if isinstance(iterations, int) and not isinstance(iterations, bool) and iterations >= 0 else 0,
+        tool_calls=int(tools) if isinstance(tools, int) and not isinstance(tools, bool) and tools >= 0 else 0,
+        input_tokens=metadata.get("input_tokens") if isinstance(metadata.get("input_tokens"), int) else None,
+        output_tokens=metadata.get("output_tokens") if isinstance(metadata.get("output_tokens"), int) else None,
+        total_tokens=tokens if isinstance(tokens, int) and not isinstance(tokens, bool) and tokens >= 0 else None,
+        cost_usd=float(cost) if isinstance(cost, (int, float)) and not isinstance(cost, bool) and cost >= 0 else None,
+        provider=metadata.get("provider") if isinstance(metadata.get("provider"), str) else None,
+        model=metadata.get("model_name") if isinstance(metadata.get("model_name"), str) else None,
+    )
 
 
 def _effective_score(result: ValidationResult) -> float:

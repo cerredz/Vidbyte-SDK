@@ -23,7 +23,7 @@ KNOWN EDGE CASES:
     Empty and undeclared keys are rejected by machine.py with WorkflowRoutingError.
 
 RELATED DOCS:
-    https://github.com/cerredz/Vidbyte-SDK/blob/main/docs/design/validated-state-machine-workflows.md
+    https://github.com/cerredz/Vidbyte-SDK/blob/main/docs/design/agent-harness-state-machine-runtime.md
 
 TESTS:
     No feature-specific test file is added by the approved no-tests design.
@@ -33,8 +33,9 @@ TESTS:
 from __future__ import annotations
 
 import inspect
-from collections.abc import Awaitable, Callable
-from typing import Generic
+from collections.abc import Awaitable, Callable, Mapping
+from types import MappingProxyType
+from typing import Any, Generic
 
 from vidbyte.workflows.contracts import RoutingContext, StateT
 from vidbyte.workflows.errors import WorkflowDefinitionError
@@ -57,6 +58,11 @@ class CallableRouter(Generic[StateT]):
     def name(self) -> str:
         # Returns the stable identifier used in routing diagnostics.
         return self._name
+
+    @property
+    def definition_fingerprint(self) -> Mapping[str, Any]:
+        # Exposes caller-owned stable identity without inspecting callback bytecode.
+        return MappingProxyType({"adapter": "callable_router:v1", "name": self._name})
 
     async def route(self, context: RoutingContext[StateT]) -> str:
         # Invokes the callback and awaits it only when necessary.

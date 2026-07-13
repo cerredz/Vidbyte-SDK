@@ -14,7 +14,7 @@ Relations:
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from typing import Any
 
 from vidbyte.agents.types import AgentMessage
@@ -140,6 +140,7 @@ class SessionSerializer:
             "tool_names": list(state.tool_names),
             "history": [dict(item) for item in state.history],
             "run_id": state.run_id,
+            "runner_options": self._scrub_metadata(state.runner_options),
             "loop_settings": self._safe(state.loop_settings),
             "aggregate_plan": self._safe(state.aggregate_plan),
             "context_summary": self._safe(state.context_summary),
@@ -166,6 +167,7 @@ class SessionSerializer:
             tool_names=tuple(data.get("tool_names", ()) or ()),
             history=tuple(dict(item) for item in data.get("history", ()) or ()),
             run_id=data.get("run_id"),
+            runner_options=dict(data.get("runner_options", {}) or {}),
             loop_settings=dict(data.get("loop_settings", {}) or {}),
             aggregate_plan=dict(data.get("aggregate_plan", {}) or {}),
             context_summary=dict(data.get("context_summary", {}) or {}),

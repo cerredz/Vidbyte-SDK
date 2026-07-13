@@ -72,6 +72,7 @@ class BaseAgent(McpAttachableMixin):
         aggregator: Any | None = None,
         aggregate: AggregateConfig | None = None,
         temperature: float | None = None,
+        runner_options: Mapping[str, Any] | None = None,
         run_id: str | None = None,
         description: str = "",
         capabilities: Sequence[str] = (),
@@ -142,6 +143,7 @@ class BaseAgent(McpAttachableMixin):
             model_name=model_name,
             temperature=temperature,
             run_id=run_id,
+            runner_options=dict(runner_options or {}),
         )
         self.name = name
         self._runner_cache: dict[str, object] = {}
@@ -441,6 +443,7 @@ class BaseAgent(McpAttachableMixin):
             provider=self.runner_config.provider,
             model_name=self.runner_config.model_name,
             temperature=self.runner_config.temperature,
+            runner_options=dict(self._safe_trace_value(self.runner_config.runner_options)),
             runtime_type=self.runtime_type.value,
             runtime_config=self._export_runtime_config(),
             algorithm=self.algorithm.name,
@@ -471,6 +474,7 @@ class BaseAgent(McpAttachableMixin):
             provider=state.provider,
             model_name=state.model_name,
             temperature=state.temperature,
+            runner_options=dict(state.runner_options),
             run_id=state.run_id,
             agent_loop_settings=cls._restore_loop_settings(state),
             description=state.description,
@@ -1163,12 +1167,15 @@ class BaseAgent(McpAttachableMixin):
 
     def _runner_for_model(self) -> tuple[object, str]:
         # Resolve and cache the executable runner for this agent's provider/model identity.
-        utility = Runner.from_model(
-            provider=self.runner_config.provider,
-            model_name=self.runner_config.model_name,
-            api_key=self.runner_config.api_key,
-            temperature=self.runner_config.temperature,
-        )
+        runner_arguments: dict[str, Any] = {
+            "provider": self.runner_config.provider,
+            "model_name": self.runner_config.model_name,
+            "api_key": self.runner_config.api_key,
+            "temperature": self.runner_config.temperature,
+        }
+        if self.runner_config.runner_options:
+            runner_arguments["options"] = self.runner_config.runner_options
+        utility = Runner.from_model(**runner_arguments)
         runner_type = utility.resolve_runner_type()
         if runner_type not in self._runner_cache:
             self._runner_cache[runner_type] = utility.build()

@@ -17,6 +17,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
+from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, Mapping, Sequence
 
 from vidbyte.lib.errors import AgentForkConfigurationError
@@ -113,6 +114,13 @@ class AgentRunnerConfig:
     model_name: str | None = None
     temperature: float | None = None
     run_id: str | None = None
+    runner_options: Mapping[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        # Freezes provider-specific reasoning/configuration options at agent construction.
+        if not isinstance(self.runner_options, Mapping):
+            raise TypeError("AgentRunnerConfig.runner_options must be a mapping.")
+        object.__setattr__(self, "runner_options", MappingProxyType(dict(self.runner_options)))
 
 
 @dataclass(frozen=True, slots=True)
@@ -206,6 +214,7 @@ class AgentForkSettings:
     model_name: str | None = None
     provider: ModelProvider | str | None = None
     temperature: float | None = None
+    runner_options: Mapping[str, Any] | None = None
     mcp: bool = True
     inherit_mcp: bool | None = None
 
@@ -221,3 +230,7 @@ class AgentForkSettings:
             raise AgentForkConfigurationError(
                 "model_name must be a single model name string; use AggregateAgent for multi-model aggregation."
             )
+        if self.runner_options is not None:
+            if not isinstance(self.runner_options, Mapping):
+                raise AgentForkConfigurationError("runner_options must be a mapping when provided.")
+            object.__setattr__(self, "runner_options", MappingProxyType(dict(self.runner_options)))

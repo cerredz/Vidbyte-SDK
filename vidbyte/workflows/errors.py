@@ -17,6 +17,17 @@ PUBLIC API INVENTORY:
     StageExecutionError: Stage invocation exhausted its declared recovery policy.
     WorkflowRoutingError: No declared route matches an emitted outcome or branch.
     TransitionLimitError: Selected transition attempts exceeded the run budget.
+    WorkflowBudgetError: A stage, run, detour, or child exhausted a declared ceiling.
+    WorkflowCommandError: A stage returned conflicting or undeclared control intent.
+    WorkflowPersistenceError: Canonical event/checkpoint storage lost consistency.
+    WorkflowResumeError: A suspended run cannot resume from the requested boundary.
+    WorkflowApprovalError: A confirmation response is stale, malformed, or mismatched.
+    WorkflowInterruptError: An explicit stage interrupt cannot consume its response.
+    WorkflowStuckError: Deterministic loop evidence crossed a configured threshold.
+    WorkflowCapabilityError: A stage profile or tool action cannot be enforced safely.
+    WorkflowDetourError: A detour entry, stack, or return contract is invalid.
+    WorkflowSubgraphError: Child mapping, execution, suspension, or join failed.
+    WorkflowErrorRecord: Serializable, bounded error evidence stored in run results.
 
 COMMON MODIFICATION PATTERNS:
     Add a new class only for a caller-actionable failure family, give it static
@@ -33,7 +44,7 @@ KNOWN EDGE CASES:
     the workflow error's own details remain intentionally small and safe.
 
 RELATED DOCS:
-    https://github.com/cerredz/Vidbyte-SDK/blob/main/docs/design/validated-state-machine-workflows.md
+    https://github.com/cerredz/Vidbyte-SDK/blob/main/docs/design/agent-harness-state-machine-runtime.md
 
 TESTS:
     No feature-specific test file is added by the approved no-tests design.
@@ -43,6 +54,8 @@ TESTS:
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import dataclass, field
+from types import MappingProxyType
 from typing import Any, ClassVar
 
 from vidbyte.lib.errors import VidbyteSdkError
@@ -66,6 +79,31 @@ class WorkflowError(VidbyteSdkError):
         packet.setdefault("related_files", self.related_files)
         super().__init__(message, details=packet)
 
+    def to_context_packet(self) -> dict[str, Any]:
+        # Returns one self-contained, safe diagnostic mapping for logs and agents.
+        return {"message": self.message, **self.details}
+
+
+@dataclass(frozen=True, slots=True)
+class WorkflowErrorRecord:
+    """Bounded serializable evidence for a workflow lifecycle ERROR result."""
+
+    error_type: str
+    message: str
+    details: Mapping[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        # Copies safe detail fields so persisted error evidence cannot be mutated.
+        object.__setattr__(self, "error_type", str(self.error_type).strip() or "WorkflowError")
+        object.__setattr__(self, "message", str(self.message)[:2000])
+        object.__setattr__(self, "details", MappingProxyType(dict(self.details)))
+
+    @classmethod
+    def from_error(cls, error: BaseException) -> "WorkflowErrorRecord":
+        # Converts a public workflow error or arbitrary exception into bounded evidence.
+        details = error.details if isinstance(error, VidbyteSdkError) else {}
+        return cls(type(error).__name__, str(error)[:2000], details=details)
+
 
 class WorkflowDefinitionError(WorkflowError):
     """Raised when a graph cannot compile into one unambiguous definition."""
@@ -82,7 +120,7 @@ class WorkflowExecutionError(WorkflowError):
     description = "A compiled StateMachine failed before reaching a declared terminal result."
     expected = "A run should either reach a named terminal or raise a typed child error with run and stage identifiers while leaving external side effects caller-owned."
     remediation = "Inspect the child error type, run_id, stage, outcome, and chained cause; fix the failing callback or policy rather than adding an implicit fallback."
-    related_files = ("vidbyte/workflows/machine.py", "vidbyte/workflows/contracts.py")
+    related_files: ClassVar[tuple[str, ...]] = ("vidbyte/workflows/machine.py", "vidbyte/workflows/contracts.py")
 
 
 class WorkflowStateError(WorkflowExecutionError):
@@ -127,16 +165,117 @@ class TransitionLimitError(WorkflowExecutionError):
     description = "The run exhausted max_transitions through cycles, retries encoded as routes, or guard redirect chains before reaching a terminal."
     expected = "Every selected transition consumes one budget unit so non-linear workflows remain bounded even when agents or validators repeat outcomes."
     remediation = "Inspect transition records for the repeating source/outcome pair, repair the stopping condition, or raise the limit only when the longer path is intentional."
-    related_files = ("vidbyte/workflows/machine.py", "vidbyte/workflows/contracts.py")
+    related_files: ClassVar[tuple[str, ...]] = ("vidbyte/workflows/machine.py", "vidbyte/workflows/contracts.py")
+
+
+class WorkflowBudgetError(WorkflowExecutionError):
+    """Raised when deterministic workflow resource accounting reaches a ceiling."""
+
+    description = "A stage, root run, detour, or child graph exhausted a declared visit, step, call, token, cost, time, depth, or concurrency ceiling."
+    expected = "Every resource-consuming boundary is charged before unsafe work begins, and a run stops rather than silently exceeding its configured economics."
+    remediation = "Inspect the named counter and limit, repair a repeated route or right-size the explicit budget; never bypass accounting in a stage callback."
+    related_files = ("vidbyte/workflows/budget.py", "vidbyte/workflows/machine.py", "vidbyte/workflows/subgraphs.py")
+
+
+class WorkflowCommandError(WorkflowExecutionError):
+    """Raised when a stage command conflicts with the compiled control contract."""
+
+    description = "A WorkflowCommand selected conflicting control actions, wrote an undeclared channel, or requested a goto/send/detour operation unavailable from its source stage."
+    expected = "One command may select exactly one primary control action, and every destination or child graph is declared statically on the compiled definition."
+    remediation = "Remove conflicting fields or add the precise command transition/subgraph declaration; do not permit arbitrary runtime target names."
+    related_files = ("vidbyte/workflows/contracts.py", "vidbyte/workflows/graph.py", "vidbyte/workflows/machine.py")
+
+
+class WorkflowPersistenceError(WorkflowExecutionError):
+    """Raised when canonical event or checkpoint persistence loses consistency."""
+
+    description = "A workflow store rejected an append/checkpoint/definition, returned corrupt data, or observed an optimistic sequence conflict."
+    expected = "Events are append-only, uniquely identified, monotonically sequenced, and checkpointed without rewriting prior workflow truth."
+    remediation = "Inspect the store path/run ID/expected sequence, repair corrupt caller-owned data or serialize writers, then resume from the latest compatible boundary."
+    related_files = ("vidbyte/workflows/persistence.py", "vidbyte/workflows/stores/memory.py", "vidbyte/workflows/stores/file.py")
+
+
+class WorkflowResumeError(WorkflowExecutionError):
+    """Raised when a stored run cannot resume at a compatible suspension boundary."""
+
+    description = "The requested run is absent, finished, errored, running, unversioned, definition-incompatible, or missing the checkpoint/event evidence needed for resume."
+    expected = "Only suspended runs resume against the exact definition, schema, reducer identities, request kind, and latest canonical sequence that created them."
+    remediation = "Use inspect() to verify lifecycle and pending request, supply the original compatible machine/store, and respond with the current request ID."
+    related_files: ClassVar[tuple[str, ...]] = ("vidbyte/workflows/machine.py", "vidbyte/workflows/projection.py", "vidbyte/workflows/persistence.py")
+
+
+class WorkflowApprovalError(WorkflowResumeError):
+    """Raised for stale, duplicate, mismatched, or invalid approval responses."""
+
+    description = "A human confirmation response did not match the currently pending approval request or omitted the required approval decision."
+    expected = "Approval responses reference exactly one active request, carry a boolean decision, and cannot select a graph target or be replayed."
+    remediation = "Read result.pending, respond once with ResumeCommand.approve/reject using its request_id, and let the compiled edge choose continuation."
+    related_files = ("vidbyte/workflows/approval.py", "vidbyte/workflows/machine.py", "vidbyte/workflows/contracts.py")
+
+
+class WorkflowInterruptError(WorkflowResumeError):
+    """Raised when an explicit stage interrupt cannot consume a resume value."""
+
+    description = "A stage interrupt response was absent, had the wrong request ID/kind/schema, or no longer matched the replay ordinal reached by the stage."
+    expected = "On replay, StageContext.interrupt consumes stored values in declaration order and suspends again only at the first unanswered ordinal."
+    remediation = "Resume the active interrupt with ResumeCommand.resume and keep pre-interrupt external effects idempotent under the supplied key."
+    related_files = ("vidbyte/workflows/contracts.py", "vidbyte/workflows/machine.py")
+
+
+class WorkflowStuckError(WorkflowExecutionError):
+    """Raised when deterministic agent loop evidence crosses a stuck threshold."""
+
+    description = "The workflow-owned detector observed repeated action/results, action/errors, monologues, ping-pong actions, or context-window failures above policy."
+    expected = "Loop fingerprints ignore volatile identifiers while preserving semantic content identity, and threshold breaches transition lifecycle to ERROR."
+    remediation = "Inspect the safe pattern/fingerprint/count evidence, change the prompt/tool/result or route stopping condition, then start or resume intentionally."
+    related_files = ("vidbyte/workflows/detection.py", "vidbyte/workflows/stages.py", "vidbyte/workflows/machine.py")
+
+
+class WorkflowCapabilityError(WorkflowExecutionError):
+    """Raised when a stage capability or action policy cannot be enforced safely."""
+
+    description = "A stage requested tool visibility/model/action policy on an opaque stage, named an unknown or duplicate tool, or attempted an action denied by deterministic guards."
+    expected = "Visible tools are resolved exactly before model invocation and action safety executes independently before every instrumented tool call."
+    remediation = "Use AgentStage or another policy-aware stage, correct tool names/specs, or change the explicit capability/action policy after reviewing the denial evidence."
+    related_files = ("vidbyte/workflows/capabilities.py", "vidbyte/workflows/stages.py", "vidbyte/workflows/graph.py")
+
+
+class WorkflowDetourError(WorkflowExecutionError):
+    """Raised when detour matching, depth, continuation, or return is invalid."""
+
+    description = "A signal-triggered detour exceeded nesting, targeted an invalid stage, returned with an empty stack, or referenced a stale continuation."
+    expected = "Detours enter through compiled rules, keep immutable frames, checkpoint boundaries, and return only through WorkflowCommand.return_from_detour."
+    remediation = "Inspect the rule/frame/depth details, declare the correct target and return mode, or remove an invalid return command from an ordinary stage."
+    related_files = ("vidbyte/workflows/detours.py", "vidbyte/workflows/graph.py", "vidbyte/workflows/machine.py")
+
+
+class WorkflowSubgraphError(WorkflowExecutionError):
+    """Raised when isolated child graph execution or deterministic joining fails."""
+
+    description = "A Send referenced an unknown child, duplicated a key, exceeded recursion/concurrency/budget, failed mapping, suspended unexpectedly, or could not join safely."
+    expected = "Each child has isolated state/events/checkpoints, a bounded budget, unique key/run ID, and summaries merged in input rather than completion order."
+    remediation = "Inspect the child/key/policy details, correct mapping or budget declarations, and resume suspended children before retrying the parent join."
+    related_files = ("vidbyte/workflows/subgraphs.py", "vidbyte/workflows/graph.py", "vidbyte/workflows/machine.py")
 
 
 __all__ = [
     "StageExecutionError",
     "TransitionLimitError",
     "WorkflowDefinitionError",
+    "WorkflowApprovalError",
+    "WorkflowBudgetError",
+    "WorkflowCapabilityError",
+    "WorkflowCommandError",
+    "WorkflowDetourError",
     "WorkflowError",
+    "WorkflowErrorRecord",
     "WorkflowExecutionError",
+    "WorkflowInterruptError",
+    "WorkflowPersistenceError",
+    "WorkflowResumeError",
     "WorkflowRoutingError",
     "WorkflowStateError",
+    "WorkflowStuckError",
+    "WorkflowSubgraphError",
     "WorkflowValidationError",
 ]

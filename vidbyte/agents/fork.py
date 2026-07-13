@@ -47,6 +47,7 @@ class AgentForker:
             provider=agent.runner_config.provider if settings.provider is None else settings.provider,
             model_name=agent.runner_config.model_name if settings.model_name is None else settings.model_name,
             temperature=agent.runner_config.temperature if settings.temperature is None else settings.temperature,
+            runner_options=agent.runner_config.runner_options if settings.runner_options is None else settings.runner_options,
             run_id=child_run_id,
             description=agent.description,
             capabilities=agent.capabilities,
@@ -77,6 +78,7 @@ class AgentForker:
             max_iterations=settings.max_iterations,
             max_tokens=base.max_tokens,
             max_tool_calls=base.max_tool_calls,
+            max_queued_prompts=base.max_queued_prompts,
             max_parallel_tool_calls=base.max_parallel_tool_calls,
             max_retries=base.max_retries,
             timeout_seconds=base.timeout_seconds,
@@ -84,6 +86,10 @@ class AgentForker:
             compaction_trigger_tokens=base.compaction_trigger_tokens,
             compaction_target_tokens=base.compaction_target_tokens,
             allowed_tools=base.allowed_tools,
+            tool_error_policy=base.tool_error_policy,
+            tool_settings=base.tool_settings,
+            output_contracts=base._output_contracts,
+            max_contract_rejections=base.max_contract_rejections,
         )
 
     @classmethod

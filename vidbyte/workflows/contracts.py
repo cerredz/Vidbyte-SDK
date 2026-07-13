@@ -9,10 +9,10 @@ ARCHITECTURE NOTE:
     so execution evidence cannot be changed through the original dictionaries.
 
 PUBLIC API INVENTORY:
-    ValidationPhase / ValidationStatus / ValidatorErrorPolicy / MachineStatus:
-        Stable string enums for validation and terminal behavior.
-    WorkflowEventType: Stable event names emitted by a compiled run.
-    RetryPolicy / StagePolicy / StateMachineSettings: Validated execution policy.
+    WorkflowLifecycleStatus / TerminalStatus / MachineStatus: Orthogonal run and
+        declared-terminal status, including the compatibility terminal alias.
+    RetryPolicy / StagePolicy / StateMachineSettings: Layered execution policy.
+    WorkflowInterrupt / WorkflowCommand / ResumeCommand: Bounded control requests.
     WorkflowFeedback / StageResult / ValidationResult: Stage and gate payloads.
     StageContext / ValidationContext / RoutingContext: Callback input contracts.
     ValidationRecord / StageExecution / TransitionRecord / WorkflowEvent:
@@ -29,9 +29,8 @@ COMMON MODIFICATION PATTERNS:
 WHAT NOT TO DO IN THIS FILE:
     1. Do not select routes or commit state; machine.py owns runtime decisions.
     2. Do not import BaseAgent or BaseGrader; adapters own those dependencies.
-    3. Do not persist or serialize records as a durable schema; v1 is in-memory.
-    4. Do not make the ledger immutable inside callback contexts; its explicit
-       purpose is to retain mechanical observations across rejected attempts.
+    3. Do not persist records here; events.py and persistence.py own durable schemas.
+    4. Do not expose an untracked mutable ledger; observations are event-backed.
 
 KNOWN EDGE CASES:
     Frozen dataclasses can still contain mutable nested values supplied by SDK
@@ -39,7 +38,7 @@ KNOWN EDGE CASES:
     State snapshots are optional because state can be large or sensitive.
 
 RELATED DOCS:
-    https://github.com/cerredz/Vidbyte-SDK/blob/main/docs/design/validated-state-machine-workflows.md
+    https://github.com/cerredz/Vidbyte-SDK/blob/main/docs/design/agent-harness-state-machine-runtime.md
 
 TESTS:
     No feature-specific test file is added by the approved no-tests design.
@@ -48,13 +47,21 @@ TESTS:
 
 from __future__ import annotations
 
-from collections.abc import Mapping, MutableMapping
-from dataclasses import dataclass, field
-from datetime import datetime
+from collections.abc import Awaitable, Callable, Mapping
+from dataclasses import dataclass, field, replace
 from enum import Enum
 from math import isfinite
 from types import MappingProxyType
 from typing import Any, Generic, Protocol, TypeVar, runtime_checkable
+
+from pydantic import BaseModel
+
+from .approval import ApprovalGate, RiskLevel
+from .budget import CostModel, UsageReport, WorkflowBudget
+from .detours import WorkflowSignal
+from .errors import WorkflowErrorRecord
+from .events import WorkflowEvent, WorkflowEventType
+from .subgraphs import Send
 
 
 StateT = TypeVar("StateT")
@@ -84,25 +91,25 @@ class ValidatorErrorPolicy(str, Enum):
     RAISE = "raise"
 
 
-class MachineStatus(str, Enum):
+class WorkflowLifecycleStatus(str, Enum):
+    """Execution condition independent from the graph's declared position."""
+
+    RUNNING = "running"
+    WAITING_FOR_CONFIRMATION = "waiting_for_confirmation"
+    INTERRUPTED = "interrupted"
+    FINISHED = "finished"
+    ERROR = "error"
+
+
+class TerminalStatus(str, Enum):
     """Declared status attached to a terminal graph node."""
 
     SUCCEEDED = "succeeded"
     FAILED = "failed"
 
 
-class WorkflowEventType(str, Enum):
-    """Ordered lifecycle events emitted by a workflow run."""
-
-    RUN_STARTED = "run_started"
-    STAGE_STARTED = "stage_started"
-    STAGE_FINISHED = "stage_finished"
-    VALIDATION_FINISHED = "validation_finished"
-    TRANSITION_SELECTED = "transition_selected"
-    TRANSITION_REJECTED = "transition_rejected"
-    STATE_COMMITTED = "state_committed"
-    RUN_FINISHED = "run_finished"
-    RUN_FAILED = "run_failed"
+# Preserves the PR #268 public name without creating a second terminal-status type.
+MachineStatus = TerminalStatus
 
 
 @dataclass(frozen=True, slots=True)
@@ -135,10 +142,11 @@ class RetryPolicy:
 
 @dataclass(frozen=True, slots=True)
 class StagePolicy:
-    """Timeout, retry, and handled-error routing policy for one stage."""
+    """Visit, timeout, retry, and handled-error routing policy for one stage."""
 
     retry: RetryPolicy = field(default_factory=RetryPolicy)
     timeout_seconds: float | None = None
+    max_visits: int | None = None
     error_outcome: str | None = None
 
     def __post_init__(self) -> None:
@@ -149,6 +157,9 @@ class StagePolicy:
             if not isinstance(self.timeout_seconds, (int, float)) or isinstance(self.timeout_seconds, bool) or not isfinite(self.timeout_seconds) or self.timeout_seconds <= 0:
                 raise ValueError("StagePolicy.timeout_seconds must be a finite number greater than zero when provided.")
             object.__setattr__(self, "timeout_seconds", float(self.timeout_seconds))
+        if self.max_visits is not None:
+            if not isinstance(self.max_visits, int) or isinstance(self.max_visits, bool) or self.max_visits <= 0:
+                raise ValueError("StagePolicy.max_visits must be an integer greater than zero when provided.")
         if self.error_outcome is not None:
             if not isinstance(self.error_outcome, str):
                 raise TypeError("StagePolicy.error_outcome must be a string when provided.")
@@ -160,22 +171,31 @@ class StagePolicy:
 
 @dataclass(frozen=True, slots=True)
 class StateMachineSettings:
-    """Run-wide limits, validator policy, and evidence-capture settings."""
+    """Run-wide budgets, validator policy, and evidence-capture settings."""
 
-    max_transitions: int = 100
+    budget: WorkflowBudget = field(default_factory=WorkflowBudget)
+    cost_model: CostModel | None = None
+    max_transitions: int | None = None
     timeout_seconds: float | None = None
     validator_error_policy: ValidatorErrorPolicy = ValidatorErrorPolicy.FAIL_CLOSED
     validation_error_outcome: str = "validation_error"
     record_state_snapshots: bool = False
 
     def __post_init__(self) -> None:
-        # Validates global limits and normalizes enum and outcome values.
-        if not isinstance(self.max_transitions, int) or isinstance(self.max_transitions, bool) or self.max_transitions <= 0:
-            raise ValueError("StateMachineSettings.max_transitions must be an integer greater than zero.")
+        # Folds legacy limit arguments into the canonical WorkflowBudget record.
+        if not isinstance(self.budget, WorkflowBudget):
+            raise TypeError("StateMachineSettings.budget must be a WorkflowBudget instance.")
+        budget = self.budget
+        if self.max_transitions is not None:
+            if not isinstance(self.max_transitions, int) or isinstance(self.max_transitions, bool) or self.max_transitions <= 0:
+                raise ValueError("StateMachineSettings.max_transitions must be an integer greater than zero when provided.")
+            budget = replace(budget, max_transitions=self.max_transitions)
         if self.timeout_seconds is not None:
             if not isinstance(self.timeout_seconds, (int, float)) or isinstance(self.timeout_seconds, bool) or not isfinite(self.timeout_seconds) or self.timeout_seconds <= 0:
                 raise ValueError("StateMachineSettings.timeout_seconds must be a finite number greater than zero when provided.")
-            object.__setattr__(self, "timeout_seconds", float(self.timeout_seconds))
+            budget = replace(budget, timeout_seconds=float(self.timeout_seconds))
+        if self.cost_model is not None and not callable(getattr(self.cost_model, "estimate", None)):
+            raise TypeError("StateMachineSettings.cost_model must provide estimate(usage) when provided.")
         if not isinstance(self.record_state_snapshots, bool):
             raise TypeError("StateMachineSettings.record_state_snapshots must be a boolean.")
         policy = self.validator_error_policy if isinstance(self.validator_error_policy, ValidatorErrorPolicy) else ValidatorErrorPolicy(self.validator_error_policy)
@@ -186,6 +206,9 @@ class StateMachineSettings:
             raise ValueError("StateMachineSettings.validation_error_outcome cannot be empty.")
         object.__setattr__(self, "validator_error_policy", policy)
         object.__setattr__(self, "validation_error_outcome", outcome)
+        object.__setattr__(self, "budget", budget)
+        object.__setattr__(self, "max_transitions", budget.max_transitions)
+        object.__setattr__(self, "timeout_seconds", budget.timeout_seconds)
 
 
 @dataclass(frozen=True, slots=True)
@@ -224,6 +247,134 @@ class StageResult(Generic[StateT]):
 
 
 @dataclass(frozen=True, slots=True)
+class WorkflowInterrupt:
+    """One replayable request for external input at a stage call site."""
+
+    namespace: str
+    prompt: str
+    schema: type[BaseModel] | None = None
+    metadata: Mapping[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        # Validates the durable request identity without serializing executable schema code.
+        object.__setattr__(self, "namespace", _required_text(self.namespace, "WorkflowInterrupt.namespace"))
+        object.__setattr__(self, "prompt", _required_text(self.prompt, "WorkflowInterrupt.prompt"))
+        if self.schema is not None and (not isinstance(self.schema, type) or not issubclass(self.schema, BaseModel)):
+            raise TypeError("WorkflowInterrupt.schema must be a Pydantic BaseModel class when provided.")
+        object.__setattr__(self, "metadata", _freeze_mapping(self.metadata))
+
+
+class PendingRequestKind(str, Enum):
+    """Kind of durable external input that currently suspends a run."""
+
+    APPROVAL = "approval"
+    INTERRUPT = "interrupt"
+    SUBGRAPH = "subgraph"
+
+
+@dataclass(frozen=True, slots=True)
+class PendingRequest:
+    """Public bounded description of the exact request needed to resume a run."""
+
+    request_id: str
+    kind: PendingRequestKind
+    stage: str
+    prompt: str
+    metadata: Mapping[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        # Normalizes the external resume token and freezes diagnostic request facts.
+        object.__setattr__(self, "request_id", _required_text(self.request_id, "PendingRequest.request_id"))
+        object.__setattr__(self, "kind", self.kind if isinstance(self.kind, PendingRequestKind) else PendingRequestKind(self.kind))
+        object.__setattr__(self, "stage", _required_text(self.stage, "PendingRequest.stage"))
+        object.__setattr__(self, "prompt", _required_text(self.prompt, "PendingRequest.prompt"))
+        object.__setattr__(self, "metadata", _freeze_mapping(self.metadata))
+
+
+@dataclass(frozen=True, slots=True)
+class ResumeCommand:
+    """External response to one exact pending approval or stage interrupt."""
+
+    request_id: str
+    value: Any = None
+    approved: bool | None = None
+
+    def __post_init__(self) -> None:
+        # Rejects ambiguous approval values while retaining arbitrary schema-validated input.
+        object.__setattr__(self, "request_id", _required_text(self.request_id, "ResumeCommand.request_id"))
+        if self.approved is not None and not isinstance(self.approved, bool):
+            raise TypeError("ResumeCommand.approved must be a boolean or None.")
+
+    @classmethod
+    def approve(cls, request_id: str, value: Any = None) -> "ResumeCommand":
+        # Creates an affirmative response for a pending transition approval.
+        return cls(request_id=request_id, value=value, approved=True)
+
+    @classmethod
+    def reject(cls, request_id: str, value: Any = None) -> "ResumeCommand":
+        # Creates a negative response for a pending transition approval.
+        return cls(request_id=request_id, value=value, approved=False)
+
+    @classmethod
+    def resume(cls, request_id: str, value: Any) -> "ResumeCommand":
+        # Creates a value response for a replayable StageContext.interrupt call.
+        return cls(request_id=request_id, value=value, approved=None)
+
+
+@dataclass(frozen=True, slots=True)
+class WorkflowCommand(Generic[StateT]):
+    """Reducer update plus one statically bounded control-flow request."""
+
+    update: Mapping[str, Any] = field(default_factory=dict)
+    outcome: str | None = None
+    goto: str | None = None
+    sends: tuple[Send, ...] = ()
+    signals: tuple[WorkflowSignal, ...] = ()
+    interrupt: WorkflowInterrupt | None = None
+    return_from_detour: str | None = None
+    usage: UsageReport | None = None
+    metadata: Mapping[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        # Ensures updates accompany at most one primary control action.
+        object.__setattr__(self, "update", _freeze_mapping(self.update))
+        outcome = _optional_text(self.outcome, "WorkflowCommand.outcome")
+        goto = _optional_text(self.goto, "WorkflowCommand.goto")
+        return_from_detour = _optional_text(self.return_from_detour, "WorkflowCommand.return_from_detour")
+        sends = tuple(self.sends)
+        signals = tuple(self.signals)
+        if any(not isinstance(item, Send) for item in sends):
+            raise TypeError("WorkflowCommand.sends must contain Send values.")
+        if any(not isinstance(item, WorkflowSignal) for item in signals):
+            raise TypeError("WorkflowCommand.signals must contain WorkflowSignal values.")
+        if self.interrupt is not None and not isinstance(self.interrupt, WorkflowInterrupt):
+            raise TypeError("WorkflowCommand.interrupt must be WorkflowInterrupt when provided.")
+        if self.usage is not None and not isinstance(self.usage, UsageReport):
+            raise TypeError("WorkflowCommand.usage must be UsageReport when provided.")
+        primary_count = sum((outcome is not None, goto is not None, bool(sends), self.interrupt is not None, return_from_detour is not None))
+        if primary_count > 1:
+            raise ValueError("WorkflowCommand may select only one of outcome, goto, sends, interrupt, or return_from_detour.")
+        if primary_count == 0:
+            outcome = "success"
+        object.__setattr__(self, "outcome", outcome)
+        object.__setattr__(self, "goto", goto)
+        object.__setattr__(self, "sends", sends)
+        object.__setattr__(self, "signals", signals)
+        object.__setattr__(self, "return_from_detour", return_from_detour)
+        object.__setattr__(self, "metadata", _freeze_mapping(self.metadata))
+
+
+class _StageInterruptSignal(BaseException):
+    """Internal non-retryable stack unwind used by StageContext.interrupt."""
+
+    def __init__(self, request: WorkflowInterrupt, ordinal: int) -> None:
+        # Carries only the deterministic call-site ordinal and typed request.
+        super().__init__(request.prompt)
+        self.request = request
+        self.ordinal = ordinal
+
+
+@dataclass(frozen=True, slots=True)
 class ValidationResult:
     """Structured gate decision returned by every workflow validator."""
 
@@ -232,6 +383,7 @@ class ValidationResult:
     feedback: str = ""
     score: float | None = None
     details: Mapping[str, Any] = field(default_factory=dict)
+    usage: UsageReport | None = None
 
     def __post_init__(self) -> None:
         # Normalizes statuses and validates the code and optional unit score.
@@ -243,30 +395,32 @@ class ValidationResult:
             if not isinstance(self.score, (int, float)) or isinstance(self.score, bool) or not isfinite(self.score) or not 0.0 <= self.score <= 1.0:
                 raise ValueError("ValidationResult.score must be a finite number between 0.0 and 1.0 when provided.")
             object.__setattr__(self, "score", float(self.score))
+        if self.usage is not None and not isinstance(self.usage, UsageReport):
+            raise TypeError("ValidationResult.usage must be UsageReport when provided.")
         object.__setattr__(self, "status", status)
         object.__setattr__(self, "code", code)
         object.__setattr__(self, "feedback", self.feedback.strip())
         object.__setattr__(self, "details", _freeze_mapping(self.details))
 
     @classmethod
-    def passed(cls, *, code: str = "pass", feedback: str = "", score: float | None = None, details: Mapping[str, Any] | None = None) -> ValidationResult:
+    def passed(cls, *, code: str = "pass", feedback: str = "", score: float | None = None, details: Mapping[str, Any] | None = None, usage: UsageReport | None = None) -> ValidationResult:
         # Builds a passing gate decision with optional diagnostic evidence.
-        return cls(ValidationStatus.PASS, code=code, feedback=feedback, score=score, details=details or {})
+        return cls(ValidationStatus.PASS, code=code, feedback=feedback, score=score, details=details or {}, usage=usage)
 
     @classmethod
-    def rejected(cls, code: str, feedback: str, *, score: float | None = None, details: Mapping[str, Any] | None = None) -> ValidationResult:
+    def rejected(cls, code: str, feedback: str, *, score: float | None = None, details: Mapping[str, Any] | None = None, usage: UsageReport | None = None) -> ValidationResult:
         # Builds a rejection whose code must resolve through the declared graph.
-        return cls(ValidationStatus.REJECT, code=code, feedback=feedback, score=score, details=details or {})
+        return cls(ValidationStatus.REJECT, code=code, feedback=feedback, score=score, details=details or {}, usage=usage)
 
     @classmethod
-    def abstained(cls, code: str, feedback: str, *, details: Mapping[str, Any] | None = None) -> ValidationResult:
+    def abstained(cls, code: str, feedback: str, *, details: Mapping[str, Any] | None = None, usage: UsageReport | None = None) -> ValidationResult:
         # Builds a non-decision for normalization by the machine's error policy.
-        return cls(ValidationStatus.ABSTAIN, code=code, feedback=feedback, details=details or {})
+        return cls(ValidationStatus.ABSTAIN, code=code, feedback=feedback, details=details or {}, usage=usage)
 
     @classmethod
-    def errored(cls, code: str, feedback: str, *, details: Mapping[str, Any] | None = None) -> ValidationResult:
+    def errored(cls, code: str, feedback: str, *, details: Mapping[str, Any] | None = None, usage: UsageReport | None = None) -> ValidationResult:
         # Builds a validator infrastructure failure without raising from the adapter.
-        return cls(ValidationStatus.ERROR, code=code, feedback=feedback, details=details or {})
+        return cls(ValidationStatus.ERROR, code=code, feedback=feedback, details=details or {}, usage=usage)
 
 
 @dataclass(frozen=True, slots=True)
@@ -281,20 +435,44 @@ class StageContext(Generic[StateT]):
     transition_count: int
     feedback: tuple[WorkflowFeedback, ...]
     history: tuple[StageExecution, ...]
-    ledger: MutableMapping[str, Any]
+    observations: Mapping[str, Any]
     metadata: Mapping[str, Any]
+    super_step: int = 0
+    idempotency_key: str = ""
+    _observe_handler: Callable[[str, Any], Awaitable[Any]] | None = field(default=None, repr=False, compare=False)
+    _interrupt_handler: Callable[[WorkflowInterrupt], Any] | None = field(default=None, repr=False, compare=False)
 
     def __post_init__(self) -> None:
-        # Protects context metadata while preserving the explicitly mutable ledger.
+        # Deep-freezes projected observations and assigns a stable retry identity.
         object.__setattr__(self, "run_id", _required_text(self.run_id, "StageContext.run_id"))
         object.__setattr__(self, "stage", _required_text(self.stage, "StageContext.stage"))
-        if self.visit <= 0 or self.attempt <= 0 or self.transition_count < 0:
-            raise ValueError("StageContext visit/attempt must be positive and transition_count cannot be negative.")
-        if not isinstance(self.ledger, MutableMapping):
-            raise TypeError("StageContext.ledger must be a mutable mapping.")
+        if self.visit <= 0 or self.attempt <= 0 or self.transition_count < 0 or self.super_step < 0:
+            raise ValueError("StageContext visit/attempt must be positive and transition_count/super_step cannot be negative.")
         object.__setattr__(self, "feedback", tuple(self.feedback))
         object.__setattr__(self, "history", tuple(self.history))
+        object.__setattr__(self, "observations", _deep_freeze_mapping(self.observations))
         object.__setattr__(self, "metadata", _freeze_mapping(self.metadata))
+        key = self.idempotency_key.strip() if isinstance(self.idempotency_key, str) else ""
+        object.__setattr__(self, "idempotency_key", key or f"{self.run_id}:{self.stage}:{self.visit}")
+
+    @property
+    def ledger(self) -> Mapping[str, Any]:
+        # Preserves read-only PR #268 access while removing untracked mutation.
+        return self.observations
+
+    async def observe(self, channel: str, value: Any) -> Any:
+        # Appends and reduces one immediate observation through the owning runtime.
+        if self._observe_handler is None:
+            raise RuntimeError("StageContext.observe() requires a running state machine context.")
+        return await self._observe_handler(_required_text(channel, "observation channel"), value)
+
+    def interrupt(self, request: WorkflowInterrupt) -> Any:
+        # Returns a replayed value or unwinds the stage at a durable interrupt boundary.
+        if not isinstance(request, WorkflowInterrupt):
+            raise TypeError("StageContext.interrupt() requires WorkflowInterrupt.")
+        if self._interrupt_handler is None:
+            raise RuntimeError("StageContext.interrupt() requires a running state machine context.")
+        return self._interrupt_handler(request)
 
 
 @dataclass(frozen=True, slots=True)
@@ -310,7 +488,7 @@ class ValidationContext(Generic[StateT]):
     outcome: str
     target: str | None
     feedback: tuple[WorkflowFeedback, ...]
-    ledger: MutableMapping[str, Any]
+    observations: Mapping[str, Any]
     metadata: Mapping[str, Any]
 
     def __post_init__(self) -> None:
@@ -322,7 +500,13 @@ class ValidationContext(Generic[StateT]):
         object.__setattr__(self, "outcome", _required_text(self.outcome, "ValidationContext.outcome"))
         object.__setattr__(self, "target", self.target.strip() if self.target is not None else None)
         object.__setattr__(self, "feedback", tuple(self.feedback))
+        object.__setattr__(self, "observations", _deep_freeze_mapping(self.observations))
         object.__setattr__(self, "metadata", _freeze_mapping(self.metadata))
+
+    @property
+    def ledger(self) -> Mapping[str, Any]:
+        # Preserves read-only access for validators written against PR #268.
+        return self.observations
 
 
 @dataclass(frozen=True, slots=True)
@@ -334,7 +518,7 @@ class RoutingContext(Generic[StateT]):
     candidate_state: StateT
     stage_result: StageResult[StateT]
     feedback: tuple[WorkflowFeedback, ...]
-    ledger: MutableMapping[str, Any]
+    observations: Mapping[str, Any]
     metadata: Mapping[str, Any]
 
     def __post_init__(self) -> None:
@@ -342,7 +526,13 @@ class RoutingContext(Generic[StateT]):
         object.__setattr__(self, "run_id", _required_text(self.run_id, "RoutingContext.run_id"))
         object.__setattr__(self, "stage", _required_text(self.stage, "RoutingContext.stage"))
         object.__setattr__(self, "feedback", tuple(self.feedback))
+        object.__setattr__(self, "observations", _deep_freeze_mapping(self.observations))
         object.__setattr__(self, "metadata", _freeze_mapping(self.metadata))
+
+    @property
+    def ledger(self) -> Mapping[str, Any]:
+        # Preserves read-only access for routers written against PR #268.
+        return self.observations
 
 
 @dataclass(frozen=True, slots=True)
@@ -416,66 +606,70 @@ class TransitionRecord:
 
 
 @dataclass(frozen=True, slots=True)
-class WorkflowEvent:
-    """Ordered, timestamped lifecycle signal delivered to observers."""
-
-    sequence: int
-    event_type: WorkflowEventType
-    run_id: str
-    stage: str | None
-    occurred_at: datetime
-    elapsed_ms: float
-    payload: Mapping[str, Any]
-
-    def __post_init__(self) -> None:
-        # Normalizes event identifiers and protects event payloads.
-        event_type = self.event_type if isinstance(self.event_type, WorkflowEventType) else WorkflowEventType(self.event_type)
-        if self.sequence <= 0 or self.elapsed_ms < 0:
-            raise ValueError("WorkflowEvent.sequence must be positive and elapsed_ms cannot be negative.")
-        object.__setattr__(self, "event_type", event_type)
-        object.__setattr__(self, "run_id", _required_text(self.run_id, "WorkflowEvent.run_id"))
-        object.__setattr__(self, "stage", self.stage.strip() if self.stage is not None else None)
-        object.__setattr__(self, "payload", _freeze_mapping(self.payload))
-
-
-@dataclass(frozen=True, slots=True)
 class StateMachineResult(Generic[StateT]):
-    """Terminal state and ordered evidence returned by a completed workflow."""
+    """Projected run state and ordered evidence at any durable boundary."""
 
     run_id: str
-    status: MachineStatus
-    terminal: str
+    definition_id: str
+    lifecycle: WorkflowLifecycleStatus
+    terminal_status: TerminalStatus | None
+    terminal: str | None
     state: StateT
-    ledger: Mapping[str, Any]
+    observations: Mapping[str, Any]
+    pending: PendingRequest | None
+    usage: UsageReport
+    checkpoint_id: str | None
     metadata: Mapping[str, Any]
     stages: tuple[StageExecution, ...]
     transitions: tuple[TransitionRecord, ...]
     events: tuple[WorkflowEvent, ...]
     observer_errors: tuple[str, ...]
+    error: WorkflowErrorRecord | None
     duration_ms: float
 
     def __post_init__(self) -> None:
-        # Freezes result collections while preserving caller-owned nested values.
-        status = self.status if isinstance(self.status, MachineStatus) else MachineStatus(self.status)
+        # Freezes projected collections and enforces lifecycle/terminal orthogonality.
+        lifecycle = self.lifecycle if isinstance(self.lifecycle, WorkflowLifecycleStatus) else WorkflowLifecycleStatus(self.lifecycle)
+        terminal_status = self.terminal_status if self.terminal_status is None or isinstance(self.terminal_status, TerminalStatus) else TerminalStatus(self.terminal_status)
         if self.duration_ms < 0:
             raise ValueError("StateMachineResult.duration_ms cannot be negative.")
         object.__setattr__(self, "run_id", _required_text(self.run_id, "StateMachineResult.run_id"))
-        object.__setattr__(self, "status", status)
-        object.__setattr__(self, "terminal", _required_text(self.terminal, "StateMachineResult.terminal"))
-        object.__setattr__(self, "ledger", _freeze_mapping(self.ledger))
+        object.__setattr__(self, "definition_id", _required_text(self.definition_id, "StateMachineResult.definition_id"))
+        object.__setattr__(self, "lifecycle", lifecycle)
+        object.__setattr__(self, "terminal_status", terminal_status)
+        object.__setattr__(self, "terminal", _optional_text(self.terminal, "StateMachineResult.terminal"))
+        if lifecycle is WorkflowLifecycleStatus.FINISHED and (terminal_status is None or self.terminal is None):
+            raise ValueError("A FINISHED StateMachineResult requires terminal_status and terminal.")
+        if lifecycle is not WorkflowLifecycleStatus.FINISHED and (terminal_status is not None or self.terminal is not None):
+            raise ValueError("Only a FINISHED StateMachineResult may carry a terminal status or name.")
+        if not isinstance(self.usage, UsageReport):
+            raise TypeError("StateMachineResult.usage must be UsageReport.")
+        if self.pending is not None and not isinstance(self.pending, PendingRequest):
+            raise TypeError("StateMachineResult.pending must be PendingRequest when provided.")
+        object.__setattr__(self, "observations", _deep_freeze_mapping(self.observations))
         object.__setattr__(self, "metadata", _freeze_mapping(self.metadata))
         object.__setattr__(self, "stages", tuple(self.stages))
         object.__setattr__(self, "transitions", tuple(self.transitions))
         object.__setattr__(self, "events", tuple(self.events))
         object.__setattr__(self, "observer_errors", tuple(self.observer_errors))
 
+    @property
+    def status(self) -> TerminalStatus | None:
+        # Preserves the PR #268 terminal-status attribute for completed runs.
+        return self.terminal_status
+
+    @property
+    def ledger(self) -> Mapping[str, Any]:
+        # Preserves a read-only compatibility projection over immediate observations.
+        return self.observations
+
 
 @runtime_checkable
 class Stage(Protocol[StateT]):
     """Structural contract for one workflow stage."""
 
-    async def run(self, context: StageContext[StateT]) -> StageResult[StateT]:
-        # Produces one candidate state and semantic route outcome.
+    async def run(self, context: StageContext[StateT]) -> StageResult[StateT] | WorkflowCommand[StateT]:
+        # Produces one whole-state candidate or reducer-backed bounded command.
         ...
 
 
@@ -518,15 +712,20 @@ class WorkflowObserver(Protocol):
 
 @dataclass(frozen=True, slots=True)
 class RouteTarget(Generic[StateT]):
-    """Conditional branch destination plus ordered target-specific guards."""
+    """Conditional branch destination plus guards and transition policy."""
 
     target: str
     guards: tuple[Validator[StateT], ...] = ()
+    approval: ApprovalGate | None = None
+    risk: RiskLevel = RiskLevel.LOW
 
     def __post_init__(self) -> None:
         # Normalizes a branch target and protects guard declaration order.
         object.__setattr__(self, "target", _required_text(self.target, "RouteTarget.target"))
         object.__setattr__(self, "guards", tuple(self.guards))
+        if self.approval is not None and not isinstance(self.approval, ApprovalGate):
+            raise TypeError("RouteTarget.approval must be ApprovalGate when provided.")
+        object.__setattr__(self, "risk", self.risk if isinstance(self.risk, RiskLevel) else RiskLevel(self.risk))
 
 
 def _freeze_mapping(value: Mapping[str, Any] | None) -> Mapping[str, Any]:
@@ -534,6 +733,24 @@ def _freeze_mapping(value: Mapping[str, Any] | None) -> Mapping[str, Any]:
     if value is not None and not isinstance(value, Mapping):
         raise TypeError(f"Workflow mapping fields require Mapping values, got {type(value).__name__}.")
     return MappingProxyType(dict(value or {}))
+
+
+def _deep_freeze_mapping(value: Mapping[str, Any] | None) -> Mapping[str, Any]:
+    # Recursively removes the old nested-mutation escape hatch from observations.
+    if value is not None and not isinstance(value, Mapping):
+        raise TypeError(f"Workflow observation fields require Mapping values, got {type(value).__name__}.")
+    return MappingProxyType({str(key): _deep_freeze(item) for key, item in dict(value or {}).items()})
+
+
+def _deep_freeze(value: Any) -> Any:
+    # Freezes common nested containers while leaving typed scalar/domain objects intact.
+    if isinstance(value, Mapping):
+        return MappingProxyType({key: _deep_freeze(item) for key, item in value.items()})
+    if isinstance(value, (list, tuple)):
+        return tuple(_deep_freeze(item) for item in value)
+    if isinstance(value, (set, frozenset)):
+        return frozenset(_deep_freeze(item) for item in value)
+    return value
 
 
 def _required_text(value: str, field_name: str) -> str:
@@ -546,9 +763,24 @@ def _required_text(value: str, field_name: str) -> str:
     return text
 
 
+def _optional_text(value: str | None, field_name: str) -> str | None:
+    # Normalizes optional identifiers while rejecting non-string values.
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise TypeError(f"{field_name} must be a string when provided, got {type(value).__name__}.")
+    text = value.strip()
+    if not text:
+        raise ValueError(f"{field_name} cannot be empty when provided.")
+    return text
+
+
 __all__ = [
     "MachineStatus",
+    "PendingRequest",
+    "PendingRequestKind",
     "RetryPolicy",
+    "ResumeCommand",
     "RouteTarget",
     "Router",
     "RoutingContext",
@@ -559,6 +791,7 @@ __all__ = [
     "StageResult",
     "StateMachineResult",
     "StateMachineSettings",
+    "TerminalStatus",
     "ValidationContext",
     "ValidationPhase",
     "ValidationRecord",
@@ -569,5 +802,8 @@ __all__ = [
     "WorkflowEvent",
     "WorkflowEventType",
     "WorkflowFeedback",
+    "WorkflowCommand",
+    "WorkflowInterrupt",
+    "WorkflowLifecycleStatus",
     "WorkflowObserver",
 ]

@@ -70,6 +70,7 @@ class RunState:
     tool_names: tuple[str, ...]
     history: tuple[Mapping[str, Any], ...]
     run_id: str | None = None
+    runner_options: Mapping[str, Any] = field(default_factory=dict)
     loop_settings: Mapping[str, Any] = field(default_factory=dict)
     aggregate_plan: Mapping[str, Any] = field(default_factory=dict)
     context_summary: Mapping[str, Any] = field(default_factory=dict)
