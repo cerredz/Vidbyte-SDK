@@ -2,7 +2,7 @@
 
 Description:
     Exports the root Vidbyte SDK client and top-level public tool, agent, context,
-    paradigm, pipeline, and validated workflow contracts.
+    paradigm, pipeline, ledger-driven multi-agent, and validated workflow contracts.
 Purpose:
     Keeps common SDK imports concise while leaving specialized built-in tools in
     their category packages.
@@ -14,8 +14,9 @@ Architecture:
     - Context exports: BaseAgentContext, BaseContext, ContextBudget, ContextPermissions.
     - Preset exports: BudgetPreset, PermissionPreset.
     - Pipeline exports: BasePipeline, ConditionalPipeline, ParallelPipeline, PipelineNode, SequentialPipeline.
+    - Multi-agent exports: MultiAgent, MagenticOneOrchestrator, TaskLedger, AgentBinding, AgentTransfer, and immutable ledger contracts.
     - Workflow exports: StateGraph, StateMachine, stages, validators, routers, policies, records, and typed errors.
-    - Error exports: McpError, McpConnectionError, McpInitializeError, McpToolDiscoveryError, McpToolExecutionError, McpAttachmentError, PipelineExecutionError.
+    - Error exports: MCP, pipeline, workflow, multi-agent execution, task-ledger, and agent-transfer error families.
 Key Functions / Exports:
     - VidbyteSDK: Main SDK entry point.
     - BaseAgent: Base class for building agents.
@@ -35,6 +36,12 @@ __version__ = "0.1.0"
 
 from vidbyte.agents import (
     Agent,
+    AgentBinding,
+    AgentDispatch,
+    AgentReport,
+    AgentTransfer,
+    FinalizationContext,
+    LedgerEvent,
     AggregateAgent,
     AggregateConfig,
     AggregateResult,
@@ -51,8 +58,25 @@ from vidbyte.agents import (
     AgentStopReason,
     BaseAgent,
     HandoffAgent,
+    MagenticOneOrchestrator,
+    MultiAgent,
+    MultiAgentOrchestrator,
+    MultiAgentResult,
+    MultiAgentSettings,
+    MultiAgentStopReason,
     MultiProviderAggregator,
+    OrchestrationContext,
+    OrchestratorAction,
+    OrchestratorDecision,
+    OrchestratorPlan,
     ProposerSpec,
+    TaskBlocker,
+    TaskEvidence,
+    TaskLedger,
+    TaskLedgerSnapshot,
+    TaskRecord,
+    TaskSpec,
+    TaskStatus,
     ToolSettings,
 )
 from vidbyte.client import VidbyteSDK
@@ -189,13 +213,16 @@ from vidbyte.tools.builtins.sessions import (
 )
 from vidbyte.lib.enums import BudgetPreset, PermissionPreset, Prompt
 from vidbyte.lib.errors import (
+    AgentTransferError,
     McpAttachmentError,
     McpConnectionError,
     McpError,
     McpInitializeError,
     McpToolDiscoveryError,
     McpToolExecutionError,
+    MultiAgentExecutionError,
     PipelineExecutionError,
+    TaskLedgerError,
     TracerConfigurationError,
 )
 from vidbyte.lib.tracing import NullTracer, TracerBase
@@ -344,6 +371,32 @@ from vidbyte.tools.mcp import (
 
 __all__ = [
     "Agent",
+    "AgentBinding",
+    "AgentDispatch",
+    "AgentReport",
+    "AgentTransfer",
+    "AgentTransferError",
+    "FinalizationContext",
+    "LedgerEvent",
+    "MagenticOneOrchestrator",
+    "MultiAgent",
+    "MultiAgentExecutionError",
+    "MultiAgentOrchestrator",
+    "MultiAgentResult",
+    "MultiAgentSettings",
+    "MultiAgentStopReason",
+    "OrchestrationContext",
+    "OrchestratorAction",
+    "OrchestratorDecision",
+    "OrchestratorPlan",
+    "TaskBlocker",
+    "TaskEvidence",
+    "TaskLedger",
+    "TaskLedgerError",
+    "TaskLedgerSnapshot",
+    "TaskRecord",
+    "TaskSpec",
+    "TaskStatus",
     "ActionTrace",
     "ContinualTraceAgent",
     "ContinualTraceMiddleware",

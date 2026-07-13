@@ -5,8 +5,8 @@ Description:
     single source of truth for prompt identifiers.
 
 Purpose:
-    Enables static typing, autocomplete, and validation for static prompt templates loaded
-    from external JSON and Markdown files.
+    Enables static typing, autocomplete, and validation for the 51 static prompt templates
+    across 19 JSON/Markdown-backed families, including multi-agent manager phases.
 
 Architecture and Key Functions:
     - Prompt (Enum): Inherits from `str` and `Enum`. It maps high-level, semantic prompt
@@ -56,6 +56,10 @@ class Prompt(str, Enum):
     MULTI_PROVIDER_AGENTIC_GRADER_GRADER_PROMPT = "multi_provider_agentic_grader.grader_prompt"
     MULTI_PROVIDER_AGGREGATOR_SYNTHESIS_SYSTEM_PROMPT = "multi_provider_aggregator.synthesis_system_prompt"
     MULTI_PROVIDER_AGGREGATOR_SYNTHESIS_PROMPT = "multi_provider_aggregator.synthesis_prompt"
+    MULTI_AGENT_ORCHESTRATOR_PLANNING_PROMPT = "multi_agent_orchestrator.planning_prompt"
+    MULTI_AGENT_ORCHESTRATOR_PROGRESS_PROMPT = "multi_agent_orchestrator.progress_prompt"
+    MULTI_AGENT_ORCHESTRATOR_REPLANNING_PROMPT = "multi_agent_orchestrator.replanning_prompt"
+    MULTI_AGENT_ORCHESTRATOR_FINAL_PROMPT = "multi_agent_orchestrator.final_prompt"
     TEMPLATES_INTENT_BASED = "templates.intent_based"
     TEMPLATES_PERSONA = "templates.persona"
     TEMPLATES_SPECIFICATION = "templates.specification"

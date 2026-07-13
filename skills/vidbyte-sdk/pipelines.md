@@ -7,6 +7,8 @@ string-out: one agent's reply becomes the next agent's prompt. There is no share
 context object, no pipeline-level budget, and no artifact layer — each agent carries
 its own configuration, strategy, and tools. Pipelines move strings, nothing else.
 
+Use `vidbyte.agents.multi.MultiAgent` instead when a manager must own the overall goal, inspect shared task progress, choose the next worker dynamically, require verified evidence, retry, or replan. A multi-agent team is an adaptive controller over a run-local `TaskLedger`, not a pipeline topology. See [`multi-agent.md`](multi-agent.md).
+
 ## Why pipelines exist
 
 Strategies compose reasoning *inside* a single agent loop. Pipelines compose *agents*
@@ -175,3 +177,5 @@ from vidbyte import BasePipeline, PipelineNode, PipelineExecutionError
 - Pipelines do not stream results or emit partial outputs.
 - Pipelines do not retry or vote — those are future topology types. Map-reduce
   (fan-out → fan-in) is supported via `MapReducePipeline`.
+- Pipelines do not own task status, evidence, blockers, retries, or replanning. Those
+  belong to the ledger-driven `MultiAgent` package.
