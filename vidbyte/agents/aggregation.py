@@ -1,21 +1,25 @@
 """Context Protocol Header
 
-Description:
+PURPOSE:
     Implements the Multi-Provider Aggregator (Mixture-of-Agents) engine and the
-    AggregateAgent class that exposes it as a first-class SDK agent.
-Purpose:
-    Fans a request out to several proposer models concurrently and routes their
-    candidate answers to a final aggregator model that synthesizes a new response
-    grounded in all of them (it composes its own answer, it does not select one).
-Architecture:
-    - MultiProviderAggregator: Pure async orchestration over agent-like objects.
-    - AggregateResult: Frozen carrier for the synthesized content and metadata.
+    AggregateAgent that exposes it as a first-class SDK agent. It fans a request
+    out to several proposer models concurrently and routes their candidate answers
+    to a final aggregator model that synthesizes a new response grounded in all of
+    them (it composes its own answer, it does not select one).
+ROLE IN CODEBASE:
+    The explicit SDK surface for proposer/aggregator execution. Sibling of
+    vidbyte/agents/algorithms/multi_provider_agentic_grader.py, which selects a
+    winning candidate instead of synthesizing a new one. BaseAgent delegates here
+    when constructed with an aggregation plan.
+ARCHITECTURE:
+    - MultiProviderAggregator: pure async orchestration over agent-like objects.
+    - AggregateResult: frozen carrier for the synthesized content and metadata.
     - AggregateAgent: BaseAgent subclass that builds proposer/aggregator child
       agents from ProposerSpecs and runs the engine inside generate_reply.
-Relations:
-    Sibling of vidbyte/agents/algorithms/multi_provider_agentic_grader.py, which
-    selects a winning candidate instead of synthesizing a new answer. This module
-    is the explicit SDK surface for proposer/aggregator execution.
+FUNCTION INVENTORY:
+    - MultiProviderAggregator.run(...): fan out to proposers, then synthesize.
+    - AggregateAgent.generate_reply(...): builds children and runs the engine.
+    - AggregateAgent construction: turns ProposerSpecs into executable children.
 """
 
 from __future__ import annotations

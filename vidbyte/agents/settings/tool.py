@@ -1,17 +1,21 @@
 """Context Protocol Header
 
-Description:
-    Defines simple universal settings for agent tool usage.
-Purpose:
-    Gives AgentLoopSettings a validated nested object for denied tools, tool-call
-    budgets, per-tool budgets, model-visible result bounds, thrash/failure budgets,
-    per-call timeouts, and sliding-window limits, and owns the pure decision logic
-    the direct runtime calls to enforce them.
-Architecture:
-    - ToolSettings: Stateless settings + decision object (denial, truncate, budgets).
-Relations:
-    Used by vidbyte.agents.settings.loop, carried on AgentRuntimeConfig, and
-    enforced inline by vidbyte.agents.runtime.AgentRuntime.
+PURPOSE:
+    Defines ToolSettings, the validated nested object that gives AgentLoopSettings
+    universal tool-use constraints: denied tools, tool-call budgets, per-tool
+    budgets, model-visible result bounds, thrash/failure budgets, per-call
+    timeouts, and sliding-window limits. It also owns the pure decision logic the
+    direct runtime calls to enforce those constraints.
+ROLE IN CODEBASE:
+    Constructed by vidbyte.agents.settings.loop, carried on AgentRuntimeConfig,
+    and enforced inline by vidbyte.agents.runtime.AgentRuntime at each tool call.
+ARCHITECTURE:
+    - ToolSettings: stateless settings + decision object (denial, truncation, and
+      budget checks) that never holds live per-run counters itself.
+FUNCTION INVENTORY:
+    - ToolSettings.__init__: validates and stores the tool-use constraints.
+    - Decision helpers the runtime calls per tool call to deny, cap, or truncate
+      a non-internal tool invocation against the configured budgets.
 """
 
 from __future__ import annotations
@@ -61,7 +65,12 @@ class ToolSettings:
         return None
 
     def truncate(self, result: ToolResult) -> ToolResult:
-        # Returns a model-visible result capped to result_max_chars; callers keep the raw ToolResult.
+        # @intent truncate-a-copy-for-the-model-never-the-original
+        # result_max_chars bounds how much tool output the model sees so one large payload cannot blow the
+        # context window, but the caller still holds the untruncated ToolResult for tracing, tool contexts,
+        # and downstream logic. So this returns a NEW capped ToolResult rather than mutating the input, and
+        # it records original_chars/truncated_chars in metadata so the truncation is auditable — the model
+        # is told explicitly that output was cut so it does not assume the tool returned only this much.
         if self.result_max_chars is None or len(result.output) <= self.result_max_chars:
             return result
         omitted = len(result.output) - self.result_max_chars

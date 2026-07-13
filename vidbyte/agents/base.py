@@ -1,5 +1,4 @@
-"""
-FILE: vidbyte/agents/base.py
+"""Context Protocol Header
 
 PURPOSE:
     Defines BaseAgent, the public composition root for executable Vidbyte agents.
@@ -7,7 +6,6 @@ PURPOSE:
     inference, local tool attachment, context and trace setup, durable-session
     integration, handoff state, and dispatch into the selected runtime. It does
     not implement the direct model/tool loop itself.
-
 ROLE IN CODEBASE:
     vidbyte/agents/__init__.py exports BaseAgent as Agent for SDK callers.
     BaseAgent delegates direct text execution to runtime.py through the runtime
@@ -15,14 +13,12 @@ ROLE IN CODEBASE:
     middleware from vidbyte/middleware, and supplies local tools from
     vidbyte/tools. sessions/session.py binds durable checkpoints around its
     public run methods without making persistence part of the constructor.
-
-ARCHITECTURE NOTE:
-    This is the imperative shell around agent configuration and a run request.
-    The public methods should read as orchestration; provider protocol details,
-    tool execution, context-window loops, and middleware dispatch belong to
-    their dedicated collaborators. Compatibility guards here prevent options
-    intended for the linear runtime from silently reaching a non-linear runtime.
-
+ARCHITECTURE:
+    The imperative shell around agent configuration and a run request. Public
+    methods read as orchestration; provider protocol details, tool execution,
+    context-window loops, and middleware dispatch belong to dedicated
+    collaborators. Construction-time guards reject options intended for the
+    linear runtime before they can silently reach a non-linear runtime.
 FUNCTION INVENTORY:
     - BaseAgent.__init__(...): validates compatible construction options and
       initializes observable agent, MCP, trace, session, and queue state.
@@ -37,65 +33,6 @@ FUNCTION INVENTORY:
       for the configured provider/model pair.
     - BaseAgent._safe_trace_value(...): recursively excludes secret-like keys
       before trace data crosses an observability boundary.
-
-COMMON MODIFICATION PATTERNS:
-    - Add a construction option by updating the constructor, AgentForkSettings,
-      state export/restore, this inventory, and the agents README when the
-      option changes public ownership.
-    - Add a linear-only capability by rejecting it with a dedicated diagnostic
-      error before runtime construction and by documenting its non-linear rule.
-    - Add a run lifecycle phase by keeping root trace cleanup and session
-      notification correct on success, exception, and cancellation paths.
-
-WHAT NOT TO DO IN THIS FILE:
-    1. Do not add model/tool loop mechanics; runtime.py owns direct execution.
-    2. Do not implement provider adapters or embed provider credentials; use
-       lib.runners and vidbyte/providers through the existing inference path.
-    3. Do not bypass permission policy, middleware, or runtime compatibility
-       guards by invoking a tool or runner directly from this façade.
-    4. Do not put prompt text, tool arguments, secrets, or raw provider output
-       in diagnostic errors, session markers, or tracing metadata.
-    5. Do not make optional handoff/session bookkeeping hide a primary result.
-
-KNOWN EDGE CASES:
-    - The linear runtime supports middleware, continual tracing, tool settings,
-      output contracts, and non-default context algorithms; non-linear runtimes
-      intentionally reject incompatible combinations before execution.
-    - Aggregate requests delegate to AggregateAgent before normal direct-run
-      setup, so changes to the normal path must retain that early branch.
-    - Cancellation is a BaseException path: traces must close, but cancellation
-      must not be wrapped as an ordinary AgentExecutionError.
-    - Queued prompt and automatic handoff failures are non-fatal after a primary
-      reply has succeeded; their metadata is diagnostic rather than a retry API.
-
-COMMON ERRORS RAISED BY THIS FILE:
-    - AgentNameRequiredError and AgentSystemPromptRequiredError: construction
-      lacks the identity or instruction required for an executable agent.
-    - NonLinearRuntimeFeatureError: a linear-only feature was combined with a
-      search or actor runtime.
-    - AgentExecutionFailureError: a non-cancellation failure escaped the public
-      execution boundary after trace finalization.
-    - AgentRunnerRequiredError and RunnerProtocolError: runner inference or the
-      selected runner cannot satisfy direct execution.
-
-RELATED DOCS:
-    - https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/agents/README.md
-    - https://github.com/cerredz/Vidbyte-SDK/blob/main/docs/design/agentic-engineering-base-agent-runtime.md
-    - https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/agentic_engineering/file_headers.md
-    - https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/agentic_engineering/function_design.md
-    - https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/agentic_engineering/intent_based_commenting.md
-
-TEST FILES:
-    - tests/test_agent_base.py: public construction, execution, and wrappers.
-    - tests/test_agent_runtime.py: runtime dispatch and compatibility guards.
-    - tests/test_agent_tool_loop.py: direct loop behavior reached through agents.
-    - tests/test_tracing.py: root trace cleanup and agent/runtime spans.
-
-CONCURRENCY MODEL:
-    BaseAgent keeps mutable history, tool contexts, session state, and queued
-    prompts. One instance should not service concurrent callers without external
-    coordination. MCP attachment and runner inference are lifecycle operations;
-    the runtime owns per-run loop state.
 """
 
 from __future__ import annotations
@@ -107,7 +44,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from vidbyte.agents.mixins import McpAttachableMixin
-from vidbyte.agents.errors import ActiveEventLoopExecutionError, AgentExecutionFailureError, AgentNameRequiredError, AgentRunnerRequiredError, AgentSystemPromptRequiredError, AgentToolMetadataRequiredError, AggregationProviderRequiredError, LoopSettingsConflictError, NonLinearRuntimeFeatureError, RunnerProtocolError, TracerAliasConflictError
+from vidbyte.lib.errors.agent import ActiveEventLoopExecutionError, AgentExecutionFailureError, AgentNameRequiredError, AgentRunnerRequiredError, AgentSystemPromptRequiredError, AgentToolMetadataRequiredError, AggregationProviderRequiredError, LoopSettingsConflictError, NonLinearRuntimeFeatureError, RunnerProtocolError, TracerAliasConflictError
 from vidbyte.agents.settings import AgentLoopSettings
 from vidbyte.agents.types import AgentCard, AgentInput, AgentMessage
 from vidbyte.context.manager import ContextManager
@@ -320,6 +257,12 @@ class BaseAgent(McpAttachableMixin):
     def _resolve_aggregate_plan(self, model_name: str | Sequence[str] | None, provider_str: str | None, proposers: Sequence[Any] | None, aggregator: Any | None, aggregate: AggregateConfig | None) -> tuple[dict[str, Any] | None, str | None]:
         # Detects a multi-model aggregation request and returns (plan_or_None, normalized single host model name).
         is_sequence = isinstance(model_name, (list, tuple)) and not isinstance(model_name, str)
+        # @intent aggregation-requires-two-distinct-models
+        # A list of model names is the ergonomic way to ask for mixture-of-agents, but a single-element
+        # list is a degenerate case that must collapse back to an ordinary single-model run — building an
+        # aggregate plan for one proposer would spin up a synthesis pass over one candidate and change
+        # cost and latency with no benefit. Only an explicit proposers= list or a 2+ model list becomes a
+        # plan; the provider is mandatory there because each generated ProposerSpec must be routable.
         if proposers:
             specs = list(proposers)
             host_model = model_name if isinstance(model_name, str) else None
@@ -499,6 +442,12 @@ class BaseAgent(McpAttachableMixin):
         record_turn = getattr(session, "record_turn", None)
         if not callable(record_turn):
             return
+        # @intent session-persistence-fails-open
+        # Durable-session recording is bookkeeping layered around a run, not part of producing the reply.
+        # If the store is unavailable or record_turn raises, the customer-visible answer already exists and
+        # must still be returned; converting a persistence failure into a run failure would make an agent
+        # with a session strictly less reliable than the same agent without one. Capture the failure as a
+        # diagnostic marker on the reply metadata instead of letting it propagate.
         try:
             record_turn(reply)
         except Exception as exc:
@@ -771,8 +720,12 @@ class BaseAgent(McpAttachableMixin):
                 self._tracer.end_trace(trace_ctx, error=exc)
             raise AgentExecutionFailureError(dynamic_context={"agent_name": self.name, "phase": "generate_reply", "cause_type": type(exc).__name__}) from exc
         except BaseException as exc:
-            # Catches CancelledError and other BaseException subclasses that bypass
-            # the Exception handler, ensuring the root trace is always finalized.
+            # @intent never-wrap-cancellation-as-execution-failure
+            # CancelledError (and KeyboardInterrupt) are BaseException, not Exception, so they bypass the
+            # handler above on purpose. They signal that the caller's task is being torn down, not that
+            # the agent produced a bad answer — wrapping them in AgentExecutionFailureError would swallow
+            # the cancellation and let the surrounding event loop believe the run failed normally. We still
+            # finalize the root trace so no span is left open, then re-raise the original type unchanged.
             if trace_ctx is not None:
                 self._tracer.end_trace(trace_ctx, error=exc)
             raise

@@ -1,5 +1,4 @@
-"""
-FILE: vidbyte/agents/runtime.py
+"""Context Protocol Header
 
 PURPOSE:
     Defines AgentRuntime, the canonical direct text model/tool loop for
@@ -7,7 +6,6 @@ PURPOSE:
     middleware and context-window hooks, invokes models, validates and executes
     permitted tools, applies tool settings, records trace spans, and produces
     the final AgentResult with stop and contract metadata.
-
 ROLE IN CODEBASE:
     base.py constructs this runtime through the RuntimeRegistry for linear runs.
     The runtime consumes ContextManager and context-window contracts from
@@ -15,14 +13,12 @@ ROLE IN CODEBASE:
     and permission policy from vidbyte/tools, and RunnerHandle extraction
     functions provided by BaseAgent. runtimes/linear.py is a compatibility
     re-export; provider selection belongs above this file.
-
-ARCHITECTURE NOTE:
-    AgentRuntime is the imperative execution boundary, not a provider adapter.
-    Middleware remains non-model-visible, permission checks remain ahead of
-    validation and execution, and the ordered provider conversation is the
-    durable contract for tool calling. Inner context-window algorithms observe
-    a bounded snapshot after completed tool calls rather than rewriting history.
-
+ARCHITECTURE:
+    The imperative execution boundary, not a provider adapter. Middleware
+    remains non-model-visible, permission checks remain ahead of validation and
+    execution, and the ordered provider conversation is the durable contract for
+    tool calling. Inner context-window algorithms observe a bounded snapshot
+    after completed tool calls rather than rewriting history.
 FUNCTION INVENTORY:
     - AgentRuntime.build_context(...): merges base, agent, and per-call context
       while selecting user versus internal tool schemas.
@@ -36,66 +32,6 @@ FUNCTION INVENTORY:
       before placing a model-visible result in conversation history.
     - AgentRuntime._budget_stop/_final_result(...): create terminal results with
       stable stop reason, counter, and output-contract metadata.
-
-COMMON MODIFICATION PATTERNS:
-    - Add a middleware boundary by preserving hook order in _arun_once and
-      updating the middleware context passed to every affected phase.
-    - Add a tool failure mode by adding one agents/errors.py class, converting
-      it to a model-safe ToolResult summary, and updating this header.
-    - Add a context-window capability by preserving the initial and
-      post-tool-call hook timing and keeping private run state out of results.
-
-WHAT NOT TO DO IN THIS FILE:
-    1. Do not infer providers or construct provider clients; BaseAgent and
-       lib.runners own provider/model selection.
-    2. Do not run a tool before PermissionPolicy has approved it, even if its
-       arguments look valid or it is called by a trusted model.
-    3. Do not inject middleware state, error packets, or raw tool output into a
-       model-visible message unless the relevant policy explicitly permits it.
-    4. Do not alter assistant-tool-result ordering; providers use that order to
-       associate tool-call identifiers with results.
-    5. Do not expose prompts, raw provider responses, credentials, or tool
-       arguments through trace, error, or result metadata without redaction.
-
-KNOWN EDGE CASES:
-    - A plain text response is terminal unless an inner context-window algorithm
-      requests another iteration after its post-iteration hook.
-    - Internal isDone terminates without adding a normal tool-result message.
-    - Model failures reach retry middleware before escaping; BaseException still
-      finalizes a trace span and propagates for cancellation correctness.
-    - A failed tool becomes a ToolCallContext and ToolResult so later model turns
-      can adapt; policy denial remains distinct from execution failure.
-    - Tool settings can deny, cap, or truncate non-internal calls without
-      changing the agent-local tool catalog.
-
-COMMON ERRORS RAISED BY THIS FILE:
-    - ContextWindowRunnerTypeError: an inner algorithm received something other
-      than the RunnerHandle needed to preserve model invocation behavior.
-    - RuntimeUnknownToolError: parsed model tool name is absent from the catalog.
-    - RuntimeToolPermissionError: policy denied the call before validation.
-    - RuntimeToolValidationError, RuntimeToolExecutionError, and
-      RuntimeToolTimeoutError: a registered tool could not complete safely.
-    - RuntimeToolOutputSchemaError: a successful result violated its schema.
-
-RELATED DOCS:
-    - https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/agents/README.md
-    - https://github.com/cerredz/Vidbyte-SDK/blob/main/docs/design/agentic-engineering-base-agent-runtime.md
-    - https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/agentic_engineering/error_messages.md
-    - https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/agentic_engineering/function_design.md
-    - https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/agentic_engineering/intent_based_commenting.md
-
-TEST FILES:
-    - tests/test_agent_runtime.py: context construction, stop paths, and loop.
-    - tests/test_agent_tool_loop.py: provider conversation and tool-call order.
-    - tests/test_agent_middleware.py: lifecycle order, retry, deny, and abort.
-    - tests/test_tracing.py: direct-runtime and model/tool span behavior.
-
-CONCURRENCY MODEL:
-    Each arun invocation owns local counters, messages, and call contexts, but
-    ContextManager and middleware instances may be shared mutable collaborators.
-    The runtime does not introduce locks; callers must avoid sharing one mutable
-    agent/context manager across concurrent runs unless the collaborator's own
-    contract guarantees safety.
 """
 
 from __future__ import annotations
@@ -108,7 +44,7 @@ if TYPE_CHECKING:
     from vidbyte.agents.settings.tool import ToolSettings
 
 from vidbyte.agents.context_algorithms import AgentRuntimeContextAlgorithms
-from vidbyte.agents.errors import ContextWindowRunnerTypeError, RuntimeToolExecutionError, RuntimeToolOutputSchemaError, RuntimeToolPermissionError, RuntimeToolTimeoutError, RuntimeToolValidationError, RuntimeUnknownToolError
+from vidbyte.lib.errors.agent import ContextWindowRunnerTypeError, RuntimeToolExecutionError, RuntimeToolOutputSchemaError, RuntimeToolPermissionError, RuntimeToolTimeoutError, RuntimeToolValidationError, RuntimeUnknownToolError
 from vidbyte.agents.types import AgentMessage
 from vidbyte.context.algorithms import ContextWindowAlgorithm, ToolResultAdmission
 from vidbyte.context.manager import ContextManager
@@ -1143,6 +1079,13 @@ class AgentRuntime:
             provider=provider,
             metadata=_safe_trace_mapping(call.metadata),
         )
+        # @intent tool-failure-becomes-a-model-visible-result-not-a-raise
+        # Every failure mode below — unknown tool, permission denial, validation, execution error, schema
+        # violation — is caught and turned into a ToolResult.error rather than propagated. An agent loop
+        # is a conversation: a failed tool call is information the model can react to (retry with different
+        # arguments, pick another tool, or give up gracefully), whereas an exception here would abort the
+        # whole run on the first bad call. The distinct state per branch (FAILED vs DENIED) and the redacted
+        # diagnostic string are what let a later model turn adapt without ever seeing internal packet fields.
         try:
             tool = self._get_tool(call)
             spec = tool.spec()

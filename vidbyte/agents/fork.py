@@ -1,18 +1,20 @@
 """Context Protocol Header
 
-Description:
-    Houses AgentForker, the utility class that owns all BaseAgent fork logic.
-Purpose:
-    Keeps base.py focused on agent execution by extracting fork config
-    resolution, tool cloning, lineage metadata, and run-state carry into one
-    cohesive place driven entirely by a validated AgentForkSettings.
-Architecture:
-    - AgentForker: Stateless utility whose functions take a live parent agent
-      and an AgentForkSettings, and return an isolated child BaseAgent branch.
-Relations:
+PURPOSE:
+    Houses AgentForker, the utility that owns all BaseAgent fork logic. It keeps
+    base.py focused on execution by extracting fork config resolution, tool
+    cloning, lineage metadata, and run-state carry into one cohesive place driven
+    entirely by a validated AgentForkSettings.
+ROLE IN CODEBASE:
     Invoked by BaseAgent.fork. Reads inheritable state off the parent agent and
     constructs the child via BaseAgent. Settings/validation live in
     vidbyte.lib.dataclasses.agents; fork errors live in vidbyte.lib.errors.
+ARCHITECTURE:
+    - AgentForker: stateless utility whose functions take a live parent agent and
+      an AgentForkSettings and return an isolated child BaseAgent branch.
+FUNCTION INVENTORY:
+    - AgentForker.fork(parent, settings): resolves config and builds the child.
+    - Internal helpers for tool cloning, lineage metadata, and run-state carry.
 """
 
 from __future__ import annotations

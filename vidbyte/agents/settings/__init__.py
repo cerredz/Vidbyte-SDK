@@ -1,16 +1,18 @@
 """Context Protocol Header
 
-Description:
-    Public exports for the vidbyte.agents.settings sub-package.
-Purpose:
-    Exposes AgentLoopSettings and nested settings objects for agentic loop
-    parameters.
-Architecture:
-    - AgentLoopSettings: Main loop settings object.
-    - ToolErrorPolicy: Nested policy for tool-error retry/render behavior.
-    - ToolSettings: Nested universal tool-use constraints.
-Relations:
-    Re-exported from vidbyte.agents.__init__.
+PURPOSE:
+    Public export surface for the vidbyte.agents.settings sub-package, exposing
+    AgentLoopSettings and its nested settings objects for agentic loop parameters.
+ROLE IN CODEBASE:
+    Imported by vidbyte.agents.base and re-exported from vidbyte.agents.__init__
+    so callers configure loop budgets and tool policy without importing internals.
+ARCHITECTURE:
+    - AgentLoopSettings: main loop settings object.
+    - ToolErrorPolicy / UnrecoverableAction: nested tool-error retry policy.
+    - ToolSettings: nested universal tool-use constraints.
+FUNCTION INVENTORY:
+    - (package init) re-exports AgentLoopSettings, ToolSettings, ToolErrorPolicy,
+      and UnrecoverableAction; no callable logic lives here.
 """
 
 from vidbyte.agents.settings.loop import AgentLoopSettings

@@ -1,18 +1,20 @@
 """Context Protocol Header
 
-Description:
-    Defines mixins that equip agents and harnesses with lifecycle-managed and preset MCP servers.
-Purpose:
-    Enforces identical APIs and automated cleanup routines for attached subprocesses
-    without duplicating logic across agents and harnesses.
-Architecture:
-    - McpAttachableMixin: Shared base class implementing async and sync builder APIs,
-      lazy startup, preset lookup capabilities, and context manager hooks.
-Key Functions:
-    - attach_preset_mcp_server: Attaches a pre-configured popular MCP server in one line.
-    - with_preset_mcp_server: Defer attaching a pre-configured popular MCP server until agent execution.
-Relations:
-    Inherited by SDK classes that attach MCP servers. Integrates with vidbyte.tools.mcp.presets.
+PURPOSE:
+    Defines mixins that equip agents and harnesses with lifecycle-managed and
+    preset MCP servers, enforcing identical APIs and automated cleanup routines
+    for attached subprocesses without duplicating logic across agents and
+    harnesses.
+ROLE IN CODEBASE:
+    Inherited by SDK classes that attach MCP servers (BaseAgent among them) and
+    integrates with vidbyte.tools.mcp.presets for preset lookup.
+ARCHITECTURE:
+    - McpAttachableMixin: shared base class implementing async and sync builder
+      APIs, lazy startup, preset lookup, and context-manager hooks.
+FUNCTION INVENTORY:
+    - attach_preset_mcp_server: attaches a pre-configured popular MCP server in one line.
+    - with_preset_mcp_server: defers attaching a preset MCP server until execution.
+    - Async/sync builder, lazy-startup, and cleanup context-manager hooks.
 """
 
 from __future__ import annotations

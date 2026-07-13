@@ -114,7 +114,7 @@ AgentRuntime
 AgentMessage / AgentResult
 
 Supporting navigation artifacts
-  `- agents/README.md + structured headers + agents/errors.py context packets
+  `- agents/README.md + structured headers + lib/errors/agent.py context packets
 ```
 
 ---
@@ -123,7 +123,7 @@ Supporting navigation artifacts
 
 ### 6.1 Agent Diagnostic Error Contracts
 
-**File(s):** `vidbyte/agents/errors.py`
+**File(s):** `vidbyte/lib/errors/agent.py`
 **Type:** New file
 
 #### What it does
@@ -425,7 +425,7 @@ class _RuntimeRunState:
 | `ConfigurationError` subtype | Incompatible runtime option combination or conflicting construction settings. |
 | Tool error subtype / model-safe `ToolResult` | Unknown, denied, invalid, failed, or schema-invalid tool call. |
 
-No public endpoint is added. `vidbyte.agents.errors` remains an internal support module and is not added to package-level `__all__`; normal Python import behavior still permits advanced callers to inspect a concrete error type if necessary.
+No public endpoint is added. The concrete agent diagnostic errors live in `vidbyte.lib.errors.agent` and are re-exported from `vidbyte.lib.errors` alongside the shared SDK exception hierarchy, so advanced callers can inspect a concrete error type through the same import surface they already use for `AgentExecutionError`/`ConfigurationError`.
 
 ---
 
@@ -436,7 +436,7 @@ Complete list of every file that will be created, modified, or deleted:
 | Action | File Path | Reason |
 |--------|-----------|--------|
 | CREATE | `docs/design/agentic-engineering-base-agent-runtime.md` | Approved source-of-truth design for the implementation. |
-| CREATE | `vidbyte/agents/errors.py` | Dedicated typed diagnostic errors and safe context-packet support for target-module failures. |
+| CREATE | `vidbyte/lib/errors/agent.py` | Dedicated typed diagnostic errors and safe context-packet support for target-module failures, re-exported from `vidbyte/lib/errors/__init__.py`. |
 | MODIFY | `vidbyte/agents/base.py` | Full header, constructor/execution decomposition, intent comments, one-line signatures/comments, and typed diagnostics. |
 | MODIFY | `vidbyte/agents/runtime.py` | Full header, explicit runtime state, loop/tool decomposition, intent comments, one-line signatures/comments, and typed diagnostics. |
 | MODIFY | `vidbyte/agents/README.md` | Folder comprehension cache with intent, non-goals, direct-file index, and compact logs. |
