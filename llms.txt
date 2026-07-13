@@ -12,7 +12,7 @@ Primary README reference:
 
 ## Overview
 
-Vidbyte SDK is the Python SDK surface for building agent workflows with tools, managed context, structured output, tracing, middleware, pipelines, prompt assets, evals, MCP integration, provider registries, and swappable runtimes. It is designed for developers who want to build the agent itself: the loop, tool execution, context window, trace artifact, runtime policy, and multi-agent composition.
+Vidbyte SDK is the Python SDK surface for building agent workflows with tools, managed context, structured output, tracing, middleware, pipelines, validated state machines, prompt assets, evals, MCP integration, provider registries, and swappable runtimes. It is designed for developers who want to build the agent itself: the loop, tool execution, context window, trace artifact, runtime policy, and multi-agent composition.
 
 The SDK package imports as `vidbyte`. The repository currently identifies the package as version `0.1.0` and pre-release; its README says it is intentionally minimal as a public SDK namespace and does not include private Vidbyte service logic. Public docs should preserve that boundary: document the reusable developer-facing abstractions, and do not imply that proprietary Vidbyte learning models, backend data access, private scoring logic, or production platform internals ship inside this package.
 
@@ -21,17 +21,18 @@ The core mental model is:
 1. Create an `Agent` or `BaseAgent`.
 2. Give it a system prompt, model/provider config, optional runner, optional tools, optional context manager, optional middleware, optional trace settings, and optional runtime choice.
 3. Run it with `run()` or `arun()`.
-4. Let the SDK handle message assembly, context primitives, tool schemas, tool calls, tool results, iteration limits, trace hooks, and pipeline composition.
+4. Let the SDK handle message assembly, context primitives, tool schemas, tool calls, tool results, iteration limits, trace hooks, pipeline composition, and optional graph-enforced workflow progression.
 
 ## Description
 
-Vidbyte SDK is the developer-facing agent framework in the Vidbyte ecosystem. It packages the reusable infrastructure needed to build agent applications: model execution, agent-local tools, context objects, context-window algorithms, middleware, prompt catalogs, evals, pipelines, MCP adapters, and runtime registries. It is intentionally separate from private Vidbyte platform services. The SDK should be documented as a local Python package for agent builders, not as a backend API client for unpublished Vidbyte internals.
+Vidbyte SDK is the developer-facing agent framework in the Vidbyte ecosystem. It packages the reusable infrastructure needed to build agent applications: model execution, agent-local tools, context objects, context-window algorithms, middleware, prompt catalogs, evals, pipelines, validated state-machine workflows, MCP adapters, and runtime registries. It is intentionally separate from private Vidbyte platform services. The SDK should be documented as a local Python package for agent builders, not as a backend API client for unpublished Vidbyte internals.
 
 ## Use Cases
 
 - Build a tool-using agent that can inspect files, call functions, and iterate until a stopping condition.
 - Build a coding agent with workspace-bounded file tools, shell/test verification, and a continual trace report.
 - Build a research workflow with planner, researcher, and synthesizer stages.
+- Build a context/spec/implementation harness whose typed state is validated before each graph-controlled transition.
 - Build a support agent with grounded tools, policy middleware, escalation, and audit logs.
 - Build eval suites that compare agent behavior across prompts, models, and graders.
 - Install packaged Vidbyte skills into a local coding harness through the `vidbyte-sdk` CLI.
@@ -54,6 +55,7 @@ Vidbyte SDK is the developer-facing agent framework in the Vidbyte ecosystem. It
 - Prompt asset discovery and direct prompt imports.
 - Eval cases, suites, runners, graders, and a local eval registry.
 - Sequential, parallel, conditional, and map-reduce pipelines.
+- Typed state-machine workflows with stage validators, transition guards, conditional branches, cycles, declared jumps, retries, execution limits, and structured records.
 - Durable sessions with continue/resume/fork/batch-fork over a checkpoint DAG, pluggable stores (memory, file, SQLite, Postgres, MongoDB, Supabase), tags/name lookup, usage rollups, portable export/import bundles, and prebuilt Checkpoint/Fork/BatchFork/Rewind/Resume agent tools.
 
 ## How To Install And Use
@@ -179,7 +181,7 @@ print(reply.content)
 
 ### Multi-Agent Orchestration
 
-Multi-agent execution is modeled as composition. The SDK includes `BaseAgent`, `AgentInput`, and `AgentRegistry`; custom harnesses should stay outside the base SDK until public contracts are explicit.
+Multi-agent execution is modeled as composition. The SDK includes `BaseAgent`, `AgentInput`, and `AgentRegistry`; `vidbyte.pipelines` handles simple string topologies; `vidbyte.workflows` enforces typed, gated, non-linear stage progression; and opinionated recipes belong in `vidbyte.paradigms`. Custom external-harness integrations should stay under `vidbyte.harnesses` once their public contracts are explicit.
 
 Use metadata for semantic labels such as role. Use explicit system prompts, model config, runners, and tools for behavior.
 
@@ -619,6 +621,58 @@ case = EvalCase(
 )
 ```
 
+### Validated Workflows
+
+`vidbyte.workflows` is the reusable control-flow layer for harnesses where code, rather than prompt instructions, must own legal stage progression. A `StateGraph[StateT]` declares stages, terminals, semantic outcomes, bounded conditional branches, and transition guards. `compile()` validates the definition and returns an immutable `StateMachine[StateT]`; each `arun()` keeps counters and records local so the compiled machine can serve concurrent independent runs.
+
+Core invariants:
+
+- A stage receives a clone of the latest committed typed state and returns `StageResult(candidate_state, outcome=...)`.
+- Stage validators run before routing. The selected transition's guards run after routing. Candidate state commits only if both boundaries pass.
+- A validator returns `ValidationResult` with `PASS`, `REJECT`, `ABSTAIN`, or `ERROR`. Rejection codes are semantic labels; only the compiled graph maps labels or router keys to targets.
+- Rejection and handled stage errors route with unchanged committed state plus `WorkflowFeedback`.
+- Every selected transition attempt, including a guard rejection, consumes `StateMachineSettings.max_transitions`.
+- The mutable run ledger is deliberately not transactional. It is suitable for mechanical evidence such as every file visited, while compact selected context belongs in candidate state.
+- State rollback is in-memory only. Filesystem, network, tool, and model side effects require idempotency, candidate artifacts, or explicit compensation.
+- `AgentValidator` is fail-closed by default and requires a Pydantic verdict model, but its substantive LLM judgment is still probabilistic.
+
+Primary imports include `StateGraph`, `StateMachine`, `StageResult`, `ValidationResult`, `CallableStage`, `AgentStage`, `CallableValidator`, `SchemaValidator`, `GraderValidator`, `AgentValidator`, `CallableRouter`, `RouteTarget`, `RetryPolicy`, `StagePolicy`, `StateMachineSettings`, `WorkflowObserver`, typed records, statuses, and workflow errors. They are available from both `vidbyte.workflows` and the root `vidbyte` package.
+
+```python
+from dataclasses import dataclass, replace
+
+from vidbyte import CallableStage, CallableValidator, MachineStatus
+from vidbyte import StageResult, StateGraph, ValidationResult
+
+
+@dataclass(frozen=True)
+class HarnessState:
+    request: str
+    context: str = ""
+
+
+async def gather_context(ctx):
+    ctx.ledger.setdefault("files_visited", set()).add("vidbyte/agents/base.py")
+    return StageResult(replace(ctx.state, context="relevant contracts"))
+
+
+def context_is_sufficient(ctx):
+    if ctx.candidate_state.context:
+        return ValidationResult.passed()
+    return ValidationResult.rejected("needs_more_context", "Collect more evidence.")
+
+
+graph = StateGraph(HarnessState, name="context-loop")
+graph.add_stage("context", CallableStage(gather_context), validators=(CallableValidator(context_is_sufficient),))
+graph.add_terminal("done", status=MachineStatus.SUCCEEDED)
+graph.set_entry("context")
+graph.add_transition("context", "done")
+graph.add_transition("context", "context", on="needs_more_context")
+result = await graph.compile().arun(HarnessState(request="Inspect the SDK"))
+```
+
+Use `AgentStage` for work performed by `BaseAgent`. Use `AgentValidator` with a developer-supplied prompt builder, Pydantic verdict model, and verdict mapper for an agent guardrail. The mapper can emit a semantic rejection code such as `needs_more_context`, but cannot select a target stage. Use `SchemaValidator` or `CallableValidator` before an agent verifier when deterministic checks can establish shape or invariants cheaply.
+
 ### Pipelines
 
 Pipelines compose agents across agent boundaries. The contract is string-in and string-out: one stage's output becomes another stage's prompt. Each agent keeps its own tools, middleware, context, and history. The pipeline layer does not add shared context, budgets, artifacts, streaming, retries, or voting.
@@ -706,6 +760,7 @@ vidbyte/
 |-- prompts/
 |-- providers/
 |-- pipelines/
+|-- workflows/         # Typed graph builder, validated runtime, adapters, policies, records, and workflow errors
 |-- sources/
 |-- trace/
 |-- middleware/
