@@ -101,6 +101,32 @@ middleware-oriented retry/render for tool *failures*.
 
 **Process skill:** follow `skills/tool-settings/SKILL.md` end-to-end before opening a PR.
 
+### Add or Change Output Contracts
+
+**Example:** Adding a new effort floor (`MinCompactions`, `MinSuccessfulToolCalls`),
+extending `_contract_counters`, or changing contract enforcement boundaries.
+
+**Do not confuse with loop ceilings** — output contracts are **floors** (when the
+agent may stop). `max_iterations` / `max_tokens` / `max_tool_calls` are **ceilings**
+(when it must stop). See `skills/output-contracts/SKILL.md`.
+
+**Files to update:**
+
+| File | What to add |
+|------|-------------|
+| `skills/output-contracts/SKILL.md` | Floor table, counter keys, process steps, invariants |
+| `skills/agentic-loop-settings/SKILL.md` | Nested `output_contracts` / `max_contract_rejections` / `contract_unsatisfied` |
+| `vidbyte/agents/contracts/floors.py` | New floor class |
+| `vidbyte/agents/contracts/__init__.py` | Export base + floors |
+| `vidbyte/agents/__init__.py` | Public re-exports |
+| `vidbyte/agents/contract.py` | Owner (`report` / evaluation helpers) when metadata shape changes |
+| `vidbyte/agents/settings/loop.py` | Validation (floor vs ceiling / special pairings) |
+| `vidbyte/agents/runtime.py` | Counter snapshot + finalization-boundary wiring |
+| `vidbyte/agents/base.py` | Linear-only guard (already present; extend only if needed) |
+| `docs/design/output-contracts-loop-settings.md` or a new design doc | Non-trivial architecture changes |
+
+**Process skill:** follow `skills/output-contracts/SKILL.md` end-to-end before opening a PR.
+
 ### Add or Change Repository Artifacts
 
 **Example:** Adding or regenerating `artifacts/file_index.md`.

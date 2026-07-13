@@ -15,6 +15,7 @@ Relations:
 from __future__ import annotations
 
 import asyncio
+import math
 from collections.abc import Callable, Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
@@ -181,6 +182,7 @@ class AgentRuntime:
         iteration_count = 0
         model_call_count = 0
         rejections = 0
+        compaction_count = 0
         tokens_used: int | None = None
         started_at = self.middleware.clock()
         last_response: object | None = None
@@ -321,7 +323,7 @@ class AgentRuntime:
                 tool_call_count=len(call_contexts),
             )
             try:
-                raw_result, model_call_count = await self._invoke_with_middleware(
+                raw_result, model_call_count, compaction_count = await self._invoke_with_middleware(
                     handle,
                     message,
                     call_options,
@@ -334,6 +336,7 @@ class AgentRuntime:
                     metadata=runtime_metadata,
                     run_state=run_state,
                     trace_context=active_trace_context,
+                    compaction_count=compaction_count,
                 )
             except BaseException as exc:
                 self._end_semantic_span(iteration_span, error=exc)
@@ -428,7 +431,7 @@ class AgentRuntime:
                         model_response=raw_result,
                     )
                 if self.output_contract.active():
-                    counters = self._contract_counters(iteration_count=iteration_count, model_call_count=model_call_count, call_contexts=call_contexts, tokens_used=tokens_used, started_at=started_at)
+                    counters = self._contract_counters(iteration_count=iteration_count, model_call_count=model_call_count, call_contexts=call_contexts, tokens_used=tokens_used, started_at=started_at, final_output=last_assistant_output, compaction_count=compaction_count)
                     self._publish_contract_evaluations(run_state, counters)
                     unmet = self.output_contract.unmet(counters)
                     if unmet and self.output_contract.exhausted(rejections):
@@ -563,7 +566,7 @@ class AgentRuntime:
                             model_response=raw_result,
                         )
                     if self.output_contract.active():
-                        counters = self._contract_counters(iteration_count=iteration_count, model_call_count=model_call_count, call_contexts=call_contexts, tokens_used=tokens_used, started_at=started_at)
+                        counters = self._contract_counters(iteration_count=iteration_count, model_call_count=model_call_count, call_contexts=call_contexts, tokens_used=tokens_used, started_at=started_at, final_output=result.output, compaction_count=compaction_count)
                         self._publish_contract_evaluations(run_state, counters)
                         unmet = self.output_contract.unmet(counters)
                         if unmet and self.output_contract.exhausted(rejections):
@@ -638,8 +641,8 @@ class AgentRuntime:
                     model_response=raw_result,
                 )
 
-    async def _invoke_with_middleware(self, handle: RunnerHandle, message: str, call_options: Mapping[str, Any], *, context: BaseAgentContext, iteration_count: int, model_call_count: int, call_contexts: Sequence[ToolCallContext], tokens_used: int | None, started_at: float, metadata: Mapping[str, Any], run_state: dict[type, Any] | None = None, trace_context: SpanContext | None = None) -> tuple[object | AgentResult, int]:
-        """Invoke the runner, allowing middleware to retry model errors."""
+    async def _invoke_with_middleware(self, handle: RunnerHandle, message: str, call_options: Mapping[str, Any], *, context: BaseAgentContext, iteration_count: int, model_call_count: int, call_contexts: Sequence[ToolCallContext], tokens_used: int | None, started_at: float, metadata: Mapping[str, Any], run_state: dict[type, Any] | None = None, trace_context: SpanContext | None = None, compaction_count: int = 0) -> tuple[object | AgentResult, int, int]:
+        """Invoke the runner, allowing middleware to retry model errors while tracking compaction events."""
         provider = handle.provider
         while True:
             current_call_options = dict(call_options)
@@ -669,7 +672,9 @@ class AgentRuntime:
                         contexts=call_contexts,
                     ),
                     model_call_count,
+                    compaction_count,
                 )
+            compaction_count += self._compaction_event_delta(decision)
             current_call_options = self._apply_before_model_call_transform(current_call_options, decision)
             model_call_count += 1
             llm_span = self._tracer.start_span(
@@ -689,7 +694,7 @@ class AgentRuntime:
                 raw_result = await handle.invoke(message, **current_call_options)
                 output_text = handle.extract_text(raw_result)
                 self._tracer.end_span(llm_span, output=output_text)
-                return raw_result, model_call_count
+                return raw_result, model_call_count, compaction_count
             except Exception as exc:
                 self._tracer.end_span(llm_span, error=exc)
                 decision = await self.middleware.on_model_error(
@@ -721,6 +726,7 @@ class AgentRuntime:
                             contexts=call_contexts,
                         ),
                         model_call_count,
+                        compaction_count,
                     )
                 raise
             except BaseException as exc:
@@ -1673,16 +1679,73 @@ class AgentRuntime:
             "tool_calls": tuple(contexts),
         }
 
-    def _contract_counters(self, *, iteration_count: int, model_call_count: int, call_contexts: Sequence[ToolCallContext], tokens_used: int | None, started_at: float) -> dict[str, Any]:
+    def _contract_counters(self, *, iteration_count: int, model_call_count: int, call_contexts: Sequence[ToolCallContext], tokens_used: int | None, started_at: float, final_output: str | None = None, compaction_count: int = 0) -> dict[str, Any]:
         # Packages the live runtime counters into the dict output contracts read by key.
         # Internal tools (e.g. isDone) are excluded so effort floors count only real work.
+        final_text = final_output or ""
+        non_internal = self._non_internal_tool_contexts(call_contexts)
         return {
             "iteration_count": iteration_count,
             "model_call_count": model_call_count,
-            "tool_call_count": sum(1 for context in call_contexts if not self._tool_name_is_internal(context.tool_name)),
+            "tool_call_count": len(non_internal),
+            "successful_tool_call_count": self._successful_tool_call_count(non_internal),
+            "distinct_tool_count": self._distinct_tool_count(non_internal),
+            "tool_calls_by_name": self._tool_calls_by_name(non_internal),
             "tokens_used": tokens_used or 0,
             "elapsed_seconds": self.middleware.clock() - started_at,
+            "final_output_chars": len(final_text),
+            "final_output_tokens": self._approx_output_tokens(final_text),
+            "cost_spent_usd": self._cost_spent_usd(tokens_used),
+            "compaction_count": compaction_count,
         }
+
+    def _non_internal_tool_contexts(self, call_contexts: Sequence[ToolCallContext]) -> list[ToolCallContext]:
+        # Filters out internal tools so effort floors count only developer-facing work.
+        return [context for context in call_contexts if not self._tool_name_is_internal(context.tool_name)]
+
+    def _successful_tool_call_count(self, call_contexts: Sequence[ToolCallContext]) -> int:
+        # Counts tool contexts that finished with SUCCEEDED (excludes failures and denials).
+        return sum(1 for context in call_contexts if context.state is ToolCallState.SUCCEEDED)
+
+    def _distinct_tool_count(self, call_contexts: Sequence[ToolCallContext]) -> int:
+        # Counts unique tool names across the provided (already non-internal) contexts.
+        return len({context.tool_name for context in call_contexts})
+
+    def _tool_calls_by_name(self, call_contexts: Sequence[ToolCallContext]) -> dict[str, int]:
+        # Builds a histogram of non-internal tool call counts keyed by tool name.
+        counts: dict[str, int] = {}
+        for context in call_contexts:
+            counts[context.tool_name] = counts.get(context.tool_name, 0) + 1
+        return counts
+
+    @staticmethod
+    def _approx_output_tokens(text: str) -> int:
+        # Estimates tokens deterministically as ceil(chars/4), matching compaction heuristics.
+        return max(1, math.ceil(len(text) / 4)) if text else 0
+
+    def _cost_spent_usd(self, tokens_used: int | None) -> float:
+        # Returns estimated USD spend from CostBudgetMiddleware when attached, else 0.0.
+        del tokens_used
+        from vidbyte.middleware.builtins.cost_budget import CostBudgetMiddleware
+
+        for middleware in self.middleware.middleware:
+            if isinstance(middleware, CostBudgetMiddleware):
+                return float(middleware.estimated_spend_usd)
+        return 0.0
+
+    def _compaction_event_delta(self, decision: MiddlewareDecision) -> int:
+        # Returns 1 when a history compaction transform actually mutated provider messages.
+        transform = decision.transform
+        if transform is None or transform.provider_messages is None:
+            return 0
+        meta = dict(transform.metadata or {})
+        if "compaction" not in meta:
+            return 0
+        before = meta.get("before_count")
+        after = meta.get("after_count")
+        if before is not None and after is not None:
+            return 1 if int(before) != int(after) else 0
+        return 1
 
     def _publish_contract_evaluations(self, run_state: dict[type, Any], counters: Mapping[str, Any]) -> None:
         # Records each contract's evaluation into run_state so _with_run_state_metadata lifts it into the result.

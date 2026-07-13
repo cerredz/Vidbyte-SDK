@@ -8,7 +8,7 @@ Purpose:
     human unit, and the base supplies the satisfied/error logic.
 Architecture:
     - OutputContract: Declarative base with satisfied()/error() over a counters mapping.
-    - floors.py: MinToolCalls / MinTokens / MinIterations / MinElapsedSeconds.
+    - floors.py: Prebuilt deterministic effort floors (tool, token, time, cost, compaction, ...).
 Relations:
     Declared on vidbyte.agents.settings.loop.AgentLoopSettings via output_contracts= and
     owned at runtime by vidbyte.agents.contract.AgentLoopSettingsOutputContract.
@@ -52,8 +52,25 @@ class OutputContract:
         observed = counters.get(self.key) or 0
         return f"Only {observed} {self.unit} so far; at least {self.minimum} are required before finishing. Keep working."
 
+    def observed(self, counters: Mapping[str, Any]) -> Any:
+        # Returns the scalar (or map entry) value reported for this contract in metadata.
+        return counters.get(self.key) or 0
 
-from vidbyte.agents.contracts.floors import MinElapsedSeconds, MinIterations, MinTokens, MinToolCalls
+
+from vidbyte.agents.contracts.floors import (
+    MinCompactions,
+    MinCostSpent,
+    MinDistinctTools,
+    MinElapsedSeconds,
+    MinFinalOutputChars,
+    MinFinalOutputTokens,
+    MinIterations,
+    MinSuccessfulToolCalls,
+    MinTimeTaken,
+    MinTokens,
+    MinToolCalls,
+    MinToolCallsById,
+)
 
 __all__ = [
     "OutputContract",
@@ -61,4 +78,12 @@ __all__ = [
     "MinTokens",
     "MinIterations",
     "MinElapsedSeconds",
+    "MinTimeTaken",
+    "MinSuccessfulToolCalls",
+    "MinDistinctTools",
+    "MinFinalOutputChars",
+    "MinFinalOutputTokens",
+    "MinToolCallsById",
+    "MinCompactions",
+    "MinCostSpent",
 ]

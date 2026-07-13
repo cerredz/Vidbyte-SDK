@@ -52,7 +52,17 @@ class AgentLoopSettingsOutputContract:
 
     def report(self, counters: Mapping[str, Any]) -> list[dict[str, Any]]:
         # Builds the per-contract records surfaced in AgentResult.metadata["contract_evaluations"].
-        return [
-            {"name": contract.name, "satisfied": contract.satisfied(counters), "minimum": contract.minimum}
-            for contract in self._contracts
-        ]
+        return [self._report_row(contract, counters) for contract in self._contracts]
+
+    def _report_row(self, contract: OutputContract, counters: Mapping[str, Any]) -> dict[str, Any]:
+        # Builds one evaluation record including observed value and optional tool identity.
+        row: dict[str, Any] = {
+            "name": contract.name,
+            "satisfied": contract.satisfied(counters),
+            "minimum": contract.minimum,
+            "observed": contract.observed(counters),
+        }
+        tool_name = getattr(contract, "tool_name", None)
+        if tool_name is not None:
+            row["tool_name"] = tool_name
+        return row

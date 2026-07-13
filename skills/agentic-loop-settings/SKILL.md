@@ -122,6 +122,31 @@ settings = AgentLoopSettings(
 
 > `tool_error_policy` is a separate nested object for tool-error retry/render behavior (middleware-oriented). Do not confuse it with `tool_settings`.
 
+### 3.1.2 Output contracts (effort floors)
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `output_contracts` | `Sequence[OutputContract]` | `()` | Deterministic **floors** that gate when a linear agent may stop. Owned as `settings.output_contract` (`AgentLoopSettingsOutputContract`). Empty = no-op. |
+| `max_contract_rejections` | `int` | `3` | How many unmet finalization attempts are allowed before the run stops with `stop_reason=contract_unsatisfied`. Must be `> 0`. |
+
+**Ceilings say when the agent MUST stop. Output contracts say when it MAY stop.**
+
+When the model calls `isDone` (or tries to finalize with no tool calls) before every floor is met, the runtime injects corrective feedback and continues the loop. See the full process guide:
+
+- **Output contracts skill:** `skills/output-contracts/SKILL.md`
+- **Framework design:** `docs/design/output-contracts-loop-settings.md`
+- **Extended floors design:** `docs/design/output-contract-skill-and-extended-floors.md`
+
+```python
+from vidbyte.agents import AgentLoopSettings, MinToolCalls, MinSuccessfulToolCalls, MinTimeTaken
+
+settings = AgentLoopSettings(
+    max_tool_calls=20,
+    max_contract_rejections=5,
+    output_contracts=[MinToolCalls(5), MinSuccessfulToolCalls(3), MinTimeTaken(15)],
+)
+```
+
 ### 3.2 Validated but Reserved (Not Yet Enforced at Runtime)
 
 These parameters are accepted and validated on `AgentLoopSettings` at construction time, but the execution loop does not yet read or enforce them. They are stored on the settings object for introspection and documented here so that future runtime implementations have a stable API to target.
@@ -147,6 +172,8 @@ These parameters are accepted and validated on `AgentLoopSettings` at constructi
 | `compaction_target_tokens >= compaction_trigger_tokens` (when both set) | `compaction_target_tokens must be less than compaction_trigger_tokens` |
 | `tool_settings` is not a `ToolSettings` instance | `tool_settings must be a ToolSettings instance when provided` |
 | `max_tool_calls` and `ToolSettings.max_calls` both set and differ | must match when both are provided |
+| Effort floor `minimum >=` paired ceiling (when ceiling set) | floor is unreachable (require minimum < ceiling) |
+| `MinToolCallsById` minimum `>=` `ToolSettings.max_calls_per_tool[name]` when set | floor is unreachable for that tool |
 | Both `agent_loop_settings=` and flat params passed to `BaseAgent` | `Pass either agent_loop_settings= or individual loop params (...), not both.` |
 
 ---
@@ -168,6 +195,7 @@ When the runtime stops due to an `AgentLoopSettings` budget, the `AgentResult.me
 | `"tool_settings_denied"` | `ToolSettings` denial with `on_deny="abort"` |
 | `"final_response"` | Agent completed normally (no budget hit) |
 | `"is_done"` | Agent called the `isDone` tool explicitly |
+| `"contract_unsatisfied"` | Output-contract floors still unmet after `max_contract_rejections` attempts |
 
 ---
 
