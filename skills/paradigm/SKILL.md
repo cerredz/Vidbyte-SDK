@@ -79,15 +79,18 @@ The canonical short definition, from `vidbyte/paradigms/README.md`:
 ## 2. Where Paradigms Live
 
 The paradigm scaffolding is a first-class SDK layer under `vidbyte/paradigms/`.
-As of this scaffolding, the package provides the contract and the namespace only
-- **no concrete paradigm harnesses ship from it yet**.
+The package ships the abstract contract plus concrete context-minimal fanout and
+durable long-running harnesses.
 
 ```text
 vidbyte/paradigms/
-|-- __init__.py    Public exports: ParadigmHarness, ParadigmClient
-|-- base.py        ParadigmHarness - abstract runnable contract
-|-- client.py      ParadigmClient - namespace client (currently a marker)
-`-- README.md      Package role, design philosophy, non-goals
+|-- __init__.py              Public paradigm exports
+|-- base.py                  ParadigmHarness abstract contract
+|-- client.py                Concrete family namespace factories
+|-- types.py                 Shared AgentRoleSettings
+|-- context_minimal_fanout/  Fresh-window fanout harness and skills
+|-- long_running/            Durable DAG, ledger, verification, recovery, learning
+`-- README.md                Package role, design philosophy, non-goals
 ```
 
 It is reachable two ways:
@@ -149,11 +152,25 @@ Two things to know:
   instructing the caller to `await arun()`. Concrete harnesses inherit this and
   should not override it without a reviewed reason.
 
-`vidbyte/paradigms/client.py` defines `ParadigmClient`, currently an empty
-namespace marker. It reserves the public surface for future paradigm factory
-methods but intentionally exposes none, so its presence never implies a paradigm
-exists. Factories get added to it only *after* the harness they construct is
-implemented.
+`vidbyte/paradigms/client.py` exposes `context_minimal_fanout` and `long_running`
+factories. Direct class construction remains the primary documented surface.
+
+### Long-running family
+
+`LongRunningParadigm` decomposes an immutable root contract into a validated DAG,
+runs one ready task at a time in fresh bounded contexts, independently verifies
+attempts, audits global drift, invalidates downstream work, and final-audits the
+synthesis. An append-only ledger is canonical state and supports typed resume.
+
+Reusable memory is a separate `vidbyte.procedures` lifecycle: candidates are
+staged but non-retrievable, then promoted only after task verification, aligned
+drift, exact fingerprint checks, model fidelity review, configured deterministic
+validators, and a final active-ledger authorization. Models search compact cards
+and load exact versions under cumulative context budgets.
+
+Worker write/execute tools are disabled by default. Effective non-read tools need
+an `AttemptIsolator` unless the caller explicitly opts into unsafe unisolated work;
+even then, rejected or interrupted side effects stop in `RECOVERY_REQUIRED`.
 
 ---
 

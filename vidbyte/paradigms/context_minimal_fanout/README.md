@@ -2,13 +2,14 @@
 
 `context_minimal_fanout` is the paradigm family for reducing implementation
 agent context load by decomposing one broad request into smaller ownership
-areas. On this branch, the package ships distributable external-harness skills;
-runnable Python harness implementations can be added separately.
+areas. It ships both a runnable Python harness and distributable external-harness
+skills. Use `LongRunningParadigm` instead when work needs durable resume,
+dependency verification, global drift correction, or cross-run procedure memory.
 
 ## Role In The SDK
 
-This package is an importable asset package so the SDK wheel can include
-context-minimal fanout skill files. The files are consumed by
+The Python harness performs context extraction, splitting, adversarial ownership
+de-overlap, and fresh implementation fanout. Skill files are consumed by
 `vidbyte.skills.Skills` through `importlib.resources`.
 
 ## Design Philosophy
@@ -19,6 +20,16 @@ teach a harness how to gather context, decompose work, persist plans, enforce
 ownership boundaries, and optionally fan out to subagents.
 
 ## Usage
+
+```python
+from vidbyte import ContextMinimalFanoutParadigm
+
+result = ContextMinimalFanoutParadigm(default_tool_root=".").run(
+    "Split and implement this repository change."
+)
+```
+
+External-harness skill materialization remains available:
 
 ```python
 from vidbyte.skills import ContextMinimalFanoutSkill, Skills

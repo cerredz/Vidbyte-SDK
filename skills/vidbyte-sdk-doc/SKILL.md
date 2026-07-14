@@ -5,6 +5,23 @@ description: Comprehensive reference for the Vidbyte SDK repository, including p
 
 # Vidbyte SDK Doc
 
+## Long-running paradigm and procedures
+
+The SDK exposes `LongRunningParadigm`, typed start/resume options, file/in-memory
+run ledger stores, trusted validator and attempt-isolator seams, and a separate
+`vidbyte.procedures` library. The harness uses a finite task DAG and fresh bounded
+role contexts. Task completion requires independent criterion/validator evidence;
+run completion additionally requires final root audit.
+
+Procedure candidates are never searchable. A successful source task must survive
+global drift review, exact candidate fidelity checks, required deterministic
+procedure validators, and active-ledger authorization before a VERIFIED version
+becomes retrievable. `ProcedureRef` pins namespace/id/version/fingerprint, so
+outcomes and retirement never alias a replacement version.
+
+See `vidbyte/paradigms/long_running/README.md` and
+`docs/design/long-running-paradigm.md` for API details and safety boundaries.
+
 ## When To Use This Skill
 
 Use this skill when working inside the `vidbyte-sdk` repository and you need the complete local map of what the SDK offers, where code belongs, how the design docs relate to the current implementation, and what to verify before handing off changes.

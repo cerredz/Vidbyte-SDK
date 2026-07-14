@@ -300,9 +300,20 @@ trip.
 #### `vidbyte/paradigms/`
 The namespace for thin runnable paradigm harnesses: high-level agentic patterns that
 compose agents, tools, context, middleware, prompts, trace, pipelines, and evals into one
-opinionated control flow. It currently ships scaffolding only — `ParadigmHarness` and
-`ParadigmClient` — with no concrete paradigm harness published from this namespace yet.
-It sits above raw primitives as the "whole strategy in a box" layer.
+opinionated control flow. It ships `ParadigmHarness`, `ParadigmClient`, runnable
+context-minimal fanout, and durable long-running families. It sits above raw primitives
+as the "whole strategy in a box" layer.
+
+#### `vidbyte/paradigms/long_running/`
+Durable plan/execute/verify/audit/learn orchestration. Owns immutable task DAG and
+runtime contracts, append-only run ledgers with validated replay, fresh bounded role
+contexts, task isolation/recovery, deterministic validator seams, global drift review,
+procedure-learning sagas, and final audit gating.
+
+#### `vidbyte/procedures/`
+Provider-neutral cross-run procedure memory. Separates non-retrievable candidates from
+active VERIFIED versions, pins refs by namespace/id/version/fingerprint, stores exact
+outcomes, retires repeatedly suspected versions, and supplies in-memory/file stores.
 
 ### Pipelines
 
@@ -458,6 +469,14 @@ Tools that expose persistence-provider access (for example MongoDB and row-orien
 queries) as agent-callable actions. Bridge the `vidbyte/lib/providers` backends into the
 tool layer with descriptions and a common base. Let an agent read structured data through
 a governed tool.
+
+#### `vidbyte/tools/builtins/procedures/`
+Long-running role tools for compact VERIFIED-card search, one-item compatible expansion,
+and candidate-only staging. Promotion authority remains outside the model tool plane.
+
+#### `vidbyte/tools/builtins/verified_context/`
+Stable hash-pinned handles and a bounded one-item loader for current VERIFIED task
+results/artifacts. The trusted source revalidates task status, scope, and content hash.
 
 #### `vidbyte/tools/builtins/sessions/`
 Agent-facing session tools that reuse the sessions primitive: session, checkpoint, fork,

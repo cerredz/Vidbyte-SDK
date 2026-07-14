@@ -1,3 +1,17 @@
+"""Context Protocol Header
+
+Path: vidbyte/middleware/compaction/engine.py
+Purpose: Select and apply deterministic compaction strategies across SDK message shapes.
+Architecture: ContextCompactionEngine adapts provider dictionaries and ToolResult values
+to focused strategy classes, then restores caller-facing shapes and statistics.
+Exports: ContextCompactionEngine.
+Invariants: Provider conversion preserves raw message metadata needed for boundary-safe
+character accounting; strategies never mutate caller-owned records.
+Do not: Put policy-specific prompt generation or hidden summarization here.
+Related: context_compaction.py, strategies.py, and vidbyte/middleware/README.md.
+Tests: Existing compaction verification; no new tests by approved workflow.
+"""
+
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
@@ -130,7 +144,8 @@ class ContextCompactionEngine:
         if mode is CompactionMode.TRIM_WITH_PROVIDER_BOUNDARIES:
             max_messages = options.get("max_messages")
             max_tokens = options.get("max_tokens")
-            return TrimWithProviderBoundariesCompaction(None if max_messages is None else int(max_messages), None if max_tokens is None else int(max_tokens), options.get("token_counter"))
+            max_chars = options.get("max_chars")
+            return TrimWithProviderBoundariesCompaction(None if max_messages is None else int(max_messages), None if max_tokens is None else int(max_tokens), options.get("token_counter"), None if max_chars is None else int(max_chars))
         if mode is CompactionMode.DELETE_MESSAGES_BY_ID_OR_RANGE:
             start = options.get("start")
             end = options.get("end")

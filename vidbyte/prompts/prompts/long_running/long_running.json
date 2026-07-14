@@ -1,0 +1,15 @@
+{
+  "name": "Long-Running Paradigm",
+  "description": "Role prompts for durable decomposition, isolated execution, verification, procedure learning, drift control, and finalization",
+  "key": "long_running",
+  "prompts": {
+    "planner": {"path": "planner.md", "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/long_running/planner.md"},
+    "worker": {"path": "worker.md", "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/long_running/worker.md"},
+    "repair": {"path": "repair.md", "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/long_running/repair.md"},
+    "verifier": {"path": "verifier.md", "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/long_running/verifier.md"},
+    "procedure_curator": {"path": "procedure_curator.md", "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/long_running/procedure_curator.md"},
+    "procedure_verifier": {"path": "procedure_verifier.md", "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/long_running/procedure_verifier.md"},
+    "synthesizer": {"path": "synthesizer.md", "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/long_running/synthesizer.md"},
+    "auditor": {"path": "auditor.md", "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/long_running/auditor.md"}
+  }
+}

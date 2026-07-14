@@ -156,7 +156,7 @@ high-level agentic engineering patterns that compose agents, tools, context,
 prompts, middleware, trace, pipelines, and evals into an opinionated execution
 loop.
 
-The first concrete paradigm is `ContextMinimalFanoutParadigm`. It runs a
+`ContextMinimalFanoutParadigm` runs a
 four-stage pipeline — a context-extraction agent, a splitter agent, an
 adversarial de-overlap agent, and parallel implementation agents — so one large
 request is turned into non-overlapping, context-rich prompts that each run in a
@@ -174,6 +174,31 @@ harness = ContextMinimalFanoutParadigm(
 )
 result = harness.run("Implement the requested repo change.")
 ```
+
+`LongRunningParadigm` is the durable choice for goals that need verified
+subproblems, resumable checkpoints, bounded fresh contexts, drift correction,
+and cross-run procedure learning:
+
+```python
+from vidbyte import LongRunningParadigm, LongRunningRunOptions
+
+harness = LongRunningParadigm()
+result = harness.run(
+    "Complete the migration and report evidence.",
+    run_options=LongRunningRunOptions(
+        success_criteria=("The migration is complete and evidenced.",),
+        invariants=("Do not weaken security boundaries.",),
+    ),
+)
+```
+
+Only independently verified, globally aligned, fidelity-checked procedures are
+retrievable in later runs. Models see compact cards and explicitly expand one
+exact procedure or verified dependency through cumulative-budget load tools;
+the append-only ledger keeps the full public audit trail. Use file-backed ledger
+and procedure stores for process-restart durability. Worker write/execute tools
+are off by default and require an `AttemptIsolator` (or an explicit unsafe
+construction opt-in that still stops after ambiguous side effects).
 
 ## Context Objects
 
@@ -636,6 +661,8 @@ Advanced built-ins are grouped by category:
 - `vidbyte.tools.builtins.fork`: `ForkConversationTool`
 - `vidbyte.tools.builtins.handoff`: `CreateHandoffTool`
 - `vidbyte.tools.builtins.sessions`: `CheckpointTool`, `ForkTool`, `BatchForkTool`, `RewindTool`, `ResumeReplaceTool`, `ResumeAppendTool`, `ResumeOutputTool`, `SessionTool`
+- `vidbyte.tools.builtins.procedures`: `ProcedureSearchTool`, `ProcedureLoadTool`, `StageProcedureTool`
+- `vidbyte.tools.builtins.verified_context`: `VerifiedContextLoadTool` and stable `VerifiedContextRef` handles
 - `vidbyte.tools.builtins.providers`: provider/database helper tools
 - `vidbyte.tools.mcp`: `McpClient`, `McpStdioTransport`, `McpBridgedTool`
 - `vidbyte.tools.security`: `PermissionPolicy`, `ToolPermission`, sandbox transport protocols

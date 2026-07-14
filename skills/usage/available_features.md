@@ -1,5 +1,28 @@
 # Available Features
 
+## Durable long-running paradigm
+
+`LongRunningParadigm` handles broad multi-stage goals with a validated dependency
+DAG, one fresh context per role call, independently verified task results, global
+drift review, downstream invalidation, finite retry/replan/finalization budgets,
+and append-only resumable state.
+
+```python
+from vidbyte import LongRunningParadigm, LongRunningRunOptions
+
+result = LongRunningParadigm().run(
+    "Complete the broad goal.",
+    run_options=LongRunningRunOptions(
+        success_criteria=("Every required outcome has evidence.",),
+    ),
+)
+```
+
+Use `FileRunLedgerStore` and `FileProcedureStore` for process-restart durability.
+Only verified, aligned, fidelity-checked procedures become retrievable across
+runs. Non-read worker tools require an `AttemptIsolator` or an explicit unsafe
+opt-in, which still stops on ambiguous rejected/interrupted side effects.
+
 Features, runtimes, middleware, pipelines, tools, durable sessions, artifact sources, and orchestration primitives included out of the box in the Vidbyte SDK.
 
 ## Root SDK Client
