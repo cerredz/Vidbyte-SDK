@@ -2,7 +2,7 @@
 
 Use this skill when making a Vidbyte agent persistent — saving its conversation to disk or a database and continuing, resuming, or forking it later, across processes.
 
-Durable sessions add a harness-level primitive that wraps any agent in a `Session` and persists its run state as an append-only checkpoint DAG. The agent stays pure; persistence lives in the `Session` wrapper, so it works for every runtime (linear, MCTS, actor). All session logic lives under `vidbyte/sessions/`; database-backed stores live under `vidbyte/lib/providers/`.
+Durable sessions add a harness-level primitive that wraps persistable agents in a `Session` and stores run state as an append-only checkpoint DAG. The agent stays pure; persistence lives in the `Session` wrapper, so it works for the linear, MCTS, and actor runtimes. `MultiAgent` is intentionally not persistable because `RunState` cannot encode its orchestrator, transfers, subtype factories, and live task ledger without changing behavior. All session logic lives under `vidbyte/sessions/`; database-backed stores live under `vidbyte/lib/providers/`.
 
 ## Attach in one line
 
@@ -168,6 +168,7 @@ session = Session(agent, store=store)   # auto-binds the tools
 
 ## Rules of thumb
 
+- `Session(MultiAgent(...))` and `multi_agent.persist(...)` fail before any store write; persist individual workers separately when that is the desired boundary.
 - The agent's state seam is `BaseAgent.export_state()` / `BaseAgent.restore(state, *, tools, runner, middleware)` - pure, no I/O. `agent.persist()` and `agent.session` are entry points into the external `Session` wrapper.
 - Persist raw history; re-supply tools/runner/middleware at resume.
 - Never persist secrets; the serializer scrubs credential-like keys and `api_key`.

@@ -110,25 +110,41 @@ print(reply.content)
 
 ## Multi-Agent Orchestration
 
-Multi-agent execution is modeled as composition:
-
-- `vidbyte.agents` contains actor objects such as `BaseAgent`, `AgentInput`, and `AgentRegistry`.
-- `vidbyte.pipelines` composes simple string-producing agents through fixed topologies.
-- `vidbyte.workflows` enforces typed, gated, non-linear stage transitions in Python code.
-- Custom harnesses stay outside the base SDK until their public contracts are explicitly defined.
+Use `MultiAgent` when open-ended work needs a manager that owns the overall goal,
+tracks evidence and blockers in a shared `TaskLedger`, delegates one ready task
+per round, and replans after failure:
 
 ```python
-from vidbyte import BaseAgent
+from vidbyte import BaseAgent, MultiAgent, MultiAgentSettings
 
-agent = BaseAgent(
-    name="researcher",
-    system_prompt="Answer directly and cite uncertainty.",
+manager = BaseAgent(
+    name="manager",
+    system_prompt="Plan, delegate, track progress, and recover from blockers.",
     provider="openai",
     model_name="gpt-4.1",
 )
+researcher = BaseAgent(
+    name="researcher",
+    system_prompt="Research the assigned task and return evidence.",
+    provider="openai",
+    model_name="gpt-4.1",
+)
+team = MultiAgent(
+    name="research-team",
+    system_prompt="Produce a grounded answer and expose uncertainty.",
+    orchestrator=manager,
+    agents=[researcher],
+    settings=MultiAgentSettings(max_rounds=12, max_replans=2),
+)
 
-reply = await agent.arun("Draft a concise release note")
+reply = await team.arun("Investigate the release risk and recommend next steps.")
 ```
+
+Wrap workers in `AgentBinding` / `AgentTransfer` to define the exact request,
+report parser, validator, dispatch gate, subtype-aware fork factory, and closer.
+`MultiAgent` is serial and run-local; its facade cannot own tools, MCP servers,
+or durable sessions. Use pipelines for fixed string flow and `vidbyte.workflows`
+when Python code must own a deterministic state machine.
 
 For custom agents, pass an explicit `system_prompt`, provider/model config, and tools into `Agent` or `BaseAgent`.
 Semantic labels such as roles belong in agent metadata when callers need them.
@@ -959,9 +975,9 @@ reply metadata but never ends the run.
 ## Prompts
 
 Prompts are repository-backed text assets exposed through an enum-keyed accessor
-and direct Python imports. The catalog currently includes 34 prompt assets across
-13 families, including handoff, reflexion, evals, prompt templates, goals,
-actor-runtime personas, and trajectory checkpoints.
+and direct Python imports. The catalog currently includes 51 prompt assets across
+19 families, including handoff, reflexion, evals, prompt templates, goals,
+actor-runtime personas, trajectory checkpoints, and multi-agent orchestration.
 
 ```python
 from vidbyte.prompts import Prompts

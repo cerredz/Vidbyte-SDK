@@ -12,6 +12,10 @@ agents, and swappable runtime implementations. Agents normalize input, build a
 context window, infer the runner from provider/model configuration, execute tools when the
 runtime requests them, and return an `AgentMessage`.
 
+For open-ended team work, `vidbyte.agents.multi` exposes `MultiAgent`, a
+`BaseAgent`-compatible facade whose manager plans against a shared immutable
+ledger snapshot, delegates one worker per round, and can replan after failure.
+
 ## Design Philosophy
 
 Agents are explicit composition objects rather than hidden global state. The SDK
@@ -73,12 +77,43 @@ print(agent.session is session)
 
 `agent.persist(...)` delegates to `vidbyte.sessions.Session(agent, ...)`. Once bound, direct `agent.arun(...)` and `agent.run(...)` calls record checkpoints with the same policy as `session.arun(...)` and `session.run(...)`; `agent.session` returns the current session or `None`.
 
+`MultiAgent` is intentionally excluded from durable sessions because its
+orchestrator, transfer callbacks, worker factories, and live ledger cannot be
+encoded by `RunState` without changing behavior on restore.
+
+## Ledger-Driven Teams
+
+```python
+from vidbyte import AgentBinding, AgentTransfer, MultiAgent
+
+team = MultiAgent(
+    name="team",
+    system_prompt="Own the goal, surface blockers, and finish with evidence.",
+    orchestrator=manager_agent,
+    agents=[
+        AgentBinding(
+            researcher_agent,
+            transfer=AgentTransfer(report_validator=verify_research_report),
+        )
+    ],
+)
+
+reply = await team.arun("Investigate the incident and recommend a response.")
+ledger = team.last_ledger
+```
+
+The default transfer sends deterministic JSON and treats non-blank worker text
+as completed but unverified evidence. Use a report validator to mark evidence
+verified. Use pipelines for fixed text flow and workflows for code-owned state
+machines; use `MultiAgent` when the manager must own progress and recovery.
+
 ## Key Modules
 
 - `base.py`: `BaseAgent`, inferred runner construction, tool binding, context assembly, trace setup, and runtime dispatch.
 - `client.py`: namespace client used by `VidbyteSDK().agents`.
 - `runtimes/`: linear, search, and actor-model runtime components.
 - `handoff.py`: structured handoff generation from a completed agent run.
+- `multi/`: ledger-driven manager/worker orchestration and transfer controls.
 - `types.py`: agent messages, input envelopes, cards, and specs.
 
 ## Related Layers

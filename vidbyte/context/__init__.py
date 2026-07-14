@@ -6,10 +6,11 @@ Purpose:
     Allows developers to import all context-window configuration models, presets,
     and managers from a single public namespace.
 Architecture:
-    - Namespace client for ContextWindow and ContextManager.
+    - Namespace client for ContextWindow, ContextManager, and MultiAgentContext.
 Key Functions / Exports:
     - ContextManager: Manages loading, updating, and exporting context items.
     - ContextWindow: Represents the sliding/compacted context window.
+    - MultiAgentContext: Builds and renders orchestration context primitives.
     - ContextWindowAlgorithm: Base class for context window compaction/pruning.
 Relation to codebase as a whole:
     Provides public exports for all context primitives and algorithms (including PlanContextItem, MultiProviderAgenticGraderAlgorithm, ReflexionAlgorithm, etc.) which are consumed by agents and runner engines to manage LLM context windows dynamically.
@@ -32,6 +33,13 @@ from vidbyte.context.primitives import (
     FileContextItem,
     GitDiffContextItem,
     MemoryContextItem,
+    MultiAgentContextSerializer,
+    MultiAgentLedgerContextItem,
+    MultiAgentLimitsContextItem,
+    MultiAgentReportContextItem,
+    MultiAgentRequestContextItem,
+    MultiAgentTeamContextItem,
+    MultiAgentTerminalContextItem,
     PlanContextItem,
     ProblemSpaceSearchContextItem,
     ProgressContextItem,
@@ -58,6 +66,7 @@ from vidbyte.context.handoff import (
     ResearchHandoff,
 )
 from vidbyte.context.manager import ContextManager
+from vidbyte.context.multi_agent import MultiAgentContext
 from vidbyte.context.presets import ContextWindowPresets
 from vidbyte.context.window import ContextWindow
 
@@ -90,6 +99,14 @@ __all__ = [
     "Handoff",
     "MemoryContextItem",
     "MinimalHandoff",
+    "MultiAgentContext",
+    "MultiAgentContextSerializer",
+    "MultiAgentLedgerContextItem",
+    "MultiAgentLimitsContextItem",
+    "MultiAgentReportContextItem",
+    "MultiAgentRequestContextItem",
+    "MultiAgentTeamContextItem",
+    "MultiAgentTerminalContextItem",
     "ResearchHandoff",
     "MultiProviderAgenticGraderAlgorithm",
     "InnerContextWindowAlgorithm",

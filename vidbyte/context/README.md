@@ -7,7 +7,7 @@ progress, tool calls, handoff notes, and context-window policies explicit.
 ## Role In The SDK
 
 `vidbyte.context` provides `ContextManager`, `BaseContext`, context item
-dataclasses, handoff models, compaction engines, and context-window algorithms.
+dataclasses, multi-agent context composition, handoff models, compaction engines, and context-window algorithms.
 Agents use this layer to build the system and message context that reaches a
 runner. Tools and middleware can also update managed context primitives during a
 run.
@@ -54,8 +54,9 @@ context.upsert(
 ## Key Modules
 
 - `manager.py`: ordered context item collection and managed primitive registry.
+- `multi_agent.py`: builds orchestration contexts and composes manager-facing primitives.
 - `window.py` and `presets.py`: context-window preset resolution.
-- `primitives/`: typed context items for files, tasks, progress, memory, responses, and tool calls.
+- `primitives/`: typed context items for files, tasks, progress, memory, responses, tool calls, and multi-agent orchestration state.
 - `algorithms/`: reflexion, grader, tool-result, and trajectory-checkpoint algorithms.
 - `compaction.py`: deterministic context compaction contracts and stats.
 - `handoff/`: structured handoff models.

@@ -583,7 +583,7 @@ The SDK installs a unified `vidbyte-sdk` command. Current commands are `vidbyte-
 
 ### Prompts
 
-Prompts are repository-backed text assets exposed through an enum-keyed accessor and direct Python imports. The README describes 34 prompt assets across 13 families, including handoff, reflexion, evals, prompt templates, goals, actor-runtime personas, and trajectory checkpoints.
+Prompts are repository-backed text assets exposed through an enum-keyed accessor and direct Python imports. The README describes 51 prompt assets across 19 families, including handoff, reflexion, evals, prompt templates, goals, actor-runtime personas, trajectory checkpoints, and multi-agent orchestration.
 
 ```python
 from vidbyte.prompts import Prompts
@@ -620,6 +620,43 @@ case = EvalCase(
     templates=(T.short_answer_fact(), T.safe_customer_support()),
 )
 ```
+
+### Ledger-Driven Multi-Agent Teams
+
+`vidbyte.agents.multi.MultiAgent` is a `BaseAgent`-compatible facade for complex,
+open-ended work that needs a manager to own progress and recovery. Each run forks
+an isolated orchestrator and isolated worker agents, creates a fresh `TaskLedger`,
+commits exactly one worker report per round, and uses finite round, replan, retry,
+event, and timeout budgets. The manager sees immutable snapshots and cannot mutate
+task state directly.
+
+```python
+from vidbyte import AgentBinding, AgentTransfer, BaseAgent, MultiAgent, MultiAgentSettings
+
+manager = BaseAgent(name="manager", system_prompt="Plan, delegate, and recover.", provider="openai", model_name="gpt-4.1")
+researcher = BaseAgent(name="researcher", system_prompt="Return evidence for assigned work.", provider="openai", model_name="gpt-4.1")
+team = MultiAgent(
+    name="research-team",
+    system_prompt="Produce a grounded answer.",
+    orchestrator=manager,
+    agents=[AgentBinding(researcher, transfer=AgentTransfer(report_validator=validate_report))],
+    settings=MultiAgentSettings(max_rounds=12, max_replans=2, require_verified_evidence=True),
+)
+reply = await team.arun("Investigate the issue and recommend next steps.")
+```
+
+`AgentTransfer` lets developers define the pre-dispatch gate, request builder,
+report parser, report validator, fork settings, worker timeout/retries, subtype
+fork factory, and closer. The default request is deterministic JSON and rejects
+non-JSON payloads. The default parser accepts non-blank text as completed output
+with unverified evidence; only developer parsers/validators should mark evidence
+verified. `MultiAgent.last_result` and `last_ledger` expose the terminal result and
+latest immutable snapshot.
+
+The team facade cannot own tools or MCP servers and does not support `Session`,
+state export, or restore. Configure provider/model/tools/MCP on the manager and
+workers. Use pipelines for fixed string flow and validated workflows when Python
+code must own legal state transitions.
 
 ### Validated Workflows
 

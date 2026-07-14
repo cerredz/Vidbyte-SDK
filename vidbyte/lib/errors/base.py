@@ -12,6 +12,9 @@ Architecture:
     - PermissionDeniedError: Raised when a policy refuses a tool call.
     - McpProtocolError: Raised when an MCP transport returns malformed data.
     - AgentExecutionError: Raised when an agent cannot generate a reply.
+    - MultiAgentExecutionError: Base exception for team controller failures.
+    - TaskLedgerError: Raised when a ledger invariant or transition is rejected.
+    - AgentTransferError: Raised at developer-defined worker transfer boundaries.
     - AgentRegistryError: Raised when local agent discovery fails.
     - AgentForkError: Base exception for agent fork pipeline failures.
     - AgentForkConfigurationError: Raised when fork settings are invalid or out of range.
@@ -67,6 +70,18 @@ class McpProtocolError(VidbyteSdkError):
 
 class AgentExecutionError(VidbyteSdkError):
     """Raised when an agent cannot generate a reply."""
+
+
+class MultiAgentExecutionError(AgentExecutionError):
+    """Raised when a multi-agent controller cannot safely continue or finalize."""
+
+
+class TaskLedgerError(MultiAgentExecutionError):
+    """Raised when a TaskLedger plan or state transition violates an invariant."""
+
+
+class AgentTransferError(MultiAgentExecutionError):
+    """Raised when a worker request, report, validator, or lifecycle seam fails."""
 
 
 class AgentRegistryError(VidbyteSdkError):
