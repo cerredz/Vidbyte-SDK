@@ -1,34 +1,28 @@
 """FILE: vidbyte/harnesses/__init__.py
 
 PURPOSE:
-    Exposes the complete public harness execution-contract surface from one
-    stable package import while preserving the HarnessClient namespace entry.
+    Exposes the public harness execution-contract surface from one stable package
+    import while preserving the HarnessClient namespace entry.
 
 ROLE IN CODEBASE:
-    SDK callers import contracts, configuration, registry, execution, stores,
-    serialization, dataset export, and typed failures from vidbyte.harnesses.
+    SDK callers import the Harness base class, contracts, configuration, registry,
+    trajectory collection/sinks, redaction, and typed failures from vidbyte.harnesses.
 
 ARCHITECTURE NOTE:
     Imports here are export shims only. They must not create stores, register
-    implementations, parse configuration, or execute harness code.
+    implementations, parse configuration, or execute harness code. Persistence is
+    provided by vidbyte.sessions; this package owns only the run envelope and the
+    consented, redacted trajectory export.
 
 PUBLIC API INVENTORY:
-    HarnessClient; contracts/enums; HarnessConfigLoader; structural registry;
-    HarnessContext/LoadedHarness; HarnessStore and local stores; serializer;
-    dataset exporter; and the complete harness error family.
-
-COMMON MODIFICATION PATTERNS:
-    Add imports and __all__ entries when a public contract is introduced, then
-    decide separately whether the root vidbyte package should re-export it.
+    HarnessClient; the Harness base class and wrap_implementation; contracts/enums;
+    HarnessConfigLoader; structural registry; TrajectoryCollector and the
+    TrajectorySink family; redaction helpers; and the harness error family.
 
 WHAT NOT TO DO IN THIS FILE:
     1. Do not instantiate a client or backend at import time.
     2. Do not import optional provider/database dependencies.
     3. Do not hide a public typed error from package callers.
-
-KNOWN EDGE CASES:
-    TYPE_CHECKING indirection in registry.py prevents its HarnessContext annotation
-    from introducing an import cycle through this package surface.
 
 RELATED DOCS:
     https://github.com/cerredz/Vidbyte-SDK/blob/main/docs/design/harness-execution-contract.md
@@ -44,82 +38,58 @@ from vidbyte.harnesses.client import HarnessClient
 from vidbyte.harnesses.config import HarnessConfigLoader
 from vidbyte.harnesses.contracts import (
     HARNESS_SCHEMA_VERSION,
-    HarnessArtifactRef,
-    HarnessCaptureLevel,
-    HarnessCaptureScope,
-    HarnessErrorRecord,
-    HarnessEvent,
     HarnessExecutionResult,
-    HarnessPersistenceMode,
     HarnessRun,
     HarnessRunStatus,
     HarnessSpec,
+    TrajectoryRecord,
 )
-from vidbyte.harnesses.dataset import HarnessDatasetExporter
+from vidbyte.harnesses.dataset import TrajectoryCollector
 from vidbyte.harnesses.errors import (
     HarnessConfigurationError,
     HarnessCredentialConfigError,
-    HarnessDatasetExportError,
     HarnessDuplicateRegistrationError,
     HarnessError,
-    HarnessEventSequenceError,
     HarnessExecutionError,
     HarnessFileReferenceError,
     HarnessRegistrationError,
-    HarnessRunConflictError,
-    HarnessRunTransitionError,
-    HarnessSerializationError,
-    HarnessSpecCollisionError,
-    HarnessStoreError,
+    HarnessSinkError,
     HarnessTimeoutError,
     HarnessVersionError,
 )
-from vidbyte.harnesses.execution import HarnessContext, LoadedHarness
+from vidbyte.harnesses.execution import Harness, wrap_implementation
 from vidbyte.harnesses.registry import HarnessFactory, HarnessImplementation, HarnessRegistry
-from vidbyte.harnesses.serialization import HarnessSecretPolicy, HarnessSerializer
-from vidbyte.harnesses.store import BaseHarnessStore, HarnessStore
-from vidbyte.harnesses.stores import FileHarnessStore, InMemoryHarnessStore
+from vidbyte.harnesses.serialization import HarnessRedactor, HarnessSecretPolicy
+from vidbyte.harnesses.sinks import FileTrajectorySink, InMemoryTrajectorySink, TrajectorySink
 
 __all__ = [
     "HARNESS_SCHEMA_VERSION",
-    "BaseHarnessStore",
-    "FileHarnessStore",
-    "HarnessArtifactRef",
-    "HarnessCaptureLevel",
-    "HarnessCaptureScope",
+    "FileTrajectorySink",
+    "Harness",
     "HarnessClient",
     "HarnessConfigLoader",
     "HarnessConfigurationError",
-    "HarnessContext",
     "HarnessCredentialConfigError",
-    "HarnessDatasetExportError",
-    "HarnessDatasetExporter",
     "HarnessDuplicateRegistrationError",
     "HarnessError",
-    "HarnessErrorRecord",
-    "HarnessEvent",
-    "HarnessEventSequenceError",
     "HarnessExecutionError",
     "HarnessExecutionResult",
     "HarnessFactory",
     "HarnessFileReferenceError",
     "HarnessImplementation",
-    "HarnessPersistenceMode",
+    "HarnessRedactor",
     "HarnessRegistrationError",
     "HarnessRegistry",
     "HarnessRun",
-    "HarnessRunConflictError",
     "HarnessRunStatus",
-    "HarnessRunTransitionError",
     "HarnessSecretPolicy",
-    "HarnessSerializationError",
-    "HarnessSerializer",
+    "HarnessSinkError",
     "HarnessSpec",
-    "HarnessSpecCollisionError",
-    "HarnessStore",
-    "HarnessStoreError",
     "HarnessTimeoutError",
     "HarnessVersionError",
-    "InMemoryHarnessStore",
-    "LoadedHarness",
+    "InMemoryTrajectorySink",
+    "TrajectoryCollector",
+    "TrajectoryRecord",
+    "TrajectorySink",
+    "wrap_implementation",
 ]

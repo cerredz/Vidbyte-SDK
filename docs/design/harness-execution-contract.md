@@ -3,7 +3,52 @@
 **Status:** Draft
 **Author:** Codex
 **Created:** 2026-07-12
-**Last Updated:** 2026-07-12
+**Last Updated:** 2026-07-13
+
+---
+
+## 0. Post-Review Revision (2026-07-13)
+
+Two review passes on PR #267 revised this design after the first implementation
+landed. Where the sections below conflict with this revision, **this revision is
+authoritative**; the original sections are retained for rationale/history.
+
+**Config is the single source of truth (schema change).**
+- The top-level envelope is now `schema_version`, `harness`, `agents`, and the
+  optional `metadata` and `orchestration`. The flat top-level `params` bucket is
+  removed: per-agent hyperparameters move onto each `agents[]` entry as `params`
+  and `tools`; between-agent knobs move to a dedicated `orchestration:` object.
+- `harness.version` leaves the YAML entirely. Version identifies implementation
+  *code*, so it is a class attribute on the `Harness` subclass. `harness.type`
+  (the implementation *kind*) stays in config.
+- Per-agent validation is now strict (unique `name`, optional `provider`/`model`,
+  `system_prompt` string-or-`{$file}`, open `params`, `tools` list).
+- `spec_id = sha256(canonical({type, version, agents, orchestration}))`. The
+  code-supplied `version` is folded in (so a code change is a new variant), and
+  descriptive `metadata` is excluded (so renaming never forks identity).
+
+**A concrete `Harness` base class owns `load()`/`execute()`.**
+- This reverses the original "no base class" goal by *synthesis*: the low-level
+  structural `HarnessImplementation` protocol is kept (now `run(request)`), and a
+  concrete `Harness` base class implements it and adds load/version/session
+  ergonomics. Foreign objects with `run(request)` still work via
+  `wrap_implementation(...)` / `HarnessClient.load(implementation=...)`.
+
+**Persistence pivots onto durable Sessions; the bespoke capture system is deleted.**
+- Deleted (~1,500 lines): `HarnessContext`, `HarnessPersistenceCoordinator`,
+  `store.py` + `stores/*` (`HarnessStore`/`BaseHarnessStore`/in-memory/file),
+  `HarnessEvent`/`HarnessArtifactRef` and the capture/persistence enums, the
+  record codecs in `serialization.py`, and their re-exports.
+- Added: `Harness.session(agent)` auto-instrument seam (forces `PER_STEP` +
+  `FULL` trace + `run_id` tag), collection wired into `execute()`'s fail-open
+  `finally`, `TrajectoryRecord` + `TrajectoryCollector` + a `TrajectorySink` port
+  (in-memory + atomic-JSONL file sinks), an opt-in `collect` consent gate, and a
+  mandatory redaction pass (`HarnessRedactor`) over `task`/`output`/`history`.
+- The operational `SessionStore` (durable checkpoints + full traces) and the
+  licensed, redacted `TrajectorySink` are kept as deliberately distinct surfaces
+  so the consent/redaction boundary stays sharp.
+
+The current source of truth for behavior is `vidbyte/harnesses/README.md`.
 
 ---
 
