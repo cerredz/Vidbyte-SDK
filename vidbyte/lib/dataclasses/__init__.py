@@ -8,7 +8,7 @@ Purpose:
 Architecture:
     - Tool contracts from tools.
     - Context, MCP, security, sandbox, and multi-agent contracts.
-    - Harness specification, run, event, artifact, and policy contracts.
+    - Harness specification, run manifest, and trajectory-record contracts.
 Relations:
     Related to vidbyte.tools, vidbyte.agents, and vidbyte.harnesses.
 """
@@ -55,16 +55,11 @@ from vidbyte.context.primitives import (
 from vidbyte.lib.dataclasses.filesystem import FileStat, FileSystemToolConfig
 from vidbyte.lib.dataclasses.harnesses import (
     HARNESS_SCHEMA_VERSION,
-    HarnessArtifactRef,
-    HarnessCaptureLevel,
-    HarnessCaptureScope,
-    HarnessErrorRecord,
-    HarnessEvent,
     HarnessExecutionResult,
-    HarnessPersistenceMode,
     HarnessRun,
     HarnessRunStatus,
     HarnessSpec,
+    TrajectoryRecord,
 )
 from vidbyte.lib.dataclasses.mcp import McpToolDefinition
 from vidbyte.lib.dataclasses.middleware import (
@@ -155,16 +150,11 @@ __all__ = [
     "FileSystemToolConfig",
     "GitDiffContextItem",
     "HARNESS_SCHEMA_VERSION",
-    "HarnessArtifactRef",
-    "HarnessCaptureLevel",
-    "HarnessCaptureScope",
-    "HarnessErrorRecord",
-    "HarnessEvent",
     "HarnessExecutionResult",
-    "HarnessPersistenceMode",
     "HarnessRun",
     "HarnessRunStatus",
     "HarnessSpec",
+    "TrajectoryRecord",
     "MemoryContextItem",
     "McpToolDefinition",
     "LlmsTxtDocument",

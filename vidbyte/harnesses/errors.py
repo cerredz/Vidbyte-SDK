@@ -2,8 +2,8 @@
 
 PURPOSE:
     Defines typed, agent-readable failures for harness configuration, registry,
-    serialization, storage, state transitions, execution, and timeout boundaries.
-    This file owns diagnostic context, not validation or persistence behavior.
+    file references, trajectory sinks, execution, and timeout boundaries. This
+    file owns diagnostic context, not validation or persistence behavior.
 
 ROLE IN CODEBASE:
     Raised by every module under vidbyte.harnesses and consumed by SDK callers.
@@ -16,9 +16,8 @@ ARCHITECTURE NOTE:
 
 PUBLIC API INVENTORY:
     HarnessError and specialized configuration, credential, file-reference,
-    version, registration, serialization, store, collision, transition, event,
-    dataset, execution, and timeout subclasses. HarnessError.to_context_packet()
-    returns a self-contained safe diagnostic mapping.
+    version, registration, sink, execution, and timeout subclasses.
+    HarnessError.to_context_packet() returns a self-contained safe diagnostic mapping.
 
 COMMON MODIFICATION PATTERNS:
     Add one subclass per distinct failure mode, then reference it in the source
@@ -88,8 +87,8 @@ class HarnessConfigurationError(HarnessError):
     """Raised when the common harness configuration envelope is invalid."""
 
     description = "Harness configuration could not be validated before implementation construction."
-    expected_vs_actual = "Expected: schema_version, harness, agents, and params follow the public envelope. Actual: a required field, type, or value is invalid."
-    blast_radius = ("vidbyte/harnesses/config.py", "vidbyte/harnesses/client.py")
+    expected_vs_actual = "Expected: schema_version, harness, and agents follow the public envelope (metadata/orchestration optional). Actual: a required field, type, or value is invalid."
+    blast_radius = ("vidbyte/harnesses/config.py", "vidbyte/harnesses/execution.py")
 
 
 class HarnessCredentialConfigError(HarnessConfigurationError):
@@ -133,59 +132,13 @@ class HarnessDuplicateRegistrationError(HarnessRegistrationError):
     fix_approaches = ("Remove the duplicate registration.", "Use a distinct implementation version for changed behavior.")
 
 
-class HarnessSerializationError(HarnessError):
-    """Raised when a canonical harness payload cannot be encoded or decoded."""
+class HarnessSinkError(HarnessError):
+    """Raised when a trajectory sink cannot durably write a redacted export record."""
 
-    description = "A specification, run, or event cannot cross the JSON persistence boundary safely."
-    expected_vs_actual = "Expected: a versioned mapping matching the contract. Actual: the payload is malformed, incomplete, or unsafe."
-    blast_radius = ("vidbyte/harnesses/serialization.py", "vidbyte/harnesses/stores/file.py", "vidbyte/harnesses/dataset.py")
-
-
-class HarnessStoreError(HarnessError):
-    """Raised when a run store cannot complete a safe persistence operation."""
-
-    description = "The configured harness store failed at a specification, run, or event boundary."
-    expected_vs_actual = "Expected: the store honors the asynchronous HarnessStore contract. Actual: an operation failed or returned inconsistent state."
-    blast_radius = ("vidbyte/harnesses/store.py", "vidbyte/harnesses/stores", "vidbyte/harnesses/execution.py")
-
-
-class HarnessSpecCollisionError(HarnessStoreError):
-    """Raised when one spec ID points at two different resolved configurations."""
-
-    description = "Content-addressed specification identity detected conflicting resolved behavior."
-    expected_vs_actual = "Expected: equal spec IDs always have equal resolved configs. Actual: the backend returned different behavior for the same digest."
-    fix_approaches = ("Inspect backend corruption or custom hashing changes.", "Never overwrite a spec record with different resolved behavior.")
-
-
-class HarnessRunConflictError(HarnessStoreError):
-    """Raised when a run is missing, duplicated, or linked to the wrong spec."""
-
-    description = "A unique run identity or its immutable specification link is inconsistent."
-    expected_vs_actual = "Expected: one run ID permanently references one spec. Actual: creation or lookup found conflicting state."
-
-
-class HarnessRunTransitionError(HarnessStoreError):
-    """Raised when a run attempts an illegal lifecycle transition."""
-
-    description = "A run lifecycle mutation would erase or contradict its terminal history."
-    expected_vs_actual = "Expected: RUNNING transitions once to a terminal status. Actual: the transition source or target is invalid."
-    fix_approaches = ("Trace the begin/finish calls for the run ID.", "Do not terminalize a run twice or finish it as RUNNING.")
-
-
-class HarnessEventSequenceError(HarnessStoreError):
-    """Raised when an event sequence is missing, duplicated, or out of order."""
-
-    description = "Ordered trajectory evidence would become ambiguous if this event were accepted."
-    expected_vs_actual = "Expected: the next event sequence equals the current event count. Actual: the supplied sequence is not the next value."
-    fix_approaches = ("Serialize emit calls through HarnessContext.", "Do not append events directly with caller-assigned sequence gaps.")
-
-
-class HarnessDatasetExportError(HarnessStoreError):
-    """Raised when canonical runs cannot be materialized into the requested file."""
-
-    description = "The raw dataset exporter could not atomically produce its JSONL artifact."
-    expected_vs_actual = "Expected: selected specs, runs, and events are readable and the destination is writable. Actual: source or target I/O failed."
-    blast_radius = ("vidbyte/harnesses/dataset.py",)
+    description = "A TrajectorySink could not atomically publish one redacted trajectory record."
+    expected_vs_actual = "Expected: the sink can encode the record and write its destination. Actual: encoding or destination I/O failed."
+    blast_radius = ("vidbyte/harnesses/sinks.py",)
+    fix_approaches = ("Confirm the destination path is writable.", "Inspect the safe error type; collection is fail-open inside execute() and never fails the run.")
 
 
 class HarnessExecutionError(HarnessError):
@@ -218,18 +171,12 @@ class HarnessTimeoutError(HarnessExecutionError):
 __all__ = [
     "HarnessConfigurationError",
     "HarnessCredentialConfigError",
-    "HarnessDatasetExportError",
     "HarnessDuplicateRegistrationError",
     "HarnessError",
-    "HarnessEventSequenceError",
     "HarnessExecutionError",
     "HarnessFileReferenceError",
     "HarnessRegistrationError",
-    "HarnessRunConflictError",
-    "HarnessRunTransitionError",
-    "HarnessSerializationError",
-    "HarnessSpecCollisionError",
-    "HarnessStoreError",
+    "HarnessSinkError",
     "HarnessTimeoutError",
     "HarnessVersionError",
 ]

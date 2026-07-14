@@ -7,8 +7,8 @@ PURPOSE:
 
 ROLE IN CODEBASE:
     HarnessClient accepts direct HarnessImplementation objects or asks
-    HarnessRegistry to create one from a HarnessSpec. LoadedHarness later calls
-    the validated execute method. The registry depends only on contracts/errors.
+    HarnessRegistry to create one from a HarnessSpec. The Harness execution
+    envelope later calls the validated run method. Depends only on contracts/errors.
 
 ARCHITECTURE NOTE:
     Registration is optional, client-local, and exact. There is no inheritance
@@ -16,7 +16,7 @@ ARCHITECTURE NOTE:
     fallback. See docs/design/harness-execution-contract.md.
 
 PUBLIC API INVENTORY:
-    HarnessImplementation.execute(request, context); HarnessFactory.create(spec);
+    HarnessImplementation.run(request); HarnessFactory.create(spec);
     HarnessRegistry.register(), create(), validate_implementation(), and
     known_versions().
 
@@ -30,7 +30,7 @@ WHAT NOT TO DO IN THIS FILE:
     3. Do not silently replace an existing factory or select a latest version.
 
 KNOWN EDGE CASES:
-    Structural validation proves only that execute is callable; implementation
+    Structural validation proves only that run is callable; implementation
     correctness is observed inside the execution envelope and recorded as a run.
     Factories receive a defensive copy and mutation is rejected so construction
     cannot silently diverge from the recorded specification.
@@ -51,7 +51,7 @@ TESTS:
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 from vidbyte.harnesses.contracts import HarnessSpec
 from vidbyte.harnesses.errors import (
@@ -60,15 +60,19 @@ from vidbyte.harnesses.errors import (
     HarnessRegistrationError,
 )
 
-if TYPE_CHECKING:
-    from vidbyte.harnesses.execution import HarnessContext
-
 
 @runtime_checkable
 class HarnessImplementation(Protocol):
-    """Open structural contract for arbitrary synchronous or asynchronous harnesses."""
+    """Open structural contract for arbitrary synchronous or asynchronous harnesses.
 
-    def execute(self, request: Any, context: "HarnessContext") -> Any:
+    This is the low-level seam: the concrete `Harness` base class in execution.py
+    implements it and adds load()/version/session ergonomics, while a foreign object
+    with a callable `run(request)` still works without inheriting anything. Per-agent
+    trajectory capture is not part of this seam; implementations obtain durable
+    Sessions from `Harness.session(agent)` (or bind their own SessionStore).
+    """
+
+    def run(self, request: Any) -> Any:
         # Runs implementation-specific logic and returns either a value or awaitable.
         ...
 
@@ -109,11 +113,24 @@ class HarnessRegistry:
         return self.validate_implementation(implementation)
 
     def validate_implementation(self, implementation: object) -> HarnessImplementation:
-        # Accepts any object with a callable execute method and rejects wider assumptions.
-        execute = getattr(implementation, "execute", None)
-        if not callable(execute):
-            raise HarnessRegistrationError("Harness implementation must expose callable execute(request, context).", details={"actual_type": type(implementation).__name__})
+        # Accepts any object with a callable run method and rejects wider assumptions.
+        run = getattr(implementation, "run", None)
+        if not callable(run):
+            raise HarnessRegistrationError("Harness implementation must expose callable run(request).", details={"actual_type": type(implementation).__name__})
         return implementation  # type: ignore[return-value]
+
+    def resolve_for_type(self, harness_type: str) -> HarnessFactory:
+        # Selects the sole factory for one type; version now lives in code, not config.
+        matches = [factory for (registered_type, _version), factory in self._factories.items() if registered_type == harness_type]
+        if not matches:
+            raise HarnessRegistrationError("No harness factory is registered for this type.", details={"harness_type": harness_type, "known_types": self.known_types()})
+        if len(matches) > 1:
+            raise HarnessRegistrationError("Multiple factory versions are registered for this type; pass implementation= explicitly.", details={"harness_type": harness_type, "known_versions": self.known_versions(harness_type)})
+        return matches[0]
+
+    def known_types(self) -> tuple[str, ...]:
+        # Lists registered harness types in stable order.
+        return tuple(sorted({registered_type for registered_type, _version in self._factories}))
 
     def known_versions(self, harness_type: str) -> tuple[str, ...]:
         # Lists registered exact versions for one type in stable order.

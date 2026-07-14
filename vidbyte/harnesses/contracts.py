@@ -1,9 +1,9 @@
 """FILE: vidbyte/harnesses/contracts.py
 
 PURPOSE:
-    Provides the feature-local public import path for harness specification,
-    execution, event, artifact, error-record, and policy dataclasses. Contract
-    definitions remain centralized in vidbyte.lib.dataclasses.harnesses.
+    Provides the feature-local public import path for harness specification, run
+    manifest, trajectory-record, and lifecycle contracts. Contract definitions
+    remain centralized in vidbyte.lib.dataclasses.harnesses.
 
 ROLE IN CODEBASE:
     Imported by all vidbyte.harnesses modules and by users who prefer the feature
@@ -11,23 +11,18 @@ ROLE IN CODEBASE:
 
 ARCHITECTURE NOTE:
     This compatibility shim mirrors vidbyte.sessions.contracts so shared data has
-    one definition while feature imports remain stable.
+    one definition while feature imports remain stable. The bespoke capture
+    contracts (events, artifact refs, capture/persistence enums) were removed when
+    persistence pivoted onto durable Sessions; only the survivors are re-exported.
 
 PUBLIC API INVENTORY:
-    Re-exports HARNESS_SCHEMA_VERSION and every public harness dataclass/enum.
-
-COMMON MODIFICATION PATTERNS:
-    When adding a central contract, add its import and __all__ entry here and in
-    vidbyte/lib/dataclasses/__init__.py.
+    Re-exports HARNESS_SCHEMA_VERSION, HarnessRunStatus, HarnessSpec, HarnessRun,
+    TrajectoryRecord, and HarnessExecutionResult.
 
 WHAT NOT TO DO IN THIS FILE:
     1. Do not duplicate dataclass definitions.
     2. Do not add loader, execution, or storage behavior.
-    3. Do not import concrete stores or implementations.
-
-KNOWN EDGE CASES:
-    Import order must stay dependency-light because errors and serializers load
-    this module near package initialization.
+    3. Do not re-export the removed event/store contracts.
 
 RELATED DOCS:
     https://github.com/cerredz/Vidbyte-SDK/blob/main/docs/design/harness-execution-contract.md
@@ -41,28 +36,18 @@ from __future__ import annotations
 
 from vidbyte.lib.dataclasses.harnesses import (
     HARNESS_SCHEMA_VERSION,
-    HarnessArtifactRef,
-    HarnessCaptureLevel,
-    HarnessCaptureScope,
-    HarnessErrorRecord,
-    HarnessEvent,
     HarnessExecutionResult,
-    HarnessPersistenceMode,
     HarnessRun,
     HarnessRunStatus,
     HarnessSpec,
+    TrajectoryRecord,
 )
 
 __all__ = [
     "HARNESS_SCHEMA_VERSION",
-    "HarnessArtifactRef",
-    "HarnessCaptureLevel",
-    "HarnessCaptureScope",
-    "HarnessErrorRecord",
-    "HarnessEvent",
     "HarnessExecutionResult",
-    "HarnessPersistenceMode",
     "HarnessRun",
     "HarnessRunStatus",
     "HarnessSpec",
+    "TrajectoryRecord",
 ]
