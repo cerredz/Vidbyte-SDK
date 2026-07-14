@@ -3,6 +3,19 @@
 Tools in the Vidbyte SDK bridge model-requested tool calls to local Python
 capabilities, MCP-backed tools, and built-in utilities.
 
+Long-running paradigms also use two narrow built-in categories:
+
+- `builtins.procedures`: search compact active VERIFIED procedure cards, load
+  one exact compatible procedure into a role-local context, or stage a
+  non-retrievable candidate. Only trusted controller code can promote.
+- `builtins.verified_context`: expand one advertised, hash-pinned VERIFIED task
+  result/artifact handle after revalidating current task status and cumulative
+  context budgets.
+
+These load tools return compact acknowledgements; expanded bodies enter the
+bound `ContextManager` and never reappear in the tool result. Search results and
+failed loads do not count as procedure use.
+
 ## Role In The SDK
 
 `vidbyte.tools` exposes `@tool`, `FunctionTool`, `BaseTool`, `Tools`,

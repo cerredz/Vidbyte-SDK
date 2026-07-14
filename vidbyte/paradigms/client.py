@@ -15,6 +15,7 @@ Relations:
 from __future__ import annotations
 
 from vidbyte.paradigms.context_minimal_fanout import ContextMinimalFanoutClient
+from vidbyte.paradigms.long_running import LongRunningClient
 
 
 class ParadigmClient:
@@ -23,6 +24,7 @@ class ParadigmClient:
     def __init__(self) -> None:
         # Attaches concrete paradigm family clients to the root paradigm namespace.
         self.context_minimal_fanout = ContextMinimalFanoutClient()
+        self.long_running = LongRunningClient()
 
 
 __all__ = ["ParadigmClient"]

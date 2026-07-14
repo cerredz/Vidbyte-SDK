@@ -193,6 +193,11 @@ vidbyte/
 |   `-- client.py
 |-- prompts/
 |   `-- prompts/
+|-- procedures/              verified cross-run procedure library and stores
+|-- paradigms/
+|   |-- types.py             shared role construction settings
+|   |-- context_minimal_fanout/
+|   `-- long_running/        durable DAG/ledger/verification harness
 |-- providers/
 |   `-- client.py
 |-- trace/
@@ -285,7 +290,10 @@ vidbyte/
 - Keep concrete text/image/video model runners under `vidbyte/lib/runners/`; they are internal or advanced implementation details, not the preferred user-facing docs surface.
 - Keep shared SDK scaffolding under `vidbyte/shared/`.
 - Advanced tools are approved under `vidbyte/tools/` when they follow the shared `BaseTool`, `ToolSpec`, `Tools`, and agent-local execution contracts. `ToolRegistry` and `ToolExecutor` are compatibility/lower-level infrastructure, not the preferred public workflow.
-- Keep built-in tool categories under `vidbyte/tools/builtins/`; current approved categories are `code_search`, `editing`, `context` (legacy `ContextCompactionTool`), `context_primitives`, `fork`, `handoff`, `memory`, `mcp`, `providers`, `sessions`, `calculator`, `code_execution`, and `document_retrieval`, plus the standalone `reflexion` and `trajectory_checkpoint` context-algorithm tools and `filesystem` via `vidbyte/tools/filesystem/`.
+- Keep built-in tool categories under `vidbyte/tools/builtins/`; current approved categories include `code_search`, `editing`, `context`, `context_primitives`, `fork`, `handoff`, `memory`, `mcp`, `procedures`, `providers`, `sessions`, `verified_context`, `calculator`, `code_execution`, and `document_retrieval`, plus standalone context-algorithm tools and `filesystem` via `vidbyte/tools/filesystem/`.
+- Keep durable reusable procedure contracts, lifecycle policy, codecs, and local stores under `vidbyte/procedures/`. Candidate staging is model-callable; verification, promotion, retirement, and exact-version outcome accounting remain trusted application operations.
+- Keep concrete paradigm orchestration under `vidbyte/paradigms/<family>/`. Long-running canonical state belongs in its append-only run ledger, while model-visible state is always a bounded projection built by a fresh role context.
+- Long-running resume fingerprints behavior-changing prompts, models, tools, middleware, stores, validators, and isolators. Live components need stable `behavior_fingerprint()` data or an explicit construction fingerprint.
 - Context compaction is **middleware**, not a tool. Add compaction behavior under `vidbyte/middleware/compaction/` (re-exported through `vidbyte/middleware/builtins/context_compaction.py`). Follow `skills/vidbyte-sdk/middleware.md`.
 - Keep MCP bridge code under `vidbyte/tools/mcp/`.
 - Keep permission and sandbox abstractions under `vidbyte/tools/security/`.

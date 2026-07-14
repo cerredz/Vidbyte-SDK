@@ -1,3 +1,18 @@
+"""Context Protocol Header
+
+Path: vidbyte/middleware/compaction/context_compaction.py
+Purpose: Expose deterministic tool-result and provider-history compaction middleware.
+Architecture: Middleware translates lifecycle contexts into ContextCompactionEngine
+requests; strategy implementations own message selection.
+Exports: ToolResultCompactionMiddleware, MessageHistoryCompactionMiddleware, summary
+middleware, and trace-replacement compaction.
+Invariants: Raw runtime records remain available while only model-visible projections
+are transformed; configured bounds are validated before runtime.
+Do not: Perform hidden model calls in deterministic trim modes.
+Related: vidbyte/middleware/README.md and docs/design/long-running-paradigm.md.
+Tests: Existing compaction suite; no new tests under approved no-tests workflow.
+"""
+
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Mapping, Sequence
@@ -134,9 +149,9 @@ class MessageHistoryCompactionMiddleware(AgentMiddleware):
         return cls(mode=CompactionMode.TRIM_TO_TOKEN_BUDGET, max_tokens=max_tokens, token_counter=token_counter, preserve_system=preserve_system)
 
     @classmethod
-    def trim_with_provider_boundaries(cls, max_messages: int | None = None, max_tokens: int | None = None, token_counter: TokenCounter | None = None) -> "MessageHistoryCompactionMiddleware":
-        # Builds middleware that trims history while preserving adjacent tool boundaries.
-        return cls(mode=CompactionMode.TRIM_WITH_PROVIDER_BOUNDARIES, max_messages=max_messages, max_tokens=max_tokens, token_counter=token_counter)
+    def trim_with_provider_boundaries(cls, max_messages: int | None = None, max_tokens: int | None = None, token_counter: TokenCounter | None = None, max_chars: int | None = None) -> "MessageHistoryCompactionMiddleware":
+        # Trim complete provider groups while preserving mandatory inputs under all bounds.
+        return cls(mode=CompactionMode.TRIM_WITH_PROVIDER_BOUNDARIES, max_messages=max_messages, max_tokens=max_tokens, token_counter=token_counter, max_chars=max_chars)
 
     @classmethod
     def delete_messages(cls, message_ids: tuple[str, ...] = (), start: int | None = None, end: int | None = None) -> "MessageHistoryCompactionMiddleware":

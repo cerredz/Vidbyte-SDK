@@ -62,6 +62,7 @@ prompt text.
 | Expert Prompting | `expert_prompting` | expert_prompt | [expert_prompting.json](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/expert_prompting.json) |
 | Goal Behavior | `goals` | goal_prompt | [goals/goal_prompt.md](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/goals/goal_prompt.md) |
 | Handoff | `handoff` | system_prompt | [handoff/handoff.md](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/handoff/handoff.md) |
+| Long Running | `long_running` | planner, worker, repair, verifier, procedure_curator, procedure_verifier, synthesizer, auditor | [long_running/](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/long_running) |
 | Mimic Behavior | `mimic_behavior` | mimic_prompt | [mimic_behavior/mimic_prompt.md](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/mimic_behavior/mimic_prompt.md) |
 | Multi-Provider Agentic Grader | `multi_provider_agentic_grader` | agent_system_prompt, grader_system_prompt, grader_prompt | [multi_provider_agentic_grader/](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/multi_provider_agentic_grader) |
 | Multi-Provider Aggregator | `multi_provider_aggregator` | synthesis_system_prompt, synthesis_prompt | [multi_provider_aggregator/](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/multi_provider_aggregator) |

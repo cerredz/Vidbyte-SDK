@@ -12,6 +12,7 @@ Architecture:
     - SplitPrompt / PromptSplitPlan: structured splitter/adversarial output.
     - ImplementationOutput / ContextMinimalFanoutResult: fanout results.
     - ContextMinimalFanoutSettings: per-role configuration for the four stages.
+    - AgentRoleSettings: Backward-compatible re-export from vidbyte.paradigms.types.
 Relations:
     Consumed by vidbyte.paradigms.context_minimal_fanout.paradigm and built from
     OutputSchemaBuilder snapshots.
@@ -25,6 +26,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from vidbyte.lib.errors import ConfigurationError
+from vidbyte.paradigms.types import AgentRoleSettings
 
 if TYPE_CHECKING:
     # Avoids a runtime circular import; ContextManager is only used as a type hint
@@ -412,34 +414,6 @@ class ContextMinimalFanoutResult:
 
 
 @dataclass(frozen=True, slots=True)
-class AgentRoleSettings:
-    """Per-role configuration for one pipeline stage agent."""
-
-    name: str = ""
-    system_prompt: str | None = None
-    runner: object | None = None
-    provider: str | None = None
-    model_name: str | Sequence[str] | None = None
-    api_key: str | None = None
-    temperature: float | None = None
-    tools: tuple[object, ...] = ()
-    middleware: tuple[object, ...] = ()
-    agent_options: Mapping[str, Any] = field(default_factory=dict)
-    max_tokens: int | None = None
-
-    def __post_init__(self) -> None:
-        # Normalizes tuple and mapping fields.
-        object.__setattr__(self, "tools", _object_tuple(self.tools))
-        object.__setattr__(self, "middleware", _object_tuple(self.middleware))
-        object.__setattr__(self, "agent_options", dict(self.agent_options))
-
-    def with_overrides(self, **overrides: Any) -> "AgentRoleSettings":
-        # Returns a new settings object with per-run overrides applied.
-        clean = {key: value for key, value in overrides.items() if value is not None}
-        return replace(self, **clean)
-
-
-@dataclass(frozen=True, slots=True)
 class ContextMinimalFanoutSettings:
     """Per-role configuration for the four-stage context-minimal fanout pipeline."""
 
@@ -549,20 +523,6 @@ def _normalize_path(path: str) -> str:
 def _escape_attr(value: str) -> str:
     # Escapes the small subset needed for XML-style attribute rendering.
     return value.replace("&", "&amp;").replace('"', "&quot;").replace("<", "&lt;")
-
-
-def _object_tuple(value: object) -> tuple[object, ...]:
-    # Normalizes single objects, sequences, and Tools-like catalogs into tuples.
-    if value is None:
-        return ()
-    all_items = getattr(value, "all", None)
-    if callable(all_items):
-        return tuple(all_items())
-    if isinstance(value, tuple):
-        return value
-    if isinstance(value, list):
-        return tuple(value)
-    return (value,)
 
 
 __all__ = [

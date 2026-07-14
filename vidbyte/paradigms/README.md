@@ -11,9 +11,9 @@ pipelines, and evals. They are not raw primitives. A paradigm harness owns a
 repeatable control flow such as "worker, critic, repair, repeat" or "decompose
 into fresh context windows, run isolated subtasks, merge, and audit."
 
-This package currently provides `ParadigmHarness`, `ParadigmClient`, and
-package-local distributable skill assets for the first context-minimal fanout
-paradigm family. Runnable Python harness factories can be added separately.
+This package provides `ParadigmHarness`, `ParadigmClient`, runnable
+`ContextMinimalFanoutParadigm` and `LongRunningParadigm` families, plus the
+context-minimal fanout distributable skill assets.
 
 ## Design Philosophy
 
@@ -34,9 +34,21 @@ paradigms = sdk.paradigms
 print(type(paradigms).__name__)
 ```
 
-Future concrete paradigm harnesses should expose an agent-like `run()` / `arun()`
-surface while accepting caller-provided tools, system prompts, models, limits,
-and policies.
+Concrete paradigm harnesses expose an agent-like `run()` / `arun()` surface.
+The long-running family additionally exposes `aresume()` / `resume()` over its
+validated append-only ledger.
+
+```python
+from vidbyte import LongRunningParadigm, LongRunningRunOptions
+
+result = LongRunningParadigm().run(
+    "Solve the broad goal.",
+    run_options=LongRunningRunOptions(success_criteria=("Every criterion has evidence.",)),
+)
+```
+
+See [`long_running/README.md`](long_running/README.md) for persistence, procedure
+learning, verification semantics, context isolation, and side-effect limits.
 
 Distributable skills are available through the sibling registry:
 
@@ -48,12 +60,11 @@ skill_text = Skills().text(ContextMinimalFanoutSkill.DECOMPOSE_FANOUT)
 
 ## Key Modules
 
-- `base.py`: `ParadigmHarness`, the abstract runnable contract for future thin
-  harnesses.
-- `client.py`: `ParadigmClient`, currently a namespace marker for future
-  paradigm factories.
-- `context_minimal_fanout/`: packaged external-harness skills for decomposing,
-  designing, and fanning out broad implementation tasks.
+- `base.py`: `ParadigmHarness`, the abstract runnable contract.
+- `client.py`: namespace factories for both concrete families.
+- `context_minimal_fanout/`: runnable fresh-window fanout plus distributable skills.
+- `long_running/`: durable task DAG, ledger, recovery, verification, drift, and learning.
+- `types.py`: role construction settings shared by paradigm families.
 - `__init__.py`: public exports for the paradigm namespace.
 
 ## Related Layers

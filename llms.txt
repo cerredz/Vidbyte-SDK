@@ -1,5 +1,29 @@
 ﻿# Vidbyte SDK Documentation for LLMs
 
+## Durable long-running execution
+
+Use `LongRunningParadigm` for broad goals that need a validated task dependency
+graph, fresh bounded contexts per role/attempt, independent verification, global
+drift correction, append-only resume, and verified cross-run procedure reuse.
+
+```python
+from vidbyte import LongRunningParadigm, LongRunningRunOptions
+
+result = LongRunningParadigm().run(
+    "Complete the broad goal.",
+    run_options=LongRunningRunOptions(
+        success_criteria=("Every required outcome is evidenced.",),
+    ),
+)
+```
+
+Use `FileRunLedgerStore` and `FileProcedureStore` for process-restart durability.
+Procedure candidates stay non-retrievable until task verification, aligned drift,
+exact-fingerprint fidelity checks, configured validators, and active-ledger
+authorization pass. Worker write/execute tools require `AttemptIsolator` unless
+the caller explicitly accepts unsafe unisolated work; ambiguous rejected or
+interrupted side effects always stop scheduling.
+
 This file is an agent-oriented documentation bundle for the Vidbyte SDK repository. It includes the public SDK docs and the Vidbyte MCP Server docs because both surfaces live in this repository.
 
 # Vidbyte SDK

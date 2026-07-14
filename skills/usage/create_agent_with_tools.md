@@ -1,5 +1,12 @@
 # Create Agent with Tools
 
+For a `LongRunningParadigm`, attach role tools through `AgentRoleSettings` rather
+than reusing one stateful `BaseAgent`. Planner/verifier/auditor/synthesizer tools
+must be `SAFE` or `READ`. Worker/repair `WRITE` or `EXECUTE` tools require an
+`AttemptIsolator` unless the settings explicitly allow unsafe unisolated side
+effects. The harness constructs fresh agents and adds bounded procedure and
+verified-dependency load tools itself.
+
 Create an agent equipped with tools that it can call during execution. Tools are the primary way to extend an agent beyond text generation — they let the model search files, run code, call APIs, query databases, and more.
 
 When tools are attached, the agent automatically enters a tool-calling loop: the model can request tool executions, the agent runs them, feeds results back to the model, and repeats until the model produces a final text response.

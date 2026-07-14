@@ -1,6 +1,22 @@
+"""Context Protocol Header
+
+Path: vidbyte/middleware/compaction/strategies.py
+Purpose: Implement pure, deterministic message-selection and projection strategies.
+Architecture: Each BaseCompaction subclass owns one policy; shared provider grouping and
+counting helpers preserve tool call/result adjacency across applicable strategies.
+Exports: Strategy classes consumed by ContextCompactionEngine.
+Invariants: Compaction returns new tuples, keeps provider order, and never separates an
+adjacent tool call/result group in provider-boundary trim mode.
+Do not: Perform I/O, mutate raw histories, or silently remove mandatory system/current
+user inputs to satisfy a bound.
+Related: engine.py, context_compaction.py, and docs/design/long-running-paradigm.md.
+Tests: Existing compaction suite; no new tests under approved no-tests workflow.
+"""
+
 from __future__ import annotations
 
 import dataclasses
+import json
 import math
 import re
 from collections.abc import Callable, Mapping, Sequence
@@ -56,6 +72,18 @@ def _message_tokens(message: ContextMessage, token_counter: TokenCounter | None)
     # Counts one message body using an injected counter when available, otherwise the local heuristic.
     counter = token_counter or _approximate_token_count
     return max(0, int(counter(message.content)))
+
+
+def _message_visible_chars(message: ContextMessage) -> int:
+    # Count provider-visible roles, names, text, tool arguments, and tool results.
+    metadata = message.metadata if isinstance(message.metadata, Mapping) else {}
+    raw = metadata.get("provider_message")
+    if isinstance(raw, Mapping):
+        try:
+            return len(json.dumps(dict(raw), ensure_ascii=False, separators=(",", ":"), sort_keys=True, default=str))
+        except (TypeError, ValueError):
+            pass
+    return len(message.role) + len(message.kind) + len(message.content)
 
 
 def _message_identifier(message: ContextMessage, fallback_index: int) -> str:
@@ -556,38 +584,60 @@ class TrimToTokenBudgetCompaction(BaseCompaction):
 class TrimWithProviderBoundariesCompaction(BaseCompaction):
     """Trims message history while avoiding orphaned tool-call/result boundaries."""
 
-    def __init__(self, max_messages: int | None = None, max_tokens: int | None = None, token_counter: TokenCounter | None = None) -> None:
-        # Stores count and token bounds used after provider-boundary repair.
+    def __init__(self, max_messages: int | None = None, max_tokens: int | None = None, token_counter: TokenCounter | None = None, max_chars: int | None = None) -> None:
+        # Store aggregate bounds applied to complete provider/tool message groups.
         if max_messages is not None and max_messages < 0:
             raise ValueError("max_messages must be non-negative.")
         if max_tokens is not None and max_tokens < 0:
             raise ValueError("max_tokens must be non-negative.")
+        if max_chars is not None and max_chars < 0:
+            raise ValueError("max_chars must be non-negative.")
         self.max_messages = max_messages
         self.max_tokens = max_tokens
         self.token_counter = token_counter
+        self.max_chars = max_chars
 
     async def compact(self, messages: Sequence[ContextMessage]) -> tuple[ContextMessage, ...]:
-        # Trims from the oldest side, repairs tool boundaries, then optionally applies token trimming.
-        if self.max_messages is None:
-            selected = tuple(messages)
-        else:
-            selected_indexes = set(range(max(0, len(messages) - self.max_messages), len(messages)))
-            selected_indexes.update(self._boundary_repairs(messages, selected_indexes))
-            selected = tuple(message for index, message in enumerate(messages) if index in selected_indexes)
-        if self.max_tokens is None:
-            return selected
-        return await TrimToTokenBudgetCompaction(self.max_tokens, self.token_counter, preserve_system=True).compact(selected)
+        # Keep mandatory system/current-user groups and evict oldest optional groups.
+        groups = _provider_groups(tuple(messages))
+        selected = set(range(len(groups)))
+        mandatory = self._mandatory_group_indexes(groups)
+        if not self._within_bounds(self._flatten(groups, mandatory)):
+            raise ValueError("Mandatory system/current-user messages exceed provider history bounds.")
+        for index in range(len(groups)):
+            if self._within_bounds(self._flatten(groups, selected)):
+                break
+            if index not in mandatory:
+                selected.remove(index)
+        compacted = self._flatten(groups, selected)
+        if not self._within_bounds(compacted):
+            raise ValueError("Provider history cannot satisfy configured bounds without dropping mandatory messages.")
+        return compacted
 
-    def _boundary_repairs(self, messages: Sequence[ContextMessage], selected_indexes: set[int]) -> set[int]:
-        # Finds adjacent call/result records needed to avoid broken provider transcript shapes.
-        repairs: set[int] = set()
-        for index in tuple(selected_indexes):
-            message = messages[index]
-            if message.kind == "tool_result" and index > 0 and messages[index - 1].kind == "tool_call":
-                repairs.add(index - 1)
-            if message.kind == "tool_call" and index + 1 < len(messages) and messages[index + 1].kind == "tool_result":
-                repairs.add(index + 1)
-        return repairs
+    def _mandatory_group_indexes(self, groups: Sequence[tuple[ContextMessage, ...]]) -> set[int]:
+        # Preserve every system group and the newest user input as the active request.
+        mandatory = {index for index, group in enumerate(groups) if any(message.role == "system" for message in group)}
+        user_indexes = [index for index, group in enumerate(groups) if any(message.role == "user" for message in group)]
+        if user_indexes:
+            mandatory.add(user_indexes[-1])
+        return mandatory
+
+    def _within_bounds(self, messages: Sequence[ContextMessage]) -> bool:
+        # Check each configured aggregate budget against one candidate transcript.
+        if self.max_messages is not None and len(messages) > self.max_messages:
+            groups = _provider_groups(tuple(messages))
+            if not (self.max_messages > 0 and len(groups) == 1):
+                return False
+        if self.max_tokens is not None and sum(_message_tokens(message, self.token_counter) for message in messages) > self.max_tokens:
+            return False
+        if self.max_chars is not None and sum(_message_visible_chars(message) for message in messages) > self.max_chars:
+            return False
+        return True
+
+    @staticmethod
+    def _flatten(groups: Sequence[tuple[ContextMessage, ...]], selected: set[int]) -> tuple[ContextMessage, ...]:
+        # Restore original provider order from selected complete groups.
+        return tuple(message for index, group in enumerate(groups) if index in selected for message in group)
 
 
 class DeleteMessagesByIdOrRangeCompaction(BaseCompaction):

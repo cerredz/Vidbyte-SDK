@@ -14,6 +14,7 @@ Architecture:
     - Context primitive editing tools from builtins.context_primitives.
     - Context algorithm tools from builtins.trajectory_checkpoint and builtins.reflexion.
     - Sequential continuation tool from builtins.run_prompts_sequentially.
+    - Verified procedure retrieval/staging and verified dependency expansion tools.
 Relations:
     Related to vidbyte.tools.client and vidbyte.tools.registry.
 """
@@ -56,6 +57,8 @@ from vidbyte.tools.builtins.fork import ForkConversationTool
 from vidbyte.tools.builtins.handoff import CreateHandoffTool
 from vidbyte.tools.builtins.mcp import AttachMcpServerTool, SearchMcpServersTool
 from vidbyte.tools.builtins.run_prompts_sequentially import RunPromptsSequentiallyTool
+from vidbyte.tools.builtins.procedures import ProcedureLoadTool, ProcedureSearchTool, StageProcedureTool
+from vidbyte.tools.builtins.verified_context import VerifiedContextLoadTool, VerifiedContextRef, VerifiedContextSource
 from vidbyte.tools.builtins.providers import (
     MongoCreateCollectionTool,
     MongoCreateIndexTool,
@@ -134,6 +137,8 @@ __all__ = [
     "OutputSchemaField",
     "PatchTool",
     "ProgressLog",
+    "ProcedureLoadTool",
+    "ProcedureSearchTool",
     "ReflexionTool",
     "ResumeAppendTool",
     "ResumeOutputTool",
@@ -143,7 +148,11 @@ __all__ = [
     "SearchMcpServersTool",
     "SemanticSearchTool",
     "SessionTool",
+    "StageProcedureTool",
     "TrajectoryCheckpointTool",
+    "VerifiedContextLoadTool",
+    "VerifiedContextRef",
+    "VerifiedContextSource",
     # Memory providers
     "CogneeAddTool",
     "CogneeCognifyTool",

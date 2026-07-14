@@ -1,5 +1,20 @@
 # Available Tools
 
+## Procedure and verified-context tools
+
+Long-running roles use constructor-bound tools that cannot widen their namespace,
+task scope, environment compatibility, or cumulative context budget:
+
+| Tool | Permission | Purpose |
+|------|------------|---------|
+| `ProcedureSearchTool` | READ | Search compact cards for active compatible VERIFIED procedures; never returns bodies |
+| `ProcedureLoadTool` | READ | Revalidate and load one exact procedure version into the bound `ContextManager`; successful refs are authoritative usage records |
+| `StageProcedureTool` | WRITE | Stage a bounded non-retrievable candidate with controller-bound run/task/attempt provenance; cannot promote |
+| `VerifiedContextLoadTool` | READ | Expand one advertised hash-pinned VERIFIED dependency result/artifact after source revalidation |
+
+Search cards, failed loads, and model claims never count as use. Promotion and
+retirement are trusted `ProcedureLibrary` operations, not agent tools.
+
 Tools included out of the box in the Vidbyte SDK. Every tool is a callable capability that models can invoke during execution. Tools extend what an agent can do beyond text generation — they let agents search code, read files, run calculations, edit files, and more.
 
 Import tools from their category packages under `vidbyte.tools.builtins.*` or `vidbyte.tools.filesystem`.
