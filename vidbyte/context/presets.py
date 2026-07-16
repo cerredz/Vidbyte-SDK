@@ -16,6 +16,7 @@ from vidbyte.context.algorithms import (
     ContextWindowAlgorithm,
     ErrorCorrectionAlgorithm,
     MultiProviderAgenticGraderAlgorithm,
+    PairwiseTournamentAlgorithm,
     ProblemSpaceSearchAlgorithm,
     ReflexionAlgorithm,
     TrajectoryCheckpointAlgorithm,
@@ -73,6 +74,11 @@ class ContextWindowPresets:
             name="multi_provider_agentic_grader",
             multi_provider_agentic_grader=MultiProviderAgenticGraderAlgorithm(),
         )
+
+    @property
+    def pairwise_tournament(self) -> ContextWindowAlgorithm:
+        # Runs isolated candidates through a deterministic position-balanced knockout bracket.
+        return ContextWindowAlgorithm(name="pairwise_tournament", pairwise_tournament=PairwiseTournamentAlgorithm())
 
     @property
     def trajectory_checkpoints(self) -> ContextWindowAlgorithm:

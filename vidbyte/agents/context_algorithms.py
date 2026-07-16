@@ -4,10 +4,12 @@ Description:
     Dispatches attached context-window algorithms for AgentRuntime.
 Purpose:
     Keeps AgentRuntime focused on the generic model/tool loop while providing a
-    clean detection and adapter surface for runtime context-window algorithms.
+    clean detection and adapter surface for runtime context-window algorithms;
+    privacy-sensitive algorithms can suppress content-bearing structural traces.
 Architecture:
     - AgentRuntimeContextAlgorithms: Detects configured algorithms and returns
-      per-algorithm runtime implementations.
+      per-algorithm runtime implementations, including the return-level
+      PairwiseTournamentRuntimeAlgorithm.
 Relations:
     Used by vidbyte.agents.runtime.
 """
@@ -17,7 +19,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
-from vidbyte.agents.algorithms import MultiProviderAgenticGraderRuntimeAlgorithm, ReflexionRuntimeAlgorithm
+from vidbyte.agents.algorithms import MultiProviderAgenticGraderRuntimeAlgorithm, PairwiseTournamentRuntimeAlgorithm, ReflexionRuntimeAlgorithm
 from vidbyte.context.runtime import InnerContextWindowAlgorithm
 from vidbyte.lib.dataclasses.runner import RunnerHandle
 from vidbyte.lib.tracing import SpanContext
@@ -40,6 +42,8 @@ class AgentRuntimeContextAlgorithms:
             return "reflexion"
         if self.runtime.algorithm.multi_provider_agentic_grader is not None:
             return "multi_provider_agentic_grader"
+        if self.runtime.algorithm.pairwise_tournament is not None:
+            return "pairwise_tournament"
         if self.runtime.algorithm.trajectory_checkpoints is not None:
             return "trajectory_checkpoints"
         if self.runtime.algorithm.problem_space_search is not None:
@@ -52,12 +56,14 @@ class AgentRuntimeContextAlgorithms:
         # Return whether the configured runtime algorithm matches name.
         return self.detect_algorithm() == name
 
-    def return_algorithm(self) -> ReflexionRuntimeAlgorithm | MultiProviderAgenticGraderRuntimeAlgorithm | None:
+    def return_algorithm(self) -> ReflexionRuntimeAlgorithm | MultiProviderAgenticGraderRuntimeAlgorithm | PairwiseTournamentRuntimeAlgorithm | None:
         # Return the configured runtime algorithm implementation.
         if self.runtime.algorithm.reflexion is not None:
             return ReflexionRuntimeAlgorithm(self.runtime, self.runtime.algorithm.reflexion)
         if self.runtime.algorithm.multi_provider_agentic_grader is not None:
             return MultiProviderAgenticGraderRuntimeAlgorithm(self.runtime, self.runtime.algorithm.multi_provider_agentic_grader)
+        if self.runtime.algorithm.pairwise_tournament is not None:
+            return PairwiseTournamentRuntimeAlgorithm(self.runtime, self.runtime.algorithm.pairwise_tournament)
         return None
 
     def inner_loop_algorithm(self) -> InnerContextWindowAlgorithm | None:
@@ -79,7 +85,10 @@ class AgentRuntimeContextAlgorithms:
         algorithm = self.return_algorithm()
         if algorithm is None:
             return None
-        span = self._start_algorithm_span(trace_context, algorithm=self.detect_algorithm() or "unknown", message=message)
+        algorithm_name = self.detect_algorithm() or "unknown"
+        content_private = algorithm_name == "pairwise_tournament"
+        span_attributes = {"algorithm": algorithm_name} if content_private else {"algorithm": algorithm_name, "message": message}
+        span = self._start_algorithm_span(trace_context, **span_attributes)
         try:
             result = await algorithm.arun(
                 message,
@@ -89,10 +98,13 @@ class AgentRuntimeContextAlgorithms:
                 options=options,
                 trace_context=span or trace_context,
             )
-            self._end_algorithm_span(span, output=result.output)
+            self._end_algorithm_span(span, output="completed" if content_private else result.output)
             return result
         except BaseException as exc:
-            self._end_algorithm_span(span, error=exc)
+            if content_private:
+                self._end_algorithm_span(span, output="failed")
+            else:
+                self._end_algorithm_span(span, error=exc)
             raise
 
     def _start_algorithm_span(self, parent: SpanContext | None, **attributes: Any) -> SpanContext | None:

@@ -7,7 +7,7 @@ Purpose:
     packages provide compatibility import shims.
 Architecture:
     - Tool contracts from tools.
-    - Context, MCP, security, sandbox, and multi-agent contracts.
+    - Context, MCP, security, sandbox, multi-agent, and pairwise-tournament contracts.
 Relations:
     Related to vidbyte.tools, vidbyte.agents.
 """
@@ -124,6 +124,15 @@ from vidbyte.lib.dataclasses.sources import (
 )
 from vidbyte.lib.dataclasses.runner import RunnerHandle
 from vidbyte.lib.dataclasses.strategies import AgentResult
+from vidbyte.lib.dataclasses.pairwise_tournament import (
+    PairwiseCandidateRecord,
+    PairwiseCriterionAssessment,
+    PairwiseJudgePayload,
+    PairwiseLegRecord,
+    PairwiseMatchRecord,
+    PairwiseRoundRecord,
+    PairwiseTournamentReport,
+)
 from vidbyte.lib.dataclasses.trace import (
     TraceField,
     TraceFieldType,
@@ -210,6 +219,13 @@ __all__ = [
     "OrchestratorPlan",
     "PermissionDecision",
     "PermissionPolicy",
+    "PairwiseCandidateRecord",
+    "PairwiseCriterionAssessment",
+    "PairwiseJudgePayload",
+    "PairwiseLegRecord",
+    "PairwiseMatchRecord",
+    "PairwiseRoundRecord",
+    "PairwiseTournamentReport",
     "ProgressContextItem",
     "ProgressLog",
     "ResponseContextItem",

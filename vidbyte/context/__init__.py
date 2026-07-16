@@ -13,7 +13,7 @@ Key Functions / Exports:
     - MultiAgentContext: Builds and renders orchestration context primitives.
     - ContextWindowAlgorithm: Base class for context window compaction/pruning.
 Relation to codebase as a whole:
-    Provides public exports for all context primitives and algorithms (including PlanContextItem, MultiProviderAgenticGraderAlgorithm, ReflexionAlgorithm, etc.) which are consumed by agents and runner engines to manage LLM context windows dynamically.
+    Provides public exports for all context primitives and algorithms (including PlanContextItem, PairwiseTournamentAlgorithm, MultiProviderAgenticGraderAlgorithm, and ReflexionAlgorithm) which are consumed by agents and runner engines to manage LLM context windows dynamically.
 Similar files:
     - vidbyte/__init__.py: Root module exporting overall SDK contracts.
     - vidbyte/context/manager.py: Contains the concrete ContextManager implementation.
@@ -22,7 +22,7 @@ Similar files:
 
 from __future__ import annotations
 
-from vidbyte.context.algorithms import ContextWindowAlgorithm, ErrorCorrectionAlgorithm, MultiProviderAgenticGraderAlgorithm, ProblemSpaceSearchAlgorithm, ReflexionAlgorithm, ToolResultAdmission, TrajectoryCheckpointAlgorithm
+from vidbyte.context.algorithms import ContextWindowAlgorithm, ErrorCorrectionAlgorithm, MatchFailurePolicy, MultiProviderAgenticGraderAlgorithm, PairwiseTournamentAlgorithm, ProblemSpaceSearchAlgorithm, ReflexionAlgorithm, ToolResultAdmission, TournamentSeeding, TrajectoryCheckpointAlgorithm, UnresolvedMatchPolicy
 from vidbyte.context.compaction import CompactionMode, CompactionStats, ContextCompactionEngine, Summarizer
 from vidbyte.context.primitives import (
     ArtifactContextItem,
@@ -69,6 +69,7 @@ from vidbyte.context.manager import ContextManager
 from vidbyte.context.multi_agent import MultiAgentContext
 from vidbyte.context.presets import ContextWindowPresets
 from vidbyte.context.window import ContextWindow
+from vidbyte.lib.dataclasses.pairwise_tournament import PairwiseCandidateRecord, PairwiseCriterionAssessment, PairwiseJudgePayload, PairwiseLegRecord, PairwiseMatchRecord, PairwiseRoundRecord, PairwiseTournamentReport
 
 __all__ = [
     "ArtifactContextItem",
@@ -98,6 +99,7 @@ __all__ = [
     "GitDiffContextItem",
     "Handoff",
     "MemoryContextItem",
+    "MatchFailurePolicy",
     "MinimalHandoff",
     "MultiAgentContext",
     "MultiAgentContextSerializer",
@@ -109,6 +111,14 @@ __all__ = [
     "MultiAgentTerminalContextItem",
     "ResearchHandoff",
     "MultiProviderAgenticGraderAlgorithm",
+    "PairwiseCandidateRecord",
+    "PairwiseCriterionAssessment",
+    "PairwiseJudgePayload",
+    "PairwiseLegRecord",
+    "PairwiseMatchRecord",
+    "PairwiseRoundRecord",
+    "PairwiseTournamentAlgorithm",
+    "PairwiseTournamentReport",
     "InnerContextWindowAlgorithm",
     "PlanContextItem",
     "ProblemSpaceSearchAlgorithm",
@@ -121,6 +131,8 @@ __all__ = [
     "TextContextItem",
     "ToolCallContextItem",
     "ToolResultAdmission",
+    "TournamentSeeding",
     "TrajectoryCheckpointAlgorithm",
     "TrajectoryCheckpointContextItem",
+    "UnresolvedMatchPolicy",
 ]

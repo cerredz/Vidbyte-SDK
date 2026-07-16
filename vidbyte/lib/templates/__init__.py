@@ -8,6 +8,7 @@ Purpose:
 Architecture:
     - ContextWindowTemplate and TemplateViolation from base module.
     - ReflexionContextWindowTemplate from reflexion module.
+    - PairwiseTournamentContextWindowTemplate from pairwise_tournament module.
 Relations:
     Consumed by tests and scripts. Imports RecorderBase from
     vidbyte.context.templates.
@@ -20,11 +21,13 @@ from vidbyte.lib.templates.error_correction import ErrorCorrectionContextWindowT
 from vidbyte.lib.templates.problem_space_search import ProblemSpaceSearchContextWindowTemplate
 from vidbyte.lib.templates.reflexion import ReflexionContextWindowTemplate
 from vidbyte.lib.templates.trajectory_checkpoints import TrajectoryCheckpointContextWindowTemplate
+from vidbyte.lib.templates.pairwise_tournament import PairwiseTournamentContextWindowTemplate
 
 __all__ = [
     "ContextWindowTemplate",
     "ErrorCorrectionContextWindowTemplate",
     "ProblemSpaceSearchContextWindowTemplate",
+    "PairwiseTournamentContextWindowTemplate",
     "ReflexionContextWindowTemplate",
     "TemplateViolation",
     "TrajectoryCheckpointContextWindowTemplate",

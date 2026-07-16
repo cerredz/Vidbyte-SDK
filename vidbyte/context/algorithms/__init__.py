@@ -9,6 +9,7 @@ Architecture:
     - Tool-result admission algorithms from tool_results.
     - Reflexion runtime context-window algorithm from reflexion.
     - Multi-provider agentic grader context-window algorithm from multi_provider_agentic_grader.
+    - Pairwise tournament configuration and failure/seeding policies.
 Relations:
     Used by vidbyte.context.presets and AgentRuntime.
 """
@@ -20,6 +21,7 @@ from vidbyte.context.algorithms.multi_provider_agentic_grader import MultiProvid
 from vidbyte.context.algorithms.trajectory_checkpoints import TrajectoryCheckpointAlgorithm
 from vidbyte.context.algorithms.problem_space_search import ProblemSpaceSearchAlgorithm
 from vidbyte.context.algorithms.error_correction import ErrorCorrectionAlgorithm
+from vidbyte.context.algorithms.pairwise_tournament import MatchFailurePolicy, PairwiseTournamentAlgorithm, TournamentSeeding, UnresolvedMatchPolicy
 from vidbyte.context.algorithms.tool_results import (
     ContextWindowAlgorithm,
     ToolResultAdmission,
@@ -29,9 +31,13 @@ __all__ = [
     "ContextWindowAlgorithm",
     "ErrorCorrectionAlgorithm",
     "MultiProviderAgenticGraderAlgorithm",
+    "MatchFailurePolicy",
+    "PairwiseTournamentAlgorithm",
     "ProblemSpaceSearchAlgorithm",
     "ReflexionAlgorithm",
     "TrajectoryCheckpointAlgorithm",
+    "TournamentSeeding",
     "ToolResultAdmission",
+    "UnresolvedMatchPolicy",
 ]
 

@@ -1,0 +1,15 @@
+{
+  "name": "Pairwise Tournament",
+  "description": "Isolated position-balanced judge prompts for the pairwise-tournament context-window algorithm. The judge receives only the original task, two anonymous candidate slots, and explicitly permitted evidence/tools, and must select A, B, or abstain through a strict structured-output contract.",
+  "key": "pairwise_tournament",
+  "prompts": {
+    "judge_system_prompt": {
+      "path": "judge_system_prompt.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/pairwise_tournament/judge_system_prompt.md"
+    },
+    "judge_prompt": {
+      "path": "judge_prompt.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/pairwise_tournament/judge_prompt.md"
+    }
+  }
+}
