@@ -65,3 +65,68 @@ context.upsert(
 
 Context is consumed by [`agents`](../agents/README.md), updated by some
 [`tools`](../tools/README.md), and bounded by [`middleware`](../middleware/README.md).
+
+## Prosecutor / Defender / Judge
+
+`ContextWindow.preset.prosecutor_defender_judge` is a return-level,
+review/verdict-only algorithm. It performs one ordinary producer pass and then
+runs prosecutor, defender, and judge roles strictly in that order. The SDK
+assigns allegation IDs, requires the defender and judge to return the same IDs
+in the same order, and derives `pass` or `needs_changes` from surviving judge
+decisions. Review text never returns to the producer and never replaces its
+output or structured result.
+
+Each role receives a newly constructed `AgentRuntime` and `BaseAgentContext`.
+The stage projection contains only its role prompt, original task, exact
+candidate, explicitly named artifact contents, explicitly named tool schemas and
+stage-local results, and normalized protocol records from the preceding role.
+Producer history, system prompt, scratch state, memory, context items, file paths,
+run metadata, context manager, middleware, invocation options, raw reviewer
+conversations, and implicit internal tools are excluded.
+
+```python
+from vidbyte import (
+    ContextWindowAlgorithm,
+    DebateStageSettings,
+    ProsecutorDefenderJudgeAlgorithm,
+)
+
+review = ProsecutorDefenderJudgeAlgorithm(
+    prosecutor=DebateStageSettings(
+        artifact_names=("requirements",),
+        tool_names=("grep",),
+    ),
+    defender=DebateStageSettings(
+        artifact_names=("requirements", "implementation-notes"),
+        tool_names=("grep",),
+    ),
+    judge=DebateStageSettings(
+        provider="openai",
+        model="gpt-4.1",
+        artifact_names=("requirements",),
+    ),
+)
+
+algorithm = ContextWindowAlgorithm(
+    name="prosecutor_defender_judge",
+    prosecutor_defender_judge=review,
+)
+```
+
+Artifact names must resolve to one unambiguous `ContextArtifact`. Inputs that
+exceed configured exact-review bounds fail instead of being truncated. Review
+tools are restricted to explicit `SAFE`/`READ` capabilities; MCP bridges,
+delegation/fork tools, live primitive bindings, and mutating/executing tools are
+rejected. A standalone custom tool remains an explicit authority grant: the SDK
+cannot prove that developer code will not reveal its own closure or external
+service state.
+
+Successful details live under
+`result.metadata["prosecutor_defender_judge"]`, including the candidate hash,
+normalized allegations, defenses, decisions, survivor IDs, verdict, stage
+provenance, stop reasons, timing, and bounded accounting. Stage calls never enter
+producer `calls` or top-level producer tool-call metadata. Structural algorithm
+trace attributes contain identifiers, resource names, hashes, lengths, counts,
+timing, and status—not task, candidate, artifact, allegation, defense, decision,
+tool argument/result, or provider response text. Existing global tracing policy
+still governs ordinary nested provider/tool spans.
