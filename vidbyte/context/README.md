@@ -57,7 +57,7 @@ context.upsert(
 - `multi_agent.py`: builds orchestration contexts and composes manager-facing primitives.
 - `window.py` and `presets.py`: context-window preset resolution.
 - `primitives/`: typed context items for files, tasks, progress, memory, responses, tool calls, and multi-agent orchestration state.
-- `algorithms/`: reflexion, grader, tool-result, and trajectory-checkpoint algorithms.
+- `algorithms/`: reflexion, grader, pairwise-tournament, tool-result, and trajectory-checkpoint algorithms.
 - `compaction.py`: deterministic context compaction contracts and stats.
 - `handoff/`: structured handoff models.
 
@@ -65,3 +65,29 @@ context.upsert(
 
 Context is consumed by [`agents`](../agents/README.md), updated by some
 [`tools`](../tools/README.md), and bounded by [`middleware`](../middleware/README.md).
+
+## Pairwise Tournament
+
+`PairwiseTournamentAlgorithm` is a return-level algorithm that runs 2-16
+independent producer candidates, assigns opaque IDs, and advances adjacent
+entrants through a deterministic single-elimination bracket. Each match uses two
+fresh judge runtimes: one sees candidate X as A and Y as B, while the other sees
+the same exact strings with positions reversed. Only agreement after mapping
+slots back to candidate IDs is judge consensus.
+
+Judges receive a positive projection: the original task, the current anonymous
+pair, exact uniquely named artifacts, and exact allowlisted `SAFE`/`READ` tools.
+They do not inherit producer history, middleware, context manager, internal
+tools, metadata, provider identity, prior decisions, seeds, or bracket state.
+Oversized or ambiguous evidence fails preflight and is never silently truncated.
+
+The returned `AgentResult` preserves the winner's exact `output`, `structured`,
+`calls`, and existing metadata. Its strategy becomes `pairwise_tournament`, and
+`metadata["pairwise_tournament"]` adds hashes, source provenance, seed order,
+rounds, byes, structural leg decisions, fallback labels, timings, and bounded
+accounting. Candidate bodies, judge summaries, tool payloads, prompts, and raw
+exception messages are excluded from that report.
+
+Default unresolved and failure policies raise. `LOWER_SEED` is opt-in and is
+recorded as non-consensus. Use `TournamentSeeding.CONTENT_HASH` when seed order
+should depend on candidate content rather than provider-map insertion order.

@@ -457,7 +457,40 @@ written into the active `ContextManager`.
 
 ---
 
-## 11. Adding Templates to a New Algorithm — Checklist
+## 11. Pairwise Tournament
+
+### Template
+
+```python
+from vidbyte.lib.templates import PairwiseTournamentContextWindowTemplate
+
+template = PairwiseTournamentContextWindowTemplate(candidate_count=5, round_count=3)
+print(template.expected_slots)
+# ('system_prompt',
+#  'pairwise_tournament_candidate_fanout',
+#  'pairwise_tournament_candidate_barrier',
+#  'pairwise_tournament_round',
+#  'pairwise_tournament_round',
+#  'pairwise_tournament_round',
+#  'pairwise_tournament_winner')
+```
+
+The adapter emits candidate fan-out and barrier slots in coordinator order,
+then one round slot only after every match in that round settles. Match and leg
+completion order never creates recorder slots. Failures append
+`pairwise_tournament_failure` after the last completed structural slot.
+
+| Emit point | Slot |
+|------------|------|
+| Tournament entry | `system_prompt` |
+| Immediately before candidate tasks are created | `pairwise_tournament_candidate_fanout` |
+| After the full candidate gather barrier | `pairwise_tournament_candidate_barrier` |
+| After each full match barrier advances a round | `pairwise_tournament_round` |
+| After exactly one winning candidate remains | `pairwise_tournament_winner` |
+
+---
+
+## 12. Adding Templates to a New Algorithm — Checklist
 
 - [ ] Add `recorder.append("<algo>_<stage>", iteration=...)` at each structural
       emit point in `vidbyte/agents/algorithms/<name>.py`.
@@ -472,7 +505,7 @@ written into the active `ContextManager`.
 
 ---
 
-## 12. File Reference
+## 13. File Reference
 
 | File | Role |
 |------|------|
@@ -481,9 +514,11 @@ written into the active `ContextManager`.
 | `vidbyte/lib/templates/base.py` | ContextWindowTemplate, TemplateViolation |
 | `vidbyte/lib/templates/reflexion.py` | ReflexionContextWindowTemplate |
 | `vidbyte/lib/templates/trajectory_checkpoints.py` | TrajectoryCheckpointContextWindowTemplate |
+| `vidbyte/lib/templates/pairwise_tournament.py` | PairwiseTournamentContextWindowTemplate |
 | `vidbyte/lib/templates/__init__.py` | Module exports |
 | `vidbyte/agents/runtime.py` | recorder param added; defaults to NullRecorder |
 | `vidbyte/agents/algorithms/reflexion.py` | system_prompt, reflexion_trial, reflexion_reflection emits |
+| `vidbyte/agents/algorithms/pairwise_tournament.py` | candidate fan-out/barrier, round, winner, and failure emits |
 | `vidbyte/context/algorithms/trajectory_checkpoints.py` | system_prompt, trajectory_checkpoint_iteration, trajectory_checkpoint_injection emits |
 | `tests/test_context_window_templates.py` | All template and instrumentation tests |
 | `scripts/test-context-window-templates.py` | Executable verification script |

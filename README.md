@@ -274,6 +274,43 @@ agent = Agent(
 )
 ```
 
+`pairwise_tournament` is a return-level selector for tasks where several fully
+independent answers should compete without revealing their source identity to the
+judge. It creates 2-16 candidates, builds a deterministic knockout bracket, and
+judges every match twice with A/B positions reversed. The exact winning producer
+result is returned; the judge cannot synthesize or revise an answer.
+
+```python
+from vidbyte import PairwiseTournamentAlgorithm
+from vidbyte.context.algorithms import ContextWindowAlgorithm
+
+agent = Agent(
+    name="tournament-agent",
+    system_prompt="Answer the request precisely.",
+    provider="openai",
+    model_name="gpt-5.5",
+    algorithm=ContextWindowAlgorithm(
+        name="pairwise_tournament",
+        pairwise_tournament=PairwiseTournamentAlgorithm(
+            provider_models={
+                "openai": "gpt-5.5",
+                "anthropic": "claude-sonnet-5",
+            },
+            judge_provider="openai",
+            judge_model="gpt-5.5",
+        ),
+    ),
+)
+```
+
+The default policies fail closed when a candidate, judge leg, or bounded
+tiebreak cannot produce a defensible winner. An explicit lower-seed policy can
+guarantee advancement, but metadata labels that result as a policy fallback.
+For `N` candidates, budget for `N` producer runs and at least `2 * (N - 1)`
+judge calls, plus up to the configured bidirectional tiebreak attempts. Pairwise
+comparison reduces observable slot bias but does not make an LLM judge unbiased
+or guarantee that one knockout bracket finds a globally best candidate.
+
 Per-call context can be supplied with `AgentInput` without mutating the agent's
 default context:
 
