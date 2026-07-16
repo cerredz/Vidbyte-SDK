@@ -652,7 +652,7 @@ from vidbyte.context import ProblemFrameContextItem, EvidenceChallengeContextIte
 
 ### 6.9 Documentation And Contributor Guidance
 
-**File(s):** `vidbyte/context/README.md`, `skills/vidbyte-sdk/context-primitives.md`
+**File(s):** `vidbyte/context/README.md`, `vidbyte/context/primitives/README.md`, `skills/vidbyte-sdk/context-primitives.md`
 **Type:** Modified
 
 #### What it does
@@ -692,6 +692,7 @@ context.place_after_system_prompt(
 3. Explain how managed IDs and placement can make a concern persistent and prominent.
 4. Add the five new modules and all nineteen types to the contributor skill's package map.
 5. Distinguish caller/worker-authored problem-solving primitives from algorithm-authored `ProblemSpaceSearchContextItem` and `ErrorCorrectionContextItem`.
+6. Add the five new modules to the primitives folder README's file index, which is present on the current `main` branch.
 
 #### Edge Cases & Error Handling
 
@@ -835,6 +836,7 @@ N/A - no endpoint.
 | MODIFY | `vidbyte/context/__init__.py` | Export all nineteen primitives from the context namespace |
 | MODIFY | `vidbyte/__init__.py` | Export all nineteen primitives from the SDK root |
 | MODIFY | `vidbyte/context/README.md` | Document domain-neutral problem-solving usage and limitations |
+| MODIFY | `vidbyte/context/primitives/README.md` | Keep the primitives folder file index synchronized with the five new modules |
 | MODIFY | `skills/vidbyte-sdk/context-primitives.md` | Update contributor module map and primitive guidance |
 
 No files will be deleted.
