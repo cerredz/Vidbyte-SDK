@@ -7,13 +7,16 @@ Purpose:
     and managers from a single public namespace.
 Architecture:
     - Namespace client for ContextWindow, ContextManager, and MultiAgentContext.
+    - Problem-solving records for framing, epistemics, decisions, execution, and closure.
 Key Functions / Exports:
     - ContextManager: Manages loading, updating, and exporting context items.
     - ContextWindow: Represents the sliding/compacted context window.
     - MultiAgentContext: Builds and renders orchestration context primitives.
     - ContextWindowAlgorithm: Base class for context window compaction/pruning.
 Relation to codebase as a whole:
-    Provides public exports for all context primitives and algorithms (including PlanContextItem, MultiProviderAgenticGraderAlgorithm, ReflexionAlgorithm, etc.) which are consumed by agents and runner engines to manage LLM context windows dynamically.
+    Provides public exports for context primitives and algorithms, including
+    general problem-solving challenges consumed by callers, agents, and runner
+    engines to manage LLM context windows dynamically.
 Similar files:
     - vidbyte/__init__.py: Root module exporting overall SDK contracts.
     - vidbyte/context/manager.py: Contains the concrete ContextManager implementation.

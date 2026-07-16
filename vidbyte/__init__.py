@@ -11,7 +11,7 @@ Architecture:
     - Agent exports: BaseAgent, AgentCard, AgentMessage, AgentRegistry, AgentRunnerConfig, AgentSpec.
     - Tool exports: BaseTool, ToolCall, ToolExecutor, ToolParameter, ToolPermission, ToolRegistry, ToolResult, ToolSpec, ToolStatus, ToolsFormatter.
     - MCP exports: McpServerConfig, McpServerHandle, McpToolPermission.
-    - Context exports: BaseAgentContext, BaseContext, ContextBudget, ContextPermissions.
+    - Context exports: context contracts plus general problem-solving challenge records.
     - Preset exports: BudgetPreset, PermissionPreset.
     - Pipeline exports: BasePipeline, ConditionalPipeline, ParallelPipeline, PipelineNode, SequentialPipeline.
     - Multi-agent exports: MultiAgent, MagenticOneOrchestrator, TaskLedger, AgentBinding, AgentTransfer, and immutable ledger contracts.
