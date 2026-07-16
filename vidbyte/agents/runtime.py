@@ -7,6 +7,10 @@ Purpose:
     permission checks, and provider-reported token accounting out of BaseAgent.
 Architecture:
     - AgentRuntime: Builds BaseAgentContext and runs direct model/tool loops.
+    - include_internal_tools: Lets isolated review stages opt out of implicit
+      completion tools while preserving the existing default for all callers.
+    - _tool_call_observer: Lets an isolated orchestrator retain completed calls
+      if a later child model call is cancelled or times out.
 Relations:
     Used by vidbyte.agents.base. Depends on shared context, tool, security, and
     strategy dataclasses without owning modality routing or runner construction.
@@ -54,27 +58,14 @@ from vidbyte.tools.types import ToolCall, ToolCallContext, ToolCallState, ToolRe
 class AgentRuntime:
     """Internal runtime for direct agent execution."""
 
-    def __init__(
-        self,
-        *,
-        agent_name: str,
-        system_prompt: str,
-        tools: Tools,
-        permission_policy: PermissionPolicy,
-        config: AgentRuntimeConfig | None = None,
-        tracer: TracerBase | None = None,
-        middleware: Sequence[AgentMiddleware] = (),
-        run_id: str | None = None,
-        algorithm: ContextWindowAlgorithm | str | None = None,
-        context_manager: ContextManager | None = None,
-        recorder: RecorderBase | None = None,
-        output_schema: type | Mapping[str, Any] | None = None,
-        output_contract: "AgentLoopSettingsOutputContract | None" = None,
-    ) -> None:
+    def __init__(self, *, agent_name: str, system_prompt: str, tools: Tools, permission_policy: PermissionPolicy, config: AgentRuntimeConfig | None = None, tracer: TracerBase | None = None, middleware: Sequence[AgentMiddleware] = (), run_id: str | None = None, algorithm: ContextWindowAlgorithm | str | None = None, context_manager: ContextManager | None = None, recorder: RecorderBase | None = None, output_schema: type | Mapping[str, Any] | None = None, output_contract: "AgentLoopSettingsOutputContract | None" = None, include_internal_tools: bool = True, _tool_call_observer: Callable[[ToolCallContext], None] | None = None) -> None:
+        # Builds one runtime and optionally excludes implicit agent-control tools for strict child stages.
         self.agent_name = agent_name
         self.system_prompt = system_prompt
         self.user_tools = tools
-        self.tools = with_internal_agent_tools(tools)
+        self.tools = with_internal_agent_tools(tools) if include_internal_tools else tools
+        self.include_internal_tools = include_internal_tools
+        self._tool_call_observer = _tool_call_observer
         self.permission_policy = permission_policy
         self.config = config or AgentRuntimeConfig()
         self.run_id = run_id
@@ -1435,6 +1426,7 @@ class AgentRuntime:
             if after_decision.sleep_seconds:
                 await self.middleware.sleep(after_decision.sleep_seconds)
         call_contexts.append(context_record)
+        self._observe_tool_call(context_record)
         if after_decision.action is MiddlewareAction.ABORT_RUN:
             return self._middleware_abort_result(
                 after_decision,
@@ -1508,8 +1500,14 @@ class AgentRuntime:
             return self._stopped_result(f"Agent runtime stopped by tool settings: {reason}", stop_reason=AgentStopReason.TOOL_SETTINGS_DENIED, iteration_count=iteration_count, tokens_used=tokens_used, contexts=call_contexts)
         context_record, result = self._denied_tool_result(call, provider, message=f"Tool denied by tool settings: {reason}", error=reason, reason=reason, metadata=meta, iteration_count=iteration_count)
         call_contexts.append(context_record)
+        self._observe_tool_call(context_record)
         self._append_tool_result_message(messages, call, result, provider, MiddlewareDecision.continue_(), truncate=False)
         return context_record, result
+
+    def _observe_tool_call(self, context: ToolCallContext) -> None:
+        # Publishes one completed call to an optional internal orchestration sink.
+        if self._tool_call_observer is not None:
+            self._tool_call_observer(context)
 
     @staticmethod
     def _executed_counts(call_contexts: Sequence[ToolCallContext]) -> dict[str, int]:

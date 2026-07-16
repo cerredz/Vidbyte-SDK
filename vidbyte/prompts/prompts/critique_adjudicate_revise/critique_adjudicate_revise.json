@@ -1,0 +1,19 @@
+{
+  "name": "Critique Adjudicate Revise",
+  "description": "Strict isolated role prompts for concurrent grounded criticism, reference-only adjudication, and accepted-findings-only revision.",
+  "key": "critique_adjudicate_revise",
+  "prompts": {
+    "critic": {
+      "path": "critic.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/critique_adjudicate_revise/critic.md"
+    },
+    "adjudicator": {
+      "path": "adjudicator.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/critique_adjudicate_revise/adjudicator.md"
+    },
+    "reviser": {
+      "path": "reviser.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/critique_adjudicate_revise/reviser.md"
+    }
+  }
+}

@@ -5,8 +5,8 @@ Description:
     single source of truth for prompt identifiers.
 
 Purpose:
-    Enables static typing, autocomplete, and validation for the 51 static prompt templates
-    across 19 JSON/Markdown-backed families, including multi-agent manager phases.
+    Enables static typing, autocomplete, and validation for static prompt templates,
+    including isolated critique-adjudicate-revise role prompts.
 
 Architecture and Key Functions:
     - Prompt (Enum): Inherits from `str` and `Enum`. It maps high-level, semantic prompt
@@ -82,6 +82,9 @@ class Prompt(str, Enum):
     TRAJECTORY_CHECKPOINTS_AGENTIC_SUMMARIZER = "trajectory_checkpoints.agentic_summarizer"
     PROBLEM_SPACE_SEARCH_EXPLORER = "problem_space_search.explorer"
     ERROR_CORRECTION_AUDITOR = "error_correction.auditor"
+    CRITIQUE_ADJUDICATE_REVISE_CRITIC = "critique_adjudicate_revise.critic"
+    CRITIQUE_ADJUDICATE_REVISE_ADJUDICATOR = "critique_adjudicate_revise.adjudicator"
+    CRITIQUE_ADJUDICATE_REVISE_REVISER = "critique_adjudicate_revise.reviser"
 
 __all__ = [
     "Prompt",

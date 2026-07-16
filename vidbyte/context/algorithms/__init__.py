@@ -9,6 +9,7 @@ Architecture:
     - Tool-result admission algorithms from tool_results.
     - Reflexion runtime context-window algorithm from reflexion.
     - Multi-provider agentic grader context-window algorithm from multi_provider_agentic_grader.
+    - Critique-adjudicate-revise public policy and provenance contracts.
 Relations:
     Used by vidbyte.context.presets and AgentRuntime.
 """
@@ -20,6 +21,7 @@ from vidbyte.context.algorithms.multi_provider_agentic_grader import MultiProvid
 from vidbyte.context.algorithms.trajectory_checkpoints import TrajectoryCheckpointAlgorithm
 from vidbyte.context.algorithms.problem_space_search import ProblemSpaceSearchAlgorithm
 from vidbyte.context.algorithms.error_correction import ErrorCorrectionAlgorithm
+from vidbyte.context.algorithms.critique_adjudicate_revise import AcceptedFinding, CriticFailurePolicy, CriticFinding, CritiqueAdjudicateReviseAlgorithm, FindingEvidence, ReviewStageAccess, StageFailurePolicy
 from vidbyte.context.algorithms.tool_results import (
     ContextWindowAlgorithm,
     ToolResultAdmission,
@@ -27,10 +29,17 @@ from vidbyte.context.algorithms.tool_results import (
 
 __all__ = [
     "ContextWindowAlgorithm",
+    "AcceptedFinding",
+    "CriticFailurePolicy",
+    "CriticFinding",
+    "CritiqueAdjudicateReviseAlgorithm",
     "ErrorCorrectionAlgorithm",
     "MultiProviderAgenticGraderAlgorithm",
     "ProblemSpaceSearchAlgorithm",
+    "FindingEvidence",
     "ReflexionAlgorithm",
+    "ReviewStageAccess",
+    "StageFailurePolicy",
     "TrajectoryCheckpointAlgorithm",
     "ToolResultAdmission",
 ]

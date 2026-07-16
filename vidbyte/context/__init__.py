@@ -13,7 +13,8 @@ Key Functions / Exports:
     - MultiAgentContext: Builds and renders orchestration context primitives.
     - ContextWindowAlgorithm: Base class for context window compaction/pruning.
 Relation to codebase as a whole:
-    Provides public exports for all context primitives and algorithms (including PlanContextItem, MultiProviderAgenticGraderAlgorithm, ReflexionAlgorithm, etc.) which are consumed by agents and runner engines to manage LLM context windows dynamically.
+    Provides public exports for all context primitives and algorithms, including
+    critique-adjudicate-revise provenance and access contracts.
 Similar files:
     - vidbyte/__init__.py: Root module exporting overall SDK contracts.
     - vidbyte/context/manager.py: Contains the concrete ContextManager implementation.
@@ -22,7 +23,7 @@ Similar files:
 
 from __future__ import annotations
 
-from vidbyte.context.algorithms import ContextWindowAlgorithm, ErrorCorrectionAlgorithm, MultiProviderAgenticGraderAlgorithm, ProblemSpaceSearchAlgorithm, ReflexionAlgorithm, ToolResultAdmission, TrajectoryCheckpointAlgorithm
+from vidbyte.context.algorithms import AcceptedFinding, ContextWindowAlgorithm, CriticFailurePolicy, CriticFinding, CritiqueAdjudicateReviseAlgorithm, ErrorCorrectionAlgorithm, FindingEvidence, MultiProviderAgenticGraderAlgorithm, ProblemSpaceSearchAlgorithm, ReflexionAlgorithm, ReviewStageAccess, StageFailurePolicy, ToolResultAdmission, TrajectoryCheckpointAlgorithm
 from vidbyte.context.compaction import CompactionMode, CompactionStats, ContextCompactionEngine, Summarizer
 from vidbyte.context.primitives import (
     ArtifactContextItem,
@@ -72,6 +73,7 @@ from vidbyte.context.window import ContextWindow
 
 __all__ = [
     "ArtifactContextItem",
+    "AcceptedFinding",
     "BaseContext",
     "BaseAgentContext",
     "ContextArtifact",
@@ -89,12 +91,16 @@ __all__ = [
     "ContextWindowPlacement",
     "ContextWindowPresets",
     "ContextWindowRunContext",
+    "CriticFailurePolicy",
+    "CriticFinding",
+    "CritiqueAdjudicateReviseAlgorithm",
     "DocumentContextItem",
     "EngineeringHandoff",
     "EnvironmentContextItem",
     "ErrorCorrectionAlgorithm",
     "ErrorCorrectionContextItem",
     "FileContextItem",
+    "FindingEvidence",
     "GitDiffContextItem",
     "Handoff",
     "MemoryContextItem",
@@ -115,8 +121,10 @@ __all__ = [
     "ProblemSpaceSearchContextItem",
     "ProgressContextItem",
     "ReflexionAlgorithm",
+    "ReviewStageAccess",
     "ResponseContextItem",
     "Summarizer",
+    "StageFailurePolicy",
     "TaskContextItem",
     "TextContextItem",
     "ToolCallContextItem",

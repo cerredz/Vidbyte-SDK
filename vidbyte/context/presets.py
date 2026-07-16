@@ -13,6 +13,7 @@ Relations:
 """
 
 from vidbyte.context.algorithms import (
+    CritiqueAdjudicateReviseAlgorithm,
     ContextWindowAlgorithm,
     ErrorCorrectionAlgorithm,
     MultiProviderAgenticGraderAlgorithm,
@@ -97,6 +98,11 @@ class ContextWindowPresets:
             name="error_correction",
             error_correction=ErrorCorrectionAlgorithm(),
         )
+
+    @property
+    def critique_adjudicate_revise(self) -> ContextWindowAlgorithm:
+        # Returns the fail-closed three-critic review, adjudication, and revision preset.
+        return ContextWindowAlgorithm(name="critique_adjudicate_revise", critique_adjudicate_revise=CritiqueAdjudicateReviseAlgorithm())
 
 
 

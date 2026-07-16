@@ -14,10 +14,11 @@ Relations:
 
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
-from vidbyte.agents.algorithms import MultiProviderAgenticGraderRuntimeAlgorithm, ReflexionRuntimeAlgorithm
+from vidbyte.agents.algorithms import CritiqueAdjudicateReviseRuntimeAlgorithm, MultiProviderAgenticGraderRuntimeAlgorithm, ReflexionRuntimeAlgorithm
 from vidbyte.context.runtime import InnerContextWindowAlgorithm
 from vidbyte.lib.dataclasses.runner import RunnerHandle
 from vidbyte.lib.tracing import SpanContext
@@ -46,18 +47,22 @@ class AgentRuntimeContextAlgorithms:
             return "problem_space_search"
         if self.runtime.algorithm.error_correction is not None:
             return "error_correction"
+        if self.runtime.algorithm.critique_adjudicate_revise is not None:
+            return "critique_adjudicate_revise"
         return None
 
     def is_algorithm(self, name: str) -> bool:
         # Return whether the configured runtime algorithm matches name.
         return self.detect_algorithm() == name
 
-    def return_algorithm(self) -> ReflexionRuntimeAlgorithm | MultiProviderAgenticGraderRuntimeAlgorithm | None:
+    def return_algorithm(self) -> ReflexionRuntimeAlgorithm | MultiProviderAgenticGraderRuntimeAlgorithm | CritiqueAdjudicateReviseRuntimeAlgorithm | None:
         # Return the configured runtime algorithm implementation.
         if self.runtime.algorithm.reflexion is not None:
             return ReflexionRuntimeAlgorithm(self.runtime, self.runtime.algorithm.reflexion)
         if self.runtime.algorithm.multi_provider_agentic_grader is not None:
             return MultiProviderAgenticGraderRuntimeAlgorithm(self.runtime, self.runtime.algorithm.multi_provider_agentic_grader)
+        if self.runtime.algorithm.critique_adjudicate_revise is not None:
+            return CritiqueAdjudicateReviseRuntimeAlgorithm(self.runtime, self.runtime.algorithm.critique_adjudicate_revise)
         return None
 
     def inner_loop_algorithm(self) -> InnerContextWindowAlgorithm | None:
@@ -79,7 +84,8 @@ class AgentRuntimeContextAlgorithms:
         algorithm = self.return_algorithm()
         if algorithm is None:
             return None
-        span = self._start_algorithm_span(trace_context, algorithm=self.detect_algorithm() or "unknown", message=message)
+        algorithm_name = self.detect_algorithm() or "unknown"
+        span = self._start_algorithm_span(trace_context, algorithm=algorithm_name, task_hash=hashlib.sha256(message.encode("utf-8")).hexdigest())
         try:
             result = await algorithm.arun(
                 message,
@@ -89,10 +95,11 @@ class AgentRuntimeContextAlgorithms:
                 options=options,
                 trace_context=span or trace_context,
             )
-            self._end_algorithm_span(span, output=result.output)
+            self._end_algorithm_span(span, output="succeeded" if algorithm_name == "critique_adjudicate_revise" else result.output)
             return result
         except BaseException as exc:
-            self._end_algorithm_span(span, error=exc)
+            safe_error = RuntimeError(type(exc).__name__) if algorithm_name == "critique_adjudicate_revise" else exc
+            self._end_algorithm_span(span, error=safe_error)
             raise
 
     def _start_algorithm_span(self, parent: SpanContext | None, **attributes: Any) -> SpanContext | None:

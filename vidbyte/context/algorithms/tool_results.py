@@ -8,6 +8,7 @@ Purpose:
 Architecture:
     - ToolResultAdmission: Supported admission modes.
     - ContextWindowAlgorithm: Immutable runtime algorithm object.
+    - critique_adjudicate_revise: Optional return-level adversarial review policy.
 Relations:
     Used by vidbyte.context.presets and AgentRuntime.
 """
@@ -25,6 +26,7 @@ from vidbyte.context.algorithms.multi_provider_agentic_grader import MultiProvid
 from vidbyte.context.algorithms.trajectory_checkpoints import TrajectoryCheckpointAlgorithm
 from vidbyte.context.algorithms.problem_space_search import ProblemSpaceSearchAlgorithm
 from vidbyte.context.algorithms.error_correction import ErrorCorrectionAlgorithm
+from vidbyte.context.algorithms.critique_adjudicate_revise import CritiqueAdjudicateReviseAlgorithm
 from vidbyte.lib.dataclasses.tools import ToolCall, ToolResult
 
 
@@ -48,11 +50,12 @@ class ContextWindowAlgorithm:
     trajectory_checkpoints: TrajectoryCheckpointAlgorithm | None = None
     problem_space_search: ProblemSpaceSearchAlgorithm | None = None
     error_correction: ErrorCorrectionAlgorithm | None = None
+    critique_adjudicate_revise: CritiqueAdjudicateReviseAlgorithm | None = None
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         # Verifies that at most one runtime context algorithm is configured.
-        active = [x for x in (self.reflexion, self.multi_provider_agentic_grader, self.trajectory_checkpoints, self.problem_space_search, self.error_correction) if x is not None]
+        active = [x for x in (self.reflexion, self.multi_provider_agentic_grader, self.trajectory_checkpoints, self.problem_space_search, self.error_correction, self.critique_adjudicate_revise) if x is not None]
         if len(active) > 1:
             raise ValueError("At most one runtime context-window algorithm can be configured.")
 
@@ -72,6 +75,7 @@ class ContextWindowAlgorithm:
 
 __all__ = [
     "ContextWindowAlgorithm",
+    "CritiqueAdjudicateReviseAlgorithm",
     "ErrorCorrectionAlgorithm",
     "MultiProviderAgenticGraderAlgorithm",
     "ProblemSpaceSearchAlgorithm",
