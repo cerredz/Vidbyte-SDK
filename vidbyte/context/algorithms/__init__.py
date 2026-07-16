@@ -6,6 +6,7 @@ Purpose:
     Keeps runtime context algorithms separate from preset registration and
     public context primitives.
 Architecture:
+    - Independent critic configuration from independent_critic.
     - Tool-result admission algorithms from tool_results.
     - Reflexion runtime context-window algorithm from reflexion.
     - Multi-provider agentic grader context-window algorithm from multi_provider_agentic_grader.
@@ -15,6 +16,7 @@ Relations:
 
 from __future__ import annotations
 
+from vidbyte.context.algorithms.independent_critic import CriticFailurePolicy, IndependentCriticAlgorithm
 from vidbyte.context.algorithms.reflexion import ReflexionAlgorithm
 from vidbyte.context.algorithms.multi_provider_agentic_grader import MultiProviderAgenticGraderAlgorithm
 from vidbyte.context.algorithms.trajectory_checkpoints import TrajectoryCheckpointAlgorithm
@@ -26,12 +28,13 @@ from vidbyte.context.algorithms.tool_results import (
 )
 
 __all__ = [
+    "CriticFailurePolicy",
     "ContextWindowAlgorithm",
     "ErrorCorrectionAlgorithm",
+    "IndependentCriticAlgorithm",
     "MultiProviderAgenticGraderAlgorithm",
     "ProblemSpaceSearchAlgorithm",
     "ReflexionAlgorithm",
     "TrajectoryCheckpointAlgorithm",
     "ToolResultAdmission",
 ]
-

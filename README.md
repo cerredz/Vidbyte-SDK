@@ -237,6 +237,46 @@ agent = Agent(
 )
 ```
 
+Use `independent_critic` when a completed candidate needs an advisory review
+from a fresh context. The critic sees only the original task, exact candidate,
+and explicitly allowlisted artifacts/tools. It never receives producer history,
+scratch state, middleware transforms, private options, or implicit internal
+tools. The candidate is not revised and findings are not adjudicated.
+
+```python
+from vidbyte import Agent, ContextWindow
+
+agent = Agent(
+    name="reviewed-worker",
+    system_prompt="Solve the task carefully.",
+    provider="openai",
+    model_name="gpt-4.1",
+    algorithm=ContextWindow.preset.independent_critic,
+)
+
+reply = await agent.arun("Produce the migration plan.")
+review = reply.metadata["independent_critic"]
+```
+
+The preset is fail-closed and inherits no artifacts or tools. Custom
+configuration makes every reviewer capability explicit:
+
+```python
+from vidbyte import CriticFailurePolicy, IndependentCriticAlgorithm
+from vidbyte.context.algorithms import ContextWindowAlgorithm
+
+algorithm = ContextWindowAlgorithm(
+    name="independent_critic",
+    independent_critic=IndependentCriticAlgorithm(
+        reviewer_provider="anthropic",
+        reviewer_model="claude-sonnet-4-5",
+        allowed_artifact_names=("requirements",),
+        allowed_tool_names=("read_text",),
+        failure_policy=CriticFailurePolicy.RAISE,
+    ),
+)
+```
+
 For long-running direct loops, trajectory checkpoints can periodically write a
 bounded runtime checkpoint into the context window through managed context
 primitives. Checkpoints summarize observable runtime state only; their score is

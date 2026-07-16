@@ -58,6 +58,7 @@ context.upsert(
 - `window.py` and `presets.py`: context-window preset resolution.
 - `primitives/`: typed context items for files, tasks, progress, memory, responses, tool calls, and multi-agent orchestration state.
 - `algorithms/`: reflexion, grader, tool-result, and trajectory-checkpoint algorithms.
+- `algorithms/independent_critic.py`: immutable review-only critic policy, exact evidence serialization, and bounded report normalization.
 - `compaction.py`: deterministic context compaction contracts and stats.
 - `handoff/`: structured handoff models.
 
@@ -65,3 +66,17 @@ context.upsert(
 
 Context is consumed by [`agents`](../agents/README.md), updated by some
 [`tools`](../tools/README.md), and bounded by [`middleware`](../middleware/README.md).
+
+## Independent Critic
+
+`ContextWindow.preset.independent_critic` runs the normal producer once, then
+reviews its exact candidate in a fresh runtime. Reviewer visibility is built
+from an empty context plus the original task, candidate, and explicit artifact
+and tool allowlists. Producer history, system prompt, metadata, context items,
+middleware, provider options, and implicit tools remain outside the boundary.
+
+The public candidate stays unchanged. Advisory, unadjudicated findings appear
+under `result.metadata["independent_critic"]`. The default raises when review
+cannot produce valid JSON; custom configuration can choose
+`CriticFailurePolicy.RETURN_CANDIDATE`, which returns the producer result with
+an explicit `status="review_failed"` marker instead of claiming success.

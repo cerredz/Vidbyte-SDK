@@ -12,8 +12,9 @@ Key Functions / Exports:
     - ContextWindow: Represents the sliding/compacted context window.
     - MultiAgentContext: Builds and renders orchestration context primitives.
     - ContextWindowAlgorithm: Base class for context window compaction/pruning.
+    - IndependentCriticAlgorithm: Configures isolated advisory candidate review.
 Relation to codebase as a whole:
-    Provides public exports for all context primitives and algorithms (including PlanContextItem, MultiProviderAgenticGraderAlgorithm, ReflexionAlgorithm, etc.) which are consumed by agents and runner engines to manage LLM context windows dynamically.
+    Provides public exports for all context primitives and algorithms (including IndependentCriticAlgorithm, MultiProviderAgenticGraderAlgorithm, and ReflexionAlgorithm) which are consumed by agents and runner engines to manage LLM context windows dynamically.
 Similar files:
     - vidbyte/__init__.py: Root module exporting overall SDK contracts.
     - vidbyte/context/manager.py: Contains the concrete ContextManager implementation.
@@ -22,7 +23,7 @@ Similar files:
 
 from __future__ import annotations
 
-from vidbyte.context.algorithms import ContextWindowAlgorithm, ErrorCorrectionAlgorithm, MultiProviderAgenticGraderAlgorithm, ProblemSpaceSearchAlgorithm, ReflexionAlgorithm, ToolResultAdmission, TrajectoryCheckpointAlgorithm
+from vidbyte.context.algorithms import ContextWindowAlgorithm, CriticFailurePolicy, ErrorCorrectionAlgorithm, IndependentCriticAlgorithm, MultiProviderAgenticGraderAlgorithm, ProblemSpaceSearchAlgorithm, ReflexionAlgorithm, ToolResultAdmission, TrajectoryCheckpointAlgorithm
 from vidbyte.context.compaction import CompactionMode, CompactionStats, ContextCompactionEngine, Summarizer
 from vidbyte.context.primitives import (
     ArtifactContextItem,
@@ -89,6 +90,7 @@ __all__ = [
     "ContextWindowPlacement",
     "ContextWindowPresets",
     "ContextWindowRunContext",
+    "CriticFailurePolicy",
     "DocumentContextItem",
     "EngineeringHandoff",
     "EnvironmentContextItem",
@@ -97,6 +99,7 @@ __all__ = [
     "FileContextItem",
     "GitDiffContextItem",
     "Handoff",
+    "IndependentCriticAlgorithm",
     "MemoryContextItem",
     "MinimalHandoff",
     "MultiAgentContext",
