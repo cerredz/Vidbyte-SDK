@@ -5,8 +5,8 @@ Description:
     single source of truth for prompt identifiers.
 
 Purpose:
-    Enables static typing, autocomplete, and validation for the 51 static prompt templates
-    across 19 JSON/Markdown-backed families, including multi-agent manager phases.
+    Enables static typing, autocomplete, and validation for the 53 static prompt templates
+    across 20 JSON/Markdown-backed families, including multi-agent manager phases.
 
 Architecture and Key Functions:
     - Prompt (Enum): Inherits from `str` and `Enum`. It maps high-level, semantic prompt

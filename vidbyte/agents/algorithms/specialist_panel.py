@@ -190,13 +190,33 @@ class SpecialistPanelRuntimeAlgorithm:
     async def _run_panel(self, plans: tuple[_ReviewerPlan, ...], panel_id: str, trace_context: SpanContext | None) -> tuple[SpecialistReviewRecord | SpecialistFailureRecord | BaseException, ...]:
         # Create the entire independent first round before awaiting its barrier.
         tasks = tuple(asyncio.create_task(self._run_reviewer(plan, panel_id, trace_context)) for plan in plans)
+        pending = set(tasks)
         try:
-            return tuple(await asyncio.gather(*tasks, return_exceptions=True))
+            while pending:
+                done, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
+                terminal = self._terminal_task_failure(done)
+                if terminal is not None:
+                    for task in pending:
+                        task.cancel()
+                    await asyncio.gather(*pending, return_exceptions=True)
+                    raise terminal
+            return tuple(task.result() for task in tasks)
         except BaseException:
             for task in tasks:
                 task.cancel()
             await asyncio.gather(*tasks, return_exceptions=True)
             raise
+
+    @staticmethod
+    def _terminal_task_failure(tasks: set[asyncio.Task[SpecialistReviewRecord | SpecialistFailureRecord]]) -> BaseException | None:
+        # Return only cancellation or process-level failures; ordinary reviewer errors are typed results.
+        for task in tasks:
+            if task.cancelled():
+                return asyncio.CancelledError()
+            error = task.exception()
+            if error is not None:
+                return error
+        return None
 
     async def _run_reviewer(self, plan: _ReviewerPlan, panel_id: str, trace_context: SpanContext | None) -> SpecialistReviewRecord | SpecialistFailureRecord:
         # Execute and validate one reviewer without touching any shared outcome collection.
@@ -226,7 +246,9 @@ class SpecialistPanelRuntimeAlgorithm:
     def _validate_review(self, plan: _ReviewerPlan, result: AgentResult, started_at: float) -> SpecialistReviewRecord:
         # Admit only schema-valid, bounded reviews covering each configured output requirement exactly once.
         if result.structured is None:
-            raise _ReviewFailure("missing_structured_output", "reviewer returned no valid structured output")
+            if result.output.strip():
+                raise _ReviewFailure("invalid_structured_output", "reviewer output did not validate against the fixed structured schema")
+            raise _ReviewFailure("missing_structured_output", "reviewer returned no structured output")
         try:
             payload = SpecialistReviewPayload.model_validate(result.structured)
         except ValidationError as exc:

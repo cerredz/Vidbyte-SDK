@@ -4,7 +4,8 @@ Description:
     Defines the internal direct execution runtime for Vidbyte agents.
 Purpose:
     Keeps agent loop execution, context-window construction, tool execution,
-    permission checks, and provider-reported token accounting out of BaseAgent.
+    permission checks, provider-reported token accounting, and optional internal
+    completion-tool admission out of BaseAgent.
 Architecture:
     - AgentRuntime: Builds BaseAgentContext and runs direct model/tool loops.
 Relations:
