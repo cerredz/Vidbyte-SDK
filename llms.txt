@@ -199,7 +199,13 @@ reviewed = AdversarialAgent(
     system_prompt="Deliver a correct implementation.",
     worker=worker,
     adversary=adversary,
-    settings=AdversarialSettings(num_adversaries=2, adversarial_rounds=2),
+    settings=AdversarialSettings.specialist_panel(
+        ("correctness", "security"),
+        adversarial_rounds=2,
+        fresh_adversaries_each_round=True,
+        run_timeout_seconds=180.0,
+        max_child_calls=7,
+    ),
 )
 
 reply = await reviewed.arun("Implement the requested change.")
@@ -211,7 +217,12 @@ sequentially against the same per-round snapshot, and `adversarial_rounds` is an
 exact count with no early stop. Partial reviewer failures are recorded; a round
 must still meet `min_successful_adversaries`. Full outputs remain in
 `last_result`; downstream prompt forwarding and public message metadata are
-bounded. Facade-level tool/MCP mutation is rejected before side effects. See
+bounded. Specialist panels assign lenses to forks of the same adversary prototype;
+they are not independently configured or cross-provider panels. The derived
+`required_child_calls` supports `max_child_calls` preflight, while
+`run_timeout_seconds` cancels active controller work at its deadline and then
+awaits cleanup, which may extend wall-clock time. Facade-level
+tool/MCP mutation is rejected before side effects. See
 `skills/vidbyte-sdk/adversarial-agent.md`.
 
 ### Multi-Agent Orchestration

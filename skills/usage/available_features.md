@@ -69,7 +69,13 @@ reviewed = AdversarialAgent(
     system_prompt="Deliver the strongest verified implementation.",
     worker=configured_worker,
     adversary=configured_read_only_reviewer,
-    settings=AdversarialSettings(num_adversaries=2, adversarial_rounds=2),
+    settings=AdversarialSettings.specialist_panel(
+        ("correctness", "security"),
+        adversarial_rounds=2,
+        fresh_adversaries_each_round=True,
+        run_timeout_seconds=180.0,
+        max_child_calls=7,
+    ),
 )
 
 reply = await reviewed.arun("Implement the change.")
@@ -79,7 +85,10 @@ The facade is runnerless: configure providers/models, tools, middleware,
 permissions, structured output, and MCP on the children. A successful run makes
 exactly `1 + adversarial_rounds * (num_adversaries + 1)` child calls, with no v1
 early stopping. Full artifacts live in `last_result`; public metadata and later
-prompt forwarding are bounded. See
+prompt forwarding are bounded. `required_child_calls` exposes that exact cost;
+`max_child_calls` validates it before execution. Specialist panels are lens-assigned
+forks of one adversary prototype, not independently configured/cross-provider
+panels. See
 [`skills/vidbyte-sdk/adversarial-agent.md`](../vidbyte-sdk/adversarial-agent.md).
 
 ## Ledger-Driven Multi-Agent Teams

@@ -40,10 +40,13 @@ reviewed_worker = AdversarialAgent(
     system_prompt="Deliver a correct implementation that satisfies the request and repository constraints.",
     worker=worker,
     adversary=adversary,
-    settings=AdversarialSettings(
-        num_adversaries=2,
+    settings=AdversarialSettings.specialist_panel(
+        ("correctness", "security"),
         adversarial_rounds=2,
         min_successful_adversaries=1,
+        fresh_adversaries_each_round=True,
+        run_timeout_seconds=180.0,
+        max_child_calls=7,
     ),
 )
 
@@ -58,7 +61,7 @@ The facade's `system_prompt` is workflow-level guidance included in every determ
 
 One successful run performs:
 
-1. Fork one run-local worker and `num_adversaries` run-local adversaries.
+1. Fork one run-local worker and, by default, `num_adversaries` run-local adversaries.
 2. Ask the worker for an initial result.
 3. For each exact adversarial round:
    1. Give every adversary the same immutable worker snapshot, sequentially.
@@ -77,6 +80,8 @@ For two adversaries and two rounds, the run makes seven child calls. `adversaria
 
 Reviewers run sequentially. Forked agents may share custom runner or tool objects, and the SDK does not assume those objects are concurrency-safe.
 
+With `fresh_adversaries_each_round=True`, reviewer forks are created at the start of each round with round-qualified names. All successful forks remain cleanup-owned, including reviewers created before a later fork fails. The worker remains one run-local fork for the entire run.
+
 ## Settings
 
 | Setting | Default | Meaning |
@@ -87,14 +92,22 @@ Reviewers run sequentially. Forked agents may share custom runner or tool object
 | `per_adversary_timeout` | `None` | Optional timeout in seconds for each reviewer call |
 | `max_review_chars` | `4000` | Per-review forwarding limit in the next worker prompt |
 | `max_worker_output_chars` | `12000` | Worker-output forwarding limit in review/revision prompts |
+| `specialties` | `()` | Empty, one shared, or one index-aligned specialty per adversary |
+| `fresh_adversaries_each_round` | `False` | Fork a new cleanup-owned reviewer set at the start of each round |
+| `run_timeout_seconds` | `None` | Optional finite positive deadline for active controller work; cleanup is awaited afterward |
+| `max_child_calls` | `None` | Optional positive ceiling that must cover `required_child_calls` |
 
-Counts and character limits must be positive integers. The success floor cannot exceed the adversary count, and a configured timeout must be positive.
+Counts and character limits must be positive integers. The success floor cannot exceed the adversary count, and configured timeouts must be finite and positive. `required_child_calls` is a derived read-only property using the exact formula above; it counts child-agent invocations, not tool calls made inside a child.
+
+Specialties are trimmed, limited to 500 characters, and included only in the assigned reviewer's tagged/JSON-encoded prompt field. A singleton lens applies to every reviewer; an exact-length tuple maps by one-based reviewer index. Raw specialty text is retained on `AdversarialReview.specialty` for run-local audit but excluded from card and trace metadata.
+
+`AdversarialSettings.specialist_panel(("security", "correctness"), ...)` derives `num_adversaries=2`. It creates independently prompted forks of the same configured adversary prototype. It does not create independently configured reviewers, provider diversity, debate, adjudication, or a cross-provider panel.
 
 Forwarding limits bound only later child prompts. Full successful worker and reviewer outputs remain available in the typed `last_result` records.
 
 ## Result And Public Agent State
 
-`await facade.arun(...)` returns an ordinary `AgentMessage`. Its content and existing metadata come from the final worker reply. `metadata["adversarial"]` adds only a bounded summary: configured/completed rounds, child-call count, successful/failed review counts, and child prototype names.
+`await facade.arun(...)` returns an ordinary `AgentMessage`. Its content and existing metadata come from the final worker reply. `metadata["adversarial"]` adds only a bounded summary: configured/completed rounds, required child calls, configured call/time budgets, specialty count, reviewer freshness, successful/failed review counts, and child prototype names.
 
 After success:
 
@@ -127,9 +140,10 @@ The run raises `AdversarialExecutionError` when:
 
 - the worker raises during its initial pass or a revision;
 - the worker returns blank content; or
-- a round finishes below `min_successful_adversaries`.
+- a round finishes below `min_successful_adversaries`; or
+- active controller work exceeds `run_timeout_seconds`.
 
-The error details include safe phase, round, counts, child names, and remediation context. They do not embed prompts, review bodies, credentials, or raw exception text. Cancellation propagates after child spans and run-local MCP resources are closed.
+The total timeout cancels the controller, waits for its shielded run-local cleanup, and then raises a distinct safe `AdversarialExecutionError` with `phase="run_timeout"`. Cleanup may extend total wall-clock time beyond `run_timeout_seconds`; the deadline bounds active child workflow execution, not cleanup duration. Error details include safe phase, round, counts, child names, configured budgets, and remediation context. They do not embed prompts, specialty values, review bodies, credentials, or raw exception text. Caller cancellation propagates after child spans and run-local MCP resources are closed.
 
 Specialized worker/adversary subclasses must preserve their behavioral subtype from `fork()`. If a fork silently returns `BaseAgent`, the facade raises `ConfigurationError` before the first model call. Use an exact `BaseAgent` or add a subtype-preserving fork override.
 
@@ -160,7 +174,7 @@ Default `await facade.handoff()` derives a `HandoffAgent` from the worker's prov
 
 ## Tracing
 
-The facade emits an `agent.run` root trace with `strategy="adversarial"`, plus `adversarial.worker` and `adversarial.review` spans carrying role, phase, round, index, child name, and bounded counts. Raw reviewer bodies are not trace attributes. Child agents still emit their own configured traces.
+The facade emits an `agent.run` root trace with `strategy="adversarial"`, plus `adversarial.worker` and `adversarial.review` spans carrying role, phase, round, index, child name, and bounded policy facts. Facade trace/card metadata omits raw reviewer bodies and specialty strings. Child agents still emit their own configured traces according to their tracer settings, including any configured prompt/output detail.
 
 ## Choosing The Right Primitive
 

@@ -139,7 +139,13 @@ reviewed = AdversarialAgent(
     system_prompt="Deliver a correct implementation that satisfies the repository constraints.",
     worker=worker,
     adversary=adversary,
-    settings=AdversarialSettings(num_adversaries=2, adversarial_rounds=2),
+    settings=AdversarialSettings.specialist_panel(
+        ("correctness", "security"),
+        adversarial_rounds=2,
+        fresh_adversaries_each_round=True,
+        run_timeout_seconds=180.0,
+        max_child_calls=7,
+    ),
 )
 
 reply = await reviewed.arun("Implement the SDK feature.")
@@ -151,7 +157,12 @@ A successful run makes exactly
 `1 + adversarial_rounds * (num_adversaries + 1)` sequential child calls.
 Rounds are exact in v1; there is no early stopping. Full round artifacts live in
 `last_result`, while the final `AgentMessage` contains only bounded summary
-metadata. Facade-level tool/MCP attachment is rejected before side effects.
+metadata. `specialist_panel(...)` assigns lenses to forks of the same adversary
+prototype; it does not create independently configured or cross-provider reviewers.
+`required_child_calls` exposes the exact preflight cost, `max_child_calls` can cap
+it, and `run_timeout_seconds` cancels active controller work after its deadline;
+cleanup is still awaited and may extend total wall-clock time.
+Facade-level tool/MCP attachment is rejected before side effects.
 See the [Adversarial Agent guide](skills/vidbyte-sdk/adversarial-agent.md) for
 failure thresholds, forwarding limits, fork/handoff behavior, and side-effect
 guidance.
