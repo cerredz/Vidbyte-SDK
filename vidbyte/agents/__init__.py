@@ -7,6 +7,7 @@ Purpose:
     swappable execution runtimes, and multi-agent ledger/transfer contracts.
 Architecture:
     - BaseAgent: Client-facing agent coordinator.
+    - AdversarialAgent: Runnerless sequential worker/reviewer refinement facade.
     - AgentRegistry: Local/shared memory storage registry.
     - Swappable Runtimes: LinearAgentRuntime, SearchTreeRuntimeComponent, PointToPointActorRuntime, BroadcastActorRuntime.
     - Multi-Agent Team: MultiAgent, MagenticOneOrchestrator, TaskLedger, AgentBinding, and AgentTransfer.
@@ -19,6 +20,7 @@ Similar Files:
 from __future__ import annotations
 
 from vidbyte.agents.base import BaseAgent
+from vidbyte.agents.adversarial import AdversarialAgent, AdversarialResult, AdversarialReview, AdversarialRoundResult, AdversarialSettings
 from vidbyte.agents.aggregation import AggregateAgent, AggregateResult, MultiProviderAggregator
 from vidbyte.agents.client import AgentClient
 from vidbyte.agents.continual_trace import ContinualTraceAgent
@@ -88,6 +90,11 @@ Agent = BaseAgent
 
 __all__ = [
     "Agent",
+    "AdversarialAgent",
+    "AdversarialResult",
+    "AdversarialReview",
+    "AdversarialRoundResult",
+    "AdversarialSettings",
     "AgentBinding",
     "AgentDispatch",
     "AgentReport",

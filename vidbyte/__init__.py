@@ -8,7 +8,7 @@ Purpose:
     their category packages.
 Architecture:
     - VidbyteSDK: Root namespace client.
-    - Agent exports: BaseAgent, AgentCard, AgentMessage, AgentRegistry, AgentRunnerConfig, AgentSpec.
+    - Agent exports: BaseAgent, AdversarialAgent, AgentCard, AgentMessage, AgentRegistry, AgentRunnerConfig, AgentSpec.
     - Tool exports: BaseTool, ToolCall, ToolExecutor, ToolParameter, ToolPermission, ToolRegistry, ToolResult, ToolSpec, ToolStatus, ToolsFormatter.
     - MCP exports: McpServerConfig, McpServerHandle, McpToolPermission.
     - Context exports: BaseAgentContext, BaseContext, ContextBudget, ContextPermissions.
@@ -36,6 +36,11 @@ __version__ = "0.1.0"
 
 from vidbyte.agents import (
     Agent,
+    AdversarialAgent,
+    AdversarialResult,
+    AdversarialReview,
+    AdversarialRoundResult,
+    AdversarialSettings,
     AgentBinding,
     AgentDispatch,
     AgentReport,
@@ -371,6 +376,11 @@ from vidbyte.tools.mcp import (
 
 __all__ = [
     "Agent",
+    "AdversarialAgent",
+    "AdversarialResult",
+    "AdversarialReview",
+    "AdversarialRoundResult",
+    "AdversarialSettings",
     "AgentBinding",
     "AgentDispatch",
     "AgentReport",

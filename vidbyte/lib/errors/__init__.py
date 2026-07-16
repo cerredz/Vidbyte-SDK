@@ -14,6 +14,7 @@ Relations:
 from __future__ import annotations
 
 from vidbyte.lib.errors.base import (
+    AdversarialExecutionError,
     AgentExecutionError,
     AgentTransferError,
     AgentForkConfigurationError,
@@ -52,6 +53,7 @@ from vidbyte.lib.errors.base import (
 )
 
 __all__ = [
+    "AdversarialExecutionError",
     "AgentExecutionError",
     "AgentTransferError",
     "AgentForkConfigurationError",

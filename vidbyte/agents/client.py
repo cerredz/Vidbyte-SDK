@@ -5,18 +5,21 @@ Description:
 Purpose:
     Keeps `sdk.agents` ergonomic while deferring feature imports until their constructor is requested.
 Architecture:
-    AgentClient routes base, handoff, continual-trace, aggregate, and ledger-driven multi-agent constructors.
+    AgentClient routes base, adversarial, handoff, continual-trace, aggregate, and ledger-driven multi-agent constructors.
 Relations:
     Constructed by `VidbyteSDK`; feature implementations remain owned by their packages under `vidbyte.agents`.
 """
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from vidbyte.agents.base import BaseAgent
 from vidbyte.agents.handoff import HandoffAgent
 from vidbyte.context.handoff import Handoff
+
+if TYPE_CHECKING:
+    from vidbyte.agents.adversarial import AdversarialAgent
 
 
 class AgentClient:
@@ -39,6 +42,11 @@ class AgentClient:
         # Construct an AggregateAgent that fans out to multiple proposer models and synthesizes one answer.
         from vidbyte.agents.aggregation import AggregateAgent
         return AggregateAgent(**kwargs)
+
+    def adversarial(self, **kwargs: Any) -> AdversarialAgent:
+        # Construct a runnerless AdversarialAgent while preserving its explicit constructor errors.
+        from vidbyte.agents.adversarial import AdversarialAgent
+        return AdversarialAgent(**kwargs)
 
     def multi(self, **kwargs: Any) -> Any:
         # Construct a ledger-driven MultiAgent team with explicit manager and worker controls.

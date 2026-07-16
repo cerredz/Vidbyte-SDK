@@ -16,6 +16,7 @@ Architecture:
     - TaskLedgerError: Raised when a ledger invariant or transition is rejected.
     - AgentTransferError: Raised at developer-defined worker transfer boundaries.
     - AgentRegistryError: Raised when local agent discovery fails.
+    - AdversarialExecutionError: Raised when staged adversarial refinement cannot safely finish.
     - AgentForkError: Base exception for agent fork pipeline failures.
     - AgentForkConfigurationError: Raised when fork settings are invalid or out of range.
     - McpError: Base exception for all developer attachment and execution failures.
@@ -90,6 +91,10 @@ class AgentRegistryError(VidbyteSdkError):
 
 class AggregateExecutionError(AgentExecutionError):
     """Raised when an aggregate (mixture-of-agents) run cannot produce a synthesis."""
+
+
+class AdversarialExecutionError(AgentExecutionError):
+    """Raised when an adversarial run cannot produce a valid final worker result."""
 
 
 class AgentForkError(VidbyteSdkError):
