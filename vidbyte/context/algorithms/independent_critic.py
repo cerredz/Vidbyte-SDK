@@ -182,7 +182,8 @@ class IndependentCriticAlgorithm:
             raise ConfigurationError("critic findings must be a JSON array.")
         raw_findings = tuple(value)
         normalized = tuple(self._normalize_finding(item) for item in raw_findings[: self.max_findings])
-        fields_truncated = any(item.pop("_truncated") == "true" for item in normalized)
+        truncation_flags = tuple(item.pop("_truncated") == "true" for item in normalized)
+        fields_truncated = any(truncation_flags)
         return normalized, len(raw_findings) > self.max_findings, fields_truncated
 
     def _normalize_finding(self, value: object) -> dict[str, str]:
