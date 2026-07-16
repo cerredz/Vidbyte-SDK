@@ -51,13 +51,47 @@ context.upsert(
 )
 ```
 
+### Critique, adjudicate, and revise
+
+`ContextWindow.preset.critique_adjudicate_revise` runs a normal producer once,
+then sends its exact candidate to three concurrent critics. Critics receive no
+producer history, memory, middleware, implicit tools, or peer findings. A fresh
+adjudicator removes duplicates, rejects unsupported criticism, and resolves
+contradictions using IDs only; SDK code constructs the accepted findings that a
+fresh revision worker receives.
+
+All stage artifact and tool allowlists are empty by default. Custom access uses
+exact names from `BaseContext.artifacts` and the agent's user-tool catalog:
+
+```python
+from vidbyte import CritiqueAdjudicateReviseAlgorithm, ReviewStageAccess
+from vidbyte import ContextWindowAlgorithm
+
+algorithm = ContextWindowAlgorithm(
+    name="critique_adjudicate_revise",
+    critique_adjudicate_revise=CritiqueAdjudicateReviseAlgorithm(
+        critic_access=ReviewStageAccess(allowed_artifact_names=("requirements",)),
+        revision_access=ReviewStageAccess(
+            allowed_artifact_names=("requirements",),
+            allowed_tool_names=("apply_patch",),
+        ),
+    ),
+)
+```
+
+Defaults fail closed. Opt-in `RETURN_CANDIDATE` terminal policies return the
+producer candidate with degraded metadata, but cannot roll back producer or
+stage tool side effects. Parallel critic tools additionally require explicit
+`allow_parallel_critic_tools=True` because arbitrary custom tools may not be
+concurrency-safe.
+
 ## Key Modules
 
 - `manager.py`: ordered context item collection and managed primitive registry.
 - `multi_agent.py`: builds orchestration contexts and composes manager-facing primitives.
 - `window.py` and `presets.py`: context-window preset resolution.
 - `primitives/`: typed context items for files, tasks, progress, memory, responses, tool calls, and multi-agent orchestration state.
-- `algorithms/`: reflexion, grader, tool-result, and trajectory-checkpoint algorithms.
+- `algorithms/`: reflexion, grader, critique-adjudicate-revise, tool-result, and inner-loop algorithms.
 - `compaction.py`: deterministic context compaction contracts and stats.
 - `handoff/`: structured handoff models.
 

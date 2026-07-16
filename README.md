@@ -274,6 +274,31 @@ agent = Agent(
 )
 ```
 
+For adversarial review followed by a controlled revision, use
+`critique_adjudicate_revise`. The producer runs once; three mutually isolated
+critics review the same exact task and candidate concurrently; a separate
+adjudicator selects only grounded source IDs; and a fresh revision worker sees
+only SDK-constructed accepted findings. Raw and rejected criticism never enters
+the revision context.
+
+```python
+from vidbyte import Agent, ContextWindow
+
+agent = Agent(
+    name="reviewed-worker",
+    system_prompt="Complete the task and satisfy every stated requirement.",
+    provider="openai",
+    model_name="gpt-4.1",
+    algorithm=ContextWindow.preset.critique_adjudicate_revise,
+)
+```
+
+The default adds three concurrent critic calls, one adjudicator call, and at
+most one revision call. Stage artifact/tool allowlists are empty and failures
+raise by default. Enabling stage tools can create side effects; parallel critic
+tools require explicit concurrency opt-in. An opt-in degraded return preserves
+the producer candidate but does not undo any tool action that already occurred.
+
 Per-call context can be supplied with `AgentInput` without mutating the agent's
 default context:
 
@@ -976,7 +1001,7 @@ reply metadata but never ends the run.
 
 Prompts are repository-backed text assets exposed through an enum-keyed accessor
 and direct Python imports. The catalog currently includes 51 prompt assets across
-19 families, including handoff, reflexion, evals, prompt templates, goals,
+20 families, including handoff, reflexion, critique-adjudicate-revise, evals, prompt templates, goals,
 actor-runtime personas, trajectory checkpoints, and multi-agent orchestration.
 
 ```python

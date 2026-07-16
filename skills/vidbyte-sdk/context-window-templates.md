@@ -457,7 +457,47 @@ written into the active `ContextManager`.
 
 ---
 
-## 11. Adding Templates to a New Algorithm — Checklist
+## 11. Critique-Adjudicate-Revise
+
+`CritiqueAdjudicateReviseContextWindowTemplate` models successful outer-stage
+structure. Concurrent critic completion never emits recorder events, so runtime
+timing cannot change the slot sequence.
+
+```python
+from vidbyte.lib.templates import CritiqueAdjudicateReviseContextWindowTemplate
+
+revised = CritiqueAdjudicateReviseContextWindowTemplate()
+skipped = CritiqueAdjudicateReviseContextWindowTemplate(revision_expected=False)
+```
+
+Successful revised sequence:
+
+```text
+system_prompt
+critique_adjudicate_revise_producer
+critique_adjudicate_revise_critic_fanout
+critique_adjudicate_revise_critic_barrier
+critique_adjudicate_revise_adjudication
+critique_adjudicate_revise_revision
+```
+
+When adjudication accepts no findings, the last slot is
+`critique_adjudicate_revise_revision_skipped`. A failed run appends
+`critique_adjudicate_revise_failure` after the last begun stage and is
+intentionally outside the successful template contract.
+
+| Emit point | Slot |
+|------------|------|
+| Adapter run start | `system_prompt` |
+| Before producer `_arun_once` | `critique_adjudicate_revise_producer` |
+| Immediately before critic task scheduling | `critique_adjudicate_revise_critic_fanout` |
+| Immediately after the full gather barrier | `critique_adjudicate_revise_critic_barrier` |
+| Before adjudicator execution | `critique_adjudicate_revise_adjudication` |
+| Before revision, or when it is skipped | `critique_adjudicate_revise_revision` / `critique_adjudicate_revise_revision_skipped` |
+
+---
+
+## 12. Adding Templates to a New Algorithm — Checklist
 
 - [ ] Add `recorder.append("<algo>_<stage>", iteration=...)` at each structural
       emit point in `vidbyte/agents/algorithms/<name>.py`.
@@ -472,7 +512,7 @@ written into the active `ContextManager`.
 
 ---
 
-## 12. File Reference
+## 13. File Reference
 
 | File | Role |
 |------|------|
@@ -480,10 +520,12 @@ written into the active `ContextManager`.
 | `vidbyte/context/templates/__init__.py` | Module exports |
 | `vidbyte/lib/templates/base.py` | ContextWindowTemplate, TemplateViolation |
 | `vidbyte/lib/templates/reflexion.py` | ReflexionContextWindowTemplate |
+| `vidbyte/lib/templates/critique_adjudicate_revise.py` | CritiqueAdjudicateReviseContextWindowTemplate |
 | `vidbyte/lib/templates/trajectory_checkpoints.py` | TrajectoryCheckpointContextWindowTemplate |
 | `vidbyte/lib/templates/__init__.py` | Module exports |
 | `vidbyte/agents/runtime.py` | recorder param added; defaults to NullRecorder |
 | `vidbyte/agents/algorithms/reflexion.py` | system_prompt, reflexion_trial, reflexion_reflection emits |
+| `vidbyte/agents/algorithms/critique_adjudicate_revise.py` | producer, critic barrier, adjudication, revision, and failure emits |
 | `vidbyte/context/algorithms/trajectory_checkpoints.py` | system_prompt, trajectory_checkpoint_iteration, trajectory_checkpoint_injection emits |
 | `tests/test_context_window_templates.py` | All template and instrumentation tests |
 | `scripts/test-context-window-templates.py` | Executable verification script |
