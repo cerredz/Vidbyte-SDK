@@ -7,13 +7,14 @@ Purpose:
     packages provide compatibility import shims.
 Architecture:
     - Tool contracts from tools.
-    - Context, MCP, security, sandbox, and multi-agent contracts.
+    - Adversarial, context, MCP, security, sandbox, and multi-agent contracts.
 Relations:
-    Related to vidbyte.tools, vidbyte.agents.
+    Related to vidbyte.tools, vidbyte.agents, and vidbyte.agents.settings.
 """
 
 from __future__ import annotations
 
+from vidbyte.lib.dataclasses.adversarial import AdversarialSettings
 from vidbyte.lib.dataclasses.agents import (
     AgentCard,
     AgentIterationSnapshot,
@@ -143,6 +144,7 @@ from vidbyte.lib.dataclasses.tools import (
 )
 
 __all__ = [
+    "AdversarialSettings",
     "AgentCard",
     "AgentDispatch",
     "AgentIterationSnapshot",

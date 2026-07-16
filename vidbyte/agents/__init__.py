@@ -8,6 +8,7 @@ Purpose:
 Architecture:
     - BaseAgent: Client-facing agent coordinator.
     - AdversarialAgent: Runnerless sequential worker/reviewer refinement facade.
+    - AdversarialSettings: Portable immutable controls re-exported from agent settings.
     - AgentRegistry: Local/shared memory storage registry.
     - Swappable Runtimes: LinearAgentRuntime, SearchTreeRuntimeComponent, PointToPointActorRuntime, BroadcastActorRuntime.
     - Multi-Agent Team: MultiAgent, MagenticOneOrchestrator, TaskLedger, AgentBinding, and AgentTransfer.
@@ -20,11 +21,11 @@ Similar Files:
 from __future__ import annotations
 
 from vidbyte.agents.base import BaseAgent
-from vidbyte.agents.adversarial import AdversarialAgent, AdversarialResult, AdversarialReview, AdversarialRoundResult, AdversarialSettings
+from vidbyte.agents.adversarial import AdversarialAgent, AdversarialResult, AdversarialReview, AdversarialRoundResult
 from vidbyte.agents.aggregation import AggregateAgent, AggregateResult, MultiProviderAggregator
 from vidbyte.agents.client import AgentClient
 from vidbyte.agents.continual_trace import ContinualTraceAgent
-from vidbyte.agents.settings import AgentLoopSettings, ToolErrorPolicy, ToolSettings, UnrecoverableAction
+from vidbyte.agents.settings import AdversarialSettings, AgentLoopSettings, ToolErrorPolicy, ToolSettings, UnrecoverableAction
 from vidbyte.agents.contracts import (
     MinCompactions,
     MinCostSpent,

@@ -4,7 +4,8 @@ FILE:
     vidbyte/agents/adversarial.py owns the runnerless adversarial-review facade.
 PURPOSE:
     Coordinates a configured worker and reviewer prototype through exact sequential
-    review/revision rounds; keep looking elsewhere for provider or runner execution.
+    review/revision rounds with enforceable settings; keep looking elsewhere for
+    provider, runner, or unsupported topology execution.
 ROLE IN CODEBASE:
     Called through vidbyte.agents exports and AgentClient.adversarial(). Calls
     BaseAgent.fork()/generate_reply(), HandoffAgent, MCP cleanup, and SDK tracing.
@@ -12,8 +13,9 @@ ARCHITECTURE NOTE:
     The facade owns orchestration and public lifecycle state. Run-local child forks
     own model execution, tools, middleware, permissions, context, and MCP resources.
 PUBLIC CONTRACT INVENTORY (reviewed 2026-07-16):
-    AdversarialSettings validates round, reviewer, timeout, and forwarding limits.
-    AdversarialReview records one successful or failed reviewer attempt.
+    AdversarialSettings is imported from vidbyte.lib.dataclasses.adversarial and
+    validates reviewer shape, specialties, lifecycle, timeout, and call bounds.
+    AdversarialReview records one successful or failed reviewer attempt and lens.
     AdversarialRoundResult records one reviewed snapshot and worker revision.
     AdversarialResult records full successful outputs plus bounded summary metadata.
     AdversarialAgent.__init__(...) accepts child prototypes and facade metadata only;
@@ -23,8 +25,8 @@ PUBLIC CONTRACT INVENTORY (reviewed 2026-07-16):
     AdversarialAgent.card()/handoff(...) preserve supported BaseAgent integrations.
     Verification: existing repository suite plus compile/import/signature/package smoke.
 COMMON MODIFICATION PATTERNS:
-    Add a setting to AdversarialSettings, validate it there, include only a bounded
-    safe summary in message/card metadata, and document its call-cost implications.
+    Add enforceable settings in vidbyte/lib/dataclasses/adversarial.py, wire them into
+    this controller, include only bounded summaries, and document cost implications.
     Change prompt envelopes only in _AdversarialPromptRenderer so child-call ordering
     and lifecycle state remain independent of presentation details.
 WHAT NOT TO DO IN THIS FILE:
@@ -36,12 +38,13 @@ KNOWN EDGE CASES:
     Specialized child prototypes must implement subtype-preserving fork(); ordinary
     BaseAgent.fork() intentionally produces BaseAgent. Blank replies count as failures.
     Repeated worker passes may repeat write-side effects. Forwarding truncation never
-    truncates the full successful artifacts retained in last_result.
+    truncates full artifacts retained in last_result. Fresh reviewers add fork/cleanup
+    work but not model calls; total timeout cancellation still waits for safe cleanup.
 COMMON ERRORS RAISED BY THIS FILE:
     ConfigurationError identifies invalid settings, child types, unsupported facade
     capability attachment, or subtype-erasing forks and points to the owning boundary.
-    AdversarialExecutionError identifies worker failure/blank output or an unmet
-    successful-review threshold with safe phase, index, count, and child-name details.
+    AdversarialExecutionError identifies worker failure/blank output, an unmet
+    review threshold, or total run timeout with safe phase/count/child details.
 RELATED DOCS:
     https://github.com/cerredz/Vidbyte-SDK/blob/main/docs/design/adversarial-agent.md
     Load the design before changing API ownership, sequencing, failure policy, or cost.
@@ -50,7 +53,8 @@ TESTS:
     and the design document's ephemeral compile/import/signature/package checks.
 CONCURRENCY:
     One facade instance is mutable and not safe for overlapping runs. Reviewer calls
-    are sequential because child forks may share mutable runners or custom tool objects.
+    remain sequential, including fresh per-round forks, because children may share
+    mutable runners or custom tool objects.
 """
 
 from __future__ import annotations
@@ -66,6 +70,7 @@ from vidbyte.agents.base import BaseAgent
 from vidbyte.agents.types import AgentCard, AgentForkSettings, AgentInput, AgentMessage
 from vidbyte.context import BaseContext
 from vidbyte.context.handoff import Handoff, MinimalHandoff
+from vidbyte.lib.dataclasses.adversarial import AdversarialSettings
 from vidbyte.lib.dataclasses.agents import AgentMetadata
 from vidbyte.lib.enums import ModelModality
 from vidbyte.lib.errors import AdversarialExecutionError, ConfigurationError
@@ -77,66 +82,13 @@ _TRUNCATION_MARKER = "...[truncated]"
 
 
 @dataclass(frozen=True, slots=True)
-class AdversarialSettings:
-    """Validated controls for one exact adversarial workflow."""
-
-    num_adversaries: int = 1
-    adversarial_rounds: int = 1
-    min_successful_adversaries: int = 1
-    per_adversary_timeout: float | None = None
-    max_review_chars: int = 4000
-    max_worker_output_chars: int = 12000
-
-    def __post_init__(self) -> None:
-        # Reject invalid workflow cardinality and bounds before any child is forked or called.
-        self._require_positive_int("num_adversaries", self.num_adversaries)
-        self._require_positive_int("adversarial_rounds", self.adversarial_rounds)
-        self._require_positive_int("min_successful_adversaries", self.min_successful_adversaries)
-        self._require_positive_int("max_review_chars", self.max_review_chars)
-        self._require_positive_int("max_worker_output_chars", self.max_worker_output_chars)
-        if self.min_successful_adversaries > self.num_adversaries:
-            raise ConfigurationError(
-                "AdversarialSettings.min_successful_adversaries cannot exceed num_adversaries.",
-                details={
-                    "field": "min_successful_adversaries",
-                    "actual": self.min_successful_adversaries,
-                    "num_adversaries": self.num_adversaries,
-                    "expected": "1 <= min_successful_adversaries <= num_adversaries",
-                },
-            )
-        if self.per_adversary_timeout is not None and (isinstance(self.per_adversary_timeout, bool) or not isinstance(self.per_adversary_timeout, (int, float)) or self.per_adversary_timeout <= 0):
-            raise ConfigurationError(
-                "AdversarialSettings.per_adversary_timeout must be a positive number when provided.",
-                details={
-                    "field": "per_adversary_timeout",
-                    "actual_type": type(self.per_adversary_timeout).__name__,
-                    "expected": "positive int or float, or None",
-                },
-            )
-
-    @staticmethod
-    def _require_positive_int(field_name: str, value: int) -> None:
-        # Keep count and character limits strict; booleans are not accepted as integer settings.
-        if type(value) is int and value > 0:
-            return
-        raise ConfigurationError(
-            f"AdversarialSettings.{field_name} must be a positive integer.",
-            details={
-                "field": field_name,
-                "actual_type": type(value).__name__,
-                "actual": value,
-                "expected": "positive integer",
-            },
-        )
-
-
-@dataclass(frozen=True, slots=True)
 class AdversarialReview:
     """Outcome of one adversary's attempt to challenge a worker snapshot."""
 
     round_index: int
     adversary_index: int
     adversary_name: str
+    specialty: str | None = None
     content: str = ""
     error: str | None = None
     metadata: Mapping[str, Any] = field(default_factory=dict)
@@ -204,20 +156,25 @@ class _AdversarialPromptRenderer:
             )
         )
 
-    def render_review_prompt(self, workflow_instructions: str, original_task: str, worker_output: str, *, round_index: int, adversary_index: int) -> str:
-        # Give one reviewer an immutable bounded snapshot and ask for concrete challenges, not a rewrite.
-        return "\n".join(
+    def render_review_prompt(self, workflow_instructions: str, original_task: str, worker_output: str, *, round_index: int, adversary_index: int, specialty: str | None) -> str:
+        # Gives one reviewer only its assigned lens and an immutable bounded worker snapshot.
+        fields = [
+            "<vidbyte-adversarial-review>",
+            self._json_field("workflow_instructions", workflow_instructions),
+            self._json_field("original_task", original_task),
+            self._json_field("round_index", round_index),
+            self._json_field("adversary_index", adversary_index),
+        ]
+        if specialty is not None:
+            fields.append(self._json_field("specialty", specialty))
+        fields.extend(
             (
-                "<vidbyte-adversarial-review>",
-                self._json_field("workflow_instructions", workflow_instructions),
-                self._json_field("original_task", original_task),
-                self._json_field("round_index", round_index),
-                self._json_field("adversary_index", adversary_index),
                 self._json_field("worker_output", self._truncate(worker_output, self._settings.max_worker_output_chars)),
-                self._json_field("instruction", "Challenge concrete correctness, requirement-conformance, testing, security, completeness, safety, and maintainability defects. Inspect real artifacts with read-only tools when available. Return actionable objections; do not rewrite the implementation."),
+                self._json_field("instruction", "Prioritize the supplied specialty when present, while still reporting critical defects outside it. Challenge concrete correctness, requirement-conformance, testing, security, completeness, safety, and maintainability defects. Inspect real artifacts with read-only tools when available. Return actionable objections; do not rewrite the implementation."),
                 "</vidbyte-adversarial-review>",
             )
         )
+        return "\n".join(fields)
 
     def render_revision_prompt(self, workflow_instructions: str, original_task: str, worker_output: str, reviews: Sequence[AdversarialReview], *, round_index: int) -> str:
         # Present successful reviews as untrusted advice so the worker remains the final implementation authority.
@@ -294,10 +251,16 @@ class _AdversarialRunController:
             await self._close_run_agents()
 
     def _fork_run_agents(self) -> None:
-        # Create one worker and the configured reviewer set before the first model call.
+        # Creates the persistent worker and, by default, one reviewer set before model calls.
         self._worker = self._fork_prototype(self._worker_prototype, f"{self._facade_name}:worker")
-        self._adversaries = [
-            self._fork_prototype(self._adversary_prototype, f"{self._facade_name}:adversary:{index}")
+        if not self._settings.fresh_adversaries_each_round:
+            self._adversaries = self._fork_adversaries()
+
+    def _fork_adversaries(self, round_index: int | None = None) -> list[BaseAgent]:
+        # Forks one ordered reviewer set, preserving legacy names unless freshness is enabled.
+        prefix = self._facade_name if round_index is None else f"{self._facade_name}:round:{round_index}"
+        return [
+            self._fork_prototype(self._adversary_prototype, f"{prefix}:adversary:{index}")
             for index in range(1, self._settings.num_adversaries + 1)
         ]
 
@@ -342,7 +305,7 @@ class _AdversarialRunController:
         return child
 
     async def _run_rounds(self, initial_reply: AgentMessage) -> tuple[list[AdversarialRoundResult], AgentMessage, int, int]:
-        # Reuse the same run-local worker and reviewer per index across all exact rounds.
+        # Reuses the worker while applying the configured persistent or per-round reviewer lifecycle.
         rounds: list[AdversarialRoundResult] = []
         current_reply = initial_reply
         successful_total = 0
@@ -355,7 +318,9 @@ class _AdversarialRunController:
         return rounds, current_reply, successful_total, failed_total
 
     async def _run_round(self, round_index: int, current_reply: AgentMessage) -> tuple[AdversarialRoundResult, AgentMessage, int, int]:
-        # Review one immutable worker snapshot, enforce the threshold, and request one full revision.
+        # Fork fresh reviewers when requested, then review one snapshot and request one revision.
+        if self._settings.fresh_adversaries_each_round:
+            self._adversaries = self._fork_adversaries(round_index)
         snapshot = current_reply.content
         reviews = await self._collect_reviews(round_index, snapshot)
         successful_reviews = tuple(review for review in reviews if review.error is None)
@@ -370,11 +335,12 @@ class _AdversarialRunController:
         # Call reviewer forks sequentially so shared runner/tool objects never receive implicit concurrency.
         reviews: list[AdversarialReview] = []
         for adversary_index, adversary in enumerate(self._adversaries, start=1):
-            prompt = self._renderer.render_review_prompt(self._workflow_instructions, self._request.original_prompt, worker_output, round_index=round_index, adversary_index=adversary_index)
-            reviews.append(await self._call_adversary(adversary, prompt, round_index, adversary_index))
+            specialty = self._settings.specialty_for(adversary_index)
+            prompt = self._renderer.render_review_prompt(self._workflow_instructions, self._request.original_prompt, worker_output, round_index=round_index, adversary_index=adversary_index, specialty=specialty)
+            reviews.append(await self._call_adversary(adversary, prompt, round_index=round_index, adversary_index=adversary_index, specialty=specialty))
         return reviews
 
-    async def _call_adversary(self, adversary: BaseAgent, prompt: str, round_index: int, adversary_index: int) -> AdversarialReview:
+    async def _call_adversary(self, adversary: BaseAgent, prompt: str, *, round_index: int, adversary_index: int, specialty: str | None) -> AdversarialReview:
         # Convert ordinary reviewer errors, timeouts, and blank replies into ordered partial-failure records.
         span = self._tracer.start_span("adversarial.review", parent=self._trace_context, agent_name=adversary.name, role="reviewer", status="started", round_index=round_index, adversary_index=adversary_index)
         trace_metadata = {
@@ -391,13 +357,14 @@ class _AdversarialRunController:
                 raise ValueError("blank adversary reply")
             metadata = {"content_chars": len(content), "reply_metadata_keys": tuple(sorted(str(key) for key in reply.metadata))}
             self._tracer.end_span(span, output=f"{len(content)} characters")
-            return AdversarialReview(round_index=round_index, adversary_index=adversary_index, adversary_name=adversary.name, content=content, metadata=metadata)
+            return AdversarialReview(round_index=round_index, adversary_index=adversary_index, adversary_name=adversary.name, specialty=specialty, content=content, metadata=metadata)
         except Exception as exc:
             self._tracer.end_span(span, error=exc)
             return AdversarialReview(
                 round_index=round_index,
                 adversary_index=adversary_index,
                 adversary_name=adversary.name,
+                specialty=specialty,
                 error=f"{type(exc).__name__}: adversary review failed",
                 metadata={"error_type": type(exc).__name__},
             )
@@ -496,7 +463,12 @@ class _AdversarialRunController:
             "num_adversaries": self._settings.num_adversaries,
             "adversarial_rounds": self._settings.adversarial_rounds,
             "completed_rounds": len(rounds),
-            "child_call_count": 1 + self._settings.adversarial_rounds * (self._settings.num_adversaries + 1),
+            "child_call_count": self._settings.required_child_calls,
+            "required_child_calls": self._settings.required_child_calls,
+            "max_child_calls": self._settings.max_child_calls,
+            "specialty_count": len(self._settings.specialties),
+            "fresh_adversaries_each_round": self._settings.fresh_adversaries_each_round,
+            "run_timeout_seconds": self._settings.run_timeout_seconds,
             "worker_name": self._worker_prototype.name,
             "adversary_name": self._adversary_prototype.name,
         }
@@ -571,7 +543,7 @@ class AdversarialAgent(BaseAgent):
             trace_context = self._start_adversarial_trace(prompt, input_metadata, trace_metadata)
             request = _AdversarialRunRequest(message=message, original_prompt=prompt, modality=modality, context=context, history=(*tuple(history), *tuple(self.history)), options=dict(options))
             controller = _AdversarialRunController(facade_name=self.name, workflow_instructions=self.system_prompt, worker_prototype=self.worker, adversary_prototype=self.adversary, settings=self.settings, renderer=self._renderer, tracer=self._tracer, trace_context=trace_context, request=request)
-            outcome = await controller.run()
+            outcome = await self._run_controller(controller)
             reply = self._build_final_reply(outcome, recipient)
             self._tracer.end_trace(trace_context, output=outcome.result.final_output)
             trace_closed = True
@@ -637,6 +609,11 @@ class AdversarialAgent(BaseAgent):
             "per_adversary_timeout": self.settings.per_adversary_timeout,
             "max_review_chars": self.settings.max_review_chars,
             "max_worker_output_chars": self.settings.max_worker_output_chars,
+            "specialty_count": len(self.settings.specialties),
+            "fresh_adversaries_each_round": self.settings.fresh_adversaries_each_round,
+            "required_child_calls": self.settings.required_child_calls,
+            "max_child_calls": self.settings.max_child_calls,
+            "run_timeout_seconds": self.settings.run_timeout_seconds,
         }
         return AgentCard(
             name=self.name,
@@ -691,6 +668,11 @@ class AdversarialAgent(BaseAgent):
             "adversary_name": self.adversary.name,
             "num_adversaries": self.settings.num_adversaries,
             "adversarial_rounds": self.settings.adversarial_rounds,
+            "specialty_count": len(self.settings.specialties),
+            "fresh_adversaries_each_round": self.settings.fresh_adversaries_each_round,
+            "required_child_calls": self.settings.required_child_calls,
+            "max_child_calls": self.settings.max_child_calls,
+            "run_timeout_seconds": self.settings.run_timeout_seconds,
         }
         return self._tracer.start_trace(
             "agent.run",
@@ -714,6 +696,28 @@ class AdversarialAgent(BaseAgent):
         }
         metadata = {**dict(outcome.final_worker_reply.metadata), "adversarial": summary}
         return AgentMessage(sender=self.name, recipient=recipient, content=outcome.result.final_output, metadata=metadata)
+
+    async def _run_controller(self, controller: _AdversarialRunController) -> _AdversarialRunOutcome:
+        # Enforce the total deadline while allowing controller cancellation cleanup to finish first.
+        if self.settings.run_timeout_seconds is None:
+            return await controller.run()
+        try:
+            return await asyncio.wait_for(controller.run(), timeout=self.settings.run_timeout_seconds)
+        except asyncio.TimeoutError as exc:
+            raise AdversarialExecutionError(
+                f"AdversarialAgent '{self.name}' exceeded its configured total run timeout.",
+                details={
+                    "file": "vidbyte/agents/adversarial.py",
+                    "function": "AdversarialAgent._run_controller",
+                    "facade": self.name,
+                    "phase": "run_timeout",
+                    "error_type": "AdversarialRunTimeout",
+                    "run_timeout_seconds": self.settings.run_timeout_seconds,
+                    "required_child_calls": self.settings.required_child_calls,
+                    "expected": "active adversarial controller work to complete within run_timeout_seconds",
+                    "remediation": "Increase run_timeout_seconds or reduce reviewer count, review rounds, and child workload.",
+                },
+            ) from exc
 
     def _commit_success(self, prompt: str, reply: AgentMessage, outcome: _AdversarialRunOutcome) -> None:
         # Publish one facade turn only after every configured child stage has completed successfully.
