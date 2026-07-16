@@ -45,7 +45,7 @@ Do not claim a feature exists just because a design doc describes it. Confirm th
 vidbyte/
 |-- __init__.py          Root public exports.
 |-- client.py            VidbyteSDK namespace client.
-|-- agents/              Agent actors, runtime, runtimes (linear/search/actor), context-algorithm dispatcher, handoff agent, registry, MCP attach mixin.
+|-- agents/              Agent actors, adversarial/aggregate facades, runtimes, context-algorithm dispatcher, handoff agent, registry, MCP attach mixin.
 |   `-- multi/           Ledger-driven team facade, orchestrator, task ledger, worker transfers, and callback types.
 |-- context/             Public context primitives (package), manager, presets, context-window algorithms, handoff primitives, compaction, templates.
 |-- evals/               Eval suites, graders, runner, registry.
@@ -71,7 +71,7 @@ Keep central contracts under `vidbyte/lib/` when they are shared by multiple pac
 `vidbyte.__init__` is the broad convenience import surface. It currently exposes:
 
 - Root client: `VidbyteSDK`.
-- Agents: `Agent`, `BaseAgent`, `AgentClient`, `AgentInput`, `AgentCard`, `AgentMessage`, `AgentRegistry`, `AgentRunnerConfig`, `AgentSpec`.
+- Agents: `Agent`, `BaseAgent`, `AdversarialAgent`, `AdversarialSettings`, `AdversarialReview`, `AdversarialRoundResult`, `AdversarialResult`, `AgentClient`, `AgentInput`, `AgentCard`, `AgentMessage`, `AgentRegistry`, `AgentRunnerConfig`, `AgentSpec`.
 - Multi-agent teams: `MultiAgent`, `MagenticOneOrchestrator`, `MultiAgentOrchestrator`, `TaskLedger`, `AgentBinding`, `AgentTransfer`, `MultiAgentSettings`, `MultiAgentResult`, task/ledger/report contracts, `TaskStatus`, `OrchestratorAction`, and multi-agent errors.
 - Agent settings (`vidbyte.agents`): `AgentLoopSettings`, `ToolErrorPolicy`, `UnrecoverableAction`.
 - Contexts: `BaseContext`, `BaseAgentContext`, `ContextBudget`, `ContextPermissions`, `ContextManager`, `ContextWindow`, `ContextWindowAlgorithm`, `ToolResultAdmission`, `ContextItem`, `TextContextItem`, `FileContextItem`, `GitDiffContextItem`, `TaskContextItem`, `DocumentContextItem`, `EnvironmentContextItem`, `MemoryContextItem`, `ProgressContextItem`, `ArtifactContextItem`, `ResponseContextItem`, `ToolCallContextItem`, `TrajectoryCheckpointContextItem`, `PlanContextItem`.
@@ -99,6 +99,7 @@ Root exports are meant for common imports. More specialized built-ins should sti
 `vidbyte.client.VidbyteSDK` is a namespace aggregator. It constructs:
 
 - `sdk.agents`: `AgentClient`.
+- `sdk.agents.adversarial(**kwargs)`: constructs an `AdversarialAgent`; arguments pass unchanged so undeclared facade execution settings such as `runner=` raise `TypeError`.
 - `sdk.agents.multi(**kwargs)`: constructs a `MultiAgent` with the same keyword-only public constructor surface as the class.
 - `sdk.harnesses`: `HarnessClient`.
 - `sdk.harnesses.sessions`: `SessionClient` namespace for attach/export/import helpers.
@@ -112,6 +113,7 @@ There is no `sdk.strategies` namespace. Reasoning is configured per agent throug
 Primary files:
 
 - `vidbyte/agents/base.py`
+- `vidbyte/agents/adversarial.py`
 - `vidbyte/agents/client.py`
 - `vidbyte/agents/mixins.py`
 - `vidbyte/agents/runtime.py`, `vidbyte/agents/runtimes/`, `vidbyte/agents/context_algorithms.py`, `vidbyte/agents/algorithms/`
@@ -124,6 +126,7 @@ Primary files:
 Primary concepts:
 
 - `Agent = BaseAgent` is the ergonomic alias.
+- `AdversarialAgent` is a runnerless `BaseAgent`-compatible facade. It receives configured worker/adversary prototypes, runs exact sequential challenge/revision rounds, returns only the worker's final revision, and retains full typed detail in `last_result`.
 - `BaseAgent` is the executable actor. It owns name, system prompt, runtime selection, context-window algorithm, runner settings, explicit runners by modality, tools, permission policy, middleware, MCP attachment state, history, metadata, and capabilities.
 - `AgentInput` is a typed input wrapper with `prompt`, `modality`, `metadata`, optional `context_items`, and optional `context_manager`.
 - `AgentMessage` is the in-process message payload passed between agents.
@@ -163,6 +166,33 @@ MCP attachment:
 - Pending MCP configs can be connected lazily before execution.
 - Attached remote tools are bridged into native `BaseTool` objects.
 - Agents should close MCP servers through `close_mcp_servers()` or async context manager usage.
+
+## Adversarial Worker Refinement
+
+Primary files:
+
+- `vidbyte/agents/adversarial.py` — facade, settings/result records, deterministic prompt renderer, run-local controller, tracing, cleanup, cards, fork, and handoff.
+- `vidbyte/agents/client.py` — lazy `sdk.agents.adversarial(**kwargs)` constructor.
+- `vidbyte/lib/errors/base.py` — `AdversarialExecutionError` under the common `AgentExecutionError` boundary.
+- `skills/vidbyte-sdk/adversarial-agent.md` — maintained implementation and usage reference.
+
+Architecture:
+
+- The facade constructor accepts child prototypes plus facade identity/metadata/tracing only. It has no runner/provider/model/API-key/tool/MCP/output-schema configuration or `**kwargs` escape hatch.
+- A run forks one worker and `num_adversaries` reviewer children. Reviewers execute sequentially against the same immutable per-round worker snapshot; the same worker and reviewer per index are reused across rounds.
+- `adversarial_rounds` is exact. Successful call count is `1 + adversarial_rounds * (num_adversaries + 1)`.
+- Reviewer blank/error/timeout outcomes are ordered partial-failure records. Every round must meet `min_successful_adversaries`; worker errors or blank output are fatal.
+- Forwarding limits bound only later child prompts. Full successful outputs remain in `last_result`, while final message metadata contains a bounded summary and retains final worker metadata.
+- Run-local MCP resources close on success, failure, timeout, and cancellation. Prototype resources remain reusable.
+- Specialized prototypes must implement subtype-preserving `fork()`; subtype erosion raises before the first model call.
+- Facade-level tools and MCP attachment are rejected before side effects. Reviewers are not automatically read-only; callers must provide read-safe tools and permissions.
+- Worker revisions can repeat write-side effects. Prefer idempotent tools or state inspection before mutation.
+
+Compatibility:
+
+- The facade supports normal run/arun/sequential helpers, receive/history/behavior, registries, pipelines, `as_tool`, cards, safe facade forking, and explicit handoff.
+- Default handoff execution derives provider/model configuration from the worker prototype. Structured output and continual tracing remain child-owned.
+- Use `AggregateAgent` for independent proposals plus one synthesis, pipelines for fixed stage flow, workflows for code-owned state transitions, and `MultiAgent` for adaptive ledger-driven delegation.
 
 ## Ledger-Driven Multi-Agent Teams
 

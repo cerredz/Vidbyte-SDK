@@ -8,7 +8,7 @@ The Vidbyte SDK is a **Python-native agent framework**. Every interaction follow
 2. **Send a Prompt** — a plain string or a typed `AgentInput` with optional modality routing.
 3. **Receive a Reply** — an `AgentMessage` with content, sender, recipient, and metadata.
 
-Agents own their execution context: tools, runtime, context-window algorithm, middleware, history, budget, permissions, and modality routing. Pipelines wire agents together without shared state; `MultiAgent` coordinates open-ended teams through a shared, snapshot-based task ledger and developer-defined worker transfers.
+Agents own their execution context: tools, runtime, context-window algorithm, middleware, history, budget, permissions, and modality routing. Pipelines wire agents together without shared state; `AdversarialAgent` runs exact worker/challenger revision rounds; `MultiAgent` coordinates open-ended teams through a shared, snapshot-based task ledger and developer-defined worker transfers.
 
 ## Framework Boundaries
 
@@ -19,6 +19,7 @@ Agents own their execution context: tools, runtime, context-window algorithm, mi
 | **Runtime** | Execution paradigm the agent loop runs under | `AgentRuntimeType` (linear, mcts_search, actor model) — see [`skills/agent-runtimes/SKILL.md`](../agent-runtimes/SKILL.md) |
 | **Context-Window Algorithm** | SDK-selected runtime behavior that transforms what the model sees | `ContextWindow.preset.<name>` (reflexion, trajectory_checkpoints, grader), `ContextWindowAlgorithm` |
 | **Pipeline** | String-in/string-out wiring between agents (sequential, parallel, conditional, map-reduce) | `SequentialPipeline`, `ParallelPipeline`, `ConditionalPipeline`, `MapReducePipeline` |
+| **Adversarial Agent** | One worker remains final authority while configured reviewer forks challenge exact sequential rounds | `AdversarialAgent`, `AdversarialSettings`, `AdversarialResult` |
 | **Multi-Agent Team** | Manager-owned goals, ledger tasks, evidence, blockers, retries, and replanning across worker agents | `MultiAgent`, `MagenticOneOrchestrator`, `TaskLedger`, `AgentBinding`, `AgentTransfer` |
 | **Middleware** | Deterministic runtime policy code injected into the agent loop; not model-visible | `AgentMiddleware`, `MiddlewareDecision`, built-in middleware under `vidbyte/middleware/builtins/` |
 | **Prompt** | Repository-backed text assets, enum-keyed, importable as constants | `Prompts`, `Prompt`, direct string imports |
@@ -32,6 +33,7 @@ Agents own their execution context: tools, runtime, context-window algorithm, mi
 - **Single agent with tools**: Wrap a model with custom Python functions it can call during execution.
 - **Swappable runtimes**: Run an agent under a linear loop, an MCTS tree search, or an actor-model swarm via `runtime=...`.
 - **Pipelined workflows**: Chain agents sequentially, run them in parallel, route conditionally, or fan-out/fan-in with map-reduce.
+- **Adversarial refinement**: Challenge one worker's result with isolated reviewer forks before every exact worker revision round.
 - **Ledger-driven teams**: Delegate one ready task at a time, evaluate explicit worker reports, enforce evidence/completion gates, and replan after stalls or failure.
 - **Context-window algorithms**: Attach runtime behaviors like reflexion retries or trajectory checkpoints via `algorithm=ContextWindow.preset.<name>`.
 - **Durable sessions**: Persist, resume, fork, batch fork, rewind, tag, inspect usage, and export/import agent checkpoint DAGs.
@@ -127,6 +129,7 @@ For step-by-step instructions on specific SDK operations, see the usage skill fi
 | Create Agent with Tools | [`skills/usage/create_agent_with_tools.md`](../usage/create_agent_with_tools.md) | Attaching tools to agents, permission policy, built-in tools |
 | Import Prompt | [`skills/usage/import_prompt.md`](../usage/import_prompt.md) | `Prompts.get()`, direct imports, prompt families, full prompt listing |
 | Create Agents | [`skills/usage/create_agents.md`](../usage/create_agents.md) | `AgentRegistry`, multi-agent patterns, capability metadata |
+| Adversarial Agent | [`skills/vidbyte-sdk/adversarial-agent.md`](../vidbyte-sdk/adversarial-agent.md) | Runnerless worker/reviewer ownership, exact rounds, settings, results, and failures |
 | Create Pipeline | [`skills/usage/create_pipeline.md`](../usage/create_pipeline.md) | Sequential, parallel, conditional, map-reduce pipelines, nesting |
 | Multi-Agent Teams | [`skills/vidbyte-sdk/multi-agent.md`](../vidbyte-sdk/multi-agent.md) | Orchestrator/ledger lifecycle, transfers, completion gates, limits, errors |
 | Available Tools | [`skills/usage/available_tools.md`](../usage/available_tools.md) | Complete catalog of built-in tools (code search, filesystem, context primitives, memory, MCP) |
@@ -145,6 +148,7 @@ For step-by-step instructions on specific SDK operations, see the usage skill fi
 | Agent Runtimes | [`skills/agent-runtimes/SKILL.md`](../agent-runtimes/SKILL.md) | Linear, MCTS search, and actor-model runtimes |
 | Middleware (detailed) | [`skills/vidbyte-sdk/middleware.md`](../vidbyte-sdk/middleware.md) | Full middleware reference: hooks, decisions, built-in catalog, compaction |
 | Pipelines (detailed) | [`skills/vidbyte-sdk/pipelines.md`](../vidbyte-sdk/pipelines.md) | Full pipeline reference (topologies, composability, error handling) |
+| Adversarial Agent | [`skills/vidbyte-sdk/adversarial-agent.md`](../vidbyte-sdk/adversarial-agent.md) | Sequential worker/challenger refinement, ownership boundaries, limits, results, and errors |
 | Multi-Agent Teams | [`skills/vidbyte-sdk/multi-agent.md`](../vidbyte-sdk/multi-agent.md) | Ledger-driven orchestration, public contracts, extension seams, and boundaries |
 | Handoffs | [`skills/vidbyte-sdk/handoff.md`](../vidbyte-sdk/handoff.md) | Structured handoff documents and the handoff agent |
 | Context-Window Algorithms | [`skills/vidbyte-sdk/adding-context-window-algorithms.md`](../vidbyte-sdk/adding-context-window-algorithms.md) | Adding/changing attached context-window algorithms |
@@ -172,6 +176,7 @@ vidbyte/
 |-- client.py
 |-- agents/
 |   |-- base.py
+|   |-- adversarial.py        runnerless exact worker/reviewer refinement facade
 |   |-- handoff.py            HandoffAgent
 |   |-- runtime.py
 |   |-- context_algorithms.py runtime dispatcher for context-window algorithms
@@ -251,6 +256,7 @@ vidbyte/
 - Keep `vidbyte/` as the top-level Python package namespace.
 - Keep namespace clients in `vidbyte/harnesses/`, `vidbyte/tools/`, and `vidbyte/providers/`.
 - Keep agent actor abstractions in `vidbyte/agents/`.
+- Keep `AdversarialAgent` and its result/settings records in `vidbyte/agents/adversarial.py`; the facade must not accept runner/provider/model/tools/MCP configuration, and its child calls remain sequential until independent runner/tool ownership is explicit. Follow `skills/vidbyte-sdk/adversarial-agent.md`.
 - Keep agent execution runtimes (linear, MCTS search, actor model) in `vidbyte/agents/runtimes/`. Follow `skills/agent-runtimes/SKILL.md` when adding or modifying runtimes.
 - Keep context-window algorithm runtime adapters in `vidbyte/agents/algorithms/` and public config under `vidbyte/context/algorithms/`. Follow `skills/vidbyte-sdk/adding-context-window-algorithms.md`.
 - Keep the handoff primitive family under `vidbyte/context/handoff/` and `HandoffAgent` in `vidbyte/agents/handoff.py`. Follow `skills/vidbyte-sdk/handoff.md`.

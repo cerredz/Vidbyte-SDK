@@ -16,6 +16,33 @@ For open-ended team work, `vidbyte.agents.multi` exposes `MultiAgent`, a
 `BaseAgent`-compatible facade whose manager plans against a shared immutable
 ledger snapshot, delegates one worker per round, and can replan after failure.
 
+For implementation-plus-challenge work, `AdversarialAgent` is a runnerless
+`BaseAgent`-compatible facade. It forks one configured worker and a configured
+number of adversaries, runs reviewers sequentially against an immutable round
+snapshot, and returns only the worker's final revision. Child agents own all
+provider/model, tools, middleware, permissions, structured output, and MCP
+configuration.
+
+```python
+from vidbyte import AdversarialAgent, AdversarialSettings
+
+reviewed = AdversarialAgent(
+    name="reviewed-worker",
+    system_prompt="Deliver the strongest verified implementation.",
+    worker=configured_worker,
+    adversary=configured_read_only_reviewer,
+    settings=AdversarialSettings(num_adversaries=2, adversarial_rounds=2),
+)
+
+reply = await reviewed.arun("Implement the change.")
+```
+
+The facade constructor has no runner/provider/model parameters. Its exact call
+count is `1 + adversarial_rounds * (num_adversaries + 1)`. Configure read-only
+review tools explicitly, and remember that worker revisions can repeat write-side
+effects. Full artifacts are retained in `last_result`; public message metadata is
+bounded. See [`skills/vidbyte-sdk/adversarial-agent.md`](../../skills/vidbyte-sdk/adversarial-agent.md).
+
 ## Design Philosophy
 
 Agents are explicit composition objects rather than hidden global state. The SDK
@@ -110,6 +137,7 @@ machines; use `MultiAgent` when the manager must own progress and recovery.
 ## Key Modules
 
 - `base.py`: `BaseAgent`, inferred runner construction, tool binding, context assembly, trace setup, and runtime dispatch.
+- `adversarial.py`: runnerless worker/adversary sequencing, settings, result records, failure policy, and child cleanup.
 - `client.py`: namespace client used by `VidbyteSDK().agents`.
 - `runtimes/`: linear, search, and actor-model runtime components.
 - `handoff.py`: structured handoff generation from a completed agent run.

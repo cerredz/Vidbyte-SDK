@@ -733,4 +733,3 @@ Potential follow-up designs, not v1 blockers:
 
 - What: Require each adversary to return a schema with accept/revise verdicts and stop when all accept.
 - Why rejected: The supplied adversary may already own an output schema or specialized behavior. Plain nonblank review text keeps v1 composable, while exact rounds make cost/call semantics deterministic. Structured convergence deserves a separate compatible extension.
-

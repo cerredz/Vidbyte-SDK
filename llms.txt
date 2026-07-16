@@ -42,6 +42,7 @@ Vidbyte SDK is the developer-facing agent framework in the Vidbyte ecosystem. It
 ## Feature Summary
 
 - Agents and modality-aware model execution.
+- Runnerless adversarial worker refinement with exact sequential review/revision rounds.
 - Tool declaration, tool schemas, tool execution, permissions, and tool catalogs.
 - Agent-native fork tooling through `ForkConversationTool` for immediate isolated child execution.
 - Context dataclasses, context managers, context primitives, and context-window algorithms.
@@ -178,6 +179,40 @@ image_agent = sdk.agents.base(
 reply = image_agent.run("A clean product mockup on a white desk")
 print(reply.content)
 ```
+
+### Adversarial Worker Review
+
+`AdversarialAgent` is a `BaseAgent`-compatible facade for one configured worker
+that remains final authority while configured adversary forks challenge its
+output. The facade constructor intentionally has no runner/provider/model/API-key
+parameters. Configure model execution, tools, middleware, permissions, structured
+output, and MCP servers on the child prototypes.
+
+```python
+from vidbyte import AdversarialAgent, AdversarialSettings, BaseAgent
+
+worker = BaseAgent(name="worker", system_prompt="Implement and verify.", provider="openai", model_name="gpt-5", tools=worker_tools)
+adversary = BaseAgent(name="reviewer", system_prompt="Challenge concrete defects; never write.", provider="openai", model_name="gpt-5-mini", tools=read_only_tools)
+
+reviewed = AdversarialAgent(
+    name="reviewed-worker",
+    system_prompt="Deliver a correct implementation.",
+    worker=worker,
+    adversary=adversary,
+    settings=AdversarialSettings(num_adversaries=2, adversarial_rounds=2),
+)
+
+reply = await reviewed.arun("Implement the requested change.")
+```
+
+Each successful run makes exactly
+`1 + adversarial_rounds * (num_adversaries + 1)` child calls. Reviewers run
+sequentially against the same per-round snapshot, and `adversarial_rounds` is an
+exact count with no early stop. Partial reviewer failures are recorded; a round
+must still meet `min_successful_adversaries`. Full outputs remain in
+`last_result`; downstream prompt forwarding and public message metadata are
+bounded. Facade-level tool/MCP mutation is rejected before side effects. See
+`skills/vidbyte-sdk/adversarial-agent.md`.
 
 ### Multi-Agent Orchestration
 

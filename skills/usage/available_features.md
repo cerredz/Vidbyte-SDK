@@ -54,6 +54,34 @@ from vidbyte import (
 
 For detailed usage examples, see [`skills/usage/create_pipeline.md`](create_pipeline.md).
 
+## Adversarial Worker Refinement
+
+`AdversarialAgent` coordinates one configured worker prototype and one configured
+adversary prototype through exact sequential review/revision rounds. The worker
+produces the initial result and every revision; adversary forks challenge the same
+immutable snapshot within each round.
+
+```python
+from vidbyte import AdversarialAgent, AdversarialSettings
+
+reviewed = AdversarialAgent(
+    name="reviewed-worker",
+    system_prompt="Deliver the strongest verified implementation.",
+    worker=configured_worker,
+    adversary=configured_read_only_reviewer,
+    settings=AdversarialSettings(num_adversaries=2, adversarial_rounds=2),
+)
+
+reply = await reviewed.arun("Implement the change.")
+```
+
+The facade is runnerless: configure providers/models, tools, middleware,
+permissions, structured output, and MCP on the children. A successful run makes
+exactly `1 + adversarial_rounds * (num_adversaries + 1)` child calls, with no v1
+early stopping. Full artifacts live in `last_result`; public metadata and later
+prompt forwarding are bounded. See
+[`skills/vidbyte-sdk/adversarial-agent.md`](../vidbyte-sdk/adversarial-agent.md).
+
 ## Ledger-Driven Multi-Agent Teams
 
 `MultiAgent` is a `BaseAgent`-compatible facade for open-ended work that needs a manager to own the overall goal, delegate ready tasks, evaluate evidence, and replan after stalls or failures. Unlike a pipeline, a team shares an immutable view of a run-local `TaskLedger` and can choose a different next action after every worker report.

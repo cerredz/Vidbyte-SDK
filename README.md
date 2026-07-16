@@ -23,6 +23,7 @@ access remain outside this package.
 - Durable agent sessions that checkpoint, resume, fork, batch fork, tag, export/import, and summarize usage across long-running work.
 - MCP Studio servers that expose Vidbyte agents, tools, prompts, and pipelines to MCP-compatible clients.
 - Local eval suites with reusable graders, concurrency controls, and run registries.
+- Adversarial worker refinement where configured reviewers challenge each exact worker revision round.
 - Agent pipelines that compose specialized agents through sequential, parallel, conditional, and map-reduce topologies.
 - Typed state-machine workflows with validation gates, conditional branches, cycles, retries, and declared jumps.
 - Prompt libraries, context-window algorithms, and trace artifacts that make long-running agent work easier to inspect.
@@ -31,7 +32,7 @@ access remain outside this package.
 
 | Layer | Role |
 |-------|------|
-| [`vidbyte.agents`](vidbyte/agents/README.md) | Executable agent actors, runtimes, inferred runner selection, handoff, and agent registries |
+| [`vidbyte.agents`](vidbyte/agents/README.md) | Executable agent actors, adversarial refinement, runtimes, inferred runner selection, handoff, and agent registries |
 | [`vidbyte.cli`](vidbyte/cli/README.md) | Unified console command for SDK developer surfaces, currently `vidbyte-sdk skills` |
 | [`vidbyte.context`](vidbyte/context/README.md) | Structured context items, context windows, compaction, algorithms, and handoff models |
 | [`vidbyte.evals`](vidbyte/evals/README.md) | Local eval cases, suites, runners, graders, registries, and result summaries |
@@ -107,6 +108,53 @@ image_agent = sdk.agents.base(
 reply = image_agent.run("A clean product mockup on a white desk")
 print(reply.content)
 ```
+
+## Adversarial Worker Review
+
+Use `AdversarialAgent` when one configured worker should implement the task and
+configured reviewer forks should challenge each result before the worker revises
+it. The facade is deliberately runnerless: provider/model, tools, middleware,
+permissions, structured output, and MCP configuration belong on the worker and
+adversary prototypes.
+
+```python
+from vidbyte import AdversarialAgent, AdversarialSettings, BaseAgent
+
+worker = BaseAgent(
+    name="worker",
+    system_prompt="Implement and verify the requested change.",
+    provider="openai",
+    model_name="gpt-5",
+    tools=worker_tools,
+)
+adversary = BaseAgent(
+    name="reviewer",
+    system_prompt="Challenge concrete defects without mutating artifacts.",
+    provider="openai",
+    model_name="gpt-5-mini",
+    tools=read_only_tools,
+)
+reviewed = AdversarialAgent(
+    name="reviewed-worker",
+    system_prompt="Deliver a correct implementation that satisfies the repository constraints.",
+    worker=worker,
+    adversary=adversary,
+    settings=AdversarialSettings(num_adversaries=2, adversarial_rounds=2),
+)
+
+reply = await reviewed.arun("Implement the SDK feature.")
+print(reply.content)
+print(reviewed.last_result.rounds)
+```
+
+A successful run makes exactly
+`1 + adversarial_rounds * (num_adversaries + 1)` sequential child calls.
+Rounds are exact in v1; there is no early stopping. Full round artifacts live in
+`last_result`, while the final `AgentMessage` contains only bounded summary
+metadata. Facade-level tool/MCP attachment is rejected before side effects.
+See the [Adversarial Agent guide](skills/vidbyte-sdk/adversarial-agent.md) for
+failure thresholds, forwarding limits, fork/handoff behavior, and side-effect
+guidance.
 
 ## Multi-Agent Orchestration
 

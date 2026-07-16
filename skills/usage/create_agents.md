@@ -128,6 +128,32 @@ async def plan_and_code(task: str) -> str:
 
 This pattern works well for linear, fixed-role workflows where you know the exact agents and their order at code time.
 
+## Adversarial Worker Pattern
+
+Use `AdversarialAgent` when one worker should implement and remain final authority
+while a configurable number of adversaries challenge every exact revision round:
+
+```python
+from vidbyte import AdversarialAgent, AdversarialSettings
+
+reviewed = AdversarialAgent(
+    name="reviewed-coder",
+    system_prompt="Deliver a correct implementation that satisfies the task.",
+    worker=coder,
+    adversary=reviewer,
+    settings=AdversarialSettings(num_adversaries=2, adversarial_rounds=2),
+)
+
+reply = await reviewed.arun("Implement the feature.")
+```
+
+Do not pass a runner/provider/model to the facade. Those settings, tools, and MCP
+servers belong on `coder` and `reviewer`. The exact child-call count is
+`1 + adversarial_rounds * (num_adversaries + 1)`. Use explicitly read-only
+reviewer tools when mutation is undesirable, and inspect full round detail through
+`reviewed.last_result`. See
+[`skills/vidbyte-sdk/adversarial-agent.md`](../vidbyte-sdk/adversarial-agent.md).
+
 ## Multi-Agent Orchestration
 
 Use `MultiAgent` when a manager must own the overall goal, shared task progress,
@@ -142,6 +168,6 @@ flow. See [`skills/usage/create_pipeline.md`](create_pipeline.md).
 
 - **Use descriptive names and capabilities** â€” they are the primary keys for registry lookups and orchestration selection.
 - **Register agents early** â€” in a single setup function before any execution, not lazily during runs.
-- **Choose orchestration intentionally** — pipelines wire fixed output flow; `MultiAgent` gives a manager a shared ledger and recovery loop.
+- **Choose orchestration intentionally** — pipelines wire fixed output flow; `AdversarialAgent` challenges one worker through exact rounds; `MultiAgent` gives a manager a shared ledger and recovery loop.
 - **Keep agents focused** â€” each agent should have a single, clear responsibility defined by its system prompt and tools.
 
