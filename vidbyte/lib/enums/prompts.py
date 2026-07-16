@@ -5,12 +5,13 @@ Description:
     single source of truth for prompt identifiers.
 
 Purpose:
-    Enables static typing, autocomplete, and validation for the 51 static prompt templates
-    across 19 JSON/Markdown-backed families, including multi-agent manager phases.
+    Enables static typing, autocomplete, and validation for the 57 static prompt templates
+    across 20 JSON/Markdown-backed families, including multi-agent manager and debate phases.
 
 Architecture and Key Functions:
     - Prompt (Enum): Inherits from `str` and `Enum`. It maps high-level, semantic prompt
-      identifiers (constants) to their corresponding catalog-relative string paths.
+    identifiers (constants) to their corresponding catalog-relative string paths,
+    including the six prosecutor/defender/judge role prompts.
       Keys are used programmatically, while values map to assets under `vidbyte/prompts/prompts/`.
 
 Relation to the codebase as a whole:
@@ -82,6 +83,12 @@ class Prompt(str, Enum):
     TRAJECTORY_CHECKPOINTS_AGENTIC_SUMMARIZER = "trajectory_checkpoints.agentic_summarizer"
     PROBLEM_SPACE_SEARCH_EXPLORER = "problem_space_search.explorer"
     ERROR_CORRECTION_AUDITOR = "error_correction.auditor"
+    PROSECUTOR_DEFENDER_JUDGE_PROSECUTOR_SYSTEM_PROMPT = "prosecutor_defender_judge.prosecutor_system_prompt"
+    PROSECUTOR_DEFENDER_JUDGE_PROSECUTOR_PROMPT = "prosecutor_defender_judge.prosecutor_prompt"
+    PROSECUTOR_DEFENDER_JUDGE_DEFENDER_SYSTEM_PROMPT = "prosecutor_defender_judge.defender_system_prompt"
+    PROSECUTOR_DEFENDER_JUDGE_DEFENDER_PROMPT = "prosecutor_defender_judge.defender_prompt"
+    PROSECUTOR_DEFENDER_JUDGE_JUDGE_SYSTEM_PROMPT = "prosecutor_defender_judge.judge_system_prompt"
+    PROSECUTOR_DEFENDER_JUDGE_JUDGE_PROMPT = "prosecutor_defender_judge.judge_prompt"
 
 __all__ = [
     "Prompt",
