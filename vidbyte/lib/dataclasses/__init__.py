@@ -124,6 +124,14 @@ from vidbyte.lib.dataclasses.sources import (
 )
 from vidbyte.lib.dataclasses.runner import RunnerHandle
 from vidbyte.lib.dataclasses.strategies import AgentResult
+from vidbyte.lib.dataclasses.specialist_panel import (
+    SpecialistFailureRecord,
+    SpecialistFindingPayload,
+    SpecialistPanelReport,
+    SpecialistRequirementAssessmentPayload,
+    SpecialistReviewPayload,
+    SpecialistReviewRecord,
+)
 from vidbyte.lib.dataclasses.trace import (
     TraceField,
     TraceFieldType,
@@ -229,6 +237,12 @@ __all__ = [
     "SessionStatus",
     "SourceResult",
     "SourceSnapshot",
+    "SpecialistFailureRecord",
+    "SpecialistFindingPayload",
+    "SpecialistPanelReport",
+    "SpecialistRequirementAssessmentPayload",
+    "SpecialistReviewPayload",
+    "SpecialistReviewRecord",
     "TaskContextItem",
     "TaskBlocker",
     "TaskEvidence",

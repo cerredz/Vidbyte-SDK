@@ -22,7 +22,7 @@ Similar files:
 
 from __future__ import annotations
 
-from vidbyte.context.algorithms import ContextWindowAlgorithm, ErrorCorrectionAlgorithm, MultiProviderAgenticGraderAlgorithm, ProblemSpaceSearchAlgorithm, ReflexionAlgorithm, ToolResultAdmission, TrajectoryCheckpointAlgorithm
+from vidbyte.context.algorithms import ContextWindowAlgorithm, ErrorCorrectionAlgorithm, MultiProviderAgenticGraderAlgorithm, ProblemSpaceSearchAlgorithm, ReflexionAlgorithm, SpecialistPanelAlgorithm, SpecialistRole, ToolResultAdmission, TrajectoryCheckpointAlgorithm
 from vidbyte.context.compaction import CompactionMode, CompactionStats, ContextCompactionEngine, Summarizer
 from vidbyte.context.primitives import (
     ArtifactContextItem,
@@ -115,6 +115,8 @@ __all__ = [
     "ProblemSpaceSearchContextItem",
     "ProgressContextItem",
     "ReflexionAlgorithm",
+    "SpecialistPanelAlgorithm",
+    "SpecialistRole",
     "ResponseContextItem",
     "Summarizer",
     "TaskContextItem",

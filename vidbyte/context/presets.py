@@ -18,6 +18,7 @@ from vidbyte.context.algorithms import (
     MultiProviderAgenticGraderAlgorithm,
     ProblemSpaceSearchAlgorithm,
     ReflexionAlgorithm,
+    SpecialistPanelAlgorithm,
     TrajectoryCheckpointAlgorithm,
     ToolResultAdmission,
 )
@@ -97,6 +98,11 @@ class ContextWindowPresets:
             name="error_correction",
             error_correction=ErrorCorrectionAlgorithm(),
         )
+
+    @property
+    def specialist_panel(self) -> ContextWindowAlgorithm:
+        # Review one producer candidate with the default five isolated specialist roles.
+        return ContextWindowAlgorithm(name="specialist_panel", specialist_panel=SpecialistPanelAlgorithm())
 
 
 

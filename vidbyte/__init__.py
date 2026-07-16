@@ -177,6 +177,8 @@ from vidbyte.context import (
     ProblemSpaceSearchContextItem,
     ProgressContextItem,
     ReflexionAlgorithm,
+    SpecialistPanelAlgorithm,
+    SpecialistRole,
     ResponseContextItem,
     TaskContextItem,
     TextContextItem,
@@ -185,6 +187,7 @@ from vidbyte.context import (
     TrajectoryCheckpointAlgorithm,
     TrajectoryCheckpointContextItem,
 )
+from vidbyte.lib.dataclasses.specialist_panel import SpecialistFailureRecord, SpecialistFindingPayload, SpecialistPanelReport, SpecialistRequirementAssessmentPayload, SpecialistReviewPayload, SpecialistReviewRecord
 from vidbyte.tools.builtins.context_primitives import (
     CREATE_TOOL_REGISTRY,
     CreateContextPrimitiveTool,
@@ -552,6 +555,14 @@ __all__ = [
     "Prompt",
     "Prompts",
     "ReflexionAlgorithm",
+    "SpecialistFailureRecord",
+    "SpecialistFindingPayload",
+    "SpecialistPanelAlgorithm",
+    "SpecialistPanelReport",
+    "SpecialistRequirementAssessmentPayload",
+    "SpecialistReviewPayload",
+    "SpecialistReviewRecord",
+    "SpecialistRole",
     "ResponseContextItem",
     "RuntimeLimitMiddleware",
     "SummaryCompactionMiddleware",

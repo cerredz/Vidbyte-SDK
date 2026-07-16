@@ -10,7 +10,8 @@ Purpose:
 
 Architecture and Key Functions:
     - Prompt (Enum): Inherits from `str` and `Enum`. It maps high-level, semantic prompt
-      identifiers (constants) to their corresponding catalog-relative string paths.
+    identifiers (constants) to their corresponding catalog-relative string paths,
+    including isolated Specialist Panel reviewer prompts.
       Keys are used programmatically, while values map to assets under `vidbyte/prompts/prompts/`.
 
 Relation to the codebase as a whole:
@@ -54,6 +55,8 @@ class Prompt(str, Enum):
     MULTI_PROVIDER_AGENTIC_GRADER_AGENT_SYSTEM_PROMPT = "multi_provider_agentic_grader.agent_system_prompt"
     MULTI_PROVIDER_AGENTIC_GRADER_GRADER_SYSTEM_PROMPT = "multi_provider_agentic_grader.grader_system_prompt"
     MULTI_PROVIDER_AGENTIC_GRADER_GRADER_PROMPT = "multi_provider_agentic_grader.grader_prompt"
+    SPECIALIST_PANEL_REVIEWER_SYSTEM_PROMPT = "specialist_panel.reviewer_system_prompt"
+    SPECIALIST_PANEL_REVIEWER_PROMPT = "specialist_panel.reviewer_prompt"
     MULTI_PROVIDER_AGGREGATOR_SYNTHESIS_SYSTEM_PROMPT = "multi_provider_aggregator.synthesis_system_prompt"
     MULTI_PROVIDER_AGGREGATOR_SYNTHESIS_PROMPT = "multi_provider_aggregator.synthesis_prompt"
     MULTI_AGENT_ORCHESTRATOR_PLANNING_PROMPT = "multi_agent_orchestrator.planning_prompt"

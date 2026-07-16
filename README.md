@@ -274,6 +274,43 @@ agent = Agent(
 )
 ```
 
+Use a Specialist Panel when one completed candidate needs independent review by
+roles with different responsibilities and least-privilege evidence access. The
+candidate remains `reply.output`; role-provenanced reviews are available at
+`reply.metadata["specialist_panel"]`.
+
+```python
+from vidbyte import ContextWindowAlgorithm, SpecialistPanelAlgorithm, SpecialistRole
+
+panel = SpecialistPanelAlgorithm(
+    roles=(
+        SpecialistRole(
+            specialist_id="security",
+            responsibility="Identify trust-boundary and authorization defects",
+            instructions="Support every allegation with permitted evidence.",
+            output_requirements=("Assess every reachable trust boundary",),
+            tool_names=("grep",),
+            artifact_names=("threat-model",),
+        ),
+        SpecialistRole(
+            specialist_id="correctness",
+            responsibility="Validate behavioral and requirement correctness",
+            instructions="Trace the requested behavior through the candidate.",
+            output_requirements=("Assess every stated requirement",),
+            artifact_names=("requirements",),
+        ),
+    ),
+)
+agent = Agent(..., algorithm=ContextWindowAlgorithm(name="specialist_panel", specialist_panel=panel))
+reply = await agent.arun("Produce the implementation plan")
+reviews = reply.metadata["specialist_panel"]
+```
+
+Every named tool and artifact must exist in the producer's user-tool catalog or
+original context. The default `ContextWindow.preset.specialist_panel` uses five
+tool-free roles for correctness, security, performance, evidence, and requirement
+completeness.
+
 Per-call context can be supplied with `AgentInput` without mutating the agent's
 default context:
 

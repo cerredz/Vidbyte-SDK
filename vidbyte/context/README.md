@@ -57,7 +57,7 @@ context.upsert(
 - `multi_agent.py`: builds orchestration contexts and composes manager-facing primitives.
 - `window.py` and `presets.py`: context-window preset resolution.
 - `primitives/`: typed context items for files, tasks, progress, memory, responses, tool calls, and multi-agent orchestration state.
-- `algorithms/`: reflexion, grader, tool-result, and trajectory-checkpoint algorithms.
+- `algorithms/`: reflexion, grader, specialist-panel, tool-result, and inner-loop algorithms.
 - `compaction.py`: deterministic context compaction contracts and stats.
 - `handoff/`: structured handoff models.
 
@@ -65,3 +65,25 @@ context.upsert(
 
 Context is consumed by [`agents`](../agents/README.md), updated by some
 [`tools`](../tools/README.md), and bounded by [`middleware`](../middleware/README.md).
+
+## Specialist Panel
+
+`ContextWindow.preset.specialist_panel` runs one producer and reviews its exact
+candidate concurrently with five independent specialist roles. The algorithm is
+review-only: it preserves the producer's `output`, `structured`, `calls`,
+`strategy_name`, and existing metadata, then adds a versioned report at
+`result.metadata["specialist_panel"]`.
+
+Each reviewer receives only the original task, exact candidate, explicitly named
+artifacts, and explicitly named cloned user tools. It receives no producer history,
+memory, system prompt, previous calls, middleware, implicit completion tool, private
+options, or another specialist's findings. Missing or duplicate artifact names,
+unknown tools, and oversized exact inputs fail before fanout; the implementation
+never silently truncates reviewer evidence.
+
+`min_successful` defaults to all roles. Lower it deliberately to accept a partial
+report containing ordered typed failures for timed-out or invalid reviews. Review
+order always follows configured role order, not completion order, and findings are
+not merged or adjudicated. One producer model run plus one concurrent run per role
+is billed. Use critique-adjudicate-revise when findings should be filtered and sent
+to a revision worker instead of remaining advisory metadata.

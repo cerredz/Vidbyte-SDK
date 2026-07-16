@@ -1,0 +1,15 @@
+{
+  "name": "Specialist Panel",
+  "description": "Role-specific prompts for isolated, concurrent review of one producer candidate.",
+  "key": "specialist_panel",
+  "prompts": {
+    "reviewer_system_prompt": {
+      "path": "reviewer_system_prompt.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/specialist_panel/reviewer_system_prompt.md"
+    },
+    "reviewer_prompt": {
+      "path": "reviewer_prompt.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/specialist_panel/reviewer_prompt.md"
+    }
+  }
+}

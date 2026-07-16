@@ -54,27 +54,12 @@ from vidbyte.tools.types import ToolCall, ToolCallContext, ToolCallState, ToolRe
 class AgentRuntime:
     """Internal runtime for direct agent execution."""
 
-    def __init__(
-        self,
-        *,
-        agent_name: str,
-        system_prompt: str,
-        tools: Tools,
-        permission_policy: PermissionPolicy,
-        config: AgentRuntimeConfig | None = None,
-        tracer: TracerBase | None = None,
-        middleware: Sequence[AgentMiddleware] = (),
-        run_id: str | None = None,
-        algorithm: ContextWindowAlgorithm | str | None = None,
-        context_manager: ContextManager | None = None,
-        recorder: RecorderBase | None = None,
-        output_schema: type | Mapping[str, Any] | None = None,
-        output_contract: "AgentLoopSettingsOutputContract | None" = None,
-    ) -> None:
+    def __init__(self, *, agent_name: str, system_prompt: str, tools: Tools, permission_policy: PermissionPolicy, config: AgentRuntimeConfig | None = None, tracer: TracerBase | None = None, middleware: Sequence[AgentMiddleware] = (), run_id: str | None = None, algorithm: ContextWindowAlgorithm | str | None = None, context_manager: ContextManager | None = None, recorder: RecorderBase | None = None, output_schema: type | Mapping[str, Any] | None = None, output_contract: "AgentLoopSettingsOutputContract | None" = None, include_internal_tools: bool = True) -> None:
+        # Build isolated runtime-owned execution state; internal completion tools remain opt-out for reviewers.
         self.agent_name = agent_name
         self.system_prompt = system_prompt
         self.user_tools = tools
-        self.tools = with_internal_agent_tools(tools)
+        self.tools = with_internal_agent_tools(tools) if include_internal_tools else tools
         self.permission_policy = permission_policy
         self.config = config or AgentRuntimeConfig()
         self.run_id = run_id
