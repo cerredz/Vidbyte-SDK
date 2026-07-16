@@ -14,15 +14,17 @@ Relations:
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
-from vidbyte.agents.algorithms import MultiProviderAgenticGraderRuntimeAlgorithm, ReflexionRuntimeAlgorithm
+from vidbyte.agents.algorithms import MultiProviderAgenticGraderRuntimeAlgorithm, ParallelPanelRuntimeAlgorithm, ReflexionRuntimeAlgorithm
 from vidbyte.context.runtime import InnerContextWindowAlgorithm
 from vidbyte.lib.dataclasses.runner import RunnerHandle
 from vidbyte.lib.tracing import SpanContext
 from vidbyte.lib.dataclasses.context import BaseAgentContext
 from vidbyte.lib.dataclasses.strategies import AgentResult
+from vidbyte.lib.errors import AgentExecutionError
 
 if TYPE_CHECKING:
     from vidbyte.agents.runtimes import LinearAgentRuntime as AgentRuntime
@@ -40,6 +42,8 @@ class AgentRuntimeContextAlgorithms:
             return "reflexion"
         if self.runtime.algorithm.multi_provider_agentic_grader is not None:
             return "multi_provider_agentic_grader"
+        if self.runtime.algorithm.parallel_panel is not None:
+            return "parallel_panel"
         if self.runtime.algorithm.trajectory_checkpoints is not None:
             return "trajectory_checkpoints"
         if self.runtime.algorithm.problem_space_search is not None:
@@ -52,12 +56,14 @@ class AgentRuntimeContextAlgorithms:
         # Return whether the configured runtime algorithm matches name.
         return self.detect_algorithm() == name
 
-    def return_algorithm(self) -> ReflexionRuntimeAlgorithm | MultiProviderAgenticGraderRuntimeAlgorithm | None:
+    def return_algorithm(self) -> ReflexionRuntimeAlgorithm | MultiProviderAgenticGraderRuntimeAlgorithm | ParallelPanelRuntimeAlgorithm | None:
         # Return the configured runtime algorithm implementation.
         if self.runtime.algorithm.reflexion is not None:
             return ReflexionRuntimeAlgorithm(self.runtime, self.runtime.algorithm.reflexion)
         if self.runtime.algorithm.multi_provider_agentic_grader is not None:
             return MultiProviderAgenticGraderRuntimeAlgorithm(self.runtime, self.runtime.algorithm.multi_provider_agentic_grader)
+        if self.runtime.algorithm.parallel_panel is not None:
+            return ParallelPanelRuntimeAlgorithm(self.runtime, self.runtime.algorithm.parallel_panel)
         return None
 
     def inner_loop_algorithm(self) -> InnerContextWindowAlgorithm | None:
@@ -75,11 +81,14 @@ class AgentRuntimeContextAlgorithms:
         return self.inner_loop_algorithm() is not None
 
     async def arun(self, message: str, *, handle: RunnerHandle, context: BaseAgentContext, metadata: Mapping[str, Any] | None = None, options: Mapping[str, Any] | None = None, trace_context: SpanContext | None = None) -> AgentResult | None:
+        # Runs the configured outer algorithm under a semantic span, or returns None when absent.
         """Run the configured algorithm, or return None when no algorithm exists."""
         algorithm = self.return_algorithm()
         if algorithm is None:
             return None
-        span = self._start_algorithm_span(trace_context, algorithm=self.detect_algorithm() or "unknown", message=message)
+        algorithm_name = self.detect_algorithm() or "unknown"
+        trace_attributes = {"algorithm": algorithm_name, "message_chars": len(message)} if algorithm_name == "parallel_panel" else {"algorithm": algorithm_name, "message": message}
+        span = self._start_algorithm_span(trace_context, **trace_attributes)
         try:
             result = await algorithm.arun(
                 message,
@@ -89,10 +98,11 @@ class AgentRuntimeContextAlgorithms:
                 options=options,
                 trace_context=span or trace_context,
             )
-            self._end_algorithm_span(span, output=result.output)
+            self._end_algorithm_span(span, output="completed" if algorithm_name == "parallel_panel" else result.output)
             return result
         except BaseException as exc:
-            self._end_algorithm_span(span, error=exc)
+            safe_error = AgentExecutionError("Parallel panel algorithm failed.") if algorithm_name == "parallel_panel" and not isinstance(exc, asyncio.CancelledError) else exc
+            self._end_algorithm_span(span, error=safe_error)
             raise
 
     def _start_algorithm_span(self, parent: SpanContext | None, **attributes: Any) -> SpanContext | None:

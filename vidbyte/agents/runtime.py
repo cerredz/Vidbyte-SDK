@@ -4,9 +4,12 @@ Description:
     Defines the internal direct execution runtime for Vidbyte agents.
 Purpose:
     Keeps agent loop execution, context-window construction, tool execution,
-    permission checks, and provider-reported token accounting out of BaseAgent.
+    permission checks, provider-reported token accounting, and the exact
+    internal-tool capability boundary out of BaseAgent.
 Architecture:
     - AgentRuntime: Builds BaseAgentContext and runs direct model/tool loops.
+    - include_internal_tools: Defaults to current isDone behavior, while
+      isolated model-only stages can request an exact-empty tool surface.
 Relations:
     Used by vidbyte.agents.base. Depends on shared context, tool, security, and
     strategy dataclasses without owning modality routing or runner construction.
@@ -54,27 +57,13 @@ from vidbyte.tools.types import ToolCall, ToolCallContext, ToolCallState, ToolRe
 class AgentRuntime:
     """Internal runtime for direct agent execution."""
 
-    def __init__(
-        self,
-        *,
-        agent_name: str,
-        system_prompt: str,
-        tools: Tools,
-        permission_policy: PermissionPolicy,
-        config: AgentRuntimeConfig | None = None,
-        tracer: TracerBase | None = None,
-        middleware: Sequence[AgentMiddleware] = (),
-        run_id: str | None = None,
-        algorithm: ContextWindowAlgorithm | str | None = None,
-        context_manager: ContextManager | None = None,
-        recorder: RecorderBase | None = None,
-        output_schema: type | Mapping[str, Any] | None = None,
-        output_contract: "AgentLoopSettingsOutputContract | None" = None,
-    ) -> None:
+    def __init__(self, *, agent_name: str, system_prompt: str, tools: Tools, permission_policy: PermissionPolicy, config: AgentRuntimeConfig | None = None, tracer: TracerBase | None = None, middleware: Sequence[AgentMiddleware] = (), run_id: str | None = None, algorithm: ContextWindowAlgorithm | str | None = None, context_manager: ContextManager | None = None, recorder: RecorderBase | None = None, output_schema: type | Mapping[str, Any] | None = None, output_contract: "AgentLoopSettingsOutputContract | None" = None, include_internal_tools: bool = True) -> None:
+        # Initializes one runtime, optionally suppressing implicit tools for isolated model-only calls.
         self.agent_name = agent_name
         self.system_prompt = system_prompt
         self.user_tools = tools
-        self.tools = with_internal_agent_tools(tools)
+        self.include_internal_tools = include_internal_tools
+        self.tools = with_internal_agent_tools(tools) if include_internal_tools else tools
         self.permission_policy = permission_policy
         self.config = config or AgentRuntimeConfig()
         self.run_id = run_id

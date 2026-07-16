@@ -12,10 +12,14 @@ Relations:
     Used by vidbyte.context.window and BaseAgent.
 """
 
+from collections.abc import Mapping
+from typing import Any
+
 from vidbyte.context.algorithms import (
     ContextWindowAlgorithm,
     ErrorCorrectionAlgorithm,
     MultiProviderAgenticGraderAlgorithm,
+    ParallelPanelAlgorithm,
     ProblemSpaceSearchAlgorithm,
     ReflexionAlgorithm,
     TrajectoryCheckpointAlgorithm,
@@ -74,6 +78,25 @@ class ContextWindowPresets:
             multi_provider_agentic_grader=MultiProviderAgenticGraderAlgorithm(),
         )
 
+    def parallel_panel(self, reviewer_count: int = 3, min_successful_reviews: int = 2, max_concurrency: int | None = None, per_reviewer_timeout_seconds: float | None = None, panel_timeout_seconds: float | None = None, max_candidate_chars: int = 50_000, max_review_chars: int = 6_000, artifact_names: tuple[str, ...] = (), max_artifact_chars: int = 4_000, max_total_artifact_chars: int = 16_000, reviewer_system_prompt: str | None = None, reviewer_prompt: str | None = None, metadata: Mapping[str, Any] | None = None) -> ContextWindowAlgorithm:
+        # Builds a validated parallel-panel wrapper with caller-selected review limits.
+        config = ParallelPanelAlgorithm(
+            reviewer_count=reviewer_count,
+            min_successful_reviews=min_successful_reviews,
+            max_concurrency=max_concurrency,
+            per_reviewer_timeout_seconds=per_reviewer_timeout_seconds,
+            panel_timeout_seconds=panel_timeout_seconds,
+            max_candidate_chars=max_candidate_chars,
+            max_review_chars=max_review_chars,
+            artifact_names=artifact_names,
+            max_artifact_chars=max_artifact_chars,
+            max_total_artifact_chars=max_total_artifact_chars,
+            reviewer_system_prompt=reviewer_system_prompt,
+            reviewer_prompt=reviewer_prompt,
+            metadata=dict(metadata or {}),
+        )
+        return ContextWindowAlgorithm(name="parallel_panel", parallel_panel=config)
+
     @property
     def trajectory_checkpoints(self) -> ContextWindowAlgorithm:
         # Write deterministic trajectory checkpoints through ContextManager primitives.
@@ -115,6 +138,8 @@ def resolve_context_window_algorithm(
         preset = getattr(preset_registry, algorithm)
     except AttributeError as exc:
         raise ValueError(f"Unknown context window algorithm preset: {algorithm}") from exc
+    if callable(preset):
+        preset = preset()
     if not isinstance(preset, ContextWindowAlgorithm):
         raise ValueError(f"Unknown context window algorithm preset: {algorithm}")
     return preset
