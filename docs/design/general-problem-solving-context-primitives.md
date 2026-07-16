@@ -1,6 +1,6 @@
 # Design Doc: General Problem-Solving Context Primitives
 
-**Status:** Draft
+**Status:** Approved
 **Author:** Codex
 **Created:** 2026-07-16
 **Last Updated:** 2026-07-16
@@ -869,8 +869,8 @@ No files will be deleted.
 
 ## 12. Open Questions
 
-- [ ] Confirm that “add them” means the full nineteen-type revised catalog, not only the ten-type suggested initial subset. This design assumes all nineteen.
-- [ ] Confirm that all nineteen types should be exported from the SDK root. This design follows the current first-class primitive convention and assumes yes.
+- [x] Approval confirmed that “add them” means the full nineteen-type revised catalog, not only the ten-type suggested initial subset.
+- [x] Approval confirmed that all nineteen types should be exported from the SDK root.
 - [ ] Should lifecycle strings eventually become enums with construction-time validation? Proposed answer for this change: no; retain flexible strings and consider enums only alongside lifecycle tools or enforcement.
 - [ ] Should future model-callable tools support type-specific creation and resolution? Proposed answer: yes as a separate design, after the primitive API has stabilized.
 - [ ] Should `primitive_frozen` eventually prevent removal or support resolver authority? Proposed answer: potentially, but only in a separate `ContextManager` lifecycle/authority design because changing removal semantics is broader and potentially breaking.

@@ -49,9 +49,21 @@ Public items are importable from `vidbyte.context.primitives` (and most from
 
 ```python
 from vidbyte.context.primitives import (
-    TextContextItem, FileContextItem, GitDiffContextItem, TaskContextItem, PlanContextItem,
-    DocumentContextItem, EnvironmentContextItem, MemoryContextItem, ProgressContextItem,
-    ArtifactContextItem, ResponseContextItem, ToolCallContextItem, TrajectoryCheckpointContextItem,
+    ArtifactContextItem,
+    AssumptionChallengeContextItem,
+    CompletionGateContextItem,
+    DocumentContextItem,
+    EnvironmentContextItem,
+    FileContextItem,
+    GitDiffContextItem,
+    MemoryContextItem,
+    PlanContextItem,
+    ProgressContextItem,
+    ResponseContextItem,
+    TaskContextItem,
+    TextContextItem,
+    ToolCallContextItem,
+    TrajectoryCheckpointContextItem,
 )
 ```
 
