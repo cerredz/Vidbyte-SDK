@@ -873,25 +873,8 @@ class AgentRuntime:
             return stopped, 0
 
         engine = ContextCompactionEngine()
-        compacted = original_messages
+        compacted, after_tokens = await self._compact_provider_messages_for_budget(engine, message, current, original_messages, budget)
         current["messages"] = compacted
-        after_tokens = self._estimated_model_input_tokens(message, current)
-        max_messages = max(0, len(compacted) - 1)
-        while compacted and after_tokens > budget:
-            next_compacted, _ = await engine.compact_provider_messages(
-                compacted,
-                mode=CompactionMode.TRIM_WITH_PROVIDER_BOUNDARIES,
-                options={"max_messages": max_messages},
-            )
-            if len(next_compacted) >= len(compacted):
-                max_messages = max(0, max_messages - 1)
-                if max_messages > 0:
-                    continue
-                next_compacted = ()
-            compacted = next_compacted
-            current["messages"] = compacted
-            after_tokens = self._estimated_model_input_tokens(message, current)
-            max_messages = max(0, len(compacted) - 1)
 
         removed_messages = len(original_messages) - len(compacted)
         event = {
@@ -911,6 +894,32 @@ class AgentRuntime:
                 removed_messages=removed_messages,
             ), int(removed_messages > 0)
         return current, int(removed_messages > 0)
+
+    async def _compact_provider_messages_for_budget(self, engine: ContextCompactionEngine, message: str, call_options: Mapping[str, Any], provider_messages: Sequence[Mapping[str, Any]], budget: int) -> tuple[tuple[dict[str, Any], ...], int]:
+        # Finds the largest newest suffix that fits, using boundary repair on every candidate.
+        empty_options = dict(call_options)
+        empty_options["messages"] = ()
+        best_messages: tuple[dict[str, Any], ...] = ()
+        best_tokens = self._estimated_model_input_tokens(message, empty_options)
+        low = 1
+        high = len(provider_messages)
+        while low <= high:
+            candidate_limit = (low + high) // 2
+            candidate, _ = await engine.compact_provider_messages(
+                provider_messages,
+                mode=CompactionMode.TRIM_WITH_PROVIDER_BOUNDARIES,
+                options={"max_messages": candidate_limit},
+            )
+            candidate_options = dict(call_options)
+            candidate_options["messages"] = candidate
+            candidate_tokens = self._estimated_model_input_tokens(message, candidate_options)
+            if candidate_tokens <= budget:
+                best_messages = candidate
+                best_tokens = candidate_tokens
+                low = candidate_limit + 1
+            else:
+                high = candidate_limit - 1
+        return best_messages, best_tokens
 
     def _context_window_budget_stop(self, *, iteration_count: int, tokens_used: int | None, call_contexts: Sequence[ToolCallContext], before_tokens: int, after_tokens: int, removed_messages: int) -> AgentResult:
         # Returns a diagnostic hard stop without issuing provider I/O.
