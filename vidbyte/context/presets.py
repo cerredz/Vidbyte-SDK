@@ -15,6 +15,7 @@ Relations:
 from vidbyte.context.algorithms import (
     ContextWindowAlgorithm,
     ErrorCorrectionAlgorithm,
+    IndependentCriticAlgorithm,
     MultiProviderAgenticGraderAlgorithm,
     ProblemSpaceSearchAlgorithm,
     ReflexionAlgorithm,
@@ -73,6 +74,11 @@ class ContextWindowPresets:
             name="multi_provider_agentic_grader",
             multi_provider_agentic_grader=MultiProviderAgenticGraderAlgorithm(),
         )
+
+    @property
+    def independent_critic(self) -> ContextWindowAlgorithm:
+        # Review one producer candidate inside a fresh critic-only runtime.
+        return ContextWindowAlgorithm(name="independent_critic", independent_critic=IndependentCriticAlgorithm())
 
     @property
     def trajectory_checkpoints(self) -> ContextWindowAlgorithm:
