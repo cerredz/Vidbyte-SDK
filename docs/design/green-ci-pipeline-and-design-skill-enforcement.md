@@ -83,7 +83,7 @@ These global files are outside the Git repository. They cannot be committed in t
 
 ### Functional Requirements
 
-1. `pyproject.toml` must define a `dev` optional dependency group containing the tools required by the local CI command: pytest, build, and twine.
+1. `pyproject.toml` must define a `dev` optional dependency group containing the tools required by the local CI command: pytest, pytest-asyncio, build, and twine.
 2. `pyproject.toml` must configure pytest with `testpaths = ["tests"]` and strict configuration/marker handling.
 3. `scripts/run_ci.py` must be the canonical cross-platform local entry point and must run successfully from a clean repository worktree with `python scripts/run_ci.py` after `python -m pip install -e ".[dev]"`.
 4. The default local command must run every V1 gate: generated-file hygiene, source compilation, the complete test suite, distribution build, metadata validation, wheel inspection, clean wheel installation, dependency validation, and installed-package smoke checks.
@@ -263,7 +263,7 @@ python scripts/run_ci.py --stage package --dist-dir dist
 
 ### 6.3 Green Baseline Reconciliation
 
-**File(s):** `tests/agent_test_support.py`, the 26 test files listed in Section 9, `vidbyte/agents/base.py`, `vidbyte/agents/aggregation.py`, `scripts/test_aggregate_agent.py`
+**File(s):** `tests/agent_test_support.py`, the 17 test files listed in Section 9, and the five `vidbyte/agents/` implementation files listed there
 **Type:** New file, Modified
 
 #### What it does
@@ -554,34 +554,27 @@ Complete list of every file that will be created, modified, or deleted:
 | MODIFY | `README.md` | Document the canonical local pipeline command |
 | MODIFY | `CONTRIBUTING.md` | Replace separate pre-PR commands with the canonical gate |
 | MODIFY | `vidbyte/agents/base.py` | Restore removal of the accidentally reintroduced aggregation overload while preserving runner inference |
-| MODIFY | `vidbyte/agents/aggregation.py` | Keep documentation aligned with dedicated aggregation ownership |
-| MODIFY | `scripts/test_aggregate_agent.py` | Align the existing verification wrapper with the restored aggregation boundary |
+| MODIFY | `vidbyte/agents/continual_trace.py` | Carry the inferred source runner into the internal continual-trace agent |
+| MODIFY | `vidbyte/agents/handoff.py` | Carry the inferred source runner into the internal handoff generator |
+| MODIFY | `vidbyte/agents/algorithms/multi_provider_agentic_grader.py` | Consume the current three-value middleware invocation result |
+| MODIFY | `vidbyte/agents/algorithms/reflexion.py` | Consume the current three-value middleware invocation result |
 | MODIFY | `tests/test_agent_base.py` | Remove stale ConfiguredAgentRunner/public runner-injection assumptions |
 | MODIFY | `tests/test_agent_behavior.py` | Use the shared offline runner support |
 | MODIFY | `tests/test_agent_fork_isolation.py` | Align fork fixtures with provider/model inference and isolated caches |
 | MODIFY | `tests/test_agent_middleware.py` | Use the shared offline runner support |
-| MODIFY | `tests/test_agent_modality_routing.py` | Align runner-inference tests with current contracts |
-| MODIFY | `tests/test_agent_runtime.py` | Remove only stale agent-facing modality assumptions while retaining runtime-level coverage |
 | MODIFY | `tests/test_agent_tool.py` | Use the shared offline runner support |
 | MODIFY | `tests/test_agent_tool_loop.py` | Use the shared offline runner support |
-| MODIFY | `tests/test_aggregate_agent.py` | Enforce dedicated aggregation and rejected BaseAgent overloads |
-| MODIFY | `tests/test_context_compaction_middleware.py` | Use the shared offline runner support |
-| MODIFY | `tests/test_context_window_templates.py` | Update stale fake-runner result-shape patches |
 | MODIFY | `tests/test_continual_trace.py` | Use the shared offline runner support |
+| MODIFY | `tests/test_concurrent_middleware.py` | Replace a real-time concurrency wait with deterministic clock advancement while strengthening the exact probe-count assertion |
 | MODIFY | `tests/test_create_handoff_tool.py` | Use the shared offline runner support |
 | MODIFY | `tests/test_durable_sessions.py` | Remove stale RunState modality fields and use offline runner support |
-| MODIFY | `tests/test_error_correction_algorithm.py` | Use the shared offline runner support |
 | MODIFY | `tests/test_evals.py` | Use the shared offline runner support |
 | MODIFY | `tests/test_fork_tool.py` | Remove stale fork modality expectations and use offline runner support |
 | MODIFY | `tests/test_handoff_agent.py` | Use the shared offline runner support |
 | MODIFY | `tests/test_mcp_attachment.py` | Use the shared offline runner support |
 | MODIFY | `tests/test_mcp_studio_server.py` | Use the shared offline runner support |
-| MODIFY | `tests/test_multi_provider_agentic_grader.py` | Patch the current Runner build/result contract |
-| MODIFY | `tests/test_problem_space_search_algorithm.py` | Use the shared offline runner support |
-| MODIFY | `tests/test_reflexion_algorithm.py` | Patch the current Runner build/result contract |
 | MODIFY | `tests/test_semantic_tracing.py` | Use the shared offline runner support |
 | MODIFY | `tests/test_tracing.py` | Use the shared offline runner support |
-| MODIFY | `tests/test_trajectory_checkpoint_algorithm.py` | Use the shared offline runner support |
 | MODIFY | `C:\Users\422mi\.codex\skills\design-doc-no-tests\SKILL.md` | Add the Vidbyte local/remote green persistence gate |
 | MODIFY | `C:\Users\422mi\.codex\skills\design-doc-no-tests\agents\openai.yaml` | Remove stale “verification not required” UI wording |
 | MODIFY | `C:\Users\422mi\.claude\skills\design-doc-no-tests\SKILL.md` | Add the same Vidbyte local/remote green persistence gate |
@@ -589,7 +582,9 @@ Complete list of every file that will be created, modified, or deleted:
 | CREATE | `C:\Users\422mi\.grok\skills\design-doc-no-tests\SKILL.md` | Install a native Grok-global version of the workflow |
 | CREATE | `C:\Users\422mi\.grok\skills\design-doc-no-tests\references\design-doc-template.md` | Supply the design template referenced by the Grok skill |
 
-**Totals: 6 created, 37 modified, 0 deleted.** Four created files and 33 modified files belong to the repository implementation/PR; two created files and four modified files are user-global external rollout artifacts.
+**Totals: 6 created, 30 modified, 0 deleted.** Four created files and 26 modified files belong to the repository implementation/PR; two created files and four modified files are user-global external rollout artifacts.
+
+Implementation discovery narrowed the planned API-migration edits from 26 test files to 16: after the shared offline runner seam and production boundary fixes landed, the other ten enumerated tests already matched the current API and needed no edits. A seventeenth test file was added after the canonical full run exposed a real-time circuit-breaker wait that could flake under suite load; its deterministic clock now asserts the stronger exact one-probe/two-rejection result. Four production files were added because the complete suite exposed two internal agents that needed to inherit the inferred runner cache and two algorithms that still unpacked an older middleware result shape. These are direct baseline repairs required by the approved green-CI scope, not new feature behavior.
 
 ---
 
@@ -599,6 +594,7 @@ Complete list of every file that will be created, modified, or deleted:
 |------------|--------------------|---------|------|
 | Python | 3.11 and 3.12 in hosted CI | Supported-version source validation | `requires-python >=3.11` is broader than the V1 matrix |
 | pytest | >=8 development extra | Canonical collection/runner for existing unittest-compatible suite | Tool upgrades may surface stricter collection behavior |
+| pytest-asyncio | >=0.23 development extra | Async test execution and declared asyncio configuration/markers on clean runners | Plugin upgrades may change loop-scope defaults; the repository pins its intended fixture scope |
 | build | >=1 development extra | Standards-based wheel/sdist construction | Build backend changes can alter package contents; wheel inspection gates this |
 | twine | >=5 development extra | Distribution metadata validation | Metadata validation does not replace installed-wheel smoke testing |
 | Python `venv`, `subprocess`, `pathlib` | Standard library | Cross-platform clean installation and orchestration | Venv creation can fail in incomplete Python installations |

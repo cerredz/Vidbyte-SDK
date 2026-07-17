@@ -2,6 +2,7 @@
 
 [![PyPI version](https://img.shields.io/pypi/v/vidbyte-sdk.svg)](https://pypi.org/project/vidbyte-sdk/)
 [![Python versions](https://img.shields.io/pypi/pyversions/vidbyte-sdk.svg)](https://pypi.org/project/vidbyte-sdk/)
+[![CI](https://github.com/cerredz/Vidbyte-SDK/actions/workflows/ci.yml/badge.svg)](https://github.com/cerredz/Vidbyte-SDK/actions/workflows/ci.yml)
 [![Publish to PyPI](https://github.com/cerredz/Vidbyte-SDK/actions/workflows/publish.yml/badge.svg)](https://github.com/cerredz/Vidbyte-SDK/actions/workflows/publish.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
@@ -1371,10 +1372,14 @@ Private Vidbyte service implementations, proprietary learning evaluations, promp
 ## Local Verification
 
 ```bash
-python -m compileall vidbyte
-python -m unittest discover -s tests
-python -c "from vidbyte import Agent, Tools, VidbyteSDK, tool; sdk = VidbyteSDK(); print(Agent.__name__, Tools.__name__, type(sdk.agents).__name__, callable(tool))"
+python -m pip install -e ".[dev]"
+python scripts/run_ci.py
 ```
+
+The same command runs the required source and installed-package gates used by
+pull requests and releases. For a focused diagnostic rerun, use
+`--stage source` or `--stage package`; always finish with the full command before
+opening or updating a pull request.
 
 ## Contributing and Support
 
