@@ -610,6 +610,27 @@ agent = Agent(
 
 `denied_tools` is useful even when tools are passed explicitly: it documents team policy and blocks tools acquired dynamically by name. Internal runtime tools (such as the completion tool) are never blocked. With `on_deny="continue"` (default), a denied or over-per-tool-budget call is recorded as a denied tool result the model sees, and the run continues; with `on_deny="abort"` the run stops with stop reason `tool_settings_denied`. Budget-class limits hard-stop the run with dedicated stop reasons: `max_calls` / `max_tool_calls`, `max_calls_per_iteration`, `max_identical_calls`, `max_consecutive_failures`, `max_error_calls`, and `sliding_window_max_calls`. `on_deny` does **not** soft-continue those budgets. `tool_timeout_seconds` cancels hung tool awaits best-effort via `asyncio.wait_for` and records a failed tool result that counts toward failure budgets. `sliding_window_max_calls` and `sliding_window_iterations` must both be set or both omitted. `result_max_chars` truncates only the model-visible tool result while the raw `ToolResult` remains available in runtime metadata. `ToolSettings.max_calls` and `AgentLoopSettings.max_tool_calls` map to the same budget and must match if both are set. `ToolSettings` complements, and does not replace, `PermissionPolicy`.
 
+The direct text runtime also enforces the advanced `AgentLoopSettings` safeguards themselves:
+
+```python
+agent = Agent(
+    name="bounded-worker",
+    system_prompt="Research with the approved tools and finish within the runtime envelope.",
+    provider="openai",
+    model_name="gpt-4.1",
+    tools=[search, read_file, delete_file],
+    agent_loop_settings=AgentLoopSettings(
+        max_parallel_tool_calls=4,           # concurrent bodies; results stay in provider order
+        max_retries=2,                       # model retries after the initial failed attempt
+        timeout_seconds=60.0,                # one deadline around the complete direct run
+        context_window_budget=16000,         # deterministic approximate input-token ceiling
+        allowed_tools=("search", "read_file"),  # user-tool schemas plus execution allowlist
+    ),
+)
+```
+
+`allowed_tools=()` hides and denies every user tool while keeping internal control tools such as `isDone`. A hidden tool requested anyway is denied before lookup, permission checks, validation, or execution. Context budgeting uses the SDK's deterministic four-characters-per-token approximation and trims old provider messages without mutating `BaseAgentContext`; fixed input that still cannot fit stops with `context_window_budget`. Model retry exhaustion and whole-run timeout stop with `max_retries` and `timeout`. These settings apply to the default direct text runtime, and only settings with a live numeric current/limit counter appear in the injected loop-settings prompt block.
+
 Compaction middleware supports deterministic provider-message pruning without hidden model calls. Examples include `trim_to_token_budget`, `trim_with_provider_boundaries`, `delete_messages`, `tool_output_sliding_window`, `clear_tool_results_except`, `head_tail_tool_preview`, `scrub_bloat`, `summary_with_backrefs`, `selective_prune`, `salience_score_eviction`, `query_relevance_filter`, and `context_snapshot_branch_trim`.
 
 ```python

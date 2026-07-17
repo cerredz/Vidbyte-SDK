@@ -54,7 +54,11 @@ settings = AgentLoopSettings(
     max_iterations=10,
     max_tokens=8000,
     max_tool_calls=20,
+    max_parallel_tool_calls=4,
+    max_retries=2,
     timeout_seconds=60.0,
+    context_window_budget=16000,
+    allowed_tools=("search", "read_file"),
 )
 
 agent = BaseAgent(
@@ -92,6 +96,11 @@ These parameters are stored on `AgentLoopSettings`, validated at construction ti
 | `max_iterations` | `int \| None` | `None` | Maximum number of model call + tool call cycles. The loop stops with `stop_reason=max_iterations` when this count is reached. Originally exposed as `max_tool_rounds`. |
 | `max_tokens` | `int \| None` | `None` | Maximum cumulative tokens consumed across all model calls in the run. The loop stops with `stop_reason=max_tokens` when usage reaches this ceiling. |
 | `max_tool_calls` | `int \| None` | `None` | Maximum total tool invocations across the entire run. Independent of iterations — an agent can hit this limit without exhausting `max_iterations` if it fans out many tools per iteration. Stops with `stop_reason=max_tool_calls`. |
+| `max_parallel_tool_calls` | `int \| None` | `None` | Maximum tool bodies dispatched concurrently within one direct-runtime iteration. `None` preserves legacy sequential execution and `1` forces sequential execution. Results are committed in provider order. |
+| `max_retries` | `int \| None` | `None` | Maximum model-call retries after the initial failed attempt. The setting enables immediate model retries on its own and caps middleware-requested retries. Tool bodies are not retried by this setting. Exhaustion stops with `stop_reason=max_retries`. |
+| `timeout_seconds` | `float \| None` | `None` | One wall-clock deadline around the complete direct run, including context algorithms, middleware, model calls, and tool calls. Expiry stops with `stop_reason=timeout`. |
+| `context_window_budget` | `int \| None` | `None` | Approximate maximum model-input tokens. The runtime uses a deterministic four-characters-per-token estimate, trims oldest removable provider messages with boundary repair, and stops with `stop_reason=context_window_budget` when fixed input cannot fit. |
+| `allowed_tools` | `tuple[str, ...] \| None` | `None` | User-tool allowlist enforced in provider schemas and again before lookup, permission checks, validation, or execution. `()` denies all user tools. Internal runtime tools such as `isDone` remain available. |
 | `compaction_trigger_tokens` | `int \| None` | `None` | Token usage level at which context compaction triggers. Must be greater than `compaction_target_tokens`. |
 | `compaction_target_tokens` | `int \| None` | `None` | Target token usage after compaction completes. Must be less than `compaction_trigger_tokens`. |
 
@@ -147,17 +156,9 @@ settings = AgentLoopSettings(
 )
 ```
 
-### 3.2 Validated but Reserved (Not Yet Enforced at Runtime)
+### 3.2 Direct-Runtime Scope and Ordering
 
-These parameters are accepted and validated on `AgentLoopSettings` at construction time, but the execution loop does not yet read or enforce them. They are stored on the settings object for introspection and documented here so that future runtime implementations have a stable API to target.
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `max_parallel_tool_calls` | `int \| None` | `None` | Maximum number of tool calls that can be dispatched concurrently within a single iteration. A value of `1` forces strictly sequential tool execution. |
-| `max_retries` | `int \| None` | `None` | Per-step retry budget. How many times the runtime may retry a failed model call or tool call before treating it as a hard failure and stopping the loop. |
-| `timeout_seconds` | `float \| None` | `None` | Wall-clock time limit for the entire run in seconds. Distinct from iteration or token limits — enforces an absolute time ceiling regardless of progress. |
-| `context_window_budget` | `int \| None` | `None` | Tokens reserved for context messages (history, tool results, primitives) as opposed to generation. Helps the agent self-regulate verbosity when it is aware that its context is constrained. |
-| `allowed_tools` | `tuple[str, ...] \| None` | `None` | Explicit whitelist of tool names this agent is permitted to call. When set, the runtime will refuse any tool call whose name is not in this set. |
+These safeguards apply to the default direct text runtime. They do not implicitly change MCTS, actor-model, or non-text runtimes. Parallel dispatch performs allowlist and middleware preflight in provider order, executes approved bodies under the configured ceiling, and finalizes contexts and model-visible results in provider order. The first `isDone` call is a barrier: later calls in the same model response are not dispatched. A hallucinated hidden tool is recorded as denied with reason `tool_not_allowed_by_loop_settings` and still consumes normal tool-call accounting.
 
 ---
 
@@ -187,6 +188,9 @@ When the runtime stops due to an `AgentLoopSettings` budget, the `AgentResult.me
 | `"max_iterations"` | `max_iterations` reached |
 | `"max_tokens"` | `max_tokens` reached |
 | `"max_tool_calls"` | `max_tool_calls` / `ToolSettings.max_calls` reached |
+| `"timeout"` | Whole-run `timeout_seconds` deadline expired |
+| `"max_retries"` | Configured model-call retries were exhausted |
+| `"context_window_budget"` | Fixed model input could not fit the approximate context budget |
 | `"max_calls_per_iteration"` | `ToolSettings.max_calls_per_iteration` hard-stop |
 | `"max_identical_calls"` | `ToolSettings.max_identical_calls` hard-stop |
 | `"max_consecutive_failures"` | `ToolSettings.max_consecutive_failures` hard-stop |
@@ -222,7 +226,7 @@ Only budgets that are **both numerically calculable and tracked by the runtime l
 | `max_tokens` | cumulative tokens used so far |
 | `max_tool_calls` | live tool-call count |
 
-Budgets that have no meaningful live "current/limit" measurement are intentionally **excluded** from the context window: `max_retries`, `timeout_seconds`, `allowed_tools`, `max_parallel_tool_calls`, `context_window_budget`, and the compaction params. They remain available for introspection on `agent.agent_loop_settings`.
+Settings that have no meaningful live "current/limit" measurement are intentionally **excluded** from this block: `max_retries`, `timeout_seconds`, `allowed_tools`, `max_parallel_tool_calls`, `context_window_budget`, and the compaction params. The direct runtime still enforces them at model, tool, and whole-run boundaries, and they remain available for introspection on `agent.agent_loop_settings`.
 
 A budget that is not configured (`None`) is omitted from the block. When none of the calculable budgets are set, no block is injected at all and the system context is unchanged.
 
@@ -260,14 +264,9 @@ has_tool_policy = agent.agent_loop_settings.tool_settings is not None
 
 ---
 
-## 9. Future Roadmap
+## 9. Remaining Limitations
 
-The following runtime enforcement work is deferred to follow-up PRs:
-
-- `max_parallel_tool_calls`: requires tool dispatch concurrency control in `AgentRuntime._process_tool_call`.
-- `max_retries`: requires per-step retry loop integration into `AgentRuntime._invoke_with_middleware`.
-- `timeout_seconds`: requires async wall-clock tracking via `asyncio.wait_for` wrapping the run.
-- `context_window_budget`: requires the compaction middleware to read this value as a signal.
-- `allowed_tools`: requires a pre-execution check in `AgentRuntime.execute_tool_call`.
-
-Each deferred param is already validated and stored; adding runtime enforcement only requires reading the existing attribute.
+- `max_retries` covers model invocations only. Automatic tool-body retries require an explicit idempotency-aware policy such as the existing tool-error middleware.
+- `context_window_budget` is deterministic but approximate; it does not use provider-specific tokenizers.
+- Async cancellation is best-effort. Synchronous work already offloaded to a thread may continue after the runtime returns a timeout result.
+- These enforcement paths belong to the direct text runtime; other runtime families must define their own equivalent contracts before adopting the settings.

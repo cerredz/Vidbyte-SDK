@@ -1,6 +1,6 @@
 # Design Doc: Runtime Loop Settings Enforcement
 
-**Status:** Draft
+**Status:** Approved
 **Author:** Codex
 **Created:** 2026-07-17
 **Last Updated:** 2026-07-17
@@ -404,9 +404,9 @@ N/A - no HTTP endpoints are affected. The existing Python SDK API becomes functi
 
 ## 12. Open Questions
 
-- [ ] Confirm that `max_retries` should apply to model invocations only in this fix. This is the proposed behavior because the existing retry hook and original roadmap target `_invoke_with_middleware()`, while automatic tool retries can duplicate non-idempotent side effects.
-- [ ] Confirm that deterministic approximate input-token enforcement is acceptable for `context_window_budget`. Exact provider tokenization would require new provider/tokenizer contracts and dependencies; the proposal reuses the SDK's existing four-characters-per-token compaction convention.
-- [ ] Confirm that internal `isDone` must remain exempt from `allowed_tools`. This matches the existing `ToolPolicyMiddleware` security contract and prevents an empty allowlist from creating a non-terminating loop.
+- [x] Confirmed: `max_retries` applies to model invocations only in this fix. The existing retry hook and original roadmap target `_invoke_with_middleware()`, while automatic tool retries can duplicate non-idempotent side effects.
+- [x] Confirmed: deterministic approximate input-token enforcement is acceptable for `context_window_budget`. Exact provider tokenization would require new provider/tokenizer contracts and dependencies; the implementation reuses the SDK's existing four-characters-per-token compaction convention.
+- [x] Confirmed: internal `isDone` remains exempt from `allowed_tools`. This matches the existing `ToolPolicyMiddleware` security contract and prevents an empty allowlist from creating a non-terminating loop.
 
 ---
 
