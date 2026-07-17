@@ -3,6 +3,7 @@ from __future__ import annotations
 import unittest
 from unittest.mock import patch
 
+from tests.agent_test_support import build_test_agent
 from vidbyte import Agent, tool
 from vidbyte.agents import AgentRuntime
 from vidbyte.tools import BaseTool, ToolCall, ToolPermission, ToolResult, ToolSpec
@@ -73,7 +74,7 @@ class AgentToolLoopTests(unittest.IsolatedAsyncioTestCase):
                 ),
             ]
         )
-        agent = Agent(name="worker", system_prompt="Work.", runner=runner, tools=[lookup])
+        agent = build_test_agent(name="worker", system_prompt="Work.", runner=runner, tools=[lookup])
 
         reply = await agent.arun("task")
 
@@ -98,7 +99,7 @@ class AgentToolLoopTests(unittest.IsolatedAsyncioTestCase):
                 ),
             ]
         )
-        agent = Agent(name="worker", system_prompt="Work.", runner=runner, tools=[])
+        agent = build_test_agent(name="worker", system_prompt="Work.", runner=runner, tools=[])
         agent.add_tool(lambda: "unused")
 
         reply = await agent.arun("task")
@@ -120,7 +121,7 @@ class AgentToolLoopTests(unittest.IsolatedAsyncioTestCase):
                 ),
             ]
         )
-        agent = Agent(name="worker", system_prompt="Work.", runner=runner, tools=[tool_instance])
+        agent = build_test_agent(name="worker", system_prompt="Work.", runner=runner, tools=[tool_instance])
 
         reply = await agent.arun("task")
 
@@ -138,7 +139,7 @@ class AgentToolLoopTests(unittest.IsolatedAsyncioTestCase):
                 FakeResponse("", {"output": [{"type": "function_call", "name": "lookup", "arguments": "{}"}]}),
             ]
         )
-        agent = Agent(name="worker", system_prompt="Work.", runner=runner, tools=[lookup], max_tool_rounds=1)
+        agent = build_test_agent(name="worker", system_prompt="Work.", runner=runner, tools=[lookup], max_tool_rounds=1)
 
         reply = await agent.arun("task")
 
@@ -192,7 +193,7 @@ class AssistantToolCallHistoryTests(unittest.IsolatedAsyncioTestCase):
                 ),
             ]
         )
-        agent = Agent(name="worker", system_prompt="Work.", runner=runner, tools=[read])
+        agent = build_test_agent(name="worker", system_prompt="Work.", runner=runner, tools=[read])
         with patch.object(AgentRuntime, "_llm_trace_inputs", return_value={}):
             await agent.arun("task")
 
@@ -236,7 +237,7 @@ class AssistantToolCallHistoryTests(unittest.IsolatedAsyncioTestCase):
                 ),
             ]
         )
-        agent = Agent(name="worker", system_prompt="Work.", runner=runner, tools=[read])
+        agent = build_test_agent(name="worker", system_prompt="Work.", runner=runner, tools=[read])
         with patch.object(AgentRuntime, "_llm_trace_inputs", return_value={}):
             await agent.arun("task", provider="anthropic")
 
@@ -291,7 +292,7 @@ class AssistantToolCallHistoryTests(unittest.IsolatedAsyncioTestCase):
                 ),
             ]
         )
-        agent = Agent(name="worker", system_prompt="Work.", runner=runner, tools=[read])
+        agent = build_test_agent(name="worker", system_prompt="Work.", runner=runner, tools=[read])
         with patch.object(AgentRuntime, "_llm_trace_inputs", return_value={}):
             await agent.arun("task", provider="gemini")
 
@@ -328,7 +329,7 @@ class AssistantToolCallHistoryTests(unittest.IsolatedAsyncioTestCase):
                 ),
             ]
         )
-        agent = Agent(name="worker", system_prompt="Work.", runner=runner, tools=[read])
+        agent = build_test_agent(name="worker", system_prompt="Work.", runner=runner, tools=[read])
         with patch.object(AgentRuntime, "_llm_trace_inputs", return_value={}):
             reply = await agent.arun("task")
         # The run must still complete successfully — just without an assistant turn in messages.
@@ -341,7 +342,7 @@ class AssistantToolCallHistoryTests(unittest.IsolatedAsyncioTestCase):
                 FakeResponse("just text", {"choices": [{"message": {"role": "assistant", "content": "just text"}}]}),
             ]
         )
-        agent = Agent(name="worker", system_prompt="Work.", runner=runner, tools=[])
+        agent = build_test_agent(name="worker", system_prompt="Work.", runner=runner, tools=[])
         with patch.object(AgentRuntime, "_llm_trace_inputs", return_value={}):
             reply = await agent.arun("task")
         self.assertEqual(reply.content, "just text")
@@ -386,7 +387,7 @@ class AssistantToolCallHistoryTests(unittest.IsolatedAsyncioTestCase):
                 ),
             ]
         )
-        agent = Agent(name="worker", system_prompt="Work.", runner=runner, tools=[read])
+        agent = build_test_agent(name="worker", system_prompt="Work.", runner=runner, tools=[read])
         with patch.object(AgentRuntime, "_llm_trace_inputs", return_value={}):
             await agent.arun("task")
 

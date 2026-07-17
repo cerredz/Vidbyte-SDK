@@ -19,6 +19,9 @@ import asyncio
 import unittest
 from typing import Any
 
+from pydantic import BaseModel
+
+from tests.agent_test_support import bind_test_runner, build_test_agent
 from vidbyte.agents.base import BaseAgent
 from vidbyte.agents.types import AgentForkSettings, AgentInput
 from vidbyte.context.handoff.base import Handoff
@@ -28,7 +31,6 @@ from vidbyte.evals.behavior.output import OutputBehavior
 from vidbyte.evals.behavior.tool import ToolBehavior
 from vidbyte.lib.dataclasses.agents import AgentMessage
 from vidbyte.lib.dataclasses.tools import ToolCallContext, ToolCallState, ToolResult, ToolStatus
-from pydantic import BaseModel
 
 
 def make_call(name: str, state: ToolCallState = ToolCallState.SUCCEEDED, args: dict[str, Any] | None = None, result_output: str | None = "ok") -> ToolCallContext:
@@ -88,7 +90,13 @@ class MockAgent(BaseAgent):
     """BaseAgent subclass returning scripted replies with tool call metadata."""
 
     def __init__(self, reply_metadata: dict[str, Any] | None = None, reply_content: str = "processed") -> None:
-        super().__init__(name="mock", system_prompt="test", runner=object())
+        super().__init__(
+            name="mock",
+            system_prompt="test",
+            provider="openai",
+            model_name="gpt-4.1-mini",
+        )
+        bind_test_runner(self, object())
         self._reply_metadata = reply_metadata or {}
         self._reply_content = reply_content
 
@@ -738,12 +746,12 @@ class AgentBehaviorTests(unittest.IsolatedAsyncioTestCase):
 
     def test_agent_behavior_returns_behavior(self) -> None:
         # [Edge Case] agent.behavior returns a Behavior instance.
-        agent = BaseAgent(name="t", system_prompt="t", runner=object())
+        agent = build_test_agent(name="t", system_prompt="t", runner=object())
         self.assertIsInstance(agent.behavior, Behavior)
 
     def test_agent_behavior_efficiency_returns_efficiency_behavior(self) -> None:
         # [Edge Case] agent.behavior.efficiency returns an EfficiencyBehavior instance.
-        agent = BaseAgent(name="t", system_prompt="t", runner=object())
+        agent = build_test_agent(name="t", system_prompt="t", runner=object())
         self.assertIsInstance(agent.behavior.efficiency, EfficiencyBehavior)
 
     def test_behavior_from_probe_helper_initializes_efficiency(self) -> None:
@@ -753,18 +761,18 @@ class AgentBehaviorTests(unittest.IsolatedAsyncioTestCase):
 
     def test_agent_behavior_output_returns_output_behavior(self) -> None:
         # [Edge Case] agent.behavior.output returns an OutputBehavior instance.
-        agent = BaseAgent(name="t", system_prompt="t", runner=object())
+        agent = build_test_agent(name="t", system_prompt="t", runner=object())
         self.assertIsInstance(agent.behavior.output, OutputBehavior)
 
     def test_agent_behavior_cached(self) -> None:
         # [Silent Failure] agent.behavior returns the same instance on repeated access.
-        agent = BaseAgent(name="t", system_prompt="t", runner=object())
+        agent = build_test_agent(name="t", system_prompt="t", runner=object())
         self.assertIs(agent.behavior, agent.behavior)
         self.assertIs(agent.behavior.output, agent.behavior.output)
 
     def test_behavior_probe_lazy_and_cached(self) -> None:
         # [Hidden Assumption / Silent Failure] probe built lazily and cached.
-        b = Behavior(BaseAgent(name="t", system_prompt="t", runner=object()))
+        b = Behavior(build_test_agent(name="t", system_prompt="t", runner=object()))
         self.assertIsNone(b._probe)
         first = b.probe
         self.assertIsNotNone(b._probe)

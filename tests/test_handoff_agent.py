@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import unittest
 
+from tests.agent_test_support import build_test_agent
 from vidbyte import (
     EngineeringHandoff,
     Handoff,
@@ -110,20 +111,20 @@ class HandoffPrimitiveTests(unittest.TestCase):
 
 class HandoffAgentTests(unittest.IsolatedAsyncioTestCase):
     def test_system_prompt_contains_asset_and_all_section_titles(self) -> None:
-        agent = HandoffAgent(EngineeringHandoff(), runner=HandoffRunner(_ENGINEERING_BODY))
+        agent = build_test_agent(EngineeringHandoff(), agent_type=HandoffAgent, runner=HandoffRunner(_ENGINEERING_BODY))
         prompt = agent.system_prompt
         self.assertIn(Prompts().get(Prompt.HANDOFF_SYSTEM_PROMPT)[:40], prompt)
         for title in EngineeringHandoff().section_titles():
             self.assertIn(title, prompt)
 
     def test_output_schema_contains_required_section_titles(self) -> None:
-        agent = HandoffAgent(EngineeringHandoff(), runner=HandoffRunner(_ENGINEERING_BODY))
+        agent = build_test_agent(EngineeringHandoff(), agent_type=HandoffAgent, runner=HandoffRunner(_ENGINEERING_BODY))
         section_schema = agent.output_schema["properties"]["sections"]
         self.assertEqual(section_schema["required"], list(EngineeringHandoff().section_titles()))
         self.assertIn("Objective", section_schema["properties"])
 
     async def test_generate_handoff_returns_filled_spec_subclass(self) -> None:
-        agent = HandoffAgent(EngineeringHandoff(), runner=HandoffRunner(_ENGINEERING_BODY))
+        agent = build_test_agent(EngineeringHandoff(), agent_type=HandoffAgent, runner=HandoffRunner(_ENGINEERING_BODY))
         doc = await agent.generate_handoff("the run digest")
         self.assertIsInstance(doc, EngineeringHandoff)
         self.assertTrue(doc.is_filled)
@@ -132,41 +133,41 @@ class HandoffAgentTests(unittest.IsolatedAsyncioTestCase):
     async def test_generate_handoff_uses_structured_json_output_when_available(self) -> None:
         body = json.dumps({"sections": {"Summary": "done", "Next Steps": "ship"}})
         runner = HandoffRunner(body)
-        agent = HandoffAgent(MinimalHandoff(), runner=runner)
+        agent = build_test_agent(MinimalHandoff(), agent_type=HandoffAgent, runner=runner)
         doc = await agent.generate_handoff("the run digest")
         self.assertEqual(doc.sections["Summary"], "done")
         self.assertIsNotNone(runner.last_response_format)
 
     async def test_parse_sections_is_case_insensitive(self) -> None:
-        agent = HandoffAgent(MinimalHandoff(), runner=HandoffRunner("## summary\nhi\n## NEXT STEPS\ngo"))
+        agent = build_test_agent(MinimalHandoff(), agent_type=HandoffAgent, runner=HandoffRunner("## summary\nhi\n## NEXT STEPS\ngo"))
         doc = await agent.generate_handoff("digest")
         self.assertEqual(doc.sections["Summary"], "hi")
         self.assertEqual(doc.sections["Next Steps"], "go")
 
     async def test_no_headers_stores_raw_output(self) -> None:
-        agent = HandoffAgent(MinimalHandoff(), runner=HandoffRunner("just prose, no headers"))
+        agent = build_test_agent(MinimalHandoff(), agent_type=HandoffAgent, runner=HandoffRunner("just prose, no headers"))
         doc = await agent.generate_handoff("digest")
         self.assertEqual(doc.metadata.get("raw_output"), "just prose, no headers")
 
     async def test_extra_sections_retained_in_metadata(self) -> None:
         body = "## Summary\ns\n## Next Steps\nn\n## Bonus\nextra"
-        agent = HandoffAgent(MinimalHandoff(), runner=HandoffRunner(body))
+        agent = build_test_agent(MinimalHandoff(), agent_type=HandoffAgent, runner=HandoffRunner(body))
         doc = await agent.generate_handoff("digest")
         self.assertEqual(doc.metadata.get("extra_sections", {}).get("Bonus"), "extra")
 
     def test_defaults_to_minimal_handoff(self) -> None:
-        agent = HandoffAgent(runner=HandoffRunner("x"))
+        agent = build_test_agent(agent_type=HandoffAgent, runner=HandoffRunner("x"))
         self.assertIsInstance(agent.spec, MinimalHandoff)
 
     def test_does_not_auto_trigger_its_own_handoff(self) -> None:
-        agent = HandoffAgent(MinimalHandoff(), runner=HandoffRunner("x"))
+        agent = build_test_agent(MinimalHandoff(), agent_type=HandoffAgent, runner=HandoffRunner("x"))
         self.assertIsNone(agent._handoff_spec)
 
 
 class BaseAgentHandoffIntegrationTests(unittest.IsolatedAsyncioTestCase):
     def _agent(self, body: str, *, handoff: Handoff | None = None) -> BaseAgent:
         # Build a base agent wired to a fixed-body fake runner, optionally with an auto-handoff spec.
-        return BaseAgent(name="worker", system_prompt="Work.", runner=HandoffRunner(body), handoff=handoff)
+        return build_test_agent(name="worker", system_prompt="Work.", runner=HandoffRunner(body), handoff=handoff)
 
     def test_handoff_param_does_not_shadow_method(self) -> None:
         agent = self._agent("x", handoff=MinimalHandoff())
@@ -187,7 +188,7 @@ class BaseAgentHandoffIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(agent.last_handoff)
 
     async def test_auto_handoff_failure_is_non_fatal(self) -> None:
-        agent = BaseAgent(name="w", system_prompt="Work.", runner=ExplodingRunner(), handoff=MinimalHandoff())
+        agent = build_test_agent(name="w", system_prompt="Work.", runner=ExplodingRunner(), handoff=MinimalHandoff())
         with self.assertRaises(Exception):
             # The primary run itself fails here; ensure the agent surfaces it normally.
             await agent.generate_reply("task")
@@ -228,7 +229,7 @@ class BaseAgentHandoffIntegrationTests(unittest.IsolatedAsyncioTestCase):
     async def test_handoff_by_uses_provided_generator(self) -> None:
         agent = self._agent("primary output")
         await agent.generate_reply("task")
-        custom = HandoffAgent(ResearchHandoff(), runner=HandoffRunner("## Question\nq\n## Findings\nf"))
+        custom = build_test_agent(ResearchHandoff(), agent_type=HandoffAgent, runner=HandoffRunner("## Question\nq\n## Findings\nf"))
         doc = await agent.handoff(by=custom)
         self.assertIsInstance(doc, ResearchHandoff)
         self.assertEqual(doc.sections["Question"], "q")
@@ -240,7 +241,7 @@ class BaseAgentHandoffIntegrationTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_handoff_reuses_self_runner_by_default(self) -> None:
         runner = HandoffRunner(_ENGINEERING_BODY)
-        agent = BaseAgent(name="w", system_prompt="Work.", runner=runner)
+        agent = build_test_agent(name="w", system_prompt="Work.", runner=runner)
         await agent.generate_reply("task")
         before = runner.calls
         await agent.handoff(EngineeringHandoff())
@@ -269,14 +270,14 @@ class HandoffExportTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(sdk.agents.handoff(), HandoffAgent)
 
     async def test_end_to_end_handoff_feeds_next_agent(self) -> None:
-        producer = BaseAgent(name="p", system_prompt="Work.", runner=HandoffRunner(_ENGINEERING_BODY), handoff=EngineeringHandoff())
+        producer = build_test_agent(name="p", system_prompt="Work.", runner=HandoffRunner(_ENGINEERING_BODY), handoff=EngineeringHandoff())
         reply = await producer.generate_reply("build it")
         doc = reply.metadata["handoff"]
         self.assertIsInstance(doc, EngineeringHandoff)
         self.assertEqual(doc.sections["Objective"], "Ship the feature.")
         # The produced handoff is a context primitive a fresh agent can ingest directly.
         self.assertIn("Ship the feature.", doc.to_context_text())
-        consumer = BaseAgent(name="c", system_prompt="Continue.", runner=HandoffRunner("ok"), context_items=[doc])
+        consumer = build_test_agent(name="c", system_prompt="Continue.", runner=HandoffRunner("ok"), context_items=[doc])
         self.assertIn(doc, consumer.context_items)
 
 
