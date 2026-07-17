@@ -516,7 +516,7 @@ agent = Agent(
 reply = await agent.arun("Find where tools are formatted.")
 ```
 
-The runtime builds the context window, appends a short agentic-loop prompt after the system prompt, sends tool schemas to the model, executes permitted tool calls, appends tool results back into the ordered message context, and repeats until the model calls the internal `isDone` tool. If the model returns ordinary text without a tool call, that text is preserved as assistant history and the loop continues. `max_iterations` and `max_tokens` are optional safeguards; `max_tokens` uses provider-reported usage when available.
+The runtime builds the context window, appends a short agentic-loop prompt after the system prompt, sends tool schemas to the model, executes permitted tool calls, appends tool results back into the ordered message context, and repeats until the model calls the internal `isDone` tool. If the model returns ordinary text without a tool call, that text is preserved as assistant history and the loop continues. `AgentLoopSettings` supplies optional iteration, provider-reported token, total tool-call, model-retry, whole-run timeout, approximate context-window, tool-concurrency, and user-tool allowlist safeguards for this direct text loop.
 
 `ForkConversationTool` is agent-native: it lets the model ask the current agent to run an isolated child conversation immediately through `BaseAgent.fork(...)`. It is separate from durable session forks, inherits permission policy, requires allowlisted model swaps, and only exposes developer-provided extra toolsets.
 

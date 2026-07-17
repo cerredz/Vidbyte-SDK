@@ -4,8 +4,8 @@ Description:
     Ground-truth reference for all agentic loop settings in the Vidbyte SDK.
 Purpose:
     Documents every parameter available on AgentLoopSettings — what it does,
-    why it exists, which ones are enforced at runtime, and which are reserved
-    for future runtime implementations.
+    why it exists, where the direct runtime enforces it, and which limitations
+    remain for other runtime families.
 Architecture:
     SDK Skill Guide.
 Relations:
