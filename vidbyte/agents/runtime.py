@@ -119,6 +119,7 @@ class AgentRuntime:
         self.config = config or AgentRuntimeConfig()
         self.user_tools = tools
         self.tools = self._runtime_tools(tools)
+        self._internal_tool_names = self._resolve_internal_tool_names(self.tools)
         self.permission_policy = permission_policy
         self.run_id = run_id
         self.algorithm = ContextWindow.resolve_algorithm(algorithm)
@@ -138,6 +139,16 @@ class AgentRuntime:
             allowed = set(self.config.allowed_tools)
             visible = Tools(tool for tool in tools if tool.name in allowed)
         return with_internal_agent_tools(visible)
+
+    @staticmethod
+    def _resolve_internal_tool_names(tools: Tools) -> frozenset[str]:
+        # Caches runtime-owned names so execution guards never need a registry lookup.
+        names = []
+        for tool in tools:
+            metadata = getattr(tool.spec(), "metadata", {})
+            if isinstance(metadata, Mapping) and metadata.get("internal"):
+                names.append(tool.name)
+        return frozenset(names)
 
     def _context_window_admission_middleware(self) -> tuple[AgentMiddleware, ...]:
         # Returns compatibility middleware for legacy tool-result admission presets.
@@ -1355,7 +1366,7 @@ class AgentRuntime:
 
     def _tool_allowed(self, call: ToolCall) -> bool:
         # Internal control tools bypass the user allowlist; every other call must be named.
-        return self._tool_is_internal(call) or self.config.allowed_tools is None or call.tool_name in self.config.allowed_tools
+        return call.tool_name in self._internal_tool_names or self.config.allowed_tools is None or call.tool_name in self.config.allowed_tools
 
     def _loop_settings_denied_tool(self, call: ToolCall, provider: str, *, iteration_count: int) -> tuple[ToolCallContext, ToolResult]:
         # Produces the stable defense-in-depth denial before lookup, permission, or validation.
@@ -1371,14 +1382,7 @@ class AgentRuntime:
 
     def _tool_name_is_internal(self, tool_name: str) -> bool:
         # Name-based internal check shared by _tool_is_internal and the contract counters.
-        if tool_name == IS_DONE_TOOL_NAME:
-            return True
-        try:
-            spec = self.tools._get(tool_name).spec()
-        except Exception:
-            return False
-        metadata = getattr(spec, "metadata", {})
-        return bool(isinstance(metadata, Mapping) and metadata.get("internal"))
+        return tool_name in self._internal_tool_names
 
     def _get_tool(self, call: ToolCall) -> object:
         """Resolve a tool from the catalog by name, raising ToolRegistryError if missing."""
