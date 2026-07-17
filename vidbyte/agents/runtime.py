@@ -1276,6 +1276,8 @@ class AgentRuntime:
 
     async def execute_tool_call(self, call: ToolCall, *, provider: str, trace_context: SpanContext | None = None, iteration_count: int | None = None, tool_is_internal: bool = False) -> tuple[ToolCallContext, ToolResult]:
         # Resolves, authorizes, validates, executes, and records one tool call with optional timeout.
+        if not self._tool_allowed(call):
+            return self._loop_settings_denied_tool(call, provider, iteration_count=iteration_count)
         tool_input = _safe_trace_value(dict(call.arguments))
         tool_span = self._tracer.start_span(
             "tool.call",
@@ -1368,7 +1370,7 @@ class AgentRuntime:
         # Internal control tools bypass the user allowlist; every other call must be named.
         return call.tool_name in self._internal_tool_names or self.config.allowed_tools is None or call.tool_name in self.config.allowed_tools
 
-    def _loop_settings_denied_tool(self, call: ToolCall, provider: str, *, iteration_count: int) -> tuple[ToolCallContext, ToolResult]:
+    def _loop_settings_denied_tool(self, call: ToolCall, provider: str, *, iteration_count: int | None) -> tuple[ToolCallContext, ToolResult]:
         # Produces the stable defense-in-depth denial before lookup, permission, or validation.
         return self._denied_tool_result(
             call,
