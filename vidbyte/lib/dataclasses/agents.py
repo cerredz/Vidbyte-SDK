@@ -1,16 +1,36 @@
 """Context Protocol Header
 
 Description:
-    Defines immutable data contracts representing agent states, capabilities, and configurations.
+    Defines immutable agent state, configuration, capability, and stop-reason contracts.
 Purpose:
-    Exposes stable data structures like AgentCard and AgentMessage for registry and execution systems.
+    Keep stable data shapes shared by agent construction, registries, runtimes,
+    forks, and orchestration strategies in one dependency-light module.
 Architecture:
-    - AgentRunnerConfig: Primitive backend configuration.
-    - AgentCard: Local agent description, capabilities, and tools.
-    - AgentMessage: Actor-to-actor message payload.
-    - AgentSpec: Construction-friendly agent settings block.
-Relations:
-    Used by vidbyte.agents.base, vidbyte.agents.registry, and orchestration strategies.
+    AgentRuntimeConfig is the frozen direct-loop contract; AgentStopReason is its
+    machine-readable termination vocabulary; remaining dataclasses describe agents.
+Inputs:
+    Validated SDK configuration values and agent metadata assembled by public layers.
+Outputs:
+    Frozen/slotted runtime settings plus reusable immutable agent records and enums.
+System Role:
+    Used by vidbyte.agents.base, vidbyte.agents.runtime, registries, and strategies.
+Dependencies:
+    Standard dataclasses/enums and TYPE_CHECKING-only imports keep runtime coupling low.
+Data Flow:
+    AgentLoopSettings -> AgentRuntimeConfig -> AgentRuntime -> AgentResult metadata.
+Security:
+    Positive hard limits are revalidated for callers that construct the internal
+    config directly; allowed_tools retains empty-tuple deny-all semantics.
+Performance:
+    Contracts are immutable and slotted; validation touches a fixed field set.
+Testing:
+    Exercised by runtime, middleware, fork, and agent-loop-settings suites; a
+    coverage percentage was not collected because coverage.py is not installed.
+Quality:
+    New fields are appended with None defaults to preserve existing keyword behavior.
+Related Docs:
+    https://github.com/cerredz/Vidbyte-SDK/blob/main/docs/design/runtime-loop-settings-enforcement.md
+    https://github.com/cerredz/Vidbyte-SDK/blob/main/tests/test_agent_runtime.py
 """
 
 from __future__ import annotations
@@ -44,6 +64,9 @@ class AgentStopReason(str, Enum):
     MAX_ITERATIONS = "max_iterations"
     MAX_TOKENS = "max_tokens"
     MAX_TOOL_CALLS = "max_tool_calls"
+    TIMEOUT = "timeout"
+    MAX_RETRIES = "max_retries"
+    CONTEXT_WINDOW_BUDGET = "context_window_budget"
     MAX_CALLS_PER_ITERATION = "max_calls_per_iteration"
     MAX_IDENTICAL_CALLS = "max_identical_calls"
     MAX_CONSECUTIVE_FAILURES = "max_consecutive_failures"
@@ -66,6 +89,11 @@ class AgentRuntimeConfig:
     compaction_trigger_tokens: int | None = None
     compaction_target_tokens: int | None = None
     tool_settings: "ToolSettings | None" = None
+    max_parallel_tool_calls: int | None = None
+    max_retries: int | None = None
+    timeout_seconds: float | None = None
+    context_window_budget: int | None = None
+    allowed_tools: tuple[str, ...] | None = None
 
     def __post_init__(self) -> None:
         """Validate optional budget values."""
@@ -75,10 +103,15 @@ class AgentRuntimeConfig:
             "max_tool_calls",
             "compaction_trigger_tokens",
             "compaction_target_tokens",
+            "max_parallel_tool_calls",
+            "max_retries",
+            "context_window_budget",
         ):
             value = getattr(self, field_name)
             if value is not None and value <= 0:
                 raise ValueError(f"{field_name} must be greater than zero when provided.")
+        if self.timeout_seconds is not None and self.timeout_seconds <= 0.0:
+            raise ValueError("timeout_seconds must be greater than zero when provided.")
 
 
 @dataclass(frozen=True, slots=True)

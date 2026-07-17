@@ -1,22 +1,53 @@
 """Context Protocol Header
 
 Description:
-    Defines the internal direct execution runtime for Vidbyte agents.
+    Defines the direct text runtime and enforces all AgentLoopSettings boundaries.
 Purpose:
-    Keeps agent loop execution, context-window construction, tool execution,
-    permission checks, and provider-reported token accounting out of BaseAgent.
+    Keep model/tool looping, context construction, permissions, retries, timeouts,
+    context budgeting, ordered concurrency, and accounting out of BaseAgent.
 Architecture:
-    - AgentRuntime: Builds BaseAgentContext and runs direct model/tool loops.
-Relations:
-    Used by vidbyte.agents.base. Depends on shared context, tool, security, and
-    strategy dataclasses without owning modality routing or runner construction.
+    AgentRuntime owns one outer deadline, middleware-aware model steps, deterministic
+    context trimming, and ordered tool preflight/body/finalization stages.
+Inputs:
+    RunnerHandle, BaseAgentContext, AgentRuntimeConfig, provider options, middleware,
+    tool catalog, permission policy, optional context algorithm, and output contracts.
+Outputs:
+    AgentResult with stable stop_reason values, runtime counters, tool-call contexts,
+    middleware metadata, and bounded enforcement diagnostics.
+System Role:
+    Called by vidbyte.agents.base for the default direct text path; it does not own
+    modality selection, runner creation, MCTS, actor-model, or non-text runtimes.
+Dependencies:
+    asyncio, middleware pipeline/compaction engine, context manager, tools formatter,
+    permission policy, runner handle, tracing, and shared agent dataclasses.
+Data Flow:
+    Public settings -> AgentRuntimeConfig -> whole-run deadline -> model step ->
+    context-budget/retry gates -> tool allowlist/preflight -> bounded bodies -> ordered result.
+Security:
+    allowed_tools filters schemas and denies unlisted calls before lookup, permission,
+    validation, or execution; internal isDone remains exempt; PermissionPolicy still applies.
+Performance:
+    Unset settings add constant-time branches. Context estimation is linear in serialized
+    input size; configured tool concurrency is capped and transcript commits stay ordered.
+Testing:
+    Covered by tests/test_agent_runtime.py, tests/test_agent_middleware.py,
+    tests/test_tracing.py, compaction suites, and scripts/test-agent-loop-settings.py;
+    a coverage percentage was not collected because coverage.py is not installed.
+Quality:
+    None preserves legacy behavior, hard stops are enum-backed, and cancellation is
+    best-effort for non-cooperative synchronous work already running in threads.
+Related Docs:
+    https://github.com/cerredz/Vidbyte-SDK/blob/main/docs/design/runtime-loop-settings-enforcement.md
+    https://github.com/cerredz/Vidbyte-SDK/blob/main/skills/agentic-loop-settings/SKILL.md
 """
 
 from __future__ import annotations
 
 import asyncio
+import json
 import math
 from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -41,6 +72,7 @@ from vidbyte.context.templates import NullRecorder, RecorderBase
 from vidbyte.lib.tracing import NullTracer, SpanContext, TracerBase
 from vidbyte.middleware import AgentMiddleware, MiddlewarePipeline
 from vidbyte.middleware.builtins.context_compaction import ToolResultCompactionMiddleware
+from vidbyte.middleware.compaction import CompactionMode, ContextCompactionEngine
 from vidbyte.prompts.agentic_loop import append_agentic_loop_prompt
 from vidbyte.agents.contract import AgentLoopSettingsOutputContract
 from vidbyte.lib.dataclasses.context import BaseAgentContext, BaseContext
@@ -49,6 +81,17 @@ from vidbyte.tools._internal import IS_DONE_TOOL_NAME, with_internal_agent_tools
 from vidbyte.tools.catalog import Tools
 from vidbyte.tools.security import PermissionDecision, PermissionPolicy
 from vidbyte.tools.types import ToolCall, ToolCallContext, ToolCallState, ToolResult
+
+
+@dataclass(frozen=True, slots=True)
+class _PreparedToolCall:
+    """Ordered preflight outcome used to isolate concurrent tool bodies from shared state."""
+
+    call: ToolCall
+    tool_is_internal: bool
+    before_decision: MiddlewareDecision
+    precomputed: tuple[ToolCallContext, ToolResult] | None = None
+    skip_after_middleware: bool = False
 
 
 class AgentRuntime:
@@ -73,10 +116,10 @@ class AgentRuntime:
     ) -> None:
         self.agent_name = agent_name
         self.system_prompt = system_prompt
-        self.user_tools = tools
-        self.tools = with_internal_agent_tools(tools)
-        self.permission_policy = permission_policy
         self.config = config or AgentRuntimeConfig()
+        self.user_tools = tools
+        self.tools = self._runtime_tools(tools)
+        self.permission_policy = permission_policy
         self.run_id = run_id
         self.algorithm = ContextWindow.resolve_algorithm(algorithm)
         self._tracer: TracerBase = tracer or NullTracer()
@@ -86,6 +129,15 @@ class AgentRuntime:
         self.output_schema = output_schema
         self._schema_formatter = OutputSchemaFormatter()
         self.output_contract = output_contract or AgentLoopSettingsOutputContract(())
+
+    def _runtime_tools(self, tools: Tools) -> Tools:
+        # Filters only user tools, then restores runtime-internal control tools unconditionally.
+        if self.config.allowed_tools is None:
+            visible = tools
+        else:
+            allowed = set(self.config.allowed_tools)
+            visible = Tools(tool for tool in tools if tool.name in allowed)
+        return with_internal_agent_tools(visible)
 
     def _context_window_admission_middleware(self) -> tuple[AgentMiddleware, ...]:
         # Returns compatibility middleware for legacy tool-result admission presets.
@@ -143,7 +195,28 @@ class AgentRuntime:
         )
 
     async def arun(self, message: str, *, handle: RunnerHandle, context: BaseAgentContext, metadata: Mapping[str, Any] | None = None, options: Mapping[str, Any] | None = None, trace_context: SpanContext | None = None) -> AgentResult:
-        """Run the direct model/tool loop until isDone or a budget stop."""
+        """Run the complete direct operation under one optional wall-clock deadline."""
+        timeout_seconds = self.config.timeout_seconds
+        if timeout_seconds is None:
+            return await self._arun_without_timeout(message, handle=handle, context=context, metadata=metadata, options=options, trace_context=trace_context)
+        deadline = asyncio.timeout(timeout_seconds)
+        try:
+            async with deadline:
+                return await self._arun_without_timeout(message, handle=handle, context=context, metadata=metadata, options=options, trace_context=trace_context)
+        except TimeoutError:
+            if not deadline.expired():
+                raise
+            stopped = self._stopped_result(
+                f"Agent runtime timed out after {timeout_seconds} seconds.",
+                stop_reason=AgentStopReason.TIMEOUT,
+                iteration_count=0,
+                tokens_used=None,
+                contexts=(),
+            )
+            return self._with_result_metadata(self._with_middleware_metadata(stopped), timeout_seconds=timeout_seconds)
+
+    async def _arun_without_timeout(self, message: str, *, handle: RunnerHandle, context: BaseAgentContext, metadata: Mapping[str, Any] | None = None, options: Mapping[str, Any] | None = None, trace_context: SpanContext | None = None) -> AgentResult:
+        # Keeps one deadline around algorithm selection and the entire direct model/tool loop.
         algorithm_result = await AgentRuntimeContextAlgorithms(self).arun(
             message,
             handle=handle,
@@ -341,8 +414,8 @@ class AgentRuntime:
             except BaseException as exc:
                 self._end_semantic_span(iteration_span, error=exc)
                 raise
-            self._end_semantic_span(iteration_span, output=handle.extract_text(raw_result))
             if isinstance(raw_result, AgentResult):
+                self._end_semantic_span(iteration_span, output=raw_result.output)
                 return await self._finish_result(
                     raw_result,
                     message=message,
@@ -356,6 +429,7 @@ class AgentRuntime:
                     run_state=run_state,
                     model_response=last_response,
                 )
+            self._end_semantic_span(iteration_span, output=handle.extract_text(raw_result))
             last_response = raw_result
             iteration_count += 1
             last_assistant_output = handle.extract_text(raw_result)
@@ -496,14 +570,28 @@ class AgentRuntime:
             if assistant_tool_msg is not None:
                 messages.append(dict(assistant_tool_msg))
             contract_rejected = False
-            for call in tool_calls:
-                processed = await self._process_tool_call(
-                    call,
-                    provider,
-                    messages,
-                    call_contexts,
+            processed_calls = await self._process_tool_calls(
+                tool_calls,
+                provider,
+                messages,
+                call_contexts,
+                message=message,
+                context=context,
+                iteration_count=iteration_count,
+                model_call_count=model_call_count,
+                tokens_used=tokens_used,
+                started_at=started_at,
+                metadata=runtime_metadata,
+                run_state=run_state,
+                model_response=raw_result,
+                trace_context=active_trace_context,
+            )
+            if isinstance(processed_calls, AgentResult):
+                return await self._finish_result(
+                    processed_calls,
                     message=message,
                     context=context,
+                    provider=provider,
                     iteration_count=iteration_count,
                     model_call_count=model_call_count,
                     tokens_used=tokens_used,
@@ -511,23 +599,8 @@ class AgentRuntime:
                     metadata=runtime_metadata,
                     run_state=run_state,
                     model_response=raw_result,
-                    trace_context=active_trace_context,
                 )
-                if isinstance(processed, AgentResult):
-                    return await self._finish_result(
-                        processed,
-                        message=message,
-                        context=context,
-                        provider=provider,
-                        iteration_count=iteration_count,
-                        model_call_count=model_call_count,
-                        tokens_used=tokens_used,
-                        started_at=started_at,
-                        metadata=runtime_metadata,
-                        run_state=run_state,
-                        model_response=raw_result,
-                    )
-                _, result = processed
+            for call, result in processed_calls:
                 if call.tool_name == IS_DONE_TOOL_NAME:
                     decision = await self.middleware.after_iteration(
                         self._middleware_context(
@@ -642,8 +715,9 @@ class AgentRuntime:
                 )
 
     async def _invoke_with_middleware(self, handle: RunnerHandle, message: str, call_options: Mapping[str, Any], *, context: BaseAgentContext, iteration_count: int, model_call_count: int, call_contexts: Sequence[ToolCallContext], tokens_used: int | None, started_at: float, metadata: Mapping[str, Any], run_state: dict[type, Any] | None = None, trace_context: SpanContext | None = None, compaction_count: int = 0) -> tuple[object | AgentResult, int, int]:
-        """Invoke the runner, allowing middleware to retry model errors while tracking compaction events."""
+        """Invoke one model step under middleware transforms, context budget, and retry ceiling."""
         provider = handle.provider
+        retries_used = 0
         while True:
             current_call_options = dict(call_options)
             decision = await self.middleware.before_model_call(
@@ -676,6 +750,18 @@ class AgentRuntime:
                 )
             compaction_count += self._compaction_event_delta(decision)
             current_call_options = self._apply_before_model_call_transform(current_call_options, decision)
+            budget_outcome, budget_compactions = await self._apply_context_window_budget(
+                message,
+                current_call_options,
+                iteration_count=iteration_count,
+                tokens_used=tokens_used,
+                call_contexts=call_contexts,
+                run_state=run_state,
+            )
+            compaction_count += budget_compactions
+            if isinstance(budget_outcome, AgentResult):
+                return budget_outcome, model_call_count, compaction_count
+            current_call_options = budget_outcome
             model_call_count += 1
             llm_span = self._tracer.start_span(
                 "llm.call",
@@ -714,9 +800,9 @@ class AgentRuntime:
                     )
                 )
                 if decision.action is MiddlewareAction.RETRY:
-                    if decision.sleep_seconds:
-                        await self.middleware.sleep(decision.sleep_seconds)
-                    continue
+                    requested_retry = True
+                else:
+                    requested_retry = False
                 if decision.action is MiddlewareAction.ABORT_RUN:
                     return (
                         self._middleware_abort_result(
@@ -728,12 +814,138 @@ class AgentRuntime:
                         model_call_count,
                         compaction_count,
                     )
-                raise
+                if self.config.max_retries is None:
+                    if not requested_retry:
+                        raise
+                    if decision.sleep_seconds:
+                        await self.middleware.sleep(decision.sleep_seconds)
+                    continue
+                if retries_used >= self.config.max_retries:
+                    stopped = self._stopped_result(
+                        "Agent runtime stopped after exhausting max_retries for a model invocation.",
+                        stop_reason=AgentStopReason.MAX_RETRIES,
+                        iteration_count=iteration_count,
+                        tokens_used=tokens_used,
+                        contexts=call_contexts,
+                    )
+                    stopped = self._with_result_metadata(
+                        stopped,
+                        retry_count=retries_used,
+                        max_retries=self.config.max_retries,
+                        error_type=type(exc).__name__,
+                    )
+                    return stopped, model_call_count, compaction_count
+                retries_used += 1
+                if requested_retry and decision.sleep_seconds:
+                    await self.middleware.sleep(decision.sleep_seconds)
+                continue
             except BaseException as exc:
                 # Catches CancelledError and other BaseException subclasses so the
                 # llm.call span is always finalized before propagating.
                 self._tracer.end_span(llm_span, error=exc)
                 raise
+
+    async def _apply_context_window_budget(self, message: str, call_options: Mapping[str, Any], *, iteration_count: int, tokens_used: int | None, call_contexts: Sequence[ToolCallContext], run_state: dict[type, Any] | None) -> tuple[dict[str, Any] | AgentResult, int]:
+        # Trims only provider conversation messages and fails closed when fixed input cannot fit.
+        current = dict(call_options)
+        budget = self.config.context_window_budget
+        if budget is None:
+            return current, 0
+        before_tokens = self._estimated_model_input_tokens(message, current)
+        if before_tokens <= budget:
+            return current, 0
+
+        original_messages = self._provider_messages_from_options(current)
+        fixed_options = dict(current)
+        if "messages" in fixed_options:
+            fixed_options["messages"] = ()
+        fixed_tokens = self._estimated_model_input_tokens(message, fixed_options)
+        if fixed_tokens > budget:
+            stopped = self._context_window_budget_stop(
+                iteration_count=iteration_count,
+                tokens_used=tokens_used,
+                call_contexts=call_contexts,
+                before_tokens=before_tokens,
+                after_tokens=fixed_tokens,
+                removed_messages=len(original_messages),
+            )
+            self._record_context_budget_metadata(run_state, stopped.metadata)
+            return stopped, 0
+
+        engine = ContextCompactionEngine()
+        compacted = original_messages
+        current["messages"] = compacted
+        after_tokens = self._estimated_model_input_tokens(message, current)
+        max_messages = max(0, len(compacted) - 1)
+        while compacted and after_tokens > budget:
+            next_compacted, _ = await engine.compact_provider_messages(
+                compacted,
+                mode=CompactionMode.TRIM_WITH_PROVIDER_BOUNDARIES,
+                options={"max_messages": max_messages},
+            )
+            if len(next_compacted) >= len(compacted):
+                max_messages = max(0, max_messages - 1)
+                if max_messages > 0:
+                    continue
+                next_compacted = ()
+            compacted = next_compacted
+            current["messages"] = compacted
+            after_tokens = self._estimated_model_input_tokens(message, current)
+            max_messages = max(0, len(compacted) - 1)
+
+        removed_messages = len(original_messages) - len(compacted)
+        event = {
+            "context_window_budget": budget,
+            "estimated_tokens_before": before_tokens,
+            "estimated_tokens_after": after_tokens,
+            "removed_message_count": removed_messages,
+        }
+        self._record_context_budget_metadata(run_state, event)
+        if after_tokens > budget:
+            return self._context_window_budget_stop(
+                iteration_count=iteration_count,
+                tokens_used=tokens_used,
+                call_contexts=call_contexts,
+                before_tokens=before_tokens,
+                after_tokens=after_tokens,
+                removed_messages=removed_messages,
+            ), int(removed_messages > 0)
+        return current, int(removed_messages > 0)
+
+    def _context_window_budget_stop(self, *, iteration_count: int, tokens_used: int | None, call_contexts: Sequence[ToolCallContext], before_tokens: int, after_tokens: int, removed_messages: int) -> AgentResult:
+        # Returns a diagnostic hard stop without issuing provider I/O.
+        stopped = self._stopped_result(
+            "Agent runtime stopped because fixed model input exceeds context_window_budget.",
+            stop_reason=AgentStopReason.CONTEXT_WINDOW_BUDGET,
+            iteration_count=iteration_count,
+            tokens_used=tokens_used,
+            contexts=call_contexts,
+        )
+        return self._with_result_metadata(
+            stopped,
+            context_window_budget=self.config.context_window_budget,
+            estimated_tokens_before=before_tokens,
+            estimated_tokens_after=after_tokens,
+            removed_message_count=removed_messages,
+        )
+
+    @staticmethod
+    def _record_context_budget_metadata(run_state: dict[type, Any] | None, metadata: Mapping[str, Any]) -> None:
+        # Publishes the latest compaction decision through the existing result-metadata channel.
+        if run_state is None:
+            return
+        keys = ("context_window_budget", "estimated_tokens_before", "estimated_tokens_after", "removed_message_count")
+        published = run_state.get("__result_metadata__")
+        if not isinstance(published, dict):
+            published = {}
+            run_state["__result_metadata__"] = published
+        published["context_window_enforcement"] = {key: metadata[key] for key in keys if key in metadata}
+
+    @staticmethod
+    def _estimated_model_input_tokens(message: str, call_options: Mapping[str, Any]) -> int:
+        # Counts the complete serialized provider input using the established four-char heuristic.
+        serialized = json.dumps({"prompt": message, "options": dict(call_options)}, sort_keys=True, separators=(",", ":"), ensure_ascii=False, default=str)
+        return max(1, math.ceil(len(serialized) / 4))
 
     async def _finish_result(
         self,
@@ -777,6 +989,17 @@ class AgentRuntime:
         result = self._with_context_window_metadata(result, metadata)
         result = self._with_run_state_metadata(result, run_state)
         return self._with_middleware_metadata(result)
+
+    @staticmethod
+    def _with_result_metadata(result: AgentResult, **extra: Any) -> AgentResult:
+        # Adds bounded enforcement diagnostics without changing the result payload contract.
+        return AgentResult(
+            output=result.output,
+            strategy_name=result.strategy_name,
+            calls=result.calls,
+            metadata={**dict(result.metadata), **extra},
+            structured=result.structured,
+        )
 
     @staticmethod
     def _with_run_state_metadata(result: AgentResult, run_state: dict[type, Any] | None) -> AgentResult:
@@ -1121,6 +1344,22 @@ class AgentRuntime:
         """Return whether a call targets a runtime-only internal tool."""
         return self._tool_name_is_internal(call.tool_name)
 
+    def _tool_allowed(self, call: ToolCall) -> bool:
+        # Internal control tools bypass the user allowlist; every other call must be named.
+        return self._tool_is_internal(call) or self.config.allowed_tools is None or call.tool_name in self.config.allowed_tools
+
+    def _loop_settings_denied_tool(self, call: ToolCall, provider: str, *, iteration_count: int) -> tuple[ToolCallContext, ToolResult]:
+        # Produces the stable defense-in-depth denial before lookup, permission, or validation.
+        return self._denied_tool_result(
+            call,
+            provider,
+            message=f"Tool '{call.tool_name}' is not allowed by AgentLoopSettings.allowed_tools.",
+            error="tool_not_allowed_by_loop_settings",
+            reason="tool_not_allowed_by_loop_settings",
+            metadata={"allowed_tools": self.config.allowed_tools or ()},
+            iteration_count=iteration_count,
+        )
+
     def _tool_name_is_internal(self, tool_name: str) -> bool:
         # Name-based internal check shared by _tool_is_internal and the contract counters.
         if tool_name == IS_DONE_TOOL_NAME:
@@ -1299,10 +1538,11 @@ class AgentRuntime:
     def _render_loop_settings_block(self, *, iteration_count: int, tokens_used: int | None, tool_call_count: int) -> str:
         """Render the agent-loop-settings context block as 'current usage / configured limit' lines.
 
-        Only the budgets that are both numerically calculable and tracked by the runtime loop are
-        injected (max_iterations, max_tokens, max_tool_calls). Settings without a live runtime
-        measurement (max_retries, timeout_seconds, allowed_tools, etc.) are intentionally excluded.
-        Returns an empty string when no relevant budget is configured.
+        Only budgets with meaningful live current/limit counters are injected
+        (max_iterations, max_tokens, max_tool_calls). Retry, timeout, concurrency,
+        context-window, and tool-allowlist settings are enforced at their runtime
+        boundaries without adding static lines to this live-counter block.
+        Returns an empty string when no relevant live counter is configured.
         """
         lines: list[str] = []
         if self.config.max_iterations is not None:
@@ -1353,6 +1593,186 @@ class AgentRuntime:
             },
         )
 
+    async def _process_tool_calls(self, tool_calls: Sequence[ToolCall], provider: str, messages: list[dict[str, Any]], call_contexts: list[ToolCallContext], *, message: str, context: BaseAgentContext, iteration_count: int, model_call_count: int, tokens_used: int | None, started_at: float, metadata: Mapping[str, Any], run_state: dict[type, Any] | None = None, model_response: object | None = None, trace_context: SpanContext | None = None) -> tuple[tuple[ToolCall, ToolResult], ...] | AgentResult:
+        # Uses the legacy ordered path unless the caller explicitly requests real parallelism.
+        parallel_limit = self.config.max_parallel_tool_calls
+        bounded_calls = self._calls_through_is_done(tool_calls)
+        if parallel_limit is None:
+            processed_calls: list[tuple[ToolCall, ToolResult]] = []
+            for call in bounded_calls:
+                processed = await self._process_tool_call(call, provider, messages, call_contexts, message=message, context=context, iteration_count=iteration_count, model_call_count=model_call_count, tokens_used=tokens_used, started_at=started_at, metadata=metadata, run_state=run_state, model_response=model_response, trace_context=trace_context)
+                if isinstance(processed, AgentResult):
+                    return processed
+                _, result = processed
+                processed_calls.append((call, result))
+            return tuple(processed_calls)
+
+        processed_calls = []
+        cursor = 0
+        while cursor < len(bounded_calls):
+            remaining_total = self._remaining_tool_call_budget(call_contexts)
+            if remaining_total == 0:
+                return self._max_tool_calls_stop(iteration_count=iteration_count, tokens_used=tokens_used, contexts=call_contexts)
+            batch_size = min(parallel_limit, len(bounded_calls) - cursor)
+            if remaining_total is not None:
+                batch_size = min(batch_size, remaining_total)
+            batch_calls = bounded_calls[cursor : cursor + batch_size]
+            prepared, pending_stop = await self._prepare_tool_batch(batch_calls, provider, messages, call_contexts, message=message, context=context, iteration_count=iteration_count, model_call_count=model_call_count, tokens_used=tokens_used, started_at=started_at, metadata=metadata, run_state=run_state, model_response=model_response)
+            batch_processed, finalization_stop = await self._execute_prepared_tool_batch(prepared, provider, messages, call_contexts, message=message, context=context, iteration_count=iteration_count, model_call_count=model_call_count, tokens_used=tokens_used, started_at=started_at, metadata=metadata, run_state=run_state, model_response=model_response, trace_context=trace_context)
+            processed_calls.extend(batch_processed)
+            stop = pending_stop or finalization_stop
+            if stop is not None:
+                return self._rebase_stopped_result(stop, iteration_count=iteration_count, tokens_used=tokens_used, contexts=call_contexts)
+            cursor += len(batch_calls)
+            if any(call.tool_name == IS_DONE_TOOL_NAME for call, _ in batch_processed):
+                break
+            if self._remaining_tool_call_budget(call_contexts) == 0 and cursor < len(bounded_calls):
+                return self._max_tool_calls_stop(iteration_count=iteration_count, tokens_used=tokens_used, contexts=call_contexts)
+        return tuple(processed_calls)
+
+    @staticmethod
+    def _calls_through_is_done(tool_calls: Sequence[ToolCall]) -> tuple[ToolCall, ...]:
+        # Treats the first internal completion call as a dispatch barrier for later provider calls.
+        bounded: list[ToolCall] = []
+        for call in tool_calls:
+            bounded.append(call)
+            if call.tool_name == IS_DONE_TOOL_NAME:
+                break
+        return tuple(bounded)
+
+    def _remaining_tool_call_budget(self, call_contexts: Sequence[ToolCallContext]) -> int | None:
+        # Reserves total-call capacity before a concurrent batch is launched.
+        if self.config.max_tool_calls is None:
+            return None
+        return max(0, self.config.max_tool_calls - len(call_contexts))
+
+    def _max_tool_calls_stop(self, *, iteration_count: int, tokens_used: int | None, contexts: Sequence[ToolCallContext]) -> AgentResult:
+        # Centralizes the mid-response total-call stop used by bounded dispatch.
+        return self._stopped_result("Agent runtime stopped after reaching max_tool_calls.", stop_reason=AgentStopReason.MAX_TOOL_CALLS, iteration_count=iteration_count, tokens_used=tokens_used, contexts=contexts)
+
+    async def _prepare_tool_batch(self, batch_calls: Sequence[ToolCall], provider: str, messages: list[dict[str, Any]], call_contexts: Sequence[ToolCallContext], *, message: str, context: BaseAgentContext, iteration_count: int, model_call_count: int, tokens_used: int | None, started_at: float, metadata: Mapping[str, Any], run_state: dict[type, Any] | None, model_response: object | None) -> tuple[tuple[_PreparedToolCall, ...], AgentResult | None]:
+        # Runs policy and middleware in provider order before any approved body is dispatched.
+        prepared: list[_PreparedToolCall] = []
+        shadow_contexts = list(call_contexts)
+        shadow_messages = list(messages)
+        pending_stop: AgentResult | None = None
+        for call in batch_calls:
+            tool_is_internal = self._tool_is_internal(call)
+            if not self._tool_allowed(call):
+                denied = self._loop_settings_denied_tool(call, provider, iteration_count=iteration_count)
+                prepared.append(_PreparedToolCall(call, tool_is_internal, MiddlewareDecision.continue_(), denied, True))
+                shadow_contexts.append(denied[0])
+                continue
+            settings_outcome = self._enforce_tool_settings(call, provider, shadow_messages, shadow_contexts, tool_is_internal, iteration_count=iteration_count, tokens_used=tokens_used)
+            if isinstance(settings_outcome, AgentResult):
+                pending_stop = settings_outcome
+                break
+            if settings_outcome is not None:
+                prepared.append(_PreparedToolCall(call, tool_is_internal, MiddlewareDecision.continue_(), settings_outcome, True))
+                continue
+            decision = await self.middleware.before_tool_call(
+                self._middleware_context(
+                    MiddlewareHook.BEFORE_TOOL_CALL,
+                    message=message,
+                    context=context,
+                    provider=provider,
+                    iteration_count=iteration_count,
+                    model_call_count=model_call_count,
+                    tool_call_count=len(shadow_contexts),
+                    tokens_used=tokens_used,
+                    started_at=started_at,
+                    metadata=metadata,
+                    run_state=run_state,
+                    tool_call=call,
+                    tool_is_internal=tool_is_internal,
+                    model_response=model_response,
+                )
+            )
+            if decision.action is MiddlewareAction.ABORT_RUN:
+                pending_stop = self._middleware_abort_result(decision, iteration_count=iteration_count, tokens_used=tokens_used, contexts=shadow_contexts)
+                break
+            precomputed = self._middleware_denied_tool(call, provider, decision, iteration_count=iteration_count) if decision.action is MiddlewareAction.DENY_TOOL else None
+            prepared.append(_PreparedToolCall(call, tool_is_internal, decision, precomputed, False))
+            if precomputed is not None:
+                shadow_contexts.append(precomputed[0])
+            else:
+                placeholder = ToolResult.success(call.tool_name, "")
+                shadow_contexts.append(self._build_tool_call_context(call, provider=provider, state=ToolCallState.SUCCEEDED, result=placeholder, iteration_count=iteration_count, tool_is_internal=tool_is_internal))
+        return tuple(prepared), pending_stop
+
+    async def _execute_prepared_tool_batch(self, prepared: Sequence[_PreparedToolCall], provider: str, messages: list[dict[str, Any]], call_contexts: list[ToolCallContext], *, message: str, context: BaseAgentContext, iteration_count: int, model_call_count: int, tokens_used: int | None, started_at: float, metadata: Mapping[str, Any], run_state: dict[type, Any] | None, model_response: object | None, trace_context: SpanContext | None) -> tuple[tuple[tuple[ToolCall, ToolResult], ...], AgentResult | None]:
+        # Awaits bodies concurrently, then commits every result and hook in original provider order.
+        async def execute(plan: _PreparedToolCall) -> tuple[ToolCallContext, ToolResult]:
+            # Reuses precomputed denials while launching only approved execution paths.
+            if plan.precomputed is not None:
+                return plan.precomputed
+            return await self.execute_tool_call(plan.call, provider=provider, trace_context=trace_context, iteration_count=iteration_count, tool_is_internal=plan.tool_is_internal)
+
+        initial_results = await asyncio.gather(*(execute(plan) for plan in prepared))
+        processed: list[tuple[ToolCall, ToolResult]] = []
+        first_stop: AgentResult | None = None
+        for plan, initial in zip(prepared, initial_results):
+            context_record, result, stop = await self._finalize_prepared_tool_call(plan, initial, provider, messages, call_contexts, message=message, context=context, iteration_count=iteration_count, model_call_count=model_call_count, tokens_used=tokens_used, started_at=started_at, metadata=metadata, run_state=run_state, model_response=model_response, trace_context=trace_context, allow_retry=first_stop is None)
+            processed.append((plan.call, result))
+            if first_stop is None and stop is not None:
+                first_stop = stop
+        return tuple(processed), first_stop
+
+    async def _finalize_prepared_tool_call(self, plan: _PreparedToolCall, initial: tuple[ToolCallContext, ToolResult], provider: str, messages: list[dict[str, Any]], call_contexts: list[ToolCallContext], *, message: str, context: BaseAgentContext, iteration_count: int, model_call_count: int, tokens_used: int | None, started_at: float, metadata: Mapping[str, Any], run_state: dict[type, Any] | None, model_response: object | None, trace_context: SpanContext | None, allow_retry: bool) -> tuple[ToolCallContext, ToolResult, AgentResult | None]:
+        # Applies retry/after hooks and shared transcript mutations only in provider order.
+        context_record, result = initial
+        after_decision = MiddlewareDecision.continue_()
+        if not plan.skip_after_middleware:
+            while True:
+                after_decision = await self.middleware.after_tool_call(
+                    self._middleware_context(
+                        MiddlewareHook.AFTER_TOOL_CALL,
+                        message=message,
+                        context=context,
+                        provider=provider,
+                        iteration_count=iteration_count,
+                        model_call_count=model_call_count,
+                        tool_call_count=len(call_contexts) + 1,
+                        tokens_used=tokens_used,
+                        started_at=started_at,
+                        metadata=self._tool_call_middleware_metadata(metadata, plan.call),
+                        run_state=run_state,
+                        tool_call=plan.call,
+                        tool_result=result,
+                        tool_is_internal=plan.tool_is_internal,
+                        model_response=model_response,
+                    )
+                )
+                if after_decision.action is not MiddlewareAction.RETRY or not allow_retry:
+                    break
+                if after_decision.sleep_seconds:
+                    await self.middleware.sleep(after_decision.sleep_seconds)
+                if plan.before_decision.action is MiddlewareAction.DENY_TOOL:
+                    context_record, result = self._middleware_denied_tool(plan.call, provider, plan.before_decision, iteration_count=iteration_count)
+                else:
+                    context_record, result = await self.execute_tool_call(plan.call, provider=provider, trace_context=trace_context, iteration_count=iteration_count, tool_is_internal=plan.tool_is_internal)
+
+        call_contexts.append(context_record)
+        if plan.call.tool_name != IS_DONE_TOOL_NAME:
+            self._append_tool_result_message(messages, plan.call, result, provider, after_decision, truncate=not plan.skip_after_middleware)
+        if after_decision.action is MiddlewareAction.ABORT_RUN:
+            stop = self._middleware_abort_result(after_decision, iteration_count=iteration_count, tokens_used=tokens_used, contexts=call_contexts)
+            return context_record, result, stop
+        failure_stop = self._enforce_tool_settings_after_failure(context_record, plan.tool_is_internal, call_contexts, iteration_count=iteration_count, tokens_used=tokens_used)
+        return context_record, result, failure_stop
+
+    def _rebase_stopped_result(self, result: AgentResult, *, iteration_count: int, tokens_used: int | None, contexts: Sequence[ToolCallContext]) -> AgentResult:
+        # Replaces shadow preflight accounting with the concrete provider-ordered batch results.
+        metadata = dict(result.metadata)
+        try:
+            stop_reason = AgentStopReason(str(metadata.get("stop_reason")))
+        except ValueError:
+            stop_reason = AgentStopReason.ERROR
+        rebased = self._stopped_result(result.output, stop_reason=stop_reason, iteration_count=iteration_count, tokens_used=tokens_used, contexts=contexts)
+        runtime_keys = {"stop_reason", "iteration_count", "tokens_used", "tool_call_count", "tool_call_states", "tool_calls"}
+        extras = {key: value for key, value in metadata.items() if key not in runtime_keys}
+        return self._with_result_metadata(rebased, **extras)
+
     async def _process_tool_call(
         self,
         call: ToolCall,
@@ -1373,6 +1793,11 @@ class AgentRuntime:
     ) -> tuple[ToolCallContext, ToolResult] | AgentResult:
         """Execute one tool call, record its context, and append it to messages."""
         tool_is_internal = self._tool_is_internal(call)
+        if not self._tool_allowed(call):
+            context_record, result = self._loop_settings_denied_tool(call, provider, iteration_count=iteration_count)
+            call_contexts.append(context_record)
+            self._append_tool_result_message(messages, call, result, provider, MiddlewareDecision.continue_(), truncate=False)
+            return context_record, result
         settings_outcome = self._enforce_tool_settings(call, provider, messages, call_contexts, tool_is_internal, iteration_count=iteration_count, tokens_used=tokens_used)
         if settings_outcome is not None:
             return settings_outcome
