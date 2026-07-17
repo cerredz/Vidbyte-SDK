@@ -392,7 +392,11 @@ class PortableBundleTests(unittest.IsolatedAsyncioTestCase):
         imported_id = client.import_(target, session.export(), new_id="se_client")
 
         self.assertEqual(imported_id, "se_client")
-        self.assertEqual(client.export(target, imported_id), SessionBundleExporter(target).export(imported_id))
+        with mock.patch("vidbyte.sessions.client.SessionBundleExporter") as exporter_type:
+            exporter_type.return_value.export.return_value = b"exported-bundle"
+            self.assertEqual(client.export(target, imported_id), b"exported-bundle")
+        exporter_type.assert_called_once_with(target)
+        exporter_type.return_value.export.assert_called_once_with(imported_id)
 
     def test_import_without_new_id_rejects_existing_session(self) -> None:  # [Hidden Assumption]
         # Verify same-id imports fail loudly rather than clobbering existing metadata.

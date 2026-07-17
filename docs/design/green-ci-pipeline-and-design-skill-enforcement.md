@@ -567,7 +567,7 @@ Complete list of every file that will be created, modified, or deleted:
 | MODIFY | `tests/test_continual_trace.py` | Use the shared offline runner support |
 | MODIFY | `tests/test_concurrent_middleware.py` | Replace a real-time concurrency wait with deterministic clock advancement while strengthening the exact probe-count assertion |
 | MODIFY | `tests/test_create_handoff_tool.py` | Use the shared offline runner support |
-| MODIFY | `tests/test_durable_sessions.py` | Remove stale RunState modality fields and use offline runner support |
+| MODIFY | `tests/test_durable_sessions.py` | Remove stale RunState modality fields, use offline runner support, and verify bundle-export delegation without comparing timestamped ZIP bytes |
 | MODIFY | `tests/test_evals.py` | Use the shared offline runner support |
 | MODIFY | `tests/test_fork_tool.py` | Remove stale fork modality expectations and use offline runner support |
 | MODIFY | `tests/test_handoff_agent.py` | Use the shared offline runner support |
@@ -584,7 +584,7 @@ Complete list of every file that will be created, modified, or deleted:
 
 **Totals: 6 created, 30 modified, 0 deleted.** Four created files and 26 modified files belong to the repository implementation/PR; two created files and four modified files are user-global external rollout artifacts.
 
-Implementation discovery narrowed the planned API-migration edits from 26 test files to 16: after the shared offline runner seam and production boundary fixes landed, the other ten enumerated tests already matched the current API and needed no edits. A seventeenth test file was added after the canonical full run exposed a real-time circuit-breaker wait that could flake under suite load; its deterministic clock now asserts the stronger exact one-probe/two-rejection result. Four production files were added because the complete suite exposed two internal agents that needed to inherit the inferred runner cache and two algorithms that still unpacked an older middleware result shape. These are direct baseline repairs required by the approved green-CI scope, not new feature behavior.
+Implementation discovery narrowed the planned API-migration edits from 26 test files to 16: after the shared offline runner seam and production boundary fixes landed, the other ten enumerated tests already matched the current API and needed no edits. A seventeenth test file was added after the canonical full run exposed a real-time circuit-breaker wait that could flake under suite load; its deterministic clock now asserts the stronger exact one-probe/two-rejection result. Hosted Linux runs also exposed a durable-session assertion that compared separately generated timestamped ZIP bytes; it now directly verifies the client-to-exporter delegation contract instead. Four production files were added because the complete suite exposed two internal agents that needed to inherit the inferred runner cache and two algorithms that still unpacked an older middleware result shape. These are direct baseline repairs required by the approved green-CI scope, not new feature behavior.
 
 ---
 
