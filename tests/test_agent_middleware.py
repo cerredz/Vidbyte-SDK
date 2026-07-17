@@ -2,6 +2,7 @@
 
 import unittest
 
+from tests.agent_test_support import build_test_agent
 from vidbyte.agents import AgentLoopSettings, AgentRuntime, BaseAgent, ToolErrorPolicy
 from vidbyte.lib.dataclasses.agents import AgentRuntimeConfig
 from vidbyte.lib.dataclasses.middleware import MiddlewareContext, MiddlewareDecision
@@ -326,7 +327,7 @@ class AgentMiddlewareTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(failing.executions, 1)
 
     async def test_agent_loop_settings_auto_registers_tool_error_policy_middleware(self) -> None:
-        agent = BaseAgent(
+        agent = build_test_agent(
             name="worker",
             system_prompt="Work.",
             runner=object(),

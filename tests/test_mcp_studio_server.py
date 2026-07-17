@@ -19,6 +19,7 @@ from __future__ import annotations
 import json
 import unittest
 
+from tests.agent_test_support import build_test_agent
 from vidbyte.agents import BaseAgent
 from vidbyte.mcp_server import McpStudioServer
 from vidbyte.mcp_server.server import (
@@ -58,7 +59,7 @@ class McpStudioServerTests(unittest.IsolatedAsyncioTestCase):
         pass
 
     def _make_agent(self, name: str) -> BaseAgent:
-        return BaseAgent(
+        return build_test_agent(
             name=name,
             system_prompt="You are a test agent.",
             runner=FakeRunner(),
