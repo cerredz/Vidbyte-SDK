@@ -53,8 +53,8 @@ The current `llms.txt` has partial agent, handoff, context, and tool coverage, b
 7. State the settings validation rules: positive limits, positive `timeout_seconds`, `compaction_target_tokens < compaction_trigger_tokens`, nested type validation, `ToolSettings.max_calls` agreement with `max_tool_calls`, and output-floor/ceiling compatibility where defined.
 8. Document `ToolSettings` and `ToolErrorPolicy` as nested configuration objects rather than claiming their fields are top-level `AgentLoopSettings` arguments.
 9. Document `ContextManager` unmanaged (`add`, `extend`, `remove`, `clear`, `items`, `by_kind`, `to_context`) and managed (`upsert`, `get_by_id`, `remove_by_id`, `clear_registry`, `place_after_system_prompt`, `place_after_tools`, rendering) APIs, frozen primitive protection, and all four `ContextWindowPlacement` values.
-10. Enumerate the public context primitives: `TextContextItem`, `FileContextItem`, `GitDiffContextItem`, `DocumentContextItem`, `EnvironmentContextItem`, `MemoryContextItem`, `TaskContextItem`, `ProgressContextItem`, `PlanContextItem`, `ArtifactContextItem`, `ResponseContextItem`, `ToolCallContextItem`, `ReflexionContextItem`, `TrajectoryCheckpointContextItem`, `ProblemSpaceSearchContextItem`, and `ErrorCorrectionContextItem`.
-11. List `ContextWindow.preset`: `default` / `raw_tool_outputs`, `compact_tool_outputs`, `hide_tool_outputs` / `no_raw_tool_outputs`, `reflexion`, `multi_provider_agentic_grader`, `trajectory_checkpoints`, `problem_space_search`, and `error_correction`, including the non-linear-runtime restriction for non-default algorithms.
+10. Enumerate all current public context primitives by their source groups: documents/records/tasks, checkpoint/reasoning, multi-agent, framing, epistemics, decisions, execution, and closure. The catalog must name every concrete `*ContextItem` re-exported by `vidbyte.context.primitives` and identify `MultiAgentContextSerializer` as support API rather than a primitive.
+11. List `ContextWindow.preset`: `default` / `raw_tool_outputs`, `compact_tool_outputs`, `hide_tool_outputs` / `no_raw_tool_outputs`, `reflexion`, `multi_provider_agentic_grader`, `prosecutor_defender_judge`, `independent_critic`, `trajectory_checkpoints`, `problem_space_search`, and `error_correction`, including the non-linear-runtime restriction for non-default algorithms.
 12. Catalog every concrete built-in tool listed in Section 6, grouping it by capability and marking `CalculatorTool` and `DocumentRetrievalTool` as direct-module imports when applicable.
 13. State that tools are explicit agent-local instances subject to `PermissionPolicy`; tool family builders, registries, and result/schema types are support APIs rather than tools to pass directly to an agent.
 
@@ -110,7 +110,7 @@ Adds the requested complete LLM-facing API reference without changing code.
 
 1. Preserve the current surrounding `llms.txt` prose and insert the new section at the approved location.
 2. Explain output contracts as minimum effort floors before finalization, separately from `output_schema` formatting/validation.
-3. List the output, handoff, settings, context, and tool symbols required in Section 4 from their source packages.
+3. List the output, handoff, settings, context, and tool symbols required in Section 4 from their source packages, including all current primitive groups rather than only the original document/task/checkpoint subset.
 4. Present concrete built-ins by these groups:
    - Utilities/search: `CalculatorTool`, `CodeExecutionTool`, `DocumentRetrievalTool`, `GlobTool`, `GrepTool`, `SemanticSearchTool`.
    - Context: `ContextCompactionTool`, `CreateContextPrimitiveTool`, `ContextEditTool`, `ContextListTool`, `ContextMoveTool`, `ContextReciteTool`, `ContextRemoveTool`, `ContextStatsTool`, `ContextUpsertTool`, `ReflexionTool`, `TrajectoryCheckpointTool`.
