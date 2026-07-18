@@ -10,6 +10,7 @@ Architecture:
     - Tool-result admission algorithms from tool_results.
     - Reflexion runtime context-window algorithm from reflexion.
     - Multi-provider agentic grader context-window algorithm from multi_provider_agentic_grader.
+    - Parallel-panel public policy from parallel_panel.
 Relations:
     Used by vidbyte.context.presets and AgentRuntime.
 """
@@ -19,6 +20,7 @@ from __future__ import annotations
 from vidbyte.context.algorithms.independent_critic import CriticFailurePolicy, IndependentCriticAlgorithm
 from vidbyte.context.algorithms.reflexion import ReflexionAlgorithm
 from vidbyte.context.algorithms.multi_provider_agentic_grader import MultiProviderAgenticGraderAlgorithm
+from vidbyte.context.algorithms.parallel_panel import ParallelPanelAlgorithm
 from vidbyte.context.algorithms.trajectory_checkpoints import TrajectoryCheckpointAlgorithm
 from vidbyte.context.algorithms.problem_space_search import ProblemSpaceSearchAlgorithm
 from vidbyte.context.algorithms.error_correction import ErrorCorrectionAlgorithm
@@ -33,6 +35,7 @@ __all__ = [
     "ErrorCorrectionAlgorithm",
     "IndependentCriticAlgorithm",
     "MultiProviderAgenticGraderAlgorithm",
+    "ParallelPanelAlgorithm",
     "ProblemSpaceSearchAlgorithm",
     "ReflexionAlgorithm",
     "TrajectoryCheckpointAlgorithm",

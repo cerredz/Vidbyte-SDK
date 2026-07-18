@@ -9,7 +9,8 @@ Purpose:
 Architecture:
     - AgentRuntime: Builds BaseAgentContext and runs direct model/tool loops.
     - include_internal_tools: Defaults to current behavior but lets isolated child
-      runtimes expose exactly their explicitly supplied tool catalog.
+      runtimes expose exactly their explicitly supplied tool catalog, including an
+      exact-empty surface for model-only stages.
 Relations:
     Used by vidbyte.agents.base. Depends on shared context, tool, security, and
     strategy dataclasses without owning modality routing or runner construction.
@@ -62,6 +63,7 @@ class AgentRuntime:
         self.agent_name = agent_name
         self.system_prompt = system_prompt
         self.user_tools = tools
+        self.include_internal_tools = include_internal_tools
         self.tools = with_internal_agent_tools(tools) if include_internal_tools else tools
         self.permission_policy = permission_policy
         self.config = config or AgentRuntimeConfig()

@@ -28,7 +28,18 @@ Similar files:
 
 from __future__ import annotations
 
-from vidbyte.context.algorithms import ContextWindowAlgorithm, CriticFailurePolicy, ErrorCorrectionAlgorithm, IndependentCriticAlgorithm, MultiProviderAgenticGraderAlgorithm, ProblemSpaceSearchAlgorithm, ReflexionAlgorithm, ToolResultAdmission, TrajectoryCheckpointAlgorithm
+from vidbyte.context.algorithms import (
+    ContextWindowAlgorithm,
+    CriticFailurePolicy,
+    ErrorCorrectionAlgorithm,
+    IndependentCriticAlgorithm,
+    MultiProviderAgenticGraderAlgorithm,
+    ParallelPanelAlgorithm,
+    ProblemSpaceSearchAlgorithm,
+    ReflexionAlgorithm,
+    ToolResultAdmission,
+    TrajectoryCheckpointAlgorithm,
+)
 from vidbyte.context.compaction import CompactionMode, CompactionStats, ContextCompactionEngine, Summarizer
 from vidbyte.context.primitives import (
     AlternativeChallengeContextItem,
@@ -150,6 +161,7 @@ __all__ = [
     "ObjectiveGapContextItem",
     "ResearchHandoff",
     "MultiProviderAgenticGraderAlgorithm",
+    "ParallelPanelAlgorithm",
     "InnerContextWindowAlgorithm",
     "PlanContextItem",
     "PerspectiveGapContextItem",

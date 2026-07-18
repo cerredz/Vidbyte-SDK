@@ -46,5 +46,30 @@ class AlgorithmTrace:
         # Describes error-correction context generation.
         return AlgorithmTrace.named("error_correction", **attributes)
 
+    @staticmethod
+    def parallel_panel(**attributes: Any) -> SpanSpec:
+        # Describes the outer parallel-panel coordinator span.
+        return AlgorithmTrace.named("parallel_panel", **attributes)
+
+    @staticmethod
+    def parallel_panel_producer(**attributes: Any) -> SpanSpec:
+        # Describes the single producer pass that yields the shared candidate.
+        return AlgorithmTrace.named("parallel_panel.producer", **attributes)
+
+    @staticmethod
+    def parallel_panel_review(**attributes: Any) -> SpanSpec:
+        # Describes one isolated first-round reviewer branch.
+        return AlgorithmTrace.named("parallel_panel.review", **attributes)
+
+    @staticmethod
+    def parallel_panel_barrier(**attributes: Any) -> SpanSpec:
+        # Describes the first-round collection barrier after all reviewers settle.
+        return AlgorithmTrace.named("parallel_panel.barrier", **attributes)
+
+    @staticmethod
+    def parallel_panel_collection(**attributes: Any) -> SpanSpec:
+        # Describes ordered assembly of successful reviews and failure records.
+        return AlgorithmTrace.named("parallel_panel.collection", **attributes)
+
 
 __all__ = ["AlgorithmTrace"]

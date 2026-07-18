@@ -96,8 +96,9 @@ persistent and prominent across iterations.
 - `multi_agent.py`: builds orchestration contexts and composes manager-facing primitives.
 - `window.py` and `presets.py`: context-window preset resolution.
 - `primitives/`: typed context items for files, tasks, progress, memory, responses, tool calls, multi-agent orchestration state, and general problem-solving challenges.
-- `algorithms/`: reflexion, grader, tool-result, and trajectory-checkpoint algorithms.
+- `algorithms/`: reflexion, grader, independent-critic, parallel-panel, tool-result, and trajectory-checkpoint algorithms.
 - `algorithms/independent_critic.py`: immutable review-only critic policy, exact evidence serialization, and bounded report normalization.
+- `algorithms/parallel_panel.py`: immutable independent first-round parallel review policy.
 - `compaction.py`: deterministic context compaction contracts and stats.
 - `handoff/`: structured handoff models.
 
@@ -119,3 +120,67 @@ under `result.metadata["independent_critic"]`. The default raises when review
 cannot produce valid JSON; custom configuration can choose
 `CriticFailurePolicy.RETURN_CANDIDATE`, which returns the producer result with
 an explicit `status="review_failed"` marker instead of claiming success.
+
+## Parallel Panel
+
+Parallel Panel runs the normal producer once and then asks multiple independent,
+model-only reviewers to inspect the same completed candidate. Reviews are
+advisory, unadjudicated metadata: the algorithm does not revise the candidate,
+and the producer's `output`, `structured`, `calls`, and `strategy_name` remain
+unchanged.
+
+Configure the public algorithm directly when the wrapper is useful elsewhere:
+
+```python
+from vidbyte import ContextWindowAlgorithm, ParallelPanelAlgorithm
+
+algorithm = ContextWindowAlgorithm(
+    name="parallel_panel",
+    parallel_panel=ParallelPanelAlgorithm(
+        reviewer_count=3,
+        min_successful_reviews=2,
+        artifact_names=("requirements", "evidence"),
+        per_reviewer_timeout_seconds=30.0,
+    ),
+)
+```
+
+Or construct the same wrapper through the preset namespace:
+
+```python
+from vidbyte import ContextWindow
+
+algorithm = ContextWindow.preset.parallel_panel(
+    reviewer_count=3,
+    min_successful_reviews=2,
+    max_concurrency=3,
+)
+```
+
+Each reviewer receives exactly the original task, exact producer candidate, and
+the name, declared type, and exact content of context artifacts explicitly named
+by `artifact_names`. It receives no producer system prompt, history, scratch
+reasoning, tool transcript, runtime metadata, filesystem paths, memory, context
+items, unlisted artifacts, tools, or MCP access. Missing, ambiguous, or oversized
+allowlisted evidence fails before any reviewer starts; candidate and evidence
+content is never silently truncated.
+
+All reviewer tasks are scheduled before collection. A barrier prevents findings
+from entering result metadata until every first-round branch has settled.
+Individual reviewer failures and timeouts become bounded failure records when
+`min_successful_reviews` still succeeds. Falling below that threshold raises
+`AgentExecutionError`. A whole-panel timeout or caller cancellation cancels
+unfinished reviewers and publishes no findings.
+
+Reviewer calls increase provider cost by `reviewer_count` calls after the producer
+and can increase tail latency. `max_concurrency` bounds in-flight calls, not total
+calls. Standard asynchronous runners can overlap; a custom synchronous runner
+blocks the event-loop thread, so its metadata reports `sync_constrained` and its
+timeouts cannot preempt it while blocked. Custom asynchronous runners must
+support concurrent calls through the same runner handle.
+
+Successful recorder traces can be checked with
+`ParallelPanelContextWindowTemplate`; see
+[`skills/vidbyte-sdk/context-window-templates.md`](../../skills/vidbyte-sdk/context-window-templates.md)
+for the exact scheduling, barrier, and collection slot contract.
+

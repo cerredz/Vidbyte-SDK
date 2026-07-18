@@ -508,3 +508,43 @@ script; use the existing template harness and regression suite for verification.
 | `tests/test_context_window_templates.py` | All template and instrumentation tests |
 | `scripts/test-context-window-templates.py` | Executable verification script |
 | `docs/design/context-window-templates.md` | Full design doc |
+
+---
+
+## 13. Parallel Panel
+
+`ParallelPanelContextWindowTemplate(reviewer_count)` validates the successful
+first-round review protocol:
+
+```python
+from vidbyte.lib.templates import ParallelPanelContextWindowTemplate
+
+template = ParallelPanelContextWindowTemplate(reviewer_count=3)
+assert template.expected_slots == (
+    "system_prompt",
+    "parallel_panel_producer",
+    "parallel_panel_review",
+    "parallel_panel_review",
+    "parallel_panel_review",
+    "parallel_panel_barrier",
+    "parallel_panel_collection",
+)
+```
+
+The runtime records each `parallel_panel_review` slot synchronously in reviewer
+index order when the branch is scheduled. These slots contain structural
+identity only; they do not publish review text. No review result is inspected or
+copied to public state until all scheduled branches have settled at the gather
+barrier. `parallel_panel_barrier` contains counts only, and
+`parallel_panel_collection` contains counts and stable reviewer ordering, never
+candidate, artifact, review, or provider-response bodies.
+
+A successful run emits one system slot, one producer slot, exactly
+`reviewer_count` scheduling slots, one barrier slot, and one collection slot.
+Panel timeout and caller cancellation emit neither barrier nor collection because
+the barrier did not complete. An insufficient-success run can emit the barrier
+after all branches settle but never emits collection or publishes partial
+findings, so it intentionally does not pass the successful-run template.
+
+Instrumentation lives in `vidbyte/agents/algorithms/parallel_panel.py`; the
+reusable template lives in `vidbyte/lib/templates/parallel_panel.py`.

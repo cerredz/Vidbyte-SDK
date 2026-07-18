@@ -1,4 +1,4 @@
-﻿"""Context Protocol Header
+"""Context Protocol Header
 
 Description:
     Dispatches attached context-window algorithms for AgentRuntime.
@@ -14,15 +14,22 @@ Relations:
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
-from vidbyte.agents.algorithms import IndependentCriticRuntimeAlgorithm, MultiProviderAgenticGraderRuntimeAlgorithm, ReflexionRuntimeAlgorithm
+from vidbyte.agents.algorithms import (
+    IndependentCriticRuntimeAlgorithm,
+    MultiProviderAgenticGraderRuntimeAlgorithm,
+    ParallelPanelRuntimeAlgorithm,
+    ReflexionRuntimeAlgorithm,
+)
 from vidbyte.context.runtime import InnerContextWindowAlgorithm
 from vidbyte.lib.dataclasses.runner import RunnerHandle
 from vidbyte.lib.tracing import SpanContext
 from vidbyte.lib.dataclasses.context import BaseAgentContext
 from vidbyte.lib.dataclasses.strategies import AgentResult
+from vidbyte.lib.errors import AgentExecutionError
 
 if TYPE_CHECKING:
     from vidbyte.agents.runtimes import LinearAgentRuntime as AgentRuntime
@@ -42,6 +49,8 @@ class AgentRuntimeContextAlgorithms:
             return "multi_provider_agentic_grader"
         if self.runtime.algorithm.independent_critic is not None:
             return "independent_critic"
+        if self.runtime.algorithm.parallel_panel is not None:
+            return "parallel_panel"
         if self.runtime.algorithm.trajectory_checkpoints is not None:
             return "trajectory_checkpoints"
         if self.runtime.algorithm.problem_space_search is not None:
@@ -54,7 +63,15 @@ class AgentRuntimeContextAlgorithms:
         # Return whether the configured runtime algorithm matches name.
         return self.detect_algorithm() == name
 
-    def return_algorithm(self) -> ReflexionRuntimeAlgorithm | MultiProviderAgenticGraderRuntimeAlgorithm | IndependentCriticRuntimeAlgorithm | None:
+    def return_algorithm(
+        self,
+    ) -> (
+        ReflexionRuntimeAlgorithm
+        | MultiProviderAgenticGraderRuntimeAlgorithm
+        | IndependentCriticRuntimeAlgorithm
+        | ParallelPanelRuntimeAlgorithm
+        | None
+    ):
         # Return the configured runtime algorithm implementation.
         if self.runtime.algorithm.reflexion is not None:
             return ReflexionRuntimeAlgorithm(self.runtime, self.runtime.algorithm.reflexion)
@@ -62,6 +79,8 @@ class AgentRuntimeContextAlgorithms:
             return MultiProviderAgenticGraderRuntimeAlgorithm(self.runtime, self.runtime.algorithm.multi_provider_agentic_grader)
         if self.runtime.algorithm.independent_critic is not None:
             return IndependentCriticRuntimeAlgorithm(self.runtime, self.runtime.algorithm.independent_critic)
+        if self.runtime.algorithm.parallel_panel is not None:
+            return ParallelPanelRuntimeAlgorithm(self.runtime, self.runtime.algorithm.parallel_panel)
         return None
 
     def inner_loop_algorithm(self) -> InnerContextWindowAlgorithm | None:
@@ -84,8 +103,10 @@ class AgentRuntimeContextAlgorithms:
         if algorithm is None:
             return None
         algorithm_name = self.detect_algorithm() or "unknown"
-        span_attributes = {"algorithm": algorithm_name}
-        if algorithm_name != "independent_critic":
+        span_attributes: dict[str, Any] = {"algorithm": algorithm_name}
+        if algorithm_name == "parallel_panel":
+            span_attributes["message_chars"] = len(message)
+        elif algorithm_name != "independent_critic":
             span_attributes["message"] = message
         span = self._start_algorithm_span(trace_context, **span_attributes)
         try:
@@ -97,10 +118,21 @@ class AgentRuntimeContextAlgorithms:
                 options=options,
                 trace_context=span or trace_context,
             )
-            self._end_algorithm_span(span, output=None if algorithm_name == "independent_critic" else result.output)
+            if algorithm_name == "independent_critic":
+                output: str | None = None
+            elif algorithm_name == "parallel_panel":
+                output = "completed"
+            else:
+                output = result.output
+            self._end_algorithm_span(span, output=output)
             return result
         except BaseException as exc:
-            trace_error = _content_free_algorithm_error(exc) if algorithm_name == "independent_critic" else exc
+            if algorithm_name == "independent_critic":
+                trace_error: BaseException = _content_free_algorithm_error(exc)
+            elif algorithm_name == "parallel_panel" and not isinstance(exc, asyncio.CancelledError):
+                trace_error = AgentExecutionError("Parallel panel algorithm failed.")
+            else:
+                trace_error = exc
             self._end_algorithm_span(span, error=trace_error)
             raise
 
@@ -129,5 +161,3 @@ def _content_free_algorithm_error(exc: BaseException) -> RuntimeError:
 __all__ = [
     "AgentRuntimeContextAlgorithms",
 ]
-
-
