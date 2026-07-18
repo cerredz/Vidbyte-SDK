@@ -33,6 +33,7 @@ access remain outside this package.
 | Layer | Role |
 |-------|------|
 | [`vidbyte.agents`](vidbyte/agents/README.md) | Executable agent actors, runtimes, inferred runner selection, handoff, and agent registries |
+| [`vidbyte.config`](vidbyte/config/README.md) | Safe YAML parsing into declarative agent, tool, and middleware settings; applications resolve executable references |
 | [`vidbyte.cli`](vidbyte/cli/README.md) | Unified console command for SDK developer surfaces, currently `vidbyte-sdk skills` |
 | [`vidbyte.context`](vidbyte/context/README.md) | Structured context items, context windows, compaction, algorithms, and handoff models |
 | [`vidbyte.evals`](vidbyte/evals/README.md) | Local eval cases, suites, runners, graders, registries, and result summaries |
@@ -85,6 +86,30 @@ sdk.agents
 sdk.tools
 sdk.providers
 ```
+
+## YAML Configuration
+
+Use `ConfigurationLoader` when an application wants versioned, data-only YAML
+settings. Loading validates the document and returns declarations; it never
+imports a `ref` or instantiates a tool or middleware. Resolve those declarations
+from an application-owned allowlist before creating the agent.
+
+```python
+from vidbyte import ConfigurationLoader, VidbyteSDK
+
+loader = ConfigurationLoader()
+settings = loader.load_agent_settings("agent.yaml")
+tool_definitions = loader.load_tools("tools.yaml")
+middleware_definitions = loader.load_middleware_settings("middleware.yaml")
+
+tools = resolve_tools(tool_definitions)  # Application-owned allowlist/resolver.
+middleware = resolve_middleware(middleware_definitions)
+agent = VidbyteSDK().agents.base(**settings.to_agent_kwargs(tools=tools, middleware=middleware))
+```
+
+Each document declares `version: 1` and a matching `kind` (`agent`, `tools`, or
+`middleware`). Keep API keys, tokens, passwords, and other secrets outside YAML;
+pass them through the application or environment when constructing runtime code.
 
 ## Agents and Runner Inference
 

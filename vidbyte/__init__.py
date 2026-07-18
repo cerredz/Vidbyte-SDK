@@ -9,6 +9,7 @@ Purpose:
 Architecture:
     - VidbyteSDK: Root namespace client.
     - Agent exports: BaseAgent, AgentCard, AgentMessage, AgentRegistry, AgentRunnerConfig, AgentSpec.
+    - Configuration exports: ConfigurationLoader, AgentSettings, ToolDefinition, MiddlewareDefinition.
     - Tool exports: BaseTool, ToolCall, ToolExecutor, ToolParameter, ToolPermission, ToolRegistry, ToolResult, ToolSpec, ToolStatus, ToolsFormatter.
     - MCP exports: McpServerConfig, McpServerHandle, McpToolPermission.
     - Context exports: context contracts plus general problem-solving challenge records.
@@ -80,6 +81,7 @@ from vidbyte.agents import (
     ToolSettings,
 )
 from vidbyte.client import VidbyteSDK
+from vidbyte.config import AgentSettings, ConfigurationLoader, MiddlewareDefinition, ToolDefinition
 from vidbyte.paradigms import (
     AgentRoleSettings,
     ContextFile,
@@ -416,6 +418,7 @@ from vidbyte.tools.mcp import (
 
 __all__ = [
     "Agent",
+    "AgentSettings",
     "AllegationRecord",
     "AllegationSeverity",
     "DebateStageRecord",
@@ -578,6 +581,7 @@ __all__ = [
     "CheckpointTool",
     "RunPromptsSequentiallyTool",
     "ContextWindow",
+    "ConfigurationLoader",
     "ContextWindowAlgorithm",
     "CriticFailurePolicy",
     "ContextWindowPlacement",
@@ -603,6 +607,7 @@ __all__ = [
     "McpToolDiscoveryError",
     "McpToolExecutionError",
     "McpToolPermission",
+    "MiddlewareDefinition",
     "MiddlewareAction",
     "MiddlewareContext",
     "MiddlewareDecision",
@@ -702,6 +707,7 @@ __all__ = [
     "TaskContextItem",
     "TextContextItem",
     "ToolCall",
+    "ToolDefinition",
     "ToolCallContext",
     "ToolCallContextItem",
     "ToolCallState",

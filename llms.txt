@@ -48,6 +48,7 @@ Vidbyte SDK is the developer-facing agent framework in the Vidbyte ecosystem. It
 - Artifact sources for public documents such as `llms.txt`, plus generated repository artifacts such as `artifacts/file_index.md`.
 - Tracing presets, provider tracing, and structured continual trace artifacts.
 - Middleware hooks for policy, retry, audit, limits, tool-error retry/abort policy, and compaction.
+- Safe YAML parsing into declarative agent, tool, and middleware settings; applications resolve refs to executable components.
 - Swappable runtimes including linear, MCTS search, and actor model patterns.
 - Registries for agents, providers, runtimes, prompts, tools, and actors.
 - Unified `vidbyte-sdk` CLI with `skills list`, `skills show`, and `skills install`.
@@ -115,6 +116,26 @@ sdk.harnesses
 sdk.agents
 sdk.tools
 sdk.providers
+```
+
+### YAML Configuration
+
+`ConfigurationLoader` is the public class-first interface for data-only YAML
+configuration. It accepts versioned documents with `kind: agent`, `kind: tools`,
+or `kind: middleware` and returns `AgentSettings`, `ToolDefinition`, or
+`MiddlewareDefinition` values. It validates structure and intrinsic settings but
+never imports a `ref`, instantiates a tool or middleware, interpolates secrets,
+or performs network access. Application code must map declarations to an
+allowlisted runtime implementation before passing `settings.to_agent_kwargs(...)`
+to `VidbyteSDK().agents.base(...)`.
+
+```python
+from vidbyte import ConfigurationLoader
+
+loader = ConfigurationLoader()
+settings = loader.load_agent_settings("agent.yaml")
+tools = loader.load_tools("tools.yaml")
+middleware = loader.load_middleware_settings("middleware.yaml")
 ```
 
 For direct model execution, use an agent:

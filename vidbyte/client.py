@@ -6,8 +6,8 @@ Purpose:
     Owns construction of public namespace clients while keeping feature-specific
     logic inside their packages.
 Architecture:
-    - VidbyteSDK: Instantiates agents, harnesses, paradigms, tools, providers,
-      and evals namespace clients.
+    - VidbyteSDK: Instantiates agents, configuration, harnesses, paradigms, tools,
+      providers, and evals namespace clients.
 Relations:
     Related to vidbyte.__init__, vidbyte.tools.client, vidbyte.harnesses.client,
     vidbyte.paradigms.client, and vidbyte.providers.client.
@@ -16,6 +16,7 @@ Relations:
 from __future__ import annotations
 
 from vidbyte.agents.client import AgentClient
+from vidbyte.config import ConfigurationLoader
 from vidbyte.paradigms.client import ParadigmClient
 from vidbyte.harnesses.client import HarnessClient
 from vidbyte.providers.client import ProvidersClient
@@ -29,6 +30,7 @@ class VidbyteSDK:
     def __init__(self) -> None:
         # Instantiates each public namespace client exposed by the root SDK.
         self.agents = AgentClient()
+        self.config = ConfigurationLoader()
         self.harnesses = HarnessClient()
         self.paradigms = ParadigmClient()
         self.tools = ToolsClient()
