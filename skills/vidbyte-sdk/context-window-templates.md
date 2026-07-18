@@ -499,6 +499,25 @@ intentionally outside the successful template contract.
 
 ## 12. Adding Templates to a New Algorithm — Checklist
 
+### Independent Critic
+
+`IndependentCriticContextWindowTemplate()` expects:
+
+```text
+system_prompt
+independent_critic_candidate
+independent_critic_review
+```
+
+Pass `review_fails=True` to append `independent_critic_failure`. The runtime
+emits `system_prompt` at algorithm entry, `independent_critic_candidate` before
+the one producer call, `independent_critic_review` before exact-input validation
+and reviewer invocation, and `independent_critic_failure` only after an ordinary
+critic-stage exception. Producer failures end before the review/failure slots.
+
+This design-no-tests implementation intentionally adds no test or verification
+script; use the existing template harness and regression suite for verification.
+
 - [ ] Add `recorder.append("<algo>_<stage>", iteration=...)` at each structural
       emit point in `vidbyte/agents/algorithms/<name>.py`.
 - [ ] Create `vidbyte/lib/templates/<name>.py` with the template subclass.
@@ -520,6 +539,7 @@ intentionally outside the successful template contract.
 | `vidbyte/context/templates/__init__.py` | Module exports |
 | `vidbyte/lib/templates/base.py` | ContextWindowTemplate, TemplateViolation |
 | `vidbyte/lib/templates/reflexion.py` | ReflexionContextWindowTemplate |
+| `vidbyte/lib/templates/independent_critic.py` | IndependentCriticContextWindowTemplate |
 | `vidbyte/lib/templates/critique_adjudicate_revise.py` | CritiqueAdjudicateReviseContextWindowTemplate |
 | `vidbyte/lib/templates/trajectory_checkpoints.py` | TrajectoryCheckpointContextWindowTemplate |
 | `vidbyte/lib/templates/__init__.py` | Module exports |

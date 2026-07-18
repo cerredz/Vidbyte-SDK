@@ -4,11 +4,12 @@ Description:
     Defines the internal direct execution runtime for Vidbyte agents.
 Purpose:
     Keeps agent loop execution, context-window construction, tool execution,
-    permission checks, and provider-reported token accounting out of BaseAgent.
+    permission checks, provider-reported token accounting, and exact internal-tool
+    exposure policy out of BaseAgent.
 Architecture:
     - AgentRuntime: Builds BaseAgentContext and runs direct model/tool loops.
-    - include_internal_tools: Lets isolated review stages opt out of implicit
-      completion tools while preserving the existing default for all callers.
+    - include_internal_tools: Defaults to current behavior but lets isolated child
+      runtimes expose exactly their explicitly supplied tool catalog.
     - _tool_call_observer: Lets an isolated orchestrator retain completed calls
       if a later child model call is cancelled or times out.
 Relations:
@@ -59,13 +60,14 @@ class AgentRuntime:
     """Internal runtime for direct agent execution."""
 
     def __init__(self, *, agent_name: str, system_prompt: str, tools: Tools, permission_policy: PermissionPolicy, config: AgentRuntimeConfig | None = None, tracer: TracerBase | None = None, middleware: Sequence[AgentMiddleware] = (), run_id: str | None = None, algorithm: ContextWindowAlgorithm | str | None = None, context_manager: ContextManager | None = None, recorder: RecorderBase | None = None, output_schema: type | Mapping[str, Any] | None = None, output_contract: "AgentLoopSettingsOutputContract | None" = None, include_internal_tools: bool = True, _tool_call_observer: Callable[[ToolCallContext], None] | None = None) -> None:
-        # Builds one runtime and optionally excludes implicit agent-control tools for strict child stages.
+        # Configure one direct runtime; specialized child runtimes may opt out of implicit tools and observe calls.
         self.agent_name = agent_name
         self.system_prompt = system_prompt
         self.user_tools = tools
         self.tools = with_internal_agent_tools(tools) if include_internal_tools else tools
         self.include_internal_tools = include_internal_tools
         self._tool_call_observer = _tool_call_observer
+
         self.permission_policy = permission_policy
         self.config = config or AgentRuntimeConfig()
         self.run_id = run_id

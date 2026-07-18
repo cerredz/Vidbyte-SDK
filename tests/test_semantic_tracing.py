@@ -6,6 +6,7 @@ import unittest
 from typing import Any
 from unittest.mock import patch
 
+from tests.agent_test_support import build_test_agent
 from vidbyte import Agent, AggregateAgent, ProposerSpec, Trace, TraceController, TraceProfile
 from vidbyte.agents.types import AgentMessage
 from vidbyte.lib.errors import ConfigurationError
@@ -230,7 +231,7 @@ class SemanticRuntimeIntegrationTests(unittest.IsolatedAsyncioTestCase):
         # Verifies default semantic agent tracing emits core spans and parser/stop spans.
         events: list[dict[str, Any]] = []
         tracer = Trace.profile(Trace.debug(events), TraceProfile.default())
-        agent = Agent(name="worker", system_prompt="Work.", runner=DoneRunner(), trace=tracer)
+        agent = build_test_agent(name="worker", system_prompt="Work.", runner=DoneRunner(), trace=tracer)
         await agent.generate_reply("hello")
         names = [event.get("name") for event in events if event["type"].startswith("start")]
         self.assertIn("agent.run", names)
@@ -244,7 +245,7 @@ class SemanticRuntimeIntegrationTests(unittest.IsolatedAsyncioTestCase):
         # Verifies verbose profile adds runtime and context-window spans.
         events: list[dict[str, Any]] = []
         tracer = Trace.profile(Trace.debug(events), TraceProfile.verbose())
-        agent = Agent(name="worker", system_prompt="Work.", runner=DoneRunner(), trace=tracer)
+        agent = build_test_agent(name="worker", system_prompt="Work.", runner=DoneRunner(), trace=tracer)
         await agent.generate_reply("hello")
         names = [event.get("name") for event in events if event["type"].startswith("start")]
         self.assertIn("runtime.iteration", names)
@@ -254,7 +255,7 @@ class SemanticRuntimeIntegrationTests(unittest.IsolatedAsyncioTestCase):
         # Verifies tool.call exposes tool name, input, and output-ready metadata.
         events: list[dict[str, Any]] = []
         tracer = Trace.profile(Trace.debug(events), TraceProfile.default())
-        agent = Agent(name="worker", system_prompt="Work.", runner=DoneRunner(), trace=tracer)
+        agent = build_test_agent(name="worker", system_prompt="Work.", runner=DoneRunner(), trace=tracer)
         await agent.generate_reply("hello")
         tool_event = next(event for event in events if event.get("name") == "tool.call")
         self.assertEqual(tool_event["attributes"]["tool_name"], "isDone")

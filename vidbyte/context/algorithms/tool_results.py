@@ -7,8 +7,8 @@ Purpose:
     messages while preserving full tool results in runtime metadata.
 Architecture:
     - ToolResultAdmission: Supported admission modes.
-    - ContextWindowAlgorithm: Immutable runtime algorithm object.
-    - critique_adjudicate_revise: Optional return-level adversarial review policy.
+    - ContextWindowAlgorithm: Immutable, mutually exclusive runtime algorithm object,
+      including optional Independent Critic and critique-adjudicate-revise policies.
 Relations:
     Used by vidbyte.context.presets and AgentRuntime.
 """
@@ -22,6 +22,7 @@ from typing import Any
 
 from vidbyte.context.compaction import CompactionMode, ContextCompactionEngine
 from vidbyte.context.algorithms.reflexion import ReflexionAlgorithm
+from vidbyte.context.algorithms.independent_critic import IndependentCriticAlgorithm
 from vidbyte.context.algorithms.multi_provider_agentic_grader import MultiProviderAgenticGraderAlgorithm
 from vidbyte.context.algorithms.trajectory_checkpoints import TrajectoryCheckpointAlgorithm
 from vidbyte.context.algorithms.problem_space_search import ProblemSpaceSearchAlgorithm
@@ -47,6 +48,7 @@ class ContextWindowAlgorithm:
     max_tool_result_chars: int = 600
     reflexion: ReflexionAlgorithm | None = None
     multi_provider_agentic_grader: MultiProviderAgenticGraderAlgorithm | None = None
+    independent_critic: IndependentCriticAlgorithm | None = None
     trajectory_checkpoints: TrajectoryCheckpointAlgorithm | None = None
     problem_space_search: ProblemSpaceSearchAlgorithm | None = None
     error_correction: ErrorCorrectionAlgorithm | None = None
@@ -55,7 +57,7 @@ class ContextWindowAlgorithm:
 
     def __post_init__(self) -> None:
         # Verifies that at most one runtime context algorithm is configured.
-        active = [x for x in (self.reflexion, self.multi_provider_agentic_grader, self.trajectory_checkpoints, self.problem_space_search, self.error_correction, self.critique_adjudicate_revise) if x is not None]
+        active = [x for x in (self.reflexion, self.multi_provider_agentic_grader, self.independent_critic, self.trajectory_checkpoints, self.problem_space_search, self.error_correction, self.critique_adjudicate_revise) if x is not None]
         if len(active) > 1:
             raise ValueError("At most one runtime context-window algorithm can be configured.")
 
@@ -77,6 +79,7 @@ __all__ = [
     "ContextWindowAlgorithm",
     "CritiqueAdjudicateReviseAlgorithm",
     "ErrorCorrectionAlgorithm",
+    "IndependentCriticAlgorithm",
     "MultiProviderAgenticGraderAlgorithm",
     "ProblemSpaceSearchAlgorithm",
     "ReflexionAlgorithm",

@@ -7,14 +7,18 @@ Purpose:
     and managers from a single public namespace.
 Architecture:
     - Namespace client for ContextWindow, ContextManager, and MultiAgentContext.
+    - Problem-solving records for framing, epistemics, decisions, execution, and closure.
 Key Functions / Exports:
     - ContextManager: Manages loading, updating, and exporting context items.
     - ContextWindow: Represents the sliding/compacted context window.
     - MultiAgentContext: Builds and renders orchestration context primitives.
     - ContextWindowAlgorithm: Base class for context window compaction/pruning.
+    - IndependentCriticAlgorithm: Configures isolated advisory candidate review.
 Relation to codebase as a whole:
-    Provides public exports for all context primitives and algorithms, including
-    critique-adjudicate-revise provenance and access contracts.
+    Provides public exports for all context primitives and algorithms (including
+    general problem-solving challenges as well as IndependentCriticAlgorithm,
+    CritiqueAdjudicateReviseAlgorithm, MultiProviderAgenticGraderAlgorithm,
+    ReflexionAlgorithm, and related contracts).
 Similar files:
     - vidbyte/__init__.py: Root module exporting overall SDK contracts.
     - vidbyte/context/manager.py: Contains the concrete ContextManager implementation.
@@ -23,17 +27,45 @@ Similar files:
 
 from __future__ import annotations
 
-from vidbyte.context.algorithms import AcceptedFinding, ContextWindowAlgorithm, CriticFailurePolicy, CriticFinding, CritiqueAdjudicateReviseAlgorithm, ErrorCorrectionAlgorithm, FindingEvidence, MultiProviderAgenticGraderAlgorithm, ProblemSpaceSearchAlgorithm, ReflexionAlgorithm, ReviewStageAccess, StageFailurePolicy, ToolResultAdmission, TrajectoryCheckpointAlgorithm
+from vidbyte.context.algorithms import (
+    AcceptedFinding,
+    ContextWindowAlgorithm,
+    CriticFailurePolicy,
+    CriticFinding,
+    CritiqueAdjudicateReviseAlgorithm,
+    ErrorCorrectionAlgorithm,
+    FindingEvidence,
+    IndependentCriticAlgorithm,
+    MultiProviderAgenticGraderAlgorithm,
+    ProblemSpaceSearchAlgorithm,
+    ReflexionAlgorithm,
+    ReviewStageAccess,
+    StageFailurePolicy,
+    ToolResultAdmission,
+    TrajectoryCheckpointAlgorithm,
+)
 from vidbyte.context.compaction import CompactionMode, CompactionStats, ContextCompactionEngine, Summarizer
 from vidbyte.context.primitives import (
+    AlternativeChallengeContextItem,
+    AmbiguityContextItem,
     ArtifactContextItem,
+    AssumptionChallengeContextItem,
+    BoundaryContextItem,
+    CompletionGateContextItem,
     ContextItem,
+    DecisionChallengeContextItem,
+    DependencyContextItem,
     DocumentContextItem,
     EnvironmentContextItem,
     ErrorCorrectionContextItem,
+    EvidenceChallengeContextItem,
+    FeedbackGapContextItem,
     FileContextItem,
     GitDiffContextItem,
+    InterventionRiskContextItem,
+    InvariantContextItem,
     MemoryContextItem,
+    ModelChallengeContextItem,
     MultiAgentContextSerializer,
     MultiAgentLedgerContextItem,
     MultiAgentLimitsContextItem,
@@ -41,13 +73,20 @@ from vidbyte.context.primitives import (
     MultiAgentRequestContextItem,
     MultiAgentTeamContextItem,
     MultiAgentTerminalContextItem,
+    ObjectiveConflictContextItem,
+    ObjectiveGapContextItem,
     PlanContextItem,
+    PerspectiveGapContextItem,
+    ProblemFrameContextItem,
     ProblemSpaceSearchContextItem,
+    ProcessStallContextItem,
     ProgressContextItem,
     ResponseContextItem,
+    RiskEscalationContextItem,
     TaskContextItem,
     TextContextItem,
     ToolCallContextItem,
+    TradeoffContextItem,
     TrajectoryCheckpointContextItem,
 )
 from vidbyte.context.runtime import ContextWindowPlacement, ContextWindowRunContext, InnerContextWindowAlgorithm
@@ -72,10 +111,15 @@ from vidbyte.context.presets import ContextWindowPresets
 from vidbyte.context.window import ContextWindow
 
 __all__ = [
+    "AlternativeChallengeContextItem",
+    "AmbiguityContextItem",
     "ArtifactContextItem",
     "AcceptedFinding",
+    "AssumptionChallengeContextItem",
     "BaseContext",
     "BaseAgentContext",
+    "BoundaryContextItem",
+    "CompletionGateContextItem",
     "ContextArtifact",
     "ContextBudget",
     "CompactionMode",
@@ -94,17 +138,25 @@ __all__ = [
     "CriticFailurePolicy",
     "CriticFinding",
     "CritiqueAdjudicateReviseAlgorithm",
+    "DecisionChallengeContextItem",
+    "DependencyContextItem",
     "DocumentContextItem",
     "EngineeringHandoff",
     "EnvironmentContextItem",
     "ErrorCorrectionAlgorithm",
     "ErrorCorrectionContextItem",
+    "EvidenceChallengeContextItem",
+    "FeedbackGapContextItem",
     "FileContextItem",
     "FindingEvidence",
     "GitDiffContextItem",
     "Handoff",
+    "IndependentCriticAlgorithm",
+    "InterventionRiskContextItem",
+    "InvariantContextItem",
     "MemoryContextItem",
     "MinimalHandoff",
+    "ModelChallengeContextItem",
     "MultiAgentContext",
     "MultiAgentContextSerializer",
     "MultiAgentLedgerContextItem",
@@ -113,21 +165,28 @@ __all__ = [
     "MultiAgentRequestContextItem",
     "MultiAgentTeamContextItem",
     "MultiAgentTerminalContextItem",
+    "ObjectiveConflictContextItem",
+    "ObjectiveGapContextItem",
     "ResearchHandoff",
     "MultiProviderAgenticGraderAlgorithm",
     "InnerContextWindowAlgorithm",
     "PlanContextItem",
+    "PerspectiveGapContextItem",
+    "ProblemFrameContextItem",
     "ProblemSpaceSearchAlgorithm",
     "ProblemSpaceSearchContextItem",
+    "ProcessStallContextItem",
     "ProgressContextItem",
     "ReflexionAlgorithm",
     "ReviewStageAccess",
     "ResponseContextItem",
+    "RiskEscalationContextItem",
     "Summarizer",
     "StageFailurePolicy",
     "TaskContextItem",
     "TextContextItem",
     "ToolCallContextItem",
+    "TradeoffContextItem",
     "ToolResultAdmission",
     "TrajectoryCheckpointAlgorithm",
     "TrajectoryCheckpointContextItem",

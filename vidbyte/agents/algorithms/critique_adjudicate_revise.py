@@ -9,9 +9,9 @@ ROLE IN CODEBASE: Constructed by vidbyte/agents/context_algorithms.py. It calls 
     from vidbyte/context/algorithms/critique_adjudicate_revise.py, and emits AgentResult.
 ARCHITECTURE NOTE: Fresh object graphs and newly serialized envelopes enforce the trust
     boundary. Raw findings never share an object or envelope with the revision worker.
-FUNCTION INVENTORY: CritiqueAdjudicateReviseRuntimeAlgorithm.arun is the public adapter
-    entrypoint. Private orchestrator/leaf methods preflight access, fan out critics,
-    execute isolated stages, enforce terminal policies, and assemble sanitized results.
+FUNCTION INVENTORY: CritiqueAdjudicateReviseRuntimeAlgorithm.arun / run are the public
+    adapter entrypoints. Private orchestrator/leaf methods preflight access, fan out
+    critics, execute isolated stages, enforce terminal policies, and assemble results.
 COMMON MODIFICATION PATTERNS: Change stage data only in the corresponding envelope
     builder, parser contract, prompt asset, and metadata summary together.
 WHAT NOT TO DO IN THIS FILE: 1. Do not derive child context from producer context.
@@ -47,6 +47,8 @@ from vidbyte.context.algorithms.critique_adjudicate_revise import (
     StageFailurePolicy,
     _AdjudicationProjection,
 )
+from vidbyte.context.manager import ContextManager
+from vidbyte.context.primitives import ArtifactContextItem
 from vidbyte.context.templates import NullRecorder
 from vidbyte.lib.agents.modality_detector import ModalityDetector
 from vidbyte.lib.dataclasses.agents import AgentRuntimeConfig
@@ -62,9 +64,7 @@ from vidbyte.tools.catalog import Tools
 
 if TYPE_CHECKING:
     from vidbyte.agents.runtime import AgentRuntime
-
-_STAGE_OPTION_KEYS = frozenset({"frequency_penalty", "max_completion_tokens", "max_tokens", "presence_penalty", "seed", "temperature", "top_p"})
-_LIVE_BINDING_ATTRIBUTES = ("_context_getter", "_session", "_context", "context", "context_manager", "session")
+    from vidbyte.trace.schema import SpanSpec
 
 
 @dataclass(frozen=True, slots=True)
@@ -136,12 +136,18 @@ class CritiqueAdjudicateReviseRuntimeAlgorithm:
     """Return-level runtime adapter for critique-adjudicate-revise."""
 
     name = "critique_adjudicate_revise"
+    _STAGE_OPTION_KEYS = frozenset({"frequency_penalty", "max_completion_tokens", "max_tokens", "presence_penalty", "seed", "temperature", "top_p"})
+    _LIVE_BINDING_ATTRIBUTES = ("_context_getter", "_session", "_context", "context", "context_manager", "session")
 
     def __init__(self, runtime: AgentRuntime, algorithm: CritiqueAdjudicateReviseAlgorithm) -> None:
         # Stores the parent runtime and immutable policy for one dispatched run.
         self.runtime = runtime
         self.algorithm = algorithm
         self._schema_formatter = OutputSchemaFormatter()
+
+    def run(self, message: str, *, handle: RunnerHandle, context: BaseAgentContext, metadata: Mapping[str, Any] | None = None, options: Mapping[str, Any] | None = None, trace_context: SpanContext | None = None) -> AgentResult:
+        # Synchronous entry point for callers outside an event loop; mirrors arun() exactly.
+        return asyncio.run(self.arun(message, handle=handle, context=context, metadata=metadata, options=options, trace_context=trace_context))
 
     # @intent accepted-findings-quarantine
     # Raw critic material is intentionally stopped at the adjudicator boundary. The
@@ -192,13 +198,16 @@ class CritiqueAdjudicateReviseRuntimeAlgorithm:
 
     async def _run_producer(self, message: str, handle: RunnerHandle, context: BaseAgentContext, metadata: Mapping[str, Any] | None, options: Mapping[str, Any] | None, trace_context: SpanContext | None) -> AgentResult:
         # Executes exactly one normal producer attempt with the caller's original state.
-        span = self.runtime._start_semantic_span("algorithm.critique_adjudicate_revise.producer", parent=trace_context, stage="producer", task_hash=_content_hash(message))
+        from vidbyte.trace.components.algorithms import AlgorithmTrace
+
+        producer_spec = AlgorithmTrace.critique_adjudicate_revise_producer(stage="producer", task_hash=self._content_hash(message))
+        span = self.runtime._start_semantic_span(producer_spec.name, parent=trace_context, **dict(producer_spec.attributes))
         try:
             result = await self.runtime._arun_once(message, handle=handle, context=context, metadata=metadata, options=options, trace_context=span or trace_context)
             self.runtime._end_semantic_span(span, output="succeeded")
             return result
         except BaseException as exc:
-            self.runtime._end_semantic_span(span, error=_sanitized_error(exc))
+            self.runtime._end_semantic_span(span, error=self._sanitized_error(exc))
             raise
 
     def _preflight(self, message: str, producer: AgentResult, context: BaseAgentContext) -> _ReviewPreflight:
@@ -237,11 +246,25 @@ class CritiqueAdjudicateReviseRuntimeAlgorithm:
         return indexed
 
     def _select_artifacts(self, access: ReviewStageAccess, artifacts: Mapping[str, ContextArtifact], stage: str) -> tuple[Mapping[str, str], ...]:
-        # Copies only explicitly named artifact content and omits paths and metadata.
+        # Copies only explicitly named artifact content through ContextManager primitives.
         missing = tuple(name for name in access.allowed_artifact_names if name not in artifacts)
         if missing:
             raise ConfigurationError(f"{stage} artifact allowlist references missing names.", details={"stage": stage, "missing_names": missing})
-        return tuple({"name": name, "artifact_type": artifacts[name].artifact_type, "content": artifacts[name].content} for name in access.allowed_artifact_names)
+        selected = tuple(artifacts[name] for name in access.allowed_artifact_names)
+        managed = self._managed_artifacts(selected)
+        return tuple({"name": artifact.name, "artifact_type": artifact.artifact_type, "content": artifact.content} for artifact in managed)
+
+    def _managed_artifacts(self, artifacts: Sequence[ContextArtifact]) -> tuple[ContextArtifact, ...]:
+        # Assemble allowlisted evidence through ContextManager + ArtifactContextItem so
+        # context-window placement flows through vidbyte/context abstractions.
+        manager = ContextManager()
+        manager.extend(ArtifactContextItem(name=artifact.name, content=artifact.content, artifact_type=artifact.artifact_type) for artifact in artifacts)
+        managed: list[ContextArtifact] = []
+        for item in manager.items():
+            if not isinstance(item, ArtifactContextItem):
+                continue
+            managed.append(ContextArtifact(name=item.name, content=item.content, artifact_type=item.artifact_type))
+        return tuple(managed)
 
     def _preflight_tools(self, stage: str, access: ReviewStageAccess) -> None:
         # Proves every tool name exists and every live-bound tool can be safely cloned.
@@ -264,7 +287,7 @@ class CritiqueAdjudicateReviseRuntimeAlgorithm:
 
     def _has_live_binding(self, tool: object) -> bool:
         # Conservatively detects common producer, context, and session binding fields.
-        return any(getattr(tool, attribute, None) is not None for attribute in _LIVE_BINDING_ATTRIBUTES)
+        return any(getattr(tool, attribute, None) is not None for attribute in self._LIVE_BINDING_ATTRIBUTES)
 
     def _critic_payload(self, message: str, candidate: str, artifacts: Sequence[Mapping[str, str]]) -> str:
         # Serializes one immutable critic envelope reused byte-for-byte by every reviewer.
@@ -364,7 +387,8 @@ class CritiqueAdjudicateReviseRuntimeAlgorithm:
         # Constructs a fresh runtime/context and bounds the complete child loop by timeout.
         started_at = self.runtime.middleware.clock()
         stage_handle = self._stage_handle(spec, handle)
-        span = self.runtime._start_semantic_span(f"algorithm.critique_adjudicate_revise.{spec.stage}", parent=trace_context, stage=spec.stage, stage_id=spec.critic_id or spec.stage, provider=stage_handle.provider, model=self._model_name(spec, stage_handle))
+        stage_trace = self._stage_trace_spec(spec, stage_handle)
+        span = self.runtime._start_semantic_span(stage_trace.name, parent=trace_context, **dict(stage_trace.attributes))
         try:
             stage_runtime = self._build_stage_runtime(spec, captured_calls)
             stage_context = self._build_stage_context(stage_runtime)
@@ -374,15 +398,34 @@ class CritiqueAdjudicateReviseRuntimeAlgorithm:
             self.runtime._end_semantic_span(span, output="succeeded")
             return _StageOutcome(stage=spec.stage, stage_id=spec.critic_id or spec.stage, provider=stage_handle.provider, model=self._model_name(spec, stage_handle), elapsed_seconds=elapsed, result=result, captured_calls=tuple(captured_calls))
         except BaseException as exc:
-            self.runtime._end_semantic_span(span, error=_sanitized_error(exc))
+            self.runtime._end_semantic_span(span, error=self._sanitized_error(exc))
             raise
+
+    def _stage_trace_spec(self, spec: _StageSpec, handle: RunnerHandle) -> SpanSpec:
+        # Maps each stage to its dedicated AlgorithmTrace factory for semantic spans.
+        # Lazy import avoids a package cycle through vidbyte.trace during agent bootstrap.
+        from vidbyte.trace.components.algorithms import AlgorithmTrace
+
+        attributes = {
+            "stage": spec.stage,
+            "stage_id": spec.critic_id or spec.stage,
+            "provider": handle.provider,
+            "model": self._model_name(spec, handle),
+        }
+        if spec.stage == "critic":
+            return AlgorithmTrace.critique_adjudicate_revise_critic(**attributes)
+        if spec.stage == "adjudicator":
+            return AlgorithmTrace.critique_adjudicate_revise_adjudicator(**attributes)
+        if spec.stage == "revision":
+            return AlgorithmTrace.critique_adjudicate_revise_revision(**attributes)
+        return AlgorithmTrace.critique_adjudicate_revise(**attributes)
 
     def _build_stage_runtime(self, spec: _StageSpec, captured_calls: list[ToolCallContext]) -> AgentRuntime:
         # Builds an empty-middleware, no-history runtime with an exact cloned tool subset.
         selected = self.runtime.user_tools.subset(spec.access.allowed_tool_names)
         cloned_tools = Tools(self._clone_stage_tool(tool, spec.stage) for tool in selected)
         config = AgentRuntimeConfig(max_iterations=spec.access.max_iterations, max_tool_calls=spec.access.max_tool_calls, tool_settings=self.runtime.config.tool_settings)
-        return self.runtime.__class__(agent_name=f"{self.runtime.agent_name}:{spec.critic_id or spec.stage}", system_prompt=spec.system_prompt, tools=cloned_tools, permission_policy=self.runtime.permission_policy, config=config, tracer=self.runtime._tracer, middleware=(), run_id=self._stage_run_id(spec), algorithm=ContextWindowAlgorithm(name="default"), context_manager=None, recorder=NullRecorder(), output_schema=None, include_internal_tools=False, _tool_call_observer=captured_calls.append)
+        return self.runtime.__class__(agent_name=f"{self.runtime.agent_name}:{spec.critic_id or spec.stage}", system_prompt=spec.system_prompt, tools=cloned_tools, permission_policy=self.runtime.permission_policy, config=config, tracer=self.runtime._tracer, middleware=(), run_id=self._stage_run_id(spec), algorithm=ContextWindowAlgorithm(name="default"), context_manager=ContextManager(), recorder=NullRecorder(), output_schema=None, include_internal_tools=False, _tool_call_observer=captured_calls.append)
 
     def _clone_stage_tool(self, tool: object, stage: str) -> object:
         # Clones tools with explicit fork hooks and rejects live-bound shared objects.
@@ -400,8 +443,9 @@ class CritiqueAdjudicateReviseRuntimeAlgorithm:
         return tool
 
     def _build_stage_context(self, stage_runtime: AgentRuntime) -> BaseAgentContext:
-        # Creates context from the role prompt and tool specs without producer state.
-        return stage_runtime.build_context("", base_context=None, history=(), agent_history=(), agent_metadata={}, existing_tool_calls=(), input_metadata=None, modality=None, agentic_loop=False, context_items=(), context_manager=None)
+        # Creates context from the role prompt and a fresh ContextManager without producer state.
+        stage_manager = ContextManager()
+        return stage_runtime.build_context("", base_context=None, history=(), agent_history=(), agent_metadata={}, existing_tool_calls=(), input_metadata=None, modality=None, agentic_loop=False, context_items=(), context_manager=stage_manager)
 
     def _stage_handle(self, spec: _StageSpec, handle: RunnerHandle) -> RunnerHandle:
         # Reuses the caller handle unless the stage explicitly selects a provider/model.
@@ -412,7 +456,7 @@ class CritiqueAdjudicateReviseRuntimeAlgorithm:
 
     def _stage_options(self, options: Mapping[str, Any] | None) -> dict[str, Any]:
         # Copies only inert generation controls, excluding caller prompt/history extensions.
-        return {key: value for key, value in dict(options or {}).items() if key in _STAGE_OPTION_KEYS}
+        return {key: value for key, value in dict(options or {}).items() if key in self._STAGE_OPTION_KEYS}
 
     def _stage_metadata(self, spec: _StageSpec) -> dict[str, Any]:
         # Supplies content-free identifiers for accounting without model-visible producer state.
@@ -502,15 +546,15 @@ class CritiqueAdjudicateReviseRuntimeAlgorithm:
         # Returns the explicit stage model or the inherited runner model label.
         return spec.model or self.runtime._runner_model_name(handle.runner)
 
+    @staticmethod
+    def _content_hash(value: str) -> str:
+        # Produces a stable content-free trace identifier for structural correlation.
+        return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
-def _content_hash(value: str) -> str:
-    # Produces a stable content-free trace identifier for structural correlation.
-    return hashlib.sha256(value.encode("utf-8")).hexdigest()
-
-
-def _sanitized_error(exc: BaseException) -> RuntimeError:
-    # Retains only exception type for structural spans so payload text cannot leak.
-    return RuntimeError(type(exc).__name__)
+    @staticmethod
+    def _sanitized_error(exc: BaseException) -> RuntimeError:
+        # Retains only exception type for structural spans so payload text cannot leak.
+        return RuntimeError(type(exc).__name__)
 
 
 __all__ = ["CritiqueAdjudicateReviseRuntimeAlgorithm"]

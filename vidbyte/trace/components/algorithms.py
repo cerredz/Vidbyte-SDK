@@ -46,5 +46,30 @@ class AlgorithmTrace:
         # Describes error-correction context generation.
         return AlgorithmTrace.named("error_correction", **attributes)
 
+    @staticmethod
+    def critique_adjudicate_revise(**attributes: Any) -> SpanSpec:
+        # Describes the outer critique-adjudicate-revise orchestration span.
+        return AlgorithmTrace.named("critique_adjudicate_revise", **attributes)
+
+    @staticmethod
+    def critique_adjudicate_revise_producer(**attributes: Any) -> SpanSpec:
+        # Describes the single producer pass before critique fan-out.
+        return AlgorithmTrace.named("critique_adjudicate_revise.producer", **attributes)
+
+    @staticmethod
+    def critique_adjudicate_revise_critic(**attributes: Any) -> SpanSpec:
+        # Describes one isolated critic branch in the first-round barrier.
+        return AlgorithmTrace.named("critique_adjudicate_revise.critic", **attributes)
+
+    @staticmethod
+    def critique_adjudicate_revise_adjudicator(**attributes: Any) -> SpanSpec:
+        # Describes the reference-only adjudication stage.
+        return AlgorithmTrace.named("critique_adjudicate_revise.adjudicator", **attributes)
+
+    @staticmethod
+    def critique_adjudicate_revise_revision(**attributes: Any) -> SpanSpec:
+        # Describes the accepted-findings-only revision stage.
+        return AlgorithmTrace.named("critique_adjudicate_revise.revision", **attributes)
+
 
 __all__ = ["AlgorithmTrace"]

@@ -1,4 +1,4 @@
-﻿"""Context Protocol Header
+"""Context Protocol Header
 
 Description:
     Dispatches attached context-window algorithms for AgentRuntime.
@@ -18,7 +18,12 @@ import hashlib
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
-from vidbyte.agents.algorithms import CritiqueAdjudicateReviseRuntimeAlgorithm, MultiProviderAgenticGraderRuntimeAlgorithm, ReflexionRuntimeAlgorithm
+from vidbyte.agents.algorithms import (
+    CritiqueAdjudicateReviseRuntimeAlgorithm,
+    IndependentCriticRuntimeAlgorithm,
+    MultiProviderAgenticGraderRuntimeAlgorithm,
+    ReflexionRuntimeAlgorithm,
+)
 from vidbyte.context.runtime import InnerContextWindowAlgorithm
 from vidbyte.lib.dataclasses.runner import RunnerHandle
 from vidbyte.lib.tracing import SpanContext
@@ -27,6 +32,8 @@ from vidbyte.lib.dataclasses.strategies import AgentResult
 
 if TYPE_CHECKING:
     from vidbyte.agents.runtimes import LinearAgentRuntime as AgentRuntime
+
+_CONTENT_FREE_ALGORITHMS = frozenset({"independent_critic", "critique_adjudicate_revise"})
 
 
 class AgentRuntimeContextAlgorithms:
@@ -41,6 +48,8 @@ class AgentRuntimeContextAlgorithms:
             return "reflexion"
         if self.runtime.algorithm.multi_provider_agentic_grader is not None:
             return "multi_provider_agentic_grader"
+        if self.runtime.algorithm.independent_critic is not None:
+            return "independent_critic"
         if self.runtime.algorithm.trajectory_checkpoints is not None:
             return "trajectory_checkpoints"
         if self.runtime.algorithm.problem_space_search is not None:
@@ -55,12 +64,14 @@ class AgentRuntimeContextAlgorithms:
         # Return whether the configured runtime algorithm matches name.
         return self.detect_algorithm() == name
 
-    def return_algorithm(self) -> ReflexionRuntimeAlgorithm | MultiProviderAgenticGraderRuntimeAlgorithm | CritiqueAdjudicateReviseRuntimeAlgorithm | None:
+    def return_algorithm(self) -> ReflexionRuntimeAlgorithm | MultiProviderAgenticGraderRuntimeAlgorithm | IndependentCriticRuntimeAlgorithm | CritiqueAdjudicateReviseRuntimeAlgorithm | None:
         # Return the configured runtime algorithm implementation.
         if self.runtime.algorithm.reflexion is not None:
             return ReflexionRuntimeAlgorithm(self.runtime, self.runtime.algorithm.reflexion)
         if self.runtime.algorithm.multi_provider_agentic_grader is not None:
             return MultiProviderAgenticGraderRuntimeAlgorithm(self.runtime, self.runtime.algorithm.multi_provider_agentic_grader)
+        if self.runtime.algorithm.independent_critic is not None:
+            return IndependentCriticRuntimeAlgorithm(self.runtime, self.runtime.algorithm.independent_critic)
         if self.runtime.algorithm.critique_adjudicate_revise is not None:
             return CritiqueAdjudicateReviseRuntimeAlgorithm(self.runtime, self.runtime.algorithm.critique_adjudicate_revise)
         return None
@@ -85,7 +96,12 @@ class AgentRuntimeContextAlgorithms:
         if algorithm is None:
             return None
         algorithm_name = self.detect_algorithm() or "unknown"
-        span = self._start_algorithm_span(trace_context, algorithm=algorithm_name, task_hash=hashlib.sha256(message.encode("utf-8")).hexdigest())
+        span_attributes: dict[str, Any] = {"algorithm": algorithm_name}
+        if algorithm_name == "critique_adjudicate_revise":
+            span_attributes["task_hash"] = hashlib.sha256(message.encode("utf-8")).hexdigest()
+        elif algorithm_name != "independent_critic":
+            span_attributes["message"] = message
+        span = self._start_algorithm_span(trace_context, **span_attributes)
         try:
             result = await algorithm.arun(
                 message,
@@ -95,11 +111,20 @@ class AgentRuntimeContextAlgorithms:
                 options=options,
                 trace_context=span or trace_context,
             )
-            self._end_algorithm_span(span, output="succeeded" if algorithm_name == "critique_adjudicate_revise" else result.output)
+            if algorithm_name == "critique_adjudicate_revise":
+                output = "succeeded"
+            elif algorithm_name == "independent_critic":
+                output = None
+            else:
+                output = result.output
+            self._end_algorithm_span(span, output=output)
             return result
         except BaseException as exc:
-            safe_error = RuntimeError(type(exc).__name__) if algorithm_name == "critique_adjudicate_revise" else exc
-            self._end_algorithm_span(span, error=safe_error)
+            if algorithm_name in _CONTENT_FREE_ALGORITHMS:
+                trace_error = _content_free_algorithm_error(exc, algorithm_name)
+            else:
+                trace_error = exc
+            self._end_algorithm_span(span, error=trace_error)
             raise
 
     def _start_algorithm_span(self, parent: SpanContext | None, **attributes: Any) -> SpanContext | None:
@@ -119,8 +144,12 @@ def _is_semantic_tracer(tracer: object) -> bool:
     return all(hasattr(tracer, attr) for attr in ("inner", "profile", "translator"))
 
 
+def _content_free_algorithm_error(exc: BaseException, algorithm_name: str) -> RuntimeError:
+    # Preserve only the exception type in review-algorithm span telemetry.
+    label = algorithm_name.replace("_", " ")
+    return RuntimeError(f"{label} failed with {type(exc).__name__}.")
+
+
 __all__ = [
     "AgentRuntimeContextAlgorithms",
 ]
-
-
