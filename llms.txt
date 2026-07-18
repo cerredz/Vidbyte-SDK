@@ -469,6 +469,182 @@ agent = Agent(
 )
 ```
 
+### Agent Output Contracts, Handoffs, Context, and Built-ins
+
+#### Structured output and output contracts
+
+An agent reply is an `AgentMessage` with `sender`, `recipient`, `content`,
+`message_type` (default `"response"`), and `metadata`. Pass
+`output_schema=` to `Agent` / `BaseAgent` when a provider-supported structured
+response should be requested and validated. It accepts a Python type or a JSON
+Schema mapping; valid parsed output is surfaced in reply/result metadata as
+`"structured"`. This is separate from output contracts.
+
+Output contracts are deterministic minimum-effort floors that say when a
+**linear** agent may finish. Configure them through
+`AgentLoopSettings(output_contracts=(...))`; `AgentLoopSettings` owns them with
+`AgentLoopSettingsOutputContract`. At an `isDone` call or a plain final response,
+the runtime evaluates the floors. If any are unmet, it injects corrective
+feedback and continues. After `max_contract_rejections` (default 3), it stops
+with `AgentStopReason.CONTRACT_UNSATISFIED`. Evaluations are recorded in
+`AgentResult.metadata["contract_evaluations"]` with each contract's name,
+minimum, observed value, and satisfaction status. Output contracts are rejected
+for non-linear runtimes.
+
+```python
+from vidbyte import Agent
+from vidbyte.agents import AgentLoopSettings
+from vidbyte.agents.contracts import MinIterations, MinToolCalls
+
+agent = Agent(
+    name="careful-worker",
+    system_prompt="Investigate before finishing.",
+    runner=my_runner,
+    tools=[lookup_metric],
+    agent_loop_settings=AgentLoopSettings(
+        max_iterations=8,
+        max_tool_calls=6,
+        output_contracts=(MinIterations(2), MinToolCalls(1)),
+        max_contract_rejections=2,
+    ),
+)
+```
+
+The `OutputContract` base validates a positive `minimum`. Built-in floors are:
+
+| Contract | Required observed value |
+|----------|-------------------------|
+| `MinToolCalls` | Non-internal tool-call count |
+| `MinTokens` | Provider-reported token count |
+| `MinIterations` | Direct-loop iteration count |
+| `MinElapsedSeconds`, `MinTimeTaken` | Elapsed wall-clock seconds (`MinTimeTaken` is an alias) |
+| `MinSuccessfulToolCalls` | Successful non-internal tool calls |
+| `MinDistinctTools` | Distinct non-internal tool names |
+| `MinFinalOutputChars`, `MinFinalOutputTokens` | Candidate final-output length (tokens are approximate) |
+| `MinToolCallsById(tool_name, minimum)` | Calls to one named non-internal tool |
+| `MinCompactions` | Mutating history-compaction events |
+| `MinCostSpent` | Middleware cost estimate, or its optional tokens-based fallback |
+
+When a floor has a paired ceiling, its minimum must be strictly less than the
+configured ceiling. `MinToolCallsById` is also checked against
+`ToolSettings.max_calls_per_tool` when supplied.
+
+#### Handoffs and agent-loop settings
+
+`Handoff` is a sectioned, renderable context primitive and handoff-generation
+spec. `MinimalHandoff`, `EngineeringHandoff`, and `ResearchHandoff` provide
+prebuilt section sets. Set `handoff=` on `Agent` / `BaseAgent` for automatic
+post-run generation, or call `await agent.handoff(spec=...)` explicitly. A
+successful automatic handoff is placed in `reply.metadata["handoff"]`; produced
+handoffs are retained on `agent.last_handoff` and `agent.handoffs`. If a
+`ContextManager` is configured and the handoff has a primitive id, recording it
+also upserts it into the managed context registry.
+
+`HandoffAgent` is a specialized `BaseAgent` that turns a source run digest into
+a schema-validated, filled handoff. `CreateHandoffTool` is the agent-callable
+alternative: it accepts a title, arbitrary section map, optional audience, and
+optional instructions, then records the authored handoff on its bound agent.
+
+`AgentLoopSettings` centralizes loop configuration. All positive integer limits
+must be greater than zero; `timeout_seconds` must be positive; and when both
+compaction limits are set, `compaction_target_tokens` must be less than
+`compaction_trigger_tokens`.
+
+| Setting | Meaning |
+|---------|---------|
+| `max_iterations`, `max_tokens`, `max_tool_calls` | Direct runtime hard ceilings |
+| `max_queued_prompts` | Maximum queued follow-up prompts; default 25 |
+| `max_parallel_tool_calls`, `max_retries`, `timeout_seconds` | Additional loop controls |
+| `context_window_budget`, `compaction_trigger_tokens`, `compaction_target_tokens` | Context and compaction controls |
+| `allowed_tools` | Optional allowed tool-name tuple |
+| `tool_error_policy` | A nested `ToolErrorPolicy` instance |
+| `tool_settings` | A nested `ToolSettings` instance |
+| `output_contracts`, `max_contract_rejections` | Finish floors and their retry budget |
+
+`to_runtime_config()` projects `max_iterations`, `max_tokens`, the effective
+`max_tool_calls`, the two compaction limits, and `tool_settings` to the direct
+runtime. If both `max_tool_calls` and `ToolSettings.max_calls` are supplied,
+they must agree.
+
+`ToolSettings` provides `denied_tools`, `max_calls`, `max_calls_per_tool`,
+`result_max_chars`, `on_deny` (`"continue"` or `"abort"`),
+`max_calls_per_iteration`, `max_identical_calls`,
+`max_consecutive_failures`, `max_error_calls`, `tool_timeout_seconds`,
+`sliding_window_max_calls`, and `sliding_window_iterations`. The two
+sliding-window fields must be provided together. `ToolErrorPolicy` provides
+`max_retries_per_tool_call`, `retry_on`, `retry_backoff_base_seconds`,
+`retry_backoff_multiplier`, `retry_backoff_cap_seconds`,
+`retry_only_idempotent`, `on_unrecoverable`, and `max_total_tool_errors`.
+
+#### ContextManager, primitives, and ContextWindow
+
+Use `ContextManager` for structured context instead of assembling only raw
+prompt strings. Its unmanaged collection supports `add`, `extend`, `remove`,
+`clear`, `items`, `by_kind`, and `to_context`. Its managed primitive registry
+supports `upsert`, `get_by_id`, `remove_by_id`, `clear_registry`,
+`placement_for`, `render_primitives_zone`, and
+`render_conversation_messages`. `place_after_system_prompt` and
+`place_after_tools` create an id when necessary, then insert at semantic
+placements. A `primitive_frozen=True` item cannot be overwritten.
+
+`ContextWindowPlacement` values are `TOP_OF_CONTEXT`, `END_OF_CONTEXT`,
+`TOP_OF_CONVERSATION`, and `END_OF_CONVERSATION`. Context-zone items render
+inside the managed primitive block; conversation placements become provider
+messages for the next model call.
+
+Public primitive groups are:
+
+| Group | Context primitives |
+|-------|--------------------|
+| Documents and records | `TextContextItem`, `FileContextItem`, `GitDiffContextItem`, `DocumentContextItem`, `EnvironmentContextItem`, `MemoryContextItem`, `ArtifactContextItem`, `ResponseContextItem`, `ToolCallContextItem` |
+| Tasks and reasoning | `TaskContextItem`, `ProgressContextItem`, `PlanContextItem`, `ReflexionContextItem`, `TrajectoryCheckpointContextItem`, `ProblemSpaceSearchContextItem`, `ErrorCorrectionContextItem` |
+| Multi-agent | `MultiAgentRequestContextItem`, `MultiAgentTeamContextItem`, `MultiAgentLedgerContextItem`, `MultiAgentReportContextItem`, `MultiAgentLimitsContextItem`, `MultiAgentTerminalContextItem` |
+| Framing | `AmbiguityContextItem`, `BoundaryContextItem`, `ObjectiveConflictContextItem`, `ObjectiveGapContextItem`, `PerspectiveGapContextItem`, `ProblemFrameContextItem` |
+| Epistemics | `AssumptionChallengeContextItem`, `EvidenceChallengeContextItem`, `ModelChallengeContextItem` |
+| Decisions | `AlternativeChallengeContextItem`, `DecisionChallengeContextItem`, `TradeoffContextItem` |
+| Execution | `DependencyContextItem`, `FeedbackGapContextItem`, `InterventionRiskContextItem`, `InvariantContextItem` |
+| Closure | `CompletionGateContextItem`, `ProcessStallContextItem`, `RiskEscalationContextItem` |
+
+`ContextItem` is the common primitive protocol. `MultiAgentContextSerializer`
+is a serialization support API, not a context item to place directly.
+
+Attach an algorithm with `algorithm=ContextWindow.preset.<name>`. Presets are
+`default` / `raw_tool_outputs`, `compact_tool_outputs`,
+`hide_tool_outputs` / `no_raw_tool_outputs`, `reflexion`,
+`multi_provider_agentic_grader`, `prosecutor_defender_judge`,
+`independent_critic`, `trajectory_checkpoints`, `problem_space_search`, and
+`error_correction`. Non-default context-window algorithms are not supported by
+the SDK's non-linear runtimes.
+
+#### Complete prebuilt-tool catalog
+
+All tools are opt-in, agent-local instances: create or import them and pass
+them in `Agent(tools=[...])`. They are not globally auto-registered. The normal
+permission policy allows `SAFE` and `READ` tools; mutating or executable tools
+need an appropriate explicit `PermissionPolicy`. Agent-bound tools need a live
+agent, context tools need a live `ContextManager`, session tools need a bound
+session, and memory/MCP/provider tools may require configured external services.
+
+| Category | Concrete tools |
+|----------|----------------|
+| Direct utilities and search | `CalculatorTool` (`vidbyte.tools.builtins.calculator`), `CodeExecutionTool`, `DocumentRetrievalTool` (`vidbyte.tools.builtins.document_retrieval`), `GlobTool`, `GrepTool`, `SemanticSearchTool` |
+| Filesystem | `AppendTool`, `ChecksumTool`, `CopyTool`, `DeleteTool`, `DiffTool`, `ExistsTool`, `FindTool`, `ListDirTool`, `MakeDirTool`, `MoveTool`, `RenameTool`, `ReadBinaryTool`, `ReadLinesTool`, `ReadTextTool`, `ReplaceTextTool`, `StatTool`, `TouchTool`, `TreeTool`, `UnzipTool`, `WriteTextTool`, `ZipTool` (from `vidbyte.tools.filesystem`; configure their filesystem permissions and root) |
+| Context and reflection | `ContextCompactionTool`, `CreateContextPrimitiveTool`, `ContextEditTool`, `ContextListTool`, `ContextMoveTool`, `ContextReciteTool`, `ContextRemoveTool`, `ContextStatsTool`, `ContextUpsertTool`, `ReflexionTool`, `TrajectoryCheckpointTool` |
+| Structured-output, editing, and control | `DeclareOutputSchemaTool`, `AppendOutputTool`, `ExtendOutputSchemaTool`, `PatchTool`, `ForkConversationTool`, `CreateHandoffTool`, `RunPromptsSequentiallyTool` |
+| MCP | `SearchMcpServersTool`, `AttachMcpServerTool` |
+| Durable sessions | `SessionTool`, `CheckpointTool`, `ForkTool`, `BatchForkTool`, `RewindTool`, `ResumeReplaceTool`, `ResumeAppendTool`, `ResumeOutputTool` |
+| Provider/database | `MongoCreateCollectionTool`, `MongoCreateIndexTool`, `MongoInsertDocumentTool`, `MongoFindDocumentsTool`, `MongoUpdateDocumentsTool`, `MongoDeleteDocumentsTool`, `ProviderCreateSchemaTool`, `ProviderCreateTableTool`, `ProviderInsertRowTool`, `ProviderSelectRowsTool`, `ProviderUpdateRowsTool`, `ProviderDeleteRowsTool` |
+| Supermemory | `SupermemoryAddMemoryTool`, `SupermemorySearchMemoryTool`, `SupermemoryDeleteMemoryTool` |
+| Mem0 | `Mem0AddMemoryTool`, `Mem0SearchMemoryTool`, `Mem0GetMemoriesTool`, `Mem0DeleteMemoryTool` |
+| Zep | `ZepAddMemoryTool`, `ZepGetMemoryTool`, `ZepSearchMemoryTool`, `ZepDeleteSessionTool` |
+| Cognee | `CogneeAddTool`, `CogneeCognifyTool`, `CogneeSearchTool`, `CogneeDeleteTool` |
+| Letta | `LettaAddArchivalMemoryTool`, `LettaSearchArchivalMemoryTool`, `LettaDeleteArchivalMemoryTool`, `LettaGetMemoryBlockTool` |
+
+`OutputSchemaBuilder`, `OutputSchemaField`, `ContextWindowFactory`,
+`PrimitiveToolDefinition`, `CREATE_TOOL_REGISTRY`, `context_window_tools`, and
+the various provider/session/memory base classes are builders, registries,
+metadata, or abstract support APIs; they are not additional concrete tools.
+
 ### Middleware
 
 Middleware gives direct text agents deterministic runtime hooks for authorization, rate limiting, retry, audit logging, compaction, and policy enforcement. Middleware is not model-visible and does not appear in tool specs or agent cards.
