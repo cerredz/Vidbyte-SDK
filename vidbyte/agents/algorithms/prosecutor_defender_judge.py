@@ -36,6 +36,7 @@ from pydantic import BaseModel, ValidationError
 from vidbyte.context.algorithms.prosecutor_defender_judge import DebateStageSettings, ProsecutorDefenderJudgeAlgorithm, ProsecutorDefenderJudgeFailurePolicy
 from vidbyte.context.templates import NullRecorder
 from vidbyte.lib.agents.modality_detector import ModalityDetector
+from vidbyte.lib.agents.prosecutor_defender_judge import dump_payload, json_safe_mapping, optional_int, runner_model_name, safe_error_category, safe_tool_call_summary, safe_trace_error
 from vidbyte.lib.dataclasses.agents import AgentRuntimeConfig
 from vidbyte.lib.dataclasses.context import BaseAgentContext, ContextArtifact
 from vidbyte.lib.dataclasses.prosecutor_defender_judge import AllegationRecord, DebateStageRecord, DefenderReportPayload, DefenseRecord, EvidenceCitationPayload, EvidenceCitationRecord, EvidenceSource, JudgeDecision, JudgeDecisionRecord, JudgeReasonCode, JudgeReportPayload, ProsecutorDefenderJudgeReport, ProsecutorReportPayload
@@ -147,9 +148,9 @@ class _StageOutcome:
         # Reduces stage execution to content-free accounting and provenance.
         metadata = dict(self.result.metadata)
         calls = tuple(metadata.get("tool_calls", ()))
-        summaries = tuple(_safe_tool_call_summary(call) for call in calls)
+        summaries = tuple(safe_tool_call_summary(call) for call in calls)
         iterations = int(metadata.get("iteration_count", 0) or 0)
-        return DebateStageRecord(role=self.execution.projection.role, status="completed", provider=self.execution.provider, model=self.execution.model, artifact_names=tuple(item.name for item in self.execution.projection.artifacts), tool_names=self.execution.projection.tools.names(), stop_reason=str(metadata.get("stop_reason")) if metadata.get("stop_reason") is not None else None, duration_ms=round(self.duration_ms, 3), iteration_count=iterations, model_call_count=self.execution.invocation_counter.count, tool_call_count=int(metadata.get("tool_call_count", len(calls)) or 0), tokens_used=_optional_int(metadata.get("tokens_used")), tool_calls=summaries, metadata=_json_safe_mapping(self.execution.projection.settings.metadata))
+        return DebateStageRecord(role=self.execution.projection.role, status="completed", provider=self.execution.provider, model=self.execution.model, artifact_names=tuple(item.name for item in self.execution.projection.artifacts), tool_names=self.execution.projection.tools.names(), stop_reason=str(metadata.get("stop_reason")) if metadata.get("stop_reason") is not None else None, duration_ms=round(self.duration_ms, 3), iteration_count=iterations, model_call_count=self.execution.invocation_counter.count, tool_call_count=int(metadata.get("tool_call_count", len(calls)) or 0), tokens_used=optional_int(metadata.get("tokens_used")), tool_calls=summaries, metadata=json_safe_mapping(self.execution.projection.settings.metadata))
 
 
 class DebateResourceProjector:
@@ -238,7 +239,7 @@ class DebateStageRuntimeFactory:
     def _stage_handle(self, settings: DebateStageSettings, handle: RunnerHandle) -> tuple[RunnerHandle, str, str | None]:
         # Resolves inherited transport or creates a dedicated validated text runner.
         if settings.provider is None or settings.model is None:
-            return handle, handle.provider, _runner_model_name(handle.runner)
+            return handle, handle.provider, runner_model_name(handle.runner)
         runner = ModalityDetector.create_runner(ModelModality.TEXT, provider=settings.provider, model=settings.model)
         return handle.with_runner(runner, settings.provider), settings.provider, settings.model
 
@@ -380,33 +381,75 @@ class ProsecutorDefenderJudgeRuntimeAlgorithm:
         self.factory = DebateStageRuntimeFactory(runtime)
 
     async def arun(self, message: str, *, handle: RunnerHandle, context: BaseAgentContext, metadata: Mapping[str, Any] | None = None, options: Mapping[str, Any] | None = None, trace_context: SpanContext | None = None) -> AgentResult:
-        # Produces one candidate, runs the isolated debate, and preserves producer fields.
+        # Public dispatch entrypoint: produce one candidate, then hand the frozen
+        # candidate to the isolated debate. arun owns only the producer pass and
+        # the candidate fingerprint; run() owns the review protocol itself.
+
+        # Record that the producer system prompt was assembled, then run the
+        # ordinary producer loop exactly once with the caller's original runtime
+        # state (tools, middleware, options, output contract) fully intact.
         self.runtime.recorder.append("system_prompt")
         producer = await self._run_producer(message, handle, context, metadata, options, trace_context)
+
+        # Freeze the exact producer candidate and fingerprint it. This sha256 is
+        # the referential anchor the review stages and returned metadata are bound
+        # to; the candidate text is never revised, replaced, or re-generated after
+        # this point.
         candidate = producer.output
         candidate_sha256 = hashlib.sha256(candidate.encode("utf-8")).hexdigest()
         self.runtime.recorder.append("prosecutor_defender_judge_candidate", candidate_sha256=candidate_sha256, candidate_chars=len(candidate))
+
+        # Delegate the three strictly sequential review stages to run(). arun stays
+        # thin so the producer contract and the review contract remain separable.
+        return await self.run(message=message, candidate=candidate, candidate_sha256=candidate_sha256, producer=producer, context=context, handle=handle, trace_context=trace_context)
+
+    async def run(self, *, message: str, candidate: str, candidate_sha256: str, producer: AgentResult, context: BaseAgentContext, handle: RunnerHandle, trace_context: SpanContext | None) -> AgentResult:
+        # Executes the isolated prosecutor -> defender -> judge protocol against a
+        # frozen candidate and returns either the attached verdict or, under the
+        # configured failure policy, the untouched producer result.
         outcomes: list[_StageOutcome] = []
         try:
+            # Preflight validates exact inputs and builds all three isolated stage
+            # runtimes up front, so no review call happens until every stage can be
+            # constructed. The validator holds the trusted task/candidate bodies.
             executions = self._preflight(message, candidate, context, handle)
             validator = DebateTranscriptValidator(self.algorithm, message, candidate)
+
+            # Stage 1 (prosecutor): receives the task, exact candidate, and permitted
+            # evidence, then emits typed allegations. Normalization assigns stable
+            # SDK-owned allegation IDs and rejects any unsupported evidence citation.
             prosecutor_outcome = await self._run_stage(executions[0], self._prosecutor_payload(message, candidate, executions[0].projection), trace_context)
             allegations = validator.normalize_allegations(self._structured(prosecutor_outcome, ProsecutorReportPayload), prosecutor_outcome.execution.projection, prosecutor_outcome.tool_outputs())
             outcomes.append(prosecutor_outcome)
             self.runtime.recorder.append("prosecutor_defender_judge_prosecutor", allegation_count=len(allegations))
+
+            # Stage 2 (defender): must answer every allegation exactly once, in order.
+            # Normalization enforces the one-to-one ID mapping and blocks the defender
+            # from introducing unrelated top-level defense claims.
             defender_outcome = await self._run_stage(executions[1], self._defender_payload(message, candidate, allegations, executions[1].projection), trace_context)
             defenses = validator.normalize_defenses(self._structured(defender_outcome, DefenderReportPayload), allegations, defender_outcome.execution.projection, defender_outcome.tool_outputs())
             outcomes.append(defender_outcome)
             self.runtime.recorder.append("prosecutor_defender_judge_defender", defense_count=len(defenses))
+
+            # Stage 3 (judge): decides which allegation IDs survive. Normalization
+            # requires one ordered decision per allegation/defense pair and forbids
+            # the judge from inventing new findings.
             judge_outcome = await self._run_stage(executions[2], self._judge_payload(message, candidate, allegations, defenses, executions[2].projection), trace_context)
             decisions = validator.normalize_decisions(self._structured(judge_outcome, JudgeReportPayload), allegations, defenses)
             outcomes.append(judge_outcome)
             self.runtime.recorder.append("prosecutor_defender_judge_judge", decision_count=len(decisions))
+
+            # Derive the overall verdict deterministically from the judge decisions
+            # and attach it under producer.metadata without touching any other field.
             return self._successful_result(producer, candidate_sha256, allegations, defenses, decisions, outcomes)
         except _DebateStageFailure as failure:
+            # A stage raised an already-labelled failure (preflight, timeout, stage
+            # invocation, or malformed structured output). Apply the public policy.
             self.runtime.recorder.append("prosecutor_defender_judge_failure", failed_stage=failure.role, phase=failure.phase)
             return self._handle_failure(producer, candidate_sha256, failure, outcomes)
         except Exception as exc:
+            # An inter-stage validation/normalization error escaped unlabelled;
+            # attribute it to the stage that just completed and fail closed.
             failure = _DebateStageFailure(self._next_role(outcomes), "validation", exc)
             self.runtime.recorder.append("prosecutor_defender_judge_failure", failed_stage=failure.role, phase=failure.phase)
             return self._handle_failure(producer, candidate_sha256, failure, outcomes)
@@ -419,7 +462,7 @@ class ProsecutorDefenderJudgeRuntimeAlgorithm:
             self.runtime._end_semantic_span(span, output="completed")
             return result
         except BaseException as exc:
-            self.runtime._end_semantic_span(span, error=_safe_trace_error(exc))
+            self.runtime._end_semantic_span(span, error=safe_trace_error(exc))
             raise
 
     def _preflight(self, task: str, candidate: str, context: BaseAgentContext, handle: RunnerHandle) -> tuple[_StageExecution, ...]:
@@ -444,7 +487,7 @@ class ProsecutorDefenderJudgeRuntimeAlgorithm:
     async def _run_stage(self, execution: _StageExecution, payload: Mapping[str, Any], trace_context: SpanContext | None) -> _StageOutcome:
         # Runs one isolated role under its timeout and closes its structural span.
         role = execution.projection.role
-        prompt = self._render_stage_prompt(role, _dump_payload(payload))
+        prompt = self._render_stage_prompt(role, dump_payload(payload))
         span = self.runtime._start_semantic_span(f"algorithm.prosecutor_defender_judge.{role}", parent=trace_context, stage=role, provider=execution.provider, model=execution.model, artifact_names=tuple(item.name for item in execution.projection.artifacts), tool_names=execution.projection.tools.names(), candidate_sha256=hashlib.sha256(str(payload.get("candidate", "")).encode("utf-8")).hexdigest(), candidate_chars=len(str(payload.get("candidate", ""))))
         started = time.perf_counter()
         try:
@@ -457,7 +500,7 @@ class ProsecutorDefenderJudgeRuntimeAlgorithm:
             self.runtime._end_semantic_span(span, error=RuntimeError("CancelledError"))
             raise
         except Exception as exc:
-            self.runtime._end_semantic_span(span, error=_safe_trace_error(exc))
+            self.runtime._end_semantic_span(span, error=safe_trace_error(exc))
             raise _DebateStageFailure(role, "timeout" if isinstance(exc, TimeoutError) else "invocation", exc) from exc
 
     def _structured(self, outcome: _StageOutcome, schema: type[BaseModel]) -> Any:
@@ -476,7 +519,7 @@ class ProsecutorDefenderJudgeRuntimeAlgorithm:
     def _successful_result(self, producer: AgentResult, candidate_sha256: str, allegations: tuple[AllegationRecord, ...], defenses: tuple[DefenseRecord, ...], decisions: tuple[JudgeDecisionRecord, ...], outcomes: Sequence[_StageOutcome]) -> AgentResult:
         # Attaches the complete verdict report while preserving every producer field.
         survivors = tuple(item.allegation_id for item in decisions if item.decision is JudgeDecision.SURVIVES)
-        report = ProsecutorDefenderJudgeReport(candidate_sha256=candidate_sha256, verdict="needs_changes" if survivors else "pass", surviving_allegation_ids=survivors, allegations=allegations, defenses=defenses, decisions=decisions, stages=tuple(outcome.stage_record() for outcome in outcomes), metadata=_json_safe_mapping(self.algorithm.metadata))
+        report = ProsecutorDefenderJudgeReport(candidate_sha256=candidate_sha256, verdict="needs_changes" if survivors else "pass", surviving_allegation_ids=survivors, allegations=allegations, defenses=defenses, decisions=decisions, stages=tuple(outcome.stage_record() for outcome in outcomes), metadata=json_safe_mapping(self.algorithm.metadata))
         metadata = dict(producer.metadata)
         metadata[self.name] = report.to_dict()
         return dataclasses.replace(producer, metadata=metadata)
@@ -496,7 +539,7 @@ class ProsecutorDefenderJudgeRuntimeAlgorithm:
         for role, settings in zip(_ROLES, (self.algorithm.prosecutor, self.algorithm.defender, self.algorithm.judge)):
             stages[role] = completed.get(role, {"role": role, "status": "failed" if role == failure.role else "not_started", "artifact_names": list(settings.artifact_names), "tool_names": list(settings.tool_names)})
         message, truncated = self._bounded_failure_message(f"Review stage {failure.role} failed during {failure.phase}.")
-        return {"schema_version": 1, "status": "review_failed", "reviewed": False, "review_only": True, "candidate_revised": False, "candidate_sha256": candidate_sha256, "failed_stage": failure.role, "failure_phase": failure.phase, "error_type": type(failure.cause).__name__, "error_category": _safe_error_category(failure.cause), "error_message": message, "error_message_truncated": truncated, "stages": stages, "isolation": {"context_projection": "positive_allowlist", "producer_middleware_inherited": False, "producer_options_inherited": False, "internal_tools_included": False}, "metadata": _json_safe_mapping(self.algorithm.metadata)}
+        return {"schema_version": 1, "status": "review_failed", "reviewed": False, "review_only": True, "candidate_revised": False, "candidate_sha256": candidate_sha256, "failed_stage": failure.role, "failure_phase": failure.phase, "error_type": type(failure.cause).__name__, "error_category": safe_error_category(failure.cause), "error_message": message, "error_message_truncated": truncated, "stages": stages, "isolation": {"context_projection": "positive_allowlist", "producer_middleware_inherited": False, "producer_options_inherited": False, "internal_tools_included": False}, "metadata": json_safe_mapping(self.algorithm.metadata)}
 
     def _prosecutor_payload(self, task: str, candidate: str, projection: _StageProjection) -> dict[str, Any]:
         # Builds exactly the three prosecutor payload keys from permitted evidence.
@@ -535,55 +578,6 @@ class ProsecutorDefenderJudgeRuntimeAlgorithm:
     def _next_role(outcomes: Sequence[_StageOutcome]) -> str:
         # Attributes inter-stage validation failure to the stage just completed.
         return _ROLES[min(len(outcomes), len(_ROLES) - 1)]
-
-
-def _dump_payload(payload: Mapping[str, Any]) -> str:
-    # Encodes exact values deterministically without normalizing their contents.
-    return json.dumps(dict(payload), ensure_ascii=False, separators=(",", ":"))
-
-
-def _runner_model_name(runner: object) -> str | None:
-    # Reads a model label for provenance without copying runner configuration.
-    config = getattr(runner, "config", None)
-    value = getattr(config, "model", None) or getattr(config, "model_name", None) or getattr(runner, "model", None)
-    return str(value) if value is not None else None
-
-
-def _safe_tool_call_summary(call: object) -> dict[str, Any]:
-    # Removes arguments/results while retaining only tool identity and lifecycle state.
-    state = getattr(getattr(call, "state", None), "value", getattr(call, "state", None))
-    return {"tool_name": str(getattr(call, "tool_name", "unknown")), "state": str(state) if state is not None else "unknown"}
-
-
-def _optional_int(value: object) -> int | None:
-    # Converts accounting values to integers without accepting booleans.
-    if value is None or isinstance(value, bool):
-        return None
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return None
-
-
-def _json_safe_mapping(value: Mapping[str, Any]) -> dict[str, Any]:
-    # Produces a deterministic JSON-safe copy for public metadata provenance.
-    serialized = json.dumps(dict(value), ensure_ascii=False, sort_keys=True, default=str)
-    parsed = json.loads(serialized)
-    return dict(parsed) if isinstance(parsed, dict) else {}
-
-
-def _safe_error_category(exc: Exception) -> str:
-    # Maps failures into stable categories without exposing provider response text.
-    if isinstance(exc, TimeoutError):
-        return "timeout"
-    if isinstance(exc, (ConfigurationError, ValueError, ValidationError)):
-        return "validation"
-    return "execution"
-
-
-def _safe_trace_error(exc: BaseException) -> RuntimeError:
-    # Replaces a potentially sensitive exception body with its type for tracing.
-    return RuntimeError(type(exc).__name__)
 
 
 __all__ = [
