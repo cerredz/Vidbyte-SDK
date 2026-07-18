@@ -9,6 +9,7 @@ Architecture:
     - ContextWindowTemplate and TemplateViolation from base module.
     - ReflexionContextWindowTemplate from reflexion module.
     - ParallelPanelContextWindowTemplate from parallel_panel module.
+    - ProsecutorDefenderJudgeContextWindowTemplate from its protocol module.
 Relations:
     Consumed by tests and scripts. Imports RecorderBase from
     vidbyte.context.templates.
@@ -21,6 +22,7 @@ from vidbyte.lib.templates.error_correction import ErrorCorrectionContextWindowT
 from vidbyte.lib.templates.independent_critic import IndependentCriticContextWindowTemplate
 from vidbyte.lib.templates.problem_space_search import ProblemSpaceSearchContextWindowTemplate
 from vidbyte.lib.templates.parallel_panel import ParallelPanelContextWindowTemplate
+from vidbyte.lib.templates.prosecutor_defender_judge import ProsecutorDefenderJudgeContextWindowTemplate
 from vidbyte.lib.templates.reflexion import ReflexionContextWindowTemplate
 from vidbyte.lib.templates.trajectory_checkpoints import TrajectoryCheckpointContextWindowTemplate
 
@@ -30,6 +32,7 @@ __all__ = [
     "IndependentCriticContextWindowTemplate",
     "ProblemSpaceSearchContextWindowTemplate",
     "ParallelPanelContextWindowTemplate",
+    "ProsecutorDefenderJudgeContextWindowTemplate",
     "ReflexionContextWindowTemplate",
     "TemplateViolation",
     "TrajectoryCheckpointContextWindowTemplate",

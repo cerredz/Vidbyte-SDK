@@ -14,6 +14,8 @@ Architecture:
 Relations:
     Used by vidbyte.agents.base. Depends on shared context, tool, security, and
     strategy dataclasses without owning modality routing or runner construction.
+    Review algorithms may disable implicit internal tools while ordinary agents
+    retain them through the default constructor behavior.
 """
 
 from __future__ import annotations
@@ -59,7 +61,7 @@ class AgentRuntime:
     """Internal runtime for direct agent execution."""
 
     def __init__(self, *, agent_name: str, system_prompt: str, tools: Tools, permission_policy: PermissionPolicy, config: AgentRuntimeConfig | None = None, tracer: TracerBase | None = None, middleware: Sequence[AgentMiddleware] = (), run_id: str | None = None, algorithm: ContextWindowAlgorithm | str | None = None, context_manager: ContextManager | None = None, recorder: RecorderBase | None = None, output_schema: type | Mapping[str, Any] | None = None, output_contract: "AgentLoopSettingsOutputContract | None" = None, include_internal_tools: bool = True) -> None:
-        # Configure one direct runtime; specialized child runtimes may opt out of implicit tools.
+        # Configure one direct runtime; isolated review child runtimes may disable implicit internal tools.
         self.agent_name = agent_name
         self.system_prompt = system_prompt
         self.user_tools = tools

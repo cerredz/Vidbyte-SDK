@@ -22,6 +22,7 @@ from vidbyte.agents.algorithms import (
     IndependentCriticRuntimeAlgorithm,
     MultiProviderAgenticGraderRuntimeAlgorithm,
     ParallelPanelRuntimeAlgorithm,
+    ProsecutorDefenderJudgeRuntimeAlgorithm,
     ReflexionRuntimeAlgorithm,
 )
 from vidbyte.context.runtime import InnerContextWindowAlgorithm
@@ -47,6 +48,8 @@ class AgentRuntimeContextAlgorithms:
             return "reflexion"
         if self.runtime.algorithm.multi_provider_agentic_grader is not None:
             return "multi_provider_agentic_grader"
+        if self.runtime.algorithm.prosecutor_defender_judge is not None:
+            return "prosecutor_defender_judge"
         if self.runtime.algorithm.independent_critic is not None:
             return "independent_critic"
         if self.runtime.algorithm.parallel_panel is not None:
@@ -68,6 +71,7 @@ class AgentRuntimeContextAlgorithms:
     ) -> (
         ReflexionRuntimeAlgorithm
         | MultiProviderAgenticGraderRuntimeAlgorithm
+        | ProsecutorDefenderJudgeRuntimeAlgorithm
         | IndependentCriticRuntimeAlgorithm
         | ParallelPanelRuntimeAlgorithm
         | None
@@ -77,6 +81,8 @@ class AgentRuntimeContextAlgorithms:
             return ReflexionRuntimeAlgorithm(self.runtime, self.runtime.algorithm.reflexion)
         if self.runtime.algorithm.multi_provider_agentic_grader is not None:
             return MultiProviderAgenticGraderRuntimeAlgorithm(self.runtime, self.runtime.algorithm.multi_provider_agentic_grader)
+        if self.runtime.algorithm.prosecutor_defender_judge is not None:
+            return ProsecutorDefenderJudgeRuntimeAlgorithm(self.runtime, self.runtime.algorithm.prosecutor_defender_judge)
         if self.runtime.algorithm.independent_critic is not None:
             return IndependentCriticRuntimeAlgorithm(self.runtime, self.runtime.algorithm.independent_critic)
         if self.runtime.algorithm.parallel_panel is not None:
@@ -103,11 +109,12 @@ class AgentRuntimeContextAlgorithms:
         if algorithm is None:
             return None
         algorithm_name = self.detect_algorithm() or "unknown"
-        span_attributes: dict[str, Any] = {"algorithm": algorithm_name}
-        if algorithm_name == "parallel_panel":
-            span_attributes["message_chars"] = len(message)
-        elif algorithm_name != "independent_critic":
-            span_attributes["message"] = message
+        if algorithm_name in {"prosecutor_defender_judge", "parallel_panel"}:
+            span_attributes: dict[str, Any] = {"algorithm": algorithm_name, "message_chars": len(message)}
+        elif algorithm_name == "independent_critic":
+            span_attributes = {"algorithm": algorithm_name}
+        else:
+            span_attributes = {"algorithm": algorithm_name, "message": message}
         span = self._start_algorithm_span(trace_context, **span_attributes)
         try:
             result = await algorithm.arun(
@@ -118,17 +125,18 @@ class AgentRuntimeContextAlgorithms:
                 options=options,
                 trace_context=span or trace_context,
             )
-            if algorithm_name == "independent_critic":
-                output: str | None = None
-            elif algorithm_name == "parallel_panel":
-                output = "completed"
+            if algorithm_name in {"prosecutor_defender_judge", "parallel_panel"}:
+                self._end_algorithm_span(span, output="completed")
+            elif algorithm_name == "independent_critic":
+                self._end_algorithm_span(span, output=None)
             else:
-                output = result.output
-            self._end_algorithm_span(span, output=output)
+                self._end_algorithm_span(span, output=result.output)
             return result
         except BaseException as exc:
-            if algorithm_name == "independent_critic":
-                trace_error: BaseException = _content_free_algorithm_error(exc)
+            if algorithm_name == "prosecutor_defender_judge":
+                trace_error: BaseException = RuntimeError(type(exc).__name__)
+            elif algorithm_name == "independent_critic":
+                trace_error = _content_free_algorithm_error(exc)
             elif algorithm_name == "parallel_panel" and not isinstance(exc, asyncio.CancelledError):
                 trace_error = AgentExecutionError("Parallel panel algorithm failed.")
             else:

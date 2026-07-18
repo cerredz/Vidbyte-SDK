@@ -315,6 +315,40 @@ agent = Agent(
 )
 ```
 
+For a verdict-only adversarial review, `prosecutor_defender_judge` runs the
+normal producer once and then uses three fresh contexts in strict sequence. The
+prosecutor emits evidence-backed allegations, the defender answers those exact
+allegation IDs, and the judge decides which IDs survive. The candidate is never
+revised: `output`, `structured`, `calls`, strategy name, and existing metadata
+remain the producer's values.
+
+```python
+from vidbyte import ContextWindow
+
+agent = Agent(
+    name="reviewed-producer",
+    system_prompt="Produce the requested artifact.",
+    provider="openai",
+    model_name="gpt-4.1",
+    algorithm=ContextWindow.preset.prosecutor_defender_judge,
+)
+
+reply = await agent.arun("Evaluate this implementation against the requirements.")
+debate = reply.metadata["prosecutor_defender_judge"]
+print(debate["verdict"], debate["surviving_allegation_ids"])
+```
+
+By default, review roles receive no producer artifacts or tools and never
+receive producer history, scratch reasoning, middleware, options, system prompt,
+memory, or context-manager state. Advanced callers can construct
+`ProsecutorDefenderJudgeAlgorithm` with separate `DebateStageSettings` for each
+role. Artifact names are exact allowlists; tool names must resolve to non-bound
+`SAFE` or `READ` tools. Review adds three sequential model calls by default and
+uses stage-local timeout, iteration, token, and tool-call limits. Failures raise
+unless `ProsecutorDefenderJudgeFailurePolicy.RETURN_CANDIDATE` is explicitly
+selected, in which case the unchanged candidate carries marked no-verdict
+`review_failed` metadata.
+
 Per-call context can be supplied with `AgentInput` without mutating the agent's
 default context:
 

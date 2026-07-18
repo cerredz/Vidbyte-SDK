@@ -10,7 +10,8 @@ Architecture:
     - ContextWindowAlgorithm: Immutable, mutually exclusive runtime algorithm object,
       including optional Independent Critic and Parallel Panel configurations.
 Relations:
-    Used by vidbyte.context.presets and AgentRuntime.
+    Used by vidbyte.context.presets and AgentRuntime. Optional return-level
+    configurations, including prosecutor/defender/judge, are mutually exclusive.
 """
 
 from __future__ import annotations
@@ -25,6 +26,7 @@ from vidbyte.context.algorithms.reflexion import ReflexionAlgorithm
 from vidbyte.context.algorithms.independent_critic import IndependentCriticAlgorithm
 from vidbyte.context.algorithms.multi_provider_agentic_grader import MultiProviderAgenticGraderAlgorithm
 from vidbyte.context.algorithms.parallel_panel import ParallelPanelAlgorithm
+from vidbyte.context.algorithms.prosecutor_defender_judge import ProsecutorDefenderJudgeAlgorithm
 from vidbyte.context.algorithms.trajectory_checkpoints import TrajectoryCheckpointAlgorithm
 from vidbyte.context.algorithms.problem_space_search import ProblemSpaceSearchAlgorithm
 from vidbyte.context.algorithms.error_correction import ErrorCorrectionAlgorithm
@@ -48,6 +50,7 @@ class ContextWindowAlgorithm:
     max_tool_result_chars: int = 600
     reflexion: ReflexionAlgorithm | None = None
     multi_provider_agentic_grader: MultiProviderAgenticGraderAlgorithm | None = None
+    prosecutor_defender_judge: ProsecutorDefenderJudgeAlgorithm | None = None
     independent_critic: IndependentCriticAlgorithm | None = None
     parallel_panel: ParallelPanelAlgorithm | None = None
     trajectory_checkpoints: TrajectoryCheckpointAlgorithm | None = None
@@ -62,6 +65,7 @@ class ContextWindowAlgorithm:
             for x in (
                 self.reflexion,
                 self.multi_provider_agentic_grader,
+                self.prosecutor_defender_judge,
                 self.independent_critic,
                 self.parallel_panel,
                 self.trajectory_checkpoints,
@@ -93,9 +97,9 @@ __all__ = [
     "IndependentCriticAlgorithm",
     "MultiProviderAgenticGraderAlgorithm",
     "ParallelPanelAlgorithm",
+    "ProsecutorDefenderJudgeAlgorithm",
     "ProblemSpaceSearchAlgorithm",
     "ReflexionAlgorithm",
     "TrajectoryCheckpointAlgorithm",
     "ToolResultAdmission",
 ]
-

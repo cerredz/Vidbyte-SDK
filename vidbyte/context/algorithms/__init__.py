@@ -11,6 +11,7 @@ Architecture:
     - Reflexion runtime context-window algorithm from reflexion.
     - Multi-provider agentic grader context-window algorithm from multi_provider_agentic_grader.
     - Parallel-panel public policy from parallel_panel.
+    - Prosecutor/defender/judge review configuration from prosecutor_defender_judge.
 Relations:
     Used by vidbyte.context.presets and AgentRuntime.
 """
@@ -21,6 +22,7 @@ from vidbyte.context.algorithms.independent_critic import CriticFailurePolicy, I
 from vidbyte.context.algorithms.reflexion import ReflexionAlgorithm
 from vidbyte.context.algorithms.multi_provider_agentic_grader import MultiProviderAgenticGraderAlgorithm
 from vidbyte.context.algorithms.parallel_panel import ParallelPanelAlgorithm
+from vidbyte.context.algorithms.prosecutor_defender_judge import DebateStageSettings, ProsecutorDefenderJudgeAlgorithm, ProsecutorDefenderJudgeFailurePolicy
 from vidbyte.context.algorithms.trajectory_checkpoints import TrajectoryCheckpointAlgorithm
 from vidbyte.context.algorithms.problem_space_search import ProblemSpaceSearchAlgorithm
 from vidbyte.context.algorithms.error_correction import ErrorCorrectionAlgorithm
@@ -37,6 +39,9 @@ __all__ = [
     "MultiProviderAgenticGraderAlgorithm",
     "ParallelPanelAlgorithm",
     "ProblemSpaceSearchAlgorithm",
+    "DebateStageSettings",
+    "ProsecutorDefenderJudgeAlgorithm",
+    "ProsecutorDefenderJudgeFailurePolicy",
     "ReflexionAlgorithm",
     "TrajectoryCheckpointAlgorithm",
     "ToolResultAdmission",
