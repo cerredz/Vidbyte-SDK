@@ -541,8 +541,10 @@ pattern). Allowlist can be expanded if CI discovers legitimate gaps.
 | MODIFY | `vidbyte/tools/mcp/transport.py` | Demux reader, stderr drain, timeouts, restricted env, idempotent close. |
 | MODIFY | `vidbyte/tools/mcp/attach.py` | Pass `request_timeout=config.timeout` into transport. |
 | CREATE | `tests/test_mcp_stdio_transport.py` | Hardening scenarios: concurrent, hang, crash, malformed, notify, shutdown, env. |
+| MODIFY | `tests/test_mcp_attachment.py` | Mock constructor accepts additive transport kwargs. |
+| MODIFY | `tests/test_mcp_discovery_tools.py` | Mock constructor accepts additive transport kwargs. |
 
-**Manifest counts:** 1 CREATE design + 1 CREATE tests + 2 MODIFY source = **4 files**.
+**Manifest counts:** 1 CREATE design + 1 CREATE tests + 2 MODIFY source + 2 MODIFY mocks = **6 files**.
 
 No changes expected to `client.py`, `bridge.py`, `types.py`, `presets.py`, or
 error modules unless implementation evidence forces a tiny adjustment (then

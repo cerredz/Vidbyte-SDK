@@ -45,6 +45,7 @@ async def attach_mcp_server(config: McpServerConfig) -> McpServerHandle:
         transport = McpStdioTransport(
             list(config.command),
             env=config.env,
+            request_timeout=config.timeout,
         )
     except Exception as e:
         raise McpConnectionError(
