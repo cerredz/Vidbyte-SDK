@@ -55,6 +55,7 @@ from vidbyte.lib.enums import ModelModality
 from vidbyte.lib.errors import AdversarialExecutionError, ConfigurationError
 from vidbyte.lib.tracing import SpanContext, TracerBase
 from vidbyte.tools.mcp.types import McpServerConfig, McpToolPermission
+from vidbyte.trace.adversarial import AdversarialAgentTraceController
 
 
 class AdversarialAgent(BaseAgent):
@@ -104,9 +105,21 @@ class AdversarialAgent(BaseAgent):
             trace_metadata = dict(options.get("trace_metadata", {}) or {})
             trace_context = self._start_adversarial_trace(prompt, input_metadata, trace_metadata)
             request = _AdversarialRunRequest(message=message, original_prompt=prompt, modality=modality, context=context, history=(*tuple(history), *tuple(self.history)), options=dict(options))
-            controller = _AdversarialRunController(facade_name=self.name, workflow_instructions=self.system_prompt, worker_prototype=self.worker, adversary_prototype=self.adversary, settings=self.settings, context=self._context, tracer=self._tracer, trace_context=trace_context, request=request)
+            adversarial_trace = AdversarialAgentTraceController()
+            controller = _AdversarialRunController(
+                facade_name=self.name,
+                workflow_instructions=self.system_prompt,
+                worker_prototype=self.worker,
+                adversary_prototype=self.adversary,
+                settings=self.settings,
+                context=self._context,
+                tracer=self._tracer,
+                trace_context=trace_context,
+                request=request,
+                adversarial_trace=adversarial_trace,
+            )
             outcome = await controller.run()
-            reply = self._build_final_reply(outcome, recipient)
+            reply = self._build_final_reply(outcome, recipient, adversarial_trace)
             self._tracer.end_trace(trace_context, output=outcome.result.final_output)
             trace_closed = True
             self._commit_success(prompt, reply, outcome)
@@ -239,13 +252,28 @@ class AdversarialAgent(BaseAgent):
             metadata=self._safe_trace_value(metadata),
         )
 
-    def _build_final_reply(self, outcome: _AdversarialRunOutcome, recipient: str) -> AgentMessage:
-        # Preserve the final worker's metadata and add only a bounded workflow summary.
+    def _build_final_reply(
+        self,
+        outcome: _AdversarialRunOutcome,
+        recipient: str,
+        adversarial_trace: AdversarialAgentTraceController | None = None,
+    ) -> AgentMessage:
+        # Preserve the final worker's metadata and add only a bounded workflow + custom-trace summary.
         summary = {
             **dict(outcome.result.metadata),
             "successful_review_count": outcome.result.successful_review_count,
             "failed_review_count": outcome.result.failed_review_count,
         }
+        if adversarial_trace is not None:
+            summary["adversarial_trace"] = adversarial_trace.metadata()
+        if outcome.adversarial_trace:
+            summary["adversarial_trace_artifact"] = {
+                "worker_name": outcome.adversarial_trace.get("worker_name"),
+                "adversary_name": outcome.adversarial_trace.get("adversary_name"),
+                "worker_event_count": len(outcome.adversarial_trace.get("worker_events") or []),
+                "adversary_event_count": len(outcome.adversarial_trace.get("adversary_events") or []),
+                "current_status": outcome.adversarial_trace.get("current_status"),
+            }
         metadata = {**dict(outcome.final_worker_reply.metadata), "adversarial": summary}
         return AgentMessage(sender=self.name, recipient=recipient, content=outcome.result.final_output, metadata=metadata)
 

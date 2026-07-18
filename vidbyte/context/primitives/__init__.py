@@ -20,6 +20,10 @@ Relations:
 
 from __future__ import annotations
 
+from vidbyte.context.primitives.adversarial import (
+    AdversarialReviewContextItem,
+    AdversarialWorkerOutputContextItem,
+)
 from vidbyte.context.primitives.base import ContextItem
 from vidbyte.context.primitives.checkpoints import ReflexionContextItem, TrajectoryCheckpointContextItem
 from vidbyte.context.primitives.reasoning import ErrorCorrectionContextItem, ProblemSpaceSearchContextItem
@@ -52,6 +56,8 @@ from vidbyte.context.primitives.tasks import (
 )
 
 __all__ = [
+    "AdversarialReviewContextItem",
+    "AdversarialWorkerOutputContextItem",
     "ArtifactContextItem",
     "ContextItem",
     "DocumentContextItem",

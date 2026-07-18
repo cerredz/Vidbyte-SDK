@@ -20,6 +20,12 @@ Relations:
 from __future__ import annotations
 
 from vidbyte.lib.dataclasses.trace import TraceField, TraceFieldType, TraceMode, TraceOption, TraceSchema
+from vidbyte.trace.adversarial import (
+    AdversarialAgentTrace,
+    AdversarialAgentTraceController,
+    AdversarialAgentTraceModel,
+    AdversarialTrace,
+)
 from vidbyte.trace.base import Trace
 from vidbyte.trace.controller import TraceController
 from vidbyte.trace.continual import ActionTrace, ContinualTraceAgent, ContinualTraceMiddleware, ContinualTracer
@@ -30,6 +36,10 @@ from vidbyte.trace.session import SessionTraceController, SessionTracer
 
 __all__ = [
     "ActionTrace",
+    "AdversarialAgentTrace",
+    "AdversarialAgentTraceController",
+    "AdversarialAgentTraceModel",
+    "AdversarialTrace",
     "ContinualTraceAgent",
     "ContinualTraceMiddleware",
     "ContinualTracer",
