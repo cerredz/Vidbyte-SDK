@@ -46,5 +46,25 @@ class AlgorithmTrace:
         # Describes error-correction context generation.
         return AlgorithmTrace.named("error_correction", **attributes)
 
+    @staticmethod
+    def prosecutor_defender_judge_producer(**attributes: Any) -> SpanSpec:
+        # Describes the single producer pass of the prosecutor/defender/judge debate.
+        return AlgorithmTrace.named("prosecutor_defender_judge.producer", **attributes)
+
+    @staticmethod
+    def prosecutor_defender_judge_prosecutor(**attributes: Any) -> SpanSpec:
+        # Describes the isolated prosecutor allegation phase.
+        return AlgorithmTrace.named("prosecutor_defender_judge.prosecutor", **attributes)
+
+    @staticmethod
+    def prosecutor_defender_judge_defender(**attributes: Any) -> SpanSpec:
+        # Describes the isolated defender response phase.
+        return AlgorithmTrace.named("prosecutor_defender_judge.defender", **attributes)
+
+    @staticmethod
+    def prosecutor_defender_judge_judge(**attributes: Any) -> SpanSpec:
+        # Describes the isolated judge adjudication phase.
+        return AlgorithmTrace.named("prosecutor_defender_judge.judge", **attributes)
+
 
 __all__ = ["AlgorithmTrace"]

@@ -18,6 +18,7 @@ from vidbyte.context.algorithms import (
     IndependentCriticAlgorithm,
     MultiProviderAgenticGraderAlgorithm,
     ProblemSpaceSearchAlgorithm,
+    ProsecutorDefenderJudgeAlgorithm,
     ReflexionAlgorithm,
     TrajectoryCheckpointAlgorithm,
     ToolResultAdmission,
@@ -74,6 +75,11 @@ class ContextWindowPresets:
             name="multi_provider_agentic_grader",
             multi_provider_agentic_grader=MultiProviderAgenticGraderAlgorithm(),
         )
+
+    @property
+    def prosecutor_defender_judge(self) -> ContextWindowAlgorithm:
+        # Runs one producer followed by isolated prosecutor, defender, and judge roles.
+        return ContextWindowAlgorithm(name="prosecutor_defender_judge", prosecutor_defender_judge=ProsecutorDefenderJudgeAlgorithm())
 
     @property
     def independent_critic(self) -> ContextWindowAlgorithm:
