@@ -231,6 +231,8 @@ class ConfigurationLoader:
             if id(value) in ancestry:
                 self._error("Configuration must not contain cyclic aliases.", path, field)
             for key, item in value.items():
+                if ToolDefinition._secret_key(key):
+                    self._error("Configuration must not contain YAML-held secrets.", path, f"{field}.{key}")
                 self._serializable(item, path, f"{field}.{key}", ancestry | {id(value)})
             return
         self._error("Configuration values must be YAML scalars, lists, or string-keyed mappings.", path, field)

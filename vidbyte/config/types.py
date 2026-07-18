@@ -72,9 +72,17 @@ class ToolDefinition:
             if id(value) in ancestry:
                 raise ConfigurationError("Configuration must not contain cyclic aliases.", details={"field": field_name})
             for key, item in value.items():
+                if ToolDefinition._secret_key(key):
+                    raise ConfigurationError("Configuration must not contain YAML-held secrets.", details={"field": f"{field_name}.{key}"})
                 ToolDefinition._serializable(item, f"{field_name}.{key}", ancestry | {id(value)})
             return
         raise ConfigurationError("Configuration values must be scalars, lists, or string-keyed mappings.", details={"field": field_name})
+
+    @staticmethod
+    def _secret_key(key: str) -> bool:
+        # Identifies common credential field names without treating budget-oriented names as secrets.
+        normalized = key.strip().lower()
+        return normalized in {"api_key", "token", "password", "secret"} or normalized.endswith(("_api_key", "_token", "_password", "_secret"))
 
 
 @dataclass(slots=True)
