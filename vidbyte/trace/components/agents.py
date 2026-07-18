@@ -1,19 +1,21 @@
 """Context Protocol Header
 
 Description:
-    Defines semantic span factories for single-agent, aggregate-agent, and ledger-driven multi-agent execution.
+    Defines semantic span factories for single-agent, aggregate-agent, ledger-driven multi-agent, and adversarial-agent execution.
 Purpose:
     Standardizes stable span names and component/detail policies without coupling agents to a tracing provider.
 Architecture:
-    `AgentTrace`, `AggregateTrace`, and `MultiAgentTrace` return declarative `SpanSpec` instances for their lifecycle phases.
+    `AgentTrace`, `AggregateTrace`, `MultiAgentTrace`, and `AdversarialTrace` return declarative `SpanSpec` instances for their lifecycle phases.
 Relations:
     Routed by `TraceController` and emitted by agent implementations under `vidbyte.agents`.
+    `AdversarialTrace` is defined in `vidbyte.trace.adversarial` and re-exported here for the components facade.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
+from vidbyte.trace.adversarial import AdversarialTrace
 from vidbyte.trace.schema import ParentPolicy, SpanKind, SpanSpec, TraceDetail
 
 
@@ -89,4 +91,4 @@ class MultiAgentTrace:
         return SpanSpec("multi_agent.finalize", SpanKind.CHAIN, "multi_agent", TraceDetail.STANDARD, ParentPolicy.CURRENT, attributes)
 
 
-__all__ = ["AgentTrace", "AggregateTrace", "MultiAgentTrace"]
+__all__ = ["AdversarialTrace", "AgentTrace", "AggregateTrace", "MultiAgentTrace"]

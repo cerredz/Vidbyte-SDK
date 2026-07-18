@@ -137,7 +137,7 @@ machines; use `MultiAgent` when the manager must own progress and recovery.
 ## Key Modules
 
 - `base.py`: `BaseAgent`, inferred runner construction, tool binding, context assembly, trace setup, and runtime dispatch.
-- `adversarial.py`: runnerless worker/adversary sequencing, settings, result records, failure policy, and child cleanup.
+- `adversarial/`: runnerless worker/adversary sequencing package — `agent.py` (thin connector), `context.py` (`AdversarialContext` window mechanics), and `runtime.py` (deterministic run loop, failure policy, child cleanup). Settings and result records live in `vidbyte/lib/dataclasses/adversarial.py`.
 - `client.py`: namespace client used by `VidbyteSDK().agents`.
 - `runtimes/`: linear, search, and actor-model runtime components.
 - `handoff.py`: structured handoff generation from a completed agent run.

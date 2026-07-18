@@ -29,6 +29,7 @@ _COMPONENTS = {
     "agents",
     "aggregate",
     "multi_agent",
+    "adversarial",
     "runtimes",
     "actor",
     "search",
