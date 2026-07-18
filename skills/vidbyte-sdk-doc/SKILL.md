@@ -31,7 +31,7 @@ Do not claim a feature exists just because a design doc describes it. Confirm th
 - Python requirement: `>=3.11`.
 - Build backend: `setuptools.build_meta`.
 - Runtime dependency in `pyproject.toml`: `pydantic>=2,<3`.
-- Package data: JSON prompt files under `vidbyte.prompts.prompts`.
+- Package data: JSON prompt descriptors/assets and Markdown prompt bodies under `vidbyte.prompts.prompts`.
 - Test framework: Python `unittest`.
 - Normal verification:
   - `python -m compileall vidbyte`
@@ -46,6 +46,7 @@ vidbyte/
 |-- __init__.py          Root public exports.
 |-- client.py            VidbyteSDK namespace client.
 |-- agents/              Agent actors, runtime, runtimes (linear/search/actor), context-algorithm dispatcher, handoff agent, registry, MCP attach mixin.
+|   `-- multi/           Ledger-driven team facade, orchestrator, task ledger, worker transfers, and callback types.
 |-- context/             Public context primitives (package), manager, presets, context-window algorithms, handoff primitives, compaction, templates.
 |-- evals/               Eval suites, graders, runner, registry.
 |-- harnesses/           Minimal namespace for future/custom harness integrations.
@@ -71,6 +72,7 @@ Keep central contracts under `vidbyte/lib/` when they are shared by multiple pac
 
 - Root client: `VidbyteSDK`.
 - Agents: `Agent`, `BaseAgent`, `AgentClient`, `AgentInput`, `AgentCard`, `AgentMessage`, `AgentRegistry`, `AgentRunnerConfig`, `AgentSpec`.
+- Multi-agent teams: `MultiAgent`, `MagenticOneOrchestrator`, `MultiAgentOrchestrator`, `TaskLedger`, `AgentBinding`, `AgentTransfer`, `MultiAgentSettings`, `MultiAgentResult`, task/ledger/report contracts, `TaskStatus`, `OrchestratorAction`, and multi-agent errors.
 - Agent settings (`vidbyte.agents`): `AgentLoopSettings`, `ToolErrorPolicy`, `UnrecoverableAction`.
 - Contexts: `BaseContext`, `BaseAgentContext`, `ContextBudget`, `ContextPermissions`, `ContextManager`, `ContextWindow`, `ContextWindowAlgorithm`, `ToolResultAdmission`, `ContextItem`, `TextContextItem`, `FileContextItem`, `GitDiffContextItem`, `TaskContextItem`, `DocumentContextItem`, `EnvironmentContextItem`, `MemoryContextItem`, `ProgressContextItem`, `ArtifactContextItem`, `ResponseContextItem`, `ToolCallContextItem`, `TrajectoryCheckpointContextItem`, `PlanContextItem`.
 - Context-window algorithms: `ReflexionAlgorithm`, `TrajectoryCheckpointAlgorithm`, `MultiProviderAgenticGraderAlgorithm`, `InnerContextWindowAlgorithm`.
@@ -97,12 +99,13 @@ Root exports are meant for common imports. More specialized built-ins should sti
 `vidbyte.client.VidbyteSDK` is a namespace aggregator. It constructs:
 
 - `sdk.agents`: `AgentClient`.
+- `sdk.agents.multi(**kwargs)`: constructs a `MultiAgent` with the same keyword-only public constructor surface as the class.
 - `sdk.harnesses`: `HarnessClient`.
 - `sdk.harnesses.sessions`: `SessionClient` namespace for attach/export/import helpers.
 - `sdk.tools`: `ToolsClient`.
 - `sdk.providers`: `ProvidersClient`.
 
-There is no `sdk.strategies` namespace. Reasoning/orchestration is configured per-agent via `runtime=` and `algorithm=`, and agents are wired together with pipelines. The root client should stay light. Feature-specific behavior belongs in the feature package.
+There is no `sdk.strategies` namespace. Reasoning is configured per agent through `runtime=` and `algorithm=`; fixed string wiring belongs in pipelines; adaptive, manager-owned team orchestration belongs in `vidbyte.agents.multi`. The root client should stay light. Feature-specific behavior belongs in the feature package.
 
 ## Agents And Modality Routing
 
@@ -160,6 +163,36 @@ MCP attachment:
 - Pending MCP configs can be connected lazily before execution.
 - Attached remote tools are bridged into native `BaseTool` objects.
 - Agents should close MCP servers through `close_mcp_servers()` or async context manager usage.
+
+## Ledger-Driven Multi-Agent Teams
+
+Primary files:
+
+- `vidbyte/agents/multi/agent.py` — `MultiAgent`, the `BaseAgent`-compatible serial controller and team facade.
+- `vidbyte/agents/multi/orchestrator.py` — `MultiAgentOrchestrator` protocol and `MagenticOneOrchestrator` manager adapter.
+- `vidbyte/agents/multi/ledger.py` — `TaskLedger`, the only mutable structural authority during a run.
+- `vidbyte/agents/multi/transfer.py` — `AgentBinding`, `AgentTransfer`, default JSON request/report behavior, and worker lifecycle helpers.
+- `vidbyte/lib/dataclasses/multi_agent.py` and `vidbyte/lib/enums/multi_agent.py` — immutable public contracts, limits, states, decisions, and stop reasons.
+- `vidbyte/prompts/prompts/multi_agent_orchestrator/` — planning, progress, replanning, and final-synthesis manager prompts.
+
+Architecture:
+
+- Every run forks a fresh manager/orchestrator and worker set, constructs a fresh ledger, plans once, and commits at most one worker report per controller round.
+- The ledger owns task identity, dependency validation, revisions, optimistic dispatch checks, attempts, evidence, blockers, events, and structural carry-over during replanning. Orchestrators, callbacks, and workers receive frozen snapshots.
+- `AgentBinding` associates a stable worker name with an agent template. `AgentTransfer` lets developers replace request building, report parsing, report validation, pre-dispatch policy, retry policy, worker forking, and worker cleanup.
+- The default transfer uses deterministic JSON for requests and treats parsed worker evidence as unverified. Verified evidence must come from a developer validator; fluent model prose is not verification.
+- `MultiAgentSettings` bounds controller rounds, task attempts, stalls, replans, ledger events, invocation retries, and optional manager/worker/run timeouts.
+- A manager's `FINISH` decision is only a candidate. The controller also requires all required tasks completed, required verified evidence present, and any custom completion check to pass.
+- Cancellation and hard run timeout propagate without manufacturing worker reports. Ordinary post-dispatch failures are recorded as failed attempts so the manager can retry or replan. Forked manager/worker resources are closed with shielded cleanup.
+
+Compatibility boundaries:
+
+- `MultiAgent` supports the normal `generate_reply`, `arun`, `run`, history, queue, card, and explicit handoff surfaces.
+- The facade rejects direct provider/model configuration, tools, MCP attachment, response schemas, export/restore, and durable `Session` persistence. Put those capabilities on manager and worker agents.
+- `MultiAgent.fork()` preserves isolation only when worker and manager subtypes can be preserved by their native `fork()` methods or explicit factories; it rejects silent subtype erosion.
+- Pipelines remain the choice for predetermined string-in/string-out topology. Workflows remain the choice for deterministic state machines. Actor runtimes remain an execution paradigm inside one configured agent.
+
+The maintained implementation reference is `skills/vidbyte-sdk/multi-agent.md`.
 
 ## Agent Runtimes
 
@@ -488,10 +521,12 @@ Prompt model:
 - `Prompts().import_names()` returns generated direct import names.
 - `vidbyte.prompts.registry` is a compatibility re-export for `PromptRecord` and `Prompts`.
 
-Current prompt families (13 families, 34 prompts — authoritative source is `vidbyte/lib/enums/prompts.py`):
+Current prompt families (19 families, 51 prompts — authoritative source is `vidbyte/lib/enums/prompts.py`):
 
+- `agentic_engineering` (7 engineering-guidance prompts)
 - `agentic_loop`
 - `handoff`
+- `continual_trace`
 - `context_engineering`
 - `expert_prompting`
 - `goals`
@@ -500,9 +535,13 @@ Current prompt families (13 families, 34 prompts — authoritative source is `vi
 - `prompt_engineering`
 - `evals`
 - `multi_provider_agentic_grader`
+- `multi_provider_aggregator`
+- `multi_agent_orchestrator` (planning, progress, replanning, and final-synthesis prompts)
 - `templates`
 - `actor_runtime` (15 actor-persona prompts)
 - `trajectory_checkpoints`
+- `problem_space_search`
+- `error_correction`
 
 Prompt assets and bundles:
 

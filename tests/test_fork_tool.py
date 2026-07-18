@@ -3,6 +3,7 @@ from __future__ import annotations
 import unittest
 from typing import Any
 
+from tests.agent_test_support import build_test_agent
 from vidbyte.agents import AgentForkSettings, AgentMessage, BaseAgent
 from vidbyte.agents.settings import AgentLoopSettings
 from vidbyte.context.handoff import EngineeringHandoff
@@ -96,7 +97,7 @@ class ForkConversationToolTests(unittest.IsolatedAsyncioTestCase):
     async def test_execute_runs_bound_agent_fork_successfully(self) -> None:
         # A real BaseAgent should bind the fork tool and return the child reply plus lineage metadata.
         tool = ForkConversationTool()
-        agent = BaseAgent(name="parent", system_prompt="Work.", runner=DoneRunner(), tools=[tool], run_id="parent-run")
+        agent = build_test_agent(name="parent", system_prompt="Work.", runner=DoneRunner(), tools=[tool], run_id="parent-run")
         agent.history.append(AgentMessage(sender="user", recipient="parent", content="context"))
 
         result = await tool.execute(_call(prompt="solve it", name="child", purpose="branch"))
@@ -139,13 +140,11 @@ class ForkConversationToolTests(unittest.IsolatedAsyncioTestCase):
             drop_tool_names=["beta"],
             model="gpt-4.1-mini",
             provider="openai",
-            modality="text",
             temperature=0.4,
             runtime="linear",
             loop_settings={"max_tool_calls": 2, "allowed_tools": ["alpha"]},
             handoff={"preset": "engineering", "title": "Child Handoff"},
             output_schema={"type": "object"},
-            runner_options={"reasoning": "low"},
             include_run_state=True,
             mcp=False,
             metadata={"branch": "sdk-native"},
@@ -157,14 +156,12 @@ class ForkConversationToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(agent.captured.tools.names(), ("alpha", "gamma"))
         self.assertEqual(agent.captured.model_name, "gpt-4.1-mini")
         self.assertEqual(agent.captured.provider, "openai")
-        self.assertEqual(agent.captured.modality, "text")
         self.assertEqual(agent.captured.temperature, 0.4)
         self.assertEqual(agent.captured.runtime, "linear")
         self.assertEqual(agent.captured.algorithm, "compact_tool_outputs")
         self.assertIsInstance(agent.captured.handoff, EngineeringHandoff)
         self.assertEqual(agent.captured.handoff.title, "Child Handoff")
         self.assertEqual(agent.captured.output_schema, {"type": "object"})
-        self.assertEqual(agent.captured.runner_options, {"reasoning": "low"})
         self.assertTrue(agent.captured.include_run_state)
         self.assertFalse(agent.captured.mcp)
         self.assertEqual(agent.captured.metadata, {"branch": "sdk-native"})

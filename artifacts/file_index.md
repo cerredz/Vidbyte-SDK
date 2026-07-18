@@ -80,6 +80,14 @@ error-correction pass, which surface blind spots or prune contradicting context 
 managed context primitives. These update the window without rewriting prior conversation
 history.
 
+#### `vidbyte/agents/multi/`
+Ledger-driven multi-agent team orchestration. Contains the `MultiAgent` facade,
+run-local `TaskLedger`, constructor-owned lifecycle/runner/dispatch/cleanup collaborators,
+Magentic-One-inspired manager protocol/adapter, and developer-controlled transfer seams.
+Shared types live in `vidbyte/lib`; manager context construction and primitives live in
+`vidbyte/context`. Use it for manager-owned progress and replanning, not fixed pipeline
+flow or code-owned workflow transitions.
+
 #### `vidbyte/agents/runtimes/`
 Swappable execution-loop paradigms that decouple `BaseAgent` from a single control flow.
 Holds the runtime configs and the non-linear runtimes such as MCTS tree search, letting
@@ -102,9 +110,10 @@ across runtimes.
 
 #### `vidbyte/context/`
 The structured context subsystem: context managers, context windows, and the public
-context dataclasses (budget, permissions, base context). Use it when you want reusable,
-typed context instead of assembling raw prompt strings by hand. It is the developer-facing
-front of the lower-level dataclasses in `vidbyte/lib`.
+context dataclasses (budget, permissions, base context), including multi-agent context
+composition and prompt primitives. Use it when you want reusable, typed context instead
+of assembling raw prompt strings by hand. It is the developer-facing front of the
+lower-level dataclasses in `vidbyte/lib`.
 
 #### `vidbyte/context/algorithms/`
 Context-window growth strategies exposed as `ContextWindow` presets. Includes behaviors
@@ -316,7 +325,7 @@ override mechanism.
 #### `vidbyte/prompts/prompts/`
 The actual prompt asset files, organized into families. Families include `actor_runtime`,
 `agentic_engineering`, `continual_trace`, `goals`, `handoff`, `mimic_behavior`,
-`multi_provider_agentic_grader`, `multi_provider_aggregator`, `reflexion`, and `templates`,
+`multi_provider_agentic_grader`, `multi_provider_aggregator`, `multi_agent_orchestrator`, `reflexion`, and `templates`,
 covering personas, reflexion loops, eval judging, handoff, and trajectory-checkpoint text.
 Each family groups related prompt text that the accessor loads and exposes by enum key.
 
@@ -551,7 +560,7 @@ snippet.
 The master directory rule file and layout reference for the SDK, and the largest skill.
 Bundles per-subsystem how-to pages spanning context algorithms, prompts, agent behavior,
 context primitives, continual tracing, evals, handoff, memory tools, middleware, pipelines,
-and sessions. The broadest single entry point into SDK skills.
+sessions, and ledger-driven multi-agent teams. The broadest single entry point into SDK skills.
 
 #### `skills/vidbyte-sdk-doc/`
 A comprehensive reference for the repository as a whole. Covers public APIs, package layout,
@@ -566,7 +575,8 @@ subfolder below.
 #### `docs/design/`
 The concrete design docs written before implementing SDK features, including this artifact's
 own design doc (`artifact-file-index.md`). Each captures goals, requirements, detailed
-design, and a file-change manifest for one change. They are historical engineering
+design, and a file-change manifest for one change; `magentic-one-multi-agent.md`
+specifies the shared-ledger team primitive. They are historical engineering
 artifacts rather than user-facing documentation.
 
 #### `scripts/`

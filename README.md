@@ -2,6 +2,7 @@
 
 [![PyPI version](https://img.shields.io/pypi/v/vidbyte-sdk.svg)](https://pypi.org/project/vidbyte-sdk/)
 [![Python versions](https://img.shields.io/pypi/pyversions/vidbyte-sdk.svg)](https://pypi.org/project/vidbyte-sdk/)
+[![CI](https://github.com/cerredz/Vidbyte-SDK/actions/workflows/ci.yml/badge.svg)](https://github.com/cerredz/Vidbyte-SDK/actions/workflows/ci.yml)
 [![Publish to PyPI](https://github.com/cerredz/Vidbyte-SDK/actions/workflows/publish.yml/badge.svg)](https://github.com/cerredz/Vidbyte-SDK/actions/workflows/publish.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
@@ -9,7 +10,7 @@ Vidbyte is an agent engineering platform for building, evaluating, instrumenting
 and distributing AI workflows. The Vidbyte SDK is the Python package surface for
 that platform: it gives developers composable agents, tools, middleware, context
 management, MCP server integration, prompts, evals, provider adapters, pipelines,
-and tracing primitives.
+validated workflows, and tracing primitives.
 
 This repository is intentionally focused on reusable SDK abstractions. Private
 Vidbyte service logic, proprietary learning systems, hosted scoring, and database
@@ -25,6 +26,7 @@ access remain outside this package.
 - MCP Studio servers that expose Vidbyte agents, tools, prompts, and pipelines to MCP-compatible clients.
 - Local eval suites with reusable graders, concurrency controls, and run registries.
 - Agent pipelines that compose specialized agents through sequential, parallel, conditional, and map-reduce topologies.
+- Typed state-machine workflows with validation gates, conditional branches, cycles, retries, and declared jumps.
 - Prompt libraries, context-window algorithms, and trace artifacts that make long-running agent work easier to inspect.
 
 ## Layer Guide
@@ -48,6 +50,7 @@ access remain outside this package.
 | [`vidbyte.shared`](vidbyte/shared/README.md) | Reserved shared namespace; currently no stable public symbols |
 | [`vidbyte.tools`](vidbyte/tools/README.md) | Tool contracts, decorators, catalogs, execution, MCP bridges, and permissions |
 | [`vidbyte.trace`](vidbyte/trace/README.md) | Trace facade, debug tracer, provider tracers, and continual trace artifacts |
+| [`vidbyte.workflows`](vidbyte/workflows/README.md) | Typed state graphs with validate-before-commit stages, branches, guards, and execution records |
 
 ## Status
 
@@ -109,23 +112,41 @@ print(reply.content)
 
 ## Multi-Agent Orchestration
 
-Multi-agent execution is modeled as composition:
-
-- `vidbyte.agents` contains actor objects such as `BaseAgent`, `AgentInput`, and `AgentRegistry`.
-- `vidbyte.harnesses` can wrap any orchestration behind one `run(request)` method (subclass or foreign object) without prescribing its topology.
+Use `MultiAgent` when open-ended work needs a manager that owns the overall goal,
+tracks evidence and blockers in a shared `TaskLedger`, delegates one ready task
+per round, and replans after failure:
 
 ```python
-from vidbyte import BaseAgent
+from vidbyte import BaseAgent, MultiAgent, MultiAgentSettings
 
-agent = BaseAgent(
-    name="researcher",
-    system_prompt="Answer directly and cite uncertainty.",
+manager = BaseAgent(
+    name="manager",
+    system_prompt="Plan, delegate, track progress, and recover from blockers.",
     provider="openai",
     model_name="gpt-4.1",
 )
+researcher = BaseAgent(
+    name="researcher",
+    system_prompt="Research the assigned task and return evidence.",
+    provider="openai",
+    model_name="gpt-4.1",
+)
+team = MultiAgent(
+    name="research-team",
+    system_prompt="Produce a grounded answer and expose uncertainty.",
+    orchestrator=manager,
+    agents=[researcher],
+    settings=MultiAgentSettings(max_rounds=12, max_replans=2),
+)
 
-reply = await agent.arun("Draft a concise release note")
+reply = await team.arun("Investigate the release risk and recommend next steps.")
 ```
+
+Wrap workers in `AgentBinding` / `AgentTransfer` to define the exact request,
+report parser, validator, dispatch gate, subtype-aware fork factory, and closer.
+`MultiAgent` is serial and run-local; its facade cannot own tools, MCP servers,
+or durable sessions. Use pipelines for fixed string flow and `vidbyte.workflows`
+when Python code must own a deterministic state machine.
 
 For custom agents, pass an explicit `system_prompt`, provider/model config, and tools into `Agent` or `BaseAgent`.
 Semantic labels such as roles belong in agent metadata when callers need them.
@@ -270,6 +291,46 @@ agent = Agent(
 )
 ```
 
+Use `independent_critic` when a completed candidate needs an advisory review
+from a fresh context. The critic sees only the original task, exact candidate,
+and explicitly allowlisted artifacts/tools. It never receives producer history,
+scratch state, middleware transforms, private options, or implicit internal
+tools. The candidate is not revised and findings are not adjudicated.
+
+```python
+from vidbyte import Agent, ContextWindow
+
+agent = Agent(
+    name="reviewed-worker",
+    system_prompt="Solve the task carefully.",
+    provider="openai",
+    model_name="gpt-4.1",
+    algorithm=ContextWindow.preset.independent_critic,
+)
+
+reply = await agent.arun("Produce the migration plan.")
+review = reply.metadata["independent_critic"]
+```
+
+The preset is fail-closed and inherits no artifacts or tools. Custom
+configuration makes every reviewer capability explicit:
+
+```python
+from vidbyte import CriticFailurePolicy, IndependentCriticAlgorithm
+from vidbyte.context.algorithms import ContextWindowAlgorithm
+
+algorithm = ContextWindowAlgorithm(
+    name="independent_critic",
+    independent_critic=IndependentCriticAlgorithm(
+        reviewer_provider="anthropic",
+        reviewer_model="claude-sonnet-4-5",
+        allowed_artifact_names=("requirements",),
+        allowed_tool_names=("read_text",),
+        failure_policy=CriticFailurePolicy.RAISE,
+    ),
+)
+```
+
 For long-running direct loops, trajectory checkpoints can periodically write a
 bounded runtime checkpoint into the context window through managed context
 primitives. Checkpoints summarize observable runtime state only; their score is
@@ -306,6 +367,40 @@ agent = Agent(
     algorithm=ContextWindow.preset.problem_space_search,  # or ContextWindow.preset.error_correction
 )
 ```
+
+For a verdict-only adversarial review, `prosecutor_defender_judge` runs the
+normal producer once and then uses three fresh contexts in strict sequence. The
+prosecutor emits evidence-backed allegations, the defender answers those exact
+allegation IDs, and the judge decides which IDs survive. The candidate is never
+revised: `output`, `structured`, `calls`, strategy name, and existing metadata
+remain the producer's values.
+
+```python
+from vidbyte import ContextWindow
+
+agent = Agent(
+    name="reviewed-producer",
+    system_prompt="Produce the requested artifact.",
+    provider="openai",
+    model_name="gpt-4.1",
+    algorithm=ContextWindow.preset.prosecutor_defender_judge,
+)
+
+reply = await agent.arun("Evaluate this implementation against the requirements.")
+debate = reply.metadata["prosecutor_defender_judge"]
+print(debate["verdict"], debate["surviving_allegation_ids"])
+```
+
+By default, review roles receive no producer artifacts or tools and never
+receive producer history, scratch reasoning, middleware, options, system prompt,
+memory, or context-manager state. Advanced callers can construct
+`ProsecutorDefenderJudgeAlgorithm` with separate `DebateStageSettings` for each
+role. Artifact names are exact allowlists; tool names must resolve to non-bound
+`SAFE` or `READ` tools. Review adds three sequential model calls by default and
+uses stage-local timeout, iteration, token, and tool-call limits. Failures raise
+unless `ProsecutorDefenderJudgeFailurePolicy.RETURN_CANDIDATE` is explicitly
+selected, in which case the unchanged candidate carries marked no-verdict
+`review_failed` metadata.
 
 Per-call context can be supplied with `AgentInput` without mutating the agent's
 default context:
@@ -1008,9 +1103,9 @@ reply metadata but never ends the run.
 ## Prompts
 
 Prompts are repository-backed text assets exposed through an enum-keyed accessor
-and direct Python imports. The catalog currently includes 34 prompt assets across
-13 families, including handoff, reflexion, evals, prompt templates, goals,
-actor-runtime personas, and trajectory checkpoints.
+and direct Python imports. The catalog currently includes 51 prompt assets across
+19 families, including handoff, reflexion, evals, prompt templates, goals,
+actor-runtime personas, trajectory checkpoints, and multi-agent orchestration.
 
 ```python
 from vidbyte.prompts import Prompts
@@ -1165,6 +1260,76 @@ result = await runner.arun(suite)
 sdk.evals.registry.record(result)
 ```
 
+## Validated Workflows
+
+Use `vidbyte.workflows` when Python code must control which stages are legal,
+validate typed candidate state before it becomes committed state, and support
+bounded loops, branches, retries, and jumps. This is the control-flow layer for
+harnesses such as context -> spec -> implementation -> verification.
+
+Stages and validators return semantic outcome codes; only the compiled graph
+maps those codes to destinations. A deterministic schema check and a
+probabilistic verifier agent therefore use the same gate contract without giving
+either one permission to choose an arbitrary next stage.
+
+```python
+from dataclasses import dataclass, replace
+
+from vidbyte import CallableStage, CallableValidator, MachineStatus
+from vidbyte import StageResult, StateGraph, ValidationResult
+
+
+@dataclass(frozen=True)
+class HarnessState:
+    request: str
+    context: str = ""
+    spec: str = ""
+
+
+async def gather_context(ctx):
+    ctx.ledger.setdefault("files_visited", set()).add("vidbyte/agents/base.py")
+    return StageResult(replace(ctx.state, context="relevant SDK contracts"))
+
+
+def context_is_sufficient(ctx):
+    if ctx.candidate_state.context:
+        return ValidationResult.passed()
+    return ValidationResult.rejected("needs_more_context", "Collect more repository evidence.")
+
+
+async def write_spec(ctx):
+    return StageResult(replace(ctx.state, spec=f"Use {ctx.state.context}"))
+
+
+graph = StateGraph(HarnessState, name="software-engineering-harness")
+graph.add_stage(
+    "context",
+    CallableStage(gather_context),
+    validators=(CallableValidator(context_is_sufficient),),
+)
+graph.add_stage("spec", CallableStage(write_spec))
+graph.add_terminal("done", status=MachineStatus.SUCCEEDED)
+graph.set_entry("context")
+graph.add_transition("context", "spec")
+graph.add_transition("context", "context", on="needs_more_context")
+graph.add_transition("spec", "done")
+
+result = await graph.compile().arun(HarnessState(request="Add a state machine"))
+```
+
+Candidate state is cloned and committed only after stage validators and selected
+transition guards pass. Rejected candidates are discarded; structured feedback
+and the explicitly non-transactional run ledger remain available to the recovery
+stage. This in-memory transaction does not roll back filesystem, network, model,
+or tool side effects, so stages that perform external work still need idempotency,
+candidate artifacts, or compensation.
+
+Use `AgentStage` to adapt a `BaseAgent`, and `AgentValidator` for a verifier agent
+whose Pydantic verdict maps to `ValidationResult`. Verifier failures block by
+default, but an LLM judgment remains probabilistic. See the
+[`vidbyte.workflows` guide](vidbyte/workflows/README.md) for adapters, guard and
+branch APIs, retry/error policies, records, and the full layer boundary.
+
 ## Pipelines
 
 Pipelines compose agents across agent boundaries. The contract is string-in and
@@ -1262,6 +1427,7 @@ vidbyte/
 |-- providers/
 |   `-- client.py
 |-- pipelines/
+|-- workflows/
 |-- sessions/
 |-- sources/
 |-- trace/
@@ -1299,10 +1465,14 @@ Private Vidbyte service implementations, proprietary learning evaluations, promp
 ## Local Verification
 
 ```bash
-python -m compileall vidbyte
-python -m unittest discover -s tests
-python -c "from vidbyte import Agent, Tools, VidbyteSDK, tool; sdk = VidbyteSDK(); print(Agent.__name__, Tools.__name__, type(sdk.agents).__name__, callable(tool))"
+python -m pip install -e ".[dev]"
+python scripts/run_ci.py
 ```
+
+The same command runs the required source and installed-package gates used by
+pull requests and releases. For a focused diagnostic rerun, use
+`--stage source` or `--stage package`; always finish with the full command before
+opening or updating a pull request.
 
 ## Contributing and Support
 

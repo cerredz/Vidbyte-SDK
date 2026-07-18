@@ -22,6 +22,10 @@ This guide details how developers can configure, select, and utilize the differe
 
 The Vidbyte SDK decouples the core `BaseAgent` class from the underlying execution loop (the runtime). When instantiating an agent, developers can select from three paradigms depending on the orchestration and reasoning complexity needed:
 
+`MultiAgent` is not an `AgentRuntimeType`. It is a `BaseAgent`-compatible team
+facade with its own manager and run-local worker agents. Configure runtimes on
+those individual agents; use `skills/vidbyte-sdk/multi-agent.md` for team policy.
+
 | Runtime Type | Description | Key Topologies | Compaction & Middleware Compatibility |
 |--------------|-------------|----------------|---------------------------------------|
 | **Linear** | Sequential forward-moving loop executing actions one step at a time. | N/A | Fully Compatible |

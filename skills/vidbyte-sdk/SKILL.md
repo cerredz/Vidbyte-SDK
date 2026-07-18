@@ -9,6 +9,7 @@ vidbyte/
 |-- __init__.py
 |-- client.py
 |-- agents/                 agent actors, fork/restore state, runtimes, aggregate agents
+|   `-- multi/              ledger-driven team facade, orchestrator, ledger, and transfers
 |-- context/                context manager, primitives, presets, algorithms, handoffs
 |-- evals/                  eval suites, graders, behavior predicates
 |-- harnesses/              namespace clients including sdk.harnesses.sessions
@@ -31,9 +32,10 @@ There is no active `vidbyte/strategies/` package. Execution paradigms live under
 
 - Keep `vidbyte/` as the top-level Python package namespace and keep public dataclasses/enums/errors in `vidbyte/lib/`.
 - Keep agent actor abstractions in `vidbyte/agents/`; user-facing examples should prefer `Agent`, `BaseAgent`, `AgentInput`, `ModelModality`, or namespace clients over direct runner construction.
+- Keep open-ended, manager-owned team orchestration in `vidbyte/agents/multi/` and follow [`multi-agent.md`](multi-agent.md). The `TaskLedger` is the sole mutable structural authority; orchestrators and workers receive immutable snapshots, worker boundaries use explicit `AgentTransfer` callbacks, and the controller commits reports serially.
 - Keep execution runtimes under `vidbyte/agents/runtimes/` and follow [`skills/agent-runtimes/SKILL.md`](../agent-runtimes/SKILL.md) when adding or changing runtime behavior.
 - Keep context-window algorithm public config under `vidbyte/context/algorithms/` and runtime adapters under `vidbyte/agents/algorithms/`; follow [`adding-context-window-algorithms.md`](adding-context-window-algorithms.md).
-- Keep pipelines in `vidbyte/pipelines/`. Pipelines move strings between configured agents; they do not manage shared context, sessions, budgets, or artifacts.
+- Keep pipelines in `vidbyte/pipelines/`. Pipelines move strings through fixed topologies and do not manage shared context, sessions, budgets, artifacts, or adaptive replanning. Use `MultiAgent` when a manager must own goals, evidence, blockers, retries, and next actions.
 - Keep middleware under `vidbyte/middleware/`; built-ins belong in `vidbyte/middleware/builtins/`, compaction behavior under `vidbyte/middleware/compaction/`, and dataclass contracts in `vidbyte/lib/dataclasses/middleware.py`.
 - Keep durable sessions self-contained under `vidbyte/sessions/`. Session dataclasses/enums belong in `vidbyte/lib/dataclasses/sessions.py`; namespace-client entry points belong under `sdk.harnesses.sessions`.
 - Keep artifact source loaders under `vidbyte/sources/`; source dataclasses belong in `vidbyte/lib/dataclasses/sources.py`, enums in `vidbyte/lib/enums/sources.py`, and constants in `vidbyte/lib/config/sources.py`.
@@ -75,7 +77,7 @@ Follow [`middleware.md`](middleware.md) for the full hook lifecycle and catalog.
 
 `vidbyte/trace/components/` holds Vidbyte-owned span-spec factories. Provider-specific translation stays in `vidbyte/trace/providers/`.
 
-- `agents.py`: `agent.run`, `agent.stop`, aggregate agent, proposer, synthesis, and failure spans.
+- `agents.py`: `agent.run`, `agent.stop`, aggregate agent, proposer, synthesis, failure, and `multi_agent.*` plan/dispatch/report/replan/finalize spans.
 - `runtimes.py`: linear runtime iteration plus actor and search runtime spans.
 - `context.py`: context-window build, context primitive render summaries, compaction, and update spans.
 - `algorithms.py`: reflexion, grading, trajectory checkpoint, problem-space search, and error-correction spans.
@@ -83,4 +85,4 @@ Follow [`middleware.md`](middleware.md) for the full hook lifecycle and catalog.
 - `tools.py`: tool-call, permission, argument, result, and error spans.
 - `parsers.py`: tool-call parsing and structured-output validation spans.
 
-When changing an agent runtime, context-window algorithm, middleware, tool surface, parser, or aggregate-agent behavior, check whether semantic trace specs, README examples, and `llms.txt` need updates.
+When changing an agent runtime, context-window algorithm, middleware, tool surface, parser, aggregate-agent behavior, or ledger-driven team behavior, check whether semantic trace specs, README examples, and `llms.txt` need updates.

@@ -1,16 +1,17 @@
 """Context Protocol Header
 
 Description:
-    Exposes agents and orchestration primitives for Vidbyte SDK.
+    Exposes agents, execution runtimes, aggregate actors, and ledger-driven team orchestration for Vidbyte SDK.
 Purpose:
     Allows easy package-level import of BaseAgent, registries, client schemas,
-    and swappable execution runtimes.
+    swappable execution runtimes, and multi-agent ledger/transfer contracts.
 Architecture:
     - BaseAgent: Client-facing agent coordinator.
     - AgentRegistry: Local/shared memory storage registry.
     - Swappable Runtimes: LinearAgentRuntime, SearchTreeRuntimeComponent, PointToPointActorRuntime, BroadcastActorRuntime.
+    - Multi-Agent Team: MultiAgent, MagenticOneOrchestrator, TaskLedger, AgentBinding, and AgentTransfer.
 Relations:
-    Imported by main client and evaluator harnesses.
+    Imported by the root SDK client, evaluator harnesses, and user applications.
 Similar Files:
     - vidbyte/agents/base.py: Agent controller core.
 """
@@ -22,8 +23,47 @@ from vidbyte.agents.aggregation import AggregateAgent, AggregateResult, MultiPro
 from vidbyte.agents.client import AgentClient
 from vidbyte.agents.continual_trace import ContinualTraceAgent
 from vidbyte.agents.settings import AgentLoopSettings, ToolErrorPolicy, ToolSettings, UnrecoverableAction
-from vidbyte.agents.contracts import MinElapsedSeconds, MinIterations, MinTokens, MinToolCalls, OutputContract
+from vidbyte.agents.contracts import (
+    MinCompactions,
+    MinCostSpent,
+    MinDistinctTools,
+    MinElapsedSeconds,
+    MinFinalOutputChars,
+    MinFinalOutputTokens,
+    MinIterations,
+    MinSuccessfulToolCalls,
+    MinTimeTaken,
+    MinTokens,
+    MinToolCalls,
+    MinToolCallsById,
+    OutputContract,
+)
 from vidbyte.agents.handoff import HandoffAgent
+from vidbyte.agents.multi import (
+    AgentBinding,
+    AgentDispatch,
+    AgentReport,
+    AgentTransfer,
+    FinalizationContext,
+    LedgerEvent,
+    MagenticOneOrchestrator,
+    MultiAgent,
+    MultiAgentOrchestrator,
+    MultiAgentResult,
+    MultiAgentSettings,
+    MultiAgentStopReason,
+    OrchestrationContext,
+    OrchestratorAction,
+    OrchestratorDecision,
+    OrchestratorPlan,
+    TaskBlocker,
+    TaskEvidence,
+    TaskLedger,
+    TaskLedgerSnapshot,
+    TaskRecord,
+    TaskSpec,
+    TaskStatus,
+)
 from vidbyte.agents.context_algorithms import AgentRuntimeContextAlgorithms
 from vidbyte.lib.dataclasses.multi_agent import AggregateConfig, ProposerSpec
 from vidbyte.lib.registries import AgentRegistry
@@ -48,6 +88,12 @@ Agent = BaseAgent
 
 __all__ = [
     "Agent",
+    "AgentBinding",
+    "AgentDispatch",
+    "AgentReport",
+    "AgentTransfer",
+    "FinalizationContext",
+    "LedgerEvent",
     "AggregateAgent",
     "AggregateConfig",
     "AggregateResult",
@@ -61,6 +107,14 @@ __all__ = [
     "MinTokens",
     "MinIterations",
     "MinElapsedSeconds",
+    "MinTimeTaken",
+    "MinSuccessfulToolCalls",
+    "MinDistinctTools",
+    "MinFinalOutputChars",
+    "MinFinalOutputTokens",
+    "MinToolCallsById",
+    "MinCompactions",
+    "MinCostSpent",
     "AgentCard",
     "AgentForkSettings",
     "AgentInput",
@@ -77,6 +131,23 @@ __all__ = [
     "BaseAgent",
     "ContinualTraceAgent",
     "HandoffAgent",
+    "MagenticOneOrchestrator",
+    "MultiAgent",
+    "MultiAgentOrchestrator",
+    "MultiAgentResult",
+    "MultiAgentSettings",
+    "MultiAgentStopReason",
+    "OrchestrationContext",
+    "OrchestratorAction",
+    "OrchestratorDecision",
+    "OrchestratorPlan",
+    "TaskBlocker",
+    "TaskEvidence",
+    "TaskLedger",
+    "TaskLedgerSnapshot",
+    "TaskRecord",
+    "TaskSpec",
+    "TaskStatus",
     "AgentRuntime",
     "SearchTreeRuntimeComponent",
     "PointToPointActorRuntime",

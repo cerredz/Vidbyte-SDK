@@ -19,6 +19,11 @@ implicit shared state, hidden retries, voting, streaming, artifacts, or budgets
 at the pipeline layer. If a workflow needs those behaviors, they should be owned
 by agents, tools, middleware, or a custom pipeline.
 
+When a manager must own an evolving task list, inspect evidence and blockers,
+retry a task, or replan after failure, use `vidbyte.agents.multi.MultiAgent`
+instead. When Python code must define legal non-linear transitions, use
+`vidbyte.workflows`. Pipelines remain the smallest fixed string-flow primitive.
+
 ## Usage
 
 ```python

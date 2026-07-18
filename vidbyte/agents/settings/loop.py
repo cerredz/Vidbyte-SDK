@@ -136,6 +136,7 @@ class AgentLoopSettings:
         # Rejects any effort floor whose minimum meets or exceeds its paired ceiling (an unreachable floor).
         for contract in self._output_contracts:
             self._validate_contract_ceiling(contract)
+            self._validate_tool_calls_by_id_ceiling(contract)
 
     def _validate_contract_ceiling(self, contract: OutputContract) -> None:
         # Enforces the strict floor < ceiling invariant against this settings object's own ceiling fields.
@@ -147,6 +148,22 @@ class AgentLoopSettings:
                 f"{contract.name}(minimum={contract.minimum}) conflicts with "
                 f"AgentLoopSettings.{contract.ceiling_key}={ceiling}: the floor is unreachable "
                 "(require minimum < ceiling)."
+            )
+
+    def _validate_tool_calls_by_id_ceiling(self, contract: OutputContract) -> None:
+        # Rejects MinToolCallsById floors that cannot be reached under ToolSettings.max_calls_per_tool.
+        from vidbyte.agents.contracts import MinToolCallsById
+
+        if not isinstance(contract, MinToolCallsById):
+            return
+        if self.tool_settings is None:
+            return
+        limit = self.tool_settings.max_calls_per_tool.get(contract.tool_name)
+        if limit is not None and contract.minimum >= limit:
+            raise ConfigurationError(
+                f"{contract.name}(tool_name={contract.tool_name!r}, minimum={contract.minimum}) conflicts with "
+                f"ToolSettings.max_calls_per_tool[{contract.tool_name!r}]={limit}: the floor is unreachable "
+                "(require minimum < max_calls_per_tool)."
             )
 
     def to_runtime_config(self) -> "AgentRuntimeConfig":
