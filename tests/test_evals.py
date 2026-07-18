@@ -21,6 +21,8 @@ import json
 import unittest
 from datetime import datetime
 from typing import Any
+
+from tests.agent_test_support import bind_test_runner
 from vidbyte.agents.types import AgentForkSettings, AgentInput
 from vidbyte.agents.base import BaseAgent
 from vidbyte.evals import (
@@ -83,8 +85,10 @@ class MockAgent(BaseAgent):
         super().__init__(
             name="mock_agent",
             system_prompt="Test.",
-            runner=object()
+            provider="openai",
+            model_name="gpt-4.1-mini",
         )
+        bind_test_runner(self, object())
         self.fork_count = 0
         self.last_name = ""
         self.last_options: dict[str, Any] = {}

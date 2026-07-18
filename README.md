@@ -2,6 +2,7 @@
 
 [![PyPI version](https://img.shields.io/pypi/v/vidbyte-sdk.svg)](https://pypi.org/project/vidbyte-sdk/)
 [![Python versions](https://img.shields.io/pypi/pyversions/vidbyte-sdk.svg)](https://pypi.org/project/vidbyte-sdk/)
+[![CI](https://github.com/cerredz/Vidbyte-SDK/actions/workflows/ci.yml/badge.svg)](https://github.com/cerredz/Vidbyte-SDK/actions/workflows/ci.yml)
 [![Publish to PyPI](https://github.com/cerredz/Vidbyte-SDK/actions/workflows/publish.yml/badge.svg)](https://github.com/cerredz/Vidbyte-SDK/actions/workflows/publish.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
@@ -234,6 +235,46 @@ agent = Agent(
     model_name="gpt-4.1",
     tools=[lookup_metric],
     algorithm=ContextWindow.preset.no_raw_tool_outputs,
+)
+```
+
+Use `independent_critic` when a completed candidate needs an advisory review
+from a fresh context. The critic sees only the original task, exact candidate,
+and explicitly allowlisted artifacts/tools. It never receives producer history,
+scratch state, middleware transforms, private options, or implicit internal
+tools. The candidate is not revised and findings are not adjudicated.
+
+```python
+from vidbyte import Agent, ContextWindow
+
+agent = Agent(
+    name="reviewed-worker",
+    system_prompt="Solve the task carefully.",
+    provider="openai",
+    model_name="gpt-4.1",
+    algorithm=ContextWindow.preset.independent_critic,
+)
+
+reply = await agent.arun("Produce the migration plan.")
+review = reply.metadata["independent_critic"]
+```
+
+The preset is fail-closed and inherits no artifacts or tools. Custom
+configuration makes every reviewer capability explicit:
+
+```python
+from vidbyte import CriticFailurePolicy, IndependentCriticAlgorithm
+from vidbyte.context.algorithms import ContextWindowAlgorithm
+
+algorithm = ContextWindowAlgorithm(
+    name="independent_critic",
+    independent_critic=IndependentCriticAlgorithm(
+        reviewer_provider="anthropic",
+        reviewer_model="claude-sonnet-4-5",
+        allowed_artifact_names=("requirements",),
+        allowed_tool_names=("read_text",),
+        failure_policy=CriticFailurePolicy.RAISE,
+    ),
 )
 ```
 
@@ -1356,10 +1397,14 @@ Private Vidbyte service implementations, proprietary learning evaluations, promp
 ## Local Verification
 
 ```bash
-python -m compileall vidbyte
-python -m unittest discover -s tests
-python -c "from vidbyte import Agent, Tools, VidbyteSDK, tool; sdk = VidbyteSDK(); print(Agent.__name__, Tools.__name__, type(sdk.agents).__name__, callable(tool))"
+python -m pip install -e ".[dev]"
+python scripts/run_ci.py
 ```
+
+The same command runs the required source and installed-package gates used by
+pull requests and releases. For a focused diagnostic rerun, use
+`--stage source` or `--stage package`; always finish with the full command before
+opening or updating a pull request.
 
 ## Contributing and Support
 
