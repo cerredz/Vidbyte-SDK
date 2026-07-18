@@ -60,7 +60,7 @@ from vidbyte.harnesses.errors import (
 from vidbyte.harnesses.execution import Harness, wrap_implementation
 from vidbyte.harnesses.registry import HarnessFactory, HarnessImplementation, HarnessRegistry
 from vidbyte.harnesses.serialization import HarnessRedactor, HarnessSecretPolicy
-from vidbyte.harnesses.sinks import FileTrajectorySink, InMemoryTrajectorySink, TrajectorySink
+from vidbyte.harnesses.stores import FileTrajectorySink, InMemoryTrajectorySink, TrajectorySink
 
 __all__ = [
     "HARNESS_SCHEMA_VERSION",

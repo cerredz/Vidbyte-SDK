@@ -168,7 +168,8 @@ the same `TrajectorySink` protocol with zero harness changes.
 - `registry.py`: structural `run(request)` implementation protocol and exact registry.
 - `execution.py`: the `Harness` base class — load/execute/session lifecycle.
 - `dataset.py`: `TrajectoryCollector` — joins tagged Sessions into one redacted record.
-- `sinks.py`: `TrajectorySink` port plus in-memory and atomic-JSONL file sinks.
+- `stores/`: `TrajectorySink` port (`base.py`) plus in-memory and atomic-JSONL file
+  sinks (`memory.py`, `file.py`), mirroring the `vidbyte/sessions/stores/` layout.
 - `serialization.py`: the single redaction pass and shared secret-key policy.
 
 The full architecture and rejected alternatives are recorded in

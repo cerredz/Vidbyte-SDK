@@ -137,7 +137,7 @@ class HarnessSinkError(HarnessError):
 
     description = "A TrajectorySink could not atomically publish one redacted trajectory record."
     expected_vs_actual = "Expected: the sink can encode the record and write its destination. Actual: encoding or destination I/O failed."
-    blast_radius = ("vidbyte/harnesses/sinks.py",)
+    blast_radius = ("vidbyte/harnesses/stores/file.py", "vidbyte/harnesses/stores/memory.py")
     fix_approaches = ("Confirm the destination path is writable.", "Inspect the safe error type; collection is fail-open inside execute() and never fails the run.")
 
 

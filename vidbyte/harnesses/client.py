@@ -49,7 +49,7 @@ from typing import Any
 from vidbyte.harnesses.config import HarnessConfigLoader
 from vidbyte.harnesses.execution import Harness, wrap_implementation
 from vidbyte.harnesses.registry import HarnessFactory, HarnessRegistry
-from vidbyte.harnesses.sinks import FileTrajectorySink, InMemoryTrajectorySink, TrajectorySink
+from vidbyte.harnesses.stores import FileTrajectorySink, InMemoryTrajectorySink, TrajectorySink
 from vidbyte.sessions.client import SessionClient
 from vidbyte.sessions.store import SessionStore
 from vidbyte.sessions.stores.file import FileSessionStore

@@ -61,7 +61,7 @@ from vidbyte.harnesses.contracts import HARNESS_SCHEMA_VERSION, HarnessExecution
 from vidbyte.harnesses.dataset import TrajectoryCollector
 from vidbyte.harnesses.errors import HarnessConfigurationError, HarnessExecutionError, HarnessTimeoutError
 from vidbyte.harnesses.serialization import HarnessRedactor
-from vidbyte.harnesses.sinks import TrajectorySink
+from vidbyte.harnesses.stores import TrajectorySink
 from vidbyte.sessions.session import Session
 from vidbyte.sessions.store import SessionStore
 from vidbyte.sessions.stores.memory import InMemorySessionStore
