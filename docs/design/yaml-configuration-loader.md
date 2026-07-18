@@ -119,7 +119,7 @@ agent.yaml / tools.yaml / middleware.yaml
 
 ### 6.1 Public configuration package
 
-**File(s):** `vidbyte/config/__init__.py`
+**File(s):** `vidbyte/config/__init__.py`, `vidbyte/config/README.md`
 **Type:** New file
 
 #### What it does
@@ -142,6 +142,7 @@ from vidbyte.config import AgentSettings, ConfigurationLoader, MiddlewareDefinit
 
 - Importing `vidbyte.config` must not read configuration files or require optional tool/middleware dependencies.
 - The package must remain importable when no YAML files exist.
+- `vidbyte/config/README.md` must document the folder boundary, public files, and intentional non-goals so future configuration features do not turn parsing into runtime resolution.
 
 ### 6.2 Configuration settings types
 
@@ -441,6 +442,7 @@ agent = sdk.agents.base(
 |--------|-----------|--------|
 | CREATE | `docs/design/yaml-configuration-loader.md` | Approval-gated source of truth for the feature |
 | CREATE | `vidbyte/config/__init__.py` | Public configuration namespace exports |
+| CREATE | `vidbyte/config/README.md` | Folder boundary, file index, and explicit non-goals for the public configuration layer |
 | CREATE | `vidbyte/config/types.py` | Typed agent, tool, and middleware declaration objects with intrinsic validation |
 | CREATE | `vidbyte/config/loader.py` | Class-first safe YAML parsing and requested loader interface |
 | MODIFY | `vidbyte/client.py` | Expose `VidbyteSDK().config` as a `ConfigurationLoader` instance |
@@ -511,4 +513,3 @@ No files are deleted. No test files are created or modified under the requested 
 
 - What: Use one `ToolSettings` type for YAML-selected tools and direct-runtime policy such as denied tools or result truncation.
 - Why rejected: these are different concepts. YAML declarations select/configure tool implementations; runtime tool settings govern invocation policy. `ToolDefinition` avoids a public-name collision and preserves a clear security boundary.
-
