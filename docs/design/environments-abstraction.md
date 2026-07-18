@@ -347,8 +347,8 @@ class ModelSpec(BaseModel):
     provider: str
     model: str
     temperature: float | None = None
-    modality: str = "auto"
-    runner_options: dict[str, Any] = Field(default_factory=dict)
+    # modality/runner_options are intentionally absent: origin/main's BaseAgent does not
+    # accept them, and a recorded spec field the runtime ignores would corrupt attribution.
 
 class LoopSpec(BaseModel):
     # Mirrors AgentLoopSettings field-for-field.
@@ -394,13 +394,13 @@ class ContextAlgorithmSpec(BaseModel):
     #            grader_system_prompt, grader_prompt, max_grader_chars
 
 class ContextPrimitiveSpec(BaseModel):
-    kind: Literal[
-        "text", "file", "git_diff", "document", "environment", "memory",
-        "task", "progress", "plan", "artifact", "response", "tool_call",
-    ]
+    kind: str                           # validated against PRIMITIVE_TABLE: text, file, git_diff,
+                                        # document, environment, memory, task, progress, plan,
+                                        # artifact, response, tool_call
     fields: dict[str, Any] = Field(default_factory=dict)
-    placement: Literal["top_of_context", "end_of_context"] = "end_of_context"
-    managed: bool = False               # True -> ContextManager.upsert; False -> context_items
+    placement: str = "end_of_context"   # any ContextWindowPlacement value
+    managed: bool = False               # True -> ContextManager.upsert (primitive_id defaulted
+                                        # per spec position when absent); False -> context_items
 
 class MiddlewareSpec(BaseModel):
     name: str                           # validated against MIDDLEWARE_TABLE at spec time
@@ -461,22 +461,25 @@ MIDDLEWARE_TABLE: dict[str, type[AgentMiddleware]] = {
 }
 
 TOOL_TABLE: dict[str, Callable[..., BaseTool]] = {
+    # Keys equal each tool's runtime ToolSpec name, so specs, permitted_tool_names,
+    # and model-facing schemas share one namespace.
     # builtins
     "calculator": CalculatorTool, "code_execution": CodeExecutionTool,
     "glob": GlobTool, "grep": GrepTool, "semantic_search": SemanticSearchTool,
-    "patch": PatchTool, "document_retrieval": DocumentRetrievalTool,
-    "context_compaction": ContextCompactionTool,
+    "patch_file": PatchTool, "document_retrieval": DocumentRetrievalTool,
     "context_upsert": ContextUpsertTool, "context_list": ContextListTool,
     "context_remove": ContextRemoveTool,
     "reflexion": ReflexionTool, "trajectory_checkpoint": TrajectoryCheckpointTool,
     "create_handoff": CreateHandoffTool,
     "attach_mcp_server": AttachMcpServerTool, "search_mcp_servers": SearchMcpServersTool,
-    # filesystem suite (each factory takes FileSystemToolConfig kwargs in settings)
-    "fs_read_text": ..., "fs_read_lines": ..., "fs_write_text": ..., "fs_append_text": ...,
-    "fs_replace_text": ..., "fs_list_dir": ..., "fs_tree": ..., "fs_find": ...,
-    "fs_stat": ..., "fs_exists": ..., "fs_diff": ..., "fs_checksum": ...,
-    "fs_copy": ..., "fs_move": ..., "fs_delete": ..., "fs_make_dir": ..., "fs_touch": ...,
+    # filesystem suite (constructed with FileSystemToolConfig from settings)
+    "read_text": ..., "read_lines": ..., "read_binary": ..., "write_text": ...,
+    "append_text": ..., "replace_text": ..., "list_dir": ..., "tree": ..., "find": ...,
+    "stat": ..., "exists": ..., "diff": ..., "checksum": ..., "copy": ..., "move": ...,
+    "delete": ..., "make_dir": ..., "touch": ..., "zip": ..., "unzip": ...,
 }
+# ContextCompactionTool is excluded: its constructor requires a live ContextState,
+# which has no declarative representation yet.
 
 ALGORITHM_SETTINGS_OWNERS: dict[str, type] = {
     "reflexion": ReflexionAlgorithm,
