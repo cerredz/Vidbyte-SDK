@@ -17,7 +17,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
-from vidbyte.agents.algorithms import MultiProviderAgenticGraderRuntimeAlgorithm, ReflexionRuntimeAlgorithm
+from vidbyte.agents.algorithms import IndependentCriticRuntimeAlgorithm, MultiProviderAgenticGraderRuntimeAlgorithm, ReflexionRuntimeAlgorithm
 from vidbyte.context.runtime import InnerContextWindowAlgorithm
 from vidbyte.lib.dataclasses.runner import RunnerHandle
 from vidbyte.lib.tracing import SpanContext
@@ -40,6 +40,8 @@ class AgentRuntimeContextAlgorithms:
             return "reflexion"
         if self.runtime.algorithm.multi_provider_agentic_grader is not None:
             return "multi_provider_agentic_grader"
+        if self.runtime.algorithm.independent_critic is not None:
+            return "independent_critic"
         if self.runtime.algorithm.trajectory_checkpoints is not None:
             return "trajectory_checkpoints"
         if self.runtime.algorithm.problem_space_search is not None:
@@ -52,12 +54,14 @@ class AgentRuntimeContextAlgorithms:
         # Return whether the configured runtime algorithm matches name.
         return self.detect_algorithm() == name
 
-    def return_algorithm(self) -> ReflexionRuntimeAlgorithm | MultiProviderAgenticGraderRuntimeAlgorithm | None:
+    def return_algorithm(self) -> ReflexionRuntimeAlgorithm | MultiProviderAgenticGraderRuntimeAlgorithm | IndependentCriticRuntimeAlgorithm | None:
         # Return the configured runtime algorithm implementation.
         if self.runtime.algorithm.reflexion is not None:
             return ReflexionRuntimeAlgorithm(self.runtime, self.runtime.algorithm.reflexion)
         if self.runtime.algorithm.multi_provider_agentic_grader is not None:
             return MultiProviderAgenticGraderRuntimeAlgorithm(self.runtime, self.runtime.algorithm.multi_provider_agentic_grader)
+        if self.runtime.algorithm.independent_critic is not None:
+            return IndependentCriticRuntimeAlgorithm(self.runtime, self.runtime.algorithm.independent_critic)
         return None
 
     def inner_loop_algorithm(self) -> InnerContextWindowAlgorithm | None:
@@ -79,7 +83,11 @@ class AgentRuntimeContextAlgorithms:
         algorithm = self.return_algorithm()
         if algorithm is None:
             return None
-        span = self._start_algorithm_span(trace_context, algorithm=self.detect_algorithm() or "unknown", message=message)
+        algorithm_name = self.detect_algorithm() or "unknown"
+        span_attributes = {"algorithm": algorithm_name}
+        if algorithm_name != "independent_critic":
+            span_attributes["message"] = message
+        span = self._start_algorithm_span(trace_context, **span_attributes)
         try:
             result = await algorithm.arun(
                 message,
@@ -89,10 +97,11 @@ class AgentRuntimeContextAlgorithms:
                 options=options,
                 trace_context=span or trace_context,
             )
-            self._end_algorithm_span(span, output=result.output)
+            self._end_algorithm_span(span, output=None if algorithm_name == "independent_critic" else result.output)
             return result
         except BaseException as exc:
-            self._end_algorithm_span(span, error=exc)
+            trace_error = _content_free_algorithm_error(exc) if algorithm_name == "independent_critic" else exc
+            self._end_algorithm_span(span, error=trace_error)
             raise
 
     def _start_algorithm_span(self, parent: SpanContext | None, **attributes: Any) -> SpanContext | None:
@@ -110,6 +119,11 @@ class AgentRuntimeContextAlgorithms:
 def _is_semantic_tracer(tracer: object) -> bool:
     # Detects TraceController-like tracers without importing vidbyte.trace during agent initialization.
     return all(hasattr(tracer, attr) for attr in ("inner", "profile", "translator"))
+
+
+def _content_free_algorithm_error(exc: BaseException) -> RuntimeError:
+    # Preserve only the exception type in Independent Critic algorithm-span telemetry.
+    return RuntimeError(f"Independent critic failed with {type(exc).__name__}.")
 
 
 __all__ = [

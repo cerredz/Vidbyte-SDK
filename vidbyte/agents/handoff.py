@@ -12,7 +12,9 @@ Architecture:
 Relations:
     Subclasses vidbyte.agents.base.BaseAgent, consumes vidbyte.context.handoff.Handoff,
     reads Prompt.HANDOFF_SYSTEM_PROMPT through vidbyte.prompts.Prompts. Constructed by
-    AgentClient.handoff() and by BaseAgent.handoff().
+    AgentClient.handoff() and by BaseAgent.handoff(). Source-agent construction
+    carries the inferred runner cache so handoffs reuse the already-selected
+    execution boundary without reviving a public runner argument.
 Similar Files:
     - vidbyte/agents/base.py: The base agent this configures.
     - vidbyte/context/handoff/base.py: The Handoff spec/primitive this fills.
@@ -49,13 +51,15 @@ class HandoffAgent(BaseAgent):
     @classmethod
     def from_source_agent(cls, source_agent: BaseAgent, spec: Handoff) -> "HandoffAgent":
         """Build a handoff agent that reuses a source agent's runner and provider configuration."""
-        return cls(
+        generator = cls(
             spec,
             provider=source_agent.runner_config.provider,
             model_name=source_agent.runner_config.model_name,
             api_key=source_agent.runner_config.api_key,
             temperature=source_agent.runner_config.temperature,
         )
+        generator._runner_cache.update(source_agent._runner_cache)
+        return generator
 
     @classmethod
     async def run_auto_handoff(cls, source_agent: BaseAgent, spec: Handoff | None) -> Handoff:

@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import unittest
 
+from tests.agent_test_support import build_test_agent
 from vidbyte.agents import AgentForkSettings, AgentInput, AgentMessage, BaseAgent
-from vidbyte.agents.base import ConfiguredAgentRunner
 from vidbyte.context import ContextManager, ContextWindow, TaskContextItem, TextContextItem
 from vidbyte.lib.config import ModelProvider
 from vidbyte.middleware import AgentMiddleware
@@ -91,7 +91,7 @@ class OptionCaptureRunner:
 class AgentBaseTests(unittest.IsolatedAsyncioTestCase):
     async def test_card_and_generate_reply_pass_tools(self) -> None:
         tool = FakeTool()
-        agent = BaseAgent(
+        agent = build_test_agent(
             name="worker",
             system_prompt="Work carefully.",
             runner=EchoRunner(),
@@ -106,7 +106,7 @@ class AgentBaseTests(unittest.IsolatedAsyncioTestCase):
 
         reply = await agent.generate_reply("task")
         self.assertIn("direct:task", reply.content)
-        self.assertEqual(reply.metadata["modality"], "text")
+        self.assertEqual(reply.metadata["runner_type"], "text")
 
     async def test_runner_config_tool_helpers_and_fork(self) -> None:
         tool = FakeTool()
@@ -120,7 +120,8 @@ class AgentBaseTests(unittest.IsolatedAsyncioTestCase):
             metadata={"role": "custom_researcher"},
         )
 
-        self.assertIsInstance(agent.runner, ConfiguredAgentRunner)
+        self.assertEqual(agent.runner_config.model_name, "model-a")
+        self.assertEqual(agent.runner_config.run_id, "run-123")
         self.assertEqual(agent.tool_specs()[0].name, "lookup")
         agent.add_tool(object())
         self.assertEqual(agent.card().tool_names, ("lookup", "object"))
@@ -135,7 +136,7 @@ class AgentBaseTests(unittest.IsolatedAsyncioTestCase):
     async def test_agent_fork_preserves_middleware(self) -> None:
         middleware = FakeMiddleware()
         replacement = FakeMiddleware()
-        agent = BaseAgent(
+        agent = build_test_agent(
             name="worker",
             system_prompt="Work carefully.",
             runner=EchoRunner(),
@@ -150,18 +151,22 @@ class AgentBaseTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_agent_fork_rebuilds_runner_for_model_overrides(self) -> None:
         # Model-ish overrides must discard the live parent runner so child config can build a fresh runner lazily.
-        parent = BaseAgent(name="worker", system_prompt="Work carefully.", runner=EchoRunner(), provider="openai", model_name="model-a")
-        child = parent.fork(AgentForkSettings(name="child", model_name="model-b", temperature=0.7, runner_options={"reasoning": "low"}))
+        parent = build_test_agent(name="worker", system_prompt="Work carefully.", runner=EchoRunner(), provider="openai", model_name="model-a")
+        child = parent.fork(
+            AgentForkSettings(
+                name="child",
+                model_name="model-b",
+                temperature=0.7,
+            )
+        )
 
-        self.assertIsInstance(child.runner, ConfiguredAgentRunner)
         self.assertEqual(child.runner_config.model_name, "model-b")
         self.assertEqual(child.runner_config.temperature, 0.7)
-        self.assertEqual(child.runner_config.options, {"reasoning": "low"})
-        self.assertEqual(child.runners, {})
+        self.assertEqual(child._runner_cache, {})
 
     async def test_agent_fork_applies_tool_deltas_by_name(self) -> None:
         # Fork tool deltas should compose with inherited tools and leave the parent catalog untouched.
-        parent = BaseAgent(name="worker", system_prompt="Work carefully.", runner=EchoRunner(), tools=[FakeTool("keep"), FakeTool("drop")])
+        parent = build_test_agent(name="worker", system_prompt="Work carefully.", runner=EchoRunner(), tools=[FakeTool("keep"), FakeTool("drop")])
         child = parent.fork(AgentForkSettings(name="child", add_tools=[FakeTool("add")], drop_tools=["drop"]))
 
         self.assertEqual(parent.tools.names(), ("keep", "drop"))
@@ -169,7 +174,7 @@ class AgentBaseTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_agent_fork_clones_stateful_add_tools(self) -> None:
         # Stateful add_tools entries should be cloned before the child binds them.
-        parent = BaseAgent(name="worker", system_prompt="Work carefully.", runner=EchoRunner())
+        parent = build_test_agent(name="worker", system_prompt="Work carefully.", runner=EchoRunner())
         added = CreateHandoffTool()
 
         child = parent.fork(AgentForkSettings(name="child", add_tools=[added]))
@@ -181,7 +186,7 @@ class AgentBaseTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_agent_fork_explicit_history_wins_and_can_copy_run_state(self) -> None:
         # Explicit history should override include_history, while include_run_state copies handoffs and tool contexts.
-        parent = BaseAgent(name="worker", system_prompt="Work carefully.", runner=EchoRunner())
+        parent = build_test_agent(name="worker", system_prompt="Work carefully.", runner=EchoRunner())
         parent.history.append(AgentMessage(sender="parent", recipient="worker", content="parent-history"))
         explicit = [AgentMessage(sender="explicit", recipient="worker", content="explicit-history")]
         handoff = MinimalHandoff(primitive_id="handoff:1")
@@ -199,7 +204,7 @@ class AgentBaseTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(child.last_reply)
 
     async def test_agent_accepts_context_window_algorithm_preset(self) -> None:
-        agent = BaseAgent(
+        agent = build_test_agent(
             name="worker",
             system_prompt="Work carefully.",
             runner=EchoRunner(),
@@ -215,12 +220,12 @@ class AgentBaseTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_agent_without_strategy_calls_runner_once(self) -> None:
         runner = EchoRunner()
-        agent = BaseAgent(name="direct", system_prompt="Direct system.", runner=runner)
+        agent = build_test_agent(name="direct", system_prompt="Direct system.", runner=runner)
 
         reply = await agent.generate_reply("task")
 
         self.assertIn("direct:task", reply.content)
-        self.assertEqual(reply.metadata["modality"], "text")
+        self.assertEqual(reply.metadata["runner_type"], "text")
         self.assertIn("Direct system.", runner.system)
         self.assertIn("agentic loop", runner.system)
 
@@ -234,7 +239,7 @@ class AgentBaseTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_arun_sequentially_returns_all_replies(self) -> None:
         # [Edge Case] Three prompts → three replies returned in order
-        agent = BaseAgent(name="seq", system_prompt="S.", runner=EchoRunner())
+        agent = build_test_agent(name="seq", system_prompt="S.", runner=EchoRunner())
         replies = await agent.arun_sequentially(["a", "b", "c"])
         self.assertEqual(len(replies), 3)
         self.assertIn("direct:a", replies[0].content)
@@ -244,14 +249,14 @@ class AgentBaseTests(unittest.IsolatedAsyncioTestCase):
     async def test_arun_sequentially_empty_list_returns_empty(self) -> None:
         # [Edge Case] Empty input must return [] without touching the runner
         runner = EchoRunner()
-        agent = BaseAgent(name="seq", system_prompt="S.", runner=runner)
+        agent = build_test_agent(name="seq", system_prompt="S.", runner=runner)
         replies = await agent.arun_sequentially([])
         self.assertEqual(replies, [])
         self.assertEqual(len(agent.history), 0)
 
     async def test_arun_sequentially_single_prompt(self) -> None:
         # [Edge Case] Single-element list behaves identically to one generate_reply call
-        agent = BaseAgent(name="seq", system_prompt="S.", runner=EchoRunner())
+        agent = build_test_agent(name="seq", system_prompt="S.", runner=EchoRunner())
         replies = await agent.arun_sequentially(["only"])
         self.assertEqual(len(replies), 1)
         self.assertIn("direct:only", replies[0].content)
@@ -259,14 +264,14 @@ class AgentBaseTests(unittest.IsolatedAsyncioTestCase):
     async def test_arun_sequentially_preserves_history(self) -> None:
         # [Silent Failure] history must grow by 1 per prompt (agent reply only — user messages
         # are not pushed by generate_reply, so expect exactly N entries after N prompts)
-        agent = BaseAgent(name="seq", system_prompt="S.", runner=EchoRunner())
+        agent = build_test_agent(name="seq", system_prompt="S.", runner=EchoRunner())
         await agent.arun_sequentially(["p1", "p2", "p3"])
         self.assertEqual(len(agent.history), 3)
 
     async def test_arun_sequentially_context_accumulates(self) -> None:
         # [Hidden Failure] Each successive prompt sees the prior reply in agent.history.
         # Verify that after the second prompt, history contains the first reply.
-        agent = BaseAgent(name="seq", system_prompt="S.", runner=EchoRunner())
+        agent = build_test_agent(name="seq", system_prompt="S.", runner=EchoRunner())
         replies = await agent.arun_sequentially(["first", "second"])
         self.assertEqual(len(agent.history), 2)
         # The first reply should be the first entry in history
@@ -276,14 +281,14 @@ class AgentBaseTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_run_sequentially_raises_in_active_loop(self) -> None:
         # [Hidden Assumption] run_sequentially must refuse when called inside a running event loop
-        agent = BaseAgent(name="seq", system_prompt="S.", runner=EchoRunner())
+        agent = build_test_agent(name="seq", system_prompt="S.", runner=EchoRunner())
         with self.assertRaises(AgentExecutionError):
             agent.run_sequentially(["prompt"])
 
     async def test_arun_sequentially_stops_on_first_failure(self) -> None:
         # [Hidden Failure] If prompt N raises, prompts N+1..end must not be called
         runner = FailOnSecondRunner()
-        agent = BaseAgent(name="seq", system_prompt="S.", runner=runner)
+        agent = build_test_agent(name="seq", system_prompt="S.", runner=runner)
         with self.assertRaises(AgentExecutionError):
             await agent.arun_sequentially(["ok", "fail", "never"])
         self.assertEqual(runner.call_count, 2)
@@ -292,7 +297,7 @@ class AgentBaseTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_arun_sequentially_accepts_agent_input_objects(self) -> None:
         # [Hidden Assumption] AgentInput objects must be forwarded correctly, not coerced to strings
-        agent = BaseAgent(name="seq", system_prompt="S.", runner=EchoRunner())
+        agent = build_test_agent(name="seq", system_prompt="S.", runner=EchoRunner())
         inp = AgentInput(prompt="from-input")
         replies = await agent.arun_sequentially([inp])
         self.assertEqual(len(replies), 1)
@@ -301,7 +306,7 @@ class AgentBaseTests(unittest.IsolatedAsyncioTestCase):
     async def test_arun_sequentially_forwards_options_to_each_call(self) -> None:
         # [Silent Failure] **options must reach every underlying generate_reply invocation
         runner = OptionCaptureRunner()
-        agent = BaseAgent(name="seq", system_prompt="S.", runner=runner)
+        agent = build_test_agent(name="seq", system_prompt="S.", runner=runner)
         await agent.arun_sequentially(["x", "y"])
         # Both calls must have received the system kwarg (injected by the runtime)
         for captured in runner.captured_options:
