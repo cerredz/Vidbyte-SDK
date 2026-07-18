@@ -51,13 +51,53 @@ context.upsert(
 )
 ```
 
+## General Problem-Solving Challenges
+
+The SDK includes domain-neutral primitives for keeping adversarial questions
+visible while a person, team, or agent works through a problem. They cover
+framing and objectives, assumptions and evidence, decisions and alternatives,
+execution risks and feedback, and premature closure or unresolved escalation.
+
+```python
+from vidbyte import (
+    AssumptionChallengeContextItem,
+    CompletionGateContextItem,
+    ContextManager,
+)
+
+context = ContextManager()
+context.place_after_tools(
+    AssumptionChallengeContextItem(
+        assumption="Demand will remain constant during the pilot.",
+        falsifier="Observed demand changes materially during the pilot.",
+        validation_method="Compare weekly demand measurements.",
+        resolution_condition="Two stable measurement periods are observed.",
+    )
+)
+context.place_after_system_prompt(
+    CompletionGateContextItem(
+        claimed_result="The intervention worked.",
+        desired_outcome="Wait times decreased without reducing service quality.",
+        missing_validation=("Compare against baseline", "Review quality measures"),
+        severity="blocking",
+    )
+)
+```
+
+These records describe concerns; they do not automatically enforce a boundary,
+investigate a claim, change status, resolve a dispute, or stop an agent from
+finishing. `status` and `severity` are caller-managed strings. A stable
+`primitive_id` plus deliberate placement can keep an unresolved concern
+persistent and prominent across iterations.
+
 ## Key Modules
 
 - `manager.py`: ordered context item collection and managed primitive registry.
 - `multi_agent.py`: builds orchestration contexts and composes manager-facing primitives.
 - `window.py` and `presets.py`: context-window preset resolution.
-- `primitives/`: typed context items for files, tasks, progress, memory, responses, tool calls, and multi-agent orchestration state.
+- `primitives/`: typed context items for files, tasks, progress, memory, responses, tool calls, multi-agent orchestration state, and general problem-solving challenges.
 - `algorithms/`: reflexion, grader, tool-result, and trajectory-checkpoint algorithms.
+- `algorithms/independent_critic.py`: immutable review-only critic policy, exact evidence serialization, and bounded report normalization.
 - `compaction.py`: deterministic context compaction contracts and stats.
 - `handoff/`: structured handoff models.
 
@@ -130,3 +170,17 @@ trace attributes contain identifiers, resource names, hashes, lengths, counts,
 timing, and status—not task, candidate, artifact, allegation, defense, decision,
 tool argument/result, or provider response text. Existing global tracing policy
 still governs ordinary nested provider/tool spans.
+
+## Independent Critic
+
+`ContextWindow.preset.independent_critic` runs the normal producer once, then
+reviews its exact candidate in a fresh runtime. Reviewer visibility is built
+from an empty context plus the original task, candidate, and explicit artifact
+and tool allowlists. Producer history, system prompt, metadata, context items,
+middleware, provider options, and implicit tools remain outside the boundary.
+
+The public candidate stays unchanged. Advisory, unadjudicated findings appear
+under `result.metadata["independent_critic"]`. The default raises when review
+cannot produce valid JSON; custom configuration can choose
+`CriticFailurePolicy.RETURN_CANDIDATE`, which returns the producer result with
+an explicit `status="review_failed"` marker instead of claiming success.

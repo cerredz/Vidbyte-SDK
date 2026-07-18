@@ -13,6 +13,11 @@ registry identity, and freezing remain manager responsibilities.
 - `checkpoints.py` - reflexion and trajectory checkpoint primitives.
 - `reasoning.py` - problem-space and error-correction primitives.
 - `multi_agent.py` - request, team, ledger, report, limit, and terminal primitives used by `MultiAgentContext`.
+- `framing.py` - problem-frame, objective, boundary, ambiguity, and perspective challenges.
+- `epistemics.py` - assumption, model, and evidence challenges.
+- `decisions.py` - decision, alternative, and tradeoff challenges.
+- `execution.py` - invariant, dependency, intervention-risk, and feedback-gap challenges.
+- `closure.py` - process-stall, completion-gate, and risk-escalation challenges.
 - `__init__.py` - supported public primitive exports.
 
 Multi-agent primitives preserve explicit trust boundaries: user requests, ledger

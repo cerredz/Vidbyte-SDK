@@ -32,7 +32,7 @@ Then install the SDK into the active environment:
 
 ```bash
 python -m pip install --upgrade pip
-python -m pip install -e .
+python -m pip install -e ".[dev]"
 ```
 
 ## Making a Change
@@ -50,21 +50,22 @@ installed package can load them outside the source checkout.
 
 ## Verification
 
-Run the repository's existing checks before opening a pull request:
+Run the complete production gate before opening or updating a pull request:
 
 ```bash
-python -m compileall vidbyte
-python -m unittest discover -s tests
-python -c "from vidbyte import Agent, Tools, VidbyteSDK, tool; sdk = VidbyteSDK(); print(Agent.__name__, Tools.__name__, type(sdk.agents).__name__, callable(tool))"
+python scripts/run_ci.py
 ```
 
-Packaging changes should additionally build and validate both distributions:
+When diagnosing a failure, rerun one stage and then return to the full gate:
 
 ```bash
-python -m pip install --upgrade build twine
-python -m build
-python -m twine check dist/*
+python scripts/run_ci.py --stage source
+python scripts/run_ci.py --stage package
+python scripts/run_ci.py
 ```
+
+A change is not ready for review while any local gate or pull-request check is
+red. Do not skip, delete, or weaken checks to make a change pass.
 
 ## Pull Requests
 

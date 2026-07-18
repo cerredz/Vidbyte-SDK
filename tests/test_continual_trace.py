@@ -5,6 +5,7 @@ import unittest
 
 from pydantic import BaseModel, Field
 
+from tests.agent_test_support import build_test_agent
 from vidbyte import Agent, AgentForkSettings, TraceOption, TraceSchema
 from vidbyte.lib.dataclasses.middleware import MiddlewareContext, MiddlewareHook
 from vidbyte.lib.dataclasses.trace import TraceField, TraceFieldType
@@ -277,7 +278,7 @@ class ScriptedRunner:
 class ContinualTraceIntegrationTests(unittest.IsolatedAsyncioTestCase):
     async def test_trace_accumulates_and_surfaces(self) -> None:  # [Silent Failure]
         runner = ScriptedRunner()
-        agent = Agent(
+        agent = build_test_agent(
             name="worker",
             system_prompt="Work.",
             runner=runner,
@@ -294,7 +295,7 @@ class ContinualTraceIntegrationTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_trace_never_leaks_into_main_context(self) -> None:  # [Silent Failure]
         runner = ScriptedRunner()
-        agent = Agent(
+        agent = build_test_agent(
             name="worker",
             system_prompt="Work.",
             runner=runner,
@@ -309,7 +310,7 @@ class ContinualTraceIntegrationTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_main_run_succeeds_when_trace_fails(self) -> None:  # [Hidden Failure]
         runner = ScriptedRunner(trace_raises=True)
-        agent = Agent(
+        agent = build_test_agent(
             name="worker",
             system_prompt="Work.",
             runner=runner,

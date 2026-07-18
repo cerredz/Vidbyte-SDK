@@ -17,7 +17,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
-from vidbyte.agents.algorithms import MultiProviderAgenticGraderRuntimeAlgorithm, ProsecutorDefenderJudgeRuntimeAlgorithm, ReflexionRuntimeAlgorithm
+from vidbyte.agents.algorithms import IndependentCriticRuntimeAlgorithm, MultiProviderAgenticGraderRuntimeAlgorithm, ProsecutorDefenderJudgeRuntimeAlgorithm, ReflexionRuntimeAlgorithm
 from vidbyte.context.runtime import InnerContextWindowAlgorithm
 from vidbyte.lib.dataclasses.runner import RunnerHandle
 from vidbyte.lib.tracing import SpanContext
@@ -42,6 +42,8 @@ class AgentRuntimeContextAlgorithms:
             return "multi_provider_agentic_grader"
         if self.runtime.algorithm.prosecutor_defender_judge is not None:
             return "prosecutor_defender_judge"
+        if self.runtime.algorithm.independent_critic is not None:
+            return "independent_critic"
         if self.runtime.algorithm.trajectory_checkpoints is not None:
             return "trajectory_checkpoints"
         if self.runtime.algorithm.problem_space_search is not None:
@@ -54,7 +56,7 @@ class AgentRuntimeContextAlgorithms:
         # Return whether the configured runtime algorithm matches name.
         return self.detect_algorithm() == name
 
-    def return_algorithm(self) -> ReflexionRuntimeAlgorithm | MultiProviderAgenticGraderRuntimeAlgorithm | ProsecutorDefenderJudgeRuntimeAlgorithm | None:
+    def return_algorithm(self) -> ReflexionRuntimeAlgorithm | MultiProviderAgenticGraderRuntimeAlgorithm | ProsecutorDefenderJudgeRuntimeAlgorithm | IndependentCriticRuntimeAlgorithm | None:
         # Return the configured runtime algorithm implementation.
         if self.runtime.algorithm.reflexion is not None:
             return ReflexionRuntimeAlgorithm(self.runtime, self.runtime.algorithm.reflexion)
@@ -62,6 +64,8 @@ class AgentRuntimeContextAlgorithms:
             return MultiProviderAgenticGraderRuntimeAlgorithm(self.runtime, self.runtime.algorithm.multi_provider_agentic_grader)
         if self.runtime.algorithm.prosecutor_defender_judge is not None:
             return ProsecutorDefenderJudgeRuntimeAlgorithm(self.runtime, self.runtime.algorithm.prosecutor_defender_judge)
+        if self.runtime.algorithm.independent_critic is not None:
+            return IndependentCriticRuntimeAlgorithm(self.runtime, self.runtime.algorithm.independent_critic)
         return None
 
     def inner_loop_algorithm(self) -> InnerContextWindowAlgorithm | None:
@@ -84,7 +88,12 @@ class AgentRuntimeContextAlgorithms:
         if algorithm is None:
             return None
         algorithm_name = self.detect_algorithm() or "unknown"
-        span_attributes = {"algorithm": algorithm_name, "message_chars": len(message)} if algorithm_name == "prosecutor_defender_judge" else {"algorithm": algorithm_name, "message": message}
+        if algorithm_name == "prosecutor_defender_judge":
+            span_attributes = {"algorithm": algorithm_name, "message_chars": len(message)}
+        elif algorithm_name == "independent_critic":
+            span_attributes = {"algorithm": algorithm_name}
+        else:
+            span_attributes = {"algorithm": algorithm_name, "message": message}
         span = self._start_algorithm_span(trace_context, **span_attributes)
         try:
             result = await algorithm.arun(
@@ -95,11 +104,21 @@ class AgentRuntimeContextAlgorithms:
                 options=options,
                 trace_context=span or trace_context,
             )
-            self._end_algorithm_span(span, output="completed" if algorithm_name == "prosecutor_defender_judge" else result.output)
+            if algorithm_name == "prosecutor_defender_judge":
+                self._end_algorithm_span(span, output="completed")
+            elif algorithm_name == "independent_critic":
+                self._end_algorithm_span(span, output=None)
+            else:
+                self._end_algorithm_span(span, output=result.output)
             return result
         except BaseException as exc:
-            safe_error = RuntimeError(type(exc).__name__) if algorithm_name == "prosecutor_defender_judge" else exc
-            self._end_algorithm_span(span, error=safe_error)
+            if algorithm_name == "prosecutor_defender_judge":
+                trace_error: BaseException = RuntimeError(type(exc).__name__)
+            elif algorithm_name == "independent_critic":
+                trace_error = _content_free_algorithm_error(exc)
+            else:
+                trace_error = exc
+            self._end_algorithm_span(span, error=trace_error)
             raise
 
     def _start_algorithm_span(self, parent: SpanContext | None, **attributes: Any) -> SpanContext | None:
@@ -117,6 +136,11 @@ class AgentRuntimeContextAlgorithms:
 def _is_semantic_tracer(tracer: object) -> bool:
     # Detects TraceController-like tracers without importing vidbyte.trace during agent initialization.
     return all(hasattr(tracer, attr) for attr in ("inner", "profile", "translator"))
+
+
+def _content_free_algorithm_error(exc: BaseException) -> RuntimeError:
+    # Preserve only the exception type in Independent Critic algorithm-span telemetry.
+    return RuntimeError(f"Independent critic failed with {type(exc).__name__}.")
 
 
 __all__ = [
