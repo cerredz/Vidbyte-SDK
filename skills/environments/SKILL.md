@@ -78,6 +78,26 @@ Rules the base class enforces or expects:
 - **Versioning.** The tool contract, generator, and verifier are the environment's identity. Any change to them bumps `version`; `RolloutRecord` pins `env_version` so old data stays interpretable.
 - **Empty criteria never pass.** `Reward.from_criteria([])` is `score=0.0, passed=False`.
 
+### 3.1 Reusing evals graders in `verify`
+
+You do not have to hand-roll grading. The `vidbyte.evals` grader catalog (`RubricGrader`, `LLMJudgeGrader`, `ContainsGrader`, `JSONSchemaGrader`, `RegexMatchGrader`, `ForbiddenContentGrader`, composite `AllOfGrader`/`WeightedGrader`, …) plugs straight into a verifier through `grade_with`:
+
+```python
+from vidbyte import grade_with
+from vidbyte.evals.graders import RubricGrader, ForbiddenContentGrader
+from vidbyte.evals.types import EvalCase
+
+async def verify(self, session, trajectory) -> Reward:
+    output = (session.workspace_dir / "answer.txt").read_text()   # or trajectory[-1]["content"]
+    case = EvalCase(prompt=session.task.instructions, expected=session.verifier_state["expected"])
+    return await grade_with([RubricGrader(...), ForbiddenContentGrader(...)], case, output)
+```
+
+Each grader becomes one criterion (named by `grader.name`), folded via `Reward.from_criteria` (all-pass AND, mean score). Two rules:
+
+- **You choose the string.** evals graders score a string; environments grade world state. Feed the agent's final output for output-shaped criteria, or a file read out of `workspace_dir` for state-shaped criteria. Checks with no string (a file exists, tests exit 0, a checksum matches) stay hand-written — `grade_with` complements state grading, it does not replace it.
+- **Graders belong to the environment, never the `HarnessSpec`.** The verifier is not a swept axis; grading with a config you are also sweeping makes pass rates uninterpretable.
+
 ## 4. HarnessSpec Reference
 
 `HarnessSpec` is the declarative, versioned, JSON-round-trippable description of how an agent is assembled. Specs are **data, not objects**: recordable, diffable, sweepable. All models are pydantic v2 with `extra="forbid"` — typos are errors.
@@ -124,6 +144,8 @@ API keys are **never** in specs; they resolve from provider environment variable
 
 The spec validator rejects incompatible combinations at construction — the same rules `BaseAgent` enforces (see `skills/agent-runtimes/SKILL.md`).
 
+**One HarnessSpec resolves to one top-level policy.** A multi-*actor* topology is expressed here through `kind="actor"`, not by declaring several agents — the resolver builds exactly one `BaseAgent` exposing `arun`, and the environment contract only needs `arun` plus a final world state to verify, so it is insulated from policy shape. Heterogeneous multi-agent DAGs (distinct model/tools/context per node) are a planned versioned extension: a reusable per-agent sub-spec composed recursively via agent-as-tool, added under a new `spec_version` (recorded rollout data is protected because `RolloutRecord.harness` stores the spec as an opaque mapping). See the design note in `vidbyte/environments/resolver.py`.
+
 ### 4.4 ContextAlgorithmSpec
 
 `preset` is one of: `default`, `raw_tool_outputs`, `compact_tool_outputs`, `hide_tool_outputs`, `no_raw_tool_outputs`, `reflexion`, `multi_provider_agentic_grader`, `trajectory_checkpoints`, `problem_space_search`, `error_correction`. Optional overrides: `tool_result_admission` (`raw` \| `compact` \| `hide_raw`), `max_tool_result_chars`.
@@ -156,6 +178,8 @@ Valid names (spec names equal each tool's runtime `ToolSpec.name`, so `permitted
 Workspace scoping is the default: filesystem tools get `root=str(session.workspace_dir)` and code-search/patch tools get `root_dir=...` unless `settings` overrides them. Write-capable filesystem tools still require `{"allow_write": true}`. Context tools (`reflexion`, `trajectory_checkpoint`, `context_*`) receive the resolved `ContextManager` automatically. Memory-provider tools (Cognee/Letta/Mem0/Supermemory/Zep) are excluded from spec v1 because they require external credentials; use the prebuilt-agent escape hatch for those.
 
 Remember the authority rule: requested tools are filtered through `Environment.tools()`. A published pass rate is only comparable when the environment pinned its surface via `permitted_tool_names`.
+
+**Registering a new spec-selectable builtin.** The valid names above (and for middleware and context primitives/algorithms) come from the dispatch tables in `vidbyte/lib/config/harness_tables.py` — `VIDBYTE_MIDDLEWARE_TABLE`, `VIDBYTE_TOOL_TABLE`, `VIDBYTE_FILESYSTEM_TOOL_TABLE`, `VIDBYTE_PRIMITIVE_TABLE`, `VIDBYTE_ALGORITHM_SETTINGS_OWNERS`, plus the companion name sets. When a new builtin should be spec-selectable: (1) add it to the matching table with its key **equal to its runtime name** (e.g. a tool's `ToolSpec.name`) — never prefix or rename the key, or you break the shared namespace with `permitted_tool_names` and the model-facing schema; (2) update the name list in this section. These tables are hand-maintained for now; a tracked follow-up derives them from the builtin registries so they cannot drift.
 
 ### 4.8 TraceSpec
 

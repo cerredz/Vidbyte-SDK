@@ -11,15 +11,31 @@ Architecture:
     - HarnessSpecResolver: Per-environment builder composing runtime, loop
       settings, context algorithm, primitives, middleware, tools, and tracing.
 Relations:
-    Consumes vidbyte.environments.spec tables; produces BaseAgents for
+    Consumes the name dispatch tables in vidbyte.lib.config.harness_tables and
+    HarnessSpec from vidbyte.environments.spec; produces BaseAgents for
     vidbyte.environments.runner.
 Similar Files:
     - vidbyte/agents/base.py: BaseAgent constructor this resolver targets.
+
+Design note — single top-level policy (v1):
+    A HarnessSpec resolves to exactly one BaseAgent, so the runner only ever
+    drives one object exposing arun(prompt). This is deliberate, not a ceiling:
+    intra-agent multi-actor topologies are already expressible through
+    RuntimeSpec (kind="actor", see resolve_runtime), and the environment
+    contract is insulated from policy shape because it only requires arun plus a
+    final world state to verify. Heterogeneous multi-agent DAGs (distinct
+    model/tools/context per node) are a versioned follow-up: introduce a
+    reusable AgentSpec sub-structure and let a HarnessSpec compose several via
+    recursive agent-as-tool wiring, rather than bolting parent/child fields onto
+    a flat agent list. Because RolloutRecord.harness stores spec.model_dump() as
+    an opaque mapping and both SPEC_VERSION and RECORD_VERSION are versioned,
+    that evolution can land without breaking recorded rollout data. (Note the
+    name AgentSpec is already taken by vidbyte.lib.dataclasses.agents, so the new
+    sub-structure needs a distinct name, e.g. HarnessAgentSpec.)
 """
 
 from __future__ import annotations
 
-import dataclasses
 from typing import TYPE_CHECKING, Any
 
 from vidbyte.agents.base import BaseAgent
@@ -29,17 +45,17 @@ from vidbyte.context.algorithms import ContextWindowAlgorithm, ToolResultAdmissi
 from vidbyte.context.manager import ContextManager
 from vidbyte.context.primitives import ContextItem
 from vidbyte.context.runtime import ContextWindowPlacement
-from vidbyte.environments.spec import (
-    ALGORITHM_SETTINGS_OWNERS,
-    CONTEXT_MANAGER_TOOL_NAMES,
-    FILESYSTEM_TOOL_TABLE,
-    PASSTHROUGH_ALGORITHM_PRESETS,
-    PRIMITIVE_TABLE,
-    MIDDLEWARE_TABLE,
-    TOOL_TABLE,
-    HarnessSpec,
-)
+from vidbyte.environments.spec import HarnessSpec
 from vidbyte.environments.types import EnvSession
+from vidbyte.lib.config.harness_tables import (
+    VIDBYTE_ALGORITHM_SETTINGS_OWNERS,
+    VIDBYTE_CONTEXT_MANAGER_TOOL_NAMES,
+    VIDBYTE_FILESYSTEM_TOOL_TABLE,
+    VIDBYTE_MIDDLEWARE_TABLE,
+    VIDBYTE_PASSTHROUGH_ALGORITHM_PRESETS,
+    VIDBYTE_PRIMITIVE_TABLE,
+    VIDBYTE_TOOL_TABLE,
+)
 from vidbyte.lib.dataclasses.filesystem import FileSystemToolConfig
 from vidbyte.lib.dataclasses.trace import TraceOption
 from vidbyte.lib.enums.prompts import Prompt
@@ -75,7 +91,12 @@ class HarnessSpecResolver:
         self._environment = environment
 
     def build_agent(self, spec: HarnessSpec, session: EnvSession) -> BaseAgent:
-        """Resolve every spec axis and assemble the configured BaseAgent."""
+        """Resolve every spec axis and assemble the single configured BaseAgent.
+
+        One HarnessSpec builds one top-level policy; multi-actor topologies come
+        from the spec's RuntimeSpec, not from multiple agents here. See the
+        module header for the multi-agent evolution plan.
+        """
         context_items, context_manager = self.resolve_context(spec)
         context_manager = self._ensure_manager_for_tools(spec, context_manager)
         tracer, trace_option = self.resolve_trace(spec)
@@ -138,8 +159,8 @@ class HarnessSpecResolver:
         kwargs["tool_result_admission"] = admission
         if algorithm_spec.max_tool_result_chars is not None:
             kwargs["max_tool_result_chars"] = algorithm_spec.max_tool_result_chars
-        if algorithm_spec.preset not in PASSTHROUGH_ALGORITHM_PRESETS:
-            owner = ALGORITHM_SETTINGS_OWNERS[algorithm_spec.preset]
+        if algorithm_spec.preset not in VIDBYTE_PASSTHROUGH_ALGORITHM_PRESETS:
+            owner = VIDBYTE_ALGORITHM_SETTINGS_OWNERS[algorithm_spec.preset]
             kwargs[algorithm_spec.preset] = owner(**self._coerce_algorithm_settings(algorithm_spec.settings))
         return ContextWindowAlgorithm(**kwargs)
 
@@ -165,7 +186,7 @@ class HarnessSpecResolver:
         """Instantiate the middleware pipeline in spec order."""
         pipeline: list[AgentMiddleware] = []
         for index, entry in enumerate(spec.middleware):
-            middleware_cls = MIDDLEWARE_TABLE[entry.name]
+            middleware_cls = VIDBYTE_MIDDLEWARE_TABLE[entry.name]
             try:
                 pipeline.append(middleware_cls(**entry.settings))
             except TypeError as exc:
@@ -194,7 +215,7 @@ class HarnessSpecResolver:
 
     def _ensure_manager_for_tools(self, spec: HarnessSpec, manager: ContextManager | None) -> ContextManager | None:
         # Creates a manager when a requested tool needs one and no managed primitive made it.
-        needs_manager = any(entry.name in CONTEXT_MANAGER_TOOL_NAMES for entry in spec.tools)
+        needs_manager = any(entry.name in VIDBYTE_CONTEXT_MANAGER_TOOL_NAMES for entry in spec.tools)
         if needs_manager and manager is None:
             manager = ContextManager()
         return manager
@@ -208,7 +229,7 @@ class HarnessSpecResolver:
 
     def _build_primitive(self, index: int, kind: str, fields: dict[str, Any]) -> ContextItem:
         # Instantiates one context primitive, wrapping constructor errors with the spec path.
-        primitive_cls = PRIMITIVE_TABLE[kind]
+        primitive_cls = VIDBYTE_PRIMITIVE_TABLE[kind]
         try:
             return primitive_cls(**fields)
         except TypeError as exc:
@@ -216,12 +237,12 @@ class HarnessSpecResolver:
 
     def _build_tool(self, index: int, name: str, settings: dict[str, Any], session: EnvSession, context_manager: ContextManager | None) -> Any:
         # Instantiates one requested tool with workspace-scoped defaults and manager injection.
-        tool_cls = TOOL_TABLE[name]
+        tool_cls = VIDBYTE_TOOL_TABLE[name]
         try:
-            if name in FILESYSTEM_TOOL_TABLE:
+            if name in VIDBYTE_FILESYSTEM_TOOL_TABLE:
                 settings.setdefault("root", str(session.workspace_dir))
                 return tool_cls(FileSystemToolConfig(**settings))
-            if name in CONTEXT_MANAGER_TOOL_NAMES:
+            if name in VIDBYTE_CONTEXT_MANAGER_TOOL_NAMES:
                 if context_manager is None:
                     raise ConfigurationError(f"tools[{index}] '{name}' requires a ContextManager.")
                 return tool_cls(context_manager, **settings)

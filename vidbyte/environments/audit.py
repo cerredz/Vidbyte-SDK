@@ -20,13 +20,12 @@ Similar Files:
 
 from __future__ import annotations
 
-from collections.abc import Mapping
-from dataclasses import dataclass, field
 from types import SimpleNamespace
 from typing import Any
 
 from vidbyte.environments.base import Environment
 from vidbyte.environments.runner import EnvironmentRunner
+from vidbyte.lib.dataclasses.environments import AuditReport
 
 
 class DoNothingPolicy:
@@ -45,18 +44,6 @@ class EchoPolicy:
         """Return the prompt text itself as the entire reply."""
         del kwargs
         return SimpleNamespace(output=prompt, calls=(), metadata={})
-
-
-@dataclass(frozen=True)
-class AuditReport:
-    """Outcome of an environment audit: baseline scores, determinism, and notes."""
-
-    env_name: str
-    env_version: str
-    ok: bool
-    baseline_scores: Mapping[str, float]
-    deterministic: bool
-    notes: tuple[str, ...] = field(default_factory=tuple)
 
 
 class EnvironmentAudit:
