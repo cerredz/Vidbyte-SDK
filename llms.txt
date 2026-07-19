@@ -57,6 +57,7 @@ Vidbyte SDK is the developer-facing agent framework in the Vidbyte ecosystem. It
 - Sequential, parallel, conditional, and map-reduce pipelines.
 - Typed state-machine workflows with stage validators, transition guards, conditional branches, cycles, declared jumps, retries, execution limits, and structured records.
 - Durable sessions with continue/resume/fork/batch-fork over a checkpoint DAG, pluggable stores (memory, file, SQLite, Postgres, MongoDB, Supabase), tags/name lookup, usage rollups, portable export/import bundles, and prebuilt Checkpoint/Fork/BatchFork/Rewind/Resume agent tools.
+- Harness execution contract: a `Harness` base class that wraps any orchestration with YAML-as-source-of-truth config, a deterministic `spec_id`, a unique per-run `run_id`, auto full-trace agent capture over durable Sessions, a structural type/version factory registry for config-only loading, and opt-in consented, redacted trajectory export for training/eval datasets.
 
 ## How To Install And Use
 
@@ -181,7 +182,7 @@ print(reply.content)
 
 ### Multi-Agent Orchestration
 
-Multi-agent execution is modeled as composition. The SDK includes `BaseAgent`, `AgentInput`, and `AgentRegistry`; `vidbyte.pipelines` handles simple string topologies; `vidbyte.workflows` enforces typed, gated, non-linear stage progression; and opinionated recipes belong in `vidbyte.paradigms`. Custom external-harness integrations should stay under `vidbyte.harnesses` once their public contracts are explicit.
+Multi-agent execution is modeled as composition. The SDK includes `BaseAgent`, `AgentInput`, and `AgentRegistry`; `vidbyte.pipelines` handles simple string topologies; `vidbyte.workflows` enforces typed, gated, non-linear stage progression; and opinionated recipes belong in `vidbyte.paradigms`. Arbitrary harness orchestration is wrapped by the `vidbyte.harnesses` execution contract (config identity, durable capture, consented trajectory export) documented under Harness Execution Contract below.
 
 Use metadata for semantic labels such as role. Use explicit system prompts, model config, runners, and tools for behavior.
 
@@ -929,6 +930,16 @@ Prebuilt agent-facing tools in `vidbyte/tools/builtins/sessions/` let an agent o
 
 `BatchForkTool` accepts 1-64 branches and returns compact created/failed results. It only creates branches; execution and comparison of children remains explicit caller work.
 
+### Harness Execution Contract
+
+`vidbyte.harnesses` is the reusable outer envelope for an arbitrary harness: it adds configuration identity, durable capture, and an optional sellable trajectory dataset around orchestration code without imposing a framework-owned agent loop, topology, or retry strategy. Subclass `Harness`, declare class attributes `type` (matches the config's `harness.type`) and `version` (code identity, deliberately NOT a YAML field), and override `async run(request)`. An optional `async score(request, output)` returns an eval reward stored on the trajectory. The whole package owns only the run envelope and the consented, redacted export; per-agent persistence is reused from `vidbyte.sessions`, never a bespoke store.
+
+The YAML config is the single source of truth for every behavior hyperparameter. Top-level keys are `schema_version`, `harness`, and `agents` (required) plus optional `metadata` and `orchestration`; each agent carries its own `params`/`tools`, between-agent knobs live under `orchestration`, and a `{ $file: path }` reference inlines external prompt files. `HarnessConfigLoader` accepts a typed mapping, a JSON path, or a safe-YAML path, resolves `$file` references before identity is computed, validates `schema_version`, and rejects credential-like keys (`api_key`, `token`, `secret`, …) before anything is hashed or persisted — credentials belong in provider/env injection. `Harness.load(config)` folds the code `version` into the resolved config and computes `spec_id = hspec_<sha256>` over it (key-order-independent): changing any resolved value — a prompt file's content, an agent param, or the code `version` — changes `spec_id`, while descriptive `metadata`, store/sink choice, and timestamps do not. Three identities are distinguished: implementation (`harness.type` + code `version`), configuration (`spec_id`), and execution (a unique `run_id` per `execute()`).
+
+`Harness.execute(request, timeout_seconds=None)` runs one execution and returns `HarnessExecutionResult(output, run)`, where `run` is a typed `HarnessRun` manifest carrying `run_id`, `spec_id`, `status` (SUCCEEDED/FAILED/TIMED_OUT/CANCELLED), and the tagged session ids. Inside `run()`, `self.session(agent)` returns a durable `Session` pre-wired with per-step checkpoints, full trace, and the `run_id` tag — full-fidelity capture with zero tracing code — and that tag fans every agent's Session back into one run. When constructed with `collect=True` and a bound `sink`, `execute()` joins the run into one self-contained, redacted `TrajectoryRecord` (resolved spec + task + output + every agent's turn-by-turn history and trace + optional reward) via `TrajectoryCollector` and hands it to the sink in a fail-open `finally` that can never fail the run; a single redaction pass drops credential-keyed fields from `task`/`output`/`history` before export. A sink is the LICENSED, redacted export surface and is deliberately a distinct port from the operational `SessionStore`: `TrajectorySink` (a one-method `write(record)` protocol) plus the `InMemoryTrajectorySink` and append-only-JSONL `FileTrajectorySink` reference backends live in `vidbyte/harnesses/stores/`, mirroring `vidbyte/sessions/stores/`. Point the operational store and the export sink at different destinations to keep the consent boundary sharp.
+
+Three load paths exist. Subclass and instantiate directly (`OpenHarness(store=, sink=, collect=)`) for full control; `sdk.harnesses.load(config, implementation=obj)` wraps any foreign object exposing `run(request)` in the same envelope; or register a factory (`sdk.harnesses.register(factory)`, with `harness_type`/`harness_version`/`create(spec)`) and call `sdk.harnesses.load(config)` config-only, where the `harness.type` string resolves to an exact `(type, version)` factory. The client-local `HarnessRegistry` is deliberately strict: no dynamic import from config paths, no silent duplicate replacement, no latest-version fallback, and a deepcopy guard that rejects a factory mutating its own spec. `sdk.harnesses` also exposes `memory_store()`/`file_store(root)` and `memory_sink()`/`file_sink(path)` constructors and retains the durable `sdk.harnesses.sessions` namespace. Durable Sessions remain the checkpoint/resume abstraction, Trace remains optional observability, Evals score runs, and Paradigms remain concrete algorithms.
+
 ## Use Cases
 
 ### Autonomous Coding Agent
@@ -968,7 +979,7 @@ vidbyte/
 |-- cli/
 |-- context/
 |-- evals/
-|-- harnesses/
+|-- harnesses/        # Harness base class, config loader + spec_id, type/version registry, TrajectoryCollector, redaction, and stores/ (TrajectorySink + memory/file sinks)
 |-- mcp_server/
 |-- prompts/
 |-- providers/

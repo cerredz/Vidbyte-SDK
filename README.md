@@ -22,6 +22,7 @@ access remain outside this package.
 - Tool-using agents with local Python functions, MCP-backed tools, permission policies, and provider-native schemas.
 - Runtime policies with deterministic middleware for rate limits, budgets, retries, audit logs, compaction, and safety checks.
 - Durable agent sessions that checkpoint, resume, fork, batch fork, tag, export/import, and summarize usage across long-running work.
+- Open harness implementations with config-as-source-of-truth identity, Session-backed capture, and consented, redacted trajectory datasets.
 - MCP Studio servers that expose Vidbyte agents, tools, prompts, and pipelines to MCP-compatible clients.
 - Local eval suites with reusable graders, concurrency controls, and run registries.
 - Agent pipelines that compose specialized agents through sequential, parallel, conditional, and map-reduce topologies.
@@ -36,7 +37,7 @@ access remain outside this package.
 | [`vidbyte.cli`](vidbyte/cli/README.md) | Unified console command for SDK developer surfaces, currently `vidbyte-sdk skills` |
 | [`vidbyte.context`](vidbyte/context/README.md) | Structured context items, context windows, compaction, algorithms, and handoff models |
 | [`vidbyte.evals`](vidbyte/evals/README.md) | Local eval cases, suites, runners, graders, registries, and result summaries |
-| [`vidbyte.harnesses`](vidbyte/harnesses/README.md) | Namespace boundary for custom harness integrations |
+| [`vidbyte.harnesses`](vidbyte/harnesses/README.md) | The `Harness` base class: config-as-source-of-truth identity, Session-backed capture, and consented, redacted trajectory export |
 | [`vidbyte.lib`](vidbyte/lib/README.md) | Shared dataclasses, enums, registries, errors, runners, config, and tracing contracts |
 | [`vidbyte.mcp_server`](vidbyte/mcp_server/README.md) | Stdio MCP Studio server for exposing agents, tools, prompts, and pipelines |
 | [`vidbyte.middleware`](vidbyte/middleware/README.md) | Deterministic runtime hooks and built-in policy, safety, retry, budget, and compaction middleware |
@@ -175,6 +176,58 @@ harness = ContextMinimalFanoutParadigm(
 )
 result = harness.run("Implement the requested repo change.")
 ```
+
+## Harness execution contract
+
+Subclass `vidbyte.harnesses.Harness` when you want configuration identity and a
+sellable trajectory dataset around an arbitrary harness without adopting a
+framework-owned agent loop. The YAML is the single source of truth for every
+behavior hyperparameter; the base class hashes the exact resolved behavior plus
+the code `version` into a reusable `spec_id`, gives every invocation a unique
+`run_id`, and — under an explicit consent flag — collects one self-contained,
+redacted `TrajectoryRecord`. Per-agent capture and durable persistence come from
+`vidbyte.sessions`, not a bespoke store.
+
+```python
+from vidbyte import VidbyteSDK
+from vidbyte.harnesses import Harness
+
+class OpenHarness(Harness):
+    type = "open"        # identity of the implementation kind (matches config)
+    version = "1"        # code identity; NOT a YAML field
+
+    async def run(self, request):
+        agent = self.session(build_agent())   # full-trace, run-tagged durable session
+        reply = await agent.arun(request["question"])
+        return {"answer": reply.content}
+
+sdk = VidbyteSDK()
+h = OpenHarness(
+    store=sdk.harnesses.file_store(".vidbyte/sessions"),      # operational source of truth
+    sink=sdk.harnesses.file_sink("datasets/harness.jsonl"),   # licensed, redacted export
+    collect=True,                                             # opt-in consent gate
+)
+h.load("harness.yaml")
+result = await h.execute({"question": "what changed?"})
+```
+
+Config uses `schema_version`, `harness`, `agents`, plus optional `metadata` and
+`orchestration` at the top level; per-agent `params`/`tools` live on each agent and
+between-agent knobs live under `orchestration`. Changing any resolved behavior
+value (including referenced prompt-file content, an agent param, or the code
+`version`) changes `spec_id`; descriptive `metadata`, store/sink choice, and
+timestamps do not. Credential-like config keys are rejected before hashing or
+persistence.
+
+`self.session(agent)` forces full-fidelity capture (per-step checkpoints, full
+trace, `run_id` tag) with no developer tracing code, and the `run_id` tag fans in
+every agent's Session to reconstruct the whole run. Collection runs fail-open in
+`execute()`'s `finally` and can never fail the run; every `task`/`output`/`history`
+value passes through one redaction pass before reaching the sink. Durable Sessions
+remain the checkpoint/resume abstraction, Trace remains optional observability,
+Evals score runs, and Paradigms remain concrete algorithms. See the
+[harness guide](vidbyte/harnesses/README.md) for identity, the config schema,
+consent/redaction, and trajectory-dataset details.
 
 ## Context Objects
 
@@ -1360,7 +1413,13 @@ vidbyte/
 |-- context/
 |-- evals/
 |-- harnesses/
-|   `-- client.py
+|   |-- client.py
+|   |-- config.py
+|   |-- contracts.py
+|   |-- execution.py
+|   |-- store.py
+|   |-- dataset.py
+|   `-- stores/
 |-- mcp_server/
 |-- paradigms/
 |-- prompts/

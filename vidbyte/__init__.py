@@ -2,7 +2,8 @@
 
 Description:
     Exports the root Vidbyte SDK client and top-level public tool, agent, context,
-    paradigm, pipeline, ledger-driven multi-agent, and validated workflow contracts.
+    harness, paradigm, pipeline, ledger-driven multi-agent, and validated workflow
+    contracts.
 Purpose:
     Keeps common SDK imports concise while leaving specialized built-in tools in
     their category packages.
@@ -14,6 +15,7 @@ Architecture:
     - Context exports: context contracts plus general problem-solving challenge records.
     - Preset exports: BudgetPreset, PermissionPreset.
     - Pipeline exports: BasePipeline, ConditionalPipeline, ParallelPipeline, PipelineNode, SequentialPipeline.
+    - Harness exports: the Harness base class, specifications, run manifests, trajectory collection/sinks, and typed failures.
     - Multi-agent exports: MultiAgent, MagenticOneOrchestrator, TaskLedger, AgentBinding, AgentTransfer, and immutable ledger contracts.
     - Workflow exports: StateGraph, StateMachine, stages, validators, routers, policies, records, and typed errors.
     - Error exports: MCP, pipeline, workflow, multi-agent execution, task-ledger, and agent-transfer error families.
@@ -80,6 +82,26 @@ from vidbyte.agents import (
     ToolSettings,
 )
 from vidbyte.client import VidbyteSDK
+from vidbyte.harnesses import (
+    HARNESS_SCHEMA_VERSION,
+    FileTrajectorySink,
+    Harness,
+    HarnessClient,
+    HarnessConfigurationError,
+    HarnessError,
+    HarnessExecutionError,
+    HarnessExecutionResult,
+    HarnessImplementation,
+    HarnessRun,
+    HarnessRunStatus,
+    HarnessSinkError,
+    HarnessSpec,
+    HarnessTimeoutError,
+    InMemoryTrajectorySink,
+    TrajectoryCollector,
+    TrajectoryRecord,
+    TrajectorySink,
+)
 from vidbyte.paradigms import (
     AgentRoleSettings,
     ContextFile,
@@ -415,6 +437,7 @@ from vidbyte.tools.mcp import (
 )
 
 __all__ = [
+    "HARNESS_SCHEMA_VERSION",
     "Agent",
     "AllegationRecord",
     "AllegationSeverity",
@@ -589,6 +612,23 @@ __all__ = [
     "GitDiffContextItem",
     "Handoff",
     "HandoffAgent",
+    "Harness",
+    "HarnessClient",
+    "HarnessConfigurationError",
+    "HarnessError",
+    "HarnessExecutionError",
+    "HarnessExecutionResult",
+    "HarnessImplementation",
+    "HarnessRun",
+    "HarnessRunStatus",
+    "HarnessSinkError",
+    "HarnessSpec",
+    "HarnessTimeoutError",
+    "FileTrajectorySink",
+    "InMemoryTrajectorySink",
+    "TrajectoryCollector",
+    "TrajectoryRecord",
+    "TrajectorySink",
     "MemoryContextItem",
     "MinimalHandoff",
     "PlanContextItem",
