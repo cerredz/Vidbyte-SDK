@@ -1,6 +1,6 @@
 # Design Doc: Models & Providers Catalog Refresh
 
-**Status:** Draft  
+**Status:** Approved  
 **Author:** Grok  
 **Created:** 2026-07-20  
 **Last Updated:** 2026-07-20  
@@ -467,10 +467,15 @@ Keep human-facing provider lists aligned with the enum.
 
 ## 12. Open Questions
 
-- [ ] **OpenAI default:** Prefer `gpt-5.6-sol` (newest flagship) vs keep `gpt-5.5` until 5.6 is universally GA on every account tier? **Recommendation:** `gpt-5.6-sol` with catalog containing all three tiers.
-- [ ] **Mistral default ID:** Confirm evergreen alias (`mistral-medium-latest` / `mistral-large-latest`) vs dated Medium 3.5 ID at implement time from Mistral model card.
-- [ ] **Kimi K3 public ID:** Include `kimi-k3` in the map only if Moonshot’s API docs publish a stable ID during implementation; otherwise map K2.6 and leave K3 for a fast follow-up.
-- [ ] **Scope of new providers:** This design includes **Mistral + Moonshot only**. Approve expansion to Groq / Together / Fireworks in the same PR, or defer?
+- [x] **OpenAI default:** Implemented as `gpt-5.6-sol` (approved recommendation).
+- [x] **Mistral default ID:** Implemented as `mistral-medium-latest` evergreen alias.
+- [x] **Kimi K3:** Catalog includes `kimi-k3`; default remains existing `kimi-k2.7-code` (main already had Kimi).
+- [x] **Scope of new providers:** Mistral added. Moonshot endpoint already exists as `ModelProvider.KIMI` on main — do not add a duplicate `moonshot` enum member. Groq/Together/Fireworks deferred.
+
+### Implementation deviations (evidence from origin/main at start)
+
+1. **Kimi already first-class on main** as `ModelProvider.KIMI` with `MOONSHOT_API_KEY` + `https://api.moonshot.ai/v1` + `KimiProvider`. Design originally proposed `moonshot`; implementation keeps `kimi` to avoid a breaking rename.
+2. **Many catalog IDs already present on main** (Claude Sonnet 5 / Opus 4.8 / Fable, DeepSeek V4, Gemini 3.x, GLM 5.x, MiniMax M3, Kimi K2.x). This PR focuses on residual gaps: GPT-5.6 family, Grok 4.5, Mistral provider + models, OpenRouter companions, prefix/runner maps, skill docs, and default refreshes for OpenAI/xAI.
 
 ## 13. Alternatives Considered
 

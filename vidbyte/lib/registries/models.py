@@ -41,14 +41,15 @@ class ProviderModelRegistry:
     """Central registry for default provider-to-model mappings and validation helpers."""
 
     DEFAULT_PROVIDER_MODELS: ClassVar[dict[ModelProvider, str]] = {
-        ModelProvider.OPENAI: "gpt-5.5",
+        ModelProvider.OPENAI: "gpt-5.6-sol",
         ModelProvider.ANTHROPIC: "claude-sonnet-5",
         ModelProvider.GEMINI: "gemini-3.5-flash",
-        ModelProvider.XAI: "grok-4",
+        ModelProvider.XAI: "grok-4.5",
         ModelProvider.DEEPSEEK: "deepseek-v4-pro",
         ModelProvider.GLM: "glm-5.2",
         ModelProvider.MINIMAX: "MiniMax-M3",
         ModelProvider.KIMI: "kimi-k2.7-code",
+        ModelProvider.MISTRAL: "mistral-medium-latest",
         ModelProvider.OPENROUTER: "openrouter/auto",
         ModelProvider.ELEVENLABS: "eleven_multilingual_v2",
         ModelProvider.PLAYAI: "PlayDialog",
@@ -63,6 +64,7 @@ class ProviderModelRegistry:
         ModelProvider.GLM: "GLM_API_KEY",
         ModelProvider.MINIMAX: "MINIMAX_API_KEY",
         ModelProvider.KIMI: "MOONSHOT_API_KEY",
+        ModelProvider.MISTRAL: "MISTRAL_API_KEY",
         ModelProvider.OPENROUTER: "OPENROUTER_API_KEY",
         ModelProvider.ELEVENLABS: "ELEVENLABS_API_KEY",
         ModelProvider.PLAYAI: "PLAYAI_API_KEY",
@@ -77,6 +79,7 @@ class ProviderModelRegistry:
         ModelProvider.GLM: "https://open.bigmodel.cn/api/paas/v4",
         ModelProvider.MINIMAX: "https://api.minimax.io/v1",
         ModelProvider.KIMI: "https://api.moonshot.ai/v1",
+        ModelProvider.MISTRAL: "https://api.mistral.ai/v1",
         ModelProvider.OPENROUTER: "https://openrouter.ai/api/v1",
         ModelProvider.ELEVENLABS: "https://api.elevenlabs.io/v1",
         ModelProvider.PLAYAI: "https://api.play.ai/api/v1",
