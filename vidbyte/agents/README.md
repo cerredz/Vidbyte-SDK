@@ -62,6 +62,70 @@ reply = await agent.arun(
 )
 ```
 
+## Model Fallback
+
+An agent can declare an ordered chain of backup models. Array index sets precedence:
+index 0 is tried first, and the runtime advances one step each time a model call
+fails with a provider-level error.
+
+```python
+from vidbyte import Agent
+
+agent = Agent(
+    name="analyst",
+    system_prompt="Answer directly.",
+    provider="openai",
+    model_name="gpt-5.2",
+    fallback=[
+        "gpt-5-mini",                 # bare name inherits provider, api_key, temperature
+        "anthropic/claude-sonnet-5",  # provider-prefixed, overrides the provider
+    ],
+)
+```
+
+Entries may also be `FallbackModel` objects when a backup needs its own credentials,
+and the whole chain can be passed as a settings object alongside `AgentLoopSettings`:
+
+```python
+from vidbyte.agents import FallbackModel
+from vidbyte.agents.settings import AgentFallbackSettings
+
+agent = Agent(
+    name="analyst",
+    system_prompt="Answer directly.",
+    provider="openai",
+    model_name="gpt-5.2",
+    fallback=AgentFallbackSettings(
+        models=[FallbackModel(provider="anthropic", model="claude-sonnet-5", api_key=ANTHROPIC_KEY)],
+        enabled=True,
+    ),
+)
+```
+
+Rules worth knowing:
+
+- **Only provider-level failures trigger a switch** — `ProviderRequestError`,
+  `ProviderResponseError`, `ProviderConfigurationError`, `ProviderSelectionError`,
+  `UnsupportedProviderError`, and `TimeoutError`. Tool errors, permission denials,
+  and cancellation propagate untouched. Override with `AgentFallbackSettings(fallback_on=...)`.
+- **Retries happen first.** Retry middleware exhausts its budget on the current model
+  before the chain advances, and the chain does not reset that budget.
+- **Same-wire-format switches keep the transcript.** OpenAI, DeepSeek, xAI, and
+  OpenRouter share one payload shape, so an in-flight run carries its tool history over
+  intact. Switching across wire formats (OpenAI ↔ Anthropic ↔ Gemini) resets the
+  transcript and restarts from the original prompt, because the accumulated messages are
+  in the previous provider's shape. Tools already executed may run again in that case;
+  the run reports `context_reset: True`.
+- **Every switch is visible.** A run that fell back reports
+  `AgentResult.metadata["fallback"]` with the ordered attempt log and final model, and
+  emits an `agent.fallback` span. A clean run reports no `fallback` key at all.
+- **The chain is per-run.** Falling back on one call never pins later calls to the backup.
+- When every model fails, the agent raises `AllModelsFailedError` carrying every attempt
+  and every error, chained from the first failure.
+- Fallback requires the linear runtime and an agent with its own `provider`/`model_name`;
+  both are rejected at construction otherwise. `fork()` inherits the chain, and
+  `AgentForkSettings(fallback=...)` overrides it.
+
 ## Durable Sessions
 
 Agents can opt into durable sessions without moving persistence into the agent constructor:
@@ -111,6 +175,8 @@ machines; use `MultiAgent` when the manager must own progress and recovery.
 
 - `base.py`: `BaseAgent`, inferred runner construction, tool binding, context assembly, trace setup, and runtime dispatch.
 - `client.py`: namespace client used by `VidbyteSDK().agents`.
+- `fallback.py`: `AgentFallback`, the ordered model chain and the transforms that route a run to the next model.
+- `settings/fallback.py`: `AgentFallbackSettings`, the validated developer-facing chain configuration.
 - `runtimes/`: linear, search, and actor-model runtime components.
 - `handoff.py`: structured handoff generation from a completed agent run.
 - `multi/`: ledger-driven manager/worker orchestration and transfer controls.
