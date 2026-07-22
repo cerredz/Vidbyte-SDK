@@ -59,6 +59,7 @@ class AgentForker:
             output_schema=agent.output_schema if settings.output_schema is None else settings.output_schema,
             handoff=agent._handoff_spec if settings.handoff is None else settings.handoff,
             trace_option=settings.trace_option if settings.trace_option is not None else agent._trace_option,
+            fallback=agent._fallback_spec if settings.fallback is None else settings.fallback,
         )
         if settings.mcp if settings.inherit_mcp is None else settings.inherit_mcp:
             child._pending_mcp_configs.extend(agent._mcp_configs_for_fork())

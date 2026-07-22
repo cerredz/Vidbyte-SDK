@@ -25,7 +25,7 @@ from vidbyte.context.manager import ContextManager
 from vidbyte.context.window import ContextWindow, ContextWindowAlgorithm
 from vidbyte.context.primitives import ContextItem
 from vidbyte.context.handoff import Handoff, MinimalHandoff
-from vidbyte.lib.dataclasses.agents import AgentForkSettings, AgentMetadata, AgentRunnerConfig, AgentRuntimeConfig
+from vidbyte.lib.dataclasses.agents import AgentForkSettings, AgentMetadata, AgentRunnerConfig, AgentRuntimeConfig, FallbackModel
 from vidbyte.lib.dataclasses.runner import RunnerHandle
 from vidbyte.lib.dataclasses.sessions import SESSION_SCHEMA_VERSION, RunState
 from vidbyte.lib.dataclasses.strategies import AgentResult
@@ -42,6 +42,8 @@ from vidbyte.tools.security import PermissionPolicy
 from vidbyte.tools.types import ToolCallContext, ToolSpec
 
 if TYPE_CHECKING:
+    from vidbyte.agents.fallback import AgentFallback
+    from vidbyte.agents.settings import AgentFallbackSettings
     from vidbyte.sessions.session import Session
     from vidbyte.sessions.store import SessionStore
 
@@ -81,6 +83,7 @@ class BaseAgent(McpAttachableMixin):
         output_schema: type | Mapping[str, Any] | None = None,
         handoff: Handoff | None = None,
         trace_option: TraceOption | None = None,
+        fallback: Sequence[str | FallbackModel] | AgentFallbackSettings | None = None,
     ) -> None:
         if not name:
             raise AgentExecutionError("Agent name cannot be empty.")
@@ -117,6 +120,11 @@ class BaseAgent(McpAttachableMixin):
                         f"Agent {name} uses non-linear runtime {self.runtime_type.value}, "
                         "which does not support in-context learning algorithms."
                     )
+            if fallback is not None:
+                raise ConfigurationError(
+                    f"Agent {name} uses non-linear runtime {self.runtime_type.value}, "
+                    "which does not support model fallback."
+                )
 
         if model_name is not None and not isinstance(model_name, str):
             raise ConfigurationError(
@@ -134,6 +142,8 @@ class BaseAgent(McpAttachableMixin):
             run_id=run_id,
         )
         self.name = name
+        self._fallback_spec = fallback
+        self.fallback = self._resolve_fallback(fallback, name)
         self._runner_cache: dict[str, object] = {}
         self._agent_tool_items = tools.all() if isinstance(tools, Tools) else tuple(tools)
         self.tools = tools if isinstance(tools, Tools) else self._catalog_from_agent_tools(self._agent_tool_items)
@@ -210,6 +220,29 @@ class BaseAgent(McpAttachableMixin):
     @classmethod
     def from_run_id(cls, run_id: str, *, name: str, system_prompt: str, **kwargs: Any) -> BaseAgent:
         return cls(name=name, system_prompt=system_prompt, run_id=run_id, **kwargs)
+
+    def _resolve_fallback(self, fallback: Sequence[str | FallbackModel] | AgentFallbackSettings | None, agent_name: str) -> AgentFallback | None:
+        # Normalizes raw entries or a settings object into one AgentFallback whose index 0 is this agent's own model.
+        from vidbyte.agents.settings import AgentFallbackSettings as _AgentFallbackSettings
+
+        if fallback is None:
+            return None
+        settings = fallback if isinstance(fallback, _AgentFallbackSettings) else _AgentFallbackSettings(models=tuple(fallback))
+        return settings.to_fallback(primary=self._primary_fallback_model(agent_name))
+
+    def _primary_fallback_model(self, agent_name: str) -> FallbackModel:
+        # Builds chain index 0 from this agent's own runner identity; a chain needs a primary to fall back from.
+        if not self.runner_config.provider or not self.runner_config.model_name:
+            raise ConfigurationError(
+                f"Agent {agent_name} declares a fallback chain but no provider/model_name to fall back from.",
+                details={"agent": agent_name, "provider": self.runner_config.provider, "model_name": self.runner_config.model_name},
+            )
+        return FallbackModel(
+            provider=self.runner_config.provider,
+            model=self.runner_config.model_name,
+            api_key=self.runner_config.api_key,
+            temperature=self.runner_config.temperature,
+        )
 
     @staticmethod
     def _resolve_loop_settings(agent_loop_settings: AgentLoopSettings | None, *, max_iterations: int | None, max_tokens: int | None, compaction_trigger_tokens: int | None, compaction_target_tokens: int | None) -> AgentLoopSettings:
@@ -782,12 +815,7 @@ class BaseAgent(McpAttachableMixin):
         if runner is None:
             raise AgentExecutionError("Agent requires a runner.")
         if runner_type != RUNNER_TYPE_TEXT:
-            raw_result = await self._call_runner_once(runner, message, context=context, **options)
-            return AgentResult(
-                output=self._runner_output_text(raw_result),
-                strategy_name="direct_runner",
-                metadata=self._runner_output_metadata(raw_result),
-            )
+            return await self._run_non_text_runner(runner, message, context=context, **options)
         provider = str(options.pop("provider", None) or self._runner_provider(runner))
         handle = RunnerHandle(
             runner=runner,
@@ -806,6 +834,59 @@ class BaseAgent(McpAttachableMixin):
         )
         self._record_tool_contexts(result)
         return result
+
+    async def _run_non_text_runner(self, runner: object, message: str, *, context: BaseAgentContext, **options: Any) -> AgentResult:
+        # Runs image/audio/video/embedding runners, walking the fallback chain on provider-level failures.
+        from vidbyte.lib.errors import AllModelsFailedError
+
+        index = 0
+        attempts: list[dict[str, str]] = []
+        errors: list[BaseException] = []
+        active = runner
+        while True:
+            try:
+                raw_result = await self._call_runner_once(active, message, context=context, **options)
+            except BaseException as exc:
+                next_index = self.fallback.advance(exc, index) if self.fallback is not None else None
+                if next_index is None:
+                    if attempts:
+                        raise AllModelsFailedError(
+                            f"Agent '{self.name}' exhausted its fallback chain after {len(attempts)} model(s).",
+                            attempts=attempts,
+                            errors=[*errors, exc],
+                        ) from errors[0]
+                    raise
+                errors.append(exc)
+                attempts.append(self._fallback_attempt_record(index, next_index, exc))
+                active = self.fallback.build_runner(next_index)
+                index = next_index
+                continue
+            metadata = dict(self._runner_output_metadata(raw_result))
+            if attempts:
+                metadata["fallback"] = self._fallback_result_metadata(attempts, context_reset=False)
+            return AgentResult(
+                output=self._runner_output_text(raw_result),
+                strategy_name="direct_runner",
+                metadata=metadata,
+            )
+
+    def _fallback_attempt_record(self, index: int, next_index: int, error: BaseException) -> dict[str, str]:
+        # Builds one credential-free record describing a single model-to-model switch.
+        assert self.fallback is not None
+        return {
+            "from": self.fallback.model_at(index).identity(),
+            "to": self.fallback.model_at(next_index).identity(),
+            "error_type": type(error).__name__,
+        }
+
+    def _fallback_result_metadata(self, attempts: Sequence[Mapping[str, str]], *, context_reset: bool) -> dict[str, Any]:
+        # Summarizes the switches a run made for AgentResult.metadata["fallback"].
+        return {
+            "used": True,
+            "attempts": [dict(attempt) for attempt in attempts],
+            "final_model": attempts[-1]["to"] if attempts else None,
+            "context_reset": context_reset,
+        }
 
     async def _run_with_tools(
         self,
@@ -870,6 +951,7 @@ class BaseAgent(McpAttachableMixin):
 
         if self.runtime_type is AgentRuntimeType.LINEAR:
             kwargs["output_contract"] = self.agent_loop_settings.output_contract
+            kwargs["fallback"] = self.fallback
 
         return runtime_cls(
             agent_name=self.name,
