@@ -847,46 +847,30 @@ class BaseAgent(McpAttachableMixin):
             try:
                 raw_result = await self._call_runner_once(active, message, context=context, **options)
             except BaseException as exc:
-                next_index = self.fallback.advance(exc, index) if self.fallback is not None else None
-                if next_index is None:
-                    if attempts:
-                        raise AllModelsFailedError(
-                            f"Agent '{self.name}' exhausted its fallback chain after {len(attempts)} model(s).",
-                            attempts=attempts,
-                            errors=[*errors, exc],
-                        ) from errors[0]
+                if self.fallback is None or not self.fallback.is_model_error(exc):
                     raise
+                next_index = self.fallback.advance(exc, index)
+                if next_index is None:
+                    if not attempts:
+                        raise
+                    raise AllModelsFailedError(
+                        f"Agent '{self.name}' exhausted its fallback chain after {len(attempts)} model switch(es).",
+                        attempts=attempts,
+                        errors=[*errors, exc],
+                    ) from errors[0]
                 errors.append(exc)
-                attempts.append(self._fallback_attempt_record(index, next_index, exc))
+                attempts.append(self.fallback.attempt_record(index, next_index, exc))
                 active = self.fallback.build_runner(next_index)
                 index = next_index
                 continue
             metadata = dict(self._runner_output_metadata(raw_result))
             if attempts:
-                metadata["fallback"] = self._fallback_result_metadata(attempts, context_reset=False)
+                metadata["fallback"] = self.fallback.result_metadata(attempts, context_reset=False)
             return AgentResult(
                 output=self._runner_output_text(raw_result),
                 strategy_name="direct_runner",
                 metadata=metadata,
             )
-
-    def _fallback_attempt_record(self, index: int, next_index: int, error: BaseException) -> dict[str, str]:
-        # Builds one credential-free record describing a single model-to-model switch.
-        assert self.fallback is not None
-        return {
-            "from": self.fallback.model_at(index).identity(),
-            "to": self.fallback.model_at(next_index).identity(),
-            "error_type": type(error).__name__,
-        }
-
-    def _fallback_result_metadata(self, attempts: Sequence[Mapping[str, str]], *, context_reset: bool) -> dict[str, Any]:
-        # Summarizes the switches a run made for AgentResult.metadata["fallback"].
-        return {
-            "used": True,
-            "attempts": [dict(attempt) for attempt in attempts],
-            "final_model": attempts[-1]["to"] if attempts else None,
-            "context_reset": context_reset,
-        }
 
     async def _run_with_tools(
         self,

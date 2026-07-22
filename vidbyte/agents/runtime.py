@@ -350,7 +350,11 @@ class AgentRuntime:
                 handle, provider = transition.handle, transition.provider
                 tool_schemas, messages = transition.tool_schemas, transition.messages
                 fallback_index = transition.index
-                self._publish_fallback_metadata(run_state, fallback_attempts, context_reset=transition.context_reset)
+                # A non-None transition proves self.fallback is set, so this needs no further guard.
+                self._publish_fallback_metadata(
+                    run_state,
+                    self.fallback.result_metadata(fallback_attempts, context_reset=transition.context_reset),
+                )
                 continue
             self._end_semantic_span(iteration_span, output=handle.extract_text(raw_result))
             if isinstance(raw_result, AgentResult):
@@ -748,24 +752,20 @@ class AgentRuntime:
 
     def _fallback_transition(self, error: BaseException, *, index: int, handle: RunnerHandle, provider: str, messages: list[dict[str, Any]], attempts: list[dict[str, str]], errors: list[BaseException], parent_span: SpanContext | None) -> "FallbackTransform | None":
         """Return rebuilt state for the next model in the chain, or None when the caller must re-raise."""
-        if self.fallback is None:
+        if self.fallback is None or not self.fallback.is_model_error(error):
             return None
         next_index = self.fallback.advance(error, index)
         if next_index is None:
-            self._raise_if_chain_exhausted(error, attempts=attempts, errors=errors)
+            self._raise_chain_exhausted(error, attempts=attempts, errors=errors)
             return None
         errors.append(error)
-        attempts.append({
-            "from": self.fallback.model_at(index).identity(),
-            "to": self.fallback.model_at(next_index).identity(),
-            "error_type": type(error).__name__,
-        })
-        transition = self.fallback.transform(handle, provider, self.user_tools, messages, next_index)
+        attempts.append(self.fallback.attempt_record(index, next_index, error))
+        transition = self.fallback.transform(handle, provider, self.tools, messages, next_index)
         self._record_fallback_span(attempts[-1], transition.context_reset, parent_span)
         return transition
 
-    def _raise_if_chain_exhausted(self, error: BaseException, *, attempts: Sequence[Mapping[str, str]], errors: Sequence[BaseException]) -> None:
-        # Converts a spent chain into one error carrying every attempt; a never-used chain re-raises untouched.
+    def _raise_chain_exhausted(self, error: BaseException, *, attempts: Sequence[Mapping[str, str]], errors: Sequence[BaseException]) -> None:
+        # Only a spent chain becomes AllModelsFailedError; a chain that never switched re-raises untouched.
         if not attempts:
             return
         raise AllModelsFailedError(
@@ -786,19 +786,11 @@ class AgentRuntime:
         self._end_semantic_span(span, output=str(attempt.get("to", "")))
 
     @staticmethod
-    def _publish_fallback_metadata(run_state: dict[type, Any], attempts: Sequence[Mapping[str, str]], *, context_reset: bool) -> None:
+    def _publish_fallback_metadata(run_state: dict[type, Any], record: Mapping[str, Any]) -> None:
         # Publishes the switch log through the generic run_state channel _with_run_state_metadata already lifts.
         published = run_state.get("__result_metadata__")
-        record = {
-            "used": True,
-            "attempts": [dict(attempt) for attempt in attempts],
-            "final_model": attempts[-1]["to"] if attempts else None,
-            "context_reset": context_reset,
-        }
-        if isinstance(published, Mapping):
-            run_state["__result_metadata__"] = {**dict(published), "fallback": record}
-            return
-        run_state["__result_metadata__"] = {"fallback": record}
+        base = dict(published) if isinstance(published, Mapping) else {}
+        run_state["__result_metadata__"] = {**base, "fallback": dict(record)}
 
     async def _finish_result(
         self,

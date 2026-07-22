@@ -31,7 +31,7 @@ Agents today bind to exactly one model. When that model's provider returns an er
 
 - **Cross-provider transcript translation.** Re-rendering an in-flight Anthropic tool-call transcript into OpenAI wire format requires a neutral transcript IR and an inverse of `ToolsFormatter.format_assistant_tool_calls`, which does not exist. Explicitly deferred; Section 13 records the seam it will plug into.
 - **Fallback for non-linear runtimes.** MCTS search and the actor-model runtimes invoke through `runtimes/actor/broker.py`, not `_arun_once`. Construction raises `ConfigurationError`, following the existing precedent at `base.py:97-119`.
-- **Fallback inside `AggregateAgent` proposers.** Aggregation is a separate agent class with its own multi-model semantics. Unchanged.
+- **Fallback on the multi-model agent facades.** `AggregateAgent` (`aggregation.py:196`) and `MultiAgent` (`multi/agent.py:48`) both subclass `BaseAgent` with closed constructors and neither declares its own `provider`/`model_name` — they delegate to proposer or member agents that each carry their own identity. A chain belongs on those children, not on the facade. `HandoffAgent` and `ContinualTraceAgent` take `**kwargs` and therefore accept `fallback` for free.
 - **Session serialization of the chain.** `RunState` (`export_state` / `restore`, `base.py:364-390`) is a versioned schema; adding a field is a separate migration concern. A restored agent does not carry its fallback chain. Recorded in Section 12.
 - **New test files.** Per the `/design-doc-no-tests` workflow. The existing suite must stay green.
 - **Automatic chain construction.** No implicit "always fall back to a cheaper sibling" defaults. The chain is whatever the developer writes.
@@ -239,27 +239,39 @@ class AgentFallback:
 
     def __init__(self, models: Sequence[FallbackModel], *, fallback_on: tuple[type[BaseException], ...] = DEFAULT_FALLBACK_ERRORS) -> None: ...
 
+    def is_model_error(self, error: BaseException) -> bool: ...
     def advance(self, error: BaseException, index: int) -> int | None: ...
     def transform(self, handle: RunnerHandle, provider: str, tools: Tools, messages: list[dict[str, Any]], index: int) -> FallbackTransform: ...
     def build_runner(self, index: int) -> object: ...
     def is_wire_compatible(self, source: str, target: str) -> bool: ...
     def model_at(self, index: int) -> FallbackModel: ...
+
+    @staticmethod
+    def tool_schemas_for(tools: Tools, provider: str) -> tuple[dict[str, Any], ...]: ...
+    def attempt_record(self, index: int, next_index: int, error: BaseException) -> dict[str, str]: ...
+    @staticmethod
+    def result_metadata(attempts: Sequence[Mapping[str, str]], *, context_reset: bool) -> dict[str, Any]: ...
+
     def __len__(self) -> int: ...
     def __repr__(self) -> str: ...
 ```
 
 #### Logic / Algorithm
 
+`is_model_error(error)` is the eligibility test, kept **separate** from `advance` so callers can distinguish "this error is not ours" from "this error is ours but the chain is spent". Collapsing the two would convert a post-fallback `ToolExecutionError` or `CancelledError` into `AllModelsFailedError`.
+
 `advance(error, index)`:
-1. Return `None` when `error` is not an instance of `self.fallback_on` — not a model failure, caller re-raises.
+1. Return `None` when `is_model_error(error)` is false — not a model failure, caller re-raises untouched.
 2. Return `None` when `index + 1 >= len(self.models)` — chain exhausted, caller raises `AllModelsFailedError`.
 3. Return `index + 1`.
+
+`attempt_record` and `result_metadata` are owned here rather than duplicated at the two call sites (the runtime loop and the non-text runner path), so both surfaces emit exactly one record shape.
 
 `transform(handle, provider, tools, messages, index)`:
 1. Read `target = self.model_at(index)`.
 2. Build a concrete runner via `build_runner(index)`, which calls `Runner.from_model(provider=target.provider, model_name=target.model, api_key=target.api_key, temperature=target.temperature).build()` and memoizes the result in a private `dict[int, object]` cache. Constructed here and only here, so unused chain entries cost nothing.
 3. Produce the new handle with `handle.with_runner(runner, target.provider)` — reuses the existing primitive, preserving invoke and extraction logic.
-4. Re-render tool declarations with `ToolsFormatter.format_tools(tools, target.provider)`.
+4. Re-render tool declarations with `tool_schemas_for(tools, target.provider)`, which is `tools.provider_schemas(provider) if len(tools) else ()` — byte-identical to `AgentRuntime._resolve_tool_schemas`. The runtime passes `self.tools` (the internal-augmented catalog), **not** `self.user_tools`; passing the latter would silently drop the internal `isDone` tool after a switch and leave the agentic loop unable to signal completion.
 5. Decide the transcript: if `is_wire_compatible(provider, target.provider)`, carry `messages` through unchanged and set `context_reset=False`. Otherwise return an empty list and `context_reset=True`.
 6. Return the `FallbackTransform`.
 
@@ -443,7 +455,11 @@ Accepts the chain, catches qualifying model errors at the loop level, rebuilds p
 def __init__(self, *, ..., fallback: AgentFallback | None = None) -> None: ...
 
 def _fallback_transition(self, error: BaseException, *, index: int, handle: RunnerHandle, provider: str, messages: list[dict[str, Any]], attempts: list[dict[str, str]], errors: list[BaseException], parent_span: SpanContext | None) -> FallbackTransform | None: ...
-def _publish_fallback_metadata(self, run_state: dict[type, Any], attempts: Sequence[Mapping[str, str]], context_reset: bool) -> None: ...
+def _raise_chain_exhausted(self, error: BaseException, *, attempts: Sequence[Mapping[str, str]], errors: Sequence[BaseException]) -> None: ...
+def _record_fallback_span(self, attempt: Mapping[str, str], context_reset: bool, parent_span: SpanContext | None) -> None: ...
+
+@staticmethod
+def _publish_fallback_metadata(run_state: dict[type, Any], record: Mapping[str, Any]) -> None: ...
 ```
 
 #### Logic / Algorithm
@@ -454,14 +470,14 @@ The existing handler at `runtime.py:331-333` is extended:
 
 1. `except BaseException as exc:` — end the iteration span with the error, exactly as today.
 2. Call `self._fallback_transition(exc, index=fallback_index, ...)`.
-3. `_fallback_transition` returns `None` when `self.fallback is None`, or when `AgentFallback.advance` returns `None` and no attempt has yet been recorded. The caller then executes the original `raise`, preserving today's behavior byte-for-byte for every existing agent.
-4. When `advance` returns `None` but attempts *were* recorded, `_fallback_transition` raises `AllModelsFailedError` directly, chained from `fallback_errors[0]`.
+3. `_fallback_transition` returns `None` when `self.fallback is None` **or when `is_model_error(exc)` is false**. The caller then executes the original `raise`, preserving today's behavior byte-for-byte for every existing agent — and, critically, for any non-model error that arrives *after* a successful switch.
+4. When the error is eligible but `advance` returns `None` (chain spent) and attempts *were* recorded, `_raise_chain_exhausted` raises `AllModelsFailedError`, chained from `fallback_errors[0]`.
 5. Otherwise it records the attempt, opens and closes an `agent.fallback` semantic span via `_start_semantic_span` / `_end_semantic_span` (mirroring `_record_parser_span`, `runtime.py:1766`), calls `AgentFallback.transform`, and returns the result.
 6. Back in `_arun_once`, `handle`, `provider`, `tool_schemas`, `messages`, and `fallback_index` are reassigned from the transform, `_publish_fallback_metadata` writes the record into `run_state["__result_metadata__"]`, and the loop `continue`s.
 
 `_publish_fallback_metadata` merges into any existing `__result_metadata__` mapping rather than replacing it, since middleware also publishes through that channel. `_with_run_state_metadata` (`runtime.py:772`) then lifts it into `AgentResult.metadata["fallback"]` with no change to `_finish_result` or its call sites (FR12).
 
-`CancelledError` and other non-`Exception` `BaseException` subclasses are excluded because they are not instances of any type in `DEFAULT_FALLBACK_ERRORS`, so `advance` returns `None` and the original `raise` runs.
+`CancelledError` and other non-`Exception` `BaseException` subclasses are excluded because they are not instances of any type in `DEFAULT_FALLBACK_ERRORS`, so `is_model_error` is false and the original `raise` runs — regardless of how many switches already happened in this run.
 
 #### Edge Cases & Error Handling
 

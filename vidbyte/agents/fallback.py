@@ -20,7 +20,7 @@ Similar Files:
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -77,11 +77,13 @@ class AgentFallback:
         self.fallback_on = tuple(fallback_on)
         self._runner_cache: dict[int, object] = {}
 
+    def is_model_error(self, error: BaseException) -> bool:
+        """Report whether this error is a provider-level failure a different model could survive."""
+        return isinstance(error, self.fallback_on)
+
     def advance(self, error: BaseException, index: int) -> int | None:
-        """Return the next chain index to try, or None when this run must stop falling back."""
-        if not isinstance(error, self.fallback_on):
-            return None
-        if index + 1 >= len(self.models):
+        """Return the next chain index to try, or None when this error cannot be routed onward."""
+        if not self.is_model_error(error) or index + 1 >= len(self.models):
             return None
         return index + 1
 
@@ -94,11 +96,35 @@ class AgentFallback:
             index=index,
             handle=next_handle,
             provider=target.provider,
-            tool_schemas=ToolsFormatter.format_tools(tools, target.provider),
+            tool_schemas=self.tool_schemas_for(tools, target.provider),
             messages=list(messages) if compatible else [],
             context_reset=not compatible,
             model=target,
         )
+
+    @staticmethod
+    def tool_schemas_for(tools: Tools, provider: str) -> tuple[dict[str, Any], ...]:
+        """Re-render tool declarations for a provider, mirroring AgentRuntime._resolve_tool_schemas exactly."""
+        # Must stay identical to the runtime's initial derivation, or a switch silently changes the tool surface.
+        return tuple(tools.provider_schemas(provider)) if len(tools) else ()
+
+    def attempt_record(self, index: int, next_index: int, error: BaseException) -> dict[str, str]:
+        """Build one credential-free record describing a single model-to-model switch."""
+        return {
+            "from": self.model_at(index).identity(),
+            "to": self.model_at(next_index).identity(),
+            "error_type": type(error).__name__,
+        }
+
+    @staticmethod
+    def result_metadata(attempts: Sequence[Mapping[str, str]], *, context_reset: bool) -> dict[str, Any]:
+        """Summarize the switches a run made for AgentResult.metadata['fallback']."""
+        return {
+            "used": True,
+            "attempts": [dict(attempt) for attempt in attempts],
+            "final_model": attempts[-1]["to"] if attempts else None,
+            "context_reset": context_reset,
+        }
 
     def build_runner(self, index: int) -> object:
         """Build and memoize the executable runner for the model at index."""
