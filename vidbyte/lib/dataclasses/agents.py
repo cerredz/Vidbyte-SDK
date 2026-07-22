@@ -6,6 +6,7 @@ Purpose:
     Exposes stable data structures like AgentCard and AgentMessage for registry and execution systems.
 Architecture:
     - AgentRunnerConfig: Primitive backend configuration.
+    - FallbackModel: One entry in an ordered agent fallback chain.
     - AgentCard: Local agent description, capabilities, and tools.
     - AgentMessage: Actor-to-actor message payload.
     - AgentSpec: Construction-friendly agent settings block.
@@ -24,6 +25,7 @@ from vidbyte.lib.errors import AgentForkConfigurationError
 if TYPE_CHECKING:
     from vidbyte.agents.runtimes.configs import ActorRuntime, LinearRuntime, MctsSearchRuntime
     from vidbyte.agents.settings import AgentLoopSettings
+    from vidbyte.agents.settings.fallback import AgentFallbackSettings
     from vidbyte.agents.settings.tool import ToolSettings
     from vidbyte.context.handoff import Handoff
     from vidbyte.context.manager import ContextManager
@@ -113,6 +115,33 @@ class AgentRunnerConfig:
     model_name: str | None = None
     temperature: float | None = None
     run_id: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class FallbackModel:
+    """One model in an ordered agent fallback chain."""
+
+    provider: str
+    model: str
+    api_key: str | None = None
+    temperature: float | None = None
+
+    def __post_init__(self) -> None:
+        """Reject entries that do not name both a provider and a model."""
+        if not str(self.provider).strip():
+            raise ValueError("FallbackModel.provider cannot be empty")
+        if not str(self.model).strip():
+            raise ValueError("FallbackModel.model cannot be empty")
+
+    def identity(self) -> str:
+        """Return the 'provider/model' label used in metadata and error records."""
+        return f"{self.provider}/{self.model}"
+
+    def __repr__(self) -> str:
+        """Return a developer-readable string that never exposes the API key."""
+        key = ", api_key='***'" if self.api_key else ""
+        temperature = f", temperature={self.temperature!r}" if self.temperature is not None else ""
+        return f"FallbackModel({self.identity()!r}{key}{temperature})"
 
 
 @dataclass(frozen=True, slots=True)
@@ -206,6 +235,7 @@ class AgentForkSettings:
     model_name: str | None = None
     provider: ModelProvider | str | None = None
     temperature: float | None = None
+    fallback: Sequence[str | FallbackModel] | AgentFallbackSettings | None = None
     mcp: bool = True
     inherit_mcp: bool | None = None
 

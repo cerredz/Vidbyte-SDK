@@ -40,6 +40,13 @@ class ToolsFormatter:
         return "openai"
 
     @staticmethod
+    def wire_format(provider_or_model: str | None) -> str:
+        """Return the payload shape a provider speaks: 'openai', 'anthropic', or 'gemini'."""
+        # provider_from_model reports xai separately, but every formatting branch below treats it as OpenAI-shaped.
+        family = ToolsFormatter.provider_from_model(provider_or_model)
+        return family if family in {"anthropic", "gemini"} else "openai"
+
+    @staticmethod
     def format_tools(tools: object, provider_or_model: str) -> tuple[dict[str, Any], ...]:
         """Format a tool catalog or iterable of specs for a provider family."""
         specs_method = getattr(tools, "specs", None)
