@@ -592,6 +592,7 @@ The feature is built entirely from existing internals: `RunnerHandle.with_runner
 - **Migration path:** none required. Existing agents are unaffected.
 - **Deployment order:** single package, no service coordination.
 - **Rollback:** revert the PR. No persisted state, no migration, no config to unwind.
+- **Verification before merge:** `python scripts/run_ci.py` in full from the worktree (Section 14), plus the pull-request `CI` workflow across Python 3.11 and 3.12 and its `Package` stage.
 
 ---
 
@@ -640,10 +641,10 @@ The feature is built entirely from existing internals: `RunnerHandle.with_runner
 ## 14. CI Command Of Record
 
 ```bash
-python -m pip install -e .
-python -m pytest tests/ -q
+python -m pip install -e ".[dev]"
+python scripts/run_ci.py
 ```
 
-There is no `scripts/run_ci.py` in this repository, and `.github/workflows/` contains only `publish.yml` (tag-triggered PyPI release, no pull-request checks), so pytest is the canonical gate. Because packaging is the only automated workflow, a clean editable install plus an import smoke check of the new exports is run alongside the suite — a broken export surface would otherwise go undetected until release.
+`.github/workflows/ci.yml` runs on every pull request and drives the same script: a `source` stage across Python 3.11 and 3.12, plus a `package` stage that builds the distribution into a clean venv and smoke-checks the installed console scripts. Diagnostic-only stages are `python scripts/run_ci.py --stage source` and `--stage package`; neither replaces the full run.
 
-**Baseline on `origin/main` (`ff6dfd6`): 1436 passed, 1 skipped, 0 failed.** This feature must keep that result exactly.
+**Baseline on `origin/main` (`ff6dfd6`): `pytest tests/ -q` reports 1436 passed, 1 skipped, 0 failed.** This feature must keep that result exactly, and `python scripts/run_ci.py` must pass in full.
