@@ -42,6 +42,7 @@ from vidbyte.lib.enums import ModelModality
 from vidbyte.lib.errors import PermissionDeniedError, ToolExecutionError, ToolRegistryError
 from vidbyte.lib.token_usage import token_usage_from_response
 from vidbyte.lib.tools import ToolsFormatter
+from vidbyte.agents.pricing import UsageTracker
 from vidbyte.context.templates import NullRecorder, RecorderBase
 from vidbyte.lib.tracing import NullTracer, SpanContext, TracerBase
 from vidbyte.middleware import AgentMiddleware, MiddlewarePipeline
@@ -59,7 +60,7 @@ from vidbyte.tools.types import ToolCall, ToolCallContext, ToolCallState, ToolRe
 class AgentRuntime:
     """Internal runtime for direct agent execution."""
 
-    def __init__(self, *, agent_name: str, system_prompt: str, tools: Tools, permission_policy: PermissionPolicy, config: AgentRuntimeConfig | None = None, tracer: TracerBase | None = None, middleware: Sequence[AgentMiddleware] = (), run_id: str | None = None, algorithm: ContextWindowAlgorithm | str | None = None, context_manager: ContextManager | None = None, recorder: RecorderBase | None = None, output_schema: type | Mapping[str, Any] | None = None, output_contract: "AgentLoopSettingsOutputContract | None" = None, include_internal_tools: bool = True) -> None:
+    def __init__(self, *, agent_name: str, system_prompt: str, tools: Tools, permission_policy: PermissionPolicy, config: AgentRuntimeConfig | None = None, tracer: TracerBase | None = None, middleware: Sequence[AgentMiddleware] = (), run_id: str | None = None, algorithm: ContextWindowAlgorithm | str | None = None, context_manager: ContextManager | None = None, recorder: RecorderBase | None = None, output_schema: type | Mapping[str, Any] | None = None, output_contract: "AgentLoopSettingsOutputContract | None" = None, include_internal_tools: bool = True, usage_tracker: UsageTracker | None = None) -> None:
         # Configure one direct runtime; isolated review child runtimes may disable implicit internal tools.
         self.agent_name = agent_name
         self.system_prompt = system_prompt
@@ -76,6 +77,7 @@ class AgentRuntime:
         self.output_schema = output_schema
         self._schema_formatter = OutputSchemaFormatter()
         self.output_contract = output_contract or AgentLoopSettingsOutputContract(())
+        self.usage_tracker = usage_tracker or UsageTracker()
 
     def _context_window_admission_middleware(self) -> tuple[AgentMiddleware, ...]:
         # Returns compatibility middleware for legacy tool-result admission presets.
@@ -353,6 +355,7 @@ class AgentRuntime:
             run_state["__iteration_outputs__"] = tuple(iteration_outputs)
             runner_metadata = dict(handle.extract_metadata(raw_result))
             tokens_used = self._add_token_usage(tokens_used, token_usage_from_response(raw_result, runner_metadata))
+            usage_record = self.usage_tracker.record_call(raw_result)
 
             decision = await self.middleware.after_model_response(
                 self._middleware_context(
@@ -368,6 +371,7 @@ class AgentRuntime:
                     metadata=runtime_metadata,
                     run_state=run_state,
                     model_response=raw_result,
+                    model_usage=usage_record.usage if usage_record is not None else None,
                 )
             )
             if decision.action is not MiddlewareAction.CONTINUE:
@@ -950,6 +954,7 @@ class AgentRuntime:
         tool_call: ToolCall | None = None,
         tool_result: ToolResult | None = None,
         model_response: object | None = None,
+        model_usage: object | None = None,
         error: BaseException | None = None,
         tool_is_internal: bool = False,
         provider_messages: Sequence[Mapping[str, Any]] = (),
@@ -971,6 +976,7 @@ class AgentRuntime:
             tool_call=tool_call,
             tool_result=tool_result,
             model_response=model_response,
+            model_usage=model_usage,
             error=error,
             provider_messages=tuple(provider_messages),
             system=system,
@@ -1667,6 +1673,7 @@ class AgentRuntime:
             "tool_call_count": len(contexts),
             "tool_call_states": tuple(context.state.value for context in contexts),
             "tool_calls": tuple(contexts),
+            "usage_rollup": self.usage_tracker.rollup(),
         }
 
     def _contract_counters(self, *, iteration_count: int, model_call_count: int, call_contexts: Sequence[ToolCallContext], tokens_used: int | None, started_at: float, final_output: str | None = None, compaction_count: int = 0) -> dict[str, Any]:
