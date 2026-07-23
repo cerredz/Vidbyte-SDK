@@ -9,7 +9,7 @@
 
 ## 1. Overview
 
-This feature adds Vercel-AI-Gateway-style token-usage and cost accounting to `BaseAgent`. Every text-model call made during an agent run is parsed into a provider-native usage object, priced against a built-in per-model rate table, and accumulated into a per-run rollup. Developers interact with the agent class through functions to read usage/pricing both mid-run (`on_usage` callback after every LLM call, plus live `agent.get_usage()`) and after run (`agent.get_usage()`, `agent.get_cost_usd()`, and `AgentMessage.metadata["usage_rollup"]`). Middleware receives the same per-call data through `MiddlewareContext.model_usage` on the existing `after_model_response` hook.
+This feature adds Vercel-AI-Gateway-style token-usage and cost accounting to `BaseAgent`. Every text-model call made during an agent run is parsed into a provider-native usage object, priced against a built-in per-model rate table, and accumulated into a per-run rollup. Usage tracking is owned entirely by the agent — the tracker is built internally from the agent's own model identity, so there are no pricing/usage constructor params. Developers read usage/pricing through agent functions both mid-run (live `agent.get_usage()`) and after run (`agent.get_usage()`, `agent.get_cost_usd()`, and `AgentMessage.metadata["usage_rollup"]`). Per-call usage is observable mid-run through `MiddlewareContext.model_usage` on the existing `after_model_response` hook, so a user-supplied middleware is the sanctioned way to react to each LLM call as it happens.
 
 The design follows the user's explicit direction: per-provider usage classes with provider-native fields and per-class cost formulas, bound to provider string via a registry; the feature lives in `vidbyte/agents/pricing/`; the source-of-truth rate table lives in the lib folder (`vidbyte/lib/registries/pricing.py`).
 
@@ -22,7 +22,7 @@ The design follows the user's explicit direction: per-provider usage classes wit
 - One `ProviderUsage` class per provider response shape, each owning its native fields and its own `cost_usd()` formula, bound to a provider via a string/enum registry.
 - A source-of-truth rate table (`PROVIDER_PRICING`) in `vidbyte/lib/registries/pricing.py` covering at least every default text model in `ProviderModelRegistry.DEFAULT_PROVIDER_MODELS`, stamped with `PRICING_AS_OF`.
 - Per-call cost computed inside the agent runtime loop and summed into a `UsageRollup`; cost is `None` when pricing is unknown — never fabricated.
-- Agent-class API: `Agent(..., pricing=..., on_usage=...)` constructor params; `agent.get_usage()` and `agent.get_cost_usd()` methods usable mid-run and after run.
+- Agent-class API: usage tracking is constructed internally from the agent's model identity (no `pricing`/`on_usage` constructor params); `agent.get_usage()` and `agent.get_cost_usd()` methods usable mid-run and after run.
 - Final-return surface: `AgentMessage.metadata["usage_rollup"]` carries the `UsageRollup` (additive key; existing `metadata["usage"]` raw provider dict and `metadata["tokens_used"]` are unchanged).
 - Middleware surface: `MiddlewareContext.model_usage` populated on `AFTER_MODEL_RESPONSE` contexts with the provider-native usage object.
 - Fix the existing Gemini usage gap centrally: Gemini runs currently report `tokens_used=None` because `token_usage_from_response` never reads `TextModelResponse.usage` nor `usageMetadata` camelCase keys.
@@ -35,7 +35,7 @@ The design follows the user's explicit direction: per-provider usage classes wit
 - Platform-side credits/billing concepts; the SDK reports `cost_usd` only.
 - MCTS/actor runtimes (they already reject middleware; the tracker wiring in this doc targets `AgentRuntime` / linear only).
 - Restructuring `metadata["usage"]` (raw provider dict stays; the structured data lands on the additive `usage_rollup` key).
-- A built-in `UsageTrackingMiddleware` class (superseded by the `on_usage` agent callback + context enrichment).
+- A built-in `UsageTrackingMiddleware` class (per-call usage is exposed on `MiddlewareContext.model_usage`, so any user-supplied middleware can consume it).
 - No new feature tests, per the workflow for this change; existing CI gates still apply.
 
 ---
@@ -67,19 +67,19 @@ Audit notes:
 
 1. A `ProviderUsage` ABC must exist in `vidbyte/agents/pricing/base.py` exposing `input_tokens`, `output_tokens`, `total_tokens` properties, a `from_usage_payload` classmethod, and a `cost_usd(pricing)` method, plus a `raw` passthrough of the provider's usage sub-dict.
 2. Concrete classes must be bound to providers through a registry: `OpenAIUsage`→OPENAI, `AnthropicUsage`→ANTHROPIC, `GeminiUsage`→GEMINI, `ChatCompletionUsage`→XAI/DEEPSEEK/GLM/MINIMAX, `OpenRouterUsage`→OPENROUTER. Providers without text usage (ELEVENLABS, PLAYAI) resolve to `None`.
-3. `parse_usage(provider, payload)` must coerce provider strings to `ModelProvider`, dispatch through the registry, and return `None` (never raise) for missing/unknown/malformed payloads.
-4. Each class's `cost_usd` must implement its provider's billing semantics: OpenAI/compatible subtract the cached subset before applying input rate; Anthropic adds cache creation/read buckets at their own rates; Gemini bills `thoughtsTokenCount` as output and treats `cachedContentTokenCount` as an input subset. Cache rates fall back to the base input rate when the table omits them. `cost_usd(None)` must return `None`.
+3. `parse_usage(provider, payload)` must coerce provider strings to `ModelProvider` (inline, not via a standalone helper), dispatch through the registry, and return `None` (never raise) for missing/unknown/malformed payloads.
+4. The shared cost math (`effective_rates`, `subset_billing_cost`) and token coercion (`coerce_int`) live as methods on the `ProviderUsage` base class, so each provider subclass computes cost through `self` rather than free functions. Each class's `cost_usd` must implement its provider's billing semantics: OpenAI/compatible subtract the cached subset before applying input rate; Anthropic adds cache creation/read buckets at their own rates; Gemini bills `thoughtsTokenCount` as output and treats `cachedContentTokenCount` as an input subset. Cache rates fall back to the base input rate when the table omits them. `cost_usd(None)` must return `None`.
 5. `ModelPricing` and `ModelPricingRegistry` must live in `vidbyte/lib/registries/pricing.py`; `resolve()` must try exact match, then longest-prefix match (dated model variants), then `None`. `register()` must allow user overrides/additions. `PROVIDER_PRICING` must include every default text model from `ProviderModelRegistry` and carry `PRICING_AS_OF`.
 6. `ModelPricing` must support optional context-tier fields (`threshold_tokens`, `input_over_threshold_per_million`, `output_over_threshold_per_million`); when input tokens exceed the threshold and tier rates exist, cost functions must use the tier rates for the whole call.
-7. `UsageTracker` (in `vidbyte/agents/pricing/tracker.py`) must defensively parse any response object (`getattr` for provider/model/usage), record `UsageRecord`s, invoke the `on_usage` callback per record, and build a `UsageRollup`. Unparseable responses are skipped (record nothing), so duck-typed fake runners in existing tests are unaffected.
+7. `UsageTracker` (in `vidbyte/agents/pricing/tracker.py`) must defensively parse any response object (`getattr` for provider/model/usage), record `UsageRecord`s, and build a `UsageRollup`. Unparseable responses are skipped (record nothing), so duck-typed fake runners in existing tests are unaffected.
 8. `AgentRuntime` must accept an optional `usage_tracker` param (defaulting to a fresh `UsageTracker`), record one usage entry after every successful model call (at the existing token-accumulation point, `runtime.py:338`), and expose the tracker as `runtime.usage_tracker`.
 9. `AgentRuntime._runtime_metadata` must add `"usage_rollup": UsageRollup` so `AgentMessage.metadata["usage_rollup"]` is populated on every terminal path (final response, budget stop, middleware abort), because all such paths flow through `_runtime_metadata` or `_finish_result`.
 10. `MiddlewareContext` must gain `model_usage: object | None = None`; the `AFTER_MODEL_RESPONSE` context must carry the call's `ProviderUsage` (or `None` when unparseable). All other hooks leave it `None`.
-11. `BaseAgent` must accept `pricing: ModelPricingRegistry | None = None` and `on_usage: Callable[[UsageRecord], None] | None = None`, own a `UsageTracker`, reset it at the start of each `generate_reply`, pass it into `_runtime()`, and pass both params through `_build_aggregate_agent` so multi-model runs track usage on the inner agent.
+11. `BaseAgent` must own a `UsageTracker` built internally (no `pricing`/`on_usage` constructor params; the default rate table prices every model the agent can run), reset it at the start of each `generate_reply`, and pass it into `_runtime()`. Per-call usage is surfaced to user middleware through `MiddlewareContext.model_usage`.
 12. `BaseAgent.get_usage()` must return the current `UsageRollup` (live mid-run and final after run), delegating to the internal aggregate agent when one is configured. `BaseAgent.get_cost_usd()` must return the rollup's `cost_usd`.
 13. `token_usage_from_response` must additionally check `response.usage` (Mapping) — including Gemini camelCase keys (`totalTokenCount`, or `promptTokenCount`+`candidatesTokenCount`+`thoughtsTokenCount`) — after the metadata check and before the raw-payload check, fixing Gemini `tokens_used=None` without changing existing precedence for current callers.
 14. `OpenRouterProvider` must include `"usage": {"include": true}` in its chat-completions payload (new provider-API usage, explicitly called out), and `OpenRouterUsage.cost_usd` must prefer the provider-reported `raw["cost"]` when present, falling back to table math.
-15. `on_usage` callback exceptions must not break a run; they are caught and collected on `UsageTracker.callback_errors`.
+15. Per-call usage observation is done through a user-supplied middleware reading `MiddlewareContext.model_usage`; a middleware raising is already isolated by the existing middleware error handling, so a bad observer cannot break a run.
 16. New exports: `ModelPricing`, `ModelPricingRegistry`, `PROVIDER_PRICING`, `ProviderUsage`, `UsageRecord`, `UsageRollup`, `UsageTracker`, `parse_usage` surfaced from `vidbyte.agents.pricing` and the relevant names from the root `vidbyte` package, following existing export patterns.
 
 ### Non-Functional Requirements
@@ -110,8 +110,7 @@ provider HTTP response
       → pricing.resolve(provider, model)                → ModelPricing | None
       → usage.cost_usd(pricing)                         → float | None
       → append UsageRecord(call_index, provider, model, usage, cost_usd)
-      → notify on_usage(record)                         [mid-run surface]
-  → ctx.model_usage = record.usage  (AFTER_MODEL_RESPONSE hook)           [middleware surface]
+  → ctx.model_usage = record.usage  (AFTER_MODEL_RESPONSE hook)           [mid-run middleware surface]
   → metadata["usage_rollup"] = tracker.rollup()  at run end               [final-return surface]
   → agent.get_usage() / agent.get_cost_usd()                              [agent function surface]
 ```
@@ -212,14 +211,12 @@ class UsageRollup:
 
 ```python
 class UsageTracker:
-    def __init__(self, *, pricing: ModelPricingRegistry | None = None, on_usage: Callable[[UsageRecord], None] | None = None) -> None: ...
+    def __init__(self, *, pricing: ModelPricingRegistry | None = None) -> None: ...
     def record_call(self, response: object) -> UsageRecord | None: ...
     def rollup(self) -> UsageRollup: ...
     def reset(self) -> None: ...
     @property
     def records(self) -> tuple[UsageRecord, ...]: ...
-    @property
-    def callback_errors(self) -> tuple[Exception, ...]: ...
 ```
 
 - `record_call` reads `provider`/`model`/`usage` via `getattr`, tolerating fake/duck-typed responses (records nothing when provider or payload is unusable). `call_index` is the 1-based length of the ledger at insert time.
@@ -234,10 +231,9 @@ class UsageTracker:
 
 ### 6.7 Agent wiring (`vidbyte/agents/base.py`, modify)
 
-- Constructor: `pricing: ModelPricingRegistry | None = None`, `on_usage: Callable[[UsageRecord], None] | None = None`; builds `self._usage_tracker = UsageTracker(pricing=pricing, on_usage=on_usage)`.
+- Constructor: no pricing/usage params; builds `self._usage_tracker = UsageTracker()` (default rate table, resolved per model call at record time).
 - `generate_reply`: after the aggregate-agent delegation, calls `self._usage_tracker.reset()` before `_run_direct`.
 - `_runtime()`: passes `usage_tracker=self._usage_tracker`.
-- `_build_aggregate_agent()`: passes `pricing`/`on_usage` through to the inner agent.
 - New public methods:
 
 ```python
@@ -280,7 +276,7 @@ Attach `"usage": {"include": true}` in the OpenRouter payload (override `_create
 
 ## 8. API Changes
 
-- `BaseAgent.__init__`: additive `pricing=`, `on_usage=` kwargs.
+- `BaseAgent.__init__`: no new params — usage tracking is built internally from the agent's model identity.
 - `BaseAgent.get_usage() -> UsageRollup`, `BaseAgent.get_cost_usd() -> float | None` (new public methods).
 - `AgentRuntime.__init__`: additive `usage_tracker=` kwarg; new public attribute `runtime.usage_tracker`.
 - `MiddlewareContext.model_usage` (new field).
@@ -316,7 +312,7 @@ Attach `"usage": {"include": true}` in the OpenRouter payload (override `_create
 | `vidbyte/lib/token_usage.py` | read `response.usage` + Gemini camelCase keys (central Gemini fix) |
 | `vidbyte/lib/dataclasses/middleware.py` | `MiddlewareContext.model_usage` field |
 | `vidbyte/agents/runtime.py` | tracker param, per-call record, ctx `model_usage`, `usage_rollup` metadata |
-| `vidbyte/agents/base.py` | `pricing`/`on_usage` params, tracker ownership + reset, `get_usage()`/`get_cost_usd()`, aggregate passthrough |
+| `vidbyte/agents/base.py` | internal tracker ownership + reset (no new params), `get_usage()`/`get_cost_usd()` |
 | `vidbyte/providers/openrouter.py` | `usage: {include: true}` request field |
 | `vidbyte/agents/__init__.py` | re-export pricing symbols |
 | `vidbyte/__init__.py` | root exports for pricing/usage names |
@@ -357,5 +353,5 @@ No new third-party dependencies (`pydantic`, `httpx` remain the only runtime dep
 1. **Type `TextModelResponse.usage` as `ProviderUsage` and parse inside each provider adapter.** Rejected: `vidbyte/lib/runners/types.py` importing `vidbyte.agents.pricing` creates a lib→agents dependency (and a real import cycle through `vidbyte/agents/__init__.py` → `base.py` → `runtime.py` → `lib.dataclasses.middleware`). Parsing at the runtime boundary achieves the same centralization with zero adapter churn. The OpenRouter payload change is the single justified adapter touch.
 2. **One normalized usage dataclass for all providers.** Rejected: cache-token billing semantics differ (subset vs additive buckets; separate reasoning buckets), so a single shape either loses money-relevant detail or grows per-provider optional fields until it is a per-provider class anyway. The ABC exposes only the uniform surface (`input/output/total/cost_usd`) the rollup needs.
 3. **Caller-supplied prices only (PR-282 sessions convention).** Rejected as the sole mechanism — the user asked for a built-in source-of-truth table — but supported via `ModelPricingRegistry.register()` overrides so both conventions coexist.
-4. **Ship a `UsageTrackingMiddleware` builtin instead of agent functions.** Rejected: the user explicitly wants functions on the agent class for mid-run and after-run access; the `on_usage` callback + `MiddlewareContext.model_usage` cover both surfaces with less API surface area.
+4. **Ship a `UsageTrackingMiddleware` builtin instead of agent functions.** Rejected: the user wants functions on the agent class for mid-run and after-run access; `agent.get_usage()`/`get_cost_usd()` cover the agent surface, while `MiddlewareContext.model_usage` lets any user-supplied middleware react per call — no bespoke callback param on the agent.
 5. **Put `UsageRecord`/`UsageRollup` in `vidbyte/lib/dataclasses/`.** Rejected: they reference `ProviderUsage` (agents layer); keeping them in `vidbyte/agents/pricing/records.py` preserves the lib/agents dependency direction.

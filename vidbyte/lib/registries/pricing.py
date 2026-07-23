@@ -16,7 +16,7 @@ Key Functions:
     - register: Adds or overrides rates for one provider/model entry.
 Relations:
     Consumed by vidbyte/agents/pricing (per-provider cost formulas) and by
-    BaseAgent(pricing=...) for caller-supplied overrides.
+    UsageTracker, which prices each agent model call against the built-in table.
 Similar Files:
     - vidbyte/lib/registries/models.py
 """
