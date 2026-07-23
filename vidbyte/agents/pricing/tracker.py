@@ -39,15 +39,17 @@ class UsageTracker:
 
     def record_call(self, response: object) -> UsageRecord | None:
         # Parses, prices, and stores one model call; returns None when unusable.
-        provider = getattr(response, "provider", None)
+        # The duck-typed response.provider is coerced to a ModelProvider once here,
+        # so the pricing registry and parser downstream take only the strict enum.
+        provider = _as_provider(getattr(response, "provider", None))
         model = getattr(response, "model", "")
         payload = getattr(response, "usage", None)
         usage = parse_usage(provider, payload if isinstance(payload, Mapping) else None)
-        if usage is None:
+        if usage is None or provider is None:
             return None
         record = UsageRecord(
             call_index=len(self._records) + 1,
-            provider=provider.value if isinstance(provider, ModelProvider) else str(provider),
+            provider=provider.value,
             model=str(model),
             usage=usage,
             cost_usd=usage.cost_usd(self._pricing.resolve(provider, str(model))),
@@ -76,6 +78,17 @@ class UsageTracker:
     def records(self) -> tuple[UsageRecord, ...]:
         # Returns the immutable per-call ledger recorded so far.
         return tuple(self._records)
+
+
+def _as_provider(value: object) -> ModelProvider | None:
+    # Normalizes a duck-typed response.provider onto the ModelProvider frozen set,
+    # returning None when the value names no known provider.
+    if isinstance(value, ModelProvider):
+        return value
+    try:
+        return ModelProvider(str(value))
+    except (ValueError, TypeError):
+        return None
 
 
 def _sum_or_none(values: Iterable[int | float | None]) -> int | float | None:

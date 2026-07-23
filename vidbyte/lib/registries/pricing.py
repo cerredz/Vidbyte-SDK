@@ -141,12 +141,13 @@ class ModelPricingRegistry:
         # Returns an independent registry over the built-in PROVIDER_PRICING table.
         return cls(PROVIDER_PRICING)
 
-    def resolve(self, provider: ModelProvider | str, model: str) -> ModelPricing | None:
-        # Returns exact or longest-prefix pricing for the model, else None.
-        provider_enum = self._coerce_provider(provider)
-        if provider_enum is None or not isinstance(model, str) or not model:
+    def resolve(self, provider: ModelProvider, model: str) -> ModelPricing | None:
+        # Returns exact or longest-prefix pricing for the model, else None. The
+        # provider is strictly a ModelProvider (the enum's frozen set of keys);
+        # callers coerce any raw provider string once, at the ingestion boundary.
+        if not isinstance(provider, ModelProvider) or not isinstance(model, str) or not model:
             return None
-        models = self._table.get(provider_enum, self._EMPTY_TABLE)
+        models = self._table.get(provider, self._EMPTY_TABLE)
         exact = models.get(model)
         if exact is not None:
             return exact
@@ -155,26 +156,16 @@ class ModelPricingRegistry:
             return None
         return max(prefix_matches, key=lambda item: len(item[0]))[1]
 
-    def register(self, provider: ModelProvider | str, model: str, pricing: ModelPricing) -> None:
-        # Adds or overrides one provider/model entry after validating inputs.
-        provider_enum = self._coerce_provider(provider)
-        if provider_enum is None:
-            raise ConfigurationError(f"Unrecognized provider '{provider}'.")
+    def register(self, provider: ModelProvider, model: str, pricing: ModelPricing) -> None:
+        # Adds or overrides one provider/model entry after validating inputs; the
+        # provider must be a ModelProvider rather than an arbitrary string.
+        if not isinstance(provider, ModelProvider):
+            raise ConfigurationError("provider must be a ModelProvider.")
         if not isinstance(model, str) or not model.strip():
             raise ConfigurationError("model must be a non-empty string.")
         if not isinstance(pricing, ModelPricing):
             raise ConfigurationError("pricing must be a ModelPricing instance.")
-        self._table.setdefault(provider_enum, {})[model] = pricing
-
-    @staticmethod
-    def _coerce_provider(provider: ModelProvider | str) -> ModelProvider | None:
-        # Converts provider strings to ModelProvider, returning None when unknown.
-        if isinstance(provider, ModelProvider):
-            return provider
-        try:
-            return ModelProvider(str(provider))
-        except ValueError:
-            return None
+        self._table.setdefault(provider, {})[model] = pricing
 
 
 __all__ = [

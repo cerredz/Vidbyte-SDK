@@ -43,25 +43,17 @@ class OpenAIUsage(ProviderUsage):
             input_tokens=cls.coerce_int(payload.get("input_tokens")),
             output_tokens=cls.coerce_int(payload.get("output_tokens")),
             total_tokens=cls.coerce_int(payload.get("total_tokens")),
-            cached_input_tokens=_details_int(payload, "input_tokens_details", "cached_tokens"),
-            reasoning_tokens=_details_int(payload, "output_tokens_details", "reasoning_tokens"),
+            cached_input_tokens=cls.nested_int(payload, "input_tokens_details", "cached_tokens"),
+            reasoning_tokens=cls.nested_int(payload, "output_tokens_details", "reasoning_tokens"),
             raw=payload,
         )
-        if usage.input_tokens is None and usage.output_tokens is None and usage.total_tokens is None:
+        if all(count is None for count in (usage.input_tokens, usage.output_tokens, usage.total_tokens)):
             return None
         return usage
 
     def cost_usd(self, pricing: ModelPricing | None) -> float | None:
         # Prices uncached input at input rate and cached input at cache-read rate.
         return self.subset_billing_cost(pricing)
-
-
-def _details_int(payload: Mapping[str, Any], section: str, key: str) -> int | None:
-    # Reads one int from a nested usage details mapping, tolerating absence.
-    details = payload.get(section)
-    if not isinstance(details, Mapping):
-        return None
-    return ProviderUsage.coerce_int(details.get(key))
 
 
 __all__ = ["OpenAIUsage"]

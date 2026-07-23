@@ -7,7 +7,8 @@ Purpose:
     a provider-specific cost formula, bound to a provider string via one registry.
 Architecture:
     - ProviderUsage: ABC exposing the uniform surface (input/output/total/cost_usd)
-      and the shared token-coercion and cost-math the subclasses build on.
+      and the shared token-coercion, nested-payload reads, derived accessors, and
+      cost-math the subclasses build on.
     - usage_for: Decorator binding a ProviderUsage class to a ModelProvider.
     - parse_usage: Defensive entry point turning a raw usage payload into a
       provider-native ProviderUsage, or None.
@@ -78,6 +79,27 @@ class ProviderUsage(ABC):
             return value
         return None
 
+    @staticmethod
+    def nested_int(payload: Mapping[str, Any], *path: str) -> int | None:
+        # Walks a key path into nested usage dicts (e.g. "input_tokens_details",
+        # "cached_tokens"); returns None the moment a hop is missing or malformed,
+        # then coerces the leaf through the shared token rule.
+        node: Any = payload
+        for key in path:
+            if not isinstance(node, Mapping):
+                return None
+            node = node.get(key)
+        return ProviderUsage.coerce_int(node)
+
+    @property
+    def uncached_input_tokens(self) -> int | None:
+        # Input tokens billed at the full input rate: total input minus the cached
+        # subset. This is the one named home for the cached-is-a-subset assumption
+        # that the subset cost formula depends on.
+        if self.input_tokens is None:
+            return None
+        return self.input_tokens - min(self.cached_input_tokens or 0, self.input_tokens)
+
     def effective_rates(self, pricing: ModelPricing) -> tuple[float, float, float]:
         # Returns (input, output, cache-read) rates, using the over-threshold tier when
         # this call's input crosses it; cache-read scales with the active input rate.
@@ -106,13 +128,14 @@ class ProviderUsage(ABC):
         return self.input_tokens > pricing.threshold_tokens
 
     def subset_billing_cost(self, pricing: ModelPricing | None) -> float | None:
-        # Prices providers whose cached input is a discounted subset of input tokens.
+        # Prices providers whose cached input is a discounted subset of input tokens,
+        # reading the uncached/cached split from the named derived accessors.
         if pricing is None or (self.input_tokens is None and self.output_tokens is None):
             return None
-        billable_input = self.input_tokens or 0
-        cached = min(self.cached_input_tokens or 0, billable_input)
         input_rate, output_rate, cache_read_rate = self.effective_rates(pricing)
-        return ((billable_input - cached) * input_rate + cached * cache_read_rate + (self.output_tokens or 0) * output_rate) / 1_000_000
+        uncached_input = self.uncached_input_tokens or 0
+        cached_input = min(self.cached_input_tokens or 0, self.input_tokens or 0)
+        return (uncached_input * input_rate + cached_input * cache_read_rate + (self.output_tokens or 0) * output_rate) / 1_000_000
 
 
 def usage_for(provider: ModelProvider) -> Callable[["type[ProviderUsage]"], "type[ProviderUsage]"]:

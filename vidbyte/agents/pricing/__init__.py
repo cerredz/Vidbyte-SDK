@@ -20,7 +20,13 @@ from vidbyte.agents.pricing.base import ProviderUsage, parse_usage, usage_for
 from vidbyte.agents.pricing.openai import OpenAIUsage
 from vidbyte.agents.pricing.anthropic import AnthropicUsage
 from vidbyte.agents.pricing.gemini import GeminiUsage
-from vidbyte.agents.pricing.compatible import ChatCompletionUsage
+from vidbyte.agents.pricing.compatible import (
+    ChatCompletionUsage,
+    DeepSeekUsage,
+    GLMUsage,
+    MiniMaxUsage,
+    XAIUsage,
+)
 from vidbyte.agents.pricing.openrouter import OpenRouterUsage
 from vidbyte.agents.pricing.records import UsageRecord, UsageRollup
 from vidbyte.agents.pricing.tracker import UsageTracker
@@ -28,13 +34,17 @@ from vidbyte.agents.pricing.tracker import UsageTracker
 __all__ = [
     "AnthropicUsage",
     "ChatCompletionUsage",
+    "DeepSeekUsage",
+    "GLMUsage",
     "GeminiUsage",
+    "MiniMaxUsage",
     "OpenAIUsage",
     "OpenRouterUsage",
     "ProviderUsage",
     "UsageRecord",
     "UsageRollup",
     "UsageTracker",
+    "XAIUsage",
     "parse_usage",
     "usage_for",
 ]
