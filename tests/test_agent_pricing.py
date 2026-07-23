@@ -26,6 +26,7 @@ from vidbyte.agents.pricing import (
     GLMUsage,
     MiniMaxUsage,
     OpenAIUsage,
+    OpenRouterUsage,
     XAIUsage,
     parse_usage,
 )
@@ -98,6 +99,22 @@ class CompatibleProviderTests(unittest.TestCase):
         )
         assert usage is not None
         self.assertEqual(usage.cached_input_tokens, 40)
+
+
+class OpenRouterUsageTests(unittest.TestCase):
+    def test_provider_reported_cost_wins_over_table_math(self) -> None:
+        usage = OpenRouterUsage.from_usage_payload(
+            {"prompt_tokens": 100, "completion_tokens": 20, "total_tokens": 120, "cost": 0.0042}
+        )
+        assert usage is not None
+        self.assertEqual(usage.cost_usd(None), 0.0042)
+
+    def test_non_numeric_cost_is_rejected(self) -> None:
+        usage = OpenRouterUsage.from_usage_payload(
+            {"prompt_tokens": 100, "completion_tokens": 20, "total_tokens": 120, "cost": True}
+        )
+        assert usage is not None
+        self.assertIsNone(usage.reported_cost)
 
 
 class PricingRegistryStrictnessTests(unittest.TestCase):
