@@ -200,6 +200,45 @@ class TracerConfigurationError(VidbyteSdkError):
     """Raised when a tracing provider cannot be configured (missing credentials or SDK)."""
 
 
+class SpecialistPanelError(VidbyteSdkError):
+    """Base error for the Specialist Panel context-window algorithm."""
+
+
+class SpecialistPanelConfigurationError(SpecialistPanelError, ConfigurationError):
+    """Raised when specialist role or panel settings fail construction-time validation.
+
+    Subclasses ConfigurationError so existing configuration handling keeps catching
+    it, while giving panel construction and preflight a panel-specific type.
+    """
+
+
+class SpecialistPanelExecutionError(SpecialistPanelError, AgentExecutionError):
+    """Raised when the panel cannot complete a valid first review round.
+
+    Subclasses AgentExecutionError so agent-loop callers keep catching it, while
+    naming panel-level runtime failures (input bounds, metadata collision, or an
+    unmet successful-review threshold).
+    """
+
+
+class SpecialistReviewError(SpecialistPanelError):
+    """Content-free classified failure for a single reviewer's output.
+
+    Carries only a stable ``error_type`` category and a bounded ``safe_message`` so
+    invalid or oversized model text is never retained on the exception.
+    """
+
+    def __init__(self, error_type: str, safe_message: str) -> None:
+        # Keep only the stable category and the bounded, model-content-free message.
+        super().__init__(safe_message)
+        self.error_type = error_type
+        self.safe_message = safe_message
+
+
+class SpecialistPanelStageError(SpecialistPanelError):
+    """Trace-only panel-stage error whose message never contains model content."""
+
+
 class SessionUsageError(VidbyteSdkError):
     """Raised when durable-session usage rollup data cannot be interpreted."""
 
