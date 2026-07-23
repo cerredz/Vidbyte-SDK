@@ -80,7 +80,12 @@ from vidbyte.agents import (
     TaskSpec,
     TaskStatus,
     ToolSettings,
+    UsageRecord,
+    UsageRollup,
+    UsageTracker,
 )
+from vidbyte.agents.pricing import ProviderUsage, parse_usage
+from vidbyte.lib.registries import ModelPricing, ModelPricingRegistry, PROVIDER_PRICING
 from vidbyte.client import VidbyteSDK
 from vidbyte.harnesses import (
     HARNESS_SCHEMA_VERSION,
@@ -549,6 +554,14 @@ __all__ = [
     "AgentSpec",
     "AgentStopReason",
     "ToolSettings",
+    "ModelPricing",
+    "ModelPricingRegistry",
+    "PROVIDER_PRICING",
+    "ProviderUsage",
+    "UsageRecord",
+    "UsageRollup",
+    "UsageTracker",
+    "parse_usage",
     "AlternativeChallengeContextItem",
     "AmbiguityContextItem",
     "ArtifactContextItem",
