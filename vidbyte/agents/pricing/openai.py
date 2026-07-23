@@ -19,7 +19,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
-from vidbyte.agents.pricing.base import ProviderUsage, int_or_none, subset_billing_cost, usage_for
+from vidbyte.agents.pricing.base import ProviderUsage, usage_for
 from vidbyte.lib.enums import ModelProvider
 from vidbyte.lib.registries.pricing import ModelPricing
 
@@ -40,9 +40,9 @@ class OpenAIUsage(ProviderUsage):
     def from_usage_payload(cls, payload: Mapping[str, Any]) -> "OpenAIUsage | None":
         # Parses an OpenAI Responses usage dict; None when no token fields exist.
         usage = cls(
-            input_tokens=int_or_none(payload.get("input_tokens")),
-            output_tokens=int_or_none(payload.get("output_tokens")),
-            total_tokens=int_or_none(payload.get("total_tokens")),
+            input_tokens=cls.coerce_int(payload.get("input_tokens")),
+            output_tokens=cls.coerce_int(payload.get("output_tokens")),
+            total_tokens=cls.coerce_int(payload.get("total_tokens")),
             cached_input_tokens=_details_int(payload, "input_tokens_details", "cached_tokens"),
             reasoning_tokens=_details_int(payload, "output_tokens_details", "reasoning_tokens"),
             raw=payload,
@@ -53,7 +53,7 @@ class OpenAIUsage(ProviderUsage):
 
     def cost_usd(self, pricing: ModelPricing | None) -> float | None:
         # Prices uncached input at input rate and cached input at cache-read rate.
-        return subset_billing_cost(self.input_tokens, self.output_tokens, self.cached_input_tokens, pricing)
+        return self.subset_billing_cost(pricing)
 
 
 def _details_int(payload: Mapping[str, Any], section: str, key: str) -> int | None:
@@ -61,7 +61,7 @@ def _details_int(payload: Mapping[str, Any], section: str, key: str) -> int | No
     details = payload.get(section)
     if not isinstance(details, Mapping):
         return None
-    return int_or_none(details.get(key))
+    return ProviderUsage.coerce_int(details.get(key))
 
 
 __all__ = ["OpenAIUsage"]

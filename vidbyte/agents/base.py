@@ -19,7 +19,7 @@ from collections.abc import Callable, Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
 from vidbyte.agents.mixins import McpAttachableMixin
-from vidbyte.agents.pricing import UsageRecord, UsageRollup, UsageTracker
+from vidbyte.agents.pricing import UsageRollup, UsageTracker
 from vidbyte.agents.settings import AgentLoopSettings
 from vidbyte.agents.types import AgentCard, AgentInput, AgentMessage
 from vidbyte.context.manager import ContextManager
@@ -34,7 +34,6 @@ from vidbyte.lib.dataclasses.trace import TraceOption
 from vidbyte.lib.constants import RUNNER_TYPE_TEXT
 from vidbyte.lib.enums import AgentRuntimeType, ModelProvider
 from vidbyte.lib.errors import AgentExecutionError, ConfigurationError
-from vidbyte.lib.registries.pricing import ModelPricingRegistry
 from vidbyte.lib.runners import Runner
 from vidbyte.lib.tracing import NullTracer, TracerBase
 from vidbyte.agents.runtimes.configs import ActorRuntime, LinearRuntime, MctsSearchRuntime
@@ -83,17 +82,11 @@ class BaseAgent(McpAttachableMixin):
         output_schema: type | Mapping[str, Any] | None = None,
         handoff: Handoff | None = None,
         trace_option: TraceOption | None = None,
-        pricing: ModelPricingRegistry | None = None,
-        on_usage: Callable[[UsageRecord], None] | None = None,
     ) -> None:
         if not name:
             raise AgentExecutionError("Agent name cannot be empty.")
         if not system_prompt:
             raise AgentExecutionError("Agent system_prompt is required.")
-        if pricing is not None and not isinstance(pricing, ModelPricingRegistry):
-            raise ConfigurationError("pricing must be a ModelPricingRegistry instance.")
-        if on_usage is not None and not callable(on_usage):
-            raise ConfigurationError("on_usage must be a callable accepting one UsageRecord.")
 
         if isinstance(runtime, (LinearRuntime, MctsSearchRuntime, ActorRuntime)):
             self.runtime_type = runtime.runtime_type
@@ -201,7 +194,10 @@ class BaseAgent(McpAttachableMixin):
         self.last_trace: dict[str, Any] | None = None
         self.last_prompt: str = ""
         self.last_reply: AgentMessage | None = None
-        self._usage_tracker = UsageTracker(pricing=pricing, on_usage=on_usage)
+        # Usage/cost tracking is built from the agent's own model identity; the
+        # default rate table prices every model the agent can run. Per-call usage
+        # is observable mid-run through MiddlewareContext.model_usage.
+        self._usage_tracker = UsageTracker()
         self._behavior_view: Any = None
         self._active_session: Session | None = None
         self._queued_prompts: list[str] = []

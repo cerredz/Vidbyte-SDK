@@ -19,7 +19,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
-from vidbyte.agents.pricing.base import ProviderUsage, effective_rates, int_or_none, usage_for
+from vidbyte.agents.pricing.base import ProviderUsage, usage_for
 from vidbyte.lib.enums import ModelProvider
 from vidbyte.lib.registries.pricing import ModelPricing
 
@@ -39,10 +39,10 @@ class AnthropicUsage(ProviderUsage):
     def from_usage_payload(cls, payload: Mapping[str, Any]) -> "AnthropicUsage | None":
         # Parses an Anthropic Messages usage dict; None when no token fields exist.
         usage = cls(
-            input_tokens=int_or_none(payload.get("input_tokens")),
-            output_tokens=int_or_none(payload.get("output_tokens")),
-            cache_creation_input_tokens=int_or_none(payload.get("cache_creation_input_tokens")),
-            cache_read_input_tokens=int_or_none(payload.get("cache_read_input_tokens")),
+            input_tokens=cls.coerce_int(payload.get("input_tokens")),
+            output_tokens=cls.coerce_int(payload.get("output_tokens")),
+            cache_creation_input_tokens=cls.coerce_int(payload.get("cache_creation_input_tokens")),
+            cache_read_input_tokens=cls.coerce_int(payload.get("cache_read_input_tokens")),
             raw=payload,
         )
         if usage.total_tokens is None:
@@ -61,7 +61,7 @@ class AnthropicUsage(ProviderUsage):
         # Prices input, cache-write, cache-read, and output as separate buckets.
         if pricing is None or self.total_tokens is None:
             return None
-        input_rate, output_rate, _ = effective_rates(pricing, self.input_tokens)
+        input_rate, output_rate, _ = self.effective_rates(pricing)
         cache_write_rate = pricing.cache_write_per_million or input_rate
         cache_read_rate = pricing.cache_read_per_million or input_rate
         return (

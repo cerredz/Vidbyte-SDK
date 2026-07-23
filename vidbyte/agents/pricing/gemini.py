@@ -20,7 +20,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
-from vidbyte.agents.pricing.base import ProviderUsage, int_or_none, subset_billing_cost, usage_for
+from vidbyte.agents.pricing.base import ProviderUsage, usage_for
 from vidbyte.lib.enums import ModelProvider
 from vidbyte.lib.registries.pricing import ModelPricing
 
@@ -41,11 +41,11 @@ class GeminiUsage(ProviderUsage):
     def from_usage_payload(cls, payload: Mapping[str, Any]) -> "GeminiUsage | None":
         # Parses a Gemini usageMetadata dict; None when no token fields exist.
         usage = cls(
-            prompt_tokens=int_or_none(payload.get("promptTokenCount")),
-            candidates_tokens=int_or_none(payload.get("candidatesTokenCount")),
-            thoughts_tokens=int_or_none(payload.get("thoughtsTokenCount")),
-            cached_content_tokens=int_or_none(payload.get("cachedContentTokenCount")),
-            reported_total_tokens=int_or_none(payload.get("totalTokenCount")),
+            prompt_tokens=cls.coerce_int(payload.get("promptTokenCount")),
+            candidates_tokens=cls.coerce_int(payload.get("candidatesTokenCount")),
+            thoughts_tokens=cls.coerce_int(payload.get("thoughtsTokenCount")),
+            cached_content_tokens=cls.coerce_int(payload.get("cachedContentTokenCount")),
+            reported_total_tokens=cls.coerce_int(payload.get("totalTokenCount")),
             raw=payload,
         )
         if usage.total_tokens is None:
@@ -65,6 +65,11 @@ class GeminiUsage(ProviderUsage):
         return (self.candidates_tokens or 0) + (self.thoughts_tokens or 0)
 
     @property
+    def cached_input_tokens(self) -> int | None:
+        # Maps Gemini's cached-content bucket onto the shared cached-input subset.
+        return self.cached_content_tokens
+
+    @property
     def total_tokens(self) -> int | None:
         # Prefers the reported total, else sums prompt and output components.
         if self.reported_total_tokens is not None:
@@ -75,7 +80,7 @@ class GeminiUsage(ProviderUsage):
 
     def cost_usd(self, pricing: ModelPricing | None) -> float | None:
         # Prices uncached prompt at input rate and cached content at cache-read rate.
-        return subset_billing_cost(self.prompt_tokens, self.output_tokens, self.cached_content_tokens, pricing)
+        return self.subset_billing_cost(pricing)
 
 
 __all__ = ["GeminiUsage"]

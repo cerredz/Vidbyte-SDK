@@ -20,7 +20,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
-from vidbyte.agents.pricing.base import ProviderUsage, int_or_none, subset_billing_cost, usage_for
+from vidbyte.agents.pricing.base import ProviderUsage, usage_for
 from vidbyte.lib.enums import ModelProvider
 from vidbyte.lib.registries.pricing import ModelPricing
 
@@ -46,9 +46,9 @@ class ChatCompletionUsage(ProviderUsage):
     def from_usage_payload(cls, payload: Mapping[str, Any]) -> "ChatCompletionUsage | None":
         # Parses a chat-completions usage dict; None when no token fields exist.
         usage = cls(
-            input_tokens=int_or_none(payload.get("prompt_tokens")),
-            output_tokens=int_or_none(payload.get("completion_tokens")),
-            total_tokens=int_or_none(payload.get("total_tokens")),
+            input_tokens=cls.coerce_int(payload.get("prompt_tokens")),
+            output_tokens=cls.coerce_int(payload.get("completion_tokens")),
+            total_tokens=cls.coerce_int(payload.get("total_tokens")),
             cached_input_tokens=cls._cached_input(payload),
             reasoning_tokens=cls._reasoning(payload),
             raw=payload,
@@ -62,13 +62,13 @@ class ChatCompletionUsage(ProviderUsage):
         # Reads cached input from OpenAI-style details, DeepSeek, or Kimi fields.
         details = payload.get("prompt_tokens_details")
         if isinstance(details, Mapping):
-            cached = int_or_none(details.get("cached_tokens"))
+            cached = cls.coerce_int(details.get("cached_tokens"))
             if cached is not None:
                 return cached
-        cache_hit = int_or_none(payload.get("prompt_cache_hit_tokens"))
+        cache_hit = cls.coerce_int(payload.get("prompt_cache_hit_tokens"))
         if cache_hit is not None:
             return cache_hit
-        return int_or_none(payload.get("cached_tokens"))
+        return cls.coerce_int(payload.get("cached_tokens"))
 
     @classmethod
     def _reasoning(cls, payload: Mapping[str, Any]) -> int | None:
@@ -76,11 +76,11 @@ class ChatCompletionUsage(ProviderUsage):
         details = payload.get("completion_tokens_details")
         if not isinstance(details, Mapping):
             return None
-        return int_or_none(details.get("reasoning_tokens"))
+        return cls.coerce_int(details.get("reasoning_tokens"))
 
     def cost_usd(self, pricing: ModelPricing | None) -> float | None:
         # Prices uncached input at input rate and cached input at cache-read rate.
-        return subset_billing_cost(self.input_tokens, self.output_tokens, self.cached_input_tokens, pricing)
+        return self.subset_billing_cost(pricing)
 
 
 __all__ = ["ChatCompletionUsage"]

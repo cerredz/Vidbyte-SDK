@@ -7,9 +7,9 @@ Purpose:
     once and the agent API can expose live and final usage/cost rollups.
 Architecture:
     - UsageTracker: Mutable per-run store; defensively parses duck-typed
-      responses, prices via ModelPricingRegistry, notifies on_usage callbacks.
+      responses and prices them via ModelPricingRegistry.
 Key Functions:
-    - record_call: Parses, prices, stores, and broadcasts one model call.
+    - record_call: Parses, prices, and stores one model call.
     - rollup: Folds the ledger into an immutable UsageRollup.
     - reset: Clears the ledger at the start of a new run.
 Relations:
@@ -21,7 +21,7 @@ Similar Files:
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Iterable, Mapping
 
 from vidbyte.agents.pricing.base import parse_usage
 from vidbyte.agents.pricing.records import UsageRecord, UsageRollup
@@ -32,12 +32,10 @@ from vidbyte.lib.registries.pricing import ModelPricingRegistry
 class UsageTracker:
     """Accumulates priced usage records for one agent run."""
 
-    def __init__(self, *, pricing: ModelPricingRegistry | None = None, on_usage: Callable[[UsageRecord], None] | None = None) -> None:
-        # Bind the pricing registry and optional per-call callback for this tracker.
+    def __init__(self, *, pricing: ModelPricingRegistry | None = None) -> None:
+        # Bind the pricing registry for this tracker; defaults to the built-in table.
         self._pricing = pricing or ModelPricingRegistry.default()
-        self._on_usage = on_usage
         self._records: list[UsageRecord] = []
-        self._callback_errors: list[Exception] = []
 
     def record_call(self, response: object) -> UsageRecord | None:
         # Parses, prices, and stores one model call; returns None when unusable.
@@ -55,7 +53,6 @@ class UsageTracker:
             cost_usd=usage.cost_usd(self._pricing.resolve(provider, str(model))),
         )
         self._records.append(record)
-        self._notify(record)
         return record
 
     def rollup(self) -> UsageRollup:
@@ -72,28 +69,13 @@ class UsageTracker:
         )
 
     def reset(self) -> None:
-        # Clears all recorded calls and callback errors for a fresh run.
+        # Clears all recorded calls for a fresh run.
         self._records.clear()
-        self._callback_errors.clear()
 
     @property
     def records(self) -> tuple[UsageRecord, ...]:
         # Returns the immutable per-call ledger recorded so far.
         return tuple(self._records)
-
-    @property
-    def callback_errors(self) -> tuple[Exception, ...]:
-        # Returns exceptions raised by the on_usage callback, captured not raised.
-        return tuple(self._callback_errors)
-
-    def _notify(self, record: UsageRecord) -> None:
-        # Invokes the on_usage callback, capturing failures instead of breaking runs.
-        if self._on_usage is None:
-            return
-        try:
-            self._on_usage(record)
-        except Exception as exc:
-            self._callback_errors.append(exc)
 
 
 def _sum_or_none(values: Iterable[int | float | None]) -> int | float | None:
