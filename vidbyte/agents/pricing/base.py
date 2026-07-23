@@ -93,13 +93,12 @@ def parse_usage(provider: ModelProvider | str | None, payload: Mapping[str, Any]
 
 def effective_rates(pricing: ModelPricing, input_tokens: int | None) -> tuple[float, float, float]:
     # Returns (input, output, cache-read) rates, using the over-threshold tier when
-    # the call's input exceeds it; cache-read scales with the active input rate.
+    # the call's input crosses it; cache-read scales with the active input rate.
     input_rate = pricing.input_per_million
     output_rate = pricing.output_per_million
     if (
-        pricing.threshold_tokens is not None
-        and input_tokens is not None
-        and input_tokens > pricing.threshold_tokens
+        input_tokens is not None
+        and _over_threshold(pricing, input_tokens)
         and pricing.input_over_threshold_per_million is not None
         and pricing.output_over_threshold_per_million is not None
     ):
@@ -111,6 +110,15 @@ def effective_rates(pricing: ModelPricing, input_tokens: int | None) -> tuple[fl
     else:
         cache_read_rate = cache_read_rate * (input_rate / pricing.input_per_million)
     return input_rate, output_rate, cache_read_rate
+
+
+def _over_threshold(pricing: ModelPricing, input_tokens: int) -> bool:
+    # True when input crosses into the over-threshold tier, honoring inclusivity (xAI uses >=).
+    if pricing.threshold_tokens is None:
+        return False
+    if pricing.threshold_inclusive:
+        return input_tokens >= pricing.threshold_tokens
+    return input_tokens > pricing.threshold_tokens
 
 
 def subset_billing_cost(input_tokens: int | None, output_tokens: int | None, cached_input_tokens: int | None, pricing: ModelPricing | None) -> float | None:

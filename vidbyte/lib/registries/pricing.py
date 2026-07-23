@@ -42,22 +42,28 @@ class ModelPricing:
     threshold_tokens: int | None = None
     input_over_threshold_per_million: float | None = None
     output_over_threshold_per_million: float | None = None
+    threshold_inclusive: bool = False
 
 
 PRICING_AS_OF: str = "2026-07-22"
 
 # Rates verified against official provider pricing pages on PRICING_AS_OF.
 # Providers/models with unverifiable rates are omitted so cost resolves to None
-# instead of a guessed number (GLM, MiniMax, OpenRouter marketplace models, and
-# alias-only names such as grok-4).
+# instead of a guessed number (OpenRouter marketplace models, and alias-only
+# default names such as grok-4 and openrouter/auto that do not name a priced SKU).
+# threshold_inclusive marks providers whose over-threshold tier applies at exactly
+# the threshold (xAI, "prompt >= 200k"); the default False keeps the strict ">"
+# boundary used by OpenAI, Gemini, and MiniMax.
 PROVIDER_PRICING: dict[ModelProvider, dict[str, ModelPricing]] = {
+    # OpenAI charges the long-context tier (input x2, output x1.5) for the whole
+    # request once prompt input exceeds 272k tokens; sub-272k uses the short rate.
     ModelProvider.OPENAI: {
-        "gpt-5.6-sol": ModelPricing(input_per_million=5.0, output_per_million=30.0, cache_read_per_million=0.5),
-        "gpt-5.6-terra": ModelPricing(input_per_million=2.5, output_per_million=15.0, cache_read_per_million=0.25),
-        "gpt-5.6-luna": ModelPricing(input_per_million=1.0, output_per_million=6.0, cache_read_per_million=0.1),
-        "gpt-5.5": ModelPricing(input_per_million=5.0, output_per_million=30.0, cache_read_per_million=0.5),
+        "gpt-5.6-sol": ModelPricing(input_per_million=5.0, output_per_million=30.0, cache_read_per_million=0.5, threshold_tokens=272_000, input_over_threshold_per_million=10.0, output_over_threshold_per_million=45.0),
+        "gpt-5.6-terra": ModelPricing(input_per_million=2.5, output_per_million=15.0, cache_read_per_million=0.25, threshold_tokens=272_000, input_over_threshold_per_million=5.0, output_over_threshold_per_million=22.5),
+        "gpt-5.6-luna": ModelPricing(input_per_million=1.0, output_per_million=6.0, cache_read_per_million=0.1, threshold_tokens=272_000, input_over_threshold_per_million=2.0, output_over_threshold_per_million=9.0),
+        "gpt-5.5": ModelPricing(input_per_million=5.0, output_per_million=30.0, cache_read_per_million=0.5, threshold_tokens=272_000, input_over_threshold_per_million=10.0, output_over_threshold_per_million=45.0),
         "gpt-5.5-pro": ModelPricing(input_per_million=30.0, output_per_million=180.0),
-        "gpt-5.4": ModelPricing(input_per_million=2.5, output_per_million=15.0, cache_read_per_million=0.25),
+        "gpt-5.4": ModelPricing(input_per_million=2.5, output_per_million=15.0, cache_read_per_million=0.25, threshold_tokens=272_000, input_over_threshold_per_million=5.0, output_over_threshold_per_million=22.5),
         "gpt-5.4-mini": ModelPricing(input_per_million=0.75, output_per_million=4.5, cache_read_per_million=0.075),
         "gpt-5.4-nano": ModelPricing(input_per_million=0.2, output_per_million=1.25, cache_read_per_million=0.02),
         "gpt-5.4-pro": ModelPricing(input_per_million=30.0, output_per_million=180.0),
@@ -78,17 +84,34 @@ PROVIDER_PRICING: dict[ModelProvider, dict[str, ModelPricing]] = {
         "gemini-3.6-flash": ModelPricing(input_per_million=1.5, output_per_million=7.5, cache_read_per_million=0.15),
         "gemini-3.1-pro-preview": ModelPricing(input_per_million=2.0, output_per_million=12.0, cache_read_per_million=0.2, threshold_tokens=200_000, input_over_threshold_per_million=4.0, output_over_threshold_per_million=18.0),
     },
+    # xAI applies the high tier at prompts >= 200k (inclusive), unlike the ">" boundary
+    # used by the other tiered providers, so these entries set threshold_inclusive.
     ModelProvider.XAI: {
-        "grok-4.5": ModelPricing(input_per_million=2.0, output_per_million=6.0, cache_read_per_million=0.3, threshold_tokens=200_000, input_over_threshold_per_million=4.0, output_over_threshold_per_million=12.0),
-        "grok-4.3": ModelPricing(input_per_million=1.25, output_per_million=2.5, cache_read_per_million=0.2, threshold_tokens=200_000, input_over_threshold_per_million=2.5, output_over_threshold_per_million=5.0),
-        "grok-build-0.1": ModelPricing(input_per_million=1.0, output_per_million=2.0, cache_read_per_million=0.2, threshold_tokens=200_000, input_over_threshold_per_million=2.0, output_over_threshold_per_million=4.0),
+        "grok-4.5": ModelPricing(input_per_million=2.0, output_per_million=6.0, cache_read_per_million=0.3, threshold_tokens=200_000, input_over_threshold_per_million=4.0, output_over_threshold_per_million=12.0, threshold_inclusive=True),
+        "grok-4.3": ModelPricing(input_per_million=1.25, output_per_million=2.5, cache_read_per_million=0.2, threshold_tokens=200_000, input_over_threshold_per_million=2.5, output_over_threshold_per_million=5.0, threshold_inclusive=True),
+        "grok-build-0.1": ModelPricing(input_per_million=1.0, output_per_million=2.0, cache_read_per_million=0.2, threshold_tokens=200_000, input_over_threshold_per_million=2.0, output_over_threshold_per_million=4.0, threshold_inclusive=True),
     },
     ModelProvider.DEEPSEEK: {
         "deepseek-v4-pro": ModelPricing(input_per_million=0.435, output_per_million=0.87, cache_read_per_million=0.003625),
         "deepseek-v4-flash": ModelPricing(input_per_million=0.14, output_per_million=0.28, cache_read_per_million=0.0028),
     },
-    ModelProvider.GLM: {},
-    ModelProvider.MINIMAX: {},
+    # GLM first-party (Z.ai) rates; no context tiers published.
+    ModelProvider.GLM: {
+        "glm-5.2": ModelPricing(input_per_million=1.4, output_per_million=4.4, cache_read_per_million=0.26),
+        "glm-5.1": ModelPricing(input_per_million=1.4, output_per_million=4.4, cache_read_per_million=0.26),
+        "glm-5-turbo": ModelPricing(input_per_million=1.2, output_per_million=4.0, cache_read_per_million=0.24),
+        "glm-5": ModelPricing(input_per_million=1.0, output_per_million=3.2, cache_read_per_million=0.2),
+        "glm-4.7": ModelPricing(input_per_million=0.6, output_per_million=2.2, cache_read_per_million=0.11),
+        "glm-4.6": ModelPricing(input_per_million=0.6, output_per_million=2.2, cache_read_per_million=0.11),
+        "glm-4.5": ModelPricing(input_per_million=0.6, output_per_million=2.2, cache_read_per_million=0.11),
+    },
+    # MiniMax M3 standard-tier rates reflect the "permanent 50% off" promo over the
+    # $0.60/$2.40 list price; the >512k long-context tier doubles input and output.
+    ModelProvider.MINIMAX: {
+        "MiniMax-M3": ModelPricing(input_per_million=0.3, output_per_million=1.2, cache_read_per_million=0.06, threshold_tokens=512_000, input_over_threshold_per_million=0.6, output_over_threshold_per_million=2.4),
+        "MiniMax-M2.7-highspeed": ModelPricing(input_per_million=0.6, output_per_million=2.4, cache_read_per_million=0.06, cache_write_per_million=0.375),
+        "MiniMax-M2.7": ModelPricing(input_per_million=0.3, output_per_million=1.2, cache_read_per_million=0.06, cache_write_per_million=0.375),
+    },
     ModelProvider.KIMI: {
         "kimi-k2.7-code": ModelPricing(input_per_million=0.95, output_per_million=4.0, cache_read_per_million=0.19),
         "kimi-k2.7-code-highspeed": ModelPricing(input_per_million=1.9, output_per_million=8.0, cache_read_per_million=0.38),
@@ -96,6 +119,10 @@ PROVIDER_PRICING: dict[ModelProvider, dict[str, ModelPricing]] = {
     # OpenRouter models are priced per-generation by the marketplace; the SDK
     # prefers the provider-reported usage.cost over table math for this provider.
     ModelProvider.OPENROUTER: {},
+    # Meta Model API (OpenAI-compatible); Muse Spark 1.1 is flat-rate, no context tier.
+    ModelProvider.META: {
+        "muse-spark-1.1": ModelPricing(input_per_million=1.25, output_per_million=4.25, cache_read_per_million=0.15),
+    },
 }
 
 
