@@ -12,6 +12,7 @@ Architecture:
     - PermissionDeniedError: Raised when a policy refuses a tool call.
     - McpProtocolError: Raised when an MCP transport returns malformed data.
     - AgentExecutionError: Raised when an agent cannot generate a reply.
+    - AllModelsFailedError: Raised when every model in a fallback chain has failed.
     - MultiAgentExecutionError: Base exception for team controller failures.
     - TaskLedgerError: Raised when a ledger invariant or transition is rejected.
     - AgentTransferError: Raised at developer-defined worker transfer boundaries.
@@ -38,7 +39,7 @@ Relations:
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 
@@ -70,6 +71,16 @@ class McpProtocolError(VidbyteSdkError):
 
 class AgentExecutionError(VidbyteSdkError):
     """Raised when an agent cannot generate a reply."""
+
+
+class AllModelsFailedError(AgentExecutionError):
+    """Raised when every model in an agent's fallback chain has failed."""
+
+    def __init__(self, message: str, *, attempts: Sequence[Mapping[str, str]], errors: Sequence[BaseException]) -> None:
+        # Records the ordered per-model attempt log and the matching errors, without any credential material.
+        self.attempts = tuple(dict(attempt) for attempt in attempts)
+        self.errors = tuple(errors)
+        super().__init__(message, details={"attempts": list(self.attempts), "attempt_count": len(self.attempts)})
 
 
 class MultiAgentExecutionError(AgentExecutionError):

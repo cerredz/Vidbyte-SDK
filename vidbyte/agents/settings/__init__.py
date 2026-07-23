@@ -7,14 +7,16 @@ Purpose:
     parameters.
 Architecture:
     - AgentLoopSettings: Main loop settings object.
+    - AgentFallbackSettings: Ordered model fallback chain for an agent.
     - ToolErrorPolicy: Nested policy for tool-error retry/render behavior.
     - ToolSettings: Nested universal tool-use constraints.
 Relations:
     Re-exported from vidbyte.agents.__init__.
 """
 
+from vidbyte.agents.settings.fallback import AgentFallbackSettings
 from vidbyte.agents.settings.loop import AgentLoopSettings
 from vidbyte.agents.settings.tool import ToolSettings
 from vidbyte.agents.settings.tool_error import ToolErrorPolicy, UnrecoverableAction
 
-__all__ = ["AgentLoopSettings", "ToolErrorPolicy", "ToolSettings", "UnrecoverableAction"]
+__all__ = ["AgentFallbackSettings", "AgentLoopSettings", "ToolErrorPolicy", "ToolSettings", "UnrecoverableAction"]

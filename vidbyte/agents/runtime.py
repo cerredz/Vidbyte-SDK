@@ -25,6 +25,7 @@ from collections.abc import Callable, Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from vidbyte.agents.fallback import AgentFallback, FallbackTransform
     from vidbyte.agents.settings.tool import ToolSettings
 
 from vidbyte.agents.context_algorithms import AgentRuntimeContextAlgorithms
@@ -39,7 +40,7 @@ from vidbyte.lib.dataclasses.middleware import MiddlewareAction, MiddlewareConte
 from vidbyte.lib.dataclasses.runner import RunnerHandle
 from vidbyte.providers.output_schema import OutputSchemaFormatter
 from vidbyte.lib.enums import ModelModality
-from vidbyte.lib.errors import PermissionDeniedError, ToolExecutionError, ToolRegistryError
+from vidbyte.lib.errors import AllModelsFailedError, PermissionDeniedError, ToolExecutionError, ToolRegistryError
 from vidbyte.lib.token_usage import token_usage_from_response
 from vidbyte.lib.tools import ToolsFormatter
 from vidbyte.agents.pricing import UsageTracker
@@ -60,7 +61,7 @@ from vidbyte.tools.types import ToolCall, ToolCallContext, ToolCallState, ToolRe
 class AgentRuntime:
     """Internal runtime for direct agent execution."""
 
-    def __init__(self, *, agent_name: str, system_prompt: str, tools: Tools, permission_policy: PermissionPolicy, config: AgentRuntimeConfig | None = None, tracer: TracerBase | None = None, middleware: Sequence[AgentMiddleware] = (), run_id: str | None = None, algorithm: ContextWindowAlgorithm | str | None = None, context_manager: ContextManager | None = None, recorder: RecorderBase | None = None, output_schema: type | Mapping[str, Any] | None = None, output_contract: "AgentLoopSettingsOutputContract | None" = None, include_internal_tools: bool = True, usage_tracker: UsageTracker | None = None) -> None:
+    def __init__(self, *, agent_name: str, system_prompt: str, tools: Tools, permission_policy: PermissionPolicy, config: AgentRuntimeConfig | None = None, tracer: TracerBase | None = None, middleware: Sequence[AgentMiddleware] = (), run_id: str | None = None, algorithm: ContextWindowAlgorithm | str | None = None, context_manager: ContextManager | None = None, recorder: RecorderBase | None = None, output_schema: type | Mapping[str, Any] | None = None, output_contract: "AgentLoopSettingsOutputContract | None" = None, include_internal_tools: bool = True, usage_tracker: UsageTracker | None = None, fallback: "AgentFallback | None" = None) -> None:
         # Configure one direct runtime; isolated review child runtimes may disable implicit internal tools.
         self.agent_name = agent_name
         self.system_prompt = system_prompt
@@ -78,6 +79,7 @@ class AgentRuntime:
         self._schema_formatter = OutputSchemaFormatter()
         self.output_contract = output_contract or AgentLoopSettingsOutputContract(())
         self.usage_tracker = usage_tracker or UsageTracker()
+        self.fallback = fallback
 
     def _context_window_admission_middleware(self) -> tuple[AgentMiddleware, ...]:
         # Returns compatibility middleware for legacy tool-result admission presets.
@@ -182,6 +184,9 @@ class AgentRuntime:
         run_state: dict[type, Any] = {}
         iteration_outputs: list[str] = []
         active_trace_context = trace_context
+        fallback_index = 0
+        fallback_attempts: list[dict[str, str]] = []
+        fallback_errors: list[BaseException] = []
 
         decision = await self.middleware.before_run(
             self._middleware_context(
@@ -332,7 +337,27 @@ class AgentRuntime:
                 )
             except BaseException as exc:
                 self._end_semantic_span(iteration_span, error=exc)
-                raise
+                transition = self._fallback_transition(
+                    exc,
+                    index=fallback_index,
+                    handle=handle,
+                    provider=provider,
+                    messages=messages,
+                    attempts=fallback_attempts,
+                    errors=fallback_errors,
+                    parent_span=trace_context,
+                )
+                if transition is None:
+                    raise
+                handle, provider = transition.handle, transition.provider
+                tool_schemas, messages = transition.tool_schemas, transition.messages
+                fallback_index = transition.index
+                # A non-None transition proves self.fallback is set, so this needs no further guard.
+                self._publish_fallback_metadata(
+                    run_state,
+                    self.fallback.result_metadata(fallback_attempts, context_reset=transition.context_reset),
+                )
+                continue
             self._end_semantic_span(iteration_span, output=handle.extract_text(raw_result))
             if isinstance(raw_result, AgentResult):
                 return await self._finish_result(
@@ -728,6 +753,48 @@ class AgentRuntime:
                 # llm.call span is always finalized before propagating.
                 self._tracer.end_span(llm_span, error=exc)
                 raise
+
+    def _fallback_transition(self, error: BaseException, *, index: int, handle: RunnerHandle, provider: str, messages: list[dict[str, Any]], attempts: list[dict[str, str]], errors: list[BaseException], parent_span: SpanContext | None) -> "FallbackTransform | None":
+        """Return rebuilt state for the next model in the chain, or None when the caller must re-raise."""
+        if self.fallback is None or not self.fallback.is_model_error(error):
+            return None
+        next_index = self.fallback.advance(error, index)
+        if next_index is None:
+            self._raise_chain_exhausted(error, attempts=attempts, errors=errors)
+            return None
+        errors.append(error)
+        attempts.append(self.fallback.attempt_record(index, next_index, error))
+        transition = self.fallback.transform(handle, provider, self.tools, messages, next_index)
+        self._record_fallback_span(attempts[-1], transition.context_reset, parent_span)
+        return transition
+
+    def _raise_chain_exhausted(self, error: BaseException, *, attempts: Sequence[Mapping[str, str]], errors: Sequence[BaseException]) -> None:
+        # Only a spent chain becomes AllModelsFailedError; a chain that never switched re-raises untouched.
+        if not attempts:
+            return
+        raise AllModelsFailedError(
+            f"Agent '{self.agent_name}' exhausted its fallback chain after {len(attempts)} model switch(es).",
+            attempts=attempts,
+            errors=[*errors, error],
+        ) from errors[0]
+
+    def _record_fallback_span(self, attempt: Mapping[str, str], context_reset: bool, parent_span: SpanContext | None) -> None:
+        # Records a short span so a model switch is visible without diffing llm.call spans.
+        span = self._start_semantic_span(
+            "agent.fallback",
+            parent=parent_span,
+            agent_name=self.agent_name,
+            **{key: str(value) for key, value in attempt.items()},
+            context_reset=context_reset,
+        )
+        self._end_semantic_span(span, output=str(attempt.get("to", "")))
+
+    @staticmethod
+    def _publish_fallback_metadata(run_state: dict[type, Any], record: Mapping[str, Any]) -> None:
+        # Publishes the switch log through the generic run_state channel _with_run_state_metadata already lifts.
+        published = run_state.get("__result_metadata__")
+        base = dict(published) if isinstance(published, Mapping) else {}
+        run_state["__result_metadata__"] = {**base, "fallback": dict(record)}
 
     async def _finish_result(
         self,
