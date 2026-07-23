@@ -19,6 +19,7 @@ from collections.abc import Callable, Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
 from vidbyte.agents.mixins import McpAttachableMixin
+from vidbyte.agents.pricing import UsageRecord, UsageRollup, UsageTracker
 from vidbyte.agents.settings import AgentLoopSettings
 from vidbyte.agents.types import AgentCard, AgentInput, AgentMessage
 from vidbyte.context.manager import ContextManager
@@ -33,6 +34,7 @@ from vidbyte.lib.dataclasses.trace import TraceOption
 from vidbyte.lib.constants import RUNNER_TYPE_TEXT
 from vidbyte.lib.enums import AgentRuntimeType, ModelProvider
 from vidbyte.lib.errors import AgentExecutionError, ConfigurationError
+from vidbyte.lib.registries.pricing import ModelPricingRegistry
 from vidbyte.lib.runners import Runner
 from vidbyte.lib.tracing import NullTracer, TracerBase
 from vidbyte.agents.runtimes.configs import ActorRuntime, LinearRuntime, MctsSearchRuntime
@@ -81,11 +83,17 @@ class BaseAgent(McpAttachableMixin):
         output_schema: type | Mapping[str, Any] | None = None,
         handoff: Handoff | None = None,
         trace_option: TraceOption | None = None,
+        pricing: ModelPricingRegistry | None = None,
+        on_usage: Callable[[UsageRecord], None] | None = None,
     ) -> None:
         if not name:
             raise AgentExecutionError("Agent name cannot be empty.")
         if not system_prompt:
             raise AgentExecutionError("Agent system_prompt is required.")
+        if pricing is not None and not isinstance(pricing, ModelPricingRegistry):
+            raise ConfigurationError("pricing must be a ModelPricingRegistry instance.")
+        if on_usage is not None and not callable(on_usage):
+            raise ConfigurationError("on_usage must be a callable accepting one UsageRecord.")
 
         if isinstance(runtime, (LinearRuntime, MctsSearchRuntime, ActorRuntime)):
             self.runtime_type = runtime.runtime_type
@@ -193,6 +201,7 @@ class BaseAgent(McpAttachableMixin):
         self.last_trace: dict[str, Any] | None = None
         self.last_prompt: str = ""
         self.last_reply: AgentMessage | None = None
+        self._usage_tracker = UsageTracker(pricing=pricing, on_usage=on_usage)
         self._behavior_view: Any = None
         self._active_session: Session | None = None
         self._queued_prompts: list[str] = []
@@ -560,6 +569,7 @@ class BaseAgent(McpAttachableMixin):
             prompt, input_metadata = self._normalize_input(message)
             input_context_items, input_context_manager = self._normalize_input_context(message)
             self._active_prompt = prompt
+            self._usage_tracker.reset()
             self._behavior_view = None
             runner, runner_type = self._runner_for_model()
             trace_ctx = self._tracer.start_trace(
@@ -651,6 +661,14 @@ class BaseAgent(McpAttachableMixin):
         except RuntimeError:
             return asyncio.run(self.generate_reply(message, **options))
         raise AgentExecutionError("BaseAgent.run() cannot be called from an active event loop; use await arun().")
+
+    def get_usage(self) -> UsageRollup:
+        """Return the live or final token-usage rollup for the current or most recent run."""
+        return self._usage_tracker.rollup()
+
+    def get_cost_usd(self) -> float | None:
+        """Return total known USD cost for the current or most recent run, or None."""
+        return self.get_usage().cost_usd
 
     async def arun_sequentially(self, prompts: Sequence[str | AgentInput], **options: Any) -> list[AgentMessage]:
         # Runs each prompt through generate_reply in order, preserving self.history across all calls.
@@ -870,6 +888,7 @@ class BaseAgent(McpAttachableMixin):
 
         if self.runtime_type is AgentRuntimeType.LINEAR:
             kwargs["output_contract"] = self.agent_loop_settings.output_contract
+            kwargs["usage_tracker"] = self._usage_tracker
 
         return runtime_cls(
             agent_name=self.name,
