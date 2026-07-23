@@ -10,7 +10,7 @@ Purpose:
 Architecture:
     - VidbyteSDK: Root namespace client.
     - Agent exports: BaseAgent, AgentCard, AgentMessage, AgentRegistry, AgentRunnerConfig, AgentSpec.
-    - Configuration exports: ConfigurationLoader, AgentSettings, ToolDefinition, MiddlewareDefinition.
+    - Configuration exports: YamlLoader, AgentSettings, ToolDefinition, MiddlewareDefinition.
     - Tool exports: BaseTool, ToolCall, ToolExecutor, ToolParameter, ToolPermission, ToolRegistry, ToolResult, ToolSpec, ToolStatus, ToolsFormatter.
     - MCP exports: McpServerConfig, McpServerHandle, McpToolPermission.
     - Context exports: context contracts plus general problem-solving challenge records.
@@ -88,7 +88,7 @@ from vidbyte.agents import (
 from vidbyte.agents.pricing import ProviderUsage
 from vidbyte.lib.registries import ModelPricing, ModelPricingRegistry, PROVIDER_PRICING
 from vidbyte.client import VidbyteSDK
-from vidbyte.config import AgentSettings, ConfigurationLoader, MiddlewareDefinition, ToolDefinition
+from vidbyte.config import AgentSettings, MiddlewareDefinition, ToolDefinition, YamlLoader
 from vidbyte.harnesses import (
     HARNESS_SCHEMA_VERSION,
     FileTrajectorySink,
@@ -616,7 +616,6 @@ __all__ = [
     "CheckpointTool",
     "RunPromptsSequentiallyTool",
     "ContextWindow",
-    "ConfigurationLoader",
     "ContextWindowAlgorithm",
     "CriticFailurePolicy",
     "ContextWindowPlacement",
@@ -818,6 +817,7 @@ __all__ = [
     "ShortAnswerFactTemplate",
     "StructuredJsonTemplate",
     "WeightedGrader",
+    "YamlLoader",
     "templates",
     "tool",
     "vidbyte_tool",
