@@ -3,12 +3,16 @@
 Description:
     Provides the public class-first YAML configuration loader.
 Purpose:
-    Safely parses versioned YAML documents into validated declarative settings.
+    Safely parses versioned YAML documents into validated declarative settings and offers
+    one central entry point that loads either an agent document or a harness document.
 Architecture:
-    - ConfigurationLoader: Stateless public interface for agent, tool, and middleware documents.
+    - YamlLoader: Stateless public interface with a central load() plus typed loaders.
+    - load()/load_agent()/load_harness()/load_tools()/load_middleware(): parse a document.
+    - view_*(): return the expected document structure without touching the filesystem.
     - _DuplicateKeySafeLoader: SafeLoader variant that rejects ambiguous mappings.
 Relations:
-    Uses vidbyte.config.types and the existing ConfigurationError contract.
+    Builds the dataclasses in vidbyte.lib.dataclasses.config, uses vidbyte.lib.enums for
+    document kinds and loop fields, and delegates harness documents to HarnessConfigLoader.
 Non-Goals:
     Never resolves refs, imports code, interpolates secrets, or creates runtime objects.
 """
@@ -22,27 +26,14 @@ from typing import Any
 import yaml
 from yaml.nodes import MappingNode
 
-from vidbyte.agents.settings import AgentLoopSettings
-from vidbyte.config.types import AgentSettings, MiddlewareDefinition, ToolDefinition
+from vidbyte.harnesses.config import HarnessConfigLoader
+from vidbyte.harnesses.contracts import HARNESS_SCHEMA_VERSION, HarnessSpec
+from vidbyte.lib.dataclasses.config import AgentSettings, MiddlewareDefinition, ToolDefinition
+from vidbyte.lib.enums import ConfigKind
 from vidbyte.lib.errors import ConfigurationError
 
 _SUPPORTED_SUFFIXES = frozenset({".yaml", ".yml"})
-_LOOP_FIELDS = frozenset(
-    {
-        "max_iterations",
-        "max_tokens",
-        "max_tool_calls",
-        "max_queued_prompts",
-        "max_parallel_tool_calls",
-        "max_retries",
-        "timeout_seconds",
-        "context_window_budget",
-        "compaction_trigger_tokens",
-        "compaction_target_tokens",
-        "allowed_tools",
-        "max_contract_rejections",
-    }
-)
+_SUPPORTED_VERSION = 1
 
 
 class _DuplicateKeySafeLoader(yaml.SafeLoader):
@@ -64,183 +55,154 @@ class _DuplicateKeySafeLoader(yaml.SafeLoader):
         return mapping
 
 
-class ConfigurationLoader:
-    """Stateless loader for versioned agent, tool, and middleware YAML documents."""
+class YamlLoader:
+    """Stateless loader for versioned agent, harness, tool, and middleware YAML documents."""
 
-    def load_agent_settings(self, path: str | Path) -> AgentSettings:
+    def load(self, path: str | Path) -> AgentSettings | HarnessSpec | tuple[ToolDefinition, ...] | tuple[MiddlewareDefinition, ...]:
+        # Central entry point: reads one document and dispatches on its declared kind.
+        document_path = self._path(path)
+        document = self._read(document_path)
+        kind = self._detect_kind(document, document_path)
+        if kind is ConfigKind.HARNESS:
+            return self.load_harness(document_path)
+        if kind is ConfigKind.AGENT:
+            return self._load_agent_document(document_path, document)
+        if kind is ConfigKind.TOOLS:
+            return self._load_definitions(document_path, document, ConfigKind.TOOLS, ToolDefinition)
+        return self._load_definitions(document_path, document, ConfigKind.MIDDLEWARE, MiddlewareDefinition)
+
+    def load_agent(self, path: str | Path) -> AgentSettings:
         # Loads one agent document into intrinsic settings without resolving referenced components.
+        document_path = self._path(path)
+        return self._load_agent_document(document_path, self._read(document_path))
+
+    def load_harness(self, path: str | Path) -> HarnessSpec:
+        # Loads one harness document into a validated, content-addressed HarnessSpec.
+        document_path = self._path(path)
         try:
-            document_path, document = self._document(path, "agent")
-            payload = self._mapping(document.get("agent"), document_path, "agent")
-            self._only_fields(payload, {"name", "system_prompt", "provider", "model_name", "runtime", "loop", "tools", "middleware", "description", "capabilities", "metadata"}, document_path, "agent")
-            values = self._required_agent_fields(payload, document_path)
-            loop = self._loop_settings(payload.get("loop", {}), document_path)
-            return self._agent_settings(values, payload, loop, document_path)
+            return HarnessConfigLoader().load(document_path)
         except ConfigurationError as error:
-            error.details.setdefault("expected_kind", "agent")
+            error.details.setdefault("path", str(document_path))
+            error.details.setdefault("expected_kind", ConfigKind.HARNESS.value)
             raise
 
     def load_tools(self, path: str | Path) -> tuple[ToolDefinition, ...]:
         # Loads a tool-definition document without resolving any tool reference into executable code.
-        try:
-            document_path, document = self._document(path, "tools")
-            definitions = self._definition_list(document.get("tools"), "tools", document_path)
-            return tuple(ToolDefinition(**definition) for definition in definitions)
-        except ConfigurationError as error:
-            error.details.setdefault("expected_kind", "tools")
-            raise
-
-    def load_middleware_settings(self, path: str | Path) -> tuple[MiddlewareDefinition, ...]:
-        # Loads middleware declarations without constructing middleware or importing their references.
-        try:
-            document_path, document = self._document(path, "middleware")
-            definitions = self._definition_list(document.get("middleware"), "middleware", document_path)
-            return tuple(MiddlewareDefinition(**definition) for definition in definitions)
-        except ConfigurationError as error:
-            error.details.setdefault("expected_kind", "middleware")
-            raise
-
-    def _document(self, path: str | Path, expected_kind: str) -> tuple[Path, dict[str, Any]]:
-        # Reads one YAML file and validates its shared versioned document envelope.
         document_path = self._path(path)
+        return self._load_definitions(document_path, self._read(document_path), ConfigKind.TOOLS, ToolDefinition)
+
+    def load_middleware(self, path: str | Path) -> tuple[MiddlewareDefinition, ...]:
+        # Loads middleware declarations without constructing middleware or importing their references.
+        document_path = self._path(path)
+        return self._load_definitions(document_path, self._read(document_path), ConfigKind.MIDDLEWARE, MiddlewareDefinition)
+
+    def view_agent(self) -> dict[str, Any]:
+        # Returns the document structure an agent .yaml file must follow.
+        return AgentSettings.expected_structure()
+
+    def view_harness(self) -> dict[str, Any]:
+        # Returns the document structure a harness .yaml file must follow.
+        return {
+            "schema_version": HARNESS_SCHEMA_VERSION,
+            "harness": {"type": "<harness-type>"},
+            "agents": [{"name": "<agent-name>", "provider": "<provider>", "model": "<model>", "system_prompt": "<prompt-or-$file>", "params": {}, "tools": []}],
+            "orchestration": {},
+            "metadata": {},
+        }
+
+    def view_tools(self) -> dict[str, Any]:
+        # Returns the document structure a tools .yaml file must follow.
+        return {"version": _SUPPORTED_VERSION, "kind": ConfigKind.TOOLS.value, "tools": [ToolDefinition.expected_structure()]}
+
+    def view_middleware(self) -> dict[str, Any]:
+        # Returns the document structure a middleware .yaml file must follow.
+        return {"version": _SUPPORTED_VERSION, "kind": ConfigKind.MIDDLEWARE.value, "middleware": [MiddlewareDefinition.expected_structure()]}
+
+    def _load_agent_document(self, path: Path, document: dict[str, Any]) -> AgentSettings:
+        # Validates the agent envelope and delegates field validation to AgentSettings.
         try:
-            loaded = yaml.load(document_path.read_text(encoding="utf-8"), Loader=_DuplicateKeySafeLoader)
+            body = self._envelope(document, ConfigKind.AGENT, path)
+            return AgentSettings.from_mapping(body, "agent")
+        except ConfigurationError as error:
+            self._enrich(error, path, ConfigKind.AGENT)
+            raise
+
+    def _load_definitions(self, path: Path, document: dict[str, Any], kind: ConfigKind, definition: type[ToolDefinition | MiddlewareDefinition]) -> tuple[Any, ...]:
+        # Validates a definition-list envelope and builds each entry through its dataclass.
+        try:
+            body = self._envelope(document, kind, path)
+            if not isinstance(body, list):
+                raise ConfigurationError(f"'{kind.value}' must be a list.", details={"field": kind.value, "actual_type": type(body).__name__})
+            items = tuple(definition.from_mapping(entry, f"{kind.value}[{index}]") for index, entry in enumerate(body))
+            self._reject_duplicate_refs(items, kind)
+            return items
+        except ConfigurationError as error:
+            self._enrich(error, path, kind)
+            raise
+
+    def _envelope(self, document: Mapping[str, Any], kind: ConfigKind, path: Path) -> Any:
+        # Validates the shared ``version``/``kind`` envelope and returns the typed body.
+        allowed = {"version", "kind", kind.value}
+        unknown = sorted(set(document).difference(allowed))
+        if unknown:
+            raise ConfigurationError(f"Document contains unsupported top-level field(s): {', '.join(unknown)}.", details={"field": unknown[0], "allowed": sorted(allowed)})
+        version = document.get("version")
+        if isinstance(version, bool) or not isinstance(version, int) or version != _SUPPORTED_VERSION:
+            raise ConfigurationError(f"Document 'version' must be the supported integer {_SUPPORTED_VERSION}.", details={"field": "version", "found": version})
+        if document.get("kind") != kind.value:
+            raise ConfigurationError(f"Document 'kind' must be {kind.value!r}.", details={"field": "kind", "found": document.get("kind"), "expected": kind.value})
+        if kind.value not in document:
+            raise ConfigurationError(f"Document is missing its '{kind.value}' body.", details={"field": kind.value})
+        return document[kind.value]
+
+    def _detect_kind(self, document: Mapping[str, Any], path: Path) -> ConfigKind:
+        # Chooses the document kind from its declared envelope for the central load() dispatch.
+        if "kind" in document:
+            raw = document.get("kind")
+            try:
+                return ConfigKind(raw)
+            except (TypeError, ValueError) as error:
+                supported = sorted(member.value for member in ConfigKind)
+                raise ConfigurationError(f"Document 'kind' must be one of {supported}.", details={"path": str(path), "field": "kind", "found": raw}) from error
+        if "schema_version" in document or "harness" in document:
+            return ConfigKind.HARNESS
+        raise ConfigurationError(
+            "Document does not declare a configuration kind; expected an agent/tools/middleware document with a 'kind' field or a harness document with a 'schema_version' field.",
+            details={"path": str(path), "field": "kind"},
+        )
+
+    def _read(self, path: Path) -> dict[str, Any]:
+        # Reads one YAML file into a validated top-level mapping with duplicate keys rejected.
+        try:
+            loaded = yaml.load(path.read_text(encoding="utf-8"), Loader=_DuplicateKeySafeLoader)
         except (OSError, UnicodeError, yaml.YAMLError) as error:
-            self._error("Unable to read a valid YAML configuration document.", document_path, "document", error)
-        payload = self._mapping(loaded, document_path, "document")
-        self._only_fields(payload, {"version", "kind", expected_kind}, document_path, "document")
-        self._version(payload.get("version"), document_path)
-        self._kind(payload.get("kind"), expected_kind, document_path)
-        return document_path, payload
+            raise ConfigurationError(f"Unable to read a valid YAML document: {error}", details={"path": str(path), "field": "document"}) from error
+        if not isinstance(loaded, Mapping) or not all(isinstance(key, str) for key in loaded):
+            raise ConfigurationError("Document root must be a mapping with string keys.", details={"path": str(path), "field": "document", "actual_type": type(loaded).__name__})
+        return dict(loaded)
 
     def _path(self, value: str | Path) -> Path:
         # Validates the public path type and extension before attempting file access.
         if not isinstance(value, (str, Path)):
-            raise ConfigurationError("Configuration path must be a string or pathlib.Path.", details={"field": "path"})
+            raise ConfigurationError("Configuration path must be a string or pathlib.Path.", details={"field": "path", "actual_type": type(value).__name__})
         path = Path(value)
         if path.suffix.lower() not in _SUPPORTED_SUFFIXES:
-            raise ConfigurationError("Configuration files must use a .yaml or .yml extension.", details={"path": str(path), "field": "path"})
+            raise ConfigurationError("Configuration files must use a .yaml or .yml extension.", details={"path": str(path), "field": "path", "suffix": path.suffix})
         return path
 
-    def _required_agent_fields(self, payload: Mapping[str, Any], path: Path) -> dict[str, str]:
-        # Extracts the required agent identity and provider/model fields from a document payload.
-        required = ("name", "system_prompt", "provider", "model_name")
-        values: dict[str, str] = {}
-        for field_name in required:
-            value = payload.get(field_name)
-            if not isinstance(value, str) or not value.strip():
-                self._error("Agent configuration requires a non-blank string.", path, f"agent.{field_name}")
-            values[field_name] = value
-        return values
-
-    def _loop_settings(self, value: object, path: Path) -> AgentLoopSettings:
-        # Converts the YAML-compatible loop subset to the SDK's existing validated settings object.
-        loop = self._mapping(value, path, "agent.loop")
-        self._only_fields(loop, _LOOP_FIELDS, path, "agent.loop")
-        if "allowed_tools" in loop:
-            allowed_tools = loop["allowed_tools"]
-            if isinstance(allowed_tools, str) or not isinstance(allowed_tools, list) or not all(isinstance(item, str) for item in allowed_tools):
-                self._error("agent.loop.allowed_tools must be a list of strings.", path, "agent.loop.allowed_tools")
-            loop["allowed_tools"] = tuple(allowed_tools)
-        try:
-            return AgentLoopSettings(**loop)
-        except (TypeError, ValueError, ConfigurationError) as error:
-            self._error("Agent loop settings are invalid.", path, "agent.loop", error)
-
-    def _agent_settings(self, values: Mapping[str, str], payload: Mapping[str, Any], loop: AgentLoopSettings, path: Path) -> AgentSettings:
-        # Builds AgentSettings after all YAML-specific shape validation is complete.
-        try:
-            return AgentSettings(
-                **values,
-                runtime=payload.get("runtime", "linear"),
-                loop=loop,
-                tool_refs=self._references(payload.get("tools", []), path, "agent.tools"),
-                middleware_refs=self._references(payload.get("middleware", []), path, "agent.middleware"),
-                description=payload.get("description", ""),
-                capabilities=self._references(payload.get("capabilities", []), path, "agent.capabilities"),
-                metadata=self._mapping(payload.get("metadata", {}), path, "agent.metadata"),
-            )
-        except ConfigurationError as error:
-            self._error("Agent settings are invalid.", path, "agent", error)
-
-    def _definition_list(self, value: object, kind: str, path: Path) -> list[dict[str, Any]]:
-        # Validates a declaration list with one ref and optional data-only options per item.
-        if not isinstance(value, list):
-            self._error(f"{kind} configuration must be a list.", path, kind)
-        result: list[dict[str, Any]] = []
-        for index, definition in enumerate(value):
-            field = f"{kind}[{index}]"
-            item = self._mapping(definition, path, field)
-            self._only_fields(item, {"ref", "options"}, path, field)
-            if not isinstance(item.get("ref"), str) or not item["ref"].strip():
-                self._error(f"{field}.ref must be a non-blank string.", path, f"{field}.ref")
-            options = self._mapping(item.get("options", {}), path, f"{field}.options")
-            self._serializable(options, path, f"{field}.options")
-            result.append({"ref": item["ref"], "options": options})
-        references = [definition["ref"].strip() for definition in result]
-        if len(set(references)) != len(references):
-            self._error(f"{kind} configuration must not contain duplicate references.", path, kind)
-        return result
-
-    def _references(self, value: object, path: Path, field: str) -> tuple[str, ...]:
-        # Validates an ordered list of unique declarative reference names.
-        if isinstance(value, str) or not isinstance(value, list) or not all(isinstance(item, str) and item.strip() for item in value):
-            self._error(f"{field} must be a list of non-blank strings.", path, field)
-        references = tuple(value)
-        if len(set(references)) != len(references):
-            self._error(f"{field} must not contain duplicate references.", path, field)
-        return references
-
-    def _mapping(self, value: object, path: Path, field: str) -> dict[str, Any]:
-        # Returns a string-keyed mapping or reports the exact document field that violated the shape contract.
-        if not isinstance(value, Mapping) or not all(isinstance(key, str) for key in value):
-            self._error(f"{field} must be a mapping with string keys.", path, field)
-        return dict(value)
-
-    def _only_fields(self, payload: Mapping[str, Any], allowed: set[str] | frozenset[str], path: Path, field: str) -> None:
-        # Rejects schema drift instead of silently ignoring unsupported configuration keys.
-        unknown = sorted(set(payload).difference(allowed))
-        if unknown:
-            self._error("Configuration contains an unsupported field.", path, f"{field}.{unknown[0]}")
-
-    def _version(self, value: object, path: Path) -> None:
-        # Requires the first documented schema version and excludes bool despite bool being an int subclass.
-        if isinstance(value, bool) or not isinstance(value, int) or value != 1:
-            self._error("Configuration version must be the supported integer value 1.", path, "version")
-
-    def _kind(self, value: object, expected_kind: str, path: Path) -> None:
-        # Requires each loader method to receive its matching document kind.
-        if value != expected_kind:
-            self._error(f"Configuration kind must be {expected_kind!r}.", path, "kind")
-
-    def _serializable(self, value: object, path: Path, field: str, ancestry: frozenset[int] = frozenset()) -> None:
-        # Recursively accepts only data values that can be represented without Python object construction.
-        if value is None or isinstance(value, (bool, int, float)):
-            return
-        if isinstance(value, str):
-            if "${" in value:
-                self._error("Configuration does not support environment interpolation.", path, field)
-            return
-        if isinstance(value, list):
-            if id(value) in ancestry:
-                self._error("Configuration must not contain cyclic aliases.", path, field)
-            for index, item in enumerate(value):
-                self._serializable(item, path, f"{field}[{index}]", ancestry | {id(value)})
-            return
-        if isinstance(value, Mapping) and all(isinstance(key, str) for key in value):
-            if id(value) in ancestry:
-                self._error("Configuration must not contain cyclic aliases.", path, field)
-            for key, item in value.items():
-                if ToolDefinition._secret_key(key):
-                    self._error("Configuration must not contain YAML-held secrets.", path, f"{field}.{key}")
-                self._serializable(item, path, f"{field}.{key}", ancestry | {id(value)})
-            return
-        self._error("Configuration values must be YAML scalars, lists, or string-keyed mappings.", path, field)
+    @staticmethod
+    def _reject_duplicate_refs(items: tuple[Any, ...], kind: ConfigKind) -> None:
+        # Rejects two entries that declare the same reference in one definition document.
+        references = [item.ref for item in items]
+        duplicates = sorted({ref for ref in references if references.count(ref) > 1})
+        if duplicates:
+            raise ConfigurationError(f"'{kind.value}' must not contain duplicate references: {', '.join(duplicates)}.", details={"field": kind.value, "duplicates": duplicates})
 
     @staticmethod
-    def _error(message: str, path: Path, field: str, cause: Exception | None = None) -> None:
-        # Raises the shared error with actionable safe context and preserves a source exception when present.
-        error = ConfigurationError(message, details={"path": str(path), "field": field})
-        if cause is not None:
-            raise error from cause
-        raise error
+    def _enrich(error: ConfigurationError, path: Path, kind: ConfigKind) -> None:
+        # Attaches the offending file and expected kind so diagnostics name the exact document.
+        error.details.setdefault("path", str(path))
+        error.details.setdefault("expected_kind", kind.value)
+
+
+__all__ = ["YamlLoader"]

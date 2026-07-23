@@ -16,7 +16,7 @@ Relations:
 from __future__ import annotations
 
 from vidbyte.agents.client import AgentClient
-from vidbyte.config import ConfigurationLoader
+from vidbyte.config import YamlLoader
 from vidbyte.paradigms.client import ParadigmClient
 from vidbyte.harnesses.client import HarnessClient
 from vidbyte.providers.client import ProvidersClient
@@ -30,7 +30,7 @@ class VidbyteSDK:
     def __init__(self) -> None:
         # Instantiates each public namespace client exposed by the root SDK.
         self.agents = AgentClient()
-        self.config = ConfigurationLoader()
+        self.config = YamlLoader()
         self.harnesses = HarnessClient()
         self.paradigms = ParadigmClient()
         self.tools = ToolsClient()

@@ -6,7 +6,24 @@ Output:
 **Status:** Draft
 **Author:** Codex
 **Created:** 2026-07-18
-**Last Updated:** 2026-07-18
+**Last Updated:** 2026-07-23
+
+---
+
+> **Revision (2026-07-23, post-review of PR #295):** The implemented public API differs
+> from the original draft below in response to review feedback:
+> - The loader class is `YamlLoader` (not `ConfigurationLoader`).
+> - Methods are `load()` (central kind dispatch), `load_agent()`, `load_tools()`,
+>   `load_middleware()`, and `load_harness()`; harness documents delegate to
+>   `vidbyte.harnesses.HarnessConfigLoader`. `view_agent()/view_tools()/view_middleware()/view_harness()`
+>   return the expected document structure.
+> - The declarative dataclasses (`AgentSettings`, `ToolDefinition`, `MiddlewareDefinition`)
+>   live in `vidbyte.lib.dataclasses.config`; the document vocabularies (`ConfigKind`,
+>   `AgentLoopField`) live in `vidbyte.lib.enums`. `vidbyte.config.types` re-exports the
+>   dataclasses for compatibility.
+> - Field validation is owned by each dataclass's `from_mapping`/`__post_init__` rather than
+>   ad-hoc loader checks, and errors carry the offending file path, field, and expected value.
+> The sections below preserve the original draft for historical context.
 
 ---
 

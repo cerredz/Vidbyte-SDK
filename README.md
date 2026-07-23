@@ -90,27 +90,34 @@ sdk.providers
 
 ## YAML Configuration
 
-Use `ConfigurationLoader` when an application wants versioned, data-only YAML
-settings. Loading validates the document and returns declarations; it never
-imports a `ref` or instantiates a tool or middleware. Resolve those declarations
-from an application-owned allowlist before creating the agent.
+Use `YamlLoader` when an application wants versioned, data-only YAML settings.
+Loading validates the document and returns declarations; it never imports a `ref`
+or instantiates a tool or middleware. Resolve those declarations from an
+application-owned allowlist before creating the agent. `load(path)` is the central
+entry point that dispatches on the document's declared kind (agent, tools,
+middleware, or harness); the typed `load_agent()`, `load_tools()`,
+`load_middleware()`, and `load_harness()` methods select one kind explicitly. Each
+`view_*()` method returns the structure a document of that kind must follow.
 
 ```python
-from vidbyte import ConfigurationLoader, VidbyteSDK
+from vidbyte import YamlLoader, VidbyteSDK
 
-loader = ConfigurationLoader()
-settings = loader.load_agent_settings("agent.yaml")
+loader = YamlLoader()
+settings = loader.load_agent("agent.yaml")            # or loader.load("agent.yaml")
 tool_definitions = loader.load_tools("tools.yaml")
-middleware_definitions = loader.load_middleware_settings("middleware.yaml")
+middleware_definitions = loader.load_middleware("middleware.yaml")
+harness_spec = loader.load_harness("harness.yaml")    # delegates to the harness loader
 
 tools = resolve_tools(tool_definitions)  # Application-owned allowlist/resolver.
 middleware = resolve_middleware(middleware_definitions)
 agent = VidbyteSDK().agents.base(**settings.to_agent_kwargs(tools=tools, middleware=middleware))
 ```
 
-Each document declares `version: 1` and a matching `kind` (`agent`, `tools`, or
-`middleware`). Keep API keys, tokens, passwords, and other secrets outside YAML;
-pass them through the application or environment when constructing runtime code.
+Agent, tools, and middleware documents declare `version: 1` and a matching `kind`
+(`agent`, `tools`, or `middleware`); harness documents follow the harness envelope
+(`schema_version` plus `harness`/`agents`). Keep API keys, tokens, passwords, and
+other secrets outside YAML; pass them through the application or environment when
+constructing runtime code.
 
 ## Agents and Runner Inference
 

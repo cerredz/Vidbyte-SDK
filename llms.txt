@@ -121,22 +121,27 @@ sdk.providers
 
 ### YAML Configuration
 
-`ConfigurationLoader` is the public class-first interface for data-only YAML
-configuration. It accepts versioned documents with `kind: agent`, `kind: tools`,
-or `kind: middleware` and returns `AgentSettings`, `ToolDefinition`, or
-`MiddlewareDefinition` values. It validates structure and intrinsic settings but
+`YamlLoader` is the public class-first interface for data-only YAML configuration.
+`load(path)` reads a document and dispatches on its declared kind; the typed
+`load_agent()`, `load_tools()`, `load_middleware()`, and `load_harness()` methods
+select one kind explicitly. Agent, tools, and middleware documents declare
+`version: 1` and a matching `kind`, returning `AgentSettings`, `ToolDefinition`, or
+`MiddlewareDefinition` values; harness documents follow the harness envelope and
+return a `HarnessSpec`. The loader validates structure and intrinsic settings but
 never imports a `ref`, instantiates a tool or middleware, interpolates secrets,
 or performs network access. Application code must map declarations to an
 allowlisted runtime implementation before passing `settings.to_agent_kwargs(...)`
-to `VidbyteSDK().agents.base(...)`.
+to `VidbyteSDK().agents.base(...)`. Each `view_*()` method returns the expected
+document structure for that kind.
 
 ```python
-from vidbyte import ConfigurationLoader
+from vidbyte import YamlLoader
 
-loader = ConfigurationLoader()
-settings = loader.load_agent_settings("agent.yaml")
+loader = YamlLoader()
+settings = loader.load_agent("agent.yaml")        # or loader.load("agent.yaml")
 tools = loader.load_tools("tools.yaml")
-middleware = loader.load_middleware_settings("middleware.yaml")
+middleware = loader.load_middleware("middleware.yaml")
+harness_spec = loader.load_harness("harness.yaml")
 ```
 
 For direct model execution, use an agent:
