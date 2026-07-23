@@ -7,6 +7,7 @@ Purpose:
 Architecture:
     - AgentRunnerConfig: Primitive backend configuration.
     - FallbackModel: One entry in an ordered agent fallback chain.
+    - FallbackTransform: Rebuilt provider-derived state for a model switch.
     - AgentCard: Local agent description, capabilities, and tools.
     - AgentMessage: Actor-to-actor message payload.
     - AgentSpec: Construction-friendly agent settings block.
@@ -31,6 +32,7 @@ if TYPE_CHECKING:
     from vidbyte.context.manager import ContextManager
     from vidbyte.context.primitives import ContextItem
     from vidbyte.context.window import ContextWindowAlgorithm
+    from vidbyte.lib.dataclasses.runner import RunnerHandle
     from vidbyte.lib.dataclasses.trace import TraceOption
     from vidbyte.lib.enums import AgentRuntimeType, ModelProvider
     from vidbyte.middleware import AgentMiddleware
@@ -142,6 +144,19 @@ class FallbackModel:
         key = ", api_key='***'" if self.api_key else ""
         temperature = f", temperature={self.temperature!r}" if self.temperature is not None else ""
         return f"FallbackModel({self.identity()!r}{key}{temperature})"
+
+
+@dataclass(frozen=True, slots=True)
+class FallbackTransform:
+    """Rebuilt provider-derived state for the model a run is switching to."""
+
+    index: int
+    handle: RunnerHandle
+    provider: str
+    tool_schemas: tuple[dict[str, Any], ...]
+    messages: list[dict[str, Any]]
+    context_reset: bool
+    model: FallbackModel = field(repr=False)
 
 
 @dataclass(frozen=True, slots=True)

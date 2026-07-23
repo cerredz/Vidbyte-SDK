@@ -8,23 +8,22 @@ Purpose:
     transient provider failure degrades to the next model instead of ending the run.
 Architecture:
     - AgentFallback: Immutable chain plus advance/transform policy helpers.
-    - FallbackTransform: Rebuilt handle, provider, tool schemas, and transcript.
     - DEFAULT_FALLBACK_ERRORS: Provider-level exceptions that justify a switch.
 Relations:
-    Built by vidbyte.agents.base from AgentFallbackSettings. Consumed by
+    Built by vidbyte.agents.base via AgentFallback.from_spec. Consumed by
     vidbyte.agents.runtime inside the direct model/tool loop.
 Similar Files:
     - vidbyte/agents/settings/fallback.py: Developer-facing settings that build this.
+    - vidbyte/lib/dataclasses/agents.py: FallbackModel and FallbackTransform data contracts.
     - vidbyte/lib/dataclasses/runner.py: RunnerHandle.with_runner is the swap primitive.
 """
 
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from vidbyte.lib.dataclasses.agents import FallbackModel
+from vidbyte.lib.dataclasses.agents import FallbackModel, FallbackTransform
 from vidbyte.lib.dataclasses.runner import RunnerHandle
 from vidbyte.lib.errors import (
     ConfigurationError,
@@ -38,6 +37,8 @@ from vidbyte.lib.runners import Runner
 from vidbyte.lib.tools.formatter import ToolsFormatter
 
 if TYPE_CHECKING:
+    from vidbyte.agents.settings.fallback import AgentFallbackSettings
+    from vidbyte.lib.dataclasses.agents import AgentRunnerConfig
     from vidbyte.tools.catalog import Tools
 
 
@@ -53,19 +54,6 @@ DEFAULT_FALLBACK_ERRORS: tuple[type[BaseException], ...] = (
 )
 
 
-@dataclass(frozen=True, slots=True)
-class FallbackTransform:
-    """Rebuilt provider-derived state for the model a run is switching to."""
-
-    index: int
-    handle: RunnerHandle
-    provider: str
-    tool_schemas: tuple[dict[str, Any], ...]
-    messages: list[dict[str, Any]]
-    context_reset: bool
-    model: FallbackModel = field(repr=False)
-
-
 class AgentFallback:
     """Ordered model chain plus the transforms that route an in-flight run to the next model."""
 
@@ -76,6 +64,42 @@ class AgentFallback:
         self.models = tuple(models)
         self.fallback_on = tuple(fallback_on)
         self._runner_cache: dict[int, object] = {}
+
+    @classmethod
+    def from_spec(
+        cls,
+        spec: Sequence[str | FallbackModel] | AgentFallbackSettings | None,
+        *,
+        runner_config: AgentRunnerConfig,
+        agent_name: str,
+    ) -> AgentFallback | None:
+        """Build the chain for an agent from its constructor spec, or None when unset.
+
+        Accepts either a raw list of entries or a prepared AgentFallbackSettings and
+        prepends the agent's own provider/model as chain index 0, the model every
+        entry falls back from.
+        """
+        from vidbyte.agents.settings import AgentFallbackSettings as _AgentFallbackSettings
+
+        if spec is None:
+            return None
+        settings = spec if isinstance(spec, _AgentFallbackSettings) else _AgentFallbackSettings(models=tuple(spec))
+        return settings.to_fallback(primary=cls._primary_model(runner_config, agent_name))
+
+    @staticmethod
+    def _primary_model(runner_config: AgentRunnerConfig, agent_name: str) -> FallbackModel:
+        # Chain index 0 is the agent's own runner identity; a chain needs a primary to fall back from.
+        if not runner_config.provider or not runner_config.model_name:
+            raise ConfigurationError(
+                f"Agent {agent_name} declares a fallback chain but no provider/model_name to fall back from.",
+                details={"agent": agent_name, "provider": runner_config.provider, "model_name": runner_config.model_name},
+            )
+        return FallbackModel(
+            provider=runner_config.provider,
+            model=runner_config.model_name,
+            api_key=runner_config.api_key,
+            temperature=runner_config.temperature,
+        )
 
     def is_model_error(self, error: BaseException) -> bool:
         """Report whether this error is a provider-level failure a different model could survive."""

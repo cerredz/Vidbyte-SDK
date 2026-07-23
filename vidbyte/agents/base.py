@@ -42,7 +42,6 @@ from vidbyte.tools.security import PermissionPolicy
 from vidbyte.tools.types import ToolCallContext, ToolSpec
 
 if TYPE_CHECKING:
-    from vidbyte.agents.fallback import AgentFallback
     from vidbyte.agents.settings import AgentFallbackSettings
     from vidbyte.sessions.session import Session
     from vidbyte.sessions.store import SessionStore
@@ -143,7 +142,8 @@ class BaseAgent(McpAttachableMixin):
         )
         self.name = name
         self._fallback_spec = fallback
-        self.fallback = self._resolve_fallback(fallback, name)
+        from vidbyte.agents.fallback import AgentFallback
+        self.fallback = AgentFallback.from_spec(fallback, runner_config=self.runner_config, agent_name=name)
         self._runner_cache: dict[str, object] = {}
         self._agent_tool_items = tools.all() if isinstance(tools, Tools) else tuple(tools)
         self.tools = tools if isinstance(tools, Tools) else self._catalog_from_agent_tools(self._agent_tool_items)
@@ -220,29 +220,6 @@ class BaseAgent(McpAttachableMixin):
     @classmethod
     def from_run_id(cls, run_id: str, *, name: str, system_prompt: str, **kwargs: Any) -> BaseAgent:
         return cls(name=name, system_prompt=system_prompt, run_id=run_id, **kwargs)
-
-    def _resolve_fallback(self, fallback: Sequence[str | FallbackModel] | AgentFallbackSettings | None, agent_name: str) -> AgentFallback | None:
-        # Normalizes raw entries or a settings object into one AgentFallback whose index 0 is this agent's own model.
-        from vidbyte.agents.settings import AgentFallbackSettings as _AgentFallbackSettings
-
-        if fallback is None:
-            return None
-        settings = fallback if isinstance(fallback, _AgentFallbackSettings) else _AgentFallbackSettings(models=tuple(fallback))
-        return settings.to_fallback(primary=self._primary_fallback_model(agent_name))
-
-    def _primary_fallback_model(self, agent_name: str) -> FallbackModel:
-        # Builds chain index 0 from this agent's own runner identity; a chain needs a primary to fall back from.
-        if not self.runner_config.provider or not self.runner_config.model_name:
-            raise ConfigurationError(
-                f"Agent {agent_name} declares a fallback chain but no provider/model_name to fall back from.",
-                details={"agent": agent_name, "provider": self.runner_config.provider, "model_name": self.runner_config.model_name},
-            )
-        return FallbackModel(
-            provider=self.runner_config.provider,
-            model=self.runner_config.model_name,
-            api_key=self.runner_config.api_key,
-            temperature=self.runner_config.temperature,
-        )
 
     @staticmethod
     def _resolve_loop_settings(agent_loop_settings: AgentLoopSettings | None, *, max_iterations: int | None, max_tokens: int | None, compaction_trigger_tokens: int | None, compaction_target_tokens: int | None) -> AgentLoopSettings:

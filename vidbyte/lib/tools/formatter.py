@@ -4,7 +4,9 @@ Description:
     Converts Vidbyte tool specs to model-provider tool formats.
 Purpose:
     Keeps provider schema formatting separate from tool execution contracts so
-    OpenAI, Anthropic, Grok, and Gemini adapters can share one SDK utility.
+    every supported provider can share one SDK utility. Anthropic and Gemini own
+    their tool shapes; OpenAI, xAI/Grok, DeepSeek, GLM, MiniMax, Kimi, and
+    OpenRouter all speak the OpenAI chat-completions tool format.
 Architecture:
     - ToolsFormatter: Static provider conversion, parse, and result rendering helpers.
     - Tool errors are always rendered with full model-visible detail; callers do
@@ -25,24 +27,38 @@ from vidbyte.lib.dataclasses.tools import ToolCall, ToolParameter, ToolResult, T
 class ToolsFormatter:
     """Formats SDK tool specs and provider tool calls."""
 
+    # Provider/model substrings mapped, in priority order, to the tool wire-format
+    # family a model speaks. OpenRouter is matched first because it proxies every
+    # vendor (including Claude and Gemini models) but always exposes the OpenAI
+    # chat-completions tool format, so its Claude/Gemini model ids must not be
+    # misread as native Anthropic/Gemini payloads. DeepSeek, GLM, MiniMax, and Kimi
+    # are likewise OpenAI-compatible and fall through to the default OpenAI branch.
+    _PROVIDER_FAMILY_HINTS: tuple[tuple[tuple[str, ...], str], ...] = (
+        (("openrouter",), "openai"),
+        (("anthropic", "claude"), "anthropic"),
+        (("gemini", "google"), "gemini"),
+        (("grok", "xai"), "xai"),
+    )
+
     @staticmethod
     def provider_from_model(provider_or_model: str | None) -> str:
         """Return a provider family from a provider name or model-ish string."""
         if not provider_or_model:
             return "openai"
         value = provider_or_model.lower()
-        if "anthropic" in value or "claude" in value:
-            return "anthropic"
-        if "gemini" in value or "google" in value:
-            return "gemini"
-        if "grok" in value or "xai" in value:
-            return "xai"
+        for tokens, family in ToolsFormatter._PROVIDER_FAMILY_HINTS:
+            if any(token in value for token in tokens):
+                return family
+        # openai, deepseek, glm, minimax, kimi, and any unrecognized provider all
+        # use the OpenAI tool format.
         return "openai"
 
     @staticmethod
     def wire_format(provider_or_model: str | None) -> str:
         """Return the payload shape a provider speaks: 'openai', 'anthropic', or 'gemini'."""
-        # provider_from_model reports xai separately, but every formatting branch below treats it as OpenAI-shaped.
+        # Only Anthropic and Gemini have distinct wire shapes; xAI and every
+        # OpenAI-compatible provider (deepseek, glm, minimax, kimi, openrouter)
+        # collapse to the OpenAI payload here so fallback treats them as one format.
         family = ToolsFormatter.provider_from_model(provider_or_model)
         return family if family in {"anthropic", "gemini"} else "openai"
 
