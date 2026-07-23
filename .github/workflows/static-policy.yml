@@ -1,0 +1,31 @@
+name: Static policy
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  static-policy:
+    name: Static policy
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Semgrep
+        run: python -m pip install semgrep==1.170.1
+
+      - name: Verify policy fixtures
+        run: semgrep --test --config .semgrep/typed-mapping-boundary-policy.yml .semgrep/typed-mapping-boundary-policy.py
+
+      - name: Enforce policy
+        run: semgrep scan --error --config .semgrep/typed-mapping-boundary-policy.yml vidbyte

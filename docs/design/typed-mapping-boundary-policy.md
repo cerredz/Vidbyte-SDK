@@ -52,7 +52,7 @@ The current checkout is dirty with unrelated work and earlier uncommitted policy
 
 ### Functional Requirements
 
-1. A Semgrep policy must scan `vidbyte/**/*.py` and fail when a function parameter annotated exactly `object` or `Any` is rejected by an `isinstance(parameter, Mapping|dict)` guard that returns a fallback value.
+1. A Semgrep policy must scan `vidbyte/**/*.py` and fail when a function parameter annotated exactly `object` or `Any` is rejected by an `isinstance(parameter, Mapping|dict)` guard that is the function's first executable statement and returns a fallback value.
 2. The policy must cover both `if not isinstance(value, Mapping): return ...` and equivalent `dict` checks, including functions with other positional or keyword-only parameters.
 3. The policy must exclude only these audited trust-boundary paths: `vidbyte/lib/http/**`, `vidbyte/providers/**`, `vidbyte/mcp_server/**`, and `vidbyte/tools/mcp/**`.
 4. Adding another excluded boundary path must require a documented reason in the policy README and a passing boundary example in the Semgrep fixture; ordinary business, middleware, tool, and model code must not be excluded.
@@ -102,7 +102,7 @@ GitHub Actions: static-policy
 
 #### What it does
 
-Defines the repository-specific error-level rule `no-untyped-mapping-fallback`. It rejects an `object` or `Any` parameter that is dynamically rejected as a mapping/dict and converted into a return fallback, except in audited protocol/deserialization paths.
+Defines the repository-specific error-level rule `no-untyped-mapping-fallback`. It rejects an `object` or `Any` parameter whose first executable statement dynamically rejects it as a mapping/dict and converts it into a return fallback, except in audited protocol/deserialization paths.
 
 #### Interface / API
 
@@ -118,27 +118,19 @@ rules:
         - "vidbyte/providers/**"
         - "vidbyte/mcp_server/**"
         - "vidbyte/tools/mcp/**"
-    patterns:
-      - pattern-either:
-          - pattern-inside: |
-              def $FUNCTION(..., $VALUE: object, ...):
-                ...
-          - pattern-inside: |
-              def $FUNCTION(..., $VALUE: Any, ...):
-                ...
-      - pattern-either:
-          - pattern: |
-              if not isinstance($VALUE, Mapping):
-                return ...
-          - pattern: |
-              if not isinstance($VALUE, dict):
-                return ...
+    pattern-either:
+      - pattern: |
+          def $FUNCTION(..., $VALUE: object, ...):
+            if not isinstance($VALUE, Mapping):
+              return ...
+            ...
+      # Equivalent Any and dict variants are also included.
 ```
 
 #### Logic / Algorithm
 
 1. Bind a function parameter whose annotation is `object` or `Any`.
-2. Within that same function, match a negative `Mapping` or `dict` runtime guard for that parameter.
+2. Match a negative `Mapping` or `dict` runtime guard for that parameter only when it is the first executable statement.
 3. Report if the guard returns a fallback instead of continuing with a statically typed value or surfacing an error.
 4. Suppress findings only for the four path families listed above; each represents a documented external wire-format boundary.
 5. Emit remediation text directing authors to use a concrete mapping annotation (optionally unioned with `None`) or move parsing to a designated boundary that raises/returns a protocol error.
@@ -341,5 +333,4 @@ No runtime SDK dependency or external service integration is added.
 
 - What: keep the rule global and annotate every valid boundary occurrence line by line.
 - Why rejected: boundary status is a module-level architectural property. A documented, small path allowlist is clearer and less fragile, while line-level suppressions remain available only for exceptional cases.
-
 
