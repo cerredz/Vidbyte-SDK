@@ -34,9 +34,9 @@ def _provider_groups(messages: Sequence[ContextMessage]) -> tuple[tuple[ContextM
     return tuple(groups)
 
 
-def _build_progress_log(raw_log: object) -> ProgressLog:
+def _build_progress_log(raw_log: Mapping[str, object] | None) -> ProgressLog:
     # Coerces loose mapping data into the structured progress-log dataclass.
-    if not isinstance(raw_log, Mapping):
+    if raw_log is None:
         return ProgressLog()
     return ProgressLog(
         completed_tasks=tuple(str(item) for item in raw_log.get("completed_tasks", ())),
@@ -158,7 +158,8 @@ def _scrub_bloat_text(content: str, *, base64_min_chars: int, max_repeated_lines
 class ClearExceptSystemAndLogCompaction(BaseCompaction):
     """Keeps system messages and appends one compact progress summary."""
 
-    def __init__(self, progress_log: object = None) -> None:
+    def __init__(self, progress_log: Mapping[str, object] | None = None) -> None:
+        # Stores optional, already-typed progress data for the summary message.
         self.raw_log = progress_log
 
     async def compact(self, messages: Sequence[ContextMessage]) -> tuple[ContextMessage, ...]:
