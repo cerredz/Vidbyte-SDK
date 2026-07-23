@@ -114,6 +114,39 @@ Inner-loop context-window algorithms write through the run context's
 `place_after_system_prompt` / `place_after_tools` rather than mutating provider messages —
 see `skills/vidbyte-sdk/adding-context-window-algorithms.md`.
 
+## Context write path integrity
+
+Managed context (registry primitives and placement-driven conversation injections)
+must be written only through public `ContextManager` APIs or
+`ContextWindowRunContext` wrappers. Provider transcripts (the agent loop message
+list), compaction middleware, and outer-loop trial orchestration are separate
+surfaces and are **not** forced through the manager.
+
+| Legal write surface | Illegal bypass |
+|---------------------|----------------|
+| `upsert` / `place_after_*` / `remove_by_id` / `set_placement` / `recite` | `manager._registry[...] = ...` or `._placements` |
+| `registry_items()` / `get_by_id` / `placement_for` | Reading `manager._registry` from tools/algorithms |
+| `ctx.place_after_tools` / `ctx.place_after_system_prompt` / `ctx.remove` | Inner-loop `ctx.messages.append` / message list surgery |
+| Context tools constructed with the live `ContextManager` | Ad-hoc in-memory stores that shadow the registry |
+
+CI hard rules (see `scripts/check_context_write_paths.py` and
+`docs/design/context-write-path-integrity.md`):
+
+- **CWP001** — no private `._registry` / `._placements` access outside `manager.py`
+  (scoped under context/agents/context tools).
+- **CWP002** — inner-loop `InnerContextWindowAlgorithm` modules must not mutate
+  provider `messages`.
+- **CWP004** — context primitive tools must accept a `ContextManager` in `__init__`.
+
+```bash
+python scripts/check_context_write_paths.py
+python scripts/run_ci.py --stage source
+```
+
+Examples of correct managed reads/writes: `ContextListTool` and `ContextStatsTool`
+use `registry_items()`; `ErrorCorrectionAlgorithm` lists removable managed
+primitives via `registry_items()` before the auditor pass.
+
 ## Model-Callable Context Tools
 
 The `context_primitives` tool family lets the model manage its own context window. Each tool is constructed with the same live `ContextManager` that is passed to `BaseAgent(context_manager=...)` and is `ToolPermission.SAFE`:

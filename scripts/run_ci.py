@@ -27,6 +27,7 @@ KNOWN EDGE CASES:
     Windows and POSIX virtual environments use different interpreter locations.
 RELATED DOCS:
     docs/design/green-ci-pipeline-and-design-skill-enforcement.md
+    docs/design/context-write-path-integrity.md
     CONTRIBUTING.md
 TESTS:
     Exercised end-to-end by .github/workflows/ci.yml on Python 3.11 and 3.12.
@@ -76,9 +77,12 @@ class CiPipeline:
             self.run_package()
 
     def run_source(self) -> None:
-        """Verify repository hygiene, import syntax, and the complete test suite."""
+        """Verify repository hygiene, import syntax, write-path integrity, and tests."""
         self._assert_no_tracked_bytecode()
         self._run_command([sys.executable, "-m", "compileall", "-q", str(PACKAGE_ROOT)])
+        self._run_command(
+            [sys.executable, str(REPOSITORY_ROOT / "scripts" / "check_context_write_paths.py")],
+        )
         self._run_command([sys.executable, "-m", "pytest"])
 
     def run_package(self) -> None:
