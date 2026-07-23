@@ -11,28 +11,38 @@ ROLE IN CODEBASE:
     resolves references and computes identity. Nothing else imports these models.
 
 ARCHITECTURE NOTE:
-    The envelope is closed at the top level (extra="forbid") but open within the
-    harness descriptor, each agent entry, and the leaf maps (params/tools/metadata/
-    orchestration). This preserves the loader's original property that the YAML is a
-    forward-compatible single source of truth: new per-harness knobs do not require an
-    SDK release, while misspelled top-level keys still fail fast. Schema-version gating
-    and credential rejection stay in the loader because they must raise the typed
-    HarnessVersionError / HarnessCredentialConfigError rather than a ValidationError.
+    The envelope is closed at the top level (extra="forbid") and at the per-agent
+    `params` block (AgentParams, extra="forbid") so a hyperparameter is validated
+    against the agent's real tunables instead of being accepted blindly. It stays
+    open within the harness descriptor, each agent entry, and the remaining leaf maps
+    (tools/metadata/orchestration): new per-harness knobs there do not require an SDK
+    release, while a misspelled top-level key or an unknown/out-of-range agent
+    hyperparameter fails fast. `params` mirrors BaseAgent's own budgets/temperature/
+    runtime contract (vidbyte/agents/base.py, AgentRuntimeConfig) and `provider`/`model`
+    are validated against the ProviderModelRegistry (vidbyte/lib/registries). Schema-
+    version gating and credential rejection stay in the loader because they must raise
+    the typed HarnessVersionError / HarnessCredentialConfigError rather than a
+    ValidationError.
 
 PUBLIC API INVENTORY:
-    HarnessConfigSchema, HarnessDescriptor, AgentEntry.
+    HarnessConfigSchema, HarnessDescriptor, AgentEntry, AgentParams.
 
 WHAT NOT TO DO IN THIS FILE:
     1. Do not read files or resolve $file references; config.py owns that seam.
     2. Do not compute spec_id or hash anything; identity is not validation.
-    3. Do not close the harness/agent/leaf surfaces; they are intentionally open.
+    3. Do not close the harness/agent-entry/tools/metadata surfaces; only the
+       top-level envelope and the typed `params` block are intentionally closed.
     4. Do not raise Harness*Error here; validators raise ValueError so pydantic can
        aggregate, and config.py maps ValidationError to the typed error family.
+       Registry helpers raise ConfigurationError, so wrap them and re-raise ValueError.
 
 KNOWN EDGE CASES:
     An empty agents list is permitted (the loader historically allowed it). Present
-    name/provider/model must be non-empty strings and are stripped; absent optional
-    fields stay absent via exclude_unset so config identity is unchanged.
+    name/provider/model must be non-empty strings and are stripped; provider must be a
+    ProviderModelRegistry-known provider; params fields must be positive integers (or a
+    0.0-2.0 temperature, or an AgentRuntimeType runtime). Absent optional fields stay
+    absent via exclude_unset (recursive, so an unset params field never enters the
+    dump) so config identity is unchanged for configs that were already valid.
 
 RELATED DOCS:
     https://github.com/cerredz/Vidbyte-SDK/blob/main/docs/design/harness-config-pydantic-loader.md
@@ -48,6 +58,21 @@ from collections.abc import Mapping
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from vidbyte.lib.enums import AgentRuntimeType
+from vidbyte.lib.errors import ConfigurationError
+from vidbyte.lib.registries import ProviderModelRegistry
+
+# Positive-integer agent budgets that mirror BaseAgent / AgentRuntimeConfig: each is
+# optional, but a present value must be > 0 exactly as the runtime enforces at construction.
+_POSITIVE_INT_PARAMS: tuple[str, ...] = (
+    "max_iterations",
+    "max_tokens",
+    "max_tool_calls",
+    "max_tool_rounds",
+    "compaction_trigger_tokens",
+    "compaction_target_tokens",
+)
 
 
 class HarnessDescriptor(BaseModel):
@@ -66,6 +91,56 @@ class HarnessDescriptor(BaseModel):
         return value.strip()
 
 
+class AgentParams(BaseModel):
+    """One agent's tunable hyperparameters, typed to BaseAgent's real construction knobs.
+
+    Closed (extra="forbid") so a misspelled or unsupported hyperparameter fails at load
+    instead of being silently carried into identity and later ignored by the agent. The
+    fields and their bounds mirror BaseAgent.__init__ / AgentRuntimeConfig / AgentForkSettings
+    so the config cannot promise a budget the runtime would reject at construction.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    runtime: str | None = None
+    temperature: float | None = None
+    max_iterations: int | None = None
+    max_tokens: int | None = None
+    max_tool_calls: int | None = None
+    max_tool_rounds: int | None = None
+    compaction_trigger_tokens: int | None = None
+    compaction_target_tokens: int | None = None
+
+    @field_validator(*_POSITIVE_INT_PARAMS, mode="after")
+    @classmethod
+    def _require_positive_budget(cls, value: int | None, info: Any) -> int | None:
+        # Mirrors AgentRuntimeConfig.__post_init__: a present budget must be strictly positive.
+        if value is not None and value <= 0:
+            raise ValueError(f"agents[].params.{info.field_name} must be greater than zero when provided.")
+        return value
+
+    @field_validator("temperature", mode="after")
+    @classmethod
+    def _require_temperature_range(cls, value: float | None) -> float | None:
+        # Mirrors AgentForkSettings.__post_init__: temperature is bounded to [0.0, 2.0] when set.
+        if value is not None and not 0.0 <= value <= 2.0:
+            raise ValueError("agents[].params.temperature must be between 0 and 2 when provided.")
+        return value
+
+    @field_validator("runtime", mode="after")
+    @classmethod
+    def _require_known_runtime(cls, value: str | None) -> str | None:
+        # Requires runtime to name a real AgentRuntimeType, matching BaseAgent's runtime contract.
+        if value is None:
+            return value
+        try:
+            AgentRuntimeType(value)
+        except ValueError as exc:
+            known = sorted(member.value for member in AgentRuntimeType)
+            raise ValueError(f"agents[].params.runtime '{value}' is not a known runtime; known runtimes: {known}.") from exc
+        return value
+
+
 class AgentEntry(BaseModel):
     """One agent's declarative configuration; open at the entry level like the loader."""
 
@@ -75,7 +150,7 @@ class AgentEntry(BaseModel):
     provider: str | None = None
     model: str | None = None
     system_prompt: str | dict[str, Any] | None = None
-    params: dict[str, Any] = Field(default_factory=dict)
+    params: AgentParams = Field(default_factory=AgentParams)
     tools: list[str | dict[str, Any]] | None = None
 
     @model_validator(mode="before")
@@ -96,6 +171,31 @@ class AgentEntry(BaseModel):
         if not isinstance(value, str) or not value.strip():
             raise ValueError(f"agents[].{field_name} must be a non-empty string.")
         return value.strip()
+
+    @field_validator("provider", mode="after")
+    @classmethod
+    def _require_known_provider(cls, value: str | None) -> str | None:
+        # Requires provider to be a ProviderModelRegistry-known provider, per the reviewer's registry.
+        if value is None:
+            return value
+        try:
+            ProviderModelRegistry.validate_provider(value)
+        except ConfigurationError as exc:
+            # config.py maps ValidationError -> HarnessConfigurationError; keep the typed family intact.
+            raise ValueError(str(exc)) from exc
+        return value
+
+    @field_validator("model", mode="after")
+    @classmethod
+    def _require_valid_model(cls, value: str | None) -> str | None:
+        # Delegates non-empty model validation to the registry so this file is not the source of truth.
+        if value is None:
+            return value
+        try:
+            ProviderModelRegistry.validate_model(value)
+        except ConfigurationError as exc:
+            raise ValueError(str(exc)) from exc
+        return value
 
     @field_validator("system_prompt", mode="after")
     @classmethod
@@ -129,4 +229,4 @@ class HarnessConfigSchema(BaseModel):
         return self
 
 
-__all__ = ["AgentEntry", "HarnessConfigSchema", "HarnessDescriptor"]
+__all__ = ["AgentEntry", "AgentParams", "HarnessConfigSchema", "HarnessDescriptor"]
