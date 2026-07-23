@@ -30,6 +30,7 @@ from vidbyte.lib.registries.pricing import ModelPricing
 @usage_for(ModelProvider.GLM)
 @usage_for(ModelProvider.MINIMAX)
 @usage_for(ModelProvider.KIMI)
+@usage_for(ModelProvider.META)
 @dataclass(frozen=True, slots=True)
 class ChatCompletionUsage(ProviderUsage):
     """Chat-completions usage: cached input is a billed subset of prompt_tokens."""
