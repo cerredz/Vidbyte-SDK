@@ -148,7 +148,9 @@ class _RefOptionsDefinition(_ConfigValidation):
 
     @classmethod
     def from_mapping(cls, data: object, field_name: str) -> "_RefOptionsDefinition":
-        # Validates a single ``{ref, options}`` declaration and builds the definition.
+        # Validates a ``ref`` shorthand or a ``{ref, options}`` declaration and builds the definition.
+        if isinstance(data, str):
+            return cls(ref=data, options={})
         item = cls._mapping(data, field_name)
         cls._only(item, cls._ALLOWED_FIELDS, field_name)
         return cls(ref=item.get("ref"), options=item.get("options", {}))
@@ -416,9 +418,6 @@ class AdversarialAgentSettings(AgentSettings):
 
     _AGENT_TYPE: ClassVar[AgentType] = AgentType.ADVERSARIAL
 
-
-# BASE also carries its own AgentType so a directly-constructed AgentSettings can be resolved.
-AgentSettings._AGENT_TYPE = AgentType.BASE  # type: ignore[attr-defined]
 
 _AGENT_TYPES: dict[AgentType, type[AgentSettings]] = {
     AgentType.BASE: BaseAgentSettings,
