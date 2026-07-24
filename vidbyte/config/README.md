@@ -4,6 +4,8 @@
 
 An agent document is polymorphic on a `type:` field (one of `AgentType`: `base`, `aggregate`, `continual_trace`, `handoff`, `multi`, `adversarial`). `type` defaults to `base`, the plain `BaseAgent`, which is fully supported. The composite and facade types are registered but not yet loadable from YAML; requesting one raises a specific error. Tools and middleware are **not** separate documents — they are `tools:` and `middleware:` lists of `{ref, options}` entries nested inside the agent. The `loop:` mapping is parsed into a real `AgentLoopSettings`, and `provider`/`model_name` are validated against the canonical `ProviderModelRegistry`.
 
+An agent's `system_prompt` may be inline text or a path to a local text file (`.md`, `.markdown`, `.txt`, `.text`, `.rst`); a value whose extension matches one of those is read as UTF-8, resolving relative paths against the YAML file's folder. This is the only field that reads the filesystem, and nothing fetches over the network.
+
 This folder deliberately stops at parsing and intrinsic validation. It does not import a `ref`, create a `BaseTool` or `AgentMiddleware`, interpolate environment values, or read secrets. The application owns that resolution step because it knows which local capabilities are safe and available. The declarative dataclasses (`AgentSettings` and its subclasses, `ToolDefinition`, `MiddlewareDefinition`) live in `vidbyte.lib.dataclasses` alongside the SDK's other data contracts and are re-exported here; the `AgentType` discriminator lives in `vidbyte.lib.enums`. All field validation lives on the dataclasses.
 
 ## Non-Goals
@@ -27,4 +29,5 @@ This folder deliberately stops at parsing and intrinsic validation. It does not 
 
 - 2026-07-18: Created the public YAML parsing boundary and documented its parse-versus-resolution contract.
 - 2026-07-23: Renamed the loader to `YamlLoader`; added the central `load()` dispatch, `load_harness()`, and `view_*()` structure methods; moved the declarative dataclasses to `vidbyte.lib.dataclasses` and the document vocabularies to `vidbyte.lib.enums`; and delegated validation to each dataclass with more specific errors.
+- 2026-07-24: Allowed `system_prompt` to reference a local text file (`.md`/`.markdown`/`.txt`/`.text`/`.rst`), read as UTF-8 relative to the YAML file's folder via `YamlLoader._load_file`.
 - 2026-07-24: Collapsed to two document families (agent, harness); removed the `version`/`kind` envelope and the standalone tools/middleware documents; made the agent document polymorphic on an `AgentType` discriminator (`base` fully supported, other types registered but not yet loadable); nested tools/middleware inside the agent; parsed `loop` into `AgentLoopSettings`; and validated `provider`/`model_name` against `ProviderModelRegistry`. See `docs/design/yaml-config-polymorphic-agents.md`.

@@ -35,6 +35,7 @@ from vidbyte.lib.errors import ConfigurationError
 
 _SUPPORTED_SUFFIXES = frozenset({".yaml", ".yml"})
 _HARNESS_ENVELOPE_KEYS = frozenset({"schema_version", "harness"})
+_TEXT_FILE_SUFFIXES = frozenset({".md", ".markdown", ".txt", ".text", ".rst"})
 
 
 class _DuplicateKeySafeLoader(yaml.SafeLoader):
@@ -86,12 +87,23 @@ class YamlLoader:
         return AgentSettings.expected_structure()
 
     def _build_agent(self, path: Path, document: Mapping[str, Any]) -> AgentSettings:
-        # Delegates all field validation to AgentSettings and names the offending file on failure.
+        # Resolves a system_prompt text-file reference, then delegates all validation to AgentSettings.
+        prompt = document.get("system_prompt")
+        if isinstance(prompt, str) and Path(prompt.strip()).suffix.lower() in _TEXT_FILE_SUFFIXES:
+            document = {**document, "system_prompt": self._load_file(path.parent / prompt.strip())}
         try:
             return AgentSettings.from_mapping(document, "agent")
         except ConfigurationError as error:
             error.details.setdefault("path", str(path))
             raise
+
+    def _load_file(self, target: Path) -> str:
+        # Loads one supported text-based file's contents as UTF-8, dispatching on its extension.
+        match target.suffix.lower():
+            case ".md" | ".markdown" | ".txt" | ".text" | ".rst":
+                return target.read_text(encoding="utf-8")
+            case other:
+                raise ConfigurationError(f"Unsupported system_prompt file type '{other}'.", details={"field": "agent.system_prompt", "suffix": other})
 
     def _is_harness(self, document: Mapping[str, Any]) -> bool:
         # Recognizes a harness document by its own envelope so agents need no ``kind`` field.
