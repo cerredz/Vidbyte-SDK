@@ -6,15 +6,18 @@ Purpose:
     Owns the run's usage ledger so the agent runtime can record each model call
     once and the agent API can expose live and final usage/cost rollups.
 Architecture:
-    - UsageTracker: Mutable per-run store; defensively parses duck-typed
-      responses and prices them via ModelPricingRegistry.
+    - UsageTracker: Mutable per-run store holding two ledgers — priced model
+      calls (token axis) and priced search/fetch operations (operation axis) —
+      priced via ModelPricingRegistry and OperationPricingRegistry.
 Key Functions:
     - record_call: Parses, prices, and stores one model call.
-    - rollup: Folds the ledger into an immutable UsageRollup.
-    - reset: Clears the ledger at the start of a new run.
+    - record_operation: Prices and stores one search/fetch operation.
+    - rollup: Folds both ledgers into an immutable UsageRollup.
+    - reset: Clears both ledgers at the start of a new run.
 Relations:
-    Created by BaseAgent, consumed by AgentRuntime; pricing from
-    vidbyte/lib/registries/pricing.py.
+    Created by BaseAgent, consumed by AgentRuntime; token pricing from
+    vidbyte/lib/registries/pricing.py, operation pricing from
+    vidbyte/lib/registries/operation_pricing.py.
 Similar Files:
     - vidbyte/agents/pricing/records.py
 """
@@ -24,8 +27,9 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from typing import TYPE_CHECKING
 
-from vidbyte.agents.pricing.records import UsageRecord, UsageRollup
+from vidbyte.agents.pricing.records import OperationUsageRecord, UsageRecord, UsageRollup
 from vidbyte.lib.enums import ModelProvider
+from vidbyte.lib.registries.operation_pricing import OperationPricingRegistry
 from vidbyte.lib.registries.pricing import ModelPricingRegistry
 
 if TYPE_CHECKING:
@@ -35,10 +39,12 @@ if TYPE_CHECKING:
 class UsageTracker:
     """Accumulates priced usage records for one agent run."""
 
-    def __init__(self, *, pricing: ModelPricingRegistry | None = None) -> None:
-        # Bind the pricing registry for this tracker; defaults to the built-in table.
+    def __init__(self, *, pricing: ModelPricingRegistry | None = None, operation_pricing: OperationPricingRegistry | None = None) -> None:
+        # Bind both pricing registries for this tracker; each defaults to its built-in table.
         self._pricing = pricing or ModelPricingRegistry.default()
+        self._operation_pricing = operation_pricing or OperationPricingRegistry.default()
         self._records: list[UsageRecord] = []
+        self._operations: list[OperationUsageRecord] = []
 
     def record_call(self, response: object) -> UsageRecord | None:
         # Parses, prices, and stores one model call; returns None when unusable.
@@ -60,27 +66,58 @@ class UsageTracker:
         self._records.append(record)
         return record
 
+    def record_operation(self, operation: str, provider: str, *, mode: str = "default", units: int = 1, reported_cost_usd: float | None = None) -> OperationUsageRecord | None:
+        # Prices and stores one search/fetch operation; returns None when unusable.
+        # A provider-reported cost, when present, wins over the built-in table math,
+        # mirroring how the token axis prefers a marketplace-reported call cost.
+        if not _is_billable_key(operation, provider) or not isinstance(units, int) or isinstance(units, bool):
+            return None
+        cost = _reported_or_table_cost(reported_cost_usd, self._operation_pricing.resolve(operation, provider, mode), units)
+        record = OperationUsageRecord(
+            call_index=len(self._operations) + 1,
+            operation=operation,
+            provider=provider,
+            mode=mode,
+            units=units,
+            cost_usd=cost,
+        )
+        self._operations.append(record)
+        return record
+
     def rollup(self) -> UsageRollup:
-        # Folds the recorded calls into an immutable None-aware rollup.
+        # Folds both ledgers into an immutable None-aware rollup whose cost spans
+        # the token and operation axes and whose cost_complete requires every
+        # recorded item on both axes to be priced.
         records = tuple(self._records)
+        operations = tuple(self._operations)
+        token_costs = [record.cost_usd for record in records]
+        operation_costs = [operation.cost_usd for operation in operations]
         return UsageRollup(
             calls=records,
             model_call_count=len(records),
             input_tokens=_sum_or_none(record.usage.input_tokens for record in records),
             output_tokens=_sum_or_none(record.usage.output_tokens for record in records),
             total_tokens=_sum_or_none(record.usage.total_tokens for record in records),
-            cost_usd=_sum_or_none(record.cost_usd for record in records),
-            cost_complete=bool(records) and all(record.cost_usd is not None for record in records),
+            cost_usd=_sum_or_none(token_costs + operation_costs),
+            cost_complete=bool(records or operations) and all(cost is not None for cost in token_costs + operation_costs),
+            operations=operations,
+            operation_count=len(operations),
         )
 
     def reset(self) -> None:
-        # Clears all recorded calls for a fresh run.
+        # Clears both the model-call and operation ledgers for a fresh run.
         self._records.clear()
+        self._operations.clear()
 
     @property
     def records(self) -> tuple[UsageRecord, ...]:
         # Returns the immutable per-call ledger recorded so far.
         return tuple(self._records)
+
+    @property
+    def operations(self) -> tuple[OperationUsageRecord, ...]:
+        # Returns the immutable per-operation ledger recorded so far.
+        return tuple(self._operations)
 
 
 def _parse_usage(provider: ModelProvider | None, payload: object) -> ProviderUsage | None:
@@ -106,6 +143,21 @@ def _as_provider(value: object) -> ModelProvider | None:
         return ModelProvider(str(value))
     except (ValueError, TypeError):
         return None
+
+
+def _is_billable_key(operation: str, provider: str) -> bool:
+    # True when both operation and provider are non-empty strings worth pricing.
+    return isinstance(operation, str) and bool(operation.strip()) and isinstance(provider, str) and bool(provider.strip())
+
+
+def _reported_or_table_cost(reported_cost_usd: float | None, pricing: object, units: int) -> float | None:
+    # Prefers a valid non-negative provider-reported cost, else falls back to the
+    # tariff's own math; returns None when neither can price the operation.
+    if isinstance(reported_cost_usd, (int, float)) and not isinstance(reported_cost_usd, bool) and reported_cost_usd >= 0:
+        return float(reported_cost_usd)
+    if pricing is None:
+        return None
+    return pricing.cost_usd(units)
 
 
 def _sum_or_none(values: Iterable[int | float | None]) -> int | float | None:

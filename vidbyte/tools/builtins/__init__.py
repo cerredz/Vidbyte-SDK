@@ -55,6 +55,21 @@ from vidbyte.tools.builtins.editing import PatchTool
 from vidbyte.tools.builtins.fork import ForkConversationTool
 from vidbyte.tools.builtins.handoff import CreateHandoffTool
 from vidbyte.tools.builtins.mcp import AttachMcpServerTool, SearchMcpServersTool
+from vidbyte.tools.builtins.operations import (
+    BraveSearchTool,
+    DirectHttpFetchTool,
+    ExaSearchTool,
+    FirecrawlFetchTool,
+    LinkupFetchTool,
+    LinkupSearchTool,
+    OpenAlexSearchTool,
+    ParallelExtractTool,
+    ParallelSearchTool,
+    PricedOperationTool,
+    SemanticScholarSearchTool,
+    TavilyExtractTool,
+    TavilySearchTool,
+)
 from vidbyte.tools.builtins.run_prompts_sequentially import RunPromptsSequentiallyTool
 from vidbyte.tools.builtins.providers import (
     MongoCreateCollectionTool,
@@ -106,7 +121,20 @@ __all__ = [
     "AppendOutputTool",
     "AttachMcpServerTool",
     "BatchForkTool",
+    "BraveSearchTool",
     "CodeExecutionTool",
+    "DirectHttpFetchTool",
+    "ExaSearchTool",
+    "FirecrawlFetchTool",
+    "LinkupFetchTool",
+    "LinkupSearchTool",
+    "OpenAlexSearchTool",
+    "ParallelExtractTool",
+    "ParallelSearchTool",
+    "PricedOperationTool",
+    "SemanticScholarSearchTool",
+    "TavilyExtractTool",
+    "TavilySearchTool",
     "CreateHandoffTool",
     "CheckpointTool",
     "CompactionMode",

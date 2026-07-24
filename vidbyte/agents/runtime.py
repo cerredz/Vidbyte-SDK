@@ -53,6 +53,7 @@ from vidbyte.agents.contract import AgentLoopSettingsOutputContract
 from vidbyte.lib.dataclasses.context import BaseAgentContext, BaseContext
 from vidbyte.lib.dataclasses.strategies import AgentResult
 from vidbyte.tools._internal import IS_DONE_TOOL_NAME, with_internal_agent_tools
+from vidbyte.tools.builtins.operations.base import PricedOperationTool
 from vidbyte.tools.catalog import Tools
 from vidbyte.tools.security import PermissionDecision, PermissionPolicy
 from vidbyte.tools.types import ToolCall, ToolCallContext, ToolCallState, ToolResult
@@ -1121,6 +1122,7 @@ class AgentRuntime:
                         f"tool call error: output shape mismatch: {error}",
                         metadata={"error": "output_schema_violation", "detail": error},
                     )
+            self._record_operation_usage(tool, call, result)
             state = ToolCallState.SUCCEEDED if result.status.value == "success" else ToolCallState.FAILED
             self._tracer.end_span(tool_span, output=result.output)
         except ToolRegistryError as exc:
@@ -1159,6 +1161,22 @@ class AgentRuntime:
             self._build_tool_call_context(call, provider=provider, state=state, result=result, iteration_count=iteration_count, tool_is_internal=tool_is_internal),
             result,
         )
+
+    def _record_operation_usage(self, tool: object, call: ToolCall, result: ToolResult) -> None:
+        # Records one priced search/fetch operation for a successful PricedOperationTool
+        # call; swallows any hook error so a pricing bug can never break tool execution.
+        if not isinstance(tool, PricedOperationTool) or result.status.value != "success":
+            return
+        try:
+            self.usage_tracker.record_operation(
+                tool.operation,
+                tool.provider,
+                mode=tool.mode_used(call, result),
+                units=tool.units_used(call, result),
+                reported_cost_usd=tool.reported_cost_usd(call, result),
+            )
+        except Exception:
+            return
 
     @staticmethod
     def _middleware_denied_tool(call: ToolCall, provider: str, decision: MiddlewareDecision, *, iteration_count: int | None = None) -> tuple[ToolCallContext, ToolResult]:
