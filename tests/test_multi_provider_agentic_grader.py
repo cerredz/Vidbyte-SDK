@@ -204,7 +204,7 @@ class MultiProviderAgenticGraderTests(unittest.IsolatedAsyncioTestCase):
         os.environ["OPENAI_API_KEY"] = "fake-openai-key"
         os.environ["ANTHROPIC_API_KEY"] = "fake-anthropic-key"
 
-        algorithm = MultiProviderAgenticGraderAlgorithm(provider_models={"openai": "gpt-4o", "anthropic": "claude-3"})
+        algorithm = MultiProviderAgenticGraderAlgorithm(provider_models={"openai": "gpt-4o", "anthropic": "claude-sonnet-5"})
         runtime = AgentRuntime(
             agent_name="worker",
             system_prompt="Work.",

@@ -90,12 +90,25 @@ class YamlLoader:
         # Resolves a system_prompt text-file reference, then delegates all validation to AgentSettings.
         prompt = document.get("system_prompt")
         if isinstance(prompt, str) and Path(prompt.strip()).suffix.lower() in _TEXT_FILE_SUFFIXES:
-            document = {**document, "system_prompt": self._load_file(path.parent / prompt.strip())}
+            document = {**document, "system_prompt": self._load_file(self._contained(path, prompt.strip()))}
         try:
             return AgentSettings.from_mapping(document, "agent")
         except ConfigurationError as error:
             error.details.setdefault("path", str(path))
             raise
+
+    def _contained(self, document_path: Path, reference: str) -> Path:
+        # @intent prompt-file-containment
+        # The prompt reference comes from the same untrusted document as every other field, so it may
+        # only name a file beside the document; without this, '../../../etc/passwd' becomes the prompt.
+        base = document_path.parent.resolve()
+        target = (base / reference).resolve()
+        if base != target and base not in target.parents:
+            raise ConfigurationError(
+                "A system_prompt file reference must stay inside the configuration file's directory.",
+                details={"field": "agent.system_prompt", "path": str(document_path), "reference": reference, "resolved": str(target), "base": str(base)},
+            )
+        return target
 
     def _load_file(self, target: Path) -> str:
         # Loads one supported text-based file's contents as UTF-8, dispatching on its extension.
