@@ -28,7 +28,7 @@ from vidbyte.agents.pricing.compatible import (
     XAIUsage,
 )
 from vidbyte.agents.pricing.openrouter import OpenRouterUsage
-from vidbyte.agents.pricing.records import UsageRecord, UsageRollup
+from vidbyte.agents.pricing.records import OperationUsageRecord, UsageRecord, UsageRollup
 from vidbyte.agents.pricing.tracker import UsageTracker
 
 __all__ = [
@@ -40,6 +40,7 @@ __all__ = [
     "MiniMaxUsage",
     "OpenAIUsage",
     "OpenRouterUsage",
+    "OperationUsageRecord",
     "ProviderUsage",
     "UsageRecord",
     "UsageRollup",
