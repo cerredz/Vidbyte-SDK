@@ -34,7 +34,7 @@ access remain outside this package.
 | Layer | Role |
 |-------|------|
 | [`vidbyte.agents`](vidbyte/agents/README.md) | Executable agent actors, runtimes, inferred runner selection, handoff, and agent registries |
-| [`vidbyte.config`](vidbyte/config/README.md) | Safe YAML parsing into declarative agent, tool, and middleware settings; applications resolve executable references |
+| [`vidbyte.config`](vidbyte/config/README.md) | Safe YAML parsing into declarative agent settings (with nested tools/middleware) or a harness spec; applications resolve executable references |
 | [`vidbyte.cli`](vidbyte/cli/README.md) | Unified console command for SDK developer surfaces, currently `vidbyte-sdk skills` |
 | [`vidbyte.context`](vidbyte/context/README.md) | Structured context items, context windows, compaction, algorithms, and handoff models |
 | [`vidbyte.evals`](vidbyte/evals/README.md) | Local eval cases, suites, runners, graders, registries, and result summaries |
@@ -90,34 +90,54 @@ sdk.providers
 
 ## YAML Configuration
 
-Use `YamlLoader` when an application wants versioned, data-only YAML settings.
-Loading validates the document and returns declarations; it never imports a `ref`
-or instantiates a tool or middleware. Resolve those declarations from an
-application-owned allowlist before creating the agent. `load(path)` is the central
-entry point that dispatches on the document's declared kind (agent, tools,
-middleware, or harness); the typed `load_agent()`, `load_tools()`,
-`load_middleware()`, and `load_harness()` methods select one kind explicitly. Each
-`view_*()` method returns the structure a document of that kind must follow.
+Use `YamlLoader` when an application wants data-only YAML settings. Loading
+validates the document and returns declarations; it never imports a `ref` or
+instantiates a tool or middleware. Resolve those declarations from an
+application-owned allowlist before creating the agent. There are two document
+families: an **agent** document and a **harness** document. `load(path)` returns an
+`AgentSettings` subclass or a `HarnessSpec` — it needs no `kind` field, recognizing a
+harness by its `schema_version`/`harness` envelope and treating every other document
+as an agent. `load_agent()` and `load_harness()` select one family explicitly, and
+`view_agent()` returns the structure a base agent document must follow.
 
 ```python
 from vidbyte import YamlLoader, VidbyteSDK
 
 loader = YamlLoader()
 settings = loader.load_agent("agent.yaml")            # or loader.load("agent.yaml")
-tool_definitions = loader.load_tools("tools.yaml")
-middleware_definitions = loader.load_middleware("middleware.yaml")
 harness_spec = loader.load_harness("harness.yaml")    # delegates to the harness loader
 
-tools = resolve_tools(tool_definitions)  # Application-owned allowlist/resolver.
-middleware = resolve_middleware(middleware_definitions)
+tools = resolve_tools(settings.tools)  # Application-owned allowlist/resolver.
+middleware = resolve_middleware(settings.middleware)
 agent = VidbyteSDK().agents.base(**settings.to_agent_kwargs(tools=tools, middleware=middleware))
 ```
 
-Agent, tools, and middleware documents declare `version: 1` and a matching `kind`
-(`agent`, `tools`, or `middleware`); harness documents follow the harness envelope
-(`schema_version` plus `harness`/`agents`). Keep API keys, tokens, passwords, and
-other secrets outside YAML; pass them through the application or environment when
-constructing runtime code.
+An agent document is polymorphic on a `type:` field (`base`, `aggregate`,
+`continual_trace`, `handoff`, `multi`, `adversarial`); `type` defaults to `base`, the
+plain `BaseAgent`, which is fully supported. The other types are registered but not
+yet loadable from YAML. Tools and middleware are nested `tools:`/`middleware:` lists
+of `{ref, options}` entries — not separate documents — and `loop:` is parsed into an
+`AgentLoopSettings`. `provider` and `model_name` are validated against the canonical
+provider registry. A harness document follows the harness envelope (`schema_version`
+plus `harness`/`agents`). Keep API keys, tokens, passwords, and other secrets outside
+YAML; pass them through the application or environment when constructing runtime code.
+
+```yaml
+# agent.yaml
+type: base
+name: researcher
+system_prompt: You are a careful research assistant.
+provider: anthropic
+model_name: claude-opus-4-8
+loop:
+  max_iterations: 10
+tools:
+  - ref: web_search
+    options: { max_results: 5 }
+middleware:
+  - ref: rate_limiter
+    options: { requests_per_minute: 60 }
+```
 
 ## Agents and Runner Inference
 

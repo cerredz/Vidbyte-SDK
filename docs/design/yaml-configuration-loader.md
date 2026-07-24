@@ -10,6 +10,12 @@ Output:
 
 ---
 
+> **Superseded (2026-07-24, PR #308 review):** The polymorphic redesign of this surface —
+> two document families (agent/harness), the `AgentType` discriminator, nested tools/middleware,
+> `loop` as `AgentLoopSettings`, provider/model validation, and the shrunk loader — is specified
+> in [`yaml-config-polymorphic-agents.md`](yaml-config-polymorphic-agents.md). That document is the
+> current source of truth; the notes below describe the earlier #295-era API.
+
 > **Revision (2026-07-23, post-review of PR #295):** The implemented public API differs
 > from the original draft below in response to review feedback:
 > - The loader class is `YamlLoader` (not `ConfigurationLoader`).
