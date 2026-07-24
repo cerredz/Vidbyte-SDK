@@ -51,6 +51,7 @@ from vidbyte.context.primitives import (
     ToolCallContextItem,
     TrajectoryCheckpointContextItem,
 )
+from vidbyte.lib.dataclasses.environments import AuditReport
 from vidbyte.lib.dataclasses.filesystem import FileStat, FileSystemToolConfig
 from vidbyte.lib.dataclasses.mcp import McpToolDefinition
 from vidbyte.lib.dataclasses.middleware import (
@@ -157,6 +158,7 @@ __all__ = [
     "AgentUsage",
     "ArtifactRef",
     "ArtifactContextItem",
+    "AuditReport",
     "BaseAgentContext",
     "BaseContext",
     "BeforeDispatch",

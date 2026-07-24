@@ -130,6 +130,8 @@ from vidbyte.environments import (
     StaticTaskSet,
     TaskGenerator,
     TraceSpec,
+    criterion_from_grade,
+    grade_with,
 )
 from vidbyte.evals import (
     AllOfGrader,
@@ -730,6 +732,8 @@ __all__ = [
     "StaticTaskSet",
     "TaskGenerator",
     "TraceSpec",
+    "criterion_from_grade",
+    "grade_with",
     "BaseGrader",
     "Behavior",
     "AllOfGrader",

@@ -9,7 +9,9 @@ Purpose:
 Architecture:
     - types: EnvTask, EnvSession, Reward, RolloutRecord, calibration types.
     - base: Environment ABC, TaskGenerator protocol, StaticTaskSet.
-    - spec: HarnessSpec and its sub-specs plus name dispatch tables.
+    - grading: evals-grader adapter (criterion_from_grade, grade_with).
+    - spec: HarnessSpec and its sub-specs (name dispatch tables live in
+      vidbyte.lib.config.harness_tables).
     - resolver: HarnessSpecResolver building live BaseAgents from specs.
     - runner / records: Rollout execution and JSONL persistence.
     - audit / registry / client: Verifier audits, name registry, namespace client.
@@ -22,6 +24,7 @@ from __future__ import annotations
 from vidbyte.environments.audit import AuditReport, DoNothingPolicy, EchoPolicy, EnvironmentAudit
 from vidbyte.environments.base import Environment, StaticTaskSet, TaskGenerator
 from vidbyte.environments.client import EnvironmentsClient
+from vidbyte.environments.grading import criterion_from_grade, grade_with
 from vidbyte.environments.records import RolloutRecorder
 from vidbyte.environments.registry import EnvironmentRegistry
 from vidbyte.environments.resolver import HarnessSpecResolver
@@ -55,6 +58,8 @@ __all__ = [
     "ContextPrimitiveSpec",
     "CriterionResult",
     "DoNothingPolicy",
+    "criterion_from_grade",
+    "grade_with",
     "EchoPolicy",
     "EnvSession",
     "EnvTask",

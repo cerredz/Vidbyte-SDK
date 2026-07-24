@@ -13,8 +13,9 @@ Architecture:
     - ContextAlgorithmSpec / ContextPrimitiveSpec: Context-window configuration.
     - MiddlewareSpec / HarnessToolSpec / TraceSpec: Pipeline, tools, tracing.
     - HarnessSpec: Versioned aggregate with cross-field validation mirroring BaseAgent.
-    - MIDDLEWARE_TABLE / TOOL_TABLE / ALGORITHM_SETTINGS_OWNERS / PRIMITIVE_TABLE:
-      Single source of truth mapping spec names to SDK classes.
+    - Name dispatch tables live in vidbyte.lib.config.harness_tables (the single
+      source of truth mapping spec names to SDK classes); this module only validates
+      names against them.
 Relations:
     Resolved into live BaseAgents by vidbyte.environments.resolver; recorded into
     RolloutRecord.harness by vidbyte.environments.runner.
@@ -30,189 +31,17 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from vidbyte.context.algorithms import (
-    ErrorCorrectionAlgorithm,
-    MultiProviderAgenticGraderAlgorithm,
-    ProblemSpaceSearchAlgorithm,
-    ReflexionAlgorithm,
-    TrajectoryCheckpointAlgorithm,
-)
-from vidbyte.context.primitives import (
-    ArtifactContextItem,
-    DocumentContextItem,
-    EnvironmentContextItem,
-    FileContextItem,
-    GitDiffContextItem,
-    MemoryContextItem,
-    PlanContextItem,
-    ProgressContextItem,
-    ResponseContextItem,
-    TaskContextItem,
-    TextContextItem,
-    ToolCallContextItem,
-)
 from vidbyte.context.runtime import ContextWindowPlacement
+from vidbyte.lib.config.harness_tables import (
+    VIDBYTE_ALGORITHM_SETTINGS_OWNERS,
+    VIDBYTE_MIDDLEWARE_TABLE,
+    VIDBYTE_PASSTHROUGH_ALGORITHM_PRESETS,
+    VIDBYTE_PRIMITIVE_TABLE,
+    VIDBYTE_TOOL_TABLE,
+)
 from vidbyte.lib.registries.models import ProviderModelRegistry
-from vidbyte.middleware.builtins import (
-    AuditLogMiddleware,
-    CanaryTripwireMiddleware,
-    CircuitBreakerMiddleware,
-    ConfusedDeputyGuardMiddleware,
-    CostBudgetMiddleware,
-    ExponentialBackoffRetryMiddleware,
-    HoneypotToolMiddleware,
-    LoopDetectionMiddleware,
-    MessageHistoryCompactionMiddleware,
-    ModelRetryMiddleware,
-    RuntimeLimitMiddleware,
-    SummaryCompactionMiddleware,
-    TokenBudgetMiddleware,
-    TokenRateLimitMiddleware,
-    ToolPolicyMiddleware,
-    ToolResultCompactionMiddleware,
-    TraceReplacementCompactionMiddleware,
-    TraceSummaryTailCompactionMiddleware,
-)
-from vidbyte.tools.builtins import (
-    AttachMcpServerTool,
-    CodeExecutionTool,
-    ContextListTool,
-    ContextRemoveTool,
-    ContextUpsertTool,
-    CreateHandoffTool,
-    GlobTool,
-    GrepTool,
-    PatchTool,
-    ReflexionTool,
-    SearchMcpServersTool,
-    SemanticSearchTool,
-    TrajectoryCheckpointTool,
-)
-from vidbyte.tools.builtins.calculator import CalculatorTool
-from vidbyte.tools.builtins.document_retrieval import DocumentRetrievalTool
-from vidbyte.tools.filesystem import (
-    AppendTool,
-    ChecksumTool,
-    CopyTool,
-    DeleteTool,
-    DiffTool,
-    ExistsTool,
-    FindTool,
-    ListDirTool,
-    MakeDirTool,
-    MoveTool,
-    ReadBinaryTool,
-    ReadLinesTool,
-    ReadTextTool,
-    ReplaceTextTool,
-    StatTool,
-    TouchTool,
-    TreeTool,
-    UnzipTool,
-    WriteTextTool,
-    ZipTool,
-)
 
 SPEC_VERSION = "1"
-
-MIDDLEWARE_TABLE: dict[str, type] = {
-    "audit_log": AuditLogMiddleware,
-    "canary_tripwire": CanaryTripwireMiddleware,
-    "circuit_breaker": CircuitBreakerMiddleware,
-    "confused_deputy_guard": ConfusedDeputyGuardMiddleware,
-    "cost_budget": CostBudgetMiddleware,
-    "exponential_backoff_retry": ExponentialBackoffRetryMiddleware,
-    "honeypot_tool": HoneypotToolMiddleware,
-    "loop_detection": LoopDetectionMiddleware,
-    "message_history_compaction": MessageHistoryCompactionMiddleware,
-    "model_retry": ModelRetryMiddleware,
-    "runtime_limits": RuntimeLimitMiddleware,
-    "summary_compaction": SummaryCompactionMiddleware,
-    "token_budget": TokenBudgetMiddleware,
-    "token_rate_limit": TokenRateLimitMiddleware,
-    "tool_policy": ToolPolicyMiddleware,
-    "tool_result_compaction": ToolResultCompactionMiddleware,
-    "trace_replacement_compaction": TraceReplacementCompactionMiddleware,
-    "trace_summary_tail_compaction": TraceSummaryTailCompactionMiddleware,
-}
-
-# Tools whose constructor requires the resolved ContextManager instead of settings-only kwargs.
-CONTEXT_MANAGER_TOOL_NAMES: frozenset[str] = frozenset(
-    {"reflexion", "trajectory_checkpoint", "context_upsert", "context_list", "context_remove"}
-)
-
-# Filesystem tools take a FileSystemToolConfig; the resolver defaults root to the workspace.
-# Keys equal each tool's runtime ToolSpec name so specs, permitted_tool_names, and
-# model-facing schemas all share one namespace.
-FILESYSTEM_TOOL_TABLE: dict[str, type] = {
-    "append_text": AppendTool,
-    "checksum": ChecksumTool,
-    "copy": CopyTool,
-    "delete": DeleteTool,
-    "diff": DiffTool,
-    "exists": ExistsTool,
-    "find": FindTool,
-    "list_dir": ListDirTool,
-    "make_dir": MakeDirTool,
-    "move": MoveTool,
-    "read_binary": ReadBinaryTool,
-    "read_lines": ReadLinesTool,
-    "read_text": ReadTextTool,
-    "replace_text": ReplaceTextTool,
-    "stat": StatTool,
-    "touch": TouchTool,
-    "tree": TreeTool,
-    "unzip": UnzipTool,
-    "write_text": WriteTextTool,
-    "zip": ZipTool,
-}
-
-TOOL_TABLE: dict[str, type] = {
-    "attach_mcp_server": AttachMcpServerTool,
-    "calculator": CalculatorTool,
-    "code_execution": CodeExecutionTool,
-    "context_list": ContextListTool,
-    "context_remove": ContextRemoveTool,
-    "context_upsert": ContextUpsertTool,
-    "create_handoff": CreateHandoffTool,
-    "document_retrieval": DocumentRetrievalTool,
-    "glob": GlobTool,
-    "grep": GrepTool,
-    "patch_file": PatchTool,
-    "reflexion": ReflexionTool,
-    "search_mcp_servers": SearchMcpServersTool,
-    "semantic_search": SemanticSearchTool,
-    "trajectory_checkpoint": TrajectoryCheckpointTool,
-    **FILESYSTEM_TOOL_TABLE,
-}
-
-ALGORITHM_SETTINGS_OWNERS: dict[str, type] = {
-    "error_correction": ErrorCorrectionAlgorithm,
-    "multi_provider_agentic_grader": MultiProviderAgenticGraderAlgorithm,
-    "problem_space_search": ProblemSpaceSearchAlgorithm,
-    "reflexion": ReflexionAlgorithm,
-    "trajectory_checkpoints": TrajectoryCheckpointAlgorithm,
-}
-
-# Preset names that carry no settings-bearing algorithm dataclass.
-PASSTHROUGH_ALGORITHM_PRESETS: frozenset[str] = frozenset(
-    {"default", "raw_tool_outputs", "compact_tool_outputs", "hide_tool_outputs", "no_raw_tool_outputs"}
-)
-
-PRIMITIVE_TABLE: dict[str, type] = {
-    "artifact": ArtifactContextItem,
-    "document": DocumentContextItem,
-    "environment": EnvironmentContextItem,
-    "file": FileContextItem,
-    "git_diff": GitDiffContextItem,
-    "memory": MemoryContextItem,
-    "plan": PlanContextItem,
-    "progress": ProgressContextItem,
-    "response": ResponseContextItem,
-    "task": TaskContextItem,
-    "text": TextContextItem,
-    "tool_call": ToolCallContextItem,
-}
 
 _NON_LINEAR_RUNTIME_KINDS: frozenset[str] = frozenset({"mcts_search", "actor"})
 
@@ -314,11 +143,11 @@ class ContextAlgorithmSpec(BaseModel):
     @model_validator(mode="after")
     def _validate_settings_keys(self) -> "ContextAlgorithmSpec":
         # Settings keys must match the preset's algorithm dataclass fields exactly.
-        if self.preset in PASSTHROUGH_ALGORITHM_PRESETS:
+        if self.preset in VIDBYTE_PASSTHROUGH_ALGORITHM_PRESETS:
             if self.settings:
                 raise ValueError(f"Preset '{self.preset}' accepts no settings; got {_known(self.settings)}.")
             return self
-        owner = ALGORITHM_SETTINGS_OWNERS[self.preset]
+        owner = VIDBYTE_ALGORITHM_SETTINGS_OWNERS[self.preset]
         valid = {field.name for field in dataclasses.fields(owner)}
         unknown = set(self.settings) - valid
         if unknown:
@@ -342,9 +171,9 @@ class ContextPrimitiveSpec(BaseModel):
     @model_validator(mode="after")
     def _validate_kind_and_placement(self) -> "ContextPrimitiveSpec":
         # Kind must name a known primitive and placement must be a valid enum value.
-        if self.kind not in PRIMITIVE_TABLE:
+        if self.kind not in VIDBYTE_PRIMITIVE_TABLE:
             raise ValueError(
-                f"Unknown context primitive kind '{self.kind}'. Valid kinds: {_known(PRIMITIVE_TABLE)}."
+                f"Unknown context primitive kind '{self.kind}'. Valid kinds: {_known(VIDBYTE_PRIMITIVE_TABLE)}."
             )
         valid_placements = {member.value for member in ContextWindowPlacement}
         if self.placement not in valid_placements:
@@ -355,7 +184,7 @@ class ContextPrimitiveSpec(BaseModel):
 
 
 class MiddlewareSpec(BaseModel):
-    """One middleware pipeline entry named against MIDDLEWARE_TABLE."""
+    """One middleware pipeline entry named against VIDBYTE_MIDDLEWARE_TABLE."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -365,15 +194,15 @@ class MiddlewareSpec(BaseModel):
     @model_validator(mode="after")
     def _validate_name(self) -> "MiddlewareSpec":
         # Middleware names must exist in the dispatch table.
-        if self.name not in MIDDLEWARE_TABLE:
+        if self.name not in VIDBYTE_MIDDLEWARE_TABLE:
             raise ValueError(
-                f"Unknown middleware '{self.name}'. Valid middleware: {_known(MIDDLEWARE_TABLE)}."
+                f"Unknown middleware '{self.name}'. Valid middleware: {_known(VIDBYTE_MIDDLEWARE_TABLE)}."
             )
         return self
 
 
 class HarnessToolSpec(BaseModel):
-    """One requested prebuilt tool named against TOOL_TABLE."""
+    """One requested prebuilt tool named against VIDBYTE_TOOL_TABLE."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -383,8 +212,8 @@ class HarnessToolSpec(BaseModel):
     @model_validator(mode="after")
     def _validate_name(self) -> "HarnessToolSpec":
         # Tool names must exist in the dispatch table.
-        if self.name not in TOOL_TABLE:
-            raise ValueError(f"Unknown tool '{self.name}'. Valid tools: {_known(TOOL_TABLE)}.")
+        if self.name not in VIDBYTE_TOOL_TABLE:
+            raise ValueError(f"Unknown tool '{self.name}'. Valid tools: {_known(VIDBYTE_TOOL_TABLE)}.")
         return self
 
 
@@ -451,7 +280,7 @@ class HarnessSpec(BaseModel):
             raise ValueError(f"Runtime '{self.runtime.kind}' does not support middleware.")
         if self.trace.continual:
             raise ValueError(f"Runtime '{self.runtime.kind}' does not support continual tracing.")
-        if self.context_algorithm.preset not in PASSTHROUGH_ALGORITHM_PRESETS:
+        if self.context_algorithm.preset not in VIDBYTE_PASSTHROUGH_ALGORITHM_PRESETS:
             raise ValueError(
                 f"Runtime '{self.runtime.kind}' does not support context-window algorithm "
                 f"'{self.context_algorithm.preset}'."
@@ -459,14 +288,7 @@ class HarnessSpec(BaseModel):
 
 
 __all__ = [
-    "ALGORITHM_SETTINGS_OWNERS",
-    "CONTEXT_MANAGER_TOOL_NAMES",
-    "FILESYSTEM_TOOL_TABLE",
-    "MIDDLEWARE_TABLE",
-    "PASSTHROUGH_ALGORITHM_PRESETS",
-    "PRIMITIVE_TABLE",
     "SPEC_VERSION",
-    "TOOL_TABLE",
     "ContextAlgorithmSpec",
     "ContextPrimitiveSpec",
     "HarnessSpec",
