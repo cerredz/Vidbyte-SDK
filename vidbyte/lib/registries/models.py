@@ -16,8 +16,12 @@ Key Functions:
     - get_supported_models: Gets list of default model strings.
     - resolve_active: Returns the set of providers and models to use for a run.
     - validate_provider: Raises ConfigurationError if a provider string is unrecognized.
-    - validate_model: Raises ConfigurationError if a model string is empty.
+    - validate_model: Raises ConfigurationError if a model string is empty or unrecognized.
     - validate_provider_models_map: Validates all entries in a provider_models mapping.
+    - known_models: Returns every model identifier the SDK has a registered runner for.
+    - models_for_provider: Returns the catalogued model identifiers for one provider.
+    - provider_for_model: Returns the provider a catalogued model belongs to, or None.
+    - validate_provider_model_pair: Raises unless a model is catalogued under its provider.
 Relations:
     Used by MultiProviderAgenticGraderRuntimeAlgorithm, MultiProviderAgenticGraderAlgorithm,
     and client configurations (TextModelConfig, ImageModelConfig, VideoModelConfig).
@@ -33,12 +37,17 @@ from collections.abc import Mapping
 from typing import Any, ClassVar
 
 from vidbyte.lib.agents.modality_detector import ModalityDetector
+from vidbyte.lib.constants.runners import MODEL_PROVIDER_RUNNER_TYPE_MAP, MODEL_RUNNER_TYPE_MAP
 from vidbyte.lib.enums import ModelModality, ModelProvider
 from vidbyte.lib.errors import ConfigurationError
 
 
 class ProviderModelRegistry:
     """Central registry for default provider-to-model mappings and validation helpers."""
+
+    # Single switch governing whether an uncatalogued model is rejected or passed through.
+    # Set False to accept any non-blank model name, e.g. to use a model released after this pin.
+    STRICT_MODEL_VALIDATION: ClassVar[bool] = True
 
     DEFAULT_PROVIDER_MODELS: ClassVar[dict[ModelProvider, str]] = {
         ModelProvider.OPENAI: "gpt-5.6-sol",
@@ -169,10 +178,65 @@ class ProviderModelRegistry:
             ) from exc
 
     @classmethod
+    def known_models(cls) -> frozenset[str]:
+        # Returns every normalized model identifier the SDK has a registered runner for.
+        bare = {name.strip().lower() for name in MODEL_RUNNER_TYPE_MAP}
+        qualified = {key.split("/", 1)[1] for key in MODEL_PROVIDER_RUNNER_TYPE_MAP if "/" in key}
+        return frozenset(bare | {name.strip().lower() for name in qualified})
+
+    @classmethod
+    def models_for_provider(cls, provider: ModelProvider | str) -> tuple[str, ...]:
+        # Returns the catalogued model identifiers registered under one provider, sorted.
+        name = (provider.value if isinstance(provider, ModelProvider) else str(provider)).strip().lower()
+        prefix = f"{name}/"
+        return tuple(sorted(key.split("/", 1)[1] for key in MODEL_PROVIDER_RUNNER_TYPE_MAP if key.lower().startswith(prefix)))
+
+    @classmethod
+    def provider_for_model(cls, model: str) -> str | None:
+        # Returns the provider a catalogued model is registered under, or None when uncatalogued.
+        target = (model or "").strip().lower()
+        if not target:
+            return None
+        for key in MODEL_PROVIDER_RUNNER_TYPE_MAP:
+            provider, _, name = key.lower().partition("/")
+            if name == target or key.lower() == target:
+                return provider
+        return None
+
+    @classmethod
     def validate_model(cls, model: str) -> None:
-        # Raises ConfigurationError if model is an empty or whitespace-only string.
+        # @intent strict-model-allowlist
+        # Rejecting an uncatalogued model at validation time turns a late provider 400 into an
+        # actionable error naming the model; flip STRICT_MODEL_VALIDATION to restore name-only checks.
         if not model or not model.strip():
             raise ConfigurationError("model must be a non-empty string.")
+        if not cls.STRICT_MODEL_VALIDATION:
+            return
+        if cls._catalog_name(model) not in cls.known_models():
+            raise ConfigurationError(
+                f"Unrecognized model '{model.strip()}'. The SDK has no registered runner for it.",
+                details={"model": model.strip(), "known_model_count": len(cls.known_models())},
+            )
+
+    @classmethod
+    def validate_provider_model_pair(cls, provider: ModelProvider | str, model: str) -> None:
+        # Raises unless the model is catalogued under the provider the caller declared alongside it.
+        cls.validate_model(model)
+        if not cls.STRICT_MODEL_VALIDATION:
+            return
+        name = (provider.value if isinstance(provider, ModelProvider) else str(provider)).strip().lower()
+        owner = cls.provider_for_model(model)
+        if owner is not None and owner != name:
+            raise ConfigurationError(
+                f"Model '{model.strip()}' is registered under provider '{owner}', not '{name}'.",
+                details={"model": model.strip(), "declared_provider": name, "registered_provider": owner},
+            )
+
+    @staticmethod
+    def _catalog_name(model: str) -> str:
+        # Normalizes a model identifier to its catalog form, matching ModalityDetector's convention.
+        name = (model or "").strip().lower()
+        return name.split("/", 1)[1] if "/" in name and not name.startswith("openrouter/") else name
 
     @classmethod
     def validate_provider_models_map(cls, provider_models: Mapping[str, str]) -> None:

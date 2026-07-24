@@ -107,6 +107,7 @@ from vidbyte.lib.dataclasses.multi_agent import (
     WorkerCloser,
     WorkerForkFactory,
 )
+from vidbyte.lib.dataclasses.config import AgentSettings, MiddlewareDefinition, ToolDefinition
 from vidbyte.lib.dataclasses.sandbox import SandboxRequest, SandboxResult, SandboxTransport
 from vidbyte.lib.dataclasses.security import PermissionDecision, PermissionPolicy
 from vidbyte.lib.dataclasses.sessions import (
@@ -181,6 +182,7 @@ __all__ = [
     "AgentRunnerConfig",
     "AgentRuntimeConfig",
     "AgentRuntimeStats",
+    "AgentSettings",
     "AgentSpec",
     "AgentStopReason",
     "AgentUsage",
@@ -246,6 +248,7 @@ __all__ = [
     "MiddlewareAction",
     "MiddlewareContext",
     "MiddlewareDecision",
+    "MiddlewareDefinition",
     "MiddlewareEvent",
     "MiddlewareHook",
     "MiddlewareTransform",
@@ -290,6 +293,7 @@ __all__ = [
     "TaskSpec",
     "TextContextItem",
     "ToolCall",
+    "ToolDefinition",
     "ToolCallContext",
     "ToolCallState",
     "ToolCallContextItem",

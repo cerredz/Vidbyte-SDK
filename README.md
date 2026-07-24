@@ -34,6 +34,7 @@ access remain outside this package.
 | Layer | Role |
 |-------|------|
 | [`vidbyte.agents`](vidbyte/agents/README.md) | Executable agent actors, runtimes, inferred runner selection, handoff, and agent registries |
+| [`vidbyte.config`](vidbyte/config/README.md) | Safe YAML parsing into declarative agent settings (with nested tools/middleware) or a harness spec; applications resolve executable references |
 | [`vidbyte.cli`](vidbyte/cli/README.md) | Unified console command for SDK developer surfaces, currently `vidbyte-sdk skills` |
 | [`vidbyte.context`](vidbyte/context/README.md) | Structured context items, context windows, compaction, algorithms, and handoff models |
 | [`vidbyte.evals`](vidbyte/evals/README.md) | Local eval cases, suites, runners, graders, registries, and result summaries |
@@ -85,6 +86,57 @@ sdk.paradigms
 sdk.agents
 sdk.tools
 sdk.providers
+```
+
+## YAML Configuration
+
+Use `YamlLoader` when an application wants data-only YAML settings. Loading
+validates the document and returns declarations; it never imports a `ref` or
+instantiates a tool or middleware. Resolve those declarations from an
+application-owned allowlist before creating the agent. There are two document
+families: an **agent** document and a **harness** document. `load(path)` returns an
+`AgentSettings` subclass or a `HarnessSpec` — it needs no `kind` field, recognizing a
+harness by its `schema_version`/`harness` envelope and treating every other document
+as an agent. `load_agent()` and `load_harness()` select one family explicitly, and
+`view_agent()` returns the structure a base agent document must follow.
+
+```python
+from vidbyte import YamlLoader, VidbyteSDK
+
+loader = YamlLoader()
+settings = loader.load_agent("agent.yaml")            # or loader.load("agent.yaml")
+harness_spec = loader.load_harness("harness.yaml")    # delegates to the harness loader
+
+tools = resolve_tools(settings.tools)  # Application-owned allowlist/resolver.
+middleware = resolve_middleware(settings.middleware)
+agent = VidbyteSDK().agents.base(**settings.to_agent_kwargs(tools=tools, middleware=middleware))
+```
+
+An agent document is polymorphic on a `type:` field (`base`, `aggregate`,
+`continual_trace`, `handoff`, `multi`, `adversarial`); `type` defaults to `base`, the
+plain `BaseAgent`, which is fully supported. The other types are registered but not
+yet loadable from YAML. Tools and middleware are nested `tools:`/`middleware:` lists
+of `{ref, options}` entries — not separate documents — and `loop:` is parsed into an
+`AgentLoopSettings`. `provider` and `model_name` are validated against the canonical
+provider registry. A harness document follows the harness envelope (`schema_version`
+plus `harness`/`agents`). Keep API keys, tokens, passwords, and other secrets outside
+YAML; pass them through the application or environment when constructing runtime code.
+
+```yaml
+# agent.yaml
+type: base
+name: researcher
+system_prompt: You are a careful research assistant.
+provider: anthropic
+model_name: claude-opus-4-8
+loop:
+  max_iterations: 10
+tools:
+  - ref: web_search
+    options: { max_results: 5 }
+middleware:
+  - ref: rate_limiter
+    options: { requests_per_minute: 60 }
 ```
 
 ## Agents and Runner Inference
