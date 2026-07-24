@@ -31,9 +31,21 @@ class MockMcpStdioTransport:
 
     instances: list[MockMcpStdioTransport] = []
 
-    def __init__(self, command: list[str], *, env: dict[str, str] | None = None) -> None:
+    def __init__(
+        self,
+        command: list[str],
+        *,
+        env: dict[str, str] | None = None,
+        request_timeout: float = 30.0,
+        shutdown_timeout: float = 5.0,
+        stderr_max_bytes: int = 64 * 1024,
+        **_: object,
+    ) -> None:
         self.command = command
         self.env = env
+        self.request_timeout = request_timeout
+        self.shutdown_timeout = shutdown_timeout
+        self.stderr_max_bytes = stderr_max_bytes
         self.closed = False
         self._started = False
         MockMcpStdioTransport.instances.append(self)
