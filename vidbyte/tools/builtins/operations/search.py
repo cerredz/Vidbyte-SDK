@@ -1,0 +1,209 @@
+"""Context Protocol Header
+
+Description:
+    Pre-built priced search tools for the supported web-search providers.
+Purpose:
+    Give agents first-class search tools whose calls the runtime prices as
+    search operations, each declaring its (operation, provider) and deriving its
+    billing mode and units from the call arguments.
+Architecture:
+    - Brave/OpenAlex/SemanticScholar: flat per-request search (units = 1).
+    - Exa/Parallel: per-result search (units = requested result count).
+    - Tavily/Linkup: depth-tiered search selecting a billing mode.
+Relations:
+    Subclass PricedOperationTool (this package's base) and are exported through
+    vidbyte/tools/builtins/operations/__init__.py.
+Similar Files:
+    - vidbyte/tools/builtins/operations/fetch.py
+"""
+
+from __future__ import annotations
+
+from vidbyte.tools.builtins.operations.base import PricedOperationTool
+from vidbyte.tools.types import ToolCall, ToolParameter, ToolResult, ToolSpec
+
+
+def _int_arg(call: ToolCall, name: str, default: int) -> int:
+    # Reads a positive integer argument, falling back to default for missing/invalid values.
+    value = call.arguments.get(name, default)
+    return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else default
+
+
+def _mode_arg(call: ToolCall, name: str, allowed: tuple[str, ...], default: str) -> str:
+    # Reads a mode argument, clamping anything outside the allowed set to default.
+    value = call.arguments.get(name)
+    return value if isinstance(value, str) and value in allowed else default
+
+
+class BraveSearchTool(PricedOperationTool):
+    """Brave web search — flat per-request billing."""
+
+    operation = "search"
+    provider = "brave"
+
+    def spec(self) -> ToolSpec:
+        # Declares the Brave search tool with a query and an optional result count.
+        return ToolSpec(
+            name="brave_search",
+            description="Runs a privacy-focused Brave web search and returns ranked result snippets.",
+            parameters=(
+                ToolParameter(name="query", type="string", description="The search query.", required=True),
+                ToolParameter(name="count", type="int", description="Maximum results to return (max 20).", required=False, default=10),
+            ),
+        )
+
+    async def execute(self, call: ToolCall) -> ToolResult:
+        # Prices one Brave search call at the flat per-request rate.
+        return self._contract_result(f"brave search: {call.arguments.get('query', '')}", units=1)
+
+
+class ExaSearchTool(PricedOperationTool):
+    """Exa neural search — per-result billing over a 10-result bundle."""
+
+    operation = "search"
+    provider = "exa"
+
+    def spec(self) -> ToolSpec:
+        # Declares the Exa search tool with query, result count, and search type.
+        return ToolSpec(
+            name="exa_search",
+            description="Runs an Exa neural search returning hyper-relevant results with contents.",
+            parameters=(
+                ToolParameter(name="query", type="string", description="The search query.", required=True),
+                ToolParameter(name="num_results", type="int", description="Number of results to return.", required=False, default=10),
+                ToolParameter(name="type", type="string", description="Search mode: 'standard' or 'agentic'.", required=False, default="standard"),
+            ),
+        )
+
+    async def execute(self, call: ToolCall) -> ToolResult:
+        # Prices one Exa search by returned result count under the selected mode.
+        mode = _mode_arg(call, "type", ("standard", "agentic"), "standard")
+        units = _int_arg(call, "num_results", 10)
+        return self._contract_result(f"exa search: {call.arguments.get('query', '')}", units=units, mode=mode)
+
+
+class TavilySearchTool(PricedOperationTool):
+    """Tavily agentic search — depth tier selects the billing mode."""
+
+    operation = "search"
+    provider = "tavily"
+
+    def spec(self) -> ToolSpec:
+        # Declares the Tavily search tool with query and search depth.
+        return ToolSpec(
+            name="tavily_search",
+            description="Runs an LLM-optimized Tavily web search returning ready-to-consume snippets.",
+            parameters=(
+                ToolParameter(name="query", type="string", description="The search query.", required=True),
+                ToolParameter(name="search_depth", type="string", description="Search depth: 'basic' or 'advanced'.", required=False, default="basic"),
+                ToolParameter(name="max_results", type="int", description="Maximum results to return.", required=False, default=5),
+            ),
+        )
+
+    async def execute(self, call: ToolCall) -> ToolResult:
+        # Prices one Tavily search per request at the basic/advanced credit tier.
+        mode = _mode_arg(call, "search_depth", ("basic", "advanced"), "basic")
+        return self._contract_result(f"tavily search: {call.arguments.get('query', '')}", units=1, mode=mode)
+
+
+class LinkupSearchTool(PricedOperationTool):
+    """Linkup search — standard vs deep depth selects the billing mode."""
+
+    operation = "search"
+    provider = "linkup"
+
+    def spec(self) -> ToolSpec:
+        # Declares the Linkup search tool with query and depth.
+        return ToolSpec(
+            name="linkup_search",
+            description="Runs a Linkup web search returning sourced results or answers.",
+            parameters=(
+                ToolParameter(name="query", type="string", description="The search query.", required=True),
+                ToolParameter(name="depth", type="string", description="Search depth: 'standard' or 'deep'.", required=False, default="standard"),
+            ),
+        )
+
+    async def execute(self, call: ToolCall) -> ToolResult:
+        # Prices one Linkup search per request at the standard/deep tier.
+        mode = _mode_arg(call, "depth", ("standard", "deep"), "standard")
+        return self._contract_result(f"linkup search: {call.arguments.get('query', '')}", units=1, mode=mode)
+
+
+class ParallelSearchTool(PricedOperationTool):
+    """Parallel search — per-result billing under a processor tier."""
+
+    operation = "search"
+    provider = "parallel"
+
+    def spec(self) -> ToolSpec:
+        # Declares the Parallel search tool with objective, processor, and result count.
+        return ToolSpec(
+            name="parallel_search",
+            description="Runs a Parallel web search for an objective and returns matched results.",
+            parameters=(
+                ToolParameter(name="objective", type="string", description="Natural-language search objective.", required=True),
+                ToolParameter(name="processor", type="string", description="Processor tier: 'turbo' or 'pro'.", required=False, default="turbo"),
+                ToolParameter(name="max_results", type="int", description="Maximum results to return.", required=False, default=10),
+            ),
+        )
+
+    async def execute(self, call: ToolCall) -> ToolResult:
+        # Prices one Parallel search by returned result count under the processor tier.
+        mode = _mode_arg(call, "processor", ("turbo", "pro"), "turbo")
+        units = _int_arg(call, "max_results", 10)
+        return self._contract_result(f"parallel search: {call.arguments.get('objective', '')}", units=units, mode=mode)
+
+
+class OpenAlexSearchTool(PricedOperationTool):
+    """OpenAlex scholarly search — flat per-request billing."""
+
+    operation = "search"
+    provider = "openalex"
+
+    def spec(self) -> ToolSpec:
+        # Declares the OpenAlex works search tool with query and page size.
+        return ToolSpec(
+            name="openalex_search",
+            description="Searches OpenAlex scholarly works and returns matching records.",
+            parameters=(
+                ToolParameter(name="query", type="string", description="The search query.", required=True),
+                ToolParameter(name="per_page", type="int", description="Results per page (max 200).", required=False, default=25),
+            ),
+        )
+
+    async def execute(self, call: ToolCall) -> ToolResult:
+        # Prices one OpenAlex search call at the flat per-request rate.
+        return self._contract_result(f"openalex search: {call.arguments.get('query', '')}", units=1)
+
+
+class SemanticScholarSearchTool(PricedOperationTool):
+    """Semantic Scholar paper search — free per-request operation."""
+
+    operation = "search"
+    provider = "semantic_scholar"
+
+    def spec(self) -> ToolSpec:
+        # Declares the Semantic Scholar paper search tool with query and limit.
+        return ToolSpec(
+            name="semantic_scholar_search",
+            description="Searches Semantic Scholar papers and returns matching records.",
+            parameters=(
+                ToolParameter(name="query", type="string", description="The search query.", required=True),
+                ToolParameter(name="limit", type="int", description="Maximum papers to return (max 100).", required=False, default=10),
+            ),
+        )
+
+    async def execute(self, call: ToolCall) -> ToolResult:
+        # Prices one Semantic Scholar search call at the free rate.
+        return self._contract_result(f"semantic_scholar search: {call.arguments.get('query', '')}", units=1)
+
+
+__all__ = [
+    "BraveSearchTool",
+    "ExaSearchTool",
+    "LinkupSearchTool",
+    "OpenAlexSearchTool",
+    "ParallelSearchTool",
+    "SemanticScholarSearchTool",
+    "TavilySearchTool",
+]
