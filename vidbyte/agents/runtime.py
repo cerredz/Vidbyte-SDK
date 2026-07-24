@@ -44,7 +44,6 @@ Related Docs:
 from __future__ import annotations
 
 import asyncio
-import json
 import math
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
@@ -730,49 +729,24 @@ class AgentRuntime:
         provider = handle.provider
         retries_used = 0
         while True:
-            current_call_options = dict(call_options)
-            decision = await self.middleware.before_model_call(
-                self._middleware_context(
-                    MiddlewareHook.BEFORE_MODEL_CALL,
-                    message=message,
-                    context=context,
-                    provider=provider,
-                    iteration_count=iteration_count,
-                    model_call_count=model_call_count,
-                    tool_call_count=len(call_contexts),
-                    tokens_used=tokens_used,
-                    started_at=started_at,
-                    metadata=metadata,
-                    run_state=run_state,
-                    provider_messages=self._provider_messages_from_options(current_call_options),
-                    system=str(current_call_options.get("system")) if current_call_options.get("system") is not None else None,
-                )
-            )
-            if decision.action is not MiddlewareAction.CONTINUE:
-                return (
-                    self._middleware_abort_result(
-                        decision,
-                        iteration_count=iteration_count,
-                        tokens_used=tokens_used,
-                        contexts=call_contexts,
-                    ),
-                    model_call_count,
-                    compaction_count,
-                )
-            compaction_count += self._compaction_event_delta(decision)
-            current_call_options = self._apply_before_model_call_transform(current_call_options, decision)
-            budget_outcome, budget_compactions = await self._apply_context_window_budget(
+            prepared = await self._prepare_call_for_invocation(
+                call_options,
+                handle,
                 message,
-                current_call_options,
+                provider=provider,
+                context=context,
                 iteration_count=iteration_count,
-                tokens_used=tokens_used,
+                model_call_count=model_call_count,
                 call_contexts=call_contexts,
+                tokens_used=tokens_used,
+                started_at=started_at,
+                metadata=metadata,
                 run_state=run_state,
             )
-            compaction_count += budget_compactions
-            if isinstance(budget_outcome, AgentResult):
-                return budget_outcome, model_call_count, compaction_count
-            current_call_options = budget_outcome
+            if isinstance(prepared, AgentResult):
+                return prepared, model_call_count, compaction_count + int(prepared.metadata.get("compaction_count", 0))
+            current_call_options, model_call_count, _compaction_delta = prepared
+            compaction_count += _compaction_delta
             model_call_count += 1
             llm_span = self._tracer.start_span(
                 "llm.call",
@@ -794,61 +768,24 @@ class AgentRuntime:
                 return raw_result, model_call_count, compaction_count
             except Exception as exc:
                 self._tracer.end_span(llm_span, error=exc)
-                decision = await self.middleware.on_model_error(
-                    self._middleware_context(
-                        MiddlewareHook.ON_MODEL_ERROR,
-                        message=message,
-                        context=context,
-                        provider=provider,
-                        iteration_count=iteration_count,
-                        model_call_count=model_call_count,
-                        tool_call_count=len(call_contexts),
-                        tokens_used=tokens_used,
-                        started_at=started_at,
-                        metadata=metadata,
-                        run_state=run_state,
-                        error=exc,
-                    )
+                error_decision = await self._decide_model_error(
+                    exc,
+                    provider=provider,
+                    context=context,
+                    iteration_count=iteration_count,
+                    model_call_count=model_call_count,
+                    call_contexts=call_contexts,
+                    tokens_used=tokens_used,
+                    started_at=started_at,
+                    metadata=metadata,
+                    run_state=run_state,
+                    retries_used=retries_used,
                 )
-                if decision.action is MiddlewareAction.RETRY:
-                    requested_retry = True
-                else:
-                    requested_retry = False
-                if decision.action is MiddlewareAction.ABORT_RUN:
-                    return (
-                        self._middleware_abort_result(
-                            decision,
-                            iteration_count=iteration_count,
-                            tokens_used=tokens_used,
-                            contexts=call_contexts,
-                        ),
-                        model_call_count,
-                        compaction_count,
-                    )
-                if self.config.max_retries is None:
-                    if not requested_retry:
-                        raise
-                    if decision.sleep_seconds:
-                        await self.middleware.sleep(decision.sleep_seconds)
+                if error_decision is None:
                     continue
-                if retries_used >= self.config.max_retries:
-                    stopped = self._stopped_result(
-                        "Agent runtime stopped after exhausting max_retries for a model invocation.",
-                        stop_reason=AgentStopReason.MAX_RETRIES,
-                        iteration_count=iteration_count,
-                        tokens_used=tokens_used,
-                        contexts=call_contexts,
-                    )
-                    stopped = self._with_result_metadata(
-                        stopped,
-                        retry_count=retries_used,
-                        max_retries=self.config.max_retries,
-                        error_type=type(exc).__name__,
-                    )
-                    return stopped, model_call_count, compaction_count
+                if isinstance(error_decision, AgentResult):
+                    return error_decision, model_call_count, compaction_count
                 retries_used += 1
-                if requested_retry and decision.sleep_seconds:
-                    await self.middleware.sleep(decision.sleep_seconds)
                 continue
             except BaseException as exc:
                 # Catches CancelledError and other BaseException subclasses so the
@@ -856,8 +793,100 @@ class AgentRuntime:
                 self._tracer.end_span(llm_span, error=exc)
                 raise
 
+    async def _prepare_call_for_invocation(self, call_options: Mapping[str, Any], handle: RunnerHandle, message: str, *, provider: str, context: BaseAgentContext, iteration_count: int, model_call_count: int, call_contexts: Sequence[ToolCallContext], tokens_used: int | None, started_at: float, metadata: Mapping[str, Any], run_state: dict[type, Any] | None) -> tuple[dict[str, Any], int, int] | AgentResult:
+        # Runs before_model_call middleware, transforms options, and enforces context budget.
+        current = dict(call_options)
+        decision = await self.middleware.before_model_call(
+            self._middleware_context(
+                MiddlewareHook.BEFORE_MODEL_CALL,
+                message=message,
+                context=context,
+                provider=provider,
+                iteration_count=iteration_count,
+                model_call_count=model_call_count,
+                tool_call_count=len(call_contexts),
+                tokens_used=tokens_used,
+                started_at=started_at,
+                metadata=metadata,
+                run_state=run_state,
+                provider_messages=self._provider_messages_from_options(current),
+                system=str(current.get("system")) if current.get("system") is not None else None,
+            )
+        )
+        if decision.action is not MiddlewareAction.CONTINUE:
+            return self._middleware_abort_result(
+                decision,
+                iteration_count=iteration_count,
+                tokens_used=tokens_used,
+                contexts=call_contexts,
+            )
+        compaction_delta = self._compaction_event_delta(decision)
+        current = self._apply_before_model_call_transform(current, decision)
+        budget_outcome, budget_compactions = await self._apply_context_window_budget(
+            message,
+            current,
+            iteration_count=iteration_count,
+            tokens_used=tokens_used,
+            call_contexts=call_contexts,
+            run_state=run_state,
+        )
+        compaction_delta += budget_compactions
+        if isinstance(budget_outcome, AgentResult):
+            return budget_outcome
+        return budget_outcome, model_call_count, compaction_delta
+
+    async def _decide_model_error(self, exc: Exception, *, provider: str, context: BaseAgentContext, iteration_count: int, model_call_count: int, call_contexts: Sequence[ToolCallContext], tokens_used: int | None, started_at: float, metadata: Mapping[str, Any], run_state: dict[type, Any] | None, retries_used: int) -> AgentResult | None:
+        # Consults middleware after a model error; returns None for retry, AgentResult for abort or max-retries stop.
+        decision = await self.middleware.on_model_error(
+            self._middleware_context(
+                MiddlewareHook.ON_MODEL_ERROR,
+                message="",
+                context=context,
+                provider=provider,
+                iteration_count=iteration_count,
+                model_call_count=model_call_count,
+                tool_call_count=len(call_contexts),
+                tokens_used=tokens_used,
+                started_at=started_at,
+                metadata=metadata,
+                run_state=run_state,
+                error=exc,
+            )
+        )
+        requested_retry = decision.action is MiddlewareAction.RETRY
+        if decision.action is MiddlewareAction.ABORT_RUN:
+            return self._middleware_abort_result(
+                decision,
+                iteration_count=iteration_count,
+                tokens_used=tokens_used,
+                contexts=call_contexts,
+            )
+        if self.config.max_retries is None:
+            if not requested_retry:
+                raise exc
+            if decision.sleep_seconds:
+                await self.middleware.sleep(decision.sleep_seconds)
+            return None  # retry
+        if retries_used >= self.config.max_retries:
+            stopped = self._stopped_result(
+                "Agent runtime stopped after exhausting max_retries for a model invocation.",
+                stop_reason=AgentStopReason.MAX_RETRIES,
+                iteration_count=iteration_count,
+                tokens_used=tokens_used,
+                contexts=call_contexts,
+            )
+            return self._with_result_metadata(
+                stopped,
+                retry_count=retries_used,
+                max_retries=self.config.max_retries,
+                error_type=type(exc).__name__,
+            )
+        if requested_retry and decision.sleep_seconds:
+            await self.middleware.sleep(decision.sleep_seconds)
+        return None  # retry
+
     async def _apply_context_window_budget(self, message: str, call_options: Mapping[str, Any], *, iteration_count: int, tokens_used: int | None, call_contexts: Sequence[ToolCallContext], run_state: dict[type, Any] | None) -> tuple[dict[str, Any] | AgentResult, int]:
-        # Trims only provider conversation messages and fails closed when fixed input cannot fit.
+        # Enforces the context_window_budget by trimming provider messages through the compaction engine.
         current = dict(call_options)
         budget = self.config.context_window_budget
         if budget is None:
@@ -865,7 +894,6 @@ class AgentRuntime:
         before_tokens = self._estimated_model_input_tokens(message, current)
         if before_tokens <= budget:
             return current, 0
-
         original_messages = self._provider_messages_from_options(current)
         fixed_options = dict(current)
         if "messages" in fixed_options:
@@ -882,11 +910,14 @@ class AgentRuntime:
             )
             self._record_context_budget_metadata(run_state, stopped.metadata)
             return stopped, 0
-
         engine = ContextCompactionEngine()
-        compacted, after_tokens = await self._compact_provider_messages_for_budget(engine, message, current, original_messages, budget)
+        compacted, _ = await engine.compact_provider_messages(
+            original_messages,
+            mode=CompactionMode.TRIM_TO_TOKEN_BUDGET,
+            options={"max_tokens": budget - fixed_tokens, "preserve_system": False},
+        )
         current["messages"] = compacted
-
+        after_tokens = self._estimated_model_input_tokens(message, current)
         removed_messages = len(original_messages) - len(compacted)
         event = {
             "context_window_budget": budget,
@@ -905,32 +936,6 @@ class AgentRuntime:
                 removed_messages=removed_messages,
             ), int(removed_messages > 0)
         return current, int(removed_messages > 0)
-
-    async def _compact_provider_messages_for_budget(self, engine: ContextCompactionEngine, message: str, call_options: Mapping[str, Any], provider_messages: Sequence[Mapping[str, Any]], budget: int) -> tuple[tuple[dict[str, Any], ...], int]:
-        # Finds the largest newest suffix that fits, using boundary repair on every candidate.
-        empty_options = dict(call_options)
-        empty_options["messages"] = ()
-        best_messages: tuple[dict[str, Any], ...] = ()
-        best_tokens = self._estimated_model_input_tokens(message, empty_options)
-        low = 1
-        high = len(provider_messages)
-        while low <= high:
-            candidate_limit = (low + high) // 2
-            candidate, _ = await engine.compact_provider_messages(
-                provider_messages,
-                mode=CompactionMode.TRIM_WITH_PROVIDER_BOUNDARIES,
-                options={"max_messages": candidate_limit},
-            )
-            candidate_options = dict(call_options)
-            candidate_options["messages"] = candidate
-            candidate_tokens = self._estimated_model_input_tokens(message, candidate_options)
-            if candidate_tokens <= budget:
-                best_messages = candidate
-                best_tokens = candidate_tokens
-                low = candidate_limit + 1
-            else:
-                high = candidate_limit - 1
-        return best_messages, best_tokens
 
     def _context_window_budget_stop(self, *, iteration_count: int, tokens_used: int | None, call_contexts: Sequence[ToolCallContext], before_tokens: int, after_tokens: int, removed_messages: int) -> AgentResult:
         # Returns a diagnostic hard stop without issuing provider I/O.
@@ -963,9 +968,15 @@ class AgentRuntime:
 
     @staticmethod
     def _estimated_model_input_tokens(message: str, call_options: Mapping[str, Any]) -> int:
-        # Counts the complete serialized provider input using the established four-char heuristic.
-        serialized = json.dumps({"prompt": message, "options": dict(call_options)}, sort_keys=True, separators=(",", ":"), ensure_ascii=False, default=str)
-        return max(1, math.ceil(len(serialized) / 4))
+        # Estimates provider input tokens using the established four-char heuristic.
+        system = str(call_options.get("system", ""))
+        messages_text = "\n".join(
+            f"{msg.get('role', '')}:{msg.get('content', '')}"
+            for msg in call_options.get("messages", ())
+            if isinstance(msg, Mapping)
+        )
+        total_text = f"{system}\n{messages_text}\n{message}"
+        return max(1, math.ceil(len(total_text) / 4))
 
     async def _finish_result(
         self,
