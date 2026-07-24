@@ -53,18 +53,17 @@ class ChatCompletionUsage(ProviderUsage):
             reasoning_tokens=cls._reasoning(payload),
             raw=payload,
         )
-        if usage.input_tokens is None and usage.output_tokens is None and usage.total_tokens is None:
+        if all(count is None for count in (usage.input_tokens, usage.output_tokens, usage.total_tokens)):
             return None
         return usage
 
     @classmethod
     def _cached_input(cls, payload: Mapping[str, Any]) -> int | None:
-        # Reads cached input from OpenAI-style details, DeepSeek, or Kimi fields.
-        details = payload.get("prompt_tokens_details")
-        if isinstance(details, Mapping):
-            cached = cls.coerce_int(details.get("cached_tokens"))
-            if cached is not None:
-                return cached
+        # Reads cached input from OpenAI-style details, DeepSeek, or Kimi fields,
+        # returning the first source the provider actually reported.
+        nested = cls.nested_int(payload, "prompt_tokens_details", "cached_tokens")
+        if nested is not None:
+            return nested
         cache_hit = cls.coerce_int(payload.get("prompt_cache_hit_tokens"))
         if cache_hit is not None:
             return cache_hit
@@ -73,14 +72,27 @@ class ChatCompletionUsage(ProviderUsage):
     @classmethod
     def _reasoning(cls, payload: Mapping[str, Any]) -> int | None:
         # Reads reasoning tokens from completion details when the provider reports them.
-        details = payload.get("completion_tokens_details")
-        if not isinstance(details, Mapping):
-            return None
-        return cls.coerce_int(details.get("reasoning_tokens"))
+        return cls.nested_int(payload, "completion_tokens_details", "reasoning_tokens")
 
     def cost_usd(self, pricing: ModelPricing | None) -> float | None:
         # Prices uncached input at input rate and cached input at cache-read rate.
         return self.subset_billing_cost(pricing)
 
 
-__all__ = ["ChatCompletionUsage"]
+# xAI, DeepSeek, GLM, and MiniMax all speak the OpenAI chat-completions usage
+# shape, so per the "one class per response shape" rule they share this class
+# rather than each duplicating an identical parser. These aliases give every
+# provider a discoverable, provider-named handle on the public surface.
+XAIUsage = ChatCompletionUsage
+DeepSeekUsage = ChatCompletionUsage
+GLMUsage = ChatCompletionUsage
+MiniMaxUsage = ChatCompletionUsage
+
+
+__all__ = [
+    "ChatCompletionUsage",
+    "DeepSeekUsage",
+    "GLMUsage",
+    "MiniMaxUsage",
+    "XAIUsage",
+]
