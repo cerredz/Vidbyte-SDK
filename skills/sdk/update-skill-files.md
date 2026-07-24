@@ -399,7 +399,7 @@ After updating skill files, verify:
 - [ ] Every file path reference (`[link](path)`) resolves to an existing file
 - [ ] Every `from vidbyte import ...` example compiles against the current SDK
 - [ ] All constructor signatures match the current `BaseAgent.__init__` parameter list
-- [ ] All provider names match the current `ModelProvider` enum (10 members: openai, anthropic, gemini, xai, deepseek, glm, minimax, openrouter, elevenlabs, playai)
+- [ ] All provider names match the current `ModelProvider` enum (12 members: openai, anthropic, gemini, xai, deepseek, glm, minimax, kimi, mistral, openrouter, elevenlabs, playai)
 - [ ] All `Prompt.<X>` enum names and direct imports resolve (19 families / 51 prompts)
 - [ ] No skill references the removed `vidbyte/strategies/` package, `sdk.strategies`, removed Strategy classes, or the old `MiddlewareDecision.ALLOW/BLOCK/SKIP` API
 - [ ] All tool names match the current tool files

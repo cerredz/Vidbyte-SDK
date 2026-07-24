@@ -31,6 +31,7 @@ class ModelProvider(str, Enum):
     MINIMAX = "minimax"
     KIMI = "kimi"
     META = "meta"
+    MISTRAL = "mistral"
     OPENROUTER = "openrouter"
     ELEVENLABS = "elevenlabs"
     PLAYAI = "playai"

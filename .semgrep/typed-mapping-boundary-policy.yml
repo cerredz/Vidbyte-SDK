@@ -1,0 +1,40 @@
+rules:
+  - id: no-untyped-mapping-fallback
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Do not silently convert a non-mapping object or Any parameter into a fallback
+      value. Accept Mapping[...] | None explicitly, or validate at a designated
+      protocol/deserialization boundary and raise or return a protocol error.
+    metadata:
+      category: correctness
+      confidence: HIGH
+    paths:
+      include:
+        - /vidbyte/**/*.py
+      exclude:
+        - /vidbyte/lib/http/**
+        - /vidbyte/providers/**
+        - /vidbyte/mcp_server/**
+        - /vidbyte/tools/mcp/**
+    pattern-either:
+      - pattern: |
+          def $FUNCTION(..., $VALUE: object, ...):
+            if not isinstance($VALUE, Mapping):
+              return ...
+            ...
+      - pattern: |
+          def $FUNCTION(..., $VALUE: Any, ...):
+            if not isinstance($VALUE, Mapping):
+              return ...
+            ...
+      - pattern: |
+          def $FUNCTION(..., $VALUE: object, ...):
+            if not isinstance($VALUE, dict):
+              return ...
+            ...
+      - pattern: |
+          def $FUNCTION(..., $VALUE: Any, ...):
+            if not isinstance($VALUE, dict):
+              return ...
+            ...

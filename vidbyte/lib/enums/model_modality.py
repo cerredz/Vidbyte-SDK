@@ -53,6 +53,9 @@ class ModelNameModality(str, Enum):
     GPT_5_4_MINI = "text"
     GPT_5_4_NANO = "text"
     GPT_5_5 = "text"
+    GPT_5_6_SOL = "text"
+    GPT_5_6_TERRA = "text"
+    GPT_5_6_LUNA = "text"
 
     CLAUDE_3_5_SONNET = "text"
     CLAUDE_3_OPUS = "text"
@@ -60,8 +63,11 @@ class ModelNameModality(str, Enum):
     CLAUDE_3_SONNET = "text"
     CLAUDE_OPUS_4 = "text"
     CLAUDE_OPUS_4_7 = "text"
+    CLAUDE_OPUS_4_8 = "text"
     CLAUDE_SONNET_4 = "text"
     CLAUDE_SONNET_4_6 = "text"
+    CLAUDE_SONNET_5 = "text"
+    CLAUDE_FABLE_5 = "text"
     CLAUDE_HAIKU_4_5 = "text"
 
     GEMINI_2_0_FLASH = "text"
@@ -72,19 +78,29 @@ class ModelNameModality(str, Enum):
     GEMINI_1_5_PRO = "text"
     GEMINI_1_5_FLASH = "text"
 
+    GROK_4_5 = "text"
     GROK_4_3 = "text"
+    GROK_4 = "text"
     GROK_3 = "text"
     GROK_2 = "text"
 
     DEEPSEEK_CHAT = "text"
     DEEPSEEK_REASONER = "text"
     DEEPSEEK_V3 = "text"
+    DEEPSEEK_V4_PRO = "text"
+    DEEPSEEK_V4_FLASH = "text"
 
     GLM_4 = "text"
     GLM_4_FLASH = "text"
 
     MINIMAX_TEXT_01 = "text"
     ABAB = "text"
+
+    MISTRAL_MEDIUM = "text"
+    MISTRAL_LARGE_3 = "text"
+    MISTRAL_SMALL_4 = "text"
+    KIMI_K2_6 = "text"
+    KIMI_K2_7_CODE = "text"
 
     DALL_E_2 = "image"
     DALL_E_3 = "image"
@@ -141,6 +157,12 @@ _MODEL_NAME_MODALITY_MAP: dict[str, ModelModality] = {
     "gpt-5.4-pro": ModelModality.TEXT,
     "gpt-5.5": ModelModality.TEXT,
     "gpt-5.5-pro": ModelModality.TEXT,
+    "gpt-5.6-sol": ModelModality.TEXT,
+    "gpt-5.6-terra": ModelModality.TEXT,
+    "gpt-5.6-luna": ModelModality.TEXT,
+    "gpt-5.3-codex": ModelModality.TEXT,
+    "gpt-5-pro": ModelModality.TEXT,
+    "o3-pro": ModelModality.TEXT,
     "gpt-oss-120b": ModelModality.TEXT,
     "gpt-oss-20b": ModelModality.TEXT,
 
@@ -189,6 +211,9 @@ _MODEL_NAME_MODALITY_MAP: dict[str, ModelModality] = {
     "grok-4-fast-non-reasoning": ModelModality.TEXT,
     "grok-code-fast-1": ModelModality.TEXT,
     "grok-4.3": ModelModality.TEXT,
+    "grok-4.5": ModelModality.TEXT,
+    "grok-4.5-latest": ModelModality.TEXT,
+    "grok-build-latest": ModelModality.TEXT,
     "grok-2": ModelModality.TEXT,
     "grok-2-vision": ModelModality.TEXT,
 
@@ -229,31 +254,67 @@ _MODEL_NAME_MODALITY_MAP: dict[str, ModelModality] = {
     "kimi-k2.7-code-highspeed": ModelModality.TEXT,
     "kimi-k2.6": ModelModality.TEXT,
     "kimi-k2.5": ModelModality.TEXT,
+    "kimi-k3": ModelModality.TEXT,
     "kimi-k2-0905-preview": ModelModality.TEXT,
     "kimi-k2-turbo-preview": ModelModality.TEXT,
     "kimi-k2-thinking": ModelModality.TEXT,
     "kimi-k2-thinking-turbo": ModelModality.TEXT,
 
+    "mistral-large-2512": ModelModality.TEXT,
+    "mistral-large-latest": ModelModality.TEXT,
+    "mistral-medium-latest": ModelModality.TEXT,
+    "mistral-medium-2604": ModelModality.TEXT,
+    "mistral-medium-2508": ModelModality.TEXT,
+    "mistral-small-latest": ModelModality.TEXT,
+    "mistral-small-2603": ModelModality.TEXT,
+    "mistral-small-2506": ModelModality.TEXT,
+    "ministral-3b-latest": ModelModality.TEXT,
+    "ministral-8b-latest": ModelModality.TEXT,
+    "ministral-14b-latest": ModelModality.TEXT,
+    "ministral-3b-2512": ModelModality.TEXT,
+    "ministral-8b-2512": ModelModality.TEXT,
+    "ministral-14b-2512": ModelModality.TEXT,
+    "devstral-2512": ModelModality.TEXT,
+    "codestral-2508": ModelModality.TEXT,
+    "codestral-latest": ModelModality.TEXT,
+
     "openrouter/auto": ModelModality.TEXT,
     "openai/gpt-4o": ModelModality.TEXT,
     "openai/gpt-4o-mini": ModelModality.TEXT,
+    "openai/gpt-5.5": ModelModality.TEXT,
+    "openai/gpt-5.6-sol": ModelModality.TEXT,
+    "openai/gpt-5.6-terra": ModelModality.TEXT,
+    "openai/gpt-5.6-luna": ModelModality.TEXT,
     "openai/o1": ModelModality.TEXT,
     "openai/o1-mini": ModelModality.TEXT,
     "openai/o3-mini": ModelModality.TEXT,
     "anthropic/claude-3.5-sonnet": ModelModality.TEXT,
     "anthropic/claude-3-opus": ModelModality.TEXT,
     "anthropic/claude-3.5-haiku": ModelModality.TEXT,
+    "anthropic/claude-sonnet-5": ModelModality.TEXT,
+    "anthropic/claude-opus-4.8": ModelModality.TEXT,
+    "anthropic/claude-fable-5": ModelModality.TEXT,
     "google/gemini-2.5-pro": ModelModality.TEXT,
     "google/gemini-2.5-flash": ModelModality.TEXT,
     "google/gemini-2.0-flash-thinking-exp": ModelModality.TEXT,
+    "google/gemini-3.5-flash": ModelModality.TEXT,
     "meta-llama/llama-3.3-70b-instruct": ModelModality.TEXT,
     "meta-llama/llama-3.1-8b-instruct:free": ModelModality.TEXT,
     "meta-llama/llama-3.1-70b-instruct": ModelModality.TEXT,
     "meta-llama/llama-3.1-405b-instruct": ModelModality.TEXT,
     "deepseek/deepseek-chat": ModelModality.TEXT,
     "deepseek/deepseek-r1": ModelModality.TEXT,
+    "deepseek/deepseek-v4-pro": ModelModality.TEXT,
+    "deepseek/deepseek-v4-flash": ModelModality.TEXT,
+    "x-ai/grok-4.5": ModelModality.TEXT,
+    "x-ai/grok-4": ModelModality.TEXT,
     "mistralai/mistral-large": ModelModality.TEXT,
+    "mistralai/mistral-large-2512": ModelModality.TEXT,
+    "mistralai/mistral-medium-latest": ModelModality.TEXT,
+    "mistralai/mistral-small-latest": ModelModality.TEXT,
     "mistralai/pixtral-large-12b": ModelModality.TEXT,
+    "moonshotai/kimi-k2.5": ModelModality.TEXT,
+    "moonshotai/kimi-k2.6": ModelModality.TEXT,
     "qwen/qwen-2.5-72b-instruct": ModelModality.TEXT,
 
     "dall-e-2": ModelModality.IMAGE,
@@ -272,6 +333,9 @@ _MODEL_NAME_MODALITY_MAP: dict[str, ModelModality] = {
     "nano-banana-lite": ModelModality.IMAGE,
     "nano-banana-pro": ModelModality.IMAGE,
     "nano-banana-pro-preview": ModelModality.IMAGE,
+    "gemini-3.1-flash-image": ModelModality.IMAGE,
+    "gemini-3.1-flash-lite-image": ModelModality.IMAGE,
+    "gemini-3-pro-image": ModelModality.IMAGE,
     "grok-imagine-image": ModelModality.IMAGE,
 
     "sora": ModelModality.VIDEO,
@@ -280,7 +344,10 @@ _MODEL_NAME_MODALITY_MAP: dict[str, ModelModality] = {
     "sora-turbo": ModelModality.VIDEO,
     "veo-3.1": ModelModality.VIDEO,
     "veo-3.1-lite-preview": ModelModality.VIDEO,
+    "veo-3.1-generate-preview": ModelModality.VIDEO,
+    "veo-3.1-lite-generate-preview": ModelModality.VIDEO,
     "gemini-omni-flash-preview": ModelModality.VIDEO,
+    "gemini-omni-flash": ModelModality.VIDEO,
     "grok-imagine-video": ModelModality.VIDEO,
     "minimax-hailuo-2.3": ModelModality.VIDEO,
     "minimax-hailuo-2.3-fast": ModelModality.VIDEO,
@@ -293,12 +360,20 @@ _MODEL_NAME_MODALITY_MAP: dict[str, ModelModality] = {
     "tts-1-hd": ModelModality.AUDIO,
     "gpt-4o-audio-preview": ModelModality.AUDIO,
     "gpt-4o-realtime-preview": ModelModality.AUDIO,
+    "gpt-realtime": ModelModality.AUDIO,
+    "gpt-realtime-mini": ModelModality.AUDIO,
+    "gpt-realtime-1.5": ModelModality.AUDIO,
+    "gpt-realtime-2": ModelModality.AUDIO,
     "gpt-realtime-2.1": ModelModality.AUDIO,
     "gpt-realtime-2.1-mini": ModelModality.AUDIO,
     "gpt-realtime-translate": ModelModality.AUDIO,
     "gpt-realtime-whisper": ModelModality.AUDIO,
+    "gpt-audio": ModelModality.AUDIO,
+    "gpt-audio-1.5": ModelModality.AUDIO,
+    "gpt-audio-mini": ModelModality.AUDIO,
     "gpt-4o-transcribe": ModelModality.AUDIO,
     "gpt-4o-mini-transcribe": ModelModality.AUDIO,
+    "gpt-4o-transcribe-diarize": ModelModality.AUDIO,
     "gemini-3.1-flash-live-preview": ModelModality.AUDIO,
     "gemini-3.1-flash-tts-preview": ModelModality.AUDIO,
     "gemini-2.5-flash-live-preview": ModelModality.AUDIO,

@@ -239,6 +239,7 @@ _SUBSTRING_MODALITY_MAP: tuple[tuple[str, ModelModality], ...] = (
     ("whisper", ModelModality.AUDIO),
     ("eleven_", ModelModality.AUDIO),
     ("playdialog", ModelModality.AUDIO),
+    ("voxtral", ModelModality.AUDIO),
     ("text-embedding", ModelModality.EMBEDDING),
     ("embedding-", ModelModality.EMBEDDING),
 )
@@ -260,6 +261,10 @@ _PREFIX_MODALITY_MAP: tuple[tuple[str, ModelModality], ...] = (
     ("llama-", ModelModality.TEXT),
     ("mistral-", ModelModality.TEXT),
     ("ministral-", ModelModality.TEXT),
+    ("devstral-", ModelModality.TEXT),
+    ("codestral-", ModelModality.TEXT),
+    ("magistral-", ModelModality.TEXT),
+    ("kimi-", ModelModality.TEXT),
     ("qwen-", ModelModality.TEXT),
     ("qwen", ModelModality.TEXT),
     ("command-", ModelModality.TEXT),

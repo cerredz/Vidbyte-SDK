@@ -30,7 +30,7 @@ Agent(
     name: str,                            # required, non-empty â€” agent identity
     system_prompt: str,                   # required, non-empty â€” defines agent behavior and constraints
     runtime: AgentRuntimeType | str = AgentRuntimeType.LINEAR,  # execution runtime: linear, mcts_search, actor_model_p2p, actor_model_broadcast
-    provider: str | ModelProvider | None, # "openai", "anthropic", "gemini", "xai", "deepseek", "glm", "minimax", "openrouter", "elevenlabs", "playai"
+    provider: str | ModelProvider | None, # "openai", "anthropic", "gemini", "xai", "deepseek", "glm", "minimax", "kimi", "mistral", "openrouter", "elevenlabs", "playai"
     model_name: str | None,              # specific model ID for the provider
     modality: ModelModality = ModelModality.AUTO,  # AUTO, TEXT, IMAGE, VIDEO
     api_key: str | None = None,          # override for provider API key
