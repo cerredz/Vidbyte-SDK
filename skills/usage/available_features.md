@@ -159,7 +159,7 @@ The SDK includes a rich catalog of built-in tools and a framework for building y
 
 ### Built-in Tools
 
-The SDK ships with prebuilt tool categories covering code search, code execution, filesystem operations, document retrieval, context compaction, patch editing, and calculation. These are ready to attach to any agent.
+The SDK ships with prebuilt tool categories covering code search, code execution, filesystem operations, document retrieval, web search and page fetch (with per-operation pricing), context compaction, patch editing, and calculation. These are ready to attach to any agent.
 
 For a complete catalog of every built-in tool, see [`skills/usage/available_tools.md`](available_tools.md).
 

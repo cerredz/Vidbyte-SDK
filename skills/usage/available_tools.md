@@ -177,6 +177,70 @@ from vidbyte.tools.builtins.document_retrieval import DocumentRetrievalTool
 | `CodeExecutionTool()` | Execute Python code in a sandboxed environment. Useful for agents that need to test or run code snippets. Requires `EXECUTE` permission. |
 | `DocumentRetrievalTool()` | Retrieve documents from a pre-built index. Useful for agents that need to search through documentation or knowledge bases. |
 
+## Search & Fetch (Priced Operations)
+
+Priced operation tools give agents first-class web search and page-fetch capabilities. Each tool declares a `(operation, provider)` identity so the runtime can track and bill tool spend through the `UsageTracker`. Use these when your agent needs to search the web, fetch page content, or extract structured data — and you want transparent per-operation pricing reflected in `agent.get_cost_usd()`.
+
+```python
+from vidbyte.tools.builtins.operations import (
+    BraveSearchTool, ExaSearchTool, TavilySearchTool,
+    LinkupSearchTool, ParallelSearchTool, OpenAlexSearchTool,
+    SemanticScholarSearchTool,
+    FirecrawlFetchTool, ParallelExtractTool, TavilyExtractTool,
+    LinkupFetchTool, DirectHttpFetchTool,
+    PricedOperationTool,  # base class for creating your own
+)
+```
+
+### Search Tools (7)
+
+| Tool | Provider | Billing | Description |
+|------|----------|---------|-------------|
+| `BraveSearchTool()` | Brave | Flat per-request ($0.005) | Privacy-focused web search returning ranked result snippets. |
+| `ExaSearchTool()` | Exa | Per-result ($0.007 base + $0.001/result beyond 10) | Neural search returning hyper-relevant results with contents. Supports `type` param: `standard`, `agentic`. |
+| `TavilySearchTool()` | Tavily | Depth-tiered (basic $0.008 / advanced $0.016) | LLM-optimized web search returning ready-to-consume snippets. Supports `search_depth`: `basic`, `advanced`. |
+| `LinkupSearchTool()` | Linkup | Depth-tiered (standard $0.005 / deep $0.05) | Web search returning sourced results or answers. Supports `depth`: `standard`, `deep`. |
+| `ParallelSearchTool()` | Parallel | Per-result ($0.001/1k req) | Web search with processor tier selection. Supports `processor`: `turbo`, `pro`. |
+| `OpenAlexSearchTool()` | OpenAlex | Flat per-request ($0.001) | Scholarly works search returning matching academic records. |
+| `SemanticScholarSearchTool()` | Semantic Scholar | Free | Paper search returning matching academic records from Semantic Scholar. |
+
+All search tools accept a `query` (or `objective` for Parallel) parameter. Exa, Parallel, and OpenAlex also accept a result count parameter controlling how many results are returned — and therefore how many units are billed.
+
+### Fetch Tools (5)
+
+| Tool | Provider | Billing | Description |
+|------|----------|---------|-------------|
+| `FirecrawlFetchTool()` | Firecrawl | Per-page ($0.00083/page) | Scrapes web pages into clean markdown. Accepts `url` or `urls` (array). |
+| `ParallelExtractTool()` | Parallel | Per-URL ($0.001/URL) | Extracts LLM-ready content from web pages via Parallel Extract API. Accepts `urls` array. |
+| `TavilyExtractTool()` | Tavily | Per-URL, depth-tiered, 5-URL batch (basic $0.008 / advanced $0.016 per batch) | Extracts cleaned content from web pages. Accepts `urls` array and `extract_depth`: `basic`, `advanced`. |
+| `LinkupFetchTool()` | Linkup | Per-page, tiered (no-JS $0.001 / JS $0.005) | Fetches a single web page's content. Accepts `url` and `render_js` (bool). |
+| `DirectHttpFetchTool()` | Direct HTTP | Free | Fetches a single URL over plain HTTP using the SDK's built-in `HttpFetcher`. No third-party cost. Accepts `url`. |
+
+All fetch tools (except Linkup and DirectHttp) price by the number of URLs/pages requested. Tavily batches in groups of 5 URLs.
+
+### Creating a Priced Operation Tool
+
+Subclass `PricedOperationTool` and set the `operation` and `provider` ClassVars:
+
+```python
+from vidbyte.tools.builtins.operations import PricedOperationTool
+from vidbyte.tools.types import ToolCall, ToolResult, ToolSpec, ToolParameter
+
+class MySearchTool(PricedOperationTool):
+    operation = "search"
+    provider = "my_provider"
+
+    def spec(self) -> ToolSpec:
+        return ToolSpec(
+            name="my_search",
+            description="Custom search tool.",
+            parameters=(ToolParameter(name="query", type="string", description="Search query.", required=True),),
+        )
+
+    async def execute(self, call: ToolCall) -> ToolResult:
+        return self._contract_result(f"search: {call.arguments.get('query', '')}", units=1)
+```
+
 ## Filesystem (21 tools)
 
 Filesystem tools give agents full read/write access to the filesystem. They mirror common shell commands (`ls`, `mkdir`, `cp`, `mv`, `rm`, `cat`, `find`, `diff`, `zip`) and operate through a backend abstraction layer. Tools that modify the filesystem (`WRITE` operations) require the appropriate permission policy.
