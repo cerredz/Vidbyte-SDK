@@ -14,6 +14,29 @@ Non-Goals:
 """
 
 from vidbyte.config.loader import YamlLoader
-from vidbyte.config.types import AgentSettings, MiddlewareDefinition, ToolDefinition
+from vidbyte.config.types import (
+    AdversarialAgentSettings,
+    AggregateAgentSettings,
+    AgentSettings,
+    BaseAgentSettings,
+    ContinualTraceAgentSettings,
+    HandoffAgentSettings,
+    MiddlewareDefinition,
+    MultiAgentSettings,
+    ToolDefinition,
+)
+from vidbyte.lib.enums import AgentType
 
-__all__ = ["AgentSettings", "MiddlewareDefinition", "ToolDefinition", "YamlLoader"]
+__all__ = [
+    "AdversarialAgentSettings",
+    "AggregateAgentSettings",
+    "AgentSettings",
+    "AgentType",
+    "BaseAgentSettings",
+    "ContinualTraceAgentSettings",
+    "HandoffAgentSettings",
+    "MiddlewareDefinition",
+    "MultiAgentSettings",
+    "ToolDefinition",
+    "YamlLoader",
+]
