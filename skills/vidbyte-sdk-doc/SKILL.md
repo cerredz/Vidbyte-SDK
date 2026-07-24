@@ -302,6 +302,7 @@ Built-in tool groups:
 - `vidbyte.tools.builtins.context_primitives`: `ContextUpsertTool`, `ContextListTool`, `ContextRemoveTool`, `ContextEditTool`, `ContextReciteTool`, `ContextMoveTool`, `ContextStatsTool`, `ContextWindowFactory`
 - `vidbyte.tools.builtins.fork`: `ForkConversationTool`
 - `vidbyte.tools.builtins.handoff`: `CreateHandoffTool`
+- `vidbyte.tools.builtins.operations`: `PricedOperationTool`, `BraveSearchTool`, `ExaSearchTool`, `TavilySearchTool`, `LinkupSearchTool`, `ParallelSearchTool`, `OpenAlexSearchTool`, `SemanticScholarSearchTool` (search), `FirecrawlFetchTool`, `ParallelExtractTool`, `TavilyExtractTool`, `LinkupFetchTool`, `DirectHttpFetchTool` (fetch) — priced per-operation tools whose calls feed `UsageTracker.record_operation()`. See `skills/usage/available_tools.md`.
 - `vidbyte.tools.builtins.reflexion.ReflexionTool`, `vidbyte.tools.builtins.trajectory_checkpoint.TrajectoryCheckpointTool` (model-callable forms of the context-window algorithms)
 - `vidbyte.tools.builtins.memory`: Cognee, Letta, Mem0, Supermemory, and Zep memory tools — see `skills/vidbyte-sdk/memory-tools.md`
 - `vidbyte.tools.builtins.mcp`: `AttachMcpServerTool`, `SearchMcpServersTool`
@@ -673,6 +674,7 @@ Use these docs for background and intent. Confirm current implementation before 
 - `docs/design/context-window-primitives.md`, `docs/design/context-window-templates.md`, `docs/design/context-algorithms-as-tools.md`, `docs/design/agentic-trajectory-checkpoints.md`, `docs/design/multi-provider-agentic-grader.md`: context primitives and context-window algorithms.
 - `docs/design/artifact-context-sources.md`, `docs/design/artifact-file-index.md`: source loaders and generated repository source-map artifacts.
 - `docs/design/sdk-evals.md`: eval suites, graders, and runner.
+- `docs/design/agent-operation-pricing.md`: per-operation USD pricing for search/fetch tools, `OperationPricingRegistry`, `UsageTracker.record_operation()`, and the 12 pre-built priced operation tools.
 - `docs/design/memory-provider-tools.md`: memory tool providers (Cognee, Letta, Mem0, Supermemory, Zep).
 - `docs/design/structured-output.md`, `docs/design/new-runners.md`, `docs/design/agent-tracing-observability.md`, `docs/design/trace-facade.md`, `docs/design/semantic-trace-profiles.md`, `docs/design/session-tracer.md`: structured output, new runners (audio/embedding/streaming), tracing, semantic trace profiles, and session tracing.
 - `docs/design/advanced-tool-ecosystem.md`: dependency-free tool foundation, code search, MCP bridge, permissions/sandbox, patch/edit tools, and context compaction. Its own supersession note says later tool API docs update the public mental model.

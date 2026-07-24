@@ -439,6 +439,7 @@ Advanced built-ins are grouped by category:
 - `vidbyte.tools.builtins.handoff`: `CreateHandoffTool`.
 - `vidbyte.tools.builtins.sessions`: `CheckpointTool`, `ForkTool`, `BatchForkTool`, `RewindTool`, `ResumeReplaceTool`, `ResumeAppendTool`, `ResumeOutputTool`, `SessionTool`.
 - `vidbyte.tools.builtins.providers`: provider/database helper tools.
+- `vidbyte.tools.builtins.operations`: **Priced search & fetch tools** — `BraveSearchTool`, `ExaSearchTool`, `TavilySearchTool`, `LinkupSearchTool`, `ParallelSearchTool`, `OpenAlexSearchTool`, `SemanticScholarSearchTool`, `FirecrawlFetchTool`, `ParallelExtractTool`, `TavilyExtractTool`, `LinkupFetchTool`, `DirectHttpFetchTool`, and the `PricedOperationTool` base class. Each tool declares its `(operation, provider)` identity; the runtime records every call through `UsageTracker.record_operation()`, so `agent.get_cost_usd()` transparently includes tool spend alongside token spend. See `skills/usage/available_tools.md` for the full catalog.
 - `vidbyte.tools.mcp`: `McpClient`, `McpStdioTransport`, `McpBridgedTool`.
 - `vidbyte.tools.security`: `PermissionPolicy`, `ToolPermission`, sandbox transport protocols.
 
