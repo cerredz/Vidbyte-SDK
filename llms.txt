@@ -122,25 +122,29 @@ sdk.providers
 ### YAML Configuration
 
 `YamlLoader` is the public class-first interface for data-only YAML configuration.
-`load(path)` reads a document and dispatches on its declared kind; the typed
-`load_agent()`, `load_tools()`, `load_middleware()`, and `load_harness()` methods
-select one kind explicitly. Agent, tools, and middleware documents declare
-`version: 1` and a matching `kind`, returning `AgentSettings`, `ToolDefinition`, or
-`MiddlewareDefinition` values; harness documents follow the harness envelope and
-return a `HarnessSpec`. The loader validates structure and intrinsic settings but
-never imports a `ref`, instantiates a tool or middleware, interpolates secrets,
-or performs network access. Application code must map declarations to an
-allowlisted runtime implementation before passing `settings.to_agent_kwargs(...)`
-to `VidbyteSDK().agents.base(...)`. Each `view_*()` method returns the expected
-document structure for that kind.
+There are two document families: an agent document and a harness document.
+`load(path)` reads a document and returns an `AgentSettings` subclass or a
+`HarnessSpec` — it needs no `kind` field, recognizing a harness by its
+`schema_version`/`harness` envelope and treating every other document as an agent.
+`load_agent()` and `load_harness()` select one family explicitly. An agent document
+is polymorphic on a `type:` field (`base`, `aggregate`, `continual_trace`, `handoff`,
+`multi`, `adversarial`) that defaults to `base`; only `base` is fully loadable today,
+and the other types are registered but raise a specific error. Tools and middleware
+are nested `tools:`/`middleware:` lists of `{ref, options}` entries on the agent (not
+separate documents), `loop:` becomes an `AgentLoopSettings`, and `provider`/`model_name`
+are validated against the canonical `ProviderModelRegistry`. The loader validates
+structure and intrinsic settings but never imports a `ref`, instantiates a tool or
+middleware, interpolates secrets, or performs network access. Application code must
+map declarations to an allowlisted runtime implementation before passing
+`settings.to_agent_kwargs(...)` to `VidbyteSDK().agents.base(...)`. `view_agent()`
+returns the expected base agent document structure.
 
 ```python
 from vidbyte import YamlLoader
 
 loader = YamlLoader()
 settings = loader.load_agent("agent.yaml")        # or loader.load("agent.yaml")
-tools = loader.load_tools("tools.yaml")
-middleware = loader.load_middleware("middleware.yaml")
+tools = resolve_tools(settings.tools)             # application-owned resolver
 harness_spec = loader.load_harness("harness.yaml")
 ```
 
