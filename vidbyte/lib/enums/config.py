@@ -1,17 +1,17 @@
 """Context Protocol Header
 
 Description:
-    Enumerates the fixed vocabularies used by the public YAML configuration loader.
+    Enumerates the fixed vocabulary used by the public YAML configuration loader.
 Purpose:
-    Replaces bare string/frozenset constants in vidbyte.config with typed enums so the
-    supported document kinds and agent-loop fields have one authoritative definition.
+    Gives the agent ``type`` discriminator one authoritative, string-backed definition so
+    an agent document selects a concrete agent settings class instead of a bare string.
 Architecture:
-    - ConfigKind: The document kinds the loader can parse and dispatch on.
-    - AgentLoopField: The loop keys an agent document may set, mirroring AgentLoopSettings.
+    - AgentType: The agent kinds an agent document may declare, one per BaseAgent subclass.
 Relations:
-    Consumed by vidbyte.config.loader and vidbyte.lib.dataclasses.config.
+    Consumed by vidbyte.lib.dataclasses.config (settings dispatch) and vidbyte.config.loader.
 Similar Files:
     - vidbyte/lib/enums/agent_runtime.py: Runtime enum used by the same agent settings.
+    - vidbyte/lib/enums/model_provider.py: Provider enum validated by the same settings.
 """
 
 from __future__ import annotations
@@ -19,38 +19,25 @@ from __future__ import annotations
 from enum import Enum
 
 
-class ConfigKind(str, Enum):
-    """Supported ``kind`` values for a versioned configuration document."""
+class AgentType(str, Enum):
+    """Supported ``type`` values for an agent document, one per concrete BaseAgent subclass.
 
-    AGENT = "agent"
-    HARNESS = "harness"
-    TOOLS = "tools"
-    MIDDLEWARE = "middleware"
-
-
-class AgentLoopField(str, Enum):
-    """Loop keys accepted under ``agent.loop``, one-to-one with AgentLoopSettings kwargs.
-
-    Kept in lockstep with :class:`vidbyte.agents.settings.AgentLoopSettings` so a document
-    that names a field the loop object cannot accept is rejected with a precise field error
-    instead of a raw ``TypeError`` raised deep inside settings construction.
+    ``BASE`` is the plain :class:`vidbyte.agents.base.BaseAgent`. The remaining members name
+    the composite and facade agents; the loader recognizes them but does not yet parse their
+    full YAML shape, so requesting one raises a specific, actionable configuration error.
     """
 
-    MAX_ITERATIONS = "max_iterations"
-    MAX_TOKENS = "max_tokens"
-    MAX_TOOL_CALLS = "max_tool_calls"
-    MAX_PARALLEL_TOOL_CALLS = "max_parallel_tool_calls"
-    MAX_RETRIES = "max_retries"
-    TIMEOUT_SECONDS = "timeout_seconds"
-    CONTEXT_WINDOW_BUDGET = "context_window_budget"
-    COMPACTION_TRIGGER_TOKENS = "compaction_trigger_tokens"
-    COMPACTION_TARGET_TOKENS = "compaction_target_tokens"
-    ALLOWED_TOOLS = "allowed_tools"
+    BASE = "base"
+    AGGREGATE = "aggregate"
+    CONTINUAL_TRACE = "continual_trace"
+    HANDOFF = "handoff"
+    MULTI = "multi"
+    ADVERSARIAL = "adversarial"
 
     @classmethod
-    def names(cls) -> frozenset[str]:
-        # Returns the accepted loop-field names for allowlist validation.
-        return frozenset(member.value for member in cls)
+    def values(cls) -> tuple[str, ...]:
+        # Returns every accepted type string for building "must be one of ..." error messages.
+        return tuple(member.value for member in cls)
 
 
-__all__ = ["AgentLoopField", "ConfigKind"]
+__all__ = ["AgentType"]

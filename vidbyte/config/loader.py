@@ -3,16 +3,18 @@
 Description:
     Provides the public class-first YAML configuration loader.
 Purpose:
-    Safely parses versioned YAML documents into validated declarative settings and offers
-    one central entry point that loads either an agent document or a harness document.
+    Safely parses one YAML document into either validated agent settings or a harness
+    specification, with no ``kind`` field: agent documents are distinguished from harness
+    documents by the harness envelope and all field validation lives on the dataclasses.
 Architecture:
     - YamlLoader: Stateless public interface with a central load() plus typed loaders.
-    - load()/load_agent()/load_harness()/load_tools()/load_middleware(): parse a document.
-    - view_*(): return the expected document structure without touching the filesystem.
+    - load(): reads one document and returns an AgentSettings subclass or a HarnessSpec.
+    - load_agent()/load_harness(): parse one document of a known family.
+    - view_agent(): returns the expected agent-document structure without touching the disk.
     - _DuplicateKeySafeLoader: SafeLoader variant that rejects ambiguous mappings.
 Relations:
-    Builds the dataclasses in vidbyte.lib.dataclasses.config, uses vidbyte.lib.enums for
-    document kinds and loop fields, and delegates harness documents to HarnessConfigLoader.
+    Builds the dataclasses in vidbyte.lib.dataclasses.config and delegates harness documents
+    to vidbyte.harnesses.HarnessConfigLoader.
 Non-Goals:
     Never resolves refs, imports code, interpolates secrets, or creates runtime objects.
 """
@@ -27,13 +29,12 @@ import yaml
 from yaml.nodes import MappingNode
 
 from vidbyte.harnesses.config import HarnessConfigLoader
-from vidbyte.harnesses.contracts import HARNESS_SCHEMA_VERSION, HarnessSpec
-from vidbyte.lib.dataclasses.config import AgentSettings, MiddlewareDefinition, ToolDefinition
-from vidbyte.lib.enums import ConfigKind
+from vidbyte.harnesses.contracts import HarnessSpec
+from vidbyte.lib.dataclasses.config import AgentSettings
 from vidbyte.lib.errors import ConfigurationError
 
 _SUPPORTED_SUFFIXES = frozenset({".yaml", ".yml"})
-_SUPPORTED_VERSION = 1
+_HARNESS_ENVELOPE_KEYS = frozenset({"schema_version", "harness"})
 
 
 class _DuplicateKeySafeLoader(yaml.SafeLoader):
@@ -56,25 +57,20 @@ class _DuplicateKeySafeLoader(yaml.SafeLoader):
 
 
 class YamlLoader:
-    """Stateless loader for versioned agent, harness, tool, and middleware YAML documents."""
+    """Stateless loader for agent and harness YAML documents."""
 
-    def load(self, path: str | Path) -> AgentSettings | HarnessSpec | tuple[ToolDefinition, ...] | tuple[MiddlewareDefinition, ...]:
-        # Central entry point: reads one document and dispatches on its declared kind.
+    def load(self, path: str | Path) -> AgentSettings | HarnessSpec:
+        # Reads one document and returns a harness spec or an agent settings object by envelope.
         document_path = self._path(path)
         document = self._read(document_path)
-        kind = self._detect_kind(document, document_path)
-        if kind is ConfigKind.HARNESS:
+        if self._is_harness(document):
             return self.load_harness(document_path)
-        if kind is ConfigKind.AGENT:
-            return self._load_agent_document(document_path, document)
-        if kind is ConfigKind.TOOLS:
-            return self._load_definitions(document_path, document, ConfigKind.TOOLS, ToolDefinition)
-        return self._load_definitions(document_path, document, ConfigKind.MIDDLEWARE, MiddlewareDefinition)
+        return self._build_agent(document_path, document)
 
     def load_agent(self, path: str | Path) -> AgentSettings:
-        # Loads one agent document into intrinsic settings without resolving referenced components.
+        # Loads one agent document into validated settings without resolving referenced components.
         document_path = self._path(path)
-        return self._load_agent_document(document_path, self._read(document_path))
+        return self._build_agent(document_path, self._read(document_path))
 
     def load_harness(self, path: str | Path) -> HarnessSpec:
         # Loads one harness document into a validated, content-addressed HarnessSpec.
@@ -83,93 +79,23 @@ class YamlLoader:
             return HarnessConfigLoader().load(document_path)
         except ConfigurationError as error:
             error.details.setdefault("path", str(document_path))
-            error.details.setdefault("expected_kind", ConfigKind.HARNESS.value)
             raise
-
-    def load_tools(self, path: str | Path) -> tuple[ToolDefinition, ...]:
-        # Loads a tool-definition document without resolving any tool reference into executable code.
-        document_path = self._path(path)
-        return self._load_definitions(document_path, self._read(document_path), ConfigKind.TOOLS, ToolDefinition)
-
-    def load_middleware(self, path: str | Path) -> tuple[MiddlewareDefinition, ...]:
-        # Loads middleware declarations without constructing middleware or importing their references.
-        document_path = self._path(path)
-        return self._load_definitions(document_path, self._read(document_path), ConfigKind.MIDDLEWARE, MiddlewareDefinition)
 
     def view_agent(self) -> dict[str, Any]:
-        # Returns the document structure an agent .yaml file must follow.
+        # Returns the document structure a base agent .yaml file must follow.
         return AgentSettings.expected_structure()
 
-    def view_harness(self) -> dict[str, Any]:
-        # Returns the document structure a harness .yaml file must follow.
-        return {
-            "schema_version": HARNESS_SCHEMA_VERSION,
-            "harness": {"type": "<harness-type>"},
-            "agents": [{"name": "<agent-name>", "provider": "<provider>", "model": "<model>", "system_prompt": "<prompt-or-$file>", "params": {}, "tools": []}],
-            "orchestration": {},
-            "metadata": {},
-        }
-
-    def view_tools(self) -> dict[str, Any]:
-        # Returns the document structure a tools .yaml file must follow.
-        return {"version": _SUPPORTED_VERSION, "kind": ConfigKind.TOOLS.value, "tools": [ToolDefinition.expected_structure()]}
-
-    def view_middleware(self) -> dict[str, Any]:
-        # Returns the document structure a middleware .yaml file must follow.
-        return {"version": _SUPPORTED_VERSION, "kind": ConfigKind.MIDDLEWARE.value, "middleware": [MiddlewareDefinition.expected_structure()]}
-
-    def _load_agent_document(self, path: Path, document: dict[str, Any]) -> AgentSettings:
-        # Validates the agent envelope and delegates field validation to AgentSettings.
+    def _build_agent(self, path: Path, document: Mapping[str, Any]) -> AgentSettings:
+        # Delegates all field validation to AgentSettings and names the offending file on failure.
         try:
-            body = self._envelope(document, ConfigKind.AGENT, path)
-            return AgentSettings.from_mapping(body, "agent")
+            return AgentSettings.from_mapping(document, "agent")
         except ConfigurationError as error:
-            self._enrich(error, path, ConfigKind.AGENT)
+            error.details.setdefault("path", str(path))
             raise
 
-    def _load_definitions(self, path: Path, document: dict[str, Any], kind: ConfigKind, definition: type[ToolDefinition | MiddlewareDefinition]) -> tuple[Any, ...]:
-        # Validates a definition-list envelope and builds each entry through its dataclass.
-        try:
-            body = self._envelope(document, kind, path)
-            if not isinstance(body, list):
-                raise ConfigurationError(f"'{kind.value}' must be a list.", details={"field": kind.value, "actual_type": type(body).__name__})
-            items = tuple(definition.from_mapping(entry, f"{kind.value}[{index}]") for index, entry in enumerate(body))
-            self._reject_duplicate_refs(items, kind)
-            return items
-        except ConfigurationError as error:
-            self._enrich(error, path, kind)
-            raise
-
-    def _envelope(self, document: Mapping[str, Any], kind: ConfigKind, path: Path) -> Any:
-        # Validates the shared ``version``/``kind`` envelope and returns the typed body.
-        allowed = {"version", "kind", kind.value}
-        unknown = sorted(set(document).difference(allowed))
-        if unknown:
-            raise ConfigurationError(f"Document contains unsupported top-level field(s): {', '.join(unknown)}.", details={"field": unknown[0], "allowed": sorted(allowed)})
-        version = document.get("version")
-        if isinstance(version, bool) or not isinstance(version, int) or version != _SUPPORTED_VERSION:
-            raise ConfigurationError(f"Document 'version' must be the supported integer {_SUPPORTED_VERSION}.", details={"field": "version", "found": version})
-        if document.get("kind") != kind.value:
-            raise ConfigurationError(f"Document 'kind' must be {kind.value!r}.", details={"field": "kind", "found": document.get("kind"), "expected": kind.value})
-        if kind.value not in document:
-            raise ConfigurationError(f"Document is missing its '{kind.value}' body.", details={"field": kind.value})
-        return document[kind.value]
-
-    def _detect_kind(self, document: Mapping[str, Any], path: Path) -> ConfigKind:
-        # Chooses the document kind from its declared envelope for the central load() dispatch.
-        if "kind" in document:
-            raw = document.get("kind")
-            try:
-                return ConfigKind(raw)
-            except (TypeError, ValueError) as error:
-                supported = sorted(member.value for member in ConfigKind)
-                raise ConfigurationError(f"Document 'kind' must be one of {supported}.", details={"path": str(path), "field": "kind", "found": raw}) from error
-        if "schema_version" in document or "harness" in document:
-            return ConfigKind.HARNESS
-        raise ConfigurationError(
-            "Document does not declare a configuration kind; expected an agent/tools/middleware document with a 'kind' field or a harness document with a 'schema_version' field.",
-            details={"path": str(path), "field": "kind"},
-        )
+    def _is_harness(self, document: Mapping[str, Any]) -> bool:
+        # Recognizes a harness document by its own envelope so agents need no ``kind`` field.
+        return any(key in document for key in _HARNESS_ENVELOPE_KEYS)
 
     def _read(self, path: Path) -> dict[str, Any]:
         # Reads one YAML file into a validated top-level mapping with duplicate keys rejected.
@@ -189,20 +115,6 @@ class YamlLoader:
         if path.suffix.lower() not in _SUPPORTED_SUFFIXES:
             raise ConfigurationError("Configuration files must use a .yaml or .yml extension.", details={"path": str(path), "field": "path", "suffix": path.suffix})
         return path
-
-    @staticmethod
-    def _reject_duplicate_refs(items: tuple[Any, ...], kind: ConfigKind) -> None:
-        # Rejects two entries that declare the same reference in one definition document.
-        references = [item.ref for item in items]
-        duplicates = sorted({ref for ref in references if references.count(ref) > 1})
-        if duplicates:
-            raise ConfigurationError(f"'{kind.value}' must not contain duplicate references: {', '.join(duplicates)}.", details={"field": kind.value, "duplicates": duplicates})
-
-    @staticmethod
-    def _enrich(error: ConfigurationError, path: Path, kind: ConfigKind) -> None:
-        # Attaches the offending file and expected kind so diagnostics name the exact document.
-        error.details.setdefault("path", str(path))
-        error.details.setdefault("expected_kind", kind.value)
 
 
 __all__ = ["YamlLoader"]
