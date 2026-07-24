@@ -166,6 +166,9 @@ class MiddlewareContext:
     tool_call: ToolCall | None = None
     tool_result: ToolResult | None = None
     model_response: object | None = None
+    # Provider-native usage for the current model call (ProviderUsage); loosely
+    # typed like model_response to keep lib independent of the agents layer.
+    model_usage: object | None = None
     error: BaseException | None = None
     provider_messages: Sequence[Mapping[str, Any]] = ()
     system: str | None = None

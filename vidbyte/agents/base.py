@@ -19,13 +19,14 @@ from collections.abc import Callable, Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
 from vidbyte.agents.mixins import McpAttachableMixin
+from vidbyte.agents.pricing import UsageRollup, UsageTracker
 from vidbyte.agents.settings import AgentLoopSettings
 from vidbyte.agents.types import AgentCard, AgentInput, AgentMessage
 from vidbyte.context.manager import ContextManager
 from vidbyte.context.window import ContextWindow, ContextWindowAlgorithm
 from vidbyte.context.primitives import ContextItem
 from vidbyte.context.handoff import Handoff, MinimalHandoff
-from vidbyte.lib.dataclasses.agents import AgentForkSettings, AgentMetadata, AgentRunnerConfig, AgentRuntimeConfig
+from vidbyte.lib.dataclasses.agents import AgentForkSettings, AgentMetadata, AgentRunnerConfig, AgentRuntimeConfig, FallbackModel
 from vidbyte.lib.dataclasses.runner import RunnerHandle
 from vidbyte.lib.dataclasses.sessions import SESSION_SCHEMA_VERSION, RunState
 from vidbyte.lib.dataclasses.strategies import AgentResult
@@ -42,6 +43,7 @@ from vidbyte.tools.security import PermissionPolicy
 from vidbyte.tools.types import ToolCallContext, ToolSpec
 
 if TYPE_CHECKING:
+    from vidbyte.agents.settings import AgentFallbackSettings
     from vidbyte.sessions.session import Session
     from vidbyte.sessions.store import SessionStore
 
@@ -81,6 +83,7 @@ class BaseAgent(McpAttachableMixin):
         output_schema: type | Mapping[str, Any] | None = None,
         handoff: Handoff | None = None,
         trace_option: TraceOption | None = None,
+        fallback: Sequence[str | FallbackModel] | AgentFallbackSettings | None = None,
     ) -> None:
         if not name:
             raise AgentExecutionError("Agent name cannot be empty.")
@@ -117,6 +120,11 @@ class BaseAgent(McpAttachableMixin):
                         f"Agent {name} uses non-linear runtime {self.runtime_type.value}, "
                         "which does not support in-context learning algorithms."
                     )
+            if fallback is not None:
+                raise ConfigurationError(
+                    f"Agent {name} uses non-linear runtime {self.runtime_type.value}, "
+                    "which does not support model fallback."
+                )
 
         if model_name is not None and not isinstance(model_name, str):
             raise ConfigurationError(
@@ -134,6 +142,9 @@ class BaseAgent(McpAttachableMixin):
             run_id=run_id,
         )
         self.name = name
+        self._fallback_spec = fallback
+        from vidbyte.agents.fallback import AgentFallback
+        self.fallback = AgentFallback.from_spec(fallback, runner_config=self.runner_config, agent_name=name)
         self._runner_cache: dict[str, object] = {}
         self._agent_tool_items = tools.all() if isinstance(tools, Tools) else tuple(tools)
         self.tools = tools if isinstance(tools, Tools) else self._catalog_from_agent_tools(self._agent_tool_items)
@@ -193,6 +204,10 @@ class BaseAgent(McpAttachableMixin):
         self.last_trace: dict[str, Any] | None = None
         self.last_prompt: str = ""
         self.last_reply: AgentMessage | None = None
+        # Usage/cost tracking is built from the agent's own model identity; the
+        # default rate table prices every model the agent can run. Per-call usage
+        # is observable mid-run through MiddlewareContext.model_usage.
+        self._usage_tracker = UsageTracker()
         self._behavior_view: Any = None
         self._active_session: Session | None = None
         self._queued_prompts: list[str] = []
@@ -560,6 +575,7 @@ class BaseAgent(McpAttachableMixin):
             prompt, input_metadata = self._normalize_input(message)
             input_context_items, input_context_manager = self._normalize_input_context(message)
             self._active_prompt = prompt
+            self._usage_tracker.reset()
             self._behavior_view = None
             runner, runner_type = self._runner_for_model()
             trace_ctx = self._tracer.start_trace(
@@ -651,6 +667,14 @@ class BaseAgent(McpAttachableMixin):
         except RuntimeError:
             return asyncio.run(self.generate_reply(message, **options))
         raise AgentExecutionError("BaseAgent.run() cannot be called from an active event loop; use await arun().")
+
+    def get_usage(self) -> UsageRollup:
+        """Return the live or final token-usage rollup for the current or most recent run."""
+        return self._usage_tracker.rollup()
+
+    def get_cost_usd(self) -> float | None:
+        """Return total known USD cost for the current or most recent run, or None."""
+        return self.get_usage().cost_usd
 
     async def arun_sequentially(self, prompts: Sequence[str | AgentInput], **options: Any) -> list[AgentMessage]:
         # Runs each prompt through generate_reply in order, preserving self.history across all calls.
@@ -782,12 +806,7 @@ class BaseAgent(McpAttachableMixin):
         if runner is None:
             raise AgentExecutionError("Agent requires a runner.")
         if runner_type != RUNNER_TYPE_TEXT:
-            raw_result = await self._call_runner_once(runner, message, context=context, **options)
-            return AgentResult(
-                output=self._runner_output_text(raw_result),
-                strategy_name="direct_runner",
-                metadata=self._runner_output_metadata(raw_result),
-            )
+            return await self._run_non_text_runner(runner, message, context=context, **options)
         provider = str(options.pop("provider", None) or self._runner_provider(runner))
         handle = RunnerHandle(
             runner=runner,
@@ -806,6 +825,43 @@ class BaseAgent(McpAttachableMixin):
         )
         self._record_tool_contexts(result)
         return result
+
+    async def _run_non_text_runner(self, runner: object, message: str, *, context: BaseAgentContext, **options: Any) -> AgentResult:
+        # Runs image/audio/video/embedding runners, walking the fallback chain on provider-level failures.
+        from vidbyte.lib.errors import AllModelsFailedError
+
+        index = 0
+        attempts: list[dict[str, str]] = []
+        errors: list[BaseException] = []
+        active = runner
+        while True:
+            try:
+                raw_result = await self._call_runner_once(active, message, context=context, **options)
+            except BaseException as exc:
+                if self.fallback is None or not self.fallback.is_model_error(exc):
+                    raise
+                next_index = self.fallback.advance(exc, index)
+                if next_index is None:
+                    if not attempts:
+                        raise
+                    raise AllModelsFailedError(
+                        f"Agent '{self.name}' exhausted its fallback chain after {len(attempts)} model switch(es).",
+                        attempts=attempts,
+                        errors=[*errors, exc],
+                    ) from errors[0]
+                errors.append(exc)
+                attempts.append(self.fallback.attempt_record(index, next_index, exc))
+                active = self.fallback.build_runner(next_index)
+                index = next_index
+                continue
+            metadata = dict(self._runner_output_metadata(raw_result))
+            if attempts:
+                metadata["fallback"] = self.fallback.result_metadata(attempts, context_reset=False)
+            return AgentResult(
+                output=self._runner_output_text(raw_result),
+                strategy_name="direct_runner",
+                metadata=metadata,
+            )
 
     async def _run_with_tools(
         self,
@@ -870,6 +926,8 @@ class BaseAgent(McpAttachableMixin):
 
         if self.runtime_type is AgentRuntimeType.LINEAR:
             kwargs["output_contract"] = self.agent_loop_settings.output_contract
+            kwargs["usage_tracker"] = self._usage_tracker
+            kwargs["fallback"] = self.fallback
 
         return runtime_cls(
             agent_name=self.name,

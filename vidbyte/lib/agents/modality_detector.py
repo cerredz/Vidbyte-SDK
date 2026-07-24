@@ -256,6 +256,7 @@ _PREFIX_MODALITY_MAP: tuple[tuple[str, ModelModality], ...] = (
     ("deepseek-", ModelModality.TEXT),
     ("glm-", ModelModality.TEXT),
     ("minimax-", ModelModality.TEXT),
+    ("muse-spark", ModelModality.TEXT),
     ("abab", ModelModality.TEXT),
     ("llama-", ModelModality.TEXT),
     ("mistral-", ModelModality.TEXT),
