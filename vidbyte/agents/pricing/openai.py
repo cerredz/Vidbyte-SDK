@@ -19,12 +19,10 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
-from vidbyte.agents.pricing.base import ProviderUsage, usage_for
-from vidbyte.lib.enums import ModelProvider
+from vidbyte.agents.pricing.base import ProviderUsage
 from vidbyte.lib.registries.pricing import ModelPricing
 
 
-@usage_for(ModelProvider.OPENAI)
 @dataclass(frozen=True, slots=True)
 class OpenAIUsage(ProviderUsage):
     """OpenAI Responses usage: cached input is a billed subset of input_tokens."""

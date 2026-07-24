@@ -22,11 +22,14 @@ Similar Files:
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
+from typing import TYPE_CHECKING
 
-from vidbyte.agents.pricing.base import parse_usage
 from vidbyte.agents.pricing.records import UsageRecord, UsageRollup
 from vidbyte.lib.enums import ModelProvider
 from vidbyte.lib.registries.pricing import ModelPricingRegistry
+
+if TYPE_CHECKING:
+    from vidbyte.agents.pricing.base import ProviderUsage
 
 
 class UsageTracker:
@@ -44,7 +47,7 @@ class UsageTracker:
         provider = _as_provider(getattr(response, "provider", None))
         model = getattr(response, "model", "")
         payload = getattr(response, "usage", None)
-        usage = parse_usage(provider, payload if isinstance(payload, Mapping) else None)
+        usage = _parse_usage(provider, payload)
         if usage is None or provider is None:
             return None
         record = UsageRecord(
@@ -78,6 +81,20 @@ class UsageTracker:
     def records(self) -> tuple[UsageRecord, ...]:
         # Returns the immutable per-call ledger recorded so far.
         return tuple(self._records)
+
+
+def _parse_usage(provider: ModelProvider | None, payload: object) -> ProviderUsage | None:
+    # Resolves the provider's usage parser off the enum and applies it defensively;
+    # never raises, returning None for an unknown provider or an unusable payload.
+    if provider is None or not isinstance(payload, Mapping):
+        return None
+    usage_cls = provider.usage_class()
+    if usage_cls is None:
+        return None
+    try:
+        return usage_cls.from_usage_payload(payload)
+    except Exception:
+        return None
 
 
 def _as_provider(value: object) -> ModelProvider | None:

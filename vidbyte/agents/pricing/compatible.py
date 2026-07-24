@@ -20,17 +20,10 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
-from vidbyte.agents.pricing.base import ProviderUsage, usage_for
-from vidbyte.lib.enums import ModelProvider
+from vidbyte.agents.pricing.base import ProviderUsage
 from vidbyte.lib.registries.pricing import ModelPricing
 
 
-@usage_for(ModelProvider.XAI)
-@usage_for(ModelProvider.DEEPSEEK)
-@usage_for(ModelProvider.GLM)
-@usage_for(ModelProvider.MINIMAX)
-@usage_for(ModelProvider.KIMI)
-@usage_for(ModelProvider.META)
 @dataclass(frozen=True, slots=True)
 class ChatCompletionUsage(ProviderUsage):
     """Chat-completions usage: cached input is a billed subset of prompt_tokens."""

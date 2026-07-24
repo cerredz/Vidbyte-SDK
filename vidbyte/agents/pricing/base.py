@@ -4,17 +4,14 @@ Description:
     Abstract contract and provider registry for per-provider token usage classes.
 Purpose:
     Gives every provider response shape its own usage class with native fields and
-    a provider-specific cost formula, bound to a provider string via one registry.
+    a provider-specific cost formula.
 Architecture:
     - ProviderUsage: ABC exposing the uniform surface (input/output/total/cost_usd)
       and the shared token-coercion, nested-payload reads, derived accessors, and
       cost-math the subclasses build on.
-    - usage_for: Decorator binding a ProviderUsage class to a ModelProvider.
-    - parse_usage: Defensive entry point turning a raw usage payload into a
-      provider-native ProviderUsage, or None.
 Relations:
-    Subclassed by the provider modules in this package; consumed by UsageTracker
-    and by AgentRuntime through parse_usage.
+    Subclassed by the provider modules in this package; a provider's subclass is
+    resolved from ModelProvider.usage_class and consumed by UsageTracker.
 Similar Files:
     - vidbyte/lib/registries/pricing.py
 """
@@ -22,13 +19,10 @@ Similar Files:
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from typing import Any
 
-from vidbyte.lib.enums import ModelProvider
 from vidbyte.lib.registries.pricing import ModelPricing
-
-_USAGE_CLASSES: dict[ModelProvider, type["ProviderUsage"]] = {}
 
 
 class ProviderUsage(ABC):
@@ -138,35 +132,6 @@ class ProviderUsage(ABC):
         return (uncached_input * input_rate + cached_input * cache_read_rate + (self.output_tokens or 0) * output_rate) / 1_000_000
 
 
-def usage_for(provider: ModelProvider) -> Callable[["type[ProviderUsage]"], "type[ProviderUsage]"]:
-    # Decorator binding one ProviderUsage class to a provider in the registry.
-    def wrap(cls: type[ProviderUsage]) -> type[ProviderUsage]:
-        _USAGE_CLASSES[provider] = cls
-        return cls
-
-    return wrap
-
-
-def parse_usage(provider: ModelProvider | str | None, payload: Mapping[str, Any] | None) -> ProviderUsage | None:
-    # Dispatches a raw usage payload to the provider's usage class; never raises.
-    if not isinstance(payload, Mapping):
-        return None
-    if not isinstance(provider, ModelProvider):
-        try:
-            provider = ModelProvider(str(provider))
-        except (ValueError, TypeError):
-            return None
-    usage_cls = _USAGE_CLASSES.get(provider)
-    if usage_cls is None:
-        return None
-    try:
-        return usage_cls.from_usage_payload(payload)
-    except Exception:
-        return None
-
-
 __all__ = [
     "ProviderUsage",
-    "parse_usage",
-    "usage_for",
 ]

@@ -84,7 +84,7 @@ from vidbyte.agents import (
     UsageRollup,
     UsageTracker,
 )
-from vidbyte.agents.pricing import ProviderUsage, parse_usage
+from vidbyte.agents.pricing import ProviderUsage
 from vidbyte.lib.registries import ModelPricing, ModelPricingRegistry, PROVIDER_PRICING
 from vidbyte.client import VidbyteSDK
 from vidbyte.harnesses import (
@@ -561,7 +561,6 @@ __all__ = [
     "UsageRecord",
     "UsageRollup",
     "UsageTracker",
-    "parse_usage",
     "AlternativeChallengeContextItem",
     "AmbiguityContextItem",
     "ArtifactContextItem",

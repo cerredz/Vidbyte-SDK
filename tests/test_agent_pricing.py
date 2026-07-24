@@ -28,7 +28,6 @@ from vidbyte.agents.pricing import (
     OpenAIUsage,
     OpenRouterUsage,
     XAIUsage,
-    parse_usage,
 )
 from vidbyte.lib.enums import ModelProvider
 from vidbyte.lib.errors import ConfigurationError
@@ -87,9 +86,11 @@ class CompatibleProviderTests(unittest.TestCase):
         for alias in (XAIUsage, DeepSeekUsage, GLMUsage, MiniMaxUsage):
             self.assertIs(alias, ChatCompletionUsage)
 
-    def test_parse_usage_dispatches_compatible_providers(self) -> None:
-        for provider in (ModelProvider.XAI, ModelProvider.GLM, ModelProvider.MINIMAX, ModelProvider.DEEPSEEK):
-            usage = parse_usage(provider, {"prompt_tokens": 100, "completion_tokens": 20, "total_tokens": 120})
+    def test_usage_class_dispatches_compatible_providers(self) -> None:
+        for provider in (ModelProvider.XAI, ModelProvider.GLM, ModelProvider.MINIMAX, ModelProvider.DEEPSEEK, ModelProvider.META, ModelProvider.MISTRAL):
+            usage_cls = provider.usage_class()
+            self.assertIs(usage_cls, ChatCompletionUsage)
+            usage = usage_cls.from_usage_payload({"prompt_tokens": 100, "completion_tokens": 20, "total_tokens": 120})
             self.assertIsInstance(usage, ChatCompletionUsage)
 
     def test_cached_input_reads_first_reported_source(self) -> None:

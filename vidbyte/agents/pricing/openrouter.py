@@ -21,13 +21,10 @@ from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from typing import Any
 
-from vidbyte.agents.pricing.base import usage_for
 from vidbyte.agents.pricing.compatible import ChatCompletionUsage
-from vidbyte.lib.enums import ModelProvider
 from vidbyte.lib.registries.pricing import ModelPricing
 
 
-@usage_for(ModelProvider.OPENROUTER)
 @dataclass(frozen=True, slots=True)
 class OpenRouterUsage(ChatCompletionUsage):
     """OpenRouter usage: provider-reported cost wins over table pricing."""
