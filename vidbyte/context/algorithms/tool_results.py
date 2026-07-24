@@ -7,9 +7,11 @@ Purpose:
     messages while preserving full tool results in runtime metadata.
 Architecture:
     - ToolResultAdmission: Supported admission modes.
-    - ContextWindowAlgorithm: Immutable runtime algorithm object.
+    - ContextWindowAlgorithm: Immutable, mutually exclusive runtime algorithm object,
+      including the optional Independent Critic configuration.
 Relations:
-    Used by vidbyte.context.presets and AgentRuntime.
+    Used by vidbyte.context.presets and AgentRuntime. Optional return-level
+    configurations, including prosecutor/defender/judge, are mutually exclusive.
 """
 
 from __future__ import annotations
@@ -21,7 +23,9 @@ from typing import Any
 
 from vidbyte.context.compaction import CompactionMode, ContextCompactionEngine
 from vidbyte.context.algorithms.reflexion import ReflexionAlgorithm
+from vidbyte.context.algorithms.independent_critic import IndependentCriticAlgorithm
 from vidbyte.context.algorithms.multi_provider_agentic_grader import MultiProviderAgenticGraderAlgorithm
+from vidbyte.context.algorithms.prosecutor_defender_judge import ProsecutorDefenderJudgeAlgorithm
 from vidbyte.context.algorithms.trajectory_checkpoints import TrajectoryCheckpointAlgorithm
 from vidbyte.context.algorithms.problem_space_search import ProblemSpaceSearchAlgorithm
 from vidbyte.context.algorithms.error_correction import ErrorCorrectionAlgorithm
@@ -45,6 +49,8 @@ class ContextWindowAlgorithm:
     max_tool_result_chars: int = 600
     reflexion: ReflexionAlgorithm | None = None
     multi_provider_agentic_grader: MultiProviderAgenticGraderAlgorithm | None = None
+    prosecutor_defender_judge: ProsecutorDefenderJudgeAlgorithm | None = None
+    independent_critic: IndependentCriticAlgorithm | None = None
     trajectory_checkpoints: TrajectoryCheckpointAlgorithm | None = None
     problem_space_search: ProblemSpaceSearchAlgorithm | None = None
     error_correction: ErrorCorrectionAlgorithm | None = None
@@ -52,7 +58,7 @@ class ContextWindowAlgorithm:
 
     def __post_init__(self) -> None:
         # Verifies that at most one runtime context algorithm is configured.
-        active = [x for x in (self.reflexion, self.multi_provider_agentic_grader, self.trajectory_checkpoints, self.problem_space_search, self.error_correction) if x is not None]
+        active = [x for x in (self.reflexion, self.multi_provider_agentic_grader, self.prosecutor_defender_judge, self.independent_critic, self.trajectory_checkpoints, self.problem_space_search, self.error_correction) if x is not None]
         if len(active) > 1:
             raise ValueError("At most one runtime context-window algorithm can be configured.")
 
@@ -73,7 +79,9 @@ class ContextWindowAlgorithm:
 __all__ = [
     "ContextWindowAlgorithm",
     "ErrorCorrectionAlgorithm",
+    "IndependentCriticAlgorithm",
     "MultiProviderAgenticGraderAlgorithm",
+    "ProsecutorDefenderJudgeAlgorithm",
     "ProblemSpaceSearchAlgorithm",
     "ReflexionAlgorithm",
     "TrajectoryCheckpointAlgorithm",

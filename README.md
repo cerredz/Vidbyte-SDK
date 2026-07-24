@@ -2,6 +2,7 @@
 
 [![PyPI version](https://img.shields.io/pypi/v/vidbyte-sdk.svg)](https://pypi.org/project/vidbyte-sdk/)
 [![Python versions](https://img.shields.io/pypi/pyversions/vidbyte-sdk.svg)](https://pypi.org/project/vidbyte-sdk/)
+[![CI](https://github.com/cerredz/Vidbyte-SDK/actions/workflows/ci.yml/badge.svg)](https://github.com/cerredz/Vidbyte-SDK/actions/workflows/ci.yml)
 [![Publish to PyPI](https://github.com/cerredz/Vidbyte-SDK/actions/workflows/publish.yml/badge.svg)](https://github.com/cerredz/Vidbyte-SDK/actions/workflows/publish.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
@@ -21,6 +22,7 @@ access remain outside this package.
 - Tool-using agents with local Python functions, MCP-backed tools, permission policies, and provider-native schemas.
 - Runtime policies with deterministic middleware for rate limits, budgets, retries, audit logs, compaction, and safety checks.
 - Durable agent sessions that checkpoint, resume, fork, batch fork, tag, export/import, and summarize usage across long-running work.
+- Open harness implementations with config-as-source-of-truth identity, Session-backed capture, and consented, redacted trajectory datasets.
 - MCP Studio servers that expose Vidbyte agents, tools, prompts, and pipelines to MCP-compatible clients.
 - Local eval suites with reusable graders, concurrency controls, and run registries.
 - Agent pipelines that compose specialized agents through sequential, parallel, conditional, and map-reduce topologies.
@@ -35,7 +37,7 @@ access remain outside this package.
 | [`vidbyte.cli`](vidbyte/cli/README.md) | Unified console command for SDK developer surfaces, currently `vidbyte-sdk skills` |
 | [`vidbyte.context`](vidbyte/context/README.md) | Structured context items, context windows, compaction, algorithms, and handoff models |
 | [`vidbyte.evals`](vidbyte/evals/README.md) | Local eval cases, suites, runners, graders, registries, and result summaries |
-| [`vidbyte.harnesses`](vidbyte/harnesses/README.md) | Namespace boundary for custom harness integrations |
+| [`vidbyte.harnesses`](vidbyte/harnesses/README.md) | The `Harness` base class: config-as-source-of-truth identity, Session-backed capture, and consented, redacted trajectory export |
 | [`vidbyte.lib`](vidbyte/lib/README.md) | Shared dataclasses, enums, registries, errors, runners, config, and tracing contracts |
 | [`vidbyte.mcp_server`](vidbyte/mcp_server/README.md) | Stdio MCP Studio server for exposing agents, tools, prompts, and pipelines |
 | [`vidbyte.middleware`](vidbyte/middleware/README.md) | Deterministic runtime hooks and built-in policy, safety, retry, budget, and compaction middleware |
@@ -175,6 +177,58 @@ harness = ContextMinimalFanoutParadigm(
 result = harness.run("Implement the requested repo change.")
 ```
 
+## Harness execution contract
+
+Subclass `vidbyte.harnesses.Harness` when you want configuration identity and a
+sellable trajectory dataset around an arbitrary harness without adopting a
+framework-owned agent loop. The YAML is the single source of truth for every
+behavior hyperparameter; the base class hashes the exact resolved behavior plus
+the code `version` into a reusable `spec_id`, gives every invocation a unique
+`run_id`, and — under an explicit consent flag — collects one self-contained,
+redacted `TrajectoryRecord`. Per-agent capture and durable persistence come from
+`vidbyte.sessions`, not a bespoke store.
+
+```python
+from vidbyte import VidbyteSDK
+from vidbyte.harnesses import Harness
+
+class OpenHarness(Harness):
+    type = "open"        # identity of the implementation kind (matches config)
+    version = "1"        # code identity; NOT a YAML field
+
+    async def run(self, request):
+        agent = self.session(build_agent())   # full-trace, run-tagged durable session
+        reply = await agent.arun(request["question"])
+        return {"answer": reply.content}
+
+sdk = VidbyteSDK()
+h = OpenHarness(
+    store=sdk.harnesses.file_store(".vidbyte/sessions"),      # operational source of truth
+    sink=sdk.harnesses.file_sink("datasets/harness.jsonl"),   # licensed, redacted export
+    collect=True,                                             # opt-in consent gate
+)
+h.load("harness.yaml")
+result = await h.execute({"question": "what changed?"})
+```
+
+Config uses `schema_version`, `harness`, `agents`, plus optional `metadata` and
+`orchestration` at the top level; per-agent `params`/`tools` live on each agent and
+between-agent knobs live under `orchestration`. Changing any resolved behavior
+value (including referenced prompt-file content, an agent param, or the code
+`version`) changes `spec_id`; descriptive `metadata`, store/sink choice, and
+timestamps do not. Credential-like config keys are rejected before hashing or
+persistence.
+
+`self.session(agent)` forces full-fidelity capture (per-step checkpoints, full
+trace, `run_id` tag) with no developer tracing code, and the `run_id` tag fans in
+every agent's Session to reconstruct the whole run. Collection runs fail-open in
+`execute()`'s `finally` and can never fail the run; every `task`/`output`/`history`
+value passes through one redaction pass before reaching the sink. Durable Sessions
+remain the checkpoint/resume abstraction, Trace remains optional observability,
+Evals score runs, and Paradigms remain concrete algorithms. See the
+[harness guide](vidbyte/harnesses/README.md) for identity, the config schema,
+consent/redaction, and trajectory-dataset details.
+
 ## Context Objects
 
 Context dataclasses are exposed through `vidbyte.context` and centralized internally under `vidbyte.lib.dataclasses`.
@@ -237,6 +291,46 @@ agent = Agent(
 )
 ```
 
+Use `independent_critic` when a completed candidate needs an advisory review
+from a fresh context. The critic sees only the original task, exact candidate,
+and explicitly allowlisted artifacts/tools. It never receives producer history,
+scratch state, middleware transforms, private options, or implicit internal
+tools. The candidate is not revised and findings are not adjudicated.
+
+```python
+from vidbyte import Agent, ContextWindow
+
+agent = Agent(
+    name="reviewed-worker",
+    system_prompt="Solve the task carefully.",
+    provider="openai",
+    model_name="gpt-4.1",
+    algorithm=ContextWindow.preset.independent_critic,
+)
+
+reply = await agent.arun("Produce the migration plan.")
+review = reply.metadata["independent_critic"]
+```
+
+The preset is fail-closed and inherits no artifacts or tools. Custom
+configuration makes every reviewer capability explicit:
+
+```python
+from vidbyte import CriticFailurePolicy, IndependentCriticAlgorithm
+from vidbyte.context.algorithms import ContextWindowAlgorithm
+
+algorithm = ContextWindowAlgorithm(
+    name="independent_critic",
+    independent_critic=IndependentCriticAlgorithm(
+        reviewer_provider="anthropic",
+        reviewer_model="claude-sonnet-4-5",
+        allowed_artifact_names=("requirements",),
+        allowed_tool_names=("read_text",),
+        failure_policy=CriticFailurePolicy.RAISE,
+    ),
+)
+```
+
 For long-running direct loops, trajectory checkpoints can periodically write a
 bounded runtime checkpoint into the context window through managed context
 primitives. Checkpoints summarize observable runtime state only; their score is
@@ -273,6 +367,40 @@ agent = Agent(
     algorithm=ContextWindow.preset.problem_space_search,  # or ContextWindow.preset.error_correction
 )
 ```
+
+For a verdict-only adversarial review, `prosecutor_defender_judge` runs the
+normal producer once and then uses three fresh contexts in strict sequence. The
+prosecutor emits evidence-backed allegations, the defender answers those exact
+allegation IDs, and the judge decides which IDs survive. The candidate is never
+revised: `output`, `structured`, `calls`, strategy name, and existing metadata
+remain the producer's values.
+
+```python
+from vidbyte import ContextWindow
+
+agent = Agent(
+    name="reviewed-producer",
+    system_prompt="Produce the requested artifact.",
+    provider="openai",
+    model_name="gpt-4.1",
+    algorithm=ContextWindow.preset.prosecutor_defender_judge,
+)
+
+reply = await agent.arun("Evaluate this implementation against the requirements.")
+debate = reply.metadata["prosecutor_defender_judge"]
+print(debate["verdict"], debate["surviving_allegation_ids"])
+```
+
+By default, review roles receive no producer artifacts or tools and never
+receive producer history, scratch reasoning, middleware, options, system prompt,
+memory, or context-manager state. Advanced callers can construct
+`ProsecutorDefenderJudgeAlgorithm` with separate `DebateStageSettings` for each
+role. Artifact names are exact allowlists; tool names must resolve to non-bound
+`SAFE` or `READ` tools. Review adds three sequential model calls by default and
+uses stage-local timeout, iteration, token, and tool-call limits. Failures raise
+unless `ProsecutorDefenderJudgeFailurePolicy.RETURN_CANDIDATE` is explicitly
+selected, in which case the unchanged candidate carries marked no-verdict
+`review_failed` metadata.
 
 Per-call context can be supplied with `AgentInput` without mutating the agent's
 default context:
@@ -1306,7 +1434,13 @@ vidbyte/
 |-- context/
 |-- evals/
 |-- harnesses/
-|   `-- client.py
+|   |-- client.py
+|   |-- config.py
+|   |-- contracts.py
+|   |-- execution.py
+|   |-- store.py
+|   |-- dataset.py
+|   `-- stores/
 |-- mcp_server/
 |-- paradigms/
 |-- prompts/
@@ -1352,10 +1486,14 @@ Private Vidbyte service implementations, proprietary learning evaluations, promp
 ## Local Verification
 
 ```bash
-python -m compileall vidbyte
-python -m unittest discover -s tests
-python -c "from vidbyte import Agent, Tools, VidbyteSDK, tool; sdk = VidbyteSDK(); print(Agent.__name__, Tools.__name__, type(sdk.agents).__name__, callable(tool))"
+python -m pip install -e ".[dev]"
+python scripts/run_ci.py
 ```
+
+The same command runs the required source and installed-package gates used by
+pull requests and releases. For a focused diagnostic rerun, use
+`--stage source` or `--stage package`; always finish with the full command before
+opening or updating a pull request.
 
 ## Contributing and Support
 

@@ -8,6 +8,12 @@ Purpose:
 Architecture:
     AgentRuntimeConfig is the frozen direct-loop contract; AgentStopReason is its
     machine-readable termination vocabulary; remaining dataclasses describe agents.
+    - AgentRunnerConfig: Primitive backend configuration.
+    - FallbackModel: One entry in an ordered agent fallback chain.
+    - FallbackTransform: Rebuilt provider-derived state for a model switch.
+    - AgentCard: Local agent description, capabilities, and tools.
+    - AgentMessage: Actor-to-actor message payload.
+    - AgentSpec: Construction-friendly agent settings block.
 Inputs:
     Validated SDK configuration values and agent metadata assembled by public layers.
 Outputs:
@@ -31,6 +37,8 @@ Quality:
 Related Docs:
     https://github.com/cerredz/Vidbyte-SDK/blob/main/docs/design/runtime-loop-settings-enforcement.md
     https://github.com/cerredz/Vidbyte-SDK/blob/main/tests/test_agent_runtime.py
+Relations:
+    Used by vidbyte.agents.base, vidbyte.agents.registry, and orchestration strategies.
 """
 
 from __future__ import annotations
@@ -44,11 +52,13 @@ from vidbyte.lib.errors import AgentForkConfigurationError
 if TYPE_CHECKING:
     from vidbyte.agents.runtimes.configs import ActorRuntime, LinearRuntime, MctsSearchRuntime
     from vidbyte.agents.settings import AgentLoopSettings
+    from vidbyte.agents.settings.fallback import AgentFallbackSettings
     from vidbyte.agents.settings.tool import ToolSettings
     from vidbyte.context.handoff import Handoff
     from vidbyte.context.manager import ContextManager
     from vidbyte.context.primitives import ContextItem
     from vidbyte.context.window import ContextWindowAlgorithm
+    from vidbyte.lib.dataclasses.runner import RunnerHandle
     from vidbyte.lib.dataclasses.trace import TraceOption
     from vidbyte.lib.enums import AgentRuntimeType, ModelProvider
     from vidbyte.middleware import AgentMiddleware
@@ -149,6 +159,46 @@ class AgentRunnerConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class FallbackModel:
+    """One model in an ordered agent fallback chain."""
+
+    provider: str
+    model: str
+    api_key: str | None = None
+    temperature: float | None = None
+
+    def __post_init__(self) -> None:
+        """Reject entries that do not name both a provider and a model."""
+        if not str(self.provider).strip():
+            raise ValueError("FallbackModel.provider cannot be empty")
+        if not str(self.model).strip():
+            raise ValueError("FallbackModel.model cannot be empty")
+
+    def identity(self) -> str:
+        """Return the 'provider/model' label used in metadata and error records."""
+        return f"{self.provider}/{self.model}"
+
+    def __repr__(self) -> str:
+        """Return a developer-readable string that never exposes the API key."""
+        key = ", api_key='***'" if self.api_key else ""
+        temperature = f", temperature={self.temperature!r}" if self.temperature is not None else ""
+        return f"FallbackModel({self.identity()!r}{key}{temperature})"
+
+
+@dataclass(frozen=True, slots=True)
+class FallbackTransform:
+    """Rebuilt provider-derived state for the model a run is switching to."""
+
+    index: int
+    handle: RunnerHandle
+    provider: str
+    tool_schemas: tuple[dict[str, Any], ...]
+    messages: list[dict[str, Any]]
+    context_reset: bool
+    model: FallbackModel = field(repr=False)
+
+
+@dataclass(frozen=True, slots=True)
 class AgentInput:
     """Typed agent input for prompt metadata and per-call context."""
 
@@ -239,6 +289,7 @@ class AgentForkSettings:
     model_name: str | None = None
     provider: ModelProvider | str | None = None
     temperature: float | None = None
+    fallback: Sequence[str | FallbackModel] | AgentFallbackSettings | None = None
     mcp: bool = True
     inherit_mcp: bool | None = None
 

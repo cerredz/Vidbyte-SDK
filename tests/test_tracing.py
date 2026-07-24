@@ -6,6 +6,7 @@ import unittest
 from typing import Any
 from unittest.mock import patch
 
+from tests.agent_test_support import build_test_agent
 from vidbyte.agents import AgentForkSettings
 from vidbyte.agents.base import BaseAgent
 from vidbyte.agents.types import AgentInput
@@ -144,7 +145,7 @@ class NullTracerTests(unittest.TestCase):
 
 class BaseAgentTracerWiringTests(unittest.IsolatedAsyncioTestCase):
     def _make_agent(self, tracer=None) -> BaseAgent:
-        return BaseAgent(
+        return build_test_agent(
             name="test-agent",
             system_prompt="Be helpful.",
             runner=AlwaysDoneRunner(),
@@ -153,7 +154,7 @@ class BaseAgentTracerWiringTests(unittest.IsolatedAsyncioTestCase):
 
     def _make_agent_with_trace(self, trace=None) -> BaseAgent:
         # Builds a test agent through the new trace= alias.
-        return BaseAgent(
+        return build_test_agent(
             name="test-agent",
             system_prompt="Be helpful.",
             runner=AlwaysDoneRunner(),
@@ -194,7 +195,7 @@ class BaseAgentTracerWiringTests(unittest.IsolatedAsyncioTestCase):
             def run(self, *a: object, **kw: object) -> None:
                 raise RuntimeError("runner exploded")
 
-        agent = BaseAgent(
+        agent = build_test_agent(
             name="bomb-agent",
             system_prompt="Crash.",
             runner=BombRunner(),
@@ -231,7 +232,7 @@ class BaseAgentTracerWiringTests(unittest.IsolatedAsyncioTestCase):
     def test_trace_alias_rejects_tracer_and_trace_together(self) -> None:
         # Verifies users cannot supply both tracing entry points at once.
         with self.assertRaises(ConfigurationError):
-            BaseAgent(
+            build_test_agent(
                 name="test-agent",
                 system_prompt="Be helpful.",
                 runner=AlwaysDoneRunner(),
@@ -677,7 +678,7 @@ class GenerateReplyCancellationTests(unittest.IsolatedAsyncioTestCase):
     """Verifies generate_reply closes its root trace on CancelledError."""
 
     def _make_cancelling_agent(self, tracer: TracerBase) -> BaseAgent:
-        return BaseAgent(
+        return build_test_agent(
             name="cancel-agent",
             system_prompt="Be helpful.",
             runner=CancelledRunner(),
@@ -731,7 +732,7 @@ class GenerateReplyCancellationTests(unittest.IsolatedAsyncioTestCase):
             def run(self, *a: object, **kw: object) -> None:
                 raise RuntimeError("explode")
 
-        agent = BaseAgent(
+        agent = build_test_agent(
             name="bomb-agent",
             system_prompt="Crash.",
             runner=BombRunner(),

@@ -10,6 +10,7 @@ from io import BytesIO
 from pathlib import Path
 from unittest import mock
 
+from tests.agent_test_support import bind_test_runner, build_test_agent
 from vidbyte import Agent
 from vidbyte.agents.types import AgentMessage
 from vidbyte.sessions.contracts import (
@@ -81,9 +82,7 @@ class FakeAgent:
             capabilities=(),
             provider="openai",
             model_name="gpt-4.1",
-            modality="text",
             temperature=None,
-            runner_options={},
             runtime_type="linear",
             runtime_config={},
             algorithm="default",
@@ -136,9 +135,7 @@ def _run_state(name: str = "a", history: tuple = ()) -> RunState:
         capabilities=(),
         provider="openai",
         model_name="gpt-4.1",
-        modality="text",
         temperature=None,
-        runner_options={},
         runtime_type="linear",
         runtime_config={},
         algorithm="default",
@@ -173,11 +170,11 @@ class SerializerTests(unittest.TestCase):
             back = self.s.checkpoint_from_dict(self.s.checkpoint_to_dict(cp))
             self.assertEqual(len(back.run_state.history), count)
 
-    def test_strips_api_key_from_runner_options(self) -> None:  # [Hidden Assumption]
+    def test_strips_api_key_from_runtime_config(self) -> None:  # [Hidden Assumption]
         state = RunState(
             schema_version=1, agent_name="a", system_prompt="s", description="d", capabilities=(), provider="openai",
-            model_name="m", modality="text", temperature=None, runner_options={"api_key": "secret", "keep": 1},
-            runtime_type="linear", runtime_config={}, algorithm="default", metadata={}, agent_metadata={}, tool_names=(), history=())
+            model_name="m", temperature=None,
+            runtime_type="linear", runtime_config={"api_key": "secret", "keep": 1}, algorithm="default", metadata={}, agent_metadata={}, tool_names=(), history=())
         cp = Checkpoint(id="ck", session_id="se", parent_id=None, seq=0, created_at="t", run_state=state)
         text = json.dumps(self.s.checkpoint_to_dict(cp))
         self.assertNotIn("api_key", text)
@@ -242,7 +239,7 @@ class AgentStateSeamTests(unittest.TestCase):
     def test_restore_records_tool_mismatch(self) -> None:  # [Hidden Assumption]
         state = RunState(
             schema_version=1, agent_name="x", system_prompt="s", description="d", capabilities=(), provider="openai",
-            model_name="m", modality="text", temperature=None, runner_options={}, runtime_type="linear", runtime_config={},
+            model_name="m", temperature=None, runtime_type="linear", runtime_config={},
             algorithm="default", metadata={}, agent_metadata={}, tool_names=("grep",), history=())
         restored = Agent.restore(state)
         self.assertIn("__resume_tool_mismatch__", restored.metadata)
@@ -395,7 +392,11 @@ class PortableBundleTests(unittest.IsolatedAsyncioTestCase):
         imported_id = client.import_(target, session.export(), new_id="se_client")
 
         self.assertEqual(imported_id, "se_client")
-        self.assertEqual(client.export(target, imported_id), SessionBundleExporter(target).export(imported_id))
+        with mock.patch("vidbyte.sessions.client.SessionBundleExporter") as exporter_type:
+            exporter_type.return_value.export.return_value = b"exported-bundle"
+            self.assertEqual(client.export(target, imported_id), b"exported-bundle")
+        exporter_type.assert_called_once_with(target)
+        exporter_type.return_value.export.assert_called_once_with(imported_id)
 
     def test_import_without_new_id_rejects_existing_session(self) -> None:  # [Hidden Assumption]
         # Verify same-id imports fail loudly rather than clobbering existing metadata.
@@ -493,7 +494,7 @@ class SessionFacadeTests(unittest.IsolatedAsyncioTestCase):
     def test_agent_persist_delegates_to_session_and_binds_property(self) -> None:  # [Edge Case]
         # Verify agent.persist() is pure Session construction plus public session binding.
         store = InMemorySessionStore()
-        agent = Agent(name="worker", system_prompt="Work.", runner=EchoRunner())
+        agent = build_test_agent(name="worker", system_prompt="Work.", runner=EchoRunner())
         self.assertIsNone(agent.session)
 
         session = agent.persist(store=store, policy=CheckpointPolicy.MANUAL, tags=("native",))
@@ -505,7 +506,7 @@ class SessionFacadeTests(unittest.IsolatedAsyncioTestCase):
     def test_bind_session_binds_carried_session_tools(self) -> None:  # [Silent Failure]
         # Verify Session binds tools through BaseAgent.bind_session() instead of private writes.
         tool = SessionBindingProbe()
-        agent = Agent(name="worker", system_prompt="Work.", runner=EchoRunner(), tools=[tool])
+        agent = build_test_agent(name="worker", system_prompt="Work.", runner=EchoRunner(), tools=[tool])
         session = Session(agent, store=InMemorySessionStore())
 
         self.assertIs(tool.session, session)
@@ -651,13 +652,13 @@ class SessionFacadeTests(unittest.IsolatedAsyncioTestCase):
         original_fork = session.fork
         attempts = 0
 
-        def flaky_fork(*, at=None, tools=None, runner=None, middleware=None):
+        def flaky_fork(*, at=None, tools=None, middleware=None):
             # Fails only the second fork attempt while delegating the rest to the real fork.
             nonlocal attempts
             attempts += 1
             if attempts == 2:
                 raise SessionError("boom")
-            return original_fork(at=at, tools=tools, runner=runner, middleware=middleware)
+            return original_fork(at=at, tools=tools, middleware=middleware)
 
         with mock.patch.object(session, "fork", side_effect=flaky_fork):
             outcomes = session.batch_fork(3)
@@ -730,7 +731,7 @@ class SessionIntegrationTests(unittest.IsolatedAsyncioTestCase):
     async def test_bound_agent_arun_writes_one_checkpoint(self) -> None:  # [Silent Failure]
         # Verify running a bound agent directly records the completed turn exactly once.
         store = InMemorySessionStore()
-        agent = Agent(name="worker", system_prompt="Work.", runner=EchoRunner())
+        agent = build_test_agent(name="worker", system_prompt="Work.", runner=EchoRunner())
         session = Session(agent, store=store)
 
         reply = await agent.arun("first")
@@ -742,7 +743,7 @@ class SessionIntegrationTests(unittest.IsolatedAsyncioTestCase):
     async def test_session_arun_does_not_double_persist_agent_hook(self) -> None:  # [Silent Failure]
         # Verify Session.arun() delegates to the agent hook without writing a second checkpoint.
         store = InMemorySessionStore()
-        agent = Agent(name="worker", system_prompt="Work.", runner=EchoRunner())
+        agent = build_test_agent(name="worker", system_prompt="Work.", runner=EchoRunner())
         session = Session(agent, store=store)
 
         await session.arun("first")
@@ -752,7 +753,7 @@ class SessionIntegrationTests(unittest.IsolatedAsyncioTestCase):
     async def test_agent_arun_respects_manual_session_policy(self) -> None:  # [Hidden Assumption]
         # Verify the session policy still owns whether agent-side turn recording persists.
         store = InMemorySessionStore()
-        agent = Agent(name="worker", system_prompt="Work.", runner=EchoRunner())
+        agent = build_test_agent(name="worker", system_prompt="Work.", runner=EchoRunner())
         session = Session(agent, store=store, policy=CheckpointPolicy.MANUAL)
 
         await agent.arun("first")
@@ -767,7 +768,7 @@ class SessionIntegrationTests(unittest.IsolatedAsyncioTestCase):
                 # Simulate a checkpoint write failure after session metadata is already valid.
                 raise SessionStoreError("disk full")
 
-        agent = Agent(name="worker", system_prompt="Work.", runner=EchoRunner())
+        agent = build_test_agent(name="worker", system_prompt="Work.", runner=EchoRunner())
         Session(agent, store=FailingStore())
 
         reply = await agent.arun("first")
@@ -785,13 +786,14 @@ class SessionIntegrationTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_resume_continues_history_cold(self) -> None:  # [Hidden Failure]
         store = InMemorySessionStore()
-        agent = Agent(name="worker", system_prompt="Work.", runner=EchoRunner())
+        agent = build_test_agent(name="worker", system_prompt="Work.", runner=EchoRunner())
         session = Session(agent, store=store)
         await session.arun("first")
         await session.arun("second")
         session_id = session.id
 
-        resumed = Session.resume(store, session_id, runner=EchoRunner())
+        resumed = Session.resume(store, session_id)
+        bind_test_runner(resumed.agent, EchoRunner())
         self.assertEqual(len(resumed.agent.history), 2)
         reply = await resumed.arun("third")
         self.assertEqual(reply.content, "answer-1")
@@ -800,11 +802,12 @@ class SessionIntegrationTests(unittest.IsolatedAsyncioTestCase):
     async def test_file_store_parity_round_trip(self) -> None:  # [Silent Failure]
         with tempfile.TemporaryDirectory() as root:
             store = FileSessionStore(root)
-            agent = Agent(name="worker", system_prompt="Work.", runner=EchoRunner())
+            agent = build_test_agent(name="worker", system_prompt="Work.", runner=EchoRunner())
             session = Session(agent, store=store)
             await session.arun("first")
             session_id = session.id
-            resumed = Session.resume(store, session_id, runner=EchoRunner())
+            resumed = Session.resume(store, session_id)
+            bind_test_runner(resumed.agent, EchoRunner())
             self.assertEqual(len(resumed.agent.history), 1)
 
 

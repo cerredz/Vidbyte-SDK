@@ -23,7 +23,7 @@ from vidbyte.lib.enums import ModelProvider
 from vidbyte.lib.errors import ProviderSelectionError
 from vidbyte.providers.anthropic import AnthropicProvider
 from vidbyte.providers.client import ProvidersClient
-from vidbyte.providers.compatible import DeepSeekProvider, GLMProvider, KimiProvider, MiniMaxProvider
+from vidbyte.providers.compatible import DeepSeekProvider, GLMProvider, KimiProvider, MetaProvider, MiniMaxProvider, MistralProvider
 from vidbyte.providers.elevenlabs import ElevenLabsProvider
 from vidbyte.providers.gemini import GeminiProvider
 from vidbyte.providers.openai import OpenAIProvider
@@ -37,7 +37,7 @@ class ModelProviders:
     """Central factory for SDK provider adapters."""
 
     @staticmethod
-    def text(config: TextModelConfig) -> OpenAIProvider | AnthropicProvider | GeminiProvider | XAIProvider | DeepSeekProvider | GLMProvider | MiniMaxProvider | KimiProvider | OpenRouterProvider:
+    def text(config: TextModelConfig) -> OpenAIProvider | AnthropicProvider | GeminiProvider | XAIProvider | DeepSeekProvider | GLMProvider | MiniMaxProvider | KimiProvider | MetaProvider | MistralProvider | OpenRouterProvider:
         # Return a text-capable adapter for the requested model provider.
         providers = {
             ModelProvider.OPENAI: OpenAIProvider,
@@ -48,6 +48,8 @@ class ModelProviders:
             ModelProvider.GLM: GLMProvider,
             ModelProvider.MINIMAX: MiniMaxProvider,
             ModelProvider.KIMI: KimiProvider,
+            ModelProvider.META: MetaProvider,
+            ModelProvider.MISTRAL: MistralProvider,
             ModelProvider.OPENROUTER: OpenRouterProvider,
         }
         return ModelProviders._build_text_provider(config, providers)
@@ -142,7 +144,9 @@ __all__ = [
     "GLMProvider",
     "GeminiProvider",
     "KimiProvider",
+    "MetaProvider",
     "MiniMaxProvider",
+    "MistralProvider",
     "ModelProviders",
     "OpenAIProvider",
     "OpenRouterProvider",

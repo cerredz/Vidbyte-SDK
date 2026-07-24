@@ -19,14 +19,14 @@ from collections.abc import Callable, Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
 from vidbyte.agents.mixins import McpAttachableMixin
+from vidbyte.agents.pricing import UsageRollup, UsageTracker
 from vidbyte.agents.settings import AgentLoopSettings
 from vidbyte.agents.types import AgentCard, AgentInput, AgentMessage
 from vidbyte.context.manager import ContextManager
 from vidbyte.context.window import ContextWindow, ContextWindowAlgorithm
 from vidbyte.context.primitives import ContextItem
 from vidbyte.context.handoff import Handoff, MinimalHandoff
-from vidbyte.lib.dataclasses.agents import AgentForkSettings, AgentMetadata, AgentRunnerConfig, AgentRuntimeConfig
-from vidbyte.lib.dataclasses.multi_agent import AggregateConfig, ProposerSpec
+from vidbyte.lib.dataclasses.agents import AgentForkSettings, AgentMetadata, AgentRunnerConfig, AgentRuntimeConfig, FallbackModel
 from vidbyte.lib.dataclasses.runner import RunnerHandle
 from vidbyte.lib.dataclasses.sessions import SESSION_SCHEMA_VERSION, RunState
 from vidbyte.lib.dataclasses.strategies import AgentResult
@@ -43,6 +43,7 @@ from vidbyte.tools.security import PermissionPolicy
 from vidbyte.tools.types import ToolCallContext, ToolSpec
 
 if TYPE_CHECKING:
+    from vidbyte.agents.settings import AgentFallbackSettings
     from vidbyte.sessions.session import Session
     from vidbyte.sessions.store import SessionStore
 
@@ -67,10 +68,7 @@ class BaseAgent(McpAttachableMixin):
         middleware: Sequence[AgentMiddleware] = (),
         api_key: str | None = None,
         provider: ModelProvider | str | None = None,
-        model_name: str | Sequence[str] | None = None,
-        proposers: Sequence[Any] | None = None,
-        aggregator: Any | None = None,
-        aggregate: AggregateConfig | None = None,
+        model_name: str | None = None,
         temperature: float | None = None,
         run_id: str | None = None,
         description: str = "",
@@ -85,6 +83,7 @@ class BaseAgent(McpAttachableMixin):
         output_schema: type | Mapping[str, Any] | None = None,
         handoff: Handoff | None = None,
         trace_option: TraceOption | None = None,
+        fallback: Sequence[str | FallbackModel] | AgentFallbackSettings | None = None,
     ) -> None:
         if not name:
             raise AgentExecutionError("Agent name cannot be empty.")
@@ -121,21 +120,20 @@ class BaseAgent(McpAttachableMixin):
                         f"Agent {name} uses non-linear runtime {self.runtime_type.value}, "
                         "which does not support in-context learning algorithms."
                     )
+            if fallback is not None:
+                raise ConfigurationError(
+                    f"Agent {name} uses non-linear runtime {self.runtime_type.value}, "
+                    "which does not support model fallback."
+                )
 
-        provider_str = str(provider.value if isinstance(provider, ModelProvider) else provider) if provider is not None else None
-        self._aggregate_agent: BaseAgent | None = None
-        self._aggregate_plan, model_name = self._resolve_aggregate_plan(model_name, provider_str, proposers, aggregator, aggregate)
-        if self._aggregate_plan is not None and self.runtime_type in (
-            AgentRuntimeType.MCTS_SEARCH,
-            AgentRuntimeType.ACTOR_MODEL,
-            AgentRuntimeType.ACTOR_MODEL_P2P,
-            AgentRuntimeType.ACTOR_MODEL_BROADCAST,
-        ):
+        if model_name is not None and not isinstance(model_name, str):
             raise ConfigurationError(
-                f"Agent {name} uses non-linear runtime {self.runtime_type.value}, "
-                "which does not support multi-model aggregation."
+                "BaseAgent model_name must be a single model name string; "
+                "use AggregateAgent for multi-model aggregation.",
+                details={"agent": name, "model_name_type": type(model_name).__name__},
             )
 
+        provider_str = str(provider.value if isinstance(provider, ModelProvider) else provider) if provider is not None else None
         self.runner_config = AgentRunnerConfig(
             api_key=api_key,
             provider=provider_str,
@@ -144,6 +142,9 @@ class BaseAgent(McpAttachableMixin):
             run_id=run_id,
         )
         self.name = name
+        self._fallback_spec = fallback
+        from vidbyte.agents.fallback import AgentFallback
+        self.fallback = AgentFallback.from_spec(fallback, runner_config=self.runner_config, agent_name=name)
         self._runner_cache: dict[str, object] = {}
         self._agent_tool_items = tools.all() if isinstance(tools, Tools) else tuple(tools)
         self.tools = tools if isinstance(tools, Tools) else self._catalog_from_agent_tools(self._agent_tool_items)
@@ -203,6 +204,10 @@ class BaseAgent(McpAttachableMixin):
         self.last_trace: dict[str, Any] | None = None
         self.last_prompt: str = ""
         self.last_reply: AgentMessage | None = None
+        # Usage/cost tracking is built from the agent's own model identity; the
+        # default rate table prices every model the agent can run. Per-call usage
+        # is observable mid-run through MiddlewareContext.model_usage.
+        self._usage_tracker = UsageTracker()
         self._behavior_view: Any = None
         self._active_session: Session | None = None
         self._queued_prompts: list[str] = []
@@ -216,63 +221,6 @@ class BaseAgent(McpAttachableMixin):
         # MCP Attachable State
         self._mcp_handles = []
         self._pending_mcp_configs = []
-
-        if self._aggregate_plan is not None:
-            self._aggregate_agent = self._build_aggregate_agent()
-
-    def _resolve_aggregate_plan(self, model_name: str | Sequence[str] | None, provider_str: str | None, proposers: Sequence[Any] | None, aggregator: Any | None, aggregate: AggregateConfig | None) -> tuple[dict[str, Any] | None, str | None]:
-        # Detects a multi-model aggregation request and returns (plan_or_None, normalized single host model name).
-        is_sequence = isinstance(model_name, (list, tuple)) and not isinstance(model_name, str)
-        if proposers:
-            specs = list(proposers)
-            host_model = model_name if isinstance(model_name, str) else None
-        elif is_sequence and len(model_name) >= 2:
-            if not provider_str:
-                raise ConfigurationError("A list of model names requires a provider for multi-model aggregation.")
-            specs = [ProposerSpec(provider=provider_str, model=str(m)) for m in model_name]
-            host_model = str(model_name[0])
-        else:
-            normalized = str(model_name[0]) if is_sequence and len(model_name) == 1 else (None if is_sequence else model_name)
-            return None, normalized
-        plan = {
-            "proposers": specs,
-            "aggregator": aggregator,
-            "config": aggregate,
-            "provider": provider_str,
-            "model": host_model or self._first_spec_model(specs),
-        }
-        return plan, None
-
-    def _build_aggregate_agent(self) -> BaseAgent:
-        # Constructs the internal AggregateAgent that generate_reply delegates to when a plan is present.
-        from vidbyte.agents.aggregation import AggregateAgent
-        plan = self._aggregate_plan or {}
-        return AggregateAgent(
-            name=self.name,
-            system_prompt=self.system_prompt,
-            proposers=plan["proposers"],
-            aggregator=plan["aggregator"],
-            config=plan["config"],
-            provider=plan["provider"],
-            model_name=plan["model"],
-            api_key=self.runner_config.api_key,
-            agent_metadata=self.agent_metadata,
-            tools=self._agent_tool_items,
-            middleware=self.middleware,
-            temperature=self.runner_config.temperature,
-            metadata=dict(self.metadata),
-            tracer=self._tracer,
-        )
-
-    @staticmethod
-    def _first_spec_model(specs: Sequence[Any]) -> str | None:
-        # Returns the model name of the first proposer that is a ProposerSpec or (provider, model) tuple.
-        for spec in specs:
-            if isinstance(spec, ProposerSpec):
-                return spec.model
-            if isinstance(spec, tuple) and len(spec) >= 2 and isinstance(spec[1], str):
-                return spec[1]
-        return None
 
     @classmethod
     def from_run_id(cls, run_id: str, *, name: str, system_prompt: str, **kwargs: Any) -> BaseAgent:
@@ -450,7 +398,7 @@ class BaseAgent(McpAttachableMixin):
             history=tuple(serializer.message_to_dict(message) for message in self.history),
             run_id=self.runner_config.run_id,
             loop_settings=self._export_loop_settings(),
-            aggregate_plan=self._export_aggregate_plan(),
+            aggregate_plan={},
             context_summary=self._export_context_summary(),
             trace_option=self._export_trace_option(),
             output_schema=self._export_output_schema(),
@@ -526,33 +474,6 @@ class BaseAgent(McpAttachableMixin):
             values["allowed_tools"] = list(values["allowed_tools"])
         return {key: value for key, value in values.items() if value is not None}
 
-    def _export_aggregate_plan(self) -> dict[str, Any]:
-        # Persist only serializable aggregate settings; live proposer/aggregator objects are re-supplied by callers.
-        if self._aggregate_plan is None:
-            return {}
-        plan = dict(self._aggregate_plan)
-        specs = []
-        for spec in tuple(plan.get("proposers") or ()):
-            if isinstance(spec, ProposerSpec):
-                specs.append(
-                    {
-                        "provider": spec.provider,
-                        "model": spec.model,
-                        "label": spec.label,
-                        "system_prompt": spec.system_prompt,
-                    }
-                )
-            else:
-                specs.append({"repr": repr(spec)})
-        config = plan.get("config")
-        return {
-            "proposers": specs,
-            "provider": plan.get("provider"),
-            "model": plan.get("model"),
-            "aggregator": type(plan.get("aggregator")).__name__ if plan.get("aggregator") is not None else None,
-            "config": self._aggregate_config_to_dict(config),
-        }
-
     def _export_context_summary(self) -> dict[str, Any]:
         # Record resumable context metadata without serializing live context objects.
         return {
@@ -585,19 +506,6 @@ class BaseAgent(McpAttachableMixin):
         if isinstance(self.output_schema, Mapping):
             return {"kind": "mapping", "schema": dict(self.output_schema)}
         return {"kind": "type", "name": getattr(self.output_schema, "__name__", type(self.output_schema).__name__)}
-
-    @staticmethod
-    def _aggregate_config_to_dict(config: Any) -> dict[str, Any]:
-        if not isinstance(config, AggregateConfig):
-            return {}
-        return {
-            "synthesis_system_prompt": config.synthesis_system_prompt,
-            "synthesis_prompt_template": config.synthesis_prompt_template,
-            "max_candidate_chars": config.max_candidate_chars,
-            "max_concurrency": config.max_concurrency,
-            "per_proposer_timeout": config.per_proposer_timeout,
-            "min_successful": config.min_successful,
-        }
 
     @staticmethod
     def _restore_loop_settings(state: RunState) -> AgentLoopSettings:
@@ -660,10 +568,6 @@ class BaseAgent(McpAttachableMixin):
         recipient: str = "orchestrator",
         **options: Any,
     ) -> AgentMessage:
-        if self._aggregate_agent is not None:
-            reply = await self._aggregate_agent.generate_reply(message, recipient=recipient, **options)
-            self._notify_session(reply)
-            return reply
         await self._ensure_mcp_connected()
         trace_ctx = None
         try:
@@ -671,6 +575,7 @@ class BaseAgent(McpAttachableMixin):
             prompt, input_metadata = self._normalize_input(message)
             input_context_items, input_context_manager = self._normalize_input_context(message)
             self._active_prompt = prompt
+            self._usage_tracker.reset()
             self._behavior_view = None
             runner, runner_type = self._runner_for_model()
             trace_ctx = self._tracer.start_trace(
@@ -762,6 +667,14 @@ class BaseAgent(McpAttachableMixin):
         except RuntimeError:
             return asyncio.run(self.generate_reply(message, **options))
         raise AgentExecutionError("BaseAgent.run() cannot be called from an active event loop; use await arun().")
+
+    def get_usage(self) -> UsageRollup:
+        """Return the live or final token-usage rollup for the current or most recent run."""
+        return self._usage_tracker.rollup()
+
+    def get_cost_usd(self) -> float | None:
+        """Return total known USD cost for the current or most recent run, or None."""
+        return self.get_usage().cost_usd
 
     async def arun_sequentially(self, prompts: Sequence[str | AgentInput], **options: Any) -> list[AgentMessage]:
         # Runs each prompt through generate_reply in order, preserving self.history across all calls.
@@ -893,12 +806,7 @@ class BaseAgent(McpAttachableMixin):
         if runner is None:
             raise AgentExecutionError("Agent requires a runner.")
         if runner_type != RUNNER_TYPE_TEXT:
-            raw_result = await self._call_runner_once(runner, message, context=context, **options)
-            return AgentResult(
-                output=self._runner_output_text(raw_result),
-                strategy_name="direct_runner",
-                metadata=self._runner_output_metadata(raw_result),
-            )
+            return await self._run_non_text_runner(runner, message, context=context, **options)
         provider = str(options.pop("provider", None) or self._runner_provider(runner))
         handle = RunnerHandle(
             runner=runner,
@@ -917,6 +825,43 @@ class BaseAgent(McpAttachableMixin):
         )
         self._record_tool_contexts(result)
         return result
+
+    async def _run_non_text_runner(self, runner: object, message: str, *, context: BaseAgentContext, **options: Any) -> AgentResult:
+        # Runs image/audio/video/embedding runners, walking the fallback chain on provider-level failures.
+        from vidbyte.lib.errors import AllModelsFailedError
+
+        index = 0
+        attempts: list[dict[str, str]] = []
+        errors: list[BaseException] = []
+        active = runner
+        while True:
+            try:
+                raw_result = await self._call_runner_once(active, message, context=context, **options)
+            except BaseException as exc:
+                if self.fallback is None or not self.fallback.is_model_error(exc):
+                    raise
+                next_index = self.fallback.advance(exc, index)
+                if next_index is None:
+                    if not attempts:
+                        raise
+                    raise AllModelsFailedError(
+                        f"Agent '{self.name}' exhausted its fallback chain after {len(attempts)} model switch(es).",
+                        attempts=attempts,
+                        errors=[*errors, exc],
+                    ) from errors[0]
+                errors.append(exc)
+                attempts.append(self.fallback.attempt_record(index, next_index, exc))
+                active = self.fallback.build_runner(next_index)
+                index = next_index
+                continue
+            metadata = dict(self._runner_output_metadata(raw_result))
+            if attempts:
+                metadata["fallback"] = self.fallback.result_metadata(attempts, context_reset=False)
+            return AgentResult(
+                output=self._runner_output_text(raw_result),
+                strategy_name="direct_runner",
+                metadata=metadata,
+            )
 
     async def _run_with_tools(
         self,
@@ -981,6 +926,8 @@ class BaseAgent(McpAttachableMixin):
 
         if self.runtime_type is AgentRuntimeType.LINEAR:
             kwargs["output_contract"] = self.agent_loop_settings.output_contract
+            kwargs["usage_tracker"] = self._usage_tracker
+            kwargs["fallback"] = self.fallback
 
         return runtime_cls(
             agent_name=self.name,

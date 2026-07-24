@@ -186,10 +186,20 @@ class KimiProvider(OpenAICompatibleProvider):
     provider = ModelProvider.KIMI
 
 
+class MetaProvider(OpenAICompatibleProvider):
+    provider = ModelProvider.META
+
+
+class MistralProvider(OpenAICompatibleProvider):
+    provider = ModelProvider.MISTRAL
+
+
 __all__ = [
     "DeepSeekProvider",
     "GLMProvider",
     "KimiProvider",
+    "MetaProvider",
     "MiniMaxProvider",
+    "MistralProvider",
     "OpenAICompatibleProvider",
 ]

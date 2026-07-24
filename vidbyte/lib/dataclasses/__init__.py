@@ -8,8 +8,9 @@ Purpose:
 Architecture:
     - Tool contracts from tools.
     - Context, MCP, security, sandbox, and multi-agent contracts.
+    - Harness specification, run manifest, and trajectory-record contracts.
 Relations:
-    Related to vidbyte.tools, vidbyte.agents.
+    Related to vidbyte.tools, vidbyte.agents, and vidbyte.harnesses.
 """
 
 from __future__ import annotations
@@ -52,6 +53,14 @@ from vidbyte.context.primitives import (
     TrajectoryCheckpointContextItem,
 )
 from vidbyte.lib.dataclasses.filesystem import FileStat, FileSystemToolConfig
+from vidbyte.lib.dataclasses.harnesses import (
+    HARNESS_SCHEMA_VERSION,
+    HarnessExecutionResult,
+    HarnessRun,
+    HarnessRunStatus,
+    HarnessSpec,
+    TrajectoryRecord,
+)
 from vidbyte.lib.dataclasses.mcp import McpToolDefinition
 from vidbyte.lib.dataclasses.middleware import (
     MiddlewareAction,
@@ -123,6 +132,26 @@ from vidbyte.lib.dataclasses.sources import (
     SourceSnapshot,
 )
 from vidbyte.lib.dataclasses.runner import RunnerHandle
+from vidbyte.lib.dataclasses.prosecutor_defender_judge import (
+    AllegationRecord,
+    AllegationSeverity,
+    DebateStageRecord,
+    DefenderReportPayload,
+    DefensePosition,
+    DefenseRecord,
+    DefenseResponsePayload,
+    EvidenceCitationPayload,
+    EvidenceCitationRecord,
+    EvidenceSource,
+    JudgeDecision,
+    JudgeDecisionPayload,
+    JudgeDecisionRecord,
+    JudgeReasonCode,
+    JudgeReportPayload,
+    ProsecutorAllegationPayload,
+    ProsecutorDefenderJudgeReport,
+    ProsecutorReportPayload,
+)
 from vidbyte.lib.dataclasses.strategies import AgentResult
 from vidbyte.lib.dataclasses.trace import (
     TraceField,
@@ -155,6 +184,8 @@ __all__ = [
     "AgentSpec",
     "AgentStopReason",
     "AgentUsage",
+    "AllegationRecord",
+    "AllegationSeverity",
     "ArtifactRef",
     "ArtifactContextItem",
     "BaseAgentContext",
@@ -172,10 +203,18 @@ __all__ = [
     "ContextState",
     "ContextToolCall",
     "DagNode",
+    "DebateStageRecord",
+    "DefenderReportPayload",
+    "DefensePosition",
+    "DefenseRecord",
+    "DefenseResponsePayload",
     "DocumentContextItem",
     "EnvironmentContextItem",
     "EventHandler",
     "EvaluationDecision",
+    "EvidenceCitationPayload",
+    "EvidenceCitationRecord",
+    "EvidenceSource",
     "FinalizationContext",
     "FinalizationRenderer",
     "FileContextItem",
@@ -183,6 +222,12 @@ __all__ = [
     "FetchResponse",
     "FileSystemToolConfig",
     "GitDiffContextItem",
+    "HARNESS_SCHEMA_VERSION",
+    "HarnessExecutionResult",
+    "HarnessRun",
+    "HarnessRunStatus",
+    "HarnessSpec",
+    "TrajectoryRecord",
     "MemoryContextItem",
     "McpToolDefinition",
     "LlmsTxtDocument",
@@ -190,6 +235,11 @@ __all__ = [
     "LlmsTxtSection",
     "LedgerFactory",
     "LedgerEvent",
+    "JudgeDecision",
+    "JudgeDecisionPayload",
+    "JudgeDecisionRecord",
+    "JudgeReasonCode",
+    "JudgeReportPayload",
     "ManagerAgentCloser",
     "ManagerAgentFactory",
     "MarkdownDocument",
@@ -212,6 +262,9 @@ __all__ = [
     "PermissionPolicy",
     "ProgressContextItem",
     "ProgressLog",
+    "ProsecutorAllegationPayload",
+    "ProsecutorDefenderJudgeReport",
+    "ProsecutorReportPayload",
     "ResponseContextItem",
     "ReportParser",
     "ReportValidator",

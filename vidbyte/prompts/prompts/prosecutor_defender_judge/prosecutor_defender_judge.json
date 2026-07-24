@@ -1,0 +1,31 @@
+{
+  "name": "Prosecutor Defender Judge",
+  "description": "Role-isolated prompts for evidence-backed adversarial review and allegation adjudication",
+  "key": "prosecutor_defender_judge",
+  "prompts": {
+    "prosecutor_system_prompt": {
+      "path": "prosecutor_system_prompt.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/prosecutor_defender_judge/prosecutor_system_prompt.md"
+    },
+    "prosecutor_prompt": {
+      "path": "prosecutor_prompt.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/prosecutor_defender_judge/prosecutor_prompt.md"
+    },
+    "defender_system_prompt": {
+      "path": "defender_system_prompt.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/prosecutor_defender_judge/defender_system_prompt.md"
+    },
+    "defender_prompt": {
+      "path": "defender_prompt.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/prosecutor_defender_judge/defender_prompt.md"
+    },
+    "judge_system_prompt": {
+      "path": "judge_system_prompt.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/prosecutor_defender_judge/judge_system_prompt.md"
+    },
+    "judge_prompt": {
+      "path": "judge_prompt.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/prosecutor_defender_judge/judge_prompt.md"
+    }
+  }
+}

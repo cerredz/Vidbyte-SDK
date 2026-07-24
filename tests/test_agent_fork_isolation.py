@@ -4,6 +4,7 @@ import unittest
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
+from tests.agent_test_support import build_test_agent
 from vidbyte.agents import AgentForkSettings, AgentMessage, BaseAgent
 from vidbyte.lib.dataclasses.agents import AgentMetadata
 from vidbyte.lib.dataclasses.trace import TraceOption
@@ -108,7 +109,7 @@ class AgentForkIsolationTests(unittest.IsolatedAsyncioTestCase):
 
     def _agent(self, *, tools: list[object] | None = None, run_id: str | None = None, tracer: TracerBase | None = None) -> BaseAgent:
         # Constructs a simple runnable agent for fork tests.
-        return BaseAgent(name="parent", system_prompt="Work.", runner=DoneRunner(), tools=tools or [], run_id=run_id, tracer=tracer)
+        return build_test_agent(name="parent", system_prompt="Work.", runner=DoneRunner(), tools=tools or [], run_id=run_id, tracer=tracer)
 
     async def test_fork_clones_create_handoff_tool_binding(self) -> None:
         # Parent and child create_handoff tools must record on their own owning agents.
@@ -146,7 +147,7 @@ class AgentForkIsolationTests(unittest.IsolatedAsyncioTestCase):
 
     def test_fork_clones_agent_tool_context_getter(self) -> None:
         # AgentTool wrappers must keep parent and child context getters separate after fork.
-        delegate = BaseAgent(
+        delegate = build_test_agent(
             name="delegate",
             system_prompt="Delegate.",
             runner=DoneRunner(),

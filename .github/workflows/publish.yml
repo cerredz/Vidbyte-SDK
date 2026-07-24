@@ -13,8 +13,8 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  build:
-    name: Build and verify distributions
+  validate-tag:
+    name: Validate release tag
     runs-on: ubuntu-latest
 
     steps:
@@ -41,81 +41,18 @@ jobs:
           print(f"Validated release tag {actual_tag}.")
           PY
 
-      - name: Install build tools
-        run: python -m pip install --upgrade build twine
-
-      - name: Build distributions
-        run: python -m build
-
-      - name: Validate distribution metadata
-        run: python -m twine check dist/*
-
-      - name: Inspect wheel contents
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-          from zipfile import ZipFile
-
-          wheels = list(Path("dist").glob("*.whl"))
-          if len(wheels) != 1:
-              raise SystemExit(f"Expected one wheel, found {len(wheels)}.")
-
-          with ZipFile(wheels[0]) as archive:
-              names = set(archive.namelist())
-
-          required = "vidbyte/prompts/prompts/error_correction_auditor.md"
-          if required not in names:
-              raise SystemExit(f"Wheel is missing required prompt asset: {required}")
-
-          generated = sorted(
-              name for name in names
-              if "__pycache__" in name.split("/") or name.endswith((".pyc", ".pyo"))
-          )
-          if generated:
-              raise SystemExit(f"Wheel contains generated Python artifacts: {generated}")
-          print(f"Validated {len(names)} wheel entries.")
-          PY
-
-      - name: Verify clean-environment installation
-        run: |
-          python -m venv .release-venv
-          .release-venv/bin/python -m pip install --no-cache-dir dist/*.whl
-          .release-venv/bin/python -m pip check
-          mkdir -p "$RUNNER_TEMP/vidbyte-sdk-smoke"
-          (
-            cd "$RUNNER_TEMP/vidbyte-sdk-smoke"
-            "$GITHUB_WORKSPACE/.release-venv/bin/python" - <<'PY'
-          import os
-          from importlib.metadata import version
-
-          import vidbyte
-          from vidbyte import Prompts, VidbyteSDK
-
-          distribution_version = version("vidbyte-sdk")
-          tagged_version = os.environ["GITHUB_REF_NAME"].removeprefix("v")
-          if distribution_version != tagged_version or vidbyte.__version__ != distribution_version:
-              raise SystemExit(
-                  "Version mismatch: "
-                  f"tag={tagged_version}, distribution={distribution_version}, module={vidbyte.__version__}"
-              )
-          if not Prompts().keys():
-              raise SystemExit("Installed prompt catalog is empty.")
-          VidbyteSDK()
-          print(f"Installed vidbyte-sdk {distribution_version} imports successfully.")
-          PY
-          )
-
-      - name: Upload verified distributions
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: python-package-distributions
-          path: dist/
-          if-no-files-found: error
-          retention-days: 7
+  ci:
+    name: Verify release source and artifacts
+    needs: validate-tag
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
 
   publish:
     name: Publish verified distributions
-    needs: build
+    needs:
+      - validate-tag
+      - ci
     runs-on: ubuntu-latest
     environment:
       name: pypi

@@ -191,8 +191,7 @@ class ErrorCorrectionAlgorithm(InnerContextWindowAlgorithm):
     def _format_managed_primitives(self, ctx: ContextWindowRunContext) -> str:
         # Lists currently-managed primitive ids and titles so the auditor can name stale ids.
         lines = []
-        for item in ctx.context_manager.items():
-            primitive_id = getattr(item, "primitive_id", None)
+        for primitive_id, item in ctx.context_manager.registry_items():
             if not primitive_id or not self._is_removable(str(primitive_id)):
                 continue
             title = getattr(item, "title", "")

@@ -617,6 +617,13 @@ for runtime to append. Do not make deterministic runtime algorithms depend on a
 model-called `write_context` tool. Tools are model-selected; inner-loop context
 algorithms are SDK-selected runtime behavior.
 
+CI enforces this for inner-loop modules as **CWP002** in
+`scripts/check_context_write_paths.py` (wired into `python scripts/run_ci.py`).
+Private `ContextManager._registry` / `._placements` access is also banned outside
+`manager.py` (**CWP001**). See the "Context write path integrity" section in
+`skills/vidbyte-sdk/context-primitives.md` and
+`docs/design/context-write-path-integrity.md`.
+
 `AgentRuntime` renders the manager on the next model call through the existing
 context-window primitive path. This keeps a single standard for context-window
 updates and preserves middleware, permissions, tracing, tool execution, and
@@ -633,6 +640,8 @@ When adding an inner-loop algorithm:
 6. Publish final metadata with `ctx.set_metadata(...)`; the runtime copies public
    `state` keys onto the final result metadata.
 7. Add tests proving the next model call sees the context through `ContextManager`, not direct message injection.
+8. Run `python scripts/check_context_write_paths.py` (or full `python scripts/run_ci.py`)
+   so CWP002/CWP001 pass before opening a PR.
 
 ### 10.4 Metadata Contract
 

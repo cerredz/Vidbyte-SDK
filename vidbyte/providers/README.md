@@ -42,7 +42,7 @@ schema = tool_spec_to_provider_schema(lookup_metric.spec(), "openai")
 
 - `__init__.py`: provider factory and public adapter exports.
 - `base.py`: provider schema translation helpers.
-- `openai.py`, `anthropic.py`, `gemini.py`, `xai.py`, `openrouter.py`, `compatible.py`: provider adapters.
+- `openai.py`, `anthropic.py`, `gemini.py`, `xai.py`, `openrouter.py`, `compatible.py` (DeepSeek, GLM, MiniMax, Kimi, Mistral): provider adapters.
 - `tracing/`: provider-backed trace adapters.
 
 ## Related Layers
