@@ -159,11 +159,16 @@ class AgentDescriptor:
     # ── identity validation ──
 
     def _validate_identity(self) -> None:
-        # Validates name and system_prompt are non-empty and within length limits.
+        # Validates name and system_prompt are non-empty, within length limits, and free of interpolation.
         if not self.name or not self.name.strip():
             raise ConfigurationError(
                 "Agent name must be a non-empty string.",
                 details={"field": "name", "expected": "non-empty string"},
+            )
+        if _INTERPOLATION_PATTERN.search(self.name):
+            raise ConfigurationError(
+                "Agent name must not contain environment interpolation patterns.",
+                details={"field": "name", "expected": "no ${...} patterns"},
             )
         if len(self.name) > _MAX_NAME_CHARS:
             raise ConfigurationError(
@@ -175,6 +180,11 @@ class AgentDescriptor:
                 "Agent system_prompt must be a non-empty string.",
                 details={"field": "system_prompt", "expected": "non-empty string"},
             )
+        if _INTERPOLATION_PATTERN.search(self.system_prompt):
+            raise ConfigurationError(
+                "Agent system_prompt must not contain environment interpolation patterns.",
+                details={"field": "system_prompt", "expected": "no ${...} patterns"},
+            )
         if len(self.system_prompt) > _MAX_SYSTEM_PROMPT_CHARS:
             raise ConfigurationError(
                 f"Agent system_prompt must be at most {_MAX_SYSTEM_PROMPT_CHARS} characters.",
@@ -184,6 +194,11 @@ class AgentDescriptor:
             raise ConfigurationError(
                 f"Agent description must be at most {_MAX_DESCRIPTION_CHARS} characters.",
                 details={"field": "description", "max_chars": _MAX_DESCRIPTION_CHARS, "actual_chars": len(self.description)},
+            )
+        if self.description and _INTERPOLATION_PATTERN.search(self.description):
+            raise ConfigurationError(
+                "Agent description must not contain environment interpolation patterns.",
+                details={"field": "description", "expected": "no ${...} patterns"},
             )
 
     # ── provider / model validation ──
@@ -266,13 +281,18 @@ class AgentDescriptor:
                 )
 
     def _validate_middleware_refs(self) -> None:
-        # Rejects blank, overly long, malformed, or duplicate middleware refs.
+        # Rejects blank, overly long, malformed, or duplicate middleware refs and interpolation patterns.
         seen: set[str] = set()
         for index, ref in enumerate(self.middleware_refs):
             if not ref or not ref.strip():
                 raise ConfigurationError(
                     f"Middleware ref at index {index} is empty.",
                     details={"field": f"middleware[{index}]", "expected": "non-empty string"},
+                )
+            if _INTERPOLATION_PATTERN.search(ref):
+                raise ConfigurationError(
+                    f"Middleware ref '{ref}' must not contain environment interpolation patterns.",
+                    details={"field": f"middleware[{index}]", "expected": "no ${...} patterns"},
                 )
             if len(ref) > _MAX_REF_CHARS:
                 raise ConfigurationError(
@@ -317,12 +337,17 @@ class AgentDescriptor:
     # ── algorithm validation ──
 
     def _validate_algorithm(self) -> None:
-        # Rejects empty or overly long algorithm strings.
+        # Rejects empty, overly long, or interpolation-containing algorithm strings.
         if self.algorithm is not None:
             if not self.algorithm.strip():
                 raise ConfigurationError(
                     "algorithm must be a non-empty string when provided.",
                     details={"field": "algorithm", "expected": "non-empty string"},
+                )
+            if _INTERPOLATION_PATTERN.search(self.algorithm):
+                raise ConfigurationError(
+                    "algorithm must not contain environment interpolation patterns.",
+                    details={"field": "algorithm", "expected": "no ${...} patterns"},
                 )
             if len(self.algorithm) > _MAX_REF_CHARS:
                 raise ConfigurationError(
@@ -373,6 +398,24 @@ class AgentDescriptor:
                     "field": "trace_option",
                     "runtime": self.runtime.value,
                     "expected": "trace_option must be None for non-linear runtimes",
+                },
+            )
+        if self.middleware_refs:
+            raise ConfigurationError(
+                "middleware is not supported with non-linear runtimes.",
+                details={
+                    "field": "middleware",
+                    "runtime": self.runtime.value,
+                    "expected": "middleware must be empty for non-linear runtimes",
+                },
+            )
+        if self.algorithm is not None:
+            raise ConfigurationError(
+                "algorithm is not supported with non-linear runtimes.",
+                details={
+                    "field": "algorithm",
+                    "runtime": self.runtime.value,
+                    "expected": "algorithm must be None for non-linear runtimes",
                 },
             )
         loop = self.loop

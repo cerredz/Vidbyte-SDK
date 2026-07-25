@@ -168,7 +168,11 @@ class YamlLoader:
         )
         tools_raw = raw.get("tools", [])
         tools = tuple(
-            ToolSpec(name=t.get("ref", ""), description=t.get("ref", ""))
+            ToolSpec(
+                name=t.get("ref", ""),
+                description=t.get("ref", ""),
+                metadata=dict(t.get("options", {})),
+            )
             for t in tools_raw
         ) if tools_raw else ()
         middleware_refs = tuple(
