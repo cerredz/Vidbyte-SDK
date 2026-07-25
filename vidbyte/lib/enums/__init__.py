@@ -16,7 +16,7 @@ Similar Files:
 from __future__ import annotations
 
 from vidbyte.lib.enums.agent_runtime import AgentRuntimeType
-from vidbyte.lib.enums.config import AgentType
+from vidbyte.lib.enums.config import AgentType, DocumentType
 from vidbyte.lib.enums.context import BudgetPreset, PermissionPreset
 from vidbyte.lib.enums.model_modality import ModelModality, ModelNameModality
 from vidbyte.lib.enums.model_provider import ModelProvider
@@ -30,6 +30,7 @@ __all__ = [
     "AgentRuntimeType",
     "AgentType",
     "BudgetPreset",
+    "DocumentType",
     "ContextMinimalFanoutSkill",
     "ModelModality",
     "ModelNameModality",
