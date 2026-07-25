@@ -27,12 +27,17 @@ import yaml
 
 from vidbyte.agents.settings.loop import AgentLoopSettings
 from vidbyte.agents.settings.tool import ToolSettings
+from vidbyte.lib.dataclasses.adversarial_agent_descriptor import AdversarialAgentDescriptor
+from vidbyte.lib.dataclasses.aggregate_agent_descriptor import AggregateAgentDescriptor
 from vidbyte.lib.dataclasses.agent_descriptor import AgentDescriptor
 from vidbyte.lib.dataclasses.agents import AgentMetadata
+from vidbyte.lib.dataclasses.continual_trace_descriptor import ContinualTraceAgentDescriptor
 from vidbyte.lib.dataclasses.environment_descriptor import EnvironmentDescriptor
 from vidbyte.lib.dataclasses.harness_descriptor import HarnessDescriptor
+from vidbyte.lib.dataclasses.multi_agent_descriptor import MultiAgentDescriptor
 from vidbyte.lib.dataclasses.tools import ToolSpec
 from vidbyte.lib.dataclasses.trace import TraceOption
+from vidbyte.lib.dataclasses.handoff_agent_descriptor import HandoffAgentDescriptor
 from vidbyte.lib.enums.agent_runtime import AgentRuntimeType
 from vidbyte.lib.enums.config import AgentType, DocumentType
 from vidbyte.lib.errors import ConfigurationError
@@ -139,20 +144,18 @@ class YamlLoader:
                 f"Unknown agent_type '{agent_type_raw}'. Known types: {AgentType.values()}.",
                 details={"path": str(path), "field": "agent_type", "expected": list(AgentType.values())},
             ) from exc
-        if agent_type != AgentType.BASE:
-            raise ConfigurationError(
-                f"Agent type '{agent_type.value}' is not yet loadable from YAML. Only 'base' is supported in this version.",
-                details={"path": str(path), "field": "agent_type", "actual": agent_type.value},
-            )
-        try:
+        if agent_type == AgentType.BASE:
             return YamlLoader._construct_base_agent(raw, path)
-        except ConfigurationError:
-            raise
-        except Exception as exc:
-            raise ConfigurationError(
-                f"Failed to build agent descriptor: {exc}",
-                details={"path": str(path)},
-            ) from exc
+        if agent_type == AgentType.MULTI:
+            return YamlLoader._build_multi_agent(raw, path)
+        if agent_type == AgentType.AGGREGATE:
+            return YamlLoader._build_aggregate_agent(raw, path)
+        if agent_type == AgentType.ADVERSARIAL:
+            return YamlLoader._build_adversarial_agent(raw, path)
+        if agent_type == AgentType.HANDOFF:
+            return YamlLoader._build_handoff_agent(raw, path)
+        if agent_type == AgentType.CONTINUAL_TRACE:
+            return YamlLoader._build_continual_trace_agent(raw, path)
 
     @staticmethod
     def _construct_base_agent(raw: dict[str, Any], path: str | Path) -> AgentDescriptor:
@@ -266,6 +269,102 @@ class YamlLoader:
                 f"Failed to build environment descriptor: {exc}",
                 details={"path": str(path)},
             ) from exc
+
+    @staticmethod
+    def _build_multi_agent(raw: dict[str, Any], path: str | Path) -> MultiAgentDescriptor:
+        # Builds a MultiAgentDescriptor from raw YAML, composing nested AgentDescriptors.
+        orchestrator_raw = raw.get("orchestrator")
+        orchestrator = YamlLoader._build_agent_from_raw(orchestrator_raw, path) if orchestrator_raw else None
+        agents_raw = raw.get("agents", [])
+        agents = tuple(YamlLoader._build_agent_from_raw(a, path) for a in agents_raw) if agents_raw else ()
+        settings_raw = raw.get("settings", {})
+        from vidbyte.lib.dataclasses.multi_agent import MultiAgentSettings
+        settings = MultiAgentSettings(**settings_raw) if settings_raw else MultiAgentSettings()
+        return MultiAgentDescriptor(
+            name=str(raw.get("name", "")),
+            system_prompt=str(raw.get("system_prompt", "")),
+            description=str(raw.get("description", "")),
+            orchestrator=orchestrator,
+            agents=agents,
+            settings=settings,
+            capabilities=tuple(str(c) for c in raw.get("capabilities", [])),
+            metadata=dict(raw.get("metadata", {})),
+        )
+
+    @staticmethod
+    def _build_aggregate_agent(raw: dict[str, Any], path: str | Path) -> AggregateAgentDescriptor:
+        # Builds an AggregateAgentDescriptor from raw YAML, composing ProposerSpecs.
+        from vidbyte.lib.dataclasses.multi_agent import AggregateConfig, ProposerSpec
+        proposers_raw = raw.get("proposers", [])
+        proposers = tuple(
+            ProposerSpec(provider=p.get("provider", ""), model=p.get("model", ""), label=p.get("label"), system_prompt=p.get("system_prompt"))
+            for p in proposers_raw
+        ) if proposers_raw else ()
+        aggregator_raw = raw.get("aggregator")
+        aggregator = ProposerSpec(provider=aggregator_raw.get("provider", ""), model=aggregator_raw.get("model", ""), label=aggregator_raw.get("label"), system_prompt=aggregator_raw.get("system_prompt")) if aggregator_raw else None
+        config_raw = raw.get("config", {})
+        config = AggregateConfig(**config_raw) if config_raw else AggregateConfig()
+        return AggregateAgentDescriptor(
+            name=str(raw.get("name", "")),
+            system_prompt=str(raw.get("system_prompt", "")),
+            description=str(raw.get("description", "")),
+            proposers=proposers,
+            aggregator=aggregator,
+            config=config,
+            metadata=dict(raw.get("metadata", {})),
+        )
+
+    @staticmethod
+    def _build_adversarial_agent(raw: dict[str, Any], path: str | Path) -> AdversarialAgentDescriptor:
+        # Builds an AdversarialAgentDescriptor from raw YAML, composing nested AgentDescriptors.
+        from vidbyte.lib.dataclasses.adversarial_agent_descriptor import AdversarialSettings
+        worker_raw = raw.get("worker")
+        worker = YamlLoader._build_agent_from_raw(worker_raw, path) if worker_raw else None
+        adversary_raw = raw.get("adversary")
+        adversary = YamlLoader._build_agent_from_raw(adversary_raw, path) if adversary_raw else None
+        settings_raw = raw.get("settings", {})
+        settings = AdversarialSettings(**settings_raw) if settings_raw else AdversarialSettings()
+        return AdversarialAgentDescriptor(
+            name=str(raw.get("name", "")),
+            system_prompt=str(raw.get("system_prompt", "")),
+            description=str(raw.get("description", "")),
+            worker=worker,
+            adversary=adversary,
+            settings=settings,
+            capabilities=tuple(str(c) for c in raw.get("capabilities", [])),
+            metadata=dict(raw.get("metadata", {})),
+        )
+
+    @staticmethod
+    def _build_handoff_agent(raw: dict[str, Any], path: str | Path) -> HandoffAgentDescriptor:
+        # Builds a HandoffAgentDescriptor from raw YAML.
+        handoff_raw = raw.get("handoff", {})
+        sections_raw = handoff_raw.get("sections", {})
+        sections = tuple(sections_raw.keys()) if isinstance(sections_raw, dict) else tuple(str(s) for s in sections_raw) if sections_raw else ()
+        source = raw.get("source", {})
+        return HandoffAgentDescriptor(
+            name=str(raw.get("name", "handoff")),
+            handoff_title=str(handoff_raw.get("title", "Handoff")),
+            handoff_instructions=str(handoff_raw.get("instructions", "")),
+            sections=sections,
+            source_provider=source.get("provider") if source else None,
+            source_model_name=source.get("model_name") if source else None,
+            metadata=dict(raw.get("metadata", {})),
+        )
+
+    @staticmethod
+    def _build_continual_trace_agent(raw: dict[str, Any], path: str | Path) -> ContinualTraceAgentDescriptor:
+        # Builds a ContinualTraceAgentDescriptor from raw YAML.
+        schema = dict(raw.get("schema", {}))
+        source = raw.get("source", {})
+        return ContinualTraceAgentDescriptor(
+            name=str(raw.get("name", "continual-trace")),
+            schema=schema,
+            max_trace_iterations=int(raw.get("max_trace_iterations", 3)),
+            source_provider=source.get("provider") if source else None,
+            source_model_name=source.get("model_name") if source else None,
+            metadata=dict(raw.get("metadata", {})),
+        )
 
 
 __all__ = ["YamlLoader"]

@@ -89,7 +89,12 @@ from vidbyte.agents.pricing import ProviderUsage
 from vidbyte.lib.registries import ModelPricing, ModelPricingRegistry, PROVIDER_PRICING
 from vidbyte.client import VidbyteSDK
 from vidbyte.config import AgentSettings, MiddlewareDefinition, ToolDefinition, YamlLoader
+from vidbyte.lib.dataclasses.adversarial_agent_descriptor import AdversarialAgentDescriptor
+from vidbyte.lib.dataclasses.aggregate_agent_descriptor import AggregateAgentDescriptor
 from vidbyte.lib.dataclasses.agent_descriptor import AgentDescriptor
+from vidbyte.lib.dataclasses.continual_trace_descriptor import ContinualTraceAgentDescriptor
+from vidbyte.lib.dataclasses.handoff_agent_descriptor import HandoffAgentDescriptor
+from vidbyte.lib.dataclasses.multi_agent_descriptor import MultiAgentDescriptor
 from vidbyte.lib.enums.config import AgentType
 from vidbyte.harnesses import (
     HARNESS_SCHEMA_VERSION,
@@ -447,6 +452,8 @@ from vidbyte.tools.mcp import (
 
 __all__ = [
     "HARNESS_SCHEMA_VERSION",
+    "AdversarialAgentDescriptor",
+    "AggregateAgentDescriptor",
     "Agent",
     "AgentDescriptor",
     "AgentSettings",
@@ -485,6 +492,7 @@ __all__ = [
     "MultiAgentOrchestrator",
     "MultiAgentResult",
     "MultiAgentSettings",
+    "MultiAgentDescriptor",
     "MultiAgentStopReason",
     "OrchestrationContext",
     "OrchestratorAction",
