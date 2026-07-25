@@ -193,20 +193,40 @@ class YamlLoader:
         # document granting no capabilities cannot silently inherit every tool the application happens to own.
         if not settings.tools:
             return Tools()
-        available = catalog if isinstance(catalog, Tools) else Tools(catalog)
+        available = self._catalog(catalog)
+        declared = tuple(definition.ref for definition in settings.tools)
         try:
-            return available.subset(definition.ref for definition in settings.tools)
+            return available.subset(declared)
         except ToolRegistryError as error:
-            raise ConfigurationError(f"A declared tool reference is not in the catalog supplied to build_agent(): {error}", details={"field": "agent.tools", "declared": [definition.ref for definition in settings.tools], "available": sorted(available.names())}) from error
+            missing = sorted(set(declared).difference(available.names()))
+            raise ConfigurationError(f"Tool reference(s) declared by the document were not in the catalog supplied to build_agent(): {', '.join(missing)}.", details={"field": "agent.tools", "missing": missing, "declared": list(declared), "available": sorted(available.names())}) from error
+
+    def _catalog(self, catalog: "Tools | Sequence[object]") -> Tools:
+        # Normalizes the caller's tool catalog, naming the parameter when the container itself is unusable.
+        if isinstance(catalog, Tools):
+            return catalog
+        try:
+            return Tools(catalog)
+        except TypeError as error:
+            raise ConfigurationError(f"build_agent() 'tools' must be a Tools catalog or an iterable of tools: {error}", details={"field": "build_agent.tools", "actual_type": type(catalog).__name__}) from error
 
     def _resolve_named(self, definitions: tuple[Any, ...], available: Mapping[str, object], field_name: str) -> tuple[object, ...]:
         # Looks every declared middleware or context-item reference up in the caller's mapping, failing closed on the first miss.
+        if not definitions:
+            return ()
+        components = self._component_map(available, field_name)
         resolved: list[object] = []
         for index, definition in enumerate(definitions):
-            if definition.ref not in available:
-                raise ConfigurationError(f"Declared reference '{definition.ref}' was not supplied to build_agent().", details={"field": definition.path or f"{field_name}[{index}]", "reference": definition.ref, "available": sorted(available)})
-            resolved.append(available[definition.ref])
+            if definition.ref not in components:
+                raise ConfigurationError(f"Declared reference '{definition.ref}' was not supplied to build_agent().", details={"field": definition.path or f"{field_name}[{index}]", "reference": definition.ref, "available": sorted(components)})
+            resolved.append(components[definition.ref])
         return tuple(resolved)
+
+    def _component_map(self, available: Mapping[str, object], field_name: str) -> Mapping[str, object]:
+        # Requires caller-supplied components as a ref-keyed mapping, since every reference resolves by name.
+        if not isinstance(available, Mapping) or not all(isinstance(key, str) for key in available):
+            raise ConfigurationError(f"build_agent() '{field_name.rpartition('.')[2]}' must be a mapping of reference name to component.", details={"field": f"build_agent.{field_name.rpartition('.')[2]}", "actual_type": type(available).__name__})
+        return available
 
     def _assert_contract_tools_resolve(self, settings: AgentSettings, tools: Tools) -> None:
         # @intent unsatisfiable-floors-fail-at-build

@@ -87,7 +87,9 @@ The seam exists. This change makes it a method.
 8. `name=` overrides the settings' name, re-validated against the same rules the loader applies; an invalid override raises rather than reaching `BaseAgent`.
 9. Passing a `HarnessSpec` raises a `ConfigurationError` stating that harness documents are not yet buildable and naming `load_agent`.
 10. Settings whose `type` is not `AgentType.BASE` raise a `ConfigurationError` naming the requested type.
-11. Any tool name appearing in `loop.output_contracts` (contracts exposing `tool_name`), `loop.tool_settings.max_calls_per_tool`, or `loop.allowed_tools` that is not in the resolved tool set raises a `ConfigurationError` at build time.
+11. A tool name required by an output-contract **floor** (a contract exposing `tool_name`, e.g. `MinToolCallsById`) that is not in the resolved tool set raises a `ConfigurationError` at build time. The check applies only when the document declares at least one tool.
+
+    > **Narrowed during implementation.** This requirement originally also covered `loop.tool_settings.max_calls_per_tool` and `loop.allowed_tools`. Both are **ceilings/filters**: an entry naming an absent tool is inert — the ceiling is never consulted and the filter matches nothing — so rejecting it buys no correctness. Worse, `BaseAgent` carries `McpAttachableMixin`, so tools can legitimately be attached after construction; a hard check on those two fields would reject a valid MCP flow. Only the floor is genuinely unsatisfiable, and only the floor is checked. The check is skipped entirely for a document declaring no tools, since such an agent is presumably getting its tools from a post-construction attachment this layer cannot see. An agent that needs a floor on an attached tool must declare it so it arrives through the supplied catalog.
 12. `build_agent` never imports a module, attribute, or callable named by document text.
 13. Each call returns a fresh `BaseAgent`; no memoization or instance reuse.
 
@@ -144,11 +146,17 @@ class YamlLoader:
     def build_agent(self, settings: AgentSettings, *, name: str | None = None, tools: "Tools | Sequence[object]" = (), middleware: Mapping[str, object] = {}, context_items: Mapping[str, object] = {}, context_manager: object | None = None, output_schema: object | None = None, tracer: object | None = None, permission_policy: object | None = None) -> "BaseAgent": ...
 
     def _buildable_settings(self, settings: object, name: str | None) -> AgentSettings: ...
-    def _resolve_tools(self, settings: AgentSettings, catalog: object) -> object: ...
+    def _renamed(self, settings: AgentSettings, name: str) -> AgentSettings: ...
+    def _resolve_tools(self, settings: AgentSettings, catalog: "Tools | Sequence[object]") -> Tools: ...
+    def _catalog(self, catalog: "Tools | Sequence[object]") -> Tools: ...
     def _resolve_named(self, definitions: tuple[Any, ...], available: Mapping[str, object], field_name: str) -> tuple[object, ...]: ...
-    def _assert_tool_names_resolve(self, settings: AgentSettings, resolved: object) -> None: ...
-    def _construct_agent(self, settings: AgentSettings, tools: object, middleware: tuple[object, ...], context_items: tuple[object, ...], injections: Mapping[str, object]) -> "BaseAgent": ...
+    def _component_map(self, available: Mapping[str, object], field_name: str) -> Mapping[str, object]: ...
+    def _assert_contract_tools_resolve(self, settings: AgentSettings, tools: Tools) -> None: ...
+    def _contract_tool_names(self, loop: "AgentLoopSettings") -> tuple[str, ...]: ...
+    def _construct_agent(self, settings: AgentSettings, tools: Tools, middleware: tuple[object, ...], context_items: tuple[object, ...], injections: Mapping[str, object]) -> "BaseAgent": ...
 ```
+
+The existing private `_build_agent` (which parses a document into `AgentSettings`) is renamed `_parse_agent_settings`. It is referenced only inside this file, and leaving a private `_build_agent` beside a public `build_agent` that does something entirely different is a readability trap.
 
 Mutable defaults are written as immutable empty mappings in the implementation (`MappingProxyType({})` or a module constant), not literal `{}`.
 
@@ -200,13 +208,15 @@ Mutable defaults are written as immutable empty mappings in the implementation (
 
 | Condition | Behavior |
 |---|---|
+| `tools=` is not a `Tools` or an iterable of tools | `ConfigurationError`, `field=build_agent.tools`, reporting the received type. |
+| `middleware=`/`context_items=` is not a string-keyed mapping | `ConfigurationError`, `field=build_agent.<param>`, reporting the received type. |
 | `HarnessSpec` passed | `ConfigurationError`: harness documents not buildable; use `load_agent`. FR9. |
 | Non-`base` `AgentType` | `ConfigurationError` naming the type. FR10. |
 | Declared tool ref absent from catalog | `ConfigurationError`, `field=agent.tools`, unresolved names listed. FR3. |
 | Declared middleware/context ref absent | `ConfigurationError` at the entry's own path. FR4/FR5. |
 | Document declares no tools but caller supplies a catalog | Agent gets no tools. FR6. |
-| `MinToolCallsById("x")` with no tool `x` | `ConfigurationError` — otherwise the agent burns `max_contract_rejections` on a permanently unsatisfiable contract, then fails at runtime. FR11. |
-| `max_calls_per_tool` / `allowed_tools` naming an absent tool | Same. FR11. |
+| `MinToolCallsById("x")` with no tool `x`, document declares tools | `ConfigurationError` — otherwise the agent burns `max_contract_rejections` on a permanently unsatisfiable contract, then fails at runtime. FR11. |
+| `max_calls_per_tool` / `allowed_tools` naming an absent tool | Allowed. Inert, and may name a post-construction MCP attachment. See FR11. |
 | `name=` fails validation (spaces, >64 chars, bad charset) | `ConfigurationError` from the re-run `__post_init__`, re-pointed at `build_agent.name`. FR8. |
 | Duplicate tool names in the caller's catalog | `Tools.__init__` already raises `ToolRegistrationError`; left to surface as-is (caller's own construction error, not a document error). |
 | `output_schema` in both document and injection | Injection wins; documented. |
@@ -261,11 +271,14 @@ No existing signature changes; `to_agent_kwargs` keeps working for callers who p
 | Action | File Path | Reason |
 |--------|-----------|--------|
 | CREATE | `docs/design/yaml-loader-build-agent.md` | This design doc; first commit on the branch |
-| MODIFY | `vidbyte/config/loader.py` | Add `build_agent` and its four private helpers; extend the Context Protocol Header |
-| MODIFY | `vidbyte/config/README.md` | Correct the parse-only contract, list the new method, add a Logs entry |
+| MODIFY | `vidbyte/config/loader.py` | Add `build_agent` and its private helpers; rename `_build_agent` → `_parse_agent_settings`; extend the Context Protocol Header |
+| MODIFY | `vidbyte/agents/settings/loop.py` | Add a read-only `output_contracts` property |
+| MODIFY | `vidbyte/config/README.md` | Correct the parse-only contract, document the build rules, add a Logs entry |
 | MODIFY | `README.md` | Show the one-line build form in the YAML Configuration section |
 
 No file is deleted. `vidbyte/__init__.py` and `vidbyte/config/__init__.py` need no change — `YamlLoader` is already exported from both.
+
+`AgentLoopSettings` stores its contracts as `self._output_contracts` with no public accessor, so the FR11 check would otherwise require reaching into another class's private state. The property is read-only, returns the existing tuple, changes no behavior, and exposes information `AgentLoopSettings.__repr__` and `AgentLoopSettingsOutputContract.report()` already surface.
 
 ---
 
