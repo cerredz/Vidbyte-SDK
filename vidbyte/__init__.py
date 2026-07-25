@@ -89,6 +89,8 @@ from vidbyte.agents.pricing import ProviderUsage
 from vidbyte.lib.registries import ModelPricing, ModelPricingRegistry, PROVIDER_PRICING
 from vidbyte.client import VidbyteSDK
 from vidbyte.config import AgentSettings, MiddlewareDefinition, ToolDefinition, YamlLoader
+from vidbyte.lib.dataclasses.agent_descriptor import AgentDescriptor
+from vidbyte.lib.enums.config import AgentType
 from vidbyte.harnesses import (
     HARNESS_SCHEMA_VERSION,
     FileTrajectorySink,
@@ -446,6 +448,7 @@ from vidbyte.tools.mcp import (
 __all__ = [
     "HARNESS_SCHEMA_VERSION",
     "Agent",
+    "AgentDescriptor",
     "AgentSettings",
     "AllegationRecord",
     "AllegationSeverity",
@@ -566,6 +569,7 @@ __all__ = [
     "UsageTracker",
     "AlternativeChallengeContextItem",
     "AmbiguityContextItem",
+    "AgentType",
     "ArtifactContextItem",
     "AssumptionChallengeContextItem",
     "BoundaryContextItem",

@@ -1,17 +1,16 @@
 """Context Protocol Header
 
 Description:
-    Enumerates the fixed vocabulary used by the public YAML configuration loader.
+    Defines the type discriminators for YAML configuration documents.
 Purpose:
-    Gives the agent ``type`` discriminator one authoritative, string-backed definition so
-    an agent document selects a concrete agent settings class instead of a bare string.
+    Gives the YamlLoader and descriptor dataclasses a single vocabulary for
+    document kind (agent, harness, environment) and agent subtype (base, multi,
+    aggregate, adversarial, handoff, continual_trace).
 Architecture:
-    - AgentType: The agent kinds an agent document may declare, one per BaseAgent subclass.
+    - DocumentType: top-level YAML discriminator.
+    - AgentType: polymorphic agent subtype within an agent document.
 Relations:
-    Consumed by vidbyte.lib.dataclasses.config (settings dispatch) and vidbyte.config.loader.
-Similar Files:
-    - vidbyte/lib/enums/agent_runtime.py: Runtime enum used by the same agent settings.
-    - vidbyte/lib/enums/model_provider.py: Provider enum validated by the same settings.
+    Used by vidbyte/lib/config/loader.py, vidbyte/lib/dataclasses/agent_descriptor.py.
 """
 
 from __future__ import annotations
@@ -19,25 +18,31 @@ from __future__ import annotations
 from enum import Enum
 
 
-class AgentType(str, Enum):
-    """Supported ``type`` values for an agent document, one per concrete BaseAgent subclass.
+class DocumentType(str, Enum):
+    """Top-level YAML document kind discriminator."""
 
-    ``BASE`` is the plain :class:`vidbyte.agents.base.BaseAgent`. The remaining members name
-    the composite and facade agents; the loader recognizes them but does not yet parse their
-    full YAML shape, so requesting one raises a specific, actionable configuration error.
-    """
+    AGENT = "agent"
+    HARNESS = "harness"
+    ENVIRONMENT = "environment"
+
+
+class AgentType(str, Enum):
+    """Polymorphic agent subtype within an agent YAML document."""
 
     BASE = "base"
-    AGGREGATE = "aggregate"
-    CONTINUAL_TRACE = "continual_trace"
-    HANDOFF = "handoff"
     MULTI = "multi"
+    AGGREGATE = "aggregate"
     ADVERSARIAL = "adversarial"
+    HANDOFF = "handoff"
+    CONTINUAL_TRACE = "continual_trace"
 
     @classmethod
     def values(cls) -> tuple[str, ...]:
-        # Returns every accepted type string for building "must be one of ..." error messages.
+        # Returns all valid agent type strings for error messages.
         return tuple(member.value for member in cls)
 
 
-__all__ = ["AgentType"]
+__all__ = [
+    "AgentType",
+    "DocumentType",
+]

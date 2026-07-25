@@ -15,6 +15,7 @@ Relations:
 
 from __future__ import annotations
 
+from vidbyte.lib.dataclasses.agent_descriptor import AgentDescriptor
 from vidbyte.lib.dataclasses.agents import (
     AgentCard,
     AgentIterationSnapshot,
@@ -25,6 +26,7 @@ from vidbyte.lib.dataclasses.agents import (
     AgentSpec,
     AgentStopReason,
 )
+from vidbyte.lib.dataclasses.environment_descriptor import EnvironmentDescriptor
 from vidbyte.lib.dataclasses.context import (
     BaseAgentContext,
     BaseContext,
@@ -53,6 +55,7 @@ from vidbyte.context.primitives import (
     TrajectoryCheckpointContextItem,
 )
 from vidbyte.lib.dataclasses.filesystem import FileStat, FileSystemToolConfig
+from vidbyte.lib.dataclasses.harness_descriptor import HarnessDescriptor
 from vidbyte.lib.dataclasses.harnesses import (
     HARNESS_SCHEMA_VERSION,
     HarnessExecutionResult,
@@ -174,6 +177,7 @@ from vidbyte.lib.dataclasses.tools import (
 
 __all__ = [
     "AgentCard",
+    "AgentDescriptor",
     "AgentDispatch",
     "AgentIterationSnapshot",
     "AgentMessage",
@@ -212,6 +216,7 @@ __all__ = [
     "DefenseResponsePayload",
     "DocumentContextItem",
     "EnvironmentContextItem",
+    "EnvironmentDescriptor",
     "EventHandler",
     "EvaluationDecision",
     "EvidenceCitationPayload",
@@ -225,6 +230,7 @@ __all__ = [
     "FileSystemToolConfig",
     "GitDiffContextItem",
     "HARNESS_SCHEMA_VERSION",
+    "HarnessDescriptor",
     "HarnessExecutionResult",
     "HarnessRun",
     "HarnessRunStatus",

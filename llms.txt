@@ -121,31 +121,35 @@ sdk.providers
 
 ### YAML Configuration
 
-`YamlLoader` is the public class-first interface for data-only YAML configuration.
-There are two document families: an agent document and a harness document.
-`load(path)` reads a document and returns an `AgentSettings` subclass or a
-`HarnessSpec` — it needs no `kind` field, recognizing a harness by its
-`schema_version`/`harness` envelope and treating every other document as an agent.
-`load_agent()` and `load_harness()` select one family explicitly. An agent document
-is polymorphic on a `type:` field (`base`, `aggregate`, `continual_trace`, `handoff`,
-`multi`, `adversarial`) that defaults to `base`; only `base` is fully loadable today,
-and the other types are registered but raise a specific error. Tools and middleware
-are nested `tools:`/`middleware:` lists of `{ref, options}` entries on the agent (not
-separate documents), `loop:` becomes an `AgentLoopSettings`, and `provider`/`model_name`
-are validated against the canonical `ProviderModelRegistry`. The loader validates
-structure and intrinsic settings but never imports a `ref`, instantiates a tool or
-middleware, interpolates secrets, or performs network access. Application code must
-map declarations to an allowlisted runtime implementation before passing
-`settings.to_agent_kwargs(...)` to `VidbyteSDK().agents.base(...)`. `view_agent()`
-returns the expected base agent document structure.
+`YamlLoader` (in `vidbyte.lib.config.loader`) is the public class-first interface for
+data-only YAML configuration. There are three document families: agent, harness, and
+environment, discriminated by a `type:` field at the document root. `load_agent(path)`,
+`load_harness(path)`, and `load_environment(path)` select one family explicitly. An
+agent document carries an `agent_type:` discriminator (`base`, `multi`, `aggregate`,
+`adversarial`, `handoff`, `continual_trace`) that defaults to `base`; only `base` is
+fully loadable today, and the other types are registered but raise a specific error.
+
+The loader produces `AgentDescriptor`, `HarnessDescriptor`, or `EnvironmentDescriptor`
+objects. Unlike the legacy `AgentSettings`, these descriptors *compose* the SDK's
+existing runtime settings classes (`AgentLoopSettings`, `ToolSettings`, `AgentMetadata`,
+`TraceOption`, `ToolSpec`) rather than duplicating their fields. Validation lives on
+the composed objects' own `__post_init__` and `_validate()` methods.
+
+Tools and middleware are declared as ref strings (resolved later by application code).
+`loop:` maps directly to `AgentLoopSettings` fields. `provider` and `model_name` are
+validated against `ProviderModelRegistry`. The loader validates structure and intrinsic
+settings but never imports a ref, instantiates a tool or middleware, reads secrets,
+or performs network access. Application code resolves refs and calls
+`descriptor.to_agent_kwargs(tools=..., middleware=...)` for `BaseAgent` construction.
 
 ```python
-from vidbyte import YamlLoader
+from vidbyte import YamlLoader, AgentDescriptor
 
 loader = YamlLoader()
-settings = loader.load_agent("agent.yaml")        # or loader.load("agent.yaml")
-tools = resolve_tools(settings.tools)             # application-owned resolver
-harness_spec = loader.load_harness("harness.yaml")
+desc: AgentDescriptor = loader.load_agent("agent.yaml")
+tools = resolve_tools(desc.tools)          # application-owned resolver
+middleware = resolve_mw(desc.middleware_refs)
+agent = sdk.agents.base(**desc.to_agent_kwargs(tools=tools, middleware=middleware))
 ```
 
 For direct model execution, use an agent:
