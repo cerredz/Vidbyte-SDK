@@ -81,6 +81,11 @@ class AgentLoopSettings:
         self.output_contract = AgentLoopSettingsOutputContract(self._output_contracts, max_rejections=max_contract_rejections)
         self._validate()
 
+    @property
+    def output_contracts(self) -> tuple[OutputContract, ...]:
+        # Returns the configured output contracts so callers can inspect them without reaching into private state.
+        return self._output_contracts
+
     def _validate(self) -> None:
         # Raises ConfigurationError for any constraint violation found on this settings object.
         self._validate_positive_int_fields()
