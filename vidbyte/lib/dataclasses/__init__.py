@@ -15,6 +15,8 @@ Relations:
 
 from __future__ import annotations
 
+from vidbyte.lib.dataclasses.adversarial_agent_descriptor import AdversarialAgentDescriptor
+from vidbyte.lib.dataclasses.aggregate_agent_descriptor import AggregateAgentDescriptor
 from vidbyte.lib.dataclasses.agent_descriptor import AgentDescriptor
 from vidbyte.lib.dataclasses.agents import (
     AgentCard,
@@ -26,6 +28,7 @@ from vidbyte.lib.dataclasses.agents import (
     AgentSpec,
     AgentStopReason,
 )
+from vidbyte.lib.dataclasses.continual_trace_descriptor import ContinualTraceAgentDescriptor
 from vidbyte.lib.dataclasses.environment_descriptor import EnvironmentDescriptor
 from vidbyte.lib.dataclasses.context import (
     BaseAgentContext,
@@ -56,6 +59,7 @@ from vidbyte.context.primitives import (
 )
 from vidbyte.lib.dataclasses.filesystem import FileStat, FileSystemToolConfig
 from vidbyte.lib.dataclasses.harness_descriptor import HarnessDescriptor
+from vidbyte.lib.dataclasses.handoff_agent_descriptor import HandoffAgentDescriptor
 from vidbyte.lib.dataclasses.harnesses import (
     HARNESS_SCHEMA_VERSION,
     HarnessExecutionResult,
@@ -111,6 +115,7 @@ from vidbyte.lib.dataclasses.multi_agent import (
     WorkerForkFactory,
 )
 from vidbyte.lib.dataclasses.config import AgentSettings, MiddlewareDefinition, ToolDefinition
+from vidbyte.lib.dataclasses.multi_agent_descriptor import MultiAgentDescriptor
 from vidbyte.lib.dataclasses.sandbox import SandboxRequest, SandboxResult, SandboxTransport
 from vidbyte.lib.dataclasses.security import PermissionDecision, PermissionPolicy
 from vidbyte.lib.dataclasses.sessions import (
@@ -176,6 +181,8 @@ from vidbyte.lib.dataclasses.tools import (
 )
 
 __all__ = [
+    "AdversarialAgentDescriptor",
+    "AggregateAgentDescriptor",
     "AgentCard",
     "AgentDescriptor",
     "AgentDispatch",
@@ -208,6 +215,7 @@ __all__ = [
     "ContextResponse",
     "ContextState",
     "ContextToolCall",
+    "ContinualTraceAgentDescriptor",
     "DagNode",
     "DebateStageRecord",
     "DefenderReportPayload",
@@ -236,6 +244,7 @@ __all__ = [
     "HarnessRunStatus",
     "HarnessSpec",
     "TrajectoryRecord",
+    "HandoffAgentDescriptor",
     "MemoryContextItem",
     "McpToolDefinition",
     "LlmsTxtDocument",
@@ -261,6 +270,7 @@ __all__ = [
     "MultiAgentResult",
     "MultiAgentRunState",
     "MultiAgentSettings",
+    "MultiAgentDescriptor",
     "MultiAgentEventCallback",
     "NodeState",
     "OrchestrationContext",

@@ -29,11 +29,13 @@ from typing import Any
 
 from vidbyte.agents.settings.loop import AgentLoopSettings
 from vidbyte.agents.settings.tool import ToolSettings
+from vidbyte.lib.agents.modality_detector import ModalityDetector
 from vidbyte.lib.dataclasses.agents import AgentMetadata
 from vidbyte.lib.dataclasses.tools import ToolSpec
 from vidbyte.lib.dataclasses.trace import TraceOption
 from vidbyte.lib.enums.agent_runtime import AgentRuntimeType
 from vidbyte.lib.enums.config import AgentType
+from vidbyte.lib.enums.model_modality import ModelModality
 from vidbyte.lib.enums.model_provider import ModelProvider
 from vidbyte.lib.errors import ConfigurationError
 from vidbyte.lib.registries.models import ProviderModelRegistry
@@ -43,7 +45,15 @@ _MAX_SYSTEM_PROMPT_CHARS = 500_000
 _MAX_DESCRIPTION_CHARS = 2000
 _MAX_REF_CHARS = 128
 _MAX_CAPABILITY_CHARS = 200
+_MAX_CAPABILITIES = 64
+_MAX_TOOL_DEFINITIONS = 128
+_MAX_OUTPUT_SCHEMA_KEYS = 200
+_MAX_OUTPUT_SCHEMA_DEPTH = 10
+_MAX_AGENT_METADATA_NAME = 128
+_MAX_AGENT_METADATA_DESC = 1000
+_MAX_AGENT_METADATA_USECASES = 2000
 _REF_PATTERN = re.compile(r"^[a-z][a-z0-9_.-]*$")
+_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9-]*$")
 _INTERPOLATION_PATTERN = re.compile(r"\$\{[^}]*\}")
 _SECRET_KEY_SUFFIXES = (
     "api_key", "token", "password", "secret", "credential",
@@ -51,6 +61,7 @@ _SECRET_KEY_SUFFIXES = (
 _SECRET_KEY_PREFIXES = (
     "api_key_", "token_", "password_", "secret_", "credential_",
 )
+_PROVIDER_TEMPERATURE_CEILING: dict[str, float] = {"anthropic": 1.0}
 
 
 def _has_secret_like_keys(mapping: Mapping[str, Any]) -> bool:
@@ -124,6 +135,7 @@ class AgentDescriptor:
         self._validate_refs()
         self._validate_capabilities()
         self._validate_algorithm()
+        self._validate_agent_metadata()
         self._validate_output_schema()
         self._validate_metadata()
         self._validate_runtime_compatibility()
@@ -169,6 +181,11 @@ class AgentDescriptor:
             raise ConfigurationError(
                 "Agent name must not contain environment interpolation patterns.",
                 details={"field": "name", "expected": "no ${...} patterns"},
+            )
+        if not _NAME_PATTERN.match(self.name):
+            raise ConfigurationError(
+                f"Agent name '{self.name}' should use kebab-case (lowercase letters, digits, hyphens) for tool-name compatibility.",
+                details={"field": "name", "actual": self.name, "pattern": _NAME_PATTERN.pattern},
             )
         if len(self.name) > _MAX_NAME_CHARS:
             raise ConfigurationError(
@@ -230,15 +247,25 @@ class AgentDescriptor:
                 f"Invalid model_name: {exc}",
                 details={"field": "model_name", "actual": self.model_name},
             ) from exc
+        modality = ModalityDetector.detect_modality(self.model_name)
+        if modality not in (ModelModality.TEXT, ModelModality.AUTO):
+            raise ConfigurationError(
+                f"model_name '{self.model_name}' has {modality.value} modality and cannot drive a conversational agent; agents require a text model.",
+                details={"field": "model_name", "actual": self.model_name, "modality": modality.value},
+            )
 
     # ── temperature validation ──
 
     def _validate_temperature(self) -> None:
-        # Validates temperature is in the supported range when set.
-        if self.temperature is not None and not (0.0 <= self.temperature <= 2.0):
+        # Validates temperature is in the supported range, tightened to the provider's ceiling.
+        if self.temperature is None:
+            return
+        ceiling = _PROVIDER_TEMPERATURE_CEILING.get(self.provider or "", 2.0)
+        if not (0.0 <= self.temperature <= ceiling):
+            scope = f" for provider '{self.provider}'" if self.provider else ""
             raise ConfigurationError(
-                "temperature must be between 0.0 and 2.0 when provided.",
-                details={"field": "temperature", "actual": self.temperature, "expected": "0.0 <= temperature <= 2.0"},
+                f"temperature must be between 0.0 and {ceiling}{scope} when provided.",
+                details={"field": "temperature", "actual": self.temperature, "expected": f"0.0 <= temperature <= {ceiling}"},
             )
 
     # ── ref (tool / middleware) validation ──
@@ -249,7 +276,12 @@ class AgentDescriptor:
         self._validate_middleware_refs()
 
     def _validate_tool_specs(self) -> None:
-        # Rejects blank, overly long, malformed, or duplicate tool refs and checks for secrets.
+        # Rejects blank, overly long, malformed, or duplicate tool refs, excessive count, and secrets.
+        if len(self.tools) > _MAX_TOOL_DEFINITIONS:
+            raise ConfigurationError(
+                f"Agent must have at most {_MAX_TOOL_DEFINITIONS} tool definitions; got {len(self.tools)}.",
+                details={"field": "tools", "max_count": _MAX_TOOL_DEFINITIONS, "actual_count": len(self.tools)},
+            )
         seen: set[str] = set()
         for index, spec in enumerate(self.tools):
             ref = spec.name if spec.name else ""
@@ -314,7 +346,12 @@ class AgentDescriptor:
     # ── capabilities validation ──
 
     def _validate_capabilities(self) -> None:
-        # Rejects blank, overly long, or duplicate capability strings.
+        # Rejects blank, overly long, duplicate capability strings, and excessive count.
+        if len(self.capabilities) > _MAX_CAPABILITIES:
+            raise ConfigurationError(
+                f"Agent must have at most {_MAX_CAPABILITIES} capabilities; got {len(self.capabilities)}.",
+                details={"field": "capabilities", "max_count": _MAX_CAPABILITIES, "actual_count": len(self.capabilities)},
+            )
         seen: set[str] = set()
         for index, cap in enumerate(self.capabilities):
             if not cap or not cap.strip():
@@ -355,10 +392,31 @@ class AgentDescriptor:
                     details={"field": "algorithm", "max_chars": _MAX_REF_CHARS, "actual_chars": len(self.algorithm)},
                 )
 
+    # ── agent_metadata validation ──
+
+    def _validate_agent_metadata(self) -> None:
+        # Validates agent-as-tool metadata field length limits.
+        meta = self.agent_metadata
+        if meta.name and len(meta.name) > _MAX_AGENT_METADATA_NAME:
+            raise ConfigurationError(
+                f"agent_metadata.name must be at most {_MAX_AGENT_METADATA_NAME} characters.",
+                details={"field": "agent_metadata.name", "max_chars": _MAX_AGENT_METADATA_NAME, "actual_chars": len(meta.name)},
+            )
+        if meta.description and len(meta.description) > _MAX_AGENT_METADATA_DESC:
+            raise ConfigurationError(
+                f"agent_metadata.description must be at most {_MAX_AGENT_METADATA_DESC} characters.",
+                details={"field": "agent_metadata.description", "max_chars": _MAX_AGENT_METADATA_DESC, "actual_chars": len(meta.description)},
+            )
+        if meta.use_cases and len(meta.use_cases) > _MAX_AGENT_METADATA_USECASES:
+            raise ConfigurationError(
+                f"agent_metadata.use_cases must be at most {_MAX_AGENT_METADATA_USECASES} characters.",
+                details={"field": "agent_metadata.use_cases", "max_chars": _MAX_AGENT_METADATA_USECASES, "actual_chars": len(meta.use_cases)},
+            )
+
     # ── output_schema validation ──
 
     def _validate_output_schema(self) -> None:
-        # Rejects non-dict, overly large, or secret-containing output schemas.
+        # Rejects non-dict, overly large, deep, or secret-containing output schemas.
         if self.output_schema is None:
             return
         if not isinstance(self.output_schema, dict):
@@ -366,10 +424,16 @@ class AgentDescriptor:
                 "output_schema must be a mapping when provided.",
                 details={"field": "output_schema", "actual_type": type(self.output_schema).__name__},
             )
-        if len(self.output_schema) > 200:
+        if len(self.output_schema) > _MAX_OUTPUT_SCHEMA_KEYS:
             raise ConfigurationError(
-                "output_schema must have at most 200 top-level keys.",
-                details={"field": "output_schema", "max_keys": 200, "actual_keys": len(self.output_schema)},
+                f"output_schema must have at most {_MAX_OUTPUT_SCHEMA_KEYS} top-level keys.",
+                details={"field": "output_schema", "max_keys": _MAX_OUTPUT_SCHEMA_KEYS, "actual_keys": len(self.output_schema)},
+            )
+        depth = AgentDescriptor._schema_depth(self.output_schema)
+        if depth > _MAX_OUTPUT_SCHEMA_DEPTH:
+            raise ConfigurationError(
+                f"output_schema must have at most {_MAX_OUTPUT_SCHEMA_DEPTH} nesting levels; got {depth}.",
+                details={"field": "output_schema", "max_depth": _MAX_OUTPUT_SCHEMA_DEPTH, "actual_depth": depth},
             )
         if _has_secret_like_keys(self.output_schema):
             raise ConfigurationError(
@@ -454,6 +518,14 @@ class AgentDescriptor:
                     "expected": "algorithm must be None for non-linear runtimes",
                 },
             )
+
+
+    @staticmethod
+    def _schema_depth(value: Any, current: int = 1) -> int:
+        # Returns the maximum nesting depth of a JSON-Schema-like structure.
+        if not isinstance(value, dict) or not value:
+            return current
+        return max(AgentDescriptor._schema_depth(v, current + 1) for v in value.values())
 
 
 __all__ = ["AgentDescriptor"]
