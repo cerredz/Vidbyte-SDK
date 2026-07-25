@@ -92,13 +92,18 @@ sdk.providers
 
 Use `YamlLoader` when an application wants data-only YAML settings. Loading
 validates the document and returns declarations; it never imports a `ref` or
-instantiates a tool or middleware. Resolve those declarations from an
-application-owned allowlist before creating the agent. There are two document
+instantiates a tool or middleware. There are two document
 families: an **agent** document and a **harness** document. `load(path)` returns an
 `AgentSettings` subclass or a `HarnessSpec` — it needs no `kind` field, recognizing a
 harness by its `schema_version`/`harness` envelope and treating every other document
 as an agent. `load_agent()` and `load_harness()` select one family explicitly, and
 `view_agent()` returns the structure a base agent document must follow.
+
+`build_agent(settings, ...)` takes what `load()` returned and constructs the agent.
+Every runtime component still comes from the caller — the loader never imports
+anything a document names. The document acts as the allowlist: the agent receives
+exactly the `tools:` it declares, resolved by name out of the catalog you supply, and
+a declared `ref` you did not supply raises rather than silently disappearing.
 
 ```python
 from vidbyte import YamlLoader, VidbyteSDK
@@ -107,10 +112,18 @@ loader = YamlLoader()
 settings = loader.load_agent("agent.yaml")            # or loader.load("agent.yaml")
 harness_spec = loader.load_harness("harness.yaml")    # delegates to the harness loader
 
+agent = loader.build_agent(settings, tools=my_catalog, middleware={"logger": LoggingMiddleware()})
+
+# Or resolve and construct by hand when you want the kwargs without the construction:
 tools = resolve_tools(settings.tools)  # Application-owned allowlist/resolver.
 middleware = resolve_middleware(settings.middleware)
 agent = VidbyteSDK().agents.base(**settings.to_agent_kwargs(tools=tools, middleware=middleware))
 ```
+
+`build_agent()` also accepts the construction inputs YAML cannot carry —
+`context_manager`, `output_schema` (a Python class, which wins over the document's
+JSON Schema), `tracer`, `permission_policy` — plus `name=` to override the declared
+name, re-validated against the same rules the document faced.
 
 An agent document is polymorphic on a `type:` field (`base`, `aggregate`,
 `continual_trace`, `handoff`, `multi`, `adversarial`); `type` defaults to `base`, the
