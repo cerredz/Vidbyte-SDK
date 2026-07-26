@@ -77,11 +77,9 @@ class ContinualTraceAgentDescriptor:
     @staticmethod
     def _max_depth(value: Any, current: int = 1) -> int:
         # Returns the maximum nesting depth of a JSON-like structure.
-        if not isinstance(value, dict):
-            return current
-        if not value:
-            return current
-        return max(ContinualTraceAgentDescriptor._max_depth(v, current + 1) for v in value.values())
+        if isinstance(value, dict) and value:
+            return max(ContinualTraceAgentDescriptor._max_depth(item, current + 1) for item in value.values())
+        return current
 
     def _validate_iterations(self) -> None:
         # Validates max_trace_iterations is an integer in [1, 3].

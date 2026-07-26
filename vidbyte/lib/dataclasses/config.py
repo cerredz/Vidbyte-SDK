@@ -671,9 +671,11 @@ class AgentSettings(_ConfigValidation):
 
     @classmethod
     def _coerce_contract(cls, builder: type, item: object, index: int) -> Any:
-        # Builds one output contract from a document mapping, naming its position on failure.
-        if not isinstance(item, Mapping):
+        # Builds one output contract from a document mapping, passing an already-built contract through and naming its position on failure.
+        if isinstance(item, builder):
             return item
+        if not isinstance(item, Mapping):
+            raise cls._error(f"'agent.loop.output_contracts[{index}]' must be a mapping of contract fields or an already-built {builder.__name__}.", f"agent.loop.output_contracts[{index}]", actual_type=type(item).__name__)
         payload = cls._mapping(item, f"agent.loop.output_contracts[{index}]")
         try:
             return builder(**payload)
