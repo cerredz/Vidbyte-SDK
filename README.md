@@ -34,7 +34,7 @@ access remain outside this package.
 | Layer | Role |
 |-------|------|
 | [`vidbyte.agents`](vidbyte/agents/README.md) | Executable agent actors, runtimes, inferred runner selection, handoff, and agent registries |
-| [`vidbyte.config`](vidbyte/config/README.md) | Safe YAML parsing into declarative agent settings (with nested tools/middleware) or a harness spec; applications resolve executable references |
+| [`vidbyte.config`](vidbyte/config/README.md) | Safe YAML parsing into declarative agent settings (with nested tools/middleware) or a harness spec, plus agent construction from those settings alone |
 | [`vidbyte.cli`](vidbyte/cli/README.md) | Unified console command for SDK developer surfaces, currently `vidbyte-sdk skills` |
 | [`vidbyte.context`](vidbyte/context/README.md) | Structured context items, context windows, compaction, algorithms, and handoff models |
 | [`vidbyte.evals`](vidbyte/evals/README.md) | Local eval cases, suites, runners, graders, registries, and result summaries |
@@ -99,31 +99,28 @@ harness by its `schema_version`/`harness` envelope and treating every other docu
 as an agent. `load_agent()` and `load_harness()` select one family explicitly, and
 `view_agent()` returns the structure a base agent document must follow.
 
-`build_agent(settings, ...)` takes what `load()` returned and constructs the agent.
-Every runtime component still comes from the caller — the loader never imports
-anything a document names. The document acts as the allowlist: the agent receives
-exactly the `tools:` it declares, resolved by name out of the catalog you supply, and
-a declared `ref` you did not supply raises rather than silently disappearing.
+`build_agent(settings)` takes what `load_agent()` returned — and nothing else — and
+constructs the agent. A declared `ref` is never an import path: it is a name looked up
+in `ComponentRegistry`, which catalogs the SDK's own middleware, built-in tools, and
+context primitives, and an entry's `options` become that class's keyword arguments. An
+unregistered `ref` raises rather than silently disappearing, so a document cannot name
+your application's own tools or middleware — attach those to the built agent yourself.
+`name=` is the one override, re-validated against the same rules the document faced.
 
 ```python
 from vidbyte import YamlLoader, VidbyteSDK
+from vidbyte.lib.registries import ComponentRegistry
 
 loader = YamlLoader()
 settings = loader.load_agent("agent.yaml")            # or loader.load("agent.yaml")
 harness_spec = loader.load_harness("harness.yaml")    # delegates to the harness loader
 
-agent = loader.build_agent(settings, tools=my_catalog, middleware={"logger": LoggingMiddleware()})
+agent = loader.build_agent(settings)                  # or build_agent(settings, name="discovery")
+ComponentRegistry.names("middleware")                 # the refs a document may declare
 
-# Or resolve and construct by hand when you want the kwargs without the construction:
-tools = resolve_tools(settings.tools)  # Application-owned allowlist/resolver.
-middleware = resolve_middleware(settings.middleware)
-agent = VidbyteSDK().agents.base(**settings.to_agent_kwargs(tools=tools, middleware=middleware))
+# Or construct by hand when you want the kwargs, or components YAML cannot carry:
+agent = VidbyteSDK().agents.base(**settings.to_agent_kwargs(tools=my_catalog, middleware=[LoggingMiddleware()]))
 ```
-
-`build_agent()` also accepts the construction inputs YAML cannot carry —
-`context_manager`, `output_schema` (a Python class, which wins over the document's
-JSON Schema), `tracer`, `permission_policy` — plus `name=` to override the declared
-name, re-validated against the same rules the document faced.
 
 An agent document is polymorphic on a `type:` field (`base`, `aggregate`,
 `continual_trace`, `handoff`, `multi`, `adversarial`); `type` defaults to `base`, the

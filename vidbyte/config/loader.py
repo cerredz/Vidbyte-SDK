@@ -6,33 +6,32 @@ Purpose:
     Safely parses one YAML document into either validated agent settings or a harness
     specification, with no ``kind`` field: agent documents are distinguished from harness
     documents by the harness envelope and all field validation lives on the dataclasses.
-    build_agent() then turns those settings into a live agent using components the caller
-    supplies, so the SDK owns construction instead of every application repeating it.
+    build_agent() then turns those settings into a live agent, so the SDK owns construction
+    instead of every application repeating it.
 Architecture:
     - YamlLoader: Stateless public interface with a central load() plus typed loaders.
     - load(): reads one document and returns an AgentSettings subclass or a HarnessSpec.
     - load_agent()/load_harness(): parse one document of a known family.
-    - build_agent(): resolves declared refs against caller-supplied components and constructs
-      one BaseAgent from the settings load() returned.
+    - build_agent(): builds one BaseAgent from exactly the settings load() returned, resolving
+      every declared ref through the SDK's own ComponentRegistry.
     - view_agent(): returns the expected agent-document structure without touching the disk.
     - _DuplicateKeySafeLoader: SafeLoader variant that rejects ambiguous mappings.
 Relations:
     Builds the dataclasses in vidbyte.lib.dataclasses.config and delegates harness documents
-    to vidbyte.harnesses.HarnessConfigLoader. Tool references resolve through the existing
-    vidbyte.tools.catalog.Tools name lookup; BaseAgent is imported inside the construction
-    method so this package's dependency on vidbyte.agents stays reversible.
+    to vidbyte.harnesses.HarnessConfigLoader. Tool, middleware, and context-item references
+    resolve through vidbyte.lib.registries.ComponentRegistry; BaseAgent is imported inside the
+    construction method so this package's dependency on vidbyte.agents stays reversible.
 Non-Goals:
-    Never imports code named by a document, interpolates secrets, or reads a component from
-    anywhere but the caller. Parsing alone creates no runtime object; only build_agent does,
-    and only from components the caller already holds.
+    Never imports code named by a document or interpolates secrets. A ref selects a class the
+    SDK already registers; a document cannot name application-defined tools or middleware, which
+    stay the caller's job to attach to the built agent.
 """
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from dataclasses import replace
 from pathlib import Path
-from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
 
 import yaml
@@ -42,7 +41,8 @@ from vidbyte.harnesses.config import HarnessConfigLoader
 from vidbyte.harnesses.contracts import HarnessSpec
 from vidbyte.lib.dataclasses.config import AgentSettings
 from vidbyte.lib.enums import AgentType
-from vidbyte.lib.errors import ConfigurationError, ToolRegistryError
+from vidbyte.lib.errors import ConfigurationError
+from vidbyte.lib.registries.components import ComponentRegistry
 from vidbyte.tools.catalog import Tools
 
 if TYPE_CHECKING:
@@ -52,7 +52,6 @@ if TYPE_CHECKING:
 _SUPPORTED_SUFFIXES = frozenset({".yaml", ".yml"})
 _HARNESS_ENVELOPE_KEYS = frozenset({"schema_version", "harness"})
 _TEXT_FILE_SUFFIXES = frozenset({".md", ".markdown", ".txt", ".text", ".rst"})
-_NO_COMPONENTS: Mapping[str, object] = MappingProxyType({})
 
 
 class _DuplicateKeySafeLoader(yaml.SafeLoader):
@@ -99,14 +98,12 @@ class YamlLoader:
             error.details.setdefault("path", str(document_path))
             raise
 
-    def build_agent(self, settings: AgentSettings, *, name: str | None = None, tools: "Tools | Sequence[object]" = (), middleware: Mapping[str, object] = _NO_COMPONENTS, context_items: Mapping[str, object] = _NO_COMPONENTS, context_manager: object | None = None, output_schema: object | None = None, tracer: object | None = None, permission_policy: object | None = None) -> "BaseAgent":
-        # Builds one live agent from the settings load() returned, resolving every declared reference against the caller's components.
+    def build_agent(self, settings: AgentSettings, *, name: str | None = None) -> "BaseAgent":
+        # Builds one live agent from exactly the settings load_agent() returned, resolving every declared ref through the SDK's component registry.
         buildable = self._buildable_settings(settings, name)
-        resolved_tools = self._resolve_tools(buildable, tools)
-        resolved_middleware = self._resolve_named(buildable.middleware, middleware, "agent.middleware")
-        resolved_items = self._resolve_named(buildable.context_items, context_items, "agent.context_items")
-        self._assert_contract_tools_resolve(buildable, resolved_tools)
-        return self._construct_agent(buildable, resolved_tools, resolved_middleware, resolved_items, {"context_manager": context_manager, "output_schema": output_schema, "tracer": tracer, "permission_policy": permission_policy})
+        tools = ComponentRegistry.build_tools(buildable.tools)
+        self._assert_contract_tools_resolve(buildable, tools)
+        return self._construct_agent(buildable, tools, ComponentRegistry.build_middleware(buildable.middleware), ComponentRegistry.build_context_items(buildable.context_items))
 
     def view_agent(self) -> dict[str, Any]:
         # Returns the document structure a base agent .yaml file must follow.
@@ -187,47 +184,6 @@ class YamlLoader:
             error.details["field"] = "build_agent.name"
             raise
 
-    def _resolve_tools(self, settings: AgentSettings, catalog: "Tools | Sequence[object]") -> Tools:
-        # @intent document-is-the-allowlist
-        # The built agent gets exactly what the document declares, never the caller's whole catalog, so a
-        # document granting no capabilities cannot silently inherit every tool the application happens to own.
-        if not settings.tools:
-            return Tools()
-        available = self._catalog(catalog)
-        declared = tuple(definition.ref for definition in settings.tools)
-        try:
-            return available.subset(declared)
-        except ToolRegistryError as error:
-            missing = sorted(set(declared).difference(available.names()))
-            raise ConfigurationError(f"Tool reference(s) declared by the document were not in the catalog supplied to build_agent(): {', '.join(missing)}.", details={"field": "agent.tools", "missing": missing, "declared": list(declared), "available": sorted(available.names())}) from error
-
-    def _catalog(self, catalog: "Tools | Sequence[object]") -> Tools:
-        # Normalizes the caller's tool catalog, naming the parameter when the container itself is unusable.
-        if isinstance(catalog, Tools):
-            return catalog
-        try:
-            return Tools(catalog)
-        except TypeError as error:
-            raise ConfigurationError(f"build_agent() 'tools' must be a Tools catalog or an iterable of tools: {error}", details={"field": "build_agent.tools", "actual_type": type(catalog).__name__}) from error
-
-    def _resolve_named(self, definitions: tuple[Any, ...], available: Mapping[str, object], field_name: str) -> tuple[object, ...]:
-        # Looks every declared middleware or context-item reference up in the caller's mapping, failing closed on the first miss.
-        if not definitions:
-            return ()
-        components = self._component_map(available, field_name)
-        resolved: list[object] = []
-        for index, definition in enumerate(definitions):
-            if definition.ref not in components:
-                raise ConfigurationError(f"Declared reference '{definition.ref}' was not supplied to build_agent().", details={"field": definition.path or f"{field_name}[{index}]", "reference": definition.ref, "available": sorted(components)})
-            resolved.append(components[definition.ref])
-        return tuple(resolved)
-
-    def _component_map(self, available: Mapping[str, object], field_name: str) -> Mapping[str, object]:
-        # Requires caller-supplied components as a ref-keyed mapping, since every reference resolves by name.
-        if not isinstance(available, Mapping) or not all(isinstance(key, str) for key in available):
-            raise ConfigurationError(f"build_agent() '{field_name.rpartition('.')[2]}' must be a mapping of reference name to component.", details={"field": f"build_agent.{field_name.rpartition('.')[2]}", "actual_type": type(available).__name__})
-        return available
-
     def _assert_contract_tools_resolve(self, settings: AgentSettings, tools: Tools) -> None:
         # @intent unsatisfiable-floors-fail-at-build
         # An output-contract floor naming a tool the agent will not have can never be met, so the run would
@@ -245,14 +201,12 @@ class YamlLoader:
         # Collects the tool identity of every output contract that targets one named tool.
         return tuple(str(getattr(contract, "tool_name")) for contract in loop.output_contracts if getattr(contract, "tool_name", None))
 
-    def _construct_agent(self, settings: AgentSettings, tools: Tools, middleware: tuple[object, ...], context_items: tuple[object, ...], injections: Mapping[str, object]) -> "BaseAgent":
-        # Maps validated settings onto BaseAgent keyword arguments and layers the caller's non-serializable inputs on top.
+    def _construct_agent(self, settings: AgentSettings, tools: Tools, middleware: tuple[object, ...], context_items: tuple[object, ...]) -> "BaseAgent":
+        # Maps validated settings and the components built from them onto BaseAgent keyword arguments.
         from vidbyte.agents.base import BaseAgent
 
-        kwargs = settings.to_agent_kwargs(tools=tools, middleware=middleware, context_items=context_items)
-        kwargs.update({key: value for key, value in injections.items() if value is not None})
         try:
-            return BaseAgent(**kwargs)
+            return BaseAgent(**settings.to_agent_kwargs(tools=tools, middleware=middleware, context_items=context_items))
         except (TypeError, ValueError) as error:
             raise ConfigurationError(f"Settings for agent '{settings.name}' did not construct a BaseAgent: {error}", details={"field": "agent", "agent": settings.name}) from error
 

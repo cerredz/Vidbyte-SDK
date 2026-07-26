@@ -141,6 +141,8 @@ Gains a build step that turns validated settings plus caller-supplied components
 
 #### Interface / API
 
+> **Superseded by §14.** The signature and the resolution helpers below are the pre-review form; §14 records the shipped shape.
+
 ```python
 class YamlLoader:
     def build_agent(self, settings: AgentSettings, *, name: str | None = None, tools: "Tools | Sequence[object]" = (), middleware: Mapping[str, object] = {}, context_items: Mapping[str, object] = {}, context_manager: object | None = None, output_schema: object | None = None, tracer: object | None = None, permission_policy: object | None = None) -> "BaseAgent": ...
@@ -157,8 +159,6 @@ class YamlLoader:
 ```
 
 The existing private `_build_agent` (which parses a document into `AgentSettings`) is renamed `_parse_agent_settings`. It is referenced only inside this file, and leaving a private `_build_agent` beside a public `build_agent` that does something entirely different is a readability trap.
-
-Mutable defaults are written as immutable empty mappings in the implementation (`MappingProxyType({})` or a module constant), not literal `{}`.
 
 #### Logic / Algorithm
 
@@ -339,6 +339,46 @@ No new third-party dependency; `pyproject.toml` is untouched.
 
 - **What:** `tools: []` in the document means "everything the caller supplied".
 - **Why rejected:** fails open. A document that grants no capabilities would silently grant all of them. The document is the allowlist (FR6).
+
+---
+
+## 14. Review Revision — Registry Resolution (PR #317)
+
+Two review comments on `Vidbyte-SDK#317` changed the resolution model. This section supersedes §5, §6.1, and FR2/FR4–FR7 above; everything else stands.
+
+> **[loader.py:106](https://github.com/cerredz/Vidbyte-SDK/pull/317#discussion_r3653200950)** — "its not actually possible to build the custom middleware functions for the .yaml file, we should build the agent with just its settings corresponding to the .yaml file (note, input should just be what load_agent() returns, if you need to update AgentSettings to accomplish this then do so"
+>
+> **[loader.py:223](https://github.com/cerredz/Vidbyte-SDK/pull/317#discussion_r3653203565)** — "feel like all of these herlper functions can simple be done in less lines of code with our registries inside of vidbyte/lib/registries"
+
+### Shipped shape
+
+```python
+class YamlLoader:
+    def build_agent(self, settings: AgentSettings, *, name: str | None = None) -> "BaseAgent": ...
+
+
+class ComponentRegistry:  # vidbyte/lib/registries/components.py
+    @classmethod
+    def build_tools(cls, definitions: Sequence[Any]) -> "Tools": ...
+    @classmethod
+    def build_middleware(cls, definitions: Sequence[Any]) -> tuple[Any, ...]: ...
+    @classmethod
+    def build_context_items(cls, definitions: Sequence[Any]) -> tuple[Any, ...]: ...
+    @classmethod
+    def build(cls, kind: str, ref: str, options: Mapping[str, Any]) -> Any: ...
+    @classmethod
+    def names(cls, kind: str) -> tuple[str, ...]: ...
+```
+
+- **The settings are the only input.** The component mappings and the four injection parameters (`context_manager`, `output_schema`, `tracer`, `permission_policy`) are gone; a caller who needs them uses `to_agent_kwargs()` and constructs directly, which is the seam that already exists for exactly that case.
+- **A ref selects a registered class, not a caller-supplied object.** `ComponentRegistry` catalogs the public exports of `vidbyte.tools.builtins`, `vidbyte.middleware`, and `vidbyte.context.primitives`, keyed by class name; an entry's validated `options` become that class's keyword arguments. `names(kind)` publishes the vocabulary.
+- **The security invariant is unchanged and now stated where the scan happens.** The packages scanned are literals in `components.py`; a ref is only ever a key looked up in the resulting mapping, so no document text reaches an import.
+- **Application-defined components are undeclarable by design** — a YAML file cannot carry a Python callable. That is the review comment's premise, and it is now the documented rule rather than a silently-empty middleware list.
+- **Four loader helpers deleted.** `_resolve_tools`, `_catalog`, `_resolve_named`, and `_component_map` (~40 lines of hand-rolled name lookup and container gating) collapse into three registry calls. The gates the review did not object to — `_buildable_settings`, `_renamed`, `_assert_contract_tools_resolve`, `_contract_tool_names`, `_construct_agent` — are unchanged apart from dropping the injections argument.
+- **`AgentSettings` needed no change.** `to_agent_kwargs(tools=, middleware=, context_items=)` already accepts built components, so the registry's output feeds it unchanged.
+- **FR6 still holds by construction**: an empty `tools:` list builds an empty catalog, so a document granting no capabilities grants none.
+
+Open question §12's first bullet is now answered: `from vidbyte import YamlLoader`, `vidbyte.config.YamlLoader`, and `VidbyteSDK().config` all resolve to `vidbyte/config/loader.py`, so this method landed on the exported class. `llms.txt` remains wrong about that and is still a follow-up.
 
 ---
 

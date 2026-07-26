@@ -15,6 +15,7 @@ Similar Files:
 from __future__ import annotations
 
 from vidbyte.lib.registries.agents import AgentRegistry
+from vidbyte.lib.registries.components import ComponentRegistry
 from vidbyte.lib.registries.models import ProviderModelRegistry
 from vidbyte.lib.registries.pricing import ModelPricing, ModelPricingRegistry, PRICING_AS_OF, PROVIDER_PRICING
 from vidbyte.lib.registries.prompts import PromptRecord, Prompts
@@ -24,6 +25,7 @@ from vidbyte.lib.registries.actors import ActorRegistry, actor_registry
 
 __all__ = [
     "AgentRegistry",
+    "ComponentRegistry",
     "ProviderModelRegistry",
     "ModelPricing",
     "ModelPricingRegistry",
