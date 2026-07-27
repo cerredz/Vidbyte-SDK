@@ -13,6 +13,8 @@ Key Functions:
     - resolve_api_key: Resolves explicit API key or retrieves environment variable.
     - resolve_endpoint: Resolves explicit endpoint or defaults to standard URL.
     - get_supported_providers: Gets list of supported provider strings.
+    - is_valid_provider: Reports whether a provider string is one the SDK offers.
+    - resolve_provider: Coerces a provider string to ModelProvider, or None.
     - get_supported_models: Gets list of default model strings.
     - resolve_active: Returns the set of providers and models to use for a run.
     - validate_provider: Raises ConfigurationError if a provider string is unrecognized.
@@ -154,6 +156,23 @@ class ProviderModelRegistry:
         return sorted(p.value for p in ModelProvider)
 
     @classmethod
+    def is_valid_provider(cls, provider: str) -> bool:
+        # Non-raising counterpart to validate_provider, for callers that branch on
+        # provider support rather than failing. Accepts the same surrounding
+        # whitespace and casing that resolve_provider tolerates.
+        return cls.resolve_provider(provider) is not None
+
+    @classmethod
+    def resolve_provider(cls, provider: str) -> ModelProvider | None:
+        # Coerces a provider string to the enum the pricing registries key on, or
+        # None. Centralizing the coercion keeps every caller from re-deciding how
+        # to normalize, which is how a raw string silently misses a price lookup.
+        try:
+            return ModelProvider(str(provider).strip().lower())
+        except ValueError:
+            return None
+
+    @classmethod
     def get_supported_models(cls) -> list[str]:
         # Returns the list of default model identifiers across all registered providers.
         return sorted(list(cls.DEFAULT_PROVIDER_MODELS.values()))
@@ -169,13 +188,12 @@ class ProviderModelRegistry:
     @classmethod
     def validate_provider(cls, provider: str) -> None:
         # Raises ConfigurationError if provider is not a recognized ModelProvider value.
-        try:
-            ModelProvider(provider)
-        except ValueError as exc:
+        # Delegates coercion so this and is_valid_provider can never disagree.
+        if cls.resolve_provider(provider) is None:
             known = cls.get_supported_providers()
             raise ConfigurationError(
                 f"Unrecognized provider '{provider}'. Known providers: {known}."
-            ) from exc
+            )
 
     @classmethod
     def known_models(cls) -> frozenset[str]:
