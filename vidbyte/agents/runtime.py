@@ -1163,20 +1163,31 @@ class AgentRuntime:
         )
 
     def _record_operation_usage(self, tool: object, call: ToolCall, result: ToolResult) -> None:
-        # Records one priced search/fetch operation for a successful PricedOperationTool
-        # call; swallows any hook error so a pricing bug can never break tool execution.
-        if not isinstance(tool, PricedOperationTool) or result.status.value != "success":
+        # Records one priced search/fetch operation per provider attempt a
+        # PricedOperationTool call spent, so a retried or failed provider request stays
+        # billable; swallows any hook error so a pricing bug can never break execution.
+        if not isinstance(tool, PricedOperationTool):
             return
         try:
-            self.usage_tracker.record_operation(
-                tool.operation,
-                tool.provider,
-                mode=tool.mode_used(call, result),
-                units=tool.units_used(call, result),
-                reported_cost_usd=tool.reported_cost_usd(call, result),
-            )
+            attempts = self._billable_attempts(tool, call, result)
+            for _ in range(attempts):
+                self.usage_tracker.record_operation(
+                    tool.operation,
+                    tool.provider,
+                    mode=tool.mode_used(call, result),
+                    units=tool.units_used(call, result),
+                    reported_cost_usd=tool.reported_cost_usd(call, result),
+                )
         except Exception:
             return
+
+    def _billable_attempts(self, tool: PricedOperationTool, call: ToolCall, result: ToolResult) -> int:
+        # Returns how many attempts to price, or zero when the call never reached the provider.
+        if result.status.value != "success" and not tool.declares_usage(result):
+            return 0
+        if tool.units_used(call, result) < 1:
+            return 0
+        return max(0, tool.attempts_used(call, result))
 
     @staticmethod
     def _middleware_denied_tool(call: ToolCall, provider: str, decision: MiddlewareDecision, *, iteration_count: int | None = None) -> tuple[ToolCallContext, ToolResult]:

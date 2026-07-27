@@ -21,7 +21,8 @@ from __future__ import annotations
 
 import asyncio
 
-from vidbyte.lib.errors import SourceFetchError
+from vidbyte.lib.dataclasses.operations import FetchPayload
+from vidbyte.lib.errors import ProviderRequestError, ProviderResponseError, SourceFetchError
 from vidbyte.tools.builtins.operations.base import PricedOperationTool
 from vidbyte.tools.types import ToolCall, ToolParameter, ToolResult, ToolSpec
 
@@ -32,6 +33,15 @@ def _urls_count(call: ToolCall) -> int:
     if isinstance(urls, (list, tuple)):
         return len(urls)
     return 1 if call.arguments.get("url") else 0
+
+
+def _url_list(call: ToolCall) -> list[str]:
+    # Resolves the concrete page URLs a fetch call targets, dropping blank entries.
+    urls = call.arguments.get("urls")
+    if isinstance(urls, (list, tuple)):
+        return [str(url) for url in urls if isinstance(url, str) and url.strip()]
+    single = call.arguments.get("url")
+    return [single] if isinstance(single, str) and single.strip() else []
 
 
 class FirecrawlFetchTool(PricedOperationTool):
@@ -52,8 +62,22 @@ class FirecrawlFetchTool(PricedOperationTool):
         )
 
     async def execute(self, call: ToolCall) -> ToolResult:
-        # Prices one Firecrawl scrape by the number of pages fetched.
-        return self._contract_result("firecrawl scrape", units=_urls_count(call), mode="scrape")
+        # Scrapes every requested page through the injected FirecrawlClient, or prices a stub.
+        urls = _url_list(call)
+        if not urls:
+            return self._failed_result("firecrawl fetch requires a url or urls argument.", units=0, mode="scrape", attempts=0, error="missing_url")
+        if self._client is None:
+            return self._contract_result("firecrawl scrape", units=len(urls), mode="scrape")
+        try:
+            payload = await self._client.scrape(urls)
+        except (ProviderRequestError, ProviderResponseError):
+            return self._failed_result("firecrawl fetch failed.", units=len(urls), mode="scrape", attempts=self._client.max_attempts, error="fetch_failed")
+        return self._executed_result(self._render(payload), payload, units=payload.billable_units, mode="scrape", attempts=payload.attempts)
+
+    def _render(self, payload: FetchPayload) -> str:
+        # Renders one line per scraped page; page bodies travel in the payload, not the summary.
+        lines = [f"{index}. {page.final_url} ({len(page.content)} chars)" for index, page in enumerate(payload.pages, start=1)]
+        return f"firecrawl scrape: {len(payload.pages)} pages.\n" + "\n".join(lines)
 
 
 class ParallelExtractTool(PricedOperationTool):

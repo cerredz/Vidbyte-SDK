@@ -16,6 +16,12 @@ Relations:
 from __future__ import annotations
 
 from vidbyte.tools.builtins.operations.base import PricedOperationTool
+from vidbyte.tools.builtins.operations.clients import (
+    BraveClient,
+    FirecrawlClient,
+    RetryPolicy,
+    WebOperationClient,
+)
 from vidbyte.tools.builtins.operations.fetch import (
     DirectHttpFetchTool,
     FirecrawlFetchTool,
@@ -34,9 +40,11 @@ from vidbyte.tools.builtins.operations.search import (
 )
 
 __all__ = [
+    "BraveClient",
     "BraveSearchTool",
     "DirectHttpFetchTool",
     "ExaSearchTool",
+    "FirecrawlClient",
     "FirecrawlFetchTool",
     "LinkupFetchTool",
     "LinkupSearchTool",
@@ -44,7 +52,9 @@ __all__ = [
     "ParallelExtractTool",
     "ParallelSearchTool",
     "PricedOperationTool",
+    "RetryPolicy",
     "SemanticScholarSearchTool",
     "TavilyExtractTool",
     "TavilySearchTool",
+    "WebOperationClient",
 ]
