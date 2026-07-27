@@ -53,7 +53,12 @@ class FirecrawlFetchTool(PricedOperationTool):
 
     async def execute(self, call: ToolCall) -> ToolResult:
         # Prices one Firecrawl scrape by the number of pages fetched.
-        return self._contract_result("firecrawl scrape", units=_urls_count(call), mode="scrape")
+        return await self._execute_or_contract(
+            call,
+            "firecrawl scrape",
+            units=_urls_count(call),
+            mode="scrape",
+        )
 
 
 class ParallelExtractTool(PricedOperationTool):
@@ -74,7 +79,11 @@ class ParallelExtractTool(PricedOperationTool):
 
     async def execute(self, call: ToolCall) -> ToolResult:
         # Prices one Parallel extract by the number of URLs.
-        return self._contract_result("parallel extract", units=_urls_count(call))
+        return await self._execute_or_contract(
+            call,
+            "parallel extract",
+            units=_urls_count(call),
+        )
 
 
 class TavilyExtractTool(PricedOperationTool):
@@ -98,7 +107,12 @@ class TavilyExtractTool(PricedOperationTool):
         # Prices one Tavily extract by URL count at the basic/advanced tier.
         depth = call.arguments.get("extract_depth")
         mode = depth if depth in ("basic", "advanced") else "basic"
-        return self._contract_result("tavily extract", units=_urls_count(call), mode=mode)
+        return await self._execute_or_contract(
+            call,
+            "tavily extract",
+            units=_urls_count(call),
+            mode=mode,
+        )
 
 
 class LinkupFetchTool(PricedOperationTool):
@@ -121,7 +135,12 @@ class LinkupFetchTool(PricedOperationTool):
     async def execute(self, call: ToolCall) -> ToolResult:
         # Prices one Linkup fetch at the js/nojs rate for a single page.
         mode = "js" if call.arguments.get("render_js") is True else "nojs"
-        return self._contract_result("linkup fetch", units=1, mode=mode)
+        return await self._execute_or_contract(
+            call,
+            "linkup fetch",
+            units=1,
+            mode=mode,
+        )
 
 
 class DirectHttpFetchTool(PricedOperationTool):
@@ -147,7 +166,7 @@ class DirectHttpFetchTool(PricedOperationTool):
             body = await asyncio.to_thread(self._fetch_body, url)
         except SourceFetchError as exc:
             return ToolResult.error(self.name, f"direct_http fetch failed: {exc}", metadata={"error": "fetch_failed", "url": url})
-        return self._contract_result(body, units=1)
+        return await self._execute_or_contract(call, body, units=1)
 
     def _fetch_body(self, url: str) -> str:
         # Performs the blocking GET and returns decoded page text.

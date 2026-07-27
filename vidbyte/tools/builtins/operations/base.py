@@ -1,29 +1,42 @@
-"""Context Protocol Header
+"""FILE: vidbyte/tools/builtins/operations/base.py
 
-Description:
-    Abstract base for tools whose execution incurs a priced search/fetch operation.
-Purpose:
-    Carries the stable (operation, provider) identity the runtime uses to price a
-    tool call, and derives the per-call mode / units / provider-reported cost from
-    the call and result without any mutable per-call state.
-Architecture:
-    - PricedOperationTool: BaseTool subclass adding operation/provider ClassVars and
-      the mode_used / units_used / reported_cost_usd hooks the runtime reads.
-Relations:
-    Subclassed by the search and fetch tools in this package; detected by
-    AgentRuntime._record_operation_usage and priced via UsageTracker.record_operation
-    against vidbyte/lib/registries/operation_pricing.py.
-Similar Files:
-    - vidbyte/tools/builtins/document_retrieval.py
+PURPOSE:
+    Defines the stateless priced-operation contract and the application executor
+    seam shared by SDK search and fetch tools.
+ROLE IN CODEBASE:
+    Search and fetch tools subclass PricedOperationTool. AgentRuntime reads its
+    operation metadata and UsageTracker prices the result through the operation
+    pricing registry.
+ARCHITECTURE NOTE:
+    The SDK owns tool schemas and billing identity; applications inject provider
+    I/O as one async executor returning ToolResult.
+FUNCTION INVENTORY:
+    PricedOperationTool: delegates calls, normalizes results, and exposes usage
+    hooks consumed by AgentRuntime.
+COMMON MODIFICATION PATTERNS:
+    Add shared result behavior here; keep provider arguments and unit selection in
+    the concrete operation module.
+WHAT NOT TO DO IN THIS FILE:
+    1. Do not store credentials or provider clients.
+    2. Do not trust executor-supplied operation_usage metadata.
+KNOWN EDGE CASES:
+    Executor failures are converted into redacted priced error results so failed
+    provider attempts remain observable without leaking exception messages.
+RELATED DOCS:
+    tests/features/priced_operation_executor/FEATURE.md
+TESTS:
+    tests/features/priced_operation_executor/test_contract.py
 """
 
 from __future__ import annotations
 
-from collections.abc import Mapping
-from typing import Any, ClassVar
+from collections.abc import Awaitable, Callable, Mapping
+from typing import Any, ClassVar, TypeAlias
 
 from vidbyte.tools.base import BaseTool
-from vidbyte.tools.types import ToolResult
+from vidbyte.tools.types import ToolCall, ToolResult
+
+OperationExecutor: TypeAlias = Callable[[ToolCall], Awaitable[ToolResult]]
 
 
 class PricedOperationTool(BaseTool):
@@ -33,6 +46,45 @@ class PricedOperationTool(BaseTool):
     provider: ClassVar[str] = ""
 
     _USAGE_KEY: ClassVar[str] = "operation_usage"
+
+    def __init__(self, *, executor: OperationExecutor | None = None) -> None:
+        self._executor = executor
+
+    async def _execute_or_contract(
+        self,
+        call: ToolCall,
+        summary: str,
+        *,
+        units: int = 1,
+        mode: str = "default",
+        reported_cost_usd: float | None = None,
+    ) -> ToolResult:
+        if self._executor is None:
+            return self._contract_result(
+                summary,
+                units=units,
+                mode=mode,
+                reported_cost_usd=reported_cost_usd,
+            )
+        try:
+            result = await self._executor(call)
+        # External executors may use any provider exception hierarchy. Normalize
+        # every failure here so usage remains billable and secret text stays out.
+        except Exception as exc:  # noqa: BLE001
+            result = ToolResult.error(
+                self.name,
+                "Operation executor failed.",
+                metadata={
+                    "error": "operation_executor_error",
+                    "error_type": type(exc).__name__,
+                },
+            )
+        return self._priced_result(
+            result,
+            units=units,
+            mode=mode,
+            reported_cost_usd=reported_cost_usd,
+        )
 
     def mode_used(self, call: object, result: ToolResult) -> str:
         # Returns the billing mode for this call, read from the result's usage annotation.
@@ -49,10 +101,45 @@ class PricedOperationTool(BaseTool):
         raw = self._operation_usage(result).get("reported_cost_usd")
         return float(raw) if isinstance(raw, (int, float)) and not isinstance(raw, bool) else None
 
-    def _contract_result(self, summary: str, *, units: int = 1, mode: str = "default", reported_cost_usd: float | None = None) -> ToolResult:
+    def _contract_result(
+        self,
+        summary: str,
+        *,
+        units: int = 1,
+        mode: str = "default",
+        reported_cost_usd: float | None = None,
+    ) -> ToolResult:
         # Builds a deterministic priced-contract result carrying the billing annotation;
         # a real provider client replaces the body while keeping this usage metadata shape.
-        return ToolResult.success(self.name, summary, metadata=self._usage_metadata(units=units, mode=mode, reported_cost_usd=reported_cost_usd))
+        return self._priced_result(
+            ToolResult.success(self.name, summary),
+            units=units,
+            mode=mode,
+            reported_cost_usd=reported_cost_usd,
+        )
+
+    def _priced_result(
+        self,
+        result: ToolResult,
+        *,
+        units: int,
+        mode: str,
+        reported_cost_usd: float | None,
+    ) -> ToolResult:
+        metadata = dict(result.metadata)
+        metadata.update(
+            self._usage_metadata(
+                units=units,
+                mode=mode,
+                reported_cost_usd=reported_cost_usd,
+            )
+        )
+        return ToolResult(
+            tool_name=self.name,
+            status=result.status,
+            output=result.output,
+            metadata=metadata,
+        )
 
     @classmethod
     def _operation_usage(cls, result: ToolResult) -> Mapping[str, Any]:
@@ -73,4 +160,4 @@ class PricedOperationTool(BaseTool):
         return {cls._USAGE_KEY: payload}
 
 
-__all__ = ["PricedOperationTool"]
+__all__ = ["OperationExecutor", "PricedOperationTool"]

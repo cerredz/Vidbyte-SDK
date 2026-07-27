@@ -1,21 +1,33 @@
-"""Context Protocol Header
+"""FILE: vidbyte/tools/builtins/operations/__init__.py
 
-Description:
-    Exports the pre-built priced search/fetch operation tools.
-Purpose:
-    Provides convenient imports for the operation tools and their shared base
-    without auto-registering instances.
-Architecture:
-    - PricedOperationTool: Shared base carrying (operation, provider) identity.
-    - Search tools: Brave/Exa/Tavily/Linkup/Parallel/OpenAlex/SemanticScholar.
-    - Fetch tools: Firecrawl/Parallel/Tavily/Linkup/DirectHttp.
-Relations:
-    Re-exported by vidbyte.tools.builtins; priced via UsageTracker.record_operation.
+PURPOSE:
+    Exports the priced search/fetch tool vocabulary and its executor contract.
+ROLE IN CODEBASE:
+    Re-exported by vidbyte.tools.builtins; applications import concrete tools and
+    OperationExecutor from this package without auto-registering instances.
+ARCHITECTURE NOTE:
+    Concrete schemas remain provider-specific while PricedOperationTool owns the
+    shared execution and usage boundary.
+FUNCTION INVENTORY:
+    OperationExecutor and PricedOperationTool plus all supported operation tools.
+COMMON MODIFICATION PATTERNS:
+    Export a new concrete operation tool here after defining and testing it.
+WHAT NOT TO DO IN THIS FILE:
+    1. Do not instantiate or auto-register tools.
+KNOWN EDGE CASES:
+    This module is a public import surface; removing names is a breaking change.
+RELATED DOCS:
+    vidbyte/tools/builtins/operations/README.md
+TESTS:
+    tests/features/priced_operation_executor/test_contract.py
 """
 
 from __future__ import annotations
 
-from vidbyte.tools.builtins.operations.base import PricedOperationTool
+from vidbyte.tools.builtins.operations.base import (
+    OperationExecutor,
+    PricedOperationTool,
+)
 from vidbyte.tools.builtins.operations.fetch import (
     DirectHttpFetchTool,
     FirecrawlFetchTool,
@@ -41,6 +53,7 @@ __all__ = [
     "LinkupFetchTool",
     "LinkupSearchTool",
     "OpenAlexSearchTool",
+    "OperationExecutor",
     "ParallelExtractTool",
     "ParallelSearchTool",
     "PricedOperationTool",

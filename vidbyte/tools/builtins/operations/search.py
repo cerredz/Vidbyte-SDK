@@ -54,7 +54,11 @@ class BraveSearchTool(PricedOperationTool):
 
     async def execute(self, call: ToolCall) -> ToolResult:
         # Prices one Brave search call at the flat per-request rate.
-        return self._contract_result(f"brave search: {call.arguments.get('query', '')}", units=1)
+        return await self._execute_or_contract(
+            call,
+            f"brave search: {call.arguments.get('query', '')}",
+            units=1,
+        )
 
 
 class ExaSearchTool(PricedOperationTool):
@@ -79,7 +83,12 @@ class ExaSearchTool(PricedOperationTool):
         # Prices one Exa search by returned result count under the selected mode.
         mode = _mode_arg(call, "type", ("standard", "agentic"), "standard")
         units = _int_arg(call, "num_results", 10)
-        return self._contract_result(f"exa search: {call.arguments.get('query', '')}", units=units, mode=mode)
+        return await self._execute_or_contract(
+            call,
+            f"exa search: {call.arguments.get('query', '')}",
+            units=units,
+            mode=mode,
+        )
 
 
 class TavilySearchTool(PricedOperationTool):
@@ -103,7 +112,12 @@ class TavilySearchTool(PricedOperationTool):
     async def execute(self, call: ToolCall) -> ToolResult:
         # Prices one Tavily search per request at the basic/advanced credit tier.
         mode = _mode_arg(call, "search_depth", ("basic", "advanced"), "basic")
-        return self._contract_result(f"tavily search: {call.arguments.get('query', '')}", units=1, mode=mode)
+        return await self._execute_or_contract(
+            call,
+            f"tavily search: {call.arguments.get('query', '')}",
+            units=1,
+            mode=mode,
+        )
 
 
 class LinkupSearchTool(PricedOperationTool):
@@ -126,7 +140,12 @@ class LinkupSearchTool(PricedOperationTool):
     async def execute(self, call: ToolCall) -> ToolResult:
         # Prices one Linkup search per request at the standard/deep tier.
         mode = _mode_arg(call, "depth", ("standard", "deep"), "standard")
-        return self._contract_result(f"linkup search: {call.arguments.get('query', '')}", units=1, mode=mode)
+        return await self._execute_or_contract(
+            call,
+            f"linkup search: {call.arguments.get('query', '')}",
+            units=1,
+            mode=mode,
+        )
 
 
 class ParallelSearchTool(PricedOperationTool):
@@ -151,7 +170,12 @@ class ParallelSearchTool(PricedOperationTool):
         # Prices one Parallel search by returned result count under the processor tier.
         mode = _mode_arg(call, "processor", ("turbo", "pro"), "turbo")
         units = _int_arg(call, "max_results", 10)
-        return self._contract_result(f"parallel search: {call.arguments.get('objective', '')}", units=units, mode=mode)
+        return await self._execute_or_contract(
+            call,
+            f"parallel search: {call.arguments.get('objective', '')}",
+            units=units,
+            mode=mode,
+        )
 
 
 class OpenAlexSearchTool(PricedOperationTool):
@@ -173,7 +197,11 @@ class OpenAlexSearchTool(PricedOperationTool):
 
     async def execute(self, call: ToolCall) -> ToolResult:
         # Prices one OpenAlex search call at the flat per-request rate.
-        return self._contract_result(f"openalex search: {call.arguments.get('query', '')}", units=1)
+        return await self._execute_or_contract(
+            call,
+            f"openalex search: {call.arguments.get('query', '')}",
+            units=1,
+        )
 
 
 class SemanticScholarSearchTool(PricedOperationTool):
@@ -195,7 +223,11 @@ class SemanticScholarSearchTool(PricedOperationTool):
 
     async def execute(self, call: ToolCall) -> ToolResult:
         # Prices one Semantic Scholar search call at the free rate.
-        return self._contract_result(f"semantic_scholar search: {call.arguments.get('query', '')}", units=1)
+        return await self._execute_or_contract(
+            call,
+            f"semantic_scholar search: {call.arguments.get('query', '')}",
+            units=1,
+        )
 
 
 __all__ = [
