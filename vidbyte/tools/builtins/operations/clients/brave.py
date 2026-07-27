@@ -63,13 +63,11 @@ class BraveClient(WebOperationClient):
         results = web.get("results")
         if not isinstance(results, (list, tuple)):
             return ()
-        hits = (self._hit_from_result(item) for item in results)
+        hits = (self._hit_from_result(item) for item in results if isinstance(item, Mapping))
         return tuple(hit for hit in hits if hit is not None)
 
-    def _hit_from_result(self, item: object) -> SearchHit | None:
+    def _hit_from_result(self, item: Mapping[str, Any]) -> SearchHit | None:
         # Normalizes one Brave result, skipping any entry without a usable URL.
-        if not isinstance(item, Mapping):
-            return None
         url = item.get("url")
         if not isinstance(url, str) or not url.strip():
             return None
