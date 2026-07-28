@@ -634,7 +634,47 @@ PR, so the repos are not coupled.
 
 ---
 
-## 14. Verification
+## 14. Implementation Deviations
+
+Recorded after implementation; each replaced a design-doc decision that turned out to be wrong or
+needlessly heavy once the code was in front of the audit.
+
+1. **Non-linear runtimes now reject `output_schema` at construction, rather than getting the boundary
+   raise.** Requirement 11 assumed those runtimes would simply lack repair. They actually never
+   populate `AgentResult.structured` at all, so the boundary raise would have fired on *every* run —
+   turning a silently-unenforced schema into a guaranteed failure. `BaseAgent.__init__` now raises
+   `ConfigurationError`, matching how it already rejects middleware, continual tracing, in-context
+   algorithms, and fallback on those runtimes. The combination never worked; it is now loud.
+
+2. **`HandoffAgent` is a deliberate, documented exception to the guarantee.** It declares an
+   `output_schema` but recovers every section from markdown headers when the model returns prose. The
+   guarantee would have converted a sparser handoff into a failed run, so `generate_handoff` catches
+   the violation and parses `exc.raw_output`. This is the one intended escape, not a general opt-out —
+   the reason `OutputSchemaViolationError` carries the raw output at all.
+
+3. **`annotate(schema)` dropped its `tier` parameter.** No tier enforces `minItems`/`pattern`/`minimum`,
+   so branching on it would have been fluff.
+
+4. **`DeepSeekProvider._attach_response_format` was deleted, not rewritten.** Every compatible provider
+   subclasses one base, so the tier check lives there and DeepSeek needs no override. This is a net
+   deletion and fixes the same silent fall-through for xAI, GLM, Kimi, and MiniMax.
+
+5. **`StructuredOutputSupport` lives in `vidbyte/lib/enums/structured_output.py`**, following the
+   repo's one-enum-per-file convention rather than being added to the package `__init__`.
+
+6. **`AgentLoopSettingsOutputContract.report()` now includes `error` for unsatisfied contracts**, and
+   gained a `contracts` property. Both were needed to carry the validation error into the raised
+   error without reaching into private state; every contract benefits.
+
+7. **The session fix landed in `_safe`, not `message_to_dict`.** Adding the `BaseModel` branch to the
+   shared coercion helper repairs the pre-existing `metadata["structured"]` drop at the same time.
+
+Files touched beyond the §9 manifest: `vidbyte/lib/enums/structured_output.py` (new, per deviation 5)
+and `vidbyte/agents/handoff.py` (modified, per deviation 2).
+
+---
+
+## 15. Verification
 
 Canonical CI, run from the implementation worktree per the field guide:
 
