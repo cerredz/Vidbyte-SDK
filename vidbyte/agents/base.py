@@ -126,6 +126,13 @@ class BaseAgent(McpAttachableMixin):
                     f"Agent {name} uses non-linear runtime {self.runtime_type.value}, "
                     "which does not support model fallback."
                 )
+            if output_schema is not None:
+                # These runtimes never populate AgentResult.structured, so a schema they silently
+                # ignored would fail every run once the guarantee is enforced. Reject it up front.
+                raise ConfigurationError(
+                    f"Agent {name} uses non-linear runtime {self.runtime_type.value}, "
+                    "which does not support output_schema."
+                )
 
         if model_name is not None and not isinstance(model_name, str):
             raise ConfigurationError(

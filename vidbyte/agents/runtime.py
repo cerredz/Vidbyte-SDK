@@ -79,6 +79,7 @@ class AgentRuntime:
         self.recorder: RecorderBase = recorder or NullRecorder()
         self.output_schema = output_schema
         self._schema_formatter = OutputSchemaFormatter()
+        self._wire_schema_cache: dict[str, Any] | None = None
         self.output_contract = output_contract or AgentLoopSettingsOutputContract(())
         self.usage_tracker = usage_tracker or UsageTracker()
         self.fallback = fallback
@@ -1368,9 +1369,11 @@ class AgentRuntime:
         return call_options
 
     def _wire_schema(self) -> dict[str, Any]:
-        # Resolves the declared schema and folds unenforceable constraints into descriptions.
-        # Providers wrap this in their own envelope; the runtime never builds a provider payload.
-        return self._schema_formatter.annotate(self._schema_formatter.resolve_schema(self.output_schema))
+        # Resolves the declared schema once per runtime and folds unenforceable constraints into
+        # descriptions. Providers wrap this; the runtime never builds a provider payload itself.
+        if self._wire_schema_cache is None:
+            self._wire_schema_cache = self._schema_formatter.annotate(self._schema_formatter.resolve_schema(self.output_schema))
+        return self._wire_schema_cache
 
     def _validated_output(self, output: str) -> tuple[Any, str | None]:
         # Reuses the schema contract's own evaluation of this output so it is never parsed twice.
