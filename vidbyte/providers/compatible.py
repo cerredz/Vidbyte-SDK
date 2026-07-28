@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import json
 from typing import Any, Mapping
 
 from vidbyte.lib.config import TextModelConfig
-from vidbyte.lib.enums import ModelProvider
+from vidbyte.lib.enums import ModelProvider, StructuredOutputSupport
 from vidbyte.lib.errors import ProviderConfigurationError, ProviderResponseError
 from vidbyte.lib.http import HttpResponseParser, HttpTransport
+from vidbyte.lib.registries.structured_output import StructuredOutputRegistry
 from vidbyte.lib.runners.types import TextModelResponse
 
 
@@ -76,9 +78,36 @@ class OpenAICompatibleProvider:
             payload["tool_choice"] = config.tool_choice
 
     def _attach_response_format(self, payload: dict[str, Any], config: TextModelConfig) -> None:
-        # Preserve structured output options for compatible chat APIs.
-        if config.response_format is not None:
-            payload["response_format"] = dict(config.response_format)
+        # Sends the strongest structured-output request this endpoint is declared to support.
+        if config.response_format is None:
+            return
+        schema = dict(config.response_format)
+        tier = StructuredOutputRegistry.resolve(self.provider, config.model)
+        if tier is StructuredOutputSupport.NATIVE_SCHEMA:
+            payload["response_format"] = {"type": "json_schema", "json_schema": {"name": "agent_output", "schema": schema, "strict": True}}
+            return
+        if tier is StructuredOutputSupport.JSON_MODE:
+            payload["response_format"] = {"type": "json_object"}
+        self._describe_schema_in_system(payload, schema)
+
+    def _describe_schema_in_system(self, payload: dict[str, Any], schema: dict[str, Any]) -> None:
+        # @intent below-native-the-fields-only-reach-the-model-as-text
+        # json_object promises parseable JSON and nothing about the declared fields, so their names
+        # and types have to arrive some other way. DeepSeek additionally requires the word "json" in
+        # the prompt before JSON mode engages at all, which this description satisfies.
+        description = (
+            "\n\nYou MUST respond with ONLY a valid JSON object matching this exact schema."
+            " Use these exact field names and types:\n"
+            f"```json\n{json.dumps(schema, indent=2, ensure_ascii=False)}\n```"
+        )
+        messages = payload.get("messages", [])
+        if not messages:
+            return
+        first = messages[0]
+        if first.get("role") == "system":
+            first["content"] += description
+        else:
+            messages.insert(0, {"role": "system", "content": description.strip()})
 
     def _attach_metadata(self, payload: dict[str, Any], config: TextModelConfig, metadata: Mapping[str, object] | None) -> None:
         # Merge runner-call metadata with static config metadata.
@@ -108,29 +137,6 @@ class OpenAICompatibleProvider:
 
 class DeepSeekProvider(OpenAICompatibleProvider):
     provider = ModelProvider.DEEPSEEK
-
-    def _attach_response_format(self, payload: dict[str, Any], config: TextModelConfig) -> None:
-        # DeepSeek does not support json_schema or json_object natively.
-        # Instead, inject the expected JSON schema into the system prompt
-        # so the model knows the exact field names and structure to return.
-        if config.response_format is not None:
-            fmt = dict(config.response_format)
-            schema_desc = ""
-            json_schema = fmt.get("json_schema", {}).get("schema")
-            if isinstance(json_schema, dict):
-                import json as _json
-                schema_desc = (
-                    "\n\nYou MUST respond with ONLY a valid JSON object matching this exact schema."
-                    " Use these exact field names and types:\n"
-                    f"```json\n{_json.dumps(json_schema, indent=2, ensure_ascii=False)}\n```"
-                )
-            messages = payload.get("messages", [])
-            if messages:
-                first = messages[0]
-                if first.get("role") == "system":
-                    first["content"] += schema_desc
-                else:
-                    messages.insert(0, {"role": "system", "content": schema_desc.strip()})
 
     def _extract_chat_text(self, parsed: Mapping[str, Any]) -> str:
         # DeepSeek may return tool_calls even when no tools are configured,
