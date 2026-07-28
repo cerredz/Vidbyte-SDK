@@ -25,6 +25,7 @@ from vidbyte.lib.enums.platform import Platform
 from vidbyte.lib.enums.prompts import Prompt
 from vidbyte.lib.enums.skills import ContextMinimalFanoutSkill, Skill, Skills as SkillEnums
 from vidbyte.lib.enums.sources import PinPolicy
+from vidbyte.lib.enums.structured_output import StructuredOutputSupport
 
 __all__ = [
     "AgentRuntimeType",
@@ -43,5 +44,6 @@ __all__ = [
     "Prompt",
     "Skill",
     "SkillEnums",
+    "StructuredOutputSupport",
     "TaskStatus",
 ]

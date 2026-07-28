@@ -83,6 +83,17 @@ class AllModelsFailedError(AgentExecutionError):
         super().__init__(message, details={"attempts": list(self.attempts), "attempt_count": len(self.attempts)})
 
 
+class OutputSchemaViolationError(AgentExecutionError):
+    """Raised when an agent declared an output_schema but could not produce a valid instance."""
+
+    def __init__(self, message: str, *, raw_output: str, validation_error: str | None = None, stop_reason: str | None = None) -> None:
+        # Records what the model actually returned and why it failed, so the caller never has to re-parse.
+        self.raw_output = raw_output
+        self.validation_error = validation_error
+        self.stop_reason = stop_reason
+        super().__init__(message, details={"validation_error": validation_error, "stop_reason": stop_reason, "output_chars": len(raw_output)})
+
+
 class MultiAgentExecutionError(AgentExecutionError):
     """Raised when a multi-agent controller cannot safely continue or finalize."""
 
