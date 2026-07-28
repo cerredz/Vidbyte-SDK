@@ -192,6 +192,8 @@ class AgentMessage:
     content: str
     message_type: str = "response"
     metadata: Mapping[str, Any] = field(default_factory=dict)
+    # The validated instance when the sending agent declared an output_schema, else None.
+    structured: Any = None
 
 
 @dataclass(frozen=True, slots=True)

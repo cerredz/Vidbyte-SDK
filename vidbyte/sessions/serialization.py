@@ -109,16 +109,18 @@ class SessionSerializer:
             "content": message.content,
             "message_type": message.message_type,
             "metadata": self._scrub_metadata(message.metadata),
+            "structured": self._safe(message.structured),
         }
 
     def message_from_dict(self, data: Mapping[str, Any]) -> AgentMessage:
-        # Rebuild an AgentMessage from a persisted dict.
+        # Rebuild an AgentMessage from a persisted dict; structured returns as plain data, not a model.
         return AgentMessage(
             sender=data.get("sender", ""),
             recipient=data.get("recipient", ""),
             content=data.get("content", ""),
             message_type=data.get("message_type", "response"),
             metadata=dict(data.get("metadata", {}) or {}),
+            structured=data.get("structured"),
         )
 
     def _run_state_to_dict(self, state: RunState) -> dict[str, Any]:
@@ -191,7 +193,20 @@ class SessionSerializer:
             return {str(k): self._safe(v) for k, v in value.items() if not self._is_secret_key(str(k))}
         if isinstance(value, (list, tuple)):
             return [self._safe(item) for item in value]
+        dumped = self._dumped_model(value)
+        if dumped is not None:
+            return dumped
         return {"__dropped__": type(value).__name__}
+
+    def _dumped_model(self, value: Any) -> dict[str, Any] | None:
+        # Renders a validated structured-output instance as plain JSON data, or None if it is not one.
+        try:
+            from pydantic import BaseModel
+        except ImportError:
+            return None
+        if not isinstance(value, BaseModel):
+            return None
+        return {str(k): self._safe(v) for k, v in value.model_dump(mode="json").items()}
 
     @staticmethod
     def _is_secret_key(key: str) -> bool:

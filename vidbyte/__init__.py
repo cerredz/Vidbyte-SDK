@@ -302,10 +302,13 @@ from vidbyte.lib.errors import (
     McpToolDiscoveryError,
     McpToolExecutionError,
     MultiAgentExecutionError,
+    OutputSchemaViolationError,
     PipelineExecutionError,
     TaskLedgerError,
     TracerConfigurationError,
 )
+from vidbyte.lib.enums import StructuredOutputSupport
+from vidbyte.lib.registries.structured_output import StructuredOutputRegistry
 from vidbyte.lib.tracing import NullTracer, TracerBase
 from vidbyte.trace import (
     ActionTrace,
@@ -516,6 +519,9 @@ __all__ = [
     "SessionTracer",
     "NullTracer",
     "OutputSchemaFormatter",
+    "OutputSchemaViolationError",
+    "StructuredOutputSupport",
+    "StructuredOutputRegistry",
     "AppendOutputTool",
     "AgentRoleSettings",
     "ContextFile",
