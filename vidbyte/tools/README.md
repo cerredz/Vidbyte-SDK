@@ -49,6 +49,36 @@ print(catalog.provider_schemas("openai"))
 - `security/`: permission policies and sandbox contracts.
 - `mcp/`: MCP clients, transports, presets, and bridged tools.
 - `builtins/`: code search, context, context primitives, editing, memory, MCP, handoff, and utility tools.
+- `builtins/operations/`: priced search and fetch tools plus the executing provider clients.
+
+## Priced Operation Tools
+
+Search and fetch tools subclass `PricedOperationTool`, which carries the
+`(operation, provider)` identity the runtime prices against
+[`operation_pricing`](../lib/registries/operation_pricing.py). Supply a client
+and the tool performs the real provider request; omit it and the tool returns a
+priced contract stub, so a tool can be wired into an agent before credentials
+exist.
+
+```python
+from vidbyte.tools.builtins.operations import BraveClient, BraveSearchTool, RetryPolicy
+
+search = BraveSearchTool(client=BraveClient(api_key, retry=RetryPolicy(max_attempts=3)))
+```
+
+The client owns transport policy — timeout, exponential backoff, retryable
+status codes, and a response-body ceiling — and never discovers a credential on
+its own. A successful call returns two channels on one result: `output` holds a
+compact summary for the model's context window, and
+`metadata["operation_payload"]` holds the typed `SearchPayload` or
+`FetchPayload` the application consumes, each record keeping its undecoded
+vendor mapping under `raw`.
+
+Billing is attempt-accurate. A tool declares `units` and `attempts` in
+`metadata["operation_usage"]`, and the runtime records one priced operation per
+attempt — so three retries of a flat-rate search bill three times, and a call
+that exhausts its retries and fails is still billed for the attempts it spent. A
+call that never reached the provider declares `units=0` and bills nothing.
 
 ## Related Layers
 

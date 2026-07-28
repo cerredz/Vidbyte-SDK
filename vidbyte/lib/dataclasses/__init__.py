@@ -116,6 +116,12 @@ from vidbyte.lib.dataclasses.multi_agent import (
 )
 from vidbyte.lib.dataclasses.config import AgentSettings, MiddlewareDefinition, ToolDefinition
 from vidbyte.lib.dataclasses.multi_agent_descriptor import MultiAgentDescriptor
+from vidbyte.lib.dataclasses.operations import (
+    FetchPayload,
+    FetchedPage,
+    SearchHit,
+    SearchPayload,
+)
 from vidbyte.lib.dataclasses.sandbox import SandboxRequest, SandboxResult, SandboxTransport
 from vidbyte.lib.dataclasses.security import PermissionDecision, PermissionPolicy
 from vidbyte.lib.dataclasses.sessions import (
@@ -234,7 +240,9 @@ __all__ = [
     "FinalizationRenderer",
     "FileContextItem",
     "FileStat",
+    "FetchPayload",
     "FetchResponse",
+    "FetchedPage",
     "FileSystemToolConfig",
     "GitDiffContextItem",
     "HARNESS_SCHEMA_VERSION",
@@ -293,6 +301,8 @@ __all__ = [
     "SandboxRequest",
     "SandboxResult",
     "SandboxTransport",
+    "SearchHit",
+    "SearchPayload",
     "Selection",
     "Checkpoint",
     "CheckpointPolicy",

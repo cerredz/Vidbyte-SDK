@@ -19,6 +19,8 @@ Similar Files:
 
 from __future__ import annotations
 
+from vidbyte.lib.dataclasses.operations import SearchPayload
+from vidbyte.lib.errors import ProviderRequestError, ProviderResponseError
 from vidbyte.tools.builtins.operations.base import PricedOperationTool
 from vidbyte.tools.types import ToolCall, ToolParameter, ToolResult, ToolSpec
 
@@ -53,8 +55,22 @@ class BraveSearchTool(PricedOperationTool):
         )
 
     async def execute(self, call: ToolCall) -> ToolResult:
-        # Prices one Brave search call at the flat per-request rate.
-        return self._contract_result(f"brave search: {call.arguments.get('query', '')}", units=1)
+        # Runs the query through the injected BraveClient, or prices a contract stub without one.
+        query = str(call.arguments.get("query", ""))
+        if self._client is None:
+            return self._contract_result(f"brave search: {query}", units=1)
+        try:
+            payload = await self._client.search(query, count=_int_arg(call, "count", 10))
+        except (ProviderRequestError, ProviderResponseError):
+            return self._failed_result("brave search failed.", units=1, mode="default", attempts=self._client.max_attempts, error="search_failed")
+        return self._executed_result(self._render(payload), payload, units=payload.billable_units, mode="default", attempts=payload.attempts)
+
+    def _render(self, payload: SearchPayload) -> str:
+        # Renders a compact numbered result list for the model's context window.
+        if not payload.hits:
+            return f"brave search: no results for {payload.query!r}."
+        lines = [f"{index}. {hit.title} — {hit.url}" + (f"\n   {hit.snippet[:300]}" if hit.snippet else "") for index, hit in enumerate(payload.hits, start=1)]
+        return f"brave search: {len(payload.hits)} results for {payload.query!r}.\n" + "\n".join(lines)
 
 
 class ExaSearchTool(PricedOperationTool):
