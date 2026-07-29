@@ -121,36 +121,76 @@ sdk.providers
 
 ### YAML Configuration
 
-`YamlLoader` (in `vidbyte.lib.config.loader`) is the public class-first interface for
-data-only YAML configuration. There are three document families: agent, harness, and
-environment, discriminated by a `type:` field at the document root. `load_agent(path)`,
-`load_harness(path)`, and `load_environment(path)` select one family explicitly. An
-agent document carries an `agent_type:` discriminator (`base`, `multi`, `aggregate`,
+`YamlLoader` (exported as `vidbyte.YamlLoader`, defined in `vidbyte.config.loader`) is
+the public class-first interface for data-only YAML configuration. There are two
+document families, **agent** and **harness**, and no `kind:` field distinguishes them:
+a document is a harness when it carries the harness envelope (`schema_version:` or
+`harness:`), and an agent otherwise. `load(path)` returns whichever applies;
+`load_agent(path)` and `load_harness(path)` select one family explicitly and fail on
+the other.
+
+| Method | Returns | Purpose |
+|---|---|---|
+| `load(path)` | `AgentSettings \| HarnessSpec` | Dispatch on the document envelope |
+| `load_agent(path)` | `AgentSettings` | Parse one agent document |
+| `load_harness(path)` | `HarnessSpec` | Parse one harness document, content-addressed by `spec_id` |
+| `harness_agent_names(spec)` | `tuple[str, ...]` | Names a harness declares inline, in document order |
+| `load_harness_agent(spec, name)` | `AgentSettings` | One harness-declared agent as ordinary settings |
+| `build_agent(settings, name=None)` | `BaseAgent` | Construct a live agent from those settings |
+| `view_agent()` | `dict` | The structure an agent document must follow |
+
+An agent document carries a `type:` discriminator (`base`, `multi`, `aggregate`,
 `adversarial`, `handoff`, `continual_trace`) that defaults to `base`; only `base` is
-fully loadable today, and the other types are registered but raise a specific error.
+loadable and buildable today, and the other types raise a specific error.
 
-The loader produces `AgentDescriptor`, `HarnessDescriptor`, or `EnvironmentDescriptor`
-objects. Unlike the legacy `AgentSettings`, these descriptors *compose* the SDK's
-existing runtime settings classes (`AgentLoopSettings`, `ToolSettings`, `AgentMetadata`,
-`TraceOption`, `ToolSpec`) rather than duplicating their fields. Validation lives on
-the composed objects' own `__post_init__` and `_validate()` methods.
-
-Tools and middleware are declared as ref strings (resolved later by application code).
-`loop:` maps directly to `AgentLoopSettings` fields. `provider` and `model_name` are
-validated against `ProviderModelRegistry`. The loader validates structure and intrinsic
-settings but never imports a ref, instantiates a tool or middleware, reads secrets,
-or performs network access. Application code resolves refs and calls
-`descriptor.to_agent_kwargs(tools=..., middleware=...)` for `BaseAgent` construction.
+`build_agent` resolves the document's `tools:`, `middleware:`, and `context_items:`
+refs through the SDK's own `ComponentRegistry` — never by importing anything the
+document names. A ref selects a class the SDK already registers, so **application-defined
+tools and middleware are not declarable in YAML**; attach those to the built agent
+afterwards. `loop:` maps to `AgentLoopSettings`; `provider` and `model_name` are checked
+against `ProviderModelRegistry`. Loading and building never read secrets or touch the
+network, and an output contract naming a tool the agent will not have fails at build
+time rather than late in a run.
 
 ```python
-from vidbyte import YamlLoader, AgentDescriptor
+from vidbyte import YamlLoader
 
 loader = YamlLoader()
-desc: AgentDescriptor = loader.load_agent("agent.yaml")
-tools = resolve_tools(desc.tools)          # application-owned resolver
-middleware = resolve_mw(desc.middleware_refs)
-agent = sdk.agents.base(**desc.to_agent_kwargs(tools=tools, middleware=middleware))
+settings = loader.load_agent("agent.yaml")     # -> AgentSettings
+agent = loader.build_agent(settings)           # -> BaseAgent, refs resolved by the SDK
+renamed = loader.build_agent(settings, name="reviewer")
+agent.middleware = (*agent.middleware, MyAppMiddleware())   # app-owned, attached after
 ```
+
+A harness document may declare its agents inline instead of pointing at sidecar agent
+files. `harness_agent_names` enumerates them and `load_harness_agent` returns one as
+ordinary `AgentSettings`, so the same `build_agent` finishes the job:
+
+```yaml
+# research.yaml
+schema_version: 1
+harness:
+  type: research
+agents:
+  - name: discovery
+    provider: deepseek
+    model: deepseek-v4-flash
+    system_prompt:
+      $file: prompts/discovery.md
+    loop:
+      max_iterations: 12
+```
+
+```python
+spec = loader.load_harness("research.yaml")
+for name in loader.harness_agent_names(spec):          # ("discovery", ...)
+    agent = loader.build_agent(loader.load_harness_agent(spec, name))
+```
+
+The harness dialect differs from an agent document in four ways, reconciled on read so
+`spec_id` never changes: `model` becomes `model_name`, a resolved `$file` prompt becomes
+its text, and the harness-only `role`/`params` keys are dropped. Any other unsupported
+key fails with a `ConfigurationError` naming the exact field.
 
 For direct model execution, use an agent:
 

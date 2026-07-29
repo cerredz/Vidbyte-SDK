@@ -218,12 +218,15 @@ class HarnessConfigLoader:
         return agent
 
     def _validate_system_prompt(self, value: Any, index: int) -> None:
-        # Accepts either inline prompt text or an unresolved {$file: ...} reference.
+        # @intent load-validates-twice-so-both-prompt-shapes-are-legal
+        # load() validates the requested config and again after $file resolution. The second pass
+        # sees the {content, sha256} mapping _resolve_file_reference produced, so rejecting it here
+        # made every documented {$file: ...} prompt unloadable rather than merely unresolved.
         if isinstance(value, str):
             return
-        if isinstance(value, Mapping) and set(value) == {"$file"}:
+        if isinstance(value, Mapping) and set(value) in ({"$file"}, {"content", "sha256"}):
             return
-        raise HarnessConfigurationError("Harness agent system_prompt must be a string or a {$file: ...} reference.", details={"field": f"agents[{index}].system_prompt", "actual_type": type(value).__name__})
+        raise HarnessConfigurationError("Harness agent system_prompt must be a string, a {$file: ...} reference, or a resolved {content, sha256} reference.", details={"field": f"agents[{index}].system_prompt", "actual_type": type(value).__name__})
 
     def _validate_tools(self, value: Any, index: int) -> list[Any]:
         # Requires a list of tool names or tool specs; leaves the spec shape open.

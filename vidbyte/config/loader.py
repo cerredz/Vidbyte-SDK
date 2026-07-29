@@ -12,6 +12,9 @@ Architecture:
     - YamlLoader: Stateless public interface with a central load() plus typed loaders.
     - load(): reads one document and returns an AgentSettings subclass or a HarnessSpec.
     - load_agent()/load_harness(): parse one document of a known family.
+    - harness_agent_names()/load_harness_agent(): enumerate the agents a harness document declares
+      inline and translate one into the same AgentSettings a standalone agent document produces,
+      so a harness needs no sidecar agent files.
     - build_agent(): builds one BaseAgent from exactly the settings load() returned, resolving
       every declared ref through the SDK's own ComponentRegistry.
     - view_agent(): returns the expected agent-document structure without touching the disk.
@@ -52,6 +55,10 @@ if TYPE_CHECKING:
 _SUPPORTED_SUFFIXES = frozenset({".yaml", ".yml"})
 _HARNESS_ENVELOPE_KEYS = frozenset({"schema_version", "harness"})
 _TEXT_FILE_SUFFIXES = frozenset({".md", ".markdown", ".txt", ".text", ".rst"})
+# Keys describing an agent's place in a harness rather than how to construct it.
+# Anything else unrecognized still fails AgentSettings' own allowlist by field name.
+_HARNESS_ONLY_AGENT_KEYS = frozenset({"role", "params"})
+_HARNESS_AGENT_FIELD_ALIASES = {"model": "model_name"}
 
 
 class _DuplicateKeySafeLoader(yaml.SafeLoader):
@@ -98,6 +105,20 @@ class YamlLoader:
             error.details.setdefault("path", str(document_path))
             raise
 
+    def harness_agent_names(self, spec: HarnessSpec) -> tuple[str, ...]:
+        # Lists the names a harness document declares, in document order, so a factory can loop over them.
+        return tuple(str(entry.get("name", "")) for entry in self._harness_spec(spec).agents)
+
+    def load_harness_agent(self, spec: HarnessSpec, name: str) -> AgentSettings:
+        # Translates one harness-declared agent into the same validated settings a standalone agent document produces.
+        harness = self._harness_spec(spec)
+        payload = self._agent_settings_payload(self._harness_agent_entry(harness, name))
+        try:
+            return AgentSettings.from_mapping(payload, f"harness.agents[{name}]")
+        except ConfigurationError as error:
+            error.details.setdefault("harness_type", harness.harness_type)
+            raise
+
     def build_agent(self, settings: AgentSettings, *, name: str | None = None) -> "BaseAgent":
         # Builds one live agent from exactly the settings load_agent() returned, resolving every declared ref through the SDK's component registry.
         buildable = self._buildable_settings(settings, name)
@@ -141,6 +162,43 @@ class YamlLoader:
             case other:
                 raise ConfigurationError(f"Unsupported system_prompt file type '{other}'.", details={"field": "agent.system_prompt", "suffix": other})
 
+    def _harness_spec(self, spec: object) -> HarnessSpec:
+        # Guards the public harness-agent entry points so a wrong type fails here instead of on attribute access.
+        if not isinstance(spec, HarnessSpec):
+            raise ConfigurationError("A harness spec is required; pass the value load_harness() returned.", details={"field": "harness.spec", "actual_type": type(spec).__name__})
+        return spec
+
+    def _harness_agent_entry(self, spec: HarnessSpec, name: str) -> Mapping[str, Any]:
+        # Finds one declared agent by name, naming every available agent when the lookup fails.
+        for entry in spec.agents:
+            if str(entry.get("name", "")) == name:
+                return entry
+        available = [str(entry.get("name", "")) for entry in spec.agents]
+        raise ConfigurationError(f"Harness '{spec.harness_type}' does not declare an agent named '{name}'.", details={"field": "harness.agents.name", "name": name, "available": available, "harness_type": spec.harness_type})
+
+    def _agent_settings_payload(self, entry: Mapping[str, Any]) -> dict[str, Any]:
+        # @intent translate-do-not-converge
+        # The harness spec keeps its own dialect because spec.agents feeds spec_id; rewriting it at the
+        # source would re-fingerprint every existing harness variant. Translating on read keeps durable
+        # identity byte-identical, so this maps the four differences and lets AgentSettings reject the rest.
+        payload: dict[str, Any] = {}
+        for key, value in entry.items():
+            if key in _HARNESS_ONLY_AGENT_KEYS:
+                continue
+            field = _HARNESS_AGENT_FIELD_ALIASES.get(key, key)
+            # An explicit canonical key always beats its alias, so a spec carrying both
+            # resolves the same way regardless of the order its keys happen to iterate in.
+            if field != key and field in entry:
+                continue
+            payload[field] = self._agent_settings_value(field, value)
+        return payload
+
+    def _agent_settings_value(self, field: str, value: Any) -> Any:
+        # Unwraps a resolved {$file} prompt to its text, leaving every other value exactly as the spec stored it.
+        if field == "system_prompt" and isinstance(value, Mapping) and "content" in value:
+            return str(value["content"])
+        return value
+
     def _is_harness(self, document: Mapping[str, Any]) -> bool:
         # Recognizes a harness document by its own envelope so agents need no ``kind`` field.
         return any(key in document for key in _HARNESS_ENVELOPE_KEYS)
@@ -167,7 +225,7 @@ class YamlLoader:
     def _buildable_settings(self, settings: object, name: str | None) -> AgentSettings:
         # Accepts only base-agent settings and applies the optional name override before anything is resolved.
         if isinstance(settings, HarnessSpec):
-            raise ConfigurationError("A harness document is not buildable into one agent; load the agent document with load_agent() instead.", details={"field": "build_agent.settings", "harness_type": settings.harness_type, "agents": [str(agent.get("name", "")) for agent in settings.agents]})
+            raise ConfigurationError("A harness spec is not buildable into one agent; select one with load_harness_agent(spec, name) first, or load a standalone agent document with load_agent().", details={"field": "build_agent.settings", "harness_type": settings.harness_type, "agents": [str(agent.get("name", "")) for agent in settings.agents]})
         if not isinstance(settings, AgentSettings):
             raise ConfigurationError("build_agent() requires the AgentSettings returned by load() or load_agent().", details={"field": "build_agent.settings", "actual_type": type(settings).__name__})
         if settings.type is not AgentType.BASE:
