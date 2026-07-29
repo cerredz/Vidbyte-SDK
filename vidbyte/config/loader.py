@@ -107,7 +107,7 @@ class YamlLoader:
 
     def harness_agent_names(self, spec: HarnessSpec) -> tuple[str, ...]:
         # Lists the names a harness document declares, in document order, so a factory can loop over them.
-        return tuple(str(entry["name"]) for entry in self._harness_spec(spec).agents)
+        return tuple(str(entry.get("name", "")) for entry in self._harness_spec(spec).agents)
 
     def load_harness_agent(self, spec: HarnessSpec, name: str) -> AgentSettings:
         # Translates one harness-declared agent into the same validated settings a standalone agent document produces.
