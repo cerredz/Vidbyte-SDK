@@ -33,9 +33,18 @@ class AgentLoopSettingsOutputContract:
         self._contracts = tuple(contracts)
         self._max_rejections = max_rejections
 
+    @property
+    def contracts(self) -> tuple[OutputContract, ...]:
+        # Returns the contracts this owner evaluates, in declaration order.
+        return self._contracts
+
     def active(self) -> bool:
         # Returns whether any contract is configured for this agent.
         return bool(self._contracts)
+
+    def with_contract(self, contract: OutputContract) -> "AgentLoopSettingsOutputContract":
+        # Returns a new owner carrying one extra contract, preserving the configured rejection budget.
+        return AgentLoopSettingsOutputContract((*self._contracts, contract), max_rejections=self._max_rejections)
 
     def unmet(self, counters: Mapping[str, Any]) -> list[OutputContract]:
         # Returns the contracts not yet satisfied by the current counters snapshot.
@@ -56,12 +65,15 @@ class AgentLoopSettingsOutputContract:
 
     def _report_row(self, contract: OutputContract, counters: Mapping[str, Any]) -> dict[str, Any]:
         # Builds one evaluation record including observed value and optional tool identity.
+        satisfied = contract.satisfied(counters)
         row: dict[str, Any] = {
             "name": contract.name,
-            "satisfied": contract.satisfied(counters),
+            "satisfied": satisfied,
             "minimum": contract.minimum,
             "observed": contract.observed(counters),
         }
+        if not satisfied:
+            row["error"] = contract.error(counters)
         tool_name = getattr(contract, "tool_name", None)
         if tool_name is not None:
             row["tool_name"] = tool_name

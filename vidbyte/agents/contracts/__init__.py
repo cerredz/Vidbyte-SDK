@@ -71,9 +71,11 @@ from vidbyte.agents.contracts.floors import (
     MinToolCalls,
     MinToolCallsById,
 )
+from vidbyte.agents.contracts.schema import SchemaConformance
 
 __all__ = [
     "OutputContract",
+    "SchemaConformance",
     "MinToolCalls",
     "MinTokens",
     "MinIterations",

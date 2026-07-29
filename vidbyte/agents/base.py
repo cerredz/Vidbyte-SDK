@@ -33,7 +33,7 @@ from vidbyte.lib.dataclasses.strategies import AgentResult
 from vidbyte.lib.dataclasses.trace import TraceOption
 from vidbyte.lib.constants import RUNNER_TYPE_TEXT
 from vidbyte.lib.enums import AgentRuntimeType, ModelProvider
-from vidbyte.lib.errors import AgentExecutionError, ConfigurationError
+from vidbyte.lib.errors import AgentExecutionError, ConfigurationError, OutputSchemaViolationError
 from vidbyte.lib.runners import Runner
 from vidbyte.lib.tracing import NullTracer, TracerBase
 from vidbyte.agents.runtimes.configs import ActorRuntime, LinearRuntime, MctsSearchRuntime
@@ -43,6 +43,7 @@ from vidbyte.tools.security import PermissionPolicy
 from vidbyte.tools.types import ToolCallContext, ToolSpec
 
 if TYPE_CHECKING:
+    from vidbyte.agents.contract import AgentLoopSettingsOutputContract
     from vidbyte.agents.settings import AgentFallbackSettings
     from vidbyte.sessions.session import Session
     from vidbyte.sessions.store import SessionStore
@@ -124,6 +125,13 @@ class BaseAgent(McpAttachableMixin):
                 raise ConfigurationError(
                     f"Agent {name} uses non-linear runtime {self.runtime_type.value}, "
                     "which does not support model fallback."
+                )
+            if output_schema is not None:
+                # These runtimes never populate AgentResult.structured, so a schema they silently
+                # ignored would fail every run once the guarantee is enforced. Reject it up front.
+                raise ConfigurationError(
+                    f"Agent {name} uses non-linear runtime {self.runtime_type.value}, "
+                    "which does not support output_schema."
                 )
 
         if model_name is not None and not isinstance(model_name, str):
@@ -642,6 +650,7 @@ class BaseAgent(McpAttachableMixin):
             recipient=recipient,
             content=result.output,
             metadata=metadata,
+            structured=result.structured,
         )
         self.history.append(reply)
         self.last_prompt = prompt
@@ -654,7 +663,33 @@ class BaseAgent(McpAttachableMixin):
         self._notify_session(reply)
         if self._queued_prompts and not self._draining_queued_prompts:
             await self._drain_queued_prompts(metadata)
+        self._assert_schema_satisfied(result)
         return reply
+
+    def _assert_schema_satisfied(self, result: AgentResult) -> None:
+        # Fails loudly when a declared schema produced no instance, rather than returning a silent None.
+        # @intent raise-after-the-turn-is-recorded
+        # The failed attempt is still appended to history and checkpointed before this runs, so a
+        # session keeps the evidence of what the model actually said instead of losing the turn.
+        if self.output_schema is None or result.structured is not None:
+            return
+        raise OutputSchemaViolationError(
+            f"Agent '{self.name}' declared an output_schema but produced no valid instance.",
+            raw_output=result.output,
+            validation_error=self._schema_violation_detail(result),
+            stop_reason=str(result.metadata.get("stop_reason") or ""),
+        )
+
+    @staticmethod
+    def _schema_violation_detail(result: AgentResult) -> str | None:
+        # Pulls the schema contract's own error text out of the run's contract evaluations.
+        evaluations = result.metadata.get("contract_evaluations")
+        if not isinstance(evaluations, Sequence):
+            return None
+        for row in evaluations:
+            if isinstance(row, Mapping) and row.get("name") == "SchemaConformance":
+                return str(row.get("error") or "") or None
+        return None
 
     async def arun(self, message: str | AgentInput, **options: Any) -> AgentMessage:
         """Async ergonomic alias for generate_reply()."""
@@ -925,7 +960,7 @@ class BaseAgent(McpAttachableMixin):
                 }
 
         if self.runtime_type is AgentRuntimeType.LINEAR:
-            kwargs["output_contract"] = self.agent_loop_settings.output_contract
+            kwargs["output_contract"] = self._output_contract_with_schema()
             kwargs["usage_tracker"] = self._usage_tracker
             kwargs["fallback"] = self.fallback
 
@@ -954,6 +989,16 @@ class BaseAgent(McpAttachableMixin):
             return middleware
         from vidbyte.middleware.continual_trace import ContinualTraceMiddleware
         return (*middleware, ContinualTraceMiddleware(self._trace_option, source_agent=self))
+
+    def _output_contract_with_schema(self) -> "AgentLoopSettingsOutputContract":
+        # Adds the declared schema to this run's contracts so a malformed answer is repaired in-loop.
+        # Read here rather than at construction so assigning output_schema after build still applies.
+        contract = self.agent_loop_settings.output_contract
+        if self.output_schema is None:
+            return contract
+        from vidbyte.agents.contracts import SchemaConformance
+
+        return contract.with_contract(SchemaConformance(self.output_schema))
 
     def _catalog_from_agent_tools(self, tools: Sequence[object]) -> Tools:
         catalog = Tools()

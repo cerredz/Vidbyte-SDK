@@ -202,9 +202,9 @@ class OpenAIProvider:
             payload["tool_choice"] = config.tool_choice
 
     def _attach_response_format(self, payload: dict[str, Any], config: TextModelConfig) -> None:
-        # Structured response formats are nested under text.format for Responses.
+        # Wraps the resolved JSON schema in the Responses API's strict text.format envelope.
         if config.response_format is not None:
-            payload["text"] = {"format": dict(config.response_format)}
+            payload["text"] = {"format": {"type": "json_schema", "name": "agent_output", "schema": dict(config.response_format), "strict": True}}
 
     def _attach_metadata(self, payload: dict[str, Any], config: TextModelConfig, metadata: Mapping[str, object] | None) -> None:
         # Merge runner-call metadata with static config metadata.

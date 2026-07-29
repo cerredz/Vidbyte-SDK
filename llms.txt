@@ -549,11 +549,75 @@ agent = Agent(
 #### Structured output and output contracts
 
 An agent reply is an `AgentMessage` with `sender`, `recipient`, `content`,
-`message_type` (default `"response"`), and `metadata`. Pass
-`output_schema=` to `Agent` / `BaseAgent` when a provider-supported structured
-response should be requested and validated. It accepts a Python type or a JSON
-Schema mapping; valid parsed output is surfaced in reply/result metadata as
-`"structured"`. This is separate from output contracts.
+`message_type` (default `"response"`), `metadata`, and `structured`.
+
+`output_schema=` on `Agent` / `BaseAgent` is a **guarantee, not a hint**. Declaring
+it is the only thing an application should have to do: the SDK owns picking the
+strongest enforcement the endpoint supports, describing the schema to the model,
+parsing what comes back, repairing it if it is wrong, and failing loudly if it
+cannot be repaired. Applications must not write their own parse-and-validate
+helper around a reply.
+
+Structured-output support is a first-class developer feature. Query
+`StructuredOutputRegistry.describe(provider, model)` for the resolved
+`StructuredOutputDescription`, including its enforcement tier, a three-to-four-sentence
+explanation of its guarantees, and its safe fallback. Use
+`StructuredOutputRegistry.descriptions()` when presenting every available mode to a developer.
+Capability declarations live in `vidbyte.lib.configs.structured_output`; the registry only resolves
+those declarations, so adding a provider never requires guessing from its name.
+
+| Tier | Provider guarantee | SDK behavior when lower support is needed |
+| --- | --- | --- |
+| `NATIVE_SCHEMA` | The provider constrains generation to the JSON Schema. | Degrades to strict tools only when the declared model override requires it. |
+| `STRICT_TOOLS` | A required tool call validates schema-shaped arguments. | Degrades to JSON mode when strict tools are unavailable. |
+| `JSON_MODE` | The provider guarantees valid JSON, not field conformance. | The SDK sends schema guidance and repairs failed Pydantic validation. |
+| `PROMPT_ONLY` | No provider transport guarantee is declared. | The SDK sends schema guidance, validates locally, and repairs within the contract budget. |
+
+```python
+class Extraction(BaseModel):
+    title: str = Field(description="The source title, verbatim.")
+    claims: list[str] = Field(min_length=2)
+
+agent = BaseAgent(name="x", system_prompt="...", output_schema=Extraction)
+reply = await agent.arun("...")
+reply.structured.title          # validated instance, never None
+```
+
+It accepts a Pydantic model or a JSON Schema mapping. A Pydantic model is the
+strong tier: fields are validated and a violation is repairable. A raw mapping is
+the weak tier — the SDK checks that the output is JSON but does not check its
+fields, because the SDK carries no JSON Schema validator. Prefer a model.
+
+What the SDK does on your behalf, per run:
+
+1. Resolves the schema and folds constraints no provider grammar enforces
+   (`minItems`, `minLength`, `pattern`, …) into each field's `description`, so the
+   model is told about them. Pydantic still enforces them on the way back.
+2. Resolves the endpoint's `StructuredOutputSupport` tier from
+   `StructuredOutputRegistry` and sends the strongest request that tier accepts —
+   native `json_schema` grammar-constrained decoding, `json_object` JSON mode, or
+   a schema description in the system prompt. Providers own their own wire format;
+   an unknown provider degrades to `PROMPT_ONLY` rather than sending a rejected payload.
+3. Registers a `SchemaConformance` output contract, so an invalid final answer is
+   rejected at the stop boundary and the validation error is fed back for repair,
+   bounded by `max_contract_rejections`.
+4. Puts the validated instance on `reply.structured` (and, unchanged, in
+   `metadata["structured"]`).
+5. Raises `OutputSchemaViolationError` — carrying `raw_output`, `validation_error`,
+   and `stop_reason` — if the schema was declared and no valid instance survived.
+
+The consequence: `reply.structured` is non-`None` whenever `generate_reply` returns
+and a schema was declared, so callers never test it for `None` and never re-parse
+`reply.content`. Repair happens only on the linear runtime; non-linear runtimes get
+the raise but not the retry. Note that grammar-constrained decoding guarantees
+*shape*, never accuracy, and cannot survive a `max_tokens` truncation.
+
+Declaring the schema through YAML is deliberately limited to inline JSON Schema
+mappings: a configuration document may never name a Python import. To attach a
+Pydantic model to a YAML-loaded agent, use the settings escape hatch —
+`BaseAgent(**{**settings.to_agent_kwargs(), "output_schema": MyModel})`.
+
+This is separate from output contracts, though it is implemented as one.
 
 Output contracts are deterministic minimum-effort floors that say when a
 **linear** agent may finish. Configure them through
@@ -1097,7 +1161,7 @@ Suggested Context7 rules:
 - Use `Agent` or `BaseAgent` as the main execution surface.
 - Use `ContextManager` and context primitives for structured context.
 - Use `vidbyte.sources` and `artifacts/file_index.md` when repository-backed docs/artifacts need deterministic context.
-- Use `output_schema` for typed structured outputs when documented.
+- Use `output_schema` for typed structured outputs, and read `reply.structured` directly — never hand-write parsing, validation, retry, or `None` checks around it.
 - Use `agent.persist(...)` / `Session` for durable work and `ForkConversationTool` only for immediate isolated child execution.
 - Do not invent private Vidbyte platform APIs or undocumented service calls.
 - Preserve the pre-release status until final release messaging changes.

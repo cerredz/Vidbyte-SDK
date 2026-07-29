@@ -50,6 +50,7 @@ from vidbyte.middleware import AgentMiddleware, MiddlewarePipeline
 from vidbyte.middleware.builtins.context_compaction import ToolResultCompactionMiddleware
 from vidbyte.prompts.agentic_loop import append_agentic_loop_prompt
 from vidbyte.agents.contract import AgentLoopSettingsOutputContract
+from vidbyte.agents.contracts.schema import SchemaConformance
 from vidbyte.lib.dataclasses.context import BaseAgentContext, BaseContext
 from vidbyte.lib.dataclasses.strategies import AgentResult
 from vidbyte.tools._internal import IS_DONE_TOOL_NAME, with_internal_agent_tools
@@ -78,6 +79,7 @@ class AgentRuntime:
         self.recorder: RecorderBase = recorder or NullRecorder()
         self.output_schema = output_schema
         self._schema_formatter = OutputSchemaFormatter()
+        self._wire_schema_cache: dict[str, Any] | None = None
         self.output_contract = output_contract or AgentLoopSettingsOutputContract(())
         self.usage_tracker = usage_tracker or UsageTracker()
         self.fallback = fallback
@@ -1363,10 +1365,22 @@ class AgentRuntime:
         if conversation_messages:
             call_options.setdefault("messages", conversation_messages)
         if self.output_schema is not None:
-            fmt = self._schema_formatter.build_response_format(provider, self.output_schema)
-            if fmt is not None:
-                call_options.setdefault("response_format", fmt)
+            call_options.setdefault("response_format", self._wire_schema())
         return call_options
+
+    def _wire_schema(self) -> dict[str, Any]:
+        # Resolves the declared schema once per runtime and folds unenforceable constraints into
+        # descriptions. Providers wrap this; the runtime never builds a provider payload itself.
+        if self._wire_schema_cache is None:
+            self._wire_schema_cache = self._schema_formatter.annotate(self._schema_formatter.resolve_schema(self.output_schema))
+        return self._wire_schema_cache
+
+    def _validated_output(self, output: str) -> tuple[Any, str | None]:
+        # Reuses the schema contract's own evaluation of this output so it is never parsed twice.
+        for contract in self.output_contract.contracts:
+            if isinstance(contract, SchemaConformance) and contract.schema is self.output_schema:
+                return contract.evaluate({contract.key: output})
+        return self._schema_formatter.validate(output, self.output_schema)
 
     def _build_conversation_messages(self, messages: list[dict[str, Any]]) -> tuple[dict[str, Any], ...]:
         """Assemble placed context-window conversation messages around runtime messages."""
@@ -1425,7 +1439,7 @@ class AgentRuntime:
         structured: Any = None
         if self.output_schema is not None:
             span = self._start_semantic_span("parser.structured_output", output_chars=len(output or ""))
-            structured, validation_error = self._schema_formatter.validate(output, self.output_schema)
+            structured, validation_error = self._validated_output(output)
             if validation_error:
                 self._end_semantic_span(span, error=ValueError(validation_error))
             else:
