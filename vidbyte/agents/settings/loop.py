@@ -1,19 +1,43 @@
 """Context Protocol Header
 
 Description:
-    Defines AgentLoopSettings, the canonical configuration object for all parameters
-    that govern the agentic execution loop.
+    Defines AgentLoopSettings, the canonical developer-facing configuration for
+    direct agent loop budgets, behavior, tool policy, and output contracts.
 Purpose:
-    Consolidates loop budget and behavioral constraints into a single validated class,
-    replacing scattered flat kwargs with a structured developer-facing abstraction.
+    Validate loop settings once and preserve them through the public-to-internal
+    AgentRuntimeConfig handoff instead of scattering flat kwargs across runtimes.
 Architecture:
-    - AgentLoopSettings: Plain class with __init__-level validation.
-    - to_runtime_config(): Converts to the internal AgentRuntimeConfig contract.
-Relations:
-    Imported by vidbyte.agents.base. Exported from vidbyte.agents.settings.
+    AgentLoopSettings owns public validation; to_runtime_config() performs the
+    single conversion into the frozen internal runtime contract.
+Inputs:
+    Constructor keyword settings, nested ToolSettings/ToolErrorPolicy objects,
+    and output-contract definitions supplied by SDK callers or fork settings.
+Outputs:
+    A validated settings object and an AgentRuntimeConfig carrying every direct-
+    runtime field without normalizing meaningful values such as allowed_tools=().
+System Role:
+    Imported by vidbyte.agents.base and exported through vidbyte.agents.settings.
+Dependencies:
+    Uses SDK configuration errors and agent/tool contract types; the runtime-config
+    import stays local to avoid a module cycle.
+Data Flow:
+    User configuration -> validation -> BaseAgent -> to_runtime_config() -> AgentRuntime.
+Security:
+    Validates positive bounds early; runtime.py remains authoritative for allowlist
+    enforcement and internal-tool exemptions.
+Performance:
+    Construction and conversion are linear only in output-contract count.
+Testing:
+    Covered by scripts/test-agent-loop-settings.py and direct runtime unit suites;
+    a coverage percentage was not collected because coverage.py is not installed.
+Quality:
+    All optional safeguards default to None for backward-compatible no-op behavior.
+Related Docs:
+    https://github.com/cerredz/Vidbyte-SDK/blob/main/docs/design/runtime-loop-settings-enforcement.md
+    https://github.com/cerredz/Vidbyte-SDK/blob/main/skills/agentic-loop-settings/SKILL.md
 Similar Files:
-    - vidbyte/agents/runtimes/configs.py: ActorRuntime follows the same plain-class pattern.
-    - vidbyte/lib/dataclasses/agents.py: AgentRuntimeConfig is the internal contract this converts to.
+    https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/agents/runtimes/configs.py
+    https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/lib/dataclasses/agents.py
 """
 
 from __future__ import annotations
@@ -172,7 +196,7 @@ class AgentLoopSettings:
             )
 
     def to_runtime_config(self) -> "AgentRuntimeConfig":
-        # Converts the subset of fields understood by the internal runtime into AgentRuntimeConfig.
+        # Preserves every direct-runtime setting at the public-to-internal handoff.
         from vidbyte.lib.dataclasses.agents import AgentRuntimeConfig
         max_tool_calls = self.tool_settings.max_calls if self.tool_settings is not None and self.tool_settings.max_calls is not None else self.max_tool_calls
         return AgentRuntimeConfig(
@@ -182,6 +206,11 @@ class AgentLoopSettings:
             compaction_trigger_tokens=self.compaction_trigger_tokens,
             compaction_target_tokens=self.compaction_target_tokens,
             tool_settings=self.tool_settings,
+            max_parallel_tool_calls=self.max_parallel_tool_calls,
+            max_retries=self.max_retries,
+            timeout_seconds=self.timeout_seconds,
+            context_window_budget=self.context_window_budget,
+            allowed_tools=self.allowed_tools,
         )
 
     def __repr__(self) -> str:
