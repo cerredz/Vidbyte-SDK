@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from typing import Any, Mapping
 
 from vidbyte.lib.config import TextModelConfig
@@ -83,29 +82,23 @@ class OpenAICompatibleProvider:
             return
         schema = dict(config.response_format)
         tier = StructuredOutputRegistry.resolve(self.provider, config.model)
-        if tier is StructuredOutputSupport.NATIVE_SCHEMA:
-            payload["response_format"] = {"type": "json_schema", "json_schema": {"name": "agent_output", "schema": schema, "strict": True}}
-            return
-        if tier is StructuredOutputSupport.JSON_MODE:
-            payload["response_format"] = {"type": "json_object"}
-        self._describe_schema_in_system(payload, schema)
-
-    def _describe_schema_in_system(self, payload: dict[str, Any], schema: dict[str, Any]) -> None:
+        match tier:
+            case StructuredOutputSupport.NATIVE_SCHEMA:
+                payload["response_format"] = {"type": "json_schema", "json_schema": {"name": "agent_output", "schema": schema, "strict": True}}
+                return
+            case StructuredOutputSupport.JSON_MODE:
+                payload["response_format"] = {"type": "json_object"}
+            case StructuredOutputSupport.STRICT_TOOLS | StructuredOutputSupport.PROMPT_ONLY:
+                pass
+            case _:
+                raise ProviderConfigurationError(f"{self.provider.value} resolved unsupported structured-output tier {tier!r}.", provider=self.provider.value)
         # @intent below-native-the-fields-only-reach-the-model-as-text
-        # json_object promises parseable JSON and nothing about the declared fields, so their names
-        # and types have to arrive some other way. DeepSeek additionally requires the word "json" in
-        # the prompt before JSON mode engages at all, which this description satisfies.
-        description = (
-            "\n\nYou MUST respond with ONLY a valid JSON object matching this exact schema."
-            " Use these exact field names and types:\n"
-            f"```json\n{json.dumps(schema, indent=2, ensure_ascii=False)}\n```"
-        )
-        messages = payload.get("messages", [])
-        if not messages:
-            return
-        first = messages[0]
-        if first.get("role") == "system":
-            first["content"] += description
+        # JSON mode guarantees parseable JSON rather than field conformance, so each lower tier needs
+        # schema guidance in the system prompt; DeepSeek also requires the word "JSON" before enabling it.
+        description = StructuredOutputRegistry.describe(self.provider, config.model).schema_instruction(schema)
+        messages = payload["messages"]
+        if messages[0].get("role") == "system":
+            messages[0]["content"] += description
         else:
             messages.insert(0, {"role": "system", "content": description.strip()})
 

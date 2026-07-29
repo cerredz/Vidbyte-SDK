@@ -20,7 +20,7 @@ from vidbyte.lib.registries.models import ProviderModelRegistry
 from vidbyte.lib.registries.pricing import ModelPricing, ModelPricingRegistry, PRICING_AS_OF, PROVIDER_PRICING
 from vidbyte.lib.registries.prompts import PromptRecord, Prompts
 from vidbyte.lib.registries.runtimes import RuntimeRegistry
-from vidbyte.lib.registries.structured_output import MODEL_SUPPORT, PROVIDER_SUPPORT, STRUCTURED_OUTPUT_AS_OF, StructuredOutputRegistry
+from vidbyte.lib.registries.structured_output import MODEL_SUPPORT, PROVIDER_SUPPORT, STRUCTURED_OUTPUT_AS_OF, STRUCTURED_OUTPUT_DESCRIPTIONS, StructuredOutputDescription, StructuredOutputRegistry
 from vidbyte.lib.registries.tools import ToolRegistry
 from vidbyte.lib.registries.actors import ActorRegistry, actor_registry
 
@@ -36,9 +36,11 @@ __all__ = [
     "Prompts",
     "RuntimeRegistry",
     "StructuredOutputRegistry",
+    "StructuredOutputDescription",
     "PROVIDER_SUPPORT",
     "MODEL_SUPPORT",
     "STRUCTURED_OUTPUT_AS_OF",
+    "STRUCTURED_OUTPUT_DESCRIPTIONS",
     "ToolRegistry",
     "ActorRegistry",
     "actor_registry",

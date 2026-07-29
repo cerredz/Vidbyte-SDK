@@ -558,6 +558,21 @@ parsing what comes back, repairing it if it is wrong, and failing loudly if it
 cannot be repaired. Applications must not write their own parse-and-validate
 helper around a reply.
 
+Structured-output support is a first-class developer feature. Query
+`StructuredOutputRegistry.describe(provider, model)` for the resolved
+`StructuredOutputDescription`, including its enforcement tier, a three-to-four-sentence
+explanation of its guarantees, and its safe fallback. Use
+`StructuredOutputRegistry.descriptions()` when presenting every available mode to a developer.
+Capability declarations live in `vidbyte.lib.configs.structured_output`; the registry only resolves
+those declarations, so adding a provider never requires guessing from its name.
+
+| Tier | Provider guarantee | SDK behavior when lower support is needed |
+| --- | --- | --- |
+| `NATIVE_SCHEMA` | The provider constrains generation to the JSON Schema. | Degrades to strict tools only when the declared model override requires it. |
+| `STRICT_TOOLS` | A required tool call validates schema-shaped arguments. | Degrades to JSON mode when strict tools are unavailable. |
+| `JSON_MODE` | The provider guarantees valid JSON, not field conformance. | The SDK sends schema guidance and repairs failed Pydantic validation. |
+| `PROMPT_ONLY` | No provider transport guarantee is declared. | The SDK sends schema guidance, validates locally, and repairs within the contract budget. |
+
 ```python
 class Extraction(BaseModel):
     title: str = Field(description="The source title, verbatim.")
