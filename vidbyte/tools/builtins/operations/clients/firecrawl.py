@@ -20,7 +20,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-from vidbyte.lib.dataclasses.operations import FetchedPage, FetchPayload
+from vidbyte.lib.dataclasses.operations import FetchedPage, FetchPayload, OperationCharge
 from vidbyte.lib.errors import ProviderResponseError
 from vidbyte.lib.http.transport import HttpTransport
 from vidbyte.tools.builtins.operations.clients._base import RetryPolicy, WebOperationClient
@@ -45,7 +45,7 @@ class FirecrawlClient(WebOperationClient):
             page, used = await self._scrape_one(url)
             pages.append(page)
             attempts = max(attempts, used)
-        return FetchPayload(provider=self.provider, pages=tuple(pages), attempts=attempts, billable_units=len(pages))
+        return FetchPayload(provider=self.provider, pages=tuple(pages), attempts=attempts, billable_units=len(pages), charges=(OperationCharge("fetch", self.provider, mode="scrape", meter="page", units=len(pages)),))
 
     def _headers(self) -> dict[str, str]:
         # Builds the Firecrawl bearer header; the key never leaves this mapping.

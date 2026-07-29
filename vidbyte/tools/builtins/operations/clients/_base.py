@@ -24,6 +24,7 @@ from json import JSONDecodeError, loads
 from typing import Any
 from urllib.parse import urlencode
 
+from vidbyte.lib.dataclasses.operations import OperationCharge, ProviderOperationPayload
 from vidbyte.lib.errors import ProviderRequestError, ProviderResponseError
 from vidbyte.lib.http.transport import HttpResponse, HttpTransport
 
@@ -78,6 +79,15 @@ class WebOperationClient:
         self._require_ok(operation, response)
         return self._decode_object(operation, response), response.attempts
 
+    async def request_operation(self, operation: str, method: str, *, path: str, headers: Mapping[str, str], json_body: Mapping[str, object] | None = None, charges: tuple[OperationCharge, ...] = (), async_id: str | None = None) -> ProviderOperationPayload:
+        # Executes an endpoint and wraps its JSON, request identity, and pricebook charges.
+        payload, attempts = await self.request_json(operation, method, path=path, headers=headers, json_body=json_body)
+        return ProviderOperationPayload(provider=self.provider, operation=operation, data=payload, attempts=attempts, request_id=self._request_id(payload), async_id=async_id or self._async_id(payload), charges=charges, provider_usage=self._provider_usage(payload), provider_reported_cost_usd=self._reported_cost(payload))
+
+    def request_headers(self) -> dict[str, str]:
+        # Returns the default bearer-authenticated JSON headers for provider APIs.
+        return {"Authorization": f"Bearer {self._api_key}", "Content-Type": "application/json"}
+
     def _absolute_url(self, path: str, query: Mapping[str, str] | None) -> str:
         # Joins the configured base URL with the path and an encoded query string.
         url = f"{self._base_url}/{path.lstrip('/')}"
@@ -97,6 +107,36 @@ class WebOperationClient:
         if not isinstance(payload, dict):
             raise ProviderResponseError(f"{self._provider} {operation} returned a non-object JSON body.", provider=self._provider, status_code=response.status_code)
         return payload
+
+    @staticmethod
+    def _request_id(payload: Mapping[str, Any]) -> str | None:
+        # Extracts common request identifiers without assuming a provider schema.
+        for key in ("requestId", "request_id", "id", "search_id", "extract_id"):
+            value = payload.get(key)
+            if isinstance(value, str) and value.strip():
+                return value
+        return None
+
+    @staticmethod
+    def _async_id(payload: Mapping[str, Any]) -> str | None:
+        # Extracts common asynchronous job identifiers for resumable operations.
+        for key in ("task_id", "taskId", "webset_id", "websetId", "research_id", "monitor_id", "find_all_id"):
+            value = payload.get(key)
+            if isinstance(value, str) and value.strip():
+                return value
+        return None
+
+    @staticmethod
+    def _provider_usage(payload: Mapping[str, Any]) -> Mapping[str, Any]:
+        # Keeps provider usage counters while avoiding a second vendor-specific envelope.
+        value = payload.get("usage")
+        return value if isinstance(value, Mapping) else {}
+
+    @staticmethod
+    def _reported_cost(payload: Mapping[str, Any]) -> float | None:
+        # Reads a vendor cost estimate for reconciliation while the pricebook remains authoritative.
+        value = payload.get("costDollars", payload.get("cost_dollars"))
+        return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else None
 
 
 __all__ = [

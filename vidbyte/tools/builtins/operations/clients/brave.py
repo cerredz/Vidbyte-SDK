@@ -21,7 +21,7 @@ from collections.abc import Mapping
 from datetime import date
 from typing import Any
 
-from vidbyte.lib.dataclasses.operations import SearchHit, SearchPayload
+from vidbyte.lib.dataclasses.operations import OperationCharge, SearchHit, SearchPayload
 from vidbyte.lib.errors import ProviderResponseError
 from vidbyte.lib.http.transport import HttpTransport
 from vidbyte.tools.builtins.operations.clients._base import RetryPolicy, WebOperationClient
@@ -41,7 +41,7 @@ class BraveClient(WebOperationClient):
     async def search(self, query: str, *, count: int = 10, language: str = "en") -> SearchPayload:
         """Run one Brave web search and return normalized hits with billing counts."""
         payload, attempts = await self.request_json("search", "GET", path="web/search", headers=self._headers(), query=self._query_params(query, count, language))
-        return SearchPayload(provider=self.provider, query=query, hits=self._hits_from_payload(payload), attempts=attempts, billable_units=1)
+        return SearchPayload(provider=self.provider, query=query, hits=self._hits_from_payload(payload), attempts=attempts, billable_units=1, charges=(OperationCharge("search", self.provider, meter="request", units=1),))
 
     def _headers(self) -> dict[str, str]:
         # Builds the Brave subscription-token header; the key never leaves this mapping.

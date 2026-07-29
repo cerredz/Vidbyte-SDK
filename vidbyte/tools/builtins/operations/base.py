@@ -22,10 +22,11 @@ Similar Files:
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Any, ClassVar
 
 from vidbyte.tools.base import BaseTool
+from vidbyte.lib.dataclasses.operations import OperationCharge
 from vidbyte.tools.builtins.operations.clients import WebOperationClient
 from vidbyte.tools.types import ToolResult
 
@@ -59,9 +60,17 @@ class PricedOperationTool(BaseTool):
         return raw if isinstance(raw, int) and not isinstance(raw, bool) and raw > 0 else 1
 
     def reported_cost_usd(self, call: object, result: ToolResult) -> float | None:
-        # Returns a provider-reported USD cost when the result carries one, else None.
-        raw = self._operation_usage(result).get("reported_cost_usd")
+        # Returns a provider-reported USD estimate for reconciliation only.
+        raw = self._operation_usage(result).get("provider_reported_cost_usd", self._operation_usage(result).get("reported_cost_usd"))
         return float(raw) if isinstance(raw, (int, float)) and not isinstance(raw, bool) else None
+
+    def charges_used(self, call: object, result: ToolResult) -> tuple[Mapping[str, Any], ...]:
+        # Returns normalized pricebook charge components, preserving legacy single-charge metadata.
+        usage = self._operation_usage(result)
+        raw = usage.get("charges")
+        if isinstance(raw, Sequence) and not isinstance(raw, (str, bytes)):
+            return tuple(item for item in raw if isinstance(item, Mapping) and item.get("billable", True))
+        return ({"operation": self.operation, "provider": self.provider, "mode": self.mode_used(call, result), "meter": "unit", "units": self.units_used(call, result), "billable": True},)
 
     def _contract_result(self, summary: str, *, units: int = 1, mode: str = "default", reported_cost_usd: float | None = None) -> ToolResult:
         # Builds a deterministic priced-contract result carrying the billing annotation;
@@ -70,13 +79,23 @@ class PricedOperationTool(BaseTool):
 
     def _executed_result(self, summary: str, payload: object, *, units: int, mode: str, attempts: int) -> ToolResult:
         # Builds a success result carrying the model-facing summary and the typed payload.
-        metadata = self._usage_metadata(units=units, mode=mode, attempts=attempts)
+        charges = getattr(payload, "charges", ())
+        reported = getattr(payload, "provider_reported_cost_usd", None)
+        metadata = self._usage_metadata(units=units, mode=mode, attempts=attempts, charges=charges, provider_reported_cost_usd=reported)
         metadata[self._PAYLOAD_KEY] = payload
         return ToolResult.success(self.name, summary, metadata=metadata)
 
-    def _failed_result(self, message: str, *, units: int, mode: str, attempts: int, error: str) -> ToolResult:
+    def _payload_result(self, summary: str, payload: object, *, attempts: int = 1, operation: str | None = None) -> ToolResult:
+        # Builds a result from a provider payload and carries all its pricebook charges.
+        charges = getattr(payload, "charges", ())
+        reported = getattr(payload, "provider_reported_cost_usd", None)
+        metadata = self._usage_metadata(attempts=attempts, charges=charges, provider_reported_cost_usd=reported, operation=operation)
+        metadata[self._PAYLOAD_KEY] = payload
+        return ToolResult.success(self.name, summary, metadata=metadata)
+
+    def _failed_result(self, message: str, *, units: int | float, mode: str, attempts: int, error: str, operation: str | None = None) -> ToolResult:
         # Builds an error result that still declares the attempts the retry policy spent.
-        metadata = self._usage_metadata(units=units, mode=mode, attempts=attempts)
+        metadata = self._usage_metadata(units=units, mode=mode, attempts=attempts, operation=operation)
         metadata["error"] = error
         return ToolResult.error(self.name, message, metadata=metadata)
 
@@ -95,13 +114,24 @@ class PricedOperationTool(BaseTool):
         return bool(cls._operation_usage(result))
 
     @classmethod
-    def _usage_metadata(cls, *, units: int = 1, mode: str = "default", attempts: int = 1, reported_cost_usd: float | None = None) -> dict[str, Any]:
+    def _usage_metadata(cls, *, units: int | float = 1, mode: str = "default", attempts: int = 1, reported_cost_usd: float | None = None, provider_reported_cost_usd: float | None = None, charges: Sequence[OperationCharge | Mapping[str, Any]] | None = None, operation: str | None = None) -> dict[str, Any]:
         # Builds the metadata a subclass merges into its ToolResult so the runtime can
         # price the operation from the result alone, keeping the tool stateless.
-        payload: dict[str, Any] = {"operation": cls.operation, "provider": cls.provider, "mode": mode, "units": units, "attempts": attempts}
-        if reported_cost_usd is not None:
-            payload["reported_cost_usd"] = reported_cost_usd
+        payload: dict[str, Any] = {"operation": operation or cls.operation, "provider": cls.provider, "mode": mode, "units": units, "attempts": attempts}
+        if charges:
+            payload["charges"] = tuple(cls._charge_mapping(charge) for charge in charges)
+        if provider_reported_cost_usd is not None:
+            payload["provider_reported_cost_usd"] = provider_reported_cost_usd
+        elif reported_cost_usd is not None:
+            payload["provider_reported_cost_usd"] = reported_cost_usd
         return {cls._USAGE_KEY: payload}
+
+    @staticmethod
+    def _charge_mapping(charge: OperationCharge | Mapping[str, Any]) -> dict[str, Any]:
+        # Converts a typed charge or mapping into safe runtime usage metadata.
+        if isinstance(charge, OperationCharge):
+            return {"operation": charge.operation, "provider": charge.provider, "mode": charge.mode, "meter": charge.meter, "units": charge.units, "billable": charge.billable}
+        return {"operation": charge.get("operation", ""), "provider": charge.get("provider", ""), "mode": charge.get("mode", "default"), "meter": charge.get("meter", "unit"), "units": charge.get("units", 1), "billable": charge.get("billable", True)}
 
 
 __all__ = ["PricedOperationTool"]

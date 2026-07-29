@@ -66,20 +66,21 @@ class UsageTracker:
         self._records.append(record)
         return record
 
-    def record_operation(self, operation: str, provider: str, *, mode: str = "default", units: int = 1, reported_cost_usd: float | None = None) -> OperationUsageRecord | None:
-        # Prices and stores one search/fetch operation; returns None when unusable.
-        # A provider-reported cost, when present, wins over the built-in table math,
-        # mirroring how the token axis prefers a marketplace-reported call cost.
-        if not _is_billable_key(operation, provider) or not isinstance(units, int) or isinstance(units, bool):
+    def record_operation(self, operation: str, provider: str, *, mode: str = "default", units: int | float = 1, meter: str = "unit", reported_cost_usd: float | None = None, provider_reported_cost_usd: float | None = None) -> OperationUsageRecord | None:
+        # Prices one operation strictly from the configured SDK pricebook.
+        if not _is_billable_key(operation, provider) or not _is_numeric_units(units) or not isinstance(meter, str) or not meter.strip():
             return None
-        cost = _reported_or_table_cost(reported_cost_usd, self._operation_pricing.resolve(operation, provider, mode), units)
+        provider_cost = provider_reported_cost_usd if provider_reported_cost_usd is not None else reported_cost_usd
+        pricing = self._operation_pricing.resolve(operation, provider, mode)
         record = OperationUsageRecord(
             call_index=len(self._operations) + 1,
             operation=operation,
             provider=provider,
             mode=mode,
             units=units,
-            cost_usd=cost,
+            meter=meter,
+            cost_usd=_pricebook_cost(pricing, units),
+            provider_reported_cost_usd=_valid_reported_cost(provider_cost),
         )
         self._operations.append(record)
         return record
@@ -150,14 +151,25 @@ def _is_billable_key(operation: str, provider: str) -> bool:
     return isinstance(operation, str) and bool(operation.strip()) and isinstance(provider, str) and bool(provider.strip())
 
 
-def _reported_or_table_cost(reported_cost_usd: float | None, pricing: object, units: int) -> float | None:
-    # Prefers a valid non-negative provider-reported cost, else falls back to the
-    # tariff's own math; returns None when neither can price the operation.
-    if isinstance(reported_cost_usd, (int, float)) and not isinstance(reported_cost_usd, bool) and reported_cost_usd >= 0:
-        return float(reported_cost_usd)
+def _pricebook_cost(pricing: object, units: int | float) -> float | None:
+    # Computes cost only from the pricebook so vendor-reported dollars cannot alter SDK billing.
     if pricing is None:
         return None
     return pricing.cost_usd(units)
+
+
+def _valid_reported_cost(value: object) -> float | None:
+    # Preserves a non-negative provider estimate for reconciliation without billing from it.
+    if isinstance(value, (int, float)) and not isinstance(value, bool) and value >= 0:
+        return float(value)
+    return None
+
+
+def _is_numeric_units(value: object) -> bool:
+    # Accepts finite non-negative quantities for request, page, credit, or time meters.
+    import math
+
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(float(value)) and value >= 0
 
 
 def _sum_or_none(values: Iterable[int | float | None]) -> int | float | None:

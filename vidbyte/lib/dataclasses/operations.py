@@ -25,6 +25,18 @@ from typing import Any
 
 
 @dataclass(frozen=True, slots=True)
+class OperationCharge:
+    """One provider billing component resolved through the SDK pricebook."""
+
+    operation: str
+    provider: str
+    mode: str = "default"
+    meter: str = "unit"
+    units: float = 1.0
+    billable: bool = True
+
+
+@dataclass(frozen=True, slots=True)
 class SearchHit:
     """One normalized web-search result with its undecoded vendor record."""
 
@@ -45,6 +57,10 @@ class SearchPayload:
     hits: tuple[SearchHit, ...] = ()
     attempts: int = 1
     billable_units: int = 1
+    request_id: str | None = None
+    charges: tuple[OperationCharge, ...] = ()
+    provider_usage: Mapping[str, Any] = field(default_factory=dict)
+    provider_reported_cost_usd: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -66,11 +82,32 @@ class FetchPayload:
     pages: tuple[FetchedPage, ...] = ()
     attempts: int = 1
     billable_units: int = 1
+    request_id: str | None = None
+    charges: tuple[OperationCharge, ...] = ()
+    provider_usage: Mapping[str, Any] = field(default_factory=dict)
+    provider_reported_cost_usd: float | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderOperationPayload:
+    """Provider-neutral envelope for endpoint-specific API results."""
+
+    provider: str
+    operation: str
+    data: Mapping[str, Any]
+    attempts: int = 1
+    request_id: str | None = None
+    async_id: str | None = None
+    charges: tuple[OperationCharge, ...] = ()
+    provider_usage: Mapping[str, Any] = field(default_factory=dict)
+    provider_reported_cost_usd: float | None = None
 
 
 __all__ = [
     "FetchPayload",
     "FetchedPage",
+    "OperationCharge",
+    "ProviderOperationPayload",
     "SearchHit",
     "SearchPayload",
 ]

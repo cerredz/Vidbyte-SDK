@@ -23,6 +23,7 @@ import asyncio
 
 from vidbyte.lib.dataclasses.operations import FetchPayload
 from vidbyte.lib.errors import ProviderRequestError, ProviderResponseError, SourceFetchError
+from vidbyte.tools.builtins.operations.api import ProviderApiTool
 from vidbyte.tools.builtins.operations.base import PricedOperationTool
 from vidbyte.tools.types import ToolCall, ToolParameter, ToolResult, ToolSpec
 
@@ -80,6 +81,55 @@ class FirecrawlFetchTool(PricedOperationTool):
         return f"firecrawl scrape: {len(payload.pages)} pages.\n" + "\n".join(lines)
 
 
+class BrowserbaseFetchTool(PricedOperationTool):
+    """Browserbase raw page fetch with optional proxy billing."""
+
+    operation = "fetch"
+    provider = "browserbase"
+
+    def spec(self) -> ToolSpec:
+        # Declares Browserbase Fetch's URL, redirect, SSL, and proxy controls.
+        return ToolSpec(name="browserbase_fetch", description="Fetches or extracts a web page through Browserbase infrastructure without requiring a browser session.", parameters=(ToolParameter("url", "string", "Page URL to fetch."), ToolParameter("proxies", "bool", "Use Browserbase proxies; this selects a higher pricebook mode.", required=False, default=False), ToolParameter("extract", "bool", "Return Browserbase Extract output.", required=False, default=False), ToolParameter("allow_redirects", "bool", "Follow redirects.", required=False, default=True), ToolParameter("allow_insecure_ssl", "bool", "Allow insecure TLS certificates.", required=False, default=False)))
+
+    async def execute(self, call: ToolCall) -> ToolResult:
+        # Runs Browserbase Fetch through the injected client and records proxy mode.
+        url = str(call.arguments.get("url", ""))
+        proxies = call.arguments.get("proxies") is True
+        extract = call.arguments.get("extract") is True
+        mode = "proxy" if proxies else "default"
+        operation = "extract" if extract else "fetch"
+        if self._client is None:
+            return self._contract_result("browserbase fetch", units=1, mode=mode)
+        try:
+            payload = await self._client.fetch(url, proxies=proxies, extract=extract, allow_redirects=call.arguments.get("allow_redirects") is not False, allow_insecure_ssl=call.arguments.get("allow_insecure_ssl") is True)
+        except (ProviderRequestError, ProviderResponseError):
+            return self._failed_result(f"browserbase {operation} failed.", units=1, mode=mode, attempts=self._client.max_attempts, error="fetch_failed", operation=operation)
+        return self._executed_result(self._render(payload), payload, units=1, mode=mode, attempts=payload.attempts)
+
+    def _render(self, payload: FetchPayload) -> str:
+        # Renders page identities and sizes while the bounded content stays in payload metadata.
+        lines = [f"{index}. {page.final_url} ({len(page.content)} chars)" for index, page in enumerate(payload.pages, start=1)]
+        return f"browserbase fetch: {len(payload.pages)} pages.\n" + "\n".join(lines)
+
+
+class ExaContentsTool(ProviderApiTool):
+    """Retrieve Exa page contents, highlights, and summaries."""
+
+    operation = "fetch"
+    provider = "exa"
+    tool_name = "exa_contents"
+    description = "Retrieves known URLs from Exa with markdown text, summaries, highlights, and livecrawl controls."
+    charge_operation = None
+    parameters = (ToolParameter("urls", "array", "Known URLs to retrieve."), ToolParameter("text", "object", "Text retrieval options or true.", required=False, default=True), ToolParameter("summary", "object", "Optional summary options.", required=False), ToolParameter("highlights", "object", "Optional highlight options.", required=False), ToolParameter("livecrawl", "string", "Optional livecrawl policy.", required=False))
+
+    async def _request(self, call: ToolCall):
+        # Retrieves Exa contents through the provider client so page and summary meters are explicit.
+        urls = call.arguments.get("urls", ())
+        if not isinstance(urls, (list, tuple)):
+            urls = ()
+        return await self._client.contents(urls, text=call.arguments.get("text", True), summary=call.arguments.get("summary"), highlights=call.arguments.get("highlights"), livecrawl=call.arguments.get("livecrawl"))
+
+
 class ParallelExtractTool(PricedOperationTool):
     """Parallel extract — per-URL billing."""
 
@@ -97,8 +147,17 @@ class ParallelExtractTool(PricedOperationTool):
         )
 
     async def execute(self, call: ToolCall) -> ToolResult:
-        # Prices one Parallel extract by the number of URLs.
-        return self._contract_result("parallel extract", units=_urls_count(call))
+        # Runs Parallel Extract and prices each requested URL through the provider client.
+        urls = call.arguments.get("urls", ())
+        if not isinstance(urls, (list, tuple)):
+            urls = ()
+        if self._client is None:
+            return self._contract_result("parallel extract", units=len(urls))
+        try:
+            payload = await self._client.extract(urls)
+        except (ProviderRequestError, ProviderResponseError):
+            return self._failed_result("parallel extract failed.", units=len(urls), mode="default", attempts=self._client.max_attempts, error="fetch_failed")
+        return self._payload_result("parallel extract completed.", payload)
 
 
 class TavilyExtractTool(PricedOperationTool):
@@ -115,14 +174,24 @@ class TavilyExtractTool(PricedOperationTool):
             parameters=(
                 ToolParameter(name="urls", type="array", description="Page URLs to extract.", required=True),
                 ToolParameter(name="extract_depth", type="string", description="Extract depth: 'basic' or 'advanced'.", required=False, default="basic"),
+                ToolParameter(name="format", type="string", description="Output format: markdown or text.", required=False, default="markdown"),
             ),
         )
 
     async def execute(self, call: ToolCall) -> ToolResult:
-        # Prices one Tavily extract by URL count at the basic/advanced tier.
+        # Runs Tavily Extract and bills only successful URL extractions.
+        urls = call.arguments.get("urls", ())
+        if not isinstance(urls, (list, tuple)):
+            urls = ()
         depth = call.arguments.get("extract_depth")
         mode = depth if depth in ("basic", "advanced") else "basic"
-        return self._contract_result("tavily extract", units=_urls_count(call), mode=mode)
+        if self._client is None:
+            return self._contract_result("tavily extract", units=len(urls), mode=mode)
+        try:
+            payload = await self._client.extract(urls, extract_depth=mode, format=str(call.arguments.get("format", "markdown")))
+        except (ProviderRequestError, ProviderResponseError):
+            return self._failed_result("tavily extract failed.", units=len(urls), mode=mode, attempts=self._client.max_attempts, error="fetch_failed")
+        return self._payload_result("tavily extract completed.", payload)
 
 
 class LinkupFetchTool(PricedOperationTool):
@@ -183,6 +252,8 @@ class DirectHttpFetchTool(PricedOperationTool):
 
 __all__ = [
     "DirectHttpFetchTool",
+    "BrowserbaseFetchTool",
+    "ExaContentsTool",
     "FirecrawlFetchTool",
     "LinkupFetchTool",
     "ParallelExtractTool",

@@ -119,6 +119,8 @@ from vidbyte.lib.dataclasses.multi_agent_descriptor import MultiAgentDescriptor
 from vidbyte.lib.dataclasses.operations import (
     FetchPayload,
     FetchedPage,
+    OperationCharge,
+    ProviderOperationPayload,
     SearchHit,
     SearchPayload,
 )
@@ -243,6 +245,8 @@ __all__ = [
     "FetchPayload",
     "FetchResponse",
     "FetchedPage",
+    "OperationCharge",
+    "ProviderOperationPayload",
     "FileSystemToolConfig",
     "GitDiffContextItem",
     "HARNESS_SCHEMA_VERSION",

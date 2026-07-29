@@ -16,20 +16,28 @@ Relations:
 from __future__ import annotations
 
 from vidbyte.tools.builtins.operations.base import PricedOperationTool
+from vidbyte.tools.builtins.operations.api import ProviderApiTool
 from vidbyte.tools.builtins.operations.clients import (
+    BrowserbaseClient,
     BraveClient,
+    ExaClient,
     FirecrawlClient,
+    ParallelClient,
     RetryPolicy,
+    TavilyClient,
     WebOperationClient,
 )
 from vidbyte.tools.builtins.operations.fetch import (
+    BrowserbaseFetchTool,
     DirectHttpFetchTool,
+    ExaContentsTool,
     FirecrawlFetchTool,
     LinkupFetchTool,
     ParallelExtractTool,
     TavilyExtractTool,
 )
 from vidbyte.tools.builtins.operations.search import (
+    BrowserbaseSearchTool,
     BraveSearchTool,
     ExaSearchTool,
     LinkupSearchTool,
@@ -38,23 +46,57 @@ from vidbyte.tools.builtins.operations.search import (
     SemanticScholarSearchTool,
     TavilySearchTool,
 )
+from vidbyte.tools.builtins.operations.providers import (
+    BrowserbaseContextTool,
+    BrowserbaseSessionTool,
+    ExaAnswerTool,
+    ExaMonitorTool,
+    ExaWebsetTool,
+    ParallelChatTool,
+    ParallelFindAllTool,
+    ParallelMonitorTool,
+    ParallelTaskTool,
+    TavilyCrawlTool,
+    TavilyMapTool,
+    TavilyResearchTool,
+)
 
 __all__ = [
     "BraveClient",
+    "BrowserbaseClient",
+    "BrowserbaseContextTool",
+    "BrowserbaseFetchTool",
+    "BrowserbaseSearchTool",
+    "BrowserbaseSessionTool",
     "BraveSearchTool",
     "DirectHttpFetchTool",
     "ExaSearchTool",
+    "ExaAnswerTool",
+    "ExaContentsTool",
+    "ExaClient",
     "FirecrawlClient",
     "FirecrawlFetchTool",
     "LinkupFetchTool",
     "LinkupSearchTool",
     "OpenAlexSearchTool",
+    "ParallelChatTool",
+    "ParallelFindAllTool",
+    "ParallelMonitorTool",
+    "ParallelTaskTool",
     "ParallelExtractTool",
     "ParallelSearchTool",
     "PricedOperationTool",
     "RetryPolicy",
     "SemanticScholarSearchTool",
     "TavilyExtractTool",
+    "TavilyCrawlTool",
+    "TavilyMapTool",
+    "TavilyResearchTool",
     "TavilySearchTool",
+    "ExaMonitorTool",
+    "ExaWebsetTool",
+    "ParallelClient",
+    "ProviderApiTool",
+    "TavilyClient",
     "WebOperationClient",
 ]

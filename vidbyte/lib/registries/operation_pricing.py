@@ -38,10 +38,10 @@ class OperationPricing:
 
     usd_fixed: float = 0.0
     usd_per_unit: float = 0.0
-    included_units: int = 0
+    included_units: float = 0.0
     unit_batch: int = 1
 
-    def cost_usd(self, units: int) -> float:
+    def cost_usd(self, units: int | float) -> float:
         # Prices one operation: fixed base plus the per-unit rate applied to the
         # billable units above the included allowance, rounded up to whole batches.
         billable = max(0, units - self.included_units)
@@ -49,53 +49,93 @@ class OperationPricing:
         return self.usd_fixed + self.usd_per_unit * batches
 
 
-OPERATION_PRICING_AS_OF: str = "2026-07-24"
+OPERATION_PRICING_AS_OF: str = "2026-07-29"
 
-# Rates verified against official provider docs on OPERATION_PRICING_AS_OF and
-# converted to USD (the token tracker's unit) from each provider's native basis.
-# Reference-plan assumptions baked into the effective rate, since the customer's
-# plan is not knowable at call time:
-#   - Tavily / Firecrawl bill in credits; USD uses PAYG ($0.008/credit) and the
-#     Standard plan ($0.00083/credit) respectively.
-#   - Exa assumes a single content type (text+highlights); extra content types
-#     (summaries) bill separately and are out of scope.
-#   - Parallel Search assumes ~10 included results before the per-result rate.
-#   - OpenAlex prices the marginal search call; the account-level $1/day free
-#     allowance is not trackable per call.
-# Free operations resolve to an all-zero tariff (cost 0.0), never None, so they do
-# not poison the rollup's cost_complete flag. Sources:
-#   brave  https://brave.com/learn/best-search-api-2026/
-#   exa    https://exa.ai/docs/reference/search
-#   tavily https://docs.tavily.com/documentation/api-credits
-#   linkup https://docs.linkup.so/pages/documentation/platform/pricing
-#   parallel https://docs.parallel.ai/getting-started/pricing
-#   openalex https://blog.openalex.org/openalex-api-new-features-and-usage-based-pricing/
+# Rates are reviewed against official provider docs on OPERATION_PRICING_AS_OF and
+# converted to USD from each provider's native request, result, page, credit, run,
+# or time meter. Plan allowances are not inferred at call time; applications can
+# supply an OperationPricingRegistry override for their account plan.
+# Dynamic providers emit their native quantity (for example Tavily credits or
+# Browserbase browser hours) and the SDK applies the corresponding tariff here.
+# Free operations resolve to an all-zero tariff; unsupported operations resolve to
+# None so cost_complete remains visibly false instead of guessing.
+# Sources:
+#   browserbase https://www.browserbase.com/pricing
+#   exa        https://exa.ai/pricing?tab=api
+#   tavily     https://docs.tavily.com/documentation/api-credits
+#   parallel   https://docs.parallel.ai/getting-started/pricing
+#   brave      https://brave.com/search/api/
+#   firecrawl  https://www.firecrawl.dev/pricing
+#   linkup     https://docs.linkup.so/pages/documentation/platform/pricing
+#   openalex   https://blog.openalex.org/openalex-api-new-features-and-usage-based-pricing/
 #   semantic_scholar https://github.com/allenai/s2-folks/blob/main/API_RELEASE_NOTES.md
-#   firecrawl https://www.eesel.ai/blog/firecrawl-pricing
 OPERATION_PRICING: dict[tuple[str, str, str], OperationPricing] = {
     # ── search ──────────────────────────────────────────────────────────────
     ("search", "brave", "default"): OperationPricing(usd_fixed=0.005),
-    ("search", "exa", "default"): OperationPricing(usd_fixed=0.007, usd_per_unit=0.001, included_units=10),
-    ("search", "exa", "standard"): OperationPricing(usd_fixed=0.007, usd_per_unit=0.001, included_units=10),
-    ("search", "exa", "agentic"): OperationPricing(usd_fixed=0.012, usd_per_unit=0.001, included_units=10),
-    ("search", "tavily", "default"): OperationPricing(usd_fixed=0.008),
-    ("search", "tavily", "basic"): OperationPricing(usd_fixed=0.008),
-    ("search", "tavily", "advanced"): OperationPricing(usd_fixed=0.016),
+    ("search", "browserbase", "default"): OperationPricing(usd_fixed=0.007),
+    ("search", "exa", "default"): OperationPricing(usd_fixed=0.007),
+    ("search", "exa", "standard"): OperationPricing(usd_fixed=0.007),
+    ("search", "exa", "instant"): OperationPricing(usd_fixed=0.007),
+    ("search", "exa", "fast"): OperationPricing(usd_fixed=0.007),
+    ("search", "exa", "auto"): OperationPricing(usd_fixed=0.007),
+    ("search", "exa", "deep-lite"): OperationPricing(usd_fixed=0.012),
+    ("search", "exa", "deep"): OperationPricing(usd_fixed=0.012),
+    ("search", "exa", "deep-reasoning"): OperationPricing(usd_fixed=0.015),
+    ("search_extra_result", "exa", "default"): OperationPricing(usd_per_unit=0.001),
+    ("search_extra_result", "exa", "deep"): OperationPricing(usd_per_unit=0.001),
+    ("content_summary", "exa", "default"): OperationPricing(usd_per_unit=0.001),
+    ("answer", "exa", "default"): OperationPricing(usd_fixed=0.005),
+    ("search", "tavily", "default"): OperationPricing(usd_per_unit=0.008),
+    ("search", "tavily", "basic"): OperationPricing(usd_per_unit=0.008),
+    ("search", "tavily", "fast"): OperationPricing(usd_per_unit=0.008),
+    ("search", "tavily", "ultra-fast"): OperationPricing(usd_per_unit=0.008),
+    ("search", "tavily", "advanced"): OperationPricing(usd_per_unit=0.008),
     ("search", "linkup", "default"): OperationPricing(usd_fixed=0.005),
     ("search", "linkup", "standard"): OperationPricing(usd_fixed=0.005),
     ("search", "linkup", "deep"): OperationPricing(usd_fixed=0.05),
-    ("search", "parallel", "default"): OperationPricing(usd_fixed=0.000001, usd_per_unit=0.000001, included_units=10),
-    ("search", "parallel", "turbo"): OperationPricing(usd_fixed=0.000001, usd_per_unit=0.000001, included_units=10),
-    ("search", "parallel", "pro"): OperationPricing(usd_fixed=0.000005, usd_per_unit=0.000001, included_units=10),
+    ("search", "parallel", "default"): OperationPricing(usd_fixed=0.005),
+    ("search", "parallel", "turbo"): OperationPricing(usd_fixed=0.005),
+    ("search", "parallel", "basic"): OperationPricing(usd_fixed=0.005),
+    ("search", "parallel", "advanced"): OperationPricing(usd_fixed=0.005),
+    ("search_extra_result", "parallel", "default"): OperationPricing(usd_per_unit=0.001),
+    ("search_extra_result", "parallel", "turbo"): OperationPricing(usd_per_unit=0.001),
     ("search", "openalex", "default"): OperationPricing(usd_fixed=0.001),
     ("search", "semantic_scholar", "default"): OperationPricing(),
     # ── fetch ───────────────────────────────────────────────────────────────
     ("fetch", "firecrawl", "default"): OperationPricing(usd_per_unit=0.00083),
     ("fetch", "firecrawl", "scrape"): OperationPricing(usd_per_unit=0.00083),
+    ("fetch", "browserbase", "default"): OperationPricing(usd_per_unit=0.001),
+    ("fetch", "browserbase", "proxy"): OperationPricing(usd_per_unit=0.004),
+    ("extract", "browserbase", "default"): OperationPricing(usd_per_unit=0.004),
+    ("extract", "browserbase", "proxy"): OperationPricing(usd_per_unit=0.007),
     ("fetch", "parallel", "default"): OperationPricing(usd_per_unit=0.001),
     ("fetch", "tavily", "default"): OperationPricing(usd_per_unit=0.008, unit_batch=5),
     ("fetch", "tavily", "basic"): OperationPricing(usd_per_unit=0.008, unit_batch=5),
     ("fetch", "tavily", "advanced"): OperationPricing(usd_per_unit=0.016, unit_batch=5),
+    ("map", "tavily", "default"): OperationPricing(usd_per_unit=0.008, unit_batch=10),
+    ("map", "tavily", "instructions"): OperationPricing(usd_per_unit=0.016, unit_batch=10),
+    ("research", "tavily", "default"): OperationPricing(usd_per_unit=0.008),
+    ("fetch", "exa", "default"): OperationPricing(usd_per_unit=0.001),
+    ("chat", "parallel", "speed"): OperationPricing(usd_fixed=0.005),
+    ("chat", "parallel", "lite"): OperationPricing(usd_fixed=0.005),
+    ("chat", "parallel", "base"): OperationPricing(usd_fixed=0.010),
+    ("chat", "parallel", "core"): OperationPricing(usd_fixed=0.025),
+    ("task", "parallel", "lite"): OperationPricing(usd_fixed=0.005),
+    ("task", "parallel", "base"): OperationPricing(usd_fixed=0.010),
+    ("task", "parallel", "core"): OperationPricing(usd_fixed=0.025),
+    ("task", "parallel", "pro"): OperationPricing(usd_fixed=0.100),
+    ("task", "parallel", "ultra"): OperationPricing(usd_fixed=0.300),
+    ("find_all_request", "parallel", "preview"): OperationPricing(usd_fixed=0.10),
+    ("find_all_request", "parallel", "base"): OperationPricing(usd_fixed=0.25),
+    ("find_all_request", "parallel", "core"): OperationPricing(usd_fixed=2.0),
+    ("find_all_request", "parallel", "pro"): OperationPricing(usd_fixed=10.0),
+    ("find_all_match", "parallel", "base"): OperationPricing(usd_per_unit=0.03),
+    ("find_all_match", "parallel", "core"): OperationPricing(usd_per_unit=0.15),
+    ("find_all_match", "parallel", "pro"): OperationPricing(usd_per_unit=1.0),
+    ("monitor", "parallel", "lite"): OperationPricing(usd_per_unit=0.003),
+    ("monitor", "parallel", "base"): OperationPricing(usd_per_unit=0.010),
+    ("monitor", "exa", "default"): OperationPricing(usd_fixed=0.015),
+    ("session_hour", "browserbase", "default"): OperationPricing(usd_per_unit=0.12),
     ("fetch", "linkup", "default"): OperationPricing(usd_per_unit=0.001),
     ("fetch", "linkup", "nojs"): OperationPricing(usd_per_unit=0.001),
     ("fetch", "linkup", "js"): OperationPricing(usd_per_unit=0.005),

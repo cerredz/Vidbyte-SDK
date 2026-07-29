@@ -1165,31 +1165,38 @@ class AgentRuntime:
         )
 
     def _record_operation_usage(self, tool: object, call: ToolCall, result: ToolResult) -> None:
-        # Records one priced search/fetch operation per provider attempt a
-        # PricedOperationTool call spent, so a retried or failed provider request stays
-        # billable; swallows any hook error so a pricing bug can never break execution.
+        # Records every pricebook charge component per provider attempt without breaking tool execution.
         if not isinstance(tool, PricedOperationTool):
             return
         try:
             attempts = self._billable_attempts(tool, call, result)
+            charges = tool.charges_used(call, result)
             for _ in range(attempts):
-                self.usage_tracker.record_operation(
-                    tool.operation,
-                    tool.provider,
-                    mode=tool.mode_used(call, result),
-                    units=tool.units_used(call, result),
-                    reported_cost_usd=tool.reported_cost_usd(call, result),
-                )
+                for charge in charges:
+                    self.usage_tracker.record_operation(
+                        str(charge.get("operation", tool.operation)),
+                        str(charge.get("provider", tool.provider)),
+                        mode=str(charge.get("mode", tool.mode_used(call, result))),
+                        units=charge.get("units", tool.units_used(call, result)),
+                        meter=str(charge.get("meter", "unit")),
+                        provider_reported_cost_usd=tool.reported_cost_usd(call, result),
+                    )
         except Exception:
             return
 
     def _billable_attempts(self, tool: PricedOperationTool, call: ToolCall, result: ToolResult) -> int:
-        # Returns how many attempts to price, or zero when the call never reached the provider.
+        # Returns provider attempts when at least one declared charge has billable quantity.
         if result.status.value != "success" and not tool.declares_usage(result):
             return 0
-        if tool.units_used(call, result) < 1:
+        charges = tool.charges_used(call, result)
+        if not charges or not any(self._positive_charge_units(charge.get("units")) for charge in charges):
             return 0
         return max(0, tool.attempts_used(call, result))
+
+    @staticmethod
+    def _positive_charge_units(value: object) -> bool:
+        # Accepts positive integer or fractional quantities for all provider meters.
+        return isinstance(value, (int, float)) and not isinstance(value, bool) and value > 0
 
     @staticmethod
     def _middleware_denied_tool(call: ToolCall, provider: str, decision: MiddlewareDecision, *, iteration_count: int | None = None) -> tuple[ToolCallContext, ToolResult]:

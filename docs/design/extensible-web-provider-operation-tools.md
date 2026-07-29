@@ -297,6 +297,8 @@ Implementation will follow existing Context Protocol headers, type annotations, 
 10. `vidbyte/tools/builtins/operations/providers/parallel.py` â€” Parallel Chat, Responses, Task, FindAll, Monitor, and lifecycle tools.
 11. `docs/usage/priced-web-provider-tools.md` â€” Construction examples, endpoint matrix, pricing assumptions, safety limits, and pricebook override guidance.
 
+12. `vidbyte/tools/builtins/operations/providers/README.md` — Agent-readable index and invariants for the new provider endpoint adapter folder.
+
 ### Modify
 
 1. `vidbyte/lib/registries/operation_pricing.py` â€” Add the four providers, all supported billable meters/modes, fractional/composed tariff support, source/as-of metadata, and explicit unknown-price behavior.
@@ -360,6 +362,5 @@ These are implementation choices to resolve while coding, not approval blockers:
 ## Approval
 
 This design is ready for implementation approval. After explicit approval, implementation will begin in a fresh worktree based on `main`, with this document committed first. The implementation will then run canonical CI, perform the required second-pass cross-reference against the original request and this design, resolve critical/notable issues, and report the exact verification evidence.
-
 
 

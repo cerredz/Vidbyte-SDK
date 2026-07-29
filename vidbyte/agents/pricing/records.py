@@ -42,8 +42,10 @@ class OperationUsageRecord:
     operation: str
     provider: str
     mode: str = "default"
-    units: int = 1
+    units: int | float = 1
+    meter: str = "unit"
     cost_usd: float | None = None
+    provider_reported_cost_usd: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
