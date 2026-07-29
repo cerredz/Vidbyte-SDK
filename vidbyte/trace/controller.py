@@ -113,6 +113,9 @@ class TraceController(TracerBase):
         elif name.startswith("multi_agent."):
             detail = TraceDetail.VERBOSE if name == "multi_agent.ledger_update" else TraceDetail.STANDARD
             component = "multi_agent"
+        elif name.startswith("adversarial."):
+            detail = TraceDetail.VERBOSE if name == "adversarial.round" else TraceDetail.STANDARD
+            component = "adversarial"
         elif name.startswith("session."):
             detail = TraceDetail.STANDARD
             component = "sessions"

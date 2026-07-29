@@ -1,65 +1,59 @@
 """Context Protocol Header
 
 FILE:
-    vidbyte/lib/dataclasses/adversarial.py owns portable adversarial workflow settings.
+    vidbyte/lib/dataclasses/adversarial.py owns adversarial workflow policy and result records.
 PURPOSE:
-    Defines and validates the immutable controls the adversarial facade can enforce;
-    keep agent execution, topology dispatch, provider ownership, and prompt rendering elsewhere.
+    Validates the immutable controls enforced by the sequential worker/reviewer
+    workflow and stores full review artifacts without owning agent execution.
 ROLE IN CODEBASE:
-    Imported by vidbyte.agents.adversarial for orchestration and re-exported through
-    vidbyte.lib.dataclasses, vidbyte.agents.settings, vidbyte.agents, and vidbyte.
+    Imported by vidbyte.agents.adversarial and re-exported through
+    vidbyte.lib.dataclasses, vidbyte.agents.settings, and vidbyte.agents.
+    The runtime calls the enforcement and forwarding-bound helpers here.
 ARCHITECTURE NOTE:
-    This low-level contract prevents future tools and context algorithms from importing
-    the high-level agents package merely to share validated adversarial policy.
-PUBLIC CONTRACT INVENTORY (reviewed 2026-07-16):
-    AdversarialSettings validates exact rounds, reviewer shape, specialties, timeouts,
-    forwarding bounds, reviewer freshness, and deterministic child-call budgets.
-    required_child_calls reports child-agent invocations, excluding nested tool calls.
-    specialty_for(index) resolves generic, shared, or index-aligned review lenses.
-    specialist_panel(...) builds the homogeneous-prototype panel supported by the facade.
+    This is the low-level contract boundary: settings validation and enforcement
+    stay separate from child-agent orchestration, prompt rendering, and tracing.
+FUNCTION INVENTORY:
+    AdversarialSettings validates workflow bounds, resolves specialties, enforces
+    review thresholds, and bounds forwarded text. AdversarialReview,
+    AdversarialRoundResult, and AdversarialResult are immutable output records.
 COMMON MODIFICATION PATTERNS:
-    Add only controls the current controller can enforce, validate them before execution,
-    then update facade summaries and skills/vidbyte-sdk/adversarial-agent.md together.
+    Add only controls the current sequential controller can enforce; update the
+    controller, context summary, public docs, and behavioral verification together.
 WHAT NOT TO DO IN THIS FILE:
-    Do not add provider/model/runner objects, live agents, tools, topology strategies,
-    prompt rendering, or orchestration state; those responsibilities belong to agents.
+    Do not add provider/model objects, live agents, tools, prompts, or orchestration.
 KNOWN EDGE CASES:
-    A singleton specialty is shared by every reviewer; an exact-length tuple is aligned
-    by one-based reviewer index. Duplicate specialties are intentional and permitted.
-COMMON ERRORS RAISED BY THIS FILE:
-    ConfigurationError reports invalid types, cardinality, bounds, or incompatible budgets
-    before any child fork or model call can occur.
+    One specialty is shared by every reviewer; an exact-length tuple is index-aligned.
+    Duplicate specialties are valid. Forwarding bounds never truncate retained results.
 RELATED DOCS:
+    https://github.com/cerredz/Vidbyte-SDK/blob/main/docs/design/adversarial-agent.md
     https://github.com/cerredz/Vidbyte-SDK/blob/main/docs/design/adversarial-agent-settings.md
-    Load the design before extending this contract with a new execution control.
-TESTS:
-    No dedicated files under the approved no-tests workflow; use the design document's
-    import, validation, preset, orchestration, timeout, and package smoke commands.
-CONCURRENCY:
-    Immutable and safe to share. Reviewer concurrency remains an agent-controller concern.
+TEST FILES:
+    Existing repository tests and the design-document import/validation smoke checks.
+CONCURRENCY MODEL:
+    Settings and result records are immutable and safe to share; runtime concurrency
+    remains owned by the adversarial controller.
 """
 
 from __future__ import annotations
 
-from collections.abc import Sequence
-from dataclasses import dataclass
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, field
 from math import isfinite
 from typing import Any
 
-from vidbyte.lib.errors import ConfigurationError
+from vidbyte.lib.errors import AdversarialExecutionError, ConfigurationError
 
 _MAX_SPECIALTY_CHARS = 500
+_TRUNCATION_MARKER = "...[truncated]"
 
 
 # @intent executable-settings-only
-# Adversarial settings are a promise about behavior, not a catalog of possible ideas.
-# Every accepted field below is enforced by the current sequential critique-and-revise
-# controller. Future topologies must add their orchestration first or in the same change;
-# adding an ignored debate, provider, or judge setting would mislead SDK callers into
-# believing that a stronger review topology ran when the facade silently used its default.
+# These settings are a promise about behavior, not a catalog of possible ideas.
+# Every accepted field is enforced by the current sequential controller; adding a
+# setting without wiring its behavior would mislead callers about the workflow run.
 @dataclass(frozen=True, slots=True)
 class AdversarialSettings:
-    """Validated controls for one exact adversarial workflow."""
+    """Validated controls and enforcement helpers for one adversarial workflow."""
 
     num_adversaries: int = 1
     adversarial_rounds: int = 1
@@ -73,8 +67,9 @@ class AdversarialSettings:
     max_child_calls: int | None = None
 
     def __post_init__(self) -> None:
-        # Normalizes immutable specialty policy and rejects invalid workflow bounds before execution.
-        object.__setattr__(self, "specialties", self._normalize_specialties(self.specialties))
+        object.__setattr__(
+            self, "specialties", self._normalize_specialties(self.specialties)
+        )
         self._validate_positive_counts()
         self._validate_success_threshold()
         self._validate_timeouts()
@@ -84,11 +79,13 @@ class AdversarialSettings:
 
     @property
     def required_child_calls(self) -> int:
-        # Reports exact child-agent invocations; nested model tool calls are intentionally excluded.
+        """Return the exact child-agent call count for the configured workflow."""
+
         return 1 + self.adversarial_rounds * (self.num_adversaries + 1)
 
     def specialty_for(self, adversary_index: int) -> str | None:
-        # Resolves the generic, shared, or index-aligned lens for one one-based reviewer index.
+        """Resolve the shared or one-based index-aligned reviewer specialty."""
+
         self._require_adversary_index(adversary_index)
         if not self.specialties:
             return None
@@ -97,9 +94,14 @@ class AdversarialSettings:
         return self.specialties[adversary_index - 1]
 
     @classmethod
-    def specialist_panel(cls, specialties: Sequence[str], **overrides: Any) -> AdversarialSettings:
-        # Builds the supported panel shape: independent lenses over forks of one adversary prototype.
-        conflicts = tuple(sorted({"num_adversaries", "specialties"}.intersection(overrides)))
+    def specialist_panel(
+        cls, specialties: Sequence[str], **overrides: Any
+    ) -> AdversarialSettings:
+        """Build settings with one independent reviewer lens per specialty."""
+
+        conflicts = tuple(
+            sorted({"num_adversaries", "specialties"}.intersection(overrides))
+        )
         if conflicts:
             raise ConfigurationError(
                 "AdversarialSettings.specialist_panel derives reviewer shape from specialties; conflicting overrides are not allowed.",
@@ -108,7 +110,7 @@ class AdversarialSettings:
                     "function": "AdversarialSettings.specialist_panel",
                     "conflicting_fields": conflicts,
                     "expected": "omit num_adversaries and specialties from overrides",
-                    "remediation": "Pass specialty lenses as the first argument and use overrides only for round, timeout, freshness, threshold, or budget controls.",
+                    "remediation": "Pass specialty lenses as the first argument and use overrides only for workflow controls.",
                 },
             )
         normalized = cls._normalize_specialties(specialties)
@@ -126,15 +128,62 @@ class AdversarialSettings:
             )
         return cls(num_adversaries=len(normalized), specialties=normalized, **overrides)
 
+    def is_review_threshold_met(self, successful: int) -> bool:
+        """Return whether enough non-blank reviews permit a worker revision."""
+
+        return successful >= self.min_successful_adversaries
+
+    def enforce_review_threshold(
+        self,
+        successful: int,
+        total: int,
+        *,
+        context: Mapping[str, Any] | None = None,
+    ) -> None:
+        """Raise an actionable execution error when the configured review floor fails."""
+
+        if self.is_review_threshold_met(successful):
+            return
+        details: dict[str, Any] = {
+            "file": "vidbyte/lib/dataclasses/adversarial.py",
+            "function": "AdversarialSettings.enforce_review_threshold",
+            "phase": "adversarial_review",
+            "successful_reviews": successful,
+            "failed_reviews": max(total - successful, 0),
+            "required_successful_reviews": self.min_successful_adversaries,
+            "expected": "the configured minimum number of non-blank successful reviews",
+            "remediation": "Inspect reviewer configuration/timeouts or lower min_successful_adversaries intentionally.",
+        }
+        if context:
+            details.update(context)
+        raise AdversarialExecutionError(
+            f"Adversarial review produced {successful} successful review(s); {self.min_successful_adversaries} required.",
+            details=details,
+        )
+
+    def bound_review_text(self, text: str) -> str:
+        """Bound review content before it is forwarded to the worker."""
+
+        return self._bound(text, self.max_review_chars)
+
+    def bound_worker_output(self, text: str) -> str:
+        """Bound a worker snapshot before it is forwarded to reviewers."""
+
+        return self._bound(text, self.max_worker_output_chars)
+
     def _validate_positive_counts(self) -> None:
-        # Applies strict integer validation to cardinality, forwarding, and optional call-budget fields.
-        for field_name in ("num_adversaries", "adversarial_rounds", "min_successful_adversaries", "max_review_chars", "max_worker_output_chars"):
+        for field_name in (
+            "num_adversaries",
+            "adversarial_rounds",
+            "min_successful_adversaries",
+            "max_review_chars",
+            "max_worker_output_chars",
+        ):
             self._require_positive_int(field_name, getattr(self, field_name))
         if self.max_child_calls is not None:
             self._require_positive_int("max_child_calls", self.max_child_calls)
 
     def _validate_success_threshold(self) -> None:
-        # Requires every per-round success floor to be reachable by the configured reviewer count.
         if self.min_successful_adversaries <= self.num_adversaries:
             return
         raise ConfigurationError(
@@ -151,12 +200,14 @@ class AdversarialSettings:
         )
 
     def _validate_timeouts(self) -> None:
-        # Accepts only positive numeric per-review and whole-workflow timeout values.
-        self._require_positive_number_or_none("per_adversary_timeout", self.per_adversary_timeout)
-        self._require_positive_number_or_none("run_timeout_seconds", self.run_timeout_seconds)
+        self._require_positive_number_or_none(
+            "per_adversary_timeout", self.per_adversary_timeout
+        )
+        self._require_positive_number_or_none(
+            "run_timeout_seconds", self.run_timeout_seconds
+        )
 
     def _validate_specialty_shape(self) -> None:
-        # Allows generic, shared-lens, or exact index-aligned reviewer specialties only.
         specialty_count = len(self.specialties)
         if specialty_count in (0, 1, self.num_adversaries):
             return
@@ -174,7 +225,6 @@ class AdversarialSettings:
         )
 
     def _validate_freshness(self) -> None:
-        # Rejects truthy substitutes so reviewer lifecycle policy is explicit and immutable.
         if type(self.fresh_adversaries_each_round) is bool:
             return
         raise ConfigurationError(
@@ -190,8 +240,10 @@ class AdversarialSettings:
         )
 
     def _validate_child_call_budget(self) -> None:
-        # Fails preflight when the configured ceiling cannot accommodate the exact workflow.
-        if self.max_child_calls is None or self.max_child_calls >= self.required_child_calls:
+        if (
+            self.max_child_calls is None
+            or self.max_child_calls >= self.required_child_calls
+        ):
             return
         raise ConfigurationError(
             "AdversarialSettings.max_child_calls is below the exact child-agent call requirement.",
@@ -207,8 +259,10 @@ class AdversarialSettings:
         )
 
     def _require_adversary_index(self, adversary_index: int) -> None:
-        # Rejects non-integer or out-of-range one-based specialty lookups with safe diagnostics.
-        if type(adversary_index) is int and 1 <= adversary_index <= self.num_adversaries:
+        if (
+            type(adversary_index) is int
+            and 1 <= adversary_index <= self.num_adversaries
+        ):
             return
         raise ConfigurationError(
             "AdversarialSettings.specialty_for requires a one-based reviewer index within num_adversaries.",
@@ -224,7 +278,6 @@ class AdversarialSettings:
 
     @staticmethod
     def _require_positive_int(field_name: str, value: int) -> None:
-        # Keeps count and character limits strict; booleans are not accepted as integer settings.
         if type(value) is int and value > 0:
             return
         raise ConfigurationError(
@@ -242,8 +295,11 @@ class AdversarialSettings:
 
     @staticmethod
     def _require_positive_number_or_none(field_name: str, value: float | None) -> None:
-        # Validates finite optional timeout seconds without accepting booleans as numeric values.
-        finite_number = isinstance(value, (int, float)) and not isinstance(value, bool) and (not isinstance(value, float) or isfinite(value))
+        finite_number = (
+            isinstance(value, (int, float))
+            and not isinstance(value, bool)
+            and (not isinstance(value, float) or isfinite(value))
+        )
         if value is None or (finite_number and value > 0):
             return
         raise ConfigurationError(
@@ -260,7 +316,6 @@ class AdversarialSettings:
 
     @staticmethod
     def _normalize_specialties(values: Sequence[str]) -> tuple[str, ...]:
-        # Converts a non-string sequence into bounded nonblank specialty labels without coercion.
         if isinstance(values, (str, bytes)) or not isinstance(values, Sequence):
             raise ConfigurationError(
                 "AdversarialSettings.specialties must be a sequence of strings, not a string or non-sequence value.",
@@ -275,41 +330,82 @@ class AdversarialSettings:
             )
         normalized: list[str] = []
         for index, value in enumerate(values, start=1):
-            normalized.append(AdversarialSettings._normalize_specialty(value, index))
+            if not isinstance(value, str):
+                raise ConfigurationError(
+                    "AdversarialSettings.specialties entries must be strings.",
+                    details={
+                        "file": "vidbyte/lib/dataclasses/adversarial.py",
+                        "function": "AdversarialSettings._normalize_specialties",
+                        "field": "specialties",
+                        "index": index,
+                        "actual_type": type(value).__name__,
+                        "expected": "nonblank string",
+                        "remediation": "Replace the entry with a concise review specialty string.",
+                    },
+                )
+            specialty = value.strip()
+            if not specialty or len(specialty) > _MAX_SPECIALTY_CHARS:
+                raise ConfigurationError(
+                    "AdversarialSettings.specialties entries must be nonblank and at most 500 characters.",
+                    details={
+                        "file": "vidbyte/lib/dataclasses/adversarial.py",
+                        "function": "AdversarialSettings._normalize_specialties",
+                        "field": "specialties",
+                        "index": index,
+                        "actual_chars": len(specialty),
+                        "max_chars": _MAX_SPECIALTY_CHARS,
+                        "expected": "1..500 characters after trimming",
+                        "remediation": "Provide a concise specialty label without surrounding whitespace.",
+                    },
+                )
+            normalized.append(specialty)
         return tuple(normalized)
 
     @staticmethod
-    def _normalize_specialty(value: str, index: int) -> str:
-        # Trims one specialty and rejects invalid type, blank content, or oversized prompt input.
-        if not isinstance(value, str):
-            raise ConfigurationError(
-                "AdversarialSettings.specialties entries must be strings.",
-                details={
-                    "file": "vidbyte/lib/dataclasses/adversarial.py",
-                    "function": "AdversarialSettings._normalize_specialty",
-                    "field": "specialties",
-                    "index": index,
-                    "actual_type": type(value).__name__,
-                    "expected": "nonblank string",
-                    "remediation": "Replace the entry with a concise review specialty string.",
-                },
-            )
-        normalized = value.strip()
-        if not normalized or len(normalized) > _MAX_SPECIALTY_CHARS:
-            raise ConfigurationError(
-                "AdversarialSettings.specialties entries must be nonblank and at most 500 characters.",
-                details={
-                    "file": "vidbyte/lib/dataclasses/adversarial.py",
-                    "function": "AdversarialSettings._normalize_specialty",
-                    "field": "specialties",
-                    "index": index,
-                    "actual_chars": len(normalized),
-                    "max_chars": _MAX_SPECIALTY_CHARS,
-                    "expected": "1..500 characters after trimming",
-                    "remediation": "Provide a concise specialty label without surrounding whitespace.",
-                },
-            )
-        return normalized
+    def _bound(text: str, limit: int) -> str:
+        if len(text) <= limit:
+            return text
+        return text[:limit] + _TRUNCATION_MARKER
 
 
-__all__ = ["AdversarialSettings"]
+@dataclass(frozen=True, slots=True)
+class AdversarialReview:
+    """Outcome of one adversary's attempt to challenge a worker snapshot."""
+
+    round_index: int
+    adversary_index: int
+    adversary_name: str
+    content: str = ""
+    specialty: str | None = None
+    error: str | None = None
+    metadata: Mapping[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
+class AdversarialRoundResult:
+    """Full successful artifacts from one review and worker-revision round."""
+
+    round_index: int
+    reviewed_worker_output: str
+    reviews: tuple[AdversarialReview, ...]
+    revised_worker_output: str
+
+
+@dataclass(frozen=True, slots=True)
+class AdversarialResult:
+    """Detailed successful result retained on AdversarialAgent.last_result."""
+
+    initial_worker_output: str
+    rounds: tuple[AdversarialRoundResult, ...]
+    final_output: str
+    successful_review_count: int
+    failed_review_count: int
+    metadata: Mapping[str, Any] = field(default_factory=dict)
+
+
+__all__ = [
+    "AdversarialResult",
+    "AdversarialReview",
+    "AdversarialRoundResult",
+    "AdversarialSettings",
+]

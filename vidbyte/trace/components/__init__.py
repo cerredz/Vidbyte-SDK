@@ -12,7 +12,7 @@ Relations:
 
 from __future__ import annotations
 
-from vidbyte.trace.components.agents import AgentTrace, AggregateTrace, MultiAgentTrace
+from vidbyte.trace.components.agents import AdversarialTrace, AgentTrace, AggregateTrace, MultiAgentTrace
 from vidbyte.trace.components.algorithms import AlgorithmTrace
 from vidbyte.trace.components.context import ContextTrace
 from vidbyte.trace.components.middleware import MiddlewareTrace
@@ -22,6 +22,7 @@ from vidbyte.trace.components.tools import ToolTrace
 
 __all__ = [
     "ActorRuntimeTrace",
+    "AdversarialTrace",
     "AgentTrace",
     "AggregateTrace",
     "AlgorithmTrace",

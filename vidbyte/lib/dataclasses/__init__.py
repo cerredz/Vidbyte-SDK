@@ -14,7 +14,12 @@ Relations:
 
 from __future__ import annotations
 
-from vidbyte.lib.dataclasses.adversarial import AdversarialSettings
+from vidbyte.lib.dataclasses.adversarial import (
+    AdversarialResult,
+    AdversarialReview,
+    AdversarialRoundResult,
+    AdversarialSettings,
+)
 from vidbyte.lib.dataclasses.agents import (
     AgentCard,
     AgentIterationSnapshot,
@@ -144,6 +149,9 @@ from vidbyte.lib.dataclasses.tools import (
 )
 
 __all__ = [
+    "AdversarialResult",
+    "AdversarialReview",
+    "AdversarialRoundResult",
     "AdversarialSettings",
     "AgentCard",
     "AgentDispatch",
