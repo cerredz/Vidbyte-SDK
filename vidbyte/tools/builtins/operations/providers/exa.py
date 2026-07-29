@@ -14,8 +14,9 @@ Relations:
 
 from __future__ import annotations
 
+from vidbyte.lib.dataclasses.operations import OperationCharge
 from vidbyte.tools.builtins.operations.api import ProviderApiTool
-from vidbyte.tools.types import ToolParameter
+from vidbyte.tools.types import ToolCall, ToolParameter
 
 
 class ExaAnswerTool(ProviderApiTool):
@@ -42,6 +43,18 @@ class ExaWebsetTool(ProviderApiTool):
     parameters = (ToolParameter("action", "string", "API action such as create, list, get, update, or delete."), ToolParameter("webset_id", "string", "Existing Webset ID when the action targets one.", required=False), ToolParameter("query", "string", "Natural-language Webset search objective.", required=False), ToolParameter("criteria", "array", "Structured verification or enrichment criteria.", required=False), ToolParameter("metadata", "object", "Provider-supported Webset metadata.", required=False))
     charge_operation = None
 
+    async def _request(self, call: ToolCall):
+        # Routes Webset CRUD, search, enrichment, import, and monitor actions to documented paths.
+        action = str(call.arguments.get("action", "list"))
+        webset_id = str(call.arguments.get("webset_id", ""))
+        if action in {"get", "update", "delete", "searches", "enrichments", "imports"} and not webset_id:
+            raise ValueError("webset_id is required for the selected action")
+        suffix = f"/{webset_id}" if webset_id else ""
+        path = {"create": "websets", "list": "websets", "get": f"websets{suffix}", "update": f"websets{suffix}", "delete": f"websets{suffix}", "searches": f"websets{suffix}/searches", "enrichments": f"websets{suffix}/enrichments", "imports": f"websets{suffix}/imports"}.get(action, "websets")
+        method = {"create": "POST", "list": "GET", "get": "GET", "update": "PATCH", "delete": "DELETE", "searches": "POST", "enrichments": "POST", "imports": "POST"}.get(action, "GET")
+        body = {key: value for key, value in call.arguments.items() if key not in {"action", "webset_id"} and value is not None}
+        return await self._client.api("webset", method=method, path=path, body=body or None, charges=())
+
 
 class ExaMonitorTool(ProviderApiTool):
     """Create or inspect Exa web monitors."""
@@ -55,6 +68,19 @@ class ExaMonitorTool(ProviderApiTool):
     charge_operation = "monitor"
     charge_mode = "default"
     charge_meter = "request"
+
+    async def _request(self, call: ToolCall):
+        # Routes Exa monitor CRUD actions while keeping the recurring API unpriced until execution metadata is known.
+        action = str(call.arguments.get("action", "list"))
+        monitor_id = str(call.arguments.get("monitor_id", ""))
+        if action in {"get", "update", "delete"} and not monitor_id:
+            raise ValueError("monitor_id is required for the selected action")
+        suffix = f"/{monitor_id}" if monitor_id else ""
+        path = "monitors" if action in {"create", "list"} else f"monitors{suffix}"
+        method = {"create": "POST", "list": "GET", "get": "GET", "update": "PATCH", "delete": "DELETE"}.get(action, "GET")
+        body = {key: value for key, value in call.arguments.items() if key not in {"action", "monitor_id"} and value is not None}
+        charges = (OperationCharge("monitor", self.provider, mode="default", meter="request", units=1),) if action == "create" else ()
+        return await self._client.api("monitor", method=method, path=path, body=body or None, charges=charges)
 
 
 __all__ = ["ExaAnswerTool", "ExaMonitorTool", "ExaWebsetTool"]

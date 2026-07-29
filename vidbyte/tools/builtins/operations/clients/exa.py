@@ -32,18 +32,20 @@ class ExaClient(WebOperationClient):
         # Builds Exa's API-key header without exposing credentials to the tool result.
         return {"x-api-key": self._api_key, "Content-Type": "application/json"}
 
-    async def search(self, query: str, *, num_results: int = 10, search_type: str = "auto", contents: Mapping[str, object] | None = None, category: str | None = None) -> SearchPayload:
+    async def search(self, query: str, *, num_results: int = 10, search_type: str = "auto", contents: Mapping[str, object] | None = None, category: str | None = None, options: Mapping[str, object] | None = None) -> SearchPayload:
         # Runs Exa search with optional contents, category, and documented search modes.
         body: dict[str, object] = {"query": query, "numResults": min(max(1, num_results), 100), "type": search_type}
         if contents is not None:
             body["contents"] = dict(contents)
         if category:
             body["category"] = category
+        if options:
+            body.update(options)
         charges = self._search_charges(search_type, num_results, contents)
         payload = await self.request_operation("search", "POST", path="search", headers=self.request_headers(), json_body=body, charges=charges)
         return self._search_payload(query, payload)
 
-    async def contents(self, urls: Sequence[str], *, text: Mapping[str, object] | bool = True, summary: Mapping[str, object] | bool | None = None, highlights: Mapping[str, object] | None = None, livecrawl: str | None = None) -> ProviderOperationPayload:
+    async def contents(self, urls: Sequence[str], *, text: Mapping[str, object] | bool = True, summary: Mapping[str, object] | bool | None = None, highlights: Mapping[str, object] | None = None, livecrawl: str | None = None, options: Mapping[str, object] | None = None) -> ProviderOperationPayload:
         # Retrieves known URLs with Exa text, summaries, highlights, and livecrawl controls.
         body: dict[str, object] = {"ids": [url for url in urls if isinstance(url, str) and url.strip()], "text": text}
         if summary is not None:
@@ -52,6 +54,8 @@ class ExaClient(WebOperationClient):
             body["highlights"] = dict(highlights)
         if livecrawl:
             body["livecrawl"] = livecrawl
+        if options:
+            body.update(options)
         count = len(body["ids"])
         charges = [OperationCharge("fetch", self.provider, meter="page", units=count)]
         if summary is not None:

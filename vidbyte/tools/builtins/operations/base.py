@@ -118,7 +118,7 @@ class PricedOperationTool(BaseTool):
         # Builds the metadata a subclass merges into its ToolResult so the runtime can
         # price the operation from the result alone, keeping the tool stateless.
         payload: dict[str, Any] = {"operation": operation or cls.operation, "provider": cls.provider, "mode": mode, "units": units, "attempts": attempts}
-        if charges:
+        if charges is not None:
             payload["charges"] = tuple(cls._charge_mapping(charge) for charge in charges)
         if provider_reported_cost_usd is not None:
             payload["provider_reported_cost_usd"] = provider_reported_cost_usd

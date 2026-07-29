@@ -33,9 +33,11 @@ class BrowserbaseClient(WebOperationClient):
         # Builds Browserbase's API-key header without exposing the key to results.
         return {"x-bb-api-key": self._api_key, "Content-Type": "application/json"}
 
-    async def search(self, query: str, *, num_results: int = 10) -> SearchPayload:
+    async def search(self, query: str, *, num_results: int = 10, options: Mapping[str, object] | None = None) -> SearchPayload:
         # Searches Browserbase and normalizes ranked web results for the model.
         body = {"query": query, "numResults": min(max(1, num_results), 25)}
+        if options:
+            body.update(options)
         payload = await self.request_operation("search", "POST", path="search", headers=self.request_headers(), json_body=body, charges=(OperationCharge("search", self.provider, units=1, meter="request"),))
         return self._search_payload(query, payload)
 
@@ -56,7 +58,7 @@ class BrowserbaseClient(WebOperationClient):
         # Converts Browserbase result records into the shared search contract.
         raw_results = payload.data.get("results", ())
         hits = tuple(self._search_hit(item) for item in raw_results if isinstance(item, Mapping))
-        return SearchPayload(provider=self.provider, query=query, hits=tuple(hit for hit in hits if hit is not None), attempts=payload.attempts, billable_units=1, request_id=payload.request_id, charges=payload.charges, provider_usage=payload.provider_usage)
+        return SearchPayload(provider=self.provider, query=query, hits=tuple(hit for hit in hits if hit is not None), attempts=payload.attempts, billable_units=1, request_id=payload.request_id, charges=payload.charges, provider_usage=payload.provider_usage, provider_reported_cost_usd=payload.provider_reported_cost_usd)
 
     @staticmethod
     def _search_hit(item: Mapping[str, Any]) -> SearchHit | None:

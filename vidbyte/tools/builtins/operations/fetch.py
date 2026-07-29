@@ -20,6 +20,7 @@ Similar Files:
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Mapping
 
 from vidbyte.lib.dataclasses.operations import FetchPayload
 from vidbyte.lib.errors import ProviderRequestError, ProviderResponseError, SourceFetchError
@@ -120,14 +121,16 @@ class ExaContentsTool(ProviderApiTool):
     tool_name = "exa_contents"
     description = "Retrieves known URLs from Exa with markdown text, summaries, highlights, and livecrawl controls."
     charge_operation = None
-    parameters = (ToolParameter("urls", "array", "Known URLs to retrieve."), ToolParameter("text", "object", "Text retrieval options or true.", required=False, default=True), ToolParameter("summary", "object", "Optional summary options.", required=False), ToolParameter("highlights", "object", "Optional highlight options.", required=False), ToolParameter("livecrawl", "string", "Optional livecrawl policy.", required=False))
+    parameters = (ToolParameter("urls", "array", "Known URLs to retrieve."), ToolParameter("text", "object", "Text retrieval options or true.", required=False, default=True), ToolParameter("summary", "object", "Optional summary options.", required=False), ToolParameter("highlights", "object", "Optional highlight options.", required=False), ToolParameter("livecrawl", "string", "Optional livecrawl policy.", required=False), ToolParameter("options", "object", "Additional documented Exa Contents fields such as images or favicons.", required=False))
 
     async def _request(self, call: ToolCall):
         # Retrieves Exa contents through the provider client so page and summary meters are explicit.
         urls = call.arguments.get("urls", ())
         if not isinstance(urls, (list, tuple)):
             urls = ()
-        return await self._client.contents(urls, text=call.arguments.get("text", True), summary=call.arguments.get("summary"), highlights=call.arguments.get("highlights"), livecrawl=call.arguments.get("livecrawl"))
+        options = call.arguments.get("options")
+        options = options if isinstance(options, Mapping) else None
+        return await self._client.contents(urls, text=call.arguments.get("text", True), summary=call.arguments.get("summary"), highlights=call.arguments.get("highlights"), livecrawl=call.arguments.get("livecrawl"), options=options)
 
 
 class ParallelExtractTool(PricedOperationTool):
@@ -143,6 +146,9 @@ class ParallelExtractTool(PricedOperationTool):
             description="Extracts LLM-ready content from web pages via the Parallel Extract API.",
             parameters=(
                 ToolParameter(name="urls", type="array", description="Page URLs to extract.", required=True),
+                ToolParameter(name="objective", type="string", description="Optional focused extraction objective.", required=False),
+                ToolParameter(name="max_chars_total", type="int", description="Total extracted character budget.", required=False, default=20000),
+                ToolParameter(name="options", type="object", description="Additional documented Parallel Extract fields such as session_id or advanced_settings.", required=False),
             ),
         )
 
@@ -154,7 +160,9 @@ class ParallelExtractTool(PricedOperationTool):
         if self._client is None:
             return self._contract_result("parallel extract", units=len(urls))
         try:
-            payload = await self._client.extract(urls)
+            options = call.arguments.get("options")
+            options = options if isinstance(options, Mapping) else None
+            payload = await self._client.extract(urls, objective=call.arguments.get("objective"), max_chars_total=int(call.arguments.get("max_chars_total", 20000)), options=options)
         except (ProviderRequestError, ProviderResponseError):
             return self._failed_result("parallel extract failed.", units=len(urls), mode="default", attempts=self._client.max_attempts, error="fetch_failed")
         return self._payload_result("parallel extract completed.", payload)
@@ -175,6 +183,9 @@ class TavilyExtractTool(PricedOperationTool):
                 ToolParameter(name="urls", type="array", description="Page URLs to extract.", required=True),
                 ToolParameter(name="extract_depth", type="string", description="Extract depth: 'basic' or 'advanced'.", required=False, default="basic"),
                 ToolParameter(name="format", type="string", description="Output format: markdown or text.", required=False, default="markdown"),
+                ToolParameter(name="include_images", type="bool", description="Include extracted images.", required=False, default=False),
+                ToolParameter(name="include_favicon", type="bool", description="Include source favicons.", required=False, default=False),
+                ToolParameter(name="options", type="object", description="Additional documented Tavily Extract fields such as chunks_per_source or timeout.", required=False),
             ),
         )
 
@@ -188,7 +199,9 @@ class TavilyExtractTool(PricedOperationTool):
         if self._client is None:
             return self._contract_result("tavily extract", units=len(urls), mode=mode)
         try:
-            payload = await self._client.extract(urls, extract_depth=mode, format=str(call.arguments.get("format", "markdown")))
+            options = call.arguments.get("options")
+            options = options if isinstance(options, Mapping) else None
+            payload = await self._client.extract(urls, extract_depth=mode, format=str(call.arguments.get("format", "markdown")), include_images=call.arguments.get("include_images") is True, include_favicon=call.arguments.get("include_favicon") is True, options=options)
         except (ProviderRequestError, ProviderResponseError):
             return self._failed_result("tavily extract failed.", units=len(urls), mode=mode, attempts=self._client.max_attempts, error="fetch_failed")
         return self._payload_result("tavily extract completed.", payload)

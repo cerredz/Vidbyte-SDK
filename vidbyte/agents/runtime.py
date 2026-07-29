@@ -1172,14 +1172,14 @@ class AgentRuntime:
             attempts = self._billable_attempts(tool, call, result)
             charges = tool.charges_used(call, result)
             for _ in range(attempts):
-                for charge in charges:
+                for index, charge in enumerate(charges):
                     self.usage_tracker.record_operation(
                         str(charge.get("operation", tool.operation)),
                         str(charge.get("provider", tool.provider)),
                         mode=str(charge.get("mode", tool.mode_used(call, result))),
                         units=charge.get("units", tool.units_used(call, result)),
                         meter=str(charge.get("meter", "unit")),
-                        provider_reported_cost_usd=tool.reported_cost_usd(call, result),
+                        provider_reported_cost_usd=tool.reported_cost_usd(call, result) if index == 0 else None,
                     )
         except Exception:
             return

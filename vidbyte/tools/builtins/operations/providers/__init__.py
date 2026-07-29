@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from vidbyte.tools.builtins.operations.providers.browserbase import BrowserbaseContextTool, BrowserbaseSessionTool
 from vidbyte.tools.builtins.operations.providers.exa import ExaAnswerTool, ExaMonitorTool, ExaWebsetTool
-from vidbyte.tools.builtins.operations.providers.parallel import ParallelChatTool, ParallelFindAllTool, ParallelMonitorTool, ParallelTaskTool
+from vidbyte.tools.builtins.operations.providers.parallel import ParallelChatTool, ParallelFindAllTool, ParallelMonitorTool, ParallelResponseTool, ParallelTaskTool
 from vidbyte.tools.builtins.operations.providers.tavily import TavilyCrawlTool, TavilyMapTool, TavilyResearchTool
 
 __all__ = [
@@ -27,6 +27,7 @@ __all__ = [
     "ParallelChatTool",
     "ParallelFindAllTool",
     "ParallelMonitorTool",
+    "ParallelResponseTool",
     "ParallelTaskTool",
     "TavilyCrawlTool",
     "TavilyMapTool",

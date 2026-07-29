@@ -37,38 +37,46 @@ class TavilyClient(WebOperationClient):
             headers["X-Project-ID"] = self._project_id
         return headers
 
-    async def search(self, query: str, *, search_depth: str = "basic", max_results: int = 5, topic: str = "general", include_answer: bool = False, include_raw_content: bool = False) -> SearchPayload:
+    async def search(self, query: str, *, search_depth: str = "basic", max_results: int = 5, topic: str = "general", include_answer: bool = False, include_raw_content: bool = False, options: Mapping[str, object] | None = None) -> SearchPayload:
         # Runs Tavily search with depth, topic, filtering, answer, and content controls.
         depth = search_depth if search_depth in {"basic", "advanced", "fast", "ultra-fast"} else "basic"
         body = {"query": query, "search_depth": depth, "max_results": min(max(1, max_results), 20), "topic": topic, "include_answer": include_answer, "include_raw_content": include_raw_content}
+        if options:
+            body.update(options)
         credits = 2 if depth == "advanced" else 1
         charge = OperationCharge("search", self.provider, mode=depth, meter="credit", units=credits)
         payload = await self.request_operation("search", "POST", path="search", headers=self.request_headers(), json_body=body, charges=(charge,))
         return self._search_payload(query, payload)
 
-    async def extract(self, urls: Sequence[str], *, extract_depth: str = "basic", format: str = "markdown", include_images: bool = False, include_favicon: bool = False) -> ProviderOperationPayload:
+    async def extract(self, urls: Sequence[str], *, extract_depth: str = "basic", format: str = "markdown", include_images: bool = False, include_favicon: bool = False, options: Mapping[str, object] | None = None) -> ProviderOperationPayload:
         # Extracts bounded content from known URLs using Tavily's success-based credit meter.
         body = {"urls": [url for url in urls if isinstance(url, str) and url.strip()], "extract_depth": extract_depth, "format": format, "include_images": include_images, "include_favicon": include_favicon}
+        if options:
+            body.update(options)
         payload = await self.request_operation("fetch", "POST", path="extract", headers=self.request_headers(), json_body=body, charges=())
         successes = self._successful_count(payload.data)
         mode = "advanced" if extract_depth == "advanced" else "basic"
         return replace(payload, charges=(OperationCharge("fetch", self.provider, mode=mode, meter="successful_url", units=successes),))
 
-    async def map(self, url: str, *, instructions: str | None = None, max_depth: int = 1, max_breadth: int = 20, limit: int = 50) -> ProviderOperationPayload:
+    async def map(self, url: str, *, instructions: str | None = None, max_depth: int = 1, max_breadth: int = 20, limit: int = 50, options: Mapping[str, object] | None = None) -> ProviderOperationPayload:
         # Maps a site's link graph with explicit depth, breadth, and page limits.
         body: dict[str, object] = {"url": url, "max_depth": min(max(1, max_depth), 5), "max_breadth": min(max(1, max_breadth), 500), "limit": max(1, limit)}
         if instructions:
             body["instructions"] = instructions
+        if options:
+            body.update(options)
         mode = "instructions" if instructions else "default"
         payload = await self.request_operation("map", "POST", path="map", headers=self.request_headers(), json_body=body, charges=())
         pages = self._result_count(payload.data)
         return replace(payload, charges=(OperationCharge("map", self.provider, mode=mode, meter="successful_page", units=pages),))
 
-    async def crawl(self, url: str, *, instructions: str | None = None, max_depth: int = 1, max_breadth: int = 20, limit: int = 50, extract_depth: str = "basic", format: str = "markdown") -> ProviderOperationPayload:
+    async def crawl(self, url: str, *, instructions: str | None = None, max_depth: int = 1, max_breadth: int = 20, limit: int = 50, extract_depth: str = "basic", format: str = "markdown", options: Mapping[str, object] | None = None) -> ProviderOperationPayload:
         # Crawls and extracts a site while preserving separate map and extraction charges.
         body: dict[str, object] = {"url": url, "max_depth": min(max(1, max_depth), 5), "max_breadth": min(max(1, max_breadth), 500), "limit": max(1, limit), "extract_depth": extract_depth, "format": format}
         if instructions:
             body["instructions"] = instructions
+        if options:
+            body.update(options)
         payload = await self.request_operation("crawl", "POST", path="crawl", headers=self.request_headers(), json_body=body, charges=())
         pages = self._result_count(payload.data)
         map_mode = "instructions" if instructions else "default"
@@ -81,7 +89,7 @@ class TavilyClient(WebOperationClient):
         body: dict[str, object] = {"input": input, "model": model, "stream": stream}
         if output_schema is not None:
             body["output_schema"] = dict(output_schema)
-        payload = await self.request_operation("research", "POST", path="research", headers=self.request_headers(), json_body=body, charges=())
+        payload = await (self.stream_operation("research", path="research", headers=self.request_headers(), json_body=body, charges=()) if stream else self.request_operation("research", "POST", path="research", headers=self.request_headers(), json_body=body, charges=()))
         credits = self._credit_count(payload.provider_usage) or 1
         return replace(payload, charges=(OperationCharge("research", self.provider, meter="credit", units=credits),))
 
@@ -93,7 +101,7 @@ class TavilyClient(WebOperationClient):
         # Converts Tavily result records into provider-neutral search hits.
         raw_results = payload.data.get("results", ())
         hits = tuple(self._search_hit(item) for item in raw_results if isinstance(item, Mapping))
-        return SearchPayload(provider=self.provider, query=query, hits=tuple(hit for hit in hits if hit is not None), attempts=payload.attempts, billable_units=1, request_id=payload.request_id, charges=payload.charges, provider_usage=payload.provider_usage)
+        return SearchPayload(provider=self.provider, query=query, hits=tuple(hit for hit in hits if hit is not None), attempts=payload.attempts, billable_units=1, request_id=payload.request_id, charges=payload.charges, provider_usage=payload.provider_usage, provider_reported_cost_usd=payload.provider_reported_cost_usd)
 
     @staticmethod
     def _search_hit(item: Mapping[str, Any]) -> SearchHit | None:

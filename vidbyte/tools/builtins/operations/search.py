@@ -19,6 +19,8 @@ Similar Files:
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 from vidbyte.lib.dataclasses.operations import SearchPayload
 from vidbyte.lib.errors import ProviderRequestError, ProviderResponseError
 from vidbyte.tools.builtins.operations.base import PricedOperationTool
@@ -81,7 +83,7 @@ class BrowserbaseSearchTool(PricedOperationTool):
 
     def spec(self) -> ToolSpec:
         # Declares Browserbase Search's bounded query and result-count controls.
-        return ToolSpec(name="browserbase_search", description="Runs Browserbase Search and returns ranked web results.", parameters=(ToolParameter("query", "string", "Search query."), ToolParameter("num_results", "int", "Number of results from 1 to 25.", required=False, default=10)))
+        return ToolSpec(name="browserbase_search", description="Runs Browserbase Search and returns ranked web results.", parameters=(ToolParameter("query", "string", "Search query."), ToolParameter("num_results", "int", "Number of results from 1 to 25.", required=False, default=10), ToolParameter("options", "object", "Additional documented Browserbase Search fields.", required=False)))
 
     async def execute(self, call: ToolCall) -> ToolResult:
         # Runs Browserbase Search through the injected client or returns a priced contract stub.
@@ -89,7 +91,9 @@ class BrowserbaseSearchTool(PricedOperationTool):
         if self._client is None:
             return self._contract_result(f"browserbase search: {query}")
         try:
-            payload = await self._client.search(query, num_results=_int_arg(call, "num_results", 10))
+            options = call.arguments.get("options")
+            options = options if isinstance(options, Mapping) else None
+            payload = await self._client.search(query, num_results=_int_arg(call, "num_results", 10), options=options)
         except (ProviderRequestError, ProviderResponseError):
             return self._failed_result("browserbase search failed.", units=1, mode="default", attempts=self._client.max_attempts, error="search_failed")
         return self._executed_result(_render_search(payload), payload, units=1, mode="default", attempts=payload.attempts)
@@ -110,6 +114,9 @@ class ExaSearchTool(PricedOperationTool):
                 ToolParameter(name="query", type="string", description="The search query.", required=True),
                 ToolParameter(name="num_results", type="int", description="Number of results to return.", required=False, default=10),
                 ToolParameter(name="type", type="string", description="Search mode: instant, fast, auto, deep-lite, deep, or deep-reasoning.", required=False, default="auto"),
+                ToolParameter(name="contents", type="object", description="Optional Exa contents configuration including text, highlights, or summary.", required=False),
+                ToolParameter(name="category", type="string", description="Optional Exa category filter.", required=False),
+                ToolParameter(name="options", type="object", description="Additional documented Exa Search fields such as domains, date filters, outputSchema, or stream.", required=False),
             ),
         )
 
@@ -120,7 +127,11 @@ class ExaSearchTool(PricedOperationTool):
         if self._client is None:
             return self._contract_result(f"exa search: {query}", units=1, mode=mode)
         try:
-            payload = await self._client.search(query, num_results=_int_arg(call, "num_results", 10), search_type=mode)
+            contents = call.arguments.get("contents")
+            contents = contents if isinstance(contents, Mapping) else None
+            options = call.arguments.get("options")
+            options = options if isinstance(options, Mapping) else None
+            payload = await self._client.search(query, num_results=_int_arg(call, "num_results", 10), search_type=mode, contents=contents, category=call.arguments.get("category"), options=options)
         except (ProviderRequestError, ProviderResponseError):
             return self._failed_result("exa search failed.", units=1, mode=mode, attempts=self._client.max_attempts, error="search_failed")
         return self._executed_result(_render_search(payload), payload, units=1, mode=mode, attempts=payload.attempts)
@@ -141,6 +152,10 @@ class TavilySearchTool(PricedOperationTool):
                 ToolParameter(name="query", type="string", description="The search query.", required=True),
                 ToolParameter(name="search_depth", type="string", description="Search depth: 'basic' or 'advanced'.", required=False, default="basic"),
                 ToolParameter(name="max_results", type="int", description="Maximum results to return.", required=False, default=5),
+                ToolParameter(name="topic", type="string", description="general, news, or finance.", required=False, default="general"),
+                ToolParameter(name="include_answer", type="bool", description="Include Tavily's short answer.", required=False, default=False),
+                ToolParameter(name="include_raw_content", type="bool", description="Include extracted raw content.", required=False, default=False),
+                ToolParameter(name="options", type="object", description="Additional documented Tavily Search fields such as domains, country, date ranges, or images.", required=False),
             ),
         )
 
@@ -151,7 +166,9 @@ class TavilySearchTool(PricedOperationTool):
         if self._client is None:
             return self._contract_result(f"tavily search: {query}", units=2 if mode == "advanced" else 1, mode=mode)
         try:
-            payload = await self._client.search(query, search_depth=mode, max_results=_int_arg(call, "max_results", 5))
+            options = call.arguments.get("options")
+            options = options if isinstance(options, Mapping) else None
+            payload = await self._client.search(query, search_depth=mode, max_results=_int_arg(call, "max_results", 5), topic=str(call.arguments.get("topic", "general")), include_answer=call.arguments.get("include_answer") is True, include_raw_content=call.arguments.get("include_raw_content") is True, options=options)
         except (ProviderRequestError, ProviderResponseError):
             return self._failed_result("tavily search failed.", units=2 if mode == "advanced" else 1, mode=mode, attempts=self._client.max_attempts, error="search_failed")
         return self._executed_result(_render_search(payload), payload, units=1, mode=mode, attempts=payload.attempts)
@@ -196,6 +213,8 @@ class ParallelSearchTool(PricedOperationTool):
                 ToolParameter(name="processor", type="string", description="Search mode: turbo, basic, or advanced.", required=False, default="turbo"),
                 ToolParameter(name="max_results", type="int", description="Maximum results to return.", required=False, default=10),
                 ToolParameter(name="search_queries", type="array", description="Optional 2-3 keyword queries.", required=False),
+                ToolParameter(name="max_chars_total", type="int", description="Total excerpt character budget.", required=False, default=10000),
+                ToolParameter(name="options", type="object", description="Additional documented Parallel Search fields such as session_id, client_model, or advanced_settings.", required=False),
             ),
         )
 
@@ -209,7 +228,9 @@ class ParallelSearchTool(PricedOperationTool):
         if not isinstance(queries, (list, tuple)):
             queries = ()
         try:
-            payload = await self._client.search(objective, search_queries=queries, mode=mode)
+            options = call.arguments.get("options")
+            options = options if isinstance(options, Mapping) else None
+            payload = await self._client.search(objective, search_queries=queries, mode=mode, max_chars_total=_int_arg(call, "max_chars_total", 10000), options=options)
         except (ProviderRequestError, ProviderResponseError):
             return self._failed_result("parallel search failed.", units=1, mode=mode, attempts=self._client.max_attempts, error="search_failed")
         return self._executed_result(_render_search(payload), payload, units=1, mode=mode, attempts=payload.attempts)

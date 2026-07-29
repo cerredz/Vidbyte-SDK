@@ -84,6 +84,19 @@ class WebOperationClient:
         payload, attempts = await self.request_json(operation, method, path=path, headers=headers, json_body=json_body)
         return ProviderOperationPayload(provider=self.provider, operation=operation, data=payload, attempts=attempts, request_id=self._request_id(payload), async_id=async_id or self._async_id(payload), charges=charges, provider_usage=self._provider_usage(payload), provider_reported_cost_usd=self._reported_cost(payload))
 
+    async def stream_operation(self, operation: str, *, path: str, headers: Mapping[str, str], json_body: Mapping[str, object] | None = None, charges: tuple[OperationCharge, ...] = ()) -> ProviderOperationPayload:
+        # Collects provider SSE events into one bounded operation payload for runtime accounting.
+        events: list[Mapping[str, Any]] = []
+        async for chunk in self._transport.stream_request(method="POST", url=self._absolute_url(path, None), headers=headers, json_body=json_body, timeout_seconds=self._timeout_seconds):
+            try:
+                event = loads(chunk)
+            except (JSONDecodeError, TypeError, ValueError):
+                continue
+            if isinstance(event, Mapping):
+                events.append(dict(event))
+        data = events[-1] if events else {"events": events}
+        return ProviderOperationPayload(provider=self.provider, operation=operation, data=data, attempts=1, request_id=self._request_id(data), async_id=self._async_id(data), charges=charges, provider_usage=self._provider_usage(data), provider_reported_cost_usd=self._reported_cost(data))
+
     def request_headers(self) -> dict[str, str]:
         # Returns the default bearer-authenticated JSON headers for provider APIs.
         return {"Authorization": f"Bearer {self._api_key}", "Content-Type": "application/json"}

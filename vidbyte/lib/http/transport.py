@@ -4,9 +4,8 @@ import asyncio
 import json
 import time
 import uuid
-from collections.abc import Iterator
+from collections.abc import AsyncIterator, Iterator, Mapping
 from dataclasses import dataclass, replace
-from typing import Mapping
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -44,6 +43,29 @@ class HttpTransport:
         except httpx.RequestError as exc:
             raise ProviderRequestError("HTTP request failed before receiving a provider response.", provider="http", response_excerpt=str(exc)) from exc
         raise ProviderRequestError("HTTP retry loop exited unexpectedly.", provider="http")
+
+    async def stream_request(self, *, method: str, url: str, headers: Mapping[str, str], json_body: Mapping[str, object] | None = None, timeout_seconds: float = 120.0) -> AsyncIterator[str]:
+        # Streams bounded SSE data lines for providers that expose research progress.
+        request_headers = dict(headers)
+        request_headers["accept"] = "text/event-stream"
+        content = json.dumps(json_body).encode("utf-8") if json_body is not None else None
+        if content is not None:
+            request_headers.setdefault("content-type", "application/json")
+        try:
+            async with httpx.AsyncClient(timeout=timeout_seconds) as client:
+                async with client.stream(method, url, headers=request_headers, content=content) as response:
+                    if not 200 <= response.status_code < 300:
+                        raise ProviderRequestError("Provider SSE request returned a failing status.", provider="http", status_code=response.status_code)
+                    async for line in response.aiter_lines():
+                        if line.startswith("data: "):
+                            payload = line[6:]
+                            if payload == "[DONE]":
+                                return
+                            yield payload
+        except ProviderRequestError:
+            raise
+        except httpx.RequestError as exc:
+            raise ProviderRequestError("HTTP SSE connection failed.", provider="http", response_excerpt=str(exc)) from exc
 
     async def _send_once(self, client: httpx.AsyncClient, *, method: str, url: str, headers: Mapping[str, str], json_body: Mapping[str, object] | None, timeout_seconds: float, max_response_bytes: int | None = None) -> HttpResponse:
         # Execute a single httpx request and return HTTP errors as responses rather than exceptions.

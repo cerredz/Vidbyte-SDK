@@ -18,7 +18,7 @@ The same pattern is available for `BrowserbaseClient`, `TavilyClient`, and `Para
 | Browserbase | `browserbase_search`, `browserbase_fetch`, `browserbase_session`, `browserbase_context` |
 | Exa | `exa_search`, `exa_contents`, `exa_answer`, `exa_webset`, `exa_monitor` |
 | Tavily | `tavily_search`, `tavily_extract`, `tavily_map`, `tavily_crawl`, `tavily_research` |
-| Parallel | `parallel_search`, `parallel_extract`, `parallel_chat`, `parallel_task`, `parallel_find_all`, `parallel_monitor` |
+| Parallel | `parallel_search`, `parallel_extract`, `parallel_chat`, `parallel_response`, `parallel_task`, `parallel_find_all`, `parallel_monitor` |
 
 Async provider operations return a bounded result containing the provider task or resource ID. Polling and cancellation should be performed by an application-specific lifecycle adapter so a long-running research job can resume after process restart.
 

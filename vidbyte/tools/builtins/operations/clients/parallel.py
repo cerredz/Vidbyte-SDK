@@ -33,18 +33,22 @@ class ParallelClient(WebOperationClient):
         # Builds Parallel's API-key header without exposing credentials to tool output.
         return {"x-api-key": self._api_key, "Content-Type": "application/json"}
 
-    async def search(self, objective: str, *, search_queries: Sequence[str] = (), mode: str = "turbo", max_chars_total: int = 10_000) -> SearchPayload:
+    async def search(self, objective: str, *, search_queries: Sequence[str] = (), mode: str = "turbo", max_chars_total: int = 10_000, options: Mapping[str, object] | None = None) -> SearchPayload:
         # Runs Parallel Search with natural-language objective and optional keyword queries.
         queries = [query for query in search_queries if isinstance(query, str) and query.strip()][:3]
         body: dict[str, object] = {"objective": objective, "search_queries": queries, "mode": mode, "max_chars_total": max(1, max_chars_total)}
+        if options:
+            body.update(options)
         payload = await self.request_operation("search", "POST", path="v1/search", headers=self.request_headers(), json_body=body, charges=(OperationCharge("search", self.provider, mode=mode, meter="request", units=1),))
         return self._search_payload(objective, payload)
 
-    async def extract(self, urls: Sequence[str], *, objective: str | None = None, max_chars_total: int = 20_000) -> ProviderOperationPayload:
+    async def extract(self, urls: Sequence[str], *, objective: str | None = None, max_chars_total: int = 20_000, options: Mapping[str, object] | None = None) -> ProviderOperationPayload:
         # Extracts clean content from up to twenty known URLs through Parallel.
         body: dict[str, object] = {"urls": [url for url in urls if isinstance(url, str) and url.strip()][:20], "max_chars_total": max(1, max_chars_total)}
         if objective:
             body["objective"] = objective
+        if options:
+            body.update(options)
         count = len(body["urls"])
         charge = OperationCharge("fetch", self.provider, mode="default", meter="url", units=count)
         return await self.request_operation("fetch", "POST", path="v1/extract", headers=self.request_headers(), json_body=body, charges=(charge,))
@@ -56,6 +60,12 @@ class ParallelClient(WebOperationClient):
             body["system"] = system
         charge = OperationCharge("chat", self.provider, mode=model, meter="request", units=1)
         return await self.request_operation("chat", "POST", path="v1/chat", headers=self.request_headers(), json_body=body, charges=(charge,))
+
+    async def response(self, input: str, *, model: str = "speed") -> ProviderOperationPayload:
+        # Requests the Responses API using the same documented model-tier meter as Chat.
+        body = {"input": input, "model": model}
+        charge = OperationCharge("response", self.provider, mode=model, meter="request", units=1)
+        return await self.request_operation("response", "POST", path="v1/responses", headers=self.request_headers(), json_body=body, charges=(charge,))
 
     async def task(self, input: str, *, processor: str = "base", output_schema: Mapping[str, object] | None = None) -> ProviderOperationPayload:
         # Starts an asynchronous Parallel Task research or enrichment run.
@@ -94,7 +104,7 @@ class ParallelClient(WebOperationClient):
         valid_hits = tuple(hit for hit in hits if hit is not None)
         extra = max(0, len(valid_hits) - 10)
         charges = payload.charges + ((OperationCharge("search_extra_result", self.provider, mode="default", meter="result", units=extra),) if extra else ())
-        return SearchPayload(provider=self.provider, query=objective, hits=valid_hits, attempts=payload.attempts, billable_units=1, request_id=payload.request_id, charges=charges, provider_usage=payload.provider_usage)
+        return SearchPayload(provider=self.provider, query=objective, hits=valid_hits, attempts=payload.attempts, billable_units=1, request_id=payload.request_id, charges=charges, provider_usage=payload.provider_usage, provider_reported_cost_usd=payload.provider_reported_cost_usd)
 
     @staticmethod
     def _match_count(data: Mapping[str, Any]) -> int:
