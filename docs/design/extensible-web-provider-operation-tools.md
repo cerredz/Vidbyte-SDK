@@ -362,5 +362,3 @@ These are implementation choices to resolve while coding, not approval blockers:
 ## Approval
 
 This design is ready for implementation approval. After explicit approval, implementation will begin in a fresh worktree based on `main`, with this document committed first. The implementation will then run canonical CI, perform the required second-pass cross-reference against the original request and this design, resolve critical/notable issues, and report the exact verification evidence.
-
-
