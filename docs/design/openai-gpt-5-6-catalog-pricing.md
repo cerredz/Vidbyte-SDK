@@ -1,8 +1,8 @@
 # Design Doc: OpenAI GPT-5.6 model catalog and pricing
 
-**Status:** Draft  
-**Author:** Codex  
-**Created:** 2026-07-30  
+**Status:** Draft
+**Author:** Codex
+**Created:** 2026-07-30
 **Last Updated:** 2026-07-30
 
 ---
@@ -175,7 +175,7 @@ ProviderModelRegistry
 
 ModelPricingRegistry
   â””â”€ resolve provider + model + service tier + context length
-       -> immutable ModelPrice {input, cached_input, cache_write, output}
+       -> immutable ModelPricing with standard, long-context, and tier rates
 
 OpenAI Responses provider
   â””â”€ continues forwarding the caller-selected model unchanged
@@ -190,7 +190,7 @@ are involved.
 
 ### 6.1 Provider model catalog and alias resolution
 
-**File(s):** `vidbyte/lib/registries/models.py`  
+**File(s):** `vidbyte/lib/registries/models.py`
 **Type:** Modified
 
 #### What it does
@@ -238,7 +238,7 @@ def is_supported_model(cls, provider: ModelProvider | str, model: str) -> bool: 
 
 ### 6.2 Existing OpenAI pricing declarations
 
-**File(s):** `vidbyte/lib/registries/pricing.py`  
+**File(s):** `vidbyte/lib/registries/pricing.py`
 **Type:** Modified
 
 #### What it does
@@ -311,7 +311,7 @@ does not require an API shape change.
 
 ### 6.3 Pricing registry
 
-**File(s):** `vidbyte/lib/registries/pricing.py`  
+**File(s):** `vidbyte/lib/registries/pricing.py`
 **Type:** Modified
 
 #### What it does
@@ -351,7 +351,7 @@ class ModelPricingRegistry:
 
 ### 6.4 Public exports and documentation
 
-**File(s):** `vidbyte/lib/constants/runners.py`, `vidbyte/lib/registries/models.py`, `vidbyte/lib/registries/__init__.py`, `vidbyte/lib/README.md`, `README.md`  
+**File(s):** `vidbyte/lib/constants/runners.py`, `vidbyte/lib/registries/models.py`, `vidbyte/lib/registries/__init__.py`, `vidbyte/lib/README.md`, `README.md`
 **Type:** Modified
 
 #### What it does
