@@ -15,7 +15,9 @@ Key Functions:
     - get_supported_providers: Gets list of supported provider strings.
     - is_valid_provider: Reports whether a provider string is one the SDK offers.
     - resolve_provider: Coerces a provider string to ModelProvider, or None.
-    - get_supported_models: Gets list of default model strings.
+    - get_supported_models: Gets the default model strings or one provider's catalog.
+    - normalize_model: Resolves provider-scoped model aliases for lookup callers.
+    - is_supported_model: Reports whether a provider/model pair is catalogued.
     - resolve_active: Returns the set of providers and models to use for a run.
     - validate_provider: Raises ConfigurationError if a provider string is unrecognized.
     - validate_model: Raises ConfigurationError if a model string is empty or unrecognized.
@@ -99,6 +101,18 @@ class ProviderModelRegistry:
         ModelProvider.PLAYAI: "https://api.play.ai/api/v1",
     }
 
+    MODEL_ALIASES: ClassVar[dict[ModelProvider, dict[str, str]]] = {
+        ModelProvider.OPENAI: {"gpt-5.6": "gpt-5.6-sol"},
+    }
+
+    OPENAI_CATALOG: ClassVar[tuple[str, ...]] = (
+        "gpt-5.5",
+        "gpt-5.6",
+        "gpt-5.6-sol",
+        "gpt-5.6-terra",
+        "gpt-5.6-luna",
+    )
+
     @classmethod
     def default_model(cls, provider: ModelProvider) -> str:
         # Returns the canonical default model string for the given provider enum member.
@@ -173,9 +187,32 @@ class ProviderModelRegistry:
             return None
 
     @classmethod
-    def get_supported_models(cls) -> list[str]:
-        # Returns the list of default model identifiers across all registered providers.
-        return sorted(list(cls.DEFAULT_PROVIDER_MODELS.values()))
+    def get_supported_models(cls, provider: ModelProvider | str | None = None) -> list[str]:
+        # Returns default models or the catalogued identifiers for one provider.
+        if provider is not None:
+            return list(cls.models_for_provider(provider))
+        return sorted(set(cls.DEFAULT_PROVIDER_MODELS.values()) | set(cls.OPENAI_CATALOG))
+
+    @classmethod
+    def normalize_model(cls, provider: ModelProvider | str, model: str) -> str:
+        # Resolves a provider-scoped alias without changing the caller's request config.
+        p_enum = cls._require_provider(provider)
+        if not isinstance(model, str) or not model.strip():
+            raise ConfigurationError("model must be a non-empty string.")
+        raw_model = model.strip()
+        provider_prefix = f"{p_enum.value}/"
+        lookup_model = raw_model[len(provider_prefix):] if raw_model.lower().startswith(provider_prefix) else raw_model
+        return cls.MODEL_ALIASES.get(p_enum, {}).get(lookup_model.lower(), raw_model)
+
+    @classmethod
+    def is_supported_model(cls, provider: ModelProvider | str, model: str) -> bool:
+        # Reports whether the provider owns the model after alias normalization.
+        try:
+            p_enum = cls._require_provider(provider)
+            normalized = cls.normalize_model(p_enum, model)
+        except ConfigurationError:
+            return False
+        return normalized.lower() in {name.lower() for name in cls.models_for_provider(p_enum)}
 
     @classmethod
     def resolve_active(cls, provider_models: Mapping[str, str] | None, options: Mapping[str, Any] | None) -> dict[str, str]:
@@ -194,6 +231,17 @@ class ProviderModelRegistry:
             raise ConfigurationError(
                 f"Unrecognized provider '{provider}'. Known providers: {known}."
             )
+
+    @classmethod
+    def _require_provider(cls, provider: ModelProvider | str) -> ModelProvider:
+        # Coerces a provider for alias and catalog helpers, raising one shared error shape.
+        resolved = cls.resolve_provider(provider.value if isinstance(provider, ModelProvider) else str(provider))
+        if resolved is None:
+            raise ConfigurationError(
+                f"Unrecognized provider '{provider}'.",
+                details={"provider": str(provider), "known_providers": cls.get_supported_providers()},
+            )
+        return resolved
 
     @classmethod
     def known_models(cls) -> frozenset[str]:

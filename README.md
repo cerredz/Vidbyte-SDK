@@ -868,6 +868,7 @@ register local runtime objects without hardcoding lookups.
 |----------|---------|
 | `AgentRegistry` | Registers live agents and finds them by name, capability, tool name, or metadata. |
 | `ProviderModelRegistry` | Centralizes provider defaults, API key env vars, endpoints, model validation, and active provider resolution. |
+| `ModelPricingRegistry` | Resolves immutable per-model USD token rates, including OpenAI GPT-5.6 tier metadata. |
 | `Prompts` / `PromptRecord` | Loads prompt assets and exposes prompt text, descriptions, families, and direct import names. |
 | `RuntimeRegistry` | Resolves `AgentRuntimeType` enum values to concrete runtime classes. |
 | `ToolRegistry` | Thread-safe compatibility wrapper around the newer agent-local `Tools` catalog. |
@@ -876,7 +877,7 @@ register local runtime objects without hardcoding lookups.
 ```python
 from vidbyte import tool
 from vidbyte.lib.enums import AgentRuntimeType, ModelProvider
-from vidbyte.lib.registries import ProviderModelRegistry, RuntimeRegistry, ToolRegistry, actor_registry
+from vidbyte.lib.registries import ModelPricingRegistry, ProviderModelRegistry, RuntimeRegistry, ToolRegistry, actor_registry
 
 @tool
 def lookup_metric(user_id: int) -> dict[str, int]:
@@ -884,6 +885,8 @@ def lookup_metric(user_id: int) -> dict[str, int]:
 
 default_openai_model = ProviderModelRegistry.default_model(ModelProvider.OPENAI)
 openai_env_var = ProviderModelRegistry.get_api_key_env_var("openai")
+openai_models = ProviderModelRegistry.get_supported_models("openai")
+gpt56_luna_price = ModelPricingRegistry.default().resolve(ModelProvider.OPENAI, "gpt-5.6-luna")
 runtime_cls = RuntimeRegistry.resolve(AgentRuntimeType.LINEAR)
 tool_registry = ToolRegistry([lookup_metric])
 known_actor_roles = actor_registry.list()
