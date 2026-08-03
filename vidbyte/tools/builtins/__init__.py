@@ -57,6 +57,8 @@ from vidbyte.tools.builtins.handoff import CreateHandoffTool
 from vidbyte.tools.builtins.mcp import AttachMcpServerTool, SearchMcpServersTool
 from vidbyte.tools.builtins.operations import (
     BraveSearchTool,
+    BrowserbaseFetchTool,
+    BrowserbaseSearchTool,
     DirectHttpFetchTool,
     ExaSearchTool,
     FirecrawlFetchTool,
@@ -122,6 +124,8 @@ __all__ = [
     "AttachMcpServerTool",
     "BatchForkTool",
     "BraveSearchTool",
+    "BrowserbaseFetchTool",
+    "BrowserbaseSearchTool",
     "CodeExecutionTool",
     "DirectHttpFetchTool",
     "ExaSearchTool",
