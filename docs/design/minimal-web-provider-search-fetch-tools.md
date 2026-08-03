@@ -190,7 +190,7 @@ class BrowserbaseClient(WebOperationClient):
 #### Edge Cases & Error Handling
 
 - Non-2xx and non-JSON responses already raise `ProviderRequestError` / `ProviderResponseError` from `_require_ok` / `_decode_object`.
-- A results block that is present but not a list returns `()` rather than raising; a non-mapping results *container* raises `ProviderResponseError`, matching `brave.py`.
+- A missing `results` key returns `()`; a `results` value that is present but not a list raises `ProviderResponseError`, per the Section 4 reliability requirement that a shape violation fails closed rather than returning a misleading empty result set.
 - A result item without a non-blank `url` is dropped.
 - Empty fetch content raises `ProviderResponseError`, matching `firecrawl.py`'s empty-markdown rule.
 
@@ -312,7 +312,9 @@ class BrowserbaseSearchTool(PricedOperationTool):
     def _render(self, payload: SearchPayload) -> str: ...
 ```
 
-`ExaSearchTool.spec` changes only its `type` parameter description and default, from `'standard' | 'agentic'` (default `standard`) to the documented `auto | fast | deep-lite | deep | deep-reasoning` (default `auto`). Its tool name, other parameters, `operation`, and `provider` are unchanged. `TavilySearchTool.spec` and `ParallelSearchTool.spec` are unchanged.
+`ExaSearchTool.spec` changes its `type` parameter description and default, from `'standard' | 'agentic'` (default `standard`) to the documented `auto | fast | deep-lite | deep | deep-reasoning` (default `auto`), and drops "with contents" from the tool description because the client no longer requests a contents block (D4). Its tool name, other parameters, `operation`, and `provider` are unchanged. `TavilySearchTool.spec` and `ParallelSearchTool.spec` are unchanged.
+
+A module-level `_render_search_results(label, payload)` helper carries the render shared by all five search tools. `BraveSearchTool._render` delegates to it, producing byte-identical output to its current inline implementation.
 
 #### Logic / Algorithm
 
@@ -354,7 +356,9 @@ class BrowserbaseFetchTool(PricedOperationTool):
     def _render(self, payload: FetchPayload) -> str: ...
 ```
 
-`TavilyExtractTool.spec` and `ParallelExtractTool.spec` are unchanged.
+`TavilyExtractTool.spec` and `ParallelExtractTool.spec` are unchanged apart from noting Parallel's 20-URL batch maximum in the `urls` description.
+
+A module-level `_render_fetched_pages(label, payload)` helper carries the render shared by all four page-fetch tools. `FirecrawlFetchTool._render` delegates to it, producing byte-identical output. The `_urls_count` helper is removed: both of its callers now resolve concrete URLs through `_url_list`, leaving it dead.
 
 #### Logic / Algorithm
 
