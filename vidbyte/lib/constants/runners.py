@@ -1,3 +1,35 @@
+"""Context Protocol Header
+
+FILE: vidbyte/lib/constants/runners.py
+PURPOSE: Owns the provider-qualified and bare model-to-runner catalogs used by
+    Runner inference and strict ProviderModelRegistry validation. Model aliases
+    that users may select must appear in both maps; this file must not own API
+    payload construction or provider pricing formulas.
+ROLE IN CODEBASE: `vidbyte/lib/runners/utility.py` reads these maps to choose a
+    runner, while `vidbyte/lib/registries/models.py` uses them for discovery and
+    validation. `vidbyte/providers/` owns transport payloads; pricing belongs to
+    `vidbyte/lib/registries/pricing.py`.
+ARCHITECTURE NOTE: The qualified map is the provider boundary and the bare map
+    supports model-only runner inference. Keeping both entries synchronized is
+    required for strict model validation and OpenAI-compatible aliases.
+FUNCTION INVENTORY: No functions; this module exports constants and mappings.
+COMMON MODIFICATION PATTERNS: Add a model to both qualified and bare maps with
+    the same runner type, then verify ProviderModelRegistry and runner inference.
+WHAT NOT TO DO: Do not add pricing, API keys, endpoints, HTTP payloads, or UI
+    model-selector behavior here; those belong to the registry/config/provider
+    layers named above.
+KNOWN EDGE CASES: `gpt-5.6` is an OpenAI alias for `gpt-5.6-sol`; it remains a
+    distinct catalog entry so strict validation accepts the caller's spelling.
+RELATED DOCS: docs/design/openai-gpt-5-6-catalog-pricing.md and
+    https://developers.openai.com/api/docs/models.
+AUTO-GENERATED FLAG: No; maintained source data.
+TEST FILES: tests/test_model_registry.py and runner/model routing tests cover
+    catalog and inference behavior; repository-wide unittest discovery is the
+    required verification.
+CONCURRENCY MODEL: Immutable-at-runtime module-level mappings; no locks or
+    mutation protocol is provided.
+"""
+
 from __future__ import annotations
 
 RUNNER_TYPE_TEXT = "text"
@@ -17,6 +49,7 @@ MODEL_PROVIDER_RUNNER_TYPE_MAP: dict[str, str] = {
     "openai/gpt-5.4-nano": RUNNER_TYPE_TEXT,
     "openai/gpt-5.4-pro": RUNNER_TYPE_TEXT,
     "openai/gpt-5.5": RUNNER_TYPE_TEXT,
+    "openai/gpt-5.6": RUNNER_TYPE_TEXT,
     "openai/gpt-5.5-pro": RUNNER_TYPE_TEXT,
     "openai/gpt-5.6-sol": RUNNER_TYPE_TEXT,
     "openai/gpt-5.6-terra": RUNNER_TYPE_TEXT,
@@ -146,6 +179,7 @@ MODEL_RUNNER_TYPE_MAP: dict[str, str] = {
     "gpt-5.4-nano": RUNNER_TYPE_TEXT,
     "gpt-5.4-pro": RUNNER_TYPE_TEXT,
     "gpt-5.5": RUNNER_TYPE_TEXT,
+    "gpt-5.6": RUNNER_TYPE_TEXT,
     "gpt-5.5-pro": RUNNER_TYPE_TEXT,
     "gpt-5.6-sol": RUNNER_TYPE_TEXT,
     "gpt-5.6-terra": RUNNER_TYPE_TEXT,

@@ -6,8 +6,12 @@ Purpose:
     Centralizes per-model USD token rates so agent usage tracking can price model
     calls without scattering rate constants across providers or agents.
 Architecture:
-    - ModelPricing: Immutable per-model rate record (USD per million tokens).
+    - ModelPricing: Immutable per-model rate record (USD per million tokens),
+      including optional service-tier metadata.
+    - OPENAI_GPT56_TIER_RATES: Official GPT-5.6 Standard, Batch, Flex, and Fast
+      rate metadata with short/long context fields.
     - PROVIDER_PRICING: Built-in rate table keyed by provider then model string.
+    - PRICING_SOURCE_URL / PRICING_AS_OF: Audit metadata for the live source.
     - ModelPricingRegistry: Resolves (provider, model) to rates with prefix
       matching and supports caller overrides.
 Key Functions:
@@ -29,6 +33,7 @@ from typing import ClassVar
 
 from vidbyte.lib.enums import ModelProvider
 from vidbyte.lib.errors import ConfigurationError
+from vidbyte.lib.registries.models import ProviderModelRegistry
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,9 +48,11 @@ class ModelPricing:
     input_over_threshold_per_million: float | None = None
     output_over_threshold_per_million: float | None = None
     threshold_inclusive: bool = False
+    tier_rates: Mapping[str, Mapping[str, float]] | None = None
 
 
-PRICING_AS_OF: str = "2026-07-22"
+PRICING_AS_OF: str = "2026-07-30"
+PRICING_SOURCE_URL: str = "https://developers.openai.com/api/docs/pricing"
 
 # Rates verified against official provider pricing pages on PRICING_AS_OF.
 # Providers/models with unverifiable rates are omitted so cost resolves to None
@@ -54,13 +61,35 @@ PRICING_AS_OF: str = "2026-07-22"
 # threshold_inclusive marks providers whose over-threshold tier applies at exactly
 # the threshold (xAI, "prompt >= 200k"); the default False keeps the strict ">"
 # boundary used by OpenAI, Gemini, and MiniMax.
+
+OPENAI_GPT56_TIER_RATES: dict[str, dict[str, dict[str, float]]] = {
+    "gpt-5.6-sol": {
+        "standard": {"input_per_million": 5.0, "cached_input_per_million": 0.5, "cache_write_per_million": 6.25, "output_per_million": 30.0, "long_input_per_million": 10.0, "long_cached_input_per_million": 1.0, "long_cache_write_per_million": 12.5, "long_output_per_million": 45.0},
+        "batch": {"input_per_million": 2.5, "cached_input_per_million": 0.25, "cache_write_per_million": 3.125, "output_per_million": 15.0, "long_input_per_million": 5.0, "long_cached_input_per_million": 0.5, "long_cache_write_per_million": 6.25, "long_output_per_million": 22.5},
+        "flex": {"input_per_million": 2.5, "cached_input_per_million": 0.25, "cache_write_per_million": 3.125, "output_per_million": 15.0, "long_input_per_million": 5.0, "long_cached_input_per_million": 0.5, "long_cache_write_per_million": 6.25, "long_output_per_million": 22.5},
+        "fast": {"input_per_million": 10.0, "cached_input_per_million": 1.0, "cache_write_per_million": 12.5, "output_per_million": 60.0},
+    },
+    "gpt-5.6-terra": {
+        "standard": {"input_per_million": 2.0, "cached_input_per_million": 0.2, "cache_write_per_million": 2.5, "output_per_million": 12.0, "long_input_per_million": 4.0, "long_cached_input_per_million": 0.4, "long_cache_write_per_million": 5.0, "long_output_per_million": 18.0},
+        "batch": {"input_per_million": 1.0, "cached_input_per_million": 0.1, "cache_write_per_million": 1.25, "output_per_million": 6.0, "long_input_per_million": 2.0, "long_cached_input_per_million": 0.2, "long_cache_write_per_million": 2.5, "long_output_per_million": 9.0},
+        "flex": {"input_per_million": 1.0, "cached_input_per_million": 0.1, "cache_write_per_million": 1.25, "output_per_million": 6.0, "long_input_per_million": 2.0, "long_cached_input_per_million": 0.2, "long_cache_write_per_million": 2.5, "long_output_per_million": 9.0},
+        "fast": {"input_per_million": 4.0, "cached_input_per_million": 0.4, "cache_write_per_million": 5.0, "output_per_million": 24.0},
+    },
+    "gpt-5.6-luna": {
+        "standard": {"input_per_million": 0.2, "cached_input_per_million": 0.02, "cache_write_per_million": 0.25, "output_per_million": 1.2, "long_input_per_million": 0.4, "long_cached_input_per_million": 0.04, "long_cache_write_per_million": 0.5, "long_output_per_million": 1.8},
+        "batch": {"input_per_million": 0.1, "cached_input_per_million": 0.01, "cache_write_per_million": 0.125, "output_per_million": 0.6, "long_input_per_million": 0.2, "long_cached_input_per_million": 0.02, "long_cache_write_per_million": 0.25, "long_output_per_million": 0.9},
+        "flex": {"input_per_million": 0.1, "cached_input_per_million": 0.01, "cache_write_per_million": 0.125, "output_per_million": 0.6, "long_input_per_million": 0.2, "long_cached_input_per_million": 0.02, "long_cache_write_per_million": 0.25, "long_output_per_million": 0.9},
+        "fast": {"input_per_million": 0.4, "cached_input_per_million": 0.04, "cache_write_per_million": 0.5, "output_per_million": 2.4},
+    },
+}
+
 PROVIDER_PRICING: dict[ModelProvider, dict[str, ModelPricing]] = {
     # OpenAI charges the long-context tier (input x2, output x1.5) for the whole
     # request once prompt input exceeds 272k tokens; sub-272k uses the short rate.
     ModelProvider.OPENAI: {
-        "gpt-5.6-sol": ModelPricing(input_per_million=5.0, output_per_million=30.0, cache_read_per_million=0.5, threshold_tokens=272_000, input_over_threshold_per_million=10.0, output_over_threshold_per_million=45.0),
-        "gpt-5.6-terra": ModelPricing(input_per_million=2.5, output_per_million=15.0, cache_read_per_million=0.25, threshold_tokens=272_000, input_over_threshold_per_million=5.0, output_over_threshold_per_million=22.5),
-        "gpt-5.6-luna": ModelPricing(input_per_million=1.0, output_per_million=6.0, cache_read_per_million=0.1, threshold_tokens=272_000, input_over_threshold_per_million=2.0, output_over_threshold_per_million=9.0),
+        "gpt-5.6-sol": ModelPricing(input_per_million=5.0, output_per_million=30.0, cache_read_per_million=0.5, cache_write_per_million=6.25, threshold_tokens=272_000, input_over_threshold_per_million=10.0, output_over_threshold_per_million=45.0, tier_rates=OPENAI_GPT56_TIER_RATES["gpt-5.6-sol"]),
+        "gpt-5.6-terra": ModelPricing(input_per_million=2.0, output_per_million=12.0, cache_read_per_million=0.2, cache_write_per_million=2.5, threshold_tokens=272_000, input_over_threshold_per_million=4.0, output_over_threshold_per_million=18.0, tier_rates=OPENAI_GPT56_TIER_RATES["gpt-5.6-terra"]),
+        "gpt-5.6-luna": ModelPricing(input_per_million=0.2, output_per_million=1.2, cache_read_per_million=0.02, cache_write_per_million=0.25, threshold_tokens=272_000, input_over_threshold_per_million=0.4, output_over_threshold_per_million=1.8, tier_rates=OPENAI_GPT56_TIER_RATES["gpt-5.6-luna"]),
         "gpt-5.5": ModelPricing(input_per_million=5.0, output_per_million=30.0, cache_read_per_million=0.5, threshold_tokens=272_000, input_over_threshold_per_million=10.0, output_over_threshold_per_million=45.0),
         "gpt-5.5-pro": ModelPricing(input_per_million=30.0, output_per_million=180.0),
         "gpt-5.4": ModelPricing(input_per_million=2.5, output_per_million=15.0, cache_read_per_million=0.25, threshold_tokens=272_000, input_over_threshold_per_million=5.0, output_over_threshold_per_million=22.5),
@@ -145,13 +174,18 @@ class ModelPricingRegistry:
         # Returns exact or longest-prefix pricing for the model, else None. The
         # provider is strictly a ModelProvider (the enum's frozen set of keys);
         # callers coerce any raw provider string once, at the ingestion boundary.
-        if not isinstance(provider, ModelProvider) or not isinstance(model, str) or not model:
+        if not isinstance(provider, ModelProvider) or not isinstance(model, str) or not model.strip():
             return None
         models = self._table.get(provider, self._EMPTY_TABLE)
-        exact = models.get(model)
+        requested_model = model.strip()
+        exact = models.get(requested_model)
         if exact is not None:
             return exact
-        prefix_matches = [(key, pricing) for key, pricing in models.items() if model.startswith(key)]
+        canonical_model = ProviderModelRegistry.normalize_model(provider, requested_model)
+        exact = models.get(canonical_model)
+        if exact is not None:
+            return exact
+        prefix_matches = [(key, pricing) for key, pricing in models.items() if canonical_model.startswith(key)]
         if not prefix_matches:
             return None
         return max(prefix_matches, key=lambda item: len(item[0]))[1]
@@ -171,6 +205,8 @@ class ModelPricingRegistry:
 __all__ = [
     "ModelPricing",
     "ModelPricingRegistry",
+    "OPENAI_GPT56_TIER_RATES",
     "PRICING_AS_OF",
+    "PRICING_SOURCE_URL",
     "PROVIDER_PRICING",
 ]
