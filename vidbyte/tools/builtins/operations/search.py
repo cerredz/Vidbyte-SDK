@@ -7,8 +7,8 @@ Purpose:
     search operations, each declaring its (operation, provider) and deriving its
     billing mode and units from the call arguments.
 Architecture:
-    - Brave/OpenAlex/SemanticScholar: flat per-request search (units = 1).
-    - Exa/Parallel: per-result search (units = requested result count).
+    - Brave/Browserbase/OpenAlex/SemanticScholar: flat per-request search (units = 1).
+    - Exa/Parallel: per-result search (units = returned result count, floored at 1).
     - Tavily/Linkup: depth-tiered search selecting a billing mode.
 Relations:
     Subclass PricedOperationTool (this package's base) and are exported through
@@ -35,6 +35,17 @@ def _mode_arg(call: ToolCall, name: str, allowed: tuple[str, ...], default: str)
     # Reads a mode argument, clamping anything outside the allowed set to default.
     value = call.arguments.get(name)
     return value if isinstance(value, str) and value in allowed else default
+
+
+def _render_search_results(label: str, payload: SearchPayload) -> str:
+    # Renders a compact numbered result list for the model's context window.
+    if not payload.hits:
+        return f"{label}: no results for {payload.query!r}."
+    lines = [f"{index}. {hit.title} — {hit.url}" + (f"\n   {hit.snippet[:300]}" if hit.snippet else "") for index, hit in enumerate(payload.hits, start=1)]
+    return f"{label}: {len(payload.hits)} results for {payload.query!r}.\n" + "\n".join(lines)
+
+
+_EXA_SEARCH_TYPES = ("auto", "fast", "deep-lite", "deep", "deep-reasoning")
 
 
 class BraveSearchTool(PricedOperationTool):
@@ -67,10 +78,36 @@ class BraveSearchTool(PricedOperationTool):
 
     def _render(self, payload: SearchPayload) -> str:
         # Renders a compact numbered result list for the model's context window.
-        if not payload.hits:
-            return f"brave search: no results for {payload.query!r}."
-        lines = [f"{index}. {hit.title} — {hit.url}" + (f"\n   {hit.snippet[:300]}" if hit.snippet else "") for index, hit in enumerate(payload.hits, start=1)]
-        return f"brave search: {len(payload.hits)} results for {payload.query!r}.\n" + "\n".join(lines)
+        return _render_search_results("brave search", payload)
+
+
+class BrowserbaseSearchTool(PricedOperationTool):
+    """Browserbase web search — flat per-request billing."""
+
+    operation = "search"
+    provider = "browserbase"
+
+    def spec(self) -> ToolSpec:
+        # Declares the Browserbase search tool with a query and an optional result count.
+        return ToolSpec(
+            name="browserbase_search",
+            description="Runs a Browserbase web search and returns ranked result snippets.",
+            parameters=(
+                ToolParameter(name="query", type="string", description="The search query.", required=True),
+                ToolParameter(name="num_results", type="int", description="Maximum results to return (max 25).", required=False, default=10),
+            ),
+        )
+
+    async def execute(self, call: ToolCall) -> ToolResult:
+        # Runs the query through the injected BrowserbaseClient, or prices a contract stub without one.
+        query = str(call.arguments.get("query", ""))
+        if self._client is None:
+            return self._contract_result(f"browserbase search: {query}", units=1)
+        try:
+            payload = await self._client.search(query, num_results=_int_arg(call, "num_results", 10))
+        except (ProviderRequestError, ProviderResponseError):
+            return self._failed_result("browserbase search failed.", units=1, mode="default", attempts=self._client.max_attempts, error="search_failed")
+        return self._executed_result(_render_search_results("browserbase search", payload), payload, units=payload.billable_units, mode="default", attempts=payload.attempts)
 
 
 class ExaSearchTool(PricedOperationTool):
@@ -83,19 +120,25 @@ class ExaSearchTool(PricedOperationTool):
         # Declares the Exa search tool with query, result count, and search type.
         return ToolSpec(
             name="exa_search",
-            description="Runs an Exa neural search returning hyper-relevant results with contents.",
+            description="Runs an Exa neural search returning hyper-relevant ranked results.",
             parameters=(
                 ToolParameter(name="query", type="string", description="The search query.", required=True),
                 ToolParameter(name="num_results", type="int", description="Number of results to return.", required=False, default=10),
-                ToolParameter(name="type", type="string", description="Search mode: 'standard' or 'agentic'.", required=False, default="standard"),
+                ToolParameter(name="type", type="string", description="Search mode: 'auto', 'fast', 'deep-lite', 'deep', or 'deep-reasoning'.", required=False, default="auto"),
             ),
         )
 
     async def execute(self, call: ToolCall) -> ToolResult:
-        # Prices one Exa search by returned result count under the selected mode.
-        mode = _mode_arg(call, "type", ("standard", "agentic"), "standard")
-        units = _int_arg(call, "num_results", 10)
-        return self._contract_result(f"exa search: {call.arguments.get('query', '')}", units=units, mode=mode)
+        # Runs the query through the injected ExaClient, or prices a contract stub without one.
+        query = str(call.arguments.get("query", ""))
+        mode = _mode_arg(call, "type", _EXA_SEARCH_TYPES, "auto")
+        if self._client is None:
+            return self._contract_result(f"exa search: {query}", units=_int_arg(call, "num_results", 10), mode=mode)
+        try:
+            payload = await self._client.search(query, num_results=_int_arg(call, "num_results", 10), search_type=mode)
+        except (ProviderRequestError, ProviderResponseError):
+            return self._failed_result("exa search failed.", units=1, mode=mode, attempts=self._client.max_attempts, error="search_failed")
+        return self._executed_result(_render_search_results("exa search", payload), payload, units=payload.billable_units, mode=mode, attempts=payload.attempts)
 
 
 class TavilySearchTool(PricedOperationTool):
@@ -117,9 +160,16 @@ class TavilySearchTool(PricedOperationTool):
         )
 
     async def execute(self, call: ToolCall) -> ToolResult:
-        # Prices one Tavily search per request at the basic/advanced credit tier.
+        # Runs the query through the injected TavilyClient, or prices a contract stub without one.
+        query = str(call.arguments.get("query", ""))
         mode = _mode_arg(call, "search_depth", ("basic", "advanced"), "basic")
-        return self._contract_result(f"tavily search: {call.arguments.get('query', '')}", units=1, mode=mode)
+        if self._client is None:
+            return self._contract_result(f"tavily search: {query}", units=1, mode=mode)
+        try:
+            payload = await self._client.search(query, max_results=_int_arg(call, "max_results", 5), search_depth=mode)
+        except (ProviderRequestError, ProviderResponseError):
+            return self._failed_result("tavily search failed.", units=1, mode=mode, attempts=self._client.max_attempts, error="search_failed")
+        return self._executed_result(_render_search_results("tavily search", payload), payload, units=payload.billable_units, mode=mode, attempts=payload.attempts)
 
 
 class LinkupSearchTool(PricedOperationTool):
@@ -164,10 +214,16 @@ class ParallelSearchTool(PricedOperationTool):
         )
 
     async def execute(self, call: ToolCall) -> ToolResult:
-        # Prices one Parallel search by returned result count under the processor tier.
+        # Runs the objective through the injected ParallelClient, or prices a contract stub without one.
+        objective = str(call.arguments.get("objective", ""))
         mode = _mode_arg(call, "processor", ("turbo", "pro"), "turbo")
-        units = _int_arg(call, "max_results", 10)
-        return self._contract_result(f"parallel search: {call.arguments.get('objective', '')}", units=units, mode=mode)
+        if self._client is None:
+            return self._contract_result(f"parallel search: {objective}", units=_int_arg(call, "max_results", 10), mode=mode)
+        try:
+            payload = await self._client.search(objective, max_results=_int_arg(call, "max_results", 10), processor=mode)
+        except (ProviderRequestError, ProviderResponseError):
+            return self._failed_result("parallel search failed.", units=1, mode=mode, attempts=self._client.max_attempts, error="search_failed")
+        return self._executed_result(_render_search_results("parallel search", payload), payload, units=payload.billable_units, mode=mode, attempts=payload.attempts)
 
 
 class OpenAlexSearchTool(PricedOperationTool):
@@ -216,6 +272,7 @@ class SemanticScholarSearchTool(PricedOperationTool):
 
 __all__ = [
     "BraveSearchTool",
+    "BrowserbaseSearchTool",
     "ExaSearchTool",
     "LinkupSearchTool",
     "OpenAlexSearchTool",

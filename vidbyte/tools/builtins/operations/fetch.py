@@ -7,8 +7,8 @@ Purpose:
     operations, each declaring its (operation, provider) and deriving its billing
     mode and units (pages / URLs) from the call arguments.
 Architecture:
-    - Firecrawl/Parallel/Tavily: per-URL (page) fetch, units from the URL count.
-    - Linkup: single-page fetch, JS vs no-JS selects the billing mode.
+    - Firecrawl/Parallel/Tavily: per-page fetch, units from the pages returned.
+    - Browserbase/Linkup: single-page fetch, a mode flag selects the billing rate.
     - DirectHttp: the SDK's own zero-cost HTTP fetcher; performs a live GET.
 Relations:
     Subclass PricedOperationTool (this package's base) and are exported through
@@ -27,14 +27,6 @@ from vidbyte.tools.builtins.operations.base import PricedOperationTool
 from vidbyte.tools.types import ToolCall, ToolParameter, ToolResult, ToolSpec
 
 
-def _urls_count(call: ToolCall) -> int:
-    # Counts the pages a fetch call targets, from a urls list or a single url.
-    urls = call.arguments.get("urls")
-    if isinstance(urls, (list, tuple)):
-        return len(urls)
-    return 1 if call.arguments.get("url") else 0
-
-
 def _url_list(call: ToolCall) -> list[str]:
     # Resolves the concrete page URLs a fetch call targets, dropping blank entries.
     urls = call.arguments.get("urls")
@@ -42,6 +34,12 @@ def _url_list(call: ToolCall) -> list[str]:
         return [str(url) for url in urls if isinstance(url, str) and url.strip()]
     single = call.arguments.get("url")
     return [single] if isinstance(single, str) and single.strip() else []
+
+
+def _render_fetched_pages(label: str, payload: FetchPayload) -> str:
+    # Renders one line per page; page bodies travel in the payload, not the summary.
+    lines = [f"{index}. {page.final_url} ({len(page.content)} chars)" for index, page in enumerate(payload.pages, start=1)]
+    return f"{label}: {len(payload.pages)} pages.\n" + "\n".join(lines)
 
 
 class FirecrawlFetchTool(PricedOperationTool):
@@ -76,12 +74,44 @@ class FirecrawlFetchTool(PricedOperationTool):
 
     def _render(self, payload: FetchPayload) -> str:
         # Renders one line per scraped page; page bodies travel in the payload, not the summary.
-        lines = [f"{index}. {page.final_url} ({len(page.content)} chars)" for index, page in enumerate(payload.pages, start=1)]
-        return f"firecrawl scrape: {len(payload.pages)} pages.\n" + "\n".join(lines)
+        return _render_fetched_pages("firecrawl scrape", payload)
+
+
+class BrowserbaseFetchTool(PricedOperationTool):
+    """Browserbase fetch — single-page billing, proxies select the higher rate."""
+
+    operation = "fetch"
+    provider = "browserbase"
+
+    def spec(self) -> ToolSpec:
+        # Declares the Browserbase fetch tool over a single URL with a proxy flag.
+        return ToolSpec(
+            name="browserbase_fetch",
+            description="Fetches a single web page's content through Browserbase infrastructure.",
+            parameters=(
+                ToolParameter(name="url", type="string", description="The page URL to fetch.", required=True),
+                ToolParameter(name="proxies", type="bool", description="Route through Browserbase proxies at the higher rate.", required=False, default=False),
+            ),
+        )
+
+    async def execute(self, call: ToolCall) -> ToolResult:
+        # Fetches the page through the injected BrowserbaseClient, or prices a contract stub.
+        url = str(call.arguments.get("url", ""))
+        proxies = call.arguments.get("proxies") is True
+        mode = "proxy" if proxies else "default"
+        if not url.strip():
+            return self._failed_result("browserbase fetch requires a url argument.", units=0, mode=mode, attempts=0, error="missing_url")
+        if self._client is None:
+            return self._contract_result("browserbase fetch", units=1, mode=mode)
+        try:
+            payload = await self._client.fetch(url, proxies=proxies)
+        except (ProviderRequestError, ProviderResponseError):
+            return self._failed_result("browserbase fetch failed.", units=1, mode=mode, attempts=self._client.max_attempts, error="fetch_failed")
+        return self._executed_result(_render_fetched_pages("browserbase fetch", payload), payload, units=payload.billable_units, mode=mode, attempts=payload.attempts)
 
 
 class ParallelExtractTool(PricedOperationTool):
-    """Parallel extract — per-URL billing."""
+    """Parallel extract — per-page billing."""
 
     operation = "fetch"
     provider = "parallel"
@@ -92,13 +122,22 @@ class ParallelExtractTool(PricedOperationTool):
             name="parallel_extract",
             description="Extracts LLM-ready content from web pages via the Parallel Extract API.",
             parameters=(
-                ToolParameter(name="urls", type="array", description="Page URLs to extract.", required=True),
+                ToolParameter(name="urls", type="array", description="Page URLs to extract (max 20).", required=True),
             ),
         )
 
     async def execute(self, call: ToolCall) -> ToolResult:
-        # Prices one Parallel extract by the number of URLs.
-        return self._contract_result("parallel extract", units=_urls_count(call))
+        # Extracts every requested page through the injected ParallelClient, or prices a stub.
+        urls = _url_list(call)
+        if not urls:
+            return self._failed_result("parallel extract requires a urls argument.", units=0, mode="default", attempts=0, error="missing_url")
+        if self._client is None:
+            return self._contract_result("parallel extract", units=len(urls))
+        try:
+            payload = await self._client.extract(urls)
+        except (ProviderRequestError, ProviderResponseError):
+            return self._failed_result("parallel extract failed.", units=len(urls), mode="default", attempts=self._client.max_attempts, error="fetch_failed")
+        return self._executed_result(_render_fetched_pages("parallel extract", payload), payload, units=payload.billable_units, mode="default", attempts=payload.attempts)
 
 
 class TavilyExtractTool(PricedOperationTool):
@@ -119,10 +158,19 @@ class TavilyExtractTool(PricedOperationTool):
         )
 
     async def execute(self, call: ToolCall) -> ToolResult:
-        # Prices one Tavily extract by URL count at the basic/advanced tier.
+        # Extracts every requested page through the injected TavilyClient, or prices a stub.
+        urls = _url_list(call)
         depth = call.arguments.get("extract_depth")
         mode = depth if depth in ("basic", "advanced") else "basic"
-        return self._contract_result("tavily extract", units=_urls_count(call), mode=mode)
+        if not urls:
+            return self._failed_result("tavily extract requires a urls argument.", units=0, mode=mode, attempts=0, error="missing_url")
+        if self._client is None:
+            return self._contract_result("tavily extract", units=len(urls), mode=mode)
+        try:
+            payload = await self._client.extract(urls, extract_depth=mode)
+        except (ProviderRequestError, ProviderResponseError):
+            return self._failed_result("tavily extract failed.", units=len(urls), mode=mode, attempts=self._client.max_attempts, error="fetch_failed")
+        return self._executed_result(_render_fetched_pages("tavily extract", payload), payload, units=payload.billable_units, mode=mode, attempts=payload.attempts)
 
 
 class LinkupFetchTool(PricedOperationTool):
@@ -182,6 +230,7 @@ class DirectHttpFetchTool(PricedOperationTool):
 
 
 __all__ = [
+    "BrowserbaseFetchTool",
     "DirectHttpFetchTool",
     "FirecrawlFetchTool",
     "LinkupFetchTool",
