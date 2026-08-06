@@ -18,7 +18,7 @@ import re
 
 from typing import TYPE_CHECKING
 from vidbyte.lib.errors import ToolRegistryError
-from vidbyte.tools.activity import prepare_tool_call
+from vidbyte.tools.activity import ActivityToolFormatter
 from vidbyte.tools.catalog import Tools
 from vidbyte.tools.security import PermissionDecision, PermissionPolicy
 from vidbyte.tools.types import ToolCall, ToolResult
@@ -48,7 +48,7 @@ class ToolExecutor:
         except ToolRegistryError as exc:
             return ToolResult.error(call.tool_name, str(exc), metadata={"error": "unknown_tool"})
 
-        call = prepare_tool_call(tool, call)
+        call = ActivityToolFormatter.prepare_call(tool, call)
         spec = tool.spec()
         decision = self.permission_policy.check(spec, call)
         if decision is PermissionDecision.DENY:

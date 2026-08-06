@@ -54,7 +54,7 @@ from vidbyte.agents.contracts.schema import SchemaConformance
 from vidbyte.lib.dataclasses.context import BaseAgentContext, BaseContext
 from vidbyte.lib.dataclasses.strategies import AgentResult
 from vidbyte.tools._internal import IS_DONE_TOOL_NAME, with_internal_agent_tools
-from vidbyte.tools.activity import prepare_tool_call, unwrap_tool
+from vidbyte.tools.activity import ActivityToolFormatter
 from vidbyte.tools.base import BaseTool
 from vidbyte.tools.builtins.operations.base import PricedOperationTool
 from vidbyte.tools.catalog import Tools
@@ -1114,7 +1114,7 @@ class AgentRuntime:
         )
         try:
             tool = self._get_tool(call)
-            call = prepare_tool_call(tool, call)
+            call = ActivityToolFormatter.prepare_call(tool, call)
             spec = tool.spec()
             self._check_permission(spec, call)
             self._validate_tool_call(tool, call)
@@ -1172,7 +1172,7 @@ class AgentRuntime:
         # PricedOperationTool call spent, so a retried or failed provider request stays
         # billable; swallows any hook error so a pricing bug can never break execution.
         # Unwrapping first keeps an activity-bound priced tool metered as itself.
-        tool = unwrap_tool(tool) if isinstance(tool, BaseTool) else tool
+        tool = ActivityToolFormatter.unwrap(tool) if isinstance(tool, BaseTool) else tool
         if not isinstance(tool, PricedOperationTool):
             return
         try:

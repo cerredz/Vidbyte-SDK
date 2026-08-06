@@ -186,8 +186,18 @@ Adds the ergonomic binding method, a delegating wrapper, a common call-preparati
 class BaseTool(ABC):
     def with_activity(self, activity: ToolActivity) -> BaseTool: ...
 
-def prepare_tool_call(tool: BaseTool, call: ToolCall) -> ToolCall: ...
-def unwrap_tool(tool: BaseTool) -> BaseTool: ...
+class ActivityToolFormatter:
+    @staticmethod
+    def bind(tool: BaseTool, activity: ToolActivity) -> BaseTool: ...
+
+    @staticmethod
+    def prepare_call(tool: BaseTool, call: ToolCall) -> ToolCall: ...
+
+    @staticmethod
+    def unwrap(tool: BaseTool) -> BaseTool: ...
+
+    @staticmethod
+    def declared(tool: BaseTool) -> ToolActivity | None: ...
 
 class Tools(Sequence[BaseTool]):
     def prepare_call(self, call: ToolCall) -> ToolCall: ...
@@ -207,13 +217,13 @@ search_tool = BraveSearchTool(client=brave_client).with_activity(
 
 #### Logic / Algorithm
 
-1. `with_activity` rejects double binding and returns an activity-bound delegating tool.
+1. `with_activity` delegates to `ActivityToolFormatter.bind`, which rejects double binding and returns an activity-bound delegating tool.
 2. Its `spec()` uses `dataclasses.replace` to add the declaration to the wrapped spec without changing other fields.
-3. `prepare_tool_call` pops the reserved `activity` value from a copied argument dictionary.
+3. `ActivityToolFormatter.prepare_call` pops the reserved `activity` value from a copied argument dictionary.
 4. If present, it validates with the activity model and creates `ToolCallActivity(normalized_payload, copied_metadata)`.
 5. It returns a new immutable `ToolCall` with business arguments, the same name/call ID/metadata, and the normalized activity.
-6. The wrapper validates and executes the prepared call by delegating to the underlying tool.
-7. `unwrap_tool` follows only SDK activity wrappers and returns the original tool; it does not generically traverse arbitrary application wrappers.
+6. The wrapper validates and executes the prepared call by delegating to the underlying tool via `ActivityToolFormatter` helpers.
+7. `ActivityToolFormatter.unwrap` follows only SDK activity wrappers and returns the original tool; it does not generically traverse arbitrary application wrappers.
 
 #### Edge Cases & Error Handling
 

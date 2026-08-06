@@ -32,9 +32,9 @@ class BaseTool(ABC):
 
     def with_activity(self, activity: ToolActivity) -> "BaseTool":
         """Return this tool with one reserved activity annotation the model fills in per call."""
-        from vidbyte.tools.activity import bind_activity
+        from vidbyte.tools.activity import ActivityToolFormatter
 
-        return bind_activity(self, activity)
+        return ActivityToolFormatter.bind(self, activity)
 
     @abstractmethod
     def spec(self) -> ToolSpec:

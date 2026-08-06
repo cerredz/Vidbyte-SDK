@@ -18,7 +18,7 @@ from typing import Any, overload
 
 from vidbyte.lib.errors import ToolRegistrationError, ToolRegistryError
 from vidbyte.lib.tools import ToolsFormatter
-from vidbyte.tools.activity import prepare_tool_call
+from vidbyte.tools.activity import ActivityToolFormatter
 from vidbyte.tools.adapters import ToolInput, ensure_tool
 from vidbyte.tools.base import BaseTool
 from vidbyte.tools.types import ToolCall, ToolSpec
@@ -70,7 +70,7 @@ class Tools(Sequence[BaseTool]):
             tool = self._get(call.tool_name)
         except ToolRegistryError:
             return call
-        return prepare_tool_call(tool, call)
+        return ActivityToolFormatter.prepare_call(tool, call)
 
     def add(self, tool: ToolInput, *, replace: bool = False) -> "Tools":
         """Return a new catalog with one tool added."""

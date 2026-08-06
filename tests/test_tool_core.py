@@ -32,7 +32,7 @@ from vidbyte.tools import (
     Tools,
     ToolsFormatter,
 )
-from vidbyte.tools.activity import unwrap_tool
+from vidbyte.tools.activity import ActivityToolFormatter
 
 
 class EchoActivity(BaseModel):
@@ -86,7 +86,7 @@ class ToolActivityTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(spec.permission, tool.spec().permission)
         self.assertIsNotNone(spec.activity)
         self.assertIsNone(tool.spec().activity)
-        self.assertIs(unwrap_tool(bound), tool)
+        self.assertIs(ActivityToolFormatter.unwrap(bound), tool)
 
     def test_double_binding_is_rejected(self) -> None:
         """A tool that already declares an activity cannot be bound again."""
