@@ -18,9 +18,10 @@ from typing import Any, overload
 
 from vidbyte.lib.errors import ToolRegistrationError, ToolRegistryError
 from vidbyte.lib.tools import ToolsFormatter
+from vidbyte.tools.activity import prepare_tool_call
 from vidbyte.tools.adapters import ToolInput, ensure_tool
 from vidbyte.tools.base import BaseTool
-from vidbyte.tools.types import ToolSpec
+from vidbyte.tools.types import ToolCall, ToolSpec
 
 
 class Tools(Sequence[BaseTool]):
@@ -62,6 +63,14 @@ class Tools(Sequence[BaseTool]):
     def provider_schemas(self, provider_or_model: str) -> tuple[dict[str, Any], ...]:
         """Return provider-native tool declarations for this catalog."""
         return ToolsFormatter.format_tools(self, provider_or_model)
+
+    def prepare_call(self, call: ToolCall) -> ToolCall:
+        """Return the call with any validated activity annotation separated from its arguments."""
+        try:
+            tool = self._get(call.tool_name)
+        except ToolRegistryError:
+            return call
+        return prepare_tool_call(tool, call)
 
     def add(self, tool: ToolInput, *, replace: bool = False) -> "Tools":
         """Return a new catalog with one tool added."""

@@ -54,6 +54,8 @@ from vidbyte.agents.contracts.schema import SchemaConformance
 from vidbyte.lib.dataclasses.context import BaseAgentContext, BaseContext
 from vidbyte.lib.dataclasses.strategies import AgentResult
 from vidbyte.tools._internal import IS_DONE_TOOL_NAME, with_internal_agent_tools
+from vidbyte.tools.activity import prepare_tool_call, unwrap_tool
+from vidbyte.tools.base import BaseTool
 from vidbyte.tools.builtins.operations.base import PricedOperationTool
 from vidbyte.tools.catalog import Tools
 from vidbyte.tools.security import PermissionDecision, PermissionPolicy
@@ -1112,6 +1114,7 @@ class AgentRuntime:
         )
         try:
             tool = self._get_tool(call)
+            call = prepare_tool_call(tool, call)
             spec = tool.spec()
             self._check_permission(spec, call)
             self._validate_tool_call(tool, call)
@@ -1168,6 +1171,8 @@ class AgentRuntime:
         # Records one priced search/fetch operation per provider attempt a
         # PricedOperationTool call spent, so a retried or failed provider request stays
         # billable; swallows any hook error so a pricing bug can never break execution.
+        # Unwrapping first keeps an activity-bound priced tool metered as itself.
+        tool = unwrap_tool(tool) if isinstance(tool, BaseTool) else tool
         if not isinstance(tool, PricedOperationTool):
             return
         try:
@@ -1209,7 +1214,7 @@ class AgentRuntime:
         metadata = dict(call.metadata)
         if tool_is_internal:
             metadata["internal"] = True
-        return ToolCallContext(tool_name=call.tool_name, arguments=call.arguments, state=state, call_id=call.call_id, result=result, provider=provider, metadata=metadata, iteration_count=iteration_count)
+        return ToolCallContext(tool_name=call.tool_name, arguments=call.arguments, state=state, call_id=call.call_id, result=result, provider=provider, metadata=metadata, iteration_count=iteration_count, activity=call.activity)
 
     def _tool_is_internal(self, call: ToolCall) -> bool:
         """Return whether a call targets a runtime-only internal tool."""
@@ -1478,6 +1483,9 @@ class AgentRuntime:
         trace_context: SpanContext | None = None,
     ) -> tuple[ToolCallContext, ToolResult] | AgentResult:
         """Execute one tool call, record its context, and append it to messages."""
+        # Separate any activity annotation before policy so tool settings, middleware,
+        # and identical-call limits all evaluate the tool's business arguments only.
+        call = self.tools.prepare_call(call)
         tool_is_internal = self._tool_is_internal(call)
         settings_outcome = self._enforce_tool_settings(call, provider, messages, call_contexts, tool_is_internal, iteration_count=iteration_count, tokens_used=tokens_used)
         if settings_outcome is not None:

@@ -9,6 +9,7 @@ Architecture:
     - BaseTool: Abstract tool contract.
     - ToolLike: Structural protocol for developer-provided tools.
     - Tools: Agent-local catalog for describing and formatting tools.
+    - ToolActivity and ToolCallActivity: Declared and captured tool annotations.
     - ToolRegistry and ToolExecutor: Compatibility registration and execution pipeline.
     - Tool dataclasses and enums from vidbyte.tools.types.
     - ToolsFormatter: Provider-specific schema formatting helper.
@@ -32,7 +33,9 @@ from vidbyte.tools.function_tool import FunctionTool
 from vidbyte.lib.tools import ToolsFormatter
 from vidbyte.tools.mixins import ToolMixin
 from vidbyte.tools.types import (
+    ToolActivity,
     ToolCall,
+    ToolCallActivity,
     ToolCallContext,
     ToolCallState,
     ToolParameter,
@@ -46,7 +49,9 @@ __all__ = [
     "AgentTool",
     "BaseTool",
     "FunctionTool",
+    "ToolActivity",
     "ToolCall",
+    "ToolCallActivity",
     "ToolCallContext",
     "ToolCallState",
     "ToolExecutor",
