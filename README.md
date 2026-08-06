@@ -710,6 +710,41 @@ The runtime builds the context window, appends a short agentic-loop prompt after
 
 `ForkConversationTool` is agent-native: it lets the model ask the current agent to run an isolated child conversation immediately through `BaseAgent.fork(...)`. It is separate from durable session forks, inherits permission policy, requires allowlisted model swaps, and only exposes developer-provided extra toolsets.
 
+#### Tool activity annotations
+
+`tool.with_activity(...)` asks the same model that is already choosing a tool to attach one small typed explanation of the high-level action that call represents. The provider sees a nested `activity` object beside the tool's own arguments; the SDK validates it, removes it from the arguments the tool executes against, and exposes the normalized value on `ToolCall.activity` and `ToolCallContext.activity`.
+
+```python
+from pydantic import BaseModel, Field
+from typing import Literal
+from vidbyte import ToolActivity
+from vidbyte.tools.builtins.operations import BraveSearchTool
+
+class SearchActivity(BaseModel):
+    kind: Literal["establish_focus", "explore", "target_gap"]
+    purpose: str = Field(min_length=1, max_length=240)
+
+search_tool = BraveSearchTool(client=brave_client).with_activity(
+    ToolActivity(
+        schema=SearchActivity,
+        description="Describe the user-visible research action this search advances.",
+        metadata={"schema_version": 1, "consumer": "research_action_trace"},
+    )
+)
+```
+
+Consume it from middleware while the run is still active, or from the final `AgentResult.metadata["tool_calls"]`:
+
+```python
+async def after_tool_call(self, ctx):
+    activity = ctx.tool_call.activity
+    if activity is not None:
+        record_product_event(SearchActivity.model_validate(activity.payload))
+    return MiddlewareDecision.continue_()
+```
+
+Binding preserves the wrapped tool's name, description, permission, output schema, execution behavior, and priced-operation accounting — an annotated `BraveSearchTool` is still metered as Brave search. A missing or schema-invalid annotation is a normal `validation_error` raised before the tool or its priced provider runs. `ToolActivity.metadata` is static application metadata; it is copied onto each captured record and never rendered to the model. Attach activities only to tools whose calls are meaningful product actions, and keep the schema bounded — this is a product annotation, not chain-of-thought.
+
 ### Middleware
 
 Middleware gives direct text agents deterministic runtime hooks for authorization, rate limiting, retry, audit logging, and other policies. Middleware is not model-visible and does not appear in tool specs or agent cards.
