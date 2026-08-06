@@ -50,7 +50,12 @@ from vidbyte.agents.adversarial.context import AdversarialContext
 from vidbyte.agents.base import BaseAgent
 from vidbyte.agents.types import AgentForkSettings, AgentInput, AgentMessage
 from vidbyte.context import BaseContext
-from vidbyte.lib.dataclasses.adversarial import AdversarialResult, AdversarialReview, AdversarialRoundResult, AdversarialSettings
+from vidbyte.lib.dataclasses.adversarial import (
+    AdversarialResult,
+    AdversarialReview,
+    AdversarialRoundResult,
+    AdversarialSettings,
+)
 from vidbyte.lib.enums import ModelModality
 from vidbyte.lib.errors import AdversarialExecutionError, ConfigurationError
 from vidbyte.lib.tracing import SpanContext, TracerBase
@@ -122,7 +127,9 @@ class _AdversarialRunController:
     # all reviewers for that round have had their configured attempt.
     async def run(self) -> _AdversarialRunOutcome:
         # Execute the exact staged workflow and always release resources owned by run-local forks.
-        run_span = self._start_semantic_span(AdversarialTrace.run, agent_name=self._facade_name, role="facade")
+        run_span = self._start_semantic_span(
+            AdversarialTrace.run, agent_name=self._facade_name, role="facade"
+        )
         try:
             self._fork_run_agents()
             self._adversarial_trace.record_start(
@@ -132,9 +139,15 @@ class _AdversarialRunController:
                 num_adversaries=self._settings.num_adversaries,
                 adversarial_rounds=self._settings.adversarial_rounds,
             )
-            initial_prompt = self._context.render_initial_worker_prompt(self._workflow_instructions, self._request.original_prompt)
-            initial_reply = await self._call_worker(initial_prompt, phase="initial_worker", round_index=0)
-            rounds, final_reply, successful, failed = await self._run_rounds(initial_reply)
+            initial_prompt = self._context.render_initial_worker_prompt(
+                self._workflow_instructions, self._request.original_prompt
+            )
+            initial_reply = await self._call_worker(
+                initial_prompt, phase="initial_worker", round_index=0
+            )
+            rounds, final_reply, successful, failed = await self._run_rounds(
+                initial_reply
+            )
             result = self._context.build_result(
                 initial_reply=initial_reply,
                 rounds=rounds,
@@ -145,6 +158,10 @@ class _AdversarialRunController:
                 adversarial_rounds=self._settings.adversarial_rounds,
                 worker_name=self._worker_prototype.name,
                 adversary_name=self._adversary_prototype.name,
+                specialties=len(self._settings.specialties),
+                fresh_adversaries_each_round=self._settings.fresh_adversaries_each_round,
+                run_timeout_seconds=self._settings.run_timeout_seconds,
+                max_child_calls=self._settings.max_child_calls,
             )
             self._adversarial_trace.finalize(
                 successful_review_count=successful,
@@ -172,10 +189,24 @@ class _AdversarialRunController:
             await self._close_run_agents()
 
     def _fork_run_agents(self) -> None:
-        # Create one worker and the configured reviewer set before the first model call.
-        self._worker = self._fork_prototype(self._worker_prototype, f"{self._facade_name}:worker")
-        self._adversaries = [
-            self._fork_prototype(self._adversary_prototype, f"{self._facade_name}:adversary:{index}")
+        # Create one worker and either a persistent or round-scoped reviewer set.
+        self._worker = self._fork_prototype(
+            self._worker_prototype, f"{self._facade_name}:worker"
+        )
+        if not self._settings.fresh_adversaries_each_round:
+            self._adversaries = self._fork_adversaries()
+
+    def _fork_adversaries(self, round_index: int | None = None) -> list[BaseAgent]:
+        # Fork an ordered reviewer set, naming fresh sets by round for trace/debug clarity.
+        prefix = (
+            self._facade_name
+            if round_index is None
+            else f"{self._facade_name}:round:{round_index}"
+        )
+        return [
+            self._fork_prototype(
+                self._adversary_prototype, f"{prefix}:adversary:{index}"
+            )
             for index in range(1, self._settings.num_adversaries + 1)
         ]
 
@@ -189,7 +220,11 @@ class _AdversarialRunController:
         # Invoke the prototype's public fork API and validate that its behavioral subtype survives.
         try:
             parameters = inspect.signature(prototype.fork).parameters
-            child = prototype.fork(AgentForkSettings(name=child_name)) if "settings" in parameters else prototype.fork(name=child_name)
+            child = (
+                prototype.fork(AgentForkSettings(name=child_name))
+                if "settings" in parameters
+                else prototype.fork(name=child_name)
+            )
         except Exception as exc:
             raise ConfigurationError(
                 f"AdversarialAgent could not fork child prototype '{prototype.name}'.",
@@ -219,36 +254,55 @@ class _AdversarialRunController:
             )
         return child
 
-    async def _run_rounds(self, initial_reply: AgentMessage) -> tuple[list[AdversarialRoundResult], AgentMessage, int, int]:
+    async def _run_rounds(
+        self, initial_reply: AgentMessage
+    ) -> tuple[list[AdversarialRoundResult], AgentMessage, int, int]:
         # Reuse the same run-local worker and reviewer per index across all exact rounds.
         rounds: list[AdversarialRoundResult] = []
         current_reply = initial_reply
         successful_total = 0
         failed_total = 0
         for round_index in range(1, self._settings.adversarial_rounds + 1):
-            round_result, current_reply, successful, failed = await self._run_round(round_index, current_reply)
+            round_result, current_reply, successful, failed = await self._run_round(
+                round_index, current_reply
+            )
             rounds.append(round_result)
             successful_total += successful
             failed_total += failed
         return rounds, current_reply, successful_total, failed_total
 
-    async def _run_round(self, round_index: int, current_reply: AgentMessage) -> tuple[AdversarialRoundResult, AgentMessage, int, int]:
+    async def _run_round(
+        self, round_index: int, current_reply: AgentMessage
+    ) -> tuple[AdversarialRoundResult, AgentMessage, int, int]:
         # Review one immutable worker snapshot, place reviews on the worker window, enforce threshold, revise.
-        round_span = self._start_semantic_span(AdversarialTrace.round, round_index=round_index)
+        round_span = self._start_semantic_span(
+            AdversarialTrace.round, round_index=round_index
+        )
         try:
+            if self._settings.fresh_adversaries_each_round:
+                self._adversaries = self._fork_adversaries(round_index)
             snapshot = self._context.snapshot(current_reply.content)
             reviews = await self._collect_reviews(round_index, snapshot)
-            successful_reviews = tuple(review for review in reviews if review.error is None)
+            successful_reviews = tuple(
+                review for review in reviews if review.error is None
+            )
             failed_count = len(reviews) - len(successful_reviews)
             self._enforce_review_threshold(round_index, successful_reviews, reviews)
             worker = self._require_worker()
-            self._context.place_reviews_on_worker(worker, successful_reviews, worker_output=snapshot, round_index=round_index)
+            self._context.place_reviews_on_worker(
+                worker,
+                successful_reviews,
+                worker_output=snapshot,
+                round_index=round_index,
+            )
             revision_prompt = self._context.render_revision_prompt(
                 self._workflow_instructions,
                 self._request.original_prompt,
                 round_index=round_index,
             )
-            revised_reply = await self._call_worker(revision_prompt, phase="worker_revision", round_index=round_index)
+            revised_reply = await self._call_worker(
+                revision_prompt, phase="worker_revision", round_index=round_index
+            )
             result = AdversarialRoundResult(
                 round_index=round_index,
                 reviewed_worker_output=snapshot,
@@ -260,16 +314,21 @@ class _AdversarialRunController:
                 successful_reviews=len(successful_reviews),
                 failed_reviews=failed_count,
             )
-            self._end_span(round_span, output=f"ok={len(successful_reviews)} failed={failed_count}")
+            self._end_span(
+                round_span, output=f"ok={len(successful_reviews)} failed={failed_count}"
+            )
             return result, revised_reply, len(successful_reviews), failed_count
         except BaseException as exc:
             self._end_span(round_span, error=exc)
             raise
 
-    async def _collect_reviews(self, round_index: int, worker_output: str) -> list[AdversarialReview]:
+    async def _collect_reviews(
+        self, round_index: int, worker_output: str
+    ) -> list[AdversarialReview]:
         # Call reviewer forks sequentially so shared runner/tool objects never receive implicit concurrency.
         reviews: list[AdversarialReview] = []
         for adversary_index, adversary in enumerate(self._adversaries, start=1):
+            specialty = self._settings.specialty_for(adversary_index)
             self._context.place_worker_output_on_adversary(
                 adversary,
                 worker_output,
@@ -281,11 +340,23 @@ class _AdversarialRunController:
                 self._request.original_prompt,
                 round_index=round_index,
                 adversary_index=adversary_index,
+                specialty=specialty,
             )
-            reviews.append(await self._call_adversary(adversary, prompt, round_index, adversary_index))
+            reviews.append(
+                await self._call_adversary(
+                    adversary, prompt, round_index, adversary_index, specialty
+                )
+            )
         return reviews
 
-    async def _call_adversary(self, adversary: BaseAgent, prompt: str, round_index: int, adversary_index: int) -> AdversarialReview:
+    async def _call_adversary(
+        self,
+        adversary: BaseAgent,
+        prompt: str,
+        round_index: int,
+        adversary_index: int,
+        specialty: str | None,
+    ) -> AdversarialReview:
         # Convert ordinary reviewer errors, timeouts, and blank replies into ordered partial-failure records.
         span = self._start_semantic_span(
             AdversarialTrace.adversary,
@@ -293,6 +364,7 @@ class _AdversarialRunController:
             role="adversary",
             round_index=round_index,
             adversary_index=adversary_index,
+            specialty=specialty,
         )
         legacy_span = self._tracer.start_span(
             "adversarial.review",
@@ -308,14 +380,28 @@ class _AdversarialRunController:
             "adversarial_role": "adversary",
             "adversarial_round": round_index,
             "adversarial_index": adversary_index,
+            "adversarial_specialty": specialty,
         }
         try:
-            call = adversary.generate_reply(prompt, recipient=self._facade_name, trace_metadata=trace_metadata)
-            reply = await call if self._settings.per_adversary_timeout is None else await asyncio.wait_for(call, timeout=self._settings.per_adversary_timeout)
+            call = adversary.generate_reply(
+                prompt, recipient=self._facade_name, trace_metadata=trace_metadata
+            )
+            reply = (
+                await call
+                if self._settings.per_adversary_timeout is None
+                else await asyncio.wait_for(
+                    call, timeout=self._settings.per_adversary_timeout
+                )
+            )
             content = reply.content
             if not content.strip():
                 raise ValueError("blank adversary reply")
-            metadata = {"content_chars": len(content), "reply_metadata_keys": tuple(sorted(str(key) for key in reply.metadata))}
+            metadata = {
+                "content_chars": len(content),
+                "reply_metadata_keys": tuple(
+                    sorted(str(key) for key in reply.metadata)
+                ),
+            }
             self._tracer.end_span(legacy_span, output=f"{len(content)} characters")
             self._end_span(span, output=f"{len(content)} characters")
             self._adversarial_trace.record_adversary(
@@ -328,10 +414,11 @@ class _AdversarialRunController:
                 round_index=round_index,
                 adversary_index=adversary_index,
                 adversary_name=adversary.name,
+                specialty=specialty,
                 content=content,
                 metadata=metadata,
             )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - child model/tool failures become review records.
             self._tracer.end_span(legacy_span, error=exc)
             self._end_span(span, error=exc)
             error_text = f"{type(exc).__name__}: adversary review failed"
@@ -339,6 +426,7 @@ class _AdversarialRunController:
                 round_index=round_index,
                 adversary_index=adversary_index,
                 adversary_name=adversary.name,
+                specialty=specialty,
                 error=error_text,
             )
             return AdversarialReview(
@@ -353,7 +441,9 @@ class _AdversarialRunController:
             self._end_span(span, error=exc)
             raise
 
-    async def _call_worker(self, prompt: str, *, phase: str, round_index: int) -> AgentMessage:
+    async def _call_worker(
+        self, prompt: str, *, phase: str, round_index: int
+    ) -> AgentMessage:
         # Forward the original typed input context and safe call options to the same run-local worker.
         worker = self._require_worker()
         span = self._start_semantic_span(
@@ -396,13 +486,25 @@ class _AdversarialRunController:
                 content_preview="",
                 failed=True,
             )
-            raise self._worker_error(worker, phase, round_index, error_type=type(exc).__name__, actual="worker generate_reply raised") from exc
+            raise self._worker_error(
+                worker,
+                phase,
+                round_index,
+                error_type=type(exc).__name__,
+                actual="worker generate_reply raised",
+            ) from exc
         except BaseException as exc:
             self._tracer.end_span(legacy_span, error=exc)
             self._end_span(span, error=exc)
             raise
         if not reply.content.strip():
-            error = self._worker_error(worker, phase, round_index, error_type="BlankWorkerOutput", actual="worker returned blank content")
+            error = self._worker_error(
+                worker,
+                phase,
+                round_index,
+                error_type="BlankWorkerOutput",
+                actual="worker returned blank content",
+            )
             self._tracer.end_span(legacy_span, error=error)
             self._end_span(span, error=error)
             self._adversarial_trace.record_worker(
@@ -440,9 +542,16 @@ class _AdversarialRunController:
             options["modality"] = self._request.modality
         return options
 
-    def _enforce_review_threshold(self, round_index: int, successful: Sequence[AdversarialReview], all_reviews: Sequence[AdversarialReview]) -> None:
+    def _enforce_review_threshold(
+        self,
+        round_index: int,
+        successful: Sequence[AdversarialReview],
+        all_reviews: Sequence[AdversarialReview],
+    ) -> None:
         # Delegate the review-floor decision to the settings, supplying run-local diagnostic context.
-        failed = [review.adversary_name for review in all_reviews if review.error is not None]
+        failed = [
+            review.adversary_name for review in all_reviews if review.error is not None
+        ]
         self._settings.enforce_review_threshold(
             len(successful),
             len(all_reviews),
@@ -454,7 +563,15 @@ class _AdversarialRunController:
             },
         )
 
-    def _worker_error(self, worker: BaseAgent, phase: str, round_index: int, *, error_type: str, actual: str) -> AdversarialExecutionError:
+    def _worker_error(
+        self,
+        worker: BaseAgent,
+        phase: str,
+        round_index: int,
+        *,
+        error_type: str,
+        actual: str,
+    ) -> AdversarialExecutionError:
         # Build a safe diagnostic packet without embedding prompts, replies, credentials, or exception text.
         return AdversarialExecutionError(
             f"Adversarial worker '{worker.name}' failed during {phase} at round {round_index}.",
@@ -478,21 +595,23 @@ class _AdversarialRunController:
         if callable(open_span):
             try:
                 return open_span(factory(**attributes), parent=self._trace_context)
-            except Exception:
+            except Exception:  # noqa: BLE001, S110 - tracing is fail-open by contract.
                 pass
         name = factory().name if callable(factory) else "adversarial.span"
         try:
             spec = factory(**attributes)
             name = getattr(spec, "name", name)
-        except Exception:
+        except Exception:  # noqa: BLE001, S110 - tracing is fail-open by contract.
             pass
         return self._tracer.start_span(name, parent=self._trace_context, **attributes)
 
-    def _end_span(self, span, *, output: str | None = None, error: BaseException | None = None) -> None:
+    def _end_span(
+        self, span, *, output: str | None = None, error: BaseException | None = None
+    ) -> None:
         # Close a span opened by _start_semantic_span without failing the run on tracer errors.
         try:
             self._tracer.end_span(span, output=output, error=error)
-        except Exception:
+        except Exception:  # noqa: BLE001 - tracer failures must not fail the workflow.
             return
 
     def _require_worker(self) -> BaseAgent:
@@ -500,7 +619,11 @@ class _AdversarialRunController:
         if self._worker is None:
             raise ConfigurationError(
                 "Adversarial run-local worker was not initialized.",
-                details={"facade": self._facade_name, "phase": "fork_children", "expected": "worker fork before execution"},
+                details={
+                    "facade": self._facade_name,
+                    "phase": "fork_children",
+                    "expected": "worker fork before execution",
+                },
             )
         return self._worker
 
@@ -508,7 +631,10 @@ class _AdversarialRunController:
         # Close only run-local MCP handles; prototypes remain reusable across facade runs.
         if not self._run_agents:
             return
-        cleanup = asyncio.gather(*(agent.close_mcp_servers() for agent in self._run_agents), return_exceptions=True)
+        cleanup = asyncio.gather(
+            *(agent.close_mcp_servers() for agent in self._run_agents),
+            return_exceptions=True,
+        )
         try:
             await asyncio.shield(cleanup)
         except asyncio.CancelledError:

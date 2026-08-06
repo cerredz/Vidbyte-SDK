@@ -40,11 +40,16 @@ RELATED DOCS:
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Mapping, Sequence
 from typing import Any
 
 from vidbyte.agents.adversarial.context import AdversarialContext
-from vidbyte.agents.adversarial.runtime import _AdversarialRunController, _AdversarialRunOutcome, _AdversarialRunRequest
+from vidbyte.agents.adversarial.runtime import (
+    _AdversarialRunController,
+    _AdversarialRunOutcome,
+    _AdversarialRunRequest,
+)
 from vidbyte.agents.base import BaseAgent
 from vidbyte.agents.types import AgentCard, AgentInput, AgentMessage
 from vidbyte.context import BaseContext
@@ -61,26 +66,61 @@ from vidbyte.trace.adversarial import AdversarialAgentTraceController
 class AdversarialAgent(BaseAgent):
     """BaseAgent-compatible facade for sequential worker/adversary refinement."""
 
-    def __init__(self, *, name: str, system_prompt: str, worker: BaseAgent, adversary: BaseAgent, settings: AdversarialSettings | None = None, description: str = "", capabilities: Sequence[str] = (), agent_metadata: AgentMetadata | None = None, metadata: dict[str, Any] | None = None, tracer: type[TracerBase] | TracerBase | None = None, trace: type[TracerBase] | TracerBase | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        name: str,
+        system_prompt: str,
+        worker: BaseAgent,
+        adversary: BaseAgent,
+        settings: AdversarialSettings | None = None,
+        description: str = "",
+        capabilities: Sequence[str] = (),
+        agent_metadata: AgentMetadata | None = None,
+        metadata: dict[str, Any] | None = None,
+        tracer: type[TracerBase] | TracerBase | None = None,
+        trace: type[TracerBase] | TracerBase | None = None,
+    ) -> None:
         # Validate composition and initialize only facade identity, metadata, tracing, and lifecycle state.
         if not isinstance(worker, BaseAgent):
             raise ConfigurationError(
                 "AdversarialAgent.worker must be a configured BaseAgent instance.",
-                details={"field": "worker", "actual_type": type(worker).__name__, "expected": "BaseAgent"},
+                details={
+                    "field": "worker",
+                    "actual_type": type(worker).__name__,
+                    "expected": "BaseAgent",
+                },
             )
         if not isinstance(adversary, BaseAgent):
             raise ConfigurationError(
                 "AdversarialAgent.adversary must be a configured BaseAgent instance.",
-                details={"field": "adversary", "actual_type": type(adversary).__name__, "expected": "BaseAgent"},
+                details={
+                    "field": "adversary",
+                    "actual_type": type(adversary).__name__,
+                    "expected": "BaseAgent",
+                },
             )
-        super().__init__(name=name, system_prompt=system_prompt, description=description, capabilities=capabilities, agent_metadata=agent_metadata, metadata=metadata, tracer=tracer, trace=trace)
+        super().__init__(
+            name=name,
+            system_prompt=system_prompt,
+            description=description,
+            capabilities=capabilities,
+            agent_metadata=agent_metadata,
+            metadata=metadata,
+            tracer=tracer,
+            trace=trace,
+        )
         self.worker = worker
         self.adversary = adversary
         self.settings = settings or AdversarialSettings()
         if not isinstance(self.settings, AdversarialSettings):
             raise ConfigurationError(
                 "AdversarialAgent.settings must be an AdversarialSettings instance.",
-                details={"field": "settings", "actual_type": type(self.settings).__name__, "expected": "AdversarialSettings"},
+                details={
+                    "field": "settings",
+                    "actual_type": type(self.settings).__name__,
+                    "expected": "AdversarialSettings",
+                },
             )
         self._context = AdversarialContext(self.settings)
         self.last_result: AdversarialResult | None = None
@@ -93,7 +133,16 @@ class AdversarialAgent(BaseAgent):
     # the only result exposed as the facade reply. Preserve the one-final-history-entry
     # boundary: child transcripts stay on child forks while callers see a normal agent
     # turn with detailed full artifacts available separately through last_result.
-    async def generate_reply(self, message: str | AgentInput, *, modality: ModelModality | str | None = None, context: BaseContext | None = None, history: Sequence[AgentMessage] = (), recipient: str = "orchestrator", **options: Any) -> AgentMessage:
+    async def generate_reply(
+        self,
+        message: str | AgentInput,
+        *,
+        modality: ModelModality | str | None = None,
+        context: BaseContext | None = None,
+        history: Sequence[AgentMessage] = (),
+        recipient: str = "orchestrator",
+        **options: Any,
+    ) -> AgentMessage:
         # Normalize one public request, delegate the staged run to the controller, and commit facade state only on full success.
         prompt, input_metadata = self._normalize_input(message)
         self._active_prompt = prompt
@@ -103,8 +152,17 @@ class AdversarialAgent(BaseAgent):
         trace_closed = False
         try:
             trace_metadata = dict(options.get("trace_metadata", {}) or {})
-            trace_context = self._start_adversarial_trace(prompt, input_metadata, trace_metadata)
-            request = _AdversarialRunRequest(message=message, original_prompt=prompt, modality=modality, context=context, history=(*tuple(history), *tuple(self.history)), options=dict(options))
+            trace_context = self._start_adversarial_trace(
+                prompt, input_metadata, trace_metadata
+            )
+            request = _AdversarialRunRequest(
+                message=message,
+                original_prompt=prompt,
+                modality=modality,
+                context=context,
+                history=(*tuple(history), *tuple(self.history)),
+                options=dict(options),
+            )
             adversarial_trace = AdversarialAgentTraceController()
             controller = _AdversarialRunController(
                 facade_name=self.name,
@@ -118,7 +176,7 @@ class AdversarialAgent(BaseAgent):
                 request=request,
                 adversarial_trace=adversarial_trace,
             )
-            outcome = await controller.run()
+            outcome = await self._run_with_timeout(controller)
             reply = self._build_final_reply(outcome, recipient, adversarial_trace)
             self._tracer.end_trace(trace_context, output=outcome.result.final_output)
             trace_closed = True
@@ -153,12 +211,21 @@ class AdversarialAgent(BaseAgent):
         finally:
             self._active_prompt = ""
 
-    def fork(self, *, name: str | None = None, system_prompt: str | None = None, metadata: dict[str, Any] | None = None, include_history: bool = False) -> AdversarialAgent:
+    def fork(
+        self,
+        *,
+        name: str | None = None,
+        system_prompt: str | None = None,
+        metadata: dict[str, Any] | None = None,
+        include_history: bool = False,
+    ) -> AdversarialAgent:
         # Rebuild the runnerless facade with the same prototypes/settings and optional public transcript copy.
         merged_metadata = {**self.metadata, **dict(metadata or {})}
         child = type(self)(
             name=name or self.name,
-            system_prompt=self.system_prompt if system_prompt is None else system_prompt,
+            system_prompt=self.system_prompt
+            if system_prompt is None
+            else system_prompt,
             worker=self.worker,
             adversary=self.adversary,
             settings=self.settings,
@@ -184,6 +251,10 @@ class AdversarialAgent(BaseAgent):
             "per_adversary_timeout": self.settings.per_adversary_timeout,
             "max_review_chars": self.settings.max_review_chars,
             "max_worker_output_chars": self.settings.max_worker_output_chars,
+            "specialty_count": len(self.settings.specialties),
+            "fresh_adversaries_each_round": self.settings.fresh_adversaries_each_round,
+            "run_timeout_seconds": self.settings.run_timeout_seconds,
+            "max_child_calls": self.settings.max_child_calls,
         }
         return AgentCard(
             name=self.name,
@@ -198,9 +269,13 @@ class AdversarialAgent(BaseAgent):
 
     def add_tool(self, tool: object) -> AdversarialAgent:
         # Reject facade tool mutation before catalog/binding side effects can occur.
-        raise self._facade_capability_error("add_tool", "worker.add_tool(...) or adversary.add_tool(...)")
+        raise self._facade_capability_error(
+            "add_tool", "worker.add_tool(...) or adversary.add_tool(...)"
+        )
 
-    async def handoff(self, spec: Handoff | None = None, *, by: BaseAgent | None = None) -> Handoff:
+    async def handoff(
+        self, spec: Handoff | None = None, *, by: BaseAgent | None = None
+    ) -> Handoff:
         # Use an explicit generator when supplied, otherwise derive handoff execution from the worker prototype.
         from vidbyte.agents.handoff import HandoffAgent
 
@@ -208,27 +283,83 @@ class AdversarialAgent(BaseAgent):
         generator = by or HandoffAgent.from_source_agent(self.worker, resolved)
         return await generator.generate_handoff(HandoffAgent.render_source_run(self))
 
-    async def attach_mcp_server(self, command: Sequence[str], *, name: str | None = None, permission: McpToolPermission = McpToolPermission.EXECUTE, env: Mapping[str, str] | None = None, timeout: float = 30.0) -> AdversarialAgent:
+    async def attach_mcp_server(
+        self,
+        command: Sequence[str],
+        *,
+        name: str | None = None,
+        permission: McpToolPermission = McpToolPermission.EXECUTE,
+        env: Mapping[str, str] | None = None,
+        timeout: float = 30.0,
+    ) -> AdversarialAgent:
         # Reject direct MCP ownership before a subprocess can be started.
-        raise self._facade_capability_error("attach_mcp_server", "worker.attach_mcp_server(...) or adversary.attach_mcp_server(...)")
+        raise self._facade_capability_error(
+            "attach_mcp_server",
+            "worker.attach_mcp_server(...) or adversary.attach_mcp_server(...)",
+        )
 
-    async def attach_preset_mcp_server(self, preset_name: str, *, name: str | None = None, permission: McpToolPermission = McpToolPermission.EXECUTE, env: Mapping[str, str] | None = None, timeout: float = 30.0, extra_args: Sequence[str] | None = None) -> AdversarialAgent:
+    async def attach_preset_mcp_server(
+        self,
+        preset_name: str,
+        *,
+        name: str | None = None,
+        permission: McpToolPermission = McpToolPermission.EXECUTE,
+        env: Mapping[str, str] | None = None,
+        timeout: float = 30.0,
+        extra_args: Sequence[str] | None = None,
+    ) -> AdversarialAgent:
         # Reject direct preset MCP ownership before registry lookup or subprocess startup.
-        raise self._facade_capability_error("attach_preset_mcp_server", "worker.attach_preset_mcp_server(...) or adversary.attach_preset_mcp_server(...)")
+        raise self._facade_capability_error(
+            "attach_preset_mcp_server",
+            "worker.attach_preset_mcp_server(...) or adversary.attach_preset_mcp_server(...)",
+        )
 
-    async def attach_mcp_servers(self, servers: Sequence[McpServerConfig]) -> AdversarialAgent:
+    async def attach_mcp_servers(
+        self, servers: Sequence[McpServerConfig]
+    ) -> AdversarialAgent:
         # Reject batch MCP ownership before any concurrent startup side effects.
-        raise self._facade_capability_error("attach_mcp_servers", "worker.attach_mcp_servers(...) or adversary.attach_mcp_servers(...)")
+        raise self._facade_capability_error(
+            "attach_mcp_servers",
+            "worker.attach_mcp_servers(...) or adversary.attach_mcp_servers(...)",
+        )
 
-    def with_mcp_server(self, command: Sequence[str], *, name: str | None = None, permission: McpToolPermission = McpToolPermission.EXECUTE, env: Mapping[str, str] | None = None, timeout: float = 30.0) -> AdversarialAgent:
+    def with_mcp_server(
+        self,
+        command: Sequence[str],
+        *,
+        name: str | None = None,
+        permission: McpToolPermission = McpToolPermission.EXECUTE,
+        env: Mapping[str, str] | None = None,
+        timeout: float = 30.0,
+    ) -> AdversarialAgent:
         # Reject deferred MCP ownership before pending facade configuration is mutated.
-        raise self._facade_capability_error("with_mcp_server", "worker.with_mcp_server(...) or adversary.with_mcp_server(...)")
+        raise self._facade_capability_error(
+            "with_mcp_server",
+            "worker.with_mcp_server(...) or adversary.with_mcp_server(...)",
+        )
 
-    def with_preset_mcp_server(self, preset_name: str, *, name: str | None = None, permission: McpToolPermission = McpToolPermission.EXECUTE, env: Mapping[str, str] | None = None, timeout: float = 30.0, extra_args: Sequence[str] | None = None) -> AdversarialAgent:
+    def with_preset_mcp_server(
+        self,
+        preset_name: str,
+        *,
+        name: str | None = None,
+        permission: McpToolPermission = McpToolPermission.EXECUTE,
+        env: Mapping[str, str] | None = None,
+        timeout: float = 30.0,
+        extra_args: Sequence[str] | None = None,
+    ) -> AdversarialAgent:
         # Reject deferred preset MCP ownership before pending facade configuration is mutated.
-        raise self._facade_capability_error("with_preset_mcp_server", "worker.with_preset_mcp_server(...) or adversary.with_preset_mcp_server(...)")
+        raise self._facade_capability_error(
+            "with_preset_mcp_server",
+            "worker.with_preset_mcp_server(...) or adversary.with_preset_mcp_server(...)",
+        )
 
-    def _start_adversarial_trace(self, prompt: str, input_metadata: Mapping[str, Any], trace_metadata: Mapping[str, Any]) -> SpanContext:
+    def _start_adversarial_trace(
+        self,
+        prompt: str,
+        input_metadata: Mapping[str, Any],
+        trace_metadata: Mapping[str, Any],
+    ) -> SpanContext:
         # Open one facade trace with child identities and settings, excluding raw review content and secrets.
         metadata = {
             **self.metadata,
@@ -238,6 +369,10 @@ class AdversarialAgent(BaseAgent):
             "adversary_name": self.adversary.name,
             "num_adversaries": self.settings.num_adversaries,
             "adversarial_rounds": self.settings.adversarial_rounds,
+            "specialty_count": len(self.settings.specialties),
+            "fresh_adversaries_each_round": self.settings.fresh_adversaries_each_round,
+            "run_timeout_seconds": self.settings.run_timeout_seconds,
+            "max_child_calls": self.settings.max_child_calls,
         }
         return self._tracer.start_trace(
             "agent.run",
@@ -251,6 +386,30 @@ class AdversarialAgent(BaseAgent):
             model=self.worker.runner_config.model_name,
             metadata=self._safe_trace_value(metadata),
         )
+
+    async def _run_with_timeout(
+        self, controller: _AdversarialRunController
+    ) -> _AdversarialRunOutcome:
+        """Run the controller and convert a total timeout into a safe SDK error."""
+
+        timeout = self.settings.run_timeout_seconds
+        if timeout is None:
+            return await controller.run()
+        try:
+            return await asyncio.wait_for(controller.run(), timeout=timeout)
+        except TimeoutError as exc:
+            raise AdversarialExecutionError(
+                f"AdversarialAgent '{self.name}' exceeded its configured run timeout.",
+                details={
+                    "file": "vidbyte/agents/adversarial/agent.py",
+                    "function": "AdversarialAgent._run_with_timeout",
+                    "facade": self.name,
+                    "phase": "run_timeout",
+                    "run_timeout_seconds": timeout,
+                    "expected": "active adversarial controller work to complete within run_timeout_seconds",
+                    "remediation": "Increase run_timeout_seconds or reduce reviewer count, rounds, and child workload.",
+                },
+            ) from exc
 
     def _build_final_reply(
         self,
@@ -270,14 +429,25 @@ class AdversarialAgent(BaseAgent):
             summary["adversarial_trace_artifact"] = {
                 "worker_name": outcome.adversarial_trace.get("worker_name"),
                 "adversary_name": outcome.adversarial_trace.get("adversary_name"),
-                "worker_event_count": len(outcome.adversarial_trace.get("worker_events") or []),
-                "adversary_event_count": len(outcome.adversarial_trace.get("adversary_events") or []),
+                "worker_event_count": len(
+                    outcome.adversarial_trace.get("worker_events") or []
+                ),
+                "adversary_event_count": len(
+                    outcome.adversarial_trace.get("adversary_events") or []
+                ),
                 "current_status": outcome.adversarial_trace.get("current_status"),
             }
         metadata = {**dict(outcome.final_worker_reply.metadata), "adversarial": summary}
-        return AgentMessage(sender=self.name, recipient=recipient, content=outcome.result.final_output, metadata=metadata)
+        return AgentMessage(
+            sender=self.name,
+            recipient=recipient,
+            content=outcome.result.final_output,
+            metadata=metadata,
+        )
 
-    def _commit_success(self, prompt: str, reply: AgentMessage, outcome: _AdversarialRunOutcome) -> None:
+    def _commit_success(
+        self, prompt: str, reply: AgentMessage, outcome: _AdversarialRunOutcome
+    ) -> None:
         # Publish one facade turn only after every configured child stage has completed successfully.
         self.history.append(reply)
         self.last_prompt = prompt
@@ -285,7 +455,9 @@ class AdversarialAgent(BaseAgent):
         self.last_result = outcome.result
         self._tool_call_contexts.extend(outcome.tool_call_contexts)
 
-    def _facade_capability_error(self, operation: str, remediation: str) -> ConfigurationError:
+    def _facade_capability_error(
+        self, operation: str, remediation: str
+    ) -> ConfigurationError:
         # Centralize actionable runnerless-boundary diagnostics for unsupported facade mutation.
         return ConfigurationError(
             f"AdversarialAgent '{self.name}' cannot perform facade-level {operation}; configure a child agent instead.",

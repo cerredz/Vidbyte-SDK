@@ -141,7 +141,13 @@ reviewed = AdversarialAgent(
     system_prompt="Deliver a correct implementation that satisfies the task.",
     worker=coder,
     adversary=reviewer,
-    settings=AdversarialSettings(num_adversaries=2, adversarial_rounds=2),
+    settings=AdversarialSettings.specialist_panel(
+        ("correctness", "security"),
+        adversarial_rounds=2,
+        fresh_adversaries_each_round=True,
+        run_timeout_seconds=180.0,
+        max_child_calls=7,
+    ),
 )
 
 reply = await reviewed.arun("Implement the feature.")
@@ -151,7 +157,11 @@ Do not pass a runner/provider/model to the facade. Those settings, tools, and MC
 servers belong on `coder` and `reviewer`. The exact child-call count is
 `1 + adversarial_rounds * (num_adversaries + 1)`. Use explicitly read-only
 reviewer tools when mutation is undesirable, and inspect full round detail through
-`reviewed.last_result`. See
+`reviewed.last_result`. `specialist_panel(...)` assigns lenses to forks of the
+single `reviewer` prototype; it is not a cross-provider panel. Use
+`required_child_calls`, `max_child_calls`, and `run_timeout_seconds` for deterministic
+call-budget validation and an active-controller deadline; cleanup is awaited after
+timeout. See
 [`skills/vidbyte-sdk/adversarial-agent.md`](../vidbyte-sdk/adversarial-agent.md).
 
 ## Multi-Agent Orchestration

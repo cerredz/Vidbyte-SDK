@@ -20,7 +20,12 @@ RELATIONS:
 from __future__ import annotations
 
 from vidbyte.agents.adversarial.agent import AdversarialAgent
-from vidbyte.lib.dataclasses.adversarial import AdversarialResult, AdversarialReview, AdversarialRoundResult, AdversarialSettings
+from vidbyte.lib.dataclasses.adversarial import (
+    AdversarialResult,
+    AdversarialReview,
+    AdversarialRoundResult,
+    AdversarialSettings,
+)
 
 __all__ = [
     "AdversarialAgent",

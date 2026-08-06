@@ -86,6 +86,10 @@ _FIELD_DESCRIPTIONS: Mapping[str, str] = {
         "One-based index of the reviewer within the configured adversary set. Stable "
         "across rounds so the same fork reuses history for a given index."
     ),
+    "specialty": (
+        "Optional reviewer lens that narrows the challenge without replacing the "
+        "reviewer's responsibility to report critical defects outside that lens."
+    ),
     "worker_output": (
         "Bounded immutable snapshot of the worker candidate under review for this "
         "round. Every adversary in the round sees the same snapshot."
@@ -104,7 +108,12 @@ _FIELD_DESCRIPTIONS: Mapping[str, str] = {
 class AdversarialContext:
     """Single owner of adversarial context-window mechanics: envelopes, primitives, placement, and result metadata."""
 
-    def __init__(self, settings: AdversarialSettings, *, compaction_engine: ContextCompactionEngine | None = None) -> None:
+    def __init__(
+        self,
+        settings: AdversarialSettings,
+        *,
+        compaction_engine: ContextCompactionEngine | None = None,
+    ) -> None:
         # Hold the settings (which own the forwarding limits) and the SDK compaction engine used for window work.
         self._settings = settings
         self._compaction = compaction_engine or ContextCompactionEngine()
@@ -113,7 +122,9 @@ class AdversarialContext:
         # Take an immutable per-round snapshot of the candidate every reviewer in a round sees unchanged.
         return candidate
 
-    def render_initial_worker_prompt(self, workflow_instructions: str, original_task: str) -> str:
+    def render_initial_worker_prompt(
+        self, workflow_instructions: str, original_task: str
+    ) -> str:
         # Frame the first worker pass while retaining arbitrary task text as described JSON fields.
         return self._envelope(
             "adversarial-worker-task",
@@ -134,6 +145,7 @@ class AdversarialContext:
         *,
         round_index: int,
         adversary_index: int,
+        specialty: str | None = None,
     ) -> str:
         # Give one reviewer phase instructions; the worker snapshot lives on their context window as a primitive.
         return self._envelope(
@@ -143,6 +155,11 @@ class AdversarialContext:
                 self._json_field("original_task", original_task),
                 self._json_field("round_index", round_index),
                 self._json_field("adversary_index", adversary_index),
+                *(
+                    ()
+                    if specialty is None
+                    else (self._json_field("specialty", specialty),)
+                ),
                 self._json_field(
                     "instruction",
                     "Challenge concrete correctness, requirement-conformance, testing, security, completeness, safety, and maintainability defects. Inspect real artifacts with read-only tools when available. Return actionable objections; do not rewrite the implementation. The worker output under review is available in your context window primitives.",
@@ -189,12 +206,20 @@ class AdversarialContext:
             max_chars=self._settings.max_worker_output_chars,
             primitive_id=f"adversarial-worker-output:r{round_index}:{phase}",
             title=f"Worker Output (round {round_index})",
-            metadata={"round_index": round_index, "phase": phase, "content_chars": len(bounded)},
+            metadata={
+                "round_index": round_index,
+                "phase": phase,
+                "content_chars": len(bounded),
+            },
         )
 
-    def build_review_primitive(self, review: AdversarialReview) -> AdversarialReviewContextItem:
+    def build_review_primitive(
+        self, review: AdversarialReview
+    ) -> AdversarialReviewContextItem:
         # Create a context primitive for one adversary review (success or failure note).
-        content = "" if review.error else self._settings.bound_review_text(review.content)
+        content = (
+            "" if review.error else self._settings.bound_review_text(review.content)
+        )
         return AdversarialReviewContextItem(
             content=content,
             round_index=review.round_index,
@@ -208,6 +233,7 @@ class AdversarialContext:
                 "round_index": review.round_index,
                 "adversary_index": review.adversary_index,
                 "adversary_name": review.adversary_name,
+                "specialty": review.specialty,
                 "failed": review.error is not None,
             },
         )
@@ -247,22 +273,36 @@ class AdversarialContext:
         manager = self.ensure_agent_manager(worker)
         placed: list[str] = []
         snapshot_id = manager.place_after_tools(
-            self.build_worker_output_primitive(worker_output, round_index=round_index, phase="revision_baseline")
+            self.build_worker_output_primitive(
+                worker_output, round_index=round_index, phase="revision_baseline"
+            )
         )
         placed.append(snapshot_id)
         for review in reviews:
             if review.error is not None:
                 continue
-            placed.append(manager.place_after_tools(self.build_review_primitive(review)))
+            placed.append(
+                manager.place_after_tools(self.build_review_primitive(review))
+            )
         return tuple(placed)
 
-    def message_with_prompt(self, original_message: str | AgentInput, prompt: str, *, context_manager: ContextManager | None = None) -> str | AgentInput:
+    def message_with_prompt(
+        self,
+        original_message: str | AgentInput,
+        prompt: str,
+        *,
+        context_manager: ContextManager | None = None,
+    ) -> str | AgentInput:
         # Replace only AgentInput.prompt so metadata, context items, and managers survive every worker pass.
         if not isinstance(original_message, AgentInput):
             if context_manager is None:
                 return prompt
             return AgentInput(prompt=prompt, context_manager=context_manager)
-        manager = context_manager if context_manager is not None else original_message.context_manager
+        manager = (
+            context_manager
+            if context_manager is not None
+            else original_message.context_manager
+        )
         return AgentInput(
             prompt=prompt,
             metadata=original_message.metadata,
@@ -282,6 +322,10 @@ class AdversarialContext:
         adversarial_rounds: int,
         worker_name: str,
         adversary_name: str,
+        specialties: int,
+        fresh_adversaries_each_round: bool,
+        run_timeout_seconds: float | None,
+        max_child_calls: int | None,
     ) -> AdversarialResult:
         # Build the detailed successful result and bounded summary metadata (owned here, not in runtime).
         metadata = {
@@ -289,6 +333,11 @@ class AdversarialContext:
             "adversarial_rounds": adversarial_rounds,
             "completed_rounds": len(rounds),
             "child_call_count": 1 + adversarial_rounds * (num_adversaries + 1),
+            "required_child_calls": 1 + adversarial_rounds * (num_adversaries + 1),
+            "max_child_calls": max_child_calls,
+            "specialty_count": specialties,
+            "fresh_adversaries_each_round": fresh_adversaries_each_round,
+            "run_timeout_seconds": run_timeout_seconds,
             "worker_name": worker_name,
             "adversary_name": adversary_name,
         }
@@ -304,7 +353,12 @@ class AdversarialContext:
     def _envelope(self, tag: str, fields: Sequence[str]) -> str:
         # Open/close a non-branded XML tag with a leading description field for the tag itself.
         tag_description = _TAG_DESCRIPTIONS[tag]
-        lines = [f"<{tag}>", self._described_mapping(tag, tag_description), *fields, f"</{tag}>"]
+        lines = [
+            f"<{tag}>",
+            self._described_mapping(tag, tag_description),
+            *fields,
+            f"</{tag}>",
+        ]
         return "\n".join(lines)
 
     def _json_field(self, name: str, value: Any) -> str:

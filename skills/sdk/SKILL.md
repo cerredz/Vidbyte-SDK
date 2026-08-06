@@ -241,7 +241,7 @@ vidbyte/
 |   `-- client.py
 |-- shared/
 `-- lib/
-    |-- dataclasses/
+    |-- dataclasses/         portable contracts, including adversarial settings
     |-- runners/
     |-- templates/            ContextWindowTemplate subclasses
     |-- tools/
@@ -256,7 +256,7 @@ vidbyte/
 - Keep `vidbyte/` as the top-level Python package namespace.
 - Keep namespace clients in `vidbyte/harnesses/`, `vidbyte/tools/`, and `vidbyte/providers/`.
 - Keep agent actor abstractions in `vidbyte/agents/`.
-- Keep `AdversarialAgent` and its result/settings records in `vidbyte/agents/adversarial.py`; the facade must not accept runner/provider/model/tools/MCP configuration, and its child calls remain sequential until independent runner/tool ownership is explicit. Follow `skills/vidbyte-sdk/adversarial-agent.md`.
+- Keep `AdversarialAgent` orchestration and result records in `vidbyte/agents/adversarial.py`, but keep portable `AdversarialSettings` in `vidbyte/lib/dataclasses/adversarial.py`; the facade must not accept runner/provider/model/tools/MCP configuration, and its child calls remain sequential until independent runner/tool ownership is explicit. Follow `skills/vidbyte-sdk/adversarial-agent.md`.
 - Keep agent execution runtimes (linear, MCTS search, actor model) in `vidbyte/agents/runtimes/`. Follow `skills/agent-runtimes/SKILL.md` when adding or modifying runtimes.
 - Keep context-window algorithm runtime adapters in `vidbyte/agents/algorithms/` and public config under `vidbyte/context/algorithms/`. Follow `skills/vidbyte-sdk/adding-context-window-algorithms.md`.
 - Keep the handoff primitive family under `vidbyte/context/handoff/` and `HandoffAgent` in `vidbyte/agents/handoff.py`. Follow `skills/vidbyte-sdk/handoff.md`.

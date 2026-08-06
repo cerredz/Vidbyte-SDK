@@ -126,7 +126,7 @@ Primary files:
 Primary concepts:
 
 - `Agent = BaseAgent` is the ergonomic alias.
-- `AdversarialAgent` is a runnerless `BaseAgent`-compatible facade. It receives configured worker/adversary prototypes, runs exact sequential challenge/revision rounds, returns only the worker's final revision, and retains full typed detail in `last_result`.
+- `AdversarialAgent` is a runnerless `BaseAgent`-compatible facade. It receives configured worker/adversary prototypes, runs exact sequential challenge/revision rounds, returns only the worker's final revision, and retains full typed detail in `last_result`. Its portable immutable settings contract is defined in `vidbyte/lib/dataclasses/adversarial.py` and re-exported through the public agent namespaces.
 - `BaseAgent` is the executable actor. It owns name, system prompt, runtime selection, context-window algorithm, runner settings, explicit runners by modality, tools, permission policy, middleware, MCP attachment state, history, metadata, and capabilities.
 - `AgentInput` is a typed input wrapper with `prompt`, `modality`, `metadata`, optional `context_items`, and optional `context_manager`.
 - `AgentMessage` is the in-process message payload passed between agents.
@@ -171,7 +171,8 @@ MCP attachment:
 
 Primary files:
 
-- `vidbyte/agents/adversarial.py` — facade, settings/result records, deterministic prompt renderer, run-local controller, tracing, cleanup, cards, fork, and handoff.
+- `vidbyte/agents/adversarial.py` — facade, result records, deterministic prompt renderer, run-local controller, tracing, cleanup, cards, fork, and handoff.
+- `vidbyte/lib/dataclasses/adversarial.py` — portable immutable settings, specialty assignment, timeout validation, and deterministic child-call budgeting.
 - `vidbyte/agents/client.py` — lazy `sdk.agents.adversarial(**kwargs)` constructor.
 - `vidbyte/lib/errors/base.py` — `AdversarialExecutionError` under the common `AgentExecutionError` boundary.
 - `skills/vidbyte-sdk/adversarial-agent.md` — maintained implementation and usage reference.
@@ -179,8 +180,10 @@ Primary files:
 Architecture:
 
 - The facade constructor accepts child prototypes plus facade identity/metadata/tracing only. It has no runner/provider/model/API-key/tool/MCP/output-schema configuration or `**kwargs` escape hatch.
-- A run forks one worker and `num_adversaries` reviewer children. Reviewers execute sequentially against the same immutable per-round worker snapshot; the same worker and reviewer per index are reused across rounds.
+- A run forks one worker and `num_adversaries` reviewer children. Reviewers execute sequentially against the same immutable per-round worker snapshot; the same worker and reviewer per index are reused across rounds unless `fresh_adversaries_each_round=True` creates a cleanup-owned set for each round.
 - `adversarial_rounds` is exact. Successful call count is `1 + adversarial_rounds * (num_adversaries + 1)`.
+- `required_child_calls` exposes that exact count and `max_child_calls` rejects insufficient budgets before child forks; `run_timeout_seconds` cancels active controller work at its deadline, then awaits cleanup even when that extends wall-clock time.
+- `specialties` can be empty, shared, or index-aligned. `specialist_panel(...)` derives a homogeneous-prototype panel with distinct lenses; it is not an independently configured or cross-provider panel.
 - Reviewer blank/error/timeout outcomes are ordered partial-failure records. Every round must meet `min_successful_adversaries`; worker errors or blank output are fatal.
 - Forwarding limits bound only later child prompts. Full successful outputs remain in `last_result`, while final message metadata contains a bounded summary and retains final worker metadata.
 - Run-local MCP resources close on success, failure, timeout, and cancellation. Prototype resources remain reusable.
