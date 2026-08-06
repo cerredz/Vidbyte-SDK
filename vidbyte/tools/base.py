@@ -6,10 +6,12 @@ Purpose:
     Provides shared call validation and a small async execution contract while supporting
     both class-based and protocol-based developer tools.
 Architecture:
-    - BaseTool: Abstract contract requiring spec() and execute().
+    - BaseTool: Abstract contract requiring spec() and execute(), plus the
+      with_activity() binding used to attach a model-authored annotation.
     - ToolLike: Structural protocol for developer-provided tools.
 Relations:
-    Related to vidbyte.tools.types, vidbyte.tools.registry, and built-in tool modules.
+    Related to vidbyte.tools.types, vidbyte.tools.activity, vidbyte.tools.registry,
+    and built-in tool modules.
 """
 
 from __future__ import annotations
@@ -17,7 +19,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Any, Protocol
 
-from vidbyte.tools.types import ToolCall, ToolResult, ToolSpec
+from vidbyte.tools.types import ToolActivity, ToolCall, ToolResult, ToolSpec
 
 
 class BaseTool(ABC):
@@ -27,6 +29,12 @@ class BaseTool(ABC):
     def name(self) -> str:
         """Return the stable registry name from the tool spec."""
         return self.spec().name
+
+    def with_activity(self, activity: ToolActivity) -> "BaseTool":
+        """Return this tool with one reserved activity annotation the model fills in per call."""
+        from vidbyte.tools.activity import ActivityToolFormatter
+
+        return ActivityToolFormatter.bind(self, activity)
 
     @abstractmethod
     def spec(self) -> ToolSpec:

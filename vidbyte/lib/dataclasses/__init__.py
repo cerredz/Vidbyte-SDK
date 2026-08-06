@@ -176,7 +176,9 @@ from vidbyte.lib.dataclasses.trace import (
     TraceSchema,
 )
 from vidbyte.lib.dataclasses.tools import (
+    ToolActivity,
     ToolCall,
+    ToolCallActivity,
     ToolCallContext,
     ToolCallState,
     ToolParameter,
@@ -318,7 +320,9 @@ __all__ = [
     "TaskRecord",
     "TaskSpec",
     "TextContextItem",
+    "ToolActivity",
     "ToolCall",
+    "ToolCallActivity",
     "ToolDefinition",
     "ToolCallContext",
     "ToolCallState",

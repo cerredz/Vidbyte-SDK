@@ -9,12 +9,15 @@ Architecture:
     - ToolStatus: Normalized execution status enum.
     - ToolPermission: Authorization level requested by a tool.
     - ToolParameter: Single model-facing parameter declaration.
+    - ToolActivity: Declarative annotation schema bound to an existing tool.
+    - ToolCallActivity: Normalized per-call annotation captured before execution.
     - ToolSpec: Tool metadata plus compact prompt rendering.
     - ToolCall: Runtime invocation payload.
     - ToolResult: Runtime response payload with success/error helpers.
     - ToolCallContext: Agent-local lifecycle context for tool calls.
 Relations:
-    Re-exported by vidbyte.tools.types for existing SDK imports.
+    Re-exported by vidbyte.tools.types for existing SDK imports; bound to tools
+    by vidbyte.tools.activity.
 """
 
 from __future__ import annotations
@@ -22,7 +25,14 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import Enum
+from types import MappingProxyType
 from typing import Any
+
+from pydantic import BaseModel
+
+# Reserved provider-facing input name carrying a tool's activity annotation. Fixed so
+# prompts, provider schemas, and middleware stay uniform across every consumer.
+ACTIVITY_ARGUMENT_KEY = "activity"
 
 
 class ToolStatus(str, Enum):
@@ -69,6 +79,37 @@ class ToolParameter:
 
 
 @dataclass(frozen=True, slots=True)
+class ToolActivity:
+    """Declares one typed annotation the model fills in alongside a tool's arguments."""
+
+    schema: type[BaseModel]
+    description: str
+    required: bool = True
+    metadata: Mapping[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        """Validate the annotation schema and freeze its static consumer metadata."""
+        if not isinstance(self.schema, type) or not issubclass(self.schema, BaseModel):
+            raise ValueError("ToolActivity.schema must be a pydantic BaseModel subclass")
+        if not self.description.strip():
+            raise ValueError("ToolActivity.description cannot be empty")
+        object.__setattr__(self, "metadata", MappingProxyType(dict(self.metadata)))
+
+
+@dataclass(frozen=True, slots=True)
+class ToolCallActivity:
+    """Normalized annotation captured from one model-issued tool call."""
+
+    payload: Mapping[str, Any]
+    metadata: Mapping[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        """Freeze both mappings so a captured annotation cannot be mutated by a consumer."""
+        object.__setattr__(self, "payload", MappingProxyType(dict(self.payload)))
+        object.__setattr__(self, "metadata", MappingProxyType(dict(self.metadata)))
+
+
+@dataclass(frozen=True, slots=True)
 class ToolSpec:
     """Model-facing declaration for a tool."""
 
@@ -80,6 +121,7 @@ class ToolSpec:
     input_schema: Mapping[str, Any] | None = None
     binds_to_primitive: str | None = None
     output_schema: type | Mapping[str, Any] | None = None
+    activity: ToolActivity | None = None
 
     def __post_init__(self) -> None:
         """Validate the tool name and description."""
@@ -116,6 +158,7 @@ class ToolCall:
     arguments: Mapping[str, Any] = field(default_factory=dict)
     call_id: str | None = None
     metadata: Mapping[str, Any] = field(default_factory=dict)
+    activity: ToolCallActivity | None = None
 
     def __post_init__(self) -> None:
         """Validate that the call names a tool."""
@@ -189,6 +232,7 @@ class ToolCallContext:
     model: str | None = None
     metadata: Mapping[str, Any] = field(default_factory=dict)
     iteration_count: int | None = None
+    activity: ToolCallActivity | None = None
 
     @property
     def name(self) -> str:

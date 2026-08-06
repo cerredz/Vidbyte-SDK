@@ -529,6 +529,37 @@ print(catalog.describe())
 openai_tools = catalog.provider_schemas("openai")
 ```
 
+**Tool activity annotations.** `tool.with_activity(ToolActivity(...))` binds one typed annotation to an existing tool so the model explains, in the same turn it already pays for, what high-level action the call represents. The provider schema gains a nested `activity` object; the SDK validates it against the declared Pydantic model, strips it from the arguments the wrapped tool executes against, and exposes the normalized value as `ToolCall.activity` / `ToolCallContext.activity`.
+
+```python
+from pydantic import BaseModel, Field
+from typing import Literal
+from vidbyte import ToolActivity
+from vidbyte.tools.builtins.operations import BraveSearchTool
+
+class SearchActivity(BaseModel):
+    kind: Literal["establish_focus", "explore", "target_gap"]
+    purpose: str = Field(min_length=1, max_length=240)
+
+search_tool = BraveSearchTool(client=brave_client).with_activity(
+    ToolActivity(schema=SearchActivity, description="Describe the action this search advances.", required=True, metadata={"schema_version": 1})
+)
+
+# In middleware, while the run is still active:
+activity = ctx.tool_call.activity
+if activity is not None:
+    emit_product_event(SearchActivity.model_validate(activity.payload))
+```
+
+Guidance when building with this:
+
+- Attach an activity only to tools whose calls are genuinely meaningful product actions. Every annotated call spends tokens on the annotation, so a tool the user does not care about should not carry one.
+- Keep the schema bounded — small enums, short strings, short lists. An activity is a product-safe annotation, not chain-of-thought, and must never be used to extract hidden reasoning.
+- Binding preserves the wrapped tool's name, description, permission, execution behavior, and priced-operation identity; an annotated `BraveSearchTool` is still metered as Brave search.
+- A missing or invalid required annotation is a normal `validation_error` produced before the tool and its priced provider run.
+- `ToolActivity.metadata` is static application metadata (schema version, downstream consumer). It is copied onto each captured record and is never rendered into the model-facing schema.
+- The SDK does not sample, batch, schedule, or persist activities, and does not turn them into `ActionTrace` events. Cadence and persistence are the application's decision: attach to the tools you care about, then translate `ctx.tool_call.activity` into your own domain events.
+
 The default permission policy allows `SAFE` and `READ` tools. Mutating or executable tools require an explicit permission policy:
 
 ```python

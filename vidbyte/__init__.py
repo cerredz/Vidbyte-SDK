@@ -11,7 +11,7 @@ Architecture:
     - VidbyteSDK: Root namespace client.
     - Agent exports: BaseAgent, AgentCard, AgentMessage, AgentRegistry, AgentRunnerConfig, AgentSpec.
     - Configuration exports: YamlLoader, AgentSettings, ToolDefinition, MiddlewareDefinition.
-    - Tool exports: BaseTool, ToolCall, ToolExecutor, ToolParameter, ToolPermission, ToolRegistry, ToolResult, ToolSpec, ToolStatus, ToolsFormatter.
+    - Tool exports: BaseTool, ToolActivity, ToolCall, ToolCallActivity, ToolExecutor, ToolParameter, ToolPermission, ToolRegistry, ToolResult, ToolSpec, ToolStatus, ToolsFormatter.
     - MCP exports: McpServerConfig, McpServerHandle, McpToolPermission.
     - Context exports: context contracts plus general problem-solving challenge records.
     - Preset exports: BudgetPreset, PermissionPreset.
@@ -429,7 +429,9 @@ from vidbyte.sessions import (
 from vidbyte.tools import (
     BaseTool,
     FunctionTool,
+    ToolActivity,
     ToolCall,
+    ToolCallActivity,
     ToolCallContext,
     ToolCallState,
     ToolExecutor,
@@ -775,7 +777,9 @@ __all__ = [
     "TraceCapture",
     "TaskContextItem",
     "TextContextItem",
+    "ToolActivity",
     "ToolCall",
+    "ToolCallActivity",
     "ToolDefinition",
     "ToolCallContext",
     "ToolCallContextItem",

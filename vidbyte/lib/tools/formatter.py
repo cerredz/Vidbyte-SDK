@@ -19,9 +19,19 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterable, Mapping
+from copy import deepcopy
 from typing import Any
 
-from vidbyte.lib.dataclasses.tools import ToolCall, ToolParameter, ToolResult, ToolSpec, ToolStatus
+from vidbyte.lib.dataclasses.tools import (
+    ACTIVITY_ARGUMENT_KEY,
+    ToolActivity,
+    ToolCall,
+    ToolParameter,
+    ToolResult,
+    ToolSpec,
+    ToolStatus,
+)
+from vidbyte.lib.errors import ConfigurationError
 
 
 class ToolsFormatter:
@@ -435,10 +445,47 @@ class ToolsFormatter:
 
     @staticmethod
     def _schema_for_spec(spec: ToolSpec) -> dict[str, Any]:
-        """Return the best available JSON Schema for a tool spec."""
+        """Return the best available JSON Schema for a tool spec, including any activity annotation."""
         if isinstance(spec.input_schema, Mapping):
-            return dict(spec.input_schema)
-        return ToolsFormatter._parameters_schema(spec.parameters)
+            schema = dict(spec.input_schema)
+        else:
+            schema = ToolsFormatter._parameters_schema(spec.parameters)
+        if spec.activity is None:
+            return schema
+        return ToolsFormatter._schema_with_activity(schema, spec.activity, spec.name)
+
+    @staticmethod
+    def _schema_with_activity(schema: Mapping[str, Any], activity: ToolActivity, tool_name: str) -> dict[str, Any]:
+        """Merge an activity declaration into a tool's input schema under the reserved key."""
+        merged = deepcopy(dict(schema))
+        properties = ToolsFormatter._activity_properties(merged, tool_name)
+        properties[ACTIVITY_ARGUMENT_KEY] = ToolsFormatter._activity_schema(activity)
+        merged["properties"] = properties
+        if activity.required:
+            required = list(merged.get("required") or ())
+            if ACTIVITY_ARGUMENT_KEY not in required:
+                required.append(ACTIVITY_ARGUMENT_KEY)
+            merged["required"] = required
+        return merged
+
+    @staticmethod
+    def _activity_properties(merged: dict[str, Any], tool_name: str) -> dict[str, Any]:
+        # Returns the mutable property map an activity may be added to, rejecting a shadowed key.
+        raw_properties = merged.get("properties")
+        properties = dict(raw_properties) if isinstance(raw_properties, Mapping) else {}
+        if merged.get("type") not in (None, "object"):
+            raise ConfigurationError(f"Tool '{tool_name}' input schema must be an object to declare an activity annotation")
+        if ACTIVITY_ARGUMENT_KEY in properties:
+            raise ConfigurationError(f"Tool '{tool_name}' input schema already declares an '{ACTIVITY_ARGUMENT_KEY}' property")
+        merged.setdefault("type", "object")
+        return properties
+
+    @staticmethod
+    def _activity_schema(activity: ToolActivity) -> dict[str, Any]:
+        # Renders the annotation's Pydantic schema with the declaration's model-facing description.
+        schema = deepcopy(activity.schema.model_json_schema())
+        schema["description"] = activity.description
+        return schema
 
     @staticmethod
     def _parse_openai_tool_calls(raw_payload: Mapping[str, Any]) -> tuple[ToolCall, ...]:
