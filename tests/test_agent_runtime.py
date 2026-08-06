@@ -121,6 +121,16 @@ class ActivityRecordingMiddleware(AgentMiddleware):
         return MiddlewareDecision.continue_()
 
 
+class DenyingMiddleware(AgentMiddleware):
+    """Denies every non-internal tool call so denied-context behavior can be asserted."""
+
+    async def before_tool_call(self, ctx) -> MiddlewareDecision:
+        """Deny the call unless it targets a runtime-internal tool."""
+        if ctx.tool_is_internal:
+            return MiddlewareDecision.continue_()
+        return MiddlewareDecision.deny_tool("policy")
+
+
 async def invoke_runner(runner: FakeRunner, prompt: str, **kwargs: object) -> FakeResponse:
     runner.calls.append({"prompt": prompt, "kwargs": kwargs})
     return runner.responses.pop(0)
@@ -725,6 +735,21 @@ class ToolActivityRuntimeTests(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertEqual(result.metadata["tool_settings_budget"], "max_identical_calls")
+
+    async def test_denied_call_retains_its_activity(self) -> None:
+        """A middleware-denied call keeps the annotation so a product can say the action was blocked."""
+        tool, bound = self._annotated_search()
+        runtime = self._runtime(bound, [DenyingMiddleware()])
+
+        result = await self._run(
+            runtime,
+            [self._search_response('{"query": "blocked", "activity": {"kind": "target_gap", "purpose": "fill gap"}}'), self._done_response()],
+        )
+
+        denied = next(ctx for ctx in result.metadata["tool_calls"] if ctx.tool_name == "counting_search")
+        self.assertEqual(denied.state.value, "denied")
+        self.assertEqual(dict(denied.activity.payload), {"kind": "target_gap", "purpose": "fill gap"})
+        self.assertEqual(tool.executed_arguments, [])
 
     async def test_activity_bound_priced_tool_stays_metered(self) -> None:
         """A priced tool keeps its operation accounting behind an activity binding."""

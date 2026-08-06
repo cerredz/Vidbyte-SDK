@@ -138,7 +138,16 @@ class _ActivityBoundTool(BaseTool):
 
     async def execute(self, call: ToolCall) -> ToolResult:
         """Run the wrapped tool against business arguments with the annotation removed."""
-        return await self._tool.execute(prepare_tool_call(self, call))
+        return await self._tool.execute(self._business_call(call))
+
+    def _business_call(self, call: ToolCall) -> ToolCall:
+        # Captures a valid annotation and always removes the reserved key, so a caller that
+        # skipped validation cannot pass a malformed annotation through as a tool argument.
+        prepared = prepare_tool_call(self, call)
+        if ACTIVITY_ARGUMENT_KEY not in prepared.arguments:
+            return prepared
+        arguments = {name: value for name, value in prepared.arguments.items() if name != ACTIVITY_ARGUMENT_KEY}
+        return replace(prepared, arguments=arguments)
 
     def _activity_error(self, call: ToolCall) -> str | None:
         # Returns a bounded validation message when the reserved annotation is absent or invalid.

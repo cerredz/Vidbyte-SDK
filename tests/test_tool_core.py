@@ -179,6 +179,14 @@ class ToolActivityTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertIs(catalog.prepare_call(prepared), prepared)
 
+    async def test_direct_execution_never_leaks_a_malformed_annotation(self) -> None:
+        """A caller that skips validation cannot pass the reserved key through as an argument."""
+        tool, bound = self._bound_echo()
+
+        await bound.execute(ToolCall("echo", {"text": "hi", "activity": {"reason": ""}}))
+
+        self.assertEqual(tool.executed_arguments, [{"text": "hi"}])
+
     def test_captured_activity_payload_is_immutable(self) -> None:
         """A consumer cannot mutate a captured annotation through its payload mapping."""
         _, bound = self._bound_echo()
