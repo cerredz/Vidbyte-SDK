@@ -2,8 +2,109 @@ from __future__ import annotations
 
 import unittest
 
+from pydantic import BaseModel, Field
+
+from vidbyte.tools import BaseTool, ToolActivity, ToolCall, ToolParameter, ToolResult, ToolSpec, ToolsFormatter, tool, vidbyte_tool
 from vidbyte.providers import tool_spec_to_provider_schema
-from vidbyte.tools import ToolCall, ToolResult, ToolsFormatter, tool, vidbyte_tool
+
+
+class LookupActivity(BaseModel):
+    """Bounded annotation rendered as a nested provider input."""
+
+    purpose: str = Field(min_length=1, max_length=60)
+
+
+class LookupTool(BaseTool):
+    """Minimal tool used to verify nested activity schema rendering."""
+
+    def spec(self) -> ToolSpec:
+        """Return a lookup spec with one required business argument."""
+        return ToolSpec(
+            name="lookup",
+            description="Looks a topic up.",
+            parameters=(ToolParameter("topic", "string", "Topic to look up."),),
+        )
+
+    async def execute(self, call: ToolCall) -> ToolResult:
+        """Return the requested topic."""
+        return ToolResult.success(self.name, str(call.arguments["topic"]))
+
+
+class SchemaLookupTool(LookupTool):
+    """Lookup variant that declares an explicit input schema instead of parameters."""
+
+    def spec(self) -> ToolSpec:
+        """Return a lookup spec whose inputs come from an explicit JSON Schema."""
+        return ToolSpec(
+            name="lookup",
+            description="Looks a topic up.",
+            input_schema={
+                "type": "object",
+                "properties": {"topic": {"type": "string"}},
+                "required": ["topic"],
+                "additionalProperties": False,
+            },
+        )
+
+
+def _bound_lookup(tool_instance: LookupTool, *, required: bool = True) -> BaseTool:
+    """Return the lookup tool bound to a small required or optional activity."""
+    return tool_instance.with_activity(
+        ToolActivity(schema=LookupActivity, description="Explain this lookup.", required=required)
+    )
+
+
+class ProviderToolActivitySchemaTests(unittest.TestCase):
+    """Verifies nested activity rendering across every provider tool format."""
+
+    def test_openai_schema_nests_activity_under_the_reserved_key(self) -> None:
+        """OpenAI-compatible parameters carry the activity object and mark it required."""
+        schema = tool_spec_to_provider_schema(_bound_lookup(LookupTool()).spec(), "openai")
+        parameters = schema["function"]["parameters"]
+
+        self.assertEqual(parameters["properties"]["activity"]["type"], "object")
+        self.assertIn("purpose", parameters["properties"]["activity"]["properties"])
+        self.assertEqual(parameters["properties"]["activity"]["description"], "Explain this lookup.")
+        self.assertIn("activity", parameters["required"])
+        self.assertIn("topic", parameters["required"])
+
+    def test_anthropic_schema_nests_activity_under_the_reserved_key(self) -> None:
+        """Anthropic input_schema carries the same nested activity object."""
+        schema = tool_spec_to_provider_schema(_bound_lookup(LookupTool()).spec(), "anthropic")
+
+        self.assertIn("activity", schema["input_schema"]["properties"])
+        self.assertIn("activity", schema["input_schema"]["required"])
+
+    def test_gemini_schema_nests_activity_under_the_reserved_key(self) -> None:
+        """Gemini function parameters carry the same nested activity object."""
+        schema = tool_spec_to_provider_schema(_bound_lookup(LookupTool()).spec(), "gemini")
+
+        self.assertIn("activity", schema["parameters"]["properties"])
+        self.assertIn("activity", schema["parameters"]["required"])
+
+    def test_explicit_input_schema_keeps_its_own_policy(self) -> None:
+        """A tool with an explicit input schema keeps additionalProperties and gains the activity."""
+        schema = tool_spec_to_provider_schema(_bound_lookup(SchemaLookupTool()).spec(), "openai")
+        parameters = schema["function"]["parameters"]
+
+        self.assertFalse(parameters["additionalProperties"])
+        self.assertIn("activity", parameters["properties"])
+        self.assertEqual(parameters["required"], ["topic", "activity"])
+
+    def test_optional_activity_is_not_required(self) -> None:
+        """An optional annotation renders as a property without entering required."""
+        schema = tool_spec_to_provider_schema(_bound_lookup(LookupTool(), required=False).spec(), "openai")
+        parameters = schema["function"]["parameters"]
+
+        self.assertIn("activity", parameters["properties"])
+        self.assertNotIn("activity", parameters["required"])
+
+    def test_unannotated_schema_is_unchanged(self) -> None:
+        """A tool without an activity renders exactly as it did before the feature."""
+        plain = tool_spec_to_provider_schema(LookupTool().spec(), "openai")
+
+        self.assertEqual(plain["function"]["parameters"]["required"], ["topic"])
+        self.assertNotIn("activity", plain["function"]["parameters"]["properties"])
 
 
 class ProviderToolSchemaTranslationTests(unittest.TestCase):
