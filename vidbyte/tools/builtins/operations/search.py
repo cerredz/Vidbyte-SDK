@@ -9,6 +9,8 @@ Purpose:
 Architecture:
     - Brave/Browserbase/OpenAlex/SemanticScholar: flat per-request search (units = 1).
     - Exa/Parallel: per-result search (units = returned result count, floored at 1).
+      Exa also suffixes its billing mode with "+highlights" when the bound client
+      requested the contents block, because that bills a second vendor meter.
     - Tavily/Linkup: depth-tiered search selecting a billing mode.
 Relations:
     Subclass PricedOperationTool (this package's base) and are exported through
@@ -22,6 +24,7 @@ from __future__ import annotations
 from vidbyte.lib.dataclasses.operations import SearchPayload
 from vidbyte.lib.errors import ProviderRequestError, ProviderResponseError
 from vidbyte.tools.builtins.operations.base import PricedOperationTool
+from vidbyte.tools.builtins.operations.clients import ExaClient
 from vidbyte.tools.types import ToolCall, ToolParameter, ToolResult, ToolSpec
 
 
@@ -144,7 +147,14 @@ class ExaSearchTool(PricedOperationTool):
 
     def _billing_mode(self, search_type: str) -> str:
         # Suffixes the search type when the bound client also requested billable highlights.
-        return f"{search_type}{_HIGHLIGHTS_MODE_SUFFIX}" if getattr(self._client, "includes_highlights", False) else search_type
+        # @intent a-rename-here-must-break-the-build-not-the-invoice
+        # An untyped probe for the attribute would fall back to False if the client
+        # ever renamed it, silently resolving to the cheaper non-highlights tariff
+        # through the pricebook's "default" mode fallback. The isinstance check
+        # makes that a type error instead of an under-billed search.
+        if isinstance(self._client, ExaClient) and self._client.includes_highlights:
+            return f"{search_type}{_HIGHLIGHTS_MODE_SUFFIX}"
+        return search_type
 
 
 class TavilySearchTool(PricedOperationTool):

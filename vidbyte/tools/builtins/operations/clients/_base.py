@@ -12,8 +12,9 @@ Architecture:
       HttpTransport, reporting the attempts each request consumed, and exposing
       iso_date for vendor publication timestamps.
 Relations:
-    Subclassed by brave.BraveClient and firecrawl.FirecrawlClient; consumed by
-    the priced tools in vidbyte/tools/builtins/operations.
+    Subclassed by every vendor client in this package; brave, exa, and tavily
+    additionally route their publication dates through iso_date. Consumed by the
+    priced tools in vidbyte/tools/builtins/operations.
 Similar Files:
     - vidbyte/lib/http/transport.py
 """
