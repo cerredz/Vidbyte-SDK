@@ -49,14 +49,26 @@ class OperationPricing:
         return self.usd_fixed + self.usd_per_unit * batches
 
 
-OPERATION_PRICING_AS_OF: str = "2026-08-03"
+OPERATION_PRICING_AS_OF: str = "2026-08-08"
 
 # Rates verified against official provider docs on OPERATION_PRICING_AS_OF and
 # converted to USD (the token tracker's unit) from each provider's native basis.
-# Reference-plan assumptions baked into the effective rate, since the customer's
-# plan is not knowable at call time:
-#   - Tavily / Firecrawl bill in credits; USD uses PAYG ($0.008/credit) and the
-#     Standard plan ($0.00083/credit) respectively.
+# Most vendors publish a per-1,000-unit rate, so the entry below is that figure
+# divided by 1,000. Dividing twice is the one mistake this table has actually
+# made in review (see the Parallel note); OperationPricingTableTests asserts a
+# magnitude floor that catches it.
+# Preferred basis is the vendor's pay-as-you-go API rate. Where a vendor sells
+# no PAYG rate, a reference plan is named below, since the customer's plan is
+# not knowable at call time and those accounts should override this registry
+# through OperationPricingRegistry.register:
+#   - Tavily bills in credits at a published PAYG rate of $0.008/credit with no
+#     monthly commitment. Monthly plans are cheaper ($0.005-$0.0075/credit), so
+#     this is the plan-free API rate and it over-prices a subscribed account.
+#   - Firecrawl publishes no pay-per-use rate at all ("We currently do not offer
+#     a pay-per-use plan"), only monthly plans. USD uses the Standard plan
+#     ($83 / 100,000 credits = $0.00083/credit). Plans span 5.3x (Hobby $0.0032,
+#     Standard $0.00083, Growth $0.0007, Scale $0.0006), so any single figure
+#     here encodes a plan assumption that off-Standard accounts must override.
 #   - Exa assumes a single content type (text+highlights); extra content types
 #     (summaries) bill separately and are out of scope.
 #   - Exa "<type>+highlights" modes fold the contents meter into usd_per_unit
@@ -66,8 +78,14 @@ OPERATION_PRICING_AS_OF: str = "2026-08-03"
 #     over-prices very large ones. It is accurate near twenty results, the
 #     intended operating point. ExaClient(include_highlights=True) is what selects
 #     these modes; the default results-only client never resolves them.
-#   - Parallel publishes per-1,000 rates; entries below are the per-call quotient.
-#     Search assumes ~10 included results before the per-result rate.
+#   - Parallel's pricing table column is headed "Cost ($/1000)", so every entry
+#     below is that column's value divided by 1,000 -- turbo 1 -> $0.001/request,
+#     basic/base/advanced/pro 5 -> $0.005/request, additional results 1 ->
+#     $0.001/result above the ten included, Extract 1 -> $0.001/URL. Do not
+#     divide again: reading the column value as dollars-per-unit and then
+#     dividing by 1,000 put these six entries 1000x under the real rate on main
+#     and reverted a correct fix (PR #325) once. The Task/Chat/Response/Monitor
+#     entries further down convert the same column correctly and cross-check it.
 #   - Browserbase uses Developer-plan overage; the Startup plan halves Fetch and
 #     lowers browser hours, so those accounts should override this registry.
 #   - OpenAlex prices the marginal search call; the account-level $1/day free
@@ -84,7 +102,7 @@ OPERATION_PRICING_AS_OF: str = "2026-08-03"
 #   - Tavily "fast" / "ultra-fast" depths, whose credit cost is not published.
 # Free operations resolve to an all-zero tariff (cost 0.0), never None, so they do
 # not poison the rollup's cost_complete flag. Sources:
-#   brave  https://brave.com/learn/best-search-api-2026/
+#   brave  https://brave.com/search/api/
 #   browserbase https://www.browserbase.com/pricing
 #   exa    https://exa.ai/pricing
 #   tavily https://docs.tavily.com/documentation/api-credits
@@ -92,7 +110,7 @@ OPERATION_PRICING_AS_OF: str = "2026-08-03"
 #   parallel https://docs.parallel.ai/getting-started/pricing
 #   openalex https://blog.openalex.org/openalex-api-new-features-and-usage-based-pricing/
 #   semantic_scholar https://github.com/allenai/s2-folks/blob/main/API_RELEASE_NOTES.md
-#   firecrawl https://www.eesel.ai/blog/firecrawl-pricing
+#   firecrawl https://www.firecrawl.dev/pricing
 OPERATION_PRICING: dict[tuple[str, str, str], OperationPricing] = {
     # ── search ──────────────────────────────────────────────────────────────
     ("search", "brave", "default"): OperationPricing(usd_fixed=0.005),
@@ -119,11 +137,11 @@ OPERATION_PRICING: dict[tuple[str, str, str], OperationPricing] = {
     ("search", "linkup", "default"): OperationPricing(usd_fixed=0.005),
     ("search", "linkup", "standard"): OperationPricing(usd_fixed=0.005),
     ("search", "linkup", "deep"): OperationPricing(usd_fixed=0.05),
-    ("search", "parallel", "default"): OperationPricing(usd_fixed=0.000001, usd_per_unit=0.000001, included_units=10),
-    ("search", "parallel", "turbo"): OperationPricing(usd_fixed=0.000001, usd_per_unit=0.000001, included_units=10),
-    ("search", "parallel", "pro"): OperationPricing(usd_fixed=0.000005, usd_per_unit=0.000001, included_units=10),
-    ("search", "parallel", "base"): OperationPricing(usd_fixed=0.000005, usd_per_unit=0.000001, included_units=10),
-    ("search", "parallel", "advanced"): OperationPricing(usd_fixed=0.000005, usd_per_unit=0.000001, included_units=10),
+    ("search", "parallel", "default"): OperationPricing(usd_fixed=0.001, usd_per_unit=0.001, included_units=10),
+    ("search", "parallel", "turbo"): OperationPricing(usd_fixed=0.001, usd_per_unit=0.001, included_units=10),
+    ("search", "parallel", "pro"): OperationPricing(usd_fixed=0.005, usd_per_unit=0.001, included_units=10),
+    ("search", "parallel", "base"): OperationPricing(usd_fixed=0.005, usd_per_unit=0.001, included_units=10),
+    ("search", "parallel", "advanced"): OperationPricing(usd_fixed=0.005, usd_per_unit=0.001, included_units=10),
     ("search", "openalex", "default"): OperationPricing(usd_fixed=0.001),
     ("search", "semantic_scholar", "default"): OperationPricing(),
     # ── fetch ───────────────────────────────────────────────────────────────
@@ -131,7 +149,7 @@ OPERATION_PRICING: dict[tuple[str, str, str], OperationPricing] = {
     ("fetch", "firecrawl", "scrape"): OperationPricing(usd_per_unit=0.00083),
     ("fetch", "browserbase", "default"): OperationPricing(usd_per_unit=0.001),
     ("fetch", "browserbase", "proxy"): OperationPricing(usd_per_unit=0.004),
-    ("fetch", "parallel", "default"): OperationPricing(usd_per_unit=0.000001),
+    ("fetch", "parallel", "default"): OperationPricing(usd_per_unit=0.001),
     ("fetch", "tavily", "default"): OperationPricing(usd_per_unit=0.008, unit_batch=5),
     ("fetch", "tavily", "basic"): OperationPricing(usd_per_unit=0.008, unit_batch=5),
     ("fetch", "tavily", "advanced"): OperationPricing(usd_per_unit=0.016, unit_batch=5),
