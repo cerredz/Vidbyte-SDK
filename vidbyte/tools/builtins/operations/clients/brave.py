@@ -18,7 +18,6 @@ Similar Files:
 from __future__ import annotations
 
 from collections.abc import Mapping
-from datetime import date
 from typing import Any
 
 from vidbyte.lib.dataclasses.operations import SearchHit, SearchPayload
@@ -77,20 +76,10 @@ class BraveClient(WebOperationClient):
             title=title if isinstance(title, str) and title.strip() else url,
             url=url,
             snippet=snippet if isinstance(snippet, str) and snippet.strip() else None,
-            published_at=self._published_date(item.get("page_age") or item.get("age")),
+            published_at=self.iso_date(item.get("page_age") or item.get("age")),
             language=None,
             raw=dict(item),
         )
-
-    @staticmethod
-    def _published_date(value: object) -> str | None:
-        # Returns the leading ISO date of a Brave age string, or None when unparseable.
-        if not isinstance(value, str) or len(value) < 10:
-            return None
-        try:
-            return date.fromisoformat(value[:10]).isoformat()
-        except ValueError:
-            return None
 
 
 __all__ = [

@@ -65,20 +65,18 @@ class TavilyClient(WebOperationClient):
         hits = (self._hit_from_result(item) for item in results if isinstance(item, Mapping))
         return tuple(hit for hit in hits if hit is not None)
 
-    @staticmethod
-    def _hit_from_result(item: Mapping[str, Any]) -> SearchHit | None:
+    def _hit_from_result(self, item: Mapping[str, Any]) -> SearchHit | None:
         # Normalizes one Tavily result, skipping any entry without a usable URL.
         url = item.get("url")
         if not isinstance(url, str) or not url.strip():
             return None
         title = item.get("title")
         content = item.get("content")
-        published = item.get("published_date")
         return SearchHit(
             title=title if isinstance(title, str) and title.strip() else url,
             url=url,
             snippet=content[:_MAX_SNIPPET_CHARS] if isinstance(content, str) and content.strip() else None,
-            published_at=published if isinstance(published, str) and published.strip() else None,
+            published_at=self.iso_date(item.get("published_date")),
             raw=dict(item),
         )
 

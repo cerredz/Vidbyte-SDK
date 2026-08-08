@@ -31,6 +31,10 @@ class SearchHit:
     title: str
     url: str
     snippet: str | None = None
+    # Bare ISO-8601 calendar date (YYYY-MM-DD) or None. Clients must normalize
+    # vendor timestamps through WebOperationClient.iso_date, because consumers
+    # read this with date.fromisoformat, which rejects a full timestamp on the
+    # supported Python floor.
     published_at: str | None = None
     language: str | None = None
     raw: Mapping[str, Any] = field(default_factory=dict)
