@@ -59,6 +59,13 @@ OPERATION_PRICING_AS_OF: str = "2026-08-03"
 #     Standard plan ($0.00083/credit) respectively.
 #   - Exa assumes a single content type (text+highlights); extra content types
 #     (summaries) bill separately and are out of scope.
+#   - Exa "<type>+highlights" modes fold the contents meter into usd_per_unit
+#     (0.001 search + 0.001 highlights). This is an approximation: highlights bill
+#     from the first result while search bills only above the ten-result
+#     allowance, so the entry under-prices calls at or below ten results and
+#     over-prices very large ones. It is accurate near twenty results, the
+#     intended operating point. ExaClient(include_highlights=True) is what selects
+#     these modes; the default results-only client never resolves them.
 #   - Parallel publishes per-1,000 rates; entries below are the per-call quotient.
 #     Search assumes ~10 included results before the per-result rate.
 #   - Browserbase uses Developer-plan overage; the Startup plan halves Fetch and
@@ -70,7 +77,8 @@ OPERATION_PRICING_AS_OF: str = "2026-08-03"
 # stays visibly false instead of being guessed:
 #   - Tavily Crawl (map credits + extract credits) and Research (4-110 / 15-250).
 #   - Parallel FindAll (fixed generator cost + per-match cost).
-#   - Exa Contents billed per content type, and Agent "auto" metered mode.
+#   - Exa Contents text/summary content types, and Agent "auto" metered mode.
+#     Highlights are represented through the "+highlights" search modes above.
 #   - Browserbase browser-hours and proxy-GB, whose fractional units would round
 #     up to a whole batch under OperationPricing.cost_usd.
 #   - Tavily "fast" / "ultra-fast" depths, whose credit cost is not published.
@@ -97,6 +105,14 @@ OPERATION_PRICING: dict[tuple[str, str, str], OperationPricing] = {
     ("search", "exa", "deep-lite"): OperationPricing(usd_fixed=0.012, usd_per_unit=0.001, included_units=10),
     ("search", "exa", "deep"): OperationPricing(usd_fixed=0.012, usd_per_unit=0.001, included_units=10),
     ("search", "exa", "deep-reasoning"): OperationPricing(usd_fixed=0.015, usd_per_unit=0.001, included_units=10),
+    ("search", "exa", "default+highlights"): OperationPricing(usd_fixed=0.007, usd_per_unit=0.002, included_units=10),
+    ("search", "exa", "standard+highlights"): OperationPricing(usd_fixed=0.007, usd_per_unit=0.002, included_units=10),
+    ("search", "exa", "auto+highlights"): OperationPricing(usd_fixed=0.007, usd_per_unit=0.002, included_units=10),
+    ("search", "exa", "fast+highlights"): OperationPricing(usd_fixed=0.007, usd_per_unit=0.002, included_units=10),
+    ("search", "exa", "agentic+highlights"): OperationPricing(usd_fixed=0.012, usd_per_unit=0.002, included_units=10),
+    ("search", "exa", "deep-lite+highlights"): OperationPricing(usd_fixed=0.012, usd_per_unit=0.002, included_units=10),
+    ("search", "exa", "deep+highlights"): OperationPricing(usd_fixed=0.012, usd_per_unit=0.002, included_units=10),
+    ("search", "exa", "deep-reasoning+highlights"): OperationPricing(usd_fixed=0.015, usd_per_unit=0.002, included_units=10),
     ("search", "tavily", "default"): OperationPricing(usd_fixed=0.008),
     ("search", "tavily", "basic"): OperationPricing(usd_fixed=0.008),
     ("search", "tavily", "advanced"): OperationPricing(usd_fixed=0.016),
