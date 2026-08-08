@@ -10,8 +10,10 @@ Architecture:
     - PricingBaseTests: nested_int + uncached_input_tokens on ProviderUsage.
     - CompatibleProviderTests: xai/glm/minimax/deepseek route through one class.
     - PricingRegistryStrictnessTests: resolve/register take only ModelProvider.
+    - OperationPricingTableTests: no operation rate is off by a per-1,000 factor.
 Relations:
-    Exercises vidbyte/agents/pricing/* and vidbyte/lib/registries/pricing.py.
+    Exercises vidbyte/agents/pricing/*, vidbyte/lib/registries/pricing.py, and
+    vidbyte/lib/registries/operation_pricing.py.
 Similar Files:
     - tests/test_agent_registry.py
 """
@@ -31,7 +33,13 @@ from vidbyte.agents.pricing import (
 )
 from vidbyte.lib.enums import ModelProvider
 from vidbyte.lib.errors import ConfigurationError
+from vidbyte.lib.registries.operation_pricing import OPERATION_PRICING, OperationPricingRegistry
 from vidbyte.lib.registries.pricing import ModelPricing, ModelPricingRegistry
+
+# Floor for any non-zero operation rate. Vendors publish per-1,000-unit figures, so
+# the recurring defect is dividing by 1,000,000 instead of 1,000. The smallest real
+# rate in the table is Firecrawl's 0.00083/page, leaving 83x of headroom.
+_MIN_PLAUSIBLE_RATE_USD = 1e-5
 
 
 class PricingBaseTests(unittest.TestCase):
@@ -132,6 +140,45 @@ class PricingRegistryStrictnessTests(unittest.TestCase):
             registry.register("openai", "custom-model", pricing)  # type: ignore[arg-type]
         registry.register(ModelProvider.OPENAI, "custom-model", pricing)
         self.assertIs(registry.resolve(ModelProvider.OPENAI, "custom-model"), pricing)
+
+
+class OperationPricingTableTests(unittest.TestCase):
+    def test_no_rate_is_implausibly_small(self) -> None:
+        # Guards the whole table against a per-1,000 figure being divided twice.
+        for key, pricing in OPERATION_PRICING.items():
+            for field, rate in (("usd_fixed", pricing.usd_fixed), ("usd_per_unit", pricing.usd_per_unit)):
+                if rate:
+                    self.assertGreaterEqual(rate, _MIN_PLAUSIBLE_RATE_USD, f"{key} {field}={rate} looks off by a per-1,000 factor.")
+
+    def test_free_operations_price_at_zero_rather_than_none(self) -> None:
+        # The floor above skips zero rates, so confirm free providers really are zero.
+        registry = OperationPricingRegistry.default()
+        for operation, provider in (("search", "semantic_scholar"), ("fetch", "direct_http")):
+            pricing = registry.resolve(operation, provider)
+            assert pricing is not None
+            self.assertEqual(pricing.cost_usd(25), 0.0)
+
+    def test_parallel_rates_convert_from_the_per_thousand_column(self) -> None:
+        # Pins the divisor: Parallel's "Cost ($/1000)" value of 1 is $0.001 per unit.
+        registry = OperationPricingRegistry.default()
+        turbo = registry.resolve("search", "parallel", "turbo")
+        assert turbo is not None
+        self.assertAlmostEqual(turbo.usd_fixed, 0.001)
+        self.assertAlmostEqual(turbo.usd_per_unit, 0.001)
+        pro = registry.resolve("search", "parallel", "pro")
+        assert pro is not None
+        self.assertAlmostEqual(pro.usd_fixed, 0.005)
+        extract = registry.resolve("fetch", "parallel", "default")
+        assert extract is not None
+        self.assertAlmostEqual(extract.usd_per_unit, 0.001)
+
+    def test_parallel_search_bills_a_base_request_plus_results_above_ten(self) -> None:
+        # Twenty turbo results cost the $0.001 request plus $0.001 for each of ten extras.
+        registry = OperationPricingRegistry.default()
+        turbo = registry.resolve("search", "parallel", "turbo")
+        assert turbo is not None
+        self.assertAlmostEqual(turbo.cost_usd(20), 0.011)
+        self.assertAlmostEqual(turbo.cost_usd(10), 0.001)
 
 
 if __name__ == "__main__":
