@@ -3,12 +3,14 @@
 Description:
     Shared transport policy for the executing search and fetch operation clients.
 Purpose:
-    Holds the retry, timeout, and response-ceiling configuration and the single
-    JSON request helper both vendor clients use, so neither reimplements HTTP.
+    Holds the retry, timeout, and response-ceiling configuration, the single JSON
+    request helper both vendor clients use so neither reimplements HTTP, and the
+    one date normalizer that keeps SearchHit.published_at a single format.
 Architecture:
     - RetryPolicy: Immutable attempt budget and backoff configuration.
     - WebOperationClient: Credentialed base issuing bounded JSON requests over
-      HttpTransport and reporting the attempts each request consumed.
+      HttpTransport, reporting the attempts each request consumed, and exposing
+      iso_date for vendor publication timestamps.
 Relations:
     Subclassed by brave.BraveClient and firecrawl.FirecrawlClient; consumed by
     the priced tools in vidbyte/tools/builtins/operations.
@@ -20,12 +22,15 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import date
 from json import JSONDecodeError, loads
 from typing import Any
 from urllib.parse import urlencode
 
 from vidbyte.lib.errors import ProviderRequestError, ProviderResponseError
 from vidbyte.lib.http.transport import HttpResponse, HttpTransport
+
+_ISO_DATE_CHARS = 10
 
 
 @dataclass(frozen=True, slots=True)
@@ -97,6 +102,21 @@ class WebOperationClient:
         if not isinstance(payload, dict):
             raise ProviderResponseError(f"{self._provider} {operation} returned a non-object JSON body.", provider=self._provider, status_code=response.status_code)
         return payload
+
+    @staticmethod
+    def iso_date(value: object) -> str | None:
+        """Return the leading calendar date of a vendor date string as YYYY-MM-DD, else None."""
+        # @intent one-published-at-format-across-every-search-client
+        # SearchHit.published_at is consumed with date.fromisoformat, which rejects a
+        # full timestamp on the supported Python floor. Vendors disagree on the shape
+        # they emit, so every client normalizes here rather than passing its own
+        # through and leaving the consumer to guess which client produced the hit.
+        if not isinstance(value, str) or len(value) < _ISO_DATE_CHARS:
+            return None
+        try:
+            return date.fromisoformat(value[:_ISO_DATE_CHARS]).isoformat()
+        except ValueError:
+            return None
 
 
 __all__ = [
