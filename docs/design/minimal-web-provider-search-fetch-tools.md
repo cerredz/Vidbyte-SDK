@@ -7,6 +7,21 @@
 
 ---
 
+> **⚠️ EVERY PARALLEL RATE IN THIS DOCUMENT IS WRONG BY 1000× AND WAS REVERTED (2026-08-08).**
+> Wherever this doc shows `0.000001` or `0.000005` for a Parallel search/extract rate —
+> §"Verified pricing corrections", the numbered requirement about `("fetch", "parallel",
+> "default")`, and the `OPERATION_PRICING` code blocks — the value is wrong. Parallel's
+> pricing table column is headed **`Cost ($/1000)`**, so a value of `1` is $1 per 1,000
+> units = **$0.001 per unit**, not "$0.001 per 1,000". This doc read the column value as
+> dollars-per-unit and divided by 1,000 a second time, which also caused it to revert
+> PR #325's correct values. Live rates: turbo `0.001`, pro/base/advanced `0.005`,
+> additional results `0.001`, Extract `0.001`/URL. See
+> `docs/design/operation-pricing-payg-corrections.md`. Everything in this doc that is not
+> a Parallel rate — including the Tavily depth analysis — remains correct. Original text
+> preserved below for history.
+
+---
+
 ## 1. Overview
 
 Four providers — Browserbase, Exa, Tavily, and Parallel — currently exist in the SDK only as priced *contract stubs*: their tool classes return `_contract_result(...)` and never call the vendor API. This change gives each of them a real executing client and a working search and/or fetch tool, built exactly like the existing `BraveClient` / `FirecrawlClient` pair, and expands `OPERATION_PRICING` with the researched rates for those providers' documented API surfaces. The usage-tracking contract — `OperationUsageRecord`, `UsageTracker.record_operation`, `AgentRuntime._record_operation_usage`, `PricedOperationTool`, and the `SearchPayload` / `FetchPayload` dataclasses — is not modified. Every new operation produces exactly one usage record per provider attempt, priced solely by the existing four-field `OperationPricing` tariff.

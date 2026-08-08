@@ -171,6 +171,16 @@ class OperationPricingRegistry:
 ("fetch","linkup","js"):                 usd_per_unit=0.005
 ("fetch","direct_http","default"):       (free) all-zero
 ```
+
+> **⚠️ CORRECTION (2026-08-08):** the two `("search","parallel",…)` lines above are wrong by
+> 1000×. Parallel's pricing column is headed `Cost ($/1000)`, so its value of `1` is $1 per
+> 1,000 requests = **$0.001 per request**. Live rates are turbo `usd_fixed=0.001,
+> usd_per_unit=0.001` and pro `usd_fixed=0.005, usd_per_unit=0.001`. Note that this doc's
+> own §5 provider table and the `("fetch","parallel","default"): usd_per_unit=0.001` line
+> above state the rates **correctly** — only this sketch is wrong, and that internal
+> inconsistency is what later PRs propagated. See
+> `docs/design/operation-pricing-payg-corrections.md`.
+
 A module comment records the reference-plan assumptions (Tavily/Firecrawl credit→USD at PAYG/Standard; Exa one content type; Parallel ~10 included results; OpenAlex prices the marginal call, ignoring the $1/day credit) and the per-provider source URLs.
 
 #### Edge Cases & Error Handling
