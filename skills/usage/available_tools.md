@@ -197,10 +197,10 @@ from vidbyte.tools.builtins.operations import (
 | Tool | Provider | Billing | Description |
 |------|----------|---------|-------------|
 | `BraveSearchTool()` | Brave | Flat per-request ($0.005) | Privacy-focused web search returning ranked result snippets. |
-| `ExaSearchTool()` | Exa | Per-result ($0.007 base + $0.001/result beyond 10) | Neural search returning hyper-relevant results with contents. Supports `type` param: `standard`, `agentic`. |
+| `ExaSearchTool()` | Exa | Per-result ($0.007 base + $0.001/result beyond 10) | Neural search returning hyper-relevant results with contents. Supports `type` param: `auto`, `fast`, `deep-lite`, `deep`, `deep-reasoning`. |
 | `TavilySearchTool()` | Tavily | Depth-tiered (basic $0.008 / advanced $0.016) | LLM-optimized web search returning ready-to-consume snippets. Supports `search_depth`: `basic`, `advanced`. |
 | `LinkupSearchTool()` | Linkup | Depth-tiered (standard $0.005 / deep $0.05) | Web search returning sourced results or answers. Supports `depth`: `standard`, `deep`. |
-| `ParallelSearchTool()` | Parallel | Per-result ($0.001/1k req) | Web search with processor tier selection. Supports `processor`: `turbo`, `pro`. |
+| `ParallelSearchTool()` | Parallel | Per-result (turbo $0.001/req, pro $0.005/req, + $0.001/result beyond 10) | Web search with processor tier selection. Supports `processor`: `turbo`, `pro`. |
 | `OpenAlexSearchTool()` | OpenAlex | Flat per-request ($0.001) | Scholarly works search returning matching academic records. |
 | `SemanticScholarSearchTool()` | Semantic Scholar | Free | Paper search returning matching academic records from Semantic Scholar. |
 
