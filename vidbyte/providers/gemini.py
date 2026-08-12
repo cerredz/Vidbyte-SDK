@@ -62,19 +62,21 @@ class GeminiProvider:
     def _prompt_index(self, history: list[Mapping[str, Any]]) -> int:
         # The runtime appends this run's tool exchange to whatever history it was handed, but
         # the prompt that provoked that exchange arrives separately and would otherwise land
-        # after it. Gemini rejects that outright ("function call turn comes immediately after
-        # a user turn or after a function response turn"), so the prompt goes in front of the
-        # trailing tool block. With no tool turns this is still a plain append.
-        index = len(history)
-        while index > 0 and self._is_tool_turn(history[index - 1]):
-            index -= 1
-        return index
+        # after it, leaving the functionCall turn with nothing in front of it. Gemini rejects
+        # that outright: "function call turn comes immediately after a user turn or after a
+        # function response turn". Slot the prompt in as that missing opening turn. A history
+        # whose calls are already introduced is left alone and the prompt simply appends.
+        for index, turn in enumerate(history):
+            if not self._has_part(turn, "functionCall"):
+                continue
+            return len(history) if index and history[index - 1].get("role") == "user" else index
+        return len(history)
 
     @staticmethod
-    def _is_tool_turn(turn: Mapping[str, Any]) -> bool:
-        # A turn belongs to a tool exchange when it carries a call or its response.
+    def _has_part(turn: Mapping[str, Any], key: str) -> bool:
+        # Reports whether a turn carries a given Gemini part kind.
         parts = turn.get("parts") or ()
-        return any("functionCall" in part or "functionResponse" in part for part in parts if isinstance(part, Mapping))
+        return any(key in part for part in parts if isinstance(part, Mapping))
 
     @staticmethod
     def _gemini_turn(message: Mapping[str, Any]) -> dict[str, Any]:

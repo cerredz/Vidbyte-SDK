@@ -105,7 +105,8 @@ class GeminiContentsOrderingTests(unittest.TestCase):
         contents = self._contents([{"role": "user", "parts": [{"text": "earlier"}]}])
         self.assertEqual(contents[-1]["parts"][0]["text"], "do the thing")
 
-    def test_prompt_follows_plain_history_but_precedes_tool_block(self) -> None:
+    def test_already_introduced_call_leaves_history_alone(self) -> None:
+        # The call already follows a user turn, so the history is legal as-is.
         contents = self._contents(
             [
                 {"role": "user", "parts": [{"text": "earlier"}]},
@@ -113,8 +114,22 @@ class GeminiContentsOrderingTests(unittest.TestCase):
             ]
         )
         self.assertEqual(contents[0]["parts"][0]["text"], "earlier")
-        self.assertEqual(contents[1]["parts"][0]["text"], "do the thing")
-        self.assertIn("functionCall", contents[2]["parts"][0])
+        self.assertIn("functionCall", contents[1]["parts"][0])
+        self.assertEqual(contents[2]["parts"][0]["text"], "do the thing")
+
+    def test_prompt_precedes_call_even_when_other_turns_trail_it(self) -> None:
+        # Contract feedback is appended after the tool exchange, so the tool block is no
+        # longer trailing — the prompt still belongs in front of the call.
+        contents = self._contents(
+            [
+                {"role": "model", "parts": [{"functionCall": {"name": "t", "args": {}}}]},
+                {"role": "user", "parts": [{"functionResponse": {"name": "t", "response": {}}}]},
+                {"role": "user", "content": "that did not match the schema"},
+            ]
+        )
+        self.assertEqual(contents[0]["parts"][0]["text"], "do the thing")
+        self.assertIn("functionCall", contents[1]["parts"][0])
+        self.assertEqual(contents[3]["parts"][0]["text"], "that did not match the schema")
 
     def test_openai_shaped_history_is_converted_to_parts(self) -> None:
         # Contract feedback and assistant turns are appended in the OpenAI {role, content}
