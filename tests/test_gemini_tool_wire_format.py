@@ -78,3 +78,48 @@ class GeminiToolResultRoleTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class GeminiContentsOrderingTests(unittest.TestCase):
+    """`contents` must place the prompt before the tool exchange it provoked."""
+
+    def _contents(self, messages: list) -> list:
+        from vidbyte.lib.config import TextModelConfig
+        from vidbyte.lib.enums import ModelProvider
+        from vidbyte.providers.gemini import GeminiProvider
+
+        config = TextModelConfig(provider=ModelProvider.GEMINI, model="gemini-3.6-flash", messages=tuple(messages))
+        return GeminiProvider()._create_contents(config, "do the thing")
+
+    def test_prompt_precedes_a_trailing_tool_exchange(self) -> None:
+        contents = self._contents(
+            [
+                {"role": "model", "parts": [{"functionCall": {"name": "t", "args": {}}}]},
+                {"role": "user", "parts": [{"functionResponse": {"name": "t", "response": {}}}]},
+            ]
+        )
+        self.assertEqual([c["role"] for c in contents], ["user", "model", "user"])
+        self.assertEqual(contents[0]["parts"][0]["text"], "do the thing")
+
+    def test_prompt_appends_when_history_has_no_tool_turns(self) -> None:
+        contents = self._contents([{"role": "user", "parts": [{"text": "earlier"}]}])
+        self.assertEqual(contents[-1]["parts"][0]["text"], "do the thing")
+
+    def test_prompt_follows_plain_history_but_precedes_tool_block(self) -> None:
+        contents = self._contents(
+            [
+                {"role": "user", "parts": [{"text": "earlier"}]},
+                {"role": "model", "parts": [{"functionCall": {"name": "t", "args": {}}}]},
+            ]
+        )
+        self.assertEqual(contents[0]["parts"][0]["text"], "earlier")
+        self.assertEqual(contents[1]["parts"][0]["text"], "do the thing")
+        self.assertIn("functionCall", contents[2]["parts"][0])
+
+    def test_openai_shaped_history_is_converted_to_parts(self) -> None:
+        # Contract feedback and assistant turns are appended in the OpenAI {role, content}
+        # shape, which Gemini cannot read.
+        contents = self._contents([{"role": "assistant", "content": "prior answer"}])
+        self.assertEqual(contents[0]["role"], "model")
+        self.assertEqual(contents[0]["parts"][0]["text"], "prior answer")
+        self.assertNotIn("content", contents[0])

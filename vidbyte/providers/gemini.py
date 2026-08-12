@@ -55,9 +55,42 @@ class GeminiProvider:
 
     def _create_contents(self, config: TextModelConfig, prompt: str) -> list[Mapping[str, Any]]:
         # Gemini supports alternating user/model turns through the contents array.
-        if config.messages:
-            return [dict(message) for message in config.messages] + [{"role": "user", "parts": [{"text": prompt}]}]
-        return [{"role": "user", "parts": [{"text": prompt}]}]
+        history = [self._gemini_turn(message) for message in config.messages]
+        history.insert(self._prompt_index(history), {"role": "user", "parts": [{"text": prompt}]})
+        return history
+
+    def _prompt_index(self, history: list[Mapping[str, Any]]) -> int:
+        # The runtime appends this run's tool exchange to whatever history it was handed, but
+        # the prompt that provoked that exchange arrives separately and would otherwise land
+        # after it. Gemini rejects that outright ("function call turn comes immediately after
+        # a user turn or after a function response turn"), so the prompt goes in front of the
+        # trailing tool block. With no tool turns this is still a plain append.
+        index = len(history)
+        while index > 0 and self._is_tool_turn(history[index - 1]):
+            index -= 1
+        return index
+
+    @staticmethod
+    def _is_tool_turn(turn: Mapping[str, Any]) -> bool:
+        # A turn belongs to a tool exchange when it carries a call or its response.
+        parts = turn.get("parts") or ()
+        return any("functionCall" in part or "functionResponse" in part for part in parts if isinstance(part, Mapping))
+
+    @staticmethod
+    def _gemini_turn(message: Mapping[str, Any]) -> dict[str, Any]:
+        # History reaches providers in the OpenAI {role, content} shape, which Gemini cannot
+        # read: it wants {role, parts} and calls the assistant role 'model'. Tool turns are
+        # already built in Gemini's shape by ToolsFormatter and pass through untouched.
+        turn = dict(message)
+        role = turn.get("role")
+        if role == "assistant":
+            turn["role"] = "model"
+        elif role == "system":
+            turn["role"] = "user"
+        if "parts" not in turn and "content" in turn:
+            content = turn.pop("content")
+            turn["parts"] = [{"text": content if isinstance(content, str) else str(content)}]
+        return turn
 
     def _attach_instructions(self, payload: dict[str, Any], config: TextModelConfig, system: str | None) -> None:
         # Gemini uses systemInstruction for developer-provided instructions.
