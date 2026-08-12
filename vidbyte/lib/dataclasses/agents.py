@@ -117,6 +117,7 @@ class AgentRunnerConfig:
     model_name: str | None = None
     temperature: float | None = None
     run_id: str | None = None
+    timeout_seconds: float | None = None
 
 
 @dataclass(frozen=True, slots=True)

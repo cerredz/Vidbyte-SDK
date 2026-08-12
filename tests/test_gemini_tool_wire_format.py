@@ -76,10 +76,6 @@ class GeminiToolResultRoleTests(unittest.TestCase):
         self.assertEqual(message["role"], "user")
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class GeminiContentsOrderingTests(unittest.TestCase):
     """`contents` must place the prompt before the tool exchange it provoked."""
 
@@ -138,3 +134,24 @@ class GeminiContentsOrderingTests(unittest.TestCase):
         self.assertEqual(contents[0]["role"], "model")
         self.assertEqual(contents[0]["parts"][0]["text"], "prior answer")
         self.assertNotIn("content", contents[0])
+
+
+class AgentRequestTimeoutTests(unittest.TestCase):
+    """A slow reasoning model needs a longer HTTP read than the 60s config default."""
+
+    def _runner(self, **kwargs):
+        from vidbyte.agents import BaseAgent
+
+        agent = BaseAgent(name="w", system_prompt="s", provider="xai", model_name="grok-4.5", api_key="k", **kwargs)
+        runner, _ = agent._runner_for_model()
+        return runner
+
+    def test_timeout_reaches_the_model_config(self) -> None:
+        self.assertEqual(self._runner(timeout_seconds=300.0)._config.timeout_seconds, 300.0)
+
+    def test_default_is_left_alone_when_unset(self) -> None:
+        self.assertEqual(self._runner()._config.timeout_seconds, 60.0)
+
+
+if __name__ == "__main__":
+    unittest.main()
