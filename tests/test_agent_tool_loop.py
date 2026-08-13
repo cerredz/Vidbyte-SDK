@@ -301,8 +301,14 @@ class AssistantToolCallHistoryTests(unittest.IsolatedAsyncioTestCase):
             (i for i, m in enumerate(second_call_messages) if m.get("role") == "model"),
             None,
         )
+        # The tool result rides on a 'user' turn — generateContent has no 'function' role —
+        # so identify it by its functionResponse part rather than by role.
         function_result_idx = next(
-            (i for i, m in enumerate(second_call_messages) if m.get("role") == "function"),
+            (
+                i
+                for i, m in enumerate(second_call_messages)
+                if any("functionResponse" in part for part in m.get("parts", []) if isinstance(part, dict))
+            ),
             None,
         )
         self.assertIsNotNone(model_idx, "no model turn found for Gemini")

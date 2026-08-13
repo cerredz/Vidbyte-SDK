@@ -187,7 +187,7 @@ class ProviderAwareToolErrorRenderingTests(unittest.TestCase):
         )
         self.assertEqual(
             ToolsFormatter.format_tool_result(call, result, "gemini"),
-            {"role": "function", "parts": [{"functionResponse": {"name": "lookup", "response": {"output": "ok", "status": "success"}}}]},
+            {"role": "user", "parts": [{"functionResponse": {"name": "lookup", "response": {"output": "ok", "status": "success"}}}]},
         )
         self.assertEqual(
             ToolsFormatter.format_tool_result(call, result, "openai"),

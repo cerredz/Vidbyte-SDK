@@ -122,6 +122,22 @@ class ToolsFormatter:
         """Convert a ToolSpec into a Grok/xAI OpenAI-compatible tool."""
         return ToolsFormatter.to_openai_tool(spec)
 
+    # Gemini's function-declaration `parameters` is an OpenAPI 3.0 Schema, not full JSON
+    # Schema. It rejects unknown keywords outright ("Invalid JSON payload received. Unknown
+    # name ..."), so anything outside this set has to be dropped before the call is made.
+    _GEMINI_SCHEMA_KEYWORDS: frozenset[str] = frozenset(
+        {
+            "type", "format", "title", "description", "nullable", "enum", "default", "example",
+            "properties", "required", "items", "anyOf", "propertyOrdering",
+            "minimum", "maximum", "minLength", "maxLength", "minItems", "maxItems", "pattern",
+        }
+    )
+    # `properties` maps arbitrary property names to subschemas, so its keys must never be
+    # filtered against the keyword set the way a schema node's keys are.
+    _GEMINI_SCHEMA_MAPS: frozenset[str] = frozenset({"properties"})
+    # Keywords whose value is itself a subschema (or a list of them).
+    _GEMINI_SCHEMA_NODES: frozenset[str] = frozenset({"items", "anyOf"})
+
     @staticmethod
     def to_gemini_tool(spec: ToolSpec) -> dict[str, Any]:
         """Convert a ToolSpec into a Gemini function declaration."""
@@ -130,10 +146,56 @@ class ToolsFormatter:
                 {
                     "name": spec.name,
                     "description": spec.description,
-                    "parameters": ToolsFormatter._schema_for_spec(spec),
+                    "parameters": ToolsFormatter._gemini_schema(ToolsFormatter._schema_for_spec(spec)),
                 }
             ]
         }
+
+    @staticmethod
+    def _gemini_schema(schema: Mapping[str, Any]) -> dict[str, Any]:
+        """Reduce a JSON Schema to the OpenAPI subset Gemini's function declarations accept.
+
+        Two things break otherwise, and both fail the whole request rather than degrading:
+        `$defs`/`$ref`, which Pydantic emits for any nested model, and `additionalProperties`,
+        which ``_parameters_schema`` stamps on every spec-declared tool. Refs are expanded in
+        place and unsupported keywords are dropped.
+        """
+        defs = dict(schema.get("$defs") or {})
+        root = {key: value for key, value in schema.items() if key != "$defs"}
+        return ToolsFormatter._gemini_node(root, defs, ())
+
+    @staticmethod
+    def _gemini_node(node: Mapping[str, Any], defs: Mapping[str, Any], seen: tuple[str, ...]) -> dict[str, Any]:
+        # Expands $ref against $defs and keeps only Gemini-supported keywords, depth-first.
+        kept: dict[str, Any] = {}
+        for key, value in node.items():
+            if key not in ToolsFormatter._GEMINI_SCHEMA_KEYWORDS:
+                continue
+            kept[key] = ToolsFormatter._gemini_keyword_value(key, value, defs, seen)
+        ref = node.get("$ref")
+        if not isinstance(ref, str):
+            return kept
+        target = ref.rsplit("/", 1)[-1]
+        if target in seen or target not in defs:
+            # A self-referential model has no finite inline form. Drop the ref and keep the
+            # sibling keywords so the node still describes an object Gemini can parse.
+            return kept
+        expanded = ToolsFormatter._gemini_node(defs[target], defs, (*seen, target))
+        expanded.update(kept)
+        return expanded
+
+    @staticmethod
+    def _gemini_keyword_value(key: str, value: Any, defs: Mapping[str, Any], seen: tuple[str, ...]) -> Any:
+        # Recurses only into keywords that actually carry subschemas; everything else
+        # (enum, required, default, example) is literal data and is passed through as-is.
+        if key in ToolsFormatter._GEMINI_SCHEMA_MAPS and isinstance(value, Mapping):
+            return {name: ToolsFormatter._gemini_node(sub, defs, seen) if isinstance(sub, Mapping) else sub for name, sub in value.items()}
+        if key in ToolsFormatter._GEMINI_SCHEMA_NODES:
+            if isinstance(value, Mapping):
+                return ToolsFormatter._gemini_node(value, defs, seen)
+            if isinstance(value, list):
+                return [ToolsFormatter._gemini_node(item, defs, seen) if isinstance(item, Mapping) else item for item in value]
+        return value
 
     @staticmethod
     def parse_tool_calls(raw: object, provider_or_model: str) -> tuple[ToolCall, ...]:
@@ -269,8 +331,11 @@ class ToolsFormatter:
 
     @staticmethod
     def _format_gemini_tool_result(tool_name: str, response: Mapping[str, Any]) -> Mapping[str, Any]:
+        # generateContent only accepts 'user' and 'model' turns; a functionResponse part is
+        # carried on a 'user' turn. Sending role 'function' fails the whole request with
+        # "Role 'function' is not supported."
         return {
-            "role": "function",
+            "role": "user",
             "parts": [
                 {
                     "functionResponse": {

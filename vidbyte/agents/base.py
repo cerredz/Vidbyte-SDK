@@ -71,6 +71,7 @@ class BaseAgent(McpAttachableMixin):
         provider: ModelProvider | str | None = None,
         model_name: str | None = None,
         temperature: float | None = None,
+        timeout_seconds: float | None = None,
         run_id: str | None = None,
         description: str = "",
         capabilities: Sequence[str] = (),
@@ -147,6 +148,7 @@ class BaseAgent(McpAttachableMixin):
             provider=provider_str,
             model_name=model_name,
             temperature=temperature,
+            timeout_seconds=timeout_seconds,
             run_id=run_id,
         )
         self.name = name
@@ -1155,11 +1157,14 @@ class BaseAgent(McpAttachableMixin):
 
     def _runner_for_model(self) -> tuple[object, str]:
         # Resolve and cache the executable runner for this agent's provider/model identity.
+        # timeout_seconds is omitted when unset so the model config keeps its own default.
+        options = {"timeout_seconds": self.runner_config.timeout_seconds} if self.runner_config.timeout_seconds is not None else {}
         utility = Runner.from_model(
             provider=self.runner_config.provider,
             model_name=self.runner_config.model_name,
             api_key=self.runner_config.api_key,
             temperature=self.runner_config.temperature,
+            options=options,
         )
         runner_type = utility.resolve_runner_type()
         if runner_type not in self._runner_cache:

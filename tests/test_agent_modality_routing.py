@@ -74,6 +74,7 @@ class AgentModalityRoutingTests(unittest.IsolatedAsyncioTestCase):
             model_name="gpt-image-1",
             api_key=None,
             temperature=None,
+            options={},
         )
         self.assertEqual(reply.content, "https://example.test/image.png")
         self.assertEqual(reply.metadata["runner_type"], "image")
