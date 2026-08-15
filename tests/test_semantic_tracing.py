@@ -98,6 +98,19 @@ class SemanticTraceProfileTests(unittest.TestCase):
         self.assertTrue(profile.allows(decision))
         self.assertFalse(profile.allows(hook))
 
+    def test_middleware_hook_name_is_diagnostic_only(self) -> None:
+        # Verifies name-based semantic conversion does not leak hook traces into verbose profiles.
+        verbose_events: list[dict[str, Any]] = []
+        diagnostic_events: list[dict[str, Any]] = []
+        verbose = Trace.profile(Trace.debug(verbose_events), TraceProfile.verbose())
+        diagnostic = Trace.profile(Trace.debug(diagnostic_events), TraceProfile.diagnostic())
+        verbose_hook = verbose.start_span("middleware.hook", middleware_name="guard", hook="before_run")
+        diagnostic_hook = diagnostic.start_span("middleware.hook", middleware_name="guard", hook="before_run")
+        verbose.end_span(verbose_hook, output="continue")
+        diagnostic.end_span(diagnostic_hook, output="continue")
+        self.assertNotIn("middleware.hook", [event.get("name") for event in verbose_events])
+        self.assertIn("middleware.hook", [event.get("name") for event in diagnostic_events])
+
     def test_registry_rejects_duplicate_and_unknown_specs(self) -> None:
         # Verifies component registry catches duplicate and missing span specs.
         registry = TraceComponentRegistry()

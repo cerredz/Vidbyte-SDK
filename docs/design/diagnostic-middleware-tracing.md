@@ -11,7 +11,7 @@
 
 Vidbyte's semantic trace profiles already define `middleware.hook` as a diagnostic-only span, but `MiddlewarePipeline` retains only decisions that alter control flow (plus fail-open exceptions). A diagnostic research trace therefore cannot show that ordinary middleware hooks ran, how long they took, or what they returned.
 
-This change records a compact invocation record for every middleware hook call, then has `AgentRuntime` emit one `middleware.hook` semantic span per record while the enclosing agent trace remains open. Existing `middleware.decision` spans continue to represent only control-flow changes.
+This change records a compact invocation record for every middleware hook call, then has `AgentRuntime` emit one `middleware.hook` semantic span per record while the enclosing agent trace remains open. Existing `middleware.decision` spans continue to represent policy-relevant decisions and fail-open exceptions.
 
 This SDK change deliberately does not add a `tracer` argument to `YamlLoader.build_agent`. The public loader accepts declarative settings only; applications that need runtime-only objects construct `BaseAgent` from `AgentSettings.to_agent_kwargs(...)` after resolving registered components, per the configuration boundary documented in `field-guide/vidbyte-sdk/declarative-config-resolution.md`.
 
@@ -25,7 +25,7 @@ This SDK change deliberately does not add a `tracer` argument to `YamlLoader.bui
 - Capture middleware name, hook name, elapsed duration, returned action, reason, safe decision metadata, and exception type when a hook raises.
 - Emit `middleware.hook` spans only for semantic diagnostic tracing.
 - Preserve the existing `MiddlewarePipeline.events` and final result metadata contract for control-flow decisions.
-- Keep `middleware.decision` spans for actions other than `continue`.
+- Keep `middleware.decision` spans for the existing policy-event stream.
 - Preserve fail-closed and fail-open middleware behavior.
 - Add focused tests to existing SDK test modules without adding a feature-test directory.
 
@@ -83,7 +83,7 @@ The contract is diagnostic-only runtime state. It does not replace `MiddlewareEv
 
 `AgentRuntime._record_middleware_spans()` first emits one `middleware.hook` span for each pipeline invocation. Span attributes include the invocation contract fields, with decision metadata passed through `_safe_trace_mapping()`.
 
-The method then emits the existing `middleware.decision` spans for non-continue decisions from `MiddlewarePipeline.events`. This retains useful lower-volume decision tracing for the verbose profile while diagnostic mode supplies the complete hook timeline.
+The method then emits the existing `middleware.decision` spans for policy events from `MiddlewarePipeline.events`, including fail-open exceptions. This retains useful lower-volume decision tracing for the verbose profile while diagnostic mode supplies the complete hook timeline.
 
 `TraceController._spec_from_name()` treats the exact name `middleware.hook` as diagnostic detail. All other `middleware.*` names retain their verbose classification.
 
@@ -99,7 +99,7 @@ Update Context Protocol Headers in every modified source file to describe the in
 | --- | --- |
 | Middleware returns `continue` | One diagnostic `middleware.hook` record; no new final result metadata event; no `middleware.decision` span. |
 | Middleware changes control flow | One diagnostic hook record plus the existing decision event and decision span. |
-| Fail-open middleware raises | Invocation includes `error_type`; legacy fail-open event remains in final metadata; runtime continues. |
+| Fail-open middleware raises | Invocation includes `error_type` and `middleware_error_fail_open`; the legacy fail-open event and decision span remain; runtime continues. |
 | Fail-closed middleware raises | Invocation includes `error_type`; existing abort behavior is unchanged. |
 | `TraceProfile.default()` or `verbose()` | `middleware.hook` spans are suppressed. Existing decision spans retain their current profile behavior. |
 | `TraceProfile.diagnostic()` | Every hook invocation becomes one `middleware.hook` span with safe attributes. |
@@ -132,9 +132,12 @@ Remove-Item Env:PYTHONPATH; python scripts/run_ci.py --stage package
 | --- | --- | --- |
 | CREATE | `docs/design/diagnostic-middleware-tracing.md` | Design record and first branch commit. |
 | MODIFY | `vidbyte/lib/dataclasses/middleware.py` | Add immutable per-hook diagnostic invocation contract. |
+| MODIFY | `vidbyte/lib/dataclasses/__init__.py` | Re-export the public diagnostic invocation contract. |
 | MODIFY | `vidbyte/middleware/pipeline.py` | Measure and retain every hook invocation without changing policy events. |
+| MODIFY | `vidbyte/middleware/__init__.py` | Re-export the public diagnostic invocation contract. |
 | MODIFY | `vidbyte/agents/runtime.py` | Emit safe diagnostic hook spans before trace closure. |
 | MODIFY | `vidbyte/trace/controller.py` | Classify `middleware.hook` as diagnostic detail. |
+| MODIFY | `vidbyte/__init__.py` | Re-export the public diagnostic invocation contract. |
 | MODIFY | `vidbyte/middleware/README.md` | Document diagnostic tracing and metadata compatibility. |
 | MODIFY | `tests/test_context_compaction_middleware.py` | Cover pipeline-level invocation recording. |
 | MODIFY | `tests/test_semantic_tracing.py` | Cover profile filtering. |

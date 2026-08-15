@@ -10,6 +10,8 @@ Architecture:
     - AgentRuntime: Builds BaseAgentContext and runs direct model/tool loops.
     - include_internal_tools: Defaults to current behavior but lets isolated child
       runtimes expose exactly their explicitly supplied tool catalog.
+    - MiddlewarePipeline: Supplies control-flow events and diagnostic hook records
+      that are emitted as semantic spans before the enclosing agent trace closes.
 Relations:
     Used by vidbyte.agents.base. Depends on shared context, tool, security, and
     strategy dataclasses without owning modality routing or runner construction.
@@ -36,7 +38,7 @@ from vidbyte.context.primitives import ContextItem
 from vidbyte.context.runtime import ContextWindowPlacement, ContextWindowRunContext, InnerContextWindowAlgorithm
 from vidbyte.context.window import ContextWindow
 from vidbyte.lib.dataclasses.agents import AgentIterationSnapshot, AgentRuntimeConfig, AgentStopReason
-from vidbyte.lib.dataclasses.middleware import MiddlewareAction, MiddlewareContext, MiddlewareDecision, MiddlewareHook
+from vidbyte.lib.dataclasses.middleware import MiddlewareAction, MiddlewareContext, MiddlewareDecision, MiddlewareEvent, MiddlewareHook, MiddlewareHookInvocation
 from vidbyte.lib.dataclasses.runner import RunnerHandle
 from vidbyte.providers.output_schema import OutputSchemaFormatter
 from vidbyte.lib.enums import ModelModality
@@ -1912,17 +1914,37 @@ class AgentRuntime:
         self._end_semantic_span(span, output="built")
 
     def _record_middleware_spans(self) -> None:
-        # Emits spans for middleware decisions captured by the middleware pipeline.
+        # Emits diagnostic invocation spans separately from lower-volume policy decision spans.
+        for invocation in self.middleware.hook_invocations:
+            self._record_middleware_hook_span(invocation)
         for event in self.middleware.events:
-            span = self._start_semantic_span(
-                "middleware.decision",
-                middleware_name=event.middleware_name,
-                hook=event.hook.value,
-                action=event.action.value,
-                reason=event.reason,
-                metadata=dict(event.metadata),
-            )
-            self._end_semantic_span(span, output=event.action.value)
+            self._record_middleware_decision_span(event)
+
+    def _record_middleware_hook_span(self, invocation: MiddlewareHookInvocation) -> None:
+        # The pipeline owns elapsed time; this late semantic span stays under the active agent trace.
+        span = self._start_semantic_span(
+            "middleware.hook",
+            middleware_name=invocation.middleware_name,
+            hook=invocation.hook.value,
+            action=invocation.action.value,
+            duration_seconds=invocation.duration_seconds,
+            reason=invocation.reason,
+            metadata=_safe_trace_mapping(invocation.metadata),
+            error_type=invocation.error_type,
+        )
+        self._end_semantic_span(span, output=invocation.action.value)
+
+    def _record_middleware_decision_span(self, event: MiddlewareEvent) -> None:
+        # Existing policy events remain visible at verbose detail without exposing ordinary continuations.
+        span = self._start_semantic_span(
+            "middleware.decision",
+            middleware_name=event.middleware_name,
+            hook=event.hook.value,
+            action=event.action.value,
+            reason=event.reason,
+            metadata=_safe_trace_mapping(event.metadata),
+        )
+        self._end_semantic_span(span, output=event.action.value)
 
 
 def _trace_text(value: object, *, max_chars: int = 12000) -> str:
