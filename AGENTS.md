@@ -144,7 +144,7 @@ The shared substrate every other layer depends on and none of them may bypass �
 
 ##### `vidbyte/lib/agents/`
 
-Agent-support utilities that must live below the `agents/` layer to avoid a circular import: `modality_detector.py` (routing a request to text, image, video, audio, or embedding based on the model) and a `prosecutor_defender_judge.py` support module. Small and slightly awkward by nature — this is the overflow valve for logic `agents/` needs but `lib/` must own. Keep it minimal � anything that can live in `agents/` should.
+Agent-support utilities that must live below the `agents/` layer to avoid a circular import: `modality_detector.py` (routing a request to text, image, video, audio, or embedding based on the model) and a `prosecutor_defender_judge.py` support module. Small and slightly awkward by nature — this is the overflow valve for logic `agents/` needs but `lib/` must own. Keep it minimal — anything that can live in `agents/` should.
 
 ##### `vidbyte/lib/config/`
 
