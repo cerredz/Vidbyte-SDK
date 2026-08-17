@@ -9,10 +9,13 @@ Purpose:
     monitors get structured per-event telemetry instead of narrative prose.
 Architecture:
     - CotEventParser: Shared static parsers for enums, confidences, JSON
-      object arrays, and required text fields.
+      string/object arrays, and required text fields.
     - HypothesisTool, DecisionTool, AssumptionCheckTool, UncertaintyTool,
-      BacktrackTool: BaseTool subclasses that validate, upsert a matching
+      BacktrackTool: batch-1 event tools that validate, upsert a matching
       context primitive, and return parsed values in ToolResult.metadata.
+    - PredictionTool, GoalCheckTool, CounterfactualTool, AssumptionsTool,
+      FailuresTool, WhyTool: batch-2 monitoring tools in the same shape;
+      assumptions and failures use fixed snapshot primitive ids.
 Relations:
     Depends on vidbyte.context.manager and vidbyte.context.primitives.cot_events.
     Parallel to builtins.reflexion and builtins.trajectory_checkpoint (the
