@@ -2,18 +2,21 @@
 
 Description:
     Defines AgentFallback, the ordered model chain an agent routes through when a
-    model call fails, plus the transforms that rebuild provider-derived run state.
+    model call fails or a per-hop policy elects to advance, plus the transforms
+    that rebuild provider-derived run state.
 Purpose:
     Lets a developer declare prioritized backup models once at construction so a
-    transient provider failure degrades to the next model instead of ending the run.
+    transient provider failure, a slow call, or a cost overrun degrades to the
+    next model instead of ending the run or silently overspending.
 Architecture:
     - AgentFallback: Immutable chain plus advance/transform policy helpers.
     - DEFAULT_FALLBACK_ERRORS: Provider-level exceptions that justify a switch.
 Relations:
-    Built by vidbyte.agents.base via AgentFallback.from_spec. Consumed by
-    vidbyte.agents.runtime inside the direct model/tool loop.
+    Built by vidbyte.agents.fallback.settings.AgentFallbackSettings.to_fallback.
+    Consumed by vidbyte.agents.runtime inside the direct model/tool loop.
 Similar Files:
-    - vidbyte/agents/settings/fallback.py: Developer-facing settings that build this.
+    - vidbyte/agents/fallback/settings.py: Developer-facing settings that build this.
+    - vidbyte/agents/fallback/policies.py: Per-hop LatencyPolicy and CostBudgetPolicy.
     - vidbyte/lib/dataclasses/agents.py: FallbackModel and FallbackTransform data contracts.
     - vidbyte/lib/dataclasses/runner.py: RunnerHandle.with_runner is the swap primitive.
 """
@@ -33,11 +36,10 @@ from vidbyte.lib.errors import (
     ProviderSelectionError,
     UnsupportedProviderError,
 )
-from vidbyte.lib.runners import Runner
 from vidbyte.lib.tools.formatter import ToolsFormatter
 
 if TYPE_CHECKING:
-    from vidbyte.agents.settings.fallback import AgentFallbackSettings
+    from vidbyte.agents.fallback.settings import AgentFallbackSettings
     from vidbyte.lib.dataclasses.agents import AgentRunnerConfig
     from vidbyte.tools.catalog import Tools
 
@@ -57,12 +59,13 @@ DEFAULT_FALLBACK_ERRORS: tuple[type[BaseException], ...] = (
 class AgentFallback:
     """Ordered model chain plus the transforms that route an in-flight run to the next model."""
 
-    def __init__(self, models: Sequence[FallbackModel], *, fallback_on: tuple[type[BaseException], ...] = DEFAULT_FALLBACK_ERRORS) -> None:
+    def __init__(self, models: Sequence[FallbackModel], *, fallback_on: tuple[type[BaseException], ...] = DEFAULT_FALLBACK_ERRORS, policies: Sequence[object] = ()) -> None:
         # Stores the chain (index 0 is the primary) and caches runners lazily, keyed by chain index.
         if not models:
             raise ConfigurationError("AgentFallback requires at least the primary model in its chain.")
         self.models = tuple(models)
         self.fallback_on = tuple(fallback_on)
+        self.policies = tuple(policies)
         self._runner_cache: dict[int, object] = {}
 
     @classmethod
@@ -111,6 +114,33 @@ class AgentFallback:
             return None
         return index + 1
 
+    def advance_after_success(self, index: int, *, cost_usd: float | None) -> int | None:
+        # Returns the next chain index when a cost-budget policy's ceiling has been crossed, or None.
+        if cost_usd is None or index + 1 >= len(self.models):
+            return None
+        ceiling = self.budget_for(index)
+        if ceiling is None or cost_usd < ceiling:
+            return None
+        return index + 1
+
+    def deadline_for(self, index: int) -> float | None:
+        # Returns the first policy-declared deadline for this hop, or None if no policy sets one.
+        return self._first_policy_value(index, "deadline_for")
+
+    def budget_for(self, index: int) -> float | None:
+        # Returns the first policy-declared cost ceiling for this hop, or None if no policy sets one.
+        return self._first_policy_value(index, "budget_for")
+
+    def _first_policy_value(self, index: int, attr: str) -> float | None:
+        # Folds over self.policies, returning the first non-None result of any policy exposing `attr`.
+        for policy in self.policies:
+            getter = getattr(policy, attr, None)
+            if callable(getter):
+                value = getter(index)
+                if value is not None:
+                    return value
+        return None
+
     def transform(self, handle: RunnerHandle, provider: str, tools: Tools, messages: list[dict[str, Any]], index: int) -> FallbackTransform:
         """Rebuild the handle, provider, tool schemas, and transcript for the model at index."""
         target = self.model_at(index)
@@ -134,10 +164,18 @@ class AgentFallback:
 
     def attempt_record(self, index: int, next_index: int, error: BaseException) -> dict[str, str]:
         """Build one credential-free record describing a single model-to-model switch."""
+        return self._build_attempt_record(index, next_index, type(error).__name__)
+
+    def policy_attempt_record(self, index: int, next_index: int, reason: str) -> dict[str, str]:
+        # Builds the same record shape as attempt_record, for a switch triggered by a policy, not an exception.
+        return self._build_attempt_record(index, next_index, reason)
+
+    def _build_attempt_record(self, index: int, next_index: int, trigger: str) -> dict[str, str]:
+        # Shared record shape for both the error path and the policy path.
         return {
             "from": self.model_at(index).identity(),
             "to": self.model_at(next_index).identity(),
-            "error_type": type(error).__name__,
+            "error_type": trigger,
         }
 
     @staticmethod
@@ -152,6 +190,11 @@ class AgentFallback:
 
     def build_runner(self, index: int) -> object:
         """Build and memoize the executable runner for the model at index."""
+        # Deferred: vidbyte.lib.runners transitively reaches vidbyte.lib.config, which is
+        # imported early during SDK bootstrap (via lib.dataclasses.agent_descriptor); a
+        # module-level import here would re-enter that chain before it finishes loading.
+        from vidbyte.lib.runners import Runner
+
         if index not in self._runner_cache:
             target = self.model_at(index)
             self._runner_cache[index] = Runner.from_model(

@@ -26,7 +26,7 @@ from vidbyte.lib.errors import AgentForkConfigurationError
 if TYPE_CHECKING:
     from vidbyte.agents.runtimes.configs import ActorRuntime, LinearRuntime, MctsSearchRuntime
     from vidbyte.agents.settings import AgentLoopSettings
-    from vidbyte.agents.settings.fallback import AgentFallbackSettings
+    from vidbyte.agents.fallback.settings import AgentFallbackSettings
     from vidbyte.agents.settings.tool import ToolSettings
     from vidbyte.context.handoff import Handoff
     from vidbyte.context.manager import ContextManager
