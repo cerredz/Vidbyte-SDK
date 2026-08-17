@@ -267,6 +267,24 @@ class AgentRuntime:
                     model_response=last_response,
                 )
 
+            if self.fallback is not None and iteration_count > 0:
+                cost_transition = self._cost_fallback_transition(
+                    index=fallback_index,
+                    handle=handle,
+                    provider=provider,
+                    messages=messages,
+                    attempts=fallback_attempts,
+                    parent_span=trace_context,
+                )
+                if cost_transition is not None:
+                    handle, provider = cost_transition.handle, cost_transition.provider
+                    tool_schemas, messages = cost_transition.tool_schemas, cost_transition.messages
+                    fallback_index = cost_transition.index
+                    self._publish_fallback_metadata(
+                        run_state,
+                        self.fallback.result_metadata(fallback_attempts, context_reset=cost_transition.context_reset),
+                    )
+
             decision = await self.middleware.before_iteration(
                 self._middleware_context(
                     MiddlewareHook.BEFORE_ITERATION,
@@ -339,6 +357,7 @@ class AgentRuntime:
                     run_state=run_state,
                     trace_context=active_trace_context,
                     compaction_count=compaction_count,
+                    timeout_seconds=self.fallback.deadline_for(fallback_index) if self.fallback is not None else None,
                 )
             except BaseException as exc:
                 self._end_semantic_span(iteration_span, error=exc)
@@ -665,7 +684,7 @@ class AgentRuntime:
                     model_response=raw_result,
                 )
 
-    async def _invoke_with_middleware(self, handle: RunnerHandle, message: str, call_options: Mapping[str, Any], *, context: BaseAgentContext, iteration_count: int, model_call_count: int, call_contexts: Sequence[ToolCallContext], tokens_used: int | None, started_at: float, metadata: Mapping[str, Any], run_state: dict[type, Any] | None = None, trace_context: SpanContext | None = None, compaction_count: int = 0) -> tuple[object | AgentResult, int, int]:
+    async def _invoke_with_middleware(self, handle: RunnerHandle, message: str, call_options: Mapping[str, Any], *, context: BaseAgentContext, iteration_count: int, model_call_count: int, call_contexts: Sequence[ToolCallContext], tokens_used: int | None, started_at: float, metadata: Mapping[str, Any], run_state: dict[type, Any] | None = None, trace_context: SpanContext | None = None, compaction_count: int = 0, timeout_seconds: float | None = None) -> tuple[object | AgentResult, int, int]:
         """Invoke the runner, allowing middleware to retry model errors while tracking compaction events."""
         provider = handle.provider
         while True:
@@ -715,7 +734,10 @@ class AgentRuntime:
                 ),
             )
             try:
-                raw_result = await handle.invoke(message, **current_call_options)
+                if timeout_seconds is not None:
+                    raw_result = await asyncio.wait_for(handle.invoke(message, **current_call_options), timeout=timeout_seconds)
+                else:
+                    raw_result = await handle.invoke(message, **current_call_options)
                 output_text = handle.extract_text(raw_result)
                 self._tracer.end_span(llm_span, output=output_text)
                 return raw_result, model_call_count, compaction_count
@@ -771,6 +793,17 @@ class AgentRuntime:
         attempts.append(self.fallback.attempt_record(index, next_index, error))
         transition = self.fallback.transform(handle, provider, self.tools, messages, next_index)
         self._record_fallback_span(attempts[-1], transition.context_reset, parent_span)
+        return transition
+
+    def _cost_fallback_transition(self, *, index: int, handle: RunnerHandle, provider: str, messages: list[dict[str, Any]], attempts: list[dict[str, str]], parent_span: SpanContext | None) -> "FallbackTransform | None":
+        # Returns rebuilt state when a cost-budget policy elects to downgrade, or None to keep the current model.
+        next_index = self.fallback.advance_after_success(index, cost_usd=self.usage_tracker.rollup().cost_usd)
+        if next_index is None:
+            return None
+        record = self.fallback.policy_attempt_record(index, next_index, "cost_budget_exceeded")
+        attempts.append(record)
+        transition = self.fallback.transform(handle, provider, self.tools, messages, next_index)
+        self._record_fallback_span(record, transition.context_reset, parent_span)
         return transition
 
     def _raise_chain_exhausted(self, error: BaseException, *, attempts: Sequence[Mapping[str, str]], errors: Sequence[BaseException]) -> None:
