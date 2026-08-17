@@ -13,6 +13,7 @@ Architecture:
     - Memory provider tools from builtins.memory.
     - Context primitive editing tools from builtins.context_primitives.
     - Context algorithm tools from builtins.trajectory_checkpoint and builtins.reflexion.
+    - Deep CoT event tools from builtins.cot_events.
     - Sequential continuation tool from builtins.run_prompts_sequentially.
 Relations:
     Related to vidbyte.tools.client and vidbyte.tools.registry.
@@ -22,6 +23,14 @@ from __future__ import annotations
 
 from vidbyte.tools.builtins.code_execution import CodeExecutionTool
 from vidbyte.tools.builtins.code_search import GlobTool, GrepTool, SemanticSearchTool
+from vidbyte.tools.builtins.cot_events import (
+    AssumptionCheckTool,
+    BacktrackTool,
+    CotEventParser,
+    DecisionTool,
+    HypothesisTool,
+    UncertaintyTool,
+)
 from vidbyte.tools.builtins.output_schema import (
     AppendOutputTool,
     DeclareOutputSchemaTool,
@@ -122,14 +131,19 @@ from vidbyte.tools.builtins.memory import (
 __all__ = [
     "AppendOutputTool",
     "AttachMcpServerTool",
+    "AssumptionCheckTool",
+    "BacktrackTool",
     "BatchForkTool",
     "BraveSearchTool",
     "BrowserbaseFetchTool",
     "BrowserbaseSearchTool",
     "CodeExecutionTool",
+    "CotEventParser",
+    "DecisionTool",
     "DirectHttpFetchTool",
     "ExaSearchTool",
     "FirecrawlFetchTool",
+    "HypothesisTool",
     "LinkupFetchTool",
     "LinkupSearchTool",
     "OpenAlexSearchTool",
@@ -139,6 +153,7 @@ __all__ = [
     "SemanticScholarSearchTool",
     "TavilyExtractTool",
     "TavilySearchTool",
+    "UncertaintyTool",
     "CreateHandoffTool",
     "CheckpointTool",
     "CompactionMode",
