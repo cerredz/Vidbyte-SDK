@@ -158,9 +158,16 @@ small. Rejected alternative: five tool files + duplicate parser snippets.
 ### 6.2 The five tools
 
 All in `vidbyte/tools/builtins/cot_events.py`. Each class:
-`__init__(self, context_manager: ContextManager)`, per-instance counter,
-`spec()`, `execute()`, and small private helpers (validate → build → upsert),
-matching `ReflexionTool`'s shape.
+`__init__(self, context_manager: ContextManager)`, `spec()`, `execute()`, and
+small private helpers (validate → build → upsert), matching `ReflexionTool`'s
+shape.
+
+Primitive ID policy: the two ledger tools (`hypothesis`, `assumption_check`)
+derive their `primitive_id` from a content hash of the statement
+(`statement_primitive_id`), so re-calling with the same statement overwrites
+the single ledger entry — exactly what their descriptions promise. The three
+append-only event tools (`decision`, `uncertainty`, `backtrack`) use the
+counter-based `<name>:<n>` IDs like `ReflexionTool`.
 
 #### `HypothesisTool` (name: `hypothesis`)
 Params: `statement*` (falsifiable belief, one sentence), `basis*` (why held,

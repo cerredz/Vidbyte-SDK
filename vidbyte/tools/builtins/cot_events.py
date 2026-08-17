@@ -21,6 +21,7 @@ Relations:
 
 from __future__ import annotations
 
+import hashlib
 import json
 from typing import TYPE_CHECKING, Any
 
@@ -120,6 +121,12 @@ class _CotEventToolBase(BaseTool):
     def _next_primitive_id(self) -> str:
         # Generates a stable, unique primitive ID based on the instance counter.
         return f"{self.spec().name}:{self._counter}"
+
+    @staticmethod
+    def statement_primitive_id(prefix: str, statement: str) -> str:
+        # Derives a stable primitive ID from the statement so re-statements update one ledger entry.
+        digest = hashlib.sha1(statement.strip().lower().encode("utf-8")).hexdigest()[:12]
+        return f"{prefix}:{digest}"
 
     async def _record(self, item: Any, call: ToolCall, metadata: dict) -> ToolResult:
         # Upserts the built primitive and returns success carrying parsed metadata.
@@ -222,12 +229,12 @@ class HypothesisTool(_CotEventToolBase):
         if basis_error:
             return ToolResult.error(call.tool_name, basis_error)
 
-        self._counter += 1
         from vidbyte.context.primitives.cot_events import HypothesisContextItem
 
+        statement = str(args["statement"]).strip()
         item = HypothesisContextItem(
-            primitive_id=self._next_primitive_id(),
-            statement=str(args["statement"]).strip(),
+            primitive_id=self.statement_primitive_id("hypothesis", statement),
+            statement=statement,
             basis=str(args["basis"]).strip(),
             status=status or HYPOTHESIS_STATUSES[0],
             basis_type=basis_type or _DEFAULT_BASIS_TYPE,
@@ -457,12 +464,12 @@ class AssumptionCheckTool(_CotEventToolBase):
         if impact_error:
             return ToolResult.error(call.tool_name, impact_error)
 
-        self._counter += 1
         from vidbyte.context.primitives.cot_events import AssumptionCheckContextItem
 
+        assumption = str(args["assumption"]).strip()
         item = AssumptionCheckContextItem(
-            primitive_id=self._next_primitive_id(),
-            assumption=str(args["assumption"]).strip(),
+            primitive_id=self.statement_primitive_id("assumption_check", assumption),
+            assumption=assumption,
             action=action or ASSUMPTION_ACTIONS[0],
             impact_if_wrong=impact or IMPACT_LEVELS[1],
             verification_step=CotEventParser.optional_text(args.get("verification_step")),
