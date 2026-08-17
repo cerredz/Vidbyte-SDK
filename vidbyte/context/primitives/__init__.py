@@ -12,6 +12,7 @@ Architecture:
     - records: Artifact/Response/ToolCall primitives for existing context records.
     - multi_agent: Request/team/ledger/report/limits/terminal orchestration primitives.
     - checkpoints: ReflexionContextItem and TrajectoryCheckpointContextItem for context algorithms.
+    - cot_events: Deep CoT monitoring event primitives (hypothesis, decision, assumption_check, uncertainty, backtrack).
     - framing/epistemics/decisions/execution/closure: General problem-solving challenges.
     - All concrete types support primitive_id and primitive_frozen for registry management.
 Relations:
@@ -23,6 +24,13 @@ from __future__ import annotations
 
 from vidbyte.context.primitives.base import ContextItem
 from vidbyte.context.primitives.checkpoints import ReflexionContextItem, TrajectoryCheckpointContextItem
+from vidbyte.context.primitives.cot_events import (
+    AssumptionCheckContextItem,
+    BacktrackContextItem,
+    DecisionContextItem,
+    HypothesisContextItem,
+    UncertaintyContextItem,
+)
 from vidbyte.context.primitives.closure import (
     CompletionGateContextItem,
     ProcessStallContextItem,
@@ -86,10 +94,13 @@ __all__ = [
     "AmbiguityContextItem",
     "ArtifactContextItem",
     "AssumptionChallengeContextItem",
+    "AssumptionCheckContextItem",
+    "BacktrackContextItem",
     "BoundaryContextItem",
     "CompletionGateContextItem",
     "ContextItem",
     "DecisionChallengeContextItem",
+    "DecisionContextItem",
     "DependencyContextItem",
     "DocumentContextItem",
     "EnvironmentContextItem",
@@ -98,6 +109,7 @@ __all__ = [
     "FeedbackGapContextItem",
     "FileContextItem",
     "GitDiffContextItem",
+    "HypothesisContextItem",
     "InterventionRiskContextItem",
     "InvariantContextItem",
     "MemoryContextItem",
@@ -125,4 +137,5 @@ __all__ = [
     "ToolCallContextItem",
     "TradeoffContextItem",
     "TrajectoryCheckpointContextItem",
+    "UncertaintyContextItem",
 ]
