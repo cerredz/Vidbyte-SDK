@@ -337,3 +337,76 @@ In-package tracer implementations: `generic.py`, `langsmith.py`, and the in-memo
 #### `vidbyte/workflows/`
 
 Typed state graphs with validate-before-commit stages, conditional branches, cycles, guards, retries, declared jumps, and execution records. A workflow is deterministic control flow with typed state, as opposed to a pipeline's string-in/string-out composition or an agent's model-driven loop. Reach for it when the sequence is known in advance and the requirement is that invalid state cannot advance.
+
+## Command Deck
+
+This section is the run-command reference for this repository's toolchain. It is deliberately **not** part of the Map's topology contract above — it exists so nobody burns tokens guessing or searching for an invocation. Each entry is the literal command, what it does, and its notable parameters. Run everything from the repository root; Python 3.11+ is required.
+
+### Repository gates
+
+- `python -m pip install -e ".[dev]"`
+  Installs the package editable with the dev extra (pytest, pytest-asyncio, build, twine). The prerequisite for every other command here.
+  Params: `-e` editable; `.[dev]` selects the extra; `--force-reinstall` after dependency pin changes.
+- `python scripts/run_ci.py`
+  The canonical gate — identical to what CI runs. Diagnose with `--stage`, but a full pass is required before any PR.
+  Params: `--stage all|source|package` (default `all`); stages other than `all` are diagnostic-only.
+- `python scripts/run_ci.py --stage source`
+  Runs the source stage: the pytest suite over the package. Diagnostic loop for test failures.
+  Params: `--stage` as shown.
+- `python scripts/run_ci.py --stage package`
+  Runs the package stage: build, twine check, venv, pip, and installed SDK checks. Diagnostic loop for packaging failures.
+  Params: `--dist-dir <path>` overrides where artifacts land.
+
+### Tests
+
+- `python -m pytest tests/ -q`
+  Runs the full suite quietly — the same tests the `source` stage runs, without the rest of the pipeline.
+  Params: `-q` quiet; `-x` stop on first failure; `--tb=short` shorter tracebacks.
+- `python -m pytest tests/test_agent_base.py -q`
+  Runs a single subsystem module. One module per subsystem is the suite's organization.
+  Params: any file path; combine several to run a slice.
+- `python -m pytest tests/ -k "compaction"`
+  Filters tests by keyword expression against test names.
+  Params: `-k <expr>` supports `and`/`or`/`not`, e.g. `-k "handoff and not slow"`.
+- `python -m pytest tests/multi_agent/ -q`
+  Runs the multi-agent package, which needs multi-participant fixtures and its own timing assumptions.
+  Params: none beyond the directory path.
+
+### Static policy
+
+- `semgrep --test --config .semgrep/typed-mapping-boundary-policy.yml .semgrep/typed-mapping-boundary-policy.py`
+  Verifies the typed-mapping policy rule against its fixtures — run after editing the rule itself.
+  Params: exactly as CI invokes it (`static-policy.yml`).
+- `semgrep scan --error --config .semgrep/typed-mapping-boundary-policy.yml vidbyte`
+  Enforces the typed-mapping boundary policy across the package. Exits non-zero on any finding.
+  Params: `--error` findings fail the run; the final argument is the scan target.
+
+### Packaging
+
+- `python -m build`
+  Builds the sdist and wheel into `dist/`.
+  Params: `--sdist`/`--wheel` build one artifact type.
+- `python -m twine check dist/*`
+  Validates the built distributions' metadata before publishing.
+  Params: the dist file globs to check.
+- `python -m pip install --force-reinstall dist/*.whl`
+  Clean-install smoke check of the built wheel (the package stage automates this; run it manually when iterating).
+  Params: `--force-reinstall` over the editable install; `--target <dir>` for a fully isolated check.
+- `python -m pip show vidbyte-sdk`
+  Confirms which version and location of the package the current interpreter sees — first check when imports behave surprisingly.
+  Params: none.
+
+### SDK CLI
+
+- `vidbyte-sdk skills list`
+  Lists the packaged skills shipped with the SDK.
+  Params: none; requires the package installed.
+- `vidbyte-sdk skills show <key>`
+  Prints a packaged skill's `SKILL.md`. Keys accept unambiguous short names.
+  Params: `<key>` full key or short name, e.g. `decompose-fanout`.
+- `vidbyte-sdk skills install <key> --dest .claude/skills`
+  Materializes a packaged skill into a destination skill directory.
+  Params: `--dest <dir>` required destination; `--force` overwrite an existing non-empty skill folder.
+- `python -m vidbyte.cli skills list`
+  Module form of the same CLI — works without the console script on PATH.
+  Params: same subcommands and flags as `vidbyte-sdk`.
