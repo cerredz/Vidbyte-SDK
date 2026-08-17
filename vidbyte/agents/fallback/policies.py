@@ -25,7 +25,13 @@ from collections.abc import Sequence
 
 
 class LatencyPolicy:
-    """Per-hop call deadline; exceeding hop i's timeout advances the chain past model i."""
+    """Per-hop call deadline; exceeding hop i's timeout advances the chain past model i.
+
+    timeout_seconds_by_hop must have exactly one entry per transition the chain can
+    take -- len(models) as declared on AgentFallbackSettings, not len(models) + 1.
+    Index i is the deadline enforced while chain index i is in flight. The last
+    model in the chain never gets one: there's nowhere left to fall back to.
+    """
 
     def __init__(self, timeout_seconds_by_hop: Sequence[float]) -> None:
         # Stores one deadline per transition, indexed the same as the resolved model chain.
@@ -45,7 +51,13 @@ class LatencyPolicy:
 
 
 class CostBudgetPolicy:
-    """Per-hop cumulative-cost ceiling; crossing hop i's ceiling advances the chain past model i."""
+    """Per-hop cumulative-cost ceiling; crossing hop i's ceiling advances the chain past model i.
+
+    cost_ceiling_usd_by_hop must have exactly one entry per transition the chain can
+    take -- len(models) as declared on AgentFallbackSettings, not len(models) + 1.
+    Index i is the ceiling in effect while chain index i is in flight. The last
+    model in the chain never gets one: there's nowhere cheaper left to go.
+    """
 
     def __init__(self, cost_ceiling_usd_by_hop: Sequence[float]) -> None:
         # Stores one USD ceiling per transition, indexed the same as the resolved model chain.
