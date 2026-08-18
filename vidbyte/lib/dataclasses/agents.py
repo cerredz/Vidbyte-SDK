@@ -53,6 +53,7 @@ class AgentStopReason(str, Enum):
     MAX_CONSECUTIVE_FAILURES = "max_consecutive_failures"
     MAX_ERROR_CALLS = "max_error_calls"
     SLIDING_WINDOW_MAX_CALLS = "sliding_window_max_calls"
+    TIMEOUT = "timeout"
     MIDDLEWARE_ABORT = "middleware_abort"
     TOOL_SETTINGS_DENIED = "tool_settings_denied"
     TOOL_LOOP_LIMIT = "tool_loop_limit"
@@ -67,6 +68,7 @@ class AgentRuntimeConfig:
     max_iterations: int | None = None
     max_tokens: int | None = None
     max_tool_calls: int | None = None
+    timeout_seconds: float | None = None
     compaction_trigger_tokens: int | None = None
     compaction_target_tokens: int | None = None
     tool_settings: "ToolSettings | None" = None
@@ -83,6 +85,8 @@ class AgentRuntimeConfig:
             value = getattr(self, field_name)
             if value is not None and value <= 0:
                 raise ValueError(f"{field_name} must be greater than zero when provided.")
+        if self.timeout_seconds is not None and self.timeout_seconds <= 0:
+            raise ValueError("timeout_seconds must be greater than zero when provided.")
 
 
 @dataclass(frozen=True, slots=True)
