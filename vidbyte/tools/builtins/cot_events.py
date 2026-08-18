@@ -85,6 +85,17 @@ class CotEventParser:
         return max(_MIN_CONFIDENCE, min(_MAX_CONFIDENCE, number))
 
     @staticmethod
+    def parse_int(value: Any, minimum: int = 0) -> int | None:
+        # Coerces a number or numeric string to an int at or above minimum, or None on failure.
+        if value is None or (isinstance(value, str) and value.strip() == ""):
+            return None
+        try:
+            number = int(float(str(value).strip()))
+        except (ValueError, TypeError):
+            return None
+        return max(minimum, number)
+
+    @staticmethod
     def parse_json_objects(value: Any, field_name: str, max_items: int) -> tuple[list[dict] | None, str | None]:
         # Parses a JSON string (or list) into at most max_items dicts, returning (parsed, error).
         if value is None:

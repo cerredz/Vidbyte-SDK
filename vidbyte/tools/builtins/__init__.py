@@ -14,6 +14,8 @@ Architecture:
     - Context primitive editing tools from builtins.context_primitives.
     - Context algorithm tools from builtins.trajectory_checkpoint and builtins.reflexion.
     - Deep CoT event tools from builtins.cot_events.
+    - Batch-3 deep-family monitoring tools from builtins.cot_context, cot_foraging,
+      cot_verification, cot_delegation, and cot_meta.
     - Sequential continuation tool from builtins.run_prompts_sequentially.
 Relations:
     Related to vidbyte.tools.client and vidbyte.tools.registry.
@@ -36,6 +38,40 @@ from vidbyte.tools.builtins.cot_events import (
     PredictionTool,
     UncertaintyTool,
     WhyTool,
+)
+from vidbyte.tools.builtins.cot_context import (
+    AttentionCheckTool,
+    ContextLoadTool,
+    ForgetDecisionTool,
+    RecallTestTool,
+)
+from vidbyte.tools.builtins.cot_delegation import (
+    BlockedOnTool,
+    DelegationBriefTool,
+    DelegationReceiptTool,
+    HandoffCompletenessTool,
+    HandoffWhyTool,
+    SubagentFailuresTool,
+)
+from vidbyte.tools.builtins.cot_foraging import (
+    EnoughTool,
+    SearchPlanTool,
+    SearchWhyTool,
+    SearchYieldTool,
+)
+from vidbyte.tools.builtins.cot_meta import (
+    CalibrationSelfReportTool,
+    DescriptionDriftTool,
+    RecordDisputeTool,
+    RitualCheckTool,
+    SignalHighlightTool,
+    TelemetryGapTool,
+)
+from vidbyte.tools.builtins.cot_verification import (
+    IndependentlyDerivedTool,
+    ReadBackTool,
+    SelfTestTool,
+    VerifyTool,
 )
 from vidbyte.tools.builtins.output_schema import (
     AppendOutputTool,
@@ -139,21 +175,33 @@ __all__ = [
     "AssumptionCheckTool",
     "AssumptionsTool",
     "AttachMcpServerTool",
+    "AttentionCheckTool",
     "BacktrackTool",
     "BatchForkTool",
+    "BlockedOnTool",
     "BraveSearchTool",
     "BrowserbaseFetchTool",
     "BrowserbaseSearchTool",
+    "CalibrationSelfReportTool",
     "CodeExecutionTool",
+    "ContextLoadTool",
     "CotEventParser",
     "CounterfactualTool",
     "DecisionTool",
+    "DelegationBriefTool",
+    "DelegationReceiptTool",
+    "DescriptionDriftTool",
     "DirectHttpFetchTool",
+    "EnoughTool",
     "ExaSearchTool",
     "FailuresTool",
     "FirecrawlFetchTool",
+    "ForgetDecisionTool",
     "GoalCheckTool",
+    "HandoffCompletenessTool",
+    "HandoffWhyTool",
     "HypothesisTool",
+    "IndependentlyDerivedTool",
     "LinkupFetchTool",
     "LinkupSearchTool",
     "OpenAlexSearchTool",
@@ -161,10 +209,22 @@ __all__ = [
     "ParallelSearchTool",
     "PredictionTool",
     "PricedOperationTool",
+    "ReadBackTool",
+    "RecordDisputeTool",
+    "RecallTestTool",
+    "RitualCheckTool",
+    "SearchPlanTool",
+    "SearchWhyTool",
+    "SearchYieldTool",
+    "SelfTestTool",
     "SemanticScholarSearchTool",
+    "SignalHighlightTool",
+    "SubagentFailuresTool",
     "TavilyExtractTool",
     "TavilySearchTool",
+    "TelemetryGapTool",
     "UncertaintyTool",
+    "VerifyTool",
     "WhyTool",
     "CreateHandoffTool",
     "CheckpointTool",

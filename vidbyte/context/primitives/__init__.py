@@ -13,6 +13,7 @@ Architecture:
     - multi_agent: Request/team/ledger/report/limits/terminal orchestration primitives.
     - checkpoints: ReflexionContextItem and TrajectoryCheckpointContextItem for context algorithms.
     - cot_events: Deep CoT monitoring event primitives (hypothesis, decision, assumption_check, uncertainty, backtrack).
+    - cot_context/cot_foraging/cot_verification/cot_delegation/cot_meta: batch-3 deep-family monitoring primitives.
     - framing/epistemics/decisions/execution/closure: General problem-solving challenges.
     - All concrete types support primitive_id and primitive_frozen for registry management.
 Relations:
@@ -41,6 +42,40 @@ from vidbyte.context.primitives.closure import (
     CompletionGateContextItem,
     ProcessStallContextItem,
     RiskEscalationContextItem,
+)
+from vidbyte.context.primitives.cot_context import (
+    AttentionCheckContextItem,
+    ContextLoadContextItem,
+    ForgetDecisionContextItem,
+    RecallTestContextItem,
+)
+from vidbyte.context.primitives.cot_delegation import (
+    BlockedOnContextItem,
+    DelegationBriefContextItem,
+    DelegationReceiptContextItem,
+    HandoffCompletenessContextItem,
+    HandoffWhyContextItem,
+    SubagentFailuresContextItem,
+)
+from vidbyte.context.primitives.cot_foraging import (
+    EnoughContextItem,
+    SearchPlanContextItem,
+    SearchWhyContextItem,
+    SearchYieldContextItem,
+)
+from vidbyte.context.primitives.cot_meta import (
+    CalibrationSelfReportContextItem,
+    DescriptionDriftContextItem,
+    RecordDisputeContextItem,
+    RitualCheckContextItem,
+    SignalHighlightContextItem,
+    TelemetryGapContextItem,
+)
+from vidbyte.context.primitives.cot_verification import (
+    IndependentlyDerivedContextItem,
+    ReadBackContextItem,
+    SelfTestContextItem,
+    VerifyContextItem,
 )
 from vidbyte.context.primitives.decisions import (
     AlternativeChallengeContextItem,
@@ -102,24 +137,36 @@ __all__ = [
     "AssumptionChallengeContextItem",
     "AssumptionCheckContextItem",
     "AssumptionsSnapshotContextItem",
+    "AttentionCheckContextItem",
     "BacktrackContextItem",
+    "BlockedOnContextItem",
     "BoundaryContextItem",
+    "CalibrationSelfReportContextItem",
     "CompletionGateContextItem",
     "ContextItem",
+    "ContextLoadContextItem",
     "CounterfactualContextItem",
     "DecisionChallengeContextItem",
     "DecisionContextItem",
+    "DelegationBriefContextItem",
+    "DelegationReceiptContextItem",
     "DependencyContextItem",
+    "DescriptionDriftContextItem",
     "DocumentContextItem",
+    "EnoughContextItem",
     "EnvironmentContextItem",
     "ErrorCorrectionContextItem",
     "EvidenceChallengeContextItem",
     "FailureScanContextItem",
     "FeedbackGapContextItem",
     "FileContextItem",
+    "ForgetDecisionContextItem",
     "GitDiffContextItem",
     "GoalCheckContextItem",
+    "HandoffCompletenessContextItem",
+    "HandoffWhyContextItem",
     "HypothesisContextItem",
+    "IndependentlyDerivedContextItem",
     "InterventionRiskContextItem",
     "InvariantContextItem",
     "MemoryContextItem",
@@ -140,14 +187,26 @@ __all__ = [
     "ProblemSpaceSearchContextItem",
     "ProcessStallContextItem",
     "ProgressContextItem",
+    "ReadBackContextItem",
+    "RecordDisputeContextItem",
+    "RecallTestContextItem",
     "ReflexionContextItem",
     "ResponseContextItem",
     "RiskEscalationContextItem",
+    "RitualCheckContextItem",
+    "SearchPlanContextItem",
+    "SearchWhyContextItem",
+    "SearchYieldContextItem",
+    "SelfTestContextItem",
+    "SignalHighlightContextItem",
+    "SubagentFailuresContextItem",
     "TaskContextItem",
+    "TelemetryGapContextItem",
     "TextContextItem",
     "ToolCallContextItem",
     "TradeoffContextItem",
     "TrajectoryCheckpointContextItem",
     "UncertaintyContextItem",
+    "VerifyContextItem",
     "WhyContextItem",
 ]

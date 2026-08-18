@@ -267,9 +267,10 @@ N/A - Additive Python exports only.
 | CREATE | `vidbyte/context/primitives/cot_delegation.py` | Family D primitives |
 | CREATE | `vidbyte/context/primitives/cot_meta.py` | Family E primitives |
 | MODIFY | `vidbyte/tools/builtins/__init__.py` | Import + `__all__` for 24 tools |
+| MODIFY | `vidbyte/tools/builtins/cot_events.py` | Add shared `CotEventParser.parse_int` |
 | MODIFY | `vidbyte/context/primitives/__init__.py` | Import + `__all__` for 24 primitives |
 
-12 files: 10 created, 2 modified, 0 deleted. Stacked on `feat/deep-cot-tools-2`.
+13 files: 10 created, 3 modified, 0 deleted. Stacked on `feat/deep-cot-tools-2`.
 
 ---
 
