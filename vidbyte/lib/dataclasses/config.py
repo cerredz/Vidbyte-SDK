@@ -306,6 +306,7 @@ class AgentSettings(_ConfigValidation):
     provider: str | None = None
     model_name: str | None = None
     temperature: float | None = None
+    timeout_seconds: float | None = None
     runtime: AgentRuntimeType | str = AgentRuntimeType.LINEAR
     loop: "AgentLoopSettings | Mapping[str, Any]" = field(default_factory=_default_loop)
     algorithm: str | None = None
@@ -325,7 +326,7 @@ class AgentSettings(_ConfigValidation):
     _REQUIRED_FIELDS: ClassVar[tuple[str, ...]] = ("name", "system_prompt")
     _ALLOWED_FIELDS: ClassVar[frozenset[str]] = frozenset(
         {
-            "type", "name", "system_prompt", "provider", "model_name", "temperature", "runtime", "loop", "algorithm", "tools", "middleware",
+            "type", "name", "system_prompt", "provider", "model_name", "temperature", "timeout_seconds", "runtime", "loop", "algorithm", "tools", "middleware",
             "context_items", "description", "capabilities", "metadata", "agent_metadata", "output_schema", "trace_option", "max_tool_rounds",
         }
     )
@@ -338,6 +339,7 @@ class AgentSettings(_ConfigValidation):
         self.provider = self._validated_provider(self.provider)
         self.model_name = self._validated_model(self.model_name, self.provider)
         self.temperature = self._validated_temperature(self.temperature, self.provider)
+        self.timeout_seconds = self._validated_timeout_seconds(self.timeout_seconds)
         self.runtime = self._runtime(self.runtime)
         self.loop = self._loop(self.loop)
         self.algorithm = self._validated_algorithm(self.algorithm)
@@ -377,6 +379,7 @@ class AgentSettings(_ConfigValidation):
             provider=payload.get("provider"),
             model_name=payload.get("model_name"),
             temperature=payload.get("temperature"),
+            timeout_seconds=payload.get("timeout_seconds"),
             runtime=payload.get("runtime", AgentRuntimeType.LINEAR),
             loop=payload.get("loop", {}),
             algorithm=payload.get("algorithm"),
@@ -400,6 +403,7 @@ class AgentSettings(_ConfigValidation):
             "provider": self.provider,
             "model_name": self.model_name,
             "temperature": self.temperature,
+            "timeout_seconds": self.timeout_seconds,
             "runtime": self.runtime,
             "agent_loop_settings": self.loop,
             "algorithm": self.algorithm,
@@ -425,6 +429,7 @@ class AgentSettings(_ConfigValidation):
             "provider": "<provider>",
             "model_name": "<model-name>",
             "temperature": "<float|null>",
+            "timeout_seconds": "<seconds|null>",
             "runtime": AgentRuntimeType.LINEAR.value,
             "loop": {"max_iterations": "<int>", "max_tokens": "<int>"},
             "algorithm": "<algorithm-name|null>",
@@ -520,6 +525,20 @@ class AgentSettings(_ConfigValidation):
         if not _MIN_TEMPERATURE <= number <= ceiling:
             scope = f" for provider {provider!r}" if ceiling != _MAX_TEMPERATURE else ""
             raise cls._error(f"'agent.temperature' must be between {_MIN_TEMPERATURE} and {ceiling}{scope}; got {number}.", "agent.temperature", actual_value=number, minimum=_MIN_TEMPERATURE, maximum=ceiling)
+        return number
+
+    @classmethod
+    def _validated_timeout_seconds(cls, value: object) -> float | None:
+        # Bounds the per-model-call HTTP timeout to a positive finite number, mirroring temperature's checks.
+        if value is None:
+            return None
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise cls._error("'agent.timeout_seconds' must be a number.", "agent.timeout_seconds", actual_type=type(value).__name__)
+        number = float(value)
+        if math.isnan(number) or math.isinf(number):
+            raise cls._error(f"'agent.timeout_seconds' must be a finite number; got {value}.", "agent.timeout_seconds", actual_value=str(value))
+        if number <= 0:
+            raise cls._error(f"'agent.timeout_seconds' must be greater than zero; got {number}.", "agent.timeout_seconds", actual_value=number)
         return number
 
     @classmethod
