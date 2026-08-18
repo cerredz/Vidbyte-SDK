@@ -13,6 +13,7 @@ Architecture:
     - Memory provider tools from builtins.memory.
     - Context primitive editing tools from builtins.context_primitives.
     - Context algorithm tools from builtins.trajectory_checkpoint and builtins.reflexion.
+    - Reasoning strategy tools from builtins.reasoning.
     - Sequential continuation tool from builtins.run_prompts_sequentially.
     - Cooperative pause tool from builtins.pause.
 Relations:
@@ -29,6 +30,18 @@ from vidbyte.tools.builtins.output_schema import (
     ExtendOutputSchemaTool,
     OutputSchemaBuilder,
     OutputSchemaField,
+)
+from vidbyte.tools.builtins.reasoning import (
+    AbduceTool,
+    AnalogyTool,
+    BayesianUpdateTool,
+    CausalChainTool,
+    DeduceTool,
+    DifferentialDiagnosisTool,
+    FalsifyTool,
+    FermiEstimateTool,
+    InduceTool,
+    SteelmanTool,
 )
 from vidbyte.tools.builtins.reflexion import ReflexionTool
 from vidbyte.tools.builtins.trajectory_checkpoint import TrajectoryCheckpointTool
@@ -122,16 +135,25 @@ from vidbyte.tools.builtins.memory import (
 )
 
 __all__ = [
+    "AbduceTool",
+    "AnalogyTool",
     "AppendOutputTool",
     "AttachMcpServerTool",
     "BatchForkTool",
+    "BayesianUpdateTool",
     "BraveSearchTool",
     "BrowserbaseFetchTool",
     "BrowserbaseSearchTool",
+    "CausalChainTool",
     "CodeExecutionTool",
+    "DeduceTool",
+    "DifferentialDiagnosisTool",
     "DirectHttpFetchTool",
     "ExaSearchTool",
+    "FalsifyTool",
+    "FermiEstimateTool",
     "FirecrawlFetchTool",
+    "InduceTool",
     "LinkupFetchTool",
     "LinkupSearchTool",
     "OpenAlexSearchTool",
@@ -178,6 +200,7 @@ __all__ = [
     "SearchMcpServersTool",
     "SemanticSearchTool",
     "SessionTool",
+    "SteelmanTool",
     "TrajectoryCheckpointTool",
     # Memory providers
     "CogneeAddTool",

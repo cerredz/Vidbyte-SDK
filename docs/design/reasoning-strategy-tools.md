@@ -696,7 +696,7 @@ in Section 6.3's parameter tables).
 | MODIFY | `skills/usage/available_tools.md` | new "Reasoning Strategy Tools" doc section |
 | MODIFY | `llms.txt` | append to the two builtin-catalog summary tables |
 
-16 files created, 5 files modified.
+13 files created, 5 files modified.
 
 ---
 
