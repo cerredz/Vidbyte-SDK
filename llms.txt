@@ -768,6 +768,7 @@ Public primitive groups are:
 |-------|--------------------|
 | Documents and records | `TextContextItem`, `FileContextItem`, `GitDiffContextItem`, `DocumentContextItem`, `EnvironmentContextItem`, `MemoryContextItem`, `ArtifactContextItem`, `ResponseContextItem`, `ToolCallContextItem` |
 | Tasks and reasoning | `TaskContextItem`, `ProgressContextItem`, `PlanContextItem`, `ReflexionContextItem`, `TrajectoryCheckpointContextItem`, `ProblemSpaceSearchContextItem`, `ErrorCorrectionContextItem` |
+| Reasoning strategies | `DeductionContextItem`, `InductionContextItem`, `AbductionContextItem`, `AnalogyContextItem`, `CausalChainContextItem`, `BayesianUpdateContextItem`, `DifferentialDiagnosisContextItem`, `FermiEstimateContextItem`, `SteelmanContextItem`, `FalsifyContextItem` |
 | Multi-agent | `MultiAgentRequestContextItem`, `MultiAgentTeamContextItem`, `MultiAgentLedgerContextItem`, `MultiAgentReportContextItem`, `MultiAgentLimitsContextItem`, `MultiAgentTerminalContextItem` |
 | Framing | `AmbiguityContextItem`, `BoundaryContextItem`, `ObjectiveConflictContextItem`, `ObjectiveGapContextItem`, `PerspectiveGapContextItem`, `ProblemFrameContextItem` |
 | Epistemics | `AssumptionChallengeContextItem`, `EvidenceChallengeContextItem`, `ModelChallengeContextItem` |
@@ -800,6 +801,7 @@ session, and memory/MCP/provider tools may require configured external services.
 | Direct utilities and search | `CalculatorTool` (`vidbyte.tools.builtins.calculator`), `CodeExecutionTool`, `DocumentRetrievalTool` (`vidbyte.tools.builtins.document_retrieval`), `GlobTool`, `GrepTool`, `SemanticSearchTool` |
 | Filesystem | `AppendTool`, `ChecksumTool`, `CopyTool`, `DeleteTool`, `DiffTool`, `ExistsTool`, `FindTool`, `ListDirTool`, `MakeDirTool`, `MoveTool`, `RenameTool`, `ReadBinaryTool`, `ReadLinesTool`, `ReadTextTool`, `ReplaceTextTool`, `StatTool`, `TouchTool`, `TreeTool`, `UnzipTool`, `WriteTextTool`, `ZipTool` (from `vidbyte.tools.filesystem`; configure their filesystem permissions and root) |
 | Context and reflection | `ContextCompactionTool`, `CreateContextPrimitiveTool`, `ContextEditTool`, `ContextListTool`, `ContextMoveTool`, `ContextReciteTool`, `ContextRemoveTool`, `ContextStatsTool`, `ContextUpsertTool`, `ReflexionTool`, `TrajectoryCheckpointTool` |
+| Reasoning strategies | `DeduceTool`, `InduceTool`, `AbduceTool`, `AnalogyTool`, `CausalChainTool`, `BayesianUpdateTool`, `DifferentialDiagnosisTool`, `FermiEstimateTool`, `SteelmanTool`, `FalsifyTool` |
 | Structured-output, editing, and control | `DeclareOutputSchemaTool`, `AppendOutputTool`, `ExtendOutputSchemaTool`, `PatchTool`, `ForkConversationTool`, `CreateHandoffTool`, `RunPromptsSequentiallyTool` |
 | MCP | `SearchMcpServersTool`, `AttachMcpServerTool` |
 | Durable sessions | `SessionTool`, `CheckpointTool`, `ForkTool`, `BatchForkTool`, `RewindTool`, `ResumeReplaceTool`, `ResumeAppendTool`, `ResumeOutputTool` |
