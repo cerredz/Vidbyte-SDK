@@ -85,6 +85,13 @@ class AgentRuntime:
         self.output_contract = output_contract or AgentLoopSettingsOutputContract(())
         self.usage_tracker = usage_tracker or UsageTracker()
         self.fallback = fallback
+        self._error_rate_tally: dict[int, tuple[int, int]] = {}
+        self._error_rate_active = bool(fallback) and any(callable(getattr(policy, "error_ratio_for", None)) for policy in fallback.policies)
+
+    def _record_error_rate_attempt(self, index: int, failed: bool) -> None:
+        # Counts one invoke attempt on the chain index, so the ratio is cumulative per model since the run reached it.
+        attempts, failures = self._error_rate_tally.get(index, (0, 0))
+        self._error_rate_tally[index] = (attempts + 1, failures + (1 if failed else 0))
 
     def _context_window_admission_middleware(self) -> tuple[AgentMiddleware, ...]:
         # Returns compatibility middleware for legacy tool-result admission presets.
@@ -284,6 +291,22 @@ class AgentRuntime:
                         run_state,
                         self.fallback.result_metadata(fallback_attempts, context_reset=cost_transition.context_reset),
                     )
+                error_rate_transition = self._error_rate_fallback_transition(
+                    index=fallback_index,
+                    handle=handle,
+                    provider=provider,
+                    messages=messages,
+                    attempts=fallback_attempts,
+                    parent_span=trace_context,
+                )
+                if error_rate_transition is not None:
+                    handle, provider = error_rate_transition.handle, error_rate_transition.provider
+                    tool_schemas, messages = error_rate_transition.tool_schemas, error_rate_transition.messages
+                    fallback_index = error_rate_transition.index
+                    self._publish_fallback_metadata(
+                        run_state,
+                        self.fallback.result_metadata(fallback_attempts, context_reset=error_rate_transition.context_reset),
+                    )
 
             decision = await self.middleware.before_iteration(
                 self._middleware_context(
@@ -358,6 +381,7 @@ class AgentRuntime:
                     trace_context=active_trace_context,
                     compaction_count=compaction_count,
                     timeout_seconds=self.fallback.deadline_for(fallback_index) if self.fallback is not None else None,
+                    fallback_index=fallback_index,
                 )
             except BaseException as exc:
                 self._end_semantic_span(iteration_span, error=exc)
@@ -684,7 +708,7 @@ class AgentRuntime:
                     model_response=raw_result,
                 )
 
-    async def _invoke_with_middleware(self, handle: RunnerHandle, message: str, call_options: Mapping[str, Any], *, context: BaseAgentContext, iteration_count: int, model_call_count: int, call_contexts: Sequence[ToolCallContext], tokens_used: int | None, started_at: float, metadata: Mapping[str, Any], run_state: dict[type, Any] | None = None, trace_context: SpanContext | None = None, compaction_count: int = 0, timeout_seconds: float | None = None) -> tuple[object | AgentResult, int, int]:
+    async def _invoke_with_middleware(self, handle: RunnerHandle, message: str, call_options: Mapping[str, Any], *, context: BaseAgentContext, iteration_count: int, model_call_count: int, call_contexts: Sequence[ToolCallContext], tokens_used: int | None, started_at: float, metadata: Mapping[str, Any], run_state: dict[type, Any] | None = None, trace_context: SpanContext | None = None, compaction_count: int = 0, timeout_seconds: float | None = None, fallback_index: int = 0) -> tuple[object | AgentResult, int, int]:
         """Invoke the runner, allowing middleware to retry model errors while tracking compaction events."""
         provider = handle.provider
         while True:
@@ -738,11 +762,15 @@ class AgentRuntime:
                     raw_result = await asyncio.wait_for(handle.invoke(message, **current_call_options), timeout=timeout_seconds)
                 else:
                     raw_result = await handle.invoke(message, **current_call_options)
+                if self._error_rate_active:
+                    self._record_error_rate_attempt(fallback_index, failed=False)
                 output_text = handle.extract_text(raw_result)
                 self._tracer.end_span(llm_span, output=output_text)
                 return raw_result, model_call_count, compaction_count
             except Exception as exc:
                 self._tracer.end_span(llm_span, error=exc)
+                if self._error_rate_active and self.fallback is not None and self.fallback.is_model_error(exc):
+                    self._record_error_rate_attempt(fallback_index, failed=True)
                 decision = await self.middleware.on_model_error(
                     self._middleware_context(
                         MiddlewareHook.ON_MODEL_ERROR,
@@ -801,6 +829,18 @@ class AgentRuntime:
         if next_index is None:
             return None
         record = self.fallback.policy_attempt_record(index, next_index, "cost_budget_exceeded")
+        attempts.append(record)
+        transition = self.fallback.transform(handle, provider, self.tools, messages, next_index)
+        self._record_fallback_span(record, transition.context_reset, parent_span)
+        return transition
+
+    def _error_rate_fallback_transition(self, *, index: int, handle: RunnerHandle, provider: str, messages: list[dict[str, Any]], attempts: list[dict[str, str]], parent_span: SpanContext | None) -> "FallbackTransform | None":
+        # Returns rebuilt state when an error-rate policy elects to skip the current model, or None to keep it.
+        counted_attempts, failures = self._error_rate_tally.get(index, (0, 0))
+        next_index = self.fallback.advance_after_error_rate(index, attempts=counted_attempts, failures=failures)
+        if next_index is None:
+            return None
+        record = self.fallback.policy_attempt_record(index, next_index, "error_rate_exceeded")
         attempts.append(record)
         transition = self.fallback.transform(handle, provider, self.tools, messages, next_index)
         self._record_fallback_span(record, transition.context_reset, parent_span)
