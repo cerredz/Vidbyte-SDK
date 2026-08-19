@@ -121,7 +121,7 @@ class AgentFallback:
         # Returns (next_index, reason) when the policy vote elects to advance, or None to keep the current model.
         if index + 1 >= len(self.models):
             return None
-        votes = [(policy, policy.triggered(index, signals)) for policy in self.policies if hasattr(policy, "triggered")]
+        votes = [(policy, policy.triggered(index, signals)) for policy in self.policies if callable(getattr(policy, "triggered", None))]
         if not votes:
             return None
         if self.policies_mode is FallbackPolicyMode.ALL:

@@ -246,7 +246,7 @@ def advance_after_checkpoint(self, index: int, *, signals: FallbackSignals) -> t
     return None
 ```
 
-3. The duck-typed `hasattr(policy, "triggered")` filter is the same optional-capability idiom `_first_policy_value` already uses for `deadline_for`/`budget_for` — no `typing.Protocol`, matching the codebase's established line.
+3. The duck-typed `callable(getattr(policy, "triggered", None))` filter is the same optional-capability idiom `_first_policy_value` already uses for `deadline_for`/`budget_for` — no `typing.Protocol`, matching the codebase's established line. The callable check (not bare `hasattr`) matches that idiom exactly and keeps a non-callable `triggered` attribute from crashing mid-run.
 
 #### Edge Cases & Error Handling
 
