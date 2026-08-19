@@ -171,7 +171,7 @@ agent = Agent(
   `2/4 = 0.5`, not `0.2` — so read the ceiling as "how much retry tax am I
   willing to pay" rather than the provider's raw error rate. The ratio is not
   trusted until `min_attempts` (default 3) attempts have accumulated.
-- Both report through the same `AgentResult.metadata["fallback"]` shape and
+- All three report through the same `AgentResult.metadata["fallback"]` shape and
   `agent.fallback` span as an error-triggered switch; `error_type` carries a
   reason string (e.g. `"cost_budget_exceeded"`, `"error_rate_exceeded"`) instead
   of an exception name.
