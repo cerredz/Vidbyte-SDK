@@ -129,10 +129,10 @@ Rules worth knowing:
 ### Fallback Policies
 
 Beyond reacting to a raised error, a chain can advance proactively on a per-hop
-deadline or a per-hop cost ceiling:
+deadline, a per-hop cost ceiling, or a chain-wide stuck-tool-call detector:
 
 ```python
-from vidbyte.agents import LatencyPolicy, CostBudgetPolicy
+from vidbyte.agents import LatencyPolicy, CostBudgetPolicy, ToolCallLoopPolicy
 from vidbyte.agents.settings import AgentFallbackSettings
 
 agent = Agent(
@@ -145,6 +145,7 @@ agent = Agent(
         policies=[
             LatencyPolicy(timeout_seconds_by_hop=[8.0, 5.0]),
             CostBudgetPolicy(cost_ceiling_usd_by_hop=[0.10, 0.30]),
+            ToolCallLoopPolicy(window_size=8, repeat_threshold=3),
         ],
     ),
 )
@@ -163,12 +164,22 @@ agent = Agent(
 - **`CostBudgetPolicy`** checks cumulative run cost against hop *i*'s ceiling once
   per loop iteration, before the next model call is made. Unlike `LatencyPolicy`,
   nothing has to fail for this to trigger — it downgrades proactively.
-- Both report through the same `AgentResult.metadata["fallback"]` shape and
+- **`ToolCallLoopPolicy`** looks at the last `window_size` tool calls the run has
+  made and advances the chain once the same tool-name-plus-arguments fingerprint
+  recurs across `repeat_threshold` *distinct iterations* — same-iteration parallel
+  calls with identical arguments don't count on their own, only recurrence across
+  separate iterations does. It is **chain-wide, not per-hop** (like `fallback_on`,
+  not like `LatencyPolicy`/`CostBudgetPolicy`): a stuck tool-calling pattern isn't a
+  property of which model happens to be active, so it takes one `window_size` and
+  one `repeat_threshold`, not an array. `ignored_argument_keys` can exclude fields
+  that legitimately vary between otherwise-identical calls.
+- All three report through the same `AgentResult.metadata["fallback"]` shape and
   `agent.fallback` span as an error-triggered switch; `error_type` carries a
-  reason string (e.g. `"cost_budget_exceeded"`) instead of an exception name.
+  reason string (e.g. `"cost_budget_exceeded"`, `"tool_call_loop_detected"`)
+  instead of an exception name.
 - `fallback_on` itself stays chain-wide, not per-hop — every hop shares the same
   set of exception types that justify a switch.
-- Both policies are scoped to the tool-using (linear) runtime loop; non-text
+- All three policies are scoped to the tool-using (linear) runtime loop; non-text
   runners (image, audio, video, embedding) don't check them.
 
 ## Durable Sessions
@@ -223,7 +234,8 @@ machines; use `MultiAgent` when the manager must own progress and recovery.
 - `fallback/`: the fallback subsystem — `chain.py` (`AgentFallback`, the ordered model
   chain and the transforms that route a run to the next model), `settings.py`
   (`AgentFallbackSettings`, the validated developer-facing chain configuration), and
-  `policies.py` (`LatencyPolicy`, `CostBudgetPolicy`, the per-hop trigger conditions).
+  `policies.py` (`LatencyPolicy`, `CostBudgetPolicy`, the per-hop trigger conditions,
+  and `ToolCallLoopPolicy`, the chain-wide stuck-tool-call trigger).
 - `runtimes/`: linear, search, and actor-model runtime components.
 - `handoff.py`: structured handoff generation from a completed agent run.
 - `multi/`: ledger-driven manager/worker orchestration and transfer controls.

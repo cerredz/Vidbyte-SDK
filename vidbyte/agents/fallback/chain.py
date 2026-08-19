@@ -41,6 +41,7 @@ from vidbyte.lib.tools.formatter import ToolsFormatter
 if TYPE_CHECKING:
     from vidbyte.agents.fallback.settings import AgentFallbackSettings
     from vidbyte.lib.dataclasses.agents import AgentRunnerConfig
+    from vidbyte.lib.dataclasses.tools import ToolCallContext
     from vidbyte.tools.catalog import Tools
 
 
@@ -122,6 +123,22 @@ class AgentFallback:
         if ceiling is None or cost_usd < ceiling:
             return None
         return index + 1
+
+    def advance_after_loop_detected(self, index: int, call_contexts: Sequence["ToolCallContext"]) -> int | None:
+        # Returns the next chain index when a chain-wide policy detects a stuck tool-call pattern, or None.
+        if index + 1 >= len(self.models):
+            return None
+        if not self._is_loop_stuck(call_contexts):
+            return None
+        return index + 1
+
+    def _is_loop_stuck(self, call_contexts: Sequence["ToolCallContext"]) -> bool:
+        # Folds over self.policies, returning True when any policy exposing is_stuck() reports one.
+        for policy in self.policies:
+            is_stuck = getattr(policy, "is_stuck", None)
+            if callable(is_stuck) and is_stuck(call_contexts):
+                return True
+        return False
 
     def deadline_for(self, index: int) -> float | None:
         # Returns the first policy-declared deadline for this hop, or None if no policy sets one.

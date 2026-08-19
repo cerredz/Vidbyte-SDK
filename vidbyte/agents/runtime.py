@@ -285,6 +285,25 @@ class AgentRuntime:
                         self.fallback.result_metadata(fallback_attempts, context_reset=cost_transition.context_reset),
                     )
 
+            if self.fallback is not None and iteration_count > 0:
+                loop_transition = self._loop_fallback_transition(
+                    index=fallback_index,
+                    handle=handle,
+                    provider=provider,
+                    messages=messages,
+                    call_contexts=call_contexts,
+                    attempts=fallback_attempts,
+                    parent_span=trace_context,
+                )
+                if loop_transition is not None:
+                    handle, provider = loop_transition.handle, loop_transition.provider
+                    tool_schemas, messages = loop_transition.tool_schemas, loop_transition.messages
+                    fallback_index = loop_transition.index
+                    self._publish_fallback_metadata(
+                        run_state,
+                        self.fallback.result_metadata(fallback_attempts, context_reset=loop_transition.context_reset),
+                    )
+
             decision = await self.middleware.before_iteration(
                 self._middleware_context(
                     MiddlewareHook.BEFORE_ITERATION,
@@ -801,6 +820,17 @@ class AgentRuntime:
         if next_index is None:
             return None
         record = self.fallback.policy_attempt_record(index, next_index, "cost_budget_exceeded")
+        attempts.append(record)
+        transition = self.fallback.transform(handle, provider, self.tools, messages, next_index)
+        self._record_fallback_span(record, transition.context_reset, parent_span)
+        return transition
+
+    def _loop_fallback_transition(self, *, index: int, handle: RunnerHandle, provider: str, messages: list[dict[str, Any]], call_contexts: Sequence[ToolCallContext], attempts: list[dict[str, str]], parent_span: SpanContext | None) -> "FallbackTransform | None":
+        # Returns rebuilt state when a tool-call-loop policy detects a stuck pattern, or None to keep the current model.
+        next_index = self.fallback.advance_after_loop_detected(index, call_contexts)
+        if next_index is None:
+            return None
+        record = self.fallback.policy_attempt_record(index, next_index, "tool_call_loop_detected")
         attempts.append(record)
         transition = self.fallback.transform(handle, provider, self.tools, messages, next_index)
         self._record_fallback_span(record, transition.context_reset, parent_span)

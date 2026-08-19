@@ -16,11 +16,9 @@ Relations:
 
 from __future__ import annotations
 
-import hashlib
-import json
 from collections.abc import Iterable, Mapping, Sequence
 
-from vidbyte.lib.dataclasses.tools import ToolCallContext, ToolCallState, ToolResult
+from vidbyte.lib.dataclasses.tools import ToolCallContext, ToolCallState, ToolResult, fingerprint_tool_call
 from vidbyte.lib.errors import ConfigurationError
 
 _ON_DENY_CHOICES = ("continue", "abort")
@@ -81,12 +79,7 @@ class ToolSettings:
 
     def fingerprint(self, tool_name: str, arguments: Mapping[str, object] | None) -> str:
         # Builds a stable tool-name + args fingerprint used by identical-call budgets.
-        try:
-            serialized = json.dumps(dict(arguments or {}), sort_keys=True, default=str)
-        except Exception:
-            serialized = str(arguments)
-        digest = hashlib.sha256(serialized.encode()).hexdigest()[:16]
-        return f"{tool_name}:{digest}"
+        return fingerprint_tool_call(tool_name, dict(arguments or {}))
 
     def budget_stop(self, *, tool_name: str, arguments: Mapping[str, object] | None, call_contexts: Sequence[ToolCallContext], iteration_count: int) -> tuple[str, dict] | None:
         # Returns (reason, metadata) when a pre-exec hard budget is exceeded; pure and stateless.
