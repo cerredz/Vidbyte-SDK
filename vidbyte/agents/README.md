@@ -132,7 +132,7 @@ Beyond reacting to a raised error, a chain can advance proactively on a per-hop
 deadline or a per-hop cost ceiling:
 
 ```python
-from vidbyte.agents import LatencyPolicy, CostBudgetPolicy
+from vidbyte.agents import LatencyPolicy, CostBudgetPolicy, FallbackPolicyMode
 from vidbyte.agents.settings import AgentFallbackSettings
 
 agent = Agent(
@@ -166,6 +166,18 @@ agent = Agent(
 - Both report through the same `AgentResult.metadata["fallback"]` shape and
   `agent.fallback` span as an error-triggered switch; `error_type` carries a
   reason string (e.g. `"cost_budget_exceeded"`) instead of an exception name.
+- **`policies_mode` composes the checkpoint policies.** By default
+  (`FallbackPolicyMode.ANY`) the chain advances when *any* configured policy
+  fires. Set `policies_mode=FallbackPolicyMode.ALL` to require *every*
+  configured checkpoint policy to be satisfied — e.g. "fall back only when the
+  run is over budget *and* over the token ceiling". An ALL-triggered switch
+  records `error_type: "all_policies_satisfied"`. An invalid value raises
+  `ConfigurationError` at construction.
+- **The mode applies only to checkpoint policies.** `LatencyPolicy` and the
+  provider-error filter (`fallback_on`) always justify a fallback regardless of
+  the mode — a timeout or an outage either routes to the next model or fails
+  the run, so `ALL` never means "slow AND expensive" unless both conditions are
+  checkpoint policies.
 - `fallback_on` itself stays chain-wide, not per-hop — every hop shares the same
   set of exception types that justify a switch.
 - Both policies are scoped to the tool-using (linear) runtime loop; non-text
@@ -223,7 +235,7 @@ machines; use `MultiAgent` when the manager must own progress and recovery.
 - `fallback/`: the fallback subsystem — `chain.py` (`AgentFallback`, the ordered model
   chain and the transforms that route a run to the next model), `settings.py`
   (`AgentFallbackSettings`, the validated developer-facing chain configuration), and
-  `policies.py` (`LatencyPolicy`, `CostBudgetPolicy`, the per-hop trigger conditions).
+  `policies.py` (`LatencyPolicy`, `CostBudgetPolicy`, the per-hop trigger conditions, and the `FallbackSignals` vote contract).
 - `runtimes/`: linear, search, and actor-model runtime components.
 - `handoff.py`: structured handoff generation from a completed agent run.
 - `multi/`: ledger-driven manager/worker orchestration and transfer controls.
