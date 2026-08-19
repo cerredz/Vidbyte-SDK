@@ -16,7 +16,7 @@ Relations:
     Consumed by vidbyte.agents.runtime inside the direct model/tool loop.
 Similar Files:
     - vidbyte/agents/fallback/settings.py: Developer-facing settings that build this.
-    - vidbyte/agents/fallback/policies.py: Per-hop LatencyPolicy and CostBudgetPolicy.
+    - vidbyte/agents/fallback/policies.py: Per-hop LatencyPolicy, CostBudgetPolicy, and ErrorRatePolicy.
     - vidbyte/lib/dataclasses/agents.py: FallbackModel and FallbackTransform data contracts.
     - vidbyte/lib/dataclasses/runner.py: RunnerHandle.with_runner is the swap primitive.
 """
@@ -139,6 +139,22 @@ class AgentFallback:
             if callable(is_stuck) and is_stuck(call_contexts):
                 return True
         return False
+
+    def advance_after_error_rate(self, index: int, *, attempts: int, failures: int) -> int | None:
+        # Returns the next chain index when the current model's cumulative failure ratio has crossed its per-hop ceiling, or None.
+        if index + 1 >= len(self.models) or failures <= 0:
+            return None
+        for policy in self.policies:
+            ratio_getter = getattr(policy, "error_ratio_for", None)
+            if not callable(ratio_getter):
+                continue
+            ceiling = ratio_getter(index)
+            if ceiling is None:
+                continue
+            if attempts >= getattr(policy, "min_attempts", 0) and failures / attempts >= ceiling:
+                return index + 1
+            return None
+        return None
 
     def deadline_for(self, index: int) -> float | None:
         # Returns the first policy-declared deadline for this hop, or None if no policy sets one.
