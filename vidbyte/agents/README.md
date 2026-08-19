@@ -129,10 +129,10 @@ Rules worth knowing:
 ### Fallback Policies
 
 Beyond reacting to a raised error, a chain can advance proactively on a per-hop
-deadline or a per-hop cost ceiling:
+deadline, a per-hop cost ceiling, or a per-hop error-ratio ceiling:
 
 ```python
-from vidbyte.agents import LatencyPolicy, CostBudgetPolicy
+from vidbyte.agents import CostBudgetPolicy, ErrorRatePolicy, LatencyPolicy
 from vidbyte.agents.settings import AgentFallbackSettings
 
 agent = Agent(
@@ -145,6 +145,7 @@ agent = Agent(
         policies=[
             LatencyPolicy(timeout_seconds_by_hop=[8.0, 5.0]),
             CostBudgetPolicy(cost_ceiling_usd_by_hop=[0.10, 0.30]),
+            ErrorRatePolicy(max_error_ratio_by_hop=[0.2, 0.3]),
         ],
     ),
 )
@@ -163,12 +164,20 @@ agent = Agent(
 - **`CostBudgetPolicy`** checks cumulative run cost against hop *i*'s ceiling once
   per loop iteration, before the next model call is made. Unlike `LatencyPolicy`,
   nothing has to fail for this to trigger — it downgrades proactively.
+- **`ErrorRatePolicy`** checks the cumulative failure ratio of hop *i* (failed
+  calls ÷ attempts, counted at the model-call site, retries included) once per
+  loop iteration at the same checkpoint. A provider that recovers on retry still
+  counts its failures — one call in five failing with one retry each shows
+  `2/4 = 0.5`, not `0.2` — so read the ceiling as "how much retry tax am I
+  willing to pay" rather than the provider's raw error rate. The ratio is not
+  trusted until `min_attempts` (default 3) attempts have accumulated.
 - Both report through the same `AgentResult.metadata["fallback"]` shape and
   `agent.fallback` span as an error-triggered switch; `error_type` carries a
-  reason string (e.g. `"cost_budget_exceeded"`) instead of an exception name.
+  reason string (e.g. `"cost_budget_exceeded"`, `"error_rate_exceeded"`) instead
+  of an exception name.
 - `fallback_on` itself stays chain-wide, not per-hop — every hop shares the same
   set of exception types that justify a switch.
-- Both policies are scoped to the tool-using (linear) runtime loop; non-text
+- All three policies are scoped to the tool-using (linear) runtime loop; non-text
   runners (image, audio, video, embedding) don't check them.
 
 ## Durable Sessions
@@ -223,7 +232,7 @@ machines; use `MultiAgent` when the manager must own progress and recovery.
 - `fallback/`: the fallback subsystem — `chain.py` (`AgentFallback`, the ordered model
   chain and the transforms that route a run to the next model), `settings.py`
   (`AgentFallbackSettings`, the validated developer-facing chain configuration), and
-  `policies.py` (`LatencyPolicy`, `CostBudgetPolicy`, the per-hop trigger conditions).
+  `policies.py` (`LatencyPolicy`, `CostBudgetPolicy`, `ErrorRatePolicy`, the per-hop trigger conditions).
 - `runtimes/`: linear, search, and actor-model runtime components.
 - `handoff.py`: structured handoff generation from a completed agent run.
 - `multi/`: ledger-driven manager/worker orchestration and transfer controls.
