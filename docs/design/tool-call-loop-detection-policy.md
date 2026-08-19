@@ -169,6 +169,7 @@ Deliberately **does not** implement `hop_values()`, `deadline_for()`, or `budget
 - `len(call_contexts) < window_size`: Python's slice semantics handle this natively (`[-8:]` on a 3-item list returns all 3) — no explicit bounds check needed.
 - Same-iteration parallel duplicate calls: counted as one distinct-iteration entry per iteration, not one per call — see Functional Requirement 2's rationale.
 - `repeat_threshold > window_size`: rejected at construction (Functional Requirement 1), not left to silently never-fire at runtime.
+- Denied and internal-tool call contexts: deliberately **not** excluded from the window, unlike `ToolSettings`'s own `_is_excluded_context` filter. A call the agent keeps retrying after it was denied is itself evidence of a stuck pattern this policy exists to catch, not noise to filter — `ToolSettings`'s exclusion exists because its job (consumption budgets) is different and must stay immune to denial noise. The internal `isDone` tool cannot trigger this by construction: calling it ends the run immediately (`runtime.py`'s `call.tool_name == IS_DONE_TOOL_NAME` branch), so it can never appear more than once in `call_contexts`.
 
 ---
 

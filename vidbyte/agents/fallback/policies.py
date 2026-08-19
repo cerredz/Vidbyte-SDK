@@ -106,7 +106,7 @@ class ToolCallLoopPolicy:
         self._validate()
 
     def is_stuck(self, call_contexts: Sequence["ToolCallContext"]) -> bool:
-        """Report whether any fingerprint repeats across repeat_threshold distinct iterations in the window."""
+        # Reports whether any fingerprint repeats across repeat_threshold distinct iterations in the window.
         window = call_contexts[-self.window_size :]
         iterations_by_fingerprint = self._iterations_by_fingerprint(window)
         return any(len(iterations) >= self.repeat_threshold for iterations in iterations_by_fingerprint.values())
@@ -114,7 +114,10 @@ class ToolCallLoopPolicy:
     def _iterations_by_fingerprint(self, window: Sequence["ToolCallContext"]) -> dict[str, set[int | None]]:
         # Groups the window by tool-call fingerprint, counting distinct iteration_counts per group so
         # same-iteration parallel fan-out (a legitimate concurrent identical call) doesn't count as
-        # repetition on its own -- only recurrence across separate iterations does.
+        # repetition on its own -- only recurrence across separate iterations does. Denied and internal
+        # calls are deliberately not excluded here (unlike ToolSettings' own identical-call budget):
+        # a call the agent keeps retrying after it was denied is itself evidence of a stuck pattern,
+        # not noise to filter out.
         grouped: dict[str, set[int | None]] = {}
         for call in window:
             fingerprint = fingerprint_tool_call(call.tool_name, call.arguments, ignored_keys=self.ignored_argument_keys)
