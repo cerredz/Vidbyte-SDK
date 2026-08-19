@@ -5,15 +5,18 @@ Description:
 Purpose:
     Lets a developer declare a deadline or a cost ceiling for each transition in a
     fallback chain, so the runtime can advance to the next model proactively instead
-    of only reacting to a raised provider exception.
+    of only reacting to a raised provider exception. Policies that can vote at the
+    runtime's top-of-iteration checkpoint expose triggered(), which FallbackPolicyMode
+    composes into ANY/ALL trigger semantics.
 Architecture:
     - LatencyPolicy: One deadline per hop, enforced by wrapping the model call.
     - CostBudgetPolicy: One USD ceiling per hop, checked against live usage.
-    - Both expose hop_values() so AgentFallbackSettings can validate array length
-      and element values without knowing about either class by name.
+    - FallbackSignals: Frozen usage snapshot a checkpoint policy votes against.
+    - Both per-hop policies expose hop_values() so AgentFallbackSettings can validate
+      array length and element values without knowing about either class by name.
 Relations:
-    Consumed by vidbyte.agents.fallback.chain.AgentFallback (deadline_for/budget_for)
-    and validated by vidbyte.agents.fallback.settings.AgentFallbackSettings.
+    Consumed by vidbyte.agents.fallback.chain.AgentFallback (deadline_for,
+    advance_after_checkpoint) and validated by vidbyte.agents.fallback.settings.
 Similar Files:
     - vidbyte/agents/fallback/chain.py: Folds these policies into per-index lookups.
     - vidbyte/agents/fallback/settings.py: Validates hop_values() against chain length.
@@ -22,6 +25,15 @@ Similar Files:
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import dataclass
+
+
+@dataclass(frozen=True, slots=True)
+class FallbackSignals:
+    """Usage snapshot a checkpoint policy votes against; a None signal is unmeasurable, never a trigger."""
+
+    cost_usd: float | None = None
+    total_tokens: int | None = None
 
 
 class LatencyPolicy:
@@ -71,9 +83,15 @@ class CostBudgetPolicy:
         # Returns the ceiling in effect while chain index `index` is in flight, or None past the array.
         return self.cost_ceiling_usd_by_hop[index] if index < len(self.cost_ceiling_usd_by_hop) else None
 
+    reason = "cost_budget_exceeded"
+
+    def triggered(self, index: int, signals: FallbackSignals) -> bool:
+        # Votes True when run cost is known and at/above this hop's ceiling; unmeasurable votes False.
+        return signals.cost_usd is not None and signals.cost_usd >= self.budget_for(index)
+
     def __repr__(self) -> str:
         # Returns a compact developer-readable string of the configured ceilings.
         return f"CostBudgetPolicy({list(self.cost_ceiling_usd_by_hop)!r})"
 
 
-__all__ = ["CostBudgetPolicy", "LatencyPolicy"]
+__all__ = ["CostBudgetPolicy", "FallbackSignals", "LatencyPolicy"]
