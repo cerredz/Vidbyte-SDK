@@ -26,7 +26,7 @@ from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
 from vidbyte.lib.dataclasses.agents import FallbackModel
-from vidbyte.lib.enums import ModelProvider
+from vidbyte.lib.enums import FallbackPolicyMode, ModelProvider
 from vidbyte.lib.errors import ConfigurationError
 
 if TYPE_CHECKING:
@@ -36,13 +36,25 @@ if TYPE_CHECKING:
 class AgentFallbackSettings:
     """Validated configuration object for an agent's ordered model fallback chain."""
 
-    def __init__(self, *, models: Sequence[str | FallbackModel], fallback_on: tuple[type[BaseException], ...] | None = None, policies: Sequence[object] = (), enabled: bool = True) -> None:
-        # Stores the declared chain, error filter, and per-hop policies, then validates them immediately.
+    def __init__(self, *, models: Sequence[str | FallbackModel], fallback_on: tuple[type[BaseException], ...] | None = None, policies: Sequence[object] = (), policies_mode: FallbackPolicyMode | str = FallbackPolicyMode.ANY, enabled: bool = True) -> None:
+        # Stores the declared chain, error filter, per-hop policies, and vote mode, then validates them immediately.
         self.models = tuple(models)
         self.fallback_on = fallback_on
         self.policies = tuple(policies)
+        self.policies_mode = self._resolve_policies_mode(policies_mode)
         self.enabled = enabled
         self._validate()
+
+    @staticmethod
+    def _resolve_policies_mode(policies_mode: FallbackPolicyMode | str) -> FallbackPolicyMode:
+        # Coerces a mode string into the enum, raising ConfigurationError for any unknown value.
+        try:
+            return FallbackPolicyMode(policies_mode)
+        except ValueError:
+            raise ConfigurationError(
+                f"AgentFallbackSettings.policies_mode must be a FallbackPolicyMode, got {policies_mode!r}.",
+                details={"policies_mode": repr(policies_mode)},
+            ) from None
 
     def _validate(self) -> None:
         # Raises ConfigurationError for any constraint violation found on this settings object.
@@ -127,6 +139,7 @@ class AgentFallbackSettings:
             self.resolved_models(primary=primary),
             fallback_on=self.fallback_on if self.fallback_on is not None else DEFAULT_FALLBACK_ERRORS,
             policies=self.policies,
+            policies_mode=self.policies_mode,
         )
 
     def _resolve_entry(self, entry: str | FallbackModel, primary: FallbackModel, position: int) -> FallbackModel:
@@ -171,7 +184,8 @@ class AgentFallbackSettings:
         # Returns a compact developer-readable string showing declared entries without credentials.
         entries = ", ".join(entry.identity() if isinstance(entry, FallbackModel) else repr(entry) for entry in self.models)
         state = "" if self.enabled else ", enabled=False"
-        return f"AgentFallbackSettings([{entries}]{state})"
+        mode = "" if self.policies_mode is FallbackPolicyMode.ANY else f", policies_mode=FallbackPolicyMode.{self.policies_mode.name}"
+        return f"AgentFallbackSettings([{entries}]{state}{mode})"
 
 
 __all__ = ["AgentFallbackSettings"]
