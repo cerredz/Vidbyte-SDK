@@ -19,7 +19,7 @@ registry identity, and freezing remain manager responsibilities.
 - `decisions.py` - decision, alternative, and tradeoff challenges.
 - `execution.py` - invariant, dependency, intervention-risk, and feedback-gap challenges.
 - `closure.py` - process-stall, completion-gate, and risk-escalation challenges.
-- `reasoning_strategies.py` - deduction, induction, abduction, analogy, causal-chain, Bayesian-update, differential-diagnosis, Fermi-estimate, steelman, and falsification primitives.
+- `reasoning_strategies.py` - deduction, induction, abduction, analogy, causal-chain, Bayesian-update, differential-diagnosis, Fermi-estimate, steelman, falsification, counterexample, consistency, dilemma, quantifier, transitivity, identity, partition, modal, equivocation, necessity-sufficiency, composition-division, circularity, regress, burden-of-proof, testimony, absence-of-evidence, defeasible, statistical-syllogism, socratic, dialectic, paradox, strawman, prediction, thought-experiment, and instantiation primitives.
 - `__init__.py` - supported public primitive exports.
 
 Multi-agent primitives preserve explicit trust boundaries: user requests, ledger
