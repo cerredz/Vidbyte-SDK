@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING, Any
 
 from vidbyte.agents.mixins import McpAttachableMixin
 from vidbyte.agents.pricing import UsageRollup, UsageTracker
-from vidbyte.agents.settings import AgentLoopSettings
+from vidbyte.agents.settings import AgentKeys, AgentLoopSettings
 from vidbyte.agents.types import AgentCard, AgentInput, AgentMessage
 from vidbyte.context.manager import ContextManager
 from vidbyte.context.window import ContextWindow, ContextWindowAlgorithm
@@ -151,6 +151,14 @@ class BaseAgent(McpAttachableMixin):
             timeout_seconds=timeout_seconds,
             run_id=run_id,
         )
+        self.keys = AgentKeys(
+            agent_name=name,
+            provider=provider_str,
+            model_name=model_name,
+            runtime_type=self.runtime_type.value,
+            run_id=self.runner_config.run_id,
+            system_prompt=system_prompt,
+        )
         self.name = name
         self._fallback_spec = fallback
         from vidbyte.agents.fallback import AgentFallback
@@ -232,6 +240,9 @@ class BaseAgent(McpAttachableMixin):
         self._mcp_handles = []
         self._pending_mcp_configs = []
 
+        self.keys.record_toolset((self._tool_name(t) for t in self._agent_tool_items), self.mcp_tool_names())
+        self.keys.record_settings(self._settings_snapshot())
+
     @classmethod
     def from_run_id(cls, run_id: str, *, name: str, system_prompt: str, **kwargs: Any) -> BaseAgent:
         return cls(name=name, system_prompt=system_prompt, run_id=run_id, **kwargs)
@@ -285,6 +296,7 @@ class BaseAgent(McpAttachableMixin):
         except TypeError:
             pass
         self._bind_agent_tool_context(tool)
+        self.keys.record_toolset((self._tool_name(t) for t in self._agent_tool_items), self.mcp_tool_names())
         return self
 
     def as_tool(self) -> object:
@@ -444,6 +456,23 @@ class BaseAgent(McpAttachableMixin):
         cls._record_resume_tool_mismatch(child, state.tool_names)
         return child
 
+    def _settings_snapshot(self) -> dict[str, Any]:
+        # Assembles the full agent-settings payload for AgentKeys.record_settings, reusing existing export helpers.
+        return {
+            "agent_name": self.name,
+            "provider": self.runner_config.provider,
+            "model_name": self.runner_config.model_name,
+            "temperature": self.runner_config.temperature,
+            "runtime_type": self.runtime_type.value,
+            "runtime_config": self._export_runtime_config(),
+            "algorithm": self.algorithm.name,
+            "capabilities": list(self.capabilities),
+            "description": self.description,
+            "metadata": dict(self.metadata),
+            "loop_settings": self._export_loop_settings(),
+            "output_schema": self._export_output_schema(),
+        }
+
     def _export_runtime_config(self) -> dict[str, Any]:
         # Capture runtime budgets plus actor-runtime settings when present.
         config: dict[str, Any] = {
@@ -579,6 +608,7 @@ class BaseAgent(McpAttachableMixin):
         **options: Any,
     ) -> AgentMessage:
         await self._ensure_mcp_connected()
+        self.keys.record_settings(self._settings_snapshot())
         trace_ctx = None
         try:
             trace_metadata = dict(options.pop("trace_metadata", {}) or {})
@@ -657,6 +687,8 @@ class BaseAgent(McpAttachableMixin):
         self.history.append(reply)
         self.last_prompt = prompt
         self.last_reply = reply
+        from vidbyte.sessions.serialization import SessionSerializer
+        self.keys.record_response(SessionSerializer().message_to_dict(reply))
         if self._trace_option is not None and self._trace_option.enabled:
             trace_artifact = metadata.get("trace")
             self.last_trace = dict(trace_artifact) if isinstance(trace_artifact, Mapping) else None
@@ -928,11 +960,11 @@ class BaseAgent(McpAttachableMixin):
 
     def _record_tool_contexts(self, result: AgentResult) -> None:
         contexts = result.metadata.get("tool_calls", ())
-        self._tool_call_contexts.extend(
-            context
-            for context in tuple(contexts)
-            if isinstance(context, ToolCallContext)
-        )
+        new_contexts = tuple(context for context in tuple(contexts) if isinstance(context, ToolCallContext))
+        self._tool_call_contexts.extend(new_contexts)
+        if new_contexts:
+            latest = new_contexts[-1]
+            self.keys.record_tool_call(latest.tool_name, latest.arguments, latest.result.output if latest.result else "")
 
     def _runtime(self) -> Any:
         from vidbyte.lib.registries.runtimes import RuntimeRegistry
