@@ -24,7 +24,6 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
-import hashlib
 import json
 import time
 from collections.abc import Mapping, Sequence
@@ -33,6 +32,7 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, ValidationError
 
+from vidbyte.agents.hashing import hex_digest
 from vidbyte.context.algorithms.prosecutor_defender_judge import DebateStageSettings, ProsecutorDefenderJudgeAlgorithm, ProsecutorDefenderJudgeFailurePolicy
 from vidbyte.context.templates import NullRecorder
 from vidbyte.lib.agents.modality_detector import ModalityDetector
@@ -396,7 +396,7 @@ class ProsecutorDefenderJudgeRuntimeAlgorithm:
         # to; the candidate text is never revised, replaced, or re-generated after
         # this point.
         candidate = producer.output
-        candidate_sha256 = hashlib.sha256(candidate.encode("utf-8")).hexdigest()
+        candidate_sha256 = hex_digest(candidate)
         self.runtime.recorder.append("prosecutor_defender_judge_candidate", candidate_sha256=candidate_sha256, candidate_chars=len(candidate))
 
         # Delegate the three strictly sequential review stages to run(). arun stays
@@ -488,7 +488,7 @@ class ProsecutorDefenderJudgeRuntimeAlgorithm:
         # Runs one isolated role under its timeout and closes its structural span.
         role = execution.projection.role
         prompt = self._render_stage_prompt(role, dump_payload(payload))
-        span = self.runtime._start_semantic_span(f"algorithm.prosecutor_defender_judge.{role}", parent=trace_context, stage=role, provider=execution.provider, model=execution.model, artifact_names=tuple(item.name for item in execution.projection.artifacts), tool_names=execution.projection.tools.names(), candidate_sha256=hashlib.sha256(str(payload.get("candidate", "")).encode("utf-8")).hexdigest(), candidate_chars=len(str(payload.get("candidate", ""))))
+        span = self.runtime._start_semantic_span(f"algorithm.prosecutor_defender_judge.{role}", parent=trace_context, stage=role, provider=execution.provider, model=execution.model, artifact_names=tuple(item.name for item in execution.projection.artifacts), tool_names=execution.projection.tools.names(), candidate_sha256=hex_digest(str(payload.get("candidate", ""))), candidate_chars=len(str(payload.get("candidate", ""))))
         started = time.perf_counter()
         try:
             async with asyncio.timeout(execution.projection.settings.timeout_seconds):
