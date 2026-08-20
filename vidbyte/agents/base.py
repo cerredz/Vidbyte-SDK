@@ -458,6 +458,7 @@ class BaseAgent(McpAttachableMixin):
 
     def _settings_snapshot(self) -> dict[str, Any]:
         # Assembles the full agent-settings payload for AgentKeys.record_settings, reusing existing export helpers.
+        loop_settings = self.agent_loop_settings
         return {
             "agent_name": self.name,
             "provider": self.runner_config.provider,
@@ -471,6 +472,11 @@ class BaseAgent(McpAttachableMixin):
             "metadata": dict(self.metadata),
             "loop_settings": self._export_loop_settings(),
             "output_schema": self._export_output_schema(),
+            "tool_settings": repr(loop_settings.tool_settings) if loop_settings.tool_settings is not None else None,
+            "tool_error_policy": repr(loop_settings.tool_error_policy) if loop_settings.tool_error_policy is not None else None,
+            "output_contracts": sorted(contract.name for contract in loop_settings.output_contracts),
+            "max_contract_rejections": loop_settings.max_contract_rejections,
+            "permission_policy": {"allowed": sorted(permission.value for permission in self.permission_policy.allowed)},
         }
 
     def _export_runtime_config(self) -> dict[str, Any]:
@@ -608,6 +614,7 @@ class BaseAgent(McpAttachableMixin):
         **options: Any,
     ) -> AgentMessage:
         await self._ensure_mcp_connected()
+        self.keys.record_toolset((self._tool_name(t) for t in self._agent_tool_items), self.mcp_tool_names())
         self.keys.record_settings(self._settings_snapshot())
         trace_ctx = None
         try:
