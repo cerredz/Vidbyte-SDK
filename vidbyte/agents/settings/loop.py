@@ -61,6 +61,7 @@ class AgentLoopSettings:
         tool_settings: ToolSettings | None = None,
         output_contracts: Sequence[OutputContract] = (),
         max_contract_rejections: int = 3,
+        verifier_runtime: "VerifierRuntimeSettings | None" = None,
     ) -> None:
         # Stores all loop parameters as instance attributes, then validates them immediately.
         self.max_iterations = max_iterations
@@ -79,6 +80,7 @@ class AgentLoopSettings:
         self.max_contract_rejections = max_contract_rejections
         self._output_contracts = tuple(output_contracts)
         self.output_contract = AgentLoopSettingsOutputContract(self._output_contracts, max_rejections=max_contract_rejections)
+        self.verifier_runtime = verifier_runtime
         self._validate()
 
     @property
@@ -94,6 +96,7 @@ class AgentLoopSettings:
         self._validate_tool_error_policy()
         self._validate_tool_settings()
         self._validate_output_contracts()
+        self._validate_verifier_runtime()
 
     def _validate_positive_int_fields(self) -> None:
         # Each integer field must be strictly positive when provided.
@@ -136,6 +139,15 @@ class AgentLoopSettings:
             return
         if self.tool_settings.max_calls != self.max_tool_calls:
             raise ConfigurationError("AgentLoopSettings.max_tool_calls and ToolSettings.max_calls must match when both are provided.")
+
+    def _validate_verifier_runtime(self) -> None:
+        # Local import avoids a module-level cycle through vidbyte.agents.runtimes' package init.
+        if self.verifier_runtime is None:
+            return
+        from vidbyte.agents.runtimes.verifier import VerifierRuntimeSettings
+
+        if not isinstance(self.verifier_runtime, VerifierRuntimeSettings):
+            raise ConfigurationError("AgentLoopSettings.verifier_runtime must be a VerifierRuntimeSettings instance when provided.")
 
     def _validate_output_contracts(self) -> None:
         # Rejects any effort floor whose minimum meets or exceeds its paired ceiling (an unreachable floor).
@@ -203,6 +215,7 @@ class AgentLoopSettings:
                 "tool_error_policy",
                 "tool_settings",
                 "max_contract_rejections",
+                "verifier_runtime",
             )
             if getattr(self, name) is not None
         }

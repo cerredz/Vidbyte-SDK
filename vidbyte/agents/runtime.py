@@ -65,7 +65,7 @@ from vidbyte.tools.types import ToolCall, ToolCallContext, ToolCallState, ToolRe
 class AgentRuntime:
     """Internal runtime for direct agent execution."""
 
-    def __init__(self, *, agent_name: str, system_prompt: str, tools: Tools, permission_policy: PermissionPolicy, config: AgentRuntimeConfig | None = None, tracer: TracerBase | None = None, middleware: Sequence[AgentMiddleware] = (), run_id: str | None = None, algorithm: ContextWindowAlgorithm | str | None = None, context_manager: ContextManager | None = None, recorder: RecorderBase | None = None, output_schema: type | Mapping[str, Any] | None = None, output_contract: "AgentLoopSettingsOutputContract | None" = None, include_internal_tools: bool = True, usage_tracker: UsageTracker | None = None, fallback: "AgentFallback | None" = None) -> None:
+    def __init__(self, *, agent_name: str, system_prompt: str, tools: Tools, permission_policy: PermissionPolicy, config: AgentRuntimeConfig | None = None, tracer: TracerBase | None = None, middleware: Sequence[AgentMiddleware] = (), run_id: str | None = None, algorithm: ContextWindowAlgorithm | str | None = None, context_manager: ContextManager | None = None, recorder: RecorderBase | None = None, output_schema: type | Mapping[str, Any] | None = None, output_contract: "AgentLoopSettingsOutputContract | None" = None, include_internal_tools: bool = True, usage_tracker: UsageTracker | None = None, fallback: "AgentFallback | None" = None, verifier_runtime: "VerifierRuntimeSettings | None" = None) -> None:
         # Configure one direct runtime; isolated review child runtimes may disable implicit internal tools.
         self.agent_name = agent_name
         self.system_prompt = system_prompt
@@ -85,6 +85,15 @@ class AgentRuntime:
         self.output_contract = output_contract or AgentLoopSettingsOutputContract(())
         self.usage_tracker = usage_tracker or UsageTracker()
         self.fallback = fallback
+        self._verifier_runtime = self._build_verifier_runtime(verifier_runtime)
+
+    def _build_verifier_runtime(self, verifier_runtime: "VerifierRuntimeSettings | None") -> "AgentVerifierRuntime | None":
+        # Local import avoids a module-level cycle back through vidbyte.agents.runtimes' package init.
+        if verifier_runtime is None or not verifier_runtime.active():
+            return None
+        from vidbyte.agents.runtimes.verifier import AgentVerifierRuntime
+
+        return AgentVerifierRuntime(verifier_runtime, run_id=self.run_id or self.agent_name)
 
     def _context_window_admission_middleware(self) -> tuple[AgentMiddleware, ...]:
         # Returns compatibility middleware for legacy tool-result admission presets.
@@ -467,6 +476,23 @@ class AgentRuntime:
                         rejections += 1
                         messages.append({"role": "user", "content": self.output_contract.feedback(unmet, counters)})
                         continue
+                blocked, stop_result = await self._apply_verifier_gate(
+                    candidate_output=last_assistant_output or "",
+                    messages=messages,
+                    iteration_count=iteration_count,
+                    tokens_used=tokens_used,
+                    call_contexts=call_contexts,
+                    provider=provider,
+                    pending_tool_call=None,
+                    run_state=run_state,
+                )
+                if stop_result is not None:
+                    return await self._finish_result(
+                        stop_result,
+                        message=message, context=context, provider=provider, iteration_count=iteration_count, model_call_count=model_call_count, tokens_used=tokens_used, started_at=started_at, metadata=runtime_metadata, run_state=run_state, model_response=raw_result,
+                    )
+                if blocked:
+                    continue
                 final = self._final_result(
                     output=last_assistant_output,
                     runner_metadata=runner_metadata,
@@ -603,6 +629,24 @@ class AgentRuntime:
                             self._append_tool_result_message(messages, call, ToolResult.error(call.tool_name, self.output_contract.feedback(unmet, counters)), provider, MiddlewareDecision.continue_())
                             contract_rejected = True
                             break
+                    blocked, stop_result = await self._apply_verifier_gate(
+                        candidate_output=result.output or "",
+                        messages=messages,
+                        iteration_count=iteration_count,
+                        tokens_used=tokens_used,
+                        call_contexts=call_contexts,
+                        provider=provider,
+                        pending_tool_call=call,
+                        run_state=run_state,
+                    )
+                    if stop_result is not None:
+                        return await self._finish_result(
+                            stop_result,
+                            message=message, context=context, provider=provider, iteration_count=iteration_count, model_call_count=model_call_count, tokens_used=tokens_used, started_at=started_at, metadata=runtime_metadata, run_state=run_state, model_response=raw_result,
+                        )
+                    if blocked:
+                        contract_rejected = True  # reused: also covers a verifier-runtime rejection, same continue-the-loop effect
+                        break
                     final = self._final_result(
                         output=result.output,
                         runner_metadata=runner_metadata,
@@ -1865,6 +1909,80 @@ class AgentRuntime:
     def _publish_contract_evaluations(self, run_state: dict[type, Any], counters: Mapping[str, Any]) -> None:
         # Records each contract's evaluation into run_state so _with_run_state_metadata lifts it into the result.
         run_state.setdefault("__result_metadata__", {})["contract_evaluations"] = self.output_contract.report(counters)
+
+    async def _apply_verifier_gate(
+        self,
+        *,
+        candidate_output: str,
+        messages: list[dict[str, Any]],
+        iteration_count: int,
+        tokens_used: int | None,
+        call_contexts: Sequence[ToolCallContext],
+        provider: Any,
+        pending_tool_call: "ToolCall | None",
+        run_state: dict[type, Any],
+    ) -> tuple[bool, "AgentResult | None"]:
+        """Runs the verifier gate for one finalization attempt; returns (blocked, stop_result).
+
+        blocked=False means proceed to finalize normally. blocked=True with stop_result=None means
+        the calling loop should continue (feedback has already been injected into messages).
+        blocked=True with a stop_result means the calling loop should stop the run immediately.
+        """
+        if self._verifier_runtime is None:
+            return False, None
+        from vidbyte.agents.runtimes.verifier import GateDecision, ResolutionContext
+
+        resolution_context = ResolutionContext(
+            candidate_output=candidate_output,
+            messages=tuple(messages),
+            workspace_root=None,
+            iteration_count=iteration_count,
+            context_manager=self.context_manager,
+            cost_spent_usd=self._cost_spent_usd(tokens_used),
+        )
+        outcome = await self._verifier_runtime.on_finalization_attempt(resolution_context)
+        self._publish_verifier_evaluations(run_state)
+        if outcome.decision is GateDecision.ALLOW_FINALIZE:
+            return False, None
+        if outcome.decision is GateDecision.REJECT_AND_TERMINATE:
+            stop_result = self._stopped_result(
+                candidate_output,
+                stop_reason=AgentStopReason.VERIFICATION_FAILED,
+                iteration_count=iteration_count,
+                tokens_used=tokens_used,
+                contexts=call_contexts,
+            )
+            return True, stop_result
+        self._inject_verifier_repair(messages, outcome, provider=provider, pending_tool_call=pending_tool_call)
+        return True, None
+
+    def _inject_verifier_repair(
+        self,
+        messages: list[dict[str, Any]],
+        outcome: "VerifierRuntimeOutcome",
+        *,
+        provider: Any,
+        pending_tool_call: "ToolCall | None",
+    ) -> None:
+        # Prefers the repair strategy's own injected messages; falls back to the raw feedback text.
+        text = outcome.feedback or ""
+        injected = outcome.repair.injected_messages if outcome.repair is not None else ()
+        if pending_tool_call is None:
+            if injected:
+                messages.extend(dict(m) for m in injected)
+            else:
+                messages.append({"role": "user", "content": text})
+            return
+        # Keeps the provider transcript valid: the pending isDone call must get a matching tool result.
+        if injected:
+            text = "\n".join(str(m.get("content", "")) for m in injected)
+        self._append_tool_result_message(messages, pending_tool_call, ToolResult.error(pending_tool_call.tool_name, text), provider, MiddlewareDecision.continue_())
+
+    def _publish_verifier_evaluations(self, run_state: dict[type, Any]) -> None:
+        # Records the verifier ledger's report into run_state so _with_run_state_metadata lifts it into the result.
+        if self._verifier_runtime is None:
+            return
+        run_state.setdefault("__result_metadata__", {})["verifier_evaluations"] = self._verifier_runtime.ledger.report()
 
     @staticmethod
     def _assistant_message(output: str) -> dict[str, Any]:

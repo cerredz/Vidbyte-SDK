@@ -192,6 +192,11 @@ class BaseAgent(McpAttachableMixin):
                 f"Agent {name} uses non-linear runtime {self.runtime_type.value}, "
                 "which does not support output contracts."
             )
+        if self.agent_loop_settings.verifier_runtime is not None and self.runtime_type is not AgentRuntimeType.LINEAR:
+            raise ConfigurationError(
+                f"Agent {name} uses non-linear runtime {self.runtime_type.value}, "
+                "which does not support a verifier runtime."
+            )
         self.runtime_config = self.agent_loop_settings.to_runtime_config()
         self.max_tool_rounds = self.agent_loop_settings.max_iterations
         self.system_prompt = system_prompt
@@ -965,6 +970,7 @@ class BaseAgent(McpAttachableMixin):
             kwargs["output_contract"] = self._output_contract_with_schema()
             kwargs["usage_tracker"] = self._usage_tracker
             kwargs["fallback"] = self.fallback
+            kwargs["verifier_runtime"] = self.agent_loop_settings.verifier_runtime
 
         return runtime_cls(
             agent_name=self.name,
