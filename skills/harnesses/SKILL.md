@@ -51,6 +51,10 @@ A concrete harness subclasses `Harness` and provides:
   agents. May be sync or async.
 - `async score(request, output) -> float | None` (optional): an eval reward stored on
   the trajectory record.
+- `async after_execute(request, output, status, error) -> None` (optional): fail-open
+  cleanup after every terminal `execute()` status, including `FAILED`, `TIMED_OUT`,
+  and `CANCELLED`. Must not raise; the envelope swallows exceptions. `error` is set
+  on non-success paths and `None` on `SUCCEEDED`.
 
 Do not add an agent loop, topology, retry, or timeout policy to the base class beyond
 the existing lifecycle. Do not make one `Harness` instance concurrently reentrant; it

@@ -20,7 +20,8 @@ ARCHITECTURE NOTE:
 
 PUBLIC API INVENTORY:
     Harness.load(), execute(), session(agent), run(request) [override], score()
-    [optional override], and the spec/store/run_id properties.
+    [optional override], after_execute() [optional override], and the
+    spec/store/run_id properties.
     wrap_implementation() adapts a foreign object with run(request) into a Harness.
 
 WHAT NOT TO DO IN THIS FILE:
@@ -156,6 +157,10 @@ class Harness:
         # Optional override: return an eval reward label to enrich the trajectory record.
         return None
 
+    async def after_execute(self, request: Any, output: Any, status: HarnessRunStatus, error: BaseException | None) -> None:
+        # Optional override: fail-open cleanup after every terminal execute() status.
+        return None
+
     # --- run lifecycle -----------------------------------------------------------
 
     async def execute(self, request: Any, *, timeout_seconds: float | None = None) -> HarnessExecutionResult:
@@ -168,15 +173,15 @@ class Harness:
         try:
             output = await self._invoke_with_timeout(request, timeout)
         except _HarnessDeadlineExpired as exc:
-            run = await self._finalize(request, None, HarnessRunStatus.TIMED_OUT, started_at)
+            run = await self._finalize(request, None, HarnessRunStatus.TIMED_OUT, started_at, error=exc)
             raise HarnessTimeoutError("Harness execution exceeded timeout_seconds.", run=run) from exc
-        except asyncio.CancelledError:
-            await self._finalize_shielded(request, None, HarnessRunStatus.CANCELLED, started_at)
+        except asyncio.CancelledError as exc:
+            await self._finalize_shielded(request, None, HarnessRunStatus.CANCELLED, started_at, error=exc)
             raise
         except Exception as exc:
-            run = await self._finalize(request, None, HarnessRunStatus.FAILED, started_at)
+            run = await self._finalize(request, None, HarnessRunStatus.FAILED, started_at, error=exc)
             raise HarnessExecutionError("Harness implementation execution failed.", run=run) from exc
-        run = await self._finalize(request, output, HarnessRunStatus.SUCCEEDED, started_at)
+        run = await self._finalize(request, output, HarnessRunStatus.SUCCEEDED, started_at, error=None)
         return HarnessExecutionResult(output=output, run=run)
 
     async def _invoke_with_timeout(self, request: Any, timeout_seconds: float | None) -> Any:
@@ -200,8 +205,8 @@ class Harness:
         result = self.run(request)
         return await result if inspect.isawaitable(result) else result
 
-    async def _finalize(self, request: Any, output: Any, status: HarnessRunStatus, started_at: str) -> HarnessRun:
-        # Builds the operational manifest and runs consented, fail-open collection.
+    async def _finalize(self, request: Any, output: Any, status: HarnessRunStatus, started_at: str, *, error: BaseException | None = None) -> HarnessRun:
+        # Builds the operational manifest and runs fail-open after_execute plus collection.
         session_ids = self._safe_session_ids()
         run = HarnessRun(
             schema_version=HARNESS_SCHEMA_VERSION,
@@ -212,15 +217,31 @@ class Harness:
             ended_at=_utc_now(),
             session_ids=session_ids,
         )
+        await self._safe_after_execute(request, output, status, error)
         await self._maybe_collect(request, output, status)
         return run
 
-    async def _finalize_shielded(self, request: Any, output: Any, status: HarnessRunStatus, started_at: str) -> None:
-        # Makes a best-effort, shielded collection attempt before re-raising cancellation.
-        task = asyncio.create_task(self._maybe_collect(request, output, status))
+    async def _finalize_shielded(self, request: Any, output: Any, status: HarnessRunStatus, started_at: str, *, error: BaseException | None = None) -> None:
+        # Makes a best-effort, shielded finalize attempt before re-raising cancellation.
+        task = asyncio.create_task(self._finalize(request, output, status, started_at, error=error))
+        current = asyncio.current_task()
         try:
             await asyncio.shield(task)
         except asyncio.CancelledError:
+            if current is not None:
+                current.uncancel()
+            try:
+                await asyncio.shield(task)
+            finally:
+                if current is not None:
+                    current.cancel()
+            return
+
+    async def _safe_after_execute(self, request: Any, output: Any, status: HarnessRunStatus, error: BaseException | None) -> None:
+        # Author cleanup must never replace the execute() exception or status.
+        try:
+            await self.after_execute(request, output, status, error)
+        except Exception:
             return
 
     async def _maybe_collect(self, request: Any, output: Any, status: HarnessRunStatus) -> None:

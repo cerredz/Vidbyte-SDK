@@ -36,7 +36,7 @@ An agent runs within `AgentRuntime` and triggers middleware hooks at nine discre
 | `before_tool_call` | Before validating, checking permissions for, or running an agent tool. | All `after_model_response` fields, plus `tool_call`, `tool_is_internal` |
 | `after_tool_call` | After the tool has finished executing or has been denied. | All `before_tool_call` fields, plus `tool_result` |
 | `after_iteration` | At the end of an iteration loop, after tool executions are processed. | All iteration-accumulated counts and timings |
-| `after_run` | Before the agent runtime returns the final response payload. | All run-level accumulated statistics |
+| `after_run` | At the end of one `_arun_once` attempt: returned results **and** terminal exceptions after retries/fallback. Raise-path calls set `error`. Abort/retry/deny on that path are ignored. | All run-level accumulated statistics; `error` when the attempt is raising |
 
 ---
 

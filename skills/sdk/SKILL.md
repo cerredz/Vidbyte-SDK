@@ -62,7 +62,7 @@ Middleware is **deterministic runtime policy code** injected into the agent loop
 | `before_tool_call` | Before permission checks and tool execution |
 | `after_tool_call` | After a tool executes or is denied |
 | `after_iteration` | After each iteration completes |
-| `after_run` | Before the final result is returned |
+| `after_run` | At the end of one runtime attempt, including terminal exceptions (`ctx.error` set on the raise path) |
 
 The full hook lifecycle, available `MiddlewareContext` fields, and the built-in catalog with arguments are documented in [`skills/vidbyte-sdk/middleware.md`](../vidbyte-sdk/middleware.md).
 

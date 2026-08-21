@@ -101,7 +101,7 @@ Each hook receives a read-only `MiddlewareContext` and returns a `MiddlewareDeci
 | `before_tool_call` | Before a tool is executed |
 | `after_tool_call` | After a tool returns or is denied |
 | `after_iteration` | After each loop iteration |
-| `after_run` | Before the final result is returned |
+| `after_run` | At the end of one runtime attempt, including terminal exceptions (`ctx.error` set on the raise path) |
 
 Decisions: `MiddlewareDecision.continue_()`, `abort(reason)`, `deny_tool(reason)` (in `before_tool_call`), `retry(reason)` (in `on_model_error`), and `sleep(seconds)`.
 

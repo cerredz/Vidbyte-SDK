@@ -819,7 +819,7 @@ metadata, or abstract support APIs; they are not additional concrete tools.
 
 Middleware gives direct text agents deterministic runtime hooks for authorization, rate limiting, retry, audit logging, compaction, and policy enforcement. Middleware is not model-visible and does not appear in tool specs or agent cards.
 
-Hooks include `before_run`, `before_iteration`, `before_model_call`, `after_model_response`, `on_model_error`, `before_tool_call`, `after_tool_call`, `after_iteration`, and `after_run`.
+Hooks include `before_run`, `before_iteration`, `before_model_call`, `after_model_response`, `on_model_error`, `before_tool_call`, `after_tool_call`, `after_iteration`, and `after_run`. `after_run` is the terminal hook for a returned result and for a terminal exception after retries and fallback; raise-path calls set `ctx.error`.
 
 Built-ins include:
 

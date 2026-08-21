@@ -10,7 +10,9 @@ model-visible tools.
 `vidbyte.middleware` exposes `AgentMiddleware`, `MiddlewarePipeline`, structured
 decisions, context payloads, events, transforms, and built-in middleware. Agents
 pass middleware into compatible runtimes, which call lifecycle hooks before and
-after model calls, tool calls, iterations, and whole runs.
+after model calls, tool calls, iterations, and whole runs. `after_run` also
+runs when an attempt raises after retries and fallback are spent (`ctx.error`
+is set); abort/retry/deny decisions on that path are ignored.
 
 ## Design Philosophy
 

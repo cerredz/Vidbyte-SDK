@@ -147,6 +147,8 @@ await h.execute({"topic": "..."})
 - `TrajectoryRecord.spec` inlines the full resolved config (prompts, tools,
   orchestration) so a buyer consumes one JSONL line with no dependency on our store.
   Override `Harness.score(request, output)` to attach an optional eval `reward`.
+  Override `Harness.after_execute(request, output, status, error)` for fail-open
+  cleanup on success, failure, timeout, and cancellation; it cannot fail the run.
 
 A future `WarehouseTrajectorySink` / `S3TrajectorySink` in `providers/` implements
 the same `TrajectorySink` protocol with zero harness changes.
