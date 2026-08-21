@@ -7,6 +7,7 @@ Purpose:
     only the runtime lifecycle hooks they need.
 Architecture:
     - AgentMiddleware: Optional async hook methods matching AgentRuntime breakpoints.
+    - after_run: Terminal hook for returned results and raise-path exits (ctx.error set).
 Relations:
     Used by vidbyte.middleware.pipeline and vidbyte.agents.runtime.
 """
@@ -70,7 +71,11 @@ class AgentMiddleware(ABC):
         return MiddlewareDecision.continue_()
 
     async def after_run(self, ctx: MiddlewareContext) -> MiddlewareDecision:
-        """Run before returning the final runtime result."""
+        """Run at the end of one direct runtime attempt, including terminal exceptions.
+
+        Result-returning exits leave ctx.error unset. Raise-path exits set ctx.error
+        to the exception that will propagate; abort/retry/deny decisions are ignored.
+        """
         del ctx
         return MiddlewareDecision.continue_()
 

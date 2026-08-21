@@ -9,6 +9,7 @@ Purpose:
 Architecture:
     - _TraceRunState: Per-run accumulation dataclass kept in MiddlewareContext.run_state.
     - ContinualTraceMiddleware: Fail-open middleware that delegates to ContinualTraceAgent.
+    - after_run skips the final model update on CancelledError/TimeoutError.
 Relations:
     Built by vidbyte.agents.base.BaseAgent when trace_option is enabled; delegates to
     vidbyte.agents.continual_trace.ContinualTraceAgent.
@@ -16,6 +17,7 @@ Relations:
 
 from __future__ import annotations
 
+import asyncio
 import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
@@ -74,10 +76,15 @@ class ContinualTraceMiddleware(AgentMiddleware):
     async def after_run(self, ctx: MiddlewareContext) -> MiddlewareDecision:
         """Run one final trace update unless this iteration was already traced."""
         state = self._state(ctx)
-        if not state.finalized:
-            if state.last_updated_iteration != ctx.iteration_count:
-                await self._run_update(ctx, state)
+        if state.finalized:
+            return MiddlewareDecision.continue_()
+        if isinstance(ctx.error, (asyncio.CancelledError, TimeoutError)):
             state.finalized = True
+            self._publish(ctx, state)
+            return MiddlewareDecision.continue_()
+        if state.last_updated_iteration != ctx.iteration_count:
+            await self._run_update(ctx, state)
+        state.finalized = True
         return MiddlewareDecision.continue_()
 
     def _state(self, ctx: MiddlewareContext) -> _TraceRunState:
