@@ -39,7 +39,7 @@ PROVIDER_SUPPORT: dict[ModelProvider, StructuredOutputSupport] = {
     ModelProvider.MISTRAL: StructuredOutputSupport.NATIVE_SCHEMA,
     ModelProvider.ANTHROPIC: StructuredOutputSupport.NATIVE_SCHEMA,
     ModelProvider.DEEPSEEK: StructuredOutputSupport.JSON_MODE,
-    ModelProvider.XAI: StructuredOutputSupport.JSON_MODE,
+    ModelProvider.XAI: StructuredOutputSupport.NATIVE_SCHEMA,
     ModelProvider.GLM: StructuredOutputSupport.JSON_MODE,
     ModelProvider.KIMI: StructuredOutputSupport.JSON_MODE,
     ModelProvider.MINIMAX: StructuredOutputSupport.JSON_MODE,
