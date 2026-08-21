@@ -42,6 +42,17 @@ class VerifierRuntimeGateParams:
         # ON_EXPLICIT_SIGNAL has nothing to scan the transcript for without a tool name.
         if self.trigger is GateTrigger.ON_EXPLICIT_SIGNAL and not self.explicit_signal_tool_name:
             raise ConfigurationError("VerifierRuntimeGateParams: trigger=ON_EXPLICIT_SIGNAL requires explicit_signal_tool_name.")
+        self._validate_trigger_supported()
+
+    def _validate_trigger_supported(self) -> None:
+        # The linear runtime only calls on_finalization_attempt at its two finalization boundaries today, so
+        # ON_EVERY_ITERATION/ON_TIER_BOUNDARY would silently behave like ON_FINALIZATION_ONLY if allowed through.
+        if self.trigger in (GateTrigger.ON_EVERY_ITERATION, GateTrigger.ON_TIER_BOUNDARY):
+            raise ConfigurationError(
+                f"VerifierRuntimeGateParams: trigger={self.trigger.value} has no wired call site in the linear "
+                "runtime today — only ON_FINALIZATION_ONLY and ON_EXPLICIT_SIGNAL fire. Wiring a per-iteration or "
+                "per-tier call site is a separate, larger change to runtime.py's loop."
+            )
 
 
 class VerifierRuntimeGate:

@@ -53,6 +53,16 @@ class VerifierRuntimeFeedbackParams:
         self._validate_template_modes()
         self._validate_structured_mode()
         self._validate_max_chars()
+        self._validate_delivery_supported()
+
+    def _validate_delivery_supported(self) -> None:
+        # SYSTEM_MESSAGE and MCP_RESOURCE have no wired delivery path in the linear runtime yet;
+        # reject-at-construction, matching how RepairMode.PARALLEL_BRANCHING is handled.
+        if self.delivery in (FeedbackDelivery.SYSTEM_MESSAGE, FeedbackDelivery.MCP_RESOURCE):
+            raise ConfigurationError(
+                f"VerifierRuntimeFeedbackParams: delivery={self.delivery.value} has no wired delivery path in the "
+                "linear runtime today. Use USER_MESSAGE, TOOL_RESULT, or CONTEXT_ITEM."
+            )
 
     def _validate_template_modes(self) -> None:
         # CUSTOM_MESSAGE and RAW_AND_CUSTOM both need something to render.

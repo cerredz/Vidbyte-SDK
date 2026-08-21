@@ -1945,6 +1945,8 @@ class AgentRuntime:
         if outcome.decision is GateDecision.ALLOW_FINALIZE:
             return False, None
         if outcome.decision is GateDecision.REJECT_AND_TERMINATE:
+            on_exhausted = self._verifier_runtime.settings.params.budget.params.on_exhausted
+            run_state.setdefault("__result_metadata__", {})["verifier_exhaustion_action"] = on_exhausted.value
             stop_result = self._stopped_result(
                 candidate_output,
                 stop_reason=AgentStopReason.VERIFICATION_FAILED,
@@ -1964,19 +1966,35 @@ class AgentRuntime:
         provider: Any,
         pending_tool_call: "ToolCall | None",
     ) -> None:
-        # Prefers the repair strategy's own injected messages; falls back to the raw feedback text.
+        # A pending isDone call always gets a tool result, regardless of configured delivery — the provider
+        # transcript requires every tool call to get a matching result, which overrides delivery preference.
         text = outcome.feedback or ""
         injected = outcome.repair.injected_messages if outcome.repair is not None else ()
-        if pending_tool_call is None:
+        if pending_tool_call is not None:
             if injected:
-                messages.extend(dict(m) for m in injected)
-            else:
-                messages.append({"role": "user", "content": text})
+                text = "\n".join(str(m.get("content", "")) for m in injected)
+            self._append_tool_result_message(messages, pending_tool_call, ToolResult.error(pending_tool_call.tool_name, text), provider, MiddlewareDecision.continue_())
             return
-        # Keeps the provider transcript valid: the pending isDone call must get a matching tool result.
+        from vidbyte.agents.runtimes.verifier import FeedbackDelivery
+
+        delivery = self._verifier_feedback_delivery()
+        if delivery is FeedbackDelivery.CONTEXT_ITEM and self.context_manager is not None:
+            self._publish_verifier_feedback_context_item(text)
+            return
         if injected:
-            text = "\n".join(str(m.get("content", "")) for m in injected)
-        self._append_tool_result_message(messages, pending_tool_call, ToolResult.error(pending_tool_call.tool_name, text), provider, MiddlewareDecision.continue_())
+            messages.extend(dict(m) for m in injected)
+        else:
+            messages.append({"role": "user", "content": text})
+
+    def _verifier_feedback_delivery(self) -> "FeedbackDelivery":
+        # Reads the configured delivery mode from the orchestrator's own feedback pillar.
+        return self._verifier_runtime.settings.params.feedback.params.delivery
+
+    def _publish_verifier_feedback_context_item(self, text: str) -> None:
+        # CONTEXT_ITEM delivery: publish as a context primitive instead of appending a conversation message.
+        from vidbyte.context.primitives.verifier import VerifierDiagnosticContextItem
+
+        self.context_manager.upsert(VerifierDiagnosticContextItem(diagnostics=(text,)))
 
     def _publish_verifier_evaluations(self, run_state: dict[type, Any]) -> None:
         # Records the verifier ledger's report into run_state so _with_run_state_metadata lifts it into the result.
