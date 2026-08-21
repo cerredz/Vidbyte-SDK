@@ -141,8 +141,16 @@ class ExaSearchTool(PricedOperationTool):
             return self._contract_result(f"exa search: {query}", units=_int_arg(call, "num_results", 10), mode=mode)
         try:
             payload = await self._client.search(query, num_results=_int_arg(call, "num_results", 10), search_type=search_type)
-        except (ProviderRequestError, ProviderResponseError):
-            return self._failed_result("exa search failed.", units=1, mode=mode, attempts=self._client.max_attempts, error="search_failed")
+        except (ProviderRequestError, ProviderResponseError) as exc:
+            return self._failed_result(
+                "exa search failed.",
+                units=1,
+                mode=mode,
+                attempts=self._client.max_attempts,
+                error="search_failed",
+                error_type=type(exc).__name__,
+                error_status_code=getattr(exc, "status_code", None),
+            )
         return self._executed_result(_render_search_results("exa search", payload), payload, units=payload.billable_units, mode=mode, attempts=payload.attempts)
 
     def _billing_mode(self, search_type: str) -> str:
