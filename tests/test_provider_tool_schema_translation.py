@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from enum import Enum
 
 from pydantic import BaseModel, Field
 
@@ -12,6 +13,17 @@ class LookupActivity(BaseModel):
     """Bounded annotation rendered as a nested provider input."""
 
     purpose: str = Field(min_length=1, max_length=60)
+
+
+class LookupKind(str, Enum):
+    SEARCH = "search"
+
+
+class StructuredLookupActivity(BaseModel):
+    """Annotation with references that must resolve from the tool schema root."""
+
+    kind: LookupKind
+    preference_bases: list[LookupKind]
 
 
 class LookupTool(BaseTool):
@@ -51,6 +63,13 @@ def _bound_lookup(tool_instance: LookupTool, *, required: bool = True) -> BaseTo
     """Return the lookup tool bound to a small required or optional activity."""
     return tool_instance.with_activity(
         ToolActivity(schema=LookupActivity, description="Explain this lookup.", required=required)
+    )
+
+
+def _bound_structured_lookup(tool_instance: LookupTool) -> BaseTool:
+    """Return a lookup tool bound to a referenced enum/list activity schema."""
+    return tool_instance.with_activity(
+        ToolActivity(schema=StructuredLookupActivity, description="Explain this lookup.")
     )
 
 
@@ -105,6 +124,19 @@ class ProviderToolActivitySchemaTests(unittest.TestCase):
 
         self.assertEqual(plain["function"]["parameters"]["required"], ["topic"])
         self.assertNotIn("activity", plain["function"]["parameters"]["properties"])
+
+    def test_activity_definitions_are_hoisted_to_the_tool_schema_root(self) -> None:
+        """Nested Pydantic refs remain resolvable to strict OpenAI-compatible providers."""
+        parameters = tool_spec_to_provider_schema(
+            _bound_structured_lookup(LookupTool()).spec(), "xai"
+        )["function"]["parameters"]
+
+        self.assertIn("LookupKind", parameters["$defs"])
+        self.assertNotIn("$defs", parameters["properties"]["activity"])
+        self.assertEqual(
+            parameters["properties"]["activity"]["properties"]["kind"]["$ref"],
+            "#/$defs/LookupKind",
+        )
 
 
 class ProviderToolSchemaTranslationTests(unittest.TestCase):

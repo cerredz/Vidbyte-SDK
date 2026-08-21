@@ -523,8 +523,10 @@ class ToolsFormatter:
     def _schema_with_activity(schema: Mapping[str, Any], activity: ToolActivity, tool_name: str) -> dict[str, Any]:
         """Merge an activity declaration into a tool's input schema under the reserved key."""
         merged = deepcopy(dict(schema))
+        activity_schema = ToolsFormatter._activity_schema(activity)
+        ToolsFormatter._hoist_definitions(merged, activity_schema)
         properties = ToolsFormatter._activity_properties(merged, tool_name)
-        properties[ACTIVITY_ARGUMENT_KEY] = ToolsFormatter._activity_schema(activity)
+        properties[ACTIVITY_ARGUMENT_KEY] = activity_schema
         merged["properties"] = properties
         if activity.required:
             required = list(merged.get("required") or ())
@@ -532,6 +534,28 @@ class ToolsFormatter:
                 required.append(ACTIVITY_ARGUMENT_KEY)
             merged["required"] = required
         return merged
+
+    @staticmethod
+    def _hoist_definitions(merged: dict[str, Any], nested: dict[str, Any]) -> None:
+        """Move nested Pydantic definitions to the provider schema root."""
+        # @intent provider-schema-ref-resolution
+        # Tool parameters are the JSON Schema document sent to providers. A nested
+        # Pydantic model keeps `$defs` beside `activity`, but JSON Schema resolves
+        # `#/$defs/...` from the document root. Hoisting preserves the references so
+        # xAI and other strict tool validators can resolve enum/list definitions.
+        for definitions_key in ("$defs", "definitions"):
+            definitions = nested.pop(definitions_key, None)
+            if not isinstance(definitions, Mapping):
+                continue
+            existing = merged.get(definitions_key)
+            root_definitions = dict(existing) if isinstance(existing, Mapping) else {}
+            for name, definition in definitions.items():
+                if name in root_definitions and root_definitions[name] != definition:
+                    raise ConfigurationError(
+                        f"Activity schema definition '{name}' conflicts with the tool schema."
+                    )
+                root_definitions[name] = definition
+            merged[definitions_key] = root_definitions
 
     @staticmethod
     def _activity_properties(merged: dict[str, Any], tool_name: str) -> dict[str, Any]:
