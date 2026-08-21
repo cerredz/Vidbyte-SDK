@@ -141,6 +141,7 @@ Provides a model-callable, agent-bound wrapper around `BaseAgent.pause()`. Its c
 class PauseAgentTool(BaseTool):
     def __init__(self, max_seconds: int = 60) -> None
     def bind_agent(self, agent: Any) -> None
+    def clone_for_fork(self) -> "PauseAgentTool"
     def spec(self) -> ToolSpec
     async def execute(self, call: ToolCall) -> ToolResult
 ```
@@ -157,10 +158,11 @@ permission: safe
 
 1. Validate and store the positive developer cap during construction.
 2. Accept a live agent through `bind_agent()` when `BaseAgent` binds its tools.
-3. Return a tool error if execution occurs before binding.
-4. Validate that `seconds` is a non-boolean integer in the inclusive range `0..max_seconds`.
-5. Await `self._agent.pause(seconds)`.
-6. Return `ToolResult.success` with a human-readable confirmation and `metadata={"seconds": seconds}`.
+3. Return an unbound clone with the same cap from `clone_for_fork()` so a child fork cannot steal the parent's binding.
+4. Return a tool error if execution occurs before binding.
+5. Validate that `seconds` is a non-boolean integer in the inclusive range `0..max_seconds`.
+6. Await `self._agent.pause(seconds)`.
+7. Return `ToolResult.success` with a human-readable confirmation and `metadata={"seconds": seconds}`.
 
 #### Edge Cases & Error Handling
 
@@ -168,6 +170,7 @@ permission: safe
 - Booleans, strings, floats, and negative integers return `ToolResult.error`.
 - Values above `max_seconds` return `ToolResult.error` without sleeping.
 - A non-positive `max_seconds` is rejected with `ValueError` at construction.
+- Forked agents receive a fresh unbound tool instance; the parent and child keep independent bindings.
 - Cancellation from the parent task and `ToolSettings.tool_timeout_seconds` are allowed to propagate through the awaited pause.
 
 ### 6.3 Built-in export and agent binding
@@ -307,4 +310,3 @@ N/A - The scope decisions are resolved for this slice: the API is async, zero is
 
 - What: Implement separate methods on `HandoffAgent`, `AggregateAgent`, `ContinualTraceAgent`, and `MultiAgent`.
 - Why rejected: All ordinary subclasses can inherit the same cooperative wait, and duplicate overrides would create inconsistent behavior. `MultiAgent`'s existing team-level tool restriction remains separate from its inherited utility method.
-

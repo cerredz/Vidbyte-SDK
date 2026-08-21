@@ -4,11 +4,15 @@ Description:
     Defines the baseline agent implementation (BaseAgent).
 Purpose:
     Combines prompting, tool registration, runtime state tracking, and execution
-    into a unified developer-facing executable actor (the agent).
+    into a unified developer-facing executable actor (the agent), including its
+    cooperative pause API.
 Architecture:
-    - BaseAgent: Primary agent class inheriting MCP attachment capabilities.
+    - BaseAgent: Primary agent class inheriting MCP attachment capabilities and
+      exposing shared async execution and pause behavior.
 Relations:
-    Inherits from McpAttachableMixin. Used by registries, harnesses, and multi-agent orchestration.
+    Inherits from McpAttachableMixin. Used by registries, harnesses, and
+    multi-agent orchestration. Agent-bound built-ins are wired in
+    _bind_agent_tool_context().
 """
 
 from __future__ import annotations
@@ -341,6 +345,7 @@ class BaseAgent(McpAttachableMixin):
         from vidbyte.tools.builtins.fork import ForkConversationTool
         from vidbyte.tools.builtins.handoff import CreateHandoffTool
         from vidbyte.tools.builtins.mcp import AttachMcpServerTool
+        from vidbyte.tools.builtins.pause import PauseAgentTool
         from vidbyte.tools.builtins.run_prompts_sequentially import RunPromptsSequentiallyTool
 
         if isinstance(tool, AgentTool):
@@ -352,6 +357,8 @@ class BaseAgent(McpAttachableMixin):
         if isinstance(tool, ForkConversationTool):
             tool.bind_agent(self)
         if isinstance(tool, RunPromptsSequentiallyTool):
+            tool.bind_agent(self)
+        if isinstance(tool, PauseAgentTool):
             tool.bind_agent(self)
         self._bind_session_tool(tool)
 
@@ -696,6 +703,14 @@ class BaseAgent(McpAttachableMixin):
     async def arun(self, message: str | AgentInput, **options: Any) -> AgentMessage:
         """Async ergonomic alias for generate_reply()."""
         return await self.generate_reply(message, **options)
+
+    async def pause(self, seconds: int) -> None:
+        # Cooperatively yield for a validated whole-number delay without blocking other agent tasks.
+        if isinstance(seconds, bool) or not isinstance(seconds, int):
+            raise ValueError("BaseAgent.pause() seconds must be an integer.")
+        if seconds < 0:
+            raise ValueError("BaseAgent.pause() seconds must be non-negative.")
+        await asyncio.sleep(seconds)
 
     def run(self, message: str | AgentInput, **options: Any) -> AgentMessage:
         """Run the agent from synchronous code."""
