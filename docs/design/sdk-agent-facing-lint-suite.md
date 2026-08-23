@@ -169,44 +169,44 @@ the baseline/reporting layer.
 
 ### 6.2 Ruff Rules
 
-#### S001 â€” Python correctness foundation
+#### S001 -- Python correctness foundation
 
 - Selectors: F, E4, E7, E9.
 - Protects: undefined/unused names, broken imports, syntax-class errors, and
   high-signal parser/whitespace correctness.
 
-#### S002 â€” exception cause chaining
+#### S002 -- exception cause chaining
 
 - Selector: B904.
 - Protects: error provenance when translating provider/protocol exceptions.
 
-#### S003 â€” strict zip
+#### S003 -- strict zip
 
 - Selector: B905.
 - Protects: silent truncation in paired model/result/config iteration.
 
-#### S004 â€” timezone-aware datetime
+#### S004 -- timezone-aware datetime
 
 - Selectors: DTZ001-DTZ012.
 - Protects: trace, retry, billing, and evaluation timestamps from naive/aware drift.
 
-#### S005 â€” immutable class defaults
+#### S005 -- immutable class defaults
 
 - Selector: RUF012.
 - Protects: shared mutable state; requires `ClassVar` when sharing is intentional.
 
-#### S006 â€” async task ownership
+#### S006 -- async task ownership
 
 - Selector: RUF006.
 - Protects: fire-and-forget tasks from garbage collection and lost exceptions.
 
-#### S007 â€” public function annotations
+#### S007 -- public function annotations
 
 - Selectors: ANN001-ANN003, ANN201-ANN206. ANN401 is excluded.
 - Scope: public production functions/methods; decorators, overloads, generated
   shims, and conventional `self`/`cls` are handled by Ruff.
 
-#### S008 â€” bounded function complexity
+#### S008 -- bounded function complexity
 
 - Selectors: C901, PLR0912, PLR0915.
 - Repair: preserve orchestration in the owning class and extract coherent private
@@ -214,7 +214,7 @@ the baseline/reporting layer.
 
 ### 6.3 Type and Transport Rules
 
-#### S009 â€” staged mypy contracts
+#### S009 -- staged mypy contracts
 
 - File: `lint/rules/s009_staged_mypy_contracts.py`.
 - Runs mypy over `vidbyte/` using Python 3.11-compatible semantics,
@@ -222,7 +222,7 @@ the baseline/reporting layer.
   error codes, and missing-import tolerance for optional integrations.
 - Every current error is count debt; any new error fails regardless of code.
 
-#### S010 â€” async/sync transport parity
+#### S010 -- async/sync transport parity
 
 - File: `lint/rules/s010_transport_parity.py`.
 - Algorithm: resolve constructor assignments such as
@@ -233,7 +233,7 @@ the baseline/reporting layer.
 - Edge: injected protocol types that explicitly define the needed method are
   accepted; unknown dynamic receivers become mypy's responsibility.
 
-#### S011 â€” raw HTTP client ownership
+#### S011 -- raw HTTP client ownership
 
 - File: `lint/rules/s011_raw_http_client_ownership.py`.
 - Algorithm: flag imports/calls from `httpx`, `requests`, `urllib.request`, and
@@ -241,15 +241,16 @@ the baseline/reporting layer.
   dedicated `vidbyte/tools/mcp/transport.py` adapter.
 - Edge: type-only imports are allowed only if they do not expose client ownership.
 
-#### S012 â€” explicit outbound timeout
+#### S012 -- explicit outbound timeout
 
 - File: `lint/rules/s012_explicit_outbound_timeout.py`.
 - Algorithm: flag transport/raw HTTP request calls without an explicit
   `timeout_seconds`/`timeout` argument or a constructor-bound timeout object.
 - Edge: private transport leaf methods receiving a required timeout parameter
-  from their public owner are compliant.
+  from their public owner are compliant. MCP client calls are also compliant
+  because `McpStdioTransport` binds and enforces `request_timeout` at construction.
 
-#### S013 â€” bounded untrusted responses
+#### S013 -- bounded untrusted responses
 
 - File: `lint/rules/s013_bounded_untrusted_responses.py`.
 - Scope: fetch/search/browser/code-search/MCP ingestion and external operation
@@ -261,7 +262,7 @@ the baseline/reporting layer.
 
 ### 6.4 Declarative Contract Rules
 
-#### S014 â€” provider/model registry parity
+#### S014 -- provider/model registry parity
 
 - File: `lint/rules/s014_provider_model_registry_parity.py`.
 - Algorithm: statically extract `ModelProvider` members, default model, endpoint,
@@ -271,7 +272,7 @@ the baseline/reporting layer.
 - Edge: the intentionally generic bare `auto` alias is documented and allowed.
 - Error: identify the missing/extra registry and exact member/model.
 
-#### S015 â€” public export integrity
+#### S015 -- public export integrity
 
 - File: `lint/rules/s015_public_export_integrity.py`.
 - Algorithm: for every package `__init__.py` with `__all__`, require unique string
@@ -281,17 +282,17 @@ the baseline/reporting layer.
 - Edge: lazy `__getattr__` exports are allowed only when statically declared by a
   local lazy-export mapping.
 
-#### S016 â€” typed external-boundary errors
+#### S016 -- typed external-boundary errors
 
 - File: `lint/rules/s016_typed_boundary_errors.py`.
-- Scope: providers, MCP, operation tools/clients, public runner methods, and CLI
+- Scope: providers, MCP, every built-in tool, public runner methods, and CLI
   handoff boundaries.
 - Algorithm: flag raises of builtin `Exception`, `RuntimeError`, `ValueError`, or
   `TypeError` that leave the boundary without translation to `vidbyte.lib.errors`.
 - Edge: private parsers may use builtins when a dominating caller catches and
   translates them; typed errors subclassing builtins are compliant.
 
-#### S017 â€” no raw exception disclosure
+#### S017 -- no raw exception disclosure
 
 - File: `lint/rules/s017_no_raw_exception_disclosure.py`.
 - Algorithm: track caught exception names and flag `str(exc)`, `repr(exc)`, or
@@ -300,7 +301,7 @@ the baseline/reporting layer.
 - Edge: structured internal logging is allowed; stable error kind plus a bounded,
   explicitly sanitized provider response excerpt is allowed.
 
-#### S018 â€” priced-operation attempt propagation
+#### S018 -- priced-operation attempt propagation
 
 - File: `lint/rules/s018_priced_operation_attempts.py`.
 - Scope: `vidbyte/tools/builtins/operations/` results and clients.
@@ -309,7 +310,7 @@ the baseline/reporting layer.
   canonical pricing metadata builder.
 - Edge: validation failures before any request use zero attempts explicitly.
 
-#### S019 â€” cancellation propagation
+#### S019 -- cancellation propagation
 
 - File: `lint/rules/s019_cancellation_propagation.py`.
 - Algorithm: in async functions, flag bare/`BaseException` handlers that do not
@@ -318,7 +319,7 @@ the baseline/reporting layer.
 - Edge: `except Exception` is not flagged because modern `CancelledError`
   inherits `BaseException`; broad-catch accountability remains a separate concern.
 
-#### S020 â€” README file-index parity
+#### S020 -- README file-index parity
 
 - File: `lint/rules/s020_readme_file_index_parity.py`.
 - Algorithm: only for READMEs containing `## File Index`, parse backticked/table
@@ -326,7 +327,7 @@ the baseline/reporting layer.
 - Edge: generated files, `__pycache__`, private assets, and nested folder contents
   are excluded unless the existing index explicitly declares them.
 
-#### S021 â€” class-bound registry helpers
+#### S021 -- class-bound registry helpers
 
 - File: `lint/rules/s021_class_bound_registry_helpers.py`.
 - Scope: `vidbyte/lib/registries/*.py` and future declared registry directories.
@@ -357,15 +358,16 @@ CI CLI invokes it internally without changing its public arguments.
 
 ## 9. File Change Manifest
 
-### Files to Create (37)
+### Files to Create (39)
 
-- `docs/design/sdk-agent-facing-lint-suite.md` â€” this approved design.
-- `lint/README.md` â€” folder purpose, non-goals, commands, rule catalogue, and file index.
+- `docs/design/sdk-agent-facing-lint-suite.md` -- this approved design.
+- `lint/README.md` -- folder purpose, non-goals, commands, rule catalogue, and file index.
 - `lint/__init__.py`
 - `lint/run.py`
 - `lint/baseline.json`
 - `lint/mypy.ini`
 - `lint/core/__init__.py`
+- `lint/core/README.md` -- core folder responsibilities, non-goals, and file index.
 - `lint/core/baseline.py`
 - `lint/core/diagnostic.py`
 - `lint/core/discovery.py`
@@ -375,6 +377,7 @@ CI CLI invokes it internally without changing its public arguments.
 - `lint/core/ruff.py`
 - `lint/core/runner.py`
 - `lint/rules/__init__.py`
+- `lint/rules/README.md` -- rule folder responsibilities, non-goals, and file index.
 - `lint/rules/s001_python_correctness_foundation.py`
 - `lint/rules/s002_exception_cause_chaining.py`
 - `lint/rules/s003_strict_zip.py`
@@ -399,8 +402,8 @@ CI CLI invokes it internally without changing its public arguments.
 
 ### Files to Modify (2)
 
-- `pyproject.toml` â€” pin Ruff and mypy in the dev extra.
-- `scripts/run_ci.py` â€” invoke `python lint/run.py` in the source gate.
+- `pyproject.toml` -- pin Ruff and mypy in the dev extra.
+- `scripts/run_ci.py` -- invoke `python lint/run.py` in the source gate.
 
 ### Files to Delete (0)
 
@@ -470,4 +473,3 @@ before import execution can fail.
 
 Rejected because the existing package has material debt. A ratchet blocks every
 new regression now while allowing focused cleanup to lower counts over time.
-
