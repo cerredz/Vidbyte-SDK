@@ -107,4 +107,3 @@ Nested folders:
 Suppressions and path exceptions are policy changes. Put narrow, named boundary
 constants in the owning rule and explain why the boundary is safe; do not scatter
 inline ignores through production source.
-
