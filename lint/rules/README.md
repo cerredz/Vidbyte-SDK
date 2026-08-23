@@ -41,4 +41,3 @@ cached external findings; semantic rules inspect the shared source catalogue.
 ## Change Log
 
 - 2026-08-23: Created with S001-S021.
-

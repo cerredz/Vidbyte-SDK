@@ -28,4 +28,3 @@ SDK architecture policy beyond analyzer transport and baseline integrity.
 ## Change Log
 
 - 2026-08-23: Created for the first SDK agent-facing lint suite.
-
