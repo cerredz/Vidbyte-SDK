@@ -9,13 +9,14 @@ Purpose:
 Architecture:
     - chain.py: AgentFallback, the ordered model chain and its transforms.
     - settings.py: AgentFallbackSettings, the validated developer-facing config.
-    - policies.py: LatencyPolicy and CostBudgetPolicy, the per-hop trigger conditions.
+    - policies.py: LatencyPolicy and CostBudgetPolicy, the per-hop trigger conditions,
+      and ToolCallLoopPolicy, the chain-wide repeated-tool-call trigger.
 Relations:
     Re-exported from vidbyte.agents.__init__ and vidbyte.agents.settings.__init__.
 """
 
 from vidbyte.agents.fallback.chain import AgentFallback, DEFAULT_FALLBACK_ERRORS
-from vidbyte.agents.fallback.policies import CostBudgetPolicy, LatencyPolicy
+from vidbyte.agents.fallback.policies import CostBudgetPolicy, LatencyPolicy, ToolCallLoopPolicy
 from vidbyte.agents.fallback.settings import AgentFallbackSettings
 from vidbyte.lib.dataclasses.agents import FallbackTransform
 
@@ -26,4 +27,5 @@ __all__ = [
     "DEFAULT_FALLBACK_ERRORS",
     "FallbackTransform",
     "LatencyPolicy",
+    "ToolCallLoopPolicy",
 ]

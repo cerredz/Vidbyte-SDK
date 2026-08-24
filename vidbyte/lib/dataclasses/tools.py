@@ -15,13 +15,19 @@ Architecture:
     - ToolCall: Runtime invocation payload.
     - ToolResult: Runtime response payload with success/error helpers.
     - ToolCallContext: Agent-local lifecycle context for tool calls.
+    - fingerprint_tool_call: Stable tool-name + arguments hash shared by callers
+      that need to detect repeated or identical tool calls.
 Relations:
     Re-exported by vidbyte.tools.types for existing SDK imports; bound to tools
-    by vidbyte.tools.activity.
+    by vidbyte.tools.activity. fingerprint_tool_call is used by
+    vidbyte.agents.settings.tool.ToolSettings and
+    vidbyte.agents.fallback.policies.ToolCallLoopPolicy.
 """
 
 from __future__ import annotations
 
+import hashlib
+import json
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import Enum
@@ -243,4 +249,15 @@ class ToolCallContext:
     def output(self) -> str | None:
         """Compatibility alias for context rendering."""
         return self.result.output if self.result else None
+
+
+def fingerprint_tool_call(tool_name: str, arguments: Mapping[str, Any], *, ignored_keys: frozenset[str] = frozenset()) -> str:
+    """Build a stable tool-name + arguments fingerprint used to detect repeated or identical calls."""
+    filtered = {key: value for key, value in arguments.items() if key not in ignored_keys}
+    try:
+        serialized = json.dumps(filtered, sort_keys=True, default=str)
+    except TypeError:
+        serialized = str(filtered)
+    digest = hashlib.sha256(serialized.encode()).hexdigest()[:16]
+    return f"{tool_name}:{digest}"
 
