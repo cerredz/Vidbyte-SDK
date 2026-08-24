@@ -251,6 +251,7 @@ class AgentRuntime:
                 iteration_count=iteration_count,
                 tokens_used=tokens_used,
                 contexts=call_contexts,
+                started_at=started_at,
             )
             if stop_result is not None:
                 return await self._finish_result(
@@ -1411,8 +1412,9 @@ class AgentRuntime:
         """Render the agent-loop-settings context block as 'current usage / configured limit' lines.
 
         Only the budgets that are both numerically calculable and tracked by the runtime loop are
-        injected (max_iterations, max_tokens, max_tool_calls). Settings without a live runtime
-        measurement (max_retries, timeout_seconds, allowed_tools, etc.) are intentionally excluded.
+        injected (max_iterations, max_tokens, max_tool_calls). Settings without a countable
+        iteration measurement (max_retries, allowed_tools, etc.) are intentionally excluded, and
+        timeout_seconds is enforced at the budget check but kept out of model-visible prompt text.
         Returns an empty string when no relevant budget is configured.
         """
         lines: list[str] = []
@@ -1729,7 +1731,9 @@ class AgentRuntime:
         iteration_count: int,
         tokens_used: int | None,
         contexts: Sequence[ToolCallContext],
+        started_at: float,
     ) -> AgentResult | None:
+        # Returns a stopped result when any countable budget or the wall-clock deadline is exhausted.
         if self.config.max_iterations is not None and iteration_count >= self.config.max_iterations:
             return self._stopped_result(
                 "Agent runtime stopped after reaching max_iterations.",
@@ -1750,6 +1754,14 @@ class AgentRuntime:
             return self._stopped_result(
                 "Agent runtime stopped after reaching max_tool_calls.",
                 stop_reason=AgentStopReason.MAX_TOOL_CALLS,
+                iteration_count=iteration_count,
+                tokens_used=tokens_used,
+                contexts=contexts,
+            )
+        if self.config.timeout_seconds is not None and self.middleware.clock() - started_at >= self.config.timeout_seconds:
+            return self._stopped_result(
+                "Agent runtime stopped after reaching timeout_seconds.",
+                stop_reason=AgentStopReason.TIMEOUT,
                 iteration_count=iteration_count,
                 tokens_used=tokens_used,
                 contexts=contexts,
