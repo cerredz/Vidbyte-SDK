@@ -732,9 +732,13 @@ compaction limits are set, `compaction_target_tokens` must be less than
 | `output_contracts`, `max_contract_rejections` | Finish floors and their retry budget |
 
 `to_runtime_config()` projects `max_iterations`, `max_tokens`, the effective
-`max_tool_calls`, the two compaction limits, and `tool_settings` to the direct
-runtime. If both `max_tool_calls` and `ToolSettings.max_calls` are supplied,
-they must agree.
+`max_tool_calls`, `timeout_seconds`, the two compaction limits, and
+`tool_settings` to the direct runtime. If both `max_tool_calls` and
+`ToolSettings.max_calls` are supplied, they must agree. When `timeout_seconds`
+is set, the runtime stops at the first iteration boundary past the deadline
+with `stop_reason` `"timeout"`; in-flight calls are not cancelled, so pair the
+loop deadline with the per-call HTTP timeout (`BaseAgent(timeout_seconds=...)`)
+and `ToolSettings.tool_timeout_seconds` for full coverage.
 
 `ToolSettings` provides `denied_tools`, `max_calls`, `max_calls_per_tool`,
 `result_max_chars`, `on_deny` (`"continue"` or `"abort"`),

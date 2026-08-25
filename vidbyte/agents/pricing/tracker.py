@@ -27,7 +27,12 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from typing import TYPE_CHECKING
 
-from vidbyte.agents.pricing.records import OperationUsageRecord, UsageRecord, UsageRollup
+from vidbyte.agents.pricing.records import (
+    OperationUsageRecord,
+    UsageRecord,
+    UsageRecordingIntegrity,
+    UsageRollup,
+)
 from vidbyte.lib.enums import ModelProvider
 from vidbyte.lib.registries.operation_pricing import OperationPricingRegistry
 from vidbyte.lib.registries.pricing import ModelPricingRegistry
@@ -45,6 +50,16 @@ class UsageTracker:
         self._operation_pricing = operation_pricing or OperationPricingRegistry.default()
         self._records: list[UsageRecord] = []
         self._operations: list[OperationUsageRecord] = []
+        self._recording_corrupted = False
+
+    def mark_recording_corrupted(self) -> None:
+        # Flags that a real usage record was lost to an internal metering error, not a legitimate skip.
+        self._recording_corrupted = True
+
+    @property
+    def recording_corrupted(self) -> bool:
+        # Returns whether any call this run swallowed an exception while recording usage.
+        return self._recording_corrupted
 
     def record_call(self, response: object) -> UsageRecord | None:
         # Parses, prices, and stores one model call; returns None when unusable.
@@ -53,7 +68,11 @@ class UsageTracker:
         provider = _as_provider(getattr(response, "provider", None))
         model = getattr(response, "model", "")
         payload = getattr(response, "usage", None)
-        usage = _parse_usage(provider, payload)
+        try:
+            usage = _parse_usage(provider, payload)
+        except Exception:
+            self.mark_recording_corrupted()
+            return None
         if usage is None or provider is None:
             return None
         record = UsageRecord(
@@ -102,12 +121,16 @@ class UsageTracker:
             cost_complete=bool(records or operations) and all(cost is not None for cost in token_costs + operation_costs),
             operations=operations,
             operation_count=len(operations),
+            recording_integrity=(
+                UsageRecordingIntegrity.CORRUPTED if self._recording_corrupted else UsageRecordingIntegrity.INTACT
+            ),
         )
 
     def reset(self) -> None:
         # Clears both the model-call and operation ledgers for a fresh run.
         self._records.clear()
         self._operations.clear()
+        self._recording_corrupted = False
 
     @property
     def records(self) -> tuple[UsageRecord, ...]:
@@ -121,17 +144,15 @@ class UsageTracker:
 
 
 def _parse_usage(provider: ModelProvider | None, payload: object) -> ProviderUsage | None:
-    # Resolves the provider's usage parser off the enum and applies it defensively;
-    # never raises, returning None for an unknown provider or an unusable payload.
+    # Resolves the provider's usage parser off the enum; returns None for an unknown
+    # provider or an unusable payload. A real parse failure propagates to record_call,
+    # which is the one caller positioned to flag it rather than lose it silently.
     if provider is None or not isinstance(payload, Mapping):
         return None
     usage_cls = provider.usage_class()
     if usage_cls is None:
         return None
-    try:
-        return usage_cls.from_usage_payload(payload)
-    except Exception:
-        return None
+    return usage_cls.from_usage_payload(payload)
 
 
 def _as_provider(value: object) -> ModelProvider | None:

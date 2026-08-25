@@ -48,6 +48,27 @@ reply = await agent.arun("Summarize user 42.")
 print(reply.content)
 ```
 
+For a cooperative, bounded wait, add the built-in to the agent that should
+pause and choose its developer-owned maximum:
+
+```python
+from vidbyte.tools.builtins import PauseAgentTool
+
+agent = Agent(
+    name="paced-agent",
+    system_prompt="Use the pause tool when pacing is part of the workflow.",
+    tools=[PauseAgentTool(max_seconds=30)],
+)
+
+await agent.pause(2)  # Direct async API; does not block unrelated tasks.
+```
+
+The model-facing `pause_agent` tool pauses the agent it is attached to. A parent
+agent can reach a target agent through the existing `target_agent.as_tool()`
+composition path; the tool does not accept an arbitrary agent id. This is a
+timed cooperative wait, not durable pause/resume state or external run
+cancellation.
+
 Use `AgentInput` when a single run needs additional metadata or context items:
 
 ```python
