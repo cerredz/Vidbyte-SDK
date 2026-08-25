@@ -30,7 +30,7 @@ from vidbyte.context.manager import ContextManager
 from vidbyte.context.window import ContextWindow, ContextWindowAlgorithm
 from vidbyte.context.primitives import ContextItem
 from vidbyte.context.handoff import Handoff, MinimalHandoff
-from vidbyte.lib.dataclasses.agents import AgentForkSettings, AgentMetadata, AgentRunnerConfig, AgentRuntimeConfig, FallbackModel
+from vidbyte.lib.dataclasses.agents import AgentForkSettings, AgentMetadata, AgentRunnerConfig, AgentRuntimeConfig, FallbackModel, PauseDuration
 from vidbyte.lib.dataclasses.runner import RunnerHandle
 from vidbyte.lib.dataclasses.sessions import SESSION_SCHEMA_VERSION, RunState
 from vidbyte.lib.dataclasses.strategies import AgentResult
@@ -706,11 +706,8 @@ class BaseAgent(McpAttachableMixin):
 
     async def pause(self, seconds: int) -> None:
         # Cooperatively yield for a validated whole-number delay without blocking other agent tasks.
-        if isinstance(seconds, bool) or not isinstance(seconds, int):
-            raise ValueError("BaseAgent.pause() seconds must be an integer.")
-        if seconds < 0:
-            raise ValueError("BaseAgent.pause() seconds must be non-negative.")
-        await asyncio.sleep(seconds)
+        duration = PauseDuration(seconds=seconds)
+        await asyncio.sleep(duration.seconds)
 
     def run(self, message: str | AgentInput, **options: Any) -> AgentMessage:
         """Run the agent from synchronous code."""

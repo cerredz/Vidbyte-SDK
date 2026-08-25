@@ -26,13 +26,18 @@ ARCHITECTURE NOTE:
 FUNCTION INVENTORY:
     ``PauseAgentTool`` -> ``BaseTool`` with ``spec()``, ``bind_agent()``,
     ``clone_for_fork()``, and ``execute()`` contracts described by the class
-    body. Validation helpers are private implementation details. No
-    feature-specific test file is added by the deterministic-agent-pause design;
-    verify through the repository CI gate.
+    body. The base whole-number/non-negative check is owned by
+    ``vidbyte.lib.dataclasses.agents.PauseDuration``, the same contract
+    ``BaseAgent.pause()`` validates against; this file only layers its
+    configured ``max_seconds`` cap on top. No feature-specific test file is
+    added by the deterministic-agent-pause design; verify through the
+    repository CI gate.
 
 COMMON MODIFICATION PATTERNS:
     Add model-facing arguments in ``spec()`` and ``_input_schema()`` together.
-    Preserve strict integer validation and the configured maximum. If the tool's
+    Preserve strict integer validation and the configured maximum; keep the
+    shared ``PauseDuration`` dataclass as the single source of truth for the
+    base validation rule instead of duplicating it here. If the tool's
     ownership or binding model changes, update ``BaseAgent._bind_agent_tool_context``
     and ``docs/design/deterministic-agent-pause.md`` in the same change.
 
@@ -72,6 +77,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from vidbyte.lib.dataclasses.agents import PauseDuration
 from vidbyte.tools.base import BaseTool
 from vidbyte.tools.types import ToolCall, ToolParameter, ToolPermission, ToolResult, ToolSpec
 
@@ -161,14 +167,14 @@ class PauseAgentTool(BaseTool):
         return value
 
     def _normalize_seconds(self, value: object) -> int:
-        # Validate one model-provided duration against the tool's inclusive bounds.
-        if isinstance(value, bool) or not isinstance(value, int):
-            raise ValueError("pause_agent 'seconds' must be an integer.")
-        if value < _MIN_SECONDS:
-            raise ValueError("pause_agent 'seconds' must be non-negative.")
-        if value > self._max_seconds:
+        # Validate the whole-number delay via the shared dataclass, then enforce this tool's cap.
+        try:
+            duration = PauseDuration(seconds=value)  # type: ignore[arg-type]
+        except ValueError:
+            raise ValueError("pause_agent 'seconds' must be a non-negative integer.") from None
+        if duration.seconds > self._max_seconds:
             raise ValueError(f"pause_agent 'seconds' must not exceed {self._max_seconds}.")
-        return value
+        return duration.seconds
 
 
 __all__ = ["PauseAgentTool"]

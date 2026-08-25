@@ -114,17 +114,17 @@ async def pause(self, seconds: int) -> None
 
 #### Logic / Algorithm
 
-1. Reject `bool` and values that are not `int`.
-2. Reject negative integers.
-3. Await `asyncio.sleep(seconds)`.
-4. Return `None` after the sleep completes.
+1. Construct `vidbyte.lib.dataclasses.agents.PauseDuration(seconds=seconds)`, which rejects `bool` and non-`int` values and rejects negative integers in its `__post_init__`.
+2. Await `asyncio.sleep(duration.seconds)`.
+3. Return `None` after the sleep completes.
 
 #### Edge Cases & Error Handling
 
 - `seconds=0` is valid and yields control once through `asyncio.sleep(0)`.
 - A boolean is rejected even though Python makes `bool` an `int` subclass.
 - `asyncio.CancelledError` is not caught, so caller cancellation propagates.
-- The method does not impose the built-in's model-facing maximum; direct application calls can use any non-negative integer accepted by the API.
+- The method does not impose the built-in's model-facing maximum; direct application calls can use any non-negative integer accepted by `PauseDuration`.
+- The validation itself lives on `PauseDuration`, not inline in `pause()`, so `BaseAgent` and `PauseAgentTool` share one validated contract instead of two independent implementations.
 
 ### 6.2 PauseAgentTool
 
@@ -160,14 +160,14 @@ permission: safe
 2. Accept a live agent through `bind_agent()` when `BaseAgent` binds its tools.
 3. Return an unbound clone with the same cap from `clone_for_fork()` so a child fork cannot steal the parent's binding.
 4. Return a tool error if execution occurs before binding.
-5. Validate that `seconds` is a non-boolean integer in the inclusive range `0..max_seconds`.
+5. Validate `seconds` by constructing `PauseDuration(seconds=seconds)` (the same shared dataclass `BaseAgent.pause()` validates against), then reject values greater than `max_seconds`.
 6. Await `self._agent.pause(seconds)`.
 7. Return `ToolResult.success` with a human-readable confirmation and `metadata={"seconds": seconds}`.
 
 #### Edge Cases & Error Handling
 
 - Missing `seconds` is handled by the existing `BaseTool.validate_call()` path; direct `execute()` validation also returns a tool error for malformed input.
-- Booleans, strings, floats, and negative integers return `ToolResult.error`.
+- Booleans, strings, floats, and negative integers return `ToolResult.error`, sourced from `PauseDuration`'s validation rather than a duplicated check in this file.
 - Values above `max_seconds` return `ToolResult.error` without sleeping.
 - A non-positive `max_seconds` is rejected with `ValueError` at construction.
 - Forked agents receive a fresh unbound tool instance; the parent and child keep independent bindings.
@@ -252,6 +252,7 @@ Complete list of every file that will be created, modified, or deleted:
 |--------|-----------|--------|
 | CREATE | `docs/design/deterministic-agent-pause.md` | Source-of-truth design and implementation contract |
 | CREATE | `vidbyte/tools/builtins/pause.py` | Agent-bound `pause_agent` built-in implementation |
+| MODIFY | `vidbyte/lib/dataclasses/agents.py` | Add `PauseDuration`, the validated dataclass shared by `BaseAgent.pause()` and `PauseAgentTool` |
 | MODIFY | `vidbyte/agents/base.py` | Add inherited async pause API and bind the new agent-bound tool |
 | MODIFY | `vidbyte/tools/builtins/__init__.py` | Public export and declarative component discovery |
 | MODIFY | `vidbyte/agents/README.md` | Document direct and parent-to-target pause usage |
