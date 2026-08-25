@@ -175,7 +175,7 @@ agent = Agent(
   property of which model happens to be active, so it takes one `window_size` and
   one `repeat_threshold`, not an array. `ignored_argument_keys` can exclude fields
   that legitimately vary between otherwise-identical calls.
-- All three report through the same `AgentResult.metadata["fallback"]` shape and
+- All four policy triggers report through the same `AgentResult.metadata["fallback"]` shape and
   `agent.fallback` span as an error-triggered switch; `error_type` carries a
   reason string (e.g. `"cost_budget_exceeded"`, `"tool_call_loop_detected"`)
   instead of an exception name.
@@ -186,16 +186,13 @@ agent = Agent(
   `2/4 = 0.5`, not `0.2` — so read the ceiling as "how much retry tax am I
   willing to pay" rather than the provider's raw error rate. The ratio is not
   trusted until `min_attempts` (default 3) attempts have accumulated.
-- All three report through the same `AgentResult.metadata["fallback"]` shape and
-  `agent.fallback` span as an error-triggered switch; `error_type` carries a
-  reason string (e.g. `"cost_budget_exceeded"`, `"error_rate_exceeded"`) instead
-  of an exception name.
 - All four policy triggers report through the same `AgentResult.metadata["fallback"]`
   shape and `agent.fallback` span; `error_type` carries a reason string instead of
-  an exception name.
+  an exception name (for example, `"cost_budget_exceeded"` or
+  `"error_rate_exceeded"`).
 - `fallback_on` itself stays chain-wide, not per-hop — every hop shares the same
   set of exception types that justify a switch.
-- All three policies are scoped to the tool-using (linear) runtime loop; non-text
+- All four policy triggers are scoped to the tool-using (linear) runtime loop; non-text
   runners (image, audio, video, embedding) don't check them.
 
 ## Durable Sessions

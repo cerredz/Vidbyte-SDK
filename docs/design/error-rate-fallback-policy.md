@@ -19,8 +19,8 @@ This adds `ErrorRatePolicy`, a third per-hop fallback policy stacked directly on
 
 - Add `ErrorRatePolicy(max_error_ratio_by_hop: Sequence[float], *, min_attempts: int = 3)` to `vidbyte/agents/fallback/policies.py`, exposing `hop_values()` (for the existing generic validation) and `error_ratio_for(index)` (mirroring `budget_for`/`deadline_for`).
 - Add `AgentFallback.advance_after_error_rate(index, *, attempts, failures)` in `vidbyte/agents/fallback/chain.py`, mirroring `advance_after_success`'s guard shape.
-- Record cumulative (attempts, failures) per chain index on the `AgentRuntime` instance — the only mutable new state — at the model-call site inside `_invoke_with_middleware`, where every invoke attempt (including retries) is visible.
-- Wire a new `AgentRuntime._error_rate_fallback_transition(...)` into the same top-of-iteration checkpoint `_cost_fallback_transition` already occupies in `arun`, sequential after the cost check.
+- Give each runtime a run-scoped `AgentFallback` view whose `fallback_stats` dictionary records cumulative (attempts, failures) per chain index at the model-call site, where every invoke attempt (including retries) is visible.
+- Let `AgentFallback.should_fallback(...)` coordinate exception, cost, error-rate, and loop-policy decisions; keep `AgentRuntime.should_fallback(...)` as a thin delegation point and one generic transform application path.
 - Reuse the existing `policy_attempt_record`/`result_metadata`/`_publish_fallback_metadata`/`_record_fallback_span` machinery verbatim, with reason string `"error_rate_exceeded"` — no new metadata shape, no new span kind.
 - Ship as a stacked commit on `feat/agent-fallback-policies`, exported from the same two `__init__.py` files and documented in the same README section, with a base branch of `feat/agent-fallback-policies` (not `main`).
 
@@ -46,12 +46,12 @@ This is a direct continuation of the fallback-policy brainstorm that produced PR
 ### Current state (verified in this repo, this session, against the actual unmerged branch — not the PR description)
 
 - PR #339 (`feat/agent-fallback-policies`, base `main`, 5 commits, unmerged) moved the fallback subsystem into `vidbyte/agents/fallback/` (`chain.py`, `settings.py`, `policies.py`, `__init__.py`) and added `LatencyPolicy` and `CostBudgetPolicy`.
-- `vidbyte/agents/fallback/policies.py` (on the branch) defines both policies as plain classes exposing `hop_values() -> tuple[float, ...]` plus one policy-specific getter (`deadline_for`/`budget_for`) returning the value for a chain index or `None` past the array. Neither validates its own array (constructed before the chain length is known); all array validation is centralized in `AgentFallbackSettings._validate_policy_hop_values`, which duck-types on `hop_values()` and requires `len(values) == len(self.models)` and positive non-bool numbers per element — read directly from the actual (unmerged) file, this needs zero changes for a third policy class.
-- `vidbyte/agents/fallback/chain.py`'s `AgentFallback` folds over `self.policies` via `_first_policy_value(self, index, attr)` (first non-`None` result wins) — the pattern `error_ratio_for` would mirror. The chain is immutable and agent-owned (`BaseAgent.__init__` builds it once via `AgentFallback.from_spec`); the only mutable fallback state is loop-local (`fallback_index`, `fallback_attempts`, `fallback_errors` in `AgentRuntime.arun`), which is what keeps the chain safe under concurrent `arun_sequentially`/`asyncio.gather` use. **Mutable counters therefore must not live on the chain.**
-- `AgentRuntime` is constructed fresh per run by `BaseAgent._runtime()` (verified in `vidbyte/agents/base.py`: `return runtime_cls(...)` inside `_runtime()`, called per `arun`/`generate_reply`), and receives `fallback=self.fallback` (the shared chain) and `usage_tracker=self._usage_tracker` (agent-owned but `reset()` per run). Instance state on `AgentRuntime` is therefore per-run state — the safe home for the new tally.
-- `AgentRuntime._invoke_with_middleware` (`runtime.py`, lines 687-782 on the branch) is the only place every invoke attempt is visible: a `while True` retry loop where `before_model_call` middleware can decide RETRY. Success returns at line 743; a provider error enters `except Exception as exc:` (line 744), gets offered to `on_model_error` middleware (which may RETRY → `continue`), and only a non-retryable raise escapes to the outer loop's `except BaseException` and `_fallback_transition`. **Failures a retry recovers never reach `_fallback_transition` — they are recorded nowhere today.** This is the gap the policy exists to close and the reason the tally must be recorded inside `_invoke_with_middleware`, not in the error path.
-- The latency wrap added by PR #339 already threads `timeout_seconds=self.fallback.deadline_for(fallback_index)` into `_invoke_with_middleware` from the call site at `runtime.py:360` — the precedent for passing fallback-chain state (`fallback_index`) into this function. `asyncio.TimeoutError` is `TimeoutError` (aliased since 3.11), which is in `DEFAULT_FALLBACK_ERRORS` and so counts as a model error — a recovered latency timeout counts toward the error ratio, which is desired (timeouts are part of the stated flaky profile).
-- The top-of-iteration checkpoint (`runtime.py:270-286`) is a single `if self.fallback is not None and iteration_count > 0:` block that calls `_cost_fallback_transition` and, on a non-`None` result, reassigns `handle`, `provider`, `tool_schemas`, `messages`, `fallback_index`, and calls `_publish_fallback_metadata`. This is the exact insertion point for a second, sequential check. The token-budget design doc (`docs/design/token-budget-fallback-policy.md`, unmerged design doc on `main`) establishes the same insertion pattern for a second proactive check; this PR stacks on #339 directly and will trivially conflict with that doc's future implementation in the checkpoint block, `policies.py`, exports, and README — both blocks are purely additive, so the conflict is mechanical.
+- `vidbyte/agents/fallback/policies.py` (on the branch) defines the per-hop policies as plain classes exposing `hop_values() -> tuple[float, ...]` plus one policy-specific getter (`deadline_for`/`budget_for`/`error_ratio_for`) returning the value for a chain index or `None` past the array. Neither validates its own array (constructed before the chain length is known); all array validation is centralized in `AgentFallbackSettings._validate_policy_hop_values`, which duck-types on `hop_values()` and requires `len(values) == len(self.models)` and positive non-bool numbers per element — read directly from the actual (unmerged) file, this needs zero changes for a third policy class.
+- `vidbyte/agents/fallback/chain.py`'s `AgentFallback` folds over `self.policies` via `_first_policy_value(self, index, attr)` (first non-`None` result wins) and now exposes one `should_fallback(...)` coordinator for all proactive decisions. The agent-owned chain remains immutable configuration; `for_runtime()` creates a run-scoped view with isolated `fallback_stats` and shared runner caching, preserving concurrent `arun_sequentially`/`asyncio.gather` use.
+- `AgentRuntime` is constructed fresh per run by `BaseAgent._runtime()` (verified in `vidbyte/agents/base.py`: `return runtime_cls(...)` inside `_runtime()`, called per `arun`/`generate_reply`), receives the shared `fallback=self.fallback`, and creates `runtime.agent_fallback` through `for_runtime()`. The view owns per-run stats while the runtime only delegates decisions and applies transforms.
+- `AgentRuntime._invoke_with_middleware` (`runtime.py`, lines 687-782 on the branch) is the only place every invoke attempt is visible: a `while True` retry loop where `before_model_call` middleware can decide RETRY. Success returns at line 743; a provider error enters `except Exception as exc:` (line 744), gets offered to `on_model_error` middleware (which may RETRY → `continue`), and only a non-retryable raise escapes to the outer loop's `except BaseException` and `_fallback_transition`. **Failures a retry recovers never reach `_fallback_transition`; the runtime-scoped `AgentFallback.record_model_attempt` helper records them before middleware decides whether to retry.** This is the gap the policy exists to close and the reason the tally must be recorded inside `_invoke_with_middleware`, not in the error path.
+- The latency wrap added by PR #339 already threads `timeout_seconds=self.agent_fallback.deadline_for(fallback_index)` into `_invoke_with_middleware` from the call site at `runtime.py:360` — the precedent for passing fallback-chain state (`fallback_index`) into this function. `asyncio.TimeoutError` is `TimeoutError` (aliased since 3.11), which is in `DEFAULT_FALLBACK_ERRORS` and so counts as a model error — a recovered latency timeout counts toward the error ratio, which is desired (timeouts are part of the stated flaky profile).
+- The top-of-iteration checkpoint (`runtime.py:270-286`) now calls one generic `_fallback_transition` path. That path delegates to the runtime's `should_fallback(...)`, which delegates to `AgentFallback.should_fallback(...)`; the chain evaluates the cost, error-rate, and loop helpers in order, and the runtime applies each returned transform and publishes the existing metadata/span shape.
 - `vidbyte/agents/fallback/settings.py` (branch) validates policies generically; `AgentFallbackSettings.__init__` accepts `policies: Sequence[object] = ()` and `to_fallback()` passes it through. No changes needed.
 - `vidbyte/agents/__init__.py` and `vidbyte/agents/fallback/__init__.py` (branch) export `LatencyPolicy`/`CostBudgetPolicy` alphabetically in `__all__`; `ErrorRatePolicy` slots in between `DEFAULT_FALLBACK_ERRORS` and `FallbackTransform`.
 - `vidbyte/agents/README.md` (branch) has a "Fallback Policies" section (added in commit 5ffb860) with one bullet per policy and a combined example; the "Key Modules" entry for `policies.py` names both classes.
@@ -72,16 +72,16 @@ The branch tip `dcc4dbf` (PR #339 head) is the base this change is verified agai
 3. `ErrorRatePolicy.error_ratio_for(index)` returns the ceiling in effect at that chain index, or `None` past the configured array.
 4. `ErrorRatePolicy.__init__` raises `ConfigurationError` eagerly for a non-positive or out-of-range ratio (must be in `(0, 1]`) and for `min_attempts < 1` — the ratio domain is policy-specific and the generic settings validation cannot know it.
 5. `AgentFallback.advance_after_error_rate(index, *, attempts, failures)` returns the next chain index when `failures > 0`, the current index is not the last in the chain, `attempts >= min_attempts` for the first policy exposing `error_ratio_for` at that index, and `failures / attempts >= ceiling`; otherwise `None`.
-6. `AgentRuntime` records every invoke attempt against the current chain index in a per-run tally: success on a returned call, failure when the call raised and `self.fallback.is_model_error(exc)`. Recording is skipped entirely when no chain policy exposes `error_ratio_for` (precomputed `_error_rate_active` flag).
-7. `AgentRuntime._error_rate_fallback_transition(...)` checks the tally once per outer-loop iteration, after the first model call (`iteration_count > 0` guard, same as cost), reading the current index's `(attempts, failures)` and advancing through `advance_after_error_rate` when the ceiling has been crossed.
+6. The runtime-scoped `AgentFallback` records every invoke attempt against the current chain index: success on a returned call, failure when the call raised and `is_model_error(exc)` is true. Recording is skipped entirely when no chain policy exposes `error_ratio_for` (precomputed on the chain view).
+7. `AgentFallback.should_fallback(...)` checks the tally once per outer-loop iteration, after the first model call (`iteration_count > 0` guard, same as cost), reading the current index's `(attempts, failures)` and advancing through `advance_after_error_rate` when the ceiling has been crossed.
 8. A run whose current model's ratio has crossed its ceiling advances to the next model on the *next* iteration boundary — not mid-call — exactly like `CostBudgetPolicy` (a high ratio is not a call failure; the in-flight call is allowed to finish).
 9. The switch is recorded through the existing `AgentResult.metadata["fallback"]` shape, with `error_type: "error_rate_exceeded"`, and an `agent.fallback` span.
 10. An agent with no `ErrorRatePolicy` configured (the overwhelming majority) sees zero behavior change — no tally recording (flag-off), and `advance_after_error_rate` returns `None` over an empty/irrelevant policy tuple.
 
 ### Non-Functional Requirements
 
-- **Performance:** One dict get/set per invoke attempt when the policy is configured; zero when it isn't (`_error_rate_active` precomputed in `__init__`). One fold and one division per iteration at the checkpoint. No new I/O, no new provider calls.
-- **Concurrency:** The tally lives on `AgentRuntime`, constructed fresh per run by `BaseAgent._runtime()`; concurrent `arun_sequentially`/`asyncio.gather` on a shared agent each get their own instance, and the shared `AgentFallback` chain stays immutable. No new shared mutable state.
+- **Performance:** One dict get/set per invoke attempt when the policy is configured; zero when it isn't (`_error_rate_active` precomputed on the runtime-scoped chain view). One fold and one division per iteration at the checkpoint. No new I/O, no new provider calls.
+- **Concurrency:** The tally lives on the runtime-scoped `AgentFallback` view, constructed fresh per run by `BaseAgent._runtime()`; concurrent `arun_sequentially`/`asyncio.gather` on a shared agent each get isolated stats, while the shared chain configuration and runner cache remain reusable. No cross-run mutable policy state.
 - **Observability:** Reuses the existing `agent.fallback` span and `AgentResult.metadata["fallback"]` shape — an error-rate switch is visible in exactly the same place a cost- or error-triggered one is, distinguished only by `error_type`.
 - **Reliability:** Never raises on its own — `advance_after_error_rate` degrades to `None` when `failures == 0`, when the chain has nowhere left to go, or when no policy exposes a ceiling at the current index. A `failures > 0` precondition guarantees `attempts >= 1`, so the ratio division can never divide by zero.
 - **Backward compatibility:** Purely additive. No existing public signature changes; the one new constructor parameter path this touches (`policies=[ErrorRatePolicy(...)]`) already exists as of PR #339 and already accepts an arbitrary sequence.
@@ -90,7 +90,7 @@ The branch tip `dcc4dbf` (PR #339 head) is the base this change is verified agai
 
 ## 5. High-Level Design
 
-`ErrorRatePolicy` is data (an immutable per-hop ceiling array plus a warm-up floor); it does not itself watch anything. Watching happens at two places in `AgentRuntime`: **counting** at the model-call site inside `_invoke_with_middleware` (the only place every attempt, retried or not, is visible), and **checking** once per outer-loop iteration at the same checkpoint `CostBudgetPolicy` established. The count is a per-run tally keyed by chain index; the check asks the chain "given the attempts and failures on the current model so far, should we already be on a different model?" — and the chain answers by folding over its policies exactly as it does for `budget_for`.
+`ErrorRatePolicy` is data (an immutable per-hop ceiling array plus a warm-up floor); it does not itself watch anything. The runtime-scoped `AgentFallback` view owns the `fallback_stats` dictionary and exposes the coordination boundary. **Counting** happens at the model-call site inside `_invoke_with_middleware` (the only place every attempt, retried or not, is visible), while **checking** happens once per outer-loop iteration through `AgentRuntime.should_fallback(...)`, which delegates to `AgentFallback.should_fallback(...)`. The chain asks its policy helpers, in order, "given the current run's state, should we already be on a different model?"; the runtime only applies the returned transforms and emits existing observability data.
 
 ```
 [arun outer loop, iteration N]
@@ -98,25 +98,23 @@ The branch tip `dcc4dbf` (PR #339 head) is the base this change is verified agai
         v
   _invoke_with_middleware(handle, ..., fallback_index=i, timeout_seconds=deadline_for(i))
         |   every attempt recorded against index i:
-        |     invoke returns          -> tally[i].attempts += 1
-        |     invoke raises, is_model_error -> tally[i].attempts += 1, tally[i].failures += 1
+        |     invoke returns          -> agent_fallback.fallback_stats[i].attempts += 1
+        |     invoke raises, is_model_error -> attempts += 1, failures += 1
         |   (retried failures are counted; the RETRY decision does not change the count)
         |
         v
   (top-of-next-iteration checkpoint, iteration_count > 0)
         |
-        +--> _cost_fallback_transition(index=fallback_index)          [existing]
-        |         reads usage_tracker.rollup().cost_usd
-        |
-        +--> _error_rate_fallback_transition(index=fallback_index)    <-- NEW
-        |         reads tally[fallback_index] = (attempts, failures)
-        |         -> AgentFallback.advance_after_error_rate -> maybe advance fallback_index
+        +--> AgentRuntime.should_fallback(...)                        [one runtime boundary]
+                  -> AgentFallback.should_fallback(...)
+                  -> cost / error-rate / loop policy helpers
+                  -> ordered model-switch decisions
         |
         v
   next model call, at whichever fallback_index survived both checks
 ```
 
-The two checks are independent and sequential, not merged: the error-rate check runs against whatever `fallback_index` the cost check left behind, so a single iteration that simultaneously blows a cost ceiling and an error-rate ceiling can cascade the chain forward by more than one hop in one iteration boundary — the same documented cascade semantics the token-budget doc establishes for a second proactive check. The error-rate advance uses the identical `transform` → reassign → `policy_attempt_record` → span → metadata sequence the error path and the cost path both use; the only genuinely new code is the tally recording (one method, two call sites) and the ratio decision (one chain method).
+The checks remain independent and sequential, but the ordering now lives in `AgentFallback.should_fallback(...)`: the error-rate check runs against whatever index the cost check left behind, and a single boundary can return more than one ordered switch. The runtime applies each decision through one generic transform path, using the existing `policy_attempt_record`/`attempt_record`, span, and metadata machinery.
 
 ---
 
@@ -227,71 +225,39 @@ class AgentFallback:
 
 #### What it does (changes only)
 
-Adds the per-run attempt tally, records it at the model-call site, and adds the second proactive check to the existing top-of-iteration checkpoint.
+Creates a run-scoped `AgentFallback` view, records attempts through its helper at the
+model-call site, and routes all fallback decisions through one runtime boundary.
 
 #### Interface / API
 
 ```python
-# in AgentRuntime.__init__ (after self.fallback = fallback):
-self._error_rate_tally: dict[int, tuple[int, int]] = {}
-self._error_rate_active = bool(fallback) and any(callable(getattr(policy, "error_ratio_for", None)) for policy in fallback.policies)
+# in AgentRuntime.__init__:
+self.agent_fallback = fallback.for_runtime() if fallback is not None else None
 
-def _record_error_rate_attempt(self, index: int, failed: bool) -> None:
-    # Counts one invoke attempt on the chain index, so the ratio is cumulative per model since the run reached it.
+def should_fallback(self, index: int, *, error: BaseException | None = None,
+                    cost_usd: float | None = None,
+                    call_contexts: Sequence[ToolCallContext] = ()) -> tuple[tuple[int, str], ...]:
+    # Delegates all trigger evaluation to the run-scoped AgentFallback.
     ...
 
 async def _invoke_with_middleware(self, handle: RunnerHandle, message: str, call_options: Mapping[str, Any], *, context: BaseAgentContext, iteration_count: int, model_call_count: int, call_contexts: Sequence[ToolCallContext], tokens_used: int | None, started_at: float, metadata: Mapping[str, Any], run_state: dict[type, Any] | None = None, trace_context: SpanContext | None = None, compaction_count: int = 0, timeout_seconds: float | None = None, fallback_index: int = 0) -> tuple[object | AgentResult, int, int]: ...
 
-def _error_rate_fallback_transition(self, *, index: int, handle: RunnerHandle, provider: str, messages: list[dict[str, Any]], attempts: list[dict[str, str]], parent_span: SpanContext | None) -> "FallbackTransform | None": ...
+def _fallback_transition(self, error: BaseException | None = None, *, index: int, handle: RunnerHandle, provider: str, messages: list[dict[str, Any]], attempts: list[dict[str, str]], errors: list[BaseException], parent_span: SpanContext | None, cost_usd: float | None = None, call_contexts: Sequence[ToolCallContext] = ()) -> "FallbackTransform | None": ...
 ```
 
 #### Logic / Algorithm
 
-1. `__init__` gains the two lines above. `_error_rate_active` is precomputed so unconfigured runs pay one boolean check per attempt, not a policy fold.
-2. In `_invoke_with_middleware`, the recording sites (lines 736-782 on the branch):
-   - Success — immediately after the invoke returns (inside the existing `try`, before `extract_text`): `if self._error_rate_active: self._record_error_rate_attempt(fallback_index, failed=False)`.
-   - Failure — at the top of the existing `except Exception as exc:` block (before `on_model_error`, so the middleware RETRY decision cannot skip the count): `if self._error_rate_active and self.fallback is not None and self.fallback.is_model_error(exc): self._record_error_rate_attempt(fallback_index, failed=True)`.
+1. `__init__` creates `self.agent_fallback = fallback.for_runtime()` when a chain exists. The view has its own `fallback_stats` dictionary and reuses the shared chain's runner cache; `self.fallback` remains an alias for compatibility.
+2. In `_invoke_with_middleware`, the runtime calls `agent_fallback.record_model_attempt(fallback_index, failed=False)` immediately after a provider call returns, and calls it with `failed=True` at the top of the existing `except Exception as exc:` block when `agent_fallback.is_model_error(exc)` is true. The middleware RETRY decision therefore cannot skip a count.
    - `except BaseException` (cancellation path) is untouched — `CancelledError` never enters the counting block.
-3. The call site in `arun` (line 360) gains `fallback_index=fallback_index` next to the existing `timeout_seconds=self.fallback.deadline_for(fallback_index) ...`.
-4. In `arun`'s checkpoint block (lines 270-286), after the cost-transition block, a second sequential block:
-   ```python
-   error_rate_transition = self._error_rate_fallback_transition(
-       index=fallback_index,
-       handle=handle,
-       provider=provider,
-       messages=messages,
-       attempts=fallback_attempts,
-       parent_span=trace_context,
-   )
-   if error_rate_transition is not None:
-       handle, provider = error_rate_transition.handle, error_rate_transition.provider
-       tool_schemas, messages = error_rate_transition.tool_schemas, error_rate_transition.messages
-       fallback_index = error_rate_transition.index
-       self._publish_fallback_metadata(
-           run_state,
-           self.fallback.result_metadata(fallback_attempts, context_reset=error_rate_transition.context_reset),
-       )
-   ```
-   The block deliberately reads `fallback_index` after the cost block may have reassigned it — cascade semantics, see Section 5.
-5. `_error_rate_fallback_transition` mirrors `_cost_fallback_transition`'s body exactly:
-   ```python
-   def _error_rate_fallback_transition(self, *, index: int, handle: RunnerHandle, provider: str, messages: list[dict[str, Any]], attempts: list[dict[str, str]], parent_span: SpanContext | None) -> "FallbackTransform | None":
-       # Returns rebuilt state when an error-rate policy elects to skip the current model, or None to keep it.
-       counted_attempts, failures = self._error_rate_tally.get(index, (0, 0))
-       next_index = self.fallback.advance_after_error_rate(index, attempts=counted_attempts, failures=failures)
-       if next_index is None:
-           return None
-       record = self.fallback.policy_attempt_record(index, next_index, "error_rate_exceeded")
-       attempts.append(record)
-       transition = self.fallback.transform(handle, provider, self.tools, messages, next_index)
-       self._record_fallback_span(record, transition.context_reset, parent_span)
-       return transition
-   ```
+3. The call site in `arun` passes `fallback_index=fallback_index` next to the existing deadline lookup.
+4. At the top-of-iteration checkpoint, the runtime calls one `_fallback_transition(...)` method with cost and tool-call context. That method calls the runtime `should_fallback(...)` delegator, applies every ordered `AgentFallback.should_fallback(...)` decision, and publishes the existing metadata after the final transform.
+5. The same `_fallback_transition(...)` method handles raised provider errors. For exception decisions it appends the existing error record and error list; for policy decisions it appends the policy reason. This keeps spans, transforms, and result metadata in one runtime path without adding a policy-specific transition method.
 
 #### Edge Cases & Error Handling
 
-- `self.fallback is None`: `_error_rate_active` is `False`, so the recording sites skip and the checkpoint block is already inside `if self.fallback is not None` — zero behavior change, matching today.
-- Both `_cost_fallback_transition` and `_error_rate_fallback_transition` return non-`None` in the same iteration: handled by sequential reassignment (Section 5) — a documented cascade, not a bug.
+- `self.agent_fallback is None`: no recording or checkpoint occurs — zero behavior change, matching today.
+- Multiple policy triggers return decisions in the same iteration: `AgentFallback.should_fallback(...)` orders them, and the single runtime application loop preserves the documented cascade semantics.
 - Tally entries for an index the run left are never read again (the chain never returns to an index), so no reset is needed anywhere — the design decision that removes the entire "forgot to reset on transition" bug class.
 - A `wait_for` timeout that a retry recovers: recorded as a failure (it is a `TimeoutError` model error) — intended; timeouts are part of the flaky profile this policy detects.
 - Middleware aborts (`ABORT_RUN` decisions) and `before_model_call` non-CONTINUE decisions return without invoking the model — no attempt recorded, consistent with "attempts measure provider calls made".
@@ -333,7 +299,7 @@ Extends the "Fallback Policies" section PR #339 added, with a third bullet and a
 
 ## 7. Data Model Changes
 
-N/A — no database, no persisted schema. `AgentFallbackSettings` and `AgentFallback` are in-process Python objects; the new tally is a per-run `dict[int, tuple[int, int]]` on `AgentRuntime` that lives and dies with the run. `RunState`/`export_state`/`restore` do not serialize the fallback chain today (a pre-existing, unrelated non-goal from the original fallback design), and this change does not alter that.
+N/A — no database, no persisted schema. `AgentFallbackSettings` and `AgentFallback` are in-process Python objects; the new tally is a per-run `dict[int, dict[str, int]]` on the runtime-scoped `AgentFallback` view that lives and dies with the run. `RunState`/`export_state`/`restore` do not serialize the fallback chain today (a pre-existing, unrelated non-goal from the original fallback design), and this change does not alter that.
 
 ---
 
@@ -348,8 +314,8 @@ N/A — no HTTP endpoints. The only new public names are `ErrorRatePolicy` and i
 | Action | File Path | Reason |
 |--------|-----------|--------|
 | MODIFY | `vidbyte/agents/fallback/policies.py` | Add `ErrorRatePolicy`; update module docstring and `__all__` |
-| MODIFY | `vidbyte/agents/fallback/chain.py` | Add `advance_after_error_rate` |
-| MODIFY | `vidbyte/agents/runtime.py` | Add tally + `_error_rate_active` to `__init__`; `_record_error_rate_attempt`; recording at the invoke site; `_error_rate_fallback_transition`; checkpoint block; `fallback_index` param on `_invoke_with_middleware` |
+| MODIFY | `vidbyte/agents/fallback/chain.py` | Add run-scoped stats, `record_model_attempt`, `for_runtime`, `advance_after_error_rate`, and `should_fallback` |
+| MODIFY | `vidbyte/agents/runtime.py` | Create the run-scoped fallback view; delegate `should_fallback`; record attempts at the invoke site; apply all decisions through one generic transition path; pass `fallback_index` to `_invoke_with_middleware` |
 | MODIFY | `vidbyte/agents/fallback/__init__.py` | Export `ErrorRatePolicy`; update docstring |
 | MODIFY | `vidbyte/agents/__init__.py` | Export `ErrorRatePolicy`; update docstring |
 | MODIFY | `vidbyte/agents/README.md` | Document `ErrorRatePolicy` |
@@ -366,7 +332,7 @@ N/A — no new dependencies. Reuses the existing `AgentFallback`/`AgentFallbackS
 
 ## 11. Rollout & Deployment
 
-- No feature flag: `ErrorRatePolicy` is opt-in by construction, same as `LatencyPolicy`/`CostBudgetPolicy` — an agent that doesn't declare it sees zero behavior change (Section 6.3's `_error_rate_active` flag-off).
+- No feature flag: `ErrorRatePolicy` is opt-in by construction, same as `LatencyPolicy`/`CostBudgetPolicy` — an agent that doesn't declare it sees zero behavior change (the runtime-scoped chain's `_error_rate_active` flag stays off).
 - **Base branch is `feat/agent-fallback-policies` (PR #339), not `main`.** This PR is a stack: it cannot merge before #339 does, and its diff will only show the error-rate-specific changes as long as #339 remains unmerged. If #339 merges first, this branch should be rebased onto `main` before this PR is finalized.
 - **Interaction with the token-budget design doc** (`docs/design/token-budget-fallback-policy.md`, on `main`, not yet implemented): both add a sequential check to the same checkpoint block and both touch `policies.py`, exports, and README. Recommended stack order: #339 → token-budget → error-rate, or error-rate → token-budget; either order works because each block is purely additive, but the order should be settled before the second one is implemented so the rebase is mechanical.
 - Not a breaking change. Purely additive exports and one new optional constructor argument path (`policies=[ErrorRatePolicy(...)]`), which already exists as an accepted shape.
@@ -390,10 +356,10 @@ N/A — no new dependencies. Reuses the existing `AgentFallback`/`AgentFallbackS
 - What: Reuse the existing `fallback_errors`/`_fallback_transition` path as the failure signal — no new counting code.
 - Why rejected: failures a retry recovers never reach that path, and those recovered failures are *exactly* the retry tax this policy exists to detect. A 1-in-5-flaky provider whose retries usually succeed would show a ratio of zero and the policy would never fire — it would be a policy that does nothing in the scenario it exists for. The counting must happen inside `_invoke_with_middleware`.
 
-### Alternative 2: Mutable counters on `AgentFallback`
+### Alternative 2: Mutable counters on the shared `AgentFallback`
 
-- What: Store `{index: (attempts, failures)}` on the chain object.
-- Why rejected: `AgentFallback` is agent-owned and immutable by design (PR #339's concurrency guarantee — the chain is shared across concurrent runs, with only loop-local mutable state). Counters there would leak across runs (violating the within-run requirement) and break the concurrency claim. `AgentRuntime` is constructed fresh per run and is already the home of per-run fallback state (`fallback_attempts`, `fallback_errors` loop locals live in its `arun`).
+- What: Store `{index: (attempts, failures)}` directly on the agent-owned chain object.
+- Why rejected: the shared configuration chain is reused across concurrent runs. Instead, `AgentFallback.for_runtime()` creates a fresh view whose `fallback_stats` belongs to one run; the chain still owns the helper and policy coordination without leaking state across runs.
 
 ### Alternative 3: Per-hop compound values `(min_attempts, max_ratio)` tuples
 
