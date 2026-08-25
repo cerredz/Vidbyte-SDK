@@ -1,20 +1,31 @@
 """Context Protocol Header
 
-Description:
-    Defines the internal direct execution runtime for Vidbyte agents.
-Purpose:
-    Keeps agent loop execution, context-window construction, tool execution,
-    permission checks, provider-reported token accounting, and exact internal-tool
-    exposure policy out of BaseAgent.
-Architecture:
-    - AgentRuntime: Builds BaseAgentContext and runs direct model/tool loops.
-    - include_internal_tools: Defaults to current behavior but lets isolated child
-      runtimes expose exactly their explicitly supplied tool catalog.
-Relations:
-    Used by vidbyte.agents.base. Depends on shared context, tool, security, and
-    strategy dataclasses without owning modality routing or runner construction.
-    Review algorithms may disable implicit internal tools while ordinary agents
-    retain them through the default constructor behavior.
+FILE: vidbyte/agents/runtime.py
+ROLE IN CODEBASE: BaseAgent creates this runtime; it consumes shared contracts,
+                  runners, tools, and middleware, then delegates fallback state
+                  transitions to AgentFallback.
+ARCHITECTURE NOTE: Runtime gathers current run state and constructs one
+                    FallbackTransitionRequest. Validation and mutation of the
+                    fallback chain stay in fallback/chain.py.
+FUNCTION INVENTORY: arun and its loop helpers execute model/tool work;
+    _fallback_transition and _cost_fallback_transition collect error/policy
+    inputs; _transition_from_request applies the validated transform and tracing.
+COMMON MODIFICATION PATTERNS: Add fallback inputs to FallbackTransitionRequest,
+    then keep this boundary to one delegation call plus transform application.
+WHAT NOT TO DO: Do not duplicate provider/model/message/history validation or
+    manually append fallback attempts in this module.
+KNOWN EDGE CASES: Error-triggered transitions retain prior errors; cost-triggered
+    transitions carry no fabricated exception and are checked between iterations.
+COMMON ERRORS: Malformed fallback state raises FallbackTransitionError from the
+    shared contract; provider/tool errors retain the existing runtime handling.
+TEST FILES: Existing runtime/fallback tests and scripts/run_ci.py.
+CONCURRENCY MODEL: One runtime owns one active run's mutable attempts, errors,
+    messages, and provider state; no cross-run fallback state is shared.
+PURPOSE: Runs the direct agent model/tool loop while owning context admission,
+         permission checks, usage accounting, tracing, and fallback application.
+RELATIONS: BaseAgent creates this runtime. It consumes shared contracts, runners,
+           tools, and middleware, then delegates fallback transitions to
+           vidbyte.agents.fallback.chain.AgentFallback.
 """
 
 from __future__ import annotations
@@ -29,30 +40,50 @@ if TYPE_CHECKING:
     from vidbyte.agents.settings.tool import ToolSettings
 
 from vidbyte.agents.context_algorithms import AgentRuntimeContextAlgorithms
+from vidbyte.agents.contract import AgentLoopSettingsOutputContract
+from vidbyte.agents.contracts.schema import SchemaConformance
+from vidbyte.agents.pricing import UsageTracker
 from vidbyte.agents.types import AgentMessage
 from vidbyte.context.algorithms import ContextWindowAlgorithm, ToolResultAdmission
 from vidbyte.context.manager import ContextManager
 from vidbyte.context.primitives import ContextItem
-from vidbyte.context.runtime import ContextWindowPlacement, ContextWindowRunContext, InnerContextWindowAlgorithm
+from vidbyte.context.runtime import (
+    ContextWindowPlacement,
+    ContextWindowRunContext,
+    InnerContextWindowAlgorithm,
+)
+from vidbyte.context.templates import NullRecorder, RecorderBase
 from vidbyte.context.window import ContextWindow
-from vidbyte.lib.dataclasses.agents import AgentIterationSnapshot, AgentRuntimeConfig, AgentStopReason
-from vidbyte.lib.dataclasses.middleware import MiddlewareAction, MiddlewareContext, MiddlewareDecision, MiddlewareHook
+from vidbyte.lib.dataclasses.agents import (
+    AgentIterationSnapshot,
+    AgentRuntimeConfig,
+    AgentStopReason,
+    FallbackTransitionRequest,
+)
+from vidbyte.lib.dataclasses.context import BaseAgentContext, BaseContext
+from vidbyte.lib.dataclasses.middleware import (
+    MiddlewareAction,
+    MiddlewareContext,
+    MiddlewareDecision,
+    MiddlewareHook,
+)
 from vidbyte.lib.dataclasses.runner import RunnerHandle
-from vidbyte.providers.output_schema import OutputSchemaFormatter
+from vidbyte.lib.dataclasses.strategies import AgentResult
 from vidbyte.lib.enums import ModelModality
-from vidbyte.lib.errors import AllModelsFailedError, PermissionDeniedError, ToolExecutionError, ToolRegistryError
+from vidbyte.lib.errors import (
+    PermissionDeniedError,
+    ToolExecutionError,
+    ToolRegistryError,
+)
 from vidbyte.lib.token_usage import token_usage_from_response
 from vidbyte.lib.tools import ToolsFormatter
-from vidbyte.agents.pricing import UsageTracker
-from vidbyte.context.templates import NullRecorder, RecorderBase
 from vidbyte.lib.tracing import NullTracer, SpanContext, TracerBase
 from vidbyte.middleware import AgentMiddleware, MiddlewarePipeline
-from vidbyte.middleware.builtins.context_compaction import ToolResultCompactionMiddleware
+from vidbyte.middleware.builtins.context_compaction import (
+    ToolResultCompactionMiddleware,
+)
 from vidbyte.prompts.agentic_loop import append_agentic_loop_prompt
-from vidbyte.agents.contract import AgentLoopSettingsOutputContract
-from vidbyte.agents.contracts.schema import SchemaConformance
-from vidbyte.lib.dataclasses.context import BaseAgentContext, BaseContext
-from vidbyte.lib.dataclasses.strategies import AgentResult
+from vidbyte.providers.output_schema import OutputSchemaFormatter
 from vidbyte.tools._internal import IS_DONE_TOOL_NAME, with_internal_agent_tools
 from vidbyte.tools.activity import ActivityToolFormatter
 from vidbyte.tools.base import BaseTool
@@ -65,7 +96,7 @@ from vidbyte.tools.types import ToolCall, ToolCallContext, ToolCallState, ToolRe
 class AgentRuntime:
     """Internal runtime for direct agent execution."""
 
-    def __init__(self, *, agent_name: str, system_prompt: str, tools: Tools, permission_policy: PermissionPolicy, config: AgentRuntimeConfig | None = None, tracer: TracerBase | None = None, middleware: Sequence[AgentMiddleware] = (), run_id: str | None = None, algorithm: ContextWindowAlgorithm | str | None = None, context_manager: ContextManager | None = None, recorder: RecorderBase | None = None, output_schema: type | Mapping[str, Any] | None = None, output_contract: "AgentLoopSettingsOutputContract | None" = None, include_internal_tools: bool = True, usage_tracker: UsageTracker | None = None, fallback: "AgentFallback | None" = None) -> None:
+    def __init__(self, *, agent_name: str, system_prompt: str, tools: Tools, permission_policy: PermissionPolicy, config: AgentRuntimeConfig | None = None, tracer: TracerBase | None = None, middleware: Sequence[AgentMiddleware] = (), run_id: str | None = None, algorithm: ContextWindowAlgorithm | str | None = None, context_manager: ContextManager | None = None, recorder: RecorderBase | None = None, output_schema: type | Mapping[str, Any] | None = None, output_contract: AgentLoopSettingsOutputContract | None = None, include_internal_tools: bool = True, usage_tracker: UsageTracker | None = None, fallback: AgentFallback | None = None) -> None:
         # Configure one direct runtime; isolated review child runtimes may disable implicit internal tools.
         self.agent_name = agent_name
         self.system_prompt = system_prompt
@@ -268,6 +299,24 @@ class AgentRuntime:
                     model_response=last_response,
                 )
 
+            if self.fallback is not None and iteration_count > 0:
+                cost_transition = self._cost_fallback_transition(
+                    index=fallback_index,
+                    handle=handle,
+                    provider=provider,
+                    messages=messages,
+                    attempts=fallback_attempts,
+                    parent_span=trace_context,
+                )
+                if cost_transition is not None:
+                    handle, provider = cost_transition.handle, cost_transition.provider
+                    tool_schemas, messages = cost_transition.tool_schemas, cost_transition.messages
+                    fallback_index = cost_transition.index
+                    self._publish_fallback_metadata(
+                        run_state,
+                        self.fallback.result_metadata(fallback_attempts, context_reset=cost_transition.context_reset),
+                    )
+
             decision = await self.middleware.before_iteration(
                 self._middleware_context(
                     MiddlewareHook.BEFORE_ITERATION,
@@ -340,6 +389,7 @@ class AgentRuntime:
                     run_state=run_state,
                     trace_context=active_trace_context,
                     compaction_count=compaction_count,
+                    timeout_seconds=self.fallback.deadline_for(fallback_index) if self.fallback is not None else None,
                 )
             except BaseException as exc:
                 self._end_semantic_span(iteration_span, error=exc)
@@ -666,7 +716,7 @@ class AgentRuntime:
                     model_response=raw_result,
                 )
 
-    async def _invoke_with_middleware(self, handle: RunnerHandle, message: str, call_options: Mapping[str, Any], *, context: BaseAgentContext, iteration_count: int, model_call_count: int, call_contexts: Sequence[ToolCallContext], tokens_used: int | None, started_at: float, metadata: Mapping[str, Any], run_state: dict[type, Any] | None = None, trace_context: SpanContext | None = None, compaction_count: int = 0) -> tuple[object | AgentResult, int, int]:
+    async def _invoke_with_middleware(self, handle: RunnerHandle, message: str, call_options: Mapping[str, Any], *, context: BaseAgentContext, iteration_count: int, model_call_count: int, call_contexts: Sequence[ToolCallContext], tokens_used: int | None, started_at: float, metadata: Mapping[str, Any], run_state: dict[type, Any] | None = None, trace_context: SpanContext | None = None, compaction_count: int = 0, timeout_seconds: float | None = None) -> tuple[object | AgentResult, int, int]:
         """Invoke the runner, allowing middleware to retry model errors while tracking compaction events."""
         provider = handle.provider
         while True:
@@ -716,7 +766,10 @@ class AgentRuntime:
                 ),
             )
             try:
-                raw_result = await handle.invoke(message, **current_call_options)
+                if timeout_seconds is not None:
+                    raw_result = await asyncio.wait_for(handle.invoke(message, **current_call_options), timeout=timeout_seconds)
+                else:
+                    raw_result = await handle.invoke(message, **current_call_options)
                 output_text = handle.extract_text(raw_result)
                 self._tracer.end_span(llm_span, output=output_text)
                 return raw_result, model_call_count, compaction_count
@@ -760,29 +813,56 @@ class AgentRuntime:
                 self._tracer.end_span(llm_span, error=exc)
                 raise
 
-    def _fallback_transition(self, error: BaseException, *, index: int, handle: RunnerHandle, provider: str, messages: list[dict[str, Any]], attempts: list[dict[str, str]], errors: list[BaseException], parent_span: SpanContext | None) -> "FallbackTransform | None":
-        """Return rebuilt state for the next model in the chain, or None when the caller must re-raise."""
-        if self.fallback is None or not self.fallback.is_model_error(error):
+    def _fallback_transition(self, error: BaseException, *, index: int, handle: RunnerHandle, provider: str, messages: list[dict[str, Any]], attempts: list[dict[str, str]], errors: list[BaseException], parent_span: SpanContext | None) -> FallbackTransform | None:
+        """Delegate an error-triggered transition to the validated fallback contract."""
+        if self.fallback is None:
             return None
-        next_index = self.fallback.advance(error, index)
-        if next_index is None:
-            self._raise_chain_exhausted(error, attempts=attempts, errors=errors)
-            return None
-        errors.append(error)
-        attempts.append(self.fallback.attempt_record(index, next_index, error))
-        transition = self.fallback.transform(handle, provider, self.tools, messages, next_index)
-        self._record_fallback_span(attempts[-1], transition.context_reset, parent_span)
-        return transition
+        return self._transition_from_request(
+            FallbackTransitionRequest(
+                agent_name=self.agent_name,
+                chain_length=len(self.fallback),
+                index=index,
+                handle=handle,
+                provider=provider,
+                tools=self.tools,
+                messages=messages,
+                attempts=attempts,
+                errors=errors,
+                error=error,
+            ),
+            parent_span,
+        )
 
-    def _raise_chain_exhausted(self, error: BaseException, *, attempts: Sequence[Mapping[str, str]], errors: Sequence[BaseException]) -> None:
-        # Only a spent chain becomes AllModelsFailedError; a chain that never switched re-raises untouched.
-        if not attempts:
-            return
-        raise AllModelsFailedError(
-            f"Agent '{self.agent_name}' exhausted its fallback chain after {len(attempts)} model switch(es).",
-            attempts=attempts,
-            errors=[*errors, error],
-        ) from errors[0]
+    def _cost_fallback_transition(self, *, index: int, handle: RunnerHandle, provider: str, messages: list[dict[str, Any]], attempts: list[dict[str, str]], parent_span: SpanContext | None) -> FallbackTransform | None:
+        """Delegate a cost-triggered transition to the validated fallback contract."""
+        if self.fallback is None:
+            return None
+        cost_usd = self.usage_tracker.rollup().cost_usd
+        if cost_usd is None:
+            return None
+        return self._transition_from_request(
+            FallbackTransitionRequest(
+                agent_name=self.agent_name,
+                chain_length=len(self.fallback),
+                index=index,
+                handle=handle,
+                provider=provider,
+                tools=self.tools,
+                messages=messages,
+                attempts=attempts,
+                errors=[],
+                reason="cost_budget_exceeded",
+                cost_usd=cost_usd,
+            ),
+            parent_span,
+        )
+
+    def _transition_from_request(self, request: FallbackTransitionRequest, parent_span: SpanContext | None) -> FallbackTransform | None:
+        transition = self.fallback.fallback_transition(request)
+        if transition is None:
+            return None
+        self._record_fallback_span(transition.attempt, transition.transform.context_reset, parent_span)
+        return transition.transform
 
     def _record_fallback_span(self, attempt: Mapping[str, str], context_reset: bool, parent_span: SpanContext | None) -> None:
         # Records a short span so a model switch is visible without diffing llm.call spans.

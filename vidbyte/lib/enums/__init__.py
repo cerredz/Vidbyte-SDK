@@ -18,12 +18,18 @@ from __future__ import annotations
 from vidbyte.lib.enums.agent_runtime import AgentRuntimeType
 from vidbyte.lib.enums.config import AgentType, DocumentType
 from vidbyte.lib.enums.context import BudgetPreset, PermissionPreset
+from vidbyte.lib.enums.fallback import FallbackPolicyType
 from vidbyte.lib.enums.model_modality import ModelModality, ModelNameModality
 from vidbyte.lib.enums.model_provider import ModelProvider
-from vidbyte.lib.enums.multi_agent import MultiAgentStopReason, OrchestratorAction, TaskStatus
+from vidbyte.lib.enums.multi_agent import (
+    MultiAgentStopReason,
+    OrchestratorAction,
+    TaskStatus,
+)
 from vidbyte.lib.enums.platform import Platform
 from vidbyte.lib.enums.prompts import Prompt
-from vidbyte.lib.enums.skills import ContextMinimalFanoutSkill, Skill, Skills as SkillEnums
+from vidbyte.lib.enums.skills import ContextMinimalFanoutSkill, Skill
+from vidbyte.lib.enums.skills import Skills as SkillEnums
 from vidbyte.lib.enums.sources import PinPolicy
 from vidbyte.lib.enums.structured_output import StructuredOutputSupport
 
@@ -31,8 +37,9 @@ __all__ = [
     "AgentRuntimeType",
     "AgentType",
     "BudgetPreset",
-    "DocumentType",
     "ContextMinimalFanoutSkill",
+    "DocumentType",
+    "FallbackPolicyType",
     "ModelModality",
     "ModelNameModality",
     "ModelProvider",

@@ -14,7 +14,7 @@ Relations:
     Re-exported from vidbyte.agents.__init__.
 """
 
-from vidbyte.agents.settings.fallback import AgentFallbackSettings
+from vidbyte.agents.fallback.settings import AgentFallbackSettings
 from vidbyte.agents.settings.loop import AgentLoopSettings
 from vidbyte.agents.settings.tool import ToolSettings
 from vidbyte.agents.settings.tool_error import ToolErrorPolicy, UnrecoverableAction
