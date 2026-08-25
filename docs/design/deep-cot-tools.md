@@ -109,12 +109,13 @@ Nearest existing patterns copied for this feature:
 
 ## 5. High-Level Design
 
-Two new modules and two modified export surfaces. A single tools module
-(`cot_events.py`) holds the five tool classes plus one shared static parser
-class (`CotEventParser`) for enum/confidence/JSON-array coercion — following
-the class-bound-helpers field-guide memory instead of five files duplicating
-parsers. A single primitives module (`cot_events.py` under
-`context/primitives/`) holds the five frozen dataclasses.
+Two event modules, two SDK contract modules, and the modified export surfaces.
+The tools module (`cot_events.py`) holds the five tool classes plus one shared
+static parser class (`CotEventParser`) for enum/confidence/JSON-array coercion.
+`vidbyte/lib/enums/cot_events.py` owns categorical values and
+`vidbyte/lib/constants/cot_events.py` owns bounds, defaults, and display labels,
+so the tool module does not define a second vocabulary. The primitives module
+(`cot_events.py` under `context/primitives/`) holds the five frozen dataclasses.
 
 ```
 Model emits tool call
@@ -144,7 +145,7 @@ small. Rejected alternative: five tool files + duplicate parser snippets.
 **Type:** New file
 
 `CotEventParser` — static methods:
-- `parse_enum(value, allowed: tuple[str, ...], field_name: str) -> tuple[str | None, str | None]`
+- `parse_enum(value, allowed: type[CotEventEnum], field_name: str) -> tuple[str | None, str | None]`
   — exact-match against allowed values (case-insensitive, normalized to the
   canonical lowercase value); returns `(parsed, error)`.
 - `parse_confidence(value) -> float | None` — coerce number/numeric string,
@@ -170,41 +171,44 @@ append-only event tools (`decision`, `uncertainty`, `backtrack`) use the
 counter-based `<name>:<n>` IDs like `ReflexionTool`.
 
 #### `HypothesisTool` (name: `hypothesis`)
-Params: `statement*` (falsifiable belief, one sentence), `basis*` (why held,
-one clause), `status*` enum `proposed|supported|weakened|falsified` (re-calling
-with the same statement updates it — description says so), `basis_type` enum
-`evidence|inference|prior` (default `inference`). Primitive:
-`HypothesisContextItem`. Metadata: `status`, `basis_type`.
+Params: `statement*`, `scope*`, `basis*`, `status*` enum
+`proposed|supported|weakened|falsified`, `basis_type` enum
+`evidence|inference|prior`, `falsifier*`, `confidence`, and `next_check`.
+Primitive: `HypothesisContextItem`. Metadata: `status`, `basis_type`, and
+parsed `confidence`. The normalized statement remains the ledger identity.
 
 #### `DecisionTool` (name: `decision`)
-Params: `decision*` (choice being made now), `chosen_because*` (deciding
-reason), `rejected*` JSON `[{"option": ..., "reason": ...}]` 1–3 entries,
-`reversible` enum `yes|no|costly` (default `yes`), `confidence` number 0–1.
-Primitive: `DecisionContextItem` (renders chosen + rejected table + reversible
-+ confidence). Metadata: `reversible`, `confidence`.
+Params: `decision*`, `chosen_because*`, `criterion*`, `rejected*` JSON array of
+1–3 objects with non-empty `option` and `reason` keys, `expected_outcome*`,
+`main_risk*`, `reversible` enum `yes|no|costly`, `confidence`, and
+`review_trigger`. Primitive: `DecisionContextItem`. Metadata: `reversible`,
+`confidence`, and `rejected_count`.
 
 #### `AssumptionCheckTool` (name: `assumption_check`)
-Params: `assumption*`, `action*` enum `declared|verified|falsified`,
-`impact_if_wrong*` enum `fatal|major|minor`, `verification_step` (required
-semantically when `action=verified`; description says "state how it was
-checked"). Primitive: `AssumptionCheckContextItem`. Metadata: `action`,
-`impact_if_wrong`.
+Params: `assumption*`, `scope*`, `basis*`, `action*` enum
+`declared|verified|falsified`, `impact_if_wrong*` enum `fatal|major|minor`,
+`dependency*`, `verification_step` (required when action is `verified` or
+`falsified`), `falsifier*`, and `confidence`. Primitive:
+`AssumptionCheckContextItem`. Metadata: `action`, `impact_if_wrong`, and parsed
+`confidence`. The normalized assumption remains the ledger identity.
 
 #### `UncertaintyTool` (name: `uncertainty`)
 Params: `next_step*` number 0–1, `on_track*` number 0–1, `progress*` enum
-`progressing|stalled|regressing`, `trigger` (what prompted this reading;
-default empty). Primitive: `UncertaintyContextItem`. Metadata: `next_step`,
-`on_track`, `progress`, and derived `divergence = on_track - next_step`.
+`progressing|stalled|regressing`, `trigger`, `uncertainty_source*`, `blocker`,
+`next_action*`, and `reassessment_condition`. Primitive:
+`UncertaintyContextItem`. Metadata: `next_step`, `on_track`, `progress`, and
+derived `divergence = on_track - next_step`.
 
 #### `BacktrackTool` (name: `backtrack`)
-Params: `abandoning*`, `reason*`, `salvage` (default "nothing"), `returnable`
-enum `yes|no` (default `yes`). Primitive: `BacktrackContextItem`. Metadata:
-`returnable`.
+Params: `abandoning*`, `reason*`, `evidence*`, `attempted_result*`, `salvage`,
+`returnable` enum `yes|no`, `replacement_plan*`, and `loop_guard*`. Primitive:
+`BacktrackContextItem`. Metadata: `returnable`.
 
 #### Edge Cases & Error Handling
 - Missing/blank required strings → `ToolResult.error` naming the field.
 - Bad enum → `ToolResult.error` listing allowed values.
-- `rejected` JSON unparseable or not a list of objects → `ToolResult.error`.
+- `rejected` JSON unparseable, not a list of objects, or missing non-empty
+  `option`/`reason` keys → `ToolResult.error`.
 - `ContextManager.upsert` raising `ValueError` (frozen primitive) →
   `ToolResult.error` with the message, matching `ReflexionTool`.
 - Optional params absent or empty → defaults, never errors.
@@ -255,10 +259,14 @@ no existing signatures change.
 |--------|-----------|--------|
 | CREATE | `vidbyte/tools/builtins/cot_events.py` | Five deep-CoT tool classes + shared `CotEventParser` |
 | CREATE | `vidbyte/context/primitives/cot_events.py` | Five frozen context primitives |
+| CREATE | `vidbyte/lib/enums/cot_events.py` | Canonical categorical event values |
+| CREATE | `vidbyte/lib/constants/cot_events.py` | Shared bounds, defaults, labels, and limits |
 | MODIFY | `vidbyte/tools/builtins/__init__.py` | Import + `__all__` for the five tools |
 | MODIFY | `vidbyte/context/primitives/__init__.py` | Import + `__all__` for the five primitives |
+| MODIFY | `vidbyte/lib/enums/__init__.py` | Re-export event enums |
+| MODIFY | `vidbyte/lib/constants/__init__.py` | Re-export event constants |
 
-4 files: 2 created, 2 modified, 0 deleted.
+8 files: 4 created, 4 modified, 0 deleted.
 
 ---
 
