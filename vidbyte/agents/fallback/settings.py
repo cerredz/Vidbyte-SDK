@@ -9,7 +9,9 @@ Purpose:
     names, provider-prefixed names, or explicit FallbackModel entries, and
     converting them into the internal AgentFallback contract.
 Architecture:
-    - AgentFallbackSettings: Plain class with __init__-level validation.
+    - AgentFallbackSettings: Thin developer-facing adapter; owns no validation itself.
+    - AgentFallbackConfig (vidbyte.lib.dataclasses.agents): The strictly validated
+      shape this class builds at construction and reads every attribute from.
     - resolved_models(): Normalizes every entry against the agent's primary model.
     - to_fallback(): Converts to the internal AgentFallback contract.
 Relations:
@@ -18,6 +20,7 @@ Similar Files:
     - vidbyte/agents/settings/loop.py: AgentLoopSettings follows the same plain-class pattern.
     - vidbyte/agents/fallback/chain.py: AgentFallback is the internal contract this converts to.
     - vidbyte/agents/fallback/policies.py: LatencyPolicy and CostBudgetPolicy, validated here.
+    - vidbyte/lib/dataclasses/agents.py: AgentFallbackConfig owns the validation this class delegates to.
 """
 
 from __future__ import annotations
@@ -25,8 +28,8 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
-from vidbyte.lib.dataclasses.agents import FallbackModel
-from vidbyte.lib.enums import ModelProvider
+from vidbyte.lib.dataclasses.agents import AgentFallbackConfig, FallbackModel
+from vidbyte.lib.enums import FallbackPolicyMode, ModelProvider
 from vidbyte.lib.errors import ConfigurationError
 
 if TYPE_CHECKING:
@@ -34,84 +37,60 @@ if TYPE_CHECKING:
 
 
 class AgentFallbackSettings:
-    """Validated configuration object for an agent's ordered model fallback chain."""
+    """Developer-facing configuration object for an agent's ordered model fallback chain.
 
-    def __init__(self, *, models: Sequence[str | FallbackModel], fallback_on: tuple[type[BaseException], ...] | None = None, policies: Sequence[object] = (), enabled: bool = True) -> None:
-        # Stores the declared chain, error filter, and per-hop policies, then validates them immediately.
-        self.models = tuple(models)
-        self.fallback_on = fallback_on
-        self.policies = tuple(policies)
-        self.enabled = enabled
-        self._validate()
+    Accepts the loose, ergonomic constructor shape developers write (bare model
+    names, a mode as a plain string, `fallback_on=None` meaning "use the chain
+    default"), coerces it once into a strictly validated AgentFallbackConfig, and
+    reads every attribute back from that config -- so a constructed instance is
+    provably valid and this class carries no validation logic of its own.
+    """
 
-    def _validate(self) -> None:
-        # Raises ConfigurationError for any constraint violation found on this settings object.
-        self._validate_models_not_empty()
-        self._validate_entry_types()
-        self._validate_error_types()
-        self._validate_policy_hop_values()
-
-    def _validate_models_not_empty(self) -> None:
-        # An empty chain is a mistake; pass fallback=None to disable the feature entirely.
-        if not self.models:
-            raise ConfigurationError(
-                "AgentFallbackSettings.models cannot be empty; pass fallback=None to run without a fallback chain."
-            )
-
-    def _validate_entry_types(self) -> None:
-        # Each entry must be a non-blank model string or an explicit FallbackModel.
-        for position, entry in enumerate(self.models):
-            if isinstance(entry, FallbackModel):
-                continue
-            if not isinstance(entry, str) or not entry.strip():
-                raise ConfigurationError(
-                    f"AgentFallbackSettings.models[{position}] must be a non-empty model name or a FallbackModel, "
-                    f"got {type(entry).__name__}."
-                )
-
-    def _validate_error_types(self) -> None:
-        # Every declared trigger must be an exception class the runtime can match with isinstance.
-        for entry in self.fallback_on or ():
-            if not (isinstance(entry, type) and issubclass(entry, BaseException)):
-                raise ConfigurationError(
-                    f"AgentFallbackSettings.fallback_on entries must be exception classes, got {entry!r}."
-                )
-
-    def _validate_policy_hop_values(self) -> None:
-        # Every per-hop policy must supply exactly one value per transition, and every value must be usable.
-        expected = len(self.models)
-        for policy in self.policies:
-            hop_values = getattr(policy, "hop_values", None)
-            if not callable(hop_values):
-                continue
-            values = tuple(hop_values())
-            self._validate_policy_hop_count(policy, values, expected)
-            self._validate_policy_hop_elements(policy, values)
-
-    @staticmethod
-    def _validate_policy_hop_count(policy: object, values: tuple[object, ...], expected: int) -> None:
-        # A per-hop policy needs one value per transition: the chain has `expected` fallback
-        # models, which prepended with the primary gives `expected` possible transitions.
-        if len(values) == expected:
-            return
-        raise ConfigurationError(
-            f"{type(policy).__name__} declares {len(values)} hop value(s), but this chain has "
-            f"{expected} fallback model(s) ({expected + 1} total including the primary), which "
-            f"means {expected} possible transitions. Every per-hop policy needs exactly one value "
-            "per transition: one for the primary and one for each fallback except the last — the "
-            "final model in the chain has nowhere left to fall back to, so it never gets one.",
-            details={"policy": type(policy).__name__, "expected_hop_count": expected, "actual_hop_count": len(values)},
+    def __init__(self, *, models: Sequence[str | FallbackModel], fallback_on: tuple[type[BaseException], ...] | None = None, policies: Sequence[object] = (), policies_mode: FallbackPolicyMode | str = FallbackPolicyMode.ANY, enabled: bool = True) -> None:
+        # Coerces every loose argument into one concrete, strictly validated AgentFallbackConfig.
+        self._config = AgentFallbackConfig(
+            models=tuple(models),
+            fallback_on=tuple(fallback_on) if fallback_on is not None else None,
+            policies=tuple(policies),
+            policies_mode=self._resolve_policies_mode(policies_mode),
+            enabled=enabled,
         )
 
+    @property
+    def models(self) -> tuple[str | FallbackModel, ...]:
+        """Return the declared chain entries, as passed at construction."""
+        return self._config.models
+
+    @property
+    def fallback_on(self) -> tuple[type[BaseException], ...] | None:
+        """Return the declared error filter, or None to use the chain's default."""
+        return self._config.fallback_on
+
+    @property
+    def policies(self) -> tuple[object, ...]:
+        """Return the declared per-hop and chain-wide policies."""
+        return self._config.policies
+
+    @property
+    def policies_mode(self) -> FallbackPolicyMode:
+        """Return the resolved checkpoint-policy vote mode."""
+        return self._config.policies_mode
+
+    @property
+    def enabled(self) -> bool:
+        """Return whether this settings object builds a live fallback chain."""
+        return self._config.enabled
+
     @staticmethod
-    def _validate_policy_hop_elements(policy: object, values: tuple[object, ...]) -> None:
-        # Every hop value must be a positive, non-bool number; a gap or a zero/negative ceiling can never fire correctly.
-        for position, value in enumerate(values):
-            if isinstance(value, bool) or not isinstance(value, (int, float)) or value <= 0:
-                raise ConfigurationError(
-                    f"{type(policy).__name__} hop value at position {position} must be a positive number, got {value!r}.",
-                    details={"policy": type(policy).__name__, "position": position, "value": repr(value)},
-                )
+    def _resolve_policies_mode(policies_mode: FallbackPolicyMode | str) -> FallbackPolicyMode:
+        # Coerces a mode string into the enum, raising ConfigurationError for any unknown value.
+        try:
+            return FallbackPolicyMode(policies_mode)
+        except ValueError:
+            raise ConfigurationError(
+                f"AgentFallbackSettings.policies_mode must be a FallbackPolicyMode, got {policies_mode!r}.",
+                details={"policies_mode": repr(policies_mode)},
+            ) from None
 
     def resolved_models(self, *, primary: FallbackModel) -> tuple[FallbackModel, ...]:
         """Return the full chain with the primary first and every entry normalized against it."""
@@ -127,6 +106,7 @@ class AgentFallbackSettings:
             self.resolved_models(primary=primary),
             fallback_on=self.fallback_on if self.fallback_on is not None else DEFAULT_FALLBACK_ERRORS,
             policies=self.policies,
+            policies_mode=self.policies_mode,
         )
 
     def _resolve_entry(self, entry: str | FallbackModel, primary: FallbackModel, position: int) -> FallbackModel:
@@ -171,7 +151,8 @@ class AgentFallbackSettings:
         # Returns a compact developer-readable string showing declared entries without credentials.
         entries = ", ".join(entry.identity() if isinstance(entry, FallbackModel) else repr(entry) for entry in self.models)
         state = "" if self.enabled else ", enabled=False"
-        return f"AgentFallbackSettings([{entries}]{state})"
+        mode = "" if self.policies_mode is FallbackPolicyMode.ANY else f", policies_mode=FallbackPolicyMode.{self.policies_mode.name}"
+        return f"AgentFallbackSettings([{entries}]{state}{mode})"
 
 
 __all__ = ["AgentFallbackSettings"]

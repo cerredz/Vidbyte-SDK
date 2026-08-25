@@ -29,6 +29,7 @@ if TYPE_CHECKING:
     from vidbyte.agents.settings.tool import ToolSettings
 
 from vidbyte.agents.context_algorithms import AgentRuntimeContextAlgorithms
+from vidbyte.agents.fallback.policies import FallbackSignals
 from vidbyte.agents.types import AgentMessage
 from vidbyte.context.algorithms import ContextWindowAlgorithm, ToolResultAdmission
 from vidbyte.context.manager import ContextManager
@@ -268,7 +269,7 @@ class AgentRuntime:
                 )
 
             if self.fallback is not None and iteration_count > 0:
-                cost_transition = self._cost_fallback_transition(
+                checkpoint_transition = self._checkpoint_fallback_transition(
                     index=fallback_index,
                     handle=handle,
                     provider=provider,
@@ -276,13 +277,13 @@ class AgentRuntime:
                     attempts=fallback_attempts,
                     parent_span=trace_context,
                 )
-                if cost_transition is not None:
-                    handle, provider = cost_transition.handle, cost_transition.provider
-                    tool_schemas, messages = cost_transition.tool_schemas, cost_transition.messages
-                    fallback_index = cost_transition.index
+                if checkpoint_transition is not None:
+                    handle, provider = checkpoint_transition.handle, checkpoint_transition.provider
+                    tool_schemas, messages = checkpoint_transition.tool_schemas, checkpoint_transition.messages
+                    fallback_index = checkpoint_transition.index
                     self._publish_fallback_metadata(
                         run_state,
-                        self.fallback.result_metadata(fallback_attempts, context_reset=cost_transition.context_reset),
+                        self.fallback.result_metadata(fallback_attempts, context_reset=checkpoint_transition.context_reset),
                     )
 
             if self.fallback is not None and iteration_count > 0:
@@ -814,12 +815,17 @@ class AgentRuntime:
         self._record_fallback_span(attempts[-1], transition.context_reset, parent_span)
         return transition
 
-    def _cost_fallback_transition(self, *, index: int, handle: RunnerHandle, provider: str, messages: list[dict[str, Any]], attempts: list[dict[str, str]], parent_span: SpanContext | None) -> "FallbackTransform | None":
-        # Returns rebuilt state when a cost-budget policy elects to downgrade, or None to keep the current model.
-        next_index = self.fallback.advance_after_success(index, cost_usd=self.usage_tracker.rollup().cost_usd)
-        if next_index is None:
+    def _checkpoint_fallback_transition(self, *, index: int, handle: RunnerHandle, provider: str, messages: list[dict[str, Any]], attempts: list[dict[str, str]], parent_span: SpanContext | None) -> "FallbackTransform | None":
+        # Returns rebuilt state when the checkpoint vote elects to downgrade, or None to keep the current model.
+        rollup = self.usage_tracker.rollup()
+        decision = self.fallback.advance_after_checkpoint(
+            index,
+            signals=FallbackSignals(cost_usd=rollup.cost_usd, total_tokens=rollup.total_tokens),
+        )
+        if decision is None:
             return None
-        record = self.fallback.policy_attempt_record(index, next_index, "cost_budget_exceeded")
+        next_index, reason = decision
+        record = self.fallback.policy_attempt_record(index, next_index, reason)
         attempts.append(record)
         transition = self.fallback.transform(handle, provider, self.tools, messages, next_index)
         self._record_fallback_span(record, transition.context_reset, parent_span)

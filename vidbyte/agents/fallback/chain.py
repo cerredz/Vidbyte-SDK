@@ -26,8 +26,10 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
+from vidbyte.agents.fallback.policies import FallbackSignals
 from vidbyte.lib.dataclasses.agents import FallbackModel, FallbackTransform
 from vidbyte.lib.dataclasses.runner import RunnerHandle
+from vidbyte.lib.enums import FallbackPolicyMode
 from vidbyte.lib.errors import (
     ConfigurationError,
     ProviderConfigurationError,
@@ -60,13 +62,14 @@ DEFAULT_FALLBACK_ERRORS: tuple[type[BaseException], ...] = (
 class AgentFallback:
     """Ordered model chain plus the transforms that route an in-flight run to the next model."""
 
-    def __init__(self, models: Sequence[FallbackModel], *, fallback_on: tuple[type[BaseException], ...] = DEFAULT_FALLBACK_ERRORS, policies: Sequence[object] = ()) -> None:
-        # Stores the chain (index 0 is the primary) and caches runners lazily, keyed by chain index.
+    def __init__(self, models: Sequence[FallbackModel], *, fallback_on: tuple[type[BaseException], ...] = DEFAULT_FALLBACK_ERRORS, policies: Sequence[object] = (), policies_mode: FallbackPolicyMode = FallbackPolicyMode.ANY) -> None:
+        # Stores the chain (index 0 is the primary), the policy vote mode, and caches runners lazily, keyed by chain index.
         if not models:
             raise ConfigurationError("AgentFallback requires at least the primary model in its chain.")
         self.models = tuple(models)
         self.fallback_on = tuple(fallback_on)
         self.policies = tuple(policies)
+        self.policies_mode = policies_mode
         self._runner_cache: dict[int, object] = {}
 
     @classmethod
@@ -115,14 +118,21 @@ class AgentFallback:
             return None
         return index + 1
 
-    def advance_after_success(self, index: int, *, cost_usd: float | None) -> int | None:
-        # Returns the next chain index when a cost-budget policy's ceiling has been crossed, or None.
-        if cost_usd is None or index + 1 >= len(self.models):
+    def advance_after_checkpoint(self, index: int, *, signals: FallbackSignals) -> tuple[int, str] | None:
+        # Returns (next_index, reason) when the policy vote elects to advance, or None to keep the current model.
+        if index + 1 >= len(self.models):
             return None
-        ceiling = self.budget_for(index)
-        if ceiling is None or cost_usd < ceiling:
+        votes = [(policy, policy.triggered(index, signals)) for policy in self.policies if callable(getattr(policy, "triggered", None))]
+        if not votes:
             return None
-        return index + 1
+        if self.policies_mode is FallbackPolicyMode.ALL:
+            if not all(triggered for _, triggered in votes):
+                return None
+            return index + 1, "all_policies_satisfied"
+        for policy, triggered in votes:
+            if triggered:
+                return index + 1, policy.reason
+        return None
 
     def advance_after_loop_detected(self, index: int, call_contexts: Sequence["ToolCallContext"]) -> int | None:
         # Returns the next chain index when a chain-wide policy detects a stuck tool-call pattern, or None.
@@ -143,10 +153,6 @@ class AgentFallback:
     def deadline_for(self, index: int) -> float | None:
         # Returns the first policy-declared deadline for this hop, or None if no policy sets one.
         return self._first_policy_value(index, "deadline_for")
-
-    def budget_for(self, index: int) -> float | None:
-        # Returns the first policy-declared cost ceiling for this hop, or None if no policy sets one.
-        return self._first_policy_value(index, "budget_for")
 
     def _first_policy_value(self, index: int, attr: str) -> float | None:
         # Folds over self.policies, returning the first non-None result of any policy exposing `attr`.

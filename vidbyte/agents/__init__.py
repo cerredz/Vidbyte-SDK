@@ -21,7 +21,7 @@ from __future__ import annotations
 from vidbyte.agents.base import BaseAgent
 from vidbyte.agents.aggregation import AggregateAgent, AggregateResult, MultiProviderAggregator
 from vidbyte.agents.client import AgentClient
-from vidbyte.agents.fallback import AgentFallback, CostBudgetPolicy, FallbackTransform, LatencyPolicy, ToolCallLoopPolicy
+from vidbyte.agents.fallback import AgentFallback, CostBudgetPolicy, FallbackPolicyMode, FallbackTransform, LatencyPolicy, ToolCallLoopPolicy
 from vidbyte.agents.continual_trace import ContinualTraceAgent
 from vidbyte.agents.settings import AgentFallbackSettings, AgentLoopSettings, ToolErrorPolicy, ToolSettings, UnrecoverableAction
 from vidbyte.agents.contracts import (
@@ -106,6 +106,7 @@ __all__ = [
     "AgentLoopSettings",
     "CostBudgetPolicy",
     "FallbackModel",
+    "FallbackPolicyMode",
     "FallbackTransform",
     "LatencyPolicy",
     "ToolCallLoopPolicy",
