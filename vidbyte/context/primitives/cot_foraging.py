@@ -11,7 +11,7 @@ Architecture:
       EnoughContextItem: frozen, slotted dataclasses with deterministic
       renderers bounded by max_chars.
 Relations:
-    Written by vidbyte.tools.builtins.cot_foraging and re-exported through
+    Written by vidbyte.tools.builtins.cot.foraging and re-exported through
     vidbyte.context.primitives.
 Similar Files:
     - `vidbyte/context/primitives/cot_events.py`
@@ -30,13 +30,22 @@ _DEFAULT_MAX_CHARS = 2000
 
 @dataclass(frozen=True, slots=True)
 class SearchWhyContextItem:
-    """Records the specific missing fact that motivated a search."""
+    """Records the specific missing fact that motivated a search.
+
+    Each entry converts an impulse to search into a stated plan: the exact
+    gap in knowledge, the step it blocks, the condition that ends the search,
+    and — when it matters — how urgently the gap needs closing. Recording
+    this before the search runs makes wandering, unbounded search visible as
+    a pattern rather than an invisible cost, since a search that never had a
+    stated stop condition has no honest way to declare itself finished.
+    """
 
     missing_fact: str
     why_needed: str
     stop_condition: str
     expected_source: str | None = None
     fallback_if_not_found: str = ""
+    urgency: str | None = None
     title: str = "Search Why"
     max_chars: int = _DEFAULT_MAX_CHARS
     metadata: Mapping[str, Any] = field(default_factory=dict)
@@ -51,6 +60,8 @@ class SearchWhyContextItem:
             f"Why Needed: {self.why_needed}",
             f"Stop Condition: {self.stop_condition}",
         ]
+        if self.urgency:
+            lines.append(f"Urgency: {self.urgency}")
         if self.expected_source:
             lines.append(f"Expected Source: {self.expected_source}")
         if self.fallback_if_not_found:
@@ -60,12 +71,23 @@ class SearchWhyContextItem:
 
 @dataclass(frozen=True, slots=True)
 class SearchPlanContextItem:
-    """Records the queries about to run and the rationale for their order."""
+    """Records the queries about to run and the rationale for their order.
+
+    The record holds the shape of a search round before it executes: the
+    individual queries with their expected yields, why they are sequenced the
+    way they are, the budget of queries allowed before the agent must
+    reconsider strategy, and — when applicable — whether the queries could
+    run in parallel and what happens if the whole round comes up empty. A
+    round with a stated plan either finds its target or fails in a way that
+    is informative, rather than quietly consuming steps with no shape at all.
+    """
 
     queries: tuple[Mapping[str, Any], ...]
     order_rationale: str
     max_queries: int | None = None
     abort_if: str | None = None
+    parallelizable: str | None = None
+    fallback_strategy: str | None = None
     title: str = "Search Plan"
     max_chars: int = _DEFAULT_MAX_CHARS
     metadata: Mapping[str, Any] = field(default_factory=dict)
@@ -78,8 +100,12 @@ class SearchPlanContextItem:
         lines = [f"Order Rationale: {self.order_rationale}"]
         if self.max_queries is not None:
             lines.append(f"Max Queries: {self.max_queries}")
+        if self.parallelizable:
+            lines.append(f"Parallelizable: {self.parallelizable}")
         if self.abort_if:
             lines.append(f"Abort If: {self.abort_if}")
+        if self.fallback_strategy:
+            lines.append(f"Fallback Strategy: {self.fallback_strategy}")
         query_lines = tuple(
             f"{entry.get('query', '')} [{entry.get('expected_yield', 'exploratory')}] -> {entry.get('target', '')}"
             for entry in self.queries
@@ -90,7 +116,15 @@ class SearchPlanContextItem:
 
 @dataclass(frozen=True, slots=True)
 class SearchYieldContextItem:
-    """Records what a search round actually produced relative to expectations."""
+    """Records what a search round actually produced relative to expectations.
+
+    This is the closing half of the search_why/search_plan pair: it reports
+    the honest outcome of a completed round, including query counts that
+    exceeded the planned budget, and the deliberate next move chosen in
+    response. A round that contradicts the searcher's premise entirely is
+    recorded here as the valuable finding it is, rather than being folded
+    quietly into an ordinary miss.
+    """
 
     found: str
     queries_spent: int
@@ -124,7 +158,16 @@ class SearchYieldContextItem:
 
 @dataclass(frozen=True, slots=True)
 class EnoughContextItem:
-    """Records the declaration that existing evidence is sufficient to act."""
+    """Records the declaration that existing evidence is sufficient to act.
+
+    Each entry is a deliberate stop rule: a statement that the evidence
+    gathered so far justifies acting, backed by the strongest point in its
+    favor, the weakest link it still rests on, and — when the declaration is
+    reversible — what finding would change the verdict. Naming the weakest
+    link is the honesty check built into this primitive, since every
+    evidence base has one and pretending otherwise converts a known risk into
+    a hidden one.
+    """
 
     acting_on: str
     evidence_count: int
