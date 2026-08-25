@@ -188,12 +188,23 @@ _DEFAULT_LIKELIHOOD = "medium"
 
 @dataclass(frozen=True, slots=True)
 class PredictionContextItem:
-    """Records one forward-looking, falsifiable forecast and its resolution trigger."""
+    """Records one forward-looking, falsifiable forecast and its resolution trigger.
+
+    A prediction is only useful when it could turn out wrong, so this
+    primitive pairs the forecast with the trigger that settles it and the
+    confidence behind it. When they matter, it also records the stakes if
+    the prediction misses, what kind of outcome it concerns, and what it was
+    actually grounded in, so a later reader can judge calibration by
+    category rather than only in aggregate.
+    """
 
     primitive_id: str
     predicts: str
     by_when: str
     confidence: float
+    stakes: str | None = None
+    basis: str | None = None
+    category: str | None = None
     title: str = _PREDICTION_TITLE
     max_chars: int = _DEFAULT_MAX_CHARS
     metadata: Mapping[str, Any] = field(default_factory=dict)
@@ -207,18 +218,34 @@ class PredictionContextItem:
             f"Resolved By: {self.by_when}",
             f"Confidence: {self.confidence:.2f}",
         ]
+        if self.category:
+            lines.append(f"Category: {self.category}")
+        if self.stakes:
+            lines.append(f"Stakes: {self.stakes}")
+        if self.basis:
+            lines.append(f"Basis: {self.basis}")
         return _truncate_text("\n".join(lines), self.max_chars)
 
 
 @dataclass(frozen=True, slots=True)
 class GoalCheckContextItem:
-    """Records one goal-drift attestation comparing current activity to the original goal."""
+    """Records one goal-drift attestation comparing current activity to the original goal.
+
+    Detail work quietly rewrites an agent's own memory of the objective, so
+    this primitive forces a side-by-side comparison between the original
+    request and what is actually happening right now. Beyond the alignment
+    verdict, it can record what caused the drift and how many steps have
+    passed since the previous check, which together turn a single
+    attestation into a trend a later reader can track.
+    """
 
     primitive_id: str
     original_goal: str
     current_activity: str
     still_serves: str
     pivot_to: str | None = None
+    drift_cause: str | None = None
+    steps_since_last_check: int | None = None
     title: str = _GOAL_CHECK_TITLE
     max_chars: int = _DEFAULT_MAX_CHARS
     metadata: Mapping[str, Any] = field(default_factory=dict)
@@ -232,6 +259,10 @@ class GoalCheckContextItem:
             f"Original Goal: {self.original_goal}",
             f"Current Activity: {self.current_activity}",
         ]
+        if self.steps_since_last_check is not None:
+            lines.append(f"Steps Since Last Check: {self.steps_since_last_check}")
+        if self.drift_cause:
+            lines.append(f"Drift Cause: {self.drift_cause}")
         if self.pivot_to:
             lines.append(f"Pivot To: {self.pivot_to}")
         return _truncate_text("\n".join(lines), self.max_chars)
@@ -239,7 +270,15 @@ class GoalCheckContextItem:
 
 @dataclass(frozen=True, slots=True)
 class CounterfactualContextItem:
-    """Records the model's hindsight about a branch not taken."""
+    """Records the model's hindsight about a branch not taken.
+
+    This is deliberately labeled as hindsight rather than ground truth: the
+    branch was never actually observed, so the record pairs the guess with a
+    confidence level and, when applicable, whether the untaken branch is
+    still reachable now. Read across a run, these records reveal whether an
+    agent's branch choices are systematically good, which a single instance
+    cannot show on its own.
+    """
 
     primitive_id: str
     outcome: str
@@ -247,6 +286,7 @@ class CounterfactualContextItem:
     would_have: str
     confidence: float | None = None
     lesson: str | None = None
+    reversible: str | None = None
     title: str = _COUNTERFACTUAL_TITLE
     max_chars: int = _DEFAULT_MAX_CHARS
     metadata: Mapping[str, Any] = field(default_factory=dict)
@@ -262,6 +302,8 @@ class CounterfactualContextItem:
         ]
         if self.confidence is not None:
             lines.append(f"Confidence: {self.confidence:.2f}")
+        if self.reversible:
+            lines.append(f"Reversible: {self.reversible}")
         if self.lesson:
             lines.append(f"Lesson: {self.lesson}")
         return _truncate_text("\n".join(lines), self.max_chars)
@@ -269,11 +311,24 @@ class CounterfactualContextItem:
 
 @dataclass(frozen=True, slots=True)
 class AssumptionsSnapshotContextItem:
-    """Records the current full set of assumptions the run is proceeding under."""
+    """Records the current full set of assumptions the run is proceeding under.
+
+    Assumptions do their damage while they stay implicit, so this snapshot
+    exists to make the complete unverified foundation visible at once rather
+    than scattered across individual decisions. Alongside the raw list, it
+    can record an overall risk rating, how many entries have actually been
+    checked, confidence that the list is exhaustive, and what changed since
+    the previous snapshot, so a reader comparing two snapshots can see
+    exactly how the foundation shifted. Each call replaces the previous one.
+    """
 
     primitive_id: str
     assumptions: tuple[str, ...]
     scope: str | None = None
+    risk_level: str | None = None
+    verified_count: int | None = None
+    confidence_in_completeness: float | None = None
+    last_changed: str | None = None
     title: str = _ASSUMPTIONS_TITLE
     max_chars: int = _DEFAULT_MAX_CHARS
     metadata: Mapping[str, Any] = field(default_factory=dict)
@@ -285,17 +340,38 @@ class AssumptionsSnapshotContextItem:
         lines: list[str] = []
         if self.scope:
             lines.append(f"Scope: {self.scope}")
+        if self.risk_level:
+            lines.append(f"Risk Level: {self.risk_level}")
+        if self.verified_count is not None:
+            lines.append(f"Verified Count: {self.verified_count}")
+        if self.confidence_in_completeness is not None:
+            lines.append(f"Confidence In Completeness: {self.confidence_in_completeness:.2f}")
         _extend_section(lines, "Current Assumptions", self.assumptions)
+        if self.last_changed:
+            lines.append(f"Last Changed: {self.last_changed}")
         return _truncate_text("\n".join(lines), self.max_chars)
 
 
 @dataclass(frozen=True, slots=True)
 class FailureScanContextItem:
-    """Records the current premortem scan of what could go wrong at this stage."""
+    """Records the current premortem scan of what could go wrong at this stage.
+
+    Writing failures down before they happen is what turns them from
+    surprises into choices, so this primitive holds the current scan's
+    entries alongside an overall risk verdict, whether any high-likelihood
+    entry still lacks mitigation, confidence in the scan's own completeness,
+    and what changed relative to the previous scan. Each call replaces the
+    previous one, keeping the record aligned with the stage actually in
+    progress.
+    """
 
     primitive_id: str
     failures: tuple[Mapping[str, Any], ...]
     stage: str | None = None
+    overall_risk: str | None = None
+    blocking: str | None = None
+    confidence: float | None = None
+    previous_delta: str | None = None
     title: str = _FAILURE_SCAN_TITLE
     max_chars: int = _DEFAULT_MAX_CHARS
     metadata: Mapping[str, Any] = field(default_factory=dict)
@@ -307,6 +383,12 @@ class FailureScanContextItem:
         lines: list[str] = []
         if self.stage:
             lines.append(f"Stage: {self.stage}")
+        if self.overall_risk:
+            lines.append(f"Overall Risk: {self.overall_risk}")
+        if self.blocking:
+            lines.append(f"Blocking: {self.blocking}")
+        if self.confidence is not None:
+            lines.append(f"Confidence: {self.confidence:.2f}")
         if self.failures:
             lines.append("Could Go Wrong:")
             for entry in self.failures:
@@ -316,17 +398,30 @@ class FailureScanContextItem:
                 mitigation = str(entry.get("mitigation", "") or "")
                 if mitigation:
                     lines.append(f"  Mitigation: {mitigation}")
+        if self.previous_delta:
+            lines.append(f"Previous Delta: {self.previous_delta}")
         return _truncate_text("\n".join(lines), self.max_chars)
 
 
 @dataclass(frozen=True, slots=True)
 class WhyContextItem:
-    """Records a retrospective on why the actions taken so far were taken."""
+    """Records a retrospective on why the actions taken so far were taken.
+
+    The tool log already shows what happened; this primitive captures the
+    reasoning that is otherwise lost, along with an honest verdict on
+    whether re-examining that reasoning revealed anything that should
+    change. It can also record what prompted the retrospective, how many
+    steps it actually covers, and how confident the agent is in the
+    rationale it just reconstructed.
+    """
 
     primitive_id: str
     why: str
     reconsider: str
     change: str | None = None
+    trigger: str | None = None
+    steps_covered: int | None = None
+    confidence_in_rationale: float | None = None
     title: str = _WHY_TITLE
     max_chars: int = _DEFAULT_MAX_CHARS
     metadata: Mapping[str, Any] = field(default_factory=dict)
@@ -337,9 +432,14 @@ class WhyContextItem:
         # Renders the rationale retrospective and its reconsider verdict, bounded by max_chars.
         lines = [
             f"Reconsider: {self.reconsider}",
-            "### Why",
-            self.why,
         ]
+        if self.trigger:
+            lines.append(f"Trigger: {self.trigger}")
+        if self.steps_covered is not None:
+            lines.append(f"Steps Covered: {self.steps_covered}")
+        if self.confidence_in_rationale is not None:
+            lines.append(f"Confidence In Rationale: {self.confidence_in_rationale:.2f}")
+        lines.extend(("### Why", self.why))
         if self.change:
             lines.extend(("", "### Change", self.change))
         return _truncate_text("\n".join(lines), self.max_chars)
