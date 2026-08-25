@@ -22,6 +22,7 @@ from __future__ import annotations
 import asyncio
 import math
 from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -60,6 +61,28 @@ from vidbyte.tools.builtins.operations.base import PricedOperationTool
 from vidbyte.tools.catalog import Tools
 from vidbyte.tools.security import PermissionDecision, PermissionPolicy
 from vidbyte.tools.types import ToolCall, ToolCallContext, ToolCallState, ToolResult
+
+
+@dataclass(slots=True)
+class _LoopState:
+    """Mutable per-attempt state threaded through one _arun_once or _invoke_with_middleware call."""
+
+    message: str
+    context: BaseAgentContext
+    provider: str
+    metadata: dict[str, Any]
+    started_at: float
+    run_state: dict[type, Any] = field(default_factory=dict)
+    call_contexts: list[ToolCallContext] = field(default_factory=list)
+    iteration_count: int = 0
+    model_call_count: int = 0
+    tokens_used: int | None = None
+    model_response: object | None = None
+
+    @property
+    def tool_call_count(self) -> int:
+        """Tool calls recorded so far in this attempt."""
+        return len(self.call_contexts)
 
 
 class AgentRuntime:
@@ -164,81 +187,54 @@ class AgentRuntime:
 
     async def _arun_once(self, message: str, *, handle: RunnerHandle, context: BaseAgentContext, metadata: Mapping[str, Any] | None = None, options: Mapping[str, Any] | None = None, trace_context: SpanContext | None = None) -> AgentResult:
         """Run one direct model/tool attempt until isDone or a budget stop."""
-        provider = handle.provider
         run_options = dict(options or {})
-        runtime_metadata = dict(metadata or {})
+        state = _LoopState(
+            message=message,
+            context=context,
+            provider=handle.provider,
+            metadata=dict(metadata or {}),
+            started_at=self.middleware.clock(),
+        )
         inner_algorithm = AgentRuntimeContextAlgorithms(self).inner_loop_algorithm()
         if inner_algorithm is not None:
             if self.context_manager is None:
                 self.context_manager = ContextManager()
-            runtime_metadata["_inner_context_window_algorithm"] = inner_algorithm
-            runtime_metadata["_context_window_state"] = {}
+            state.metadata["_inner_context_window_algorithm"] = inner_algorithm
+            state.metadata["_context_window_state"] = {}
             # One run-start invocation lets the algorithm initialize before any iteration.
-            await self._run_inner_context_window_hook(runtime_metadata, message=message, provider=provider)
-        tool_schemas = self._resolve_tool_schemas(provider)
+            await self._run_inner_context_window_hook(state.metadata, message=message, provider=state.provider)
+        tool_schemas = self._resolve_tool_schemas(state.provider)
         messages = self._extract_initial_messages(run_options)
-        call_contexts: list[ToolCallContext] = []
-        iteration_count = 0
-        model_call_count = 0
         rejections = 0
         compaction_count = 0
-        tokens_used: int | None = None
-        started_at = self.middleware.clock()
-        last_response: object | None = None
         last_assistant_output: str | None = None
-        run_state: dict[type, Any] = {}
         iteration_outputs: list[str] = []
         active_trace_context = trace_context
         fallback_index = 0
         fallback_attempts: list[dict[str, str]] = []
         fallback_errors: list[BaseException] = []
 
-        decision = await self.middleware.before_run(
-            self._middleware_context(
-                MiddlewareHook.BEFORE_RUN,
-                message=message,
-                context=context,
-                provider=provider,
-                iteration_count=iteration_count,
-                model_call_count=model_call_count,
-                tool_call_count=len(call_contexts),
-                tokens_used=tokens_used,
-                started_at=started_at,
-                metadata=runtime_metadata,
-                run_state=run_state,
-            )
-        )
+        decision = await self.middleware.before_run(self._middleware_context(MiddlewareHook.BEFORE_RUN, state))
         if decision.action is not MiddlewareAction.CONTINUE:
             result = self._middleware_abort_result(
                 decision,
-                iteration_count=iteration_count,
-                tokens_used=tokens_used,
-                contexts=call_contexts,
+                iteration_count=state.iteration_count,
+                tokens_used=state.tokens_used,
+                contexts=state.call_contexts,
             )
-            return await self._finish_result(
-                result,
-                message=message,
-                context=context,
-                provider=provider,
-                iteration_count=iteration_count,
-                model_call_count=model_call_count,
-                tokens_used=tokens_used,
-                started_at=started_at,
-                metadata=runtime_metadata,
-                run_state=run_state,
-            )
+            return await self._finish_result(result, state)
 
         while True:
             # Single inner-loop context-window point: after the prior iteration's tool calls finished.
-            if iteration_count > 0:
+            if state.iteration_count > 0:
                 await self._run_inner_context_window_hook(
-                    runtime_metadata,
+                    state.metadata,
                     message=message,
-                    provider=provider,
-                    iteration_count=iteration_count,
+                    provider=state.provider,
+                    iteration_count=state.iteration_count,
                     assistant_output=last_assistant_output,
-                    call_contexts=call_contexts,
-                    tokens_used=tokens_used,
+                    call_contexts=state.call_contexts,
+                    tokens_used=state.tokens_used,
                     runner=handle,
                     invoke_runner=self._invoke_context_window_runner,
                     runner_output_text=handle.extract_text,
@@ -248,71 +244,32 @@ class AgentRuntime:
                     system_prompt=self.system_prompt,
                 )
             stop_result = self._budget_stop(
-                iteration_count=iteration_count,
-                tokens_used=tokens_used,
-                contexts=call_contexts,
-                started_at=started_at,
+                iteration_count=state.iteration_count,
+                tokens_used=state.tokens_used,
+                contexts=state.call_contexts,
+                started_at=state.started_at,
             )
             if stop_result is not None:
-                return await self._finish_result(
-                    stop_result,
-                    message=message,
-                    context=context,
-                    provider=provider,
-                    iteration_count=iteration_count,
-                    model_call_count=model_call_count,
-                    tokens_used=tokens_used,
-                    started_at=started_at,
-                    metadata=runtime_metadata,
-                    run_state=run_state,
-                    model_response=last_response,
-                )
+                return await self._finish_result(stop_result, state)
 
-            decision = await self.middleware.before_iteration(
-                self._middleware_context(
-                    MiddlewareHook.BEFORE_ITERATION,
-                    message=message,
-                    context=context,
-                    provider=provider,
-                    iteration_count=iteration_count,
-                    model_call_count=model_call_count,
-                    tool_call_count=len(call_contexts),
-                    tokens_used=tokens_used,
-                    started_at=started_at,
-                    metadata=runtime_metadata,
-                    run_state=run_state,
-                    model_response=last_response,
-                )
-            )
+            decision = await self.middleware.before_iteration(self._middleware_context(MiddlewareHook.BEFORE_ITERATION, state))
             if decision.action is not MiddlewareAction.CONTINUE:
                 result = self._middleware_abort_result(
                     decision,
-                    iteration_count=iteration_count,
-                    tokens_used=tokens_used,
-                    contexts=call_contexts,
+                    iteration_count=state.iteration_count,
+                    tokens_used=state.tokens_used,
+                    contexts=state.call_contexts,
                 )
-                return await self._finish_result(
-                    result,
-                    message=message,
-                    context=context,
-                    provider=provider,
-                    iteration_count=iteration_count,
-                    model_call_count=model_call_count,
-                    tokens_used=tokens_used,
-                    started_at=started_at,
-                    metadata=runtime_metadata,
-                    run_state=run_state,
-                    model_response=last_response,
-                )
+                return await self._finish_result(result, state)
 
             iteration_span = self._start_semantic_span(
                 "runtime.iteration",
                 parent=trace_context,
                 agent_name=self.agent_name,
-                iteration=iteration_count,
-                model_call_count=model_call_count,
-                tool_call_count=len(call_contexts),
-                tokens_used=tokens_used,
+                iteration=state.iteration_count,
+                model_call_count=state.model_call_count,
+                tool_call_count=state.tool_call_count,
+                tokens_used=state.tokens_used,
             )
             active_trace_context = iteration_span or trace_context
             call_options = self._build_iteration_call_options(
@@ -320,24 +277,24 @@ class AgentRuntime:
                 context,
                 tool_schemas,
                 messages,
-                provider,
-                iteration_count=iteration_count,
-                tokens_used=tokens_used,
-                tool_call_count=len(call_contexts),
+                state.provider,
+                iteration_count=state.iteration_count,
+                tokens_used=state.tokens_used,
+                tool_call_count=state.tool_call_count,
             )
             try:
-                raw_result, model_call_count, compaction_count = await self._invoke_with_middleware(
+                raw_result, state.model_call_count, compaction_count = await self._invoke_with_middleware(
                     handle,
                     message,
                     call_options,
                     context=context,
-                    iteration_count=iteration_count,
-                    model_call_count=model_call_count,
-                    call_contexts=call_contexts,
-                    tokens_used=tokens_used,
-                    started_at=started_at,
-                    metadata=runtime_metadata,
-                    run_state=run_state,
+                    iteration_count=state.iteration_count,
+                    model_call_count=state.model_call_count,
+                    call_contexts=state.call_contexts,
+                    tokens_used=state.tokens_used,
+                    started_at=state.started_at,
+                    metadata=state.metadata,
+                    run_state=state.run_state,
                     trace_context=active_trace_context,
                     compaction_count=compaction_count,
                 )
@@ -347,7 +304,7 @@ class AgentRuntime:
                     exc,
                     index=fallback_index,
                     handle=handle,
-                    provider=provider,
+                    provider=state.provider,
                     messages=messages,
                     attempts=fallback_attempts,
                     errors=fallback_errors,
@@ -355,114 +312,72 @@ class AgentRuntime:
                 )
                 if transition is None:
                     raise
-                handle, provider = transition.handle, transition.provider
+                handle, state.provider = transition.handle, transition.provider
                 tool_schemas, messages = transition.tool_schemas, transition.messages
                 fallback_index = transition.index
                 # A non-None transition proves self.fallback is set, so this needs no further guard.
                 self._publish_fallback_metadata(
-                    run_state,
+                    state.run_state,
                     self.fallback.result_metadata(fallback_attempts, context_reset=transition.context_reset),
                 )
                 continue
             self._end_semantic_span(iteration_span, output=handle.extract_text(raw_result))
             if isinstance(raw_result, AgentResult):
-                return await self._finish_result(
-                    raw_result,
-                    message=message,
-                    context=context,
-                    provider=provider,
-                    iteration_count=iteration_count,
-                    model_call_count=model_call_count,
-                    tokens_used=tokens_used,
-                    started_at=started_at,
-                    metadata=runtime_metadata,
-                    run_state=run_state,
-                    model_response=last_response,
-                )
-            last_response = raw_result
-            iteration_count += 1
+                # state.model_response is still the PREVIOUS iteration's response here,
+                # which is exactly what this early-exit branch should report.
+                return await self._finish_result(raw_result, state)
+            # Single point of truth from here on: every hook this iteration reads the
+            # current response as state.model_response instead of an explicit override.
+            state.model_response = raw_result
+            state.iteration_count += 1
             last_assistant_output = handle.extract_text(raw_result)
             iteration_outputs.append(last_assistant_output or "")
-            run_state["__iteration_outputs__"] = tuple(iteration_outputs)
+            state.run_state["__iteration_outputs__"] = tuple(iteration_outputs)
             runner_metadata = dict(handle.extract_metadata(raw_result))
-            tokens_used = self._add_token_usage(tokens_used, token_usage_from_response(raw_result, runner_metadata))
+            state.tokens_used = self._add_token_usage(state.tokens_used, token_usage_from_response(raw_result, runner_metadata))
             usage_record = self.usage_tracker.record_call(raw_result)
 
             decision = await self.middleware.after_model_response(
                 self._middleware_context(
                     MiddlewareHook.AFTER_MODEL_RESPONSE,
-                    message=message,
-                    context=context,
-                    provider=provider,
-                    iteration_count=iteration_count,
-                    model_call_count=model_call_count,
-                    tool_call_count=len(call_contexts),
-                    tokens_used=tokens_used,
-                    started_at=started_at,
-                    metadata=runtime_metadata,
-                    run_state=run_state,
-                    model_response=raw_result,
+                    state,
                     model_usage=usage_record.usage if usage_record is not None else None,
                 )
             )
             if decision.action is not MiddlewareAction.CONTINUE:
                 result = self._middleware_abort_result(
                     decision,
-                    iteration_count=iteration_count,
-                    tokens_used=tokens_used,
-                    contexts=call_contexts,
+                    iteration_count=state.iteration_count,
+                    tokens_used=state.tokens_used,
+                    contexts=state.call_contexts,
                 )
-                return await self._finish_result(
-                    result,
-                    message=message,
-                    context=context,
-                    provider=provider,
-                    iteration_count=iteration_count,
-                    model_call_count=model_call_count,
-                    tokens_used=tokens_used,
-                    started_at=started_at,
-                    metadata=runtime_metadata,
-                    run_state=run_state,
-                    model_response=raw_result,
-                )
+                return await self._finish_result(result, state)
 
-            tool_calls = ToolsFormatter.parse_tool_calls(raw_result, provider)
+            tool_calls = ToolsFormatter.parse_tool_calls(raw_result, state.provider)
             self._record_parser_span(
                 "parser.tool_calls",
                 parent=active_trace_context,
-                provider=provider,
+                provider=state.provider,
                 tool_call_count=len(tool_calls),
             )
             if not tool_calls:
-                if self.config.max_tokens is not None and tokens_used is not None and tokens_used >= self.config.max_tokens:
+                if self.config.max_tokens is not None and state.tokens_used is not None and state.tokens_used >= self.config.max_tokens:
                     token_stop = self._stopped_result(
                         "Agent runtime stopped after reaching max_tokens.",
                         stop_reason=AgentStopReason.MAX_TOKENS,
-                        iteration_count=iteration_count,
-                        tokens_used=tokens_used,
-                        contexts=call_contexts,
+                        iteration_count=state.iteration_count,
+                        tokens_used=state.tokens_used,
+                        contexts=state.call_contexts,
                     )
-                    return await self._finish_result(
-                        token_stop,
-                        message=message,
-                        context=context,
-                        provider=provider,
-                        iteration_count=iteration_count,
-                        model_call_count=model_call_count,
-                        tokens_used=tokens_used,
-                        started_at=started_at,
-                        metadata=runtime_metadata,
-                        run_state=run_state,
-                        model_response=raw_result,
-                    )
+                    return await self._finish_result(token_stop, state)
                 if self.output_contract.active():
-                    counters = self._contract_counters(iteration_count=iteration_count, model_call_count=model_call_count, call_contexts=call_contexts, tokens_used=tokens_used, started_at=started_at, final_output=last_assistant_output, compaction_count=compaction_count)
-                    self._publish_contract_evaluations(run_state, counters)
+                    counters = self._contract_counters(iteration_count=state.iteration_count, model_call_count=state.model_call_count, call_contexts=state.call_contexts, tokens_used=state.tokens_used, started_at=state.started_at, final_output=last_assistant_output, compaction_count=compaction_count)
+                    self._publish_contract_evaluations(state.run_state, counters)
                     unmet = self.output_contract.unmet(counters)
                     if unmet and self.output_contract.exhausted(rejections):
                         return await self._finish_result(
-                            self._stopped_result(last_assistant_output or "", stop_reason=AgentStopReason.CONTRACT_UNSATISFIED, iteration_count=iteration_count, tokens_used=tokens_used, contexts=call_contexts),
-                            message=message, context=context, provider=provider, iteration_count=iteration_count, model_call_count=model_call_count, tokens_used=tokens_used, started_at=started_at, metadata=runtime_metadata, run_state=run_state, model_response=raw_result,
+                            self._stopped_result(last_assistant_output or "", stop_reason=AgentStopReason.CONTRACT_UNSATISFIED, iteration_count=state.iteration_count, tokens_used=state.tokens_used, contexts=state.call_contexts),
+                            state,
                         )
                     if unmet:
                         rejections += 1
@@ -471,219 +386,103 @@ class AgentRuntime:
                 final = self._final_result(
                     output=last_assistant_output,
                     runner_metadata=runner_metadata,
-                    contexts=call_contexts,
-                    iteration_count=iteration_count,
-                    tokens_used=tokens_used,
+                    contexts=state.call_contexts,
+                    iteration_count=state.iteration_count,
+                    tokens_used=state.tokens_used,
                     stop_reason=AgentStopReason.FINAL_RESPONSE,
                 )
                 if inner_algorithm is not None:
                     messages.append(self._assistant_message(last_assistant_output))
-                decision = await self.middleware.after_iteration(
-                    self._middleware_context(
-                        MiddlewareHook.AFTER_ITERATION,
-                        message=message,
-                        context=context,
-                        provider=provider,
-                        iteration_count=iteration_count,
-                        model_call_count=model_call_count,
-                        tool_call_count=len(call_contexts),
-                        tokens_used=tokens_used,
-                        started_at=started_at,
-                        metadata=runtime_metadata,
-                        run_state=run_state,
-                        model_response=raw_result,
-                    )
-                )
+                decision = await self.middleware.after_iteration(self._middleware_context(MiddlewareHook.AFTER_ITERATION, state))
                 if inner_algorithm is not None and decision.action is MiddlewareAction.CONTINUE:
                     continue
                 if decision.action is not MiddlewareAction.CONTINUE:
                     final = self._middleware_abort_result(
                         decision,
-                        iteration_count=iteration_count,
-                        tokens_used=tokens_used,
-                        contexts=call_contexts,
+                        iteration_count=state.iteration_count,
+                        tokens_used=state.tokens_used,
+                        contexts=state.call_contexts,
                     )
-                return await self._finish_result(
-                    final,
-                    message=message,
-                    context=context,
-                    provider=provider,
-                    iteration_count=iteration_count,
-                    model_call_count=model_call_count,
-                    tokens_used=tokens_used,
-                    started_at=started_at,
-                    metadata=runtime_metadata,
-                    run_state=run_state,
-                    model_response=raw_result,
-                )
+                return await self._finish_result(final, state)
 
-            assistant_tool_msg = ToolsFormatter.format_assistant_tool_calls(raw_result, provider)
+            assistant_tool_msg = ToolsFormatter.format_assistant_tool_calls(raw_result, state.provider)
             if assistant_tool_msg is not None:
                 messages.append(dict(assistant_tool_msg))
             contract_rejected = False
             for call in tool_calls:
-                processed = await self._process_tool_call(
-                    call,
-                    provider,
-                    messages,
-                    call_contexts,
-                    message=message,
-                    context=context,
-                    iteration_count=iteration_count,
-                    model_call_count=model_call_count,
-                    tokens_used=tokens_used,
-                    started_at=started_at,
-                    metadata=runtime_metadata,
-                    run_state=run_state,
-                    model_response=raw_result,
-                    trace_context=active_trace_context,
-                )
+                processed = await self._process_tool_call(call, messages, state, trace_context=active_trace_context)
                 if isinstance(processed, AgentResult):
-                    return await self._finish_result(
-                        processed,
-                        message=message,
-                        context=context,
-                        provider=provider,
-                        iteration_count=iteration_count,
-                        model_call_count=model_call_count,
-                        tokens_used=tokens_used,
-                        started_at=started_at,
-                        metadata=runtime_metadata,
-                        run_state=run_state,
-                        model_response=raw_result,
-                    )
+                    return await self._finish_result(processed, state)
                 _, result = processed
                 if call.tool_name == IS_DONE_TOOL_NAME:
-                    decision = await self.middleware.after_iteration(
-                        self._middleware_context(
-                            MiddlewareHook.AFTER_ITERATION,
-                            message=message,
-                            context=context,
-                            provider=provider,
-                            iteration_count=iteration_count,
-                            model_call_count=model_call_count,
-                            tool_call_count=len(call_contexts),
-                            tokens_used=tokens_used,
-                            started_at=started_at,
-                            metadata=runtime_metadata,
-                            run_state=run_state,
-                            model_response=raw_result,
-                        )
-                    )
+                    decision = await self.middleware.after_iteration(self._middleware_context(MiddlewareHook.AFTER_ITERATION, state))
                     if decision.action is not MiddlewareAction.CONTINUE:
                         abort_result = self._middleware_abort_result(
                             decision,
-                            iteration_count=iteration_count,
-                            tokens_used=tokens_used,
-                            contexts=call_contexts,
+                            iteration_count=state.iteration_count,
+                            tokens_used=state.tokens_used,
+                            contexts=state.call_contexts,
                         )
-                        return await self._finish_result(
-                            abort_result,
-                            message=message,
-                            context=context,
-                            provider=provider,
-                            iteration_count=iteration_count,
-                            model_call_count=model_call_count,
-                            tokens_used=tokens_used,
-                            started_at=started_at,
-                            metadata=runtime_metadata,
-                            run_state=run_state,
-                            model_response=raw_result,
-                        )
+                        return await self._finish_result(abort_result, state)
                     if self.output_contract.active():
-                        counters = self._contract_counters(iteration_count=iteration_count, model_call_count=model_call_count, call_contexts=call_contexts, tokens_used=tokens_used, started_at=started_at, final_output=result.output, compaction_count=compaction_count)
-                        self._publish_contract_evaluations(run_state, counters)
+                        counters = self._contract_counters(iteration_count=state.iteration_count, model_call_count=state.model_call_count, call_contexts=state.call_contexts, tokens_used=state.tokens_used, started_at=state.started_at, final_output=result.output, compaction_count=compaction_count)
+                        self._publish_contract_evaluations(state.run_state, counters)
                         unmet = self.output_contract.unmet(counters)
                         if unmet and self.output_contract.exhausted(rejections):
                             return await self._finish_result(
-                                self._stopped_result(result.output or "", stop_reason=AgentStopReason.CONTRACT_UNSATISFIED, iteration_count=iteration_count, tokens_used=tokens_used, contexts=call_contexts),
-                                message=message, context=context, provider=provider, iteration_count=iteration_count, model_call_count=model_call_count, tokens_used=tokens_used, started_at=started_at, metadata=runtime_metadata, run_state=run_state, model_response=raw_result,
+                                self._stopped_result(result.output or "", stop_reason=AgentStopReason.CONTRACT_UNSATISFIED, iteration_count=state.iteration_count, tokens_used=state.tokens_used, contexts=state.call_contexts),
+                                state,
                             )
                         if unmet:
                             rejections += 1
-                            self._append_tool_result_message(messages, call, ToolResult.error(call.tool_name, self.output_contract.feedback(unmet, counters)), provider, MiddlewareDecision.continue_())
+                            self._append_tool_result_message(messages, call, ToolResult.error(call.tool_name, self.output_contract.feedback(unmet, counters)), state.provider, MiddlewareDecision.continue_())
                             contract_rejected = True
                             break
                     final = self._final_result(
                         output=result.output,
                         runner_metadata=runner_metadata,
-                        contexts=call_contexts,
-                        iteration_count=iteration_count,
-                        tokens_used=tokens_used,
+                        contexts=state.call_contexts,
+                        iteration_count=state.iteration_count,
+                        tokens_used=state.tokens_used,
                         stop_reason=AgentStopReason.IS_DONE,
                     )
-                    return await self._finish_result(
-                        final,
-                        message=message,
-                        context=context,
-                        provider=provider,
-                        iteration_count=iteration_count,
-                        model_call_count=model_call_count,
-                        tokens_used=tokens_used,
-                        started_at=started_at,
-                        metadata=runtime_metadata,
-                        run_state=run_state,
-                        model_response=raw_result,
-                    )
+                    return await self._finish_result(final, state)
 
             if contract_rejected:
                 continue
 
-            decision = await self.middleware.after_iteration(
-                self._middleware_context(
-                    MiddlewareHook.AFTER_ITERATION,
-                    message=message,
-                    context=context,
-                    provider=provider,
-                    iteration_count=iteration_count,
-                    model_call_count=model_call_count,
-                    tool_call_count=len(call_contexts),
-                    tokens_used=tokens_used,
-                    started_at=started_at,
-                    metadata=runtime_metadata,
-                    run_state=run_state,
-                    model_response=raw_result,
-                )
-            )
+            decision = await self.middleware.after_iteration(self._middleware_context(MiddlewareHook.AFTER_ITERATION, state))
             if decision.action is not MiddlewareAction.CONTINUE:
                 result = self._middleware_abort_result(
                     decision,
-                    iteration_count=iteration_count,
-                    tokens_used=tokens_used,
-                    contexts=call_contexts,
+                    iteration_count=state.iteration_count,
+                    tokens_used=state.tokens_used,
+                    contexts=state.call_contexts,
                 )
-                return await self._finish_result(
-                    result,
-                    message=message,
-                    context=context,
-                    provider=provider,
-                    iteration_count=iteration_count,
-                    model_call_count=model_call_count,
-                    tokens_used=tokens_used,
-                    started_at=started_at,
-                    metadata=runtime_metadata,
-                    run_state=run_state,
-                    model_response=raw_result,
-                )
+                return await self._finish_result(result, state)
 
     async def _invoke_with_middleware(self, handle: RunnerHandle, message: str, call_options: Mapping[str, Any], *, context: BaseAgentContext, iteration_count: int, model_call_count: int, call_contexts: Sequence[ToolCallContext], tokens_used: int | None, started_at: float, metadata: Mapping[str, Any], run_state: dict[type, Any] | None = None, trace_context: SpanContext | None = None, compaction_count: int = 0) -> tuple[object | AgentResult, int, int]:
         """Invoke the runner, allowing middleware to retry model errors while tracking compaction events."""
-        provider = handle.provider
+        # Local-only loop state: this method has external callers (reflexion.py,
+        # multi_provider_agentic_grader.py) so its own keyword signature stays put.
+        state = _LoopState(
+            message=message,
+            context=context,
+            provider=handle.provider,
+            metadata=dict(metadata),
+            started_at=started_at,
+            run_state=run_state if run_state is not None else {},
+            call_contexts=list(call_contexts),
+            iteration_count=iteration_count,
+            model_call_count=model_call_count,
+            tokens_used=tokens_used,
+        )
         while True:
             current_call_options = dict(call_options)
             decision = await self.middleware.before_model_call(
                 self._middleware_context(
                     MiddlewareHook.BEFORE_MODEL_CALL,
-                    message=message,
-                    context=context,
-                    provider=provider,
-                    iteration_count=iteration_count,
-                    model_call_count=model_call_count,
-                    tool_call_count=len(call_contexts),
-                    tokens_used=tokens_used,
-                    started_at=started_at,
-                    metadata=metadata,
-                    run_state=run_state,
+                    state,
                     provider_messages=self._provider_messages_from_options(current_call_options),
                     system=str(current_call_options.get("system")) if current_call_options.get("system") is not None else None,
                 )
@@ -692,16 +491,16 @@ class AgentRuntime:
                 return (
                     self._middleware_abort_result(
                         decision,
-                        iteration_count=iteration_count,
-                        tokens_used=tokens_used,
-                        contexts=call_contexts,
+                        iteration_count=state.iteration_count,
+                        tokens_used=state.tokens_used,
+                        contexts=state.call_contexts,
                     ),
-                    model_call_count,
+                    state.model_call_count,
                     compaction_count,
                 )
             compaction_count += self._compaction_event_delta(decision)
             current_call_options = self._apply_before_model_call_transform(current_call_options, decision)
-            model_call_count += 1
+            state.model_call_count += 1
             llm_span = self._tracer.start_span(
                 "llm.call",
                 parent=trace_context,
@@ -709,9 +508,9 @@ class AgentRuntime:
                     handle,
                     message=message,
                     call_options=current_call_options,
-                    provider=provider,
-                    iteration_count=iteration_count,
-                    model_call_count=model_call_count,
+                    provider=state.provider,
+                    iteration_count=state.iteration_count,
+                    model_call_count=state.model_call_count,
                     metadata=metadata,
                 ),
             )
@@ -719,24 +518,11 @@ class AgentRuntime:
                 raw_result = await handle.invoke(message, **current_call_options)
                 output_text = handle.extract_text(raw_result)
                 self._tracer.end_span(llm_span, output=output_text)
-                return raw_result, model_call_count, compaction_count
+                return raw_result, state.model_call_count, compaction_count
             except Exception as exc:
                 self._tracer.end_span(llm_span, error=exc)
                 decision = await self.middleware.on_model_error(
-                    self._middleware_context(
-                        MiddlewareHook.ON_MODEL_ERROR,
-                        message=message,
-                        context=context,
-                        provider=provider,
-                        iteration_count=iteration_count,
-                        model_call_count=model_call_count,
-                        tool_call_count=len(call_contexts),
-                        tokens_used=tokens_used,
-                        started_at=started_at,
-                        metadata=metadata,
-                        run_state=run_state,
-                        error=exc,
-                    )
+                    self._middleware_context(MiddlewareHook.ON_MODEL_ERROR, state, error=exc)
                 )
                 if decision.action is MiddlewareAction.RETRY:
                     if decision.sleep_seconds:
@@ -746,11 +532,11 @@ class AgentRuntime:
                     return (
                         self._middleware_abort_result(
                             decision,
-                            iteration_count=iteration_count,
-                            tokens_used=tokens_used,
-                            contexts=call_contexts,
+                            iteration_count=state.iteration_count,
+                            tokens_used=state.tokens_used,
+                            contexts=state.call_contexts,
                         ),
-                        model_call_count,
+                        state.model_call_count,
                         compaction_count,
                     )
                 raise
@@ -802,47 +588,24 @@ class AgentRuntime:
         base = dict(published) if isinstance(published, Mapping) else {}
         run_state["__result_metadata__"] = {**base, "fallback": dict(record)}
 
-    async def _finish_result(
-        self,
-        result: AgentResult,
-        *,
-        message: str,
-        context: BaseAgentContext,
-        provider: str,
-        iteration_count: int,
-        model_call_count: int,
-        tokens_used: int | None,
-        started_at: float,
-        metadata: Mapping[str, Any],
-        run_state: dict[type, Any] | None = None,
-        model_response: object | None = None,
-    ) -> AgentResult:
+    async def _finish_result(self, result: AgentResult, state: _LoopState) -> AgentResult:
         """Run after_run middleware and attach final middleware metadata."""
         decision = await self.middleware.after_run(
             self._middleware_context(
                 MiddlewareHook.AFTER_RUN,
-                message=message,
-                context=context,
-                provider=provider,
-                iteration_count=iteration_count,
-                model_call_count=model_call_count,
+                state,
                 tool_call_count=int(dict(result.metadata).get("tool_call_count", 0)),
-                tokens_used=tokens_used,
-                started_at=started_at,
-                metadata=metadata,
-                run_state=run_state,
-                model_response=model_response,
             )
         )
         if decision.action is MiddlewareAction.ABORT_RUN:
             result = self._middleware_abort_result(
                 decision,
-                iteration_count=iteration_count,
-                tokens_used=tokens_used,
+                iteration_count=state.iteration_count,
+                tokens_used=state.tokens_used,
                 contexts=tuple(dict(result.metadata).get("tool_calls", ())),
             )
-        result = self._with_context_window_metadata(result, metadata)
-        result = self._with_run_state_metadata(result, run_state)
+        result = self._with_context_window_metadata(result, state.metadata)
+        result = self._with_run_state_metadata(result, state.run_state)
         return self._with_middleware_metadata(result)
 
     @staticmethod
@@ -1013,17 +776,8 @@ class AgentRuntime:
     def _middleware_context(
         self,
         hook: MiddlewareHook,
+        state: _LoopState,
         *,
-        message: str,
-        context: BaseAgentContext,
-        provider: str,
-        iteration_count: int,
-        model_call_count: int,
-        tool_call_count: int,
-        tokens_used: int | None,
-        started_at: float,
-        metadata: Mapping[str, Any],
-        run_state: dict[type, Any] | None = None,
         tool_call: ToolCall | None = None,
         tool_result: ToolResult | None = None,
         model_response: object | None = None,
@@ -1032,30 +786,32 @@ class AgentRuntime:
         tool_is_internal: bool = False,
         provider_messages: Sequence[Mapping[str, Any]] = (),
         system: str | None = None,
+        tool_call_count: int | None = None,
+        metadata: Mapping[str, Any] | None = None,
     ) -> MiddlewareContext:
-        """Build a middleware context without adding metadata to the model prompt."""
+        """Build a middleware context from loop state without adding metadata to the model prompt."""
         return MiddlewareContext(
             hook=hook,
             agent_name=self.agent_name,
             run_id=self.run_id,
-            provider=provider,
-            message=message,
-            iteration_count=iteration_count,
-            model_call_count=model_call_count,
-            tool_call_count=tool_call_count,
-            elapsed_seconds=max(0, self.middleware.clock() - started_at),
-            tokens_used=tokens_used,
-            agent_context=context,
+            provider=state.provider,
+            message=state.message,
+            iteration_count=state.iteration_count,
+            model_call_count=state.model_call_count,
+            tool_call_count=tool_call_count if tool_call_count is not None else state.tool_call_count,
+            elapsed_seconds=max(0, self.middleware.clock() - state.started_at),
+            tokens_used=state.tokens_used,
+            agent_context=state.context,
             tool_call=tool_call,
             tool_result=tool_result,
-            model_response=model_response,
+            model_response=model_response if model_response is not None else state.model_response,
             model_usage=model_usage,
             error=error,
             provider_messages=tuple(provider_messages),
             system=system,
             tool_is_internal=tool_is_internal,
-            metadata=dict(metadata),
-            run_state=run_state if run_state is not None else {},
+            metadata=dict(metadata if metadata is not None else state.metadata),
+            run_state=state.run_state,
         )
 
     def _middleware_abort_result(
@@ -1470,19 +1226,9 @@ class AgentRuntime:
     async def _process_tool_call(
         self,
         call: ToolCall,
-        provider: str,
         messages: list[dict[str, Any]],
-        call_contexts: list[ToolCallContext],
+        state: _LoopState,
         *,
-        message: str,
-        context: BaseAgentContext,
-        iteration_count: int,
-        model_call_count: int,
-        tokens_used: int | None,
-        started_at: float,
-        metadata: Mapping[str, Any],
-        run_state: dict[type, Any] | None = None,
-        model_response: object | None = None,
         trace_context: SpanContext | None = None,
     ) -> tuple[ToolCallContext, ToolResult] | AgentResult:
         """Execute one tool call, record its context, and append it to messages."""
@@ -1490,33 +1236,23 @@ class AgentRuntime:
         # and identical-call limits all evaluate the tool's business arguments only.
         call = self.tools.prepare_call(call)
         tool_is_internal = self._tool_is_internal(call)
-        settings_outcome = self._enforce_tool_settings(call, provider, messages, call_contexts, tool_is_internal, iteration_count=iteration_count, tokens_used=tokens_used)
+        settings_outcome = self._enforce_tool_settings(call, state.provider, messages, state.call_contexts, tool_is_internal, iteration_count=state.iteration_count, tokens_used=state.tokens_used)
         if settings_outcome is not None:
             return settings_outcome
         decision = await self.middleware.before_tool_call(
             self._middleware_context(
                 MiddlewareHook.BEFORE_TOOL_CALL,
-                message=message,
-                context=context,
-                provider=provider,
-                iteration_count=iteration_count,
-                model_call_count=model_call_count,
-                tool_call_count=len(call_contexts),
-                tokens_used=tokens_used,
-                started_at=started_at,
-                metadata=metadata,
-                run_state=run_state,
+                state,
                 tool_call=call,
                 tool_is_internal=tool_is_internal,
-                model_response=model_response,
             )
         )
         if decision.action is MiddlewareAction.ABORT_RUN:
             return self._middleware_abort_result(
                 decision,
-                iteration_count=iteration_count,
-                tokens_used=tokens_used,
-                contexts=call_contexts,
+                iteration_count=state.iteration_count,
+                tokens_used=state.tokens_used,
+                contexts=state.call_contexts,
             )
         after_decision = MiddlewareDecision.continue_()
         while True:
@@ -1525,43 +1261,35 @@ class AgentRuntime:
             # this loop into call_contexts/messages, keeping intermediate failure
             # attempts out of the model-visible conversation history.
             if decision.action is MiddlewareAction.DENY_TOOL:
-                context_record, result = self._middleware_denied_tool(call, provider, decision, iteration_count=iteration_count)
+                context_record, result = self._middleware_denied_tool(call, state.provider, decision, iteration_count=state.iteration_count)
             else:
-                context_record, result = await self.execute_tool_call(call, provider=provider, trace_context=trace_context, iteration_count=iteration_count, tool_is_internal=tool_is_internal)
+                context_record, result = await self.execute_tool_call(call, provider=state.provider, trace_context=trace_context, iteration_count=state.iteration_count, tool_is_internal=tool_is_internal)
             after_decision = await self.middleware.after_tool_call(
                 self._middleware_context(
                     MiddlewareHook.AFTER_TOOL_CALL,
-                    message=message,
-                    context=context,
-                    provider=provider,
-                    iteration_count=iteration_count,
-                    model_call_count=model_call_count,
-                    tool_call_count=len(call_contexts) + 1,
-                    tokens_used=tokens_used,
-                    started_at=started_at,
-                    metadata=self._tool_call_middleware_metadata(metadata, call),
-                    run_state=run_state,
+                    state,
                     tool_call=call,
                     tool_result=result,
                     tool_is_internal=tool_is_internal,
-                    model_response=model_response,
+                    tool_call_count=state.tool_call_count + 1,
+                    metadata=self._tool_call_middleware_metadata(state.metadata, call),
                 )
             )
             if after_decision.action is not MiddlewareAction.RETRY:
                 break
             if after_decision.sleep_seconds:
                 await self.middleware.sleep(after_decision.sleep_seconds)
-        call_contexts.append(context_record)
+        state.call_contexts.append(context_record)
         if after_decision.action is MiddlewareAction.ABORT_RUN:
             return self._middleware_abort_result(
                 after_decision,
-                iteration_count=iteration_count,
-                tokens_used=tokens_used,
-                contexts=call_contexts,
+                iteration_count=state.iteration_count,
+                tokens_used=state.tokens_used,
+                contexts=state.call_contexts,
             )
         if call.tool_name != IS_DONE_TOOL_NAME:
-            self._append_tool_result_message(messages, call, result, provider, after_decision)
-        failure_stop = self._enforce_tool_settings_after_failure(context_record, tool_is_internal, call_contexts, iteration_count=iteration_count, tokens_used=tokens_used)
+            self._append_tool_result_message(messages, call, result, state.provider, after_decision)
+        failure_stop = self._enforce_tool_settings_after_failure(context_record, tool_is_internal, state.call_contexts, iteration_count=state.iteration_count, tokens_used=state.tokens_used)
         if failure_stop is not None:
             return failure_stop
         return context_record, result
