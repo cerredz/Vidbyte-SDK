@@ -18,6 +18,26 @@ should pass tools directly to agents or wrap collections with `Tools`. Legacy
 registries remain available for compatibility, but the catalog-first pattern
 makes tool availability easier to inspect.
 
+## Description Customization
+
+Built-in tools can expose application-specific model guidance without changing
+their execution contract. `BaseTool.customize()` returns a new tool view that
+can replace the tool description and descriptions of existing top-level
+parameters:
+
+```python
+custom_lookup = lookup_tool.customize(
+    description="Search our internal documentation.",
+    parameter_descriptions={"query": "Use our product terminology."},
+)
+```
+
+Customization never adds parameters, changes validation, or mutates the
+original tool. Use a concrete custom tool or adapter when an application needs
+new business inputs or behavior. Use `with_activity()` for a separate typed
+model-authored annotation that should be captured and removed before the
+wrapped tool executes.
+
 ## Usage
 
 ```python
@@ -44,6 +64,7 @@ print(catalog.provider_schemas("openai"))
 
 - `decorators.py`: `@tool` and `vidbyte_tool` function wrappers.
 - `function_tool.py`: `FunctionTool` creation from Python callables.
+- `customization.py`: Description-only model-facing views over existing tools.
 - `catalog.py`: agent-local immutable tool catalog.
 - `executor.py`: local tool call execution.
 - `security/`: permission policies and sandbox contracts.
