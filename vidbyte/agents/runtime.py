@@ -1187,6 +1187,7 @@ class AgentRuntime:
                     reported_cost_usd=tool.reported_cost_usd(call, result),
                 )
         except Exception:
+            self.usage_tracker.mark_recording_corrupted()
             return
 
     def _billable_attempts(self, tool: PricedOperationTool, call: ToolCall, result: ToolResult) -> int:
