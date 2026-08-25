@@ -129,10 +129,11 @@ Rules worth knowing:
 ### Fallback Policies
 
 Beyond reacting to a raised error, a chain can advance proactively on a per-hop
-deadline, a per-hop cost ceiling, or a chain-wide stuck-tool-call detector:
+deadline, a per-hop cost ceiling, a per-hop error-ratio ceiling, or a chain-wide
+stuck-tool-call detector:
 
 ```python
-from vidbyte.agents import LatencyPolicy, CostBudgetPolicy, ToolCallLoopPolicy
+from vidbyte.agents import CostBudgetPolicy, ErrorRatePolicy, LatencyPolicy, ToolCallLoopPolicy
 from vidbyte.agents.settings import AgentFallbackSettings
 
 agent = Agent(
@@ -146,6 +147,7 @@ agent = Agent(
             LatencyPolicy(timeout_seconds_by_hop=[8.0, 5.0]),
             CostBudgetPolicy(cost_ceiling_usd_by_hop=[0.10, 0.30]),
             ToolCallLoopPolicy(window_size=8, repeat_threshold=3),
+            ErrorRatePolicy(max_error_ratio_by_hop=[0.2, 0.3]),
         ],
     ),
 )
@@ -173,13 +175,24 @@ agent = Agent(
   property of which model happens to be active, so it takes one `window_size` and
   one `repeat_threshold`, not an array. `ignored_argument_keys` can exclude fields
   that legitimately vary between otherwise-identical calls.
-- All three report through the same `AgentResult.metadata["fallback"]` shape and
+- All four policy triggers report through the same `AgentResult.metadata["fallback"]` shape and
   `agent.fallback` span as an error-triggered switch; `error_type` carries a
   reason string (e.g. `"cost_budget_exceeded"`, `"tool_call_loop_detected"`)
   instead of an exception name.
+- **`ErrorRatePolicy`** checks the cumulative failure ratio of hop *i* (failed
+  calls ÷ attempts, counted at the model-call site, retries included) once per
+  loop iteration at the same checkpoint. A provider that recovers on retry still
+  counts its failures — one call in five failing with one retry each shows
+  `2/4 = 0.5`, not `0.2` — so read the ceiling as "how much retry tax am I
+  willing to pay" rather than the provider's raw error rate. The ratio is not
+  trusted until `min_attempts` (default 3) attempts have accumulated.
+- All four policy triggers report through the same `AgentResult.metadata["fallback"]`
+  shape and `agent.fallback` span; `error_type` carries a reason string instead of
+  an exception name (for example, `"cost_budget_exceeded"` or
+  `"error_rate_exceeded"`).
 - `fallback_on` itself stays chain-wide, not per-hop — every hop shares the same
   set of exception types that justify a switch.
-- All three policies are scoped to the tool-using (linear) runtime loop; non-text
+- All four policy triggers are scoped to the tool-using (linear) runtime loop; non-text
   runners (image, audio, video, embedding) don't check them.
 
 ## Durable Sessions
@@ -236,6 +249,8 @@ machines; use `MultiAgent` when the manager must own progress and recovery.
   (`AgentFallbackSettings`, the validated developer-facing chain configuration), and
   `policies.py` (`LatencyPolicy`, `CostBudgetPolicy`, the per-hop trigger conditions,
   and `ToolCallLoopPolicy`, the chain-wide stuck-tool-call trigger).
+  `policies.py` (`LatencyPolicy`, `CostBudgetPolicy`, and `ErrorRatePolicy`, the
+  per-hop trigger conditions, plus `ToolCallLoopPolicy`, the chain-wide trigger).
 - `runtimes/`: linear, search, and actor-model runtime components.
 - `handoff.py`: structured handoff generation from a completed agent run.
 - `multi/`: ledger-driven manager/worker orchestration and transfer controls.

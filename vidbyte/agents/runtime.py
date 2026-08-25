@@ -84,7 +84,8 @@ class AgentRuntime:
         self._wire_schema_cache: dict[str, Any] | None = None
         self.output_contract = output_contract or AgentLoopSettingsOutputContract(())
         self.usage_tracker = usage_tracker or UsageTracker()
-        self.fallback = fallback
+        self.agent_fallback = fallback.for_runtime() if fallback is not None else None
+        self.fallback = self.agent_fallback
 
     def _context_window_admission_middleware(self) -> tuple[AgentMiddleware, ...]:
         # Returns compatibility middleware for legacy tool-result admission presets.
@@ -267,41 +268,25 @@ class AgentRuntime:
                     model_response=last_response,
                 )
 
-            if self.fallback is not None and iteration_count > 0:
-                cost_transition = self._cost_fallback_transition(
+            if self.agent_fallback is not None and iteration_count > 0:
+                transition = self._fallback_transition(
                     index=fallback_index,
                     handle=handle,
                     provider=provider,
                     messages=messages,
                     attempts=fallback_attempts,
+                    errors=fallback_errors,
                     parent_span=trace_context,
-                )
-                if cost_transition is not None:
-                    handle, provider = cost_transition.handle, cost_transition.provider
-                    tool_schemas, messages = cost_transition.tool_schemas, cost_transition.messages
-                    fallback_index = cost_transition.index
-                    self._publish_fallback_metadata(
-                        run_state,
-                        self.fallback.result_metadata(fallback_attempts, context_reset=cost_transition.context_reset),
-                    )
-
-            if self.fallback is not None and iteration_count > 0:
-                loop_transition = self._loop_fallback_transition(
-                    index=fallback_index,
-                    handle=handle,
-                    provider=provider,
-                    messages=messages,
+                    cost_usd=self.usage_tracker.rollup().cost_usd,
                     call_contexts=call_contexts,
-                    attempts=fallback_attempts,
-                    parent_span=trace_context,
                 )
-                if loop_transition is not None:
-                    handle, provider = loop_transition.handle, loop_transition.provider
-                    tool_schemas, messages = loop_transition.tool_schemas, loop_transition.messages
-                    fallback_index = loop_transition.index
+                if transition is not None:
+                    handle, provider = transition.handle, transition.provider
+                    tool_schemas, messages = transition.tool_schemas, transition.messages
+                    fallback_index = transition.index
                     self._publish_fallback_metadata(
                         run_state,
-                        self.fallback.result_metadata(fallback_attempts, context_reset=loop_transition.context_reset),
+                        self.agent_fallback.result_metadata(fallback_attempts, context_reset=transition.context_reset),
                     )
 
             decision = await self.middleware.before_iteration(
@@ -376,7 +361,8 @@ class AgentRuntime:
                     run_state=run_state,
                     trace_context=active_trace_context,
                     compaction_count=compaction_count,
-                    timeout_seconds=self.fallback.deadline_for(fallback_index) if self.fallback is not None else None,
+                    timeout_seconds=self.agent_fallback.deadline_for(fallback_index) if self.agent_fallback is not None else None,
+                    fallback_index=fallback_index,
                 )
             except BaseException as exc:
                 self._end_semantic_span(iteration_span, error=exc)
@@ -395,10 +381,10 @@ class AgentRuntime:
                 handle, provider = transition.handle, transition.provider
                 tool_schemas, messages = transition.tool_schemas, transition.messages
                 fallback_index = transition.index
-                # A non-None transition proves self.fallback is set, so this needs no further guard.
+                # A non-None transition proves self.agent_fallback is set, so this needs no further guard.
                 self._publish_fallback_metadata(
                     run_state,
-                    self.fallback.result_metadata(fallback_attempts, context_reset=transition.context_reset),
+                    self.agent_fallback.result_metadata(fallback_attempts, context_reset=transition.context_reset),
                 )
                 continue
             self._end_semantic_span(iteration_span, output=handle.extract_text(raw_result))
@@ -703,7 +689,7 @@ class AgentRuntime:
                     model_response=raw_result,
                 )
 
-    async def _invoke_with_middleware(self, handle: RunnerHandle, message: str, call_options: Mapping[str, Any], *, context: BaseAgentContext, iteration_count: int, model_call_count: int, call_contexts: Sequence[ToolCallContext], tokens_used: int | None, started_at: float, metadata: Mapping[str, Any], run_state: dict[type, Any] | None = None, trace_context: SpanContext | None = None, compaction_count: int = 0, timeout_seconds: float | None = None) -> tuple[object | AgentResult, int, int]:
+    async def _invoke_with_middleware(self, handle: RunnerHandle, message: str, call_options: Mapping[str, Any], *, context: BaseAgentContext, iteration_count: int, model_call_count: int, call_contexts: Sequence[ToolCallContext], tokens_used: int | None, started_at: float, metadata: Mapping[str, Any], run_state: dict[type, Any] | None = None, trace_context: SpanContext | None = None, compaction_count: int = 0, timeout_seconds: float | None = None, fallback_index: int = 0) -> tuple[object | AgentResult, int, int]:
         """Invoke the runner, allowing middleware to retry model errors while tracking compaction events."""
         provider = handle.provider
         while True:
@@ -757,11 +743,15 @@ class AgentRuntime:
                     raw_result = await asyncio.wait_for(handle.invoke(message, **current_call_options), timeout=timeout_seconds)
                 else:
                     raw_result = await handle.invoke(message, **current_call_options)
+                if self.agent_fallback is not None:
+                    self.agent_fallback.record_model_attempt(fallback_index, failed=False)
                 output_text = handle.extract_text(raw_result)
                 self._tracer.end_span(llm_span, output=output_text)
                 return raw_result, model_call_count, compaction_count
             except Exception as exc:
                 self._tracer.end_span(llm_span, error=exc)
+                if self.agent_fallback is not None and self.agent_fallback.is_model_error(exc):
+                    self.agent_fallback.record_model_attempt(fallback_index, failed=True)
                 decision = await self.middleware.on_model_error(
                     self._middleware_context(
                         MiddlewareHook.ON_MODEL_ERROR,
@@ -800,40 +790,60 @@ class AgentRuntime:
                 self._tracer.end_span(llm_span, error=exc)
                 raise
 
-    def _fallback_transition(self, error: BaseException, *, index: int, handle: RunnerHandle, provider: str, messages: list[dict[str, Any]], attempts: list[dict[str, str]], errors: list[BaseException], parent_span: SpanContext | None) -> "FallbackTransform | None":
-        """Return rebuilt state for the next model in the chain, or None when the caller must re-raise."""
-        if self.fallback is None or not self.fallback.is_model_error(error):
-            return None
-        next_index = self.fallback.advance(error, index)
-        if next_index is None:
-            self._raise_chain_exhausted(error, attempts=attempts, errors=errors)
-            return None
-        errors.append(error)
-        attempts.append(self.fallback.attempt_record(index, next_index, error))
-        transition = self.fallback.transform(handle, provider, self.tools, messages, next_index)
-        self._record_fallback_span(attempts[-1], transition.context_reset, parent_span)
-        return transition
+    def should_fallback(
+        self,
+        index: int,
+        *,
+        error: BaseException | None = None,
+        cost_usd: float | None = None,
+        call_contexts: Sequence[ToolCallContext] = (),
+    ) -> tuple[tuple[int, str], ...]:
+        # Delegates every fallback trigger to the run-scoped AgentFallback coordinator.
+        if self.agent_fallback is None:
+            return ()
+        return self.agent_fallback.should_fallback(index, error=error, cost_usd=cost_usd, call_contexts=call_contexts)
 
-    def _cost_fallback_transition(self, *, index: int, handle: RunnerHandle, provider: str, messages: list[dict[str, Any]], attempts: list[dict[str, str]], parent_span: SpanContext | None) -> "FallbackTransform | None":
-        # Returns rebuilt state when a cost-budget policy elects to downgrade, or None to keep the current model.
-        next_index = self.fallback.advance_after_success(index, cost_usd=self.usage_tracker.rollup().cost_usd)
-        if next_index is None:
+    def _fallback_transition(
+        self,
+        error: BaseException | None = None,
+        *,
+        index: int,
+        handle: RunnerHandle,
+        provider: str,
+        messages: list[dict[str, Any]],
+        attempts: list[dict[str, str]],
+        errors: list[BaseException],
+        parent_span: SpanContext | None,
+        cost_usd: float | None = None,
+        call_contexts: Sequence[ToolCallContext] = (),
+    ) -> FallbackTransform | None:
+        """Apply the fallback decisions returned by the chain, or let the caller re-raise an unhandled error."""
+        if self.agent_fallback is None:
             return None
-        record = self.fallback.policy_attempt_record(index, next_index, "cost_budget_exceeded")
-        attempts.append(record)
-        transition = self.fallback.transform(handle, provider, self.tools, messages, next_index)
-        self._record_fallback_span(record, transition.context_reset, parent_span)
-        return transition
+        decisions = self.should_fallback(index, error=error, cost_usd=cost_usd, call_contexts=call_contexts)
+        if not decisions:
+            if error is not None and self.agent_fallback.is_model_error(error):
+                self._raise_chain_exhausted(error, attempts=attempts, errors=errors)
+            return None
 
-    def _loop_fallback_transition(self, *, index: int, handle: RunnerHandle, provider: str, messages: list[dict[str, Any]], call_contexts: Sequence[ToolCallContext], attempts: list[dict[str, str]], parent_span: SpanContext | None) -> "FallbackTransform | None":
-        # Returns rebuilt state when a tool-call-loop policy detects a stuck pattern, or None to keep the current model.
-        next_index = self.fallback.advance_after_loop_detected(index, call_contexts)
-        if next_index is None:
-            return None
-        record = self.fallback.policy_attempt_record(index, next_index, "tool_call_loop_detected")
-        attempts.append(record)
-        transition = self.fallback.transform(handle, provider, self.tools, messages, next_index)
-        self._record_fallback_span(record, transition.context_reset, parent_span)
+        current_index = index
+        current_handle = handle
+        current_provider = provider
+        current_messages = messages
+        transition: FallbackTransform | None = None
+        for next_index, reason in decisions:
+            if error is not None:
+                errors.append(error)
+                record = self.agent_fallback.attempt_record(current_index, next_index, error)
+                error = None
+            else:
+                record = self.agent_fallback.policy_attempt_record(current_index, next_index, reason)
+            attempts.append(record)
+            transition = self.agent_fallback.transform(current_handle, current_provider, self.tools, current_messages, next_index)
+            self._record_fallback_span(record, transition.context_reset, parent_span)
+            current_index = next_index
+            current_handle, current_provider = transition.handle, transition.provider
+            current_messages = transition.messages
         return transition
 
     def _raise_chain_exhausted(self, error: BaseException, *, attempts: Sequence[Mapping[str, str]], errors: Sequence[BaseException]) -> None:

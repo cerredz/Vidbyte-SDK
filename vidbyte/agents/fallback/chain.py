@@ -9,14 +9,15 @@ Purpose:
     transient provider failure, a slow call, or a cost overrun degrades to the
     next model instead of ending the run or silently overspending.
 Architecture:
-    - AgentFallback: Immutable chain plus advance/transform policy helpers.
+    - AgentFallback: Ordered chain, run-scoped fallback statistics, and policy decisions.
     - DEFAULT_FALLBACK_ERRORS: Provider-level exceptions that justify a switch.
 Relations:
     Built by vidbyte.agents.fallback.settings.AgentFallbackSettings.to_fallback.
     Consumed by vidbyte.agents.runtime inside the direct model/tool loop.
 Similar Files:
     - vidbyte/agents/fallback/settings.py: Developer-facing settings that build this.
-    - vidbyte/agents/fallback/policies.py: Per-hop LatencyPolicy and CostBudgetPolicy.
+    - vidbyte/agents/fallback/policies.py: Per-hop LatencyPolicy, CostBudgetPolicy,
+      and ErrorRatePolicy, plus the chain-wide ToolCallLoopPolicy.
     - vidbyte/lib/dataclasses/agents.py: FallbackModel and FallbackTransform data contracts.
     - vidbyte/lib/dataclasses/runner.py: RunnerHandle.with_runner is the swap primitive.
 """
@@ -68,6 +69,23 @@ class AgentFallback:
         self.fallback_on = tuple(fallback_on)
         self.policies = tuple(policies)
         self._runner_cache: dict[int, object] = {}
+        self.fallback_stats: dict[int, dict[str, int]] = {}
+        self._error_rate_active = any(callable(getattr(policy, "error_ratio_for", None)) for policy in self.policies)
+
+    def for_runtime(self) -> AgentFallback:
+        """Return a run-scoped view with isolated fallback statistics and shared runner caching."""
+        # The chain configuration is immutable and safe to share, while attempt statistics belong to one runtime run.
+        runtime_fallback = AgentFallback(self.models, fallback_on=self.fallback_on, policies=self.policies)
+        runtime_fallback._runner_cache = self._runner_cache
+        return runtime_fallback
+
+    def record_model_attempt(self, index: int, *, failed: bool) -> None:
+        # Records one provider attempt through the chain-owned stats helper; inactive policies incur no state update.
+        if not self._error_rate_active:
+            return
+        stats = self.fallback_stats.setdefault(index, {"attempts": 0, "failures": 0})
+        stats["attempts"] += 1
+        stats["failures"] += int(failed)
 
     @classmethod
     def from_spec(
@@ -139,6 +157,57 @@ class AgentFallback:
             if callable(is_stuck) and is_stuck(call_contexts):
                 return True
         return False
+
+    def advance_after_error_rate(self, index: int, *, attempts: int, failures: int) -> int | None:
+        # Returns the next chain index when the current model's cumulative failure ratio has crossed its per-hop ceiling, or None.
+        if index + 1 >= len(self.models) or failures <= 0:
+            return None
+        for policy in self.policies:
+            ratio_getter = getattr(policy, "error_ratio_for", None)
+            if not callable(ratio_getter):
+                continue
+            ceiling = ratio_getter(index)
+            if ceiling is None:
+                continue
+            if attempts >= getattr(policy, "min_attempts", 0) and failures / attempts >= ceiling:
+                return index + 1
+            return None
+        return None
+
+    def should_fallback(
+        self,
+        index: int,
+        *,
+        error: BaseException | None = None,
+        cost_usd: float | None = None,
+        call_contexts: Sequence[ToolCallContext] = (),
+    ) -> tuple[tuple[int, str], ...]:
+        """Return the ordered model switches requested by the active fallback triggers."""
+        if error is not None:
+            next_index = self.advance(error, index)
+            return ((next_index, type(error).__name__),) if next_index is not None else ()
+
+        decisions: list[tuple[int, str]] = []
+        current_index = index
+        next_index = self.advance_after_success(current_index, cost_usd=cost_usd)
+        if next_index is not None:
+            decisions.append((next_index, "cost_budget_exceeded"))
+            current_index = next_index
+
+        stats = self.fallback_stats.get(current_index, {"attempts": 0, "failures": 0})
+        next_index = self.advance_after_error_rate(
+            current_index,
+            attempts=stats["attempts"],
+            failures=stats["failures"],
+        )
+        if next_index is not None:
+            decisions.append((next_index, "error_rate_exceeded"))
+            current_index = next_index
+
+        next_index = self.advance_after_loop_detected(current_index, call_contexts)
+        if next_index is not None:
+            decisions.append((next_index, "tool_call_loop_detected"))
+        return tuple(decisions)
 
     def deadline_for(self, index: int) -> float | None:
         # Returns the first policy-declared deadline for this hop, or None if no policy sets one.
