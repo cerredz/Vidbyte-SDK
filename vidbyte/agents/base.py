@@ -26,6 +26,7 @@ from vidbyte.context.manager import ContextManager
 from vidbyte.context.window import ContextWindow, ContextWindowAlgorithm
 from vidbyte.context.primitives import ContextItem
 from vidbyte.context.handoff import Handoff, MinimalHandoff
+from vidbyte.lib.dataclasses.agent_keys import AgentIdentity, AgentSettingsSnapshot
 from vidbyte.lib.dataclasses.agents import AgentForkSettings, AgentMetadata, AgentRunnerConfig, AgentRuntimeConfig, FallbackModel
 from vidbyte.lib.dataclasses.runner import RunnerHandle
 from vidbyte.lib.dataclasses.sessions import SESSION_SCHEMA_VERSION, RunState
@@ -47,6 +48,11 @@ if TYPE_CHECKING:
     from vidbyte.agents.settings import AgentFallbackSettings
     from vidbyte.sessions.session import Session
     from vidbyte.sessions.store import SessionStore
+
+# AgentSettingsSnapshot.temperature is non-Optional; an agent that never pins a
+# temperature explicitly falls back to this value for settings-hashing purposes only
+# (it does not affect the temperature actually sent to the provider).
+_DEFAULT_SNAPSHOT_TEMPERATURE = 1.0
 
 
 class BaseAgent(McpAttachableMixin):
@@ -152,12 +158,14 @@ class BaseAgent(McpAttachableMixin):
             run_id=run_id,
         )
         self.keys = AgentKeys(
-            agent_name=name,
-            provider=provider_str,
-            model_name=model_name,
-            runtime_type=self.runtime_type.value,
-            run_id=self.runner_config.run_id,
-            system_prompt=system_prompt,
+            identity=AgentIdentity(
+                agent_name=name,
+                runtime_type=self.runtime_type,
+                system_prompt=system_prompt,
+                provider=self._resolve_identity_provider(provider_str, agent_name=name),
+                model_name=model_name,
+                run_id=self.runner_config.run_id,
+            )
         )
         self.name = name
         self._fallback_spec = fallback
@@ -264,6 +272,19 @@ class BaseAgent(McpAttachableMixin):
         if agent_loop_settings is not None:
             return agent_loop_settings
         return AgentLoopSettings(**flat_params)
+
+    @staticmethod
+    def _resolve_identity_provider(provider_str: str | None, *, agent_name: str) -> ModelProvider | None:
+        # Coerces the normalized provider string into a ModelProvider before AgentIdentity construction.
+        if provider_str is None:
+            return None
+        try:
+            return ModelProvider(provider_str.lower())
+        except ValueError as exc:
+            raise ConfigurationError(
+                f"Unrecognized provider '{provider_str}' for agent '{agent_name}'.",
+                details={"agent": agent_name, "provider": provider_str},
+            ) from exc
 
     @staticmethod
     def _resolve_tracer(tracer: type[TracerBase] | TracerBase | None, trace: type[TracerBase] | TracerBase | None) -> TracerBase:
@@ -456,28 +477,25 @@ class BaseAgent(McpAttachableMixin):
         cls._record_resume_tool_mismatch(child, state.tool_names)
         return child
 
-    def _settings_snapshot(self) -> dict[str, Any]:
+    def _settings_snapshot(self) -> AgentSettingsSnapshot:
         # Assembles the full agent-settings payload for AgentKeys.record_settings, reusing existing export helpers.
         loop_settings = self.agent_loop_settings
-        return {
-            "agent_name": self.name,
-            "provider": self.runner_config.provider,
-            "model_name": self.runner_config.model_name,
-            "temperature": self.runner_config.temperature,
-            "runtime_type": self.runtime_type.value,
-            "runtime_config": self._export_runtime_config(),
-            "algorithm": self.algorithm.name,
-            "capabilities": list(self.capabilities),
-            "description": self.description,
-            "metadata": dict(self.metadata),
-            "loop_settings": self._export_loop_settings(),
-            "output_schema": self._export_output_schema(),
-            "tool_settings": repr(loop_settings.tool_settings) if loop_settings.tool_settings is not None else None,
-            "tool_error_policy": repr(loop_settings.tool_error_policy) if loop_settings.tool_error_policy is not None else None,
-            "output_contracts": sorted(contract.name for contract in loop_settings.output_contracts),
-            "max_contract_rejections": loop_settings.max_contract_rejections,
-            "permission_policy": {"allowed": sorted(permission.value for permission in self.permission_policy.allowed)},
-        }
+        return AgentSettingsSnapshot(
+            identity=self.keys.identity,
+            temperature=self.runner_config.temperature if self.runner_config.temperature is not None else _DEFAULT_SNAPSHOT_TEMPERATURE,
+            runtime_config=self._export_runtime_config(),
+            algorithm=self.algorithm.name,
+            capabilities=tuple(self.capabilities),
+            description=self.description,
+            metadata=dict(self.metadata),
+            loop_settings=self._export_loop_settings(),
+            output_schema=self._export_output_schema() or {},
+            tool_settings_repr=repr(loop_settings.tool_settings) if loop_settings.tool_settings is not None else "",
+            tool_error_policy_repr=repr(loop_settings.tool_error_policy) if loop_settings.tool_error_policy is not None else "",
+            output_contracts=tuple(sorted(contract.name for contract in loop_settings.output_contracts)),
+            max_contract_rejections=loop_settings.max_contract_rejections,
+            permission_policy_allowed=tuple(sorted(permission.value for permission in self.permission_policy.allowed)),
+        )
 
     def _export_runtime_config(self) -> dict[str, Any]:
         # Capture runtime budgets plus actor-runtime settings when present.

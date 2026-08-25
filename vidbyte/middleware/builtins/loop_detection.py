@@ -25,13 +25,13 @@ import collections
 from dataclasses import dataclass, field
 from typing import Any
 
-from vidbyte.agents.hashing import stable_key
 from vidbyte.lib.dataclasses.middleware import (
     MiddlewareContext,
     MiddlewareDecision,
     MiddlewareTransform,
 )
 from vidbyte.lib.dataclasses.tools import ToolResult
+from vidbyte.lib.hashing import Hashing, StableKeyInput
 from vidbyte.middleware.base import AgentMiddleware
 
 # Constant description injected into the agent's context window when the soft
@@ -179,11 +179,11 @@ class LoopDetectionMiddleware(AgentMiddleware):
 
     def _make_key(self, tool_name: str, arguments: Any) -> str:
         """Produce a stable string key from the tool name and its arguments."""
-        return stable_key(tool_name, arguments)
+        return Hashing.stable_key(StableKeyInput(prefix=tool_name, payload=arguments)).key
 
     def _make_output_key(self, tool_name: str, output: str) -> str:
         """Produce a stable string key from the tool name and its output text."""
-        return stable_key(tool_name, output)
+        return Hashing.stable_key(StableKeyInput(prefix=tool_name, payload=output)).key
 
     @staticmethod
     def _count_consecutive_tail(key: str, history: collections.deque[str]) -> int:

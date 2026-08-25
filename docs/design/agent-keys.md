@@ -370,3 +370,16 @@ No new third-party dependencies, no external services.
 ### Alternative 4: Unbounded store (no eviction cap)
 - What: let `_store` grow for the life of the agent instance with no cap.
 - Why rejected: fails the unbounded-growth check this workflow's audit explicitly runs for every new piece of state — an actor-model or long-running agent recording a tool-call entry every iteration would grow memory without bound. A bounded FIFO cache with a documented, adjustable cap is the smaller, safer default; the tradeoff (old digests eventually stop decoding) is stated plainly rather than hidden.
+
+---
+
+## 14. Implementation Notes (post-review, PR #348 comments)
+
+Five review comments on PR #348 asked for stricter house-style boundaries than the original design used. All five were implemented in a follow-up PR built on top of this branch:
+
+1. **`AgentKeys.__init__`'s six loose keyword arguments became one `AgentIdentity` dataclass** (`vidbyte/lib/dataclasses/agent_keys.py`), and `_settings_snapshot()`'s raw dict became one `AgentSettingsSnapshot` dataclass wrapping it. Both are `frozen=True, slots=True` with `__post_init__` validation (enum-typed `provider`, length-bounded strings, a `0.0–2.0` temperature range, etc.), following the same "settings class is a thin adapter over one strictly validated dataclass" pattern already used elsewhere in this SDK. `provider`, `model_name`, and `run_id` stay the one deliberate `| None` exception on `AgentIdentity`, documented in its own docstring: `BaseAgent` legitimately constructs agents before a provider/model is pinned or a run_id exists, and forcing a non-null sentinel for `run_id` specifically would have silently defeated `record_step`'s existing "no run_id, no step" safety check. `BaseAgent.__init__`'s own public signature is unchanged — it builds the dataclass internally, so this is not a breaking API change.
+2. **`vidbyte/agents/hashing.py` was deleted and rebuilt as `vidbyte/lib/hashing.py`**, a `Hashing` static-method class where every method takes a dedicated `*Input` dataclass and returns a dedicated `*Output` dataclass (`CanonicalJsonInput/Output`, `HexDigestInput/Output`, `StableKeyInput/Output`). All four original call sites (`AgentKeys`, `ToolSettings.fingerprint`, `LoopDetectionMiddleware`, `ProsecutorDefenderJudgeAlgorithm`) were migrated to call through it.
+3. **`_AGENT_KEYS_SCHEMA_VERSION`/`_DEFAULT_MAX_STORE_ENTRIES`** moved to `vidbyte/lib/constants/agent_keys.py` (`AGENT_KEYS_SCHEMA_VERSION`, `DEFAULT_MAX_STORE_ENTRIES`).
+4. **The five `_KIND_*` string constants** became `AgentKeyKind(str, Enum)` at `vidbyte/lib/enums/agent_keys.py`.
+
+**Judgment call not taken further:** an early draft also validated `AgentIdentity.model_name` against `ProviderModelRegistry`'s known-model catalog when a provider was present. Removed after `python scripts/run_ci.py --stage source` showed three failing tests that legitimately construct agents with synthetic model names (`"model-a"`, `"m"`) to test plumbing unrelated to any real provider — `BaseAgent` never validated `model_name` against the catalog before, and that stricter check belongs to the YAML-config-loading path (`AgentDescriptor`, which already does this), not to `BaseAgent`'s raw constructor. `model_name` stays a length-bounded non-empty string on `AgentIdentity`; only `provider` is enum-strict.

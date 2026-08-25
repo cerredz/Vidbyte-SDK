@@ -18,9 +18,9 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Sequence
 
-from vidbyte.agents.hashing import stable_key
 from vidbyte.lib.dataclasses.tools import ToolCallContext, ToolCallState, ToolResult
 from vidbyte.lib.errors import ConfigurationError
+from vidbyte.lib.hashing import Hashing, StableKeyInput
 
 _ON_DENY_CHOICES = ("continue", "abort")
 _INTERNAL_DONE_TOOL_NAME = "isDone"
@@ -80,7 +80,7 @@ class ToolSettings:
 
     def fingerprint(self, tool_name: str, arguments: Mapping[str, object] | None) -> str:
         # Builds a stable tool-name + args fingerprint used by identical-call budgets.
-        return stable_key(tool_name, dict(arguments or {}))
+        return Hashing.stable_key(StableKeyInput(prefix=tool_name, payload=dict(arguments or {}))).key
 
     def budget_stop(self, *, tool_name: str, arguments: Mapping[str, object] | None, call_contexts: Sequence[ToolCallContext], iteration_count: int) -> tuple[str, dict] | None:
         # Returns (reason, metadata) when a pre-exec hard budget is exceeded; pure and stateless.

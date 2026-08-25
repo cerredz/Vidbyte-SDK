@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from vidbyte.lib.constants.agent_keys import (
+    AGENT_KEYS_SCHEMA_VERSION,
+    DEFAULT_MAX_STORE_ENTRIES,
+)
 from vidbyte.lib.constants.runners import (
     MODEL_PREFIX_RUNNER_TYPE_MAP,
     MODEL_PROVIDER_RUNNER_TYPE_MAP,
@@ -13,6 +17,8 @@ from vidbyte.lib.constants.runners import (
 )
 
 __all__ = [
+    "AGENT_KEYS_SCHEMA_VERSION",
+    "DEFAULT_MAX_STORE_ENTRIES",
     "MODEL_PREFIX_RUNNER_TYPE_MAP",
     "MODEL_PROVIDER_RUNNER_TYPE_MAP",
     "MODEL_RUNNER_TYPE_MAP",
