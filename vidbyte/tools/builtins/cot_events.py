@@ -15,7 +15,9 @@ Architecture:
       context primitive, and return parsed values in ToolResult.metadata.
     - PredictionTool, GoalCheckTool, CounterfactualTool, AssumptionsTool,
       FailuresTool, WhyTool: batch-2 monitoring tools in the same shape;
-      assumptions and failures use fixed snapshot primitive ids.
+      assumptions and failures use fixed snapshot primitive ids. Batch-2's
+      categorical fields are sourced from vidbyte.lib.enums.cot; batch-1's
+      remain inline pending its own review-comment resolution.
 Relations:
     Depends on vidbyte.context.manager and vidbyte.context.primitives.cot_events.
     Parallel to builtins.reflexion and builtins.trajectory_checkpoint (the
@@ -83,6 +85,17 @@ class CotEventParser:
         except (ValueError, TypeError):
             return None
         return max(_MIN_CONFIDENCE, min(_MAX_CONFIDENCE, number))
+
+    @staticmethod
+    def parse_int(value: Any, minimum: int = 0) -> int | None:
+        # Coerces a number or numeric string to an int at or above minimum, or None on failure.
+        if value is None or (isinstance(value, str) and value.strip() == ""):
+            return None
+        try:
+            number = int(float(str(value).strip()))
+        except (ValueError, TypeError):
+            return None
+        return max(minimum, number)
 
     @staticmethod
     def parse_json_objects(value: Any, field_name: str, max_items: int) -> tuple[list[dict] | None, str | None]:
@@ -713,9 +726,26 @@ class BacktrackTool(_CotEventToolBase):
         return await self._record(item, call, {"returnable": item.returnable})
 
 
-ASSUMPTION_SERVICE_LEVELS = ("directly", "indirectly", "no")
-RECONSIDER_LEVELS = ("none", "some", "core")
-FAILURE_LIKELIHOODS = ("high", "medium", "low")
+from vidbyte.lib.enums.cot import (
+    AssumptionRiskLevel,
+    FailureLikelihood,
+    FailureScanRisk,
+    GoalServiceLevel,
+    PredictionCategory,
+    ReconsiderLevel,
+    Severity as _Severity,
+    YesNo as _YesNo,
+)
+
+ASSUMPTION_SERVICE_LEVELS = tuple(level.value for level in GoalServiceLevel)
+RECONSIDER_LEVELS = tuple(level.value for level in ReconsiderLevel)
+FAILURE_LIKELIHOODS = tuple(level.value for level in FailureLikelihood)
+PREDICTION_STAKES_LEVELS = tuple(level.value for level in _Severity)
+PREDICTION_CATEGORIES = tuple(category.value for category in PredictionCategory)
+ASSUMPTION_RISK_LEVELS = tuple(level.value for level in AssumptionRiskLevel)
+FAILURE_SCAN_RISK_LEVELS = tuple(level.value for level in FailureScanRisk)
+REVERSIBLE_OPTIONS = tuple(option.value for option in _YesNo)
+FAILURE_SCAN_BLOCKING_OPTIONS = tuple(option.value for option in _YesNo)
 _MAX_ASSUMPTIONS = 10
 _MAX_FAILURES = 5
 _DEFAULT_FAILURE_LIKELIHOOD = "medium"
@@ -731,29 +761,29 @@ class PredictionTool(_CotEventToolBase):
         return ToolSpec(
             name="prediction",
             description=(
-                "Commit to a falsifiable forecast about what will happen next in this run. "
-                "Use this before taking an action whose outcome you are not certain of: "
-                "call the endpoint and predict the response shape, run the migration and "
-                "predict whether it completes, apply the fix and predict whether the test "
-                "passes. A prediction is only useful when it could come out wrong — pair "
-                "it with a trigger that will settle it, and give your honest probability, "
-                "because the value of this record is calibration: a run whose confident "
-                "predictions keep missing is drifting even while its outputs look busy. "
-                "Do not predict certainties ('the tool will return'), and do not hedge "
-                "with vague triggers ('at some point'). This is the cheapest self-check "
-                "available to you: state the future, then watch it arrive."
+                "Commit to a falsifiable forecast about what will happen next in the "
+                "run, before taking an action whose outcome is not yet certain. A "
+                "prediction is only useful when it could turn out wrong, so it should "
+                "be paired with an observable trigger that will settle it and an "
+                "honest probability rather than a vague hedge. The value of this "
+                "record is calibration over time: a run whose confident predictions "
+                "keep missing is drifting even while its outputs look busy, and that "
+                "pattern is invisible without a running record of what was predicted "
+                "versus what actually happened. State the future plainly and commit "
+                "to it, then let the trigger settle the matter rather than revisiting "
+                "the wording after the fact."
             ),
             parameters=(
                 ToolParameter(
                     name="predicts",
                     type="string",
                     description=(
-                        "What you predict will happen, in one sentence phrased so it can "
-                        "clearly come true or false: 'The search endpoint returns an empty "
-                        "result set for this query', 'The test suite still fails after "
-                        "this patch', 'The document does not mention rate limits'. Avoid "
-                        "'may', 'might', or 'could' — commit to the outcome you actually "
-                        "expect."
+                        "What is predicted to happen, phrased as a single statement "
+                        "that could clearly turn out true or false. A prediction "
+                        "hedged with qualifiers like 'may' or 'might' is not "
+                        "committing to anything checkable, so this field should "
+                        "commit to the outcome actually expected rather than "
+                        "describing a range of possibilities."
                     ),
                     required=True,
                 ),
@@ -762,11 +792,11 @@ class PredictionTool(_CotEventToolBase):
                     type="string",
                     description=(
                         "The observable trigger that resolves this prediction — the "
-                        "specific action or moment after which anyone can judge it hit or "
-                        "miss: 'when I call the endpoint in the next step', 'after running "
-                        "the test suite this iteration', 'by the end of this run'. A "
-                        "prediction without a resolution point is untestable and will not "
-                        "help you; tie it to something concrete and near-term."
+                        "specific action or moment after which the outcome can be "
+                        "judged a hit or a miss. A prediction without a concrete, "
+                        "near-term resolution point is effectively untestable, so "
+                        "this field should tie the forecast to something that will "
+                        "actually happen rather than an indefinite future."
                     ),
                     required=True,
                 ),
@@ -774,14 +804,56 @@ class PredictionTool(_CotEventToolBase):
                     name="confidence",
                     type="number",
                     description=(
-                        "Your probability the prediction comes true, from 0.0 to 1.0, one "
-                        "decimal. This is a forecast, not a mood: 0.5 means a genuine coin "
-                        "flip, 0.9 means you would be surprised to be wrong. If you catch "
-                        "yourself writing 0.9 for everything, you are not forecasting — "
-                        "reserve high numbers for outcomes whose failure would genuinely "
-                        "surprise you."
+                        "The probability the prediction comes true, expressed as a "
+                        "number between zero and one. This should function as a "
+                        "genuine forecast rather than a mood: a value near a coin "
+                        "flip reflects real uncertainty, and reserving high values "
+                        "for outcomes whose failure would be genuinely surprising is "
+                        "what keeps this number meaningful across many predictions."
                     ),
                     required=True,
+                ),
+                ToolParameter(
+                    name="stakes",
+                    type="string",
+                    description=(
+                        "An optional rating of the consequence if this prediction "
+                        "turns out wrong, ranging from purely cosmetic through minor, "
+                        "major, critical, and fatal. This field lets a reader "
+                        "prioritize which predictions most deserve attention when "
+                        "they resolve, since a missed high-stakes prediction and a "
+                        "missed low-stakes one carry very different weight."
+                    ),
+                    required=False,
+                    default=None,
+                ),
+                ToolParameter(
+                    name="basis",
+                    type="string",
+                    description=(
+                        "An optional statement of what the prediction is actually "
+                        "grounded in, such as a pattern observed earlier in the run "
+                        "or a stated assumption about how a system behaves. This "
+                        "field separates a forecast rooted in evidence from one "
+                        "rooted in general expectation, which matters when judging "
+                        "calibration after the fact."
+                    ),
+                    required=False,
+                    default=None,
+                ),
+                ToolParameter(
+                    name="category",
+                    type="string",
+                    description=(
+                        "An optional classification of what kind of outcome this "
+                        "prediction concerns, distinguishing a tool result, a test "
+                        "result, a user response, a broader system behavior, and an "
+                        "uncategorized other. Grouping predictions by category makes "
+                        "it possible to see whether calibration differs across kinds "
+                        "of forecast rather than only in the aggregate."
+                    ),
+                    required=False,
+                    default=None,
                 ),
             ),
             permission=ToolPermission.SAFE,
@@ -798,6 +870,12 @@ class PredictionTool(_CotEventToolBase):
         confidence = CotEventParser.parse_confidence(args.get("confidence"))
         if confidence is None:
             return ToolResult.error(call.tool_name, "Field 'confidence' must be a number between 0.0 and 1.0.")
+        stakes, stakes_error = CotEventParser.parse_enum(args.get("stakes"), PREDICTION_STAKES_LEVELS, "stakes")
+        if stakes_error:
+            return ToolResult.error(call.tool_name, stakes_error)
+        category, category_error = CotEventParser.parse_enum(args.get("category"), PREDICTION_CATEGORIES, "category")
+        if category_error:
+            return ToolResult.error(call.tool_name, category_error)
 
         self._counter += 1
         from vidbyte.context.primitives.cot_events import PredictionContextItem
@@ -807,6 +885,9 @@ class PredictionTool(_CotEventToolBase):
             predicts=str(args["predicts"]).strip(),
             by_when=str(args["by_when"]).strip(),
             confidence=confidence,
+            stakes=stakes,
+            basis=CotEventParser.optional_text(args.get("basis")),
+            category=category,
         )
         return await self._record(item, call, {"confidence": item.confidence})
 
@@ -819,17 +900,17 @@ class GoalCheckTool(_CotEventToolBase):
         return ToolSpec(
             name="goal_check",
             description=(
-                "Stop for a moment and restate, word for word from the original request, "
-                "what you were asked to do — then compare it to what you are actually "
-                "doing right now. Use this when you notice you have been heads-down in "
-                "detail for a while, when a subtask started growing its own subtasks, or "
-                "any time you cannot remember the last time you looked at the actual "
-                "request. Restating the goal verbatim is the test: if you cannot "
-                "reproduce it exactly, you have already drifted, because detail work "
-                "quietly rewrites your memory of the objective. Answer the alignment "
-                "question honestly — 'indirectly' covers legitimate setup work, but a "
-                "chain of three 'indirectly' answers in a row usually means 'no'. This "
-                "check is the single cheapest defense against efficiently completing "
+                "Restate the original request word for word and compare it directly "
+                "against what is actually being done right now. This is worth doing "
+                "whenever a subtask has been growing its own subtasks, or whenever it "
+                "has been a while since the actual request was last looked at rather "
+                "than a working summary of it. Restating the goal verbatim is itself "
+                "the test: an inability to reproduce it exactly is a sign that drift "
+                "has already occurred, since detail work quietly rewrites memory of "
+                "the objective over time. The alignment verdict should be answered "
+                "honestly rather than charitably, since a string of indirect answers "
+                "in a row usually amounts to a no in practice, and this check is one "
+                "of the cheapest available defenses against efficiently completing "
                 "the wrong task."
             ),
             parameters=(
@@ -837,11 +918,11 @@ class GoalCheckTool(_CotEventToolBase):
                     name="original_goal",
                     type="string",
                     description=(
-                        "The original request, restated word for word as it was given — "
-                        "not summarized, not as currently understood, not narrowed to the "
-                        "part you are working on. Copy it from the original message. If "
-                        "you feel the urge to paraphrase, that urge is the drift signal "
-                        "this tool exists to catch."
+                        "The original request, restated word for word as it was given "
+                        "rather than summarized, reinterpreted, or narrowed to the "
+                        "part currently being worked on. Any urge to paraphrase while "
+                        "filling in this field is itself the drift signal this tool "
+                        "exists to catch."
                     ),
                     required=True,
                 ),
@@ -849,11 +930,11 @@ class GoalCheckTool(_CotEventToolBase):
                     name="current_activity",
                     type="string",
                     description=(
-                        "What you are actually doing right now, in one sentence — the "
-                        "specific step, not the nominal task: 'Refactoring the pagination "
-                        "helper for the third time', 'Reading the fifth documentation "
-                        "page about authentication'. Name it plainly, even if it sounds "
-                        "small next to the goal."
+                        "The specific step actually being performed right now, named "
+                        "plainly rather than described as the nominal task it "
+                        "notionally belongs to. This should reflect the real, "
+                        "granular activity even when it sounds small next to the "
+                        "stated goal."
                     ),
                     required=True,
                 ),
@@ -861,13 +942,15 @@ class GoalCheckTool(_CotEventToolBase):
                     name="still_serves",
                     type="string",
                     description=(
-                        "Whether the current activity still serves the original goal. Use "
-                        "exactly one of: 'directly' (this activity produces part of the "
-                        "requested result), 'indirectly' (it is setup or enabling work "
-                        "the result depends on — be honest about how long the chain is), "
-                        "'no' (it no longer moves toward the goal at all). When in doubt "
-                        "between 'indirectly' and 'no', ask whether finishing this "
-                        "activity would change anything the requester asked for."
+                        "Whether the current activity still serves the original goal, "
+                        "distinguishing activity that directly produces part of the "
+                        "requested result, activity that is legitimate setup or "
+                        "enabling work the result depends on, activity only "
+                        "tangentially related to the goal, a genuinely unclear case, "
+                        "and activity that no longer moves toward the goal at all. "
+                        "When uncertain between adjacent categories, the deciding "
+                        "question is whether finishing the activity would change "
+                        "anything the requester actually asked for."
                     ),
                     required=True,
                 ),
@@ -875,10 +958,37 @@ class GoalCheckTool(_CotEventToolBase):
                     name="pivot_to",
                     type="string",
                     description=(
-                        "When still_serves is 'no', one sentence on what you will do "
-                        "instead — the activity that does serve the goal. This is a "
-                        "commitment to change course, not a suggestion; leave it empty "
-                        "only when still_serves is 'directly' or 'indirectly'."
+                        "Required whenever the current activity no longer serves the "
+                        "goal: a description of what will be done instead. This is a "
+                        "commitment to change course rather than a suggestion, and "
+                        "should be left empty only when the activity is still "
+                        "assessed as serving the goal in some form."
+                    ),
+                    required=False,
+                    default=None,
+                ),
+                ToolParameter(
+                    name="drift_cause",
+                    type="string",
+                    description=(
+                        "An optional account of what actually caused the drift, when "
+                        "the alignment verdict indicates any. Naming the cause, such "
+                        "as an ambiguous instruction that got over-interpreted or an "
+                        "interesting tangent that was followed too far, is what "
+                        "prevents the same drift pattern from recurring later in the "
+                        "same run."
+                    ),
+                    required=False,
+                    default=None,
+                ),
+                ToolParameter(
+                    name="steps_since_last_check",
+                    type="number",
+                    description=(
+                        "An optional non-negative integer counting how many steps "
+                        "have elapsed since the previous goal check. A large or "
+                        "growing gap between checks is itself informative, since "
+                        "drift compounds the longer it goes unexamined."
                     ),
                     required=False,
                     default=None,
@@ -900,6 +1010,7 @@ class GoalCheckTool(_CotEventToolBase):
         )
         if serves_error:
             return ToolResult.error(call.tool_name, serves_error)
+        steps_since_last_check = CotEventParser.parse_int(args.get("steps_since_last_check"))
 
         self._counter += 1
         from vidbyte.context.primitives.cot_events import GoalCheckContextItem
@@ -910,6 +1021,8 @@ class GoalCheckTool(_CotEventToolBase):
             current_activity=str(args["current_activity"]).strip(),
             still_serves=still_serves or ASSUMPTION_SERVICE_LEVELS[0],
             pivot_to=CotEventParser.optional_text(args.get("pivot_to")),
+            drift_cause=CotEventParser.optional_text(args.get("drift_cause")),
+            steps_since_last_check=steps_since_last_check,
         )
         return await self._record(item, call, {"still_serves": item.still_serves})
 
@@ -922,28 +1035,27 @@ class CounterfactualTool(_CotEventToolBase):
         return ToolSpec(
             name="counterfactual",
             description=(
-                "After an outcome arrives, record what you think would have happened on "
-                "the branch you did not take. Use this when a result is informative "
-                "either way — the fix worked and you want to note the cheaper path you "
-                "skipped, or the approach failed and you want to record whether the "
-                "alternative would have done better. One honest caveat belongs up front: "
-                "this is your hindsight, not ground truth. You did not observe the other "
-                "branch, so say what you actually believe and mark your confidence "
-                "rather than presenting the guess as fact. These records are how later "
-                "readers (and you, later in the run) learn whether your branch choices "
-                "are systematically good — a pattern of 'the alternative would have "
-                "failed too' claims that later prove wrong is itself a finding. Record "
-                "the interesting branches, not every fork."
+                "After an outcome arrives, record what would likely have happened on "
+                "the branch that was not taken. This is worth doing whenever the "
+                "result is informative either way, whether an approach succeeded and "
+                "a cheaper skipped path is worth noting, or an approach failed and "
+                "the alternative might plausibly have done better. The central "
+                "caveat is that this is hindsight rather than ground truth, since the "
+                "other branch was never actually observed, so the claim should be "
+                "stated as a genuine belief and paired with a confidence level rather "
+                "than presented as settled fact. Read across many of these records, "
+                "the pattern reveals whether branch choices have been systematically "
+                "good, which is not visible from any single instance; only the "
+                "interesting branches deserve a record, not every fork encountered."
             ),
             parameters=(
                 ToolParameter(
                     name="outcome",
                     type="string",
                     description=(
-                        "What actually happened on the path you took, in one sentence "
-                        "with the concrete result: 'The migration completed in 40 "
-                        "minutes', 'The retry loop exhausted all six attempts'. State "
-                        "the observed fact, not your evaluation of it."
+                        "What actually happened on the path that was taken, stated as "
+                        "the observed, concrete result rather than an evaluation of "
+                        "whether it was good or bad."
                     ),
                     required=True,
                 ),
@@ -951,10 +1063,9 @@ class CounterfactualTool(_CotEventToolBase):
                     name="alternative",
                     type="string",
                     description=(
-                        "The specific branch you did not take, named precisely enough to "
-                        "recognize: 'Writing the batch migration script instead of "
-                        "per-document updates', 'Asking the user for the schema up "
-                        "front'. A vague 'trying something else' is not a branch."
+                        "The specific branch that was not taken, named precisely "
+                        "enough to be recognizable as a genuine alternative rather "
+                        "than a vague notion of trying something else."
                     ),
                     required=True,
                 ),
@@ -962,10 +1073,12 @@ class CounterfactualTool(_CotEventToolBase):
                     name="would_have",
                     type="string",
                     description=(
-                        "Your honest prediction of what the alternative would have "
-                        "produced, one sentence — including the possibility that it "
-                        "would have been worse. This is a guess by definition; make it "
-                        "a specific one and let confidence carry the uncertainty."
+                        "An honest prediction of what the alternative branch would "
+                        "have produced, including the genuine possibility that it "
+                        "would have been worse than the path actually taken. This is "
+                        "a guess by definition, so it should be a specific one, with "
+                        "the accompanying confidence field carrying the actual "
+                        "uncertainty rather than the wording being hedged."
                     ),
                     required=True,
                 ),
@@ -973,11 +1086,13 @@ class CounterfactualTool(_CotEventToolBase):
                     name="confidence",
                     type="number",
                     description=(
-                        "How much you trust your would_have claim, 0.0 to 1.0, one "
-                        "decimal. Most counterfactuals deserve modest numbers — you are "
-                        "reasoning about something you never observed. A run full of "
-                        "0.9-confidence counterfactuals is overconfident about its "
-                        "unlived paths."
+                        "How much this counterfactual claim is actually trusted, "
+                        "expressed as a number between zero and one. Most "
+                        "counterfactuals deserve modest values, since they reason "
+                        "about a path that was never directly observed, and a "
+                        "pattern of consistently high confidence across many of these "
+                        "records is itself a sign of overconfidence about unlived "
+                        "paths."
                     ),
                     required=False,
                     default=None,
@@ -986,10 +1101,24 @@ class CounterfactualTool(_CotEventToolBase):
                     name="lesson",
                     type="string",
                     description=(
-                        "Optional one-clause takeaway that changes future branch "
-                        "choices: 'prefer the scripted path when volume exceeds 10k'. "
-                        "Leave empty when the counterfactual changes nothing going "
-                        "forward — not every comparison needs a moral."
+                        "An optional takeaway that would change future branch "
+                        "choices in similar situations. This should be left empty "
+                        "when the counterfactual does not actually change anything "
+                        "going forward, since not every comparison needs a moral "
+                        "attached to it."
+                    ),
+                    required=False,
+                    default=None,
+                ),
+                ToolParameter(
+                    name="reversible",
+                    type="string",
+                    description=(
+                        "An optional statement of whether the untaken alternative is "
+                        "still reachable now, expressed as yes or no. This "
+                        "distinguishes a purely retrospective comparison from one "
+                        "where switching to the alternative is still a live option "
+                        "worth actually considering."
                     ),
                     required=False,
                     default=None,
@@ -1007,6 +1136,9 @@ class CounterfactualTool(_CotEventToolBase):
             return ToolResult.error(call.tool_name, error)
 
         confidence = CotEventParser.parse_confidence(args.get("confidence"))
+        reversible, reversible_error = CotEventParser.parse_enum(args.get("reversible"), REVERSIBLE_OPTIONS, "reversible")
+        if reversible_error:
+            return ToolResult.error(call.tool_name, reversible_error)
 
         self._counter += 1
         from vidbyte.context.primitives.cot_events import CounterfactualContextItem
@@ -1018,6 +1150,7 @@ class CounterfactualTool(_CotEventToolBase):
             would_have=str(args["would_have"]).strip(),
             confidence=confidence,
             lesson=CotEventParser.optional_text(args.get("lesson")),
+            reversible=reversible,
         )
         return await self._record(item, call, {"confidence": item.confidence})
 
@@ -1030,30 +1163,30 @@ class AssumptionsTool(_CotEventToolBase):
         return ToolSpec(
             name="assumptions",
             description=(
-                "Dump the complete set of assumptions you are currently proceeding "
-                "under — everything you are treating as true without having verified it. "
-                "Use this at the start of a stage, after a significant discovery, or any "
-                "time you suspect your mental load-bearing walls have quietly changed. "
-                "List them all, not just the comfortable ones: environment facts ('the "
-                "dev database resembles production'), tool behavior ('retries are "
-                "idempotent'), scope judgments ('the user wants all endpoints, not just "
-                "one'). The act of listing is the point — assumptions do their damage "
-                "when they stay implicit, and a reader comparing consecutive snapshots "
-                "can see exactly when your unverified foundation shifted. This tool "
-                "replaces the previous snapshot, so it always reflects the current set."
+                "Record the complete set of assumptions currently being treated as "
+                "true without having actually been verified. This is worth doing at "
+                "the start of a stage, after a significant discovery, or any time "
+                "there is a suspicion that the mental load-bearing walls of the run "
+                "have quietly changed. Every assumption should be listed, not only "
+                "the comfortable ones, since environment facts, tool behavior, and "
+                "scope judgments all belong in the same net; listing is the entire "
+                "point, because assumptions do their damage while they remain "
+                "implicit. A reader comparing two consecutive snapshots can see "
+                "exactly when the unverified foundation shifted, which is the "
+                "primary value of this tool over time. Each call replaces the "
+                "previous snapshot, so it always reflects the current set."
             ),
             parameters=(
                 ToolParameter(
                     name="assumptions",
                     type="string",
                     description=(
-                        "A JSON array of 1 to 10 strings, each one assumption stated as "
-                        "a single checkable fact: [\"The production index on users.email "
-                        "exists\", \"Retrying this write will not duplicate the row\", "
-                        "\"The dev fixture data is representative\"]. Do not pad the "
-                        "list to look thorough and do not hide risky ones — an "
-                        "assumption you are embarrassed to list is exactly the one that "
-                        "belongs here most."
+                        "A JSON array of one to ten strings, each one assumption "
+                        "stated as a single checkable fact rather than a vague area "
+                        "of uncertainty. The list should not be padded to look "
+                        "thorough, and it should not omit the assumptions that would "
+                        "be uncomfortable to admit to, since those are exactly the "
+                        "ones most worth surfacing."
                     ),
                     required=True,
                 ),
@@ -1061,10 +1194,64 @@ class AssumptionsTool(_CotEventToolBase):
                     name="scope",
                     type="string",
                     description=(
-                        "Optional one-clause note on what part of the run these "
-                        "assumptions concern — 'the migration stage', 'the whole run', "
-                        "'the third-party API integration'. Leave empty for whole-run "
-                        "snapshots."
+                        "An optional note on what part of the run these assumptions "
+                        "concern, such as a particular stage rather than the run as "
+                        "a whole. This should be left empty when the snapshot is "
+                        "meant to cover the entire run rather than one bounded "
+                        "portion of it."
+                    ),
+                    required=False,
+                    default=None,
+                ),
+                ToolParameter(
+                    name="risk_level",
+                    type="string",
+                    description=(
+                        "An optional overall risk rating for the current set of "
+                        "assumptions taken together, ranging from negligible through "
+                        "low, medium, high, and critical. This field summarizes the "
+                        "combined exposure of the list rather than any single "
+                        "assumption, which the individual entries do not capture on "
+                        "their own."
+                    ),
+                    required=False,
+                    default=None,
+                ),
+                ToolParameter(
+                    name="verified_count",
+                    type="number",
+                    description=(
+                        "An optional non-negative integer counting how many of the "
+                        "listed assumptions have actually been checked rather than "
+                        "simply carried forward unexamined. A low ratio of verified "
+                        "to total assumptions is itself a useful signal about how "
+                        "much of the run's foundation remains untested."
+                    ),
+                    required=False,
+                    default=None,
+                ),
+                ToolParameter(
+                    name="confidence_in_completeness",
+                    type="number",
+                    description=(
+                        "An optional number between zero and one expressing "
+                        "confidence that this list actually captures every active "
+                        "assumption rather than missing some. A low value here is an "
+                        "honest signal that further reflection before acting may be "
+                        "warranted."
+                    ),
+                    required=False,
+                    default=None,
+                ),
+                ToolParameter(
+                    name="last_changed",
+                    type="string",
+                    description=(
+                        "An optional description of what changed in this list "
+                        "relative to the previous snapshot, such as an assumption "
+                        "being dropped once it was verified or a new one being "
+                        "added after a discovery. This turns a single snapshot into "
+                        "a visible trajectory rather than an isolated point."
                     ),
                     required=False,
                     default=None,
@@ -1080,6 +1267,11 @@ class AssumptionsTool(_CotEventToolBase):
         entries, entries_error = self._parse_assumption_entries(args.get("assumptions"))
         if entries_error:
             return ToolResult.error(call.tool_name, entries_error)
+        risk_level, risk_level_error = CotEventParser.parse_enum(args.get("risk_level"), ASSUMPTION_RISK_LEVELS, "risk_level")
+        if risk_level_error:
+            return ToolResult.error(call.tool_name, risk_level_error)
+        verified_count = CotEventParser.parse_int(args.get("verified_count"))
+        confidence_in_completeness = CotEventParser.parse_confidence(args.get("confidence_in_completeness"))
 
         from vidbyte.context.primitives.cot_events import AssumptionsSnapshotContextItem
 
@@ -1087,8 +1279,12 @@ class AssumptionsTool(_CotEventToolBase):
             primitive_id=ASSUMPTIONS_SNAPSHOT_ID,
             assumptions=tuple(entries),
             scope=CotEventParser.optional_text(args.get("scope")),
+            risk_level=risk_level,
+            verified_count=verified_count,
+            confidence_in_completeness=confidence_in_completeness,
+            last_changed=CotEventParser.optional_text(args.get("last_changed")),
         )
-        return await self._record(item, call, {"count": len(item.assumptions)})
+        return await self._record(item, call, {"count": len(item.assumptions), "risk_level": item.risk_level})
 
     def _parse_assumption_entries(self, value: Any) -> tuple[list[str] | None, str | None]:
         # Parses the assumptions JSON array into 1-10 non-empty stripped strings.
@@ -1110,31 +1306,31 @@ class FailuresTool(_CotEventToolBase):
         return ToolSpec(
             name="failures",
             description=(
-                "Run a premortem on the current stage: assume your next few steps have "
-                "already failed, and list the concrete things that could have caused it. "
-                "Use this before committing to an approach, before an irreversible "
-                "action, or whenever the run has been smooth for suspiciously long — "
-                "complacency is where the expensive failures hide. Name specific "
-                "mechanisms, not vague worries: 'the batch write times out because the "
-                "collection has no covering index', not 'something might break'. The "
-                "high-likelihood entries with no mitigation are your action items; the "
-                "act of writing them down is what turns them from surprises into "
-                "choices. This tool replaces the previous scan, so it always reflects "
-                "the current stage's risks."
+                "Run a premortem on the current stage by assuming the next few steps "
+                "have already failed and listing the concrete things that could have "
+                "caused it. This is worth doing before committing to an approach, "
+                "before an irreversible action, or whenever the run has been smooth "
+                "for a suspiciously long stretch, since complacency is exactly where "
+                "expensive failures tend to hide. Specific mechanisms should be named "
+                "rather than vague worries, since a named mechanism can actually be "
+                "mitigated while a vague worry cannot. The high-likelihood entries "
+                "left without mitigation are the real action items here, and the act "
+                "of writing them down is what turns them from surprises into "
+                "choices. Each call replaces the previous scan, so it always "
+                "reflects the current stage's risks rather than an earlier one."
             ),
             parameters=(
                 ToolParameter(
                     name="failures",
                     type="string",
                     description=(
-                        "A JSON array of 1 to 5 objects, each with keys 'failure' (the "
-                        "specific thing that could go wrong), 'likelihood' (exactly one "
-                        "of 'high', 'medium', 'low'), and optionally 'mitigation' (one "
-                        "clause on what prevents or limits it). Example: "
-                        "[{\"failure\": \"Rate limit hits during backfill\", "
-                        "\"likelihood\": \"high\", \"mitigation\": \"throttle to 100 "
-                        "writes/sec\"}]. Rank honestly — listing everything as 'low' to "
-                        "stay comfortable defeats the entire purpose."
+                        "A JSON array of one to five objects, each with a 'failure' "
+                        "key naming the specific thing that could go wrong, a "
+                        "'likelihood' key rating how probable it is, and an optional "
+                        "'mitigation' key describing what prevents or limits it. "
+                        "Ranking should be honest; marking everything as low "
+                        "likelihood to stay comfortable defeats the purpose of "
+                        "running a premortem in the first place."
                     ),
                     required=True,
                 ),
@@ -1142,10 +1338,61 @@ class FailuresTool(_CotEventToolBase):
                     name="stage",
                     type="string",
                     description=(
-                        "Optional one-clause description of the stage this scan covers: "
-                        "'backfilling the audit collection', 'final output assembly'. "
-                        "Leave empty if the scan covers the immediate next steps "
-                        "generally."
+                        "An optional description of the stage this scan covers. This "
+                        "should be left empty when the scan is meant to cover the "
+                        "immediate next steps generally rather than one specifically "
+                        "named phase of the run."
+                    ),
+                    required=False,
+                    default=None,
+                ),
+                ToolParameter(
+                    name="overall_risk",
+                    type="string",
+                    description=(
+                        "An optional overall risk verdict for the current scan taken "
+                        "as a whole, ranging from healthy through watchful, elevated, "
+                        "severe, and critical. This summarizes the combined exposure "
+                        "of the listed failures rather than describing any single "
+                        "entry."
+                    ),
+                    required=False,
+                    default=None,
+                ),
+                ToolParameter(
+                    name="blocking",
+                    type="string",
+                    description=(
+                        "An optional statement of whether any high-likelihood entry "
+                        "in this scan still lacks a mitigation, expressed as yes or "
+                        "no. A yes here identifies an actual action item rather than "
+                        "a scan that has been reviewed and accepted as is."
+                    ),
+                    required=False,
+                    default=None,
+                ),
+                ToolParameter(
+                    name="confidence",
+                    type="number",
+                    description=(
+                        "An optional number between zero and one expressing "
+                        "confidence that this scan actually covers the real risks of "
+                        "the current stage rather than missing significant ones. A "
+                        "low value here is an honest signal that the scan may be "
+                        "incomplete."
+                    ),
+                    required=False,
+                    default=None,
+                ),
+                ToolParameter(
+                    name="previous_delta",
+                    type="string",
+                    description=(
+                        "An optional description of what changed in this scan "
+                        "relative to the previous one, such as a risk being retired "
+                        "after mitigation or a new one surfacing after a discovery. "
+                        "This turns a single scan into a visible trajectory rather "
+                        "than an isolated snapshot."
                     ),
                     required=False,
                     default=None,
@@ -1161,6 +1408,15 @@ class FailuresTool(_CotEventToolBase):
         entries, entries_error = self._parse_failure_entries(args.get("failures"))
         if entries_error:
             return ToolResult.error(call.tool_name, entries_error)
+        overall_risk, overall_risk_error = CotEventParser.parse_enum(
+            args.get("overall_risk"), FAILURE_SCAN_RISK_LEVELS, "overall_risk"
+        )
+        if overall_risk_error:
+            return ToolResult.error(call.tool_name, overall_risk_error)
+        blocking, blocking_error = CotEventParser.parse_enum(args.get("blocking"), FAILURE_SCAN_BLOCKING_OPTIONS, "blocking")
+        if blocking_error:
+            return ToolResult.error(call.tool_name, blocking_error)
+        confidence = CotEventParser.parse_confidence(args.get("confidence"))
 
         from vidbyte.context.primitives.cot_events import FailureScanContextItem
 
@@ -1168,9 +1424,17 @@ class FailuresTool(_CotEventToolBase):
             primitive_id=FAILURE_SCAN_SNAPSHOT_ID,
             failures=tuple(entries),
             stage=CotEventParser.optional_text(args.get("stage")),
+            overall_risk=overall_risk,
+            blocking=blocking,
+            confidence=confidence,
+            previous_delta=CotEventParser.optional_text(args.get("previous_delta")),
         )
         likelihoods = tuple(str(entry.get("likelihood", _DEFAULT_FAILURE_LIKELIHOOD)) for entry in item.failures)
-        return await self._record(item, call, {"failure_count": len(item.failures), "likelihoods": likelihoods})
+        return await self._record(
+            item,
+            call,
+            {"failure_count": len(item.failures), "likelihoods": likelihoods, "overall_risk": item.overall_risk},
+        )
 
     def _parse_failure_entries(self, value: Any) -> tuple[list[dict] | None, str | None]:
         # Parses the failures JSON array, validating each entry's failure key and likelihood.
@@ -1204,29 +1468,31 @@ class WhyTool(_CotEventToolBase):
         return ToolSpec(
             name="why",
             description=(
-                "Stop and reconstruct the reasoning behind what you have done so far — "
-                "not what you did (the tool log already shows that), but why each "
-                "meaningful step seemed necessary at the time. Use this at natural "
-                "milestones, when the run feels like it is accumulating steps without a "
-                "spine, or when you catch yourself unable to say why the last three "
-                "actions were needed. Explain the actual rationale: what problem each "
-                "choice solved and what it was guarding against. Then answer the "
-                "reconsider question honestly — examining your own why sometimes "
-                "reveals that a step (or the whole direction) no longer makes sense, "
-                "and saying so here is the point of the tool, not a failure. A run that "
-                "cannot reconstruct its own reasons has been operating on momentum."
+                "Reconstruct the reasoning behind the actions taken so far, focusing "
+                "on why each meaningful step seemed necessary at the time rather than "
+                "restating what was done, which the tool log already shows. This is "
+                "worth doing at natural milestones, whenever the run feels like it is "
+                "accumulating steps without a clear spine, or upon noticing an "
+                "inability to say why the last few actions were actually needed. The "
+                "rationale should explain what problem each choice actually solved "
+                "and what it was guarding against, not merely narrate the sequence of "
+                "events. Examining a rationale honestly can reveal that a step, or "
+                "the whole direction, no longer makes sense, and surfacing that "
+                "finding is the entire point of this tool rather than a mark against "
+                "it; a run that cannot reconstruct its own reasons has been operating "
+                "on momentum alone."
             ),
             parameters=(
                 ToolParameter(
                     name="why",
                     type="string",
                     description=(
-                        "The rationale for the actions taken so far, as connected prose: "
-                        "the goal each meaningful step served, why it came before the "
-                        "next one, and what each choice traded away. Do not re-list the "
-                        "actions — a reader can see those. Explain the reasons. If you "
-                        "find a step you cannot justify, describe the honest gap "
-                        "instead of papering over it."
+                        "The rationale for the actions taken so far, written as "
+                        "connected reasoning about the goal each meaningful step "
+                        "served and what it traded away, rather than a re-listing of "
+                        "the actions themselves. A step that genuinely cannot be "
+                        "justified should be described as an honest gap rather than "
+                        "papered over with a plausible-sounding reason."
                     ),
                     required=True,
                 ),
@@ -1234,13 +1500,15 @@ class WhyTool(_CotEventToolBase):
                     name="reconsider",
                     type="string",
                     description=(
-                        "What examining your rationale revealed. Use exactly one of: "
-                        "'none' (the rationale holds — every step still serves the "
-                        "goal), 'some' (one named step should change or be dropped), "
-                        "'core' (the foundational rationale is wrong — the overall "
-                        "approach needs rethinking, not just a step). Be quick to say "
-                        "'some'; it is cheap. Reserve 'core' for when the reasoning "
-                        "genuinely collapses — and when it does, say it plainly."
+                        "What examining the rationale actually revealed, "
+                        "distinguishing a rationale that fully holds, one with a "
+                        "minor issue worth noting, one where a specific named step "
+                        "should change or be dropped, one where the foundational "
+                        "reasoning itself is wrong, and one where the entire approach "
+                        "needs rethinking from the ground up. Naming a smaller issue "
+                        "should not be avoided out of reluctance to admit it; the "
+                        "more severe categories should be reserved for cases where "
+                        "the reasoning genuinely collapses."
                     ),
                     required=True,
                 ),
@@ -1248,10 +1516,49 @@ class WhyTool(_CotEventToolBase):
                     name="change",
                     type="string",
                     description=(
-                        "When reconsider is 'some' or 'core', one to two sentences on "
-                        "what you will do differently now that the rationale has been "
-                        "re-examined. This is a commitment to act on the finding. Leave "
-                        "empty when reconsider is 'none'."
+                        "Required whenever reconsider indicates anything short of a "
+                        "fully holding rationale: what will actually be done "
+                        "differently now that the rationale has been re-examined. "
+                        "This field is a commitment to act on the finding, not merely "
+                        "an acknowledgment of it."
+                    ),
+                    required=False,
+                    default=None,
+                ),
+                ToolParameter(
+                    name="trigger",
+                    type="string",
+                    description=(
+                        "An optional description of what actually prompted this "
+                        "retrospective, such as reaching a natural milestone or "
+                        "noticing an inability to justify recent steps. Knowing the "
+                        "trigger helps a later reader distinguish routine reflection "
+                        "from a retrospective prompted by a specific concern."
+                    ),
+                    required=False,
+                    default=None,
+                ),
+                ToolParameter(
+                    name="steps_covered",
+                    type="number",
+                    description=(
+                        "An optional non-negative integer counting how many prior "
+                        "steps this retrospective actually accounts for. This gives "
+                        "the rationale an explicit scope rather than leaving it "
+                        "ambiguous how far back the reasoning extends."
+                    ),
+                    required=False,
+                    default=None,
+                ),
+                ToolParameter(
+                    name="confidence_in_rationale",
+                    type="number",
+                    description=(
+                        "An optional number between zero and one expressing "
+                        "confidence in the reconstructed rationale itself. A low "
+                        "value here is an honest signal that the reasoning behind "
+                        "recent steps is not actually well understood, even before "
+                        "the reconsider verdict is reached."
                     ),
                     required=False,
                     default=None,
@@ -1273,6 +1580,8 @@ class WhyTool(_CotEventToolBase):
         )
         if reconsider_error:
             return ToolResult.error(call.tool_name, reconsider_error)
+        steps_covered = CotEventParser.parse_int(args.get("steps_covered"))
+        confidence_in_rationale = CotEventParser.parse_confidence(args.get("confidence_in_rationale"))
 
         self._counter += 1
         from vidbyte.context.primitives.cot_events import WhyContextItem
@@ -1282,6 +1591,9 @@ class WhyTool(_CotEventToolBase):
             why=str(args["why"]).strip(),
             reconsider=reconsider or RECONSIDER_LEVELS[0],
             change=CotEventParser.optional_text(args.get("change")),
+            trigger=CotEventParser.optional_text(args.get("trigger")),
+            steps_covered=steps_covered,
+            confidence_in_rationale=confidence_in_rationale,
         )
         return await self._record(item, call, {"reconsider": item.reconsider})
 

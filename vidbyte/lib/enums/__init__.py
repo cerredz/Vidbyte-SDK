@@ -18,6 +18,16 @@ from __future__ import annotations
 from vidbyte.lib.enums.agent_runtime import AgentRuntimeType
 from vidbyte.lib.enums.config import AgentType, DocumentType
 from vidbyte.lib.enums.context import BudgetPreset, PermissionPreset
+from vidbyte.lib.enums.cot import (
+    AssumptionRiskLevel,
+    FailureLikelihood,
+    FailureScanRisk,
+    GoalServiceLevel,
+    PredictionCategory,
+    ReconsiderLevel,
+    Severity,
+    YesNo,
+)
 from vidbyte.lib.enums.model_modality import ModelModality, ModelNameModality
 from vidbyte.lib.enums.model_provider import ModelProvider
 from vidbyte.lib.enums.multi_agent import MultiAgentStopReason, OrchestratorAction, TaskStatus
@@ -30,9 +40,13 @@ from vidbyte.lib.enums.structured_output import StructuredOutputSupport
 __all__ = [
     "AgentRuntimeType",
     "AgentType",
+    "AssumptionRiskLevel",
     "BudgetPreset",
-    "DocumentType",
     "ContextMinimalFanoutSkill",
+    "DocumentType",
+    "FailureLikelihood",
+    "FailureScanRisk",
+    "GoalServiceLevel",
     "ModelModality",
     "ModelNameModality",
     "ModelProvider",
@@ -41,9 +55,13 @@ __all__ = [
     "PermissionPreset",
     "PinPolicy",
     "Platform",
+    "PredictionCategory",
     "Prompt",
+    "ReconsiderLevel",
+    "Severity",
     "Skill",
     "SkillEnums",
     "StructuredOutputSupport",
     "TaskStatus",
+    "YesNo",
 ]

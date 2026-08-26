@@ -180,14 +180,24 @@ N/A - Additive Python exports only.
 
 ## 9. File Change Manifest
 
+Post-review update (applying PR #337's review-comment guidance to this
+batch's own six tools): categorical fields for the six batch-2 tools were
+extracted into `vidbyte/lib/enums/cot.py`, every tool/param description was
+rewritten to drop inline examples and match the 4-5 sentence, no-example
+style, and each tool was expanded from 2-5 params to 6. Batch-1 (PR #337's
+own five tools, earlier in the same `cot_events.py` file) was left
+untouched — its comment resolution is tracked separately by PR #356.
+
 | Action | File Path | Reason |
 |--------|-----------|--------|
-| MODIFY | `vidbyte/tools/builtins/cot_events.py` | Six new tool classes |
-| MODIFY | `vidbyte/context/primitives/cot_events.py` | Six new primitives |
+| MODIFY | `vidbyte/tools/builtins/cot_events.py` | Six new tool classes; batch-2 section rewritten per review |
+| MODIFY | `vidbyte/context/primitives/cot_events.py` | Six new primitives; batch-2 section rewritten per review |
 | MODIFY | `vidbyte/tools/builtins/__init__.py` | Export the six tools |
 | MODIFY | `vidbyte/context/primitives/__init__.py` | Export the six primitives |
+| CREATE | `vidbyte/lib/enums/cot.py` | Batch-2's categorical fields as `str, Enum` classes |
+| MODIFY | `vidbyte/lib/enums/__init__.py` | Import + `__all__` for the new `cot.py` enums |
 
-0 created, 4 modified, 0 deleted. **Stacked on `feat/deep-cot-tools` (PR #337).**
+1 created, 5 modified, 0 deleted. **Stacked on `feat/deep-cot-tools` (PR #337).**
 
 ---
 
