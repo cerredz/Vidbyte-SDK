@@ -38,7 +38,26 @@ class Rule:
     id = ""
     name = ""
     severity = "blocking"
-    summary = ""
+    summary = (
+        "This rule protects one named contract in the SDK source tree. "
+        "It turns a structural or analyzer fact into a stable finding that a coding agent can locate. "
+        "The finding remains independent from unrelated policies so its baseline and repair path stay legible. "
+        "A rule is complete only when its detection, consequence, repair guidance, and verification command agree."
+    )
+    impact = (
+        "A violation means that an SDK assumption is no longer mechanically trustworthy. "
+        "The immediate symptom may appear in a caller, provider, tool, or packaging step rather than at the violating line. "
+        "That distance makes the defect expensive to diagnose when the rule reports only a count or a generic message. "
+        "The diagnostic therefore explains the downstream failure before a maintainer chooses a repair."
+    )
+    repair = (
+        "Start from the reported path, line, symbol, and rule-specific invariant. "
+        "Apply the smallest change that restores the canonical contract at its owning boundary. "
+        "Keep the implementation explicit and preserve neighboring behavior instead of weakening the analyzer or raising the baseline. "
+        "Run the focused rule first, then the repository gate that exercises the affected boundary."
+    )
+    examples: tuple[str, ...] = ()
+    will_not_work: tuple[str, ...] = ()
 
     def check(self, catalog: SourceCatalog) -> list[Finding]:
         # Produces every finding without mutating source or importing the package.

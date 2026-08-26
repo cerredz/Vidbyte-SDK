@@ -28,7 +28,32 @@ class ClassBoundRegistryHelpersRule(Rule):
     id = "S021"
     name = "class-bound-registry-helpers"
     severity = "blocking"
-    summary = "Registry modules expose behavior through owning registry classes."
+    summary = (
+        "This rule keeps public behavior for a registry beside the registry state that gives that behavior meaning. "
+        "It scans declared registry modules for public module-level helpers while allowing private parsing leaves and dunder exports. "
+        "A finding identifies a helper whose ownership is split from the class that callers must discover to understand the registry contract. "
+        "The rule makes lookup, validation, normalization, and registry data one navigable public surface."
+    )
+    impact = (
+        "A public free function beside registry data creates two competing discovery surfaces for one conceptual responsibility. "
+        "Callers may miss the canonical class, duplicate validation logic, or pass state through an API that does not visibly own it. "
+        "That split becomes more damaging as provider and model catalogues gain aliases, defaults, or compatibility rules. "
+        "The resulting architecture is harder for agents to navigate and easier to change inconsistently."
+    )
+    repair = (
+        "Identify the registry class whose state and invariants the helper reads or enforces. "
+        "Move the public helper onto that class as a static method or class method, keeping unrelated parsing details private to the module. "
+        "Update every caller to use the owning class and preserve the helper's input, output, error, and ordering behavior. "
+        "Run the focused rule plus registry import, configuration, and caller checks after confirming the public export points at the class-owned surface."
+    )
+    examples = (
+        "vidbyte/lib/registries/models.py - ProviderModelRegistry owns related lookup and validation behavior",
+        "A @staticmethod or @classmethod called through the registry class at each public call site",
+    )
+    will_not_work = (
+        "Moving the helper to a generic utils.py module and leaving registry ownership implicit.",
+        "Renaming a cross-module public helper with a leading underscore without updating ownership and callers.",
+    )
 
     def check(self, catalog: SourceCatalog) -> list[Finding]:
         # Scans only top-level statements so class methods and private parsers stay valid.
@@ -43,7 +68,7 @@ class ClassBoundRegistryHelpersRule(Rule):
 
     def explain(self, finding: Finding) -> Diagnostic:
         # Moves related behavior beside its registry data without creating a generic utility module.
-        return Diagnostic(what_happened=f"{finding.rel_path}:{finding.line} defines public module-level registry helper {finding.symbol}.", why_blocked="Registry state and its lookup/validation behavior become split across two discovery surfaces, so callers and future agents miss the canonical path and recreate logic.", how_to_fix="Move the helper onto the owning registry class as @staticmethod or @classmethod, update callers to ClassName.method(...), and keep any unrelated private parsing leaf module-private.", correct_examples=("vidbyte/lib/registries/models.py - ProviderModelRegistry owns related lookup/validation methods",), will_not_work=("Moving the helper to a generic utils.py module.", "Renaming a cross-module public helper with a leading underscore without updating ownership."), verify=self.verify_command())
+        return Diagnostic(what_happened=f"{finding.rel_path}:{finding.line} defines public module-level registry helper {finding.symbol}.", why_blocked=self.impact, how_to_fix=self.repair, correct_examples=self.examples, will_not_work=self.will_not_work, verify=self.verify_command())
 
 
 RULE = ClassBoundRegistryHelpersRule()

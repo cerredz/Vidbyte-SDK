@@ -93,7 +93,32 @@ class PublicExportIntegrityRule(Rule):
     id = "S015"
     name = "public-export-integrity"
     severity = "blocking"
-    summary = "Every __all__ symbol is bound once and root public imports are exported."
+    summary = (
+        "This rule protects the package's explicitly declared public import surface. "
+        "It verifies that each __all__ entry is unique and bound, and that root-level public imports are discoverable through the root export list. "
+        "It also recognizes lazy exports only when their names are declared in a local mapping that static analysis can inspect. "
+        "The contract keeps source-tree imports, installed-package imports, documentation, and IDE discovery pointed at the same API surface."
+    )
+    impact = (
+        "An unbound export advertises a symbol that can fail with ImportError or AttributeError when a user imports the package. "
+        "A missing root export makes a working public symbol invisible to star imports, documentation tools, and agents that inspect __all__. "
+        "Duplicate or drifted entries obscure which declaration is authoritative and can pass code review until packaging or a downstream import runs. "
+        "Because the root initializer is a high fan-out boundary, a small export mismatch can break many unrelated consumers at once."
+    )
+    repair = (
+        "Inspect the initializer's definitions, imports, assignments, lazy-export mapping, and __all__ as one public contract. "
+        "Bind or import the intended symbol once and list it once, or remove both the binding and export when the symbol is no longer public. "
+        "Use the explicit lazy-export mapping only for intentional deferred imports and preserve the package's existing initialization behavior. "
+        "Run the focused rule, direct import checks, and installed wheel smoke checks before declaring the export repair complete."
+    )
+    examples = (
+        "vidbyte/lib/registries/__init__.py - explicit local imports paired with __all__",
+        "A lazy export declared in the local mapping consumed by __getattr__",
+    )
+    will_not_work = (
+        "Relying on a star import or documentation entry to bind a missing __all__ symbol.",
+        "Adding a string to __all__ without binding the symbol or declaring a supported lazy export.",
+    )
 
     def check(self, catalog: SourceCatalog) -> list[Finding]:
         # Scans only package initializer modules that declare public surfaces.
@@ -107,7 +132,7 @@ class PublicExportIntegrityRule(Rule):
 
     def explain(self, finding: Finding) -> Diagnostic:
         # Repairs the export declaration at the owning package boundary.
-        return Diagnostic(what_happened=f"{finding.rel_path}:{finding.line} export {finding.symbol} is invalid: {finding.extra.get('reason', 'export drift')}.", why_blocked="The installed SDK can advertise a name that raises ImportError/AttributeError, or import a public symbol that users cannot discover through the documented root surface.", how_to_fix="Bind/import the symbol in this initializer and list it once in __all__, or remove both when it is not public. For intentional lazy exports, declare the name in the local lazy-export mapping consumed by __getattr__.", correct_examples=("vidbyte/lib/registries/__init__.py - explicit local imports and __all__",), will_not_work=("Relying on a star import or documentation alone.", "Adding a string to __all__ without binding the symbol."), verify=self.verify_command())
+        return Diagnostic(what_happened=f"{finding.rel_path}:{finding.line} export {finding.symbol} is invalid: {finding.extra.get('reason', 'export drift')}.", why_blocked=self.impact, how_to_fix=self.repair, correct_examples=self.examples, will_not_work=self.will_not_work, verify=self.verify_command())
 
 
 RULE = PublicExportIntegrityRule()

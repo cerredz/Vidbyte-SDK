@@ -3,8 +3,11 @@
 ## Responsibility
 
 Each file in this folder owns one stable rule ID, one conceptual invariant, its
-scope/counterexamples, and its repair diagnostic. Analyzer-backed rules select
-cached external findings; semantic rules inspect the shared source catalogue.
+scope/counterexamples, and its repair diagnostic. Every rule's `summary`,
+`impact`, and `repair` fields are deliberately deep multi-sentence explanations
+of the protected contract, the consequence of a violation, and the repair path.
+Analyzer-backed rules select cached external findings; semantic rules inspect the
+shared source catalogue.
 
 ## Non-Goals
 
@@ -41,3 +44,6 @@ cached external findings; semantic rules inspect the shared source catalogue.
 ## Change Log
 
 - 2026-08-23: Created with S001-S021.
+- 2026-08-26: Expanded every rule's agent-facing prose contract with detailed
+  summaries, impact explanations, repair sequences, examples, and rejected
+  shortcuts after review of PR #353.

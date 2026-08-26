@@ -19,10 +19,33 @@ class ImmutableClassDefaultsRule(RuffBackedRule):
 
     id = "S005"
     name = "immutable-class-defaults"
-    summary = "Mutable class defaults leak state across SDK instances and test order unless sharing is explicit."
+    summary = (
+        "This rule distinguishes intentionally shared class state from mutable state that belongs to each SDK instance. "
+        "It protects lists, dictionaries, sets, and similar containers declared on classes that providers, tools, runners, or registries may instantiate repeatedly. "
+        "A finding marks a default whose mutation can outlive the call that made it and influence later callers. "
+        "The rule therefore makes lifecycle ownership visible instead of relying on test order or convention."
+    )
     codes = frozenset({"RUF012"})
-    impact = "Mutable class defaults leak state across SDK instances and test order unless sharing is explicit."
-    repair = "Move per-instance state to initialization/default factories or annotate intentional immutable shared state with ClassVar."
+    impact = (
+        "A mutable class attribute is allocated once and then observed by every instance that reaches it. "
+        "One request can append a tool, cache a provider value, or alter configuration that changes the behavior of an unrelated later request. "
+        "The resulting leak is order-dependent, difficult to reproduce, and especially misleading in a long-lived agent process. "
+        "If sharing is intentional but unmarked, future agents may also fix the shared registry and break its lifecycle contract."
+    )
+    repair = (
+        "Decide first whether the value is per-instance state or an intentionally shared immutable or registry-owned value. "
+        "For per-instance state, initialize it in the constructor with a fresh value or use a default factory on the owning dataclass. "
+        "For intentional sharing, annotate the class variable with ClassVar and keep mutation behind the class's explicit ownership API. "
+        "Run the focused rule and an isolation check that creates two instances and proves their mutable state cannot cross-contaminate."
+    )
+    examples = (
+        "A dataclass field with a default_factory=list for per-instance state",
+        "ClassVar[dict[str, str]] for a deliberately shared immutable or registry-owned map",
+    )
+    will_not_work = (
+        "Copying the mutable class attribute only after the first request has already mutated it.",
+        "Adding ClassVar to silence the finding when the value is actually request-specific state.",
+    )
 
 
 RULE = ImmutableClassDefaultsRule()

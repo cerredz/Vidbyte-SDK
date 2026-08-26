@@ -4,6 +4,9 @@ This folder turns Vidbyte SDK architecture and correctness contracts into one
 blocking, count-ratcheted command. Its diagnostics assume the reader is a coding
 agent with no additional context, so each failure explains the consequence,
 repair, local precedent, rejected shortcuts, and focused verification command.
+Each rule also carries a deep summary, impact explanation, and repair narrative;
+these are complete prose contracts rather than terse labels, so an agent can
+understand the protected behavior before opening neighboring files.
 
 ## Responsibilities
 
@@ -68,6 +71,16 @@ Nested folders:
 
 - `core/` -- source discovery, analyzers, rule contracts, baselines, and reports.
 - `rules/` -- one independently selectable module per S-rule.
+
+## Diagnostic prose contract
+
+Every concrete rule owns `summary`, `impact`, and `repair` metadata. Each field
+uses several complete sentences to explain the rule's boundary, the caller or
+operator consequence of violating it, and the canonical repair sequence. Rule
+modules should also provide concrete examples and rejected shortcuts whenever
+those details help distinguish a correct fix from a superficially clean one.
+The text renderer presents the summary before the finding-specific location and
+then renders the impact and repair through the standard diagnostic sections.
 
 ## Rule catalogue
 

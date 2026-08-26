@@ -45,7 +45,32 @@ class ExplicitOutboundTimeoutRule(Rule):
     id = "S012"
     name = "explicit-outbound-timeout"
     severity = "blocking"
-    summary = "Every outbound HTTP/transport request declares a timeout."
+    summary = (
+        "This rule requires every outbound HTTP or transport request to expose an intentional timeout decision. "
+        "It covers provider requests, search and fetch operations, uploads, streams, and other calls that can hold an agent run open. "
+        "A finding marks a boundary where the timeout is hidden in a library default or omitted from the call's visible contract. "
+        "The rule keeps liveness policy close enough to the caller that a maintainer can audit and tune it without guessing."
+    )
+    impact = (
+        "A request without an explicit timeout can occupy an agent worker indefinitely when a provider, network, or stream stalls. "
+        "Hidden defaults vary by transport library and version, so the same operation can have inconsistent liveness across environments. "
+        "An indefinitely blocked call also delays cancellation, retries, resource cleanup, and the final response shown to the user. "
+        "The missing timeout is therefore a reliability and capacity defect rather than a minor configuration omission."
+    )
+    repair = (
+        "Find the typed timeout policy for the operation before selecting a value at the call site. "
+        "Pass config.timeout_seconds to SDK transports or pass a bounded timeout value to a raw-client adapter leaf that owns the request. "
+        "Keep the timeout explicit for streams and uploads as well as ordinary requests, and do not replace a missing policy with an arbitrarily huge constant. "
+        "Run the focused rule plus timeout, cancellation, and retry checks that exercise the affected outbound boundary."
+    )
+    examples = (
+        "vidbyte/providers/openai.py - provider calls pass the configured timeout",
+        "A transport leaf receiving a required timeout value from its public owner",
+    )
+    will_not_work = (
+        "Relying on the transport method's default or an undocumented third-party library default.",
+        "Adding an arbitrarily large timeout at the call site without tying it to typed configuration or lifecycle policy.",
+    )
 
     def check(self, catalog: SourceCatalog) -> list[Finding]:
         # Scans production calls while excluding the private transport leaves they feed.
@@ -60,7 +85,7 @@ class ExplicitOutboundTimeoutRule(Rule):
 
     def explain(self, finding: Finding) -> Diagnostic:
         # Requires the timeout to originate in typed caller configuration.
-        return Diagnostic(what_happened=f"{finding.rel_path}:{finding.line} calls outbound method {finding.symbol} without an explicit timeout keyword.", why_blocked="An agent run can remain occupied forever by a stalled provider, search API, upload, or stream. Hidden library defaults also drift by transport and version.", how_to_fix="Pass timeout_seconds=config.timeout_seconds to SDK transports or timeout=<bounded value/config> to an adapter leaf. The value must come from typed configuration or a named module constant.", correct_examples=("vidbyte/providers/openai.py - provider calls pass config.timeout_seconds",), will_not_work=("Relying on the transport method's default or an undocumented third-party default.", "Adding an arbitrarily huge timeout at the call site."), verify=self.verify_command())
+        return Diagnostic(what_happened=f"{finding.rel_path}:{finding.line} calls outbound method {finding.symbol} without an explicit timeout keyword.", why_blocked=self.impact, how_to_fix=self.repair, correct_examples=self.examples, will_not_work=self.will_not_work, verify=self.verify_command())
 
 
 RULE = ExplicitOutboundTimeoutRule()

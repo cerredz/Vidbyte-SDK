@@ -58,7 +58,32 @@ class TypedBoundaryErrorsRule(Rule):
     id = "S016"
     name = "typed-boundary-errors"
     severity = "blocking"
-    summary = "Provider, tool, runner, MCP, and CLI boundaries translate builtin failures."
+    summary = (
+        "This rule requires provider, tool, runner, MCP, and CLI boundaries to expose the SDK's typed error hierarchy. "
+        "It checks raises inside those modules because a builtin exception can escape through a private helper as easily as through a public function. "
+        "A finding identifies the boundary function and builtin type so the repair can preserve a stable caller-facing failure category. "
+        "The rule leaves the dedicated error package as the place where typed error classes are defined and organized."
+    )
+    impact = (
+        "A builtin exception does not tell an SDK caller whether configuration, provider request, provider response, protocol, or usage state failed. "
+        "Callers then parse unstable text, catch too broadly, or lose the ability to choose safe retry and remediation behavior. "
+        "A private parser can also leak a builtin indirectly when its public boundary assumes that internal errors are already translated. "
+        "The resulting error surface is inconsistent across providers and makes failures harder for agents to classify from one context packet."
+    )
+    repair = (
+        "Classify the failure by the boundary it leaves and select the matching type from vidbyte.lib.errors. "
+        "Translate builtin parsing or validation failures before they cross the provider, tool, runner, MCP, or CLI boundary. "
+        "Preserve the original cause with from exc when the translation is made in response to a caught exception. "
+        "Run the focused rule and the affected error-path checks to verify callers receive the stable type without losing useful safe context."
+    )
+    examples = (
+        "vidbyte/lib/errors/__init__.py - the SDK error hierarchy",
+        "vidbyte/lib/http/transport.py - ProviderRequestError at an outbound boundary",
+    )
+    will_not_work = (
+        "Inventing a local RuntimeError subclass outside the canonical error package.",
+        "Renaming the helper private while allowing its builtin exception to escape through the public caller.",
+    )
 
     def check(self, catalog: SourceCatalog) -> list[Finding]:
         # Scans declared boundary packages so private helpers cannot leak builtins indirectly.
@@ -73,7 +98,7 @@ class TypedBoundaryErrorsRule(Rule):
 
     def explain(self, finding: Finding) -> Diagnostic:
         # Routes one builtin failure to the SDK's stable typed error hierarchy.
-        return Diagnostic(what_happened=f"Boundary helper {finding.extra.get('function', '<module>')} in {finding.rel_path}:{finding.line} raises builtin {finding.symbol}.", why_blocked="Users cannot distinguish configuration, provider request, provider response, protocol, and usage failures without parsing message text. A private helper's builtin still escapes unless translated at that exact module boundary.", how_to_fix="Raise the matching class from vidbyte.lib.errors and preserve a caught cause with from exc. If a parser must use a builtin internally, catch and translate it before control can leave the boundary module.", correct_examples=("vidbyte/lib/errors/__init__.py - SDK error hierarchy", "vidbyte/lib/http/transport.py - ProviderRequestError translation"), will_not_work=("Inventing a local RuntimeError subclass outside the error package.", "Renaming the helper private while the builtin still escapes through its caller."), verify=self.verify_command())
+        return Diagnostic(what_happened=f"Boundary helper {finding.extra.get('function', '<module>')} in {finding.rel_path}:{finding.line} raises builtin {finding.symbol}.", why_blocked=self.impact, how_to_fix=self.repair, correct_examples=self.examples, will_not_work=self.will_not_work, verify=self.verify_command())
 
 
 RULE = TypedBoundaryErrorsRule()

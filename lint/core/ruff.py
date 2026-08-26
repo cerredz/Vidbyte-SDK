@@ -94,9 +94,23 @@ class RuffBackedRule(Rule):
     codes: frozenset[str] = frozenset()
     prefixes: tuple[str, ...] = ()
     excluded_prefixes: tuple[str, ...] = ()
-    impact = "This analyzer finding violates a supported SDK correctness contract."
-    repair = "Apply the analyzer guidance without adding a suppression."
+    impact = (
+        "This analyzer finding identifies a source pattern that can violate a supported SDK correctness contract. "
+        "The analyzer reports the local syntax fact, but the operational consequence depends on the boundary where that fact occurs. "
+        "Without rule-specific context, an agent may suppress a real defect or repair the symptom while preserving the underlying risk. "
+        "Concrete impact prose connects the reported line to the caller-visible behavior that the rule protects."
+    )
+    repair = (
+        "Read the analyzer code, message, source line, and surrounding contract before editing. "
+        "Apply the smallest canonical repair that restores the rule's invariant at the owning boundary. "
+        "Preserve intentional exceptions through explicit source structure rather than suppressions or baseline changes. "
+        "Run the focused rule and the affected repository gate after verifying the repaired behavior."
+    )
     examples: tuple[str, ...] = ()
+    will_not_work: tuple[str, ...] = (
+        "Adding noqa, per-file ignores, or analyzer configuration exceptions.",
+        "Raising lint/baseline.json because pre-existing debt is already frozen.",
+    )
 
     def check(self, catalog: SourceCatalog) -> list[Finding]:
         # Filters cached Ruff records and enriches them with source lines.
@@ -114,4 +128,4 @@ class RuffBackedRule(Rule):
 
     def explain(self, finding: Finding) -> Diagnostic:
         # Adds SDK-specific consequence and repair guidance to Ruff's local fact.
-        return Diagnostic(what_happened=f"{finding.rel_path}:{finding.line} violates {finding.extra.get('code', 'Ruff')}: {finding.extra.get('message', '')}", why_blocked=self.impact, how_to_fix=f"{self.repair} Ruff reported column {finding.extra.get('column', '1')}.", correct_examples=self.examples, will_not_work=("Adding noqa, per-file ignores, or analyzer configuration exceptions.", "Raising lint/baseline.json; pre-existing debt is already frozen."), verify=self.verify_command())
+        return Diagnostic(what_happened=f"{finding.rel_path}:{finding.line} violates {finding.extra.get('code', 'Ruff')}: {finding.extra.get('message', '')}", why_blocked=self.impact, how_to_fix=f"{self.repair} Ruff reported column {finding.extra.get('column', '1')}.", correct_examples=self.examples, will_not_work=self.will_not_work, verify=self.verify_command())

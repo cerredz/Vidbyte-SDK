@@ -24,9 +24,9 @@ class DiagnosticRenderer:
 
     @classmethod
     def render(cls, result: RuleResult, finding: Finding) -> str:
-        # Formats location, consequence, repair, precedent, rejected shortcuts, and verify.
+        # Formats rule context, location, consequence, repair, precedent, rejected shortcuts, and verify.
         diagnostic = result.rule.explain(finding)
-        sections = [f"SDK-LINT {result.rule.id} {result.rule.name} [{result.rule.severity.upper()}]", f"WHERE\n  {finding.location()}\n  {finding.source_line.strip()}", cls._section("WHAT HAPPENED", diagnostic.what_happened), cls._section("WHY THIS IS BLOCKED", diagnostic.why_blocked), cls._section("HOW TO FIX", diagnostic.how_to_fix), cls._section("CORRECT EXAMPLES", "\n".join(f"- {item}" for item in diagnostic.correct_examples) or "No local example exists yet; follow HOW TO FIX."), cls._section("WHAT WILL NOT WORK", "\n".join(f"- {item}" for item in diagnostic.will_not_work)), cls._section("VERIFY", diagnostic.verify or result.rule.verify_command())]
+        sections = [f"SDK-LINT {result.rule.id} {result.rule.name} [{result.rule.severity.upper()}]", cls._section("RULE SUMMARY", result.rule.summary), f"WHERE\n  {finding.location()}\n  {finding.source_line.strip()}", cls._section("WHAT HAPPENED", diagnostic.what_happened), cls._section("WHY THIS IS BLOCKED", diagnostic.why_blocked), cls._section("HOW TO FIX", diagnostic.how_to_fix), cls._section("CORRECT EXAMPLES", "\n".join(f"- {item}" for item in diagnostic.correct_examples) or "No local example exists yet; follow HOW TO FIX."), cls._section("WHAT WILL NOT WORK", "\n".join(f"- {item}" for item in diagnostic.will_not_work)), cls._section("VERIFY", diagnostic.verify or result.rule.verify_command())]
         return "\n\n".join(section for section in sections if section)
 
     @staticmethod

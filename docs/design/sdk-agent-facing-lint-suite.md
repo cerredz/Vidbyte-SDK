@@ -156,6 +156,10 @@ the baseline/reporting layer.
 - Baseline: exact count per rule. Stale/missing entries fail except during the
   explicit baseline-update command.
 - Registry: rejects duplicate IDs and renders the valid catalogue on selection errors.
+- Prose contract: every rule owns a multi-sentence `summary`, `impact`, and
+  `repair` narrative, plus concrete examples and rejected shortcuts where useful.
+  The renderer presents the summary with each finding and uses the impact and
+  repair fields as the standard agent-facing consequence and action sections.
 
 #### Ruff and mypy adapters
 
