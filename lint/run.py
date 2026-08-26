@@ -35,13 +35,18 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from lint.core.baseline import BaselineStore
-from lint.core.diagnostic import DiagnosticRenderer, RuleDiagnostic
-from lint.core.registry import RuleRegistry
-from lint.core.rule import LintAnalyzerError, LintConfigurationError
-from lint.core.runner import LintRunner, RuleOutcome, RunReport
-
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
+# `python lint/run.py` puts only lint/ on sys.path, not the repository root, so the
+# `lint.core...` absolute imports below would fail with ModuleNotFoundError without this.
+if str(REPOSITORY_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPOSITORY_ROOT))
+
+from lint.core.baseline import BaselineStore  # noqa: E402
+from lint.core.diagnostic import DiagnosticRenderer, RuleDiagnostic  # noqa: E402
+from lint.core.registry import RuleRegistry  # noqa: E402
+from lint.core.rule import LintAnalyzerError, LintConfigurationError  # noqa: E402
+from lint.core.runner import LintRunner, RuleOutcome, RunReport  # noqa: E402
+
 PACKAGE_ROOT = REPOSITORY_ROOT / "vidbyte"
 BASELINE_PATH = REPOSITORY_ROOT / "lint" / "baseline.json"
 DEFAULT_FINDING_LIMIT = 20
