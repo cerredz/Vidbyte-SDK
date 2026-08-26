@@ -413,10 +413,12 @@ Complete list of every file that will be created, modified, or deleted:
 | CREATE | `vidbyte/context/primitives/reasoning_traces.py` | Bounded immutable primitive corresponding to every reasoning trace tool call. |
 | MODIFY | `vidbyte/tools/builtins/__init__.py` | Export the shared reasoning tool API and 182 generated classes. |
 | MODIFY | `vidbyte/context/primitives/__init__.py` | Export the reasoning trace context primitive. |
+| MODIFY | `vidbyte/context/__init__.py` | Preserve the established public context namespace export. |
+| MODIFY | `vidbyte/__init__.py` | Preserve the established root SDK primitive export. |
 | MODIFY | `vidbyte/tools/README.md` | Document the reasoning trace built-in family and observability boundary. |
 | MODIFY | `vidbyte/context/primitives/README.md` | Add the reasoning trace primitive to the context primitive index. |
 
-**Summary:** 3 files created, 4 files modified, 0 files deleted. The design
+**Summary:** 3 files created, 6 files modified, 0 files deleted. The design
 document is counted in the created-file total because it is committed first on
 the feature branch; no implementation code is written before that commit.
 

@@ -13,6 +13,7 @@ Architecture:
     - Memory provider tools from builtins.memory.
     - Context primitive editing tools from builtins.context_primitives.
     - Context algorithm tools from builtins.trajectory_checkpoint and builtins.reflexion.
+    - 182 deep reasoning trace tools from builtins.reasoning_traces.
     - Sequential continuation tool from builtins.run_prompts_sequentially.
     - Cooperative pause tool from builtins.pause.
 Relations:
@@ -31,6 +32,12 @@ from vidbyte.tools.builtins.output_schema import (
     OutputSchemaField,
 )
 from vidbyte.tools.builtins.reflexion import ReflexionTool
+from vidbyte.tools.builtins.reasoning_traces import (
+    REASONING_TRACE_DEFINITIONS,
+    REASONING_TRACE_TOOL_CLASSES,
+    ReasoningTraceCatalog,
+    ReasoningTraceDefinition,
+)
 from vidbyte.tools.builtins.trajectory_checkpoint import TrajectoryCheckpointTool
 from vidbyte.tools.builtins.context import (
     CompactionMode,
@@ -120,6 +127,9 @@ from vidbyte.tools.builtins.memory import (
     ZepGetMemoryTool,
     ZepSearchMemoryTool,
 )
+
+for _reasoning_trace_class in REASONING_TRACE_TOOL_CLASSES.values():
+    globals()[_reasoning_trace_class.__name__] = _reasoning_trace_class
 
 __all__ = [
     "AppendOutputTool",
@@ -212,3 +222,13 @@ __all__ = [
     "ZepGetMemoryTool",
     "ZepSearchMemoryTool",
 ]
+
+__all__.extend(
+    (
+        "REASONING_TRACE_DEFINITIONS",
+        "REASONING_TRACE_TOOL_CLASSES",
+        "ReasoningTraceCatalog",
+        "ReasoningTraceDefinition",
+        *(_reasoning_trace_class.__name__ for _reasoning_trace_class in REASONING_TRACE_TOOL_CLASSES.values()),
+    )
+)
