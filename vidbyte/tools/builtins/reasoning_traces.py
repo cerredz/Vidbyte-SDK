@@ -60,6 +60,7 @@ from __future__ import annotations
 import math
 from collections.abc import Mapping
 from dataclasses import dataclass
+from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from vidbyte.tools.base import BaseTool
@@ -430,7 +431,7 @@ class _ReasoningTraceTool(BaseTool):
 class ReasoningTraceCatalog:
     """Resolve fixed source skill definitions into explicit public tool classes."""
 
-    _classes: ClassVar[dict[str, type[_ReasoningTraceTool]] | None] = None
+    _classes: ClassVar[Mapping[str, type[_ReasoningTraceTool]] | None] = None
 
     @classmethod
     def definitions(cls) -> tuple[ReasoningTraceDefinition, ...]:
@@ -450,7 +451,7 @@ class ReasoningTraceCatalog:
     def tool_classes(cls) -> Mapping[str, type[_ReasoningTraceTool]]:
         # Returns the lazily built slug-to-class map used by direct callers and exports.
         if cls._classes is None:
-            cls._classes = cls._build_classes()
+            cls._classes = MappingProxyType(cls._build_classes())
         return cls._classes
 
     @classmethod
@@ -489,6 +490,7 @@ class ReasoningTraceCatalog:
     @classmethod
     def _build_classes(cls) -> dict[str, type[_ReasoningTraceTool]]:
         # Creates one collision-checked public subclass for every fixed definition.
+        cls._validate_definitions()
         classes: dict[str, type[_ReasoningTraceTool]] = {}
         for definition in REASONING_TRACE_DEFINITIONS:
             class_name = cls._class_name(definition.skill_name)
@@ -505,6 +507,19 @@ class ReasoningTraceCatalog:
             )
         return classes
 
+    @classmethod
+    def _validate_definitions(cls) -> None:
+        # Rejects malformed or duplicate source definitions before public classes are created.
+        seen: set[str] = set()
+        for definition in REASONING_TRACE_DEFINITIONS:
+            if not definition.skill_name.strip():
+                raise ValueError("Reasoning trace skill names cannot be blank")
+            if not definition.purpose.strip():
+                raise ValueError(f"Reasoning trace purpose is blank: {definition.skill_name}")
+            if definition.skill_name in seen:
+                raise ValueError(f"Duplicate reasoning trace skill: {definition.skill_name}")
+            seen.add(definition.skill_name)
+
     @staticmethod
     def _class_name(skill_name: str) -> str:
         # Converts a source slug into a stable public PascalCase class name.
@@ -520,7 +535,7 @@ _REASONING_TRACE_TOOL_CLASSES = dict(ReasoningTraceCatalog.tool_classes())
 for _skill_name, _tool_class in _REASONING_TRACE_TOOL_CLASSES.items():
     globals()[_tool_class.__name__] = _tool_class
 
-REASONING_TRACE_TOOL_CLASSES: Mapping[str, type[_ReasoningTraceTool]] = _REASONING_TRACE_TOOL_CLASSES
+REASONING_TRACE_TOOL_CLASSES: Mapping[str, type[_ReasoningTraceTool]] = MappingProxyType(_REASONING_TRACE_TOOL_CLASSES)
 
 __all__ = [
     "ReasoningTraceCatalog",
