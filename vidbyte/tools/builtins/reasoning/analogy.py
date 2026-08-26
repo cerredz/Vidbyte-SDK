@@ -17,16 +17,28 @@ Relations:
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
+from vidbyte.context.primitives.base import ContextItem
 from vidbyte.tools.base import BaseTool
 from vidbyte.tools.builtins.reasoning._parsing import ReasoningToolInput
-from vidbyte.tools.types import ToolCall, ToolPermission, ToolResult, ToolSpec, ToolParameter
+from vidbyte.tools.types import (
+    ToolCall,
+    ToolParameter,
+    ToolPermission,
+    ToolResult,
+    ToolSpec,
+)
 
 if TYPE_CHECKING:
     from vidbyte.context.manager import ContextManager
 
-_REQUIRED_FIELDS = ("source_domain", "target_domain", "breaks_down_at", "carries_weight")
+_REQUIRED_FIELDS = (
+    "source_domain",
+    "target_domain",
+    "breaks_down_at",
+    "carries_weight",
+)
 _CARRIES_WEIGHT_VALUES = ("explains_only", "justifies_action")
 
 
@@ -54,24 +66,37 @@ class AnalogyTool(BaseTool):
                 ToolParameter(
                     name="source_domain",
                     type="string",
-                    description="The familiar domain, system, or situation being reasoned FROM — the thing you already understand.",
+                    description=(
+                        "Name the familiar domain, system, or situation used as the source of "
+                        "the analogy. Choose a source whose structure is already understood well "
+                        "enough to support a comparison. This gives the model a concrete basis "
+                        "for transferring relationships rather than merely repeating a metaphor. "
+                        "Provide the source as a plain string."
+                    ),
                     required=True,
                 ),
                 ToolParameter(
                     name="target_domain",
                     type="string",
-                    description="The unfamiliar domain, system, or situation being reasoned TO — the thing the analogy is meant to illuminate.",
+                    description=(
+                        "Name the unfamiliar domain, system, or situation that the analogy is "
+                        "intended to illuminate. State the target precisely enough that the model "
+                        "can identify which relationships need explanation. Separating the target "
+                        "from the source makes the direction of the transfer explicit. Provide the "
+                        "target as a plain string."
+                    ),
                     required=True,
                 ),
                 ToolParameter(
                     name="mapped_relations",
                     type="array",
                     description=(
-                        "The specific structural correspondences between source_domain and "
-                        "target_domain, each entry stated as 'X in source_domain corresponds to "
-                        "Y in target_domain'. An analogy is only as good as its mapped relations "
-                        "— vague resemblance ('this is kind of like that') is not enough; name "
-                        "what maps to what. May be a JSON array of strings or a JSON string."
+                        "List the specific structural correspondences between the source and "
+                        "target domains. State each relation in a form such as 'X in the source "
+                        "corresponds to Y in the target' so the mapping can be inspected. These "
+                        "relations show whether the analogy transfers structure rather than a "
+                        "vague resemblance. Provide a JSON array of strings or a JSON-encoded "
+                        "string."
                     ),
                     required=True,
                 ),
@@ -79,10 +104,11 @@ class AnalogyTool(BaseTool):
                     name="breaks_down_at",
                     type="string",
                     description=(
-                        "Where the analogy stops holding — the point at which source_domain and "
-                        "target_domain diverge and the mapping produces a wrong conclusion if "
-                        "pushed further. Mandatory: unlimited analogies are how an agent talks "
-                        "itself into an unjustified conclusion."
+                        "Describe where the analogy stops holding between the source and target. "
+                        "Identify the divergence that would make the mapped relation unreliable "
+                        "if the comparison were extended further. Naming the limit keeps the "
+                        "model from treating an explanatory comparison as universal evidence. "
+                        "Provide the breakdown point as a plain string."
                     ),
                     required=True,
                 ),
@@ -90,20 +116,24 @@ class AnalogyTool(BaseTool):
                     name="carries_weight",
                     type="string",
                     description=(
-                        "One of: 'explains_only' or 'justifies_action'. 'explains_only' means "
-                        "the analogy is a communication aid for understanding, not evidence for "
-                        "a decision. 'justifies_action' means the analogy is being treated as a "
-                        "reason to act, which requires the mapped relations to be structural, "
-                        "not superficial. Default to 'explains_only'; choose 'justifies_action' "
-                        "only if breaks_down_at does not undermine the specific action being "
-                        "justified."
+                        "State whether the analogy 'explains_only' or 'justifies_action'. Use "
+                        "'explains_only' when it is a communication aid and not evidence for a "
+                        "decision. Use 'justifies_action' only when the mapped relations support "
+                        "the specific action and the stated breakdown does not undermine it. "
+                        "Provide one of those two enum values as a plain string, with "
+                        "'explains_only' as the safer default."
                     ),
                     required=True,
                 ),
                 ToolParameter(
                     name="title",
                     type="string",
-                    description="Display label for this note. Defaults to 'Analogical Transfer'.",
+                    description=(
+                        "Choose a human-readable label for the recorded analogy. The label helps "
+                        "the model and callers distinguish this note from other context items. "
+                        "Use the default label when no more specific name is needed. Provide a "
+                        "plain string; it defaults to 'Analogical Transfer'."
+                    ),
                     required=False,
                     default="Analogical Transfer",
                 ),
@@ -138,17 +168,26 @@ class AnalogyTool(BaseTool):
         if error:
             return error
         carries_weight = ReasoningToolInput.text(args, "carries_weight")
-        return ReasoningToolInput.enum_error(carries_weight, _CARRIES_WEIGHT_VALUES, "carries_weight")
+        return ReasoningToolInput.enum_error(
+            carries_weight, _CARRIES_WEIGHT_VALUES, "carries_weight"
+        )
 
-    def _build_item(self, args: dict, primitive_id: str) -> object:
+    def _build_item(self, args: dict, primitive_id: str) -> ContextItem:
         # Constructs the AnalogyContextItem from validated call arguments.
         from vidbyte.context.primitives import AnalogyContextItem
-        return AnalogyContextItem(
-            primitive_id=primitive_id,
-            source_domain=ReasoningToolInput.text(args, "source_domain"),
-            target_domain=ReasoningToolInput.text(args, "target_domain"),
-            mapped_relations=ReasoningToolInput.string_list(args.get("mapped_relations")),
-            breaks_down_at=ReasoningToolInput.text(args, "breaks_down_at"),
-            carries_weight=ReasoningToolInput.text(args, "carries_weight"),
-            title=ReasoningToolInput.text(args, "title", "Analogical Transfer") or "Analogical Transfer",
+
+        return cast(
+            ContextItem,
+            AnalogyContextItem(
+                primitive_id=primitive_id,
+                source_domain=ReasoningToolInput.text(args, "source_domain"),
+                target_domain=ReasoningToolInput.text(args, "target_domain"),
+                mapped_relations=ReasoningToolInput.string_list(
+                    args.get("mapped_relations")
+                ),
+                breaks_down_at=ReasoningToolInput.text(args, "breaks_down_at"),
+                carries_weight=ReasoningToolInput.text(args, "carries_weight"),
+                title=ReasoningToolInput.text(args, "title", "Analogical Transfer")
+                or "Analogical Transfer",
+            ),
         )

@@ -20,11 +20,18 @@ Relations:
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
+from vidbyte.context.primitives.base import ContextItem
 from vidbyte.tools.base import BaseTool
 from vidbyte.tools.builtins.reasoning._parsing import ReasoningToolInput
-from vidbyte.tools.types import ToolCall, ToolPermission, ToolResult, ToolSpec, ToolParameter
+from vidbyte.tools.types import (
+    ToolCall,
+    ToolParameter,
+    ToolPermission,
+    ToolResult,
+    ToolSpec,
+)
 
 if TYPE_CHECKING:
     from vidbyte.context.manager import ContextManager
@@ -56,10 +63,11 @@ class DifferentialDiagnosisTool(BaseTool):
                     name="candidate_set",
                     type="array",
                     description=(
-                        "The full initial list of plausible candidates for what's actually "
-                        "happening, before elimination begins. Cast this wide — differential "
-                        "reasoning depends on not prematurely narrowing the field. May be a JSON "
-                        "array of strings or a JSON string."
+                        "List the full initial set of plausible candidates before elimination "
+                        "begins. Include credible alternatives broadly enough that the model does "
+                        "not commit to a leading explanation too early. This set is the reference "
+                        "against which later evidence and eliminations are evaluated. Provide a "
+                        "JSON array of strings or a JSON-encoded string."
                     ),
                     required=True,
                 ),
@@ -67,9 +75,11 @@ class DifferentialDiagnosisTool(BaseTool):
                     name="remaining",
                     type="array",
                     description=(
-                        "The candidates from candidate_set still consistent with all evidence "
-                        "after removing the ruled_out entries. Must be a subset of candidate_set. "
-                        "May be a JSON array of strings or a JSON string."
+                        "List the candidates from candidate_set that remain consistent with the "
+                        "evidence. Remove only candidates contradicted by the recorded ruled-out "
+                        "observations or tests, and keep this list as a subset of candidate_set. "
+                        "The remaining set tells the model what possibilities still need to be "
+                        "distinguished. Provide a JSON array of strings or a JSON-encoded string."
                     ),
                     required=True,
                 ),
@@ -77,10 +87,11 @@ class DifferentialDiagnosisTool(BaseTool):
                     name="next_discriminator",
                     type="string",
                     description=(
-                        "The single observation, test, or question that would most reduce the "
-                        "remaining candidate set — the next thing to check, chosen because it "
-                        "discriminates between remaining candidates rather than merely "
-                        "confirming the leading one."
+                        "Describe the single observation, test, or question that would most reduce "
+                        "the remaining candidate set. Choose it because it distinguishes among "
+                        "the live candidates, not merely because it confirms the current leader. "
+                        "This gives the model a concrete next step for resolving the differential. "
+                        "Provide the discriminator as a plain string."
                     ),
                     required=True,
                 ),
@@ -88,12 +99,12 @@ class DifferentialDiagnosisTool(BaseTool):
                     name="ruled_out",
                     type="array",
                     description=(
-                        "Candidates eliminated so far, each as an object {candidate, "
-                        "ruled_out_by} where ruled_out_by is the specific observation or test "
-                        "result inconsistent with that candidate. A candidate you merely find "
-                        "'less likely' is not ruled out — only list ones a concrete piece of "
-                        "evidence contradicts. May be a JSON array of objects, a JSON string, or "
-                        "omitted if nothing has been ruled out yet."
+                        "Record candidates eliminated so far as objects with candidate and "
+                        "ruled_out_by fields. Explain the specific observation or test result "
+                        "that contradicts each eliminated candidate. Do not treat a candidate as "
+                        "ruled out merely because it is less likely; concrete disconfirming evidence "
+                        "is the purpose of this field. Provide a JSON array of objects or a JSON-"
+                        "encoded string, and omit it when nothing has been ruled out."
                     ),
                     required=False,
                     default=(),
@@ -101,7 +112,12 @@ class DifferentialDiagnosisTool(BaseTool):
                 ToolParameter(
                     name="title",
                     type="string",
-                    description="Display label for this note. Defaults to 'Differential Diagnosis'.",
+                    description=(
+                        "Choose a human-readable label for the recorded differential. The label "
+                        "helps the model and callers distinguish this note from other context "
+                        "items. Use the default label when no more specific name is needed. "
+                        "Provide a plain string; it defaults to 'Differential Diagnosis'."
+                    ),
                     required=False,
                     default="Differential Diagnosis",
                 ),
@@ -136,14 +152,19 @@ class DifferentialDiagnosisTool(BaseTool):
             return "Missing or empty required field: 'remaining'."
         return ReasoningToolInput.missing_required(args, _REQUIRED_FIELDS)
 
-    def _build_item(self, args: dict, primitive_id: str) -> object:
+    def _build_item(self, args: dict, primitive_id: str) -> ContextItem:
         # Constructs the DifferentialDiagnosisContextItem from validated call arguments.
         from vidbyte.context.primitives import DifferentialDiagnosisContextItem
-        return DifferentialDiagnosisContextItem(
-            primitive_id=primitive_id,
-            candidate_set=ReasoningToolInput.string_list(args.get("candidate_set")),
-            remaining=ReasoningToolInput.string_list(args.get("remaining")),
-            next_discriminator=ReasoningToolInput.text(args, "next_discriminator"),
-            ruled_out=ReasoningToolInput.object_list(args.get("ruled_out")),
-            title=ReasoningToolInput.text(args, "title", "Differential Diagnosis") or "Differential Diagnosis",
+
+        return cast(
+            ContextItem,
+            DifferentialDiagnosisContextItem(
+                primitive_id=primitive_id,
+                candidate_set=ReasoningToolInput.string_list(args.get("candidate_set")),
+                remaining=ReasoningToolInput.string_list(args.get("remaining")),
+                next_discriminator=ReasoningToolInput.text(args, "next_discriminator"),
+                ruled_out=ReasoningToolInput.object_list(args.get("ruled_out")),
+                title=ReasoningToolInput.text(args, "title", "Differential Diagnosis")
+                or "Differential Diagnosis",
+            ),
         )

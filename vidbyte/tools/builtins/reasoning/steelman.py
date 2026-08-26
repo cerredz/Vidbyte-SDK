@@ -18,11 +18,18 @@ Relations:
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
+from vidbyte.context.primitives.base import ContextItem
 from vidbyte.tools.base import BaseTool
 from vidbyte.tools.builtins.reasoning._parsing import ReasoningToolInput
-from vidbyte.tools.types import ToolCall, ToolPermission, ToolResult, ToolSpec, ToolParameter
+from vidbyte.tools.types import (
+    ToolCall,
+    ToolParameter,
+    ToolPermission,
+    ToolResult,
+    ToolSpec,
+)
 
 if TYPE_CHECKING:
     from vidbyte.context.manager import ContextManager
@@ -55,18 +62,22 @@ class SteelmanTool(BaseTool):
                 ToolParameter(
                     name="my_position",
                     type="string",
-                    description="The claim, plan, or decision currently being held, stated as a clear, falsifiable position rather than a vague leaning.",
+                    description=(
+                        "State the claim, plan, or decision currently being held. Make it clear "
+                        "enough that a strong opposing case can address the actual position. A "
+                        "specific position gives the model something to pressure-test rather than "
+                        "a vague leaning to defend. Provide it as a plain string."
+                    ),
                     required=True,
                 ),
                 ToolParameter(
                     name="strongest_opposition",
                     type="string",
                     description=(
-                        "The best case against my_position, constructed as carefully and "
-                        "charitably as you would construct my_position itself — not the easiest "
-                        "objection to dismiss, but the one a smart, well-informed opponent would "
-                        "actually raise. A weak opposing argument defeats the purpose of this "
-                        "tool."
+                        "Construct the strongest credible case against my_position. Represent the "
+                        "opposition as carefully and charitably as a well-informed opponent would "
+                        "state it. A serious opposing case reveals weaknesses that an easy objection "
+                        "would miss. Provide the opposition as a plain string."
                     ),
                     required=True,
                 ),
@@ -74,10 +85,11 @@ class SteelmanTool(BaseTool):
                     name="survives",
                     type="string",
                     description=(
-                        "One of: 'yes', 'no', 'weakened'. 'yes' means my_position stands "
-                        "unchanged against strongest_opposition. 'no' means strongest_opposition "
-                        "defeats my_position outright. 'weakened' means my_position still holds "
-                        "but in a narrower or more qualified form than originally stated."
+                        "Record whether the position survives the strongest opposition. Use 'yes' "
+                        "when it stands unchanged, 'no' when the opposition defeats it, or "
+                        "'weakened' when it remains valid only in a narrower or more qualified form. "
+                        "This verdict tells the model whether the pressure test changed the status "
+                        "of the original position. Provide one of those enum values as a plain string."
                     ),
                     required=True,
                 ),
@@ -85,9 +97,11 @@ class SteelmanTool(BaseTool):
                     name="revision",
                     type="string",
                     description=(
-                        "How my_position should change in light of strongest_opposition. "
-                        "Required whenever survives is 'no' or 'weakened' — leave empty only "
-                        "when survives is 'yes'."
+                        "Describe how my_position should change in light of the opposition. State "
+                        "the narrower claim, new condition, or replacement decision that follows "
+                        "when the original position is weakened or defeated. A concrete revision "
+                        "turns the pressure test into an actionable update. Leave this optional "
+                        "field empty only when survives is 'yes'."
                     ),
                     required=False,
                     default="",
@@ -95,7 +109,12 @@ class SteelmanTool(BaseTool):
                 ToolParameter(
                     name="title",
                     type="string",
-                    description="Display label for this note. Defaults to 'Steelman'.",
+                    description=(
+                        "Choose a human-readable label for the recorded steelman. The label helps "
+                        "the model and callers distinguish this note from other context items. Use "
+                        "the default label when no more specific name is needed. Provide a plain "
+                        "string; it defaults to 'Steelman'."
+                    ),
                     required=False,
                     default="Steelman",
                 ),
@@ -128,21 +147,29 @@ class SteelmanTool(BaseTool):
         if error:
             return error
         survives = ReasoningToolInput.text(args, "survives")
-        enum_error = ReasoningToolInput.enum_error(survives, _SURVIVES_VALUES, "survives")
+        enum_error = ReasoningToolInput.enum_error(
+            survives, _SURVIVES_VALUES, "survives"
+        )
         if enum_error:
             return enum_error
         if survives != "yes" and not ReasoningToolInput.text(args, "revision"):
             return "Field 'revision' is required when 'survives' is 'no' or 'weakened'."
         return None
 
-    def _build_item(self, args: dict, primitive_id: str) -> object:
+    def _build_item(self, args: dict, primitive_id: str) -> ContextItem:
         # Constructs the SteelmanContextItem from validated call arguments.
         from vidbyte.context.primitives import SteelmanContextItem
-        return SteelmanContextItem(
-            primitive_id=primitive_id,
-            my_position=ReasoningToolInput.text(args, "my_position"),
-            strongest_opposition=ReasoningToolInput.text(args, "strongest_opposition"),
-            survives=ReasoningToolInput.text(args, "survives"),
-            revision=ReasoningToolInput.text(args, "revision"),
-            title=ReasoningToolInput.text(args, "title", "Steelman") or "Steelman",
+
+        return cast(
+            ContextItem,
+            SteelmanContextItem(
+                primitive_id=primitive_id,
+                my_position=ReasoningToolInput.text(args, "my_position"),
+                strongest_opposition=ReasoningToolInput.text(
+                    args, "strongest_opposition"
+                ),
+                survives=ReasoningToolInput.text(args, "survives"),
+                revision=ReasoningToolInput.text(args, "revision"),
+                title=ReasoningToolInput.text(args, "title", "Steelman") or "Steelman",
+            ),
         )

@@ -17,11 +17,18 @@ Relations:
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
+from vidbyte.context.primitives.base import ContextItem
 from vidbyte.tools.base import BaseTool
 from vidbyte.tools.builtins.reasoning._parsing import ReasoningToolInput
-from vidbyte.tools.types import ToolCall, ToolPermission, ToolResult, ToolSpec, ToolParameter
+from vidbyte.tools.types import (
+    ToolCall,
+    ToolParameter,
+    ToolPermission,
+    ToolResult,
+    ToolSpec,
+)
 
 if TYPE_CHECKING:
     from vidbyte.context.manager import ContextManager
@@ -53,10 +60,11 @@ class InduceTool(BaseTool):
                     name="observations",
                     type="array",
                     description=(
-                        "Specific individual instances or data points the generalization is "
-                        "drawn from. Each entry should be one concrete observation, not a "
-                        "summary of many. May be passed as a JSON array of strings or a JSON "
-                        "string."
+                        "List the specific instances or data points from which the "
+                        "generalization is drawn. Keep each entry as one concrete observation "
+                        "rather than a summary of many cases. These observations are the "
+                        "evidence from which the model will separate a pattern from a broader "
+                        "claim. Provide a JSON array of strings or a JSON-encoded string."
                     ),
                     required=True,
                 ),
@@ -64,9 +72,10 @@ class InduceTool(BaseTool):
                     name="pattern",
                     type="string",
                     description=(
-                        "The regularity noticed across the observations, described before "
-                        "generalizing it — the raw pattern, not yet the claim about all future "
-                        "or unseen cases."
+                        "Describe the regularity noticed across the observations. State the "
+                        "pattern before extending it to future or unseen cases. Keeping this "
+                        "description separate helps the model distinguish an observation from "
+                        "the inductive leap built on it. Provide the pattern as a plain string."
                     ),
                     required=True,
                 ),
@@ -74,9 +83,10 @@ class InduceTool(BaseTool):
                     name="generalization",
                     type="string",
                     description=(
-                        "The general claim projected from the pattern beyond the specific "
-                        "observations (e.g. 'all X have Y', 'X reliably predicts Y'). This is the "
-                        "inductive leap — the part not guaranteed by the observations alone."
+                        "State the general claim projected from the pattern beyond the listed "
+                        "observations. Make the scope clear, such as all cases, future cases, "
+                        "or a stated population. This is the inductive leap and is not guaranteed "
+                        "by the observations alone. Provide the generalization as a plain string."
                     ),
                     required=True,
                 ),
@@ -84,10 +94,11 @@ class InduceTool(BaseTool):
                     name="sample_bias_risk",
                     type="string",
                     description=(
-                        "How the observation set could be unrepresentative: too small, "
-                        "self-selected, drawn from one time/place/source, survivorship bias, or "
-                        "any other systematic skew that would make the generalization wrong even "
-                        "if every individual observation is accurate."
+                        "Describe how the observation set could be unrepresentative. Consider a "
+                        "small or self-selected sample, one time or place, survivorship bias, or "
+                        "another systematic source of skew. This risk shows how the generalization "
+                        "could fail even when every individual observation is accurate. Provide "
+                        "the risk assessment as a plain string."
                     ),
                     required=True,
                 ),
@@ -95,9 +106,11 @@ class InduceTool(BaseTool):
                     name="falsifying_case",
                     type="string",
                     description=(
-                        "A concrete observation that, if it occurred, would break this "
-                        "generalization. If you cannot describe one, the generalization is not "
-                        "yet falsifiable and should be narrowed until it is."
+                        "Give a concrete observation that would break the generalization if it "
+                        "occurred. Make the case specific enough that a future observation could "
+                        "be compared with it. This field gives the model a way to test the claim "
+                        "instead of treating the pattern as certain. Provide the falsifying case "
+                        "as a plain string."
                     ),
                     required=True,
                 ),
@@ -105,9 +118,11 @@ class InduceTool(BaseTool):
                     name="confidence",
                     type="string",
                     description=(
-                        "Self-assessed confidence in the generalization, 0.0 to 1.0 (e.g. "
-                        "'0.6'). Inductive conclusions are never certain; this should rarely be "
-                        "above 0.9. Optional."
+                        "Give a calibrated confidence in the generalization on a scale from 0.0 "
+                        "to 1.0, written as a numeric string such as '0.6'. Use the value to show "
+                        "how strongly the observations support the broader claim, not how certain "
+                        "the wording sounds. Inductive conclusions are provisional, so very high "
+                        "values should be unusual. This parameter is optional and may be omitted."
                     ),
                     required=False,
                     default=None,
@@ -115,7 +130,12 @@ class InduceTool(BaseTool):
                 ToolParameter(
                     name="title",
                     type="string",
-                    description="Display label for this note. Defaults to 'Inductive Generalization'.",
+                    description=(
+                        "Choose a human-readable label for the recorded generalization. The label "
+                        "helps the model and callers distinguish this note from other context "
+                        "items. Use the default label when no more specific name is needed. "
+                        "Provide a plain string; it defaults to 'Inductive Generalization'."
+                    ),
                     required=False,
                     default="Inductive Generalization",
                 ),
@@ -148,16 +168,21 @@ class InduceTool(BaseTool):
             return "Missing or empty required field: 'observations'."
         return ReasoningToolInput.missing_required(args, _REQUIRED_FIELDS)
 
-    def _build_item(self, args: dict, primitive_id: str) -> object:
+    def _build_item(self, args: dict, primitive_id: str) -> ContextItem:
         # Constructs the InductionContextItem from validated call arguments.
         from vidbyte.context.primitives import InductionContextItem
-        return InductionContextItem(
-            primitive_id=primitive_id,
-            observations=ReasoningToolInput.string_list(args.get("observations")),
-            pattern=ReasoningToolInput.text(args, "pattern"),
-            generalization=ReasoningToolInput.text(args, "generalization"),
-            sample_bias_risk=ReasoningToolInput.text(args, "sample_bias_risk"),
-            falsifying_case=ReasoningToolInput.text(args, "falsifying_case"),
-            confidence=ReasoningToolInput.probability(args.get("confidence")),
-            title=ReasoningToolInput.text(args, "title", "Inductive Generalization") or "Inductive Generalization",
+
+        return cast(
+            ContextItem,
+            InductionContextItem(
+                primitive_id=primitive_id,
+                observations=ReasoningToolInput.string_list(args.get("observations")),
+                pattern=ReasoningToolInput.text(args, "pattern"),
+                generalization=ReasoningToolInput.text(args, "generalization"),
+                sample_bias_risk=ReasoningToolInput.text(args, "sample_bias_risk"),
+                falsifying_case=ReasoningToolInput.text(args, "falsifying_case"),
+                confidence=ReasoningToolInput.probability(args.get("confidence")),
+                title=ReasoningToolInput.text(args, "title", "Inductive Generalization")
+                or "Inductive Generalization",
+            ),
         )

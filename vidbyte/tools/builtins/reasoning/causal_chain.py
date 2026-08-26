@@ -16,11 +16,18 @@ Relations:
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
+from vidbyte.context.primitives.base import ContextItem
 from vidbyte.tools.base import BaseTool
 from vidbyte.tools.builtins.reasoning._parsing import ReasoningToolInput
-from vidbyte.tools.types import ToolCall, ToolPermission, ToolResult, ToolSpec, ToolParameter
+from vidbyte.tools.types import (
+    ToolCall,
+    ToolParameter,
+    ToolPermission,
+    ToolResult,
+    ToolSpec,
+)
 
 if TYPE_CHECKING:
     from vidbyte.context.manager import ContextManager
@@ -51,36 +58,48 @@ class CausalChainTool(BaseTool):
                 ToolParameter(
                     name="cause",
                     type="string",
-                    description="The proposed causal factor — the thing claimed to produce the effect.",
+                    description=(
+                        "Name the factor proposed to produce the effect. State it as a specific "
+                        "variable, action, event, or condition that could in principle be changed. "
+                        "A precise cause gives the model something concrete to connect to the "
+                        "mechanism and intervention test. Provide the proposed cause as a plain "
+                        "string."
+                    ),
                     required=True,
                 ),
                 ToolParameter(
                     name="mechanism",
                     type="string",
                     description=(
-                        "The step-by-step causal pathway connecting cause to effect: what "
-                        "actually happens, in order, that makes cause produce effect. "
-                        "Correlation alone is not causation — if you cannot describe a "
-                        "mechanism, you have observed a correlation and should say so instead of "
-                        "asserting causation."
+                        "Describe the step-by-step pathway connecting the cause to the effect. "
+                        "Explain what happens and in what order to make the causal claim plausible. "
+                        "The mechanism helps the model distinguish a process from a mere observed "
+                        "correlation. Provide the pathway as a plain string, and say when no "
+                        "mechanism is known."
                     ),
                     required=True,
                 ),
                 ToolParameter(
                     name="effect",
                     type="string",
-                    description="The outcome claimed to result from cause, stated so it could in principle be measured or observed.",
+                    description=(
+                        "Name the outcome claimed to result from the cause. State it precisely "
+                        "enough that it could be measured or observed. A concrete effect lets the "
+                        "model compare the proposed mechanism with an intervention result. Provide "
+                        "the outcome as a plain string."
+                    ),
                     required=True,
                 ),
                 ToolParameter(
                     name="confounders",
                     type="array",
                     description=(
-                        "Other variables that could produce the same correlation between cause "
-                        "and effect without cause actually causing effect — common causes, "
-                        "reverse causation, selection effects. If none are plausible, state that "
-                        "explicitly as a single entry rather than leaving this empty. May be a "
-                        "JSON array of strings or a JSON string."
+                        "List other variables or pathways that could produce the same relationship "
+                        "between cause and effect. Consider common causes, reverse causation, "
+                        "selection effects, or other explanations that weaken the causal claim. "
+                        "Naming confounders helps the model separate causation from coincidence. "
+                        "Provide a JSON array of strings or a JSON-encoded string, and state "
+                        "explicitly when no plausible confounder is known."
                     ),
                     required=True,
                 ),
@@ -88,16 +107,23 @@ class CausalChainTool(BaseTool):
                     name="intervention_test",
                     type="string",
                     description=(
-                        "The experiment, natural experiment, or perturbation that would confirm "
-                        "the causal claim — what you would change and what you would expect to "
-                        "happen if the mechanism is real, versus if it is only correlation."
+                        "Describe the experiment, natural experiment, or perturbation that would "
+                        "test the causal claim. State what would be changed and what outcome would "
+                        "be expected if the mechanism were real. Include how the result would differ "
+                        "if the relationship were only correlation. Provide the test design as a "
+                        "plain string."
                     ),
                     required=True,
                 ),
                 ToolParameter(
                     name="title",
                     type="string",
-                    description="Display label for this note. Defaults to 'Causal Chain'.",
+                    description=(
+                        "Choose a human-readable label for the recorded causal claim. The label "
+                        "helps the model and callers distinguish this note from other context "
+                        "items. Use the default label when no more specific name is needed. "
+                        "Provide a plain string; it defaults to 'Causal Chain'."
+                    ),
                     required=False,
                     default="Causal Chain",
                 ),
@@ -130,15 +156,20 @@ class CausalChainTool(BaseTool):
             return "Missing or empty required field: 'confounders'."
         return ReasoningToolInput.missing_required(args, _REQUIRED_FIELDS)
 
-    def _build_item(self, args: dict, primitive_id: str) -> object:
+    def _build_item(self, args: dict, primitive_id: str) -> ContextItem:
         # Constructs the CausalChainContextItem from validated call arguments.
         from vidbyte.context.primitives import CausalChainContextItem
-        return CausalChainContextItem(
-            primitive_id=primitive_id,
-            cause=ReasoningToolInput.text(args, "cause"),
-            mechanism=ReasoningToolInput.text(args, "mechanism"),
-            effect=ReasoningToolInput.text(args, "effect"),
-            confounders=ReasoningToolInput.string_list(args.get("confounders")),
-            intervention_test=ReasoningToolInput.text(args, "intervention_test"),
-            title=ReasoningToolInput.text(args, "title", "Causal Chain") or "Causal Chain",
+
+        return cast(
+            ContextItem,
+            CausalChainContextItem(
+                primitive_id=primitive_id,
+                cause=ReasoningToolInput.text(args, "cause"),
+                mechanism=ReasoningToolInput.text(args, "mechanism"),
+                effect=ReasoningToolInput.text(args, "effect"),
+                confounders=ReasoningToolInput.string_list(args.get("confounders")),
+                intervention_test=ReasoningToolInput.text(args, "intervention_test"),
+                title=ReasoningToolInput.text(args, "title", "Causal Chain")
+                or "Causal Chain",
+            ),
         )

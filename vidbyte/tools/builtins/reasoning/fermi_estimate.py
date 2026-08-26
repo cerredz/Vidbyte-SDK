@@ -18,11 +18,18 @@ Relations:
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
+from vidbyte.context.primitives.base import ContextItem
 from vidbyte.tools.base import BaseTool
 from vidbyte.tools.builtins.reasoning._parsing import ReasoningToolInput
-from vidbyte.tools.types import ToolCall, ToolPermission, ToolResult, ToolSpec, ToolParameter
+from vidbyte.tools.types import (
+    ToolCall,
+    ToolParameter,
+    ToolPermission,
+    ToolResult,
+    ToolSpec,
+)
 
 if TYPE_CHECKING:
     from vidbyte.context.manager import ContextManager
@@ -55,54 +62,83 @@ class FermiEstimateTool(BaseTool):
                 ToolParameter(
                     name="quantity",
                     type="string",
-                    description="The unknown quantity being estimated, stated precisely with units (e.g. 'number of piano tuners in Chicago', 'requests per second at peak load').",
+                    description=(
+                        "Name the unknown quantity being estimated. State it precisely enough that "
+                        "the model can identify the relevant units and boundary. A clear quantity "
+                        "keeps the decomposition focused on the question that needs an answer. "
+                        "Provide it as a plain string and include units when they are meaningful."
+                    ),
                     required=True,
                 ),
                 ToolParameter(
                     name="decomposition",
                     type="array",
                     description=(
-                        "The quantity factored into sub-estimates that are individually easier "
-                        "to guess than the whole (e.g. population, households per piano, tunings "
-                        "per year, tuner capacity). Each entry is one factor with its rough value "
-                        "and unit. This is the core Fermi move — guess the inputs, never the "
-                        "answer directly. May be a JSON array of strings or a JSON string."
+                        "Break the quantity into factors that are individually easier to estimate "
+                        "than the whole. State one factor per entry with its rough value and unit. "
+                        "This decomposition lets the model inspect and revise assumptions instead "
+                        "of guessing the final answer directly. Provide a JSON array of strings or "
+                        "a JSON-encoded string."
                     ),
                     required=True,
                 ),
                 ToolParameter(
                     name="arithmetic",
                     type="string",
-                    description="How the decomposed factors combine (multiply, divide, sum) to produce the estimate, shown explicitly enough to be checked and re-derived.",
+                    description=(
+                        "Show how the decomposed factors combine to produce the estimate. Include "
+                        "the relevant multiplication, division, or addition so another reader can "
+                        "re-derive the result. Explicit arithmetic exposes unit mistakes and "
+                        "unexamined assumptions in the calculation. Provide the calculation as a "
+                        "plain string."
+                    ),
                     required=True,
                 ),
                 ToolParameter(
                     name="estimate",
                     type="string",
-                    description="The resulting point estimate for quantity, with units.",
+                    description=(
+                        "State the resulting point estimate for the quantity. Include the units "
+                        "that correspond to the original question. This is the central numerical "
+                        "output produced by the decomposition and arithmetic. Provide it as a plain "
+                        "string."
+                    ),
                     required=True,
                 ),
                 ToolParameter(
                     name="sanity_band",
                     type="string",
-                    description="An order-of-magnitude range the true value should fall within (e.g. '3,000 to 30,000'), used to catch an estimate that is off by 10x or more even if the arithmetic looks clean.",
+                    description=(
+                        "Give an order-of-magnitude range in which the true value should fall. "
+                        "Use the range as an independent check on the point estimate, even when "
+                        "the arithmetic is internally consistent. A broad sanity band helps the "
+                        "model detect a factor that is wrong by ten times or more. Provide the band "
+                        "as a plain string with units or clear endpoints."
+                    ),
                     required=True,
                 ),
                 ToolParameter(
                     name="anchor_risk",
                     type="string",
                     description=(
-                        "One of: 'none', 'anchored_low', 'anchored_high'. Names whether a number "
-                        "seen earlier in this conversation or task likely pulled the estimate "
-                        "toward it rather than the estimate being derived independently from the "
-                        "decomposition."
+                        "State whether an earlier number likely pulled the estimate toward it. Use "
+                        "'none' when no meaningful anchor is present, 'anchored_low' when the "
+                        "estimate may be biased downward, or 'anchored_high' when it may be biased "
+                        "upward. This judgment helps the model distinguish an independently derived "
+                        "estimate from a conversational starting point. Provide one of those enum "
+                        "values as a plain string."
                     ),
                     required=True,
                 ),
                 ToolParameter(
                     name="title",
                     type="string",
-                    description="Display label for this note. Defaults to 'Fermi Estimate'.",
+                    description=(
+                        "Choose a human-readable label for the recorded Fermi estimate. The label "
+                        "helps the model and callers distinguish this note from other context "
+                        "items. Use the default label when no more specific name is needed. "
+                        "Provide a plain string; it defaults to 'Fermi Estimate'."
+                    ),
                     required=False,
                     default="Fermi Estimate",
                 ),
@@ -137,18 +173,25 @@ class FermiEstimateTool(BaseTool):
         if error:
             return error
         anchor_risk = ReasoningToolInput.text(args, "anchor_risk")
-        return ReasoningToolInput.enum_error(anchor_risk, _ANCHOR_RISK_VALUES, "anchor_risk")
+        return ReasoningToolInput.enum_error(
+            anchor_risk, _ANCHOR_RISK_VALUES, "anchor_risk"
+        )
 
-    def _build_item(self, args: dict, primitive_id: str) -> object:
+    def _build_item(self, args: dict, primitive_id: str) -> ContextItem:
         # Constructs the FermiEstimateContextItem from validated call arguments.
         from vidbyte.context.primitives import FermiEstimateContextItem
-        return FermiEstimateContextItem(
-            primitive_id=primitive_id,
-            quantity=ReasoningToolInput.text(args, "quantity"),
-            decomposition=ReasoningToolInput.string_list(args.get("decomposition")),
-            arithmetic=ReasoningToolInput.text(args, "arithmetic"),
-            estimate=ReasoningToolInput.text(args, "estimate"),
-            sanity_band=ReasoningToolInput.text(args, "sanity_band"),
-            anchor_risk=ReasoningToolInput.text(args, "anchor_risk"),
-            title=ReasoningToolInput.text(args, "title", "Fermi Estimate") or "Fermi Estimate",
+
+        return cast(
+            ContextItem,
+            FermiEstimateContextItem(
+                primitive_id=primitive_id,
+                quantity=ReasoningToolInput.text(args, "quantity"),
+                decomposition=ReasoningToolInput.string_list(args.get("decomposition")),
+                arithmetic=ReasoningToolInput.text(args, "arithmetic"),
+                estimate=ReasoningToolInput.text(args, "estimate"),
+                sanity_band=ReasoningToolInput.text(args, "sanity_band"),
+                anchor_risk=ReasoningToolInput.text(args, "anchor_risk"),
+                title=ReasoningToolInput.text(args, "title", "Fermi Estimate")
+                or "Fermi Estimate",
+            ),
         )

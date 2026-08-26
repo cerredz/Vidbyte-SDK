@@ -17,11 +17,18 @@ Relations:
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
+from vidbyte.context.primitives.base import ContextItem
 from vidbyte.tools.base import BaseTool
 from vidbyte.tools.builtins.reasoning._parsing import ReasoningToolInput
-from vidbyte.tools.types import ToolCall, ToolPermission, ToolResult, ToolSpec, ToolParameter
+from vidbyte.tools.types import (
+    ToolCall,
+    ToolParameter,
+    ToolPermission,
+    ToolResult,
+    ToolSpec,
+)
 
 if TYPE_CHECKING:
     from vidbyte.context.manager import ContextManager
@@ -55,8 +62,11 @@ class AbduceTool(BaseTool):
                     name="evidence",
                     type="array",
                     description=(
-                        "The observed facts that need explaining. List each fact separately. "
-                        "May be passed as a JSON array of strings or a JSON string."
+                        "List the observed facts that the candidate explanations must account "
+                        "for. State each fact separately so the model can compare explanations "
+                        "against the same evidence. These facts define the problem that the "
+                        "abductive inference is trying to explain. Provide a JSON array of "
+                        "strings or a JSON-encoded string."
                     ),
                     required=True,
                 ),
@@ -64,15 +74,14 @@ class AbduceTool(BaseTool):
                     name="hypotheses",
                     type="array",
                     description=(
-                        "Candidate explanations for the evidence, 2 to 4 of them, each as an "
-                        "object: {hypothesis, explains, simplicity, assumptions_required}. "
-                        "'hypothesis' is the candidate explanation in one sentence; 'explains' "
-                        "states which listed evidence it accounts for and how well; 'simplicity' "
-                        "is a short note on how many extra assumptions it needs relative to the "
-                        "others; 'assumptions_required' lists what has to be true for it to hold. "
-                        "Provide genuine competitors, not one idea plus strawmen — fewer than 2 "
-                        "valid hypotheses is rejected. May be a JSON array of objects or a JSON "
-                        "string."
+                        "List two to four genuinely competing explanations for the evidence, "
+                        "with each entry shaped as an object containing hypothesis, explains, "
+                        "simplicity, and assumptions_required. Use those fields to show what "
+                        "each candidate explains, how many extra assumptions it needs, and what "
+                        "must be true for it to hold. Real competitors let the model choose the "
+                        "best explanation instead of endorsing the first plausible story. "
+                        "Provide a JSON array of objects or a JSON-encoded string, and include at "
+                        "least two valid hypotheses."
                     ),
                     required=True,
                 ),
@@ -80,9 +89,11 @@ class AbduceTool(BaseTool):
                     name="best",
                     type="string",
                     description=(
-                        "Which hypothesis (by its 'hypothesis' text or a short label) best "
-                        "explains the evidence, chosen for explanatory power and simplicity "
-                        "together — not just whichever came to mind first."
+                        "Identify the hypothesis that best explains the evidence. Refer to it by "
+                        "its hypothesis text or by a short label that clearly maps to one entry. "
+                        "Choose it by weighing explanatory coverage and simplicity together. "
+                        "Provide the selected explanation as a plain string so the comparison "
+                        "remains explicit."
                     ),
                     required=True,
                 ),
@@ -90,10 +101,12 @@ class AbduceTool(BaseTool):
                     name="runner_up",
                     type="string",
                     description=(
-                        "The second-best hypothesis, if any, and in one clause why it lost to "
-                        "'best'. Naming the runner-up is what keeps this an inference among "
-                        "competitors rather than a single story dressed up as reasoning. "
-                        "Optional."
+                        "Name the second-best hypothesis when one remains a serious competitor. "
+                        "Add a brief explanation of why it is weaker than the selected best "
+                        "hypothesis. Naming the runner-up preserves the comparison that makes "
+                        "this an abductive inference rather than a single asserted story. "
+                        "This parameter is optional and may be left empty when no runner-up is "
+                        "useful."
                     ),
                     required=False,
                     default="",
@@ -102,17 +115,23 @@ class AbduceTool(BaseTool):
                     name="discriminating_test",
                     type="string",
                     description=(
-                        "An observation, test, or question that would distinguish 'best' from "
-                        "the runner-up if the current evidence is ambiguous between them. If the "
-                        "evidence already fully discriminates, say what already ruled the "
-                        "runner-up out."
+                        "Describe the observation, test, or question that would distinguish the "
+                        "best explanation from its runner-up. Use this when the current evidence "
+                        "still leaves meaningful ambiguity between the candidates. If the evidence "
+                        "already discriminates, identify what ruled the runner-up out. Provide the "
+                        "test or existing discriminator as a plain string."
                     ),
                     required=True,
                 ),
                 ToolParameter(
                     name="title",
                     type="string",
-                    description="Display label for this note. Defaults to 'Abductive Inference'.",
+                    description=(
+                        "Choose a human-readable label for the recorded abductive inference. The "
+                        "label helps the model and callers distinguish this note from other "
+                        "context items. Use the default label when no more specific name is "
+                        "needed. Provide a plain string; it defaults to 'Abductive Inference'."
+                    ),
                     required=False,
                     default="Abductive Inference",
                 ),
@@ -151,15 +170,22 @@ class AbduceTool(BaseTool):
             )
         return ReasoningToolInput.missing_required(args, _REQUIRED_FIELDS)
 
-    def _build_item(self, args: dict, primitive_id: str) -> object:
+    def _build_item(self, args: dict, primitive_id: str) -> ContextItem:
         # Constructs the AbductionContextItem from validated call arguments.
         from vidbyte.context.primitives import AbductionContextItem
-        return AbductionContextItem(
-            primitive_id=primitive_id,
-            evidence=ReasoningToolInput.string_list(args.get("evidence")),
-            hypotheses=ReasoningToolInput.object_list(args.get("hypotheses")),
-            best=ReasoningToolInput.text(args, "best"),
-            runner_up=ReasoningToolInput.text(args, "runner_up") or None,
-            discriminating_test=ReasoningToolInput.text(args, "discriminating_test"),
-            title=ReasoningToolInput.text(args, "title", "Abductive Inference") or "Abductive Inference",
+
+        return cast(
+            ContextItem,
+            AbductionContextItem(
+                primitive_id=primitive_id,
+                evidence=ReasoningToolInput.string_list(args.get("evidence")),
+                hypotheses=ReasoningToolInput.object_list(args.get("hypotheses")),
+                best=ReasoningToolInput.text(args, "best"),
+                runner_up=ReasoningToolInput.text(args, "runner_up") or None,
+                discriminating_test=ReasoningToolInput.text(
+                    args, "discriminating_test"
+                ),
+                title=ReasoningToolInput.text(args, "title", "Abductive Inference")
+                or "Abductive Inference",
+            ),
         )

@@ -26,7 +26,9 @@ from vidbyte.tools.builtins.reasoning.analogy import AnalogyTool
 from vidbyte.tools.builtins.reasoning.bayesian_update import BayesianUpdateTool
 from vidbyte.tools.builtins.reasoning.causal_chain import CausalChainTool
 from vidbyte.tools.builtins.reasoning.deduce import DeduceTool
-from vidbyte.tools.builtins.reasoning.differential_diagnosis import DifferentialDiagnosisTool
+from vidbyte.tools.builtins.reasoning.differential_diagnosis import (
+    DifferentialDiagnosisTool,
+)
 from vidbyte.tools.builtins.reasoning.falsify import FalsifyTool
 from vidbyte.tools.builtins.reasoning.fermi_estimate import FermiEstimateTool
 from vidbyte.tools.builtins.reasoning.induce import InduceTool

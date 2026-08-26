@@ -18,17 +18,29 @@ Relations:
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
+from vidbyte.context.primitives.base import ContextItem
 from vidbyte.tools.base import BaseTool
 from vidbyte.tools.builtins.reasoning._parsing import ReasoningToolInput
-from vidbyte.tools.types import ToolCall, ToolPermission, ToolResult, ToolSpec, ToolParameter
+from vidbyte.tools.types import (
+    ToolCall,
+    ToolParameter,
+    ToolPermission,
+    ToolResult,
+    ToolSpec,
+)
 
 if TYPE_CHECKING:
     from vidbyte.context.manager import ContextManager
 
 _REQUIRED_TEXT_FIELDS = ("hypothesis", "evidence", "shift_explanation")
-_REQUIRED_PROBABILITY_FIELDS = ("prior", "likelihood_if_true", "likelihood_if_false", "posterior")
+_REQUIRED_PROBABILITY_FIELDS = (
+    "prior",
+    "likelihood_if_true",
+    "likelihood_if_false",
+    "posterior",
+)
 
 
 class BayesianUpdateTool(BaseTool):
@@ -54,16 +66,22 @@ class BayesianUpdateTool(BaseTool):
                 ToolParameter(
                     name="hypothesis",
                     type="string",
-                    description="The specific belief or hypothesis whose probability is being updated.",
+                    description=(
+                        "Name the specific belief or hypothesis whose probability is being "
+                        "updated. State it clearly enough that the evidence can be evaluated as "
+                        "supporting or weakening it. A precise hypothesis gives the probability "
+                        "values a stable subject across the update. Provide it as a plain string."
+                    ),
                     required=True,
                 ),
                 ToolParameter(
                     name="prior",
                     type="string",
                     description=(
-                        "Probability assigned to hypothesis BEFORE seeing the new evidence, 0.0 "
-                        "to 1.0 (e.g. '0.3'). Required and must parse as a number — this is the "
-                        "starting point the update is measured from."
+                        "Give the probability assigned to the hypothesis before the new evidence "
+                        "is considered. Express it as a numeric string from 0.0 to 1.0, such as "
+                        "'0.3'. This is the starting point against which the belief change is "
+                        "measured. The value is required and must parse as a probability."
                     ),
                     required=True,
                 ),
@@ -71,9 +89,11 @@ class BayesianUpdateTool(BaseTool):
                     name="evidence",
                     type="string",
                     description=(
-                        "The new evidence or observation that triggered this update, stated "
-                        "precisely enough that its likelihood under the hypothesis and under its "
-                        "negation can both be judged."
+                        "Describe the new evidence or observation that triggered the update. State "
+                        "it precisely enough that its likelihood can be judged under both the "
+                        "hypothesis and its negation. This identifies what information should move "
+                        "the belief rather than leaving the update unexplained. Provide the "
+                        "evidence as a plain string."
                     ),
                     required=True,
                 ),
@@ -81,9 +101,10 @@ class BayesianUpdateTool(BaseTool):
                     name="likelihood_if_true",
                     type="string",
                     description=(
-                        "P(evidence | hypothesis is true) — how likely you would be to observe "
-                        "this evidence if the hypothesis were true, 0.0 to 1.0. High values mean "
-                        "the evidence is expected under the hypothesis."
+                        "Give the probability of observing the evidence when the hypothesis is "
+                        "true. Express it as a numeric string from 0.0 to 1.0. This value shows "
+                        "how expected the evidence would be if the hypothesis were correct. It is "
+                        "required so the model can compare both sides of the update."
                     ),
                     required=True,
                 ),
@@ -91,10 +112,11 @@ class BayesianUpdateTool(BaseTool):
                     name="likelihood_if_false",
                     type="string",
                     description=(
-                        "P(evidence | hypothesis is false) — how likely you would be to observe "
-                        "this evidence if the hypothesis were false, 0.0 to 1.0. The gap between "
-                        "this and likelihood_if_true is what does the updating; if they are "
-                        "equal, this evidence should not move your belief at all."
+                        "Give the probability of observing the evidence when the hypothesis is "
+                        "false. Express it as a numeric string from 0.0 to 1.0. Comparing this "
+                        "value with likelihood_if_true shows whether the evidence distinguishes "
+                        "the two states. If the values are equal, the evidence should not move the "
+                        "prior belief."
                     ),
                     required=True,
                 ),
@@ -102,11 +124,11 @@ class BayesianUpdateTool(BaseTool):
                     name="posterior",
                     type="string",
                     description=(
-                        "Probability assigned to hypothesis AFTER incorporating the evidence, "
-                        "0.0 to 1.0. Should move in the direction implied by likelihood_if_true "
-                        "versus likelihood_if_false relative to prior — a posterior that does not "
-                        "follow from the stated likelihoods signals unexamined belief drift "
-                        "rather than a real update."
+                        "Give the probability assigned to the hypothesis after incorporating the "
+                        "evidence. Express it as a numeric string from 0.0 to 1.0. The posterior "
+                        "should move from the prior in the direction implied by the two likelihoods. "
+                        "A value that does not fit those inputs signals an unexplained belief shift "
+                        "and should be revisited."
                     ),
                     required=True,
                 ),
@@ -114,16 +136,23 @@ class BayesianUpdateTool(BaseTool):
                     name="shift_explanation",
                     type="string",
                     description=(
-                        "In plain language, why the posterior moved the amount it did (or why it "
-                        "barely moved) — connect the arithmetic to the reasoning so the update is "
-                        "auditable, not just a pair of numbers."
+                        "Explain in plain language why the posterior moved by the stated amount. "
+                        "Connect the prior, evidence, and likelihood comparison to the resulting "
+                        "belief. This gives the model an interpretable reason for the numerical "
+                        "update rather than just a pair of probabilities. Provide the explanation "
+                        "as a plain string."
                     ),
                     required=True,
                 ),
                 ToolParameter(
                     name="title",
                     type="string",
-                    description="Display label for this note. Defaults to 'Bayesian Update'.",
+                    description=(
+                        "Choose a human-readable label for the recorded belief update. The label "
+                        "helps the model and callers distinguish this note from other context "
+                        "items. Use the default label when no more specific name is needed. "
+                        "Provide a plain string; it defaults to 'Bayesian Update'."
+                    ),
                     required=False,
                     default="Bayesian Update",
                 ),
@@ -163,17 +192,34 @@ class BayesianUpdateTool(BaseTool):
                 )
         return None
 
-    def _build_item(self, args: dict, primitive_id: str) -> object:
+    def _build_item(self, args: dict, primitive_id: str) -> ContextItem:
         # Constructs the BayesianUpdateContextItem from validated call arguments.
         from vidbyte.context.primitives import BayesianUpdateContextItem
-        return BayesianUpdateContextItem(
-            primitive_id=primitive_id,
-            hypothesis=ReasoningToolInput.text(args, "hypothesis"),
-            prior=ReasoningToolInput.probability(args.get("prior")),
-            evidence=ReasoningToolInput.text(args, "evidence"),
-            likelihood_if_true=ReasoningToolInput.probability(args.get("likelihood_if_true")),
-            likelihood_if_false=ReasoningToolInput.probability(args.get("likelihood_if_false")),
-            posterior=ReasoningToolInput.probability(args.get("posterior")),
-            shift_explanation=ReasoningToolInput.text(args, "shift_explanation"),
-            title=ReasoningToolInput.text(args, "title", "Bayesian Update") or "Bayesian Update",
+
+        prior = ReasoningToolInput.probability(args.get("prior"))
+        likelihood_if_true = ReasoningToolInput.probability(
+            args.get("likelihood_if_true")
+        )
+        likelihood_if_false = ReasoningToolInput.probability(
+            args.get("likelihood_if_false")
+        )
+        posterior = ReasoningToolInput.probability(args.get("posterior"))
+        assert prior is not None
+        assert likelihood_if_true is not None
+        assert likelihood_if_false is not None
+        assert posterior is not None
+        return cast(
+            ContextItem,
+            BayesianUpdateContextItem(
+                primitive_id=primitive_id,
+                hypothesis=ReasoningToolInput.text(args, "hypothesis"),
+                prior=prior,
+                evidence=ReasoningToolInput.text(args, "evidence"),
+                likelihood_if_true=likelihood_if_true,
+                likelihood_if_false=likelihood_if_false,
+                posterior=posterior,
+                shift_explanation=ReasoningToolInput.text(args, "shift_explanation"),
+                title=ReasoningToolInput.text(args, "title", "Bayesian Update")
+                or "Bayesian Update",
+            ),
         )

@@ -16,11 +16,18 @@ Relations:
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
+from vidbyte.context.primitives.base import ContextItem
 from vidbyte.tools.base import BaseTool
 from vidbyte.tools.builtins.reasoning._parsing import ReasoningToolInput
-from vidbyte.tools.types import ToolCall, ToolPermission, ToolResult, ToolSpec, ToolParameter
+from vidbyte.tools.types import (
+    ToolCall,
+    ToolParameter,
+    ToolPermission,
+    ToolResult,
+    ToolSpec,
+)
 
 if TYPE_CHECKING:
     from vidbyte.context.manager import ContextManager
@@ -53,11 +60,11 @@ class DeduceTool(BaseTool):
                     name="premises",
                     type="array",
                     description=(
-                        "Ordered list of premises this deduction starts from, each stated as a "
-                        "claim assumed true for the purpose of this inference (not necessarily "
-                        "true in the world — that is what soundness_caveat is for). At least one "
-                        "premise is required; two or more is typical for a syllogism. May be "
-                        "passed as a JSON array of strings or a JSON string."
+                        "The premises are the specific claims from which the deduction begins. "
+                        "State each premise separately and in the order used by the inference. "
+                        "Use plain strings that describe assumptions, observations, or rules, "
+                        "not a summary of the conclusion. Provide a JSON array of strings or a "
+                        "JSON-encoded string; at least one premise is required."
                     ),
                     required=True,
                 ),
@@ -65,11 +72,11 @@ class DeduceTool(BaseTool):
                     name="inference_rule",
                     type="string",
                     description=(
-                        "Name of the specific logical rule connecting the premises to the "
-                        "conclusion, e.g. 'modus ponens', 'modus tollens', 'hypothetical "
-                        "syllogism', 'disjunctive syllogism', 'contrapositive', 'transitivity', "
-                        "or 'universal instantiation'. Naming the rule is what makes this "
-                        "deduction checkable rather than merely asserted."
+                        "Name the logical rule that connects the premises to the conclusion. "
+                        "Use a standard rule such as modus ponens, modus tollens, transitivity, "
+                        "or universal instantiation when one applies. The rule should describe "
+                        "the relationship actually used, rather than a vague label for the "
+                        "reasoning. Provide it as a plain string so the inference can be checked."
                     ),
                     required=True,
                 ),
@@ -77,8 +84,10 @@ class DeduceTool(BaseTool):
                     name="conclusion",
                     type="string",
                     description=(
-                        "The claim that necessarily follows from the premises under the named "
-                        "inference_rule, stated as a single declarative sentence."
+                        "State the claim that follows from the premises under the named rule. "
+                        "Phrase it as one clear declarative sentence so the model can compare it "
+                        "with the premises. The conclusion should express what the inference "
+                        "supports, not add an unsupported premise. Provide it as a plain string."
                     ),
                     required=True,
                 ),
@@ -86,18 +95,23 @@ class DeduceTool(BaseTool):
                     name="soundness_caveat",
                     type="string",
                     description=(
-                        "Deductive validity guarantees the conclusion only if every premise is "
-                        "true; it says nothing about whether the premises actually are true. Name "
-                        "the single weakest or least certain premise and why it might be false. "
-                        "If no premise is doubtful, state that explicitly rather than omitting "
-                        "this field."
+                        "Describe the weakest or least certain premise in the deduction. Explain "
+                        "why that premise might be false even if the logical step is valid. This "
+                        "separates validity of the inference from soundness of the overall claim. "
+                        "Provide the caveat as a plain string, and state explicitly when no premise "
+                        "is doubtful."
                     ),
                     required=True,
                 ),
                 ToolParameter(
                     name="title",
                     type="string",
-                    description="Display label for this note. Defaults to 'Deductive Chain'.",
+                    description=(
+                        "Choose a human-readable label for the recorded deduction. The label "
+                        "helps the model and callers distinguish this note from other context "
+                        "items. Use the default label when no more specific name is needed. "
+                        "Provide a plain string; it defaults to 'Deductive Chain'."
+                    ),
                     required=False,
                     default="Deductive Chain",
                 ),
@@ -130,14 +144,19 @@ class DeduceTool(BaseTool):
             return "Missing or empty required field: 'premises'."
         return ReasoningToolInput.missing_required(args, _REQUIRED_FIELDS)
 
-    def _build_item(self, args: dict, primitive_id: str) -> object:
+    def _build_item(self, args: dict, primitive_id: str) -> ContextItem:
         # Constructs the DeductionContextItem from validated call arguments.
         from vidbyte.context.primitives import DeductionContextItem
-        return DeductionContextItem(
-            primitive_id=primitive_id,
-            premises=ReasoningToolInput.string_list(args.get("premises")),
-            inference_rule=ReasoningToolInput.text(args, "inference_rule"),
-            conclusion=ReasoningToolInput.text(args, "conclusion"),
-            soundness_caveat=ReasoningToolInput.text(args, "soundness_caveat"),
-            title=ReasoningToolInput.text(args, "title", "Deductive Chain") or "Deductive Chain",
+
+        return cast(
+            ContextItem,
+            DeductionContextItem(
+                primitive_id=primitive_id,
+                premises=ReasoningToolInput.string_list(args.get("premises")),
+                inference_rule=ReasoningToolInput.text(args, "inference_rule"),
+                conclusion=ReasoningToolInput.text(args, "conclusion"),
+                soundness_caveat=ReasoningToolInput.text(args, "soundness_caveat"),
+                title=ReasoningToolInput.text(args, "title", "Deductive Chain")
+                or "Deductive Chain",
+            ),
         )

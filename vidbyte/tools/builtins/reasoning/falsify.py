@@ -17,11 +17,18 @@ Relations:
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
+from vidbyte.context.primitives.base import ContextItem
 from vidbyte.tools.base import BaseTool
 from vidbyte.tools.builtins.reasoning._parsing import ReasoningToolInput
-from vidbyte.tools.types import ToolCall, ToolPermission, ToolResult, ToolSpec, ToolParameter
+from vidbyte.tools.types import (
+    ToolCall,
+    ToolParameter,
+    ToolPermission,
+    ToolResult,
+    ToolSpec,
+)
 
 if TYPE_CHECKING:
     from vidbyte.context.manager import ContextManager
@@ -53,38 +60,57 @@ class FalsifyTool(BaseTool):
                 ToolParameter(
                     name="claim",
                     type="string",
-                    description="The claim being subjected to a falsification test, stated precisely enough that some observation could in principle contradict it. A claim that cannot fail any observation is not falsifiable and should be narrowed before using this tool.",
+                    description=(
+                        "State the claim being subjected to a falsification test. Make it precise "
+                        "enough that some possible observation could contradict it. A claim that "
+                        "cannot fail any observation should be narrowed before this tool is used. "
+                        "Provide the claim as a plain string."
+                    ),
                     required=True,
                 ),
                 ToolParameter(
                     name="test_design",
                     type="string",
-                    description="The specific test, observation, or experiment that could refute claim — designed to fail if claim is false, not merely to confirm it if true. A test that can only ever succeed is not a real test.",
+                    description=(
+                        "Describe the specific test, observation, or experiment that could refute the "
+                        "claim. Design it so that a false claim would produce a failure, rather than "
+                        "only looking for confirming evidence. This makes the test informative about "
+                        "the claim's limits. Provide the design as a plain string."
+                    ),
                     required=True,
                 ),
                 ToolParameter(
                     name="riskiest_prediction",
                     type="string",
-                    description="The boldest, most specific consequence claim forbids — the prediction most likely to be wrong if claim is false, and therefore the one whose survival provides the strongest support if claim is true. A claim that forbids nothing risky is barely a claim at all.",
+                    description=(
+                        "Name the boldest and most specific consequence that the claim forbids. "
+                        "Choose the prediction most likely to be wrong if the claim is false. Its "
+                        "survival provides stronger support than a prediction that almost any claim "
+                        "could accommodate. Provide the prediction as a plain string."
+                    ),
                     required=True,
                 ),
                 ToolParameter(
                     name="status",
                     type="string",
                     description=(
-                        "One of: 'falsified', 'survived', 'untested'. 'falsified' means "
-                        "test_design was actually run (or riskiest_prediction was checked) and "
-                        "claim failed. 'survived' means it was checked and claim held. "
-                        "'untested' means the test has been designed but not yet actually "
-                        "carried out — use this rather than assuming a well-designed test counts "
-                        "as a passed one."
+                        "Record the current result as 'falsified', 'survived', or 'untested'. Use "
+                        "'falsified' only when the test was run and the claim failed, and use "
+                        "'survived' only when the test was run and the claim held. Use 'untested' "
+                        "when the design exists but the observation has not been made. Provide one "
+                        "of those enum values as a plain string."
                     ),
                     required=True,
                 ),
                 ToolParameter(
                     name="title",
                     type="string",
-                    description="Display label for this note. Defaults to 'Falsification Test'.",
+                    description=(
+                        "Choose a human-readable label for the recorded falsification test. The "
+                        "label helps the model and callers distinguish this note from other "
+                        "context items. Use the default label when no more specific name is "
+                        "needed. Provide a plain string; it defaults to 'Falsification Test'."
+                    ),
                     required=False,
                     default="Falsification Test",
                 ),
@@ -119,14 +145,21 @@ class FalsifyTool(BaseTool):
         status = ReasoningToolInput.text(args, "status")
         return ReasoningToolInput.enum_error(status, _STATUS_VALUES, "status")
 
-    def _build_item(self, args: dict, primitive_id: str) -> object:
+    def _build_item(self, args: dict, primitive_id: str) -> ContextItem:
         # Constructs the FalsifyContextItem from validated call arguments.
         from vidbyte.context.primitives import FalsifyContextItem
-        return FalsifyContextItem(
-            primitive_id=primitive_id,
-            claim=ReasoningToolInput.text(args, "claim"),
-            test_design=ReasoningToolInput.text(args, "test_design"),
-            riskiest_prediction=ReasoningToolInput.text(args, "riskiest_prediction"),
-            status=ReasoningToolInput.text(args, "status"),
-            title=ReasoningToolInput.text(args, "title", "Falsification Test") or "Falsification Test",
+
+        return cast(
+            ContextItem,
+            FalsifyContextItem(
+                primitive_id=primitive_id,
+                claim=ReasoningToolInput.text(args, "claim"),
+                test_design=ReasoningToolInput.text(args, "test_design"),
+                riskiest_prediction=ReasoningToolInput.text(
+                    args, "riskiest_prediction"
+                ),
+                status=ReasoningToolInput.text(args, "status"),
+                title=ReasoningToolInput.text(args, "title", "Falsification Test")
+                or "Falsification Test",
+            ),
         )
