@@ -11,14 +11,27 @@ COMMON MODIFICATION PATTERNS:
     nothing else in this file changes.
 RELATED DOCS:
     docs/design/sdk-lint-python-correctness.md
+    docs/design/sdk-lint-contract-rules.md
 """
 
 from __future__ import annotations
 
 from lint.core.rule import LintConfigurationError, LintRule
+from lint.rules.c001_settings_class_configuration_error_placement import SettingsClassConfigurationErrorPlacementRule
+from lint.rules.c002_duplicate_inline_bool_guard_validation import DuplicateInlineBoolGuardValidationRule
+from lint.rules.c003_no_dynamic_import_from_data import NoDynamicImportFromDataRule
+from lint.rules.c004_operation_pricing_rate_floor import OperationPricingRateFloorRule
+from lint.rules.c005_cost_arithmetic_site_parity import CostArithmeticSiteParityRule
 from lint.rules.s001_python_correctness_foundation import PythonCorrectnessFoundationRule
 
-_RULES: tuple[type[LintRule], ...] = (PythonCorrectnessFoundationRule,)
+_RULES: tuple[type[LintRule], ...] = (
+    PythonCorrectnessFoundationRule,
+    SettingsClassConfigurationErrorPlacementRule,
+    DuplicateInlineBoolGuardValidationRule,
+    NoDynamicImportFromDataRule,
+    OperationPricingRateFloorRule,
+    CostArithmeticSiteParityRule,
+)
 
 if len({rule.rule_id for rule in _RULES}) != len(_RULES):
     raise LintConfigurationError("Duplicate rule_id registered in lint/core/registry.py.")
