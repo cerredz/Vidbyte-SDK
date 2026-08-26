@@ -12,6 +12,7 @@ registry identity, and freezing remain manager responsibilities.
 - `records.py` - artifact, response, and tool-call primitives.
 - `checkpoints.py` - reflexion and trajectory checkpoint primitives.
 - `reasoning.py` - problem-space and error-correction primitives.
+- `reasoning_traces.py` - bounded public checkpoints for 182 strategy-specific reasoning trace tools.
 - `multi_agent.py` - request, team, ledger, report, limit, and terminal primitives used by `MultiAgentContext`.
 - `framing.py` - problem-frame, objective, boundary, ambiguity, and perspective challenges.
 - `epistemics.py` - assumption, model, and evidence challenges.
@@ -24,3 +25,8 @@ Multi-agent primitives preserve explicit trust boundaries: user requests, ledger
 values, worker reports, candidate answers, and finish rationales render inside
 `<untrusted_data>` sections. Context construction belongs in
 `vidbyte/context/multi_agent.py`, not in an agent runtime.
+
+Reasoning trace primitives are also explicitly model-authored and untrusted.
+They keep method application, evidence, assumptions, alternatives,
+disconfirmation signals, confidence, and next action visible across iterations,
+but they do not verify the claims or execute the named reasoning strategy.
