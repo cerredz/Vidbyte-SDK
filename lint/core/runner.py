@@ -14,11 +14,12 @@ ARCHITECTURE NOTE:
     lint/rules/sNNN_*.py module plus one registry entry; this file does not
     change.
 WHAT NOT TO DO IN THIS FILE:
-    Do not let one rule's collect() exception propagate uncaught; convert it
+    Do not let one rule's find() exception propagate uncaught; convert it
     to an ERRORED outcome so a broken rule is diagnosable, not indistinguishable
     from a passing one and not a crash of the whole CLI.
 RELATED DOCS:
     docs/design/sdk-lint-python-correctness.md
+    docs/design/sdk-lint-contract-rules.md
 """
 
 from __future__ import annotations
@@ -75,12 +76,19 @@ class LintRunner:
     def run(self, *, rule_ids: tuple[str, ...] | None = None) -> RunReport:
         # Runs the selected rules (or every registered rule) and returns the full report.
         selected = self._resolve_rules(rule_ids)
-        SourceCatalog.python_files(self._repository_root, self._package_root)
+        files = SourceCatalog.python_files(self._repository_root, self._package_root)
         baseline = BaselineStore.load(self._baseline_path)
-        all_findings = RuffAdapter.run(self._package_root, self._union_selectors(selected))
-        outcomes = tuple(self._evaluate_rule(rule, all_findings, baseline) for rule in selected)
+        all_findings = self._run_ruff_if_needed(selected)
+        outcomes = tuple(self._evaluate_rule(rule, files, all_findings, baseline) for rule in selected)
         stale, missing = self._baseline_key_mismatches(baseline)
         return RunReport(outcomes=outcomes, stale_baseline_keys=stale, missing_baseline_keys=missing)
+
+    def _run_ruff_if_needed(self, rules: tuple[type[LintRule], ...]) -> tuple[RuffFinding, ...]:
+        # Runs Ruff once with the selected rules' unioned selectors, or skips it when none declare any.
+        selectors = self._union_selectors(rules)
+        if not selectors:
+            return ()
+        return RuffAdapter.run(self._package_root, selectors)
 
     def _resolve_rules(self, rule_ids: tuple[str, ...] | None) -> tuple[type[LintRule], ...]:
         # Returns the requested rule classes, or every registered rule when none are requested.
@@ -95,12 +103,12 @@ class LintRunner:
             merged.update(rule.ruff_selectors)
         return tuple(sorted(merged))
 
-    def _evaluate_rule(self, rule: type[LintRule], all_findings: tuple[RuffFinding, ...], baseline: dict[str, int]) -> RuleOutcome:
-        # Collects one rule's findings and compares the count against its baseline entry.
+    def _evaluate_rule(self, rule: type[LintRule], files: tuple[Path, ...], all_findings: tuple[RuffFinding, ...], baseline: dict[str, int]) -> RuleOutcome:
+        # Runs one rule's find() and compares its finding count against its baseline entry.
         # Broad except is deliberate: a broken rule must become a diagnosable ERRORED
         # outcome, never an uncaught crash of the whole CLI.
         try:
-            matched = rule.collect(all_findings)
+            findings = rule.find(files, all_findings)
         except Exception as exc:
             return RuleOutcome(
                 rule_id=rule.rule_id,
@@ -110,10 +118,6 @@ class LintRunner:
                 findings=(),
                 error=repr(exc),
             )
-        findings = tuple(
-            Finding(rule_id=rule.rule_id, code=f.code, file=f.file, line=f.line, column=f.column, message=f.message)
-            for f in matched
-        )
         baseline_count = baseline.get(rule.rule_id, 0)
         verdict = BaselineStore.evaluate(baseline_count, len(findings))
         return RuleOutcome(

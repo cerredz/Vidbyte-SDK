@@ -8,7 +8,9 @@ ROLE IN CODEBASE:
     under lint/rules/ (to satisfy the protocol), and by lint/core/discovery.py,
     ruff.py, baseline.py, runner.py, and run.py (for the two error types).
 FUNCTION INVENTORY:
-    LintRule: Protocol a rule module's class must satisfy.
+    LintRule: Protocol a rule module's class must satisfy. A rule with a
+        non-empty ruff_selectors filters the shared Ruff findings in find();
+        a pure-AST rule sets ruff_selectors to () and parses files itself.
     LintConfigurationError: Raised for a setup problem (bad path, bad
         baseline file, unknown rule id) that a human or agent must fix
         before the suite can run at all.
@@ -19,6 +21,7 @@ WHAT NOT TO DO IN THIS FILE:
     contract and error vocabulary shared across analyzers.
 RELATED DOCS:
     docs/design/sdk-lint-python-correctness.md
+    docs/design/sdk-lint-contract-rules.md
 """
 
 from __future__ import annotations
@@ -26,7 +29,9 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, ClassVar, Protocol
 
 if TYPE_CHECKING:
-    from lint.core.diagnostic import RuleDiagnostic
+    from pathlib import Path
+
+    from lint.core.diagnostic import Finding, RuleDiagnostic
     from lint.core.ruff import RuffFinding
 
 
@@ -50,6 +55,7 @@ class LintRule(Protocol):
         ...
 
     @staticmethod
-    def collect(findings: tuple[RuffFinding, ...]) -> tuple[RuffFinding, ...]:
-        # Filters the shared Ruff findings down to this rule's selector union.
+    def find(files: tuple[Path, ...], ruff_findings: tuple[RuffFinding, ...]) -> tuple[Finding, ...]:
+        # Returns this rule's fully-formed findings: Ruff-backed rules filter
+        # ruff_findings; pure-AST rules parse files themselves and ignore it.
         ...

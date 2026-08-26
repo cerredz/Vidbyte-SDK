@@ -6,7 +6,7 @@ PURPOSE:
     correctness, and parser/runtime errors.
 ROLE IN CODEBASE:
     Registered by lint/core/registry.py; its ruff_selectors are unioned into
-    the one Ruff invocation lint/core/ruff.py makes, and its collect() then
+    the one Ruff invocation lint/core/ruff.py makes, and its find() then
     filters that shared result set down to this rule's codes.
 ARCHITECTURE NOTE:
     This rule intentionally excludes Ruff's BLE001 (broad `except Exception`).
@@ -26,10 +26,14 @@ RELATED DOCS:
 
 from __future__ import annotations
 
-from typing import ClassVar
+from typing import TYPE_CHECKING, ClassVar
 
-from lint.core.diagnostic import RuleDiagnostic
-from lint.core.ruff import RuffFinding
+from lint.core.diagnostic import Finding, RuleDiagnostic
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from lint.core.ruff import RuffFinding
 
 
 class PythonCorrectnessFoundationRule:
@@ -71,12 +75,12 @@ class PythonCorrectnessFoundationRule:
         )
 
     @staticmethod
-    def collect(findings: tuple[RuffFinding, ...]) -> tuple[RuffFinding, ...]:
-        # Filters the shared Ruff findings to those matching this rule's selector prefixes.
+    def find(files: tuple[Path, ...], ruff_findings: tuple[RuffFinding, ...]) -> tuple[Finding, ...]:
+        # Filters the shared Ruff findings to this rule's selector prefixes and wraps each as a Finding.
+        matched = (f for f in ruff_findings if f.code.startswith(PythonCorrectnessFoundationRule.ruff_selectors))
         return tuple(
-            finding
-            for finding in findings
-            if finding.code.startswith(PythonCorrectnessFoundationRule.ruff_selectors)
+            Finding(rule_id="S001", code=f.code, file=f.file, line=f.line, column=f.column, message=f.message)
+            for f in matched
         )
 
 
