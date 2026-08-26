@@ -8,7 +8,8 @@ Purpose:
 Architecture:
     - AgentMiddleware: Optional hook base class for custom middleware.
     - MiddlewarePipeline: Ordered hook dispatcher used by AgentRuntime.
-    - Dataclass re-exports: hooks, actions, contexts, decisions, events.
+    - Dataclass re-exports: hooks, actions, contexts, decisions, policy events,
+      and diagnostic hook invocations.
     - Built-ins: AuditLogMiddleware, ModelRetryMiddleware, RuntimeLimitMiddleware,
       TokenRateLimitMiddleware, ToolPolicyMiddleware, TokenBudgetMiddleware,
       CostBudgetMiddleware, ExponentialBackoffRetryMiddleware,
@@ -26,6 +27,7 @@ from vidbyte.lib.dataclasses.middleware import (
     MiddlewareDecision,
     MiddlewareEvent,
     MiddlewareHook,
+    MiddlewareHookInvocation,
     MiddlewareTransform,
 )
 from vidbyte.middleware.base import AgentMiddleware
@@ -68,6 +70,7 @@ __all__ = [
     "MiddlewareDecision",
     "MiddlewareEvent",
     "MiddlewareHook",
+    "MiddlewareHookInvocation",
     "MiddlewarePipeline",
     "MiddlewareTransform",
     "MessageHistoryCompactionMiddleware",
