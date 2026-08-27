@@ -535,10 +535,11 @@ Complete list of every file that will be created, modified, or deleted:
 | MODIFY | `lint/core/registry.py` | Register A001-A003, A005-A008, and S024 |
 | MODIFY | `lint/baseline.json` | Add reviewed count allowances for each selected rule |
 | MODIFY | `lint/README.md` | Document the expanded suite and rule catalogue |
+| MODIFY | `lint/core/README.md` | Keep the lint-core file index aligned with the repository-wide catalogue |
 | MODIFY | `lint/rules/README.md` | Add file-index entries and rule descriptions |
 
-**Files to create:** 9  
-**Files to modify:** 5  
+**Files to create:** 9
+**Files to modify:** 6
 **Files to delete:** 0
 
 ---
