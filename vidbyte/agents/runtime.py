@@ -53,6 +53,7 @@ from vidbyte.agents.contract import AgentLoopSettingsOutputContract
 from vidbyte.agents.contracts.schema import SchemaConformance
 from vidbyte.lib.dataclasses.context import BaseAgentContext, BaseContext
 from vidbyte.lib.dataclasses.strategies import AgentResult
+from vidbyte.lib.dataclasses.verifier import VerifierRunRequest
 from vidbyte.tools._internal import IS_DONE_TOOL_NAME, with_internal_agent_tools
 from vidbyte.tools.activity import ActivityToolFormatter
 from vidbyte.tools.base import BaseTool
@@ -86,6 +87,8 @@ class AgentRuntime:
         self.usage_tracker = usage_tracker or UsageTracker()
         self.fallback = fallback
         self._verifier_runtime = self._build_verifier_runtime(verifier_runtime)
+        if self._verifier_runtime is not None:
+            self.tools = self.tools.extend(self._verifier_runtime.mode_tools())
 
     def _build_verifier_runtime(self, verifier_runtime: "VerifierRuntimeSettings | None") -> "AgentVerifierRuntime | None":
         # Local import avoids a module-level cycle back through vidbyte.agents.runtimes' package init.
@@ -93,7 +96,7 @@ class AgentRuntime:
             return None
         from vidbyte.agents.runtimes.verifier import AgentVerifierRuntime
 
-        return AgentVerifierRuntime(verifier_runtime, run_id=self.run_id or self.agent_name)
+        return AgentVerifierRuntime(verifier_runtime, run_id=self.run_id or self.agent_name, context_manager=self.context_manager)
 
     def _context_window_admission_middleware(self) -> tuple[AgentMiddleware, ...]:
         # Returns compatibility middleware for legacy tool-result admission presets.
@@ -151,24 +154,31 @@ class AgentRuntime:
         )
 
     async def arun(self, message: str, *, handle: RunnerHandle, context: BaseAgentContext, metadata: Mapping[str, Any] | None = None, options: Mapping[str, Any] | None = None, trace_context: SpanContext | None = None) -> AgentResult:
-        """Run the direct model/tool loop until isDone or a budget stop."""
+        """Run the direct model/tool loop through the selected verifier mode."""
+        request = VerifierRunRequest(message=message, handle=handle, context=context, metadata=metadata, options=options, trace_context=trace_context)
+        if self._verifier_runtime is not None:
+            return await self._verifier_runtime.run(request, self._run_request)
+        return await self._run_request(request)
+
+    async def _run_request(self, request: VerifierRunRequest) -> AgentResult:
+        # Runs existing context algorithms first, then one direct model/tool attempt when no outer algorithm handles it.
         algorithm_result = await AgentRuntimeContextAlgorithms(self).arun(
-            message,
-            handle=handle,
-            context=context,
-            metadata=metadata,
-            options=options,
-            trace_context=trace_context,
+            request.message,
+            handle=request.handle,
+            context=request.context,
+            metadata=request.metadata,
+            options=request.options,
+            trace_context=request.trace_context,
         )
         if algorithm_result is not None:
             return algorithm_result
         return await self._arun_once(
-            message,
-            handle=handle,
-            context=context,
-            metadata=metadata,
-            options=options,
-            trace_context=trace_context,
+            request.message,
+            handle=request.handle,
+            context=request.context,
+            metadata=request.metadata,
+            options=request.options,
+            trace_context=request.trace_context,
         )
 
     async def _arun_once(self, message: str, *, handle: RunnerHandle, context: BaseAgentContext, metadata: Mapping[str, Any] | None = None, options: Mapping[str, Any] | None = None, trace_context: SpanContext | None = None) -> AgentResult:
@@ -668,6 +678,24 @@ class AgentRuntime:
                         run_state=run_state,
                         model_response=raw_result,
                     )
+
+            if not contract_rejected:
+                blocked, stop_result = await self._apply_verifier_iteration(
+                    candidate_output=last_assistant_output or "",
+                    messages=messages,
+                    iteration_count=iteration_count,
+                    tokens_used=tokens_used,
+                    call_contexts=call_contexts,
+                    provider=provider,
+                    run_state=run_state,
+                )
+                if stop_result is not None:
+                    return await self._finish_result(
+                        stop_result,
+                        message=message, context=context, provider=provider, iteration_count=iteration_count, model_call_count=model_call_count, tokens_used=tokens_used, started_at=started_at, metadata=runtime_metadata, run_state=run_state, model_response=raw_result,
+                    )
+                if blocked:
+                    contract_rejected = True
 
             if contract_rejected:
                 continue
@@ -1957,6 +1985,36 @@ class AgentRuntime:
             return True, stop_result
         self._inject_verifier_repair(messages, outcome, provider=provider, pending_tool_call=pending_tool_call)
         return True, None
+
+    async def _apply_verifier_iteration(
+        self,
+        *,
+        candidate_output: str,
+        messages: list[dict[str, Any]],
+        iteration_count: int,
+        tokens_used: int | None,
+        call_contexts: Sequence[ToolCallContext],
+        provider: Any,
+        run_state: dict[type, Any],
+    ) -> tuple[bool, AgentResult | None]:
+        # Runs a mode-scheduled checkpoint after an ordinary iteration and applies its feedback or stop decision.
+        if self._verifier_runtime is None:
+            return False, None
+        from vidbyte.agents.runtimes.verifier import GateDecision, ResolutionContext
+
+        resolution_context = ResolutionContext(candidate_output=candidate_output, messages=tuple(messages), workspace_root=None, iteration_count=iteration_count, context_manager=self.context_manager, cost_spent_usd=self._cost_spent_usd(tokens_used))
+        outcome = await self._verifier_runtime.after_iteration(resolution_context)
+        if outcome is None:
+            return False, None
+        self._publish_verifier_evaluations(run_state)
+        if outcome.decision is GateDecision.REJECT_AND_TERMINATE:
+            on_exhausted = self._verifier_runtime.settings.params.budget.params.on_exhausted
+            run_state.setdefault("__result_metadata__", {})["verifier_exhaustion_action"] = on_exhausted.value
+            return True, self._stopped_result(candidate_output, stop_reason=AgentStopReason.VERIFICATION_FAILED, iteration_count=iteration_count, tokens_used=tokens_used, contexts=call_contexts)
+        if outcome.decision is GateDecision.REJECT_AND_CONTINUE:
+            self._inject_verifier_repair(messages, outcome, provider=provider, pending_tool_call=None)
+            return True, None
+        return False, None
 
     def _inject_verifier_repair(
         self,

@@ -22,6 +22,7 @@ Similar Files:
 
 from __future__ import annotations
 
+from vidbyte.agents.runtimes.verifier.algorithms.finalization_gate import FinalizationGateMode
 from vidbyte.lib.dataclasses.verifier import VerifierRuntimeSettingsParams
 
 
@@ -31,6 +32,7 @@ class VerifierRuntimeSettings:
     def __init__(self, params: VerifierRuntimeSettingsParams) -> None:
         # Stores the composed, already-validated pillar configuration.
         self.params = params
+        self.mode = params.mode or FinalizationGateMode()
 
     def active(self) -> bool:
         """Returns whether at least one verifier is configured to run."""

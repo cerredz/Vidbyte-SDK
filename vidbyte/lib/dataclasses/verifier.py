@@ -56,6 +56,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 from vidbyte.lib.errors import ConfigurationError
 
 if TYPE_CHECKING:
+    from vidbyte.agents.runtimes.verifier.algorithms.base import VerifierRuntimeMode
     from vidbyte.agents.runtimes.verifier.budget import VerifierRuntimeBudget
     from vidbyte.agents.runtimes.verifier.collection import VerifierCollection
     from vidbyte.agents.runtimes.verifier.feedback import VerifierRuntimeFeedback
@@ -98,6 +99,26 @@ class FeedbackDelivery(str, Enum):
     CONTEXT_ITEM = "context_item"
     SYSTEM_MESSAGE = "system_message"
     MCP_RESOURCE = "mcp_resource"
+
+
+class VerifierRuntimeModeKind(str, Enum):
+    """The supported ways a verifier can be interleaved with an agent run."""
+
+    POST_RUN = "post_run"
+    FINALIZATION_GATE = "finalization_gate"
+    PERIODIC = "periodic"
+    AS_TOOL = "as_tool"
+
+
+class VerifierRetryContextMode(str, Enum):
+    """How a post-run verification retry receives the preceding attempt."""
+
+    FULL_HISTORY = "full_history"
+    COMPACTED_HISTORY = "compacted_history"
+    FRESH_CONTEXT = "fresh_context"
+
+
+VERIFIER_TOOL_DEFAULT_NAME = "verify_current_state"
 
 
 class RepairMode(str, Enum):
@@ -220,6 +241,18 @@ class ResolutionContext:
     iteration_count: int
     context_manager: "ContextManager | None"
     cost_spent_usd: float = 0.0
+
+
+@dataclass(frozen=True, slots=True)
+class VerifierRunRequest:
+    """The complete input needed to invoke one normal AgentRuntime attempt."""
+
+    message: str
+    handle: Any
+    context: Any
+    metadata: Mapping[str, Any] | None = None
+    options: Mapping[str, Any] | None = None
+    trace_context: Any | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -491,8 +524,8 @@ class VerifierLedgerParams:
 class VerifierRuntimeSettingsParams:
     """Composes every verifier-runtime pillar into one configuration object.
 
-    No __post_init__ of its own — every field's own class already validated
-    itself at construction, so there is nothing left to check here.
+    The mode is the one behavior-level field; its own Params dataclass owns
+    algorithm-specific validation.
     """
 
     target_resolver: "VerifierTargetResolver"
@@ -503,6 +536,62 @@ class VerifierRuntimeSettingsParams:
     repair_strategy: "VerifierRepairStrategy"
     budget: "VerifierRuntimeBudget"
     ledger_params: VerifierLedgerParams
+    mode: "VerifierRuntimeMode | None" = None
+
+    def __post_init__(self) -> None:
+        # A mode must implement the verifier lifecycle contract when supplied.
+        self._validate_mode()
+
+    def _validate_mode(self) -> None:
+        # Keep the runtime-only import lazy so lib dataclasses remain importable during package initialization.
+        if self.mode is None:
+            return
+        from vidbyte.agents.runtimes.verifier.algorithms.base import VerifierRuntimeMode
+
+        if not isinstance(self.mode, VerifierRuntimeMode):
+            raise ConfigurationError("VerifierRuntimeSettingsParams.mode must be a VerifierRuntimeMode instance when provided.")
+
+
+@dataclass(frozen=True, slots=True)
+class PostRunVerificationModeParams:
+    """Validated settings for complete-run verification and retries."""
+
+    context_mode: VerifierRetryContextMode = VerifierRetryContextMode.FULL_HISTORY
+
+    def __post_init__(self) -> None:
+        # Retry construction branches on this enum, so reject raw strings instead of silently choosing fresh context.
+        if not isinstance(self.context_mode, VerifierRetryContextMode):
+            raise ConfigurationError(
+                "PostRunVerificationModeParams.context_mode must be a VerifierRetryContextMode member."
+            )
+
+
+@dataclass(frozen=True, slots=True)
+class PeriodicVerificationModeParams:
+    """Validated settings for verification after completed iterations."""
+
+    every_n_iterations: int = 1
+
+    def __post_init__(self) -> None:
+        # A zero cadence would make periodic verification impossible to schedule.
+        if self.every_n_iterations <= 0:
+            raise ConfigurationError("PeriodicVerificationModeParams.every_n_iterations must be greater than zero.")
+
+
+@dataclass(frozen=True, slots=True)
+class VerifierAsToolModeParams:
+    """Validated settings for the model-callable verifier tool."""
+
+    tool_name: str = VERIFIER_TOOL_DEFAULT_NAME
+    max_calls: int | None = None
+    required_before_finalization: bool = False
+
+    def __post_init__(self) -> None:
+        # The tool name is part of the provider-facing contract and the call ceiling must be usable.
+        if not self.tool_name.strip():
+            raise ConfigurationError("VerifierAsToolModeParams.tool_name must be a non-empty string.")
+        if self.max_calls is not None and self.max_calls <= 0:
+            raise ConfigurationError("VerifierAsToolModeParams.max_calls must be greater than zero when provided.")
 
 
 # ---------------------------------------------------------------------------
@@ -638,6 +727,8 @@ __all__ = [
     "FeedbackContentMode",
     "FeedbackDelivery",
     "LeanProofVerifierConfig",
+    "PeriodicVerificationModeParams",
+    "PostRunVerificationModeParams",
     "RepairContext",
     "RepairMode",
     "RepairOutcome",
@@ -652,10 +743,15 @@ __all__ = [
     "VerifierLedgerParams",
     "VerifierParams",
     "VerifierRepairStrategyParams",
+    "VerifierAsToolModeParams",
     "VerifierRuntimeBudgetParams",
     "VerifierRuntimeFeedbackParams",
+    "VerifierRuntimeModeKind",
     "VerifierRuntimeOutcome",
+    "VerifierRetryContextMode",
+    "VerifierRunRequest",
     "VerifierRuntimeSettingsParams",
+    "VERIFIER_TOOL_DEFAULT_NAME",
     "VerifierTarget",
     "VerifierTargetResolverParams",
     "VerifierVerdict",

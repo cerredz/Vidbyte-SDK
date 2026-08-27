@@ -27,22 +27,45 @@ Similar Files:
 from __future__ import annotations
 
 import dataclasses
+from typing import Any
 
+from vidbyte.agents.runtimes.verifier.algorithms.base import RunOnce
 from vidbyte.agents.runtimes.verifier.ledger import VerifierLedgerStatistics
 from vidbyte.agents.runtimes.verifier.settings import VerifierRuntimeSettings
 from vidbyte.agents.runtimes.verifier.types import GateDecision, RepairContext, RepairOutcome, ResolutionContext, VerificationAttempt, VerifierRuntimeOutcome
+from vidbyte.lib.dataclasses.strategies import AgentResult
+from vidbyte.lib.dataclasses.verifier import VerifierRunRequest
 
 
 class AgentVerifierRuntime:
     """Orchestrates the eight verifier-runtime pillars for one AgentRuntime run."""
 
-    def __init__(self, settings: VerifierRuntimeSettings, *, run_id: str) -> None:
+    def __init__(self, settings: VerifierRuntimeSettings, *, run_id: str, context_manager: Any = None) -> None:
         # Builds this run's own ledger, overriding the configured placeholder run_id with the real one.
         self.settings = settings
         self.ledger = VerifierLedgerStatistics(dataclasses.replace(settings.params.ledger_params, run_id=run_id))
+        self.mode = settings.mode
+        self.context_manager = context_manager
+        self._tool_call_count = 0
+        self._last_tool_passed = False
 
     async def on_finalization_attempt(self, context: ResolutionContext) -> VerifierRuntimeOutcome:
-        """Delegates the finalization check to the gate, then resolves the decision into an outcome."""
+        # Delegates finalization behavior to the selected algorithm mode.
+        return await self.mode.on_finalization(self, context)
+
+    async def run(self, request: VerifierRunRequest, run_once: RunOnce) -> AgentResult:
+        # Delegates one complete agent invocation to the selected outer algorithm mode.
+        self._tool_call_count = 0
+        self._last_tool_passed = False
+        result = await self.mode.run(self, request, run_once)
+        return self.with_verifier_metadata(result)
+
+    async def after_iteration(self, context: ResolutionContext) -> VerifierRuntimeOutcome | None:
+        # Delegates a completed non-final iteration to modes that schedule checkpoints.
+        return await self.mode.after_iteration(self, context)
+
+    async def evaluate_checkpoint(self, context: ResolutionContext) -> VerifierRuntimeOutcome:
+        # Runs the shared target, collection, verdict, ledger, gate, feedback, and repair pipeline.
         decision, attempt = await self.settings.params.gate.evaluate_finalization_attempt(
             context,
             target_resolver=self.settings.params.target_resolver,
@@ -55,6 +78,48 @@ class AgentVerifierRuntime:
             # should_fire was False this iteration — nothing ran, nothing to report back.
             return VerifierRuntimeOutcome(decision, None, None)
         return await self._resolve_decision(decision, attempt, context)
+
+    async def evaluate_result(self, request: VerifierRunRequest, result: AgentResult) -> VerifierRuntimeOutcome:
+        # Verifies a completed outer attempt using its result and initial request context.
+        output = str(getattr(result, "output", result) or "")
+        options = dict(getattr(request, "options", None) or {})
+        messages = tuple(options.get("messages", ())) + ({"role": "assistant", "content": output},)
+        metadata = getattr(result, "metadata", {})
+        context = ResolutionContext(candidate_output=output, messages=messages, workspace_root=None, iteration_count=int(dict(metadata).get("iteration_count", 0)), context_manager=self.context_manager)
+        return await self.evaluate_checkpoint(context)
+
+    async def evaluate_tool(self, candidate_output: str) -> VerifierRuntimeOutcome:
+        # Verifies the candidate supplied by the model-callable verifier tool.
+        context = ResolutionContext(candidate_output=candidate_output, messages=(), workspace_root=None, iteration_count=0, context_manager=self.context_manager)
+        outcome = await self.evaluate_checkpoint(context)
+        self._last_tool_passed = outcome.decision is GateDecision.ALLOW_FINALIZE
+        return outcome
+
+    def allow_tool_call(self) -> bool:
+        # Increments the accepted verifier-tool call count when the configured ceiling permits it.
+        mode_params = getattr(self.mode, "params", None)
+        maximum = getattr(mode_params, "max_calls", None)
+        if maximum is not None and self._tool_call_count >= maximum:
+            return False
+        self._tool_call_count += 1
+        return True
+
+    @property
+    def last_tool_passed(self) -> bool:
+        # Returns whether the most recent accepted verifier-tool call passed.
+        return self._last_tool_passed
+
+    def mode_tools(self) -> tuple[Any, ...]:
+        # Returns model-callable tools contributed by the selected algorithm mode.
+        return self.mode.tools(self)
+
+    def with_verifier_metadata(self, result: Any) -> Any:
+        # Returns a result carrying the current verifier ledger report in its metadata.
+        if not isinstance(result, AgentResult):
+            return result
+        metadata = dict(result.metadata)
+        metadata["verifier_evaluations"] = self.ledger.report()
+        return dataclasses.replace(result, metadata=metadata)
 
     async def _resolve_decision(self, decision: GateDecision, attempt: VerificationAttempt, context: ResolutionContext) -> VerifierRuntimeOutcome:
         # Turns a GateDecision into the feedback/repair pairing appropriate for that decision.
