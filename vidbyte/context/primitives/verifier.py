@@ -8,7 +8,7 @@ Purpose:
     remaining budget, per-verifier score trend, repair scope, tamper
     baseline, and flaky-check status as addressable, replaceable primitives
     via ContextManager.upsert() — never as an ever-growing unmanaged list.
-Architecture:
+Architecture note:
     - Each class carries its own fixed introductory sentence directly inside
       to_context_text(), framing what the block means before the data.
     - All eight take only plain stdlib field types (str, tuple, int, float)
@@ -20,6 +20,16 @@ Relations:
 Similar Files:
     - vidbyte/context/primitives/tasks.py: ProgressContextItem, the nearest
       existing "renders a short intro plus a status list" primitive.
+Role in codebase:
+    Defines the context-item port used to publish verifier ledger state.
+Common modification patterns:
+    Add a primitive only with a stable kind, title, and bounded text shape.
+Known edge cases:
+    Empty histories render a valid introductory block rather than no item.
+Related docs:
+    docs/design/verifier-runtime.md
+Tests:
+    Covered by verifier context primitive and ledger tests.
 """
 
 from __future__ import annotations

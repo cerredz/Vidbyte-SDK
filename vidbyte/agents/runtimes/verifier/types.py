@@ -1,56 +1,37 @@
 """Context Protocol Header
 
 Description:
-    Shared enums and result dataclasses for the verifier runtime pillars.
+    Compatibility vocabulary for verifier runtime pillars and legacy imports.
 Purpose:
-    Gives every pillar (target resolution, verifiers, gate, verdict policy,
-    feedback, repair, budget, ledger) one common, typed vocabulary instead of
-    loose dicts crossing pillar boundaries.
-Architecture:
-    - Enums defined here: VerifierExecutionMode, GateTrigger, GateDecision —
-      each is an eager default value only on VerifierCollectionParams or
-      VerifierRuntimeGateParams, the two Params classes
-      vidbyte.lib.dataclasses.verifier's move deliberately excludes (owned by
-      collection.py and gate.py respectively).
-    - Every other enum and dataclass this module used to define —
-      VerifierKind, VerifierCostClass, TargetResolutionMode, VerdictStrategy,
-      FeedbackContentMode, FeedbackDelivery, RepairMode,
-      BudgetExhaustedAction, VerifierTarget, VerifierVerdict,
-      AggregatedVerdict, VerificationAttempt, ResolutionContext,
-      RepairContext, RepairOutcome, VerifierRuntimeOutcome — now lives in
-      vidbyte.lib.dataclasses.verifier per review feedback on PR #349, and is
-      re-exported here for every existing import site in this package
-      (including vidbyte.agents.runtimes.verifier.gate and .collection,
-      neither of which this move touches).
-Relations:
-    Imported by every module in vidbyte.agents.runtimes.verifier.
-Similar Files:
-    - vidbyte/lib/dataclasses/agents.py: AgentStopReason, the sibling enum
-      family this subsystem's VERIFICATION_FAILED member extends.
+    Keeps the small execution enums local while forwarding shared contracts to
+    their lower-layer dataclass owner without creating an import cycle.
+Role in codebase:
+    Preserves the public ``verifier.types`` import path used by existing
+    verifier pillars and downstream callers.
+Architecture note:
+    Shared enums and dataclasses are resolved lazily from
+    ``vidbyte.lib.dataclasses.verifier``; the concrete dependency stays
+    downward in the runtime graph.
+Common modification patterns:
+    Add shared contracts to the lib dataclass module and list their names in
+    ``__all__``; retain local execution enums only when behavior owns them.
+Known edge cases:
+    Module-level ``__getattr__`` intentionally returns a dynamic compatibility
+    value for re-exported names, which is safe because imports are immutable.
+Related docs:
+    docs/design/verifier-runtime.md; docs/design/verifier-runtime-algorithms.md
+Tests:
+    Covered by the verifier runtime and package import smoke tests.
 """
 
 from __future__ import annotations
 
 from enum import Enum
+from importlib import import_module
+from typing import Any
 
-from vidbyte.lib.dataclasses.verifier import (
-    AggregatedVerdict,
-    BudgetExhaustedAction,
-    FeedbackContentMode,
-    FeedbackDelivery,
-    RepairContext,
-    RepairMode,
-    RepairOutcome,
-    ResolutionContext,
-    TargetResolutionMode,
-    VerdictStrategy,
-    VerificationAttempt,
-    VerifierCostClass,
-    VerifierKind,
-    VerifierRuntimeOutcome,
-    VerifierTarget,
-    VerifierVerdict,
-)
+
+_DATACLASSES_MODULE = "vidbyte.lib.dataclasses.verifier"
 
 
 class VerifierExecutionMode(str, Enum):
@@ -70,32 +51,13 @@ class GateTrigger(str, Enum):
     ON_TIER_BOUNDARY = "on_tier_boundary"
 
 
-class GateDecision(str, Enum):
-    """The three outcomes VerifierRuntimeGate.decide can return."""
+def __getattr__(name: str) -> Any:
+    """Resolve shared contracts lazily so this compatibility module stays acyclic."""
 
-    ALLOW_FINALIZE = "allow_finalize"
-    REJECT_AND_CONTINUE = "reject_and_continue"
-    REJECT_AND_TERMINATE = "reject_and_terminate"
+    return getattr(import_module(_DATACLASSES_MODULE), name)
 
 
 __all__ = [
-    "AggregatedVerdict",
-    "BudgetExhaustedAction",
-    "FeedbackContentMode",
-    "FeedbackDelivery",
-    "GateDecision",
     "GateTrigger",
-    "RepairContext",
-    "RepairMode",
-    "RepairOutcome",
-    "ResolutionContext",
-    "TargetResolutionMode",
-    "VerdictStrategy",
-    "VerificationAttempt",
-    "VerifierCostClass",
     "VerifierExecutionMode",
-    "VerifierKind",
-    "VerifierRuntimeOutcome",
-    "VerifierTarget",
-    "VerifierVerdict",
 ]

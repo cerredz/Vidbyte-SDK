@@ -6,7 +6,7 @@ Purpose:
     Runs one parameterized read query through a caller-supplied connection
     and gates on its result rows. The first concrete
     VerifierKind.QUERY_EXECUTION implementation this SDK ships.
-Architecture:
+Architecture note:
     - DatabaseQueryVerifier: Verifier subclass taking (params, config); opens
       a connection via config.connection_factory, executes config.query with
       config.query_params bound (never string-interpolated), and evaluates
@@ -19,6 +19,16 @@ Similar Files:
     - vidbyte/lib/providers/sqlite.py: the nearest existing "DB-API cursor,
       parameter-bound execute()" pattern in this repo — session storage, not
       verification, but the same parameter-binding discipline applies here.
+Role in codebase:
+    Provides the built-in DB-API query verifier implementation.
+Common modification patterns:
+    Add gates through DatabaseQueryVerifierConfig without interpolating SQL.
+Known edge cases:
+    Cursor rows may be sqlite3.Row objects or ordinary sequences.
+Related docs:
+    docs/design/verifier-runtime-builtin-verifiers.md
+Tests:
+    Covered by database query verifier tests.
 """
 
 from __future__ import annotations

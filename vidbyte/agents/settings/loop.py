@@ -19,12 +19,17 @@ Similar Files:
 from __future__ import annotations
 
 from collections.abc import Sequence
+from typing import TYPE_CHECKING
 
 from vidbyte.agents.contract import AgentLoopSettingsOutputContract
 from vidbyte.agents.contracts import OutputContract
 from vidbyte.agents.settings.tool import ToolSettings
 from vidbyte.agents.settings.tool_error import ToolErrorPolicy
 from vidbyte.lib.errors import ConfigurationError
+
+if TYPE_CHECKING:
+    from vidbyte.agents.runtimes.verifier.settings import VerifierRuntimeSettings
+    from vidbyte.lib.dataclasses.agents import AgentRuntimeConfig
 
 _POSITIVE_INT_FIELDS = (
     "max_iterations",

@@ -5,7 +5,7 @@ Description:
 Purpose:
     Renders the corrective payload injected after a failed AggregatedVerdict,
     under one of four configurable content modes.
-Architecture:
+Architecture note:
     - VerifierRuntimeFeedback: emit() dispatches to one private builder per
       mode, then applies max_diagnostics_chars truncation last.
     VerifierRuntimeFeedbackParams (validated dataclass: which
@@ -18,6 +18,16 @@ Relations:
 Similar Files:
     - vidbyte/agents/contract.py: AgentLoopSettingsOutputContract.feedback(),
       the nearest existing "render corrective text from failed checks" logic.
+Role in codebase:
+    Converts failed aggregate verdicts into bounded repair feedback.
+Common modification patterns:
+    Add a rendering branch only when FeedbackContentMode owns that policy.
+Known edge cases:
+    Truncation is applied after rendering so every delivery stays bounded.
+Related docs:
+    docs/design/verifier-runtime.md
+Tests:
+    Covered by feedback rendering tests.
 """
 
 from __future__ import annotations

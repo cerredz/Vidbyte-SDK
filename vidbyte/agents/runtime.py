@@ -29,6 +29,8 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from vidbyte.agents.fallback import AgentFallback, FallbackTransform
     from vidbyte.agents.settings.tool import ToolSettings
+    from vidbyte.agents.runtimes.verifier.runtime import AgentVerifierRuntime
+    from vidbyte.agents.runtimes.verifier.settings import VerifierRuntimeSettings
 
 from vidbyte.agents.context_algorithms import AgentRuntimeContextAlgorithms
 from vidbyte.agents.types import AgentMessage
@@ -55,7 +57,7 @@ from vidbyte.agents.contract import AgentLoopSettingsOutputContract
 from vidbyte.agents.contracts.schema import SchemaConformance
 from vidbyte.lib.dataclasses.context import BaseAgentContext, BaseContext
 from vidbyte.lib.dataclasses.strategies import AgentResult
-from vidbyte.lib.dataclasses.verifier import VerifierRunRequest
+from vidbyte.lib.dataclasses.verifier import FeedbackDelivery, VerifierRunRequest, VerifierRuntimeOutcome
 from vidbyte.tools._internal import IS_DONE_TOOL_NAME, with_internal_agent_tools
 from vidbyte.tools.activity import ActivityToolFormatter
 from vidbyte.tools.base import BaseTool
@@ -162,6 +164,7 @@ class AgentRuntime:
             return await self._verifier_runtime.run(request, self._run_request)
         return await self._run_request(request)
 
+    # @intent verifier-request-boundary
     async def _run_request(self, request: VerifierRunRequest) -> AgentResult:
         # Runs existing context algorithms first, then one direct model/tool attempt when no outer algorithm handles it.
         algorithm_result = await AgentRuntimeContextAlgorithms(self).arun(
@@ -1953,6 +1956,7 @@ class AgentRuntime:
         # Records each contract's evaluation into run_state so _with_run_state_metadata lifts it into the result.
         run_state.setdefault("__result_metadata__", {})["contract_evaluations"] = self.output_contract.report(counters)
 
+    # @intent verifier-finalization-gate
     async def _apply_verifier_gate(
         self,
         *,
@@ -2001,6 +2005,7 @@ class AgentRuntime:
         self._inject_verifier_repair(messages, outcome, provider=provider, pending_tool_call=pending_tool_call)
         return True, None
 
+    # @intent verifier-iteration-boundary
     async def _apply_verifier_iteration(
         self,
         *,
@@ -2031,6 +2036,7 @@ class AgentRuntime:
             return True, None
         return False, None
 
+    # @intent verifier-repair-injection
     def _inject_verifier_repair(
         self,
         messages: list[dict[str, Any]],

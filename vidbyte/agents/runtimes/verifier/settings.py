@@ -5,7 +5,7 @@ Description:
 Purpose:
     The single value a developer attaches to AgentLoopSettings — composes
     every pillar into one object. Pure configuration; no behavior.
-Architecture:
+Architecture note:
     - VerifierRuntimeSettings: thin wrapper exposing active().
     VerifierRuntimeSettingsParams (validated dataclass: one field per pillar;
     no __post_init__ of its own since every field's own class already
@@ -18,6 +18,17 @@ Relations:
 Similar Files:
     - vidbyte/agents/contract.py: AgentLoopSettingsOutputContract, the
       nearest existing "settings-facing owner with an active() check" shape.
+Role in codebase:
+    Attaches validated verifier configuration to AgentLoopSettings.
+Common modification patterns:
+    Add configuration fields to the lib dataclass params and keep this wrapper
+    behavior-free.
+Known edge cases:
+    Omitting mode selects FinalizationGateMode for backward compatibility.
+Related docs:
+    docs/design/verifier-runtime.md; docs/design/verifier-runtime-algorithms.md
+Tests:
+    Covered by settings construction and package tests.
 """
 
 from __future__ import annotations

@@ -7,7 +7,7 @@ Purpose:
     finalization: continue the same conversation, restart fresh with a
     summary, restrict the next attempt's edit scope, or (not yet implemented)
     fork into parallel repair attempts.
-Architecture:
+Architecture note:
     - VerifierRepairStrategy: repair() dispatches to one private method per
       mode. VerifierRepairStrategyParams (validated dataclass: which
       RepairMode, and branch_width for PARALLEL_BRANCHING) lives in
@@ -19,6 +19,17 @@ Relations:
 Similar Files:
     - vidbyte/agents/contract.py: the feedback-then-continue shape this
       module's IN_PLACE_CONTINUE mode extends with a mechanical dimension.
+Role in codebase:
+    Builds the next agent request after a rejected verification checkpoint.
+Common modification patterns:
+    Add repair behavior through RepairMode and preserve bounded feedback.
+Known edge cases:
+    Parallel branching remains an explicit unsupported outcome until a caller
+    supplies branch orchestration.
+Related docs:
+    docs/design/verifier-runtime.md
+Tests:
+    Covered by repair strategy tests.
 """
 
 from __future__ import annotations
@@ -58,6 +69,7 @@ class VerifierRepairStrategy:
         message = {"role": "user", "content": summary}
         return RepairOutcome(injected_messages=(message,), restart_session=True, scope_lock=None)
 
+    # @intent targeted-repair-scope
     async def _targeted_scope(self, context: RepairContext) -> RepairOutcome:
         # Same message as in-place repair, plus an edit-scope constraint derived from the failing diagnostics.
         message = {"role": "user", "content": context.feedback_text}
@@ -72,12 +84,14 @@ class VerifierRepairStrategy:
             "confirmed capability of this runtime today. See docs/design/verifier-runtime.md Non-Goals."
         )
 
+    # @intent extract-repair-scope
     def _extract_scope(self, attempt: VerificationAttempt) -> tuple[str, ...]:
         # Best-effort file/symbol extraction from failing diagnostics; finding nothing means no restriction.
         failed_diagnostics = " ".join(v.diagnostics for v in attempt.aggregated.verdicts if not v.passed)
         matches = _PATH_TOKEN_PATTERN.findall(failed_diagnostics)
         return tuple(sorted(set(matches)))
 
+    # @intent summarize-repair-history
     def _summarize_history(self, ledger: object) -> str:
         # Renders each past attempt's number, pass/fail, and failing verifier names into a short digest.
         lines = ["A previous attempt in this run did not pass verification. History:"]

@@ -5,7 +5,7 @@ Description:
 Purpose:
     Combines N verifier verdicts gathered for one attempt into a single
     pass/fail AggregatedVerdict, under one of five configurable strategies.
-Architecture:
+Architecture note:
     - VerifierVerdictPolicy: aggregate() dispatches to one private method
       per strategy. VerifierVerdictPolicyParams (validated dataclass: which
       VerdictStrategy, and its required companion fields — score_threshold,
@@ -17,6 +17,16 @@ Relations:
 Similar Files:
     - vidbyte/agents/contract.py: unmet()/exhausted() is the nearest existing
       "combine several checks into one decision" logic in this repo.
+Role in codebase:
+    Converts individual verifier verdicts into one aggregate result.
+Common modification patterns:
+    Add aggregation policy through VerdictStrategy and validated params.
+Known edge cases:
+    Empty verdict collections produce a neutral aggregate rather than a pass.
+Related docs:
+    docs/design/verifier-runtime.md
+Tests:
+    Covered by verdict policy tests.
 """
 
 from __future__ import annotations

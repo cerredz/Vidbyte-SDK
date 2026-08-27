@@ -8,7 +8,7 @@ Purpose:
     VerifierLedgerStatistics is the subclass that derives history-aware
     statistics from that record: score trend, regressions, flakiness, a
     tamper baseline, and the ContextItem flattening every other pillar reads.
-Architecture:
+Architecture note:
     - VerifierLedger: record()/history()/last()/report() — ledger and
       metadata only, no derived statistics.
     - VerifierLedgerStatistics(VerifierLedger): score_trend(),
@@ -28,6 +28,16 @@ Relations:
 Similar Files:
     - vidbyte/agents/contract.py: AgentLoopSettingsOutputContract.report(),
       the nearest existing "read-back state for a result's metadata" shape.
+Role in codebase:
+    Provides append-only verification history and derived run statistics.
+Common modification patterns:
+    Extend record metadata through typed attempts and preserve ordering.
+Known edge cases:
+    History may be empty on the first checkpoint; statistics remain neutral.
+Related docs:
+    docs/design/verifier-runtime.md
+Tests:
+    Covered by ledger persistence and statistics tests.
 """
 
 from __future__ import annotations
@@ -48,6 +58,9 @@ from vidbyte.context.primitives.verifier import (
 )
 from vidbyte.lib.dataclasses.verifier import RepairOutcome, VerificationAttempt, VerifierLedgerParams, VerifierTarget
 
+FIRST_ATTEMPT_NUMBER = 1
+FIRST_ATTEMPT_INDEX = 0
+
 if TYPE_CHECKING:
     from vidbyte.agents.runtimes.verifier.budget import VerifierRuntimeBudget
     from vidbyte.context.primitives import ContextItem
@@ -61,6 +74,7 @@ class VerifierLedger:
         self.params = params
         self._attempts: list[VerificationAttempt] = []
 
+    # @intent append-verification-history
     def record(self, attempt: VerificationAttempt) -> None:
         """Appends one completed verification attempt to this run's history."""
         self._attempts.append(attempt)
@@ -73,6 +87,7 @@ class VerifierLedger:
         """Returns the most recently recorded attempt, or None if nothing has been recorded yet."""
         return self._attempts[-1] if self._attempts else None
 
+    # @intent report-verification-history
     def report(self) -> list[dict[str, Any]]:
         """Returns one record per verifier verdict across every attempt, mirroring contract_evaluations' shape."""
         return [
@@ -96,6 +111,7 @@ class VerifierLedgerStatistics(VerifierLedger):
         super().__init__(params)
         self._baseline: dict[str, str] = {}
 
+    # @intent score-trend-history
     def score_trend(self, verifier_name: str) -> list[float]:
         """Returns every graded score verifier_name has reported across this run's attempts, in order."""
         return [
@@ -105,6 +121,7 @@ class VerifierLedgerStatistics(VerifierLedger):
             if verdict.verifier_name == verifier_name and verdict.score is not None
         ]
 
+    # @intent regression-history
     def regressions_since(self, attempt_number: int) -> list[str]:
         """Returns verifier names that passed at attempt_number but are failing in the latest attempt."""
         baseline_attempt = self._attempt_by_number(attempt_number)
@@ -115,6 +132,7 @@ class VerifierLedgerStatistics(VerifierLedger):
         latest_status = {v.verifier_name: v.passed for v in latest.aggregated.verdicts}
         return [name for name, was_passing in baseline_status.items() if was_passing and not latest_status.get(name, True)]
 
+    # @intent flakiness-history
     def flaky_verifiers(self, min_flips: int = 2) -> list[str]:
         """Returns verifier names whose pass/fail result flipped at least min_flips times across attempts."""
         per_verifier: dict[str, list[bool]] = {}
@@ -148,6 +166,7 @@ class VerifierLedgerStatistics(VerifierLedger):
         self._append_flake_item(items)
         return tuple(items)
 
+    # @intent context-history-item
     def _append_history_item(self, items: list[Any]) -> None:
         # Omitted entirely on the first attempt, before any history exists.
         if not self._attempts:
@@ -155,11 +174,12 @@ class VerifierLedgerStatistics(VerifierLedger):
         entries = tuple(f"Attempt {attempt.attempt_number}: {'PASSED' if attempt.aggregated.passed else 'FAILED'}" for attempt in self._attempts)
         items.append(VerifierHistoryContextItem(entries=entries))
 
+    # @intent context-regression-item
     def _append_regression_item(self, items: list[Any]) -> None:
         # Compares the first recorded attempt against the latest — the run's own opening baseline.
         if len(self._attempts) < 2:
             return
-        regressed = self.regressions_since(self._attempts[0].attempt_number)
+        regressed = self.regressions_since(self._attempts[FIRST_ATTEMPT_INDEX].attempt_number)
         if regressed:
             items.append(VerifierRegressionContextItem(regressed_names=tuple(regressed)))
 
@@ -171,6 +191,7 @@ class VerifierLedgerStatistics(VerifierLedger):
         diagnostics = tuple(f"{v.verifier_name}: {v.diagnostics}" for v in last.aggregated.verdicts if not v.passed)
         items.append(VerifierDiagnosticContextItem(diagnostics=diagnostics))
 
+    # @intent context-trend-item
     def _append_trend_item(self, items: list[Any]) -> None:
         # One rendered line per verifier that has reported at least one numeric score.
         names = sorted({v.verifier_name for attempt in self._attempts for v in attempt.aggregated.verdicts if v.score is not None})
@@ -195,6 +216,7 @@ class VerifierLedgerStatistics(VerifierLedger):
         if flaky:
             items.append(VerifierFlakeContextItem(flaky_names=flaky))
 
+    # @intent lookup-verification-attempt
     def _attempt_by_number(self, attempt_number: int) -> VerificationAttempt | None:
         # Linear scan is fine here — a verification run's attempt count is bounded by its own budget.
         for attempt in self._attempts:

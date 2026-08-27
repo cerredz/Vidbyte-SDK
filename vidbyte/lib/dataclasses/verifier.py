@@ -15,7 +15,7 @@ Purpose:
     VerifierRuntimeFeedback, VerifierRepairStrategy, VerifierRuntimeBudget,
     VerifierLedger, VerifierRuntimeSettings, AgentVerifierRuntime) that
     consume them.
-Architecture:
+Architecture note:
     - Enums: BudgetExhaustedAction, FeedbackContentMode, FeedbackDelivery,
       RepairMode, VerdictStrategy, TargetResolutionMode, VerifierKind,
       VerifierCostClass. (VerifierExecutionMode, GateTrigger, and
@@ -44,6 +44,18 @@ Relations:
 Similar Files:
     - vidbyte/lib/dataclasses/agents.py: the sibling "shared data contracts,
       no behavior" file for the base agent subsystem.
+Role in codebase:
+    Owns validated verifier data contracts below the orchestration layer.
+Common modification patterns:
+    Add frozen slots dataclasses here, validate them in __post_init__, and
+    re-export them through the verifier runtime package when public.
+Known edge cases:
+    Runtime behavior types are forward-referenced under TYPE_CHECKING so this
+    lower layer remains importable without orchestration cycles.
+Related docs:
+    docs/design/verifier-runtime.md; docs/design/verifier-runtime-algorithms.md
+Tests:
+    Covered by verifier configuration, runtime, and package tests.
 """
 
 from __future__ import annotations
@@ -55,6 +67,8 @@ from typing import TYPE_CHECKING, Any, Protocol
 
 from vidbyte.lib.errors import ConfigurationError
 
+NON_POSITIVE_TIMEOUT_BOUND = 0
+
 if TYPE_CHECKING:
     from vidbyte.agents.runtimes.verifier.algorithms.base import VerifierRuntimeMode
     from vidbyte.agents.runtimes.verifier.budget import VerifierRuntimeBudget
@@ -63,7 +77,6 @@ if TYPE_CHECKING:
     from vidbyte.agents.runtimes.verifier.gate import VerifierRuntimeGate
     from vidbyte.agents.runtimes.verifier.repair import VerifierRepairStrategy
     from vidbyte.agents.runtimes.verifier.target import VerifierTargetResolver
-    from vidbyte.agents.runtimes.verifier.types import GateDecision
     from vidbyte.agents.runtimes.verifier.verdict import VerifierVerdictPolicy
     from vidbyte.context.manager import ContextManager
     from vidbyte.context.primitives import ContextItem
@@ -99,6 +112,14 @@ class FeedbackDelivery(str, Enum):
     CONTEXT_ITEM = "context_item"
     SYSTEM_MESSAGE = "system_message"
     MCP_RESOURCE = "mcp_resource"
+
+
+class GateDecision(str, Enum):
+    """The three outcomes VerifierRuntimeGate.decide can return."""
+
+    ALLOW_FINALIZE = "allow_finalize"
+    REJECT_AND_CONTINUE = "reject_and_continue"
+    REJECT_AND_TERMINATE = "reject_and_terminate"
 
 
 class VerifierRuntimeModeKind(str, Enum):
@@ -318,7 +339,7 @@ class VerifierParams:
 
     def _validate_timeout(self) -> None:
         # A zero or negative timeout would never let the check run.
-        if self.timeout_seconds is not None and self.timeout_seconds <= 0:
+        if self.timeout_seconds is not None and self.timeout_seconds <= NON_POSITIVE_TIMEOUT_BOUND:
             raise ConfigurationError("VerifierParams.timeout_seconds must be greater than zero when provided.")
 
 
@@ -416,6 +437,7 @@ class VerifierRuntimeFeedbackParams:
         self._validate_max_chars()
         self._validate_delivery_supported()
 
+    # @intent feedback-delivery-validation
     def _validate_delivery_supported(self) -> None:
         # SYSTEM_MESSAGE and MCP_RESOURCE have no wired delivery path in the linear runtime yet;
         # reject-at-construction, matching how RepairMode.PARALLEL_BRANCHING is handled.
@@ -543,13 +565,11 @@ class VerifierRuntimeSettingsParams:
         self._validate_mode()
 
     def _validate_mode(self) -> None:
-        # Keep the runtime-only import lazy so lib dataclasses remain importable during package initialization.
         if self.mode is None:
             return
-        from vidbyte.agents.runtimes.verifier.algorithms.base import VerifierRuntimeMode
-
-        if not isinstance(self.mode, VerifierRuntimeMode):
-            raise ConfigurationError("VerifierRuntimeSettingsParams.mode must be a VerifierRuntimeMode instance when provided.")
+        required_methods = ("run", "after_iteration", "on_finalization", "tools")
+        if not all(callable(getattr(self.mode, name, None)) for name in required_methods):
+            raise ConfigurationError("VerifierRuntimeSettingsParams.mode must implement the verifier lifecycle contract when provided.")
 
 
 @dataclass(frozen=True, slots=True)
@@ -726,6 +746,7 @@ __all__ = [
     "DatabaseQueryVerifierConfig",
     "FeedbackContentMode",
     "FeedbackDelivery",
+    "GateDecision",
     "LeanProofVerifierConfig",
     "PeriodicVerificationModeParams",
     "PostRunVerificationModeParams",

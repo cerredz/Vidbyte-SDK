@@ -8,7 +8,7 @@ Purpose:
     verdict policy, feedback, repair, budget, ledger) and the orchestrator
     that composes them, for developer-facing construction and for wiring
     into vidbyte.agents.settings.loop.AgentLoopSettings.
-Architecture:
+Architecture note:
     - types: shared enums + result dataclasses.
     - verifier/collection: the checks themselves and how they are run.
     - target: what gets checked.
@@ -19,6 +19,18 @@ Architecture:
     - settings/runtime: the composed configuration and its orchestrator.
 Relations:
     Re-exported by vidbyte.agents.runtimes and vidbyte.agents.
+Role in codebase:
+    Stable public import surface for the verifier runtime subsystem.
+Common modification patterns:
+    Add new public contracts here only after defining them in their owning
+    pillar and updating the package-level exports.
+Known edge cases:
+    Imports must remain lightweight because AgentRuntime imports this surface
+    while constructing optional verifier settings.
+Related docs:
+    docs/design/verifier-runtime.md; docs/design/verifier-runtime-algorithms.md
+Tests:
+    Covered by verifier runtime imports and the full SDK test suite.
 Similar Files:
     - vidbyte/agents/contracts/__init__.py: the nearest existing
       "small package of composable, validated checks" public surface.

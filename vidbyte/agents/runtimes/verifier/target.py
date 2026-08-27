@@ -5,7 +5,7 @@ Description:
 Purpose:
     Decides what object gets handed to the verifiers, and optionally attaches
     the agent's accumulated context-window primitives to that object.
-Architecture:
+Architecture note:
     - VerifierTargetResolver: dispatches to a per-mode private resolver, then
       attaches selected context primitives to every VerifierTarget it builds.
       Every mode except CUSTOM also carries context.workspace_root onto the
@@ -20,6 +20,17 @@ Relations:
 Similar Files:
     - vidbyte/context/manager.py: ContextManager, the source this resolver
       reads from for the context-primitive port-in.
+Role in codebase:
+    Resolves the candidate representation consumed by every verifier.
+Common modification patterns:
+    Add target modes through TargetResolutionMode and keep subprocess access
+    bounded and diagnostic-rich.
+Known edge cases:
+    Missing workspace metadata degrades to an explicit empty target field.
+Related docs:
+    docs/design/verifier-runtime.md
+Tests:
+    Covered by target resolution tests.
 """
 
 from __future__ import annotations
@@ -34,6 +45,9 @@ from typing import Any
 from vidbyte.agents.runtimes.verifier.types import ResolutionContext, TargetResolutionMode, VerifierTarget
 from vidbyte.context.primitives import ContextItem
 from vidbyte.lib.dataclasses.verifier import ContextPrimitiveSelectorParams, VerifierTargetResolverParams
+
+GIT_DIFF_TIMEOUT_SECONDS = 30
+SUCCESS_RETURN_CODE = 0
 
 
 class VerifierTargetResolver:
@@ -91,6 +105,7 @@ class VerifierTargetResolver:
         diff = self._git_diff(context.workspace_root)
         return VerifierTarget(mode=TargetResolutionMode.WORKSPACE_DIFF, diff=diff, workspace_root=context.workspace_root)
 
+    # @intent bounded-workspace-diff
     @staticmethod
     def _git_diff(workspace_root: str) -> str:
         # Best-effort git diff read; any failure (no git, no repo) degrades to an empty string.
@@ -100,10 +115,10 @@ class VerifierTargetResolver:
                 cwd=workspace_root,
                 capture_output=True,
                 text=True,
-                timeout=30,
+                timeout=GIT_DIFF_TIMEOUT_SECONDS,
                 check=False,
             )
-            return result.stdout if result.returncode == 0 else ""
+            return result.stdout if result.returncode == SUCCESS_RETURN_CODE else ""
         except (OSError, subprocess.SubprocessError):
             return ""
 

@@ -7,7 +7,7 @@ Purpose:
     what giving up means. Deliberately verifier-specific: cost ceilings are
     a general agent/loop concern (CostBudgetMiddleware) and are not
     duplicated here.
-Architecture:
+Architecture note:
     - VerifierRuntimeBudget: exhausted() combines six independent checks
       against its VerifierRuntimeBudgetParams (defined in
       vidbyte.lib.dataclasses.verifier, not this file).
@@ -18,6 +18,16 @@ Relations:
 Similar Files:
     - vidbyte/agents/settings/tool_error.py: ToolErrorPolicy, the nearest
       existing "budget plus terminal action" settings object in this repo.
+Role in codebase:
+    Centralizes verifier-specific attempt, score, trend, and flakiness limits.
+Common modification patterns:
+    Add policy to VerifierRuntimeBudgetParams and keep exhaustion deterministic.
+Known edge cases:
+    Missing ledger history must not be treated as a failed verification.
+Related docs:
+    docs/design/verifier-runtime.md
+Tests:
+    Covered by verifier budget tests and the full SDK suite.
 """
 
 from __future__ import annotations
@@ -61,6 +71,7 @@ class VerifierRuntimeBudget:
         elapsed = history[-1].completed_at - history[0].started_at
         return elapsed >= self.params.max_total_seconds
 
+    # @intent score-plateau
     def _plateaued(self, ledger: object) -> bool:
         # First-pass rule: the last plateau_patience attempts' blocking pass rate is non-increasing.
         if self.params.plateau_patience is None:
@@ -72,6 +83,7 @@ class VerifierRuntimeBudget:
         pass_rates = [self._pass_rate(attempt) for attempt in recent]
         return all(pass_rates[i] <= pass_rates[i - 1] for i in range(1, len(pass_rates)))
 
+    # @intent pass-rate-budget
     @staticmethod
     def _pass_rate(attempt: VerificationAttempt) -> float:
         # Fraction of blocking verdicts that passed this attempt; an attempt with no blocking verdicts reads as 1.0.
@@ -98,6 +110,7 @@ class VerifierRuntimeBudget:
             return False
         return min(scores) < self.params.min_score_floor
 
+    # @intent failure-streak-budget
     def _consecutive_failures_exhausted(self, ledger: object) -> bool:
         # Catches one specific check stuck failing N times in a row while others pass, which plateau_patience can mask.
         if self.params.max_consecutive_failures is None:

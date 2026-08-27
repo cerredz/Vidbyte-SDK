@@ -6,7 +6,7 @@ Purpose:
     Runs a configured test-suite command and gates on the fraction of tests
     that passed, per the JUnit XML report the command produces. The first
     concrete VerifierKind.CODE_EXECUTION implementation this SDK ships.
-Architecture:
+Architecture note:
     - _JUnitSummary: total/failed/failing_names parsed out of one report.
     - TestSuiteVerifier: Verifier subclass taking (params, config), following
       the same two-argument shape CallableVerifier already established.
@@ -16,6 +16,16 @@ Relations:
 Similar Files:
     - vidbyte/agents/runtimes/verifier/target.py: _git_diff, the nearest
       existing "shell out and degrade gracefully" subprocess pattern.
+Role in codebase:
+    Provides the built-in test-suite command verifier implementation.
+Common modification patterns:
+    Change command and pass-fraction policy through TestSuiteVerifierConfig.
+Known edge cases:
+    Missing or malformed JUnit reports become explicit failed verdicts.
+Related docs:
+    docs/design/verifier-runtime-builtin-verifiers.md
+Tests:
+    Covered by test-suite verifier tests.
 """
 
 from __future__ import annotations
@@ -66,6 +76,7 @@ class TestSuiteVerifier(Verifier):
         summary = self._parse_report(target.workspace_root)
         return self._to_verdict(summary, duration_seconds=time.monotonic() - started)
 
+    # @intent bounded-test-process
     async def _run_command(self, workspace_root: str) -> None:
         # Runs off the event loop; a non-zero exit means "tests failed," not a crash, so check=False.
         env = {**os.environ, **(self._config.env or {})}

@@ -11,7 +11,7 @@ Purpose:
     VerifierRuntimeGate.evaluate_finalization_attempt(); this class owns only
     what happens *after* a decision — feedback, repair, and context
     publishing — which are not gate concerns.
-Architecture:
+Architecture note:
     - AgentVerifierRuntime: one instance per AgentRuntime run.
       on_finalization_attempt() is the entire public surface the caller needs;
       it delegates the finalization check itself to the configured gate.
@@ -22,6 +22,18 @@ Similar Files:
     - vidbyte/agents/contract.py: AgentLoopSettingsOutputContract, the
       nearest existing "one owner consulted at both finalization boundaries"
       shape this orchestrator's call sites mirror.
+Role in codebase:
+    Composes the verifier kernel and delegates algorithm-specific lifecycle
+    control to the selected VerifierRuntimeMode.
+Common modification patterns:
+    Add shared checkpoint behavior here; add new timing policy as a mode class.
+Known edge cases:
+    A runtime is scoped to one agent run and must not retain tool state across
+    subsequent runs.
+Related docs:
+    docs/design/verifier-runtime.md; docs/design/verifier-runtime-algorithms.md
+Tests:
+    Covered by verifier runtime integration tests.
 """
 
 from __future__ import annotations
@@ -49,10 +61,12 @@ class AgentVerifierRuntime:
         self._tool_call_count = 0
         self._last_tool_passed = False
 
+    # @intent verifier-finalization-boundary
     async def on_finalization_attempt(self, context: ResolutionContext) -> VerifierRuntimeOutcome:
         # Delegates finalization behavior to the selected algorithm mode.
         return await self.mode.on_finalization(self, context)
 
+    # @intent verifier-mode-dispatch
     async def run(self, request: VerifierRunRequest, run_once: RunOnce) -> AgentResult:
         # Delegates one complete agent invocation to the selected outer algorithm mode.
         self._tool_call_count = 0
@@ -64,6 +78,7 @@ class AgentVerifierRuntime:
         # Delegates a completed non-final iteration to modes that schedule checkpoints.
         return await self.mode.after_iteration(self, context)
 
+    # @intent verifier-checkpoint
     async def evaluate_checkpoint(self, context: ResolutionContext) -> VerifierRuntimeOutcome:
         # Runs the shared target, collection, verdict, ledger, gate, feedback, and repair pipeline.
         decision, attempt = await self.settings.params.gate.evaluate_finalization_attempt(
@@ -79,6 +94,7 @@ class AgentVerifierRuntime:
             return VerifierRuntimeOutcome(decision, None, None)
         return await self._resolve_decision(decision, attempt, context)
 
+    # @intent post-run-result
     async def evaluate_result(self, request: VerifierRunRequest, result: AgentResult) -> VerifierRuntimeOutcome:
         # Verifies a completed outer attempt using its result and initial request context.
         output = str(getattr(result, "output", result) or "")
@@ -88,6 +104,7 @@ class AgentVerifierRuntime:
         context = ResolutionContext(candidate_output=output, messages=messages, workspace_root=None, iteration_count=int(dict(metadata).get("iteration_count", 0)), context_manager=self.context_manager)
         return await self.evaluate_checkpoint(context)
 
+    # @intent verifier-tool-checkpoint
     async def evaluate_tool(self, candidate_output: str) -> VerifierRuntimeOutcome:
         # Verifies the candidate supplied by the model-callable verifier tool.
         context = ResolutionContext(candidate_output=candidate_output, messages=(), workspace_root=None, iteration_count=0, context_manager=self.context_manager)
@@ -121,6 +138,7 @@ class AgentVerifierRuntime:
         metadata["verifier_evaluations"] = self.ledger.report()
         return dataclasses.replace(result, metadata=metadata)
 
+    # @intent verifier-decision-resolution
     async def _resolve_decision(self, decision: GateDecision, attempt: VerificationAttempt, context: ResolutionContext) -> VerifierRuntimeOutcome:
         # Turns a GateDecision into the feedback/repair pairing appropriate for that decision.
         if decision is GateDecision.ALLOW_FINALIZE:
@@ -134,6 +152,7 @@ class AgentVerifierRuntime:
         self._publish_context(context, last_repair=repair)
         return VerifierRuntimeOutcome(decision, feedback_text, repair)
 
+    # @intent verifier-repair-transition
     async def _repair(self, attempt: VerificationAttempt, context: ResolutionContext, feedback_text: str) -> RepairOutcome:
         # Delegates to the configured RepairStrategy with everything it needs to decide what happens next.
         repair_context = RepairContext(attempt=attempt, ledger=self.ledger, resolution_context=context, feedback_text=feedback_text)

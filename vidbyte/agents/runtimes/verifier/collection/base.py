@@ -6,7 +6,7 @@ Purpose:
     Owns the set of verifiers for one target; runs them respecting
     dependency-derived tiers, short-circuiting later tiers on a blocking
     failure when configured to.
-Architecture:
+Architecture note:
     - VerifierCollectionParams: validated dataclass — non-empty, unique
       names, every kind recognized, every depends_on resolvable, acyclic.
     - VerifierCollection: topological tiering + tiered async execution.
@@ -16,6 +16,16 @@ Relations:
 Similar Files:
     - vidbyte/agents/contract.py: AgentLoopSettingsOutputContract, the
       nearest existing "owns a set of checks, runs them" class.
+Role in codebase:
+    Owns dependency-aware tier execution for a verifier collection.
+Common modification patterns:
+    Change scheduling through VerifierCollectionParams, not runtime modes.
+Known edge cases:
+    Blocking failures short-circuit later tiers only when configured to do so.
+Related docs:
+    docs/design/verifier-runtime.md
+Tests:
+    Covered by collection scheduling tests and the full SDK suite.
 """
 
 from __future__ import annotations
@@ -29,6 +39,8 @@ from vidbyte.agents.runtimes.verifier.verifier import Verifier
 from vidbyte.lib.errors import ConfigurationError
 
 _COST_ORDER = {VerifierCostClass.LEAN: 0, VerifierCostClass.STANDARD: 1, VerifierCostClass.HEAVY: 2}
+ROOT_TIER = 0
+DEPENDENCY_TIER_INCREMENT = 1
 
 
 @dataclass(frozen=True, slots=True)
@@ -133,9 +145,9 @@ class VerifierCollection:
             return depth_cache[name]
         verifier = self._by_name[name]
         if not verifier.params.depends_on:
-            depth_cache[name] = 0
-            return 0
-        depth = 1 + max(self._depth_of(dependency, depth_cache) for dependency in verifier.params.depends_on)
+            depth_cache[name] = ROOT_TIER
+            return ROOT_TIER
+        depth = DEPENDENCY_TIER_INCREMENT + max(self._depth_of(dependency, depth_cache) for dependency in verifier.params.depends_on)
         depth_cache[name] = depth
         return depth
 

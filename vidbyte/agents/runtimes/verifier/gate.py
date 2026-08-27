@@ -9,7 +9,7 @@ Purpose:
     on PR #349 ("dont really want a on_finalization_attempt in the runtime,
     the gate should have this logic"), this file also owns the finalization
     orchestration itself, not just the fire/decide judgment calls.
-Architecture:
+Architecture note:
     - VerifierRuntimeGateParams: which GateTrigger to use.
     - VerifierRuntimeGate: should_fire() / decide() / describe_trigger(), plus
       evaluate_finalization_attempt() — the orchestration entry point
@@ -28,6 +28,17 @@ Relations:
 Similar Files:
     - vidbyte/agents/contract.py: exhausted()/unmet() is the nearest existing
       "verdict + budget -> continue or stop" decision in this repo.
+Role in codebase:
+    Owns checkpoint orchestration and the verdict-to-loop decision.
+Common modification patterns:
+    Change fire/decision policy through VerifierRuntimeGateParams and its
+    collaborators; keep runtime lifecycle delegation thin.
+Known edge cases:
+    Finalization evaluation records an attempt before applying budget policy.
+Related docs:
+    docs/design/verifier-runtime.md; docs/design/verifier-runtime-algorithms.md
+Tests:
+    Covered by gate, budget, and runtime integration tests.
 """
 
 from __future__ import annotations
@@ -45,6 +56,8 @@ from vidbyte.agents.runtimes.verifier.types import (
     VerificationAttempt,
 )
 from vidbyte.lib.errors import ConfigurationError
+
+NEXT_ATTEMPT_OFFSET = 1
 
 if TYPE_CHECKING:
     from vidbyte.agents.runtimes.verifier.budget import VerifierRuntimeBudget
@@ -91,6 +104,7 @@ class VerifierRuntimeGate:
             return self._explicit_signal_present(context)
         return True
 
+    # @intent finalization-orchestration
     async def evaluate_finalization_attempt(
         self,
         context: ResolutionContext,
@@ -113,6 +127,7 @@ class VerifierRuntimeGate:
         decision = self.decide(attempt.aggregated, attempt.attempt_number, budget, ledger)
         return decision, attempt
 
+    # @intent verifier-attempt
     async def _run_attempt(
         self,
         context: ResolutionContext,
@@ -127,7 +142,7 @@ class VerifierRuntimeGate:
         verdicts = await collection.run(target)
         aggregated = verdict_policy.aggregate(verdicts)
         attempt = VerificationAttempt(
-            attempt_number=len(ledger.history()) + 1,
+            attempt_number=len(ledger.history()) + NEXT_ATTEMPT_OFFSET,
             target=target,
             aggregated=aggregated,
             started_at=started,
@@ -137,6 +152,7 @@ class VerifierRuntimeGate:
         ledger.record(attempt)
         return attempt
 
+    # @intent verdict-loop-decision
     def decide(
         self,
         verdict: AggregatedVerdict,

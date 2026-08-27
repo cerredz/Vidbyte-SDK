@@ -8,7 +8,7 @@ Purpose:
     concrete, built-in VerifierKind implementations, so every existing
     import of vidbyte.agents.runtimes.verifier.collection keeps resolving
     unchanged.
-Architecture:
+Architecture note:
     - base: VerifierCollection, VerifierCollectionParams (tiered execution
       engine; not modified by this package split).
     - test_suite / database_query / lean_proof: one concrete Verifier
@@ -18,6 +18,16 @@ Relations:
 Similar Files:
     - vidbyte/agents/runtimes/verifier/verifier.py: CallableVerifier, the
       generic Verifier subclass these concrete kinds follow the shape of.
+Role in codebase:
+    Stable package surface for tiered collection and built-in verifiers.
+Common modification patterns:
+    Add a concrete verifier module and export it after its config contract.
+Known edge cases:
+    Keep collection orchestration independent from runtime algorithm modes.
+Related docs:
+    docs/design/verifier-runtime.md
+Tests:
+    Covered by built-in verifier and collection tests.
 """
 
 from __future__ import annotations

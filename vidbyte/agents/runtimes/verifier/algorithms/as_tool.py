@@ -5,19 +5,29 @@ Description:
 Purpose:
     Lets the model request verification through the normal SDK tool catalog
     while reusing the shared verifier kernel and optional finalization check.
-Architecture:
+Architecture note:
     - VerifierAsToolMode: contributes one bound VerifierTool and enforces its
       call ceiling / required-finalization policy.
     - VerifierTool: translates a model tool call into a verifier checkpoint.
 Relations:
     Uses vidbyte.tools.base.BaseTool and vidbyte.tools.types.ToolSpec /
     ToolResult, so AgentRuntime needs no special tool-execution branch.
+Role in codebase:
+    Adapts the verifier checkpoint kernel to the model-callable tool boundary.
+Common modification patterns:
+    Change call limits or tool schema through VerifierAsToolModeParams.
+Known edge cases:
+    A tool call can be rejected by the mode budget before verification runs.
+Related docs:
+    docs/design/verifier-runtime-algorithms.md
+Tests:
+    Covered by verifier runtime tool import and execution tests.
 """
 
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from vidbyte.agents.runtimes.verifier.algorithms.base import VerifierRuntimeMode
 from vidbyte.lib.dataclasses.verifier import ResolutionContext, VerifierAsToolModeParams, VerifierRuntimeModeKind, VerifierRuntimeOutcome
@@ -42,6 +52,7 @@ class VerifierAsToolMode(VerifierRuntimeMode):
         # Contributes one tool bound to this run's verifier runtime.
         return (VerifierTool(runtime, self.params),)
 
+    # @intent tool-finalization
     async def on_finalization(self, runtime: AgentVerifierRuntime, context: ResolutionContext) -> VerifierRuntimeOutcome:
         # Requires a successful tool result when configured, otherwise leaves finalization advisory.
         if not self.params.required_before_finalization or runtime.last_tool_passed:

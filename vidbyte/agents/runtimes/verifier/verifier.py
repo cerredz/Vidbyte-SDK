@@ -6,7 +6,7 @@ Purpose:
     A verifier is one deterministic check: it takes a VerifierTarget and
     returns a VerifierVerdict. CallableVerifier wraps a plain function so the
     collection is runnable without a full concrete subclass per VerifierKind.
-Architecture:
+Architecture note:
     - Verifier: abstract base — check()/applicable()/describe().
     - CallableVerifier: wraps a sync or async predicate/verdict function.
     VerifierParams (validated dataclass: name, kind, cost_class, tier,
@@ -18,13 +18,25 @@ Relations:
 Similar Files:
     - vidbyte/agents/contracts/__init__.py: OutputContract, the nearest
       existing "small declarative check" base class in this repo.
+Role in codebase:
+    Defines the single-check contract consumed by VerifierCollection.
+Common modification patterns:
+    Add deterministic verifier behavior through a Verifier subclass or
+    CallableVerifier wrapper.
+Known edge cases:
+    A verifier may be inapplicable; that outcome must remain distinct from a
+    failed check.
+Related docs:
+    docs/design/verifier-runtime.md
+Tests:
+    Covered by verifier contract and collection tests.
 """
 
 from __future__ import annotations
 
 import inspect
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Callable
 
 from vidbyte.lib.dataclasses.verifier import VerifierParams, VerifierTarget, VerifierVerdict
 

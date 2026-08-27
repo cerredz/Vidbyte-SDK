@@ -7,7 +7,7 @@ Purpose:
     vidbyte.agents.settings.loop, matching how ToolErrorPolicy and
     ToolSettings each own their nested-settings validation in their own file
     rather than inline inside AgentLoopSettings.
-Architecture:
+Architecture note:
     - validate_verifier_runtime(): the one function AgentLoopSettings calls.
 Relations:
     Called by vidbyte.agents.settings.loop.AgentLoopSettings. Checks against
@@ -15,6 +15,17 @@ Relations:
 Similar Files:
     - vidbyte/agents/settings/tool_error.py: ToolErrorPolicy, the nearest
       existing nested-settings validation surface living in its own file.
+Role in codebase:
+    Keeps AgentLoopSettings' optional verifier type validation isolated.
+Common modification patterns:
+    Update the accepted settings wrapper without importing runtime behavior at
+    module import time.
+Known edge cases:
+    None is valid and means verifier runtime is disabled.
+Related docs:
+    docs/design/verifier-runtime.md
+Tests:
+    Covered by AgentLoopSettings verifier configuration tests.
 """
 
 from __future__ import annotations

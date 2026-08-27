@@ -6,7 +6,7 @@ Purpose:
     Compiles a Lean4 proof file and gates on a clean compile with no 'sorry'
     placeholder. The first concrete VerifierKind.FORMAL_PROOF implementation
     this SDK ships.
-Architecture:
+Architecture note:
     - LeanProofVerifier: Verifier subclass taking (params, config); resolves
       which .lean file to check, runs the configured Lean command against
       it, and gates on exit code plus its diagnostic output.
@@ -16,6 +16,17 @@ Relations:
 Similar Files:
     - vidbyte/agents/runtimes/verifier/collection/test_suite.py: the sibling
       "shell out, gate on process output" concrete verifier.
+Role in codebase:
+    Provides the built-in Lean proof compilation verifier implementation.
+Common modification patterns:
+    Change process policy through LeanProofVerifierConfig.
+Known edge cases:
+    Missing Lean binaries and malformed output become failed verdicts with
+    diagnostics instead of escaping as raw subprocess errors.
+Related docs:
+    docs/design/verifier-runtime-builtin-verifiers.md
+Tests:
+    Covered by Lean proof verifier tests.
 """
 
 from __future__ import annotations
@@ -64,11 +75,13 @@ class LeanProofVerifier(Verifier):
         result = await self._run_lean(target.workspace_root, file_path)
         return self._to_verdict(result, duration_seconds=time.monotonic() - started)
 
+    # @intent bounded-lean-process
     async def _run_lean(self, workspace_root: str, file_path: str) -> subprocess.CompletedProcess[str]:
         # Runs off the event loop; a non-zero exit means a compile error, not a crash, so check=False.
         command = (*self._config.lean_command, file_path)
         return await asyncio.to_thread(subprocess.run, command, cwd=workspace_root, capture_output=True, text=True, check=False)
 
+    # @intent lean-verdict-boundary
     def _to_verdict(self, result: subprocess.CompletedProcess[str], *, duration_seconds: float) -> VerifierVerdict:
         # Combines compile success, the sorry gate, and the warnings gate into one pass/fail.
         output = result.stdout + result.stderr
