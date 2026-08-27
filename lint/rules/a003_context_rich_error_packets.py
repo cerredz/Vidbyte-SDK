@@ -41,12 +41,14 @@ class ErrorPacketAnalyzer:
             return []
         classes = {node.name: node for node in source.tree.body if isinstance(node, ast.ClassDef)}
         schemas = {name: self._schema(node) for name, node in classes.items()}
+        exposures = {name: self._exposure(node) for name, node in classes.items()}
         findings: list[tuple[int, str, tuple[str, ...]]] = []
         for name, node in classes.items():
             if not name.endswith("Error") or name == "VidbyteSdkError":
                 continue
             fields = self._resolved_fields(node, schemas, classes, set())
-            missing = tuple(field for field in CANONICAL_DIAGNOSTIC_FIELDS if field not in fields)
+            exposed = self._resolved_exposure(node, exposures, classes, set())
+            missing = tuple(field for field in CANONICAL_DIAGNOSTIC_FIELDS if field not in fields or field not in exposed)
             if missing:
                 findings.append((node.lineno, name, missing))
         return findings
@@ -62,6 +64,24 @@ class ErrorPacketAnalyzer:
                 return frozenset(element.value for element in value.elts if isinstance(element, ast.Constant) and isinstance(element.value, str))
         return frozenset()
 
+    def _exposure(self, node: ast.ClassDef) -> frozenset[str]:
+        # Finds canonical fields assigned to self or supplied as literal details keys.
+        initializer = next((item for item in node.body if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)) and item.name == "__init__"), None)
+        if initializer is None:
+            return frozenset()
+        fields: set[str] = set()
+        for item in ast.walk(initializer):
+            if isinstance(item, (ast.Assign, ast.AnnAssign)):
+                targets = item.targets if isinstance(item, ast.Assign) else [item.target]
+                fields.update(target.attr for target in targets if isinstance(target, ast.Attribute) and isinstance(target.value, ast.Name) and target.value.id == "self")
+                if any(isinstance(target, ast.Name) and target.id == "details" for target in targets) and isinstance(item.value, ast.Dict):
+                    fields.update(key.value for key in item.value.keys if isinstance(key, ast.Constant) and isinstance(key.value, str))
+            if isinstance(item, ast.Call):
+                for keyword in item.keywords:
+                    if keyword.arg == "details" and isinstance(keyword.value, ast.Dict):
+                        fields.update(key.value for key in keyword.value.keys if isinstance(key, ast.Constant) and isinstance(key.value, str))
+        return frozenset(fields)
+
     def _resolved_fields(self, node: ast.ClassDef, schemas: dict[str, frozenset[str]], classes: dict[str, ast.ClassDef], seen: set[str]) -> frozenset[str]:
         # Combines local fields with resolvable same-module base-class schemas.
         if node.name in seen:
@@ -71,6 +91,17 @@ class ErrorPacketAnalyzer:
         for base in node.bases:
             if isinstance(base, ast.Name) and base.id in classes:
                 fields.update(self._resolved_fields(classes[base.id], schemas, classes, seen))
+        return frozenset(fields)
+
+    def _resolved_exposure(self, node: ast.ClassDef, exposures: dict[str, frozenset[str]], classes: dict[str, ast.ClassDef], seen: set[str]) -> frozenset[str]:
+        # Combines constructor-visible fields with resolvable same-module bases.
+        if node.name in seen:
+            return frozenset()
+        seen.add(node.name)
+        fields = set(exposures[node.name])
+        for base in node.bases:
+            if isinstance(base, ast.Name) and base.id in classes:
+                fields.update(self._resolved_exposure(classes[base.id], exposures, classes, seen))
         return frozenset(fields)
 
 

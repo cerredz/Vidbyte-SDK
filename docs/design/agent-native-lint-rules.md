@@ -338,7 +338,9 @@ class ContextRichErrorPacketsRule(Rule):
 3. Require all canonical field names: error kind, expected behavior, actual
    behavior, safe runtime details, likely causes, repair approaches, related
    docs, and relevant tests.
-4. Emit one finding per class with the missing field names.
+4. Require those fields to be statically exposed by constructor `self.<field>`
+   assignments or literal `details` keys, resolving same-module inheritance.
+5. Emit one finding per class with the missing schema or exposure fields.
 
 #### Edge Cases & Error Handling
 
