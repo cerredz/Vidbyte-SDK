@@ -102,7 +102,7 @@ class OperationalConstantAnalyzer:
             return f"operational context contains {matched!r}"
         call_names = {name.lower() for name in names}
         if call_names & OPERATIONAL_CALLS:
-            return f"operational call {sorted(call_names & OPERATIONAL_CALLS)[0]!r} receives a literal"
+            return f"operational call {min(call_names & OPERATIONAL_CALLS)!r} receives a literal"
         return ""
 
     def _names(self, context: tuple[ast.AST, ...]) -> tuple[str, ...]:

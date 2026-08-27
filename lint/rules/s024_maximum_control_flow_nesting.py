@@ -20,7 +20,6 @@ from lint.core.discovery import SourceCatalog, SourceFile
 from lint.core.registry import Rule
 
 MAX_NESTING_DEPTH = 3
-CONTROL_NODES = (ast.If, ast.For, ast.AsyncFor, ast.Try, ast.With, ast.AsyncWith, ast.Match)
 
 
 class NestingAnalyzer:

@@ -43,7 +43,7 @@ class DependencySeamAnalyzer:
 
     def _parameters(self, node: ast.FunctionDef | ast.AsyncFunctionDef) -> tuple[ast.arg, ...]:
         # Returns all ordinary and keyword-only parameters while ignoring variadic bags.
-        return tuple((*node.args.posonlyargs, *node.args.args, *node.args.kwonlyargs))
+        return (*node.args.posonlyargs, *node.args.args, *node.args.kwonlyargs)
 
     def _dependency_name(self, name: str) -> bool:
         # Matches explicit infrastructure seam names without requiring a naming style change.

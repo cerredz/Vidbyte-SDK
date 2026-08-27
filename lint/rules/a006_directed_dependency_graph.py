@@ -56,7 +56,7 @@ class DependencyGraphAnalyzer:
         findings = [(edge, reason) for edge in edges if (reason := self._layer_violation(edge.source, edge.target))]
         components = self._components(tuple(modules), edges)
         for component in components:
-            if len(component) == 1:
+            if len(component) == 1 and not any(edge.source == component[0] and edge.target == component[0] for edge in edges):
                 continue
             rendered = " -> ".join(component)
             findings.extend((edge, f"concrete import cycle: {rendered}") for edge in edges if edge.source in component and edge.target in component)
@@ -123,7 +123,7 @@ class DependencyGraphAnalyzer:
         for module in sorted(modules):
             if module not in indices:
                 visit(module)
-        return [component for component in components if len(component) > 1]
+        return components
 
 
 class ImportCollector(ast.NodeVisitor):
@@ -133,7 +133,6 @@ class ImportCollector(ast.NodeVisitor):
         # Retains the current module so relative imports resolve without imports.
         self.module = module
         self.imports: list[tuple[int, str]] = []
-        self._skip_type_checking = False
 
     def visit_If(self, node: ast.If) -> None:
         # Skips imports guarded by TYPE_CHECKING while retaining runtime else branches.
@@ -157,7 +156,7 @@ class ImportCollector(ast.NodeVisitor):
 
     def _is_type_checking(self, test: ast.expr) -> bool:
         # Recognizes both TYPE_CHECKING and typing.TYPE_CHECKING guards.
-        return isinstance(test, ast.Name) and test.id == "TYPE_CHECKING" or isinstance(test, ast.Attribute) and test.attr == "TYPE_CHECKING"
+        return (isinstance(test, ast.Name) and test.id == "TYPE_CHECKING") or (isinstance(test, ast.Attribute) and test.attr == "TYPE_CHECKING")
 
     def _target(self, node: ast.ImportFrom) -> str:
         # Calculates the module named by an absolute or relative import statement.
