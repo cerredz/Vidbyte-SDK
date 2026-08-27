@@ -49,3 +49,4 @@ cached external findings; semantic rules inspect the shared source catalogue.
 ## Change Log
 
 - 2026-08-23: Created with S001-S021.
+- 2026-08-26: Added article-derived S024 and A001-A003/A005-A008 policies.

@@ -133,7 +133,7 @@ current debt through `lint/baseline.json` instead of modifying `vidbyte` source.
 ## 5. High-Level Design
 
 Each selected policy is a small class implementing the existing `Rule` contract.
-The rule registry imports the nine modules explicitly, the shared
+The rule registry imports the eight modules explicitly, the shared
 `SourceCatalog` supplies parsed SDK Python files, and the existing runner turns
 their complete finding sets into baseline verdicts and diagnostics. No new
 analyzer process or runtime dependency is introduced.
@@ -532,7 +532,7 @@ Complete list of every file that will be created, modified, or deleted:
 | MODIFY | `lint/README.md` | Document the expanded suite and rule catalogue |
 | MODIFY | `lint/rules/README.md` | Add file-index entries and rule descriptions |
 
-**Files to create:** 10  
+**Files to create:** 9  
 **Files to modify:** 4  
 **Files to delete:** 0
 
@@ -617,4 +617,3 @@ for this change:
 - What: Treat all code uniformly as context-bearing.
 - Why rejected: It produces low-signal boilerplate and contradicts the article's
   distinction between load-bearing policy and ordinary implementation detail.
-
