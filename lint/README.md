@@ -94,6 +94,19 @@ Nested folders:
 | S019 | cancellation-propagation | Async cancellation is never swallowed |
 | S020 | readme-file-index-parity | Opt-in folder maps match tracked files |
 | S021 | class-bound-registry-helpers | Registry behavior stays on owning classes |
+| S024 | maximum-control-flow-nesting | Control-flow depth stays within three levels |
+
+### Agent-native rules
+
+| ID | Rule | Protected contract |
+|---|---|---|
+| A001 | agent-readable-file-headers | SDK Python files expose purpose and maintenance context |
+| A002 | intent-comments | Load-bearing policy logic explains its invariant nearby |
+| A003 | context-rich-error-packets | Boundary errors expose stable repair context |
+| A005 | typed-dependency-seams | Injected infrastructure uses concrete interfaces or Protocols |
+| A006 | directed-dependency-graph | Concrete imports obey cycles and documented layer boundaries |
+| A007 | operational-constants | Runtime policy values have named ownership |
+| A008 | library-stdout-boundary | Importable SDK code does not write unstructured stdout |
 
 ## Adding a rule
 

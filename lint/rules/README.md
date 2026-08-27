@@ -37,6 +37,14 @@ cached external findings; semantic rules inspect the shared source catalogue.
 - `s019_cancellation_propagation.py` -- preserved cancellation.
 - `s020_readme_file_index_parity.py` -- opt-in documentation parity.
 - `s021_class_bound_registry_helpers.py` -- class-owned registry behavior.
+- `s024_maximum_control_flow_nesting.py` -- maximum semantic control-flow depth.
+- `a001_agent_readable_file_headers.py` -- structured SDK source headers.
+- `a002_intent_comments.py` -- intent markers for load-bearing policy functions.
+- `a003_context_rich_error_packets.py` -- stable diagnostic fields on errors.
+- `a005_typed_dependency_seams.py` -- concrete injected dependency interfaces.
+- `a006_directed_dependency_graph.py` -- concrete import cycles and layer edges.
+- `a007_operational_constants.py` -- named operational policy values.
+- `a008_library_stdout_boundary.py` -- CLI-only builtin stdout calls.
 
 ## Change Log
 

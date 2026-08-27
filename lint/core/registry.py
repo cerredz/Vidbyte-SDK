@@ -1,6 +1,6 @@
 """FILE: lint/core/registry.py
 
-PURPOSE: Defines the rule contract and ordered S001-S021 catalogue.
+PURPOSE: Defines the rule contract and ordered SDK lint catalogue.
 ROLE IN CODEBASE: Makes every rule independently selectable and rejects duplicate IDs.
 ARCHITECTURE NOTE: Registry imports policy but never scans source itself.
 FUNCTION INVENTORY: RuleRegistry.all()/select() return stable rule instances.
@@ -18,14 +18,37 @@ import importlib
 from lint.core.diagnostic import Diagnostic, Finding
 from lint.core.discovery import SourceCatalog
 
-RULE_MODULES = tuple(f"lint.rules.s{number:03d}_{name}" for number, name in (
-    (1, "python_correctness_foundation"), (2, "exception_cause_chaining"), (3, "strict_zip"), (4, "timezone_aware_datetime"),
-    (5, "immutable_class_defaults"), (6, "async_task_ownership"), (7, "public_function_annotations"), (8, "bounded_function_complexity"),
-    (9, "staged_mypy_contracts"), (10, "transport_parity"), (11, "raw_http_client_ownership"), (12, "explicit_outbound_timeout"),
-    (13, "bounded_untrusted_responses"), (14, "provider_model_registry_parity"), (15, "public_export_integrity"), (16, "typed_boundary_errors"),
-    (17, "no_raw_exception_disclosure"), (18, "priced_operation_attempts"), (19, "cancellation_propagation"), (20, "readme_file_index_parity"),
-    (21, "class_bound_registry_helpers"),
-))
+RULE_MODULES = (
+    "lint.rules.a001_agent_readable_file_headers",
+    "lint.rules.a002_intent_comments",
+    "lint.rules.a003_context_rich_error_packets",
+    "lint.rules.a005_typed_dependency_seams",
+    "lint.rules.a006_directed_dependency_graph",
+    "lint.rules.a007_operational_constants",
+    "lint.rules.a008_library_stdout_boundary",
+    "lint.rules.s001_python_correctness_foundation",
+    "lint.rules.s002_exception_cause_chaining",
+    "lint.rules.s003_strict_zip",
+    "lint.rules.s004_timezone_aware_datetime",
+    "lint.rules.s005_immutable_class_defaults",
+    "lint.rules.s006_async_task_ownership",
+    "lint.rules.s007_public_function_annotations",
+    "lint.rules.s008_bounded_function_complexity",
+    "lint.rules.s009_staged_mypy_contracts",
+    "lint.rules.s010_transport_parity",
+    "lint.rules.s011_raw_http_client_ownership",
+    "lint.rules.s012_explicit_outbound_timeout",
+    "lint.rules.s013_bounded_untrusted_responses",
+    "lint.rules.s014_provider_model_registry_parity",
+    "lint.rules.s015_public_export_integrity",
+    "lint.rules.s016_typed_boundary_errors",
+    "lint.rules.s017_no_raw_exception_disclosure",
+    "lint.rules.s018_priced_operation_attempts",
+    "lint.rules.s019_cancellation_propagation",
+    "lint.rules.s020_readme_file_index_parity",
+    "lint.rules.s021_class_bound_registry_helpers",
+    "lint.rules.s024_maximum_control_flow_nesting",
+)
 
 
 class RuleSelectionError(RuntimeError):
