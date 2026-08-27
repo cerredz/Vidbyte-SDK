@@ -59,6 +59,7 @@ class AgentStopReason(str, Enum):
     TOOL_SETTINGS_DENIED = "tool_settings_denied"
     TOOL_LOOP_LIMIT = "tool_loop_limit"
     CONTRACT_UNSATISFIED = "contract_unsatisfied"
+    VERIFICATION_FAILED = "verification_failed"
     ERROR = "error"
 
 

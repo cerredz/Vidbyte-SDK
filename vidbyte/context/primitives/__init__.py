@@ -80,6 +80,16 @@ from vidbyte.context.primitives.tasks import (
     ProgressContextItem,
     TaskContextItem,
 )
+from vidbyte.context.primitives.verifier import (
+    VerifierBudgetContextItem,
+    VerifierDiagnosticContextItem,
+    VerifierFlakeContextItem,
+    VerifierHistoryContextItem,
+    VerifierRegressionContextItem,
+    VerifierScopeContextItem,
+    VerifierTamperContextItem,
+    VerifierTrendContextItem,
+)
 
 __all__ = [
     "AlternativeChallengeContextItem",
@@ -125,4 +135,12 @@ __all__ = [
     "ToolCallContextItem",
     "TradeoffContextItem",
     "TrajectoryCheckpointContextItem",
+    "VerifierBudgetContextItem",
+    "VerifierDiagnosticContextItem",
+    "VerifierFlakeContextItem",
+    "VerifierHistoryContextItem",
+    "VerifierRegressionContextItem",
+    "VerifierScopeContextItem",
+    "VerifierTamperContextItem",
+    "VerifierTrendContextItem",
 ]
