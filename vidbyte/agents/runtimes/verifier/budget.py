@@ -22,8 +22,7 @@ Similar Files:
 
 from __future__ import annotations
 
-from vidbyte.agents.runtimes.verifier.types import VerificationAttempt
-from vidbyte.lib.dataclasses.verifier import VerifierRuntimeBudgetParams
+from vidbyte.lib.dataclasses.verifier import VerificationAttempt, VerifierRuntimeBudgetParams
 
 
 class VerifierRuntimeBudget:

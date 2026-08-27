@@ -1,15 +1,17 @@
 """Context Protocol Header
 
 Description:
-    Defines VerifierRuntimeFeedbackParams and VerifierRuntimeFeedback.
+    Defines VerifierRuntimeFeedback.
 Purpose:
     Renders the corrective payload injected after a failed AggregatedVerdict,
     under one of four configurable content modes.
 Architecture:
-    - VerifierRuntimeFeedbackParams: which FeedbackContentMode/FeedbackDelivery,
-      plus the fields each mode requires.
     - VerifierRuntimeFeedback: emit() dispatches to one private builder per
       mode, then applies max_diagnostics_chars truncation last.
+    VerifierRuntimeFeedbackParams (validated dataclass: which
+    FeedbackContentMode/FeedbackDelivery, plus the fields each mode
+    requires) lives in vidbyte.lib.dataclasses.verifier, not here, per
+    review feedback on PR #349.
 Relations:
     Consumes vidbyte.agents.runtimes.verifier.types.AggregatedVerdict.
     Consumed by vidbyte.agents.runtimes.verifier.runtime.AgentVerifierRuntime.
@@ -20,13 +22,10 @@ Similar Files:
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-
-from vidbyte.agents.runtimes.verifier.types import AggregatedVerdict, FeedbackContentMode, FeedbackDelivery, VerifierVerdict
-from vidbyte.lib.errors import ConfigurationError
+from vidbyte.agents.runtimes.verifier.types import AggregatedVerdict, FeedbackContentMode, VerifierVerdict
+from vidbyte.lib.dataclasses.verifier import VerifierRuntimeFeedbackParams
 
 _TRUNCATION_SUFFIX = "\n...[truncated]"
-_MODES_REQUIRING_TEMPLATE = (FeedbackContentMode.CUSTOM_MESSAGE, FeedbackContentMode.RAW_AND_CUSTOM)
 
 
 class _DefaultingMapping(dict):
@@ -35,48 +34,6 @@ class _DefaultingMapping(dict):
     def __missing__(self, key: str) -> str:
         # A misconfigured template placeholder should degrade to blank text, not crash the loop.
         return ""
-
-
-@dataclass(frozen=True, slots=True)
-class VerifierRuntimeFeedbackParams:
-    """Validated configuration for one VerifierRuntimeFeedback."""
-
-    content_mode: FeedbackContentMode = FeedbackContentMode.RAW_VERDICT
-    delivery: FeedbackDelivery = FeedbackDelivery.USER_MESSAGE
-    message_template: str | None = None
-    structured_fields: tuple[str, ...] = ()
-    max_diagnostics_chars: int | None = None
-
-    def __post_init__(self) -> None:
-        # Each content mode that needs a companion field must have it.
-        self._validate_template_modes()
-        self._validate_structured_mode()
-        self._validate_max_chars()
-        self._validate_delivery_supported()
-
-    def _validate_delivery_supported(self) -> None:
-        # SYSTEM_MESSAGE and MCP_RESOURCE have no wired delivery path in the linear runtime yet;
-        # reject-at-construction, matching how RepairMode.PARALLEL_BRANCHING is handled.
-        if self.delivery in (FeedbackDelivery.SYSTEM_MESSAGE, FeedbackDelivery.MCP_RESOURCE):
-            raise ConfigurationError(
-                f"VerifierRuntimeFeedbackParams: delivery={self.delivery.value} has no wired delivery path in the "
-                "linear runtime today. Use USER_MESSAGE, TOOL_RESULT, or CONTEXT_ITEM."
-            )
-
-    def _validate_template_modes(self) -> None:
-        # CUSTOM_MESSAGE and RAW_AND_CUSTOM both need something to render.
-        if self.content_mode in _MODES_REQUIRING_TEMPLATE and not self.message_template:
-            raise ConfigurationError(f"VerifierRuntimeFeedbackParams: content_mode={self.content_mode.value} requires message_template.")
-
-    def _validate_structured_mode(self) -> None:
-        # Without named fields, STRUCTURED_PAYLOAD has nothing to render.
-        if self.content_mode is FeedbackContentMode.STRUCTURED_PAYLOAD and not self.structured_fields:
-            raise ConfigurationError("VerifierRuntimeFeedbackParams: content_mode=STRUCTURED_PAYLOAD requires structured_fields.")
-
-    def _validate_max_chars(self) -> None:
-        # A zero or negative cap would truncate every message to nothing.
-        if self.max_diagnostics_chars is not None and self.max_diagnostics_chars <= 0:
-            raise ConfigurationError("VerifierRuntimeFeedbackParams.max_diagnostics_chars must be greater than zero when provided.")
 
 
 class VerifierRuntimeFeedback:

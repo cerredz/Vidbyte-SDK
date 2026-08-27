@@ -1,7 +1,7 @@
 """Context Protocol Header
 
 Description:
-    Defines VerifierLedgerParams, VerifierLedger, and VerifierLedgerStatistics.
+    Defines VerifierLedger and VerifierLedgerStatistics.
 Purpose:
     VerifierLedger records every verification attempt this run has made and
     exposes only ledger/metadata read-back (history, last, report).
@@ -9,14 +9,16 @@ Purpose:
     statistics from that record: score trend, regressions, flakiness, a
     tamper baseline, and the ContextItem flattening every other pillar reads.
 Architecture:
-    - VerifierLedgerParams: run_id + whether to publish state into the
-      agent's ContextManager.
     - VerifierLedger: record()/history()/last()/report() — ledger and
       metadata only, no derived statistics.
     - VerifierLedgerStatistics(VerifierLedger): score_trend(),
       regressions_since(), flaky_verifiers(), baseline_snapshot(),
       tamper_check(), and to_context_items(), which flattens ledger state
       into the eight vidbyte.context.primitives.verifier ContextItems.
+    VerifierLedgerParams (validated dataclass: run_id + whether to publish
+    state into the agent's ContextManager) lives in
+    vidbyte.lib.dataclasses.verifier, not here, per review feedback on
+    PR #349.
 Relations:
     Records vidbyte.agents.runtimes.verifier.types.VerificationAttempt.
     Read by VerifierRuntimeGate.decide() and VerifierRuntimeBudget via
@@ -32,10 +34,8 @@ from __future__ import annotations
 
 import hashlib
 from collections.abc import Mapping
-from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from vidbyte.agents.runtimes.verifier.types import RepairOutcome, VerificationAttempt, VerifierTarget
 from vidbyte.context.primitives.verifier import (
     VerifierBudgetContextItem,
     VerifierDiagnosticContextItem,
@@ -46,24 +46,11 @@ from vidbyte.context.primitives.verifier import (
     VerifierTamperContextItem,
     VerifierTrendContextItem,
 )
-from vidbyte.lib.errors import ConfigurationError
+from vidbyte.lib.dataclasses.verifier import RepairOutcome, VerificationAttempt, VerifierLedgerParams, VerifierTarget
 
 if TYPE_CHECKING:
     from vidbyte.agents.runtimes.verifier.budget import VerifierRuntimeBudget
     from vidbyte.context.primitives import ContextItem
-
-
-@dataclass(frozen=True, slots=True)
-class VerifierLedgerParams:
-    """Validated configuration for one VerifierLedger."""
-
-    run_id: str
-    publish_to_context: bool = False
-
-    def __post_init__(self) -> None:
-        # A ledger with no run identity cannot be distinguished across concurrent runs in logs or metadata.
-        if not self.run_id.strip():
-            raise ConfigurationError("VerifierLedgerParams.run_id must be a non-empty string.")
 
 
 class VerifierLedger:

@@ -1,16 +1,18 @@
 """Context Protocol Header
 
 Description:
-    Defines VerifierParams and the Verifier base class, plus CallableVerifier.
+    Defines the Verifier base class, plus CallableVerifier.
 Purpose:
     A verifier is one deterministic check: it takes a VerifierTarget and
     returns a VerifierVerdict. CallableVerifier wraps a plain function so the
     collection is runnable without a full concrete subclass per VerifierKind.
 Architecture:
-    - VerifierParams: validated dataclass (name, kind, cost_class, tier,
-      blocking, depends_on, timeout_seconds).
     - Verifier: abstract base — check()/applicable()/describe().
     - CallableVerifier: wraps a sync or async predicate/verdict function.
+    VerifierParams (validated dataclass: name, kind, cost_class, tier,
+    blocking, depends_on, timeout_seconds) lives in
+    vidbyte.lib.dataclasses.verifier, not here, per review feedback on
+    PR #349.
 Relations:
     Consumed by vidbyte.agents.runtimes.verifier.collection.VerifierCollection.
 Similar Files:
@@ -23,44 +25,8 @@ from __future__ import annotations
 import inspect
 import time
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
 
-from vidbyte.agents.runtimes.verifier.types import VerifierCostClass, VerifierKind, VerifierTarget, VerifierVerdict
-from vidbyte.lib.errors import ConfigurationError
-
-
-@dataclass(frozen=True, slots=True)
-class VerifierParams:
-    """Validated configuration for one Verifier instance."""
-
-    name: str
-    kind: VerifierKind
-    cost_class: VerifierCostClass = VerifierCostClass.STANDARD
-    tier: int = 0
-    blocking: bool = True
-    depends_on: tuple[str, ...] = ()
-    timeout_seconds: float | None = None
-
-    def __post_init__(self) -> None:
-        # Rejects a blank name, a kind that is not a real VerifierKind member, and a non-positive timeout.
-        self._validate_name()
-        self._validate_kind()
-        self._validate_timeout()
-
-    def _validate_name(self) -> None:
-        # A verifier without a name cannot be addressed by depends_on or reported in feedback.
-        if not self.name.strip():
-            raise ConfigurationError("VerifierParams.name must be a non-empty string.")
-
-    def _validate_kind(self) -> None:
-        # Every verifier must declare one of the SDK's supported kinds.
-        if not isinstance(self.kind, VerifierKind):
-            raise ConfigurationError(f"VerifierParams.kind must be a VerifierKind member, got {self.kind!r}.")
-
-    def _validate_timeout(self) -> None:
-        # A zero or negative timeout would never let the check run.
-        if self.timeout_seconds is not None and self.timeout_seconds <= 0:
-            raise ConfigurationError("VerifierParams.timeout_seconds must be greater than zero when provided.")
+from vidbyte.lib.dataclasses.verifier import VerifierParams, VerifierTarget, VerifierVerdict
 
 
 class Verifier:

@@ -185,14 +185,19 @@ the hand-written-`__init__`-plus-`_validate()` pattern `ToolErrorPolicy` uses)
 **Type:** New file
 
 #### What it does
-Holds every enum and shared result/context dataclass referenced by more than
-one pillar: `VerifierKind`, `VerifierCostClass`, `TargetResolutionMode`,
-`VerifierExecutionMode`, `GateTrigger`, `GateDecision`, `VerdictStrategy`,
-`FeedbackContentMode`, `FeedbackDelivery`, `RepairMode`,
-`BudgetExhaustedAction`, and the dataclasses `VerifierTarget`,
-`VerifierVerdict`, `AggregatedVerdict`, `VerificationAttempt`,
-`ResolutionContext`, `RepairContext`, `RepairOutcome`,
-`VerifierRuntimeOutcome`.
+Per review feedback on PR #349 ("all dataclasses in this PR should be in
+vidbyte/lib/dataclasses"), this file now only defines `VerifierExecutionMode`,
+`GateTrigger`, and `GateDecision` — the three enums that remain eager
+defaults exclusively on `VerifierCollectionParams`/`VerifierRuntimeGateParams`
+(owned by `collection.py`/`gate.py`, neither modified by the move). Every
+other enum this file used to define — `VerifierKind`, `VerifierCostClass`,
+`TargetResolutionMode`, `VerdictStrategy`, `FeedbackContentMode`,
+`FeedbackDelivery`, `RepairMode`, `BudgetExhaustedAction` — and every shared
+dataclass — `VerifierTarget`, `VerifierVerdict`, `AggregatedVerdict`,
+`VerificationAttempt`, `ResolutionContext`, `RepairContext`, `RepairOutcome`,
+`VerifierRuntimeOutcome` — now lives in `vidbyte/lib/dataclasses/verifier.py`
+and is re-exported here for every existing import site in this package
+(including `collection.py` and `gate.py`, whose import lines are unchanged).
 
 #### Interface / API
 As specified in this conversation's interface-sketch turns, with one addition:
@@ -215,10 +220,12 @@ not here.
 **Type:** New file
 
 #### What it does
-`VerifierParams` (validated dataclass: `name`, `kind: VerifierKind`,
-`cost_class`, `tier`, `blocking`, `depends_on`, `timeout_seconds`) and
 `Verifier` (base class: `async check(target) -> VerifierVerdict`,
-`applicable(target) -> bool`, `describe() -> str`). Also ships one concrete,
+`applicable(target) -> bool`, `describe() -> str`). `VerifierParams`
+(validated dataclass: `name`, `kind: VerifierKind`, `cost_class`, `tier`,
+`blocking`, `depends_on`, `timeout_seconds`) now lives in
+`vidbyte/lib/dataclasses/verifier.py`, per review feedback on PR #349. Also
+ships one concrete,
 generic subclass — `CallableVerifier` — that wraps a user-supplied
 `Callable[[VerifierTarget], Awaitable[VerifierVerdict] | VerifierVerdict]` so
 the collection is runnable end-to-end without requiring a full
@@ -280,9 +287,10 @@ failing verdict — one bad verifier cannot take down the whole collection run.
 **File(s):** new · **Type:** New file
 
 #### What it does
-`ContextPrimitiveSelectorParams` + `VerifierTargetResolverParams` +
 `VerifierTargetResolver`, implementing the five `TargetResolutionMode`
-resolvers plus the context-primitive port-in.
+resolvers plus the context-primitive port-in. `ContextPrimitiveSelectorParams`
+and `VerifierTargetResolverParams` now live in
+`vidbyte/lib/dataclasses/verifier.py`, per review feedback on PR #349.
 
 #### Logic / Algorithm
 `resolve(context)` dispatches to the per-mode private resolver, then calls
@@ -334,8 +342,9 @@ ordinary iterations are never gated.
 **File(s):** new · **Type:** New file
 
 #### What it does
-`VerifierVerdictPolicyParams` + `VerifierVerdictPolicy`, implementing all five
-`VerdictStrategy` aggregations.
+`VerifierVerdictPolicy`, implementing all five `VerdictStrategy` aggregations.
+`VerifierVerdictPolicyParams` now lives in `vidbyte/lib/dataclasses/verifier.py`,
+per review feedback on PR #349.
 
 #### Logic / Algorithm
 `ALL_BLOCKING_MUST_PASS`: passed iff every `blocking=True` verdict passed;
@@ -496,9 +505,12 @@ an error.
 **File(s):** new · **Type:** New file
 
 #### What it does
-`VerifierRuntimeSettingsParams` (the container) + `VerifierRuntimeSettings`
-(the thin wrapper with `active()`), exactly as specified in the interface
-turns.
+`VerifierRuntimeSettings` (the thin wrapper with `active()`), exactly as
+specified in the interface turns. `VerifierRuntimeSettingsParams` (the
+container) now lives in `vidbyte/lib/dataclasses/verifier.py`, per review
+feedback on PR #349 — its own field annotations reference `VerifierCollection`/
+`VerifierRuntimeGate`/etc. only under `TYPE_CHECKING`, so the move introduces
+no cycle back into the pillar files.
 
 ---
 
@@ -604,11 +616,11 @@ and the twelve new public classes, covered in Section 6.
 | Action | File Path | Reason |
 |--------|-----------|--------|
 | CREATE | `vidbyte/agents/runtimes/verifier/__init__.py` | Package exports |
-| CREATE | `vidbyte/agents/runtimes/verifier/types.py` | Shared enums + dataclasses |
+| CREATE | `vidbyte/agents/runtimes/verifier/types.py` | 3 remaining enums (VerifierExecutionMode, GateTrigger, GateDecision) + re-exports |
 | CREATE | `vidbyte/agents/runtimes/verifier/verifier.py` | Verifier base + CallableVerifier |
-| CREATE | `vidbyte/agents/runtimes/verifier/collection.py` | VerifierCollection |
+| CREATE | `vidbyte/agents/runtimes/verifier/collection.py` | VerifierCollection (not modified by the PR #349 dataclass-relocation pass) |
 | CREATE | `vidbyte/agents/runtimes/verifier/target.py` | VerifierTargetResolver |
-| CREATE | `vidbyte/agents/runtimes/verifier/gate.py` | VerifierRuntimeGate |
+| CREATE | `vidbyte/agents/runtimes/verifier/gate.py` | VerifierRuntimeGate (not modified by the PR #349 dataclass-relocation pass) |
 | CREATE | `vidbyte/agents/runtimes/verifier/verdict.py` | VerifierVerdictPolicy |
 | CREATE | `vidbyte/agents/runtimes/verifier/feedback.py` | VerifierRuntimeFeedback |
 | CREATE | `vidbyte/agents/runtimes/verifier/repair.py` | VerifierRepairStrategy |
@@ -617,7 +629,7 @@ and the twelve new public classes, covered in Section 6.
 | CREATE | `vidbyte/agents/runtimes/verifier/settings.py` | VerifierRuntimeSettings |
 | CREATE | `vidbyte/agents/runtimes/verifier/runtime.py` | AgentVerifierRuntime orchestrator |
 | CREATE | `vidbyte/context/primitives/verifier.py` | 8 ledger-facing ContextItems |
-| CREATE | `vidbyte/lib/dataclasses/verifier.py` | BudgetExhaustedAction + VerifierRuntimeBudgetParams |
+| CREATE | `vidbyte/lib/dataclasses/verifier.py` | Every verifier-runtime enum + dataclass except VerifierCollectionParams (collection.py) and VerifierRuntimeGateParams (gate.py) |
 | CREATE | `vidbyte/agents/settings/verifier.py` | validate_verifier_runtime |
 | MODIFY | `vidbyte/lib/dataclasses/agents.py` | New AgentStopReason member |
 | MODIFY | `vidbyte/agents/settings/loop.py` | New verifier_runtime field, delegates validation |

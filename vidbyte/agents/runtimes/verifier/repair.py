@@ -1,17 +1,18 @@
 """Context Protocol Header
 
 Description:
-    Defines VerifierRepairStrategyParams and VerifierRepairStrategy.
+    Defines VerifierRepairStrategy.
 Purpose:
     Decides what mechanically happens to the next attempt after a rejected
     finalization: continue the same conversation, restart fresh with a
     summary, restrict the next attempt's edit scope, or (not yet implemented)
     fork into parallel repair attempts.
 Architecture:
-    - VerifierRepairStrategyParams: which RepairMode, and branch_width for
-      PARALLEL_BRANCHING.
     - VerifierRepairStrategy: repair() dispatches to one private method per
-      mode.
+      mode. VerifierRepairStrategyParams (validated dataclass: which
+      RepairMode, and branch_width for PARALLEL_BRANCHING) lives in
+      vidbyte.lib.dataclasses.verifier, not here, per review feedback on
+      PR #349.
 Relations:
     Consumes vidbyte.agents.runtimes.verifier.types.RepairContext, produces
     RepairOutcome, consumed by AgentVerifierRuntime.
@@ -23,36 +24,10 @@ Similar Files:
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
 
-from vidbyte.agents.runtimes.verifier.types import RepairContext, RepairMode, RepairOutcome, VerificationAttempt
-from vidbyte.lib.errors import ConfigurationError
+from vidbyte.lib.dataclasses.verifier import RepairContext, RepairMode, RepairOutcome, VerificationAttempt, VerifierRepairStrategyParams
 
 _PATH_TOKEN_PATTERN = re.compile(r"[\w][\w./\\-]*\.[A-Za-z0-9]{1,10}(?::\d+)?")
-
-
-@dataclass(frozen=True, slots=True)
-class VerifierRepairStrategyParams:
-    """Validated configuration for one VerifierRepairStrategy."""
-
-    mode: RepairMode = RepairMode.IN_PLACE_CONTINUE
-    scope_lock: bool = False
-    branch_width: int | None = None
-
-    def __post_init__(self) -> None:
-        # PARALLEL_BRANCHING cannot fork attempts without knowing how many to fork.
-        self._validate_branch_width_required()
-        self._validate_branch_width_range()
-
-    def _validate_branch_width_required(self) -> None:
-        # Without a width, PARALLEL_BRANCHING has no concurrency degree to fork with.
-        if self.mode is RepairMode.PARALLEL_BRANCHING and not self.branch_width:
-            raise ConfigurationError("VerifierRepairStrategyParams: mode=PARALLEL_BRANCHING requires branch_width.")
-
-    def _validate_branch_width_range(self) -> None:
-        # A width of one is not actually branching, it is IN_PLACE_CONTINUE with extra steps.
-        if self.branch_width is not None and self.branch_width < 2:
-            raise ConfigurationError("VerifierRepairStrategyParams.branch_width must be at least 2 when provided.")
 
 
 class VerifierRepairStrategy:

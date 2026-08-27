@@ -1,16 +1,16 @@
 """Context Protocol Header
 
 Description:
-    Defines the context-primitive selector, VerifierTargetResolverParams, and
-    VerifierTargetResolver.
+    Defines VerifierTargetResolver.
 Purpose:
     Decides what object gets handed to the verifiers, and optionally attaches
     the agent's accumulated context-window primitives to that object.
 Architecture:
-    - ContextPrimitiveSelectorParams: which ContextManager items to pull in.
-    - VerifierTargetResolverParams: which TargetResolutionMode to use.
     - VerifierTargetResolver: dispatches to a per-mode private resolver, then
       attaches selected context primitives to every VerifierTarget it builds.
+    ContextPrimitiveSelectorParams and VerifierTargetResolverParams (both
+    validated dataclasses) live in vidbyte.lib.dataclasses.verifier, not
+    here, per review feedback on PR #349.
 Relations:
     Produces vidbyte.agents.runtimes.verifier.types.VerifierTarget, consumed
     by VerifierCollection.run(). Reads vidbyte.context.manager.ContextManager.
@@ -25,56 +25,12 @@ import glob
 import json
 import os
 import subprocess
-from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from collections.abc import Mapping
 from typing import Any
 
 from vidbyte.agents.runtimes.verifier.types import ResolutionContext, TargetResolutionMode, VerifierTarget
 from vidbyte.context.primitives import ContextItem
-from vidbyte.lib.errors import ConfigurationError
-
-
-@dataclass(frozen=True, slots=True)
-class ContextPrimitiveSelectorParams:
-    """Which of the agent's accumulated context-window primitives to pull into the target."""
-
-    include_all: bool = False
-    include_kinds: tuple[str, ...] = ()
-    include_managed_ids: tuple[str, ...] = ()
-
-    def __post_init__(self) -> None:
-        # include_all already selects everything, so a redundant filter is a configuration mistake, not a no-op.
-        if self.include_all and (self.include_kinds or self.include_managed_ids):
-            raise ConfigurationError(
-                "ContextPrimitiveSelectorParams.include_all=True already selects every primitive; "
-                "include_kinds/include_managed_ids would be redundant and must be left empty."
-            )
-
-
-@dataclass(frozen=True, slots=True)
-class VerifierTargetResolverParams:
-    """Validated configuration for one VerifierTargetResolver."""
-
-    mode: TargetResolutionMode
-    include_patterns: tuple[str, ...] = ()
-    submission_tool_name: str | None = None
-    custom_resolver: Callable[[ResolutionContext], VerifierTarget] | None = None
-    context_primitives: ContextPrimitiveSelectorParams | None = None
-
-    def __post_init__(self) -> None:
-        # CUSTOM and STRUCTURED_SUBMISSION each require the one extra field their mode depends on.
-        self._validate_custom_mode()
-        self._validate_structured_submission_mode()
-
-    def _validate_custom_mode(self) -> None:
-        # A CUSTOM resolver with no custom_resolver has nothing to dispatch to.
-        if self.mode is TargetResolutionMode.CUSTOM and self.custom_resolver is None:
-            raise ConfigurationError("VerifierTargetResolverParams: mode=CUSTOM requires custom_resolver.")
-
-    def _validate_structured_submission_mode(self) -> None:
-        # Without a tool name there is nothing to scan the transcript for.
-        if self.mode is TargetResolutionMode.STRUCTURED_SUBMISSION and not self.submission_tool_name:
-            raise ConfigurationError("VerifierTargetResolverParams: mode=STRUCTURED_SUBMISSION requires submission_tool_name.")
+from vidbyte.lib.dataclasses.verifier import ContextPrimitiveSelectorParams, VerifierTargetResolverParams
 
 
 class VerifierTargetResolver:

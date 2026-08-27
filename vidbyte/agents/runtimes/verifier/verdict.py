@@ -1,15 +1,16 @@
 """Context Protocol Header
 
 Description:
-    Defines VerifierVerdictPolicyParams and VerifierVerdictPolicy.
+    Defines VerifierVerdictPolicy.
 Purpose:
     Combines N verifier verdicts gathered for one attempt into a single
     pass/fail AggregatedVerdict, under one of five configurable strategies.
 Architecture:
-    - VerifierVerdictPolicyParams: which VerdictStrategy, and its required
-      companion fields (score_threshold, weights, minimum_passing).
     - VerifierVerdictPolicy: aggregate() dispatches to one private method
-      per strategy.
+      per strategy. VerifierVerdictPolicyParams (validated dataclass: which
+      VerdictStrategy, and its required companion fields — score_threshold,
+      weights, minimum_passing) lives in vidbyte.lib.dataclasses.verifier,
+      not here, per review feedback on PR #349.
 Relations:
     Consumes vidbyte.agents.runtimes.verifier.types.VerifierVerdict, produces
     AggregatedVerdict, consumed by VerifierRuntimeGate.decide().
@@ -20,42 +21,10 @@ Similar Files:
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from collections.abc import Sequence
 
 from vidbyte.agents.runtimes.verifier.types import AggregatedVerdict, VerdictStrategy, VerifierVerdict
-from vidbyte.lib.errors import ConfigurationError
-
-
-@dataclass(frozen=True, slots=True)
-class VerifierVerdictPolicyParams:
-    """Validated configuration for one VerifierVerdictPolicy."""
-
-    strategy: VerdictStrategy = VerdictStrategy.ALL_BLOCKING_MUST_PASS
-    score_threshold: float | None = None
-    weights: Mapping[str, float] | None = None
-    minimum_passing: int | None = None
-
-    def __post_init__(self) -> None:
-        # Each strategy that needs a companion field must have it, and thresholds must be sane fractions.
-        self._validate_weighted_threshold()
-        self._validate_k_of_n()
-        self._validate_threshold_range()
-
-    def _validate_weighted_threshold(self) -> None:
-        # WEIGHTED_SCORE_THRESHOLD cannot decide pass/fail without a threshold to compare against.
-        if self.strategy is VerdictStrategy.WEIGHTED_SCORE_THRESHOLD and self.score_threshold is None:
-            raise ConfigurationError("VerifierVerdictPolicyParams: strategy=WEIGHTED_SCORE_THRESHOLD requires score_threshold.")
-
-    def _validate_k_of_n(self) -> None:
-        # K_OF_N cannot decide pass/fail without knowing how many verdicts must pass.
-        if self.strategy is VerdictStrategy.K_OF_N and self.minimum_passing is None:
-            raise ConfigurationError("VerifierVerdictPolicyParams: strategy=K_OF_N requires minimum_passing.")
-
-    def _validate_threshold_range(self) -> None:
-        # A threshold outside [0, 1] can never be met or can always be met — either way it is a mistake.
-        if self.score_threshold is not None and not (0.0 <= self.score_threshold <= 1.0):
-            raise ConfigurationError("VerifierVerdictPolicyParams.score_threshold must be within [0.0, 1.0].")
+from vidbyte.lib.dataclasses.verifier import VerifierVerdictPolicyParams
 
 
 class VerifierVerdictPolicy:
