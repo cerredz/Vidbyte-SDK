@@ -72,6 +72,7 @@ class TestSuiteVerifier(Verifier):
     async def check(self, target: VerifierTarget) -> VerifierVerdict:
         """Runs the configured test command, parses its JUnit report, and gates on pass_fraction."""
         started = time.monotonic()
+        assert target.workspace_root is not None
         await self._run_command(target.workspace_root)
         summary = self._parse_report(target.workspace_root)
         return self._to_verdict(summary, duration_seconds=time.monotonic() - started)
@@ -102,9 +103,12 @@ class TestSuiteVerifier(Verifier):
 
     def _in_scope(self, case: ET.Element) -> bool:
         # A testcase is in scope when its classname or file attribute starts with the configured scope_path.
+        scope_path = self._config.scope_path
+        if scope_path is None:
+            return True
         classname = case.get("classname", "").replace(".", "/")
         file_attr = case.get("file", "")
-        return classname.startswith(self._config.scope_path) or file_attr.startswith(self._config.scope_path)
+        return classname.startswith(scope_path) or file_attr.startswith(scope_path)
 
     def _to_verdict(self, summary: _JUnitSummary, *, duration_seconds: float) -> VerifierVerdict:
         # Converts the parsed summary into a verdict; zero collected tests never counts as a pass.

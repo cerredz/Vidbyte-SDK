@@ -210,7 +210,7 @@ class AgentRuntime:
         started_at = self.middleware.clock()
         last_response: object | None = None
         last_assistant_output: str | None = None
-        run_state: dict[type, Any] = {}
+        run_state: dict[str, Any] = {}
         iteration_outputs: list[str] = []
         active_trace_context = trace_context
         fallback_index = 0
@@ -743,7 +743,7 @@ class AgentRuntime:
                     model_response=raw_result,
                 )
 
-    async def _invoke_with_middleware(self, handle: RunnerHandle, message: str, call_options: Mapping[str, Any], *, context: BaseAgentContext, iteration_count: int, model_call_count: int, call_contexts: Sequence[ToolCallContext], tokens_used: int | None, started_at: float, metadata: Mapping[str, Any], run_state: dict[type, Any] | None = None, trace_context: SpanContext | None = None, compaction_count: int = 0) -> tuple[object | AgentResult, int, int]:
+    async def _invoke_with_middleware(self, handle: RunnerHandle, message: str, call_options: Mapping[str, Any], *, context: BaseAgentContext, iteration_count: int, model_call_count: int, call_contexts: Sequence[ToolCallContext], tokens_used: int | None, started_at: float, metadata: Mapping[str, Any], run_state: dict[str, Any] | None = None, trace_context: SpanContext | None = None, compaction_count: int = 0) -> tuple[object | AgentResult, int, int]:
         """Invoke the runner, allowing middleware to retry model errors while tracking compaction events."""
         provider = handle.provider
         while True:
@@ -873,7 +873,7 @@ class AgentRuntime:
         self._end_semantic_span(span, output=str(attempt.get("to", "")))
 
     @staticmethod
-    def _publish_fallback_metadata(run_state: dict[type, Any], record: Mapping[str, Any]) -> None:
+    def _publish_fallback_metadata(run_state: dict[str, Any], record: Mapping[str, Any]) -> None:
         # Publishes the switch log through the generic run_state channel _with_run_state_metadata already lifts.
         published = run_state.get("__result_metadata__")
         base = dict(published) if isinstance(published, Mapping) else {}
@@ -891,7 +891,7 @@ class AgentRuntime:
         tokens_used: int | None,
         started_at: float,
         metadata: Mapping[str, Any],
-        run_state: dict[type, Any] | None = None,
+        run_state: dict[str, Any] | None = None,
         model_response: object | None = None,
     ) -> AgentResult:
         """Run after_run middleware and attach final middleware metadata."""
@@ -923,7 +923,7 @@ class AgentRuntime:
         return self._with_middleware_metadata(result)
 
     @staticmethod
-    def _with_run_state_metadata(result: AgentResult, run_state: dict[type, Any] | None) -> AgentResult:
+    def _with_run_state_metadata(result: AgentResult, run_state: dict[str, Any] | None) -> AgentResult:
         """Merge per-run metadata published by middleware (e.g. trace artifacts) into the result."""
         # Generic, feature-agnostic lift of run_state["__result_metadata__"]; no feature imports here.
         published = (run_state or {}).get("__result_metadata__")
@@ -1100,7 +1100,7 @@ class AgentRuntime:
         tokens_used: int | None,
         started_at: float,
         metadata: Mapping[str, Any],
-        run_state: dict[type, Any] | None = None,
+        run_state: dict[str, Any] | None = None,
         tool_call: ToolCall | None = None,
         tool_result: ToolResult | None = None,
         model_response: object | None = None,
@@ -1558,7 +1558,7 @@ class AgentRuntime:
         tokens_used: int | None,
         started_at: float,
         metadata: Mapping[str, Any],
-        run_state: dict[type, Any] | None = None,
+        run_state: dict[str, Any] | None = None,
         model_response: object | None = None,
         trace_context: SpanContext | None = None,
     ) -> tuple[ToolCallContext, ToolResult] | AgentResult:
@@ -1952,7 +1952,7 @@ class AgentRuntime:
             return 1 if int(before) != int(after) else 0
         return 1
 
-    def _publish_contract_evaluations(self, run_state: dict[type, Any], counters: Mapping[str, Any]) -> None:
+    def _publish_contract_evaluations(self, run_state: dict[str, Any], counters: Mapping[str, Any]) -> None:
         # Records each contract's evaluation into run_state so _with_run_state_metadata lifts it into the result.
         run_state.setdefault("__result_metadata__", {})["contract_evaluations"] = self.output_contract.report(counters)
 
@@ -1967,7 +1967,7 @@ class AgentRuntime:
         call_contexts: Sequence[ToolCallContext],
         provider: Any,
         pending_tool_call: "ToolCall | None",
-        run_state: dict[type, Any],
+        run_state: dict[str, Any],
     ) -> tuple[bool, "AgentResult | None"]:
         """Runs the verifier gate for one finalization attempt; returns (blocked, stop_result).
 
@@ -2015,7 +2015,7 @@ class AgentRuntime:
         tokens_used: int | None,
         call_contexts: Sequence[ToolCallContext],
         provider: Any,
-        run_state: dict[type, Any],
+        run_state: dict[str, Any],
     ) -> tuple[bool, AgentResult | None]:
         # Runs a mode-scheduled checkpoint after an ordinary iteration and applies its feedback or stop decision.
         if self._verifier_runtime is None:
@@ -2067,15 +2067,19 @@ class AgentRuntime:
 
     def _verifier_feedback_delivery(self) -> "FeedbackDelivery":
         # Reads the configured delivery mode from the orchestrator's own feedback pillar.
+        if self._verifier_runtime is None:
+            return FeedbackDelivery.USER_MESSAGE
         return self._verifier_runtime.settings.params.feedback.params.delivery
 
     def _publish_verifier_feedback_context_item(self, text: str) -> None:
         # CONTEXT_ITEM delivery: publish as a context primitive instead of appending a conversation message.
+        if self.context_manager is None:
+            return
         from vidbyte.context.primitives.verifier import VerifierDiagnosticContextItem
 
         self.context_manager.upsert(VerifierDiagnosticContextItem(diagnostics=(text,)))
 
-    def _publish_verifier_evaluations(self, run_state: dict[type, Any]) -> None:
+    def _publish_verifier_evaluations(self, run_state: dict[str, Any]) -> None:
         # Records the verifier ledger's report into run_state so _with_run_state_metadata lifts it into the result.
         if self._verifier_runtime is None:
             return

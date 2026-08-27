@@ -45,6 +45,7 @@ from typing import Any
 from vidbyte.agents.runtimes.verifier.types import ResolutionContext, TargetResolutionMode, VerifierTarget
 from vidbyte.context.primitives import ContextItem
 from vidbyte.lib.dataclasses.verifier import ContextPrimitiveSelectorParams, VerifierTargetResolverParams
+from vidbyte.lib.errors import ConfigurationError
 
 GIT_DIFF_TIMEOUT_SECONDS = 30
 SUCCESS_RETURN_CODE = 0
@@ -83,7 +84,10 @@ class VerifierTargetResolver:
             return self._resolve_workspace_diff(context)
         if self.params.mode is TargetResolutionMode.STRUCTURED_SUBMISSION:
             return self._resolve_structured_submission(context)
-        return self.params.custom_resolver(context)
+        resolver = self.params.custom_resolver
+        if resolver is None:
+            raise ConfigurationError("CUSTOM target resolution requires custom_resolver.")
+        return resolver(context)
 
     def _resolve_final_output_text(self, context: ResolutionContext) -> VerifierTarget:
         # The simplest mode: whatever the model's candidate final text currently is.

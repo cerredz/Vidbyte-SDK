@@ -72,6 +72,8 @@ class LeanProofVerifier(Verifier):
         """Runs the configured Lean command against the resolved file and gates on its diagnostics."""
         started = time.monotonic()
         file_path = self._resolve_file(target)
+        assert target.workspace_root is not None
+        assert file_path is not None
         result = await self._run_lean(target.workspace_root, file_path)
         return self._to_verdict(result, duration_seconds=time.monotonic() - started)
 
