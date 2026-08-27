@@ -319,21 +319,37 @@ in the loop, not the resolver.
 `VerifierRuntimeGateParams` + `VerifierRuntimeGate`. `should_fire` checks the
 configured `GateTrigger` against the current `ResolutionContext`. `decide`
 combines an `AggregatedVerdict` with the budget/ledger state into one of the
-three `GateDecision` values.
+three `GateDecision` values. Per review feedback on PR #349 ("dont really
+want a on_finalization_attempt in the runtime, the gate should have this
+logic"), `evaluate_finalization_attempt` also lives here: it is the full
+orchestration entry point `AgentVerifierRuntime.on_finalization_attempt` now
+delegates to — resolve the target, run the collection, aggregate the
+verdict, record it, then call `decide`. Everything *after* the decision
+(feedback rendering, repair, context publishing) stays in `runtime.py`,
+since those are not gate concerns.
 
 #### Logic / Algorithm
-`decide`: if `verdict.passed`, `ALLOW_FINALIZE`. Else, ask
-`budget.exhausted(ledger)`; if exhausted, resolve `on_exhausted` —
-`FAIL`/`DOWNGRADE_TO_ADVISORY` both resolve here (`DOWNGRADE_TO_ADVISORY`
-returns `ALLOW_FINALIZE` but the caller is expected to surface the advisory
-verdicts in the result metadata, which the ledger's `report()` already does),
-`ESCALATE_TO_HUMAN` and plain exhaustion both return
-`REJECT_AND_TERMINATE`. Otherwise `REJECT_AND_CONTINUE`.
+`evaluate_finalization_attempt`: if `should_fire` is `False`, returns
+`(ALLOW_FINALIZE, None)` immediately — nothing ran, nothing to report.
+Otherwise `_run_attempt` resolves the target via the passed-in
+`target_resolver`, runs the passed-in `collection`, aggregates via the
+passed-in `verdict_policy`, records the attempt on the passed-in `ledger`,
+and returns it; `evaluate_finalization_attempt` then calls `decide` on the
+result and returns `(decision, attempt)`. `decide`: if `verdict.passed`,
+`ALLOW_FINALIZE`. Else, ask `budget.exhausted(ledger)`; if exhausted, resolve
+`on_exhausted` — `FAIL`/`DOWNGRADE_TO_ADVISORY` both resolve here
+(`DOWNGRADE_TO_ADVISORY` returns `ALLOW_FINALIZE` but the caller is expected
+to surface the advisory verdicts in the result metadata, which the ledger's
+`report()` already does), `ESCALATE_TO_HUMAN` and plain exhaustion both
+return `REJECT_AND_TERMINATE`. Otherwise `REJECT_AND_CONTINUE`.
 
 #### Edge Cases & Error Handling
 `ON_EXPLICIT_SIGNAL` trigger's `should_fire` checks the latest tool call name
 against `explicit_signal_tool_name`; absent that call, returns `False` so
-ordinary iterations are never gated.
+ordinary iterations are never gated. `target_resolver`, `collection`,
+`verdict_policy`, `budget`, and `ledger` are all accepted as parameters
+(type-hinted under `TYPE_CHECKING` only) rather than imported for real, so
+this module-level import graph stays acyclic.
 
 ---
 
@@ -523,9 +539,13 @@ no cycle back into the pillar files.
 run, constructed lazily on first use inside `AgentRuntime.__init__`.
 
 #### Logic / Algorithm
-`on_finalization_attempt(context)` exactly as specified in the interface
-turns: gate check → resolve target → run collection → aggregate → record →
-gate decide → (on reject) feedback + repair. Adds: when
+Per review feedback on PR #349, `on_finalization_attempt(context)` now
+delegates the entire gate-check-through-decide sequence (resolve target →
+run collection → aggregate → record → decide) to
+`gate.evaluate_finalization_attempt(...)`, passing it the configured
+`target_resolver`, `collection`, `verdict_policy`, `budget`, and this run's
+`ledger`. This class picks the sequence back up only once a decision comes
+back: (on reject) feedback + repair. Adds: when
 `ledger_params.publish_to_context` and `context.context_manager is not None`,
 upserts `ledger.to_context_items(...)` after recording.
 

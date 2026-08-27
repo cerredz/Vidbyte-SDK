@@ -5,14 +5,26 @@ Description:
 Purpose:
     Decides when verification fires and what an aggregated verdict means for
     loop control flow — the only place a verdict and the remaining budget
-    meet to produce a concrete continue/stop decision.
+    meet to produce a concrete continue/stop decision. Per review feedback
+    on PR #349 ("dont really want a on_finalization_attempt in the runtime,
+    the gate should have this logic"), this file also owns the finalization
+    orchestration itself, not just the fire/decide judgment calls.
 Architecture:
     - VerifierRuntimeGateParams: which GateTrigger to use.
-    - VerifierRuntimeGate: should_fire() / decide().
+    - VerifierRuntimeGate: should_fire() / decide() / describe_trigger(), plus
+      evaluate_finalization_attempt() — the orchestration entry point
+      AgentVerifierRuntime.on_finalization_attempt delegates to: resolve the
+      target, run the collection, aggregate the verdict, record it, then
+      call decide().
 Relations:
-    Consumed by vidbyte.agents.runtimes.verifier.runtime.AgentVerifierRuntime.
-    decide() reads vidbyte.agents.runtimes.verifier.budget.VerifierRuntimeBudget
-    and vidbyte.agents.runtimes.verifier.ledger.VerifierLedger by type only.
+    Consumed by vidbyte.agents.runtimes.verifier.runtime.AgentVerifierRuntime,
+    which still owns what happens *after* a decision (feedback + repair +
+    context publishing) — those are not gate concerns.
+    evaluate_finalization_attempt() reads
+    vidbyte.agents.runtimes.verifier.target.VerifierTargetResolver,
+    .collection.VerifierCollection, .verdict.VerifierVerdictPolicy,
+    .budget.VerifierRuntimeBudget, and .ledger.VerifierLedger by type only,
+    to avoid a module-level import cycle.
 Similar Files:
     - vidbyte/agents/contract.py: exhausted()/unmet() is the nearest existing
       "verdict + budget -> continue or stop" decision in this repo.
@@ -20,15 +32,26 @@ Similar Files:
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from vidbyte.agents.runtimes.verifier.types import AggregatedVerdict, BudgetExhaustedAction, GateDecision, GateTrigger, ResolutionContext
+from vidbyte.agents.runtimes.verifier.types import (
+    AggregatedVerdict,
+    BudgetExhaustedAction,
+    GateDecision,
+    GateTrigger,
+    ResolutionContext,
+    VerificationAttempt,
+)
 from vidbyte.lib.errors import ConfigurationError
 
 if TYPE_CHECKING:
     from vidbyte.agents.runtimes.verifier.budget import VerifierRuntimeBudget
+    from vidbyte.agents.runtimes.verifier.collection import VerifierCollection
     from vidbyte.agents.runtimes.verifier.ledger import VerifierLedger
+    from vidbyte.agents.runtimes.verifier.target import VerifierTargetResolver
+    from vidbyte.agents.runtimes.verifier.verdict import VerifierVerdictPolicy
 
 
 @dataclass(frozen=True, slots=True)
@@ -67,6 +90,52 @@ class VerifierRuntimeGate:
         if self.params.trigger is GateTrigger.ON_EXPLICIT_SIGNAL:
             return self._explicit_signal_present(context)
         return True
+
+    async def evaluate_finalization_attempt(
+        self,
+        context: ResolutionContext,
+        *,
+        target_resolver: "VerifierTargetResolver",
+        collection: "VerifierCollection",
+        verdict_policy: "VerifierVerdictPolicy",
+        budget: "VerifierRuntimeBudget",
+        ledger: "VerifierLedger",
+    ) -> tuple[GateDecision, VerificationAttempt | None]:
+        """Runs one full gate check for a finalization attempt: resolves the target, runs the
+        collection, aggregates the verdict, records it, and returns the resulting decision.
+
+        Returns (ALLOW_FINALIZE, None) without running anything when should_fire is False —
+        there is no attempt to report back in that case.
+        """
+        if not self.should_fire(context):
+            return GateDecision.ALLOW_FINALIZE, None
+        attempt = await self._run_attempt(context, target_resolver, collection, verdict_policy, ledger)
+        decision = self.decide(attempt.aggregated, attempt.attempt_number, budget, ledger)
+        return decision, attempt
+
+    async def _run_attempt(
+        self,
+        context: ResolutionContext,
+        target_resolver: "VerifierTargetResolver",
+        collection: "VerifierCollection",
+        verdict_policy: "VerifierVerdictPolicy",
+        ledger: "VerifierLedger",
+    ) -> VerificationAttempt:
+        # Resolves the target, runs every configured verifier, aggregates the result, and records it.
+        started = time.monotonic()
+        target = target_resolver.resolve(context)
+        verdicts = await collection.run(target)
+        aggregated = verdict_policy.aggregate(verdicts)
+        attempt = VerificationAttempt(
+            attempt_number=len(ledger.history()) + 1,
+            target=target,
+            aggregated=aggregated,
+            started_at=started,
+            completed_at=time.monotonic(),
+            cost_spent_usd=context.cost_spent_usd,
+        )
+        ledger.record(attempt)
+        return attempt
 
     def decide(
         self,

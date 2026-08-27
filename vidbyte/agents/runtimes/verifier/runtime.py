@@ -4,11 +4,17 @@ Description:
     Defines AgentVerifierRuntime, the verifier-runtime orchestrator.
 Purpose:
     The one method the linear AgentRuntime calls at each finalization
-    boundary: resolve a target, run the collection, aggregate the verdict,
-    record it, and turn the result into a concrete continue/stop decision.
+    boundary. Per review feedback on PR #349 ("dont really want a
+    on_finalization_attempt in the runtime, the gate should have this
+    logic"), resolving the target, running the collection, aggregating the
+    verdict, recording it, and deciding now lives in
+    VerifierRuntimeGate.evaluate_finalization_attempt(); this class owns only
+    what happens *after* a decision — feedback, repair, and context
+    publishing — which are not gate concerns.
 Architecture:
     - AgentVerifierRuntime: one instance per AgentRuntime run.
-      on_finalization_attempt() is the entire public surface the caller needs.
+      on_finalization_attempt() is the entire public surface the caller needs;
+      it delegates the finalization check itself to the configured gate.
 Relations:
     Constructed by vidbyte.agents.runtime.AgentRuntime from a
     vidbyte.agents.runtimes.verifier.settings.VerifierRuntimeSettings.
@@ -21,7 +27,6 @@ Similar Files:
 from __future__ import annotations
 
 import dataclasses
-import time
 
 from vidbyte.agents.runtimes.verifier.ledger import VerifierLedgerStatistics
 from vidbyte.agents.runtimes.verifier.settings import VerifierRuntimeSettings
@@ -37,29 +42,19 @@ class AgentVerifierRuntime:
         self.ledger = VerifierLedgerStatistics(dataclasses.replace(settings.params.ledger_params, run_id=run_id))
 
     async def on_finalization_attempt(self, context: ResolutionContext) -> VerifierRuntimeOutcome:
-        """Runs one full gate check for a finalization attempt and returns the resulting outcome."""
-        if not self.settings.params.gate.should_fire(context):
-            return VerifierRuntimeOutcome(GateDecision.ALLOW_FINALIZE, None, None)
-        attempt = await self._run_attempt(context)
-        decision = self.settings.params.gate.decide(attempt.aggregated, attempt.attempt_number, self.settings.params.budget, self.ledger)
-        return await self._resolve_decision(decision, attempt, context)
-
-    async def _run_attempt(self, context: ResolutionContext) -> VerificationAttempt:
-        # Resolves the target, runs every configured verifier, aggregates the result, and records it.
-        started = time.monotonic()
-        target = self.settings.params.target_resolver.resolve(context)
-        verdicts = await self.settings.params.collection.run(target)
-        aggregated = self.settings.params.verdict_policy.aggregate(verdicts)
-        attempt = VerificationAttempt(
-            attempt_number=len(self.ledger.history()) + 1,
-            target=target,
-            aggregated=aggregated,
-            started_at=started,
-            completed_at=time.monotonic(),
-            cost_spent_usd=context.cost_spent_usd,
+        """Delegates the finalization check to the gate, then resolves the decision into an outcome."""
+        decision, attempt = await self.settings.params.gate.evaluate_finalization_attempt(
+            context,
+            target_resolver=self.settings.params.target_resolver,
+            collection=self.settings.params.collection,
+            verdict_policy=self.settings.params.verdict_policy,
+            budget=self.settings.params.budget,
+            ledger=self.ledger,
         )
-        self.ledger.record(attempt)
-        return attempt
+        if attempt is None:
+            # should_fire was False this iteration — nothing ran, nothing to report back.
+            return VerifierRuntimeOutcome(decision, None, None)
+        return await self._resolve_decision(decision, attempt, context)
 
     async def _resolve_decision(self, decision: GateDecision, attempt: VerificationAttempt, context: ResolutionContext) -> VerifierRuntimeOutcome:
         # Turns a GateDecision into the feedback/repair pairing appropriate for that decision.
