@@ -27,7 +27,13 @@ Similar Files:
 from __future__ import annotations
 
 from vidbyte.agents.runtimes.verifier.budget import VerifierRuntimeBudget
-from vidbyte.agents.runtimes.verifier.collection import VerifierCollection, VerifierCollectionParams
+from vidbyte.agents.runtimes.verifier.collection import (
+    DatabaseQueryVerifier,
+    LeanProofVerifier,
+    TestSuiteVerifier,
+    VerifierCollection,
+    VerifierCollectionParams,
+)
 from vidbyte.agents.runtimes.verifier.feedback import VerifierRuntimeFeedback, VerifierRuntimeFeedbackParams
 from vidbyte.agents.runtimes.verifier.gate import VerifierRuntimeGate, VerifierRuntimeGateParams
 from vidbyte.agents.runtimes.verifier.ledger import VerifierLedger, VerifierLedgerParams, VerifierLedgerStatistics
@@ -58,7 +64,12 @@ from vidbyte.agents.runtimes.verifier.types import (
 )
 from vidbyte.agents.runtimes.verifier.verdict import VerifierVerdictPolicy, VerifierVerdictPolicyParams
 from vidbyte.agents.runtimes.verifier.verifier import CallableVerifier, Verifier, VerifierParams
-from vidbyte.lib.dataclasses.verifier import VerifierRuntimeBudgetParams
+from vidbyte.lib.dataclasses.verifier import (
+    DatabaseQueryVerifierConfig,
+    LeanProofVerifierConfig,
+    TestSuiteVerifierConfig,
+    VerifierRuntimeBudgetParams,
+)
 
 __all__ = [
     "AgentVerifierRuntime",
@@ -66,15 +77,21 @@ __all__ = [
     "BudgetExhaustedAction",
     "CallableVerifier",
     "ContextPrimitiveSelectorParams",
+    "DatabaseQueryVerifier",
+    "DatabaseQueryVerifierConfig",
     "FeedbackContentMode",
     "FeedbackDelivery",
     "GateDecision",
     "GateTrigger",
+    "LeanProofVerifier",
+    "LeanProofVerifierConfig",
     "RepairContext",
     "RepairMode",
     "RepairOutcome",
     "ResolutionContext",
     "TargetResolutionMode",
+    "TestSuiteVerifier",
+    "TestSuiteVerifierConfig",
     "VerdictStrategy",
     "VerificationAttempt",
     "Verifier",
