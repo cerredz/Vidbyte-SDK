@@ -32,11 +32,12 @@ custom_lookup = lookup_tool.customize(
 )
 ```
 
-Customization never adds parameters, changes validation, or mutates the
-original tool. Use a concrete custom tool or adapter when an application needs
-new business inputs or behavior. Use `with_activity()` for a separate typed
-model-authored annotation that should be captured and removed before the
-wrapped tool executes.
+The tool description is required; the parameter-description mapping defaults to
+empty when only the tool description changes. Customization never adds
+parameters, changes validation, or mutates the original tool. Use a concrete
+custom tool or adapter when an application needs new business inputs or
+behavior. Use `with_activity()` for a separate typed model-authored annotation
+that should be captured and removed before the wrapped tool executes.
 
 ## Usage
 

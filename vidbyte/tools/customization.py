@@ -11,8 +11,9 @@ PURPOSE:
 
 ROLE IN CODEBASE:
     Called lazily by vidbyte.tools.base.BaseTool.customize(). It calls
-    vidbyte.tools.base._ToolWrapper and vidbyte.lib.dataclasses.tools.ToolSpec,
-    ToolParameter, and the standard dataclass replacement machinery. Its
+    vidbyte.tools.base._ToolWrapper and the validated
+    vidbyte.lib.dataclasses.tools.ToolCustomization, ToolSpec, and ToolParameter
+    contracts plus the standard dataclass replacement machinery. Its
     returned spec flows through vidbyte.tools.catalog.Tools, vidbyte.lib.tools
     formatter.ToolsFormatter, and provider clients. Its execution delegation
     flows through vidbyte.tools.executor.ToolExecutor and vidbyte.agents.runtime.
@@ -24,24 +25,22 @@ ARCHITECTURE NOTE:
     properties are copied so prompt rendering and provider schemas cannot drift.
 
 FUNCTION INVENTORY:
-    _CustomizedTool.__init__(tool, description, parameter_descriptions) -> None
-        Validates and freezes the requested description replacements.
+    _CustomizedTool.__init__(tool, customization) -> None
+        Stores the already-validated description replacements.
     _CustomizedTool.spec() -> ToolSpec
         Returns a copied model-facing spec with replacements applied.
     _CustomizedTool.validate_call(call) -> str | None
         Delegates call validation to the original tool.
     _CustomizedTool.execute(call) -> ToolResult
         Delegates execution to the original tool without changing arguments.
-    _ToolSpecCustomizer.apply(spec, description, parameter_descriptions) -> ToolSpec
+    _ToolSpecCustomizer.apply(spec, customization) -> ToolSpec
         Applies validated description replacements to both schema representations.
-    _ToolSpecCustomizer._declared_parameter_names(spec) -> frozenset[str]
-        Returns effective top-level parameter names and validates explicit schemas.
     _ToolSpecCustomizer._replace_parameters(parameters, descriptions) -> tuple[ToolParameter, ...]
         Replaces matching ToolParameter descriptions immutably.
-    _ToolSpecCustomizer._replace_input_schema(schema, descriptions, tool_name) -> Mapping[str, Any] | None
-        Deep-copies and updates explicit input-schema property descriptions.
-    _validate_description_values(tool_name, description, parameter_descriptions) -> dict[str, str]
-        Rejects blank or incorrectly typed replacement values before schema use.
+    _ToolSpecCustomizer._replace_input_schema(schema, descriptions) -> Mapping[str, Any] | None
+        Deep-copies and updates validated explicit input-schema property descriptions.
+    No validation functions live here; ToolCustomization owns all input and
+        source-schema validation before this module is constructed.
 
 COMMON MODIFICATION PATTERNS:
     Add only model-facing presentation fields here. If a change needs a new
@@ -89,9 +88,9 @@ from __future__ import annotations
 from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import replace
-from types import MappingProxyType
 from typing import Any
 
+from vidbyte.lib.dataclasses.tools import ToolCustomization
 from vidbyte.tools.base import BaseTool, _ToolWrapper
 from vidbyte.tools.types import ToolCall, ToolParameter, ToolResult, ToolSpec
 
@@ -99,13 +98,10 @@ from vidbyte.tools.types import ToolCall, ToolParameter, ToolResult, ToolSpec
 class _CustomizedTool(_ToolWrapper):
     """Private wrapper that changes model-facing descriptions only."""
 
-    def __init__(self, tool: BaseTool, *, description: str | None = None, parameter_descriptions: Mapping[str, str] | None = None) -> None:
-        # Validate replacement values before the wrapper can enter a catalog.
-        descriptions = _validate_description_values(tool.name, description, parameter_descriptions)
-        _ToolSpecCustomizer.apply(tool.spec(), description, descriptions)
+    def __init__(self, tool: BaseTool, customization: ToolCustomization) -> None:
+        # The dataclass owns validation; this wrapper only preserves the tool boundary.
         self._tool = tool
-        self._description = description
-        self._parameter_descriptions = MappingProxyType(descriptions)
+        self._customization = customization
 
     @property
     def wrapped_tool(self) -> BaseTool:
@@ -114,7 +110,7 @@ class _CustomizedTool(_ToolWrapper):
 
     def spec(self) -> ToolSpec:
         # Return a fresh customized spec while preserving the wrapped contract.
-        return _ToolSpecCustomizer.apply(self._tool.spec(), self._description, self._parameter_descriptions)
+        return _ToolSpecCustomizer.apply(self._tool.spec(), self._customization)
 
     def validate_call(self, call: ToolCall) -> str | None:
         # Preserve the original validation contract and error wording.
@@ -129,37 +125,19 @@ class _ToolSpecCustomizer:
     """Pure helpers for applying description replacements to a ToolSpec."""
 
     @staticmethod
-    def apply(spec: ToolSpec, description: str | None, parameter_descriptions: Mapping[str, str]) -> ToolSpec:
-        # Validate names and replace every model-facing description representation.
-        if parameter_descriptions:
-            declared = _ToolSpecCustomizer._declared_parameter_names(spec)
-            unknown = sorted(set(parameter_descriptions) - declared)
-            if unknown:
-                names = ", ".join(repr(name) for name in unknown)
-                raise ValueError(f"Tool '{spec.name}' has no top-level parameter(s): {names}")
+    def apply(spec: ToolSpec, customization: ToolCustomization) -> ToolSpec:
+        # Replace every model-facing description representation from validated input.
+        parameter_descriptions = customization.parameter_descriptions
         input_schema = _ToolSpecCustomizer._replace_input_schema(
             spec.input_schema,
             parameter_descriptions,
-            spec.name,
         )
         return replace(
             spec,
-            description=description if description is not None else spec.description,
+            description=customization.description,
             parameters=_ToolSpecCustomizer._replace_parameters(spec.parameters, parameter_descriptions),
             input_schema=input_schema,
         )
-
-    @staticmethod
-    def _declared_parameter_names(spec: ToolSpec) -> frozenset[str]:
-        # Return the provider-facing top-level names from the active schema representation.
-        if spec.input_schema is None:
-            return frozenset(parameter.name for parameter in spec.parameters)
-        properties = spec.input_schema.get("properties") if isinstance(spec.input_schema, Mapping) else None
-        if not isinstance(properties, Mapping):
-            raise ValueError(f"Tool '{spec.name}' input_schema must expose top-level properties")
-        if not all(isinstance(name, str) for name in properties):
-            raise ValueError(f"Tool '{spec.name}' input_schema property names must be strings")
-        return frozenset(properties)
 
     @staticmethod
     def _replace_parameters(parameters: tuple[ToolParameter, ...], descriptions: Mapping[str, str]) -> tuple[ToolParameter, ...]:
@@ -172,47 +150,16 @@ class _ToolSpecCustomizer:
         )
 
     @staticmethod
-    def _replace_input_schema(schema: Mapping[str, Any] | None, descriptions: Mapping[str, str], tool_name: str) -> Mapping[str, Any] | None:
-        # Deep-copy explicit JSON Schema properties before applying descriptions.
+    def _replace_input_schema(schema: Mapping[str, Any] | None, descriptions: Mapping[str, str]) -> Mapping[str, Any] | None:
+        # Deep-copy validated explicit JSON Schema properties before applying descriptions.
         if schema is None or not descriptions:
             return schema
-        properties = schema.get("properties") if isinstance(schema, Mapping) else None
-        if not isinstance(properties, Mapping):
-            raise ValueError(f"Tool '{tool_name}' input_schema must expose top-level properties")
-        try:
-            copied = deepcopy(dict(schema))
-        except (TypeError, ValueError) as exc:
-            raise ValueError(f"Tool '{tool_name}' input_schema could not be copied") from exc
-        copied_source = copied["properties"]
-        if not isinstance(copied_source, Mapping):
-            raise ValueError(f"Tool '{tool_name}' input_schema must expose top-level properties")
-        copied_properties: dict[str, Any] = {}
-        for name, property_schema in copied_source.items():
-            if name not in descriptions:
-                copied_properties[name] = property_schema
-                continue
-            if not isinstance(property_schema, Mapping):
-                raise ValueError(f"Tool '{tool_name}' input_schema property '{name}' must be an object")
-            copied_properties[name] = {**dict(property_schema), "description": descriptions[name]}
+        copied = deepcopy(dict(schema))
+        copied_properties = dict(copied["properties"])
+        for name, description in descriptions.items():
+            copied_properties[name] = {**copied_properties[name], "description": description}
         copied["properties"] = copied_properties
         return copied
-
-
-def _validate_description_values(tool_name: str, description: str | None, parameter_descriptions: Mapping[str, str] | None) -> dict[str, str]:
-    # Reject blank or incorrectly typed descriptions before constructing the wrapper.
-    if description is not None and (not isinstance(description, str) or not description.strip()):
-        raise ValueError(f"Tool '{tool_name}' description customization cannot be blank")
-    if parameter_descriptions is None:
-        return {}
-    if not isinstance(parameter_descriptions, Mapping):
-        raise ValueError(f"Tool '{tool_name}' parameter_descriptions must be a mapping")
-    copied = dict(parameter_descriptions)
-    for name, value in copied.items():
-        if not isinstance(name, str) or not name.strip():
-            raise ValueError(f"Tool '{tool_name}' parameter description name cannot be blank")
-        if not isinstance(value, str) or not value.strip():
-            raise ValueError(f"Tool '{tool_name}' parameter '{name}' description cannot be blank")
-    return copied
 
 
 __all__: list[str] = []

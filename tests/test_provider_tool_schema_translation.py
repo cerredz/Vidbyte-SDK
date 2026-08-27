@@ -190,6 +190,7 @@ class ProviderToolActivitySchemaTests(unittest.TestCase):
         tool = SchemaLookupTool()
         original = tool.spec()
         customized = tool.customize(
+            description="Customized lookup.",
             parameter_descriptions={"topic": "Customized explicit-schema guidance."}
         ).spec()
 

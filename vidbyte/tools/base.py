@@ -10,13 +10,15 @@ Purpose:
 Architecture:
     - BaseTool: Abstract contract requiring spec() and execute(), plus the
       with_activity() and customize() bindings used to add controlled model-facing views.
+      customize() requires a concrete tool description and parameter-description mapping.
     - _ToolWrapper and _unwrap_tool: Private shared wrapper identity used by activity and
       specification customization so runtime pricing can recover the original tool.
     - ToolLike: Structural protocol for developer-provided tools.
 Relations:
     Called by vidbyte.tools.activity, vidbyte.tools.customization, vidbyte.tools.adapters,
     and built-in tool modules. It calls vidbyte.tools.types for tool contracts and lazily
-    calls vidbyte.tools.activity and vidbyte.tools.customization for wrapper construction.
+    calls vidbyte.lib.dataclasses.tools for customization validation, plus
+    vidbyte.tools.activity and vidbyte.tools.customization for wrapper construction.
     vidbyte.agents.runtime relies on the wrapper unwrapping path for priced operations.
 """
 
@@ -24,9 +26,12 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import Mapping
+from types import MappingProxyType
 from typing import Any, Protocol
 
 from vidbyte.tools.types import ToolActivity, ToolCall, ToolResult, ToolSpec
+
+_EMPTY_PARAMETER_DESCRIPTIONS: Mapping[str, str] = MappingProxyType({})
 
 
 class BaseTool(ABC):
@@ -43,11 +48,30 @@ class BaseTool(ABC):
 
         return ActivityToolFormatter.bind(self, activity)
 
-    def customize(self, *, description: str | None = None, parameter_descriptions: Mapping[str, str] | None = None) -> "BaseTool":
-        # Return an immutable model-facing description view without changing execution behavior.
+    # @intent description-only-tool-view
+    # Applications may adapt the language a model sees for local terminology,
+    # but that adaptation must never create a second runtime contract. The
+    # current ToolSpec is passed into ToolCustomization so unknown parameter
+    # names and provider-schema shape errors fail before a wrapper is cataloged.
+    # Requiring a concrete description while defaulting the mapping to empty
+    # communicates that this is an explicit model-facing replacement, not a
+    # partial mutable patch.
+    def customize(
+        self,
+        *,
+        description: str,
+        parameter_descriptions: Mapping[str, str] = _EMPTY_PARAMETER_DESCRIPTIONS,
+    ) -> "BaseTool":
+        """Return a validated model-facing description view over this tool."""
+        from vidbyte.lib.dataclasses.tools import ToolCustomization
         from vidbyte.tools.customization import _CustomizedTool
 
-        return _CustomizedTool(self, description=description, parameter_descriptions=parameter_descriptions)
+        customization = ToolCustomization(
+            tool_spec=self.spec(),
+            description=description,
+            parameter_descriptions=parameter_descriptions,
+        )
+        return _CustomizedTool(self, customization)
 
     @abstractmethod
     def spec(self) -> ToolSpec:

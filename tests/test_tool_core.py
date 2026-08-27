@@ -8,7 +8,7 @@ Architecture:
     - EchoTool: Minimal test tool.
     - EchoActivity: Bounded activity annotation used by the binding tests.
     - ToolActivityTests: Binding, validation, and argument-separation tests.
-    - ToolCustomizationTests: Immutable description overrides and wrapper composition.
+    - ToolCustomizationTests: Dataclass validation, immutable description overrides, and wrapper composition.
     - ToolCoreTests: Registry, spec rendering, validation, and execution tests.
 Relations:
     Related to vidbyte.tools.types, base, activity, customization, registry, and executor.
@@ -20,6 +20,7 @@ import unittest
 
 from pydantic import BaseModel, Field
 
+from vidbyte.lib.dataclasses import ToolCustomization
 from vidbyte.lib.errors import ToolRegistrationError, ToolRegistryError
 from vidbyte.tools import (
     BaseTool,
@@ -224,16 +225,46 @@ class ToolCustomizationTests(unittest.IsolatedAsyncioTestCase):
         tool = EchoTool()
 
         with self.assertRaises(ValueError):
-            tool.customize(parameter_descriptions={"missing": "Unknown parameter."})
+            tool.customize(
+                description="Application-specific echo guidance.",
+                parameter_descriptions={"missing": "Unknown parameter."},
+            )
         with self.assertRaises(ValueError):
-            tool.customize(description=" ")
+            tool.customize(description=" ", parameter_descriptions={})
         with self.assertRaises(ValueError):
-            tool.customize(parameter_descriptions={"text": " "})
+            tool.customize(description="Application-specific echo guidance.", parameter_descriptions={"text": " "})
+
+    def test_customization_requires_concrete_description(self) -> None:
+        """The public API requires a non-optional tool description override."""
+        tool = EchoTool()
+
+        with self.assertRaises(TypeError):
+            tool.customize(parameter_descriptions={"text": "Application-specific text guidance."})
+
+    def test_customization_dataclass_validates_and_freezes_inputs(self) -> None:
+        """Dataclass construction owns validation and prevents mapping mutation."""
+        customization = ToolCustomization(
+            tool_spec=EchoTool().spec(),
+            description="Application-specific echo guidance.",
+            parameter_descriptions={"text": "Application-specific text guidance."},
+        )
+
+        with self.assertRaises(TypeError):
+            customization.parameter_descriptions["text"] = "tampered"
+        with self.assertRaises(ValueError):
+            ToolCustomization(
+                tool_spec=EchoTool().spec(),
+                description="Application-specific echo guidance.",
+                parameter_descriptions={"missing": "Unknown parameter."},
+            )
 
     async def test_customization_delegates_execution_unchanged(self) -> None:
         """Customized tools execute the original implementation with unchanged arguments."""
         tool = EchoTool()
-        customized = tool.customize(parameter_descriptions={"text": "Custom text."})
+        customized = tool.customize(
+            description="Custom echo.",
+            parameter_descriptions={"text": "Custom text."},
+        )
 
         result = await customized.execute(ToolCall("echo", {"text": "hello"}))
 
@@ -244,8 +275,12 @@ class ToolCustomizationTests(unittest.IsolatedAsyncioTestCase):
         """Activity payloads remain separated when wrappers are composed either way."""
         tool = EchoTool()
         activity = ToolActivity(schema=EchoActivity, description="Explain this echo.")
-        customized_then_activity = tool.customize(description="Custom echo.").with_activity(activity)
-        activity_then_customized = tool.with_activity(activity).customize(description="Custom echo.")
+        customized_then_activity = tool.customize(
+            description="Custom echo.", parameter_descriptions={}
+        ).with_activity(activity)
+        activity_then_customized = tool.with_activity(activity).customize(
+            description="Custom echo.", parameter_descriptions={}
+        )
 
         for wrapped in (customized_then_activity, activity_then_customized):
             prepared = Tools([wrapped]).prepare_call(

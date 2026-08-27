@@ -17,7 +17,7 @@ Add an immutable, opt-in `BaseTool.customize()` API that lets SDK users replace 
 
 ### Goals
 
-- Add `BaseTool.customize()` as the single public entry point for model-facing description customization.
+- Add `BaseTool.customize()` as the single public entry point for model-facing description customization, requiring a concrete tool description.
 - Support replacing the full tool description.
 - Support replacing descriptions for existing top-level parameters by name.
 - Preserve the wrapped tool's name, permission, metadata, output schema, activity declaration, validation, execution, and result behavior.
@@ -52,9 +52,9 @@ The PR #343 reasoning tools use explicit `ToolParameter` declarations and rich d
 
 ### Functional Requirements
 
-1. Every `BaseTool` subclass exposes `customize()` with optional `description` and `parameter_descriptions` keyword arguments.
+1. Every `BaseTool` subclass exposes `customize()` with a concrete `description` and an optional `parameter_descriptions` mapping.
 2. `customize(description=...)` returns a new delegating tool whose `spec().description` contains the replacement while the original tool's spec is unchanged.
-3. `customize(parameter_descriptions={...})` replaces descriptions for matching top-level parameter names in `ToolSpec.parameters`.
+3. `customize(description=..., parameter_descriptions={...})` replaces descriptions for matching top-level parameter names in `ToolSpec.parameters`.
 4. When the wrapped spec has `input_schema`, the same parameter description replacements appear in the schema's top-level `properties` mapping.
 5. Unknown parameter names, blank replacement descriptions, and blank tool descriptions fail immediately with `ValueError`.
 6. The customization wrapper preserves the wrapped tool's stable name and delegates `validate_call()` and `execute()` without changing their arguments or results.
@@ -76,7 +76,7 @@ The PR #343 reasoning tools use explicit `ToolParameter` declarations and rich d
 
 ## 5. High-Level Design
 
-`BaseTool.customize()` will lazily construct a private `_CustomizedTool` wrapper. The wrapper stores the original `BaseTool` and the requested description changes. Its `spec()` method obtains the wrapped spec and creates a new spec with copied description fields; its `validate_call()` and `execute()` methods delegate unchanged. The original tool remains the execution and validation source of truth.
+`BaseTool.customize()` will lazily construct a validated `ToolCustomization` dataclass from the current `ToolSpec`, then pass it to a private `_CustomizedTool` wrapper. The wrapper stores the original `BaseTool` and validated description changes. Its `spec()` method obtains the wrapped spec and creates a new spec with copied description fields; its `validate_call()` and `execute()` methods delegate unchanged. The original tool remains the execution and validation source of truth.
 
 The shared `ToolSpec` transformation will patch both metadata representations. Parameter descriptions are resolved against the effective top-level schema and validated before the wrapper is returned. The transformation will not add or remove properties, which prevents model-visible contract drift from the runtime implementation.
 
@@ -114,21 +114,26 @@ Adds the public `BaseTool.customize()` method and a private wrapper contract sha
 #### Interface / API
 
 ```python
-def customize(self, *, description: str | None = None, parameter_descriptions: Mapping[str, str] | None = None) -> "BaseTool": ...
+def customize(
+    self,
+    *,
+    description: str,
+    parameter_descriptions: Mapping[str, str] = _EMPTY_PARAMETER_DESCRIPTIONS,
+) -> "BaseTool": ...
 ```
 
 #### Logic / Algorithm
 
-1. Import the customization wrapper lazily to keep the existing base-module dependency direction.
-2. Validate and store the requested replacement values in the customization wrapper.
+1. Import the customization dataclass and wrapper lazily to keep the existing base-module dependency direction.
+2. Construct `ToolCustomization` with the current `ToolSpec` and requested replacement values; its dataclass validation rejects invalid names, values, and schemas.
 3. Return the wrapper without changing `self`.
 4. Define a private `_ToolWrapper` base with a `wrapped_tool` property.
 5. Define a private `_unwrap_tool()` helper that follows wrapper links to the underlying implementation.
 
 #### Edge Cases & Error Handling
 
-- No overrides returns a behaviorally equivalent wrapper or the original tool, as selected by the implementation without changing public semantics.
-- Validation errors are raised at customization time rather than when the model first receives a schema.
+- The tool description is concrete; the parameter-description mapping defaults to empty when only the tool description changes.
+- Validation errors are raised by `ToolCustomization` at customization time rather than when the model first receives a schema.
 - Wrapper unwrapping stops at the first non-wrapper `BaseTool`.
 
 ### 6.2 Specification customization implementation
@@ -138,7 +143,7 @@ def customize(self, *, description: str | None = None, parameter_descriptions: M
 
 #### What it does
 
-Implements the private `_CustomizedTool` delegating wrapper and the pure spec transformation that replaces tool and top-level parameter descriptions.
+Implements the private `_CustomizedTool` delegating wrapper and the pure spec transformation that replaces tool and top-level parameter descriptions from a validated `ToolCustomization`.
 
 #### Interface / API
 
@@ -148,19 +153,18 @@ class _CustomizedTool(_ToolWrapper): ...
 
 #### Logic / Algorithm
 
-1. Validate that a supplied tool description is a non-blank string.
-2. Validate that every supplied parameter description is non-blank and names an existing top-level parameter.
-3. Call the wrapped tool's `spec()`.
-4. Replace matching `ToolParameter` objects with copied descriptions.
-5. Deep-copy and patch matching `input_schema.properties` entries when an explicit schema exists.
-6. Return a dataclass replacement of the wrapped `ToolSpec`, preserving all non-description fields.
-7. Delegate `validate_call()` and `execute()` directly to the wrapped tool.
+1. Receive replacement values already validated by `ToolCustomization` against the source spec.
+2. Call the wrapped tool's `spec()`.
+3. Replace matching `ToolParameter` objects with copied descriptions.
+4. Deep-copy and patch matching `input_schema.properties` entries when an explicit schema exists.
+5. Return a dataclass replacement of the wrapped `ToolSpec`, preserving all non-description fields.
+6. Delegate `validate_call()` and `execute()` directly to the wrapped tool.
 
 #### Edge Cases & Error Handling
 
-- An unknown parameter name raises `ValueError` and identifies the tool and parameter.
-- An explicit schema without an object-shaped top-level `properties` mapping raises `ValueError` when parameter descriptions are requested.
-- A malformed property schema that cannot receive a description raises `ValueError` rather than mutating it partially.
+- An unknown parameter name raises `ValueError` from `ToolCustomization` and identifies the tool and parameter.
+- An explicit schema without an object-shaped top-level `properties` mapping raises `ValueError` from `ToolCustomization` when parameter descriptions are requested.
+- A malformed property schema that cannot receive a description raises `ValueError` from `ToolCustomization` rather than mutating it partially.
 - Caller-owned input schemas are never mutated.
 
 ### 6.3 Generic wrapper unwrapping for activity and pricing
@@ -204,9 +208,9 @@ N/A - test modules exercise the public `BaseTool.customize()` contract.
 
 #### Logic / Algorithm
 
-1. Customize a parameter-based echo tool and assert its original spec is unchanged.
+1. Customize a parameter-based echo tool with a concrete description and assert its original spec is unchanged.
 2. Assert customized prompt and provider descriptions use the replacement values.
-3. Customize an explicit-schema tool and assert both schema properties and prompt parameters are synchronized.
+3. Customize an explicit-schema tool with a concrete description and assert both schema properties and prompt parameters are synchronized.
 4. Assert unknown names and blank descriptions fail at customization time.
 5. Compose customization with activity in both orders and assert the original tool receives only business arguments.
 
@@ -287,6 +291,8 @@ Complete list of every file that will be created, modified, or deleted:
 
 | Action | File Path | Reason |
 |--------|-----------|--------|
+| MODIFY | `vidbyte/lib/dataclasses/tools.py` | Add the validated `ToolCustomization` data contract. |
+| MODIFY | `vidbyte/lib/dataclasses/__init__.py` | Re-export the customization data contract. |
 | CREATE | `vidbyte/tools/customization.py` | Implement the private description-customizing wrapper and pure spec transformation. |
 | MODIFY | `vidbyte/tools/base.py` | Add `BaseTool.customize()` and the shared private wrapper/unwrapping contract. |
 | MODIFY | `vidbyte/tools/activity.py` | Reuse generic unwrapping for nested activity and customization wrappers. |
