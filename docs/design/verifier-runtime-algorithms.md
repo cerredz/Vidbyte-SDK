@@ -128,7 +128,7 @@ AgentLoopSettings
 VerifierRuntimeSettings(mode=ConcreteVerifierRuntimeMode(...))
         |
 AgentVerifierRuntime
-        |-- mode.run(...)                 -> PostRun / Candidate wrapper
+        |-- mode.run(...)                 -> PostRun outer wrapper
         |-- mode.after_iteration(...)    -> Periodic checkpoints
         |-- mode.on_finalization(...)    -> Finalization or required final check
         |-- mode_tools()                 -> Verifier-as-tool registration
