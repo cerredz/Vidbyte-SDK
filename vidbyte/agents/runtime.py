@@ -1,22 +1,72 @@
-"""Context Protocol Header
+"""FILE: vidbyte/agents/runtime.py
 
-Description:
-    Defines the internal direct execution runtime for Vidbyte agents.
-Purpose:
-    Keeps agent loop execution, context-window construction, tool execution,
-    permission checks, provider-reported token accounting, and exact internal-tool
-    exposure policy out of BaseAgent.
-Architecture:
-    - AgentRuntime: Builds BaseAgentContext and runs direct model/tool loops.
-    - include_internal_tools: Defaults to current behavior but lets isolated child
-      runtimes expose exactly their explicitly supplied tool catalog.
-    - MiddlewarePipeline: Supplies control-flow events and diagnostic hook records
-      that are emitted as semantic spans before the enclosing agent trace closes.
-Relations:
-    Used by vidbyte.agents.base. Depends on shared context, tool, security, and
-    strategy dataclasses without owning modality routing or runner construction.
-    Review algorithms may disable implicit internal tools while ordinary agents
-    retain them through the default constructor behavior.
+PURPOSE:
+    Owns direct agent execution: per-attempt loop state, middleware hook
+    dispatch, context-window algorithm callbacks, model invocation, tool
+    authorization/execution, usage accounting, fallback transitions, and final
+    result metadata. Do not place runner construction or public agent input
+    normalization here; those responsibilities belong to ``base.py``.
+
+ROLE IN CODEBASE:
+    Called by ``vidbyte/agents/base.py`` for linear agent runs and called
+    directly by the Reflexion and multi-provider grader runtime algorithms for
+    middleware-wrapped model calls. Calls ``vidbyte/middleware``, context
+    managers and algorithms, provider runner handles, tool catalogs/security,
+    tracing, and usage tracking. ``BaseAgentRuntimeLoopState`` owns mutable
+    state for exactly one runtime attempt so nested runs do not share counters.
+
+ARCHITECTURE NOTE:
+    This is the imperative boundary between reusable agent contracts and model
+    or tool execution. ``_middleware_context`` snapshots state for deterministic
+    middleware hooks; ``BaseAgentRuntimeLoopState`` keeps model response,
+    counters, call records, context-window state, and iteration outputs local to
+    one attempt. Runtime handoff keys come from ``vidbyte.lib.enums``.
+
+FUNCTION INVENTORY:
+    ``AgentRuntime.build_context`` -> ``BaseAgentContext``: assembles the
+    provider-facing context window from agent history and managed items.
+    ``AgentRuntime.arun`` -> ``AgentResult``: dispatches configured algorithms or
+    the direct model/tool loop.
+    ``AgentRuntime.execute_tool_call`` -> ``(ToolCallContext, ToolResult)``:
+    resolves, authorizes, validates, executes, and records one tool call.
+    ``BaseAgentRuntimeLoopState.tool_call_count`` -> ``int``: derives the number
+    of recorded calls. The runtime tests and algorithm integration tests cover
+    these contracts; private helpers are covered through those execution paths.
+
+COMMON MODIFICATION PATTERNS:
+    Add per-attempt mutable values to ``BaseAgentRuntimeLoopState`` first, then
+    route all middleware snapshots through that field. Add new run-state keys to
+    ``vidbyte/lib/enums/agent_runtime.py`` and use ``.value`` at dict boundaries.
+    Preserve ``_invoke_with_middleware``'s keyword signature because external
+    runtime algorithms call it directly.
+
+WHAT NOT TO DO IN THIS FILE:
+    1. Do not construct provider runners; use ``vidbyte/agents/base.py`` and
+       provider modality detection.
+    2. Do not add public SDK namespace exports; update the owning ``__init__.py``
+       and README when a public contract truly changes.
+    3. Do not persist ``BaseAgentRuntimeLoopState`` or put private service logic,
+       auth, database access, or network clients in this runtime.
+
+KNOWN EDGE CASES:
+    Model fallback may replace the provider and transcript during one attempt;
+    all later snapshots must read the updated state. ``AgentResult`` returned
+    directly by a runner is finalized before replacing ``model_response``.
+    Context-window algorithms write public metadata into their dedicated state
+    dict, while private keys remain excluded from final result metadata.
+
+RELATED DOCS:
+    https://github.com/cerredz/Vidbyte-SDK/blob/main/docs/design/agent-runtime-loop-state.md
+    https://github.com/cerredz/Vidbyte-SDK/blob/main/field-guide/vidbyte-sdk/runtime-boundaries.md
+
+TEST FILES:
+    ``tests/test_agent_runtime.py``, ``tests/test_agent_tool_loop.py``,
+    ``tests/test_tracing.py``, and the context algorithm integration tests.
+
+CONCURRENCY MODEL:
+    Runtime attempts are run-local and reentrant. Never store loop counters or
+    mutable attempt state on ``AgentRuntime`` itself; nested/concurrent calls
+    receive separate ``BaseAgentRuntimeLoopState`` objects.
 """
 
 from __future__ import annotations
@@ -32,30 +82,52 @@ if TYPE_CHECKING:
     from vidbyte.agents.settings.tool import ToolSettings
 
 from vidbyte.agents.context_algorithms import AgentRuntimeContextAlgorithms
+from vidbyte.agents.contract import AgentLoopSettingsOutputContract
+from vidbyte.agents.contracts.schema import SchemaConformance
+from vidbyte.agents.pricing import UsageTracker
 from vidbyte.agents.types import AgentMessage
 from vidbyte.context.algorithms import ContextWindowAlgorithm, ToolResultAdmission
 from vidbyte.context.manager import ContextManager
 from vidbyte.context.primitives import ContextItem
-from vidbyte.context.runtime import ContextWindowPlacement, ContextWindowRunContext, InnerContextWindowAlgorithm
+from vidbyte.context.runtime import (
+    ContextWindowPlacement,
+    ContextWindowRunContext,
+    InnerContextWindowAlgorithm,
+)
+from vidbyte.context.templates import NullRecorder, RecorderBase
 from vidbyte.context.window import ContextWindow
-from vidbyte.lib.dataclasses.agents import AgentIterationSnapshot, AgentRuntimeConfig, AgentStopReason
-from vidbyte.lib.dataclasses.middleware import MiddlewareAction, MiddlewareContext, MiddlewareDecision, MiddlewareEvent, MiddlewareHook, MiddlewareHookInvocation
+from vidbyte.lib.dataclasses.agents import (
+    AgentIterationSnapshot,
+    AgentRuntimeConfig,
+    AgentStopReason,
+)
+from vidbyte.lib.dataclasses.context import BaseAgentContext, BaseContext
+from vidbyte.lib.dataclasses.middleware import (
+    MiddlewareAction,
+    MiddlewareContext,
+    MiddlewareDecision,
+    MiddlewareEvent,
+    MiddlewareHook,
+    MiddlewareHookInvocation,
+)
 from vidbyte.lib.dataclasses.runner import RunnerHandle
-from vidbyte.providers.output_schema import OutputSchemaFormatter
-from vidbyte.lib.enums import ModelModality
-from vidbyte.lib.errors import AllModelsFailedError, PermissionDeniedError, ToolExecutionError, ToolRegistryError
+from vidbyte.lib.dataclasses.strategies import AgentResult
+from vidbyte.lib.enums import AgentRuntimeStateKey, ModelModality
+from vidbyte.lib.errors import (
+    AllModelsFailedError,
+    PermissionDeniedError,
+    ToolExecutionError,
+    ToolRegistryError,
+)
 from vidbyte.lib.token_usage import token_usage_from_response
 from vidbyte.lib.tools import ToolsFormatter
-from vidbyte.agents.pricing import UsageTracker
-from vidbyte.context.templates import NullRecorder, RecorderBase
 from vidbyte.lib.tracing import NullTracer, SpanContext, TracerBase
 from vidbyte.middleware import AgentMiddleware, MiddlewarePipeline
-from vidbyte.middleware.builtins.context_compaction import ToolResultCompactionMiddleware
+from vidbyte.middleware.builtins.context_compaction import (
+    ToolResultCompactionMiddleware,
+)
 from vidbyte.prompts.agentic_loop import append_agentic_loop_prompt
-from vidbyte.agents.contract import AgentLoopSettingsOutputContract
-from vidbyte.agents.contracts.schema import SchemaConformance
-from vidbyte.lib.dataclasses.context import BaseAgentContext, BaseContext
-from vidbyte.lib.dataclasses.strategies import AgentResult
+from vidbyte.providers.output_schema import OutputSchemaFormatter
 from vidbyte.tools._internal import IS_DONE_TOOL_NAME, with_internal_agent_tools
 from vidbyte.tools.activity import ActivityToolFormatter
 from vidbyte.tools.base import BaseTool
@@ -66,16 +138,19 @@ from vidbyte.tools.types import ToolCall, ToolCallContext, ToolCallState, ToolRe
 
 
 @dataclass(slots=True)
-class _LoopState:
-    """Mutable per-attempt state threaded through one _arun_once or _invoke_with_middleware call."""
+class BaseAgentRuntimeLoopState:
+    """Mutable state threaded through one direct agent runtime attempt."""
 
     message: str
     context: BaseAgentContext
     provider: str
     metadata: dict[str, Any]
     started_at: float
-    run_state: dict[type, Any] = field(default_factory=dict)
+    inner_context_window_algorithm: InnerContextWindowAlgorithm | None = None
+    context_window_state: dict[str, Any] = field(default_factory=dict)
+    run_state: dict[Any, Any] = field(default_factory=dict)
     call_contexts: list[ToolCallContext] = field(default_factory=list)
+    iteration_outputs: list[str] = field(default_factory=list)
     iteration_count: int = 0
     model_call_count: int = 0
     tokens_used: int | None = None
@@ -190,27 +265,24 @@ class AgentRuntime:
     async def _arun_once(self, message: str, *, handle: RunnerHandle, context: BaseAgentContext, metadata: Mapping[str, Any] | None = None, options: Mapping[str, Any] | None = None, trace_context: SpanContext | None = None) -> AgentResult:
         """Run one direct model/tool attempt until isDone or a budget stop."""
         run_options = dict(options or {})
-        state = _LoopState(
+        state = BaseAgentRuntimeLoopState(
             message=message,
             context=context,
             provider=handle.provider,
             metadata=dict(metadata or {}),
             started_at=self.middleware.clock(),
+            inner_context_window_algorithm=AgentRuntimeContextAlgorithms(self).inner_loop_algorithm(),
         )
-        inner_algorithm = AgentRuntimeContextAlgorithms(self).inner_loop_algorithm()
-        if inner_algorithm is not None:
+        if state.inner_context_window_algorithm is not None:
             if self.context_manager is None:
                 self.context_manager = ContextManager()
-            state.metadata["_inner_context_window_algorithm"] = inner_algorithm
-            state.metadata["_context_window_state"] = {}
             # One run-start invocation lets the algorithm initialize before any iteration.
-            await self._run_inner_context_window_hook(state.metadata, message=message, provider=state.provider)
+            await self._run_inner_context_window_hook(state, message=message, provider=state.provider)
         tool_schemas = self._resolve_tool_schemas(state.provider)
         messages = self._extract_initial_messages(run_options)
         rejections = 0
         compaction_count = 0
         last_assistant_output: str | None = None
-        iteration_outputs: list[str] = []
         active_trace_context = trace_context
         fallback_index = 0
         fallback_attempts: list[dict[str, str]] = []
@@ -230,7 +302,7 @@ class AgentRuntime:
             # Single inner-loop context-window point: after the prior iteration's tool calls finished.
             if state.iteration_count > 0:
                 await self._run_inner_context_window_hook(
-                    state.metadata,
+                    state,
                     message=message,
                     provider=state.provider,
                     iteration_count=state.iteration_count,
@@ -333,8 +405,8 @@ class AgentRuntime:
             state.model_response = raw_result
             state.iteration_count += 1
             last_assistant_output = handle.extract_text(raw_result)
-            iteration_outputs.append(last_assistant_output or "")
-            state.run_state["__iteration_outputs__"] = tuple(iteration_outputs)
+            state.iteration_outputs.append(last_assistant_output or "")
+            state.run_state[AgentRuntimeStateKey.ITERATION_OUTPUTS.value] = tuple(state.iteration_outputs)
             runner_metadata = dict(handle.extract_metadata(raw_result))
             state.tokens_used = self._add_token_usage(state.tokens_used, token_usage_from_response(raw_result, runner_metadata))
             usage_record = self.usage_tracker.record_call(raw_result)
@@ -393,10 +465,10 @@ class AgentRuntime:
                     tokens_used=state.tokens_used,
                     stop_reason=AgentStopReason.FINAL_RESPONSE,
                 )
-                if inner_algorithm is not None:
+                if state.inner_context_window_algorithm is not None:
                     messages.append(self._assistant_message(last_assistant_output))
                 decision = await self.middleware.after_iteration(self._middleware_context(MiddlewareHook.AFTER_ITERATION, state))
-                if inner_algorithm is not None and decision.action is MiddlewareAction.CONTINUE:
+                if state.inner_context_window_algorithm is not None and decision.action is MiddlewareAction.CONTINUE:
                     continue
                 if decision.action is not MiddlewareAction.CONTINUE:
                     final = self._middleware_abort_result(
@@ -467,7 +539,7 @@ class AgentRuntime:
         """Invoke the runner, allowing middleware to retry model errors while tracking compaction events."""
         # Local-only loop state: this method has external callers (reflexion.py,
         # multi_provider_agentic_grader.py) so its own keyword signature stays put.
-        state = _LoopState(
+        state = BaseAgentRuntimeLoopState(
             message=message,
             context=context,
             provider=handle.provider,
@@ -584,13 +656,13 @@ class AgentRuntime:
         self._end_semantic_span(span, output=str(attempt.get("to", "")))
 
     @staticmethod
-    def _publish_fallback_metadata(run_state: dict[type, Any], record: Mapping[str, Any]) -> None:
+    def _publish_fallback_metadata(run_state: dict[Any, Any], record: Mapping[str, Any]) -> None:
         # Publishes the switch log through the generic run_state channel _with_run_state_metadata already lifts.
-        published = run_state.get("__result_metadata__")
+        published = run_state.get(AgentRuntimeStateKey.RESULT_METADATA.value)
         base = dict(published) if isinstance(published, Mapping) else {}
-        run_state["__result_metadata__"] = {**base, "fallback": dict(record)}
+        run_state[AgentRuntimeStateKey.RESULT_METADATA.value] = {**base, "fallback": dict(record)}
 
-    async def _finish_result(self, result: AgentResult, state: _LoopState) -> AgentResult:
+    async def _finish_result(self, result: AgentResult, state: BaseAgentRuntimeLoopState) -> AgentResult:
         """Run after_run middleware and attach final middleware metadata."""
         decision = await self.middleware.after_run(
             self._middleware_context(
@@ -606,16 +678,16 @@ class AgentRuntime:
                 tokens_used=state.tokens_used,
                 contexts=tuple(dict(result.metadata).get("tool_calls", ())),
             )
-        result = self._with_context_window_metadata(result, state.metadata)
+        result = self._with_context_window_metadata(result, state)
         result = self._with_run_state_metadata(result, state.run_state)
         return self._with_middleware_metadata(result)
 
     @staticmethod
-    def _with_run_state_metadata(result: AgentResult, run_state: dict[type, Any] | None) -> AgentResult:
+    def _with_run_state_metadata(result: AgentResult, run_state: dict[Any, Any] | None) -> AgentResult:
         """Merge per-run metadata published by middleware (e.g. trace artifacts) into the result."""
-        # Generic, feature-agnostic lift of run_state["__result_metadata__"]; no feature imports here.
-        published = (run_state or {}).get("__result_metadata__")
-        iteration_outputs = (run_state or {}).get("__iteration_outputs__")
+        # Generic, feature-agnostic lift of runtime-published result metadata; no feature imports here.
+        published = (run_state or {}).get(AgentRuntimeStateKey.RESULT_METADATA.value)
+        iteration_outputs = (run_state or {}).get(AgentRuntimeStateKey.ITERATION_OUTPUTS.value)
         extra: dict[str, Any] = {}
         if isinstance(published, Mapping) and published:
             extra.update(published)
@@ -632,12 +704,12 @@ class AgentRuntime:
             structured=result.structured,
         )
 
-    async def _run_inner_context_window_hook(self, metadata: Mapping[str, Any], *, message: str, provider: str, iteration_count: int = 0, assistant_output: str | None = None, call_contexts: Sequence[ToolCallContext] = (), tokens_used: int | None = None, runner: object | None = None, invoke_runner: Callable[..., Any] | None = None, runner_output_text: Callable[[object], str] | None = None, runner_output_metadata: Callable[[object], Mapping[str, Any]] | None = None, options: Mapping[str, Any] | None = None, messages: Sequence[dict[str, Any]] | None = None, system_prompt: str | None = None) -> None:
+    async def _run_inner_context_window_hook(self, state: BaseAgentRuntimeLoopState, *, message: str, provider: str, iteration_count: int = 0, assistant_output: str | None = None, call_contexts: Sequence[ToolCallContext] = (), tokens_used: int | None = None, runner: object | None = None, invoke_runner: Callable[..., Any] | None = None, runner_output_text: Callable[[object], str] | None = None, runner_output_metadata: Callable[[object], Mapping[str, Any]] | None = None, options: Mapping[str, Any] | None = None, messages: Sequence[dict[str, Any]] | None = None, system_prompt: str | None = None) -> None:
         """Build the slim run context and invoke the inner-loop algorithm's single hook."""
         # Called once at run start (no iteration) and once after each completed iteration's tool calls.
-        algorithm = metadata.get("_inner_context_window_algorithm")
-        state = metadata.get("_context_window_state")
-        if not isinstance(algorithm, InnerContextWindowAlgorithm) or not isinstance(state, dict):
+        algorithm = state.inner_context_window_algorithm
+        context_window_state = state.context_window_state
+        if not isinstance(algorithm, InnerContextWindowAlgorithm):
             return
         if self.context_manager is None:
             return
@@ -656,14 +728,14 @@ class AgentRuntime:
                 assistant_output=assistant_output,
                 call_contexts=call_contexts,
                 tokens_used=tokens_used,
-                metadata=metadata,
+                metadata=state.metadata,
             )
         try:
             await algorithm.after_tool_calls(
                 ContextWindowRunContext(
                     context_manager=self.context_manager,
                     recorder=self.recorder,
-                    state=state,
+                    state=context_window_state,
                     iteration=iteration,
                     runner=runner,
                     provider=provider,
@@ -703,13 +775,10 @@ class AgentRuntime:
         )
 
     @staticmethod
-    def _with_context_window_metadata(result: AgentResult, metadata: Mapping[str, Any]) -> AgentResult:
+    def _with_context_window_metadata(result: AgentResult, state: BaseAgentRuntimeLoopState) -> AgentResult:
         """Attach public context-window metadata produced by inner-loop algorithms."""
         # Copies only public metadata keys and leaves private runtime state out of the result.
-        state = metadata.get("_context_window_state")
-        if not isinstance(state, dict):
-            return result
-        public_metadata = {key: value for key, value in state.items() if not str(key).startswith("_")}
+        public_metadata = {key: value for key, value in state.context_window_state.items() if not str(key).startswith("_")}
         if not public_metadata:
             return result
         result_metadata = {**dict(result.metadata), **public_metadata}
@@ -778,7 +847,7 @@ class AgentRuntime:
     def _middleware_context(
         self,
         hook: MiddlewareHook,
-        state: _LoopState,
+        state: BaseAgentRuntimeLoopState,
         *,
         tool_call: ToolCall | None = None,
         tool_result: ToolResult | None = None,
@@ -1229,7 +1298,7 @@ class AgentRuntime:
         self,
         call: ToolCall,
         messages: list[dict[str, Any]],
-        state: _LoopState,
+        state: BaseAgentRuntimeLoopState,
         *,
         trace_context: SpanContext | None = None,
     ) -> tuple[ToolCallContext, ToolResult] | AgentResult:
@@ -1605,9 +1674,9 @@ class AgentRuntime:
             return 1 if int(before) != int(after) else 0
         return 1
 
-    def _publish_contract_evaluations(self, run_state: dict[type, Any], counters: Mapping[str, Any]) -> None:
+    def _publish_contract_evaluations(self, run_state: dict[Any, Any], counters: Mapping[str, Any]) -> None:
         # Records each contract's evaluation into run_state so _with_run_state_metadata lifts it into the result.
-        run_state.setdefault("__result_metadata__", {})["contract_evaluations"] = self.output_contract.report(counters)
+        run_state.setdefault(AgentRuntimeStateKey.RESULT_METADATA.value, {})["contract_evaluations"] = self.output_contract.report(counters)
 
     @staticmethod
     def _assistant_message(output: str) -> dict[str, Any]:

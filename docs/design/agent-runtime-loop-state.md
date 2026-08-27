@@ -9,7 +9,7 @@
 
 ## 1. Overview
 
-`AgentRuntime._arun_once` and its three private helpers (`_invoke_with_middleware`, `_process_tool_call`, `_finish_result`) each rebuild a `MiddlewareContext` snapshot by passing the same 8-11 keyword arguments (`message`, `context`, `provider`, `iteration_count`, `model_call_count`, `tool_call_count`, `tokens_used`, `started_at`, `metadata`, `run_state`, `model_response`) into `self._middleware_context(...)` at every one of its 11 call sites. This change introduces one mutable, per-attempt parameter object, `_LoopState`, that carries this bag as a single value threaded through `_arun_once`. `_middleware_context`, `_finish_result`, and `_process_tool_call` are rewritten to accept `state: _LoopState` instead of the individual fields, collapsing every call site from 8-16 lines down to 1-4. `_invoke_with_middleware` keeps its existing public keyword signature (it has external callers outside `runtime.py`) but builds a local `_LoopState` internally to get the same reduction on its own two call sites. No runtime behavior changes; this is a pure internal refactor.
+`AgentRuntime._arun_once` and its three private helpers (`_invoke_with_middleware`, `_process_tool_call`, `_finish_result`) each rebuild a `MiddlewareContext` snapshot by passing the same 8-11 keyword arguments (`message`, `context`, `provider`, `iteration_count`, `model_call_count`, `tool_call_count`, `tokens_used`, `started_at`, `metadata`, `run_state`, `model_response`) into `self._middleware_context(...)` at every one of its 11 call sites. This change introduces one mutable, per-attempt parameter object, `BaseAgentRuntimeLoopState`, that carries this bag plus the inner context-window algorithm, its mutable state, and iteration outputs. `_middleware_context`, `_finish_result`, and `_process_tool_call` accept `state: BaseAgentRuntimeLoopState` instead of the individual fields, collapsing every call site from 8-16 lines down to 1-4. `_invoke_with_middleware` keeps its existing public keyword signature (it has external callers outside `runtime.py`) but builds a local `BaseAgentRuntimeLoopState` internally to get the same reduction on its own two call sites. Runtime state handoff keys are declared by `AgentRuntimeStateKey` rather than repeated string literals.
 
 ---
 
@@ -29,7 +29,7 @@
 - Touching `_budget_stop`, `_contract_counters`, `_final_result`, `_stopped_result`, `_middleware_abort_result`, `_llm_trace_inputs`, `_build_iteration_call_options`, `_enforce_tool_settings`, `_enforce_tool_settings_after_failure`, or `execute_tool_call`. These take a different, smaller subset of fields for a different purpose (budget/contract/tool-policy checks, not middleware-context construction) and are out of scope.
 - Implementing PR #351 ("Guaranteed Failure Finalization") in this PR. That work (the `_finish_error` / `_await_shielded` envelope) is rebased onto this refactor's branch and updated separately, after this PR is reviewable, so the two changes stay independently reviewable.
 - Any new test files (this is a "no tests" design-doc workflow; existing tests are the regression net for a pure refactor).
-- Moving `_LoopState` into `vidbyte/lib/dataclasses/`. That package is for shared, externally-constructed, validated value types (see `strict-config-dataclasses.md`); `_LoopState` is private mutable scratch state owned by exactly one `_arun_once`/`_invoke_with_middleware` call, matching the existing `_RunState` precedent in `vidbyte/workflows/machine.py`, which is also module-private.
+- Moving `BaseAgentRuntimeLoopState` into `vidbyte/lib/dataclasses/`. That package is for shared, externally-constructed, validated value types (see `strict-config-dataclasses.md`); this state is mutable scratch state owned by exactly one `_arun_once`/`_invoke_with_middleware` call, matching the existing `_RunState` precedent in `vidbyte/workflows/machine.py` while remaining defined next to the runtime that owns it.
 
 ---
 
@@ -41,12 +41,12 @@ It cannot: `message`, `iteration_count`, `model_call_count`, `tokens_used`, `pro
 
 The actual fix is a parameter-object refactor: bundle the mutable per-call locals into one object created once per `_arun_once` (or `_invoke_with_middleware`) call, and thread that object through instead of the individual fields. `tool_call_count`, which is recomputed as `len(call_contexts)` at 8 of the 11 `_middleware_context` call sites, becomes a `@property` on that object once it also holds `call_contexts`.
 
-This also directly benefits PR #351 ("Guaranteed Failure Finalization", open, branch `feat/guaranteed-failure-finalization`), which adds a `_finish_error` sibling to `_finish_result` carrying the exact same argument bag plus `error`. Landing the parameter object first means `_finish_error` is written against `_LoopState` from the start instead of duplicating the giant signature a second time.
+This also directly benefits PR #351 ("Guaranteed Failure Finalization", open, branch `feat/guaranteed-failure-finalization`), which adds a `_finish_error` sibling to `_finish_result` carrying the exact same argument bag plus `error`. Landing the parameter object first means `_finish_error` is written against `BaseAgentRuntimeLoopState` from the start instead of duplicating the giant signature a second time.
 
 Constraints from the field guide (`field-guide/vidbyte-sdk/`):
 
-- `class-bound-helpers.md`: prefer one named class over free functions for a shared concern — satisfied by `_LoopState` being one class rather than a loose dict.
-- `strict-config-dataclasses.md`: shared, validated value types live in `vidbyte/lib/dataclasses/` as `frozen=True, slots=True`. `_LoopState` is neither shared nor a validated config value — it is private, mutable, per-call scratch state — so it follows the `vidbyte/workflows/machine.py::_RunState` precedent instead: a module-private `@dataclass(slots=True)` (not frozen) defined next to the class that owns it.
+- `class-bound-helpers.md`: prefer one named class over free functions for a shared concern — satisfied by `BaseAgentRuntimeLoopState` being one class rather than a loose dict.
+- `strict-config-dataclasses.md`: shared, validated value types live in `vidbyte/lib/dataclasses/` as `frozen=True, slots=True`. `BaseAgentRuntimeLoopState` is neither shared nor a validated config value — it is mutable, per-call scratch state — so it follows the `vidbyte/workflows/machine.py::_RunState` precedent instead: a `@dataclass(slots=True)` (not frozen) defined next to the class that owns it.
 - `local-ci-verification.md`: the source CI stage must run with `PYTHONPATH=<worktree>` or it silently tests the canonical checkout's old code.
 
 Canonical local CI: `python -m pip install -e ".[dev]"` then `python scripts/run_ci.py` (source stage needs `PYTHONPATH=$(pwd)` from a worktree; package stage needs it unset). Required remote checks: `.github/workflows/ci.yml` jobs `Source / Python 3.11`, `Source / Python 3.12`, and `Package`.
@@ -57,13 +57,13 @@ Canonical local CI: `python -m pip install -e ".[dev]"` then `python scripts/run
 
 ### Functional Requirements
 
-1. Add a module-private `@dataclass(slots=True)` named `_LoopState` in `vidbyte/agents/runtime.py`, holding: `message: str`, `context: BaseAgentContext`, `provider: str`, `metadata: dict[str, Any]`, `started_at: float`, `run_state: dict[type, Any]` (default `{}`), `call_contexts: list[ToolCallContext]` (default `[]`), `iteration_count: int` (default `0`), `model_call_count: int` (default `0`), `tokens_used: int | None` (default `None`), `model_response: object | None` (default `None`).
-2. `_LoopState` exposes `tool_call_count` as a read-only `@property` returning `len(self.call_contexts)`.
-3. `_middleware_context` accepts `(self, hook: MiddlewareHook, state: _LoopState, *, tool_call=None, tool_result=None, model_response=None, model_usage=None, error=None, tool_is_internal=False, provider_messages=(), system=None, tool_call_count=None, metadata=None)`. `model_response` falls back to `state.model_response` when not given; `tool_call_count` falls back to `state.tool_call_count`; `metadata` falls back to `state.metadata`. Every other field (`message`, `provider`, `iteration_count`, `model_call_count`, `tokens_used`, `agent_context`, `run_state`, `elapsed_seconds`) is always read from `state`.
-4. `_finish_result` accepts `(self, result: AgentResult, state: _LoopState) -> AgentResult` and internally computes the same `tool_call_count=int(dict(result.metadata).get("tool_call_count", 0))` override it does today, passed into `_middleware_context`.
-5. `_process_tool_call` accepts `(self, call: ToolCall, messages: list[dict[str, Any]], state: _LoopState, *, trace_context: SpanContext | None = None)`. It reads `provider`/`call_contexts`/`iteration_count`/`tokens_used`/`metadata`/`run_state`/`model_response` from `state`, mutates `state.call_contexts` in place exactly where it does today (`state.call_contexts.append(context_record)`), and keeps its `AFTER_TOOL_CALL` call's existing `tool_call_count=len(call_contexts) + 1` and `metadata=self._tool_call_middleware_metadata(...)` overrides (both become `tool_call_count=state.tool_call_count + 1` / `metadata=self._tool_call_middleware_metadata(state.metadata, call)`).
-6. `_invoke_with_middleware` keeps its exact current public signature (`handle`, `message`, `call_options`, `context`, `iteration_count`, `model_call_count`, `call_contexts`, `tokens_used`, `started_at`, `metadata`, `run_state=None`, `trace_context=None`, `compaction_count=0`) unchanged. Internally it builds one local `_LoopState` from those arguments (`provider=handle.provider`, `call_contexts=list(call_contexts)`, `metadata=dict(metadata)`, `run_state=run_state if run_state is not None else {}`) and uses it for both of its `_middleware_context` calls (`BEFORE_MODEL_CALL`, `ON_MODEL_ERROR`).
-7. `_arun_once` constructs one `state = _LoopState(...)` immediately after computing `handle.provider` and `self.middleware.clock()`, in place of the current separate `provider`, `iteration_count`, `model_call_count`, `tokens_used`, `started_at`, `runtime_metadata`, `run_state`, `call_contexts`, `last_response` locals. Every read/write of those locals inside `_arun_once` becomes a read/write of the matching `state.` field (`state.provider = transition.provider` on fallback, `state.model_response = raw_result` immediately after a non-`AgentResult` raw result is obtained, `state.iteration_count += 1`, etc.). `message` and `context` remain plain locals (they never mutate) and are not re-read through `state` outside of `_middleware_context`/`_finish_result` calls.
+1. Add a `@dataclass(slots=True)` named `BaseAgentRuntimeLoopState` in `vidbyte/agents/runtime.py`, holding: `message: str`, `context: BaseAgentContext`, `provider: str`, `metadata: dict[str, Any]`, `started_at: float`, `inner_context_window_algorithm: InnerContextWindowAlgorithm | None`, `context_window_state: dict[str, Any]`, `run_state: dict[Any, Any]` (default `{}`; heterogeneous middleware class and string keys), `call_contexts: list[ToolCallContext]` (default `[]`), `iteration_outputs: list[str]` (default `[]`), `iteration_count: int` (default `0`), `model_call_count: int` (default `0`), `tokens_used: int | None` (default `None`), `model_response: object | None` (default `None`).
+2. `BaseAgentRuntimeLoopState` exposes `tool_call_count` as a read-only `@property` returning `len(self.call_contexts)`.
+3. `_middleware_context` accepts `(self, hook: MiddlewareHook, state: BaseAgentRuntimeLoopState, *, tool_call=None, tool_result=None, model_response=None, model_usage=None, error=None, tool_is_internal=False, provider_messages=(), system=None, tool_call_count=None, metadata=None)`. `model_response` falls back to `state.model_response` when not given; `tool_call_count` falls back to `state.tool_call_count`; `metadata` falls back to `state.metadata`. Every other field (`message`, `provider`, `iteration_count`, `model_call_count`, `tokens_used`, `agent_context`, `run_state`, `elapsed_seconds`) is always read from `state`.
+4. `_finish_result` accepts `(self, result: AgentResult, state: BaseAgentRuntimeLoopState) -> AgentResult` and internally computes the same `tool_call_count=int(dict(result.metadata).get("tool_call_count", 0))` override it does today, passed into `_middleware_context`.
+5. `_process_tool_call` accepts `(self, call: ToolCall, messages: list[dict[str, Any]], state: BaseAgentRuntimeLoopState, *, trace_context: SpanContext | None = None)`. It reads `provider`/`call_contexts`/`iteration_count`/`tokens_used`/`metadata`/`run_state`/`model_response` from `state`, mutates `state.call_contexts` in place exactly where it does today (`state.call_contexts.append(context_record)`), and keeps its `AFTER_TOOL_CALL` call's existing `tool_call_count=len(call_contexts) + 1` and `metadata=self._tool_call_middleware_metadata(...)` overrides (both become `tool_call_count=state.tool_call_count + 1` / `metadata=self._tool_call_middleware_metadata(state.metadata, call)`).
+6. `_invoke_with_middleware` keeps its exact current public signature (`handle`, `message`, `call_options`, `context`, `iteration_count`, `model_call_count`, `call_contexts`, `tokens_used`, `started_at`, `metadata`, `run_state=None`, `trace_context=None`, `compaction_count=0`) unchanged. Internally it builds one local `BaseAgentRuntimeLoopState` from those arguments (`provider=handle.provider`, `call_contexts=list(call_contexts)`, `metadata=dict(metadata)`, `run_state=run_state if run_state is not None else {}`) and uses it for both of its `_middleware_context` calls (`BEFORE_MODEL_CALL`, `ON_MODEL_ERROR`).
+7. `_arun_once` constructs one `state = BaseAgentRuntimeLoopState(...)` immediately after computing `handle.provider` and `self.middleware.clock()`, including the inner context-window algorithm, its mutable context-window state, and iteration-output storage. Every read/write of the loop state inside `_arun_once` becomes a read/write of the matching `state.` field (`state.provider = transition.provider` on fallback, `state.model_response = raw_result` immediately after a non-`AgentResult` raw result is obtained, `state.iteration_outputs.append(...)`, `state.iteration_count += 1`, etc.). `message` and `context` remain plain locals (they never mutate) and are not re-read through `state` outside of `_middleware_context`/`_finish_result` calls.
 8. `state.model_response` is updated to the freshly obtained `raw_result` at exactly the point `_arun_once` does it today (immediately after confirming `raw_result` is not itself an `AgentResult`, before `iteration_count` is incremented) and nowhere else. Every `_middleware_context`/`_finish_result` call site in `_arun_once` that today passes `model_response=raw_result` or `model_response=last_response` omits the argument and relies on this default, since `state.model_response` already holds the correct value at every one of those call sites (verified call site by call site in Section 6.4).
 9. Every `_finish_result` call site in `_arun_once` becomes `return await self._finish_result(<result>, state)`.
 10. Every `_middleware_context` call site in `_arun_once` passes only the hook and `state`, plus any genuinely-varying override (`model_usage` at `AFTER_MODEL_RESPONSE` only).
@@ -72,9 +72,9 @@ Canonical local CI: `python -m pip install -e ".[dev]"` then `python scripts/run
 ### Non-Functional Requirements
 
 - Behavior-preserving: for every existing call site, the `MiddlewareContext` produced after the refactor must be field-for-field identical to the one produced before it, for the same point in execution.
-- No new runtime allocations beyond the one `_LoopState` per `_arun_once` call and one per `_invoke_with_middleware` call (replacing, not adding to, the existing per-call-site dict/list work `_middleware_context` already did).
-- Readability: `_LoopState`'s docstring and the one comment at the `state.model_response = raw_result` assignment must make the "set once per iteration, read as current response until next iteration" invariant explicit, since it is now implicit at every downstream call site instead of spelled out via an explicit keyword each time.
-- No new public API surface: `_LoopState` is not exported from `vidbyte/agents/__init__.py` or any `__all__`.
+- No new runtime allocations beyond the one `BaseAgentRuntimeLoopState` per `_arun_once` call and one per `_invoke_with_middleware` call (replacing, not adding to, the existing per-call-site dict/list work `_middleware_context` already did).
+- Readability: `BaseAgentRuntimeLoopState`'s docstring and the one comment at the `state.model_response = raw_result` assignment must make the "set once per iteration, read as current response until next iteration" invariant explicit, since it is now implicit at every downstream call site instead of spelled out via an explicit keyword each time.
+- No new package-level public API surface: `BaseAgentRuntimeLoopState` is not exported from `vidbyte/agents/__init__.py` or any `__all__`.
 
 ---
 
@@ -82,12 +82,12 @@ Canonical local CI: `python -m pip install -e ".[dev]"` then `python scripts/run
 
 ```
 _arun_once
-  state = _LoopState(message, context, provider=handle.provider, metadata, started_at)
+  state = BaseAgentRuntimeLoopState(message, context, provider=handle.provider, metadata, started_at)
   before_run: self._middleware_context(BEFORE_RUN, state)
   while True:
     before_iteration: self._middleware_context(BEFORE_ITERATION, state)
     raw_result, state.model_call_count, compaction_count = _invoke_with_middleware(handle, message, ..., context=context, iteration_count=state.iteration_count, ...)  # signature unchanged
-      [_invoke_with_middleware builds its OWN local _LoopState from its args]
+      [_invoke_with_middleware builds its OWN local BaseAgentRuntimeLoopState from its args]
     state.model_response = raw_result        # single point of truth from here on
     state.iteration_count += 1
     state.tokens_used = ...
@@ -102,7 +102,7 @@ _arun_once
 Key decisions:
 
 1. One mutable object, constructed once per attempt, replaces ~9 separate locals that today move through `_arun_once` in lockstep. This mirrors the existing `_RunState` pattern in `vidbyte/workflows/machine.py`.
-2. `_invoke_with_middleware` gets an internal-only `_LoopState`, not a signature change, because two files outside `runtime.py` call it directly with the current keyword signature.
+2. `_invoke_with_middleware` gets an internal-only `BaseAgentRuntimeLoopState`, not a signature change, because two files outside `runtime.py` call it directly with the current keyword signature.
 3. `_process_tool_call` does get a signature change (`state` replaces 9 of its 11 parameters) because it has zero external callers — verified via repo-wide grep.
 4. `model_response` defaulting to `state.model_response` (rather than always requiring an explicit override) is safe because `_arun_once` already updates it at exactly one point per iteration, before any hook that should see the new value fires, and never anywhere else in the method — this is verified per-call-site in Section 6.4, not assumed.
 
@@ -110,10 +110,10 @@ Key decisions:
 
 ## 6. Detailed Design
 
-### 6.1 `_LoopState`
+### 6.1 `BaseAgentRuntimeLoopState`
 
 **Files:** `vidbyte/agents/runtime.py`
-**Type:** New (module-private class, defined directly above `class AgentRuntime`)
+**Type:** New module-scoped class, defined directly above `class AgentRuntime` and not exported by the agent package
 
 #### Responsibility
 
@@ -123,16 +123,19 @@ Owns the mutable per-attempt state (`_arun_once`) or per-call state (`_invoke_wi
 
 ```python
 @dataclass(slots=True)
-class _LoopState:
-    """Mutable per-attempt state threaded through one _arun_once or _invoke_with_middleware call."""
+class BaseAgentRuntimeLoopState:
+    """Mutable state threaded through one direct agent runtime attempt."""
 
     message: str
     context: BaseAgentContext
     provider: str
     metadata: dict[str, Any]
     started_at: float
-    run_state: dict[type, Any] = field(default_factory=dict)
+    inner_context_window_algorithm: InnerContextWindowAlgorithm | None = None
+    context_window_state: dict[str, Any] = field(default_factory=dict)
+    run_state: dict[Any, Any] = field(default_factory=dict)
     call_contexts: list[ToolCallContext] = field(default_factory=list)
+    iteration_outputs: list[str] = field(default_factory=list)
     iteration_count: int = 0
     model_call_count: int = 0
     tokens_used: int | None = None
@@ -161,12 +164,12 @@ No behavior beyond field storage and the one derived property. Not frozen: every
 
 #### Responsibility
 
-Builds a `MiddlewareContext` snapshot from one `_LoopState` plus whatever varies at a specific call site.
+Builds a `MiddlewareContext` snapshot from one `BaseAgentRuntimeLoopState` plus whatever varies at a specific call site.
 
 #### Interface / API
 
 ```python
-def _middleware_context(self, hook: MiddlewareHook, state: _LoopState, *, tool_call: ToolCall | None = None, tool_result: ToolResult | None = None, model_response: object | None = None, model_usage: object | None = None, error: BaseException | None = None, tool_is_internal: bool = False, provider_messages: Sequence[Mapping[str, Any]] = (), system: str | None = None, tool_call_count: int | None = None, metadata: Mapping[str, Any] | None = None) -> MiddlewareContext:
+def _middleware_context(self, hook: MiddlewareHook, state: BaseAgentRuntimeLoopState, *, tool_call: ToolCall | None = None, tool_result: ToolResult | None = None, model_response: object | None = None, model_usage: object | None = None, error: BaseException | None = None, tool_is_internal: bool = False, provider_messages: Sequence[Mapping[str, Any]] = (), system: str | None = None, tool_call_count: int | None = None, metadata: Mapping[str, Any] | None = None) -> MiddlewareContext:
 ```
 
 #### Logic / Algorithm
@@ -190,7 +193,7 @@ def _middleware_context(self, hook: MiddlewareHook, state: _LoopState, *, tool_c
 #### Interface / API
 
 ```python
-async def _finish_result(self, result: AgentResult, state: _LoopState) -> AgentResult:
+async def _finish_result(self, result: AgentResult, state: BaseAgentRuntimeLoopState) -> AgentResult:
 ```
 
 #### Logic / Algorithm
@@ -215,17 +218,17 @@ Same as today (drive one direct model/tool attempt); this section only changes h
 #### Logic / Algorithm
 
 1. Keep `run_options = dict(options or {})`.
-2. Build `state = _LoopState(message=message, context=context, provider=handle.provider, metadata=dict(metadata or {}), started_at=self.middleware.clock())` where today's code builds `provider`, `runtime_metadata`, `started_at` separately.
-3. Inner-context-window setup writes `state.metadata["_inner_context_window_algorithm"] = inner_algorithm` / `state.metadata["_context_window_state"] = {}` in place of `runtime_metadata[...]`.
+2. Build `state = BaseAgentRuntimeLoopState(message=message, context=context, provider=handle.provider, metadata=dict(metadata or {}), started_at=self.middleware.clock(), inner_context_window_algorithm=AgentRuntimeContextAlgorithms(self).inner_loop_algorithm())` where today's code builds `provider`, `runtime_metadata`, and the inner algorithm state separately.
+3. Inner-context-window setup uses `state.inner_context_window_algorithm` and the dedicated `state.context_window_state` dict; it does not add private algorithm objects to middleware metadata.
 4. `tool_schemas = self._resolve_tool_schemas(state.provider)`.
-5. Keep `messages`, `rejections`, `compaction_count`, `last_assistant_output`, `iteration_outputs`, `active_trace_context`, `fallback_index`, `fallback_attempts`, `fallback_errors` as plain locals — none of them are part of the `_middleware_context`/`_finish_result` argument bag.
+5. Keep `messages`, `rejections`, `compaction_count`, `last_assistant_output`, `active_trace_context`, `fallback_index`, `fallback_attempts`, `fallback_errors` as plain locals; `iteration_outputs` is owned by `state` because it is part of the attempt's durable result metadata.
 6. `BEFORE_RUN`: `self._middleware_context(MiddlewareHook.BEFORE_RUN, state)`. On abort: `self._finish_result(self._middleware_abort_result(decision, iteration_count=state.iteration_count, tokens_used=state.tokens_used, contexts=state.call_contexts), state)`.
 7. Loop top: `_run_inner_context_window_hook` call and `_budget_stop` call read `state.iteration_count`/`state.tokens_used`/`state.call_contexts`/`state.metadata`/`state.provider` instead of the old locals; on a budget stop, `return await self._finish_result(stop_result, state)` (drops the old explicit `model_response=last_response` — see point 9 below).
 8. `BEFORE_ITERATION`: `self._middleware_context(MiddlewareHook.BEFORE_ITERATION, state)` (drops the old explicit `model_response=last_response`).
 9. `_invoke_with_middleware` call: unchanged keyword names, but every value now reads from `state` (`context=context, iteration_count=state.iteration_count, model_call_count=state.model_call_count, call_contexts=state.call_contexts, tokens_used=state.tokens_used, started_at=state.started_at, metadata=state.metadata, run_state=state.run_state`), and the return unpacks into `raw_result, state.model_call_count, compaction_count = await self._invoke_with_middleware(...)`.
 10. On `BaseException` from that call: fallback transition reads `provider=state.provider`; on a non-`None` transition, `handle, state.provider = transition.handle, transition.provider`; `self._publish_fallback_metadata(state.run_state, ...)`.
 11. If `raw_result` is an `AgentResult`: `return await self._finish_result(raw_result, state)`. This is the one early-return branch that must NOT update `state.model_response` first — it needs the *previous* iteration's response (today's explicit `model_response=last_response`), which is exactly what the default already resolves to, since `state.model_response` has not been touched yet this iteration.
-12. Otherwise: `state.model_response = raw_result` (single point of truth from here on — comment this line to make the invariant explicit), then `state.iteration_count += 1`, `last_assistant_output = handle.extract_text(raw_result)`, `state.run_state["__iteration_outputs__"] = tuple(iteration_outputs)`, `state.tokens_used = self._add_token_usage(state.tokens_used, ...)`.
+12. Otherwise: `state.model_response = raw_result` (single point of truth from here on — comment this line to make the invariant explicit), then `state.iteration_count += 1`, `last_assistant_output = handle.extract_text(raw_result)`, `state.iteration_outputs.append(last_assistant_output or "")`, `state.run_state[AgentRuntimeStateKey.ITERATION_OUTPUTS.value] = tuple(state.iteration_outputs)`, and `state.tokens_used = self._add_token_usage(state.tokens_used, ...)`.
 13. `AFTER_MODEL_RESPONSE`: `self._middleware_context(MiddlewareHook.AFTER_MODEL_RESPONSE, state, model_usage=usage_record.usage if usage_record is not None else None)` — drops the old explicit `model_response=raw_result` (now redundant with the default set in step 12).
 14. No-tool-calls branch: `token_stop`/contract-unsatisfied/`final` results all call `return await self._finish_result(<result>, state)`, dropping their old explicit `model_response=raw_result`. The `AFTER_ITERATION` call inside this branch drops its old explicit `model_response=raw_result` too.
 15. Tool-call loop: `processed = await self._process_tool_call(call, messages, state, trace_context=active_trace_context)` (drops `provider`, `call_contexts`, and the 8 other now-redundant keyword arguments). The `IS_DONE_TOOL_NAME` branch's `AFTER_ITERATION` call and its `_finish_result` calls drop their old explicit `model_response=raw_result` for the same reason as step 14 — `_process_tool_call` does not touch `state.model_response`, so it is still `raw_result` from step 12.
@@ -253,15 +256,15 @@ async def _invoke_with_middleware(self, handle: RunnerHandle, message: str, call
 
 #### Logic / Algorithm
 
-1. First line of the body: `state = _LoopState(message=message, context=context, provider=handle.provider, metadata=dict(metadata), started_at=started_at, run_state=run_state if run_state is not None else {}, call_contexts=list(call_contexts), iteration_count=iteration_count, model_call_count=model_call_count, tokens_used=tokens_used)`.
+1. First line of the body: `state = BaseAgentRuntimeLoopState(message=message, context=context, provider=handle.provider, metadata=dict(metadata), started_at=started_at, run_state=run_state if run_state is not None else {}, call_contexts=list(call_contexts), iteration_count=iteration_count, model_call_count=model_call_count, tokens_used=tokens_used)`.
 2. Replace the retry `while True:` loop's two `_middleware_context` calls (`BEFORE_MODEL_CALL`, `ON_MODEL_ERROR`) with calls that pass `state` instead of the 8-9 individual keywords each currently repeats; `ON_MODEL_ERROR` still passes `error=exc` explicitly (state has no error field).
 3. Replace `model_call_count += 1` with `state.model_call_count += 1`; replace every other read of `iteration_count`/`tokens_used`/`call_contexts` in this method (`_llm_trace_inputs`, `_middleware_abort_result` calls, `self.middleware.sleep` gate) with the matching `state.` field.
 4. Both `return` statements that currently return the plain `model_call_count` local now return `state.model_call_count`.
 
 #### Edge Cases & Error Handling
 
-- `run_state` passed in by `_arun_once` is `state.run_state` from the caller's own `_LoopState` — the same dict object, not a copy — so mutations middleware makes to it inside `_invoke_with_middleware`'s local `state.run_state` remain visible to the caller's `state.run_state` after the call returns, exactly as today's pass-by-reference `run_state` dict did.
-- `call_contexts` and `metadata` ARE copied (`list(...)`, `dict(...)`) into the local `state`, matching today's behavior: this method never mutates either one, it only reads them, so a copy vs. a reference makes no observable difference, and the copy satisfies `_LoopState`'s concrete `list`/`dict` field types when a caller (e.g. `reflexion.py`, passing `call_contexts=()`) hands in a different `Sequence`/`Mapping` implementation.
+- `run_state` passed in by `_arun_once` is `state.run_state` from the caller's own `BaseAgentRuntimeLoopState` — the same dict object, not a copy — so mutations middleware makes to it inside `_invoke_with_middleware`'s local state remain visible to the caller's state after the call returns, exactly as today's pass-by-reference `run_state` dict did.
+- `call_contexts` and `metadata` ARE copied (`list(...)`, `dict(...)`) into the local state, matching today's behavior: this method never mutates either one, it only reads them, so a copy vs. a reference makes no observable difference, and the copy satisfies the concrete `list`/`dict` field types when a caller (e.g. `reflexion.py`, passing `call_contexts=()`) hands in a different `Sequence`/`Mapping` implementation.
 
 ---
 
@@ -273,7 +276,7 @@ async def _invoke_with_middleware(self, handle: RunnerHandle, message: str, call
 #### Interface / API
 
 ```python
-async def _process_tool_call(self, call: ToolCall, messages: list[dict[str, Any]], state: _LoopState, *, trace_context: SpanContext | None = None) -> tuple[ToolCallContext, ToolResult] | AgentResult:
+async def _process_tool_call(self, call: ToolCall, messages: list[dict[str, Any]], state: BaseAgentRuntimeLoopState, *, trace_context: SpanContext | None = None) -> tuple[ToolCallContext, ToolResult] | AgentResult:
 ```
 
 #### Logic / Algorithm
@@ -296,7 +299,7 @@ async def _process_tool_call(self, call: ToolCall, messages: list[dict[str, Any]
 
 ## 7. Data Model Changes
 
-N/A - `_LoopState` is not a persisted schema, collection, index, or public API type. It is a private in-process value object scoped to one `_arun_once`/`_invoke_with_middleware` call.
+N/A - `BaseAgentRuntimeLoopState` is not a persisted schema, collection, index, or package-level public API type. It is an in-process value object scoped to one `_arun_once`/`_invoke_with_middleware` call.
 
 ---
 
@@ -322,7 +325,9 @@ N/A - `_LoopState` is not a persisted schema, collection, index, or public API t
 | Action | File Path | Reason |
 |--------|-----------|--------|
 | CREATE | `docs/design/agent-runtime-loop-state.md` | This design doc. |
-| MODIFY | `vidbyte/agents/runtime.py` | Add `_LoopState`; rewrite `_middleware_context`, `_finish_result`, `_process_tool_call`, `_arun_once`; rewrite `_invoke_with_middleware`'s body (signature unchanged); add `from dataclasses import dataclass, field` import. |
+| MODIFY | `vidbyte/agents/runtime.py` | Add `BaseAgentRuntimeLoopState`; rewrite `_middleware_context`, `_finish_result`, `_process_tool_call`, `_arun_once`; rewrite `_invoke_with_middleware`'s body (signature unchanged); add runtime state-key usage. |
+| MODIFY | `vidbyte/lib/enums/agent_runtime.py` | Declare the runtime run-state key enum alongside the runtime-type enum. |
+| MODIFY | `vidbyte/lib/enums/__init__.py` | Export the runtime run-state key enum from the SDK enum namespace. |
 
 ---
 
@@ -338,13 +343,13 @@ N/A - no new third-party packages. `dataclasses` is Python stdlib, already used 
 - Not a breaking change: no public API changes. The two external callers of `_invoke_with_middleware` (`reflexion.py`, `multi_provider_agentic_grader.py`) require no edits.
 - Alpha SDK (`0.1.0`); no migration path needed.
 - Rollback: revert the PR. No persisted data, no schema, nothing to migrate.
-- Follow-up (out of scope for this PR): PR #351 ("Guaranteed Failure Finalization", branch `feat/guaranteed-failure-finalization`) is rebased onto this PR's branch after this PR is opened, and its `_finish_error`/`_await_shielded` code is rewritten to accept `_LoopState` instead of the same 9-11 keyword bag it currently duplicates. That PR keeps `base: main` throughout (per this workspace's stacked-PR-orphan lesson — a PR's base must never be retargeted to another feature branch), and its description notes the dependency on this PR so the diff is understood to shrink once this PR merges to main.
+- Follow-up (out of scope for this PR): PR #351 ("Guaranteed Failure Finalization", branch `feat/guaranteed-failure-finalization`) is rebased onto this PR's branch after this PR is opened, and its `_finish_error`/`_await_shielded` code is rewritten to accept `BaseAgentRuntimeLoopState` instead of the same 9-11 keyword bag it currently duplicates. That PR keeps `base: main` throughout (per this workspace's stacked-PR-orphan lesson — a PR's base must never be retargeted to another feature branch), and its description notes the dependency on this PR so the diff is understood to shrink once this PR merges to main.
 
 ---
 
 ## 12. Open Questions
 
-- [x] Where does `_LoopState` live — `vidbyte/lib/dataclasses/` or module-private in `runtime.py`? Settled: module-private in `runtime.py`, matching the `_RunState` precedent in `vidbyte/workflows/machine.py`.
+- [x] Where does `BaseAgentRuntimeLoopState` live — `vidbyte/lib/dataclasses/` or `runtime.py`? Settled: in `runtime.py`, matching the `_RunState` precedent in `vidbyte/workflows/machine.py` while giving the state type an explicit name.
 - [x] Does `_invoke_with_middleware`'s public signature change? Settled: no — it has external callers with the current signature.
 - [x] Does `_process_tool_call`'s signature change? Settled: yes — zero external callers.
 - [ ] N/A - no remaining open questions that block implementation.
@@ -370,5 +375,5 @@ N/A - no new third-party packages. `dataclasses` is Python stdlib, already used 
 
 ### Change `_invoke_with_middleware`'s public signature too
 
-- What: Have `reflexion.py` and `multi_provider_agentic_grader.py` construct a `_LoopState` themselves and pass it in, for full consistency with `_process_tool_call`.
-- Why rejected: `_LoopState` is private to `runtime.py` (leading underscore, module-private). Exporting it for two external call sites — each of which builds a one-off synthetic attempt, not a real `_arun_once` loop — adds cross-module coupling and ceremony to two files this change doesn't need to touch, for a benefit (two fewer long call sites, both already using named keyword arguments today) that doesn't justify the widened blast radius.
+- What: Have `reflexion.py` and `multi_provider_agentic_grader.py` construct a `BaseAgentRuntimeLoopState` themselves and pass it in, for full consistency with `_process_tool_call`.
+- Why rejected: `BaseAgentRuntimeLoopState` remains owned by `runtime.py`; exporting it for two external call sites — each of which builds a one-off synthetic attempt, not a real `_arun_once` loop — adds cross-module coupling and ceremony to two files this change doesn't need to touch, for a benefit (two fewer long call sites, both already using named keyword arguments today) that doesn't justify the widened blast radius.
