@@ -13,6 +13,7 @@ Architecture:
     - Memory provider tools from builtins.memory.
     - Context primitive editing tools from builtins.context_primitives.
     - Context algorithm tools from builtins.trajectory_checkpoint and builtins.reflexion.
+    - 182 deep reasoning trace tools from builtins.reasoning.
     - Sequential continuation tool from builtins.run_prompts_sequentially.
     - Cooperative pause tool from builtins.pause.
 Relations:
@@ -23,15 +24,6 @@ from __future__ import annotations
 
 from vidbyte.tools.builtins.code_execution import CodeExecutionTool
 from vidbyte.tools.builtins.code_search import GlobTool, GrepTool, SemanticSearchTool
-from vidbyte.tools.builtins.output_schema import (
-    AppendOutputTool,
-    DeclareOutputSchemaTool,
-    ExtendOutputSchemaTool,
-    OutputSchemaBuilder,
-    OutputSchemaField,
-)
-from vidbyte.tools.builtins.reflexion import ReflexionTool
-from vidbyte.tools.builtins.trajectory_checkpoint import TrajectoryCheckpointTool
 from vidbyte.tools.builtins.context import (
     CompactionMode,
     ContextCompactionTool,
@@ -40,7 +32,6 @@ from vidbyte.tools.builtins.context import (
 )
 from vidbyte.tools.builtins.context_primitives import (
     CREATE_TOOL_REGISTRY,
-    CreateContextPrimitiveTool,
     ContextEditTool,
     ContextListTool,
     ContextMoveTool,
@@ -49,6 +40,7 @@ from vidbyte.tools.builtins.context_primitives import (
     ContextStatsTool,
     ContextUpsertTool,
     ContextWindowFactory,
+    CreateContextPrimitiveTool,
     PrimitiveToolDefinition,
     context_window_tools,
 )
@@ -56,49 +48,6 @@ from vidbyte.tools.builtins.editing import PatchTool
 from vidbyte.tools.builtins.fork import ForkConversationTool
 from vidbyte.tools.builtins.handoff import CreateHandoffTool
 from vidbyte.tools.builtins.mcp import AttachMcpServerTool, SearchMcpServersTool
-from vidbyte.tools.builtins.pause import PauseAgentTool
-from vidbyte.tools.builtins.operations import (
-    BraveSearchTool,
-    BrowserbaseFetchTool,
-    BrowserbaseSearchTool,
-    DirectHttpFetchTool,
-    ExaSearchTool,
-    FirecrawlFetchTool,
-    LinkupFetchTool,
-    LinkupSearchTool,
-    OpenAlexSearchTool,
-    ParallelExtractTool,
-    ParallelSearchTool,
-    PricedOperationTool,
-    SemanticScholarSearchTool,
-    TavilyExtractTool,
-    TavilySearchTool,
-)
-from vidbyte.tools.builtins.run_prompts_sequentially import RunPromptsSequentiallyTool
-from vidbyte.tools.builtins.providers import (
-    MongoCreateCollectionTool,
-    MongoCreateIndexTool,
-    MongoDeleteDocumentsTool,
-    MongoFindDocumentsTool,
-    MongoInsertDocumentTool,
-    MongoUpdateDocumentsTool,
-    ProviderCreateSchemaTool,
-    ProviderCreateTableTool,
-    ProviderDeleteRowsTool,
-    ProviderInsertRowTool,
-    ProviderSelectRowsTool,
-    ProviderUpdateRowsTool,
-)
-from vidbyte.tools.builtins.sessions import (
-    BatchForkTool,
-    CheckpointTool,
-    ForkTool,
-    ResumeAppendTool,
-    ResumeOutputTool,
-    ResumeReplaceTool,
-    RewindTool,
-    SessionTool,
-)
 from vidbyte.tools.builtins.memory import (
     CogneeAddTool,
     CogneeCognifyTool,
@@ -120,6 +69,68 @@ from vidbyte.tools.builtins.memory import (
     ZepGetMemoryTool,
     ZepSearchMemoryTool,
 )
+from vidbyte.tools.builtins.operations import (
+    BraveSearchTool,
+    BrowserbaseFetchTool,
+    BrowserbaseSearchTool,
+    DirectHttpFetchTool,
+    ExaSearchTool,
+    FirecrawlFetchTool,
+    LinkupFetchTool,
+    LinkupSearchTool,
+    OpenAlexSearchTool,
+    ParallelExtractTool,
+    ParallelSearchTool,
+    PricedOperationTool,
+    SemanticScholarSearchTool,
+    TavilyExtractTool,
+    TavilySearchTool,
+)
+from vidbyte.tools.builtins.output_schema import (
+    AppendOutputTool,
+    DeclareOutputSchemaTool,
+    ExtendOutputSchemaTool,
+    OutputSchemaBuilder,
+    OutputSchemaField,
+)
+from vidbyte.tools.builtins.pause import PauseAgentTool
+from vidbyte.tools.builtins.providers import (
+    MongoCreateCollectionTool,
+    MongoCreateIndexTool,
+    MongoDeleteDocumentsTool,
+    MongoFindDocumentsTool,
+    MongoInsertDocumentTool,
+    MongoUpdateDocumentsTool,
+    ProviderCreateSchemaTool,
+    ProviderCreateTableTool,
+    ProviderDeleteRowsTool,
+    ProviderInsertRowTool,
+    ProviderSelectRowsTool,
+    ProviderUpdateRowsTool,
+)
+from vidbyte.tools.builtins.reasoning import (
+    REASONING_TRACE_DEFINITIONS,
+    REASONING_TRACE_TOOL_CLASSES,
+    ReasoningTraceCatalog,
+    ReasoningTraceDefinition,
+    ReasoningTraceTool,
+)
+from vidbyte.tools.builtins.reflexion import ReflexionTool
+from vidbyte.tools.builtins.run_prompts_sequentially import RunPromptsSequentiallyTool
+from vidbyte.tools.builtins.sessions import (
+    BatchForkTool,
+    CheckpointTool,
+    ForkTool,
+    ResumeAppendTool,
+    ResumeOutputTool,
+    ResumeReplaceTool,
+    RewindTool,
+    SessionTool,
+)
+from vidbyte.tools.builtins.trajectory_checkpoint import TrajectoryCheckpointTool
+
+for _reasoning_trace_class in REASONING_TRACE_TOOL_CLASSES.values():
+    globals()[_reasoning_trace_class.__name__] = _reasoning_trace_class
 
 __all__ = [
     "AppendOutputTool",
@@ -211,4 +222,15 @@ __all__ = [
     "ZepDeleteSessionTool",
     "ZepGetMemoryTool",
     "ZepSearchMemoryTool",
+    "REASONING_TRACE_DEFINITIONS",
+    "REASONING_TRACE_TOOL_CLASSES",
+    "ReasoningTraceCatalog",
+    "ReasoningTraceDefinition",
+    "ReasoningTraceTool",
 ]
+
+__all__.extend(
+    (
+        *(_reasoning_trace_class.__name__ for _reasoning_trace_class in REASONING_TRACE_TOOL_CLASSES.values()),
+    )
+)

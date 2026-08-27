@@ -75,6 +75,7 @@ from vidbyte.context.primitives.multi_agent import (
     MultiAgentTerminalContextItem,
 )
 from vidbyte.context.primitives.reasoning import ErrorCorrectionContextItem, ProblemSpaceSearchContextItem
+from vidbyte.context.primitives.reasoning_traces import ReasoningTraceContextItem
 from vidbyte.context.primitives.tasks import (
     PlanContextItem,
     ProgressContextItem,
@@ -115,6 +116,7 @@ __all__ = [
     "PerspectiveGapContextItem",
     "ProblemFrameContextItem",
     "ProblemSpaceSearchContextItem",
+    "ReasoningTraceContextItem",
     "ProcessStallContextItem",
     "ProgressContextItem",
     "ReflexionContextItem",

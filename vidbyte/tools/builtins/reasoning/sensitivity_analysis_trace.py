@@ -1,0 +1,46 @@
+"""Context Protocol Header
+
+Description:
+    Defines the sensitivity-analysis-trace strategy-specific reasoning trace tool.
+Purpose:
+    Exposes an explicit public schema for this reasoning strategy and records
+    its model-authored checkpoint through the shared context manager boundary.
+Architecture:
+    - SensitivityAnalysisTraceTool: Strategy-owned description and parameter shape.
+    - ReasoningTraceTool: Shared validation, rendering, and upsert behavior.
+Relations:
+    Re-exported by vidbyte.tools.builtins.reasoning and discovered by the
+    fixed SDK ComponentRegistry through vidbyte.tools.builtins.
+"""
+
+from __future__ import annotations
+
+from vidbyte.tools.builtins.reasoning._base import (
+    ReasoningTraceDefinition,
+    ReasoningTraceTool,
+    parameter,
+)
+
+
+class SensitivityAnalysisTraceTool(ReasoningTraceTool):
+    """Model-facing sensitivity-analysis-trace reasoning trace tool."""
+
+    definition = ReasoningTraceDefinition(
+        skill_name='sensitivity-analysis-trace',
+        purpose='Test how conclusions change when inputs vary.',
+        description='Use the sensitivity analysis reasoning trace when the current task benefits from test how conclusions change when inputs vary. Its central move gives the public checkpoint a strategy-specific structure for examining the question. The parameters separate the observations, judgments, uncertainties, and actions that make the strategy inspectable. The tool writes one bounded context primitive so later iterations can recover the declared reasoning state. Use it at a meaningful checkpoint after the relevant inputs are available and before the next action is chosen. The record does not execute the strategy, verify model-authored claims, or replace authoritative task instructions. Treat the result as auditable telemetry that supports comparison across iterations without exposing private chain-of-thought.',
+        parameters=(
+        parameter(name='question', type='string', description="Question captures the focused question or decision target for the sensitivity analysis trace. It keeps the record anchored to the strategy's central move rather than a generic account of reasoning. It separates this dimension from the other observations and judgments needed for test how conclusions change when inputs vary. Record the material content that would change how a careful reviewer interprets the current state. Keep the value explicit enough that a later iteration can compare it with new evidence and revise it. Treat this field as model-authored telemetry whose usefulness depends on honest, bounded reporting."),
+        parameter(name='conclusion', type='string', description="Conclusion captures the position that follows from the recorded reasoning for the sensitivity analysis trace. It keeps the record anchored to the strategy's central move rather than a generic account of reasoning. It separates this dimension from the other observations and judgments needed for test how conclusions change when inputs vary. Record the material content that would change how a careful reviewer interprets the current state. Keep the value explicit enough that a later iteration can compare it with new evidence and revise it. Treat this field as model-authored telemetry whose usefulness depends on honest, bounded reporting."),
+        parameter(name='inputs', type='string', description="Inputs captures the inputs dimension of the strategy for the sensitivity analysis trace. It keeps the record anchored to the strategy's central move rather than a generic account of reasoning. It separates this dimension from the other observations and judgments needed for test how conclusions change when inputs vary. Record the material content that would change how a careful reviewer interprets the current state. Keep the value explicit enough that a later iteration can compare it with new evidence and revise it. Treat this field as model-authored telemetry whose usefulness depends on honest, bounded reporting."),
+        parameter(name='ranges', type='string', description="Ranges captures the ranges dimension of the strategy for the sensitivity analysis trace. It keeps the record anchored to the strategy's central move rather than a generic account of reasoning. It separates this dimension from the other observations and judgments needed for test how conclusions change when inputs vary. Record the material content that would change how a careful reviewer interprets the current state. Keep the value explicit enough that a later iteration can compare it with new evidence and revise it. Treat this field as model-authored telemetry whose usefulness depends on honest, bounded reporting."),
+        parameter(name='thresholds', type='string', description="Thresholds captures the thresholds dimension of the strategy for the sensitivity analysis trace. It keeps the record anchored to the strategy's central move rather than a generic account of reasoning. It separates this dimension from the other observations and judgments needed for test how conclusions change when inputs vary. Record the material content that would change how a careful reviewer interprets the current state. Keep the value explicit enough that a later iteration can compare it with new evidence and revise it. Treat this field as model-authored telemetry whose usefulness depends on honest, bounded reporting."),
+        parameter(name='sensitive_factors', type='string', description="Sensitive factors captures the sensitive factors dimension of the strategy for the sensitivity analysis trace. It keeps the record anchored to the strategy's central move rather than a generic account of reasoning. It separates this dimension from the other observations and judgments needed for test how conclusions change when inputs vary. Record the material content that would change how a careful reviewer interprets the current state. Keep the value explicit enough that a later iteration can compare it with new evidence and revise it. Treat this field as model-authored telemetry whose usefulness depends on honest, bounded reporting."),
+        parameter(name='robustness', type='string', description="Robustness captures the robustness dimension of the strategy for the sensitivity analysis trace. It keeps the record anchored to the strategy's central move rather than a generic account of reasoning. It separates this dimension from the other observations and judgments needed for test how conclusions change when inputs vary. Record the material content that would change how a careful reviewer interprets the current state. Keep the value explicit enough that a later iteration can compare it with new evidence and revise it. Treat this field as model-authored telemetry whose usefulness depends on honest, bounded reporting."),
+        parameter(name='confidence', type='number', description="Confidence captures the calibrated confidence in the current working direction for the sensitivity analysis trace. It keeps the record anchored to the strategy's central move rather than a generic account of reasoning. It separates this dimension from the other observations and judgments needed for test how conclusions change when inputs vary. Record the material content that would change how a careful reviewer interprets the current state. Keep the value explicit enough that a later iteration can compare it with new evidence and revise it. Treat this field as model-authored telemetry whose usefulness depends on honest, bounded reporting."),
+        parameter(name='next_action', type='string', description="Next action captures the next observable action that will advance or test the work for the sensitivity analysis trace. It keeps the record anchored to the strategy's central move rather than a generic account of reasoning. It separates this dimension from the other observations and judgments needed for test how conclusions change when inputs vary. Record the material content that would change how a careful reviewer interprets the current state. Keep the value explicit enough that a later iteration can compare it with new evidence and revise it. Treat this field as model-authored telemetry whose usefulness depends on honest, bounded reporting."),
+        ),
+    )
+
+
+__all__ = ['SensitivityAnalysisTraceTool']

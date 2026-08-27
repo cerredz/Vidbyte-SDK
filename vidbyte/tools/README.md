@@ -39,6 +39,22 @@ custom tool or adapter when an application needs new business inputs or
 behavior. Use `with_activity()` for a separate typed model-authored annotation
 that should be captured and removed before the wrapped tool executes.
 
+## Deep Reasoning Traces
+
+`vidbyte.tools.builtins.reasoning` exposes 182 strategy-specific tools derived
+from the complete default reasoning-trace families in the Vidbyte Skills
+repository. Each strategy owns a module, model-facing description, typed
+parameter shape, and parameter guidance that match its reasoning move. The
+shared execution boundary validates those declarations and writes a bounded
+`ReasoningTraceContextItem` containing the strategy's declared fields into the
+active `ContextManager`; the record is public model-authored telemetry and is
+not a correctness grade or a private chain-of-thought store.
+
+Use `ReasoningTraceCatalog.tool_class(skill_name)` when an application selects a
+strategy by a fixed SDK-owned slug. Direct class construction remains available
+through the generated exports, and every generated class is `SAFE` for the
+existing permission policy and component registry discovery paths.
+
 ## Usage
 
 ```python
@@ -70,7 +86,7 @@ print(catalog.provider_schemas("openai"))
 - `executor.py`: local tool call execution.
 - `security/`: permission policies and sandbox contracts.
 - `mcp/`: MCP clients, transports, presets, and bridged tools.
-- `builtins/`: code search, context, context primitives, editing, memory, MCP, handoff, pause, and utility tools.
+- `builtins/`: code search, context, context primitives, editing, memory, MCP, handoff, pause, reasoning traces, and utility tools.
 - `builtins/operations/`: priced search and fetch tools plus the executing provider clients.
 
 ## Cooperative Pause
