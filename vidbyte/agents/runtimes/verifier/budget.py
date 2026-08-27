@@ -1,19 +1,20 @@
 """Context Protocol Header
 
 Description:
-    Defines VerifierRuntimeBudgetParams and VerifierRuntimeBudget.
+    Defines VerifierRuntimeBudget.
 Purpose:
     How many verification attempts a run is allowed before giving up, and
     what giving up means. Deliberately verifier-specific: cost ceilings are
     a general agent/loop concern (CostBudgetMiddleware) and are not
     duplicated here.
 Architecture:
-    - VerifierRuntimeBudgetParams: max_attempts, max_total_seconds,
-      plateau_patience, on_exhausted.
-    - VerifierRuntimeBudget: exhausted() combines three independent checks.
+    - VerifierRuntimeBudget: exhausted() combines six independent checks
+      against its VerifierRuntimeBudgetParams (defined in
+      vidbyte.lib.dataclasses.verifier, not this file).
 Relations:
-    Reads vidbyte.agents.runtimes.verifier.types.VerificationAttempt via
-    VerifierLedger by type only. Consumed by VerifierRuntimeGate.decide().
+    Reads vidbyte.agents.runtimes.verifier.types.VerificationAttempt, and
+    vidbyte.agents.runtimes.verifier.ledger.VerifierLedgerStatistics's
+    flaky_verifiers() by type only. Consumed by VerifierRuntimeGate.decide().
 Similar Files:
     - vidbyte/agents/settings/tool_error.py: ToolErrorPolicy, the nearest
       existing "budget plus terminal action" settings object in this repo.
@@ -21,37 +22,8 @@ Similar Files:
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-
-from vidbyte.agents.runtimes.verifier.types import BudgetExhaustedAction, VerificationAttempt
-from vidbyte.lib.errors import ConfigurationError
-
-
-@dataclass(frozen=True, slots=True)
-class VerifierRuntimeBudgetParams:
-    """Validated configuration for one VerifierRuntimeBudget."""
-
-    max_attempts: int
-    max_total_seconds: float | None = None
-    plateau_patience: int | None = None
-    on_exhausted: BudgetExhaustedAction = BudgetExhaustedAction.FAIL
-
-    def __post_init__(self) -> None:
-        # Every numeric ceiling must be strictly positive when provided.
-        self._validate_max_attempts()
-        self._validate_positive_if_present("max_total_seconds", self.max_total_seconds)
-        self._validate_positive_if_present("plateau_patience", self.plateau_patience)
-
-    def _validate_max_attempts(self) -> None:
-        # A budget of zero or fewer attempts could never let the loop run once.
-        if self.max_attempts <= 0:
-            raise ConfigurationError("VerifierRuntimeBudgetParams.max_attempts must be greater than zero.")
-
-    @staticmethod
-    def _validate_positive_if_present(name: str, value: float | int | None) -> None:
-        # Mirrors ToolErrorPolicy's own "positive when provided" validation shape.
-        if value is not None and value <= 0:
-            raise ConfigurationError(f"VerifierRuntimeBudgetParams.{name} must be greater than zero when provided.")
+from vidbyte.agents.runtimes.verifier.types import VerificationAttempt
+from vidbyte.lib.dataclasses.verifier import VerifierRuntimeBudgetParams
 
 
 class VerifierRuntimeBudget:
@@ -62,11 +34,14 @@ class VerifierRuntimeBudget:
         self.params = params
 
     def exhausted(self, ledger: object) -> bool:
-        """Returns True once any one of the three independent budget dimensions has been spent."""
+        """Returns True once any one of the six independent budget dimensions has been spent."""
         return (
             self._attempts_exhausted(ledger)
             or self._time_exhausted(ledger)
             or self._plateaued(ledger)
+            or self._flaky_exhausted(ledger)
+            or self._score_floor_exhausted(ledger)
+            or self._consecutive_failures_exhausted(ledger)
         )
 
     def remaining_attempts(self, ledger: object) -> int:
@@ -106,5 +81,43 @@ class VerifierRuntimeBudget:
             return 1.0
         return sum(1 for v in blocking if v.passed) / len(blocking)
 
+    def _flaky_exhausted(self, ledger: object) -> bool:
+        # A verifier that keeps flipping pass/fail won't be fixed by burning through more attempts.
+        if self.params.max_flaky_flips is None:
+            return False
+        return bool(ledger.flaky_verifiers(min_flips=self.params.max_flaky_flips))  # type: ignore[attr-defined]
 
-__all__ = ["VerifierRuntimeBudget", "VerifierRuntimeBudgetParams"]
+    def _score_floor_exhausted(self, ledger: object) -> bool:
+        # Distinct from plateau_patience: this looks at one attempt's lowest numeric score, not the aggregate pass rate.
+        if self.params.min_score_floor is None:
+            return False
+        last: VerificationAttempt | None = ledger.last()  # type: ignore[attr-defined]
+        if last is None:
+            return False
+        scores = [v.score for v in last.aggregated.verdicts if v.score is not None]
+        if not scores:
+            return False
+        return min(scores) < self.params.min_score_floor
+
+    def _consecutive_failures_exhausted(self, ledger: object) -> bool:
+        # Catches one specific check stuck failing N times in a row while others pass, which plateau_patience can mask.
+        if self.params.max_consecutive_failures is None:
+            return False
+        per_verifier: dict[str, list[bool]] = {}
+        for attempt in ledger.history():  # type: ignore[attr-defined]
+            for verdict in attempt.aggregated.verdicts:
+                per_verifier.setdefault(verdict.verifier_name, []).append(verdict.passed)
+        return any(self._trailing_failure_streak(sequence) >= self.params.max_consecutive_failures for sequence in per_verifier.values())
+
+    @staticmethod
+    def _trailing_failure_streak(sequence: list[bool]) -> int:
+        # Counts how many of the most recent attempts a single verifier has failed, back to its last pass (or the start).
+        streak = 0
+        for passed in reversed(sequence):
+            if passed:
+                break
+            streak += 1
+        return streak
+
+
+__all__ = ["VerifierRuntimeBudget"]

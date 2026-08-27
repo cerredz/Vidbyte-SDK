@@ -4,7 +4,7 @@ Description:
     Defines VerifierRuntimeFeedbackParams and VerifierRuntimeFeedback.
 Purpose:
     Renders the corrective payload injected after a failed AggregatedVerdict,
-    under one of six configurable content modes.
+    under one of four configurable content modes.
 Architecture:
     - VerifierRuntimeFeedbackParams: which FeedbackContentMode/FeedbackDelivery,
       plus the fields each mode requires.
@@ -45,7 +45,6 @@ class VerifierRuntimeFeedbackParams:
     delivery: FeedbackDelivery = FeedbackDelivery.USER_MESSAGE
     message_template: str | None = None
     structured_fields: tuple[str, ...] = ()
-    minimize_counterexamples: bool = False
     max_diagnostics_chars: int | None = None
 
     def __post_init__(self) -> None:
@@ -93,14 +92,12 @@ class VerifierRuntimeFeedback:
             FeedbackContentMode.RAW_VERDICT: self._build_raw_payload,
             FeedbackContentMode.CUSTOM_MESSAGE: self._build_custom_payload,
             FeedbackContentMode.STRUCTURED_PAYLOAD: self._build_structured_payload,
-            FeedbackContentMode.MINIMIZED_COUNTEREXAMPLE: self._build_minimized_payload,
-            FeedbackContentMode.SCORE_TREND_ONLY: self._build_score_payload,
             FeedbackContentMode.RAW_AND_CUSTOM: self._build_raw_and_custom_payload,
         }
         return self._truncate(builders[self.params.content_mode](verdict))
 
     def _failed(self, verdict: AggregatedVerdict) -> tuple[VerifierVerdict, ...]:
-        # The subset of verdicts every content mode except SCORE_TREND_ONLY renders from.
+        # The subset of verdicts every content mode renders from.
         return tuple(v for v in verdict.verdicts if not v.passed)
 
     def _build_raw_payload(self, verdict: AggregatedVerdict) -> str:
@@ -124,25 +121,9 @@ class VerifierRuntimeFeedback:
             lines.append(f"- {v.verifier_name}: {rendered}")
         return "\n".join(lines)
 
-    def _build_minimized_payload(self, verdict: AggregatedVerdict) -> str:
-        # Surfaces only the smallest/most illustrative failing verdict, the counterexample-minimization idea.
-        failed = self._failed(verdict)
-        if not failed:
-            return ""
-        minimized = self._minimize(failed)
-        return f"- {minimized.verifier_name}: {minimized.diagnostics}"
-
-    def _build_score_payload(self, verdict: AggregatedVerdict) -> str:
-        # Directional signal only — every verdict's score, no diagnostic detail, across pass and fail alike.
-        return "\n".join(f"- {v.verifier_name}: score={v.score}" for v in verdict.verdicts)
-
     def _build_raw_and_custom_payload(self, verdict: AggregatedVerdict) -> str:
         # Combines the framing of the custom message with the actionable detail of the raw payload.
         return f"{self._build_custom_payload(verdict)}\n\n{self._build_raw_payload(verdict)}"
-
-    def _minimize(self, verdicts: tuple[VerifierVerdict, ...]) -> VerifierVerdict:
-        # Shortest diagnostics text stands in for "smallest counterexample" without needing domain-specific parsing.
-        return min(verdicts, key=lambda v: len(v.diagnostics))
 
     def _truncate(self, payload: str) -> str:
         # Applied last, regardless of content mode, so every mode respects the same character ceiling.

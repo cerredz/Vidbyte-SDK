@@ -141,13 +141,10 @@ class AgentLoopSettings:
             raise ConfigurationError("AgentLoopSettings.max_tool_calls and ToolSettings.max_calls must match when both are provided.")
 
     def _validate_verifier_runtime(self) -> None:
-        # Local import avoids a module-level cycle through vidbyte.agents.runtimes' package init.
-        if self.verifier_runtime is None:
-            return
-        from vidbyte.agents.runtimes.verifier import VerifierRuntimeSettings
+        # Delegates to vidbyte.agents.settings.verifier so this file stays agent-settings-only.
+        from vidbyte.agents.settings.verifier import validate_verifier_runtime
 
-        if not isinstance(self.verifier_runtime, VerifierRuntimeSettings):
-            raise ConfigurationError("AgentLoopSettings.verifier_runtime must be a VerifierRuntimeSettings instance when provided.")
+        validate_verifier_runtime(self.verifier_runtime)
 
     def _validate_output_contracts(self) -> None:
         # Rejects any effort floor whose minimum meets or exceeds its paired ceiling (an unreachable floor).

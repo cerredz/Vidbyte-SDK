@@ -1,21 +1,28 @@
 """Context Protocol Header
 
 Description:
-    Defines VerifierLedgerParams and VerifierLedger.
+    Defines VerifierLedgerParams, VerifierLedger, and VerifierLedgerStatistics.
 Purpose:
-    Records every verification attempt this run has made and exposes the
-    read-back methods the other pillars depend on for history-aware
-    decisions: score trend, regressions, flakiness, and a tamper baseline.
+    VerifierLedger records every verification attempt this run has made and
+    exposes only ledger/metadata read-back (history, last, report).
+    VerifierLedgerStatistics is the subclass that derives history-aware
+    statistics from that record: score trend, regressions, flakiness, a
+    tamper baseline, and the ContextItem flattening every other pillar reads.
 Architecture:
     - VerifierLedgerParams: run_id + whether to publish state into the
       agent's ContextManager.
-    - VerifierLedger: record()/history()/last() plus the derived views, plus
-      to_context_items() which flattens ledger state into the eight
-      vidbyte.context.primitives.verifier ContextItems.
+    - VerifierLedger: record()/history()/last()/report() — ledger and
+      metadata only, no derived statistics.
+    - VerifierLedgerStatistics(VerifierLedger): score_trend(),
+      regressions_since(), flaky_verifiers(), baseline_snapshot(),
+      tamper_check(), and to_context_items(), which flattens ledger state
+      into the eight vidbyte.context.primitives.verifier ContextItems.
 Relations:
     Records vidbyte.agents.runtimes.verifier.types.VerificationAttempt.
     Read by VerifierRuntimeGate.decide() and VerifierRuntimeBudget via
-    duck-typed access (type-hinted only, to avoid an import cycle).
+    duck-typed access (type-hinted only, to avoid an import cycle). The
+    concrete instance every pillar is actually handed is a
+    VerifierLedgerStatistics, constructed by AgentVerifierRuntime.
 Similar Files:
     - vidbyte/agents/contract.py: AgentLoopSettingsOutputContract.report(),
       the nearest existing "read-back state for a result's metadata" shape.
@@ -60,13 +67,12 @@ class VerifierLedgerParams:
 
 
 class VerifierLedger:
-    """Append-only record of every verification attempt this run has made."""
+    """Append-only record of every verification attempt this run has made, plus metadata read-back."""
 
     def __init__(self, params: VerifierLedgerParams) -> None:
         # Stores the already-validated configuration and starts an empty attempt history.
         self.params = params
         self._attempts: list[VerificationAttempt] = []
-        self._baseline: dict[str, str] = {}
 
     def record(self, attempt: VerificationAttempt) -> None:
         """Appends one completed verification attempt to this run's history."""
@@ -79,6 +85,29 @@ class VerifierLedger:
     def last(self) -> VerificationAttempt | None:
         """Returns the most recently recorded attempt, or None if nothing has been recorded yet."""
         return self._attempts[-1] if self._attempts else None
+
+    def report(self) -> list[dict[str, Any]]:
+        """Returns one record per verifier verdict across every attempt, mirroring contract_evaluations' shape."""
+        return [
+            {
+                "attempt_number": attempt.attempt_number,
+                "verifier_name": verdict.verifier_name,
+                "passed": verdict.passed,
+                "score": verdict.score,
+                "blocking": verdict.blocking,
+            }
+            for attempt in self._attempts
+            for verdict in attempt.aggregated.verdicts
+        ]
+
+
+class VerifierLedgerStatistics(VerifierLedger):
+    """Derives history-aware statistics and ContextItems from a VerifierLedger's recorded attempts."""
+
+    def __init__(self, params: VerifierLedgerParams) -> None:
+        # Adds the tamper-check baseline cache on top of the base ledger's attempt history.
+        super().__init__(params)
+        self._baseline: dict[str, str] = {}
 
     def score_trend(self, verifier_name: str) -> list[float]:
         """Returns every graded score verifier_name has reported across this run's attempts, in order."""
@@ -118,20 +147,6 @@ class VerifierLedger:
         """Returns baseline paths whose current content hash no longer matches the recorded baseline."""
         del target
         return [path for path, digest in baseline.items() if self._hash_file(path) != digest]
-
-    def report(self) -> list[dict[str, Any]]:
-        """Returns one record per verifier verdict across every attempt, mirroring contract_evaluations' shape."""
-        return [
-            {
-                "attempt_number": attempt.attempt_number,
-                "verifier_name": verdict.verifier_name,
-                "passed": verdict.passed,
-                "score": verdict.score,
-                "blocking": verdict.blocking,
-            }
-            for attempt in self._attempts
-            for verdict in attempt.aggregated.verdicts
-        ]
 
     def to_context_items(self, *, budget: "VerifierRuntimeBudget", last_repair: RepairOutcome | None) -> tuple["ContextItem", ...]:
         """Builds the eight ledger-facing ContextItems from current state, skipping any with no data yet."""
@@ -215,4 +230,4 @@ class VerifierLedger:
             return None
 
 
-__all__ = ["VerifierLedger", "VerifierLedgerParams"]
+__all__ = ["VerifierLedger", "VerifierLedgerParams", "VerifierLedgerStatistics"]

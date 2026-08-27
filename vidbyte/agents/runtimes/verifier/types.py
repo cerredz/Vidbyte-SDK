@@ -9,13 +9,16 @@ Purpose:
 Architecture:
     - Enums: VerifierKind, VerifierCostClass, TargetResolutionMode,
       VerifierExecutionMode, GateTrigger, GateDecision, VerdictStrategy,
-      FeedbackContentMode, FeedbackDelivery, RepairMode, BudgetExhaustedAction.
+      FeedbackContentMode, FeedbackDelivery, RepairMode. BudgetExhaustedAction
+      is defined in vidbyte.lib.dataclasses.verifier and re-exported here.
     - Dataclasses: VerifierTarget, VerifierVerdict, AggregatedVerdict,
       VerificationAttempt, ResolutionContext, RepairContext, RepairOutcome,
       VerifierRuntimeOutcome.
 Relations:
     Imported by every module in vidbyte.agents.runtimes.verifier. Each
-    pillar's own Params dataclass lives in that pillar's file, not here.
+    pillar's own Params dataclass lives in that pillar's file, not here,
+    except VerifierRuntimeBudgetParams which lives in
+    vidbyte.lib.dataclasses.verifier alongside BudgetExhaustedAction.
 Similar Files:
     - vidbyte/lib/dataclasses/agents.py: AgentStopReason, the sibling enum
       family this subsystem's VERIFICATION_FAILED member extends.
@@ -27,6 +30,8 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING, Any
+
+from vidbyte.lib.dataclasses.verifier import BudgetExhaustedAction
 
 if TYPE_CHECKING:
     from vidbyte.context.manager import ContextManager
@@ -112,8 +117,6 @@ class FeedbackContentMode(str, Enum):
     RAW_VERDICT = "raw_verdict"
     CUSTOM_MESSAGE = "custom_message"
     STRUCTURED_PAYLOAD = "structured_payload"
-    MINIMIZED_COUNTEREXAMPLE = "minimized_counterexample"
-    SCORE_TREND_ONLY = "score_trend_only"
     RAW_AND_CUSTOM = "raw_and_custom"
 
 
@@ -134,14 +137,6 @@ class RepairMode(str, Enum):
     FRESH_RESTART_WITH_SUMMARY = "fresh_restart_with_summary"
     TARGETED_SCOPE = "targeted_scope"
     PARALLEL_BRANCHING = "parallel_branching"
-
-
-class BudgetExhaustedAction(str, Enum):
-    """What happens once VerifierRuntimeBudget.exhausted is true."""
-
-    FAIL = "fail"
-    ESCALATE_TO_HUMAN = "escalate_to_human"
-    DOWNGRADE_TO_ADVISORY = "downgrade_to_advisory"
 
 
 @dataclass(frozen=True, slots=True)

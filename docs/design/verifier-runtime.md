@@ -362,8 +362,10 @@ all."
 **File(s):** new · **Type:** New file
 
 #### What it does
-`VerifierRuntimeFeedbackParams` + `VerifierRuntimeFeedback`, implementing all
-six `FeedbackContentMode` values and truncation/minimization.
+`VerifierRuntimeFeedbackParams` + `VerifierRuntimeFeedback`, implementing
+four `FeedbackContentMode` values and truncation. `MINIMIZED_COUNTEREXAMPLE`
+and `SCORE_TREND_ONLY` (plus the now-unused `minimize_counterexamples` field)
+were removed per review feedback on PR #349.
 
 #### Logic / Algorithm
 `emit(verdict)` dispatches on `content_mode`. `RAW_VERDICT` joins every failed
@@ -371,12 +373,10 @@ verdict's `diagnostics`. `CUSTOM_MESSAGE` renders `message_template` with
 `{failure_count}`/`{verifier_names}` substitutions via `str.format_map` with a
 defaulting mapping (missing keys render empty rather than raising).
 `STRUCTURED_PAYLOAD` renders only `structured_fields` from each failed
-verdict as a compact `field=value` block. `MINIMIZED_COUNTEREXAMPLE` calls
-`_minimize` (shortest `diagnostics` string among failed verdicts) and emits
-only that one. `SCORE_TREND_ONLY` emits verifier name + score, no
-diagnostics. `RAW_AND_CUSTOM` concatenates the custom message and the raw
-payload. `_truncate` applies `max_diagnostics_chars` last, on the final
-rendered string, regardless of mode.
+verdict as a compact `field=value` block. `RAW_AND_CUSTOM` concatenates the
+custom message and the raw payload. `_truncate` applies
+`max_diagnostics_chars` last, on the final rendered string, regardless of
+mode.
 
 #### Edge Cases & Error Handling
 `STRUCTURED_PAYLOAD` with a `structured_fields` entry the verdict doesn't
@@ -420,21 +420,36 @@ repair on failure to find a path.
 **File(s):** new · **Type:** New file
 
 #### What it does
-`VerifierRuntimeBudgetParams` + `VerifierRuntimeBudget`.
+`VerifierRuntimeBudget`, consuming `VerifierRuntimeBudgetParams`. Per review
+feedback on PR #349, the params dataclass itself now lives in
+`vidbyte/lib/dataclasses/verifier.py` (alongside `BudgetExhaustedAction`,
+also moved there), re-exported from `types.py` for every existing import
+site — this file only defines the behavior class.
 
 #### Logic / Algorithm
-`exhausted(ledger)` is `_attempts_exhausted or _time_exhausted or
-_plateaued`. `_attempts_exhausted`: `len(ledger.history())
+`exhausted(ledger)` is `_attempts_exhausted or _time_exhausted or _plateaued
+or _flaky_exhausted or _score_floor_exhausted or
+_consecutive_failures_exhausted`. `_attempts_exhausted`: `len(ledger.history())
 >= max_attempts`. `_time_exhausted`: `now - ledger.history()[0].started_at >=
 max_total_seconds` when set. `_plateaued`: when `plateau_patience` is set,
 true when the last `plateau_patience` attempts' aggregate pass rate (fraction
 of blocking verdicts passed) is non-increasing — the "first-pass rule"
-flagged as a formalization target in Non-Goals. Deliberately no cost-based
-check: cost ceilings are a general agent/loop concern (`CostBudgetMiddleware`),
-not a verifier-specific one, per review feedback on PR #349.
+flagged as a formalization target in Non-Goals. `_flaky_exhausted`: true when
+`ledger.flaky_verifiers(min_flips=max_flaky_flips)` is non-empty — a verifier
+that keeps flipping won't be fixed by more attempts. `_score_floor_exhausted`:
+true when the latest attempt's lowest reported `VerifierVerdict.score` is
+below `min_score_floor` — distinct from `_plateaued`, which looks at the
+aggregate blocking pass rate, not one verifier's numeric score.
+`_consecutive_failures_exhausted`: true when any single verifier's trailing
+run of failures (most recent attempts, back to its last pass) reaches
+`max_consecutive_failures` — catches one check stuck failing while others
+pass, which `_plateaued` can mask. Deliberately no cost-based check: cost
+ceilings are a general agent/loop concern (`CostBudgetMiddleware`), not a
+verifier-specific one, per review feedback on PR #349.
 
 #### Edge Cases & Error Handling
-All three sub-checks short-circuit on an empty ledger (`False` — nothing to
+All six sub-checks short-circuit when their governing field is unset, and the
+history-based ones short-circuit on an empty ledger (`False` — nothing to
 exhaust on the first attempt).
 
 ---
@@ -444,9 +459,16 @@ exhaust on the first attempt).
 **File(s):** new · **Type:** New file
 
 #### What it does
-`VerifierLedgerParams` + `VerifierLedger`: append-only attempt history plus
-the read-back methods every other pillar depends on, plus
-`to_context_items()`.
+`VerifierLedgerParams` + `VerifierLedger` + `VerifierLedgerStatistics`. Per
+review feedback on PR #349, the base `VerifierLedger` now handles only the
+ledger and its metadata: `record()`, `history()`, `last()`, `report()`.
+`VerifierLedgerStatistics(VerifierLedger)` is the subclass that derives every
+history-aware statistic — `score_trend`, `regressions_since`,
+`flaky_verifiers`, `baseline_snapshot`, `tamper_check` — plus
+`to_context_items()`, since building context items needs those statistics.
+`AgentVerifierRuntime` constructs a `VerifierLedgerStatistics`, so every
+pillar that receives "the ledger" (gate, budget) is actually handed the
+statistics subclass.
 
 #### Logic / Algorithm
 `record` appends to an internal `list[VerificationAttempt]`.
@@ -507,8 +529,9 @@ The eight `ContextItem` dataclasses from the design conversation:
 `VerifierDiagnosticContextItem`, `VerifierBudgetContextItem`,
 `VerifierTrendContextItem`, `VerifierScopeContextItem`,
 `VerifierTamperContextItem`, `VerifierFlakeContextItem`. Each carries its
-fixed intro sentence baked into `to_context_text()`, `primitive_id`, and
-`primitive_frozen`, matching the shape every other file in
+fixed intro sentence as a literal directly inside its own `to_context_text()`
+(per review feedback on PR #349 — not as a module-level constant), alongside
+`primitive_id` and `primitive_frozen`, matching the shape every other file in
 `vidbyte/context/primitives/` already uses.
 
 ---
@@ -521,8 +544,22 @@ fixed intro sentence baked into `to_context_text()`, `primitive_id`, and
 **`vidbyte/agents/settings/loop.py`** — new `verifier_runtime:
 "VerifierRuntimeSettings | None" = None` constructor param, stored as
 `self.verifier_runtime`, validated by a new `_validate_verifier_runtime`
+that delegates to `vidbyte.agents.settings.verifier.validate_verifier_runtime`
 (type check only — the settings object validates its own contents in its own
-`__post_init__` chain).
+`__post_init__` chain). Per review feedback on PR #349, the type check itself
+lives in the new `vidbyte/agents/settings/verifier.py` (see below), not
+inline in this file, matching how `ToolErrorPolicy`/`ToolSettings` each own
+their nested-settings surface in their own file.
+
+**`vidbyte/agents/settings/verifier.py`** (new) — `validate_verifier_runtime()`,
+the one function `AgentLoopSettings._validate_verifier_runtime` calls.
+
+**`vidbyte/lib/dataclasses/verifier.py`** (new) — `BudgetExhaustedAction` +
+`VerifierRuntimeBudgetParams`, moved out of
+`vidbyte/agents/runtimes/verifier/{types,budget}.py` per review feedback on
+PR #349 so the validated dataclass lives with the SDK's other lib-level
+dataclasses; `types.py` re-exports `BudgetExhaustedAction` for every existing
+import site.
 
 **`vidbyte/agents/base.py`** — one new guard alongside the existing seven at
 lines 102-194: reject a non-`LINEAR` runtime with an active `verifier_runtime`,
@@ -576,12 +613,14 @@ and the twelve new public classes, covered in Section 6.
 | CREATE | `vidbyte/agents/runtimes/verifier/feedback.py` | VerifierRuntimeFeedback |
 | CREATE | `vidbyte/agents/runtimes/verifier/repair.py` | VerifierRepairStrategy |
 | CREATE | `vidbyte/agents/runtimes/verifier/budget.py` | VerifierRuntimeBudget |
-| CREATE | `vidbyte/agents/runtimes/verifier/ledger.py` | VerifierLedger |
+| CREATE | `vidbyte/agents/runtimes/verifier/ledger.py` | VerifierLedger + VerifierLedgerStatistics |
 | CREATE | `vidbyte/agents/runtimes/verifier/settings.py` | VerifierRuntimeSettings |
 | CREATE | `vidbyte/agents/runtimes/verifier/runtime.py` | AgentVerifierRuntime orchestrator |
 | CREATE | `vidbyte/context/primitives/verifier.py` | 8 ledger-facing ContextItems |
+| CREATE | `vidbyte/lib/dataclasses/verifier.py` | BudgetExhaustedAction + VerifierRuntimeBudgetParams |
+| CREATE | `vidbyte/agents/settings/verifier.py` | validate_verifier_runtime |
 | MODIFY | `vidbyte/lib/dataclasses/agents.py` | New AgentStopReason member |
-| MODIFY | `vidbyte/agents/settings/loop.py` | New verifier_runtime field |
+| MODIFY | `vidbyte/agents/settings/loop.py` | New verifier_runtime field, delegates validation |
 | MODIFY | `vidbyte/agents/base.py` | Non-linear guard + kwarg threading |
 | MODIFY | `vidbyte/agents/runtime.py` | Constructor param + 2 boundaries + metadata publish |
 | MODIFY | `vidbyte/agents/runtimes/__init__.py` | Re-export new package |

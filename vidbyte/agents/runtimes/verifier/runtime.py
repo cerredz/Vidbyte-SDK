@@ -23,7 +23,7 @@ from __future__ import annotations
 import dataclasses
 import time
 
-from vidbyte.agents.runtimes.verifier.ledger import VerifierLedger
+from vidbyte.agents.runtimes.verifier.ledger import VerifierLedgerStatistics
 from vidbyte.agents.runtimes.verifier.settings import VerifierRuntimeSettings
 from vidbyte.agents.runtimes.verifier.types import GateDecision, RepairContext, RepairOutcome, ResolutionContext, VerificationAttempt, VerifierRuntimeOutcome
 
@@ -34,7 +34,7 @@ class AgentVerifierRuntime:
     def __init__(self, settings: VerifierRuntimeSettings, *, run_id: str) -> None:
         # Builds this run's own ledger, overriding the configured placeholder run_id with the real one.
         self.settings = settings
-        self.ledger = VerifierLedger(dataclasses.replace(settings.params.ledger_params, run_id=run_id))
+        self.ledger = VerifierLedgerStatistics(dataclasses.replace(settings.params.ledger_params, run_id=run_id))
 
     async def on_finalization_attempt(self, context: ResolutionContext) -> VerifierRuntimeOutcome:
         """Runs one full gate check for a finalization attempt and returns the resulting outcome."""

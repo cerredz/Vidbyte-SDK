@@ -9,13 +9,13 @@ Purpose:
     baseline, and flaky-check status as addressable, replaceable primitives
     via ContextManager.upsert() — never as an ever-growing unmanaged list.
 Architecture:
-    - Each class carries a fixed introductory sentence baked into
+    - Each class carries its own fixed introductory sentence directly inside
       to_context_text(), framing what the block means before the data.
     - All eight take only plain stdlib field types (str, tuple, int, float)
       so this module has no dependency on vidbyte.agents — VerifierLedger
       does the flattening from its own rich objects before constructing these.
 Relations:
-    Constructed by vidbyte.agents.runtimes.verifier.ledger.VerifierLedger.to_context_items().
+    Constructed by vidbyte.agents.runtimes.verifier.ledger.VerifierLedgerStatistics.to_context_items().
     Re-exported by vidbyte.context.primitives.
 Similar Files:
     - vidbyte/context/primitives/tasks.py: ProgressContextItem, the nearest
@@ -27,43 +27,6 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
-
-_HISTORY_INTRO = (
-    "The following is the history of verification attempts made so far during this run. "
-    "Each entry lists the attempt number, which checks ran, and whether they passed."
-)
-_REGRESSION_INTRO = (
-    "The following checks previously passed earlier in this run but are now failing again. "
-    "This usually means a recent change reintroduced a problem that was already fixed — "
-    "review it carefully before making further changes."
-)
-_DIAGNOSTIC_INTRO = (
-    "The following is the detailed diagnostic output from the most recent failed verification "
-    "attempt. Use this to understand exactly what is still wrong before trying again."
-)
-_BUDGET_INTRO = (
-    "The following describes how much verification budget remains for this run. Once this "
-    "budget is exhausted, the run will stop regardless of whether verification has passed."
-)
-_TREND_INTRO = (
-    "The following shows how each graded verifier's score has changed across attempts in this "
-    "run. A flat or worsening trend means the current approach is not converging and a "
-    "different strategy may be needed."
-)
-_SCOPE_INTRO = (
-    "The following files or symbols are the ones implicated by the most recent verification "
-    "failure. Focus changes on these unless there is a clear reason to touch something else."
-)
-_TAMPER_INTRO = (
-    "The following verification-defining files must not be modified as part of fixing a "
-    "failure. Changing them instead of the underlying issue will be flagged and does not count "
-    "as a genuine fix."
-)
-_FLAKE_INTRO = (
-    "The following checks have produced inconsistent results across attempts with no "
-    "corresponding change to the work — they may be flaky rather than reflecting a real "
-    "problem. Treat repeated failures here with some skepticism."
-)
 
 
 @dataclass(slots=True)
@@ -79,7 +42,11 @@ class VerifierHistoryContextItem:
 
     def to_context_text(self) -> str:
         """Renders the fixed intro sentence followed by one line per recorded attempt."""
-        lines = [_HISTORY_INTRO, ""]
+        intro = (
+            "The following is the history of verification attempts made so far during this run. "
+            "Each entry lists the attempt number, which checks ran, and whether they passed."
+        )
+        lines = [intro, ""]
         lines.extend(f"- {entry}" for entry in self.entries)
         return "\n".join(lines)
 
@@ -97,7 +64,12 @@ class VerifierRegressionContextItem:
 
     def to_context_text(self) -> str:
         """Renders the fixed intro sentence followed by the list of regressed verifier names."""
-        lines = [_REGRESSION_INTRO, ""]
+        intro = (
+            "The following checks previously passed earlier in this run but are now failing again. "
+            "This usually means a recent change reintroduced a problem that was already fixed — "
+            "review it carefully before making further changes."
+        )
+        lines = [intro, ""]
         lines.extend(f"- {name}" for name in self.regressed_names)
         return "\n".join(lines)
 
@@ -115,7 +87,11 @@ class VerifierDiagnosticContextItem:
 
     def to_context_text(self) -> str:
         """Renders the fixed intro sentence followed by every failing verifier's diagnostic line."""
-        lines = [_DIAGNOSTIC_INTRO, ""]
+        intro = (
+            "The following is the detailed diagnostic output from the most recent failed verification "
+            "attempt. Use this to understand exactly what is still wrong before trying again."
+        )
+        lines = [intro, ""]
         lines.extend(f"- {line}" for line in self.diagnostics)
         return "\n".join(lines)
 
@@ -134,7 +110,11 @@ class VerifierBudgetContextItem:
 
     def to_context_text(self) -> str:
         """Renders the fixed intro sentence followed by remaining and total attempt counts."""
-        return f"{_BUDGET_INTRO}\n\n- Remaining attempts: {self.remaining_attempts} of {self.max_attempts}"
+        intro = (
+            "The following describes how much verification budget remains for this run. Once this "
+            "budget is exhausted, the run will stop regardless of whether verification has passed."
+        )
+        return f"{intro}\n\n- Remaining attempts: {self.remaining_attempts} of {self.max_attempts}"
 
 
 @dataclass(slots=True)
@@ -150,7 +130,12 @@ class VerifierTrendContextItem:
 
     def to_context_text(self) -> str:
         """Renders the fixed intro sentence followed by one pre-rendered trend line per verifier."""
-        lines = [_TREND_INTRO, ""]
+        intro = (
+            "The following shows how each graded verifier's score has changed across attempts in this "
+            "run. A flat or worsening trend means the current approach is not converging and a "
+            "different strategy may be needed."
+        )
+        lines = [intro, ""]
         lines.extend(f"- {line}" for line in self.trend_lines)
         return "\n".join(lines)
 
@@ -168,7 +153,11 @@ class VerifierScopeContextItem:
 
     def to_context_text(self) -> str:
         """Renders the fixed intro sentence followed by the implicated file/symbol tokens."""
-        lines = [_SCOPE_INTRO, ""]
+        intro = (
+            "The following files or symbols are the ones implicated by the most recent verification "
+            "failure. Focus changes on these unless there is a clear reason to touch something else."
+        )
+        lines = [intro, ""]
         lines.extend(f"- {path}" for path in self.scope)
         return "\n".join(lines)
 
@@ -186,7 +175,12 @@ class VerifierTamperContextItem:
 
     def to_context_text(self) -> str:
         """Renders the fixed intro sentence followed by every protected file path."""
-        lines = [_TAMPER_INTRO, ""]
+        intro = (
+            "The following verification-defining files must not be modified as part of fixing a "
+            "failure. Changing them instead of the underlying issue will be flagged and does not count "
+            "as a genuine fix."
+        )
+        lines = [intro, ""]
         lines.extend(f"- {path}" for path in self.protected_paths)
         return "\n".join(lines)
 
@@ -204,7 +198,12 @@ class VerifierFlakeContextItem:
 
     def to_context_text(self) -> str:
         """Renders the fixed intro sentence followed by the list of possibly-flaky verifier names."""
-        lines = [_FLAKE_INTRO, ""]
+        intro = (
+            "The following checks have produced inconsistent results across attempts with no "
+            "corresponding change to the work — they may be flaky rather than reflecting a real "
+            "problem. Treat repeated failures here with some skepticism."
+        )
+        lines = [intro, ""]
         lines.extend(f"- {name}" for name in self.flaky_names)
         return "\n".join(lines)
 

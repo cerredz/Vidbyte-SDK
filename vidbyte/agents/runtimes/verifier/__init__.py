@@ -26,11 +26,11 @@ Similar Files:
 
 from __future__ import annotations
 
-from vidbyte.agents.runtimes.verifier.budget import VerifierRuntimeBudget, VerifierRuntimeBudgetParams
+from vidbyte.agents.runtimes.verifier.budget import VerifierRuntimeBudget
 from vidbyte.agents.runtimes.verifier.collection import VerifierCollection, VerifierCollectionParams
 from vidbyte.agents.runtimes.verifier.feedback import VerifierRuntimeFeedback, VerifierRuntimeFeedbackParams
 from vidbyte.agents.runtimes.verifier.gate import VerifierRuntimeGate, VerifierRuntimeGateParams
-from vidbyte.agents.runtimes.verifier.ledger import VerifierLedger, VerifierLedgerParams
+from vidbyte.agents.runtimes.verifier.ledger import VerifierLedger, VerifierLedgerParams, VerifierLedgerStatistics
 from vidbyte.agents.runtimes.verifier.repair import VerifierRepairStrategy, VerifierRepairStrategyParams
 from vidbyte.agents.runtimes.verifier.runtime import AgentVerifierRuntime
 from vidbyte.agents.runtimes.verifier.settings import VerifierRuntimeSettings, VerifierRuntimeSettingsParams
@@ -58,6 +58,7 @@ from vidbyte.agents.runtimes.verifier.types import (
 )
 from vidbyte.agents.runtimes.verifier.verdict import VerifierVerdictPolicy, VerifierVerdictPolicyParams
 from vidbyte.agents.runtimes.verifier.verifier import CallableVerifier, Verifier, VerifierParams
+from vidbyte.lib.dataclasses.verifier import VerifierRuntimeBudgetParams
 
 __all__ = [
     "AgentVerifierRuntime",
@@ -84,6 +85,7 @@ __all__ = [
     "VerifierKind",
     "VerifierLedger",
     "VerifierLedgerParams",
+    "VerifierLedgerStatistics",
     "VerifierParams",
     "VerifierRepairStrategy",
     "VerifierRepairStrategyParams",
