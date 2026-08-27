@@ -48,8 +48,18 @@ print(catalog.provider_schemas("openai"))
 - `executor.py`: local tool call execution.
 - `security/`: permission policies and sandbox contracts.
 - `mcp/`: MCP clients, transports, presets, and bridged tools.
-- `builtins/`: code search, context, context primitives, editing, memory, MCP, handoff, and utility tools.
+- `builtins/`: code search, context, context primitives, editing, memory, MCP, handoff, pause, and utility tools.
 - `builtins/operations/`: priced search and fetch tools plus the executing provider clients.
+
+## Cooperative Pause
+
+`PauseAgentTool` exposes the model-facing `pause_agent` tool. Attach it to the
+agent that should wait and configure a maximum duration, for example
+`PauseAgentTool(max_seconds=30)`. The tool delegates to the same async
+`BaseAgent.pause(seconds)` API used by application code, so the wait yields to
+the event loop and task cancellation remains visible. It is a timed wait only;
+it does not persist run state or provide durable pause/resume or external run
+cancellation.
 
 ## Priced Operation Tools
 

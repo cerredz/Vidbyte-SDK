@@ -10,9 +10,11 @@ Architecture:
     - MiddlewareAction: Structured effects middleware may request.
     - MiddlewareDecision: One hook decision with helper constructors.
     - MiddlewareContext: Read-only runtime facts visible to middleware.
-    - MiddlewareEvent: Bounded metadata record emitted by the pipeline.
+    - MiddlewareEvent: Bounded metadata record emitted for decisions and exceptions.
+    - MiddlewareHookInvocation: Diagnostic record for every pipeline hook invocation.
 Relations:
-    Used by vidbyte.middleware and vidbyte.agents.runtime.
+    Used by vidbyte.middleware and vidbyte.agents.runtime. Invocation records feed
+    semantic diagnostic traces without expanding consumer-facing result metadata.
 """
 
 from __future__ import annotations
@@ -189,11 +191,30 @@ class MiddlewareEvent:
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
 
+@dataclass(frozen=True, slots=True)
+class MiddlewareHookInvocation:
+    """Diagnostic record for one middleware hook invocation."""
+
+    middleware_name: str
+    hook: MiddlewareHook
+    action: MiddlewareAction
+    duration_seconds: float
+    reason: str | None = None
+    metadata: Mapping[str, Any] = field(default_factory=dict)
+    error_type: str | None = None
+
+    def __post_init__(self) -> None:
+        # Monotonic clocks should not regress, but a custom test clock must not create invalid trace data.
+        if self.duration_seconds < 0:
+            raise ValueError("duration_seconds cannot be negative.")
+
+
 __all__ = [
     "MiddlewareAction",
     "MiddlewareContext",
     "MiddlewareDecision",
     "MiddlewareEvent",
     "MiddlewareHook",
+    "MiddlewareHookInvocation",
     "MiddlewareTransform",
 ]

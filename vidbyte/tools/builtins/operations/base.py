@@ -74,10 +74,14 @@ class PricedOperationTool(BaseTool):
         metadata[self._PAYLOAD_KEY] = payload
         return ToolResult.success(self.name, summary, metadata=metadata)
 
-    def _failed_result(self, message: str, *, units: int, mode: str, attempts: int, error: str) -> ToolResult:
-        # Builds an error result that still declares the attempts the retry policy spent.
+    def _failed_result(self, message: str, *, units: int, mode: str, attempts: int, error: str, error_type: str | None = None, error_status_code: int | None = None) -> ToolResult:
+        # Builds an error result that still declares attempts and safe provider diagnostics.
         metadata = self._usage_metadata(units=units, mode=mode, attempts=attempts)
         metadata["error"] = error
+        if error_type:
+            metadata["error_type"] = error_type
+        if isinstance(error_status_code, int) and not isinstance(error_status_code, bool):
+            metadata["error_status_code"] = error_status_code
         return ToolResult.error(self.name, message, metadata=metadata)
 
     @classmethod

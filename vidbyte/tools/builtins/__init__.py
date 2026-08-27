@@ -14,6 +14,7 @@ Architecture:
     - Context primitive editing tools from builtins.context_primitives.
     - Context algorithm tools from builtins.trajectory_checkpoint and builtins.reflexion.
     - Sequential continuation tool from builtins.run_prompts_sequentially.
+    - Cooperative pause tool from builtins.pause.
 Relations:
     Related to vidbyte.tools.client and vidbyte.tools.registry.
 """
@@ -55,6 +56,7 @@ from vidbyte.tools.builtins.editing import PatchTool
 from vidbyte.tools.builtins.fork import ForkConversationTool
 from vidbyte.tools.builtins.handoff import CreateHandoffTool
 from vidbyte.tools.builtins.mcp import AttachMcpServerTool, SearchMcpServersTool
+from vidbyte.tools.builtins.pause import PauseAgentTool
 from vidbyte.tools.builtins.operations import (
     BraveSearchTool,
     BrowserbaseFetchTool,
@@ -165,6 +167,7 @@ __all__ = [
     "OutputSchemaBuilder",
     "OutputSchemaField",
     "PatchTool",
+    "PauseAgentTool",
     "ProgressLog",
     "ReflexionTool",
     "ResumeAppendTool",

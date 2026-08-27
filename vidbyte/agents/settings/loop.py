@@ -188,6 +188,7 @@ class AgentLoopSettings:
             max_iterations=self.max_iterations,
             max_tokens=self.max_tokens,
             max_tool_calls=max_tool_calls,
+            timeout_seconds=self.timeout_seconds,
             compaction_trigger_tokens=self.compaction_trigger_tokens,
             compaction_target_tokens=self.compaction_target_tokens,
             tool_settings=self.tool_settings,
