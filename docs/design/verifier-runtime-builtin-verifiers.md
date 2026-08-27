@@ -427,11 +427,13 @@ class LeanProofVerifier(Verifier):
 #### Edge Cases & Error Handling
 - Missing `lean`/`lake` binary: `FileNotFoundError` propagates to a failing verdict via
   the existing collection-level handling.
-- **Assumption, flagged for verification against a real toolchain:** Lean4's CLI is
-  assumed to emit its `sorry`-usage diagnostic containing the substring `"uses 'sorry'"`
-  and warnings containing `"warning:"`, and either stream may carry them — this reads
-  both stdout and stderr combined rather than assuming one. This could not be verified
-  against an installed Lean toolchain in this environment; see Open Questions.
+- **Verified against a real toolchain** (Lean 4.33.1 / Lake 5.0.0, found installed on the
+  implementation machine): a clean proof exits 0 with no diagnostic; a `sorry` still exits
+  0 but emits `` declaration uses `sorry` `` — backtick-quoted, not straight quotes, which
+  the initial implementation had wrong and this verification caught; a genuine type error
+  exits 1 with an `error:` diagnostic. All observed on stdout in this run, but `check()`
+  reads stdout+stderr combined regardless, so a stream difference on another platform
+  would not break detection.
 
 ---
 
@@ -507,11 +509,10 @@ surface (`vidbyte.agents.runtimes.verifier`).
 
 ## 12. Open Questions
 
-- [ ] Lean4's exact CLI diagnostic format (`"uses 'sorry'"`, `"warning:"`, which
-  stream) is assumed from general Lean4 convention and could not be verified against an
-  installed toolchain in this environment. Worth a quick manual check against the team's
-  actual `lake`/`lean` version before this verifier is used in a real harness; the marker
-  strings in `lean_proof.py` are the only thing that would need adjusting.
+- [x] Lean4's exact CLI diagnostic format — verified against an installed Lean 4.33.1 /
+  Lake 5.0.0 toolchain during implementation (see 6.6). The marker was corrected from
+  `"uses 'sorry'"` to `` "uses `sorry`" `` as a result. Not yet verified against other
+  Lean4 minor versions; worth a spot-check if the team pins a materially different one.
 - [ ] Whether `TestSuiteVerifier` should also accept `pytest --json-report` output as an
   alternative to JUnit XML. Deferred — JUnit XML was chosen because it's the
   cross-language standard (pytest, jest, `go test` via `gotestsum`, etc. all support it),
