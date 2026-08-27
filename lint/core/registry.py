@@ -48,6 +48,7 @@ RULE_MODULES = (
     "lint.rules.s020_readme_file_index_parity",
     "lint.rules.s021_class_bound_registry_helpers",
     "lint.rules.s024_maximum_control_flow_nesting",
+    "lint.rules.s025_model_facing_description_depth",
 )
 
 

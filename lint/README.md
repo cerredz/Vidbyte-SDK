@@ -95,6 +95,7 @@ Nested folders:
 | S020 | readme-file-index-parity | Opt-in folder maps match tracked files |
 | S021 | class-bound-registry-helpers | Registry behavior stays on owning classes |
 | S024 | maximum-control-flow-nesting | Control-flow depth stays within three levels |
+| S025 | model-facing-description-depth | ToolSpec/ToolParameter descriptions read as general 4-5 sentence context |
 
 ### Agent-native rules
 
