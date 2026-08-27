@@ -338,9 +338,13 @@ class TestSuiteVerifier(Verifier):
    cwd=target.workspace_root, env={**os.environ, **(config.env or {})}, check=False)`
    (non-zero exit is an expected "tests failed" signal, not an error).
 3. Parse `os.path.join(target.workspace_root, config.report_path)` with
-   `xml.etree.ElementTree`; iterate `<testcase>` elements; a case counts as failed when it
-   has a `<failure>` or `<error>` child; when `scope_path` is set, only count cases whose
-   `classname` (dots replaced with `/`) or `file` attribute starts with it.
+   `xml.etree.ElementTree`; iterate `<testcase>` elements (`.iter()`, so this finds cases
+   whether the report root is a bare `<testsuite>` or a `<testsuites>` wrapper); a
+   `<skipped>` case is excluded from both `total` and `failed` (neither passed nor
+   failed — it should not silently inflate the pass fraction); a remaining case counts as
+   failed when it has a `<failure>` or `<error>` child; when `scope_path` is set, only
+   count cases whose `classname` (dots replaced with `/`) or `file` attribute starts with
+   it.
 4. `fraction_passed = (total - failed) / total if total else 0.0`; `passed = total > 0 and
    fraction_passed >= config.pass_fraction`.
 5. Return `VerifierVerdict(score=fraction_passed, diagnostics=<"N/M passed" plus up to 10
@@ -377,9 +381,11 @@ class DatabaseQueryVerifier(Verifier):
    config.query_params)`, returns `tuple(cursor.fetchall())`, and always `conn.close()`s
    in a `finally`.
 3. Evaluates every configured gate independently against the returned rows (row count
-   bounds; `expected_value` against `expected_column` of the first row, reading a mapping
-   row by key or a sequence row by index; `row_matcher(rows)`), collecting one diagnostic
-   message per failed gate.
+   bounds; `expected_value` against `expected_column` of the first row via plain
+   `row[column]` — this covers a `dict` row, a `sqlite3.Row` (mapping-style but not a
+   `dict` subclass, and without attribute access — `getattr` would raise on it), and a
+   plain tuple row, all through the same `__getitem__` call; `row_matcher(rows)`),
+   collecting one diagnostic message per failed gate.
 4. `passed = not failures`; `score=None` (row-gate results are boolean, not fractional).
 
 #### Edge Cases & Error Handling

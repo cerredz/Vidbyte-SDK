@@ -95,10 +95,9 @@ class DatabaseQueryVerifier(Verifier):
 
     @staticmethod
     def _read_column(row: Any, column: str | int) -> Any:
-        # Reads a column from either a mapping-shaped row (dict cursors) or a sequence-shaped row (tuple cursors).
-        if isinstance(column, int):
-            return row[column]
-        return row[column] if isinstance(row, dict) else getattr(row, column)
+        # __getitem__ already does the right thing for a str or int key across dict, sqlite3.Row, and tuple rows;
+        # getattr would raise on sqlite3.Row, which supports mapping-style access but not attribute access.
+        return row[column]
 
     def _check_row_matcher(self, rows: tuple[Any, ...], failures: list[str]) -> None:
         # Runs the caller-supplied predicate, when configured, over every returned row.

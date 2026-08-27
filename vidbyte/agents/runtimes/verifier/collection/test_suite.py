@@ -81,6 +81,8 @@ class TestSuiteVerifier(Verifier):
         for case in root.iter("testcase"):
             if self._config.scope_path and not self._in_scope(case):
                 continue
+            if case.find("skipped") is not None:
+                continue
             total += 1
             if case.find("failure") is not None or case.find("error") is not None:
                 failed += 1
