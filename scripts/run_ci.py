@@ -84,6 +84,12 @@ class CiPipeline:
         self._run_command(
             [sys.executable, str(REPOSITORY_ROOT / "scripts" / "check_context_write_paths.py")],
         )
+        self._run_command(
+            [sys.executable, str(REPOSITORY_ROOT / "scripts" / "check_context_primitive_introductions.py")],
+        )
+        self._run_command(
+            [sys.executable, str(REPOSITORY_ROOT / "scripts" / "check_reasoning_trace_contracts.py")],
+        )
         self._run_command([sys.executable, "-m", "pytest"])
 
     def run_package(self) -> None:
