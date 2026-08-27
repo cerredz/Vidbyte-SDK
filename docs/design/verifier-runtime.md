@@ -424,17 +424,17 @@ repair on failure to find a path.
 
 #### Logic / Algorithm
 `exhausted(ledger)` is `_attempts_exhausted or _time_exhausted or
-_cost_exhausted or _plateaued`. `_attempts_exhausted`: `len(ledger.history())
+_plateaued`. `_attempts_exhausted`: `len(ledger.history())
 >= max_attempts`. `_time_exhausted`: `now - ledger.history()[0].started_at >=
-max_total_seconds` when set. `_cost_exhausted`: `ledger.last().cost_spent_usd
->= max_cost_usd` when set (reusing the caller-supplied figure, not computing
-one). `_plateaued`: when `plateau_patience` is set, true when the last
-`plateau_patience` attempts' aggregate pass rate (fraction of blocking
-verdicts passed) is non-increasing — the "first-pass rule" flagged as a
-formalization target in Non-Goals.
+max_total_seconds` when set. `_plateaued`: when `plateau_patience` is set,
+true when the last `plateau_patience` attempts' aggregate pass rate (fraction
+of blocking verdicts passed) is non-increasing — the "first-pass rule"
+flagged as a formalization target in Non-Goals. Deliberately no cost-based
+check: cost ceilings are a general agent/loop concern (`CostBudgetMiddleware`),
+not a verifier-specific one, per review feedback on PR #349.
 
 #### Edge Cases & Error Handling
-All four sub-checks short-circuit on an empty ledger (`False` — nothing to
+All three sub-checks short-circuit on an empty ledger (`False` — nothing to
 exhaust on the first attempt).
 
 ---
