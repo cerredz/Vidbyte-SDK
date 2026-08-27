@@ -100,7 +100,7 @@ Nested folders:
 
 | ID | Rule | Protected contract |
 |---|---|---|
-| A001 | agent-readable-file-headers | SDK Python files expose purpose and maintenance context |
+| A001 | agent-readable-file-headers | Tracked Python files expose purpose and maintenance context |
 | A002 | intent-comments | Load-bearing policy logic explains its invariant nearby |
 | A003 | context-rich-error-packets | Boundary errors expose stable repair context |
 | A005 | typed-dependency-seams | Injected infrastructure uses concrete interfaces or Protocols |

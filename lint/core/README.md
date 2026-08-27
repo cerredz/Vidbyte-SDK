@@ -18,7 +18,7 @@ SDK architecture policy beyond analyzer transport and baseline integrity.
 - `__init__.py` -- core package marker.
 - `baseline.py` -- strict rule-count debt store and verdicts.
 - `diagnostic.py` -- immutable finding/diagnostic contracts.
-- `discovery.py` -- tracked source/README catalogue.
+- `discovery.py` -- tracked package/repository-wide source and README catalogues.
 - `mypy.py` -- cached pinned mypy subprocess adapter.
 - `registry.py` -- rule interface and S001-S021 catalogue.
 - `report.py` -- text/JSON result rendering.

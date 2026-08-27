@@ -24,7 +24,7 @@ turning this change into a source-wide cleanup.
 ### Goals
 
 - Add one independently reportable rule for maximum control-flow nesting.
-- Require a structured agent-readable header on tracked SDK package Python files.
+- Require a structured agent-readable header on every tracked Python file.
 - Require nearby `# @intent ...` blocks on functions whose names or logic carry
   retry, permission, pricing, redaction, persistence, fallback, state-transition,
   or external-boundary policy.
@@ -84,10 +84,10 @@ current debt through `lint/baseline.json` instead of modifying `vidbyte` source.
    three, counting `if`, `for`, `try`, `with`, and `match` across a function or
    module, while treating an `elif` chain as a sibling branch rather than an
    additional semantic nesting level.
-3. A001 must report tracked `vidbyte/**/*.py` files whose first header block does
-   not contain purpose, ownership, architecture, modification guidance, edge
-   cases, related documentation, and tests fields. The initial findings are
-   baselined; new missing headers regress.
+3. A001 must report every tracked Python file whose first header block does not
+   contain purpose, ownership, architecture, modification guidance, edge cases,
+   related documentation, and tests fields. The initial findings are baselined;
+   new missing headers regress.
 4. A002 must report load-bearing functions in the selected policy categories
    unless a nearby, non-empty `# @intent <name>` marker exists in the function's
    declaration/leading implementation block.
@@ -242,7 +242,7 @@ class MaximumControlFlowNestingRule(Rule):
 
 #### What it does
 
-Checks the opening header block of each tracked SDK package Python file for the
+Checks the opening header block of each tracked Python file for the
 canonical context fields required by the article-derived file contract.
 
 #### Interface / API
@@ -255,8 +255,10 @@ class AgentReadableFileHeadersRule(Rule):
 
 #### Logic / Algorithm
 
-1. Inspect only the first `HEADER_SCAN_LINES` lines before ordinary source
-   content becomes the module's implementation.
+1. Inspect every tracked Python file through a cached
+   `SourceCatalog.all_python_files()` view and only read the first
+   `HEADER_SCAN_LINES` lines before ordinary source content becomes the module's
+   implementation.
 2. Match the canonical markers `PURPOSE:`, `ROLE IN CODEBASE:`,
    `ARCHITECTURE NOTE:`, `COMMON MODIFICATION PATTERNS:`, `KNOWN EDGE CASES:`,
    `RELATED DOCS:`, and `TESTS:`.
@@ -268,8 +270,8 @@ class AgentReadableFileHeadersRule(Rule):
 - Existing alternate legacy headers are current debt unless they contain all
   canonical fields; the baseline preserves that debt.
 - Empty marker values are treated as missing.
-- The rule does not demand headers for unrelated repository scripts or test
-  files; package source is the importable SDK surface in this suite.
+- The rule applies to scripts and tests as well as package source because they
+  are tracked Python context available to future agents.
 
 ### 6.4 A002 -- intent comments for load-bearing logic
 
@@ -527,13 +529,14 @@ Complete list of every file that will be created, modified, or deleted:
 | CREATE | `lint/rules/a006_directed_dependency_graph.py` | Enforce concrete-module graph and layer boundaries |
 | CREATE | `lint/rules/a007_operational_constants.py` | Enforce named operational policy values |
 | CREATE | `lint/rules/a008_library_stdout_boundary.py` | Keep stdout at the CLI boundary |
+| MODIFY | `lint/core/discovery.py` | Expose cached repository-wide Python sources to A001 |
 | MODIFY | `lint/core/registry.py` | Register A001-A003, A005-A008, and S024 |
 | MODIFY | `lint/baseline.json` | Add reviewed count allowances for each selected rule |
 | MODIFY | `lint/README.md` | Document the expanded suite and rule catalogue |
 | MODIFY | `lint/rules/README.md` | Add file-index entries and rule descriptions |
 
 **Files to create:** 9  
-**Files to modify:** 4  
+**Files to modify:** 5  
 **Files to delete:** 0
 
 ---
@@ -580,8 +583,8 @@ suite to S001-S021; no runtime data or package migration is required.
 No unresolved question blocks implementation. The following decisions are fixed
 for this change:
 
-- A001 scopes the initial enforcement inventory to tracked importable SDK
-  package files, matching the current `SourceCatalog` contract.
+- A001 scopes the initial enforcement inventory to every tracked Python file,
+  while the other source rules retain the production-package catalogue.
 - A003 uses a literal `DIAGNOSTIC_FIELDS` declaration so the error packet schema
   is statically discoverable without executing constructors.
 - A006 excludes package façade initializers and `TYPE_CHECKING` imports in its

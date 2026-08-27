@@ -3,7 +3,7 @@
 PURPOSE: Reads tracked SDK Python/README sources once with deterministic paths.
 ROLE IN CODEBASE: Prevents rules from re-walking, re-reading, or importing the package.
 ARCHITECTURE NOTE: git ls-files is the authority, matching Semgrep's tracked-file gate.
-FUNCTION INVENTORY: SourceCatalog.python_files()/readmes() return cached source records.
+FUNCTION INVENTORY: SourceCatalog.python_files()/all_python_files()/readmes() return cached source records.
 WHAT NOT TO DO: Do not import vidbyte modules or follow sibling worktrees.
 KNOWN EDGE CASES: UTF-8 BOMs are accepted so Windows checkouts match compileall.
 COMMON MODIFICATION PATTERNS: Change scope, detection, and diagnostics together; rerun the focused rule.
@@ -47,6 +47,7 @@ class SourceCatalog:
         self.root = (root or repo_root()).resolve()
         self._tracked: tuple[str, ...] | None = None
         self._python: tuple[SourceFile, ...] | None = None
+        self._all_python: tuple[SourceFile, ...] | None = None
         self._readmes: tuple[SourceFile, ...] | None = None
 
     def python_files(self) -> tuple[SourceFile, ...]:
@@ -61,6 +62,12 @@ class SourceCatalog:
         if self._readmes is None:
             self._readmes = tuple(self._build(rel, parse_python=False) for rel in self._tracked_paths() if rel == "README.md" or rel.endswith("/README.md"))
         return self._readmes
+
+    def all_python_files(self) -> tuple[SourceFile, ...]:
+        # Returns every tracked Python source file for repository-wide metadata rules.
+        if self._all_python is None:
+            self._all_python = tuple(self._build(rel, parse_python=True) for rel in self._tracked_paths() if rel.endswith(".py"))
+        return self._all_python
 
     def tracked_paths(self) -> tuple[str, ...]:
         # Exposes the stable tracked catalogue for cross-file manifest rules.

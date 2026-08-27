@@ -55,7 +55,7 @@ class FileHeaderAnalyzer:
 
 
 class AgentReadableFileHeadersRule(Rule):
-    """Requires SDK package Python files to expose structured maintenance context."""
+    """Requires tracked Python files to expose structured maintenance context."""
 
     id = "A001"
     name = "agent-readable-file-headers"
@@ -63,10 +63,10 @@ class AgentReadableFileHeadersRule(Rule):
     summary = "SDK Python file headers explain purpose, ownership, architecture, and repair context."
 
     def check(self, catalog: SourceCatalog) -> list[Finding]:
-        # Scans tracked production modules and reports one complete header repair per file.
+        # Scans every tracked Python file and reports one complete header repair per file.
         findings: list[Finding] = []
         analyzer = FileHeaderAnalyzer()
-        for source in catalog.python_files():
+        for source in catalog.all_python_files():
             missing = analyzer.analyze(source)
             if missing:
                 findings.append(Finding(rule_id=self.id, rel_path=source.rel, line=1, source_line=source.line_at(1), symbol=source.rel, extra={"missing": ", ".join(missing)}))
