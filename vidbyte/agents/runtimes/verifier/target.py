@@ -8,6 +8,9 @@ Purpose:
 Architecture:
     - VerifierTargetResolver: dispatches to a per-mode private resolver, then
       attaches selected context primitives to every VerifierTarget it builds.
+      Every mode except CUSTOM also carries context.workspace_root onto the
+      VerifierTarget it returns, since any execution-based verifier (a test
+      suite, a Lean proof) needs a directory to run in.
     ContextPrimitiveSelectorParams and VerifierTargetResolverParams (both
     validated dataclasses) live in vidbyte.lib.dataclasses.verifier, not
     here, per review feedback on PR #349.
@@ -53,6 +56,7 @@ class VerifierTargetResolver:
             diff=base.diff,
             submission=base.submission,
             context_primitives=primitives,
+            workspace_root=base.workspace_root,
         )
 
     def _resolve_by_mode(self, context: ResolutionContext) -> VerifierTarget:
@@ -69,23 +73,23 @@ class VerifierTargetResolver:
 
     def _resolve_final_output_text(self, context: ResolutionContext) -> VerifierTarget:
         # The simplest mode: whatever the model's candidate final text currently is.
-        return VerifierTarget(mode=TargetResolutionMode.FINAL_OUTPUT_TEXT, text=context.candidate_output)
+        return VerifierTarget(mode=TargetResolutionMode.FINAL_OUTPUT_TEXT, text=context.candidate_output, workspace_root=context.workspace_root)
 
     def _resolve_workspace_files(self, context: ResolutionContext) -> VerifierTarget:
         # Collects file paths matching include_patterns under the workspace root; contents are not read here.
         if context.workspace_root is None or not self.params.include_patterns:
-            return VerifierTarget(mode=TargetResolutionMode.WORKSPACE_FILES, file_paths=())
+            return VerifierTarget(mode=TargetResolutionMode.WORKSPACE_FILES, file_paths=(), workspace_root=context.workspace_root)
         matches: list[str] = []
         for pattern in self.params.include_patterns:
             matches.extend(glob.glob(os.path.join(context.workspace_root, pattern), recursive=True))
-        return VerifierTarget(mode=TargetResolutionMode.WORKSPACE_FILES, file_paths=tuple(sorted(set(matches))))
+        return VerifierTarget(mode=TargetResolutionMode.WORKSPACE_FILES, file_paths=tuple(sorted(set(matches))), workspace_root=context.workspace_root)
 
     def _resolve_workspace_diff(self, context: ResolutionContext) -> VerifierTarget:
         # Shells out to `git diff`; a missing workspace or a non-git directory yields an empty diff, not an error.
         if context.workspace_root is None:
-            return VerifierTarget(mode=TargetResolutionMode.WORKSPACE_DIFF, diff="")
+            return VerifierTarget(mode=TargetResolutionMode.WORKSPACE_DIFF, diff="", workspace_root=None)
         diff = self._git_diff(context.workspace_root)
-        return VerifierTarget(mode=TargetResolutionMode.WORKSPACE_DIFF, diff=diff)
+        return VerifierTarget(mode=TargetResolutionMode.WORKSPACE_DIFF, diff=diff, workspace_root=context.workspace_root)
 
     @staticmethod
     def _git_diff(workspace_root: str) -> str:
@@ -106,7 +110,7 @@ class VerifierTargetResolver:
     def _resolve_structured_submission(self, context: ResolutionContext) -> VerifierTarget:
         # Scans the transcript backward for the most recent call to submission_tool_name.
         submission = self._latest_submission(context.messages)
-        return VerifierTarget(mode=TargetResolutionMode.STRUCTURED_SUBMISSION, submission=submission)
+        return VerifierTarget(mode=TargetResolutionMode.STRUCTURED_SUBMISSION, submission=submission, workspace_root=context.workspace_root)
 
     def _latest_submission(self, messages: Any) -> Mapping[str, Any] | None:
         # Returns None (not an error) when the submission tool has not been called yet this run.

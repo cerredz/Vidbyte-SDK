@@ -30,6 +30,11 @@ Architecture:
       VerifierVerdictPolicyParams, VerifierRuntimeFeedbackParams,
       VerifierRepairStrategyParams, VerifierRuntimeBudgetParams,
       VerifierLedgerParams, VerifierRuntimeSettingsParams.
+    - Built-in verifier kind configs: DBAPIConnection/DBAPICursor (DB-API 2.0
+      Protocol shapes), TestSuiteVerifierConfig, DatabaseQueryVerifierConfig,
+      LeanProofVerifierConfig — one per concrete Verifier subclass in
+      vidbyte.agents.runtimes.verifier.collection, following this same
+      "config lives here, behavior lives in the pillar" split.
 Relations:
     Re-exported by vidbyte.agents.runtimes.verifier.types and imported
     directly by every pillar file that used to define one of these classes
@@ -46,7 +51,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from enum import Enum
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Protocol
 
 from vidbyte.lib.errors import ConfigurationError
 
@@ -141,6 +146,7 @@ class VerifierKind(str, Enum):
     CONTRACT_COMPATIBILITY = "contract_compatibility"
     SANDBOX_EXECUTION = "sandbox_execution"
     RUBRIC_CHECKLIST = "rubric_checklist"
+    FORMAL_PROOF = "formal_proof"
     CUSTOM = "custom"
 
 
@@ -167,6 +173,7 @@ class VerifierTarget:
     diff: str | None = None
     submission: Mapping[str, Any] | None = None
     context_primitives: tuple["ContextItem", ...] = ()
+    workspace_root: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -498,17 +505,146 @@ class VerifierRuntimeSettingsParams:
     ledger_params: VerifierLedgerParams
 
 
+# ---------------------------------------------------------------------------
+# Built-in verifier kind configs
+# ---------------------------------------------------------------------------
+
+
+class DBAPICursor(Protocol):
+    """Structural shape this module needs from a DB-API 2.0 cursor."""
+
+    description: Sequence[tuple[Any, ...]] | None
+
+    def execute(self, query: str, params: Sequence[Any] | Mapping[str, Any] = ()) -> object: ...
+    def fetchall(self) -> Sequence[Any]: ...
+
+
+class DBAPIConnection(Protocol):
+    """Structural shape this module needs from a DB-API 2.0 connection."""
+
+    def cursor(self) -> DBAPICursor: ...
+    def close(self) -> None: ...
+
+
+UNSET: Any = object()
+"""Sentinel for DatabaseQueryVerifierConfig.expected_value: None is a legal DB value, so it cannot mean 'unset'."""
+
+
+@dataclass(frozen=True, slots=True)
+class TestSuiteVerifierConfig:
+    """Validated configuration for one TestSuiteVerifier."""
+
+    command: tuple[str, ...]
+    report_path: str
+    pass_fraction: float = 1.0
+    scope_path: str | None = None
+    env: Mapping[str, str] | None = None
+
+    def __post_init__(self) -> None:
+        # Every field a TestSuiteVerifier reads must already be in a checkable shape.
+        self._validate_command()
+        self._validate_report_path()
+        self._validate_pass_fraction()
+
+    def _validate_command(self) -> None:
+        # An empty command has nothing to run.
+        if not self.command:
+            raise ConfigurationError("TestSuiteVerifierConfig.command must be a non-empty sequence.")
+
+    def _validate_report_path(self) -> None:
+        # Without a report path there is nothing to parse after the command runs.
+        if not self.report_path.strip():
+            raise ConfigurationError("TestSuiteVerifierConfig.report_path must be a non-empty string.")
+
+    def _validate_pass_fraction(self) -> None:
+        # A fraction outside [0, 1] can never be met or is always met — either way it is a mistake.
+        if not (0.0 <= self.pass_fraction <= 1.0):
+            raise ConfigurationError("TestSuiteVerifierConfig.pass_fraction must be within [0.0, 1.0].")
+
+
+@dataclass(frozen=True, slots=True)
+class DatabaseQueryVerifierConfig:
+    """Validated configuration for one DatabaseQueryVerifier."""
+
+    connection_factory: Callable[[], DBAPIConnection]
+    query: str
+    query_params: tuple[Any, ...] | Mapping[str, Any] = ()
+    expected_row_count: int | None = None
+    min_row_count: int | None = None
+    max_row_count: int | None = None
+    expected_value: Any = UNSET
+    expected_column: str | int = 0
+    row_matcher: Callable[[tuple[Any, ...]], bool] | None = None
+
+    def __post_init__(self) -> None:
+        # Every gating field must be internally consistent, and at least one gate must be configured.
+        self._validate_query()
+        self._validate_row_count_bounds()
+        self._validate_has_gate()
+
+    def _validate_query(self) -> None:
+        # A blank query would execute nothing meaningful.
+        if not self.query.strip():
+            raise ConfigurationError("DatabaseQueryVerifierConfig.query must be a non-empty string.")
+
+    def _validate_row_count_bounds(self) -> None:
+        # A negative bound, or min above max, can never be satisfied.
+        for name, value in (
+            ("expected_row_count", self.expected_row_count),
+            ("min_row_count", self.min_row_count),
+            ("max_row_count", self.max_row_count),
+        ):
+            if value is not None and value < 0:
+                raise ConfigurationError(f"DatabaseQueryVerifierConfig.{name} must be >= 0 when provided.")
+        if self.min_row_count is not None and self.max_row_count is not None and self.min_row_count > self.max_row_count:
+            raise ConfigurationError("DatabaseQueryVerifierConfig.min_row_count must be <= max_row_count.")
+
+    def _validate_has_gate(self) -> None:
+        # A config with no gate configured could never fail anything, which is itself a configuration mistake.
+        has_value_gate = self.expected_value is not UNSET
+        any_gate = (
+            self.expected_row_count is not None,
+            self.min_row_count is not None,
+            self.max_row_count is not None,
+            has_value_gate,
+            self.row_matcher is not None,
+        )
+        if not any(any_gate):
+            raise ConfigurationError("DatabaseQueryVerifierConfig must configure at least one gating field.")
+
+
+@dataclass(frozen=True, slots=True)
+class LeanProofVerifierConfig:
+    """Validated configuration for one LeanProofVerifier."""
+
+    lean_command: tuple[str, ...] = ("lake", "env", "lean")
+    file_path: str | None = None
+    forbid_sorry: bool = True
+    treat_warnings_as_failure: bool = False
+
+    def __post_init__(self) -> None:
+        # A command with nothing in it has no Lean binary to invoke.
+        if not self.lean_command:
+            raise ConfigurationError("LeanProofVerifierConfig.lean_command must be a non-empty sequence.")
+
+
 __all__ = [
     "AggregatedVerdict",
     "BudgetExhaustedAction",
     "ContextPrimitiveSelectorParams",
+    "DBAPIConnection",
+    "DBAPICursor",
+    "DatabaseQueryVerifierConfig",
     "FeedbackContentMode",
     "FeedbackDelivery",
+    "LeanProofVerifierConfig",
     "RepairContext",
     "RepairMode",
     "RepairOutcome",
     "ResolutionContext",
     "TargetResolutionMode",
+    "TestSuiteVerifierConfig",
+    "UNSET",
     "VerdictStrategy",
     "VerificationAttempt",
     "VerifierCostClass",
