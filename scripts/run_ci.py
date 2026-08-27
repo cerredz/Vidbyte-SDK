@@ -77,11 +77,17 @@ class CiPipeline:
             self.run_package()
 
     def run_source(self) -> None:
-        """Verify repository hygiene, import syntax, write-path integrity, and tests."""
+        """Verify repository hygiene, context contracts, import syntax, and tests."""
         self._assert_no_tracked_bytecode()
         self._run_command([sys.executable, "-m", "compileall", "-q", str(PACKAGE_ROOT)])
         self._run_command(
             [sys.executable, str(REPOSITORY_ROOT / "scripts" / "check_context_write_paths.py")],
+        )
+        self._run_command(
+            [sys.executable, str(REPOSITORY_ROOT / "scripts" / "check_context_primitive_introductions.py")],
+        )
+        self._run_command(
+            [sys.executable, str(REPOSITORY_ROOT / "scripts" / "check_reasoning_trace_contracts.py")],
         )
         self._run_command([sys.executable, "-m", "pytest"])
 

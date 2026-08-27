@@ -26,7 +26,9 @@ values, worker reports, candidate answers, and finish rationales render inside
 `<untrusted_data>` sections. Context construction belongs in
 `vidbyte/context/multi_agent.py`, not in an agent runtime.
 
-Reasoning trace primitives are also explicitly model-authored and untrusted.
-They keep method application, evidence, assumptions, alternatives,
-disconfirmation signals, confidence, and next action visible across iterations,
-but they do not verify the claims or execute the named reasoning strategy.
+Every primitive renderer begins with a short managed-context introduction before
+its record body. This shared boundary makes the type of model-visible state clear
+to later iterations, and a repository lint rule checks that concrete primitives
+retain the introduction path. Reasoning trace primitives are also explicitly
+model-authored and untrusted: each strategy owns its parameter shape, while the
+record does not verify claims or execute the named reasoning strategy.

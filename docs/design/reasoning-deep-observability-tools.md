@@ -11,13 +11,13 @@
 
 This feature adds 182 model-callable reasoning trace tools to the Vidbyte SDK,
 based on the complete default reasoning-trace families in `vidbyte-skills`.
-Each tool exposes the same eight-field deep-observability contract while
-specializing its model-facing description and strategy identity to one source
-skill. Each call writes a bounded, immutable context-window primitive so the
-agent and downstream monitors can inspect the public reasoning record across
-iterations. This extends the context-aware built-in tool pattern reviewed in
-SDK PR #361 without introducing a private chain-of-thought store or a second
-context management system.
+Each strategy has its own module, model-facing description, typed parameter
+shape, and parameter guidance while sharing one safe execution boundary. Each
+call writes a bounded, immutable context-window primitive so the agent and
+downstream monitors can inspect the public reasoning record across iterations.
+This extends the context-aware built-in tool pattern reviewed in SDK PR #361
+without introducing a private chain-of-thought store or a second context
+management system.
 
 ---
 
@@ -27,7 +27,7 @@ context management system.
 
 - Add one model-facing `BaseTool` subclass per complete `*-trace` reasoning family in `vidbyte-skills`.
 - Preserve the source skill's strategy identity and purpose in every tool description, primitive, result, and catalog entry.
-- Give every tool exactly eight meaningful parameters: `question`, `strategy_application`, `evidence`, `assumptions`, `alternatives`, `disconfirming_signals`, `confidence`, and `next_action`.
+- Give every tool a meaningful strategy-owned parameter shape, including a focused question, confidence, and next action boundary where those fields fit the strategy.
 - Give the tool description and every parameter description four or more complete sentences of example-free general guidance.
 - Write every successful call into a corresponding bounded context-window primitive through the injected `ContextManager`.
 - Export the generated tool classes and primitive class from the normal SDK public built-in and context-primitives packages.
@@ -60,11 +60,10 @@ SDK PR #361 established the relevant review standard for model-facing tools:
 fields must decompose the event meaningfully, tool and parameter descriptions
 must be long general-purpose instructions without concrete examples, and
 structured categorical values should have a typed source of truth. This feature
-uses one universal observability contract rather than pretending that all 182
-strategies have identical internal algorithms. The strategy-specific purpose is
-kept in the description and context metadata, while the shared fields enforce
-the cross-strategy evidence, uncertainty, alternative, disconfirmation, and
-next-action signals needed for deep monitoring.
+keeps one shared execution boundary while allowing every strategy module to
+declare the fields that make its own reasoning move inspectable. The
+strategy-specific purpose and parameter shape remain in the module definition,
+and the context primitive preserves those fields for deep monitoring.
 
 The SDK already provides `BaseTool`, `ToolSpec`, `ToolParameter`, `ToolResult`,
 `ToolPermission.SAFE`, `ContextManager.upsert`, immutable slotted context
@@ -80,21 +79,21 @@ only validate, construct, upsert, and render their own primitive records.
 
 1. The SDK SHALL expose 182 reasoning trace tool classes whose tool names match the 182 selected source skill slugs.
 2. Every tool SHALL be a `BaseTool` subclass that accepts a `ContextManager` and requests `ToolPermission.SAFE`.
-3. Every tool SHALL expose exactly eight parameters named `question`, `strategy_application`, `evidence`, `assumptions`, `alternatives`, `disconfirming_signals`, `confidence`, and `next_action`.
-4. Every parameter SHALL have a non-empty description of at least four full sentences, and no model-facing description SHALL contain concrete examples or example markers.
-5. Every tool description SHALL have at least four full sentences describing when the strategy is used, why the record exists, how it supports observability, and the limits of self-authored reasoning telemetry.
-6. The four text fields that establish the record (`question`, `strategy_application`, `evidence`, and `next_action`) SHALL reject missing, blank, or whitespace-only values with an actionable `ToolResult.error`.
-7. The remaining text fields SHALL also reject blank values when supplied as required deep-observability fields; all eight parameters are required to prevent shallow event emission.
-8. `confidence` SHALL accept a numeric value in the inclusive range 0.0 through 1.0 and reject malformed or out-of-range values rather than silently clamping them.
+3. Every tool SHALL expose a strategy-owned typed parameter shape. Shared boundary fields such as `question`, `confidence`, and `next_action` may be combined with fields that represent the selected strategy's own reasoning move.
+4. Every parameter SHALL have a non-empty description of six to eight full sentences, and no model-facing description SHALL contain concrete examples or example markers.
+5. Every tool description SHALL have six to eight full sentences describing when the strategy is used, why its own shape exists, how it supports observability, and the limits of self-authored reasoning telemetry.
+6. Every required string or array field SHALL reject missing, blank, or whitespace-only values with an actionable `ToolResult.error`.
+7. Every strategy-specific field SHALL be required unless its module explicitly declares an optional field with a safe default.
+8. A declared `confidence` field SHALL accept a numeric value in the inclusive range 0.0 through 1.0 and reject malformed or out-of-range values rather than silently clamping them.
 9. Each successful call SHALL create one `ReasoningTraceContextItem`, upsert it into the injected `ContextManager`, and return its rendered context text plus strategy, confidence, and primitive identity metadata.
 10. Primitive IDs SHALL be unique within a manager for repeated calls of the same strategy and SHALL preserve the strategy slug in their readable prefix.
-11. The context primitive SHALL render the strategy, all eight recorded fields, and the source skill identity in deterministic order under a bounded character limit.
+11. The context primitive SHALL render the strategy, all declared fields, and the source skill identity in deterministic order under a bounded character limit.
 12. All generated classes, the shared tool base, the definition catalog, and the context primitive SHALL be importable through the package exports used by existing built-in tools and context primitives.
 13. A catalog lookup SHALL resolve a source skill slug to its generated tool class without importing arbitrary modules or reading a caller-provided path.
 
 ### Non-Functional Requirements
 
-- **Description quality:** A repository-local validation command SHALL inspect all 182 tool specs, confirm eight parameters, count sentence-delimited prose, and reject concrete-example markers.
+- **Description quality:** A repository-local validation command SHALL inspect all 182 strategy modules and tool specs, confirm strategy-specific shapes, count six-to-eight-sentence prose, and reject concrete-example markers.
 - **Context safety:** Primitive text SHALL be bounded at 4,000 characters and SHALL use the existing `ContextManager.upsert` path; no bespoke context assembly or compaction algorithm is permitted.
 - **Runtime cost:** Tool construction SHALL be constant-time per instance, spec construction SHALL be deterministic, and no model or network call SHALL occur during specification or execution.
 - **Scalability:** The catalog SHALL be data-driven so the 182 public class names do not require 182 copies of execution logic, while each class remains independently discoverable and instantiable.
@@ -106,14 +105,14 @@ only validate, construct, upsert, and render their own primitive records.
 
 ## 5. High-Level Design
 
-The implementation adds a data-driven reasoning trace module under
-`vidbyte.tools.builtins` and a matching immutable primitive module under
-`vidbyte.context.primitives`. A frozen definition catalog records the selected
-skill slug and a concise source-grounded purpose for each strategy. One shared
-`ReasoningTraceTool` class builds the eight-field `ToolSpec`, validates calls,
-constructs the primitive, and records the result. A generated public subclass
-is created for each catalog definition so callers and `ComponentRegistry` see
-normal class-based SDK components rather than one opaque multiplexer.
+The implementation adds a `vidbyte.tools.builtins.reasoning` package with one
+module per selected strategy and a matching immutable primitive module under
+`vidbyte.context.primitives`. Each strategy module owns its source purpose,
+model-facing description, typed parameter tuple, and parameter descriptions.
+One shared `ReasoningTraceTool` base validates each declaration, constructs the
+primitive, and records the result. The fixed package catalog imports each class
+explicitly so callers and `ComponentRegistry` see normal class-based SDK
+components without arbitrary module loading.
 
 The data flow is:
 
@@ -136,12 +135,13 @@ The data flow is:
        +--> [ToolResult text and observability metadata]
 ```
 
-Every tool uses the same public trace shape, but its name, description, class
-identity, primitive strategy field, and metadata are strategy-specific. This
-keeps the contract deep enough to expose reasoning quality without creating
-182 incompatible schemas. The primitive remains model-authored telemetry: the
-SDK records what was stated and does not claim that the stated reasoning is
-faithful, correct, or independently verified.
+Every tool has the same safe execution boundary, but its name, description,
+class identity, parameter shape, primitive fields, and metadata are
+strategy-specific. This keeps the contract deep enough to expose the selected
+reasoning move without hiding meaningful distinctions behind a universal
+schema. The primitive remains model-authored telemetry: the SDK records what
+was stated and does not claim that the stated reasoning is faithful, correct,
+or independently verified.
 
 ---
 
@@ -149,18 +149,19 @@ faithful, correct, or independently verified.
 
 ### 6.1 Reasoning Definition Catalog
 
-**File(s):** `vidbyte/tools/builtins/reasoning_traces.py`
+**File(s):** `vidbyte/tools/builtins/reasoning/`
 
 **Type:** New file
 
 #### What it does
 
-`ReasoningTraceDefinition` stores the source skill slug and purpose summary.
+Each strategy module stores one `ReasoningTraceDefinition` containing the source
+skill slug, purpose, full tool description, and explicit parameter tuple.
 `REASONING_TRACE_DEFINITIONS` contains the 182 complete families selected from
-`vidbyte-skills`. `ReasoningTraceCatalog` provides deterministic class-name
-conversion, public class generation, slug lookup, and shared description
-construction. No runtime file-system access is used; the copied source
-understanding is represented as committed SDK metadata.
+`vidbyte-skills`. `ReasoningTraceCatalog` provides fixed in-package lookup and
+public class discovery. No runtime file-system access is used; the copied
+source understanding is represented as committed SDK metadata in the strategy
+modules.
 
 #### Interface / API
 
@@ -169,6 +170,8 @@ understanding is represented as committed SDK metadata.
 class ReasoningTraceDefinition:
     skill_name: str
     purpose: str
+    description: str
+    parameters: tuple[ToolParameter, ...]
 
 
 class ReasoningTraceCatalog:
@@ -184,12 +187,11 @@ class ReasoningTraceCatalog:
 
 #### Logic / Algorithm
 
-1. Store the selected slugs in a stable alphabetical tuple.
-2. Build one frozen definition for each slug and source-grounded purpose.
-3. Derive a valid public class name by converting slug segments to PascalCase and appending `Tool`.
-4. Create a subclass bound to its definition and expose it in module globals and the module `__all__`.
-5. Build each spec from the bound definition, using five tool-description sentences and eight four-sentence parameter descriptions.
-6. Resolve lookups only against the in-memory definition/class map and raise a clear `KeyError` for unknown names.
+1. Keep one stable module and class for each selected source slug.
+2. Declare the source purpose, six-to-eight-sentence tool description, and strategy-specific parameters in that module.
+3. Create the fixed package catalog from explicit imports and reject duplicate slugs or class names.
+4. Return each class's own definition unchanged from `spec()` so provider schemas preserve the strategy shape.
+5. Resolve lookups only against the in-memory definition/class map and raise a clear `KeyError` for unknown names.
 
 #### Edge Cases & Error Handling
 
@@ -200,18 +202,19 @@ class ReasoningTraceCatalog:
 
 ### 6.2 Shared Reasoning Trace Tool
 
-**File(s):** `vidbyte/tools/builtins/reasoning_traces.py`
+**File(s):** `vidbyte/tools/builtins/reasoning/_base.py` and one strategy module per trace
 
 **Type:** New file
 
 #### What it does
 
-`ReasoningTraceTool` is the class-first execution implementation inherited by
-all 182 generated classes. It creates a strategy-specific `ToolSpec` with eight
-required fields and long, example-free prose. It rejects incomplete records and
-invalid confidence values, then upserts one primitive and returns a structured
-success result. The tool does not execute the named reasoning method; it records
-the model's public application of that method for context and observability.
+`ReasoningTraceTool` is the shared execution implementation inherited by all
+182 strategy classes. It creates a `ToolSpec` from the subclass's own explicit
+definition and preserves long, example-free prose. It rejects incomplete or
+malformed values, validates the bounded confidence field when declared, then
+upserts one primitive and returns a structured success result. The tool does not
+execute the named reasoning method; it records the model's public application of
+that method for context and observability.
 
 #### Interface / API
 
@@ -224,12 +227,13 @@ class ReasoningTraceTool(BaseTool):
 
 #### Logic / Algorithm
 
-1. Copy call arguments into a local dictionary and validate all eight required text fields.
-2. Parse `confidence` as a finite float and reject values outside the inclusive zero-to-one interval.
-3. Increment the instance sequence and choose an unused readable primitive ID for the bound strategy.
-4. Construct `ReasoningTraceContextItem` with the source slug, purpose, all fields, and the bounded rendering limit.
-5. Upsert through `ContextManager.upsert` and convert manager `ValueError` failures into `ToolResult.error`.
-6. Return `ToolResult.success` with rendered text and metadata containing strategy name, confidence, and primitive ID.
+1. Copy call arguments into a local dictionary and validate the strategy module's required fields and closed argument set.
+2. Normalize declared strings, arrays, numbers, integers, and booleans without silently accepting blank or malformed values.
+3. Parse a declared `confidence` as a finite float and reject values outside the inclusive zero-to-one range.
+4. Increment the instance sequence and choose an unused readable primitive ID for the bound strategy.
+5. Construct `ReasoningTraceContextItem` with the source slug, purpose, strategy fields, and bounded rendering limit.
+6. Upsert through `ContextManager.upsert` and convert manager `ValueError` failures into `ToolResult.error`.
+7. Return `ToolResult.success` with rendered text and metadata containing strategy name, declared fields, and primitive ID.
 
 #### Edge Cases & Error Handling
 
@@ -241,7 +245,7 @@ class ReasoningTraceTool(BaseTool):
 
 ### 6.3 Reasoning Trace Context Primitive
 
-**File(s):** `vidbyte/context/primitives/reasoning_traces.py`
+**File(s):** `vidbyte/context/primitives/reasoning_traces.py` and `vidbyte/context/primitives/base.py`
 
 **Type:** New file
 
@@ -249,10 +253,10 @@ class ReasoningTraceTool(BaseTool):
 
 `ReasoningTraceContextItem` is a frozen, slotted context primitive that stores a
 single public reasoning checkpoint. Its renderer emits the strategy identity,
-purpose, question, applied method, evidence, assumptions, alternatives,
-disconfirming signals, confidence, and next action in stable order. The shared
-`_truncate_text` helper bounds the final model-visible representation at 4,000
-characters. It is deliberately descriptive and does not validate truth,
+purpose, and the strategy module's declared fields in stable order. The shared
+primitive rendering helper prepends the repository-wide three-line managed
+context introduction, while `_truncate_text` bounds the final model-visible
+representation. It is deliberately descriptive and does not validate truth,
 resolve uncertainty, or enforce the next action.
 
 #### Interface / API
@@ -263,16 +267,20 @@ class ReasoningTraceContextItem:
     primitive_id: str
     strategy_name: str
     strategy_purpose: str
-    question: str
-    strategy_application: str
-    evidence: str
-    assumptions: str
-    alternatives: str
-    disconfirming_signals: str
-    confidence: float
-    next_action: str
+    question: str = ""
+    strategy_application: str = ""
+    evidence: str = ""
+    assumptions: str = ""
+    alternatives: str = ""
+    disconfirming_signals: str = ""
+    confidence: float | None = None
+    next_action: str = ""
     title: str = "Reasoning Trace"
     max_chars: int = 4000
+    metadata: Mapping[str, Any] = field(default_factory=dict)
+    kind: str = "reasoning_trace"
+    primitive_frozen: bool = False
+    strategy_fields: Mapping[str, Any] = field(default_factory=dict)
     kind: str = "reasoning_trace"
 
     def to_context_text(self) -> str: ...
@@ -281,9 +289,10 @@ class ReasoningTraceContextItem:
 #### Logic / Algorithm
 
 1. Render the strategy and purpose before the trace fields so the note remains interpretable after compaction or review.
-2. Render the eight fields in the same order as the tool schema to preserve validation and rendering parity.
-3. Format confidence with two decimal places for stable comparison across runs.
-4. Apply `_truncate_text` exactly once after the full text is assembled.
+2. Render the declared strategy fields in the same order as the tool schema to preserve validation and rendering parity.
+3. Retain the prior canonical fields for direct callers that construct the primitive without a strategy field map.
+4. Format confidence with two decimal places when the compatibility field is present.
+5. Apply the shared three-line introduction and `_truncate_text` exactly once after the full text is assembled.
 
 #### Edge Cases & Error Handling
 
@@ -336,19 +345,20 @@ class ReasoningTraceContextItem:
     primitive_id: str
     strategy_name: str
     strategy_purpose: str
-    question: str
-    strategy_application: str
-    evidence: str
-    assumptions: str
-    alternatives: str
-    disconfirming_signals: str
-    confidence: float
-    next_action: str
+    question: str = ""
+    strategy_application: str = ""
+    evidence: str = ""
+    assumptions: str = ""
+    alternatives: str = ""
+    disconfirming_signals: str = ""
+    confidence: float | None = None
+    next_action: str = ""
     title: str = "Reasoning Trace"
     max_chars: int = 4000
     metadata: Mapping[str, Any] = field(default_factory=dict)
     kind: str = "reasoning_trace"
     primitive_frozen: bool = False
+    strategy_fields: Mapping[str, Any] = field(default_factory=dict)
 ```
 
 **Migration strategy:** N/A - this is an additive in-memory context primitive;
@@ -367,14 +377,10 @@ format change.
 
 ```json
 {
-  "question": "string",
-  "strategy_application": "string",
-  "evidence": "string",
-  "assumptions": "string",
-  "alternatives": "string",
-  "disconfirming_signals": "string",
+  "question": "strategy-owned question text",
+  "strategy_specific_field": "shape declared by the selected strategy module",
   "confidence": "number between 0.0 and 1.0",
-  "next_action": "string"
+  "next_action": "observable next action"
 }
 ```
 
@@ -396,7 +402,7 @@ format change.
 
 | Status | Condition |
 |--------|-----------|
-| error | Any required text field is missing, blank, or whitespace-only. |
+| error | Any required strategy field is missing, blank, or whitespace-only. |
 | error | `confidence` is malformed, non-finite, or outside 0.0 through 1.0. |
 | error | The context manager rejects the primitive because its identity is frozen or invalid. |
 
@@ -409,18 +415,22 @@ Complete list of every file that will be created, modified, or deleted:
 | Action | File Path | Reason |
 |--------|-----------|--------|
 | CREATE | `docs/design/reasoning-deep-observability-tools.md` | Source-of-truth design and selected skill inventory. |
-| CREATE | `vidbyte/tools/builtins/reasoning_traces.py` | Definition catalog, shared tool implementation, generated public classes, and description contract. |
+| CREATE | `vidbyte/tools/builtins/reasoning/` | Shared execution base, fixed catalog, and one strategy-owned module per trace. |
 | CREATE | `vidbyte/context/primitives/reasoning_traces.py` | Bounded immutable primitive corresponding to every reasoning trace tool call. |
 | MODIFY | `vidbyte/tools/builtins/__init__.py` | Export the shared reasoning tool API and 182 generated classes. |
 | MODIFY | `vidbyte/context/primitives/__init__.py` | Export the reasoning trace context primitive. |
 | MODIFY | `vidbyte/context/__init__.py` | Preserve the established public context namespace export. |
 | MODIFY | `vidbyte/__init__.py` | Preserve the established root SDK primitive export. |
-| MODIFY | `vidbyte/tools/README.md` | Document the reasoning trace built-in family and observability boundary. |
+| CREATE | `scripts/check_context_primitive_introductions.py` | CI lint rule requiring the shared three-line primitive introduction. |
+| CREATE | `scripts/check_reasoning_trace_contracts.py` | CI contract check for all strategy shapes and six-to-eight-sentence descriptions. |
+| MODIFY | `vidbyte/tools/README.md` | Document the reasoning trace package, strategy-owned shapes, and observability boundary. |
 | MODIFY | `vidbyte/context/primitives/README.md` | Add the reasoning trace primitive to the context primitive index. |
 
-**Summary:** 3 files created, 6 files modified, 0 files deleted. The design
-document is counted in the created-file total because it is committed first on
-the feature branch; no implementation code is written before that commit.
+**Summary:** The design document, two repository checkers, the primitive module,
+and the reasoning package (one shared base plus 182 strategy modules) are
+created; the existing public export and documentation files are modified, and
+the original monolithic reasoning module is removed. The package checkers run as
+part of the canonical source gate.
 
 ### Selected tool inventory
 
