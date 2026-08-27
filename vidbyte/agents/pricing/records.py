@@ -8,6 +8,7 @@ Purpose:
 Architecture:
     - UsageRecord: One model call with its provider-native usage and USD cost.
     - OperationUsageRecord: One priced search/fetch operation and its USD cost.
+    - UsageRecordingIntegrity: Whether metering itself stayed intact for a run.
     - UsageRollup: The per-call and per-operation ledgers plus None-aware totals.
 Relations:
     Built by vidbyte/agents/pricing/tracker.py; surfaced on
@@ -19,8 +20,16 @@ Similar Files:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from enum import Enum
 
 from vidbyte.agents.pricing.base import ProviderUsage
+
+
+class UsageRecordingIntegrity(str, Enum):
+    """Whether every attempted usage record actually reached the run's ledgers."""
+
+    INTACT = "intact"
+    CORRUPTED = "corrupted"
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,10 +68,12 @@ class UsageRollup:
     cost_complete: bool = False
     operations: tuple[OperationUsageRecord, ...] = field(default_factory=tuple)
     operation_count: int = 0
+    recording_integrity: UsageRecordingIntegrity = UsageRecordingIntegrity.INTACT
 
 
 __all__ = [
     "OperationUsageRecord",
     "UsageRecord",
+    "UsageRecordingIntegrity",
     "UsageRollup",
 ]

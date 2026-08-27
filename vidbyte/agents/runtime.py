@@ -10,6 +10,8 @@ Architecture:
     - AgentRuntime: Builds BaseAgentContext and runs direct model/tool loops.
     - include_internal_tools: Defaults to current behavior but lets isolated child
       runtimes expose exactly their explicitly supplied tool catalog.
+    - MiddlewarePipeline: Supplies control-flow events and diagnostic hook records
+      that are emitted as semantic spans before the enclosing agent trace closes.
 Relations:
     Used by vidbyte.agents.base. Depends on shared context, tool, security, and
     strategy dataclasses without owning modality routing or runner construction.
@@ -36,7 +38,7 @@ from vidbyte.context.primitives import ContextItem
 from vidbyte.context.runtime import ContextWindowPlacement, ContextWindowRunContext, InnerContextWindowAlgorithm
 from vidbyte.context.window import ContextWindow
 from vidbyte.lib.dataclasses.agents import AgentIterationSnapshot, AgentRuntimeConfig, AgentStopReason
-from vidbyte.lib.dataclasses.middleware import MiddlewareAction, MiddlewareContext, MiddlewareDecision, MiddlewareHook
+from vidbyte.lib.dataclasses.middleware import MiddlewareAction, MiddlewareContext, MiddlewareDecision, MiddlewareEvent, MiddlewareHook, MiddlewareHookInvocation
 from vidbyte.lib.dataclasses.runner import RunnerHandle
 from vidbyte.providers.output_schema import OutputSchemaFormatter
 from vidbyte.lib.enums import ModelModality
@@ -251,6 +253,7 @@ class AgentRuntime:
                 iteration_count=iteration_count,
                 tokens_used=tokens_used,
                 contexts=call_contexts,
+                started_at=started_at,
             )
             if stop_result is not None:
                 return await self._finish_result(
@@ -1186,6 +1189,7 @@ class AgentRuntime:
                     reported_cost_usd=tool.reported_cost_usd(call, result),
                 )
         except Exception:
+            self.usage_tracker.mark_recording_corrupted()
             return
 
     def _billable_attempts(self, tool: PricedOperationTool, call: ToolCall, result: ToolResult) -> int:
@@ -1411,8 +1415,9 @@ class AgentRuntime:
         """Render the agent-loop-settings context block as 'current usage / configured limit' lines.
 
         Only the budgets that are both numerically calculable and tracked by the runtime loop are
-        injected (max_iterations, max_tokens, max_tool_calls). Settings without a live runtime
-        measurement (max_retries, timeout_seconds, allowed_tools, etc.) are intentionally excluded.
+        injected (max_iterations, max_tokens, max_tool_calls). Settings without a countable
+        iteration measurement (max_retries, allowed_tools, etc.) are intentionally excluded, and
+        timeout_seconds is enforced at the budget check but kept out of model-visible prompt text.
         Returns an empty string when no relevant budget is configured.
         """
         lines: list[str] = []
@@ -1729,7 +1734,9 @@ class AgentRuntime:
         iteration_count: int,
         tokens_used: int | None,
         contexts: Sequence[ToolCallContext],
+        started_at: float,
     ) -> AgentResult | None:
+        # Returns a stopped result when any countable budget or the wall-clock deadline is exhausted.
         if self.config.max_iterations is not None and iteration_count >= self.config.max_iterations:
             return self._stopped_result(
                 "Agent runtime stopped after reaching max_iterations.",
@@ -1750,6 +1757,14 @@ class AgentRuntime:
             return self._stopped_result(
                 "Agent runtime stopped after reaching max_tool_calls.",
                 stop_reason=AgentStopReason.MAX_TOOL_CALLS,
+                iteration_count=iteration_count,
+                tokens_used=tokens_used,
+                contexts=contexts,
+            )
+        if self.config.timeout_seconds is not None and self.middleware.clock() - started_at >= self.config.timeout_seconds:
+            return self._stopped_result(
+                "Agent runtime stopped after reaching timeout_seconds.",
+                stop_reason=AgentStopReason.TIMEOUT,
                 iteration_count=iteration_count,
                 tokens_used=tokens_used,
                 contexts=contexts,
@@ -1899,17 +1914,37 @@ class AgentRuntime:
         self._end_semantic_span(span, output="built")
 
     def _record_middleware_spans(self) -> None:
-        # Emits spans for middleware decisions captured by the middleware pipeline.
+        # Emits diagnostic invocation spans separately from lower-volume policy decision spans.
+        for invocation in self.middleware.hook_invocations:
+            self._record_middleware_hook_span(invocation)
         for event in self.middleware.events:
-            span = self._start_semantic_span(
-                "middleware.decision",
-                middleware_name=event.middleware_name,
-                hook=event.hook.value,
-                action=event.action.value,
-                reason=event.reason,
-                metadata=dict(event.metadata),
-            )
-            self._end_semantic_span(span, output=event.action.value)
+            self._record_middleware_decision_span(event)
+
+    def _record_middleware_hook_span(self, invocation: MiddlewareHookInvocation) -> None:
+        # The pipeline owns elapsed time; this late semantic span stays under the active agent trace.
+        span = self._start_semantic_span(
+            "middleware.hook",
+            middleware_name=invocation.middleware_name,
+            hook=invocation.hook.value,
+            action=invocation.action.value,
+            duration_seconds=invocation.duration_seconds,
+            reason=invocation.reason,
+            metadata=_safe_trace_mapping(invocation.metadata),
+            error_type=invocation.error_type,
+        )
+        self._end_semantic_span(span, output=invocation.action.value)
+
+    def _record_middleware_decision_span(self, event: MiddlewareEvent) -> None:
+        # Existing policy events remain visible at verbose detail without exposing ordinary continuations.
+        span = self._start_semantic_span(
+            "middleware.decision",
+            middleware_name=event.middleware_name,
+            hook=event.hook.value,
+            action=event.action.value,
+            reason=event.reason,
+            metadata=_safe_trace_mapping(event.metadata),
+        )
+        self._end_semantic_span(span, output=event.action.value)
 
 
 def _trace_text(value: object, *, max_chars: int = 12000) -> str:
