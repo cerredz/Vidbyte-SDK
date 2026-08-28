@@ -7,19 +7,22 @@ Purpose:
     Lets a developer declare a deadline or a cost ceiling for each transition in a
     fallback chain, or a repeated-tool-call detector for the chain as a whole, so
     the runtime can advance to the next model proactively instead of only reacting
-    to a raised provider exception.
+    to a raised provider exception. Policies that can vote at the runtime's
+    top-of-iteration checkpoint expose triggered(), which FallbackPolicyMode
+    composes into ANY/ALL trigger semantics.
 Architecture:
     - LatencyPolicy: One deadline per hop, enforced by wrapping the model call.
     - CostBudgetPolicy: One USD ceiling per hop, checked against live usage.
-    - Both expose hop_values() so AgentFallbackSettings can validate array length
-      and element values without knowing about either class by name.
+    - FallbackSignals: Frozen usage snapshot a checkpoint policy votes against.
+    - Both per-hop policies expose hop_values() so AgentFallbackSettings can validate
+      array length and element values without knowing about either class by name.
     - ToolCallLoopPolicy: Chain-wide (not per-hop) -- tolerance for a stuck
       tool-calling pattern doesn't vary by which model is currently active, the
       same way fallback_on's exception set doesn't. Deliberately omits
       hop_values(), so AgentFallbackSettings' per-hop validation skips it.
 Relations:
-    Consumed by vidbyte.agents.fallback.chain.AgentFallback (deadline_for/budget_for
-    for the per-hop policies, is_stuck for ToolCallLoopPolicy) and validated by
+    Consumed by vidbyte.agents.fallback.chain.AgentFallback (deadline_for,
+    advance_after_checkpoint, is_stuck for ToolCallLoopPolicy) and validated by
     vidbyte.agents.fallback.settings.AgentFallbackSettings.
 Similar Files:
     - vidbyte/agents/fallback/chain.py: Folds these policies into per-index lookups.
@@ -29,6 +32,7 @@ Similar Files:
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from vidbyte.lib.dataclasses.tools import fingerprint_tool_call
@@ -36,6 +40,14 @@ from vidbyte.lib.errors import ConfigurationError
 
 if TYPE_CHECKING:
     from vidbyte.lib.dataclasses.tools import ToolCallContext
+
+
+@dataclass(frozen=True, slots=True)
+class FallbackSignals:
+    """Usage snapshot a checkpoint policy votes against; a None signal is unmeasurable, never a trigger."""
+
+    cost_usd: float | None = None
+    total_tokens: int | None = None
 
 
 class LatencyPolicy:
@@ -84,6 +96,12 @@ class CostBudgetPolicy:
     def budget_for(self, index: int) -> float | None:
         # Returns the ceiling in effect while chain index `index` is in flight, or None past the array.
         return self.cost_ceiling_usd_by_hop[index] if index < len(self.cost_ceiling_usd_by_hop) else None
+
+    reason = "cost_budget_exceeded"
+
+    def triggered(self, index: int, signals: FallbackSignals) -> bool:
+        # Votes True when run cost is known and at/above this hop's ceiling; unmeasurable votes False.
+        return signals.cost_usd is not None and signals.cost_usd >= self.budget_for(index)
 
     def __repr__(self) -> str:
         # Returns a compact developer-readable string of the configured ceilings.
@@ -145,4 +163,4 @@ class ToolCallLoopPolicy:
         return f"ToolCallLoopPolicy(window_size={self.window_size}, repeat_threshold={self.repeat_threshold})"
 
 
-__all__ = ["CostBudgetPolicy", "LatencyPolicy", "ToolCallLoopPolicy"]
+__all__ = ["CostBudgetPolicy", "FallbackSignals", "LatencyPolicy", "ToolCallLoopPolicy"]

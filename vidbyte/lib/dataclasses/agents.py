@@ -7,6 +7,7 @@ Purpose:
 Architecture:
     - AgentRunnerConfig: Primitive backend configuration.
     - FallbackModel: One entry in an ordered agent fallback chain.
+    - AgentFallbackConfig: Strictly validated shape backing AgentFallbackSettings.
     - FallbackTransform: Rebuilt provider-derived state for a model switch.
     - AgentCard: Local agent description, capabilities, and tools.
     - AgentMessage: Actor-to-actor message payload.
@@ -21,7 +22,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Mapping, Sequence
 
-from vidbyte.lib.errors import AgentForkConfigurationError
+from vidbyte.lib.enums import FallbackPolicyMode
+from vidbyte.lib.errors import AgentForkConfigurationError, ConfigurationError
 
 if TYPE_CHECKING:
     from vidbyte.agents.runtimes.configs import ActorRuntime, LinearRuntime, MctsSearchRuntime
@@ -145,6 +147,97 @@ class FallbackModel:
         key = ", api_key='***'" if self.api_key else ""
         temperature = f", temperature={self.temperature!r}" if self.temperature is not None else ""
         return f"FallbackModel({self.identity()!r}{key}{temperature})"
+
+
+@dataclass(frozen=True, slots=True)
+class AgentFallbackConfig:
+    """Strictly validated shape backing AgentFallbackSettings.
+
+    Every constraint AgentFallbackSettings enforces is validated here in
+    __post_init__, so a constructed instance is provably valid: no caller can
+    observe a half-validated settings object, and no downstream consumer needs
+    to re-check the shape it was handed. `models` is the one field that keeps
+    an "or" type (str | FallbackModel) deliberately -- resolving a bare model
+    name requires the agent's primary model, which is not known until
+    AgentFallbackSettings.to_fallback(primary=...), one full phase after this
+    config is built. Every other field is coerced to one concrete type before
+    construction, so nothing downstream needs to type-branch on it.
+    """
+
+    models: tuple[str | FallbackModel, ...]
+    fallback_on: tuple[type[BaseException], ...] | None
+    policies: tuple[object, ...]
+    policies_mode: FallbackPolicyMode
+    enabled: bool
+
+    def __post_init__(self) -> None:
+        """Raise ConfigurationError for the first constraint violation found on this configuration."""
+        self._validate_models_not_empty()
+        self._validate_entry_types()
+        self._validate_error_types()
+        self._validate_policy_hop_values()
+
+    def _validate_models_not_empty(self) -> None:
+        # An empty chain is a mistake; pass fallback=None to disable the feature entirely.
+        if not self.models:
+            raise ConfigurationError(
+                "AgentFallbackConfig.models cannot be empty; pass fallback=None to run without a fallback chain."
+            )
+
+    def _validate_entry_types(self) -> None:
+        # Each entry must be a non-blank model string or an explicit FallbackModel.
+        for position, entry in enumerate(self.models):
+            if isinstance(entry, FallbackModel):
+                continue
+            if not isinstance(entry, str) or not entry.strip():
+                raise ConfigurationError(
+                    f"AgentFallbackConfig.models[{position}] must be a non-empty model name or a FallbackModel, "
+                    f"got {type(entry).__name__}."
+                )
+
+    def _validate_error_types(self) -> None:
+        # Every declared trigger must be an exception class the runtime can match with isinstance.
+        for entry in self.fallback_on or ():
+            if not (isinstance(entry, type) and issubclass(entry, BaseException)):
+                raise ConfigurationError(
+                    f"AgentFallbackConfig.fallback_on entries must be exception classes, got {entry!r}."
+                )
+
+    def _validate_policy_hop_values(self) -> None:
+        # Every per-hop policy must supply exactly one value per transition, and every value must be usable.
+        expected = len(self.models)
+        for policy in self.policies:
+            hop_values = getattr(policy, "hop_values", None)
+            if not callable(hop_values):
+                continue
+            values = tuple(hop_values())
+            self._validate_policy_hop_count(policy, values, expected)
+            self._validate_policy_hop_elements(policy, values)
+
+    @staticmethod
+    def _validate_policy_hop_count(policy: object, values: tuple[object, ...], expected: int) -> None:
+        # A per-hop policy needs one value per transition: the chain has `expected` fallback
+        # models, which prepended with the primary gives `expected` possible transitions.
+        if len(values) == expected:
+            return
+        raise ConfigurationError(
+            f"{type(policy).__name__} declares {len(values)} hop value(s), but this chain has "
+            f"{expected} fallback model(s) ({expected + 1} total including the primary), which "
+            f"means {expected} possible transitions. Every per-hop policy needs exactly one value "
+            "per transition: one for the primary and one for each fallback except the last — the "
+            "final model in the chain has nowhere left to fall back to, so it never gets one.",
+            details={"policy": type(policy).__name__, "expected_hop_count": expected, "actual_hop_count": len(values)},
+        )
+
+    @staticmethod
+    def _validate_policy_hop_elements(policy: object, values: tuple[object, ...]) -> None:
+        # Every hop value must be a positive, non-bool number; a gap or a zero/negative ceiling can never fire correctly.
+        for position, value in enumerate(values):
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or value <= 0:
+                raise ConfigurationError(
+                    f"{type(policy).__name__} hop value at position {position} must be a positive number, got {value!r}.",
+                    details={"policy": type(policy).__name__, "position": position, "value": repr(value)},
+                )
 
 
 @dataclass(frozen=True, slots=True)
