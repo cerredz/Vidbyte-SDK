@@ -1,14 +1,14 @@
 """FILE: lint/core/ruff.py
 
 PURPOSE: Runs pinned Ruff once and adapts records to native SDK lint rules.
-ROLE IN CODEBASE: S001-S002, S007-S008, S025-S028 share analyzer work while retaining separate baselines.
+ROLE IN CODEBASE: S001-S002, S007-S008, S025-S054 share analyzer work while retaining separate baselines.
 ARCHITECTURE NOTE: Isolated selectors prevent ambient repo/user config drift.
 FUNCTION INVENTORY: RuffStore.records(); RuffBackedRule check/explain.
 WHAT NOT TO DO: Never accept a missing analyzer, malformed JSON, or nonzero engine error.
 COMMON MODIFICATION PATTERNS: Change scope, detection, and diagnostics together; rerun the focused rule.
 KNOWN EDGE CASES: Existing debt is count-ratcheted; analyzer and parse failures fail closed.
 RELATED DOCS: docs/design/sdk-agent-facing-lint-suite.md
-TESTS: Exercised by S001-S008 through python lint/run.py.
+TESTS: Exercised by S001-S002, S007-S008, and S025-S054 through python lint/run.py.
 """
 
 from __future__ import annotations
@@ -25,10 +25,13 @@ from lint.core.registry import Rule
 
 SELECTORS = (
     "ANN,B904,B905,C901,DTZ,E4,E7,E9,F,PLR0912,PLR0915,RUF006,RUF012,"
+    "RUF007,RUF008,RUF009,RUF015,RUF017,RUF018,RUF019,RUF024,RUF043,RUF100,RUF200,"
+    "PGH003,PGH004,TID251,TID252,PLW1514,TRY002,TRY401,G004,"
+    "ASYNC109,ASYNC210,ASYNC230,ASYNC251,S506,S324,"
     "I001,UP006,UP007,UP035,UP045,"
-    "ASYNC100,ASYNC105,ASYNC109,ASYNC110,ASYNC210,ASYNC220,ASYNC221,ASYNC230,ASYNC251,"
+    "ASYNC100,ASYNC105,ASYNC110,ASYNC220,ASYNC221,"
     "B017,B023,B028,B039,"
-    "S105,S106,S107,S108,S301,S302,S324,S501,S506"
+    "S105,S106,S107,S108,S301,S302,S501"
 )
 
 
@@ -61,8 +64,8 @@ class RuffStore:
 
     @classmethod
     def _run(cls) -> tuple[RuffRecord, ...]:
-        # Executes Ruff without a shell and validates process/payload boundaries.
-        command = [sys.executable, "-m", "ruff", "check", "vidbyte", "--isolated", "--select", SELECTORS, "--output-format", "json", "--exit-zero", "--no-cache"]
+        # Executes the explicit lint policy over package code and project metadata.
+        command = [sys.executable, "-m", "ruff", "check", "pyproject.toml", "vidbyte", "--config", str(repo_root() / "lint" / "ruff.toml"), "--select", SELECTORS, "--output-format", "json", "--exit-zero", "--no-cache"]
         try:
             result = subprocess.run(command, cwd=repo_root(), check=False, capture_output=True, text=True, encoding="utf-8", errors="replace")
         except OSError as exc:
@@ -115,9 +118,38 @@ class RuffBackedRule(Rule):
         return findings
 
     def _matches(self, code: str) -> bool:
-        # Matches exact selectors or an explicitly declared selector family.
-        return code in self.codes or code.startswith(self.prefixes)
+        # Matches exact selectors or numeric Ruff families without treating F as FAST.
+        if code in self.codes:
+            return True
+        return any(code.startswith(prefix) and code[len(prefix):].startswith(tuple("0123456789")) for prefix in self.prefixes)
 
     def explain(self, finding: Finding) -> Diagnostic:
-        # Adds SDK-specific consequence and repair guidance to Ruff's local fact.
-        return Diagnostic(what_happened=f"{finding.rel_path}:{finding.line} violates {finding.extra.get('code', 'Ruff')}: {finding.extra.get('message', '')}", why_blocked=self.impact, how_to_fix=f"{self.repair} Ruff reported column {finding.extra.get('column', '1')}.", correct_examples=self.examples, will_not_work=("Adding noqa, per-file ignores, or analyzer configuration exceptions.", "Raising lint/baseline.json; pre-existing debt is already frozen."), verify=self.verify_command())
+        # Adds several sentences of SDK-specific context to Ruff's local fact.
+        code = finding.extra.get("code", "Ruff")
+        message = finding.extra.get("message", "Ruff reported a violation.")
+        return Diagnostic(
+            what_happened=(
+                f"{finding.rel_path} line {finding.line} violates {code}: {message}. "
+                "Ruff identified this construct at the displayed source location. "
+                f"The finding belongs to the `{self.name}` SDK policy and is counted independently in the baseline. "
+                "The code may parse and pass a narrow example, but it does not satisfy the repository contract represented by this rule. "
+                "Review the owning boundary before changing the source."
+            ),
+            why_blocked=(
+                f"{self.impact} "
+                "A later caller, model interaction, retry, or packaging step can observe the difference even when the local line looks harmless. "
+                "Keeping the finding blocking makes the contract visible to maintainers and future coding agents."
+            ),
+            how_to_fix=(
+                f"{self.repair} "
+                f"Ruff reported column {finding.extra.get('column', '1')}. "
+                "After editing, rerun the focused command and inspect the count rather than accepting a silent suppression."
+            ),
+            correct_examples=self.examples,
+            will_not_work=(
+                "Adding `# noqa`, a per-file ignore, or changing lint/ruff.toml to hide the finding; that removes evidence without repairing the SDK contract.",
+                "Raising lint/baseline.json for a newly introduced violation; the baseline freezes existing debt and does not authorize new debt.",
+                "Moving the same construct into a helper or renaming it when the rule concerns the underlying API, lifetime, or data flow."
+            ),
+            verify=self.verify_command(),
+        )
