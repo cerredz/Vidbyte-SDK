@@ -16,6 +16,11 @@ cached external findings; semantic rules inspect the shared source catalogue.
 ## File Index
 
 - `__init__.py` -- rule package marker.
+- `c001_settings_class_configuration_error_placement.py` -- settings validation ownership.
+- `c002_duplicate_inline_bool_guard_validation.py` -- duplicate meaningful bool guards.
+- `c003_no_dynamic_import_from_data.py` -- fixed import targets.
+- `c004_operation_pricing_rate_floor.py` -- operation pricebook magnitude floor.
+- `c005_cost_arithmetic_site_parity.py` -- reviewed cost-arithmetic locations.
 - `s001_python_correctness_foundation.py` -- Pyflakes/syntax correctness.
 - `s002_exception_cause_chaining.py` -- explicit translated causes.
 - `s003_strict_zip.py` -- explicit zip length behavior.
@@ -78,3 +83,4 @@ cached external findings; semantic rules inspect the shared source catalogue.
 - 2026-08-26: Added article-derived S024 and A001-A003/A005-A008 policies.
 - 2026-08-27: Added S025 model-facing tool/parameter description depth policy.
 - 2026-08-28: Added the sequential S026-S050 analyzer-backed policy catalogue.
+- 2026-08-28: Added C001-C005 SDK domain-contract policies.

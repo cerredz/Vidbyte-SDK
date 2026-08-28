@@ -101,7 +101,17 @@ class TransportParityRule(Rule):
     id = "S010"
     name = "transport-parity"
     severity = "blocking"
-    summary = "Async callers use HttpTransport; synchronous callers use SyncHttpTransport."
+    summary = "This rule keeps the SDK's asynchronous and synchronous HTTP contracts aligned with the methods that consume them. It resolves transport defaults and checks whether runner, provider, and built-in tool methods use the matching execution model. The rule also detects calls to transport methods that the selected implementation cannot provide. Its purpose is to make awaitability and blocking behavior explicit at the constructor, protocol, and call boundary together. The transport choice must remain consistent from dependency injection through the final request or stream operation."
+    impact = "A synchronous caller using HttpTransport receives a coroutine where it expects an HTTP response or bytes. An asynchronous caller using SyncHttpTransport can block the event loop, delaying unrelated agent work and cancellation. A method mismatch can remain hidden until one modality, provider, or upload path executes in production. These failures corrupt provider results and lifecycle behavior while making the apparent error seem far from the transport choice. A type annotation alone cannot prevent the runtime mismatch when the constructed dependency and invoked method still belong to the other execution model."
+    repair = "Trace the transport from its constructor default or injected protocol through the method that invokes it. Use HttpTransport only from awaited async code and use SyncHttpTransport for synchronous code that performs blocking I/O. Align the annotation, default constructor, provider protocol, method name, and await behavior as one contract rather than changing one line. Run the focused rule and the affected async, sync, upload, and stream checks after the transport path is coherent. Include an injected implementation in verification so the repair works for both the default and the supported dependency seam."
+    examples = (
+        "vidbyte/lib/http/transport.py - distinct async and synchronous transport methods",
+        "vidbyte/lib/runners/text.py - an async runner awaiting its transport request",
+    )
+    will_not_work = (
+        "Calling asyncio.run inside an SDK method or hiding blocking I/O behind an async function.",
+        "Changing only the type annotation while retaining the wrong transport default or call mode.",
+    )
 
     def check(self, catalog: SourceCatalog) -> list[Finding]:
         # Scans runner/provider/tool classes whose defaults own transport mode.
@@ -115,7 +125,7 @@ class TransportParityRule(Rule):
 
     def explain(self, finding: Finding) -> Diagnostic:
         # Provides the parity repair without encouraging thread shims around the wrong API.
-        return Diagnostic(what_happened=f"{finding.rel_path}:{finding.line} has {finding.extra.get('reason', 'transport mismatch')} for self.{finding.symbol}.", why_blocked="A synchronous method receives a coroutine instead of HttpResponse, or an async event loop performs blocking urllib I/O. Both failures violate provider contracts and can surface only for particular modalities.", how_to_fix="Use HttpTransport only through awaited async methods. Use SyncHttpTransport for synchronous provider/runner methods and its request_bytes/upload_multipart/stream_request APIs. Align the constructor annotation, default, provider protocol, and call together.", correct_examples=("vidbyte/lib/http/transport.py - separate transport classes and methods", "vidbyte/lib/runners/text.py - async text runner transport flow"), will_not_work=("Calling asyncio.run inside an SDK method or hiding blocking calls in an async function.", "Changing only the type annotation while retaining the wrong constructor."), verify=self.verify_command())
+        return Diagnostic(what_happened=f"{finding.rel_path}:{finding.line} has {finding.extra.get('reason', 'transport mismatch')} for self.{finding.symbol}.", why_blocked=self.impact, how_to_fix=self.repair, correct_examples=self.examples, will_not_work=self.will_not_work, verify=self.verify_command())
 
 
 RULE = TransportParityRule()

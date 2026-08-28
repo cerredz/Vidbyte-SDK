@@ -19,6 +19,7 @@ registry identity, and freezing remain manager responsibilities.
 - `decisions.py` - decision, alternative, and tradeoff challenges.
 - `execution.py` - invariant, dependency, intervention-risk, and feedback-gap challenges.
 - `closure.py` - process-stall, completion-gate, and risk-escalation challenges.
+- `reasoning_strategies.py` - deduction, induction, abduction, analogy, causal-chain, Bayesian-update, differential-diagnosis, Fermi-estimate, steelman, and falsification primitives.
 - `__init__.py` - supported public primitive exports.
 
 Multi-agent primitives preserve explicit trust boundaries: user requests, ledger

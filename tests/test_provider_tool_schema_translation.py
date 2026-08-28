@@ -1,3 +1,23 @@
+"""Context Protocol Header
+
+Description:
+    Verifies provider-facing tool schema translation across native and explicit
+    input-schema tools.
+Purpose:
+    Protects the public contract that model-facing descriptions, parameters,
+    activity annotations, and provider-specific schema shapes remain aligned.
+Architecture:
+    - LookupTool and SchemaLookupTool: Parameter-tuple and explicit-schema fixtures.
+    - ProviderToolActivitySchemaTests: Activity and customization schema contracts.
+    - ProviderToolSchemaTranslationTests: Provider wire-shape compatibility.
+Relations:
+    Exercises vidbyte.tools.customization, vidbyte.lib.tools.formatter, and
+    vidbyte.providers.base through the public provider schema helper.
+TESTS:
+    This file is the contract suite for OpenAI-compatible, Anthropic, and
+    Gemini tool schema translation.
+"""
+
 from __future__ import annotations
 
 import unittest
@@ -137,6 +157,54 @@ class ProviderToolActivitySchemaTests(unittest.TestCase):
             parameters["properties"]["activity"]["properties"]["kind"]["$ref"],
             "#/$defs/LookupKind",
         )
+
+    def test_customized_descriptions_reach_every_provider_schema(self) -> None:
+        """Description overrides remain visible in OpenAI, Anthropic, and Gemini schemas."""
+        customized = LookupTool().customize(
+            description="Customized lookup.",
+            parameter_descriptions={"topic": "Customized topic guidance."},
+        ).spec()
+
+        openai = tool_spec_to_provider_schema(customized, "openai")
+        anthropic = tool_spec_to_provider_schema(customized, "anthropic")
+        gemini = tool_spec_to_provider_schema(customized, "gemini")
+
+        self.assertEqual(openai["function"]["description"], "Customized lookup.")
+        self.assertEqual(
+            openai["function"]["parameters"]["properties"]["topic"]["description"],
+            "Customized topic guidance.",
+        )
+        self.assertEqual(anthropic["description"], "Customized lookup.")
+        self.assertEqual(
+            anthropic["input_schema"]["properties"]["topic"]["description"],
+            "Customized topic guidance.",
+        )
+        self.assertEqual(gemini["description"], "Customized lookup.")
+        self.assertEqual(
+            gemini["parameters"]["properties"]["topic"]["description"],
+            "Customized topic guidance.",
+        )
+
+    def test_customization_updates_explicit_input_schema(self) -> None:
+        """Explicit input schemas receive the same top-level parameter description override."""
+        tool = SchemaLookupTool()
+        original = tool.spec()
+        customized = tool.customize(
+            description="Customized lookup.",
+            parameter_descriptions={"topic": "Customized explicit-schema guidance."}
+        ).spec()
+
+        schema = tool_spec_to_provider_schema(customized, "openai")
+
+        self.assertEqual(
+            customized.input_schema["properties"]["topic"]["description"],
+            "Customized explicit-schema guidance.",
+        )
+        self.assertEqual(
+            schema["function"]["parameters"]["properties"]["topic"]["description"],
+            "Customized explicit-schema guidance.",
+        )
+        self.assertNotIn("description", original.input_schema["properties"]["topic"])
 
 
 class ProviderToolSchemaTranslationTests(unittest.TestCase):

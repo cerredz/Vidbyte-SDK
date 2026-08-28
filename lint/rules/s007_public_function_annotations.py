@@ -19,10 +19,18 @@ class PublicFunctionAnnotationsRule(RuffBackedRule):
 
     id = "S007"
     name = "public-function-annotations"
-    summary = "Untyped public seams hide provider, DTO, awaitability, and error contracts from callers and mypy."
+    summary = "This rule requires public SDK functions and methods to declare the types that callers must understand. It protects parameters, return values, asynchronous boundaries, provider payloads, data-transfer objects, and public error paths from disappearing into inference gaps. A finding marks a callable whose interface cannot be checked reliably by mypy, an IDE, or a downstream coding agent. The rule permits dynamic internals where the repository contract allows them while keeping public seams explicit. An annotation is treated as executable documentation because downstream code uses it to select and validate the boundary."
     codes = frozenset({"ANN001", "ANN002", "ANN003", "ANN201", "ANN202", "ANN204", "ANN205", "ANN206"})
-    impact = "Untyped public seams hide provider, DTO, awaitability, and error contracts from callers and mypy."
-    repair = "Annotate public parameters/returns with the narrowest truthful type. Any remains allowed at dynamic boundaries."
+    impact = "Without annotations, callers cannot tell whether a value is optional, awaitable, serialized, provider-specific, or guaranteed to have a stable shape. Mypy then cannot catch coroutine misuse, swapped arguments, missing fields, or an error contract that changed during a refactor. Agents compensate by opening more implementation files and may still choose a type that passes one path while breaking another. The missing contract therefore increases both integration risk and the context required to modify the SDK safely. An inaccurate annotation is also harmful because it gives callers false confidence while suppressing the mismatch the rule is meant to expose."
+    repair = "Read the callable's callers and return construction before selecting an annotation so the type describes actual behavior rather than an idealized one. Annotate every public parameter and return with the narrowest truthful SDK, standard-library, or typed collection type. Use explicit unions and protocols at dynamic provider boundaries, and keep Any only where the repository intentionally permits untyped data. Run the focused rule and mypy against the affected package after checking both synchronous and asynchronous call sites. Confirm the annotation matches runtime serialization and error behavior rather than only satisfying the static checker."
+    examples = (
+        "A public runner method annotated with its request type and concrete result type",
+        "A provider protocol that states whether request returns an awaitable response",
+    )
+    will_not_work = (
+        "Annotating every value as Any or object merely to make the diagnostic disappear.",
+        "Adding a return annotation while leaving public parameters ambiguous at the same boundary.",
+    )
 
 
 RULE = PublicFunctionAnnotationsRule()

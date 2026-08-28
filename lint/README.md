@@ -7,7 +7,10 @@ repair, local precedent, rejected shortcuts, and focused verification command.
 
 ## Responsibilities
 
-- Run pinned Ruff once and expose 33 independently baselined Ruff policies.
+- Run pinned Ruff once and expose the independently baselined analyzer policies,
+  including 33 Ruff policies.
+- Enforce five SDK domain-contract policies (C001-C005) over the same source
+  catalogue.
 - Run pinned mypy once and ratchet every package type-contract error.
 - Scan transport, registry, export, boundary-error, pricing, cancellation,
   documentation, and helper-ownership contracts without importing the SDK.
@@ -68,7 +71,7 @@ have been reviewed. Analyzer failures are never recorded as zero.
 Nested folders:
 
 - `core/` -- source discovery, analyzers, rule contracts, baselines, and reports.
-- `rules/` -- one independently selectable module per S-rule.
+- `rules/` -- one independently selectable module per S, A, or C rule.
 
 ## Rule catalogue
 
@@ -135,9 +138,19 @@ Nested folders:
 | A007 | operational-constants | Runtime policy values have named ownership |
 | A008 | library-stdout-boundary | Importable SDK code does not write unstructured stdout |
 
+### SDK domain-contract rules
+
+| ID | Rule | Protected contract |
+|---|---|---|
+| C001 | settings-class-configuration-error-placement | Settings validation is dataclass-owned |
+| C002 | duplicate-inline-bool-guard-validation | Meaningful bool guards have one validation owner |
+| C003 | no-dynamic-import-from-data | Runtime data cannot choose imported modules |
+| C004 | operation-pricing-rate-floor | Pricebook rates clear the plausibility floor |
+| C005 | cost-arithmetic-site-parity | Cost arithmetic stays in reviewed pricing owners |
+
 ## Adding a rule
 
-1. Add one `lint/rules/sNNN_name.py` module exporting `RULE`.
+1. Add one `lint/rules/{s,a,c}NNN_name.py` module exporting `RULE`.
 2. Register its number/name pair in `lint/core/registry.py`.
 3. Run the focused rule with JSON, inspect representative true positives and
    plausible counterexamples, then initialize its count explicitly.
