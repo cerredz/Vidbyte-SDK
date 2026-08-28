@@ -16,6 +16,8 @@ Architecture:
     - reasoning_strategies: Deduction/induction/abduction/analogy/causal-chain/
       Bayesian-update/differential-diagnosis/Fermi-estimate/steelman/falsify
       primitives for the named-reasoning-strategy tools.
+    - reasoning_traces: Strategy-specific trace primitives for the built-in
+      reasoning trace catalog.
     - All concrete types support primitive_id and primitive_frozen for registry management.
 Relations:
     Used by vidbyte.context.manager and re-exported by vidbyte.context and
@@ -90,6 +92,7 @@ from vidbyte.context.primitives.reasoning_strategies import (
     InductionContextItem,
     SteelmanContextItem,
 )
+from vidbyte.context.primitives.reasoning_traces import ReasoningTraceContextItem
 from vidbyte.context.primitives.tasks import (
     PlanContextItem,
     ProgressContextItem,
@@ -139,6 +142,7 @@ __all__ = [
     "PerspectiveGapContextItem",
     "ProblemFrameContextItem",
     "ProblemSpaceSearchContextItem",
+    "ReasoningTraceContextItem",
     "ProcessStallContextItem",
     "ProgressContextItem",
     "ReflexionContextItem",

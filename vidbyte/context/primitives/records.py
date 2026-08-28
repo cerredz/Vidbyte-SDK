@@ -19,6 +19,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any, ClassVar
 
+from vidbyte.context.primitives.base import _with_context_intro
+
 
 @dataclass(frozen=True, slots=True)
 class ArtifactContextItem:
@@ -76,7 +78,7 @@ class ArtifactContextItem:
 
     def to_context_text(self) -> str:
         # Renders artifact name, type, and content.
-        return f"{self.name} ({self.artifact_type}):\n{self.content}"
+        return _with_context_intro(f"{self.name} ({self.artifact_type}):\n{self.content}")
 
 
 @dataclass(frozen=True, slots=True)
@@ -94,7 +96,7 @@ class ResponseContextItem:
     def to_context_text(self) -> str:
         # Renders response with optional sender attribution.
         prefix = f"Response from {self.sender}:" if self.sender else "Response:"
-        return f"{prefix}\n{self.content}"
+        return _with_context_intro(f"{prefix}\n{self.content}")
 
 
 @dataclass(frozen=True, slots=True)
@@ -112,7 +114,7 @@ class ToolCallContextItem:
 
     def to_context_text(self) -> str:
         # Renders tool name, arguments, and output.
-        return f"Tool call: {self.name}\nArguments: {dict(self.arguments)}\nOutput: {self.output}"
+        return _with_context_intro(f"Tool call: {self.name}\nArguments: {dict(self.arguments)}\nOutput: {self.output}")
 
 
 __all__ = [

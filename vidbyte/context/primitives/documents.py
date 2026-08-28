@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, ClassVar
 
-from vidbyte.context.primitives.base import _language_from_path
+from vidbyte.context.primitives.base import _language_from_path, _with_context_intro
 
 
 @dataclass(frozen=True, slots=True)
@@ -71,7 +71,7 @@ class TextContextItem:
     def to_context_text(self) -> str:
         # Renders title, optional source, and content.
         source = f"\nSource: {self.source}" if self.source else ""
-        return f"{self.title}{source}\n{self.content}"
+        return _with_context_intro(f"{self.title}{source}\n{self.content}")
 
 
 @dataclass(frozen=True, slots=True)
@@ -99,7 +99,7 @@ class FileContextItem:
         language: str | None = None,
         metadata: Mapping[str, Any] | None = None,
         encoding: str = "utf-8",
-    ) -> "FileContextItem":
+    ) -> FileContextItem:
         # Constructs a FileContextItem by reading filesystem metadata and optionally content.
         resolved = Path(path).resolve()
         content = resolved.read_text(encoding=encoding) if include_content else None
@@ -125,7 +125,7 @@ class FileContextItem:
         if body is not None:
             lines.append("Content:")
             lines.append(body)
-        return "\n".join(lines)
+        return _with_context_intro("\n".join(lines))
 
 
 @dataclass(frozen=True, slots=True)
@@ -224,7 +224,7 @@ class GitDiffContextItem:
             lines.extend(f"- {file}" for file in self.files)
         lines.append("Diff:")
         lines.append(self.diff)
-        return "\n".join(lines)
+        return _with_context_intro("\n".join(lines))
 
 
 @dataclass(frozen=True, slots=True)
@@ -288,7 +288,7 @@ class DocumentContextItem:
             lines.append(f"Document ID: {self.document_id}")
         lines.append("Content:")
         lines.append(self.content)
-        return "\n".join(lines)
+        return _with_context_intro("\n".join(lines))
 
 
 @dataclass(frozen=True, slots=True)
@@ -355,7 +355,7 @@ class EnvironmentContextItem:
             lines.append(f"Shell: {self.shell}")
         if len(lines) == 1:
             lines.append("N/A")
-        return "\n".join(lines)
+        return _with_context_intro("\n".join(lines))
 
 
 @dataclass(frozen=True, slots=True)
@@ -404,7 +404,7 @@ class MemoryContextItem:
     def to_context_text(self) -> str:
         # Renders memory summary with optional source attribution.
         source = f"\nSource: {self.source}" if self.source else ""
-        return f"Memory summary:{source}\n{self.content}"
+        return _with_context_intro(f"Memory summary:{source}\n{self.content}")
 
 
 __all__ = [

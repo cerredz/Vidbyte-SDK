@@ -19,7 +19,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any, ClassVar
 
-from vidbyte.context.primitives.base import _extend_section
+from vidbyte.context.primitives.base import _extend_section, _with_context_intro
 
 
 @dataclass(frozen=True, slots=True)
@@ -118,7 +118,7 @@ class TaskContextItem:
         _extend_section(lines, "Completed", self.completed)
         _extend_section(lines, "Next steps", self.next_steps)
         _extend_section(lines, "Deterministic checks", self.deterministic_checks)
-        return "\n".join(lines)
+        return _with_context_intro("\n".join(lines))
 
 
 @dataclass(frozen=True, slots=True)
@@ -204,7 +204,7 @@ class ProgressContextItem:
         _extend_section(lines, "Decisions", self.decisions)
         _extend_section(lines, "Errors", self.errors)
         _extend_section(lines, "Next steps", self.next_steps)
-        return "\n".join(lines)
+        return _with_context_intro("\n".join(lines))
 
 
 @dataclass(frozen=True, slots=True)
@@ -271,7 +271,7 @@ class PlanContextItem:
             lines.append(f"{marker} {i + 1}. {step}")
         if not self.steps:
             lines.append("No steps defined.")
-        return "\n".join(lines)
+        return _with_context_intro("\n".join(lines))
 
 
 __all__ = [
