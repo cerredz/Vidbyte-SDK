@@ -47,8 +47,11 @@ than replacing it, continuing the established "one file plus one registry line" 
 The catalog was compiled from a research pass over agent-native software engineering and this
 repo's actual code. Two prior audits (this session) confirmed exact origin/main state: S001-S021
 and S024 exist (S022/S023 were removed, never re-registered — new IDs must not reuse them); A001-
-A003 and A005-A008 exist (A004 likewise skipped). This doc's rule numbering therefore starts at
-**S025** and **A009**. The audit also found, by reading actual source rather than trusting the
+A003 and A005-A008 exist (A004 likewise skipped). This doc's rule numbering originally started at
+**S025**; concurrent work landed `S025-S050`/`C001-C005` on `origin/main` mid-implementation
+(see section 12), so this PR's rules were renumbered to **S051-S061** after a merge — the
+sections below describe the original S025-S035 design intent, and section 12 records the
+renumbering. The audit also found, by reading actual source rather than trusting the
 catalog's assumptions: zero `shell=True` usage, zero `model_construct()` usage, zero weak-hash
 usage, zero insecure-random-for-security-tokens usage, and all three `ContextVar`s already default
 to `None`/`()` — several new rules can therefore ship at a **CLEAN (baseline 0)** allowance
@@ -415,6 +418,21 @@ Rollback: revert the PR; ratcheted rules simply stop being enforced, no data/sta
       only), and `self.backend.read_text(...)`/`write_text(...)` calls were flagged even though
       `self.backend` is already the reviewed `FileSystemBackend` containment abstraction (added a
       receiver-aware exclusion). Final baseline is 6, down from an initial unreviewed 16.
+- [x] **Concurrent work landed on `origin/main` mid-implementation.** While this PR was in
+      progress, a separate effort merged directly to `origin/main`: `S025-S050` (a *different*
+      rule set than this PR's original `S025-S035` draft), `C001-C005`, and a new
+      `lint/ruff.toml` config replacing the previous `--isolated` invocation. This was discovered
+      when the SDK PR's CI never triggered — `gh run list` showed a same-day push titled
+      "feat(lint): add S025-S050 SDK rules" already on `main`. Resolution: merged `origin/main`
+      into this branch (not rebased, to avoid a force-push), renumbered this PR's 11 rules to
+      `S051-S061`, and removed the Ruff codes now duplicated by the concurrent work
+      (`S052`/async-blocking-io dropped `ASYNC109/210/230/251`, already owned by the new
+      `S045-S048`; `S054`/bandit-security-subset dropped `S324`/`S506`, already owned by the new
+      `S049`/`S050`) so the same finding is never double-counted under two rule IDs. The merge
+      also introduced 5 more pre-existing-elsewhere regressions from the concurrently-added
+      source (`A001`, `S009`, `S017`, `S025`, `S050`), reviewed and ratcheted the same way as the
+      `origin/main`-breakage discovery below (one, `S050`, was hand-verified as a legitimate
+      non-security content-addressing hash, not a real crypto weakness).
 - [x] **Discovered during implementation, unrelated to this design doc's scope:** `origin/main`'s
       own `CI` GitHub Actions workflow has been failing on its last several pushes (confirmed via
       `gh run list --branch main`), independent of this branch — verified by stashing every change
