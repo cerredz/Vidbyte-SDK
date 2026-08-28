@@ -8,9 +8,10 @@ Architecture:
     - EchoTool: Minimal test tool.
     - EchoActivity: Bounded activity annotation used by the binding tests.
     - ToolActivityTests: Binding, validation, and argument-separation tests.
+    - ToolCustomizationTests: Dataclass validation, immutable description overrides, and wrapper composition.
     - ToolCoreTests: Registry, spec rendering, validation, and execution tests.
 Relations:
-    Related to vidbyte.tools.types, base, activity, registry, and executor.
+    Related to vidbyte.tools.types, base, activity, customization, registry, and executor.
 """
 
 from __future__ import annotations
@@ -19,6 +20,7 @@ import unittest
 
 from pydantic import BaseModel, Field
 
+from vidbyte.lib.dataclasses import ToolCustomization
 from vidbyte.lib.errors import ToolRegistrationError, ToolRegistryError
 from vidbyte.tools import (
     BaseTool,
@@ -196,6 +198,98 @@ class ToolActivityTests(unittest.IsolatedAsyncioTestCase):
 
         with self.assertRaises(TypeError):
             prepared.activity.payload["reason"] = "tampered"
+
+
+class ToolCustomizationTests(unittest.IsolatedAsyncioTestCase):
+    """Verifies immutable model-facing description customization."""
+
+    def test_customization_preserves_original_tool_contract(self) -> None:
+        """Customized text changes the returned spec without mutating the original tool."""
+        tool = EchoTool()
+        customized = tool.customize(
+            description="Application-specific echo guidance.",
+            parameter_descriptions={"text": "Application-specific text guidance."},
+        )
+
+        self.assertEqual(tool.spec().description, "Echo input.")
+        self.assertEqual(tool.spec().parameters[0].description, "Text to echo.")
+        self.assertEqual(customized.spec().description, "Application-specific echo guidance.")
+        self.assertEqual(
+            customized.spec().parameters[0].description,
+            "Application-specific text guidance.",
+        )
+        self.assertEqual(customized.name, tool.name)
+
+    def test_customization_rejects_unknown_or_blank_descriptions(self) -> None:
+        """Invalid customization values fail before a wrapper can enter a catalog."""
+        tool = EchoTool()
+
+        with self.assertRaises(ValueError):
+            tool.customize(
+                description="Application-specific echo guidance.",
+                parameter_descriptions={"missing": "Unknown parameter."},
+            )
+        with self.assertRaises(ValueError):
+            tool.customize(description=" ", parameter_descriptions={})
+        with self.assertRaises(ValueError):
+            tool.customize(description="Application-specific echo guidance.", parameter_descriptions={"text": " "})
+
+    def test_customization_requires_concrete_description(self) -> None:
+        """The public API requires a non-optional tool description override."""
+        tool = EchoTool()
+
+        with self.assertRaises(TypeError):
+            tool.customize(parameter_descriptions={"text": "Application-specific text guidance."})
+
+    def test_customization_dataclass_validates_and_freezes_inputs(self) -> None:
+        """Dataclass construction owns validation and prevents mapping mutation."""
+        customization = ToolCustomization(
+            tool_spec=EchoTool().spec(),
+            description="Application-specific echo guidance.",
+            parameter_descriptions={"text": "Application-specific text guidance."},
+        )
+
+        with self.assertRaises(TypeError):
+            customization.parameter_descriptions["text"] = "tampered"
+        with self.assertRaises(ValueError):
+            ToolCustomization(
+                tool_spec=EchoTool().spec(),
+                description="Application-specific echo guidance.",
+                parameter_descriptions={"missing": "Unknown parameter."},
+            )
+
+    async def test_customization_delegates_execution_unchanged(self) -> None:
+        """Customized tools execute the original implementation with unchanged arguments."""
+        tool = EchoTool()
+        customized = tool.customize(
+            description="Custom echo.",
+            parameter_descriptions={"text": "Custom text."},
+        )
+
+        result = await customized.execute(ToolCall("echo", {"text": "hello"}))
+
+        self.assertEqual(result.output, "hello")
+        self.assertEqual(tool.executed_arguments, [{"text": "hello"}])
+
+    async def test_customization_composes_with_activity_in_both_orders(self) -> None:
+        """Activity payloads remain separated when wrappers are composed either way."""
+        tool = EchoTool()
+        activity = ToolActivity(schema=EchoActivity, description="Explain this echo.")
+        customized_then_activity = tool.customize(
+            description="Custom echo.", parameter_descriptions={}
+        ).with_activity(activity)
+        activity_then_customized = tool.with_activity(activity).customize(
+            description="Custom echo.", parameter_descriptions={}
+        )
+
+        for wrapped in (customized_then_activity, activity_then_customized):
+            prepared = Tools([wrapped]).prepare_call(
+                ToolCall("echo", {"text": "hello", "activity": {"reason": "greet"}})
+            )
+            await wrapped.execute(prepared)
+            self.assertIs(ActivityToolFormatter.unwrap(wrapped), tool)
+
+        self.assertEqual(tool.executed_arguments, [{"text": "hello"}, {"text": "hello"}])
 
 
 class ToolCoreTests(unittest.IsolatedAsyncioTestCase):

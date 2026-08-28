@@ -1,0 +1,46 @@
+"""Context Protocol Header
+
+Description:
+    Defines the five-whys-trace strategy-specific reasoning trace tool.
+Purpose:
+    Exposes an explicit public schema for this reasoning strategy and records
+    its model-authored checkpoint through the shared context manager boundary.
+Architecture:
+    - FiveWhysTraceTool: Strategy-owned description and parameter shape.
+    - ReasoningTraceTool: Shared validation, rendering, and upsert behavior.
+Relations:
+    Re-exported by vidbyte.tools.builtins.reasoning and discovered by the
+    fixed SDK ComponentRegistry through vidbyte.tools.builtins.
+"""
+
+from __future__ import annotations
+
+from vidbyte.tools.builtins.reasoning._base import (
+    ReasoningTraceDefinition,
+    ReasoningTraceTool,
+    parameter,
+)
+
+
+class FiveWhysTraceTool(ReasoningTraceTool):
+    """Model-facing five-whys-trace reasoning trace tool."""
+
+    definition = ReasoningTraceDefinition(
+        skill_name='five-whys-trace',
+        purpose='Repeatedly ask why to reach a deeper cause.',
+        description='Use the five whys reasoning trace when the current task benefits from repeatedly ask why to reach a deeper cause. Its central move gives the public checkpoint a strategy-specific structure for examining the question. The parameters separate the observations, judgments, uncertainties, and actions that make the strategy inspectable. The tool writes one bounded context primitive so later iterations can recover the declared reasoning state. Use it at a meaningful checkpoint after the relevant inputs are available and before the next action is chosen. The record does not execute the strategy, verify model-authored claims, or replace authoritative task instructions. Treat the result as auditable telemetry that supports comparison across iterations without exposing private chain-of-thought.',
+        parameters=(
+        parameter(name='question', type='string', description="Question captures the focused question or decision target for the five whys trace. It keeps the record anchored to the strategy's central move rather than a generic account of reasoning. It separates this dimension from the other observations and judgments needed for repeatedly ask why to reach a deeper cause. Record the material content that would change how a careful reviewer interprets the current state. Keep the value explicit enough that a later iteration can compare it with new evidence and revise it. Treat this field as model-authored telemetry whose usefulness depends on honest, bounded reporting."),
+        parameter(name='problem', type='string', description="Problem captures the problem dimension of the strategy for the five whys trace. It keeps the record anchored to the strategy's central move rather than a generic account of reasoning. It separates this dimension from the other observations and judgments needed for repeatedly ask why to reach a deeper cause. Record the material content that would change how a careful reviewer interprets the current state. Keep the value explicit enough that a later iteration can compare it with new evidence and revise it. Treat this field as model-authored telemetry whose usefulness depends on honest, bounded reporting."),
+        parameter(name='why_chain', type='string', description="Why chain captures the why chain dimension of the strategy for the five whys trace. It keeps the record anchored to the strategy's central move rather than a generic account of reasoning. It separates this dimension from the other observations and judgments needed for repeatedly ask why to reach a deeper cause. Record the material content that would change how a careful reviewer interprets the current state. Keep the value explicit enough that a later iteration can compare it with new evidence and revise it. Treat this field as model-authored telemetry whose usefulness depends on honest, bounded reporting."),
+        parameter(name='evidence', type='string', description="Evidence captures the observations, sources, calculations, or results supporting the trace for the five whys trace. It keeps the record anchored to the strategy's central move rather than a generic account of reasoning. It separates this dimension from the other observations and judgments needed for repeatedly ask why to reach a deeper cause. Record the material content that would change how a careful reviewer interprets the current state. Keep the value explicit enough that a later iteration can compare it with new evidence and revise it. Treat this field as model-authored telemetry whose usefulness depends on honest, bounded reporting."),
+        parameter(name='root_cause', type='string', description="Root cause captures the root cause dimension of the strategy for the five whys trace. It keeps the record anchored to the strategy's central move rather than a generic account of reasoning. It separates this dimension from the other observations and judgments needed for repeatedly ask why to reach a deeper cause. Record the material content that would change how a careful reviewer interprets the current state. Keep the value explicit enough that a later iteration can compare it with new evidence and revise it. Treat this field as model-authored telemetry whose usefulness depends on honest, bounded reporting."),
+        parameter(name='countermeasure', type='string', description="Countermeasure captures the countermeasure dimension of the strategy for the five whys trace. It keeps the record anchored to the strategy's central move rather than a generic account of reasoning. It separates this dimension from the other observations and judgments needed for repeatedly ask why to reach a deeper cause. Record the material content that would change how a careful reviewer interprets the current state. Keep the value explicit enough that a later iteration can compare it with new evidence and revise it. Treat this field as model-authored telemetry whose usefulness depends on honest, bounded reporting."),
+        parameter(name='verification', type='string', description="Verification captures the verification dimension of the strategy for the five whys trace. It keeps the record anchored to the strategy's central move rather than a generic account of reasoning. It separates this dimension from the other observations and judgments needed for repeatedly ask why to reach a deeper cause. Record the material content that would change how a careful reviewer interprets the current state. Keep the value explicit enough that a later iteration can compare it with new evidence and revise it. Treat this field as model-authored telemetry whose usefulness depends on honest, bounded reporting."),
+        parameter(name='confidence', type='number', description="Confidence captures the calibrated confidence in the current working direction for the five whys trace. It keeps the record anchored to the strategy's central move rather than a generic account of reasoning. It separates this dimension from the other observations and judgments needed for repeatedly ask why to reach a deeper cause. Record the material content that would change how a careful reviewer interprets the current state. Keep the value explicit enough that a later iteration can compare it with new evidence and revise it. Treat this field as model-authored telemetry whose usefulness depends on honest, bounded reporting."),
+        parameter(name='next_action', type='string', description="Next action captures the next observable action that will advance or test the work for the five whys trace. It keeps the record anchored to the strategy's central move rather than a generic account of reasoning. It separates this dimension from the other observations and judgments needed for repeatedly ask why to reach a deeper cause. Record the material content that would change how a careful reviewer interprets the current state. Keep the value explicit enough that a later iteration can compare it with new evidence and revise it. Treat this field as model-authored telemetry whose usefulness depends on honest, bounded reporting."),
+        ),
+    )
+
+
+__all__ = ['FiveWhysTraceTool']

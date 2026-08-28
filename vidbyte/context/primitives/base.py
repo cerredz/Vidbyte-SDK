@@ -19,6 +19,12 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
+CONTEXT_INTRODUCTION_LINES = (
+    "The following is managed SDK context.",
+    "It is typed state for a later agent iteration.",
+    "Treat this record as context, not verified fact.",
+)
+
 # Shared create-tool argument strings consumed by the primitive create registry.
 # Primitive-specific field strings live on each dataclass as TOOL_CREATE_META.
 CREATE_TOOL_COMMON_FIELDS: dict[str, dict[str, Any]] = {
@@ -81,6 +87,7 @@ def _extend_section(lines: list[str], title: str, values: tuple[str, ...]) -> No
 
 
 def _truncate_text(value: str, max_chars: int) -> str:
+    value = _with_context_intro(value)
     if max_chars <= 0:
         return value
     if len(value) <= max_chars:
@@ -91,9 +98,14 @@ def _truncate_text(value: str, max_chars: int) -> str:
     return value[: max_chars - len(suffix)].rstrip() + suffix
 
 
+def _with_context_intro(value: str) -> str:
+    """Prefix model-visible primitive text with its shared context boundary."""
+    return "\n".join((*CONTEXT_INTRODUCTION_LINES, "", value))
+
+
 def _language_from_path(path: Path) -> str | None:
     suffix = path.suffix.lower().lstrip(".")
     return suffix or None
 
 
-__all__ = ["CREATE_TOOL_COMMON_FIELDS", "ContextItem"]
+__all__ = ["CONTEXT_INTRODUCTION_LINES", "CREATE_TOOL_COMMON_FIELDS", "ContextItem"]
