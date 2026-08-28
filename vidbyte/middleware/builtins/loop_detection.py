@@ -22,8 +22,6 @@ Relations:
 from __future__ import annotations
 
 import collections
-import hashlib
-import json
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -33,6 +31,7 @@ from vidbyte.lib.dataclasses.middleware import (
     MiddlewareTransform,
 )
 from vidbyte.lib.dataclasses.tools import ToolResult
+from vidbyte.lib.hashing import Hashing, StableKeyInput
 from vidbyte.middleware.base import AgentMiddleware
 
 # Constant description injected into the agent's context window when the soft
@@ -180,17 +179,11 @@ class LoopDetectionMiddleware(AgentMiddleware):
 
     def _make_key(self, tool_name: str, arguments: Any) -> str:
         """Produce a stable string key from the tool name and its arguments."""
-        try:
-            serialized = json.dumps(arguments, sort_keys=True, default=str)
-        except Exception:
-            serialized = str(arguments)
-        arg_hash = hashlib.sha256(serialized.encode()).hexdigest()[:16]
-        return f"{tool_name}:{arg_hash}"
+        return Hashing.stable_key(StableKeyInput(prefix=tool_name, payload=arguments)).key
 
     def _make_output_key(self, tool_name: str, output: str) -> str:
         """Produce a stable string key from the tool name and its output text."""
-        output_hash = hashlib.sha256(output.encode()).hexdigest()[:16]
-        return f"{tool_name}:{output_hash}"
+        return Hashing.stable_key(StableKeyInput(prefix=tool_name, payload=output)).key
 
     @staticmethod
     def _count_consecutive_tail(key: str, history: collections.deque[str]) -> int:

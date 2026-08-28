@@ -8,6 +8,7 @@ Purpose:
 Architecture:
     - AgentLoopSettings: Main loop settings object.
     - AgentFallbackSettings: Ordered model fallback chain for an agent.
+    - AgentKeys: Content-addressed store for an agent's tracked runtime keys.
     - ToolErrorPolicy: Nested policy for tool-error retry/render behavior.
     - ToolSettings: Nested universal tool-use constraints.
 Relations:
@@ -15,8 +16,9 @@ Relations:
 """
 
 from vidbyte.agents.settings.fallback import AgentFallbackSettings
+from vidbyte.agents.settings.keys import AgentKeys
 from vidbyte.agents.settings.loop import AgentLoopSettings
 from vidbyte.agents.settings.tool import ToolSettings
 from vidbyte.agents.settings.tool_error import ToolErrorPolicy, UnrecoverableAction
 
-__all__ = ["AgentFallbackSettings", "AgentLoopSettings", "ToolErrorPolicy", "ToolSettings", "UnrecoverableAction"]
+__all__ = ["AgentFallbackSettings", "AgentKeys", "AgentLoopSettings", "ToolErrorPolicy", "ToolSettings", "UnrecoverableAction"]
