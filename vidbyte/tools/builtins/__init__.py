@@ -14,6 +14,7 @@ Architecture:
     - Context primitive editing tools from builtins.context_primitives.
     - Context algorithm tools from builtins.trajectory_checkpoint and builtins.reflexion.
     - Deep CoT event tools from builtins.cot_events.
+    - Reasoning strategy tools from builtins.reasoning.
     - 182 deep reasoning trace tools from builtins.reasoning.
     - Sequential continuation tool from builtins.run_prompts_sequentially.
     - Cooperative pause tool from builtins.pause.
@@ -120,9 +121,19 @@ from vidbyte.tools.builtins.providers import (
 from vidbyte.tools.builtins.reasoning import (
     REASONING_TRACE_DEFINITIONS,
     REASONING_TRACE_TOOL_CLASSES,
+    AbduceTool,
+    AnalogyTool,
+    BayesianUpdateTool,
+    CausalChainTool,
+    DeduceTool,
+    DifferentialDiagnosisTool,
+    FalsifyTool,
+    FermiEstimateTool,
+    InduceTool,
     ReasoningTraceCatalog,
     ReasoningTraceDefinition,
     ReasoningTraceTool,
+    SteelmanTool,
 )
 from vidbyte.tools.builtins.reflexion import ReflexionTool
 from vidbyte.tools.builtins.run_prompts_sequentially import RunPromptsSequentiallyTool
@@ -145,14 +156,18 @@ __all__ = [
     "CREATE_TOOL_REGISTRY",
     "REASONING_TRACE_DEFINITIONS",
     "REASONING_TRACE_TOOL_CLASSES",
+    "AbduceTool",
+    "AnalogyTool",
     "AppendOutputTool",
     "AssumptionCheckTool",
     "AttachMcpServerTool",
     "BacktrackTool",
     "BatchForkTool",
+    "BayesianUpdateTool",
     "BraveSearchTool",
     "BrowserbaseFetchTool",
     "BrowserbaseSearchTool",
+    "CausalChainTool",
     "CheckpointTool",
     "CodeExecutionTool",
     # Memory providers
@@ -176,15 +191,20 @@ __all__ = [
     "CreateHandoffTool",
     "DecisionTool",
     "DeclareOutputSchemaTool",
+    "DeduceTool",
+    "DifferentialDiagnosisTool",
     "DirectHttpFetchTool",
     "ExaSearchTool",
     "ExtendOutputSchemaTool",
+    "FalsifyTool",
+    "FermiEstimateTool",
     "FirecrawlFetchTool",
     "ForkConversationTool",
     "ForkTool",
     "GlobTool",
     "GrepTool",
     "HypothesisTool",
+    "InduceTool",
     "LettaAddArchivalMemoryTool",
     "LettaDeleteArchivalMemoryTool",
     "LettaGetMemoryBlockTool",
@@ -230,6 +250,7 @@ __all__ = [
     "SemanticScholarSearchTool",
     "SemanticSearchTool",
     "SessionTool",
+    "SteelmanTool",
     "SupermemoryAddMemoryTool",
     "SupermemoryDeleteMemoryTool",
     "SupermemorySearchMemoryTool",
