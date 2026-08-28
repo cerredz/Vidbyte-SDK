@@ -27,6 +27,7 @@ TEST FILES:
 
 from __future__ import annotations
 
+from vidbyte.lib.enums.agent_keys import AgentKeyKind
 from vidbyte.lib.enums.agent_runtime import AgentRuntimeStateKey, AgentRuntimeType
 from vidbyte.lib.enums.config import AgentType, DocumentType
 from vidbyte.lib.enums.context import BudgetPreset, PermissionPreset
@@ -45,6 +46,7 @@ from vidbyte.lib.enums.sources import PinPolicy
 from vidbyte.lib.enums.structured_output import StructuredOutputSupport
 
 __all__ = [
+    "AgentKeyKind",
     "AgentRuntimeStateKey",
     "AgentRuntimeType",
     "AgentType",

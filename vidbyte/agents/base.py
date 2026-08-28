@@ -24,12 +24,13 @@ from typing import TYPE_CHECKING, Any
 
 from vidbyte.agents.mixins import McpAttachableMixin
 from vidbyte.agents.pricing import UsageRollup, UsageTracker
-from vidbyte.agents.settings import AgentLoopSettings
+from vidbyte.agents.settings import AgentKeys, AgentLoopSettings
 from vidbyte.agents.types import AgentCard, AgentInput, AgentMessage
 from vidbyte.context.manager import ContextManager
 from vidbyte.context.window import ContextWindow, ContextWindowAlgorithm
 from vidbyte.context.primitives import ContextItem
 from vidbyte.context.handoff import Handoff, MinimalHandoff
+from vidbyte.lib.dataclasses.agent_keys import AgentIdentity, AgentSettingsSnapshot
 from vidbyte.lib.dataclasses.agents import AgentForkSettings, AgentMetadata, AgentRunnerConfig, AgentRuntimeConfig, FallbackModel, PauseDuration
 from vidbyte.lib.dataclasses.runner import RunnerHandle
 from vidbyte.lib.dataclasses.sessions import SESSION_SCHEMA_VERSION, RunState
@@ -51,6 +52,11 @@ if TYPE_CHECKING:
     from vidbyte.agents.settings import AgentFallbackSettings
     from vidbyte.sessions.session import Session
     from vidbyte.sessions.store import SessionStore
+
+# AgentSettingsSnapshot.temperature is non-Optional; an agent that never pins a
+# temperature explicitly falls back to this value for settings-hashing purposes only
+# (it does not affect the temperature actually sent to the provider).
+_DEFAULT_SNAPSHOT_TEMPERATURE = 1.0
 
 
 class BaseAgent(McpAttachableMixin):
@@ -155,6 +161,16 @@ class BaseAgent(McpAttachableMixin):
             timeout_seconds=timeout_seconds,
             run_id=run_id,
         )
+        self.keys = AgentKeys(
+            identity=AgentIdentity(
+                agent_name=name,
+                runtime_type=self.runtime_type,
+                system_prompt=system_prompt,
+                provider=self._resolve_identity_provider(provider_str, agent_name=name),
+                model_name=model_name,
+                run_id=self.runner_config.run_id,
+            )
+        )
         self.name = name
         self._fallback_spec = fallback
         from vidbyte.agents.fallback import AgentFallback
@@ -236,6 +252,9 @@ class BaseAgent(McpAttachableMixin):
         self._mcp_handles = []
         self._pending_mcp_configs = []
 
+        self.keys.record_toolset((self._tool_name(t) for t in self._agent_tool_items), self.mcp_tool_names())
+        self.keys.record_settings(self._settings_snapshot())
+
     @classmethod
     def from_run_id(cls, run_id: str, *, name: str, system_prompt: str, **kwargs: Any) -> BaseAgent:
         return cls(name=name, system_prompt=system_prompt, run_id=run_id, **kwargs)
@@ -257,6 +276,19 @@ class BaseAgent(McpAttachableMixin):
         if agent_loop_settings is not None:
             return agent_loop_settings
         return AgentLoopSettings(**flat_params)
+
+    @staticmethod
+    def _resolve_identity_provider(provider_str: str | None, *, agent_name: str) -> ModelProvider | None:
+        # Coerces the normalized provider string into a ModelProvider before AgentIdentity construction.
+        if provider_str is None:
+            return None
+        try:
+            return ModelProvider(provider_str.lower())
+        except ValueError as exc:
+            raise ConfigurationError(
+                f"Unrecognized provider '{provider_str}' for agent '{agent_name}'.",
+                details={"agent": agent_name, "provider": provider_str},
+            ) from exc
 
     @staticmethod
     def _resolve_tracer(tracer: type[TracerBase] | TracerBase | None, trace: type[TracerBase] | TracerBase | None) -> TracerBase:
@@ -289,6 +321,7 @@ class BaseAgent(McpAttachableMixin):
         except TypeError:
             pass
         self._bind_agent_tool_context(tool)
+        self.keys.record_toolset((self._tool_name(t) for t in self._agent_tool_items), self.mcp_tool_names())
         return self
 
     def as_tool(self) -> object:
@@ -451,6 +484,26 @@ class BaseAgent(McpAttachableMixin):
         cls._record_resume_tool_mismatch(child, state.tool_names)
         return child
 
+    def _settings_snapshot(self) -> AgentSettingsSnapshot:
+        # Assembles the full agent-settings payload for AgentKeys.record_settings, reusing existing export helpers.
+        loop_settings = self.agent_loop_settings
+        return AgentSettingsSnapshot(
+            identity=self.keys.identity,
+            temperature=self.runner_config.temperature if self.runner_config.temperature is not None else _DEFAULT_SNAPSHOT_TEMPERATURE,
+            runtime_config=self._export_runtime_config(),
+            algorithm=self.algorithm.name,
+            capabilities=tuple(self.capabilities),
+            description=self.description,
+            metadata=dict(self.metadata),
+            loop_settings=self._export_loop_settings(),
+            output_schema=self._export_output_schema() or {},
+            tool_settings_repr=repr(loop_settings.tool_settings) if loop_settings.tool_settings is not None else "",
+            tool_error_policy_repr=repr(loop_settings.tool_error_policy) if loop_settings.tool_error_policy is not None else "",
+            output_contracts=tuple(sorted(contract.name for contract in loop_settings.output_contracts)),
+            max_contract_rejections=loop_settings.max_contract_rejections,
+            permission_policy_allowed=tuple(sorted(permission.value for permission in self.permission_policy.allowed)),
+        )
+
     def _export_runtime_config(self) -> dict[str, Any]:
         # Capture runtime budgets plus actor-runtime settings when present.
         config: dict[str, Any] = {
@@ -586,6 +639,8 @@ class BaseAgent(McpAttachableMixin):
         **options: Any,
     ) -> AgentMessage:
         await self._ensure_mcp_connected()
+        self.keys.record_toolset((self._tool_name(t) for t in self._agent_tool_items), self.mcp_tool_names())
+        self.keys.record_settings(self._settings_snapshot())
         trace_ctx = None
         try:
             trace_metadata = dict(options.pop("trace_metadata", {}) or {})
@@ -664,6 +719,8 @@ class BaseAgent(McpAttachableMixin):
         self.history.append(reply)
         self.last_prompt = prompt
         self.last_reply = reply
+        from vidbyte.sessions.serialization import SessionSerializer
+        self.keys.record_response(SessionSerializer().message_to_dict(reply))
         if self._trace_option is not None and self._trace_option.enabled:
             trace_artifact = metadata.get("trace")
             self.last_trace = dict(trace_artifact) if isinstance(trace_artifact, Mapping) else None
@@ -940,11 +997,11 @@ class BaseAgent(McpAttachableMixin):
 
     def _record_tool_contexts(self, result: AgentResult) -> None:
         contexts = result.metadata.get("tool_calls", ())
-        self._tool_call_contexts.extend(
-            context
-            for context in tuple(contexts)
-            if isinstance(context, ToolCallContext)
-        )
+        new_contexts = tuple(context for context in tuple(contexts) if isinstance(context, ToolCallContext))
+        self._tool_call_contexts.extend(new_contexts)
+        if new_contexts:
+            latest = new_contexts[-1]
+            self.keys.record_tool_call(latest.tool_name, latest.arguments, latest.result.output if latest.result else "")
 
     def _runtime(self) -> Any:
         from vidbyte.lib.registries.runtimes import RuntimeRegistry

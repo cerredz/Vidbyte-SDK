@@ -19,6 +19,7 @@ from __future__ import annotations
 from vidbyte.lib.dataclasses.adversarial_agent_descriptor import AdversarialAgentDescriptor
 from vidbyte.lib.dataclasses.aggregate_agent_descriptor import AggregateAgentDescriptor
 from vidbyte.lib.dataclasses.agent_descriptor import AgentDescriptor
+from vidbyte.lib.dataclasses.agent_keys import AgentIdentity, AgentSettingsSnapshot
 from vidbyte.lib.dataclasses.agents import (
     AgentCard,
     AgentIterationSnapshot,
@@ -197,6 +198,7 @@ __all__ = [
     "AgentCard",
     "AgentDescriptor",
     "AgentDispatch",
+    "AgentIdentity",
     "AgentIterationSnapshot",
     "AgentMessage",
     "AgentReport",
@@ -205,6 +207,7 @@ __all__ = [
     "AgentRuntimeConfig",
     "AgentRuntimeStats",
     "AgentSettings",
+    "AgentSettingsSnapshot",
     "AgentSpec",
     "AgentStopReason",
     "AgentUsage",

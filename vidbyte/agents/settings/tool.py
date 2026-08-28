@@ -16,12 +16,11 @@ Relations:
 
 from __future__ import annotations
 
-import hashlib
-import json
 from collections.abc import Iterable, Mapping, Sequence
 
 from vidbyte.lib.dataclasses.tools import ToolCallContext, ToolCallState, ToolResult
 from vidbyte.lib.errors import ConfigurationError
+from vidbyte.lib.hashing import Hashing, StableKeyInput
 
 _ON_DENY_CHOICES = ("continue", "abort")
 _INTERNAL_DONE_TOOL_NAME = "isDone"
@@ -81,12 +80,7 @@ class ToolSettings:
 
     def fingerprint(self, tool_name: str, arguments: Mapping[str, object] | None) -> str:
         # Builds a stable tool-name + args fingerprint used by identical-call budgets.
-        try:
-            serialized = json.dumps(dict(arguments or {}), sort_keys=True, default=str)
-        except Exception:
-            serialized = str(arguments)
-        digest = hashlib.sha256(serialized.encode()).hexdigest()[:16]
-        return f"{tool_name}:{digest}"
+        return Hashing.stable_key(StableKeyInput(prefix=tool_name, payload=dict(arguments or {}))).key
 
     def budget_stop(self, *, tool_name: str, arguments: Mapping[str, object] | None, call_contexts: Sequence[ToolCallContext], iteration_count: int) -> tuple[str, dict] | None:
         # Returns (reason, metadata) when a pre-exec hard budget is exceeded; pure and stateless.

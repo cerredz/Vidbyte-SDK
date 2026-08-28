@@ -122,6 +122,10 @@ class AgentForkConfigurationError(AgentForkError):
     """Raised when fork settings are internally inconsistent or out of range."""
 
 
+class AgentKeyNotFoundError(VidbyteSdkError):
+    """Raised when AgentKeys.decode() is given a digest that was never recorded or has been evicted."""
+
+
 class McpError(VidbyteSdkError):
     """Base class for all MCP errors."""
 
