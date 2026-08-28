@@ -14,7 +14,9 @@ Architecture:
 Relations:
     Declared by vidbyte.lib.dataclasses.tools; rendered by
     vidbyte.lib.tools.formatter; applied by vidbyte.tools.catalog,
-    vidbyte.tools.executor, and vidbyte.agents.runtime.
+    vidbyte.tools.executor, vidbyte.tools.customization, and vidbyte.agents.runtime.
+    Its generic unwrap path is shared with specification customization so runtime
+    pricing continues to see the original priced operation tool.
 """
 
 from __future__ import annotations
@@ -27,7 +29,7 @@ from pydantic import ValidationError
 
 from vidbyte.lib.dataclasses.tools import ACTIVITY_ARGUMENT_KEY
 from vidbyte.lib.errors import ToolRegistrationError
-from vidbyte.tools.base import BaseTool
+from vidbyte.tools.base import BaseTool, _ToolWrapper, _unwrap_tool
 from vidbyte.tools.types import ToolActivity, ToolCall, ToolCallActivity, ToolResult, ToolSpec
 
 
@@ -63,11 +65,8 @@ class ActivityToolFormatter:
 
     @staticmethod
     def unwrap(tool: BaseTool) -> BaseTool:
-        """Return the original tool behind any SDK activity binding, leaving other tools untouched."""
-        unwrapped = tool
-        while isinstance(unwrapped, _ActivityBoundTool):
-            unwrapped = unwrapped.wrapped_tool
-        return unwrapped
+        """Return the original tool behind any SDK wrapper, leaving plain tools untouched."""
+        return _unwrap_tool(tool)
 
     @staticmethod
     def declared(tool: BaseTool) -> ToolActivity | None:
@@ -150,7 +149,7 @@ class ActivityToolFormatter:
         return {name: value for name, value in arguments.items() if name != ACTIVITY_ARGUMENT_KEY}
 
 
-class _ActivityBoundTool(BaseTool):
+class _ActivityBoundTool(_ToolWrapper):
     """Delegating wrapper that adds one reserved activity annotation to a tool."""
 
     def __init__(self, tool: BaseTool, activity: ToolActivity) -> None:
