@@ -89,7 +89,17 @@ class NoRawExceptionDisclosureRule(Rule):
     id = "S017"
     name = "no-raw-exception-disclosure"
     severity = "blocking"
-    summary = "Caught exception text is not interpolated into public SDK results/errors."
+    summary = "This rule prevents caught exception objects from becoming unfiltered public SDK text. It covers provider, tool, MCP, runner, and result boundaries where third-party messages may contain secrets or unstable implementation detail. A finding identifies the conversion or interpolation that can move raw exception content into a caller-visible result or error. The rule permits structured internal logging while requiring the public surface to use stable and deliberately redacted data. Public diagnostics should explain what a caller can do without copying whatever text a dependency happened to emit."
+    impact = "Raw third-party exception text can contain request URLs, local paths, credentials, response bodies, headers, or provider internals. Echoing it makes the SDK's public contract change whenever a dependency changes its wording or diagnostic payload. It can also disclose sensitive data to an agent or user who only needs a safe error category and remediation path. The violation therefore combines information disclosure, contract instability, and noisy failure handling. Once the text is returned in a result or persisted trace, later redaction cannot reliably recover every place where it was copied."
+    repair = "Separate the stable public error kind and safe message from the internal exception object at the boundary. Use an existing sanitizer to produce a bounded redacted excerpt only when operators genuinely need provider detail. Keep the raw exception in structured internal logging or as a chained cause, and never interpolate it into ToolResult, public error, or user-facing message fields. Run the focused rule and a secret-bearing failure check that asserts both useful public context and absence of the original sensitive text. Test URLs, headers, credentials, and response-body fragments separately because a sanitizer that handles one category may not handle the others."
+    examples = (
+        "vidbyte/tools/builtins/operations/base.py - stable operation error metadata",
+        "An internal structured log carrying redacted detail while the public result carries only a safe error kind",
+    )
+    will_not_work = (
+        "Truncating str(exc) without first applying an explicit redaction policy.",
+        "Renaming the caught variable or routing it through an f-string helper before returning it publicly.",
+    )
 
     def check(self, catalog: SourceCatalog) -> list[Finding]:
         # Scans external-facing packages where returned/raised text reaches SDK users.
@@ -104,7 +114,7 @@ class NoRawExceptionDisclosureRule(Rule):
 
     def explain(self, finding: Finding) -> Diagnostic:
         # Separates stable public metadata from bounded/redacted internal detail.
-        return Diagnostic(what_happened=f"{finding.rel_path}:{finding.line} exposes caught exception {finding.symbol} through {finding.extra.get('reason', 'public text')}.", why_blocked="Raw third-party exceptions can contain request URLs, local paths, credentials, response bodies, or unstable messages. They also make result contracts change when dependencies change wording.", how_to_fix="Return/raise a stable typed error kind and safe message. Put bounded explicitly redacted details in a named internal field or structured logger, and use existing sanitizers for provider response excerpts.", correct_examples=("vidbyte/tools/builtins/operations/base.py - stable operation error metadata",), will_not_work=("Truncating str(exc) without redaction.", "Renaming the caught variable or routing it through an f-string helper."), verify=self.verify_command())
+        return Diagnostic(what_happened=f"{finding.rel_path}:{finding.line} exposes caught exception {finding.symbol} through {finding.extra.get('reason', 'public text')}.", why_blocked=self.impact, how_to_fix=self.repair, correct_examples=self.examples, will_not_work=self.will_not_work, verify=self.verify_command())
 
 
 RULE = NoRawExceptionDisclosureRule()

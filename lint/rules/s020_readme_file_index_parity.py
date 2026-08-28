@@ -59,7 +59,17 @@ class ReadmeFileIndexParityRule(Rule):
     id = "S020"
     name = "readme-file-index-parity"
     severity = "blocking"
-    summary = "Existing README File Index sections match tracked direct children."
+    summary = "This rule keeps an existing README File Index synchronized with the tracked direct files in its folder. It is opt-in, so it protects folders that already declare a navigation contract without forcing documentation into unrelated directories. A finding identifies a missing direct child or a stale indexed entry and distinguishes it from nested content. The result keeps the repository's local architecture map truthful for humans and coding agents. The index is treated as a maintained ownership map whose scope comes from the folder's existing documentation convention."
+    impact = "A missing entry hides a file that a future agent may need to discover, while a stale entry sends that agent toward a path that no longer exists. Both errors make ownership and modification paths probabilistic and encourage duplicate helpers or edits in the wrong folder. Documentation drift is particularly costly in a lint repository because the rules themselves are intended to teach repair patterns. The violation therefore weakens the navigation contract even when every source file still imports successfully. An index that lists nested or generated content also obscures the direct ownership boundary the section was meant to communicate."
+    repair = "Read the existing File Index and compare it with the folder's tracked direct children rather than listing nested descendants. Add each real indexed file with a responsibility description, or remove and rename stale entries so the links match the current path. Keep generated files, private assets, and folders outside the established index scope unless the local documentation explicitly declares them. Run the focused rule and the complete lint suite after checking that the README remains useful as a concise folder map. Review the resulting entries as a human navigation aid so mechanical parity does not produce an accurate but unhelpful index."
+    examples = (
+        "vidbyte/config/README.md - an indexed folder whose direct files have documented responsibilities",
+        "vidbyte/agents/multi/README.md - a local index kept in parity with tracked files",
+    )
+    will_not_work = (
+        "Listing nested descendants as if they were direct children of the indexed folder.",
+        "Renaming a file without updating the existing index entry or adding a new index to a folder outside the rule's opt-in scope.",
+    )
 
     def check(self, catalog: SourceCatalog) -> list[Finding]:
         # Applies opt-in parity to every tracked README declaring the heading.
@@ -73,7 +83,7 @@ class ReadmeFileIndexParityRule(Rule):
 
     def explain(self, finding: Finding) -> Diagnostic:
         # Keeps declared folder navigation truthful without imposing new READMEs.
-        return Diagnostic(what_happened=f"{finding.rel_path}:{finding.line} File Index entry {finding.symbol} is out of parity: {finding.extra.get('reason', 'index drift')}.", why_blocked="A File Index claims to be the local map for future agents. Missing or stale entries make architecture discovery probabilistic and encourage duplicate helpers/files.", how_to_fix="Add the tracked direct child to the existing File Index with its responsibility, or remove/rename the stale entry to match the file. Do not add a new File Index to unrelated folders for this rule.", correct_examples=("vidbyte/config/README.md - indexed folder documentation", "vidbyte/agents/multi/README.md - indexed multi-agent files"), will_not_work=("Listing nested descendants as direct children.", "Renaming a file without updating its existing index entry."), verify=self.verify_command())
+        return Diagnostic(what_happened=f"{finding.rel_path}:{finding.line} File Index entry {finding.symbol} is out of parity: {finding.extra.get('reason', 'index drift')}.", why_blocked=self.impact, how_to_fix=self.repair, correct_examples=self.examples, will_not_work=self.will_not_work, verify=self.verify_command())
 
 
 RULE = ReadmeFileIndexParityRule()

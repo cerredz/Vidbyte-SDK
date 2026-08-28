@@ -23,7 +23,17 @@ class StagedMypyContractsRule(Rule):
     id = "S009"
     name = "staged-mypy-contracts"
     severity = "blocking"
-    summary = "Package type errors may only decrease; every new contract mismatch fails."
+    summary = "This rule makes the package-wide mypy result a staged contract rather than an all-or-nothing migration. Every existing error is counted as explicit debt, while any increase is treated as a new defect in the SDK interface or implementation. The scan covers production code so provider, transport, runner, tool, and result mismatches cannot hide behind untyped callers. The ratchet lets the repository improve incrementally without allowing new ambiguity to accumulate. A lower count is evidence of progress, but it must be deliberately ratcheted into the checked-in baseline after review."
+    impact = "A mypy finding often represents a runtime mismatch even when the failing branch has not been exercised by a test. Examples include awaiting a synchronous transport, passing an optional value to a required boundary, or returning a result with the wrong public shape. Allowing new errors makes the type surface less trustworthy for SDK users, IDEs, and future agents. Raising the baseline would hide that regression and make the remaining debt harder to reduce honestly. The debt count is therefore a guard against new contract drift, not permission to leave newly introduced errors unresolved."
+    repair = "Read the full mypy message and inspect both the producer and consumer named by the type mismatch. Align the implementation with the real contract by correcting annotations, narrowing optional values, awaiting async results, or changing the call shape. Keep third-party import tolerance limited to missing external stubs and do not add a local ignore or weaken a value to Any. Run the focused rule, then mypy and the affected source tests, and lower the baseline only after the improvement is intentional. When the count changes, review the complete diff and update only the exact allowance that the verified improvement justifies."
+    examples = (
+        "vidbyte/lib/http/transport.py - separate async and synchronous transport contracts",
+        "A mypy error whose producer and consumer annotations agree after the repair",
+    )
+    will_not_work = (
+        "Adding type: ignore or broadening a meaningful type to Any only to reduce the count.",
+        "Narrowing mypy's checked package or increasing lint/baseline.json to make new debt appear historical.",
+    )
 
     def check(self, catalog: SourceCatalog) -> list[Finding]:
         # Converts cached mypy errors to source-enriched native findings.
@@ -32,7 +42,7 @@ class StagedMypyContractsRule(Rule):
 
     def explain(self, finding: Finding) -> Diagnostic:
         # Explains why a static mismatch is part of the SDK's callable contract.
-        return Diagnostic(what_happened=f"{finding.rel_path}:{finding.line} has mypy {finding.extra.get('code', 'error')}: {finding.extra.get('message', '')}", why_blocked="SDK annotations are consumed by users, IDEs, and internal dispatch. A mismatch often represents a real coroutine/transport/provider/result contract bug even when one dynamic path has not executed yet.", how_to_fix="Repair the source contract: align parameter/return types, await async results, narrow optional values, or correct the implementation. Keep ignore_missing_imports limited to absent third-party stubs; do not add local type ignores.", correct_examples=("vidbyte/lib/http/transport.py - separate async and synchronous transport contracts",), will_not_work=("Adding type: ignore or weakening the value to Any only to reduce the count.", "Narrowing mypy's checked package or raising the baseline."), verify=self.verify_command())
+        return Diagnostic(what_happened=f"{finding.rel_path}:{finding.line} has mypy {finding.extra.get('code', 'error')}: {finding.extra.get('message', '')}", why_blocked=self.impact, how_to_fix=self.repair, correct_examples=self.examples, will_not_work=self.will_not_work, verify=self.verify_command())
 
 
 RULE = StagedMypyContractsRule()
