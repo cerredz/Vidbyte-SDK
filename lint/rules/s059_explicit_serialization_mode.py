@@ -1,4 +1,4 @@
-"""FILE: lint/rules/s033_explicit_serialization_mode.py
+"""FILE: lint/rules/s059_explicit_serialization_mode.py
 
 PURPOSE: Requires every model_dump() call to declare its serialization mode explicitly.
 ROLE IN CODEBASE: Keeps wire/persistence payloads from silently depending on Pydantic's Python-mode default.
@@ -8,7 +8,7 @@ COMMON MODIFICATION PATTERNS: Change scope, detection, and diagnostics together;
 WHAT NOT TO DO: Do not import runtime packages, mutate source, suppress findings, or hide analyzer failures.
 KNOWN EDGE CASES: Existing debt is count-ratcheted; analyzer and parse failures fail closed.
 RELATED DOCS: docs/design/lint-rule-catalog-expansion.md
-TESTS: Exercised by python lint/run.py --rule S033.
+TESTS: Exercised by python lint/run.py --rule S059.
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ from lint.core.registry import Rule
 class ExplicitSerializationModeRule(Rule):
     """Requires model_dump() calls to pass an explicit mode= keyword."""
 
-    id = "S033"
+    id = "S059"
     name = "explicit-serialization-mode"
     severity = "blocking"
     summary = "model_dump() calls declare mode= explicitly instead of relying on the Python-mode default."

@@ -1,6 +1,6 @@
-"""FILE: lint/rules/s027_defensive_python_bugbear.py
+"""FILE: lint/rules/s053_defensive_python_bugbear.py
 
-PURPOSE: Defines S027 as one independently ratcheted Ruff-backed SDK policy.
+PURPOSE: Defines S053 as one independently ratcheted Ruff-backed SDK policy.
 ROLE IN CODEBASE: Groups four related defensive-Python bugbear findings under one baseline.
 ARCHITECTURE NOTE: Detection is delegated to the cached isolated Ruff adapter.
 FUNCTION INVENTORY: Module exports declarative policy or package markers; no hidden runtime work.
@@ -8,7 +8,7 @@ COMMON MODIFICATION PATTERNS: Change scope, detection, and diagnostics together;
 WHAT NOT TO DO: Do not import runtime packages, mutate source, suppress findings, or hide analyzer failures.
 KNOWN EDGE CASES: Existing debt is count-ratcheted; analyzer and parse failures fail closed.
 RELATED DOCS: docs/design/lint-rule-catalog-expansion.md
-TESTS: Exercised by python lint/run.py --rule S027.
+TESTS: Exercised by python lint/run.py --rule S053.
 """
 
 from lint.core.ruff import RuffBackedRule
@@ -17,7 +17,7 @@ from lint.core.ruff import RuffBackedRule
 class DefensivePythonBugbearRule(RuffBackedRule):
     """Enforces warning stacklevel, specific test exceptions, closure binding, and ContextVar defaults."""
 
-    id = "S027"
+    id = "S053"
     name = "defensive-python-bugbear"
     summary = "Warnings report the caller's frame, tests assert specific exceptions, loop closures bind their value, and ContextVars never default to a shared mutable object."
     codes = frozenset({"B017", "B023", "B028", "B039"})

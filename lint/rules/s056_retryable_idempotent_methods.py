@@ -1,4 +1,4 @@
-"""FILE: lint/rules/s030_retryable_idempotent_methods.py
+"""FILE: lint/rules/s056_retryable_idempotent_methods.py
 
 PURPOSE: Requires the HTTP transports' retry loops to guard non-idempotent methods with a key.
 ROLE IN CODEBASE: Keeps vidbyte/lib/http/transport.py from silently losing its idempotency guard.
@@ -9,7 +9,7 @@ COMMON MODIFICATION PATTERNS: Change scope, detection, and diagnostics together;
 WHAT NOT TO DO: Do not import runtime packages, mutate source, suppress findings, or hide analyzer failures.
 KNOWN EDGE CASES: Existing debt is count-ratcheted; analyzer and parse failures fail closed.
 RELATED DOCS: docs/design/lint-rule-catalog-expansion.md
-TESTS: Exercised by python lint/run.py --rule S030.
+TESTS: Exercised by python lint/run.py --rule S056.
 """
 
 from __future__ import annotations
@@ -40,7 +40,7 @@ def _param_names(func: ast.FunctionDef | ast.AsyncFunctionDef) -> set[str]:
 class RetryableIdempotentMethodsRule(Rule):
     """Requires HttpTransport/SyncHttpTransport.request() to accept an idempotency_key parameter."""
 
-    id = "S030"
+    id = "S056"
     name = "retryable-idempotent-methods"
     severity = "blocking"
     summary = "Retrying HTTP transports declare an idempotency_key parameter guarding non-idempotent methods."

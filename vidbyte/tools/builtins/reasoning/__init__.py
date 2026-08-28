@@ -24,17 +24,20 @@ from collections.abc import Mapping
 from types import MappingProxyType
 from typing import ClassVar
 
-from ._base import ReasoningTraceDefinition, ReasoningTraceTool, parameter
 from vidbyte.tools.builtins.reasoning.abduce import AbduceTool
 from vidbyte.tools.builtins.reasoning.analogy import AnalogyTool
 from vidbyte.tools.builtins.reasoning.bayesian_update import BayesianUpdateTool
 from vidbyte.tools.builtins.reasoning.causal_chain import CausalChainTool
 from vidbyte.tools.builtins.reasoning.deduce import DeduceTool
-from vidbyte.tools.builtins.reasoning.differential_diagnosis import DifferentialDiagnosisTool
+from vidbyte.tools.builtins.reasoning.differential_diagnosis import (
+    DifferentialDiagnosisTool,
+)
 from vidbyte.tools.builtins.reasoning.falsify import FalsifyTool
 from vidbyte.tools.builtins.reasoning.fermi_estimate import FermiEstimateTool
 from vidbyte.tools.builtins.reasoning.induce import InduceTool
 from vidbyte.tools.builtins.reasoning.steelman import SteelmanTool
+
+from ._base import ReasoningTraceDefinition, ReasoningTraceTool, parameter
 from .a3_problem_solving_trace import A3ProblemSolvingTraceTool
 from .ab_testing_trace import AbTestingTraceTool
 from .abductive_trace import AbductiveTraceTool

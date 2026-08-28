@@ -1,4 +1,4 @@
-"""FILE: lint/rules/s034_typed_public_seam_mappings.py
+"""FILE: lint/rules/s060_typed_public_seam_mappings.py
 
 PURPOSE: Rejects dict[str, Any] in public-seam function and method signatures.
 ROLE IN CODEBASE: Keeps protocol payloads at the SDK's most visible boundaries nameable and typed.
@@ -10,7 +10,7 @@ COMMON MODIFICATION PATTERNS: Change scope, detection, and diagnostics together;
 WHAT NOT TO DO: Do not import runtime packages, mutate source, suppress findings, or hide analyzer failures.
 KNOWN EDGE CASES: Existing debt is count-ratcheted; analyzer and parse failures fail closed.
 RELATED DOCS: docs/design/lint-rule-catalog-expansion.md
-TESTS: Exercised by python lint/run.py --rule S034.
+TESTS: Exercised by python lint/run.py --rule S060.
 """
 
 from __future__ import annotations
@@ -26,7 +26,7 @@ PUBLIC_SEAM_FILES = ("vidbyte/tools/types.py", "vidbyte/mcp_server/schema.py")
 
 
 def _in_public_seam(rel_path: str) -> bool:
-    # Matches the same public-seam directories and files S032 governs.
+    # Matches the same public-seam directories and files S058 governs.
     return rel_path.startswith(PUBLIC_SEAM_PREFIXES) or rel_path in PUBLIC_SEAM_FILES
 
 
@@ -50,7 +50,7 @@ def _is_dict_str_any(node: ast.expr | None) -> bool:
 class TypedPublicSeamMappingsRule(Rule):
     """Rejects dict[str, Any] in public function/method signatures under public-seam directories."""
 
-    id = "S034"
+    id = "S060"
     name = "typed-public-seam-mappings"
     severity = "blocking"
     summary = "Public-seam function and method signatures name their mapping shape instead of dict[str, Any]."

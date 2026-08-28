@@ -1,4 +1,4 @@
-"""FILE: lint/rules/s032_forbid_unknown_fields_at_boundary.py
+"""FILE: lint/rules/s058_forbid_unknown_fields_at_boundary.py
 
 PURPOSE: Requires public-seam Pydantic models to make an explicit extra-field choice.
 ROLE IN CODEBASE: Prevents a silently permissive default from hiding a typo'd or attacker-controlled field.
@@ -10,7 +10,7 @@ COMMON MODIFICATION PATTERNS: Change scope, detection, and diagnostics together;
 WHAT NOT TO DO: Do not import runtime packages, mutate source, suppress findings, or hide analyzer failures.
 KNOWN EDGE CASES: Existing debt is count-ratcheted; analyzer and parse failures fail closed.
 RELATED DOCS: docs/design/lint-rule-catalog-expansion.md
-TESTS: Exercised by python lint/run.py --rule S032.
+TESTS: Exercised by python lint/run.py --rule S058.
 """
 
 from __future__ import annotations
@@ -56,7 +56,7 @@ def _declares_extra_policy(class_node: ast.ClassDef) -> bool:
 class ForbidUnknownFieldsAtBoundaryRule(Rule):
     """Requires public-seam BaseModel subclasses to declare an explicit extra-field policy."""
 
-    id = "S032"
+    id = "S058"
     name = "forbid-unknown-fields-at-boundary"
     severity = "blocking"
     summary = "Public-seam Pydantic models declare model_config instead of relying on Pydantic's silent default."

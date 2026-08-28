@@ -1,4 +1,4 @@
-"""FILE: lint/rules/s035_bounded_safe_path.py
+"""FILE: lint/rules/s061_bounded_safe_path.py
 
 PURPOSE: Flags file I/O on a non-literal path outside the reviewed path-containment helper.
 ROLE IN CODEBASE: Guards against a future untrusted path fragment reaching open()/extractall() unresolved.
@@ -9,7 +9,7 @@ COMMON MODIFICATION PATTERNS: Change scope, detection, and diagnostics together;
 WHAT NOT TO DO: Do not import runtime packages, mutate source, suppress findings, or hide analyzer failures.
 KNOWN EDGE CASES: Existing debt is count-ratcheted; analyzer and parse failures fail closed.
 RELATED DOCS: docs/design/lint-rule-catalog-expansion.md
-TESTS: Exercised by python lint/run.py --rule S035.
+TESTS: Exercised by python lint/run.py --rule S061.
 """
 
 from __future__ import annotations
@@ -48,7 +48,7 @@ def _is_literal_path(node: ast.expr | None) -> bool:
 class BoundedSafePathRule(Rule):
     """Flags file/archive I/O on a non-literal path outside the reviewed containment helper."""
 
-    id = "S035"
+    id = "S061"
     name = "bounded-safe-path"
     severity = "blocking"
     summary = "File and archive I/O on a non-literal path routes through a resolved, contained path helper."

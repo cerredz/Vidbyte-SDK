@@ -1,4 +1,4 @@
-"""FILE: lint/rules/s029_no_shell_subprocess.py
+"""FILE: lint/rules/s055_no_shell_subprocess.py
 
 PURPOSE: Rejects shell-interpreting subprocess execution anywhere in the SDK package.
 ROLE IN CODEBASE: Protects McpStdioTransport's create_subprocess_exec-only convention from regressing.
@@ -8,7 +8,7 @@ COMMON MODIFICATION PATTERNS: Change scope, detection, and diagnostics together;
 WHAT NOT TO DO: Do not import runtime packages, mutate source, suppress findings, or hide analyzer failures.
 KNOWN EDGE CASES: Existing debt is count-ratcheted; analyzer and parse failures fail closed.
 RELATED DOCS: docs/design/lint-rule-catalog-expansion.md
-TESTS: Exercised by python lint/run.py --rule S029.
+TESTS: Exercised by python lint/run.py --rule S055.
 """
 
 from __future__ import annotations
@@ -40,7 +40,7 @@ def _has_shell_true(call: ast.Call) -> bool:
 class NoShellSubprocessRule(Rule):
     """Rejects shell=True subprocess calls, os.system, and asyncio.create_subprocess_shell."""
 
-    id = "S029"
+    id = "S055"
     name = "no-shell-subprocess"
     severity = "blocking"
     summary = "Subprocess execution never routes through a shell."

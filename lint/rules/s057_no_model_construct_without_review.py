@@ -1,4 +1,4 @@
-"""FILE: lint/rules/s031_no_model_construct_without_review.py
+"""FILE: lint/rules/s057_no_model_construct_without_review.py
 
 PURPOSE: Rejects Pydantic model_construct() calls outside a reviewed allowlist.
 ROLE IN CODEBASE: Keeps validation-skipping construction from landing silently.
@@ -8,7 +8,7 @@ COMMON MODIFICATION PATTERNS: Change scope, detection, and diagnostics together;
 WHAT NOT TO DO: Do not import runtime packages, mutate source, suppress findings, or hide analyzer failures.
 KNOWN EDGE CASES: Existing debt is count-ratcheted; analyzer and parse failures fail closed.
 RELATED DOCS: docs/design/lint-rule-catalog-expansion.md
-TESTS: Exercised by python lint/run.py --rule S031.
+TESTS: Exercised by python lint/run.py --rule S057.
 """
 
 from __future__ import annotations
@@ -27,7 +27,7 @@ ALLOWLIST: frozenset[str] = frozenset()
 class NoModelConstructWithoutReviewRule(Rule):
     """Rejects model_construct() calls outside the reviewed allowlist."""
 
-    id = "S031"
+    id = "S057"
     name = "no-model-construct-without-review"
     severity = "blocking"
     summary = "Pydantic model_construct() is used only in reviewed, allowlisted modules."
