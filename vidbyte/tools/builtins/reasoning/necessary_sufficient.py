@@ -1,34 +1,41 @@
-"""Context Protocol Header
+"""FILE: vidbyte/tools/builtins/reasoning/necessary_sufficient.py
 
-Description:
-    Implements NecessarySufficientTool — a model-callable builtin for recording
-    a condition-relationship analysis into the active ContextManager.
-Purpose:
-    Lets the model force the condition, the target, the direction of necessity,
-    the direction of sufficiency, a verdict, and the implications into a
-    checkable shape — the necessity/sufficiency confusion is the most common
-    silent error in causal and conditional claims.
-Architecture:
-    - NecessarySufficientTool: BaseTool that constructs a
-      NecessarySufficientContextItem from model-provided arguments and upserts
-      it into the injected ContextManager.
-Relations:
-    Depends on vidbyte.context.manager, vidbyte.context.primitives, and the
-    shared vidbyte.tools.builtins.reasoning._parsing.ReasoningToolInput helper.
+PURPOSE: Records one necessary sufficient reasoning result in the ContextManager through a model-callable builtin.
+ROLE IN CODEBASE: Provides the necessary_sufficient tool and its ToolSpec contract for the reasoning-strategy builtin family.
+ARCHITECTURE NOTE: Validates model arguments, constructs one frozen NecessarySufficientContextItem, upserts it through the injected ContextManager, and returns its bounded rendering.
+COMMON MODIFICATION PATTERNS: Keep parameters, validation, primitive fields, and rendering synchronized; keep model-facing descriptions general and four to five sentences.
+WHAT NOT TO DO: Do not add I/O, LLM calls, or side effects beyond the injected ContextManager upsert, and do not duplicate shared argument parsing.
+KNOWN EDGE CASES: Required fields, enum values, list arity, and cross-field relationships are validated before the primitive is constructed.
+RELATED DOCS: docs/design/reasoning-strategy-tools-batch-2.md; field-guide/vidbyte-sdk/model-facing-tool-contracts.md
+TESTS: Exercised by the SDK source and package CI stages and the reasoning-tool smoke checks.
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
+from vidbyte.context.primitives.base import ContextItem
 from vidbyte.tools.base import BaseTool
 from vidbyte.tools.builtins.reasoning._parsing import ReasoningToolInput
-from vidbyte.tools.types import ToolCall, ToolPermission, ToolResult, ToolSpec, ToolParameter
+from vidbyte.tools.types import (
+    ToolCall,
+    ToolParameter,
+    ToolPermission,
+    ToolResult,
+    ToolSpec,
+)
 
 if TYPE_CHECKING:
     from vidbyte.context.manager import ContextManager
 
-_REQUIRED_FIELDS = ("condition", "target", "necessity_direction", "sufficiency_direction", "verdict", "implications")
+_REQUIRED_FIELDS = (
+    "condition",
+    "target",
+    "necessity_direction",
+    "sufficiency_direction",
+    "verdict",
+    "implications",
+)
 _VERDICT_VALUES = ("necessary_only", "sufficient_only", "both", "neither")
 
 
@@ -45,20 +52,23 @@ class NecessarySufficientTool(BaseTool):
         return ToolSpec(
             name="necessary_sufficient",
             description=(
-                "Analyze the relationship between a condition and a target: is the "
-                "condition necessary for the target, sufficient for it, both, or neither? "
-                "State the direction of each check and the implications that follow. Use "
-                "this whenever a claim asserts that one thing 'requires' or 'guarantees' "
-                "another — the two directions are routinely conflated, and the conflation "
-                "survives until someone checks both."
+                "Analyze the relationship between a condition and a target: is the condition necessary for the "
+                "target, sufficient for it, both, or neither? State the direction of each check and the "
+                "implications that follow. Use this whenever a claim asserts that one thing 'requires' or "
+                "'guarantees' another — the two directions are routinely conflated, and the conflation survives "
+                "until someone checks both. The required fields make each part of the strategy explicit so the "
+                "conclusion can be examined against its stated basis."
             ),
             parameters=(
                 ToolParameter(
                     name="condition",
                     type="string",
                     description=(
-                        "The condition whose relationship to target is under analysis — "
-                        "e.g. 'valid login'."
+                        "The condition whose relationship to target is under analysis — e.g. 'valid login'. This field "
+                        "is part of the strategy's explicit contract, so its contribution can be reviewed separately "
+                        "from the final conclusion. Keeping it explicit prevents the analysis from relying on an "
+                        "unstated assumption and gives later iterations a stable basis for comparison. State only the "
+                        "information relevant to this field so the recorded reasoning remains focused and auditable."
                     ),
                     required=True,
                 ),
@@ -66,8 +76,11 @@ class NecessarySufficientTool(BaseTool):
                     name="target",
                     type="string",
                     description=(
-                        "The target state the condition may enable or require — e.g. "
-                        "'session granted'."
+                        "The target state the condition may enable or require — e.g. 'session granted'. This field is "
+                        "part of the strategy's explicit contract, so its contribution can be reviewed separately from "
+                        "the final conclusion. Keeping it explicit prevents the analysis from relying on an unstated "
+                        "assumption and gives later iterations a stable basis for comparison. State only the "
+                        "information relevant to this field so the recorded reasoning remains focused and auditable."
                     ),
                     required=True,
                 ),
@@ -75,10 +88,10 @@ class NecessarySufficientTool(BaseTool):
                     name="necessity_direction",
                     type="string",
                     description=(
-                        "Whether target implies condition — can target hold without "
-                        "condition? Name a concrete counter-scenario if it can; state the "
-                        "general argument if it cannot. 'Probably yes' is not a direction; "
-                        "a direction is a claim with a reason."
+                        "Whether target implies condition — can target hold without condition? Name a concrete "
+                        "counter-scenario if it can; state the general argument if it cannot. 'Probably yes' is not a "
+                        "direction; a direction is a claim with a reason. This field is part of the strategy's explicit "
+                        "contract, so its contribution can be reviewed separately from the final conclusion."
                     ),
                     required=True,
                 ),
@@ -86,9 +99,11 @@ class NecessarySufficientTool(BaseTool):
                     name="sufficiency_direction",
                     type="string",
                     description=(
-                        "Whether condition implies target — does condition alone guarantee "
-                        "target, or can condition hold while target fails? The failure "
-                        "scenario, when it exists, is the whole analysis."
+                        "Whether condition implies target — does condition alone guarantee target, or can condition "
+                        "hold while target fails? The failure scenario, when it exists, is the whole analysis. This "
+                        "field is part of the strategy's explicit contract, so its contribution can be reviewed "
+                        "separately from the final conclusion. Keeping it explicit prevents the analysis from relying "
+                        "on an unstated assumption and gives later iterations a stable basis for comparison."
                     ),
                     required=True,
                 ),
@@ -96,9 +111,10 @@ class NecessarySufficientTool(BaseTool):
                     name="verdict",
                     type="string",
                     description=(
-                        "One of: 'necessary_only', 'sufficient_only', 'both', 'neither'. "
-                        "'both' means the condition and target are equivalent. 'neither' "
-                        "means the claimed relationship fails in both directions."
+                        "One of: 'necessary_only', 'sufficient_only', 'both', 'neither'. 'both' means the condition and "
+                        "target are equivalent. 'neither' means the claimed relationship fails in both directions. This "
+                        "field is part of the strategy's explicit contract, so its contribution can be reviewed "
+                        "separately from the final conclusion."
                     ),
                     required=True,
                 ),
@@ -106,10 +122,12 @@ class NecessarySufficientTool(BaseTool):
                     name="implications",
                     type="string",
                     description=(
-                        "What the verdict means for decisions downstream — what must be "
-                        "checked, what can be relied on, and what cannot. An analysis that "
-                        "commits to a verdict but names no implication has not finished "
-                        "its job."
+                        "What the verdict means for decisions downstream — what must be checked, what can be relied on, "
+                        "and what cannot. An analysis that commits to a verdict but names no implication has not "
+                        "finished its job. This field is part of the strategy's explicit contract, so its contribution "
+                        "can be reviewed separately from the final conclusion. Keeping it explicit prevents the "
+                        "analysis from relying on an unstated assumption and gives later iterations a stable basis for "
+                        "comparison."
                     ),
                     required=True,
                 ),
@@ -131,8 +149,12 @@ class NecessarySufficientTool(BaseTool):
 
         try:
             self._manager.upsert(item)
-        except ValueError as exc:
-            return ToolResult.error(call.tool_name, str(exc))
+        except ValueError:
+            return ToolResult.error(
+                call.tool_name,
+                "Could not store the reasoning result in the context manager.",
+                metadata={"error": "context_upsert_failed"},
+            )
 
         return ToolResult.success(call.tool_name, item.to_context_text())
 
@@ -145,16 +167,25 @@ class NecessarySufficientTool(BaseTool):
             ReasoningToolInput.text(args, "verdict"), _VERDICT_VALUES, "verdict"
         )
 
-    def _build_item(self, args: dict, primitive_id: str) -> object:
+    def _build_item(self, args: dict, primitive_id: str) -> ContextItem:
         # Constructs the NecessarySufficientContextItem from validated call arguments.
         from vidbyte.context.primitives import NecessarySufficientContextItem
-        return NecessarySufficientContextItem(
-            primitive_id=primitive_id,
-            condition=ReasoningToolInput.text(args, "condition"),
-            target=ReasoningToolInput.text(args, "target"),
-            necessity_direction=ReasoningToolInput.text(args, "necessity_direction"),
-            sufficiency_direction=ReasoningToolInput.text(args, "sufficiency_direction"),
-            verdict=ReasoningToolInput.text(args, "verdict"),
-            implications=ReasoningToolInput.text(args, "implications"),
-            title=ReasoningToolInput.text(args, "title", "Condition Analysis") or "Condition Analysis",
+
+        return cast(
+            ContextItem,
+            NecessarySufficientContextItem(
+                primitive_id=primitive_id,
+                condition=ReasoningToolInput.text(args, "condition"),
+                target=ReasoningToolInput.text(args, "target"),
+                necessity_direction=ReasoningToolInput.text(
+                    args, "necessity_direction"
+                ),
+                sufficiency_direction=ReasoningToolInput.text(
+                    args, "sufficiency_direction"
+                ),
+                verdict=ReasoningToolInput.text(args, "verdict"),
+                implications=ReasoningToolInput.text(args, "implications"),
+                title=ReasoningToolInput.text(args, "title", "Condition Analysis")
+                or "Condition Analysis",
+            ),
         )

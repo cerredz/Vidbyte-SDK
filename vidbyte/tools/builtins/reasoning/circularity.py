@@ -1,32 +1,42 @@
-"""Context Protocol Header
+"""FILE: vidbyte/tools/builtins/reasoning/circularity.py
 
-Description:
-    Implements CircularityTool — a model-callable builtin for recording a
-    circular-reasoning audit into the active ContextManager.
-Purpose:
-    Lets the model force the argument, its premises and conclusion, the
-    dependency map, the circle finding, and the fix into a checkable shape —
-    circular arguments are valid, sound-looking, and empty.
-Architecture:
-    - CircularityTool: BaseTool that constructs a CircularityContextItem from
-      model-provided arguments and upserts it into the injected ContextManager.
-Relations:
-    Depends on vidbyte.context.manager, vidbyte.context.primitives, and the
-    shared vidbyte.tools.builtins.reasoning._parsing.ReasoningToolInput helper.
+PURPOSE: Records one circularity reasoning result in the ContextManager through a model-callable builtin.
+ROLE IN CODEBASE: Provides the circularity tool and its ToolSpec contract for the reasoning-strategy builtin family.
+ARCHITECTURE NOTE: Validates model arguments, constructs one frozen CircularityContextItem, upserts it through the injected ContextManager, and returns its bounded rendering.
+COMMON MODIFICATION PATTERNS: Keep parameters, validation, primitive fields, and rendering synchronized; keep model-facing descriptions general and four to five sentences.
+WHAT NOT TO DO: Do not add I/O, LLM calls, or side effects beyond the injected ContextManager upsert, and do not duplicate shared argument parsing.
+KNOWN EDGE CASES: Required fields, enum values, list arity, and cross-field relationships are validated before the primitive is constructed.
+RELATED DOCS: docs/design/reasoning-strategy-tools-batch-2.md; field-guide/vidbyte-sdk/model-facing-tool-contracts.md
+TESTS: Exercised by the SDK source and package CI stages and the reasoning-tool smoke checks.
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
+from vidbyte.context.primitives.base import ContextItem
 from vidbyte.tools.base import BaseTool
 from vidbyte.tools.builtins.reasoning._parsing import ReasoningToolInput
-from vidbyte.tools.types import ToolCall, ToolPermission, ToolResult, ToolSpec, ToolParameter
+from vidbyte.tools.types import (
+    ToolCall,
+    ToolParameter,
+    ToolPermission,
+    ToolResult,
+    ToolSpec,
+)
 
 if TYPE_CHECKING:
     from vidbyte.context.manager import ContextManager
 
-_REQUIRED_FIELDS = ("argument", "premises", "conclusion", "dependency_map", "circle_found", "fix", "verdict")
+_REQUIRED_FIELDS = (
+    "argument",
+    "premises",
+    "conclusion",
+    "dependency_map",
+    "circle_found",
+    "fix",
+    "verdict",
+)
 _VERDICT_VALUES = ("circular", "not_circular", "partially")
 
 
@@ -43,19 +53,25 @@ class CircularityTool(BaseTool):
         return ToolSpec(
             name="circularity",
             description=(
-                "Audit an argument for circularity: state the premises and conclusion, map "
-                "which premises depend on which claims, trace whether the dependency chain "
-                "returns to its start, and name the fix. Use this whenever an argument "
-                "feels 'too smooth' — circular reasoning is formally valid, which is "
-                "precisely why it survives surface checks."
+                "Audit an argument for circularity: state the premises and conclusion, map which premises "
+                "depend on which claims, trace whether the dependency chain returns to its start, and name the "
+                "fix. Use this whenever an argument feels 'too smooth' — circular reasoning is formally valid, "
+                "which is precisely why it survives surface checks. The required fields make each part of the "
+                "strategy explicit so the conclusion can be examined against its stated basis. The recorded "
+                "result preserves the analysis for later iterations without independently verifying the model's "
+                "judgment."
             ),
             parameters=(
                 ToolParameter(
                     name="argument",
                     type="string",
                     description=(
-                        "The argument under audit, quoted as a whole — the audit judges "
-                        "this exact argument, not a paraphrase of it."
+                        "The argument under audit, quoted as a whole — the audit judges this exact argument, not a "
+                        "paraphrase of it. This field is part of the strategy's explicit contract, so its contribution "
+                        "can be reviewed separately from the final conclusion. Keeping it explicit prevents the "
+                        "analysis from relying on an unstated assumption and gives later iterations a stable basis for "
+                        "comparison. State only the information relevant to this field so the recorded reasoning "
+                        "remains focused and auditable."
                     ),
                     required=True,
                 ),
@@ -63,8 +79,11 @@ class CircularityTool(BaseTool):
                     name="premises",
                     type="array",
                     description=(
-                        "The premises as stated, each its own string. May be passed as a "
-                        "JSON array of strings or a JSON string."
+                        "The premises as stated, each its own string. May be passed as a JSON array of strings or a "
+                        "JSON string. This field is part of the strategy's explicit contract, so its contribution can "
+                        "be reviewed separately from the final conclusion. Keeping it explicit prevents the analysis "
+                        "from relying on an unstated assumption and gives later iterations a stable basis for "
+                        "comparison."
                     ),
                     required=True,
                 ),
@@ -72,9 +91,11 @@ class CircularityTool(BaseTool):
                     name="conclusion",
                     type="string",
                     description=(
-                        "The conclusion the premises are claimed to establish. For a "
-                        "circle, the conclusion must be findable among the premises or "
-                        "their implicit dependencies."
+                        "The conclusion the premises are claimed to establish. For a circle, the conclusion must be "
+                        "findable among the premises or their implicit dependencies. This field is part of the "
+                        "strategy's explicit contract, so its contribution can be reviewed separately from the final "
+                        "conclusion. Keeping it explicit prevents the analysis from relying on an unstated assumption "
+                        "and gives later iterations a stable basis for comparison."
                     ),
                     required=True,
                 ),
@@ -82,10 +103,10 @@ class CircularityTool(BaseTool):
                     name="dependency_map",
                     type="array",
                     description=(
-                        "JSON array of objects with keys 'premise' and 'depends_on': what "
-                        "each premise relies on, including implicit commitments that are "
-                        "never stated. An unstated dependence is where the circle hides. "
-                        "May also be passed as a JSON string."
+                        "JSON array of objects with keys 'premise' and 'depends_on': what each premise relies on, "
+                        "including implicit commitments that are never stated. An unstated dependence is where the "
+                        "circle hides. May also be passed as a JSON string. This field is part of the strategy's "
+                        "explicit contract, so its contribution can be reviewed separately from the final conclusion."
                     ),
                     required=True,
                 ),
@@ -93,10 +114,11 @@ class CircularityTool(BaseTool):
                     name="circle_found",
                     type="string",
                     description=(
-                        "The actual dependency loop, spelled out step by step — 'premise 1 "
-                        "assumes P, P assumes premise 3, premise 3 assumes the "
-                        "conclusion'. If no loop exists, say what was traced to confirm "
-                        "its absence."
+                        "The actual dependency loop, spelled out step by step — 'premise 1 assumes P, P assumes premise "
+                        "3, premise 3 assumes the conclusion'. If no loop exists, say what was traced to confirm its "
+                        "absence. This field is part of the strategy's explicit contract, so its contribution can be "
+                        "reviewed separately from the final conclusion. Keeping it explicit prevents the analysis from "
+                        "relying on an unstated assumption and gives later iterations a stable basis for comparison."
                     ),
                     required=True,
                 ),
@@ -104,10 +126,12 @@ class CircularityTool(BaseTool):
                     name="fix",
                     type="string",
                     description=(
-                        "What would break the circle — an independent source for the "
-                        "conclusion, a dropped premise, or an external assumption stated "
-                        "and defended. An audit that finds a circle and proposes no fix "
-                        "has diagnosed but not finished."
+                        "What would break the circle — an independent source for the conclusion, a dropped premise, or "
+                        "an external assumption stated and defended. An audit that finds a circle and proposes no fix "
+                        "has diagnosed but not finished. This field is part of the strategy's explicit contract, so its "
+                        "contribution can be reviewed separately from the final conclusion. Keeping it explicit "
+                        "prevents the analysis from relying on an unstated assumption and gives later iterations a "
+                        "stable basis for comparison."
                     ),
                     required=True,
                 ),
@@ -115,10 +139,10 @@ class CircularityTool(BaseTool):
                     name="verdict",
                     type="string",
                     description=(
-                        "One of: 'circular', 'not_circular', 'partially'. 'circular' "
-                        "means the conclusion (or an equivalent of it) appears as a "
-                        "premise. 'partially' means some, but not all, of the support "
-                        "loops back."
+                        "One of: 'circular', 'not_circular', 'partially'. 'circular' means the conclusion (or an "
+                        "equivalent of it) appears as a premise. 'partially' means some, but not all, of the support "
+                        "loops back. This field is part of the strategy's explicit contract, so its contribution can be "
+                        "reviewed separately from the final conclusion."
                     ),
                     required=True,
                 ),
@@ -140,8 +164,12 @@ class CircularityTool(BaseTool):
 
         try:
             self._manager.upsert(item)
-        except ValueError as exc:
-            return ToolResult.error(call.tool_name, str(exc))
+        except ValueError:
+            return ToolResult.error(
+                call.tool_name,
+                "Could not store the reasoning result in the context manager.",
+                metadata={"error": "context_upsert_failed"},
+            )
 
         return ToolResult.success(call.tool_name, item.to_context_text())
 
@@ -158,17 +186,24 @@ class CircularityTool(BaseTool):
             ReasoningToolInput.text(args, "verdict"), _VERDICT_VALUES, "verdict"
         )
 
-    def _build_item(self, args: dict, primitive_id: str) -> object:
+    def _build_item(self, args: dict, primitive_id: str) -> ContextItem:
         # Constructs the CircularityContextItem from validated call arguments.
         from vidbyte.context.primitives import CircularityContextItem
-        return CircularityContextItem(
-            primitive_id=primitive_id,
-            argument=ReasoningToolInput.text(args, "argument"),
-            premises=ReasoningToolInput.string_list(args.get("premises")),
-            conclusion=ReasoningToolInput.text(args, "conclusion"),
-            dependency_map=ReasoningToolInput.object_list(args.get("dependency_map")),
-            circle_found=ReasoningToolInput.text(args, "circle_found"),
-            fix=ReasoningToolInput.text(args, "fix"),
-            verdict=ReasoningToolInput.text(args, "verdict"),
-            title=ReasoningToolInput.text(args, "title", "Circularity Audit") or "Circularity Audit",
+
+        return cast(
+            ContextItem,
+            CircularityContextItem(
+                primitive_id=primitive_id,
+                argument=ReasoningToolInput.text(args, "argument"),
+                premises=ReasoningToolInput.string_list(args.get("premises")),
+                conclusion=ReasoningToolInput.text(args, "conclusion"),
+                dependency_map=ReasoningToolInput.object_list(
+                    args.get("dependency_map")
+                ),
+                circle_found=ReasoningToolInput.text(args, "circle_found"),
+                fix=ReasoningToolInput.text(args, "fix"),
+                verdict=ReasoningToolInput.text(args, "verdict"),
+                title=ReasoningToolInput.text(args, "title", "Circularity Audit")
+                or "Circularity Audit",
+            ),
         )

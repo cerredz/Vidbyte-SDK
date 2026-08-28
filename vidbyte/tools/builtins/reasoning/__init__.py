@@ -40,7 +40,6 @@ from collections.abc import Mapping
 from types import MappingProxyType
 from typing import ClassVar
 
-from ._base import ReasoningTraceDefinition, ReasoningTraceTool, parameter
 from vidbyte.tools.builtins.reasoning.abduce import AbduceTool
 from vidbyte.tools.builtins.reasoning.absence_evidence import AbsenceEvidenceTool
 from vidbyte.tools.builtins.reasoning.analogy import AnalogyTool
@@ -48,13 +47,17 @@ from vidbyte.tools.builtins.reasoning.bayesian_update import BayesianUpdateTool
 from vidbyte.tools.builtins.reasoning.burden_of_proof import BurdenOfProofTool
 from vidbyte.tools.builtins.reasoning.causal_chain import CausalChainTool
 from vidbyte.tools.builtins.reasoning.circularity import CircularityTool
-from vidbyte.tools.builtins.reasoning.composition_division import CompositionDivisionTool
+from vidbyte.tools.builtins.reasoning.composition_division import (
+    CompositionDivisionTool,
+)
 from vidbyte.tools.builtins.reasoning.consistency import ConsistencyTool
 from vidbyte.tools.builtins.reasoning.counterexample import CounterexampleTool
 from vidbyte.tools.builtins.reasoning.deduce import DeduceTool
 from vidbyte.tools.builtins.reasoning.defeasible import DefeasibleTool
 from vidbyte.tools.builtins.reasoning.dialectic import DialecticTool
-from vidbyte.tools.builtins.reasoning.differential_diagnosis import DifferentialDiagnosisTool
+from vidbyte.tools.builtins.reasoning.differential_diagnosis import (
+    DifferentialDiagnosisTool,
+)
 from vidbyte.tools.builtins.reasoning.dilemma import DilemmaTool
 from vidbyte.tools.builtins.reasoning.equivocation import EquivocationTool
 from vidbyte.tools.builtins.reasoning.falsify import FalsifyTool
@@ -63,15 +66,21 @@ from vidbyte.tools.builtins.reasoning.identity import IdentityTool
 from vidbyte.tools.builtins.reasoning.induce import InduceTool
 from vidbyte.tools.builtins.reasoning.instantiate import InstantiateTool
 from vidbyte.tools.builtins.reasoning.modal import ModalTool
-from vidbyte.tools.builtins.reasoning.necessary_sufficient import NecessarySufficientTool
+from vidbyte.tools.builtins.reasoning.necessary_sufficient import (
+    NecessarySufficientTool,
+)
 from vidbyte.tools.builtins.reasoning.paradox import ParadoxTool
 from vidbyte.tools.builtins.reasoning.partition import PartitionTool
 from vidbyte.tools.builtins.reasoning.predict import PredictTool
 from vidbyte.tools.builtins.reasoning.quantifier import QuantifierTool
 from vidbyte.tools.builtins.reasoning.regress import RegressTool
 from vidbyte.tools.builtins.reasoning.socratic import SocraticTool
-from vidbyte.tools.builtins.reasoning.statistical_syllogism import StatisticalSyllogismTool
+from vidbyte.tools.builtins.reasoning.statistical_syllogism import (
+    StatisticalSyllogismTool,
+)
 from vidbyte.tools.builtins.reasoning.steelman import SteelmanTool
+
+from ._base import ReasoningTraceDefinition, ReasoningTraceTool, parameter
 from .a3_problem_solving_trace import A3ProblemSolvingTraceTool
 from .ab_testing_trace import AbTestingTraceTool
 from .abductive_trace import AbductiveTraceTool
@@ -477,12 +486,15 @@ __all__ = [
     "REASONING_TRACE_TOOL_CLASSES",
     'A3ProblemSolvingTraceTool',
     'AbTestingTraceTool',
+    "AbduceTool",
     'AbductiveTraceTool',
+    "AbsenceEvidenceTool",
     'AdaptiveReasoningTraceTool',
     'AffectHeuristicTraceTool',
     'AfterActionReviewTraceTool',
     'AlternativeFuturesTraceTool',
     'AnalogicalTraceTool',
+    "AnalogyTool",
     'AnalysisOfCompetingHypothesesTraceTool',
     'AnalyticHierarchyProcessTraceTool',
     'AnsoffMatrixTraceTool',
@@ -492,21 +504,28 @@ __all__ = [
     'BalancedScorecardTraceTool',
     'BaseRateTraceTool',
     'BayesianTraceTool',
+    "BayesianUpdateTool",
     'BcgMatrixTraceTool',
     'BiomimicryTraceTool',
     'BlueOceanStrategyTraceTool',
     'BottleneckTraceTool',
     'BowtieRiskTraceTool',
+    "BurdenOfProofTool",
     'BusinessModelCanvasTraceTool',
+    "CausalChainTool",
     'CausalLoopTraceTool',
     'CausalTraceTool',
+    "CircularityTool",
     'ComparativeCaseTraceTool',
+    "CompositionDivisionTool",
     'ConceptMappingTraceTool',
     'ConeOfPlausibilityTraceTool',
+    "ConsistencyTool",
     'ConstraintRemovalTraceTool',
     'ConstraintSatisfactionTraceTool',
     'CorrelationCausationTraceTool',
     'CostBenefitTraceTool',
+    "CounterexampleTool",
     'CounterfactualTraceTool',
     'CustomerJourneyMappingTraceTool',
     'CynefinTraceTool',
@@ -514,19 +533,25 @@ __all__ = [
     'DeceptionDetectionTraceTool',
     'DecisionMatrixTraceTool',
     'DecisionTreeTraceTool',
+    "DeduceTool",
     'DeductiveTraceTool',
     'DefaultHeuristicTraceTool',
     'DefeasibleReasoningTraceTool',
+    "DefeasibleTool",
     'DelphiMethodTraceTool',
     'DependencyMappingTraceTool',
     'DesignThinkingTraceTool',
     'DevilsAdvocacyTraceTool',
+    "DialecticTool",
     'DialecticalTraceTool',
+    "DifferentialDiagnosisTool",
+    "DilemmaTool",
     'DmaicTraceTool',
     'DoubleDiamondTraceTool',
     'DoubleLoopLearningTraceTool',
     'EliminationByAspectsTraceTool',
     'EmpathyMappingTraceTool',
+    "EquivocationTool",
     'ErrorAnalysisTraceTool',
     'EthicalMatrixTraceTool',
     'EthnographicReasoningTraceTool',
@@ -535,10 +560,12 @@ __all__ = [
     'ExpectedValueTraceTool',
     'ExperimentalDesignTraceTool',
     'FairnessAnalysisTraceTool',
+    "FalsifyTool",
     'FamiliarityHeuristicTraceTool',
     'FastAndFrugalTreesTraceTool',
     'FaultTreeTraceTool',
     'FeedbackLoopTraceTool',
+    "FermiEstimateTool",
     'FermiEstimationTraceTool',
     'FirstPrinciplesTraceTool',
     'FishboneTraceTool',
@@ -556,10 +583,13 @@ __all__ = [
     'HorizonScanningTraceTool',
     'HypothesisTestingTraceTool',
     'IcebergModelTraceTool',
+    "IdentityTool",
     'IncentiveAnalysisTraceTool',
     'IndicatorsSignpostsTraceTool',
+    "InduceTool",
     'InductiveTraceTool',
     'InfluenceDiagramTraceTool',
+    "InstantiateTool",
     'InversionTraceTool',
     'IssueTreeTraceTool',
     'JobsToBeDoneTraceTool',
@@ -576,10 +606,12 @@ __all__ = [
     'MinimaxTraceTool',
     'MintoPyramidTraceTool',
     'ModalReasoningTraceTool',
+    "ModalTool",
     'MorphologicalAnalysisTraceTool',
     'MultiAttributeUtilityTraceTool',
     'NaiveDiversificationTraceTool',
     'NarrativeReasoningTraceTool',
+    "NecessarySufficientTool",
     'NineWindowsTraceTool',
     'NonmonotonicReasoningTraceTool',
     'NthOrderEffectsTraceTool',
@@ -589,7 +621,9 @@ __all__ = [
     'OodaRedTeamTraceTool',
     'OpportunityCostTraceTool',
     'OutsideViewTraceTool',
+    "ParadoxTool",
     'ParetoPrincipleTraceTool',
+    "PartitionTool",
     'PdcaCycleTraceTool',
     'PeakEndRuleTraceTool',
     'PestleTraceTool',
@@ -600,12 +634,14 @@ __all__ = [
     'PragmatismTraceTool',
     'PrecautionaryPrincipleTraceTool',
     'PredicateLogicTraceTool',
+    "PredictTool",
     'PremortemTraceTool',
     'ProbabilisticTraceTool',
     'ProofByCasesTraceTool',
     'ProofByContradictionTraceTool',
     'PropositionalLogicTraceTool',
     'ProvocationTraceTool',
+    "QuantifierTool",
     'QuasiExperimentalTraceTool',
     'RandomStimulusTraceTool',
     'RandomizedControlTrialTraceTool',
@@ -616,6 +652,7 @@ __all__ = [
     'RedTeamTraceTool',
     'ReferenceClassForecastingTraceTool',
     'ReframingTraceTool',
+    "RegressTool",
     'RegressionReasoningTraceTool',
     'RegretMinimizationTraceTool',
     'ReverseBrainstormingTraceTool',
@@ -632,13 +669,17 @@ __all__ = [
     'SixThinkingHatsTraceTool',
     'SocialProofTraceTool',
     'SocraticQuestioningTraceTool',
+    "SocraticTool",
     'SpatialReasoningTraceTool',
     'SpeedAccuracyTradeoffTraceTool',
     'SpiderMappingTraceTool',
     'StakeholderAnalysisTraceTool',
+    "StatisticalSyllogismTool",
+    "SteelmanTool",
     'SteelmanTraceTool',
     'StockAndFlowTraceTool',
     'StoryboardingTraceTool',
+    "StrawmanTool",
     'SwotTraceTool',
     'SyllogisticTraceTool',
     'SynecticsTraceTool',
@@ -647,8 +688,11 @@ __all__ = [
     'TakeTheBestTraceTool',
     'TallyingTraceTool',
     'TemporalReasoningTraceTool',
+    "TestimonyTool",
     'TheoryOfConstraintsTraceTool',
+    "ThoughtExperimentTool",
     'TradeoffMatrixTraceTool',
+    "TransitivityTool",
     'TrialAndErrorTraceTool',
     'TrizTraceTool',
     'UncertaintyQuantificationTraceTool',
@@ -660,40 +704,5 @@ __all__ = [
     'VrioFrameworkTraceTool',
     'WhatIfAnalysisTraceTool',
     'WhyBecauseAnalysisTraceTool',
-    "AbduceTool",
-    "AbsenceEvidenceTool",
-    "AnalogyTool",
-    "BayesianUpdateTool",
-    "BurdenOfProofTool",
-    "CausalChainTool",
-    "CircularityTool",
-    "CompositionDivisionTool",
-    "ConsistencyTool",
-    "CounterexampleTool",
-    "DeduceTool",
-    "DefeasibleTool",
-    "DialecticTool",
-    "DifferentialDiagnosisTool",
-    "DilemmaTool",
-    "EquivocationTool",
-    "FalsifyTool",
-    "FermiEstimateTool",
-    "IdentityTool",
-    "InduceTool",
-    "InstantiateTool",
-    "ModalTool",
-    "NecessarySufficientTool",
-    "ParadoxTool",
-    "PartitionTool",
-    "PredictTool",
-    "QuantifierTool",
-    "RegressTool",
-    "SocraticTool",
-    "StatisticalSyllogismTool",
-    "SteelmanTool",
     "parameter",
-    "StrawmanTool",
-    "TestimonyTool",
-    "ThoughtExperimentTool",
-    "TransitivityTool",
 ]
