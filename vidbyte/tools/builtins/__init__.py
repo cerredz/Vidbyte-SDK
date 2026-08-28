@@ -14,8 +14,8 @@ Architecture:
     - Context primitive editing tools from builtins.context_primitives.
     - Context algorithm tools from builtins.trajectory_checkpoint and builtins.reflexion.
     - Deep CoT event tools from builtins.cot_events.
-    - Batch-3 deep-family monitoring tools from builtins.cot_context, cot_foraging,
-      cot_verification, cot_delegation, and cot_meta.
+    - Batch-3 deep-family monitoring tools from the builtins.cot package
+      (context, foraging, verification, delegation, and meta submodules).
     - Sequential continuation tool from builtins.run_prompts_sequentially.
 Relations:
     Related to vidbyte.tools.client and vidbyte.tools.registry.
@@ -39,38 +39,30 @@ from vidbyte.tools.builtins.cot_events import (
     UncertaintyTool,
     WhyTool,
 )
-from vidbyte.tools.builtins.cot_context import (
+from vidbyte.tools.builtins.cot import (
     AttentionCheckTool,
-    ContextLoadTool,
-    ForgetDecisionTool,
-    RecallTestTool,
-)
-from vidbyte.tools.builtins.cot_delegation import (
     BlockedOnTool,
+    CalibrationSelfReportTool,
+    ContextLoadTool,
     DelegationBriefTool,
     DelegationReceiptTool,
+    DescriptionDriftTool,
+    EnoughTool,
+    ForgetDecisionTool,
     HandoffCompletenessTool,
     HandoffWhyTool,
-    SubagentFailuresTool,
-)
-from vidbyte.tools.builtins.cot_foraging import (
-    EnoughTool,
+    IndependentlyDerivedTool,
+    ReadBackTool,
+    RecallTestTool,
+    RecordDisputeTool,
+    RitualCheckTool,
     SearchPlanTool,
     SearchWhyTool,
     SearchYieldTool,
-)
-from vidbyte.tools.builtins.cot_meta import (
-    CalibrationSelfReportTool,
-    DescriptionDriftTool,
-    RecordDisputeTool,
-    RitualCheckTool,
-    SignalHighlightTool,
-    TelemetryGapTool,
-)
-from vidbyte.tools.builtins.cot_verification import (
-    IndependentlyDerivedTool,
-    ReadBackTool,
     SelfTestTool,
+    SignalHighlightTool,
+    SubagentFailuresTool,
+    TelemetryGapTool,
     VerifyTool,
 )
 from vidbyte.tools.builtins.output_schema import (

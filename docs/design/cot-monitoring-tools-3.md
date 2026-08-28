@@ -13,10 +13,11 @@ Adds 24 model-callable monitoring tools organized into five deep families:
 context-window awareness (4), information-foraging (4), self-verification (4),
 inter-agent/handoff epistemics (4 + 2 extras: `subagent_failures`,
 `blocked_on`), and meta-monitoring (4 + 2 extras: `calibration_self_report`,
-`description_drift`). Each tool is param-rich (4–7 params) by explicit user
-direction — more semantic axes per call, not fewer — with descriptions that
-drive when/how the model calls them. Parsed enums/numbers land in
-`ToolResult.metadata` for trace-side charting. Stacked on
+`description_drift`). Each tool is param-rich (6–9 params after the review
+pass below) by explicit user direction — more semantic axes per call, not
+fewer — with descriptions that drive when/how the model calls them. Parsed
+enums/numbers land in `ToolResult.metadata` for trace-side charting. Stacked
+on
 `feat/deep-cot-tools-2` (PR #338); reuses `CotEventParser` and
 `_CotEventToolBase` from `vidbyte/tools/builtins/cot_events.py`.
 
@@ -74,7 +75,10 @@ honest over long runs.
    non-empty `query` string and validated `expected_yield` enum.
 3. Conditional requirements listed in Goals are enforced with explicit error
    messages.
-4. All enum values and bounds are named module constants.
+4. All enum values live as `str, Enum` classes in `vidbyte/lib/enums/cot.py`;
+   each tool module derives its `CotEventParser.parse_enum` allowed tuple
+   from the corresponding enum's members rather than redeclaring string
+   tuples locally. Numeric bounds remain named module constants.
 5. Each successful execute upserts exactly one primitive and returns parsed
    fields in `metadata`.
 6. All 24 tools exported from `vidbyte.tools.builtins`; all 24 primitives
@@ -89,7 +93,11 @@ honest over long runs.
 
 ### Non-Functional Requirements
 - Zero new dependencies; renders bounded by `max_chars = 2000`.
-- Per-family modules keep each file reviewable (< ~600 lines).
+- Per-family modules keep each file scoped to one family's tools. The
+  original `< ~600 lines` estimate assumed terser descriptions and fewer
+  params; after the review pass (6–9 params, 4–5 sentence descriptions with
+  no inline examples) the family modules run 630–950 lines, which is the
+  expected size for this much per-tool prose rather than a scope creep.
 
 ---
 
@@ -254,23 +262,41 @@ N/A - Additive Python exports only.
 
 ## 9. File Change Manifest
 
+Post-review update: the five family tool modules were relocated into a
+`vidbyte/tools/builtins/cot/` package (matching the repo's existing
+`fork/`, `code_search/`, `editing/` multi-file builtin convention), their
+categorical fields were extracted into `vidbyte/lib/enums/cot.py`, and every
+tool/param description and primitive docstring was rewritten. See
+[Linter Rules Added] in the resolving PR body for the durable rule this
+review produced.
+
 | Action | File Path | Reason |
 |--------|-----------|--------|
-| CREATE | `vidbyte/tools/builtins/cot_context.py` | Family A tools (4) |
-| CREATE | `vidbyte/tools/builtins/cot_foraging.py` | Family B tools (4) |
-| CREATE | `vidbyte/tools/builtins/cot_verification.py` | Family C tools (4) |
-| CREATE | `vidbyte/tools/builtins/cot_delegation.py` | Family D tools (6) |
-| CREATE | `vidbyte/tools/builtins/cot_meta.py` | Family E tools (6) |
+| CREATE | `vidbyte/tools/builtins/cot/__init__.py` | Re-exports the 24 batch-3 tools |
+| CREATE | `vidbyte/tools/builtins/cot/context.py` | Family A tools (4) |
+| CREATE | `vidbyte/tools/builtins/cot/foraging.py` | Family B tools (4) |
+| CREATE | `vidbyte/tools/builtins/cot/verification.py` | Family C tools (4) |
+| CREATE | `vidbyte/tools/builtins/cot/delegation.py` | Family D tools (6) |
+| CREATE | `vidbyte/tools/builtins/cot/meta.py` | Family E tools (6) |
+| CREATE | `vidbyte/lib/enums/cot.py` | Categorical fields as `str, Enum` classes, shared across families |
 | CREATE | `vidbyte/context/primitives/cot_context.py` | Family A primitives |
 | CREATE | `vidbyte/context/primitives/cot_foraging.py` | Family B primitives |
 | CREATE | `vidbyte/context/primitives/cot_verification.py` | Family C primitives |
 | CREATE | `vidbyte/context/primitives/cot_delegation.py` | Family D primitives |
 | CREATE | `vidbyte/context/primitives/cot_meta.py` | Family E primitives |
-| MODIFY | `vidbyte/tools/builtins/__init__.py` | Import + `__all__` for 24 tools |
+| MODIFY | `vidbyte/tools/builtins/__init__.py` | Import + `__all__` for 24 tools, now from `builtins.cot` |
 | MODIFY | `vidbyte/tools/builtins/cot_events.py` | Add shared `CotEventParser.parse_int` |
+| MODIFY | `vidbyte/lib/enums/__init__.py` | Import + `__all__` for the new `cot.py` enums |
 | MODIFY | `vidbyte/context/primitives/__init__.py` | Import + `__all__` for 24 primitives |
+| DELETE | `vidbyte/tools/builtins/cot_context.py` | Superseded by `cot/context.py` |
+| DELETE | `vidbyte/tools/builtins/cot_foraging.py` | Superseded by `cot/foraging.py` |
+| DELETE | `vidbyte/tools/builtins/cot_verification.py` | Superseded by `cot/verification.py` |
+| DELETE | `vidbyte/tools/builtins/cot_delegation.py` | Superseded by `cot/delegation.py` |
+| DELETE | `vidbyte/tools/builtins/cot_meta.py` | Superseded by `cot/meta.py` |
 
-13 files: 10 created, 3 modified, 0 deleted. Stacked on `feat/deep-cot-tools-2`.
+18 files: 12 created, 4 modified, 5 deleted (net 16 files present after the
+5 flat modules were replaced by their `cot/` package equivalents). Stacked
+on `feat/deep-cot-tools-2`.
 
 ---
 
