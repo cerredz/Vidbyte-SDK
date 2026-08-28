@@ -38,6 +38,7 @@ cached external findings; semantic rules inspect the shared source catalogue.
 - `s020_readme_file_index_parity.py` -- opt-in documentation parity.
 - `s021_class_bound_registry_helpers.py` -- class-owned registry behavior.
 - `s024_maximum_control_flow_nesting.py` -- maximum semantic control-flow depth.
+- `s025_model_facing_description_depth.py` -- ToolSpec/ToolParameter description depth.
 - `a001_agent_readable_file_headers.py` -- structured SDK source headers.
 - `a002_intent_comments.py` -- intent markers for load-bearing policy functions.
 - `a003_context_rich_error_packets.py` -- stable diagnostic fields on errors.
@@ -50,3 +51,4 @@ cached external findings; semantic rules inspect the shared source catalogue.
 
 - 2026-08-23: Created with S001-S021.
 - 2026-08-26: Added article-derived S024 and A001-A003/A005-A008 policies.
+- 2026-08-27: Added S025 model-facing tool/parameter description depth policy.
