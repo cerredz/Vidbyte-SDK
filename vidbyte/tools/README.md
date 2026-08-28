@@ -18,6 +18,43 @@ should pass tools directly to agents or wrap collections with `Tools`. Legacy
 registries remain available for compatibility, but the catalog-first pattern
 makes tool availability easier to inspect.
 
+## Description Customization
+
+Built-in tools can expose application-specific model guidance without changing
+their execution contract. `BaseTool.customize()` returns a new tool view that
+can replace the tool description and descriptions of existing top-level
+parameters:
+
+```python
+custom_lookup = lookup_tool.customize(
+    description="Search our internal documentation.",
+    parameter_descriptions={"query": "Use our product terminology."},
+)
+```
+
+The tool description is required; the parameter-description mapping defaults to
+empty when only the tool description changes. Customization never adds
+parameters, changes validation, or mutates the original tool. Use a concrete
+custom tool or adapter when an application needs new business inputs or
+behavior. Use `with_activity()` for a separate typed model-authored annotation
+that should be captured and removed before the wrapped tool executes.
+
+## Deep Reasoning Traces
+
+`vidbyte.tools.builtins.reasoning` exposes 182 strategy-specific tools derived
+from the complete default reasoning-trace families in the Vidbyte Skills
+repository. Each strategy owns a module, model-facing description, typed
+parameter shape, and parameter guidance that match its reasoning move. The
+shared execution boundary validates those declarations and writes a bounded
+`ReasoningTraceContextItem` containing the strategy's declared fields into the
+active `ContextManager`; the record is public model-authored telemetry and is
+not a correctness grade or a private chain-of-thought store.
+
+Use `ReasoningTraceCatalog.tool_class(skill_name)` when an application selects a
+strategy by a fixed SDK-owned slug. Direct class construction remains available
+through the generated exports, and every generated class is `SAFE` for the
+existing permission policy and component registry discovery paths.
+
 ## Usage
 
 ```python
@@ -44,12 +81,23 @@ print(catalog.provider_schemas("openai"))
 
 - `decorators.py`: `@tool` and `vidbyte_tool` function wrappers.
 - `function_tool.py`: `FunctionTool` creation from Python callables.
+- `customization.py`: Description-only model-facing views over existing tools.
 - `catalog.py`: agent-local immutable tool catalog.
 - `executor.py`: local tool call execution.
 - `security/`: permission policies and sandbox contracts.
 - `mcp/`: MCP clients, transports, presets, and bridged tools.
-- `builtins/`: code search, context, context primitives, editing, memory, MCP, handoff, and utility tools.
+- `builtins/`: code search, context, context primitives, editing, memory, MCP, handoff, pause, reasoning traces, and utility tools.
 - `builtins/operations/`: priced search and fetch tools plus the executing provider clients.
+
+## Cooperative Pause
+
+`PauseAgentTool` exposes the model-facing `pause_agent` tool. Attach it to the
+agent that should wait and configure a maximum duration, for example
+`PauseAgentTool(max_seconds=30)`. The tool delegates to the same async
+`BaseAgent.pause(seconds)` API used by application code, so the wait yields to
+the event loop and task cancellation remains visible. It is a timed wait only;
+it does not persist run state or provide durable pause/resume or external run
+cancellation.
 
 ## Priced Operation Tools
 

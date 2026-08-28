@@ -1,35 +1,45 @@
 """Context Protocol Header
 
 FILE: vidbyte/lib/dataclasses/agents.py
-PURPOSE: Defines shared, dependency-light contracts for agent execution and
-         fallback transitions. Fallback configuration and runtime request objects
-         validate invariants that higher-level agent packages must not duplicate.
-ROLE IN CODEBASE: Imported by agents, runtimes, registries, and public package
-                  shims. It may depend on lib enums/errors, but must not import
-                  vidbyte.agents at module import time.
-ARCHITECTURE NOTE: FallbackModel is the validated provider/model identity;
-                    AgentFallbackConfig is the constructor boundary for
-                    AgentFallback; FallbackTransitionRequest is the runtime
-                    boundary for error- and policy-triggered switches.
-FUNCTION INVENTORY:
-    - FallbackModel: validates and identifies one catalog model without exposing credentials.
-    - AgentFallbackConfig: normalizes and validates the complete fallback chain.
-    - FallbackTransitionRequest: validates mutable runtime state before a switch.
-    - FallbackTransition: carries the validated transform and audit record returned by a switch.
-    - Remaining dataclasses: existing agent, runner, message, and fork contracts.
+PURPOSE: Defines shared, dependency-light contracts for agent execution,
+         fallback transitions, and agent-facing configuration. It owns the
+         validation that higher-level agent packages must not duplicate while
+         exposing stable records such as AgentCard and AgentMessage.
+ROLE IN CODEBASE: Imported by agents, runtimes, registries, orchestration
+                  strategies, and public package shims. It may depend on lib
+                  enums/errors, but must not import vidbyte.agents at module
+                  import time.
+ARCHITECTURE NOTE: This is the dependency-light contract layer. FallbackModel
+                    identifies one catalog model; AgentFallbackConfig validates
+                    the resolved chain; FallbackTransitionRequest validates
+                    mutable runtime state before a switch. AgentRunnerConfig,
+                    PauseDuration, AgentCard, AgentMessage, and AgentSpec remain
+                    the other shared agent contracts.
+FUNCTION INVENTORY: FallbackModel validates and identifies a catalog model;
+    AgentFallbackConfig validates the complete fallback chain;
+    FallbackTransitionRequest validates in-flight transition state;
+    FallbackTransition carries a validated transform and audit record; the
+    remaining dataclasses provide existing agent, runner, message, and fork
+    contracts. Existing agent/fallback and runtime tests cover these contracts.
 COMMON MODIFICATION PATTERNS: Add cross-package fallback invariants here when
-    both settings construction and runtime transitions need the same rule.
-WHAT NOT TO DO: Do not import AgentFallback, settings, runners, or provider
-    adapters at module scope; lazy registry imports prevent an SDK bootstrap cycle.
+    settings construction and runtime transitions need the same rule. Keep
+    public data contracts here and update ``vidbyte/lib/dataclasses/__init__.py``
+    when a public export changes.
+WHAT NOT TO DO: Do not import AgentFallback, settings, runners, provider
+    adapters, auth, or network clients at module scope. Lazy registry imports
+    prevent an SDK bootstrap cycle; higher-level behavior belongs elsewhere.
 KNOWN EDGE CASES: Policy arrays contain one value per transition (resolved
-    chain length minus one); transition history is intentionally mutable because
-    the runtime appends credential-free audit records in place.
-COMMON ERRORS: FallbackConfigurationError for declaration problems and
-    FallbackTransitionError for malformed in-flight state.
+    chain length minus one). Transition history is intentionally mutable because
+    the owning runtime appends credential-free audit records in place. Provider
+    model validation must remain lazy at registry boundaries to avoid bootstrap
+    cycles.
+COMMON ERRORS: FallbackConfigurationError covers declaration failures;
+    FallbackTransitionError covers malformed in-flight state; existing agent
+    configuration errors retain their established classes.
 TEST FILES: Existing agent/fallback and runtime tests plus scripts/run_ci.py.
 CONCURRENCY MODEL: Contracts are frozen, but attempts/errors lists are shared
     with the owning single-run runtime and are mutated only during that run.
-RELATED DOCS: docs/design/agent-fallback-policies.md
+RELATED DOCS: https://github.com/cerredz/Vidbyte-SDK/blob/main/docs/design/agent-fallback-policies.md
 """
 
 from __future__ import annotations
@@ -117,6 +127,20 @@ class AgentRuntimeConfig:
                 raise ValueError(f"{field_name} must be greater than zero when provided.")
         if self.timeout_seconds is not None and self.timeout_seconds <= 0:
             raise ValueError("timeout_seconds must be greater than zero when provided.")
+
+
+@dataclass(frozen=True, slots=True)
+class PauseDuration:
+    """Validated whole-number delay in seconds for a cooperative agent pause."""
+
+    seconds: int
+
+    def __post_init__(self) -> None:
+        """Reject non-integer, boolean, and negative delays."""
+        if isinstance(self.seconds, bool) or not isinstance(self.seconds, int):
+            raise ValueError("PauseDuration.seconds must be an integer.")
+        if self.seconds < 0:
+            raise ValueError("PauseDuration.seconds must be non-negative.")
 
 
 @dataclass(frozen=True, slots=True)

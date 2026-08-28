@@ -5,7 +5,9 @@ Description:
 Purpose:
     Filters semantic spans through profiles, preserves parent context, sanitizes attributes, and translates spans for an inner tracer.
 Architecture:
-    `TraceController` maps names to component factories, including `multi_agent.*`, then delegates provider translation and tracer lifecycle calls.
+    `TraceController` maps names to component factories, including `multi_agent.*`
+    and diagnostic `middleware.hook` records, then delegates provider translation
+    and tracer lifecycle calls.
 Relations:
     Wraps `TracerBase`, consumes trace profiles/components, and is used by agents, runtimes, tools, sessions, and orchestration controllers.
 """
@@ -105,7 +107,7 @@ class TraceController(TracerBase):
             detail = TraceDetail.VERBOSE
             component = "runtimes"
         elif name.startswith("middleware."):
-            detail = TraceDetail.VERBOSE
+            detail = TraceDetail.DIAGNOSTIC if name == "middleware.hook" else TraceDetail.VERBOSE
             component = "middleware"
         elif name.startswith("aggregate."):
             detail = TraceDetail.VERBOSE

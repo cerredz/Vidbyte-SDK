@@ -12,6 +12,7 @@ Architecture:
     - Agent exports: BaseAgent, AgentCard, AgentMessage, AgentRegistry, AgentRunnerConfig, AgentSpec.
     - Configuration exports: YamlLoader, AgentSettings, ToolDefinition, MiddlewareDefinition.
     - Tool exports: BaseTool, ToolActivity, ToolCall, ToolCallActivity, ToolExecutor, ToolParameter, ToolPermission, ToolRegistry, ToolResult, ToolSpec, ToolStatus, ToolsFormatter.
+    - Middleware exports: AgentMiddleware, MiddlewarePipeline, policy events, and diagnostic hook invocations.
     - MCP exports: McpServerConfig, McpServerHandle, McpToolPermission.
     - Context exports: context contracts plus general problem-solving challenge records.
     - Preset exports: BudgetPreset, PermissionPreset.
@@ -220,6 +221,7 @@ from vidbyte.context import (
     PerspectiveGapContextItem,
     ProblemFrameContextItem,
     ProcessStallContextItem,
+    ReasoningTraceContextItem,
     ResearchHandoff,
     RiskEscalationContextItem,
     CompactionMode,
@@ -341,6 +343,7 @@ from vidbyte.middleware import (
     MiddlewareDecision,
     MiddlewareEvent,
     MiddlewareHook,
+    MiddlewareHookInvocation,
     MiddlewarePipeline,
     MiddlewareTransform,
     MessageHistoryCompactionMiddleware,
@@ -684,6 +687,7 @@ __all__ = [
     "MiddlewareDecision",
     "MiddlewareEvent",
     "MiddlewareHook",
+    "MiddlewareHookInvocation",
     "MiddlewarePipeline",
     "MiddlewareTransform",
     "MessageHistoryCompactionMiddleware",
@@ -712,6 +716,7 @@ __all__ = [
     "PrimitiveToolDefinition",
     "ProblemSpaceSearchAlgorithm",
     "ProblemSpaceSearchContextItem",
+    "ReasoningTraceContextItem",
     "ProgressContextItem",
     "Prompt",
     "Prompts",

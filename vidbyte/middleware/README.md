@@ -19,6 +19,12 @@ structured `MiddlewareDecision` objects instead of mutating hidden global state.
 By default middleware fails closed, while individual middleware can opt into
 fail-open behavior when policy failure should not abort the run.
 
+With `TraceProfile.diagnostic()`, the SDK records every hook invocation as a
+`middleware.hook` trace span with its elapsed duration and safe decision data.
+The final agent result's `middleware.events` remains intentionally smaller: it
+contains only control-flow decisions and fail-open exceptions, not ordinary
+continue decisions.
+
 ## Usage
 
 ```python

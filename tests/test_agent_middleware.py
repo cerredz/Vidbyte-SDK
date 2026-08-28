@@ -10,6 +10,7 @@ from vidbyte.lib.dataclasses.runner import RunnerHandle
 from vidbyte.middleware import AgentMiddleware
 from vidbyte.middleware.builtins import ModelRetryMiddleware, ToolErrorPolicyMiddleware, ToolPolicyMiddleware
 from vidbyte.lib.dataclasses.context import BaseContext as StrategyContext
+from vidbyte.trace import Trace, TraceProfile
 from vidbyte.tools import BaseTool, ToolCall, ToolPermission, ToolResult, ToolSpec, Tools, tool
 from vidbyte.tools.security import PermissionPolicy
 
@@ -135,6 +136,12 @@ class ExplodingMiddleware(AgentMiddleware):
     async def before_iteration(self, ctx: MiddlewareContext) -> MiddlewareDecision:
         del ctx
         raise RuntimeError("boom")
+
+
+class DiagnosticMetadataMiddleware(AgentMiddleware):
+    async def before_run(self, ctx: MiddlewareContext) -> MiddlewareDecision:
+        del ctx
+        return MiddlewareDecision.continue_(metadata={"trace_visible": True, "API_TOKEN": "secret"})
 
 
 class AgentMiddlewareTests(unittest.IsolatedAsyncioTestCase):
@@ -369,6 +376,31 @@ class AgentMiddlewareTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.output, "done")
         self.assertEqual(result.metadata["stop_reason"], "is_done")
         self.assertEqual(result.metadata["middleware"]["events"][0]["reason"], "middleware_error_fail_open")
+
+    async def test_diagnostic_trace_records_every_hook_without_expanding_result_metadata(self) -> None:
+        # Verifies diagnostic spans expose all middleware calls while public metadata keeps only policy events.
+        trace_events: list[dict] = []
+        runtime = AgentRuntime(
+            agent_name="worker",
+            system_prompt="Work.",
+            tools=Tools(),
+            permission_policy=PermissionPolicy(),
+            middleware=(DiagnosticMetadataMiddleware(),),
+            tracer=Trace.profile(Trace.debug(trace_events), TraceProfile.diagnostic()),
+        )
+        runner = FakeRunner([FakeResponse("", {"output": [{"type": "function_call", "name": "isDone", "arguments": '{"final_answer": "done"}'}]})])
+        result = await runtime.arun(
+            "task",
+            handle=RunnerHandle(runner=runner, provider="openai", invoke=invoke_runner, extract_text=runner_output_text, extract_metadata=runner_output_metadata),
+            context=self._context(runtime),
+        )
+        hook_spans = [event for event in trace_events if event.get("name") == "middleware.hook"]
+        before_run = next(event for event in hook_spans if event["attributes"]["hook"] == "before_run")
+        self.assertGreaterEqual(len(hook_spans), 1)
+        self.assertGreaterEqual(before_run["attributes"]["duration_seconds"], 0)
+        self.assertEqual(before_run["attributes"]["metadata"], {"trace_visible": True})
+        self.assertNotIn("API_TOKEN", before_run["attributes"]["metadata"])
+        self.assertEqual(result.metadata["middleware"]["event_count"], 0)
 
     async def test_runtime_limit_still_stops_with_middleware_metadata(self) -> None:
         @tool

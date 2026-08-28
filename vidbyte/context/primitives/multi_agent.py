@@ -19,8 +19,17 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
+from vidbyte.context.primitives.base import _with_context_intro
 from vidbyte.lib.dataclasses.agents import AgentCard
-from vidbyte.lib.dataclasses.multi_agent import AgentReport, FinalizationContext, MultiAgentSettings, TaskBlocker, TaskEvidence, TaskLedgerSnapshot, TaskRecord
+from vidbyte.lib.dataclasses.multi_agent import (
+    AgentReport,
+    FinalizationContext,
+    MultiAgentSettings,
+    TaskBlocker,
+    TaskEvidence,
+    TaskLedgerSnapshot,
+    TaskRecord,
+)
 
 
 class MultiAgentContextSerializer:
@@ -129,7 +138,7 @@ class MultiAgentRequestContextItem:
 
     def to_context_text(self) -> str:
         # User-authored request text always renders behind an untrusted-data boundary.
-        return MultiAgentContextSerializer.tagged("request", self.prompt, untrusted=True)
+        return _with_context_intro(MultiAgentContextSerializer.tagged("request", self.prompt, untrusted=True))
 
 
 @dataclass(frozen=True, slots=True)
@@ -147,7 +156,7 @@ class MultiAgentTeamContextItem:
     def to_context_text(self) -> str:
         # Team configuration is trusted SDK context and excludes child system prompts.
         cards = MultiAgentContextSerializer.dumps([MultiAgentContextSerializer.card(card) for card in self.team])
-        return "\n".join((MultiAgentContextSerializer.tagged("team_instructions", self.instructions), MultiAgentContextSerializer.tagged("team", cards)))
+        return _with_context_intro("\n".join((MultiAgentContextSerializer.tagged("team_instructions", self.instructions), MultiAgentContextSerializer.tagged("team", cards))))
 
 
 @dataclass(frozen=True, slots=True)
@@ -164,7 +173,7 @@ class MultiAgentLedgerContextItem:
     def to_context_text(self) -> str:
         # Ledger content includes model- and worker-authored values, so it stays untrusted.
         rendered = MultiAgentContextSerializer.dumps(MultiAgentContextSerializer.ledger(self.ledger))
-        return MultiAgentContextSerializer.tagged("ledger", rendered, untrusted=True)
+        return _with_context_intro(MultiAgentContextSerializer.tagged("ledger", rendered, untrusted=True))
 
 
 @dataclass(frozen=True, slots=True)
@@ -181,7 +190,7 @@ class MultiAgentReportContextItem:
     def to_context_text(self) -> str:
         # Report payloads never become trusted instructions merely because parsing succeeded.
         rendered = MultiAgentContextSerializer.dumps(MultiAgentContextSerializer.report(self.report))
-        return MultiAgentContextSerializer.tagged("last_report", rendered, untrusted=True)
+        return _with_context_intro(MultiAgentContextSerializer.tagged("last_report", rendered, untrusted=True))
 
 
 @dataclass(frozen=True, slots=True)
@@ -205,7 +214,7 @@ class MultiAgentLimitsContextItem:
             "maximum": {"events": self.settings.max_events, "replans": self.settings.max_replans, "rounds": self.settings.max_rounds, "stalls_before_replan": self.settings.replan_after_stalls, "task_attempts": self.settings.max_task_attempts},
             "timeouts_seconds": {"orchestrator": self.settings.orchestrator_timeout_seconds, "run": self.settings.run_timeout_seconds, "worker": self.settings.worker_timeout_seconds},
         }
-        return MultiAgentContextSerializer.tagged("limits", MultiAgentContextSerializer.dumps(value))
+        return _with_context_intro(MultiAgentContextSerializer.tagged("limits", MultiAgentContextSerializer.dumps(value)))
 
 
 @dataclass(frozen=True, slots=True)
@@ -224,10 +233,10 @@ class MultiAgentTerminalContextItem:
         decision = self.finalization.finish_decision
         terminal = {"candidate_answer": MultiAgentContextSerializer.safe_value(self.finalization.candidate_answer), "completed": self.finalization.completed, "stop_reason": self.finalization.stop_reason.value}
         finish = None if decision is None else {"action": decision.action.value, "final_answer": MultiAgentContextSerializer.safe_value(decision.final_answer), "rationale": MultiAgentContextSerializer.safe_value(decision.rationale)}
-        return "\n".join((
+        return _with_context_intro("\n".join((
             MultiAgentContextSerializer.tagged("terminal_state", MultiAgentContextSerializer.dumps(terminal), untrusted=True),
             MultiAgentContextSerializer.tagged("finish_decision", MultiAgentContextSerializer.dumps(finish), untrusted=True),
-        ))
+        )))
 
 
 __all__ = [

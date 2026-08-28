@@ -12,6 +12,7 @@ Architecture:
     - ToolActivity: Declarative annotation schema bound to an existing tool.
     - ToolCallActivity: Normalized per-call annotation captured before execution.
     - ToolSpec: Tool metadata plus compact prompt rendering.
+    - ToolCustomization: Validated description replacements bound to one ToolSpec.
     - ToolCall: Runtime invocation payload.
     - ToolResult: Runtime response payload with success/error helpers.
     - ToolCallContext: Agent-local lifecycle context for tool calls.
@@ -23,6 +24,7 @@ Relations:
 from __future__ import annotations
 
 from collections.abc import Mapping
+from copy import deepcopy
 from dataclasses import dataclass, field
 from enum import Enum
 from types import MappingProxyType
@@ -148,6 +150,83 @@ class ToolSpec:
             lines.append("Parameters: none")
         lines.extend((f"Permission: {self.permission.value}", "</tool>"))
         return "\n".join(lines)
+
+
+@dataclass(frozen=True, slots=True)
+class ToolCustomization:
+    """Validated model-facing description replacements for one tool spec."""
+
+    tool_spec: ToolSpec
+    description: str
+    parameter_descriptions: Mapping[str, str] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        # @intent description-only-tool-contract
+        # Customization changes only the instructions a model sees; the wrapped
+        # tool remains authoritative for accepted arguments and execution.
+        # Keeping the source ToolSpec here lets this dataclass reject a name or
+        # schema shape that the runtime tool cannot honor before the wrapper is
+        # exposed to a catalog or provider. A wrapper-side check would duplicate
+        # validation and could let prompt and execution contracts drift.
+        if not isinstance(self.tool_spec, ToolSpec):
+            raise ValueError("ToolCustomization.tool_spec must be a ToolSpec")
+        if not isinstance(self.description, str) or not self.description.strip():
+            raise ValueError("ToolCustomization.description cannot be blank")
+        if not isinstance(self.parameter_descriptions, Mapping):
+            raise ValueError("ToolCustomization.parameter_descriptions must be a mapping")
+
+        descriptions = dict(self.parameter_descriptions)
+        self._validate_description_values(descriptions)
+        if descriptions:
+            declared = self._declared_parameter_names()
+            unknown = sorted(set(descriptions) - declared)
+            if unknown:
+                names = ", ".join(repr(name) for name in unknown)
+                raise ValueError(f"Tool '{self.tool_spec.name}' has no top-level parameter(s): {names}")
+            self._validate_schema_properties(descriptions)
+        object.__setattr__(self, "parameter_descriptions", MappingProxyType(descriptions))
+
+    def _validate_description_values(self, descriptions: Mapping[str, str]) -> None:
+        # Reject malformed override values before any schema transformation occurs.
+        for name, description in descriptions.items():
+            if not isinstance(name, str) or not name.strip():
+                raise ValueError(f"Tool '{self.tool_spec.name}' parameter description name cannot be blank")
+            if not isinstance(description, str) or not description.strip():
+                raise ValueError(
+                    f"Tool '{self.tool_spec.name}' parameter '{name}' description cannot be blank"
+                )
+
+    def _declared_parameter_names(self) -> frozenset[str]:
+        # Use explicit schema properties when providers use that representation.
+        schema = self.tool_spec.input_schema
+        if schema is None:
+            return frozenset(parameter.name for parameter in self.tool_spec.parameters)
+        if not isinstance(schema, Mapping):
+            raise ValueError(f"Tool '{self.tool_spec.name}' input_schema must be a mapping")
+        properties = schema.get("properties")
+        if not isinstance(properties, Mapping):
+            raise ValueError(f"Tool '{self.tool_spec.name}' input_schema must expose top-level properties")
+        if not all(isinstance(name, str) for name in properties):
+            raise ValueError(f"Tool '{self.tool_spec.name}' input_schema property names must be strings")
+        return frozenset(properties)
+
+    def _validate_schema_properties(self, descriptions: Mapping[str, str]) -> None:
+        # Confirm explicit properties can receive descriptions without partial mutation.
+        if not descriptions or self.tool_spec.input_schema is None:
+            return
+        schema = self.tool_spec.input_schema
+        properties = schema.get("properties") if isinstance(schema, Mapping) else None
+        if not isinstance(properties, Mapping):
+            raise ValueError(f"Tool '{self.tool_spec.name}' input_schema must expose top-level properties")
+        for name in descriptions:
+            if not isinstance(properties[name], Mapping):
+                raise ValueError(
+                    f"Tool '{self.tool_spec.name}' input_schema property '{name}' must be an object"
+                )
+        try:
+            deepcopy(dict(schema))
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"Tool '{self.tool_spec.name}' input_schema could not be copied") from exc
 
 
 @dataclass(frozen=True, slots=True)

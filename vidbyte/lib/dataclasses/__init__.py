@@ -8,7 +8,8 @@ Purpose:
 Architecture:
     - Tool contracts from tools.
     - Context, MCP, security, sandbox, and multi-agent contracts.
-    - Harness specification, run manifest, and trajectory-record contracts.
+    - Harness specification, run manifest, trajectory-record, and middleware
+      diagnostic invocation contracts.
 Relations:
     Related to vidbyte.tools, vidbyte.agents, and vidbyte.harnesses.
 """
@@ -89,6 +90,7 @@ from vidbyte.lib.dataclasses.middleware import (
     MiddlewareDecision,
     MiddlewareEvent,
     MiddlewareHook,
+    MiddlewareHookInvocation,
     MiddlewareTransform,
 )
 from vidbyte.lib.dataclasses.multi_agent import (
@@ -191,6 +193,7 @@ from vidbyte.lib.dataclasses.tools import (
     ToolCallActivity,
     ToolCallContext,
     ToolCallState,
+    ToolCustomization,
     ToolParameter,
     ToolPermission,
     ToolResult,
@@ -300,6 +303,7 @@ __all__ = [
     "MiddlewareDefinition",
     "MiddlewareEvent",
     "MiddlewareHook",
+    "MiddlewareHookInvocation",
     "MiddlewareTransform",
     "MultiAgentDescriptor",
     "MultiAgentEventCallback",
@@ -347,6 +351,7 @@ __all__ = [
     "ToolCallContext",
     "ToolCallContextItem",
     "ToolCallState",
+    "ToolCustomization",
     "ToolDefinition",
     "ToolParameter",
     "ToolPermission",
