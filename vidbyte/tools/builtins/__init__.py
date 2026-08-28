@@ -13,6 +13,7 @@ Architecture:
     - Memory provider tools from builtins.memory.
     - Context primitive editing tools from builtins.context_primitives.
     - Context algorithm tools from builtins.trajectory_checkpoint and builtins.reflexion.
+    - Reasoning strategy tools from builtins.reasoning.
     - 182 deep reasoning trace tools from builtins.reasoning.
     - Sequential continuation tool from builtins.run_prompts_sequentially.
     - Cooperative pause tool from builtins.pause.
@@ -109,11 +110,21 @@ from vidbyte.tools.builtins.providers import (
     ProviderUpdateRowsTool,
 )
 from vidbyte.tools.builtins.reasoning import (
+    AbduceTool,
+    AnalogyTool,
+    BayesianUpdateTool,
+    CausalChainTool,
+    DeduceTool,
+    DifferentialDiagnosisTool,
+    FalsifyTool,
+    FermiEstimateTool,
+    InduceTool,
     REASONING_TRACE_DEFINITIONS,
     REASONING_TRACE_TOOL_CLASSES,
     ReasoningTraceCatalog,
     ReasoningTraceDefinition,
     ReasoningTraceTool,
+    SteelmanTool,
 )
 from vidbyte.tools.builtins.reflexion import ReflexionTool
 from vidbyte.tools.builtins.run_prompts_sequentially import RunPromptsSequentiallyTool
@@ -133,16 +144,25 @@ for _reasoning_trace_class in REASONING_TRACE_TOOL_CLASSES.values():
     globals()[_reasoning_trace_class.__name__] = _reasoning_trace_class
 
 __all__ = [
+    "AbduceTool",
+    "AnalogyTool",
     "AppendOutputTool",
     "AttachMcpServerTool",
     "BatchForkTool",
+    "BayesianUpdateTool",
     "BraveSearchTool",
     "BrowserbaseFetchTool",
     "BrowserbaseSearchTool",
+    "CausalChainTool",
     "CodeExecutionTool",
+    "DeduceTool",
+    "DifferentialDiagnosisTool",
     "DirectHttpFetchTool",
     "ExaSearchTool",
+    "FalsifyTool",
+    "FermiEstimateTool",
     "FirecrawlFetchTool",
+    "InduceTool",
     "LinkupFetchTool",
     "LinkupSearchTool",
     "OpenAlexSearchTool",
@@ -189,6 +209,7 @@ __all__ = [
     "SearchMcpServersTool",
     "SemanticSearchTool",
     "SessionTool",
+    "SteelmanTool",
     "TrajectoryCheckpointTool",
     # Memory providers
     "CogneeAddTool",
