@@ -27,8 +27,8 @@ and the canonical scripts/run_ci.py gate.
 - Register and execute S026-S050 after the existing S001-S025 rules.
 - Preserve one tracked-source catalogue, one cached Ruff invocation, deterministic
   records, and the existing baseline validation contract.
-- Add the exact Ruff selectors for the 25 requested rules, including preview
-  support where a selected rule requires it.
+- Add the exact Ruff selectors for the 25 requested rules using the pinned
+  Ruff behavior; the selected rules do not require global preview mode.
 - Add a narrowly scoped TID251 banned-API policy for APIs that are not allowed
   in the SDK's runtime package.
 - Scan pyproject.toml for RUF200 while continuing to scan the vidbyte package.
@@ -144,8 +144,8 @@ report renderer remain the sole local lint pipeline. S026-S050 are thin
 RuffBackedRule classes that select one exact analyzer code and provide SDK
 specific diagnostic metadata.
 
-lint/core/ruff.py will invoke Ruff with preview enabled, an explicit
-lint/ruff.toml configuration, and two scan roots: pyproject.toml and vidbyte.
+lint/core/ruff.py will invoke Ruff with an explicit lint/ruff.toml
+configuration and two scan roots: pyproject.toml and vidbyte.
 The committed configuration supplies the TID251 banned API mapping. RUF200 can
 therefore validate project metadata while all source rules continue to inspect
 the package in the same cached payload.
@@ -175,7 +175,7 @@ the package in the same cached payload.
 Extends the existing selector list with RUF007, RUF008, RUF009, RUF015,
 RUF017, RUF018, RUF019, RUF024, RUF043, RUF100, RUF200, PGH003, PGH004,
 TID251, TID252, PLW1514, TRY002, TRY401, G004, ASYNC109, ASYNC210, ASYNC230,
-ASYNC251, S506, and S324. It runs one explicit, preview-enabled scan with the
+ASYNC251, S506, and S324. It runs one explicit scan with the
 committed banned-API configuration and normalizes all records through the
 existing fail-closed adapter.
 
@@ -193,7 +193,7 @@ existing fail-closed adapter.
 #### Logic / Algorithm
 
 1. Build the command with pyproject.toml and vidbyte as explicit paths,
-   lint/ruff.toml as the explicit configuration, --preview, --exit-zero,
+   lint/ruff.toml as the explicit configuration, --exit-zero,
    --output-format json, and --no-cache.
 2. Accept Ruff status 0 or the ordinary finding status represented by
    --exit-zero, while rejecting process and payload errors.
@@ -205,8 +205,6 @@ existing fail-closed adapter.
 
 #### Edge Cases & Error Handling
 
-- The --preview flag applies to selected preview rules without selecting
-  unrelated preview families.
 - TID251 settings are owned by lint/ruff.toml, not by a developer's ambient
   user configuration.
 - If an analyzer path is outside the repository or a record has no valid
@@ -390,7 +388,7 @@ S026-S050 IDs only; scripts/run_ci.py keeps its current command-line interface.
 | CREATE | lint/rules/s048_blocking_sleep_in_async_function.py | S048 |
 | CREATE | lint/rules/s049_unsafe_yaml_load.py | S049 |
 | CREATE | lint/rules/s050_insecure_hash.py | S050 |
-| MODIFY | lint/core/ruff.py | Add selector union, preview mode, config, and TOML scan |
+| MODIFY | lint/core/ruff.py | Add selector union, config, and TOML scan |
 | MODIFY | lint/core/registry.py | Register S026-S050 |
 | MODIFY | lint/baseline.json | Record 25 new allowances |
 | MODIFY | lint/README.md | Document the expanded catalogue and policy |
@@ -436,8 +434,9 @@ No new dependency installation is required.
   entries after the first SDK cleanup cycle?
 - [ ] Should S041, S042, S045, and S049 remain count-ratcheted until the existing
   source debt has been reviewed by maintainers?
-- [ ] Should preview-only Ruff rules be promoted to stable catalogue entries
-  only after the pinned Ruff version makes them stable?
+- [x] The selected rules are available without global preview mode in the
+  pinned Ruff version, so the catalogue preserves the existing analyzer
+  semantics while adding only the requested selectors.
 
 These questions do not block implementation because the initial policy is
 explicit, baselined, and reversible.
