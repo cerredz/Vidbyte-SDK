@@ -30,6 +30,7 @@ from __future__ import annotations
 from vidbyte.lib.enums.agent_runtime import AgentRuntimeStateKey, AgentRuntimeType
 from vidbyte.lib.enums.config import AgentType, DocumentType
 from vidbyte.lib.enums.context import BudgetPreset, PermissionPreset
+from vidbyte.lib.enums.fallback import FallbackPolicyType
 from vidbyte.lib.enums.model_modality import ModelModality, ModelNameModality
 from vidbyte.lib.enums.model_provider import ModelProvider
 from vidbyte.lib.enums.multi_agent import (
@@ -51,6 +52,7 @@ __all__ = [
     "BudgetPreset",
     "ContextMinimalFanoutSkill",
     "DocumentType",
+    "FallbackPolicyType",
     "ModelModality",
     "ModelNameModality",
     "ModelProvider",

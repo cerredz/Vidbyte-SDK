@@ -147,6 +147,53 @@ Rules worth knowing:
   both are rejected at construction otherwise. `fork()` inherits the chain, and
   `AgentForkSettings(fallback=...)` overrides it.
 
+### Fallback Policies
+
+Fallback declarations are normalized into the shared `vidbyte.lib.dataclasses.AgentFallbackConfig` contract. `FallbackModel` entries are checked against the provider/model registry, policy kinds use `FallbackPolicyType`, and invalid declarations raise `FallbackConfigurationError`. Runtime switches are submitted as validated `FallbackTransitionRequest` objects and return one `FallbackTransition`, so runtime callers do not duplicate chain validation or audit-record mutation.
+
+Beyond reacting to a raised error, a chain can advance proactively on a per-hop
+deadline or a per-hop cost ceiling:
+
+```python
+from vidbyte.agents import LatencyPolicy, CostBudgetPolicy
+from vidbyte.agents.settings import AgentFallbackSettings
+
+agent = Agent(
+    name="analyst",
+    system_prompt="Answer directly.",
+    provider="openai",
+    model_name="gpt-5.2",
+    fallback=AgentFallbackSettings(
+        models=["gpt-5-mini", "anthropic/claude-haiku-4-5"],
+        policies=[
+            LatencyPolicy(timeout_seconds_by_hop=[8.0, 5.0]),
+            CostBudgetPolicy(cost_ceiling_usd_by_hop=[0.10, 0.30]),
+        ],
+    ),
+)
+```
+
+- **Every per-hop policy takes exactly one value per transition, never one per model.**
+  With two declared fallback models the chain has three models total but only two
+  possible transitions — primary→first fallback, first→second fallback — so each
+  array above has exactly two entries. The last model in the chain never gets one:
+  there's nowhere left to fall back to. Passing the wrong length, a gap, or a
+  non-positive value raises `FallbackConfigurationError` at `AgentFallbackSettings`
+  construction, before any agent exists.
+- **`LatencyPolicy`** wraps the call to hop *i* in a deadline; exceeding it raises
+  `TimeoutError`, which flows through the same provider-error path `fallback_on`
+  already handles — no separate metadata shape.
+- **`CostBudgetPolicy`** checks cumulative run cost against hop *i*'s ceiling once
+  per loop iteration, before the next model call is made. Unlike `LatencyPolicy`,
+  nothing has to fail for this to trigger — it downgrades proactively.
+- Both report through the same `AgentResult.metadata["fallback"]` shape and
+  `agent.fallback` span as an error-triggered switch; `error_type` carries a
+  reason string (e.g. `"cost_budget_exceeded"`) instead of an exception name.
+- `fallback_on` itself stays chain-wide, not per-hop — every hop shares the same
+  set of exception types that justify a switch.
+- Both policies are scoped to the tool-using (linear) runtime loop; non-text
+  runners (image, audio, video, embedding) don't check them.
+
 ## Durable Sessions
 
 Agents can opt into durable sessions without moving persistence into the agent constructor:
@@ -196,8 +243,10 @@ machines; use `MultiAgent` when the manager must own progress and recovery.
 
 - `base.py`: `BaseAgent`, inferred runner construction, tool binding, context assembly, trace setup, and runtime dispatch.
 - `client.py`: namespace client used by `VidbyteSDK().agents`.
-- `fallback.py`: `AgentFallback`, the ordered model chain and the transforms that route a run to the next model.
-- `settings/fallback.py`: `AgentFallbackSettings`, the validated developer-facing chain configuration.
+- `fallback/`: the fallback subsystem — `chain.py` (`AgentFallback`, the ordered model
+  chain and the transforms that route a run to the next model), `settings.py`
+  (`AgentFallbackSettings`, the validated developer-facing chain configuration), and
+  `policies.py` (`LatencyPolicy`, `CostBudgetPolicy`, the per-hop trigger conditions).
 - `runtimes/`: linear, search, and actor-model runtime components.
 - `handoff.py`: structured handoff generation from a completed agent run.
 - `multi/`: ledger-driven manager/worker orchestration and transfer controls.

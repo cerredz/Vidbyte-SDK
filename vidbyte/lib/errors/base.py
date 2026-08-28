@@ -19,6 +19,8 @@ Architecture:
     - AgentRegistryError: Raised when local agent discovery fails.
     - AgentForkError: Base exception for agent fork pipeline failures.
     - AgentForkConfigurationError: Raised when fork settings are invalid or out of range.
+    - FallbackConfigurationError: Raised when a fallback declaration violates its shared contract.
+    - FallbackTransitionError: Raised when in-flight fallback state is malformed or unsafe to switch.
     - McpError: Base exception for all developer attachment and execution failures.
     - McpConnectionError: Raised when an MCP server subprocess fails to start.
     - McpInitializeError: Raised when an MCP connection handshake fails or times out.
@@ -153,6 +155,14 @@ class McpAttachmentError(McpError):
 
 class ConfigurationError(VidbyteSdkError):
     """Raised when runner or provider configuration is invalid."""
+
+
+class FallbackConfigurationError(ConfigurationError):
+    """Raised when a fallback chain or policy contract is invalid."""
+
+
+class FallbackTransitionError(ConfigurationError):
+    """Raised when runtime state cannot be safely used for a fallback transition."""
 
 
 class UnsupportedProviderError(VidbyteSdkError):
