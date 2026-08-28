@@ -97,6 +97,38 @@ from vidbyte.tools.builtins.trajectory_checkpoint import TrajectoryCheckpointToo
 | `ReflexionTool(context_manager)` | Record a self-critique and correction plan when the model detects a reasoning error. |
 | `TrajectoryCheckpointTool(context_manager)` | Record a compressed checkpoint of reasoning, trajectory, output, score, and feedback. |
 
+## Reasoning Strategy Tools
+
+Model-callable tools anchored to named strategies from the scientific/philosophical reasoning literature. Each tool forces the model to fill in the specific fields that make that reasoning pattern checkable, rather than asserting a conclusion. Pure `SAFE` tools — no filesystem, network, or external state — that write their own `ContextItem` into the shared `ContextManager`, following the same pattern as the Context Algorithm Tools above.
+
+```python
+from vidbyte.tools.builtins.reasoning import (
+    AbduceTool,
+    AnalogyTool,
+    BayesianUpdateTool,
+    CausalChainTool,
+    DeduceTool,
+    DifferentialDiagnosisTool,
+    FalsifyTool,
+    FermiEstimateTool,
+    InduceTool,
+    SteelmanTool,
+)
+```
+
+| Tool | Description |
+|------|-------------|
+| `DeduceTool(context_manager)` | Record a deductive chain — premises, a named inference rule, the conclusion they force, and a soundness caveat naming the weakest premise. |
+| `InduceTool(context_manager)` | Record an inductive generalization projected from specific observations, with its sample-bias risk and a concrete falsifying case. |
+| `AbduceTool(context_manager)` | Record an inference to the best explanation across 2-4 genuinely competing hypotheses, with the winning pick and a discriminating test. |
+| `AnalogyTool(context_manager)` | Record an analogical transfer's mapped relations between a source and target domain, and the point where the analogy breaks down. |
+| `CausalChainTool(context_manager)` | Record a causal claim anchored to an explicit mechanism, its confounders, and an intervention test. |
+| `BayesianUpdateTool(context_manager)` | Record an explicit prior-to-posterior belief revision with both conditional likelihoods, so the shift in confidence is auditable. |
+| `DifferentialDiagnosisTool(context_manager)` | Record a candidate set narrowed by concrete disconfirming evidence, plus the next check that best discriminates what remains. |
+| `FermiEstimateTool(context_manager)` | Record a Fermi estimate: a quantity decomposed into checkable sub-estimates, with a sanity band and anchor-risk note. |
+| `SteelmanTool(context_manager)` | Record a position pressure-tested against its strongest opposition, with a required revision whenever it does not survive unchanged. |
+| `FalsifyTool(context_manager)` | Record a Popperian falsification test for a claim — the test design, the riskiest prediction it forbids, and whether it has actually been run. |
+
 ## Agent Forking
 
 `ForkConversationTool` lets a model ask its current agent to run an isolated child conversation immediately. It calls `BaseAgent.fork(...)`, runs the child branch on a focused prompt, and returns the child answer as a normal tool result.
