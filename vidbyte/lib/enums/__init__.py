@@ -30,6 +30,16 @@ from __future__ import annotations
 from vidbyte.lib.enums.agent_runtime import AgentRuntimeStateKey, AgentRuntimeType
 from vidbyte.lib.enums.config import AgentType, DocumentType
 from vidbyte.lib.enums.context import BudgetPreset, PermissionPreset
+from vidbyte.lib.enums.cot_events import (
+    AssumptionAction,
+    BasisType,
+    CotEventEnum,
+    HypothesisStatus,
+    ImpactLevel,
+    ProgressState,
+    ReturnableOption,
+    Reversibility,
+)
 from vidbyte.lib.enums.model_modality import ModelModality, ModelNameModality
 from vidbyte.lib.enums.model_provider import ModelProvider
 from vidbyte.lib.enums.multi_agent import (
@@ -48,9 +58,14 @@ __all__ = [
     "AgentRuntimeStateKey",
     "AgentRuntimeType",
     "AgentType",
+    "AssumptionAction",
+    "BasisType",
     "BudgetPreset",
     "ContextMinimalFanoutSkill",
+    "CotEventEnum",
     "DocumentType",
+    "HypothesisStatus",
+    "ImpactLevel",
     "ModelModality",
     "ModelNameModality",
     "ModelProvider",
@@ -59,7 +74,10 @@ __all__ = [
     "PermissionPreset",
     "PinPolicy",
     "Platform",
+    "ProgressState",
     "Prompt",
+    "ReturnableOption",
+    "Reversibility",
     "Skill",
     "SkillEnums",
     "StructuredOutputSupport",
