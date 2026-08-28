@@ -47,7 +47,9 @@ class FileSystemToolConfig:
             return self.backend
         platform = self.normalized_platform()
         if platform == Platform.LOCAL:
-            from vidbyte.lib.tools.filesystem.backends.local import LocalFileSystemBackend
+            from vidbyte.lib.tools.filesystem.backends.local import (
+                LocalFileSystemBackend,
+            )
 
             return LocalFileSystemBackend()
         raise ToolExecutionError(

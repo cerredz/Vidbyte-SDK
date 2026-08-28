@@ -4,12 +4,19 @@ from collections.abc import Awaitable, Callable, Mapping, Sequence
 from typing import Any
 
 from vidbyte.lib.dataclasses.context import ContextMessage
+from vidbyte.lib.dataclasses.middleware import (
+    MiddlewareContext,
+    MiddlewareDecision,
+    MiddlewareTransform,
+)
+from vidbyte.middleware.base import AgentMiddleware
 from vidbyte.middleware.compaction.base import CompactionMode, Summarizer, TokenCounter
 from vidbyte.middleware.compaction.engine import ContextCompactionEngine
-from vidbyte.middleware.compaction.strategies import ReplaceWithTraceCompaction, _provider_groups
+from vidbyte.middleware.compaction.strategies import (
+    ReplaceWithTraceCompaction,
+    _provider_groups,
+)
 from vidbyte.middleware.compaction.trace_render import TraceArtifactRenderer
-from vidbyte.lib.dataclasses.middleware import MiddlewareContext, MiddlewareDecision, MiddlewareTransform
-from vidbyte.middleware.base import AgentMiddleware
 
 
 class ToolResultCompactionMiddleware(AgentMiddleware):

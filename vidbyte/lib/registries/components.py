@@ -102,11 +102,11 @@ class ComponentRegistry:
         # @intent fixed-scan-targets
         # The packages scanned here are written in this file, never taken from a document, so a
         # reference can only select a class the SDK already exports; it can never name an import.
+        import vidbyte.middleware as middleware
         from vidbyte.context import primitives
         from vidbyte.middleware import AgentMiddleware
         from vidbyte.tools import builtins
         from vidbyte.tools.base import BaseTool
-        import vidbyte.middleware as middleware
 
         match kind:
             case "tools":

@@ -17,10 +17,10 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
-from vidbyte.tools.base import BaseTool
 from vidbyte.sessions.errors import SessionError
 from vidbyte.sessions.scope import SessionScope
 from vidbyte.sessions.store import SessionStore
+from vidbyte.tools.base import BaseTool
 from vidbyte.tools.types import ToolResult
 
 if TYPE_CHECKING:

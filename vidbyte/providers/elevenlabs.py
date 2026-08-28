@@ -1,10 +1,15 @@
 from __future__ import annotations
 
-from typing import Any, Mapping
+from collections.abc import Mapping
+from typing import Any
 
 from vidbyte.lib.config import AudioModelConfig
 from vidbyte.lib.enums import ModelProvider
-from vidbyte.lib.errors import ConfigurationError, ProviderConfigurationError, ProviderResponseError
+from vidbyte.lib.errors import (
+    ConfigurationError,
+    ProviderConfigurationError,
+    ProviderResponseError,
+)
 from vidbyte.lib.http import HttpTransport
 from vidbyte.lib.runners.types import AudioModelResponse
 

@@ -19,10 +19,10 @@ from dataclasses import dataclass, field, replace
 from typing import Any
 
 from vidbyte.lib.dataclasses.agents import AgentStopReason
-from vidbyte.lib.enums.prompts import Prompt
-from vidbyte.prompts import Prompts
 from vidbyte.lib.dataclasses.context import BaseAgentContext
 from vidbyte.lib.dataclasses.strategies import AgentResult
+from vidbyte.lib.enums.prompts import Prompt
+from vidbyte.prompts import Prompts
 
 
 @dataclass(frozen=True, slots=True)

@@ -18,24 +18,24 @@ Similar Files:
 from __future__ import annotations
 
 import uuid
-from dataclasses import dataclass, field
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, field
 from typing import Any
 
-from vidbyte.context.primitives import ContextItem
+from vidbyte.agents.types import AgentMessage
 from vidbyte.context.manager import ContextManager
+from vidbyte.context.primitives import ContextItem
+from vidbyte.context.window import ContextWindowAlgorithm
+from vidbyte.lib.dataclasses.agents import AgentRuntimeConfig
 from vidbyte.lib.dataclasses.context import BaseAgentContext, StrategyContext
 from vidbyte.lib.dataclasses.runner import RunnerHandle
 from vidbyte.lib.dataclasses.strategies import StrategyResult
-from vidbyte.agents.types import AgentMessage
 from vidbyte.lib.enums import ModelModality
-from vidbyte.tools.types import ToolCallContext
-from vidbyte.lib.dataclasses.agents import AgentRuntimeConfig
+from vidbyte.lib.tracing import TracerBase
+from vidbyte.middleware import AgentMiddleware
 from vidbyte.tools.catalog import Tools
 from vidbyte.tools.security import PermissionPolicy
-from vidbyte.lib.tracing import TracerBase
-from vidbyte.context.window import ContextWindowAlgorithm
-from vidbyte.middleware import AgentMiddleware
+from vidbyte.tools.types import ToolCallContext
 
 
 @dataclass

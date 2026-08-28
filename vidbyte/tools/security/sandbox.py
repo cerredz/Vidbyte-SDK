@@ -13,7 +13,11 @@ Relations:
 
 from __future__ import annotations
 
-from vidbyte.lib.dataclasses.sandbox import SandboxRequest, SandboxResult, SandboxTransport
+from vidbyte.lib.dataclasses.sandbox import (
+    SandboxRequest,
+    SandboxResult,
+    SandboxTransport,
+)
 
 __all__ = [
     "SandboxRequest",

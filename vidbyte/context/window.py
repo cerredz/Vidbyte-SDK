@@ -15,7 +15,10 @@ Relations:
 from __future__ import annotations
 
 from vidbyte.context.algorithms import ContextWindowAlgorithm, ToolResultAdmission
-from vidbyte.context.presets import ContextWindowPresets, resolve_context_window_algorithm
+from vidbyte.context.presets import (
+    ContextWindowPresets,
+    resolve_context_window_algorithm,
+)
 
 
 class ContextWindow:

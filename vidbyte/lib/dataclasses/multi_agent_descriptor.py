@@ -24,7 +24,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from vidbyte.lib.dataclasses.multi_agent import MultiAgentSettings
 from vidbyte.lib.errors import ConfigurationError

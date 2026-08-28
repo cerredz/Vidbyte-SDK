@@ -23,7 +23,12 @@ from datetime import datetime, timezone
 from typing import Any
 
 from vidbyte.sessions.contracts import SESSION_SCHEMA_VERSION, Checkpoint, SessionMeta
-from vidbyte.sessions.errors import SessionNotFoundError, SessionSerializationError, SessionStoreError, SessionVersionError
+from vidbyte.sessions.errors import (
+    SessionNotFoundError,
+    SessionSerializationError,
+    SessionStoreError,
+    SessionVersionError,
+)
 from vidbyte.sessions.serialization import SessionSerializer
 from vidbyte.sessions.store import SessionStore
 

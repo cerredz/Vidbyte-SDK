@@ -21,7 +21,12 @@ from typing import Any
 
 from vidbyte.agents.runtimes.configs import ActorRuntime
 from vidbyte.agents.settings import AgentLoopSettings
-from vidbyte.context.handoff import EngineeringHandoff, Handoff, MinimalHandoff, ResearchHandoff
+from vidbyte.context.handoff import (
+    EngineeringHandoff,
+    Handoff,
+    MinimalHandoff,
+    ResearchHandoff,
+)
 from vidbyte.context.window import ContextWindow
 from vidbyte.lib.dataclasses.agents import AgentForkSettings
 from vidbyte.lib.enums import AgentRuntimeType, ModelProvider

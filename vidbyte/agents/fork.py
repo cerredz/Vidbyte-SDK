@@ -18,7 +18,8 @@ Relations:
 from __future__ import annotations
 
 import uuid
-from typing import TYPE_CHECKING, Any, Mapping
+from collections.abc import Mapping
+from typing import TYPE_CHECKING, Any
 
 from vidbyte.agents.base import BaseAgent
 from vidbyte.agents.settings import AgentLoopSettings

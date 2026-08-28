@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
-from vidbyte.context.handoff import EngineeringHandoff, Handoff, MinimalHandoff, ResearchHandoff
+from vidbyte.context.handoff import (
+    EngineeringHandoff,
+    Handoff,
+    MinimalHandoff,
+    ResearchHandoff,
+)
 
 __all__ = [
     "Handoff",

@@ -5,7 +5,12 @@ from typing import Any
 
 from vidbyte.lib.dataclasses.context import ContextMessage
 from vidbyte.lib.dataclasses.tools import ToolCall, ToolResult
-from vidbyte.middleware.compaction.base import BaseCompaction, CompactionMode, CompactionStats, Summarizer
+from vidbyte.middleware.compaction.base import (
+    BaseCompaction,
+    CompactionMode,
+    CompactionStats,
+    Summarizer,
+)
 from vidbyte.middleware.compaction.strategies import (
     ClearExceptSystemAndLogCompaction,
     ContextSnapshotBranchTrimCompaction,
@@ -23,10 +28,10 @@ from vidbyte.middleware.compaction.strategies import (
     SalienceScoreEvictionCompaction,
     SelectiveContextPruningCompaction,
     StripToolResultBodiesCompaction,
-    SummaryWithBackrefsCompaction,
     SummarizeByTopicBlocksCompaction,
     SummarizeOldestNCompaction,
     SummarizeRangeCompaction,
+    SummaryWithBackrefsCompaction,
     ToolOutputSlidingWindowCompaction,
     ToolResultClearingWithExclusionsCompaction,
     TrimToTokenBudgetCompaction,

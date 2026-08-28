@@ -56,7 +56,6 @@ from math import isfinite
 from types import MappingProxyType
 from typing import Any, Generic, Protocol, TypeVar, runtime_checkable
 
-
 StateT = TypeVar("StateT")
 
 

@@ -23,7 +23,9 @@ from vidbyte.lib.errors import ConfigurationError
 
 if TYPE_CHECKING:
     from vidbyte.lib.dataclasses.agent_descriptor import AgentDescriptor
-    from vidbyte.paradigms.context_minimal_fanout.types import ContextMinimalFanoutSettings
+    from vidbyte.paradigms.context_minimal_fanout.types import (
+        ContextMinimalFanoutSettings,
+    )
 
 
 @dataclass(frozen=True, slots=True)

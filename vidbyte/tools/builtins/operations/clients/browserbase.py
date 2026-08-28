@@ -22,10 +22,18 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from vidbyte.lib.dataclasses.operations import FetchedPage, FetchPayload, SearchHit, SearchPayload
+from vidbyte.lib.dataclasses.operations import (
+    FetchedPage,
+    FetchPayload,
+    SearchHit,
+    SearchPayload,
+)
 from vidbyte.lib.errors import ProviderResponseError
 from vidbyte.lib.http.transport import HttpTransport
-from vidbyte.tools.builtins.operations.clients._base import RetryPolicy, WebOperationClient
+from vidbyte.tools.builtins.operations.clients._base import (
+    RetryPolicy,
+    WebOperationClient,
+)
 
 _MAX_RESULTS = 25
 

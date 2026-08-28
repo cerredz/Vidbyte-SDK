@@ -18,10 +18,11 @@ Relations:
 
 from __future__ import annotations
 
+import inspect
 import json
 import re
-import inspect
 from typing import Any, ClassVar
+
 from vidbyte.evals.base import BaseGrader
 from vidbyte.evals.types import EvalCase, GraderResult
 from vidbyte.lib.enums.prompts import Prompt

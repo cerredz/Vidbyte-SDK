@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from collections.abc import Iterable, Iterator
+from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import replace
-from typing import Any, Mapping
+from typing import Any
 
 from vidbyte.lib.config import TextModelConfig
-from vidbyte.lib.errors import ConfigurationError, UnsupportedProviderError
 from vidbyte.lib.enums import ModelProvider
+from vidbyte.lib.errors import ConfigurationError, UnsupportedProviderError
 from vidbyte.lib.http import HttpTransport
 from vidbyte.providers import ModelProviders
 

@@ -20,7 +20,7 @@ Similar Files:
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from vidbyte.agents.types import AgentCard
 from vidbyte.lib.errors import AgentRegistryError

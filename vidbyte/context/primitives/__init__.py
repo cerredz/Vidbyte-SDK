@@ -22,7 +22,10 @@ Relations:
 from __future__ import annotations
 
 from vidbyte.context.primitives.base import ContextItem
-from vidbyte.context.primitives.checkpoints import ReflexionContextItem, TrajectoryCheckpointContextItem
+from vidbyte.context.primitives.checkpoints import (
+    ReflexionContextItem,
+    TrajectoryCheckpointContextItem,
+)
 from vidbyte.context.primitives.closure import (
     CompletionGateContextItem,
     ProcessStallContextItem,
@@ -60,11 +63,6 @@ from vidbyte.context.primitives.framing import (
     PerspectiveGapContextItem,
     ProblemFrameContextItem,
 )
-from vidbyte.context.primitives.records import (
-    ArtifactContextItem,
-    ResponseContextItem,
-    ToolCallContextItem,
-)
 from vidbyte.context.primitives.multi_agent import (
     MultiAgentContextSerializer,
     MultiAgentLedgerContextItem,
@@ -74,8 +72,16 @@ from vidbyte.context.primitives.multi_agent import (
     MultiAgentTeamContextItem,
     MultiAgentTerminalContextItem,
 )
-from vidbyte.context.primitives.reasoning import ErrorCorrectionContextItem, ProblemSpaceSearchContextItem
+from vidbyte.context.primitives.reasoning import (
+    ErrorCorrectionContextItem,
+    ProblemSpaceSearchContextItem,
+)
 from vidbyte.context.primitives.reasoning_traces import ReasoningTraceContextItem
+from vidbyte.context.primitives.records import (
+    ArtifactContextItem,
+    ResponseContextItem,
+    ToolCallContextItem,
+)
 from vidbyte.context.primitives.tasks import (
     PlanContextItem,
     ProgressContextItem,

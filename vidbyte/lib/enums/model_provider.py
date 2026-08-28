@@ -56,7 +56,13 @@ def _usage_class_map() -> dict[ModelProvider, type[ProviderUsage]]:
     # imports the higher-level agents.pricing package at load, avoiding both an
     # import cycle and a layering inversion. Compatible providers (xAI, DeepSeek,
     # GLM, MiniMax, Kimi, Meta, Mistral) share the chat-completions usage shape.
-    from vidbyte.agents.pricing import AnthropicUsage, ChatCompletionUsage, GeminiUsage, OpenAIUsage, OpenRouterUsage
+    from vidbyte.agents.pricing import (
+        AnthropicUsage,
+        ChatCompletionUsage,
+        GeminiUsage,
+        OpenAIUsage,
+        OpenRouterUsage,
+    )
 
     return {
         ModelProvider.OPENAI: OpenAIUsage,

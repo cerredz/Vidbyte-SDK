@@ -18,18 +18,31 @@ Similar Files:
 
 from __future__ import annotations
 
-from vidbyte.lib.config import AudioModelConfig, EmbeddingModelConfig, ImageModelConfig, TextModelConfig, VideoModelConfig
+from vidbyte.lib.config import (
+    AudioModelConfig,
+    EmbeddingModelConfig,
+    ImageModelConfig,
+    TextModelConfig,
+    VideoModelConfig,
+)
 from vidbyte.lib.enums import ModelProvider
 from vidbyte.lib.errors import ProviderSelectionError
 from vidbyte.providers.anthropic import AnthropicProvider
+from vidbyte.providers.base import tool_spec_to_provider_schema
 from vidbyte.providers.client import ProvidersClient
-from vidbyte.providers.compatible import DeepSeekProvider, GLMProvider, KimiProvider, MetaProvider, MiniMaxProvider, MistralProvider
+from vidbyte.providers.compatible import (
+    DeepSeekProvider,
+    GLMProvider,
+    KimiProvider,
+    MetaProvider,
+    MiniMaxProvider,
+    MistralProvider,
+)
 from vidbyte.providers.elevenlabs import ElevenLabsProvider
 from vidbyte.providers.gemini import GeminiProvider
 from vidbyte.providers.openai import OpenAIProvider
 from vidbyte.providers.openrouter import OpenRouterProvider
 from vidbyte.providers.playai import PlayAIProvider
-from vidbyte.providers.base import tool_spec_to_provider_schema
 from vidbyte.providers.xai import XAIProvider
 
 

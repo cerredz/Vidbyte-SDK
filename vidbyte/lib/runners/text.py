@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import replace
-from typing import Any, Mapping
+from typing import Any
 
 from vidbyte.lib.config import TextModelConfig
 from vidbyte.lib.enums import ModelProvider

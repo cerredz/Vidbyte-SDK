@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 from typing import Any, ClassVar
+
 from vidbyte.evals.base import BaseGrader
 from vidbyte.evals.types import EvalCase, GraderResult
 

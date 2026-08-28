@@ -1,12 +1,17 @@
 from __future__ import annotations
 
-from typing import Any, Mapping
+from collections.abc import Mapping
+from typing import Any
 
 from vidbyte.lib.config import ImageModelConfig, TextModelConfig
 from vidbyte.lib.enums import ModelProvider
 from vidbyte.lib.errors import ProviderConfigurationError, ProviderResponseError
 from vidbyte.lib.http import HttpResponseParser, HttpTransport
-from vidbyte.lib.runners.types import GeneratedImage, ImageModelResponse, TextModelResponse
+from vidbyte.lib.runners.types import (
+    GeneratedImage,
+    ImageModelResponse,
+    TextModelResponse,
+)
 from vidbyte.providers.compatible import OpenAICompatibleProvider
 
 

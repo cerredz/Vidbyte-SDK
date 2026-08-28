@@ -31,10 +31,10 @@ class RuntimeRegistry:
     def resolve(cls, runtime_type: AgentRuntimeType) -> type:
         # Returns the runtime class for the given AgentRuntimeType; lazy-imports avoid circular deps.
         from vidbyte.agents.runtimes import (
-            LinearAgentRuntime,
-            SearchTreeRuntimeComponent,
-            PointToPointActorRuntime,
             BroadcastActorRuntime,
+            LinearAgentRuntime,
+            PointToPointActorRuntime,
+            SearchTreeRuntimeComponent,
         )
         _registry: dict[AgentRuntimeType, type] = {
             AgentRuntimeType.LINEAR: LinearAgentRuntime,

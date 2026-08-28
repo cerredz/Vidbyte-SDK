@@ -4,7 +4,13 @@ import dataclasses
 import json
 
 from vidbyte.tools.filesystem._base_tool import FileSystemTool
-from vidbyte.tools.types import ToolCall, ToolParameter, ToolPermission, ToolResult, ToolSpec
+from vidbyte.tools.types import (
+    ToolCall,
+    ToolParameter,
+    ToolPermission,
+    ToolResult,
+    ToolSpec,
+)
 
 
 class StatTool(FileSystemTool):

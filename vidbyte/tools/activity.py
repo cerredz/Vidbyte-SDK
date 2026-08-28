@@ -30,7 +30,13 @@ from pydantic import ValidationError
 from vidbyte.lib.dataclasses.tools import ACTIVITY_ARGUMENT_KEY
 from vidbyte.lib.errors import ToolRegistrationError
 from vidbyte.tools.base import BaseTool, _ToolWrapper, _unwrap_tool
-from vidbyte.tools.types import ToolActivity, ToolCall, ToolCallActivity, ToolResult, ToolSpec
+from vidbyte.tools.types import (
+    ToolActivity,
+    ToolCall,
+    ToolCallActivity,
+    ToolResult,
+    ToolSpec,
+)
 
 
 class ActivityToolFormatter:

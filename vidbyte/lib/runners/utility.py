@@ -1,9 +1,16 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import fields
-from typing import Any, Mapping
+from typing import Any
 
-from vidbyte.lib.config import AudioModelConfig, EmbeddingModelConfig, ImageModelConfig, TextModelConfig, VideoModelConfig
+from vidbyte.lib.config import (
+    AudioModelConfig,
+    EmbeddingModelConfig,
+    ImageModelConfig,
+    TextModelConfig,
+    VideoModelConfig,
+)
 from vidbyte.lib.constants import (
     MODEL_PREFIX_RUNNER_TYPE_MAP,
     MODEL_PROVIDER_RUNNER_TYPE_MAP,

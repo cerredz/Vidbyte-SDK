@@ -26,7 +26,11 @@ from vidbyte.agents.multi.transfer import AgentBinding
 from vidbyte.agents.types import AgentInput
 from vidbyte.lib.dataclasses.agents import AgentForkSettings
 from vidbyte.lib.dataclasses.multi_agent import MultiAgentRunState, MultiAgentSettings
-from vidbyte.lib.errors import AgentTransferError, ConfigurationError, MultiAgentExecutionError
+from vidbyte.lib.errors import (
+    AgentTransferError,
+    ConfigurationError,
+    MultiAgentExecutionError,
+)
 
 
 class MultiAgentValidator:

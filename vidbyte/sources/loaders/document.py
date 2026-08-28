@@ -13,7 +13,12 @@ Relations:
 from __future__ import annotations
 
 from vidbyte.context.primitives.documents import DocumentContextItem
-from vidbyte.lib.dataclasses.sources import ArtifactRef, MarkdownDocument, Selection, SourceSnapshot
+from vidbyte.lib.dataclasses.sources import (
+    ArtifactRef,
+    MarkdownDocument,
+    Selection,
+    SourceSnapshot,
+)
 from vidbyte.lib.errors import SourceParseError
 from vidbyte.sources.base import Source
 from vidbyte.sources.regex import DocumentRegex

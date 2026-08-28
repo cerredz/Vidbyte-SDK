@@ -23,7 +23,10 @@ from typing import Any
 from vidbyte.lib.dataclasses.operations import FetchedPage, FetchPayload
 from vidbyte.lib.errors import ProviderResponseError
 from vidbyte.lib.http.transport import HttpTransport
-from vidbyte.tools.builtins.operations.clients._base import RetryPolicy, WebOperationClient
+from vidbyte.tools.builtins.operations.clients._base import (
+    RetryPolicy,
+    WebOperationClient,
+)
 
 _DEFAULT_CACHE_MS = 172_800_000
 

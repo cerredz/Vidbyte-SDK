@@ -22,13 +22,6 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
-from vidbyte.context.runtime import ContextWindowPlacement
-from vidbyte.lib.dataclasses.context import (
-    BaseContext,
-    ContextArtifact,
-    ContextResponse,
-    ContextToolCall,
-)
 from vidbyte.context.primitives import (
     ArtifactContextItem,
     ContextItem,
@@ -41,6 +34,13 @@ from vidbyte.context.primitives import (
     ResponseContextItem,
     TaskContextItem,
     ToolCallContextItem,
+)
+from vidbyte.context.runtime import ContextWindowPlacement
+from vidbyte.lib.dataclasses.context import (
+    BaseContext,
+    ContextArtifact,
+    ContextResponse,
+    ContextToolCall,
 )
 
 

@@ -17,7 +17,10 @@ from __future__ import annotations
 
 from vidbyte.tools.builtins.code_search.glob import GlobTool
 from vidbyte.tools.builtins.code_search.grep import GrepTool
-from vidbyte.tools.builtins.code_search.semantic import EmbeddingProvider, SemanticSearchTool
+from vidbyte.tools.builtins.code_search.semantic import (
+    EmbeddingProvider,
+    SemanticSearchTool,
+)
 
 __all__ = [
     "EmbeddingProvider",

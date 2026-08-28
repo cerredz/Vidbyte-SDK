@@ -33,11 +33,22 @@ from __future__ import annotations
 
 from vidbyte.middleware.builtins.audit import AuditLogMiddleware
 from vidbyte.middleware.builtins.canary_tripwire import CanaryTripwireMiddleware
-from vidbyte.middleware.builtins.circuit_breaker import CircuitBreakerMiddleware, CircuitState
+from vidbyte.middleware.builtins.circuit_breaker import (
+    CircuitBreakerMiddleware,
+    CircuitState,
+)
 from vidbyte.middleware.builtins.confused_deputy import ConfusedDeputyGuardMiddleware
-from vidbyte.middleware.builtins.context_compaction import MessageHistoryCompactionMiddleware, SummaryCompactionMiddleware, ToolResultCompactionMiddleware, TraceReplacementCompactionMiddleware, TraceSummaryTailCompactionMiddleware
+from vidbyte.middleware.builtins.context_compaction import (
+    MessageHistoryCompactionMiddleware,
+    SummaryCompactionMiddleware,
+    ToolResultCompactionMiddleware,
+    TraceReplacementCompactionMiddleware,
+    TraceSummaryTailCompactionMiddleware,
+)
 from vidbyte.middleware.builtins.cost_budget import CostBudgetMiddleware
-from vidbyte.middleware.builtins.exponential_backoff_retry import ExponentialBackoffRetryMiddleware
+from vidbyte.middleware.builtins.exponential_backoff_retry import (
+    ExponentialBackoffRetryMiddleware,
+)
 from vidbyte.middleware.builtins.honeypot_tool import HoneypotToolMiddleware
 from vidbyte.middleware.builtins.loop_detection import LoopDetectionMiddleware
 from vidbyte.middleware.builtins.rate_limit import TokenRateLimitMiddleware

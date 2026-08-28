@@ -4,13 +4,14 @@ from __future__ import annotations
 
 from vidbyte.evals.templates.base import EvalTemplate
 from vidbyte.evals.templates.builtins import (
+    ClassificationTemplate,
     ConciseGroundedAnswerTemplate,
     MultipleChoiceTemplate,
     NumericAnswerTemplate,
     SafeCustomerSupportTemplate,
     ShortAnswerFactTemplate,
     StructuredJsonTemplate,
-    ClassificationTemplate,
+    classification,
     concise_grounded_answer,
     multiple_choice,
     numeric_answer,
@@ -18,7 +19,6 @@ from vidbyte.evals.templates.builtins import (
     safe_customer_support,
     short_answer_fact,
     structured_json,
-    classification,
 )
 from vidbyte.evals.templates.registry import EvalTemplateRegistry
 

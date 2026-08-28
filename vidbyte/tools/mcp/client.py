@@ -16,8 +16,8 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from vidbyte.tools.mcp.types import McpToolDefinition
 from vidbyte.tools.mcp.transport import McpTransport
+from vidbyte.tools.mcp.types import McpToolDefinition
 from vidbyte.tools.types import ToolResult
 
 

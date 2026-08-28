@@ -20,8 +20,9 @@ Similar Files:
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, Mapping
+from typing import Any
 
 from vidbyte.lib.enums import ModelProvider
 from vidbyte.lib.errors import ConfigurationError, UnsupportedProviderError

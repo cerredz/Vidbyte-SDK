@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from vidbyte.lib.dataclasses.sources import LlmsTxtDocument, LlmsTxtLink, LlmsTxtSection
 from vidbyte.sources.llms_txt.parser import LlmsTxtParser, parse_llms_txt
+
 __all__ = [
     "LlmsTxtDocument",
     "LlmsTxtLink",

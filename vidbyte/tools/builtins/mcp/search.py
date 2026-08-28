@@ -24,7 +24,13 @@ from urllib.parse import urlencode
 
 from vidbyte.lib.http.transport import HttpTransport
 from vidbyte.tools.base import BaseTool
-from vidbyte.tools.types import ToolCall, ToolParameter, ToolPermission, ToolResult, ToolSpec
+from vidbyte.tools.types import (
+    ToolCall,
+    ToolParameter,
+    ToolPermission,
+    ToolResult,
+    ToolSpec,
+)
 
 _MAX_LIMIT = 25
 _DEFAULT_LIMIT = 10

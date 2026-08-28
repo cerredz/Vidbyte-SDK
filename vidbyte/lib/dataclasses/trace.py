@@ -23,7 +23,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 class TraceMode(str, Enum):
@@ -45,6 +45,8 @@ class TraceFieldType(str, Enum):
 
 class TraceField(BaseModel):
     """Typed description object for one continual trace field."""
+
+    model_config = ConfigDict(extra="forbid")
 
     description: str
     type: TraceFieldType = TraceFieldType.STRING

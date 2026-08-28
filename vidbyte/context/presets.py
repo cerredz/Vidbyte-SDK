@@ -20,8 +20,8 @@ from vidbyte.context.algorithms import (
     ProblemSpaceSearchAlgorithm,
     ProsecutorDefenderJudgeAlgorithm,
     ReflexionAlgorithm,
-    TrajectoryCheckpointAlgorithm,
     ToolResultAdmission,
+    TrajectoryCheckpointAlgorithm,
 )
 
 

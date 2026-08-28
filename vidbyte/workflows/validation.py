@@ -57,9 +57,14 @@ from pydantic import BaseModel, TypeAdapter, ValidationError
 
 from vidbyte.agents import AgentForkSettings, AgentInput, BaseAgent
 from vidbyte.evals import BaseGrader, EvalCase, GraderResult
-from vidbyte.workflows.contracts import StateT, ValidationContext, ValidationResult, ValidationStatus, Validator
+from vidbyte.workflows.contracts import (
+    StateT,
+    ValidationContext,
+    ValidationResult,
+    ValidationStatus,
+    Validator,
+)
 from vidbyte.workflows.errors import WorkflowDefinitionError
-
 
 VerdictT = TypeVar("VerdictT", bound=BaseModel)
 

@@ -16,6 +16,7 @@ Relations:
 from __future__ import annotations
 
 from collections.abc import Sequence
+
 from vidbyte.agents.types import AgentCard, AgentInput, AgentMessage
 from vidbyte.context.manager import ContextManager
 from vidbyte.context.primitives.base import ContextItem
@@ -29,7 +30,13 @@ from vidbyte.context.primitives.multi_agent import (
 )
 from vidbyte.context.runtime import ContextWindowPlacement
 from vidbyte.lib.dataclasses.context import BaseContext
-from vidbyte.lib.dataclasses.multi_agent import AgentReport, FinalizationContext, MultiAgentSettings, OrchestrationContext, TaskLedgerSnapshot
+from vidbyte.lib.dataclasses.multi_agent import (
+    AgentReport,
+    FinalizationContext,
+    MultiAgentSettings,
+    OrchestrationContext,
+    TaskLedgerSnapshot,
+)
 
 
 class MultiAgentContext:

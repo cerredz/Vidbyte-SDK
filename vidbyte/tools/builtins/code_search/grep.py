@@ -17,7 +17,13 @@ import re
 from collections.abc import Sequence
 
 from vidbyte.tools.builtins.code_search.base import BaseCodeSearchTool
-from vidbyte.tools.types import ToolCall, ToolParameter, ToolPermission, ToolResult, ToolSpec
+from vidbyte.tools.types import (
+    ToolCall,
+    ToolParameter,
+    ToolPermission,
+    ToolResult,
+    ToolSpec,
+)
 
 
 class GrepTool(BaseCodeSearchTool):

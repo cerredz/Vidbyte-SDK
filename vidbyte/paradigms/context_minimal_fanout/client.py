@@ -15,7 +15,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from vidbyte.paradigms.context_minimal_fanout.paradigm import ContextMinimalFanoutParadigm
+from vidbyte.paradigms.context_minimal_fanout.paradigm import (
+    ContextMinimalFanoutParadigm,
+)
 
 
 class ContextMinimalFanoutClient:

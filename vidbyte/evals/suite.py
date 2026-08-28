@@ -19,10 +19,12 @@ from __future__ import annotations
 
 import csv
 import json
+from collections.abc import Iterator, Mapping, Sequence
 from pathlib import Path
-from typing import Any, Iterator, Mapping, Sequence
-from vidbyte.evals.types import EvalCase
+from typing import Any
+
 from vidbyte.evals.templates import default_template_registry
+from vidbyte.evals.types import EvalCase
 
 
 class EvalSuite:

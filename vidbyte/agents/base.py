@@ -24,23 +24,38 @@ from typing import TYPE_CHECKING, Any
 
 from vidbyte.agents.mixins import McpAttachableMixin
 from vidbyte.agents.pricing import UsageRollup, UsageTracker
+from vidbyte.agents.runtimes.configs import (
+    ActorRuntime,
+    LinearRuntime,
+    MctsSearchRuntime,
+)
 from vidbyte.agents.settings import AgentLoopSettings
 from vidbyte.agents.types import AgentCard, AgentInput, AgentMessage
-from vidbyte.context.manager import ContextManager
-from vidbyte.context.window import ContextWindow, ContextWindowAlgorithm
-from vidbyte.context.primitives import ContextItem
 from vidbyte.context.handoff import Handoff, MinimalHandoff
-from vidbyte.lib.dataclasses.agents import AgentForkSettings, AgentMetadata, AgentRunnerConfig, AgentRuntimeConfig, FallbackModel, PauseDuration
+from vidbyte.context.manager import ContextManager
+from vidbyte.context.primitives import ContextItem
+from vidbyte.context.window import ContextWindow, ContextWindowAlgorithm
+from vidbyte.lib.constants import RUNNER_TYPE_TEXT
+from vidbyte.lib.dataclasses.agents import (
+    AgentForkSettings,
+    AgentMetadata,
+    AgentRunnerConfig,
+    AgentRuntimeConfig,
+    FallbackModel,
+    PauseDuration,
+)
 from vidbyte.lib.dataclasses.runner import RunnerHandle
 from vidbyte.lib.dataclasses.sessions import SESSION_SCHEMA_VERSION, RunState
 from vidbyte.lib.dataclasses.strategies import AgentResult
 from vidbyte.lib.dataclasses.trace import TraceOption
-from vidbyte.lib.constants import RUNNER_TYPE_TEXT
 from vidbyte.lib.enums import AgentRuntimeType, ModelProvider
-from vidbyte.lib.errors import AgentExecutionError, ConfigurationError, OutputSchemaViolationError
+from vidbyte.lib.errors import (
+    AgentExecutionError,
+    ConfigurationError,
+    OutputSchemaViolationError,
+)
 from vidbyte.lib.runners import Runner
 from vidbyte.lib.tracing import NullTracer, TracerBase
-from vidbyte.agents.runtimes.configs import ActorRuntime, LinearRuntime, MctsSearchRuntime
 from vidbyte.middleware import AgentMiddleware
 from vidbyte.tools.catalog import Tools
 from vidbyte.tools.security import PermissionPolicy
@@ -346,7 +361,9 @@ class BaseAgent(McpAttachableMixin):
         from vidbyte.tools.builtins.handoff import CreateHandoffTool
         from vidbyte.tools.builtins.mcp import AttachMcpServerTool
         from vidbyte.tools.builtins.pause import PauseAgentTool
-        from vidbyte.tools.builtins.run_prompts_sequentially import RunPromptsSequentiallyTool
+        from vidbyte.tools.builtins.run_prompts_sequentially import (
+            RunPromptsSequentiallyTool,
+        )
 
         if isinstance(tool, AgentTool):
             tool.bind_context_getter(lambda: (self._active_prompt, list(self.history)))

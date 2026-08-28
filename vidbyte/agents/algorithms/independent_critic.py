@@ -27,10 +27,17 @@ import dataclasses
 from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
-from vidbyte.context.algorithms.independent_critic import CriticFailurePolicy, IndependentCriticAlgorithm
+from vidbyte.context.algorithms.independent_critic import (
+    CriticFailurePolicy,
+    IndependentCriticAlgorithm,
+)
 from vidbyte.lib.agents.modality_detector import ModalityDetector
 from vidbyte.lib.dataclasses.agents import AgentRuntimeConfig
-from vidbyte.lib.dataclasses.context import BaseAgentContext, BaseContext, ContextArtifact
+from vidbyte.lib.dataclasses.context import (
+    BaseAgentContext,
+    BaseContext,
+    ContextArtifact,
+)
 from vidbyte.lib.dataclasses.runner import RunnerHandle
 from vidbyte.lib.dataclasses.strategies import AgentResult
 from vidbyte.lib.enums import ModelModality

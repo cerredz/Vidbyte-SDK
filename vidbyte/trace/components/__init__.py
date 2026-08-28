@@ -17,7 +17,11 @@ from vidbyte.trace.components.algorithms import AlgorithmTrace
 from vidbyte.trace.components.context import ContextTrace
 from vidbyte.trace.components.middleware import MiddlewareTrace
 from vidbyte.trace.components.parsers import ParserTrace
-from vidbyte.trace.components.runtimes import ActorRuntimeTrace, LinearRuntimeTrace, SearchRuntimeTrace
+from vidbyte.trace.components.runtimes import (
+    ActorRuntimeTrace,
+    LinearRuntimeTrace,
+    SearchRuntimeTrace,
+)
 from vidbyte.trace.components.tools import ToolTrace
 
 __all__ = [

@@ -19,8 +19,9 @@ Similar Files:
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import fields
-from typing import Any, Mapping
+from typing import Any
 
 from vidbyte.lib.enums import ModelModality, ModelProvider
 from vidbyte.lib.enums.model_modality import _MODEL_NAME_MODALITY_MAP
@@ -129,7 +130,13 @@ class ModalityDetector:
         **options: Any,
     ) -> object:
         """Create the internal concrete runner for a resolved modality."""
-        from vidbyte.lib.config import AudioModelConfig, EmbeddingModelConfig, ImageModelConfig, TextModelConfig, VideoModelConfig
+        from vidbyte.lib.config import (
+            AudioModelConfig,
+            EmbeddingModelConfig,
+            ImageModelConfig,
+            TextModelConfig,
+            VideoModelConfig,
+        )
 
         resolved = ModalityDetector.coerce(modality)
         if resolved is ModelModality.AUTO:

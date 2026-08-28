@@ -29,15 +29,17 @@ import dataclasses
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
-from vidbyte.context.algorithms.multi_provider_agentic_grader import MultiProviderAgenticGraderAlgorithm
+from vidbyte.context.algorithms.multi_provider_agentic_grader import (
+    MultiProviderAgenticGraderAlgorithm,
+)
+from vidbyte.lib.agents.modality_detector import ModalityDetector
+from vidbyte.lib.dataclasses.context import BaseAgentContext
 from vidbyte.lib.dataclasses.runner import RunnerHandle
+from vidbyte.lib.dataclasses.strategies import AgentResult
 from vidbyte.lib.enums import ModelModality
 from vidbyte.lib.errors import AgentExecutionError
-from vidbyte.lib.agents.modality_detector import ModalityDetector
 from vidbyte.lib.models import ProviderModelRegistry
 from vidbyte.lib.tracing import SpanContext
-from vidbyte.lib.dataclasses.context import BaseAgentContext
-from vidbyte.lib.dataclasses.strategies import AgentResult
 
 if TYPE_CHECKING:
     from vidbyte.agents.runtime import AgentRuntime

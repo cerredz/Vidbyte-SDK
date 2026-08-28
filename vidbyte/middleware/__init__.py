@@ -47,8 +47,8 @@ from vidbyte.middleware.builtins import (
     SummaryCompactionMiddleware,
     TokenBudgetMiddleware,
     TokenRateLimitMiddleware,
-    ToolResultCompactionMiddleware,
     ToolPolicyMiddleware,
+    ToolResultCompactionMiddleware,
     TraceReplacementCompactionMiddleware,
     TraceSummaryTailCompactionMiddleware,
 )

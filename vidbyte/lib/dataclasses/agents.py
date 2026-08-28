@@ -18,14 +18,19 @@ Relations:
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Mapping, Sequence
+from typing import TYPE_CHECKING, Any
 
 from vidbyte.lib.errors import AgentForkConfigurationError
 
 if TYPE_CHECKING:
-    from vidbyte.agents.runtimes.configs import ActorRuntime, LinearRuntime, MctsSearchRuntime
+    from vidbyte.agents.runtimes.configs import (
+        ActorRuntime,
+        LinearRuntime,
+        MctsSearchRuntime,
+    )
     from vidbyte.agents.settings import AgentLoopSettings
     from vidbyte.agents.settings.fallback import AgentFallbackSettings
     from vidbyte.agents.settings.tool import ToolSettings

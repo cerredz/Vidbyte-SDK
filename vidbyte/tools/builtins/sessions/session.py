@@ -19,14 +19,20 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from vidbyte.tools.builtins.sessions._base import _SessionBuiltinTool
 from vidbyte.tools.builtins.sessions.descriptions import (
     LABEL_DESCRIPTION,
     OPERATION_DESCRIPTION,
     SESSION_ID_DESCRIPTION,
     SESSION_TOOL_DESCRIPTION,
 )
-from vidbyte.tools.builtins.sessions._base import _SessionBuiltinTool
-from vidbyte.tools.types import ToolCall, ToolParameter, ToolPermission, ToolResult, ToolSpec
+from vidbyte.tools.types import (
+    ToolCall,
+    ToolParameter,
+    ToolPermission,
+    ToolResult,
+    ToolSpec,
+)
 
 _TOOL_NAME = "session"
 

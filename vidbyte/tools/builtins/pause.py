@@ -79,7 +79,13 @@ from typing import TYPE_CHECKING, Any
 
 from vidbyte.lib.dataclasses.agents import PauseDuration
 from vidbyte.tools.base import BaseTool
-from vidbyte.tools.types import ToolCall, ToolParameter, ToolPermission, ToolResult, ToolSpec
+from vidbyte.tools.types import (
+    ToolCall,
+    ToolParameter,
+    ToolPermission,
+    ToolResult,
+    ToolSpec,
+)
 
 if TYPE_CHECKING:
     from vidbyte.agents.base import BaseAgent
