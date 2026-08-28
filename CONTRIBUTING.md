@@ -64,6 +64,11 @@ python scripts/run_ci.py --stage package
 python scripts/run_ci.py
 ```
 
+The source stage runs the SDK lint suite (`python lint/run.py`) before tests. To
+iterate on a lint failure without rerunning the full gate, use the focused
+`--rule`, `--format json`, `--all`, and `--update-baseline` options documented
+in [`lint/README.md`](lint/README.md).
+
 A change is not ready for review while any local gate or pull-request check is
 red. Do not skip, delete, or weaken checks to make a change pass.
 
