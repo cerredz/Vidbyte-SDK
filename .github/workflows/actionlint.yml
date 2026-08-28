@@ -1,0 +1,29 @@
+name: Actionlint
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/**"
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/**"
+
+permissions:
+  contents: read
+
+jobs:
+  actionlint:
+    name: Actionlint
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      # rhysd/actionlint:1.7.12, pinned by immutable content digest (not the mutable tag) so this
+      # step always runs the exact verified image regardless of future tag reuse.
+      - name: Run actionlint
+        run: |
+          docker run --rm -v "$(pwd):/repo" -w /repo \
+            rhysd/actionlint@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667 \
+            -color
