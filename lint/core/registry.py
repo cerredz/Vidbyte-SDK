@@ -48,6 +48,17 @@ RULE_MODULES = (
     "lint.rules.s020_readme_file_index_parity",
     "lint.rules.s021_class_bound_registry_helpers",
     "lint.rules.s024_maximum_control_flow_nesting",
+    "lint.rules.s025_modernized_import_and_syntax_hygiene",
+    "lint.rules.s026_async_blocking_io",
+    "lint.rules.s027_defensive_python_bugbear",
+    "lint.rules.s028_bandit_security_subset",
+    "lint.rules.s029_no_shell_subprocess",
+    "lint.rules.s030_retryable_idempotent_methods",
+    "lint.rules.s031_no_model_construct_without_review",
+    "lint.rules.s032_forbid_unknown_fields_at_boundary",
+    "lint.rules.s033_explicit_serialization_mode",
+    "lint.rules.s034_typed_public_seam_mappings",
+    "lint.rules.s035_bounded_safe_path",
 )
 
 

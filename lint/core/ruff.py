@@ -1,7 +1,7 @@
 """FILE: lint/core/ruff.py
 
 PURPOSE: Runs pinned Ruff once and adapts records to native SDK lint rules.
-ROLE IN CODEBASE: S001-S008 share analyzer work while retaining separate baselines.
+ROLE IN CODEBASE: S001-S002, S007-S008, S025-S028 share analyzer work while retaining separate baselines.
 ARCHITECTURE NOTE: Isolated selectors prevent ambient repo/user config drift.
 FUNCTION INVENTORY: RuffStore.records(); RuffBackedRule check/explain.
 WHAT NOT TO DO: Never accept a missing analyzer, malformed JSON, or nonzero engine error.
@@ -23,7 +23,13 @@ from lint.core.diagnostic import Diagnostic, Finding
 from lint.core.discovery import SourceCatalog, repo_root
 from lint.core.registry import Rule
 
-SELECTORS = "ANN,B904,B905,C901,DTZ,E4,E7,E9,F,PLR0912,PLR0915,RUF006,RUF012"
+SELECTORS = (
+    "ANN,B904,B905,C901,DTZ,E4,E7,E9,F,PLR0912,PLR0915,RUF006,RUF012,"
+    "I001,UP006,UP007,UP035,UP045,"
+    "ASYNC100,ASYNC105,ASYNC109,ASYNC110,ASYNC210,ASYNC220,ASYNC221,ASYNC230,ASYNC251,"
+    "B017,B023,B028,B039,"
+    "S105,S106,S107,S108,S301,S302,S324,S501,S506"
+)
 
 
 class RuffAnalyzerError(RuntimeError):

@@ -95,6 +95,17 @@ Nested folders:
 | S020 | readme-file-index-parity | Opt-in folder maps match tracked files |
 | S021 | class-bound-registry-helpers | Registry behavior stays on owning classes |
 | S024 | maximum-control-flow-nesting | Control-flow depth stays within three levels |
+| S025 | modernized-import-and-syntax-hygiene | Sorted imports and non-deprecated typing syntax |
+| S026 | async-blocking-io | Async functions never block the event loop |
+| S027 | defensive-python-bugbear | Warning stacklevel, specific test exceptions, closure binding, ContextVar defaults |
+| S028 | bandit-security-subset | No unsafe YAML/pickle load, weak hashes, disabled TLS verification, hardcoded credentials |
+| S029 | no-shell-subprocess | Subprocess execution never routes through a shell |
+| S030 | retryable-idempotent-methods | HTTP transports guard non-idempotent retries with a key |
+| S031 | no-model-construct-without-review | Pydantic validation-skipping construction is reviewed |
+| S032 | forbid-unknown-fields-at-boundary | Public-seam models declare an explicit extra-field policy |
+| S033 | explicit-serialization-mode | model_dump() declares its wire/Python mode explicitly |
+| S034 | typed-public-seam-mappings | Public seams name their mapping shape instead of dict[str, Any] |
+| S035 | bounded-safe-path | File/archive I/O on a dynamic path is resolved and contained |
 
 ### Agent-native rules
 
