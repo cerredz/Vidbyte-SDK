@@ -39,6 +39,31 @@ cached external findings; semantic rules inspect the shared source catalogue.
 - `s021_class_bound_registry_helpers.py` -- class-owned registry behavior.
 - `s024_maximum_control_flow_nesting.py` -- maximum semantic control-flow depth.
 - `s025_model_facing_description_depth.py` -- ToolSpec/ToolParameter description depth.
+- `s026_pairwise_zip.py` -- explicit zip length behavior.
+- `s027_mutable_dataclass_default.py` -- per-instance dataclass defaults.
+- `s028_dataclass_default_call.py` -- dataclass default evaluation timing.
+- `s029_unnecessary_first_element_allocation.py` -- lazy first-item selection.
+- `s030_quadratic_list_summation.py` -- linear list aggregation.
+- `s031_assignment_in_assert.py` -- always-active validation assignments.
+- `s032_unnecessary_key_check.py` -- direct mapping missing-key behavior.
+- `s033_mutable_dict_fromkeys.py` -- independent mutable mapping values.
+- `s034_ambiguous_pytest_raises_match.py` -- precise pytest exception patterns.
+- `s035_unused_noqa.py` -- active-only noqa suppressions.
+- `s036_invalid_pyproject.py` -- valid project metadata.
+- `s037_blanket_type_ignore.py` -- diagnostic-specific type ignores.
+- `s038_blanket_noqa.py` -- diagnostic-specific noqa suppressions.
+- `s039_banned_api_policy.py` -- repository-owned banned imports.
+- `s040_relative_imports.py` -- absolute package imports.
+- `s041_unspecified_encoding.py` -- explicit text encodings.
+- `s042_raise_vanilla_class.py` -- typed runtime exceptions.
+- `s043_verbose_log_message.py` -- concise structured exception logs.
+- `s044_logging_f_string.py` -- parameterized logging.
+- `s045_async_function_with_timeout.py` -- connected async deadlines.
+- `s046_blocking_http_call_in_async_function.py` -- non-blocking async HTTP.
+- `s047_blocking_open_in_async_function.py` -- non-blocking async file access.
+- `s048_blocking_sleep_in_async_function.py` -- cooperative async delays.
+- `s049_unsafe_yaml_load.py` -- safe YAML construction.
+- `s050_insecure_hash.py` -- security-appropriate hashing.
 - `a001_agent_readable_file_headers.py` -- structured SDK source headers.
 - `a002_intent_comments.py` -- intent markers for load-bearing policy functions.
 - `a003_context_rich_error_packets.py` -- stable diagnostic fields on errors.
@@ -52,3 +77,4 @@ cached external findings; semantic rules inspect the shared source catalogue.
 - 2026-08-23: Created with S001-S021.
 - 2026-08-26: Added article-derived S024 and A001-A003/A005-A008 policies.
 - 2026-08-27: Added S025 model-facing tool/parameter description depth policy.
+- 2026-08-28: Added the sequential S026-S050 analyzer-backed policy catalogue.
