@@ -1,33 +1,41 @@
-"""Context Protocol Header
+"""FILE: vidbyte/tools/builtins/reasoning/instantiate.py
 
-Description:
-    Implements InstantiateTool — a model-callable builtin for recording a
-    rule-to-case instantiation into the active ContextManager.
-Purpose:
-    Lets the model force the general rule, the case, the applicability
-    conditions, the condition-by-condition check, the derived conclusion, and
-    the scope check into a checkable shape — a general rule applied without
-    verifying its conditions is a rule applied to a case it may not govern.
-Architecture:
-    - InstantiateTool: BaseTool that constructs an InstantiateContextItem from
-      model-provided arguments and upserts it into the injected ContextManager.
-Relations:
-    Depends on vidbyte.context.manager, vidbyte.context.primitives, and the
-    shared vidbyte.tools.builtins.reasoning._parsing.ReasoningToolInput helper.
+PURPOSE: Records one instantiate reasoning result in the ContextManager through a model-callable builtin.
+ROLE IN CODEBASE: Provides the instantiate tool and its ToolSpec contract for the reasoning-strategy builtin family.
+ARCHITECTURE NOTE: Validates model arguments, constructs one frozen InstantiateContextItem, upserts it through the injected ContextManager, and returns its bounded rendering.
+COMMON MODIFICATION PATTERNS: Keep parameters, validation, primitive fields, and rendering synchronized; keep model-facing descriptions general and four to five sentences.
+WHAT NOT TO DO: Do not add I/O, LLM calls, or side effects beyond the injected ContextManager upsert, and do not duplicate shared argument parsing.
+KNOWN EDGE CASES: Required fields, enum values, list arity, and cross-field relationships are validated before the primitive is constructed.
+RELATED DOCS: docs/design/reasoning-strategy-tools-batch-2.md; field-guide/vidbyte-sdk/model-facing-tool-contracts.md
+TESTS: Exercised by the SDK source and package CI stages and the reasoning-tool smoke checks.
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
+from vidbyte.context.primitives.base import ContextItem
 from vidbyte.tools.base import BaseTool
 from vidbyte.tools.builtins.reasoning._parsing import ReasoningToolInput
-from vidbyte.tools.types import ToolCall, ToolPermission, ToolResult, ToolSpec, ToolParameter
+from vidbyte.tools.types import (
+    ToolCall,
+    ToolParameter,
+    ToolPermission,
+    ToolResult,
+    ToolSpec,
+)
 
 if TYPE_CHECKING:
     from vidbyte.context.manager import ContextManager
 
-_REQUIRED_FIELDS = ("general_rule", "case", "applicability_conditions", "conditions_met", "derived_conclusion", "scope_check")
+_REQUIRED_FIELDS = (
+    "general_rule",
+    "case",
+    "applicability_conditions",
+    "conditions_met",
+    "derived_conclusion",
+    "scope_check",
+)
 
 
 class InstantiateTool(BaseTool):
@@ -43,20 +51,24 @@ class InstantiateTool(BaseTool):
         return ToolSpec(
             name="instantiate",
             description=(
-                "Apply a general rule to a concrete case: state the rule, the case, the "
-                "conditions under which the rule governs, the per-condition check, the "
-                "derived conclusion, and the scope check. Use this whenever the model "
-                "concludes 'the rule says X, so for this case X' — instantiation is the "
-                "step where rules silently stop applying and conclusions keep going."
+                "Apply a general rule to a concrete case: state the rule, the case, the conditions under which "
+                "the rule governs, the per-condition check, the derived conclusion, and the scope check. Use "
+                "this whenever the model concludes 'the rule says X, so for this case X' — instantiation is the "
+                "step where rules silently stop applying and conclusions keep going. The required fields make "
+                "each part of the strategy explicit so the conclusion can be examined against its stated basis. "
+                "The recorded result preserves the analysis for later iterations without independently "
+                "verifying the model's judgment."
             ),
             parameters=(
                 ToolParameter(
                     name="general_rule",
                     type="string",
                     description=(
-                        "The general rule being applied, stated with its conditions "
-                        "visible — 'if P and Q, then R'. A rule whose conditions cannot "
-                        "be listed cannot be instantiated."
+                        "The general rule being applied, stated with its conditions visible — 'if P and Q, then R'. A "
+                        "rule whose conditions cannot be listed cannot be instantiated. This field is part of the "
+                        "strategy's explicit contract, so its contribution can be reviewed separately from the final "
+                        "conclusion. Keeping it explicit prevents the analysis from relying on an unstated assumption "
+                        "and gives later iterations a stable basis for comparison."
                     ),
                     required=True,
                 ),
@@ -64,8 +76,12 @@ class InstantiateTool(BaseTool):
                     name="case",
                     type="string",
                     description=(
-                        "The concrete case the rule is applied to, named precisely enough "
-                        "that each condition can be checked against it."
+                        "The concrete case the rule is applied to, named precisely enough that each condition can be "
+                        "checked against it. This field is part of the strategy's explicit contract, so its "
+                        "contribution can be reviewed separately from the final conclusion. Keeping it explicit "
+                        "prevents the analysis from relying on an unstated assumption and gives later iterations a "
+                        "stable basis for comparison. State only the information relevant to this field so the recorded "
+                        "reasoning remains focused and auditable."
                     ),
                     required=True,
                 ),
@@ -73,10 +89,11 @@ class InstantiateTool(BaseTool):
                     name="applicability_conditions",
                     type="array",
                     description=(
-                        "The conditions the case must satisfy for the rule to govern, "
-                        "each its own string. Every condition the rule actually requires "
-                        "must be listed — omitting one is how rules get stretched. May "
-                        "be passed as a JSON array of strings or a JSON string."
+                        "The conditions the case must satisfy for the rule to govern, each its own string. Every "
+                        "condition the rule actually requires must be listed — omitting one is how rules get stretched. "
+                        "May be passed as a JSON array of strings or a JSON string. This field is part of the "
+                        "strategy's explicit contract, so its contribution can be reviewed separately from the final "
+                        "conclusion."
                     ),
                     required=True,
                 ),
@@ -84,10 +101,11 @@ class InstantiateTool(BaseTool):
                     name="conditions_met",
                     type="array",
                     description=(
-                        "JSON array of objects with keys 'condition' and 'satisfied': "
-                        "the per-condition verdict for this case. Each applicable "
-                        "condition gets a verdict; a condition without a verdict is a "
-                        "condition unexamined. May also be passed as a JSON string."
+                        "JSON array of objects with keys 'condition' and 'satisfied': the per-condition verdict for "
+                        "this case. Each applicable condition gets a verdict; a condition without a verdict is a "
+                        "condition unexamined. May also be passed as a JSON string. This field is part of the "
+                        "strategy's explicit contract, so its contribution can be reviewed separately from the final "
+                        "conclusion."
                     ),
                     required=True,
                 ),
@@ -95,9 +113,12 @@ class InstantiateTool(BaseTool):
                     name="derived_conclusion",
                     type="string",
                     description=(
-                        "What follows for the case once the conditions are verified — "
-                        "including the honest conclusion that some conditions fail and "
-                        "the rule does not apply."
+                        "What follows for the case once the conditions are verified — including the honest conclusion "
+                        "that some conditions fail and the rule does not apply. This field is part of the strategy's "
+                        "explicit contract, so its contribution can be reviewed separately from the final conclusion. "
+                        "Keeping it explicit prevents the analysis from relying on an unstated assumption and gives "
+                        "later iterations a stable basis for comparison. State only the information relevant to this "
+                        "field so the recorded reasoning remains focused and auditable."
                     ),
                     required=True,
                 ),
@@ -105,9 +126,12 @@ class InstantiateTool(BaseTool):
                     name="scope_check",
                     type="string",
                     description=(
-                        "Whether the case is genuinely inside the rule's domain — the "
-                        "boundary sanity check that catches rules applied to cases they "
-                        "never governed, conditions notwithstanding."
+                        "Whether the case is genuinely inside the rule's domain — the boundary sanity check that "
+                        "catches rules applied to cases they never governed, conditions notwithstanding. This field is "
+                        "part of the strategy's explicit contract, so its contribution can be reviewed separately from "
+                        "the final conclusion. Keeping it explicit prevents the analysis from relying on an unstated "
+                        "assumption and gives later iterations a stable basis for comparison. State only the "
+                        "information relevant to this field so the recorded reasoning remains focused and auditable."
                     ),
                     required=True,
                 ),
@@ -129,8 +153,12 @@ class InstantiateTool(BaseTool):
 
         try:
             self._manager.upsert(item)
-        except ValueError as exc:
-            return ToolResult.error(call.tool_name, str(exc))
+        except ValueError:
+            return ToolResult.error(
+                call.tool_name,
+                "Could not store the reasoning result in the context manager.",
+                metadata={"error": "context_upsert_failed"},
+            )
 
         return ToolResult.success(call.tool_name, item.to_context_text())
 
@@ -145,16 +173,25 @@ class InstantiateTool(BaseTool):
             return "Field 'conditions_met' requires at least one entry."
         return None
 
-    def _build_item(self, args: dict, primitive_id: str) -> object:
+    def _build_item(self, args: dict, primitive_id: str) -> ContextItem:
         # Constructs the InstantiateContextItem from validated call arguments.
         from vidbyte.context.primitives import InstantiateContextItem
-        return InstantiateContextItem(
-            primitive_id=primitive_id,
-            general_rule=ReasoningToolInput.text(args, "general_rule"),
-            case=ReasoningToolInput.text(args, "case"),
-            applicability_conditions=ReasoningToolInput.string_list(args.get("applicability_conditions")),
-            conditions_met=ReasoningToolInput.object_list(args.get("conditions_met")),
-            derived_conclusion=ReasoningToolInput.text(args, "derived_conclusion"),
-            scope_check=ReasoningToolInput.text(args, "scope_check"),
-            title=ReasoningToolInput.text(args, "title", "Instantiation") or "Instantiation",
+
+        return cast(
+            ContextItem,
+            InstantiateContextItem(
+                primitive_id=primitive_id,
+                general_rule=ReasoningToolInput.text(args, "general_rule"),
+                case=ReasoningToolInput.text(args, "case"),
+                applicability_conditions=ReasoningToolInput.string_list(
+                    args.get("applicability_conditions")
+                ),
+                conditions_met=ReasoningToolInput.object_list(
+                    args.get("conditions_met")
+                ),
+                derived_conclusion=ReasoningToolInput.text(args, "derived_conclusion"),
+                scope_check=ReasoningToolInput.text(args, "scope_check"),
+                title=ReasoningToolInput.text(args, "title", "Instantiation")
+                or "Instantiation",
+            ),
         )

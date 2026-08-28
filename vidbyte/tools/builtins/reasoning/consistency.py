@@ -1,27 +1,29 @@
-"""Context Protocol Header
+"""FILE: vidbyte/tools/builtins/reasoning/consistency.py
 
-Description:
-    Implements ConsistencyTool — a model-callable builtin for recording a
-    belief-set contradiction audit into the active ContextManager.
-Purpose:
-    Lets the model force a belief set, the concrete pairs that conflict, a
-    consistency verdict, and a resolution into a checkable shape — the most
-    fundamental property any set of commitments can be audited for.
-Architecture:
-    - ConsistencyTool: BaseTool that constructs a ConsistencyContextItem from
-      model-provided arguments and upserts it into the injected ContextManager.
-Relations:
-    Depends on vidbyte.context.manager, vidbyte.context.primitives, and the
-    shared vidbyte.tools.builtins.reasoning._parsing.ReasoningToolInput helper.
+PURPOSE: Records one consistency reasoning result in the ContextManager through a model-callable builtin.
+ROLE IN CODEBASE: Provides the consistency tool and its ToolSpec contract for the reasoning-strategy builtin family.
+ARCHITECTURE NOTE: Validates model arguments, constructs one frozen ConsistencyContextItem, upserts it through the injected ContextManager, and returns its bounded rendering.
+COMMON MODIFICATION PATTERNS: Keep parameters, validation, primitive fields, and rendering synchronized; keep model-facing descriptions general and four to five sentences.
+WHAT NOT TO DO: Do not add I/O, LLM calls, or side effects beyond the injected ContextManager upsert, and do not duplicate shared argument parsing.
+KNOWN EDGE CASES: Required fields, enum values, list arity, and cross-field relationships are validated before the primitive is constructed.
+RELATED DOCS: docs/design/reasoning-strategy-tools-batch-2.md; field-guide/vidbyte-sdk/model-facing-tool-contracts.md
+TESTS: Exercised by the SDK source and package CI stages and the reasoning-tool smoke checks.
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
+from vidbyte.context.primitives.base import ContextItem
 from vidbyte.tools.base import BaseTool
 from vidbyte.tools.builtins.reasoning._parsing import ReasoningToolInput
-from vidbyte.tools.types import ToolCall, ToolPermission, ToolResult, ToolSpec, ToolParameter
+from vidbyte.tools.types import (
+    ToolCall,
+    ToolParameter,
+    ToolPermission,
+    ToolResult,
+    ToolSpec,
+)
 
 if TYPE_CHECKING:
     from vidbyte.context.manager import ContextManager
@@ -44,22 +46,22 @@ class ConsistencyTool(BaseTool):
         return ToolSpec(
             name="consistency",
             description=(
-                "Audit a set of claims for mutual contradiction: state each claim, name the "
-                "concrete pairs where both cannot hold, commit to a status, and resolve the "
-                "conflict. Use this whenever the model holds several commitments at once — "
-                "before merging plans, synthesizing positions, or relying on two rules "
-                "simultaneously. A belief set that has never been checked for contradiction "
-                "is a belief set that is only accidentally consistent."
+                "Audit a set of claims for mutual contradiction: state each claim, name the concrete pairs "
+                "where both cannot hold, commit to a status, and resolve the conflict. Use this whenever the "
+                "model holds several commitments at once — before merging plans, synthesizing positions, or "
+                "relying on two rules simultaneously. A belief set that has never been checked for "
+                "contradiction is a belief set that is only accidentally consistent. The required fields make "
+                "each part of the strategy explicit so the conclusion can be examined against its stated basis."
             ),
             parameters=(
                 ToolParameter(
                     name="claims",
                     type="array",
                     description=(
-                        "The belief set under audit, each claim stated singly as its own "
-                        "string. At least two claims are required — a one-claim set cannot "
-                        "be inconsistent. May be passed as a JSON array of strings or a "
-                        "JSON string."
+                        "The belief set under audit, each claim stated singly as its own string. At least two claims "
+                        "are required — a one-claim set cannot be inconsistent. May be passed as a JSON array of "
+                        "strings or a JSON string. This field is part of the strategy's explicit contract, so its "
+                        "contribution can be reviewed separately from the final conclusion."
                     ),
                     required=True,
                 ),
@@ -92,9 +94,11 @@ class ConsistencyTool(BaseTool):
                     name="resolution",
                     type="string",
                     description=(
-                        "Which claim must yield — or what new evidence would decide an "
-                        "'unresolved' status — and why that claim loses. An audit that "
-                        "finds a contradiction and records no resolution is not finished."
+                        "Which claim must yield — or what new evidence would decide an 'unresolved' status — and why "
+                        "that claim loses. An audit that finds a contradiction and records no resolution is not "
+                        "finished. This field is part of the strategy's explicit contract, so its contribution can be "
+                        "reviewed separately from the final conclusion. Keeping it explicit prevents the analysis from "
+                        "relying on an unstated assumption and gives later iterations a stable basis for comparison."
                     ),
                     required=True,
                 ),
@@ -116,8 +120,12 @@ class ConsistencyTool(BaseTool):
 
         try:
             self._manager.upsert(item)
-        except ValueError as exc:
-            return ToolResult.error(call.tool_name, str(exc))
+        except ValueError:
+            return ToolResult.error(
+                call.tool_name,
+                "Could not store the reasoning result in the context manager.",
+                metadata={"error": "context_upsert_failed"},
+            )
 
         return ToolResult.success(call.tool_name, item.to_context_text())
 
@@ -133,17 +141,26 @@ class ConsistencyTool(BaseTool):
         if len(claims) < 2:
             return "Field 'claims' requires at least two claims to audit."
         return ReasoningToolInput.enum_error(
-            ReasoningToolInput.text(args, "consistency_status"), _STATUS_VALUES, "consistency_status"
+            ReasoningToolInput.text(args, "consistency_status"),
+            _STATUS_VALUES,
+            "consistency_status",
         )
 
-    def _build_item(self, args: dict, primitive_id: str) -> object:
+    def _build_item(self, args: dict, primitive_id: str) -> ContextItem:
         # Constructs the ConsistencyContextItem from validated call arguments.
         from vidbyte.context.primitives import ConsistencyContextItem
-        return ConsistencyContextItem(
-            primitive_id=primitive_id,
-            claims=ReasoningToolInput.string_list(args.get("claims")),
-            pairwise_conflicts=ReasoningToolInput.object_list(args.get("pairwise_conflicts")),
-            consistency_status=ReasoningToolInput.text(args, "consistency_status"),
-            resolution=ReasoningToolInput.text(args, "resolution"),
-            title=ReasoningToolInput.text(args, "title", "Consistency Audit") or "Consistency Audit",
+
+        return cast(
+            ContextItem,
+            ConsistencyContextItem(
+                primitive_id=primitive_id,
+                claims=ReasoningToolInput.string_list(args.get("claims")),
+                pairwise_conflicts=ReasoningToolInput.object_list(
+                    args.get("pairwise_conflicts")
+                ),
+                consistency_status=ReasoningToolInput.text(args, "consistency_status"),
+                resolution=ReasoningToolInput.text(args, "resolution"),
+                title=ReasoningToolInput.text(args, "title", "Consistency Audit")
+                or "Consistency Audit",
+            ),
         )
