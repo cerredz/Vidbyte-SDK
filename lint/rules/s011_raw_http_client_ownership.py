@@ -48,7 +48,17 @@ class RawHttpClientOwnershipRule(Rule):
     id = "S011"
     name = "raw-http-client-ownership"
     severity = "blocking"
-    summary = "Raw httpx/requests/urllib clients live only in transport adapter modules."
+    summary = "This rule establishes one ownership boundary for raw HTTP clients used by the SDK. It keeps provider, search, upload, retry, timeout, response-limit, and error behavior behind the designated transport adapters. A finding identifies a module that has taken direct ownership of an HTTP library instead of consuming the injected SDK transport contract. The boundary is intentionally narrow so protocol-specific MCP transport code remains distinguishable from general provider HTTP behavior. Central ownership gives every caller the same place to inherit resource, security, and testability policy."
+    impact = "A second HTTP stack can silently choose different timeout, retry, response-size, exception, redaction, and test-injection behavior. That divergence means two providers may handle the same network failure differently even though callers expect one SDK contract. It also makes security and resource limits dependent on which module authors happened to import a client. The defect therefore expands operational behavior without a single place where maintainers can audit or repair it. A future transport hardening change can then leave the direct client path unprotected while the canonical adapter appears compliant."
+    repair = "Identify the transport capability the module needs and add or reuse that capability on the owning adapter. Inject HttpTransport or SyncHttpTransport through the existing constructor or protocol instead of importing a raw client locally. Keep raw client construction, retries, limits, and exception translation inside the designated adapter, with MCP-specific behavior in its sanctioned transport file. Run the focused rule and the relevant provider or tool checks after confirming the new call preserves timeout and error semantics. Test the injected seam and the adapter's failure translation so ownership is real rather than only a moved import."
+    examples = (
+        "vidbyte/lib/http/transport.py - canonical ownership for general HTTP clients",
+        "vidbyte/tools/mcp/transport.py - the dedicated protocol-specific transport adapter",
+    )
+    will_not_work = (
+        "Wrapping the raw call in a local helper or aliasing the imported client.",
+        "Adding another provider to the allowlist when the provider should consume an existing transport capability.",
+    )
 
     def check(self, catalog: SourceCatalog) -> list[Finding]:
         # Scans all production modules except the two explicit transport owners.
@@ -63,7 +73,7 @@ class RawHttpClientOwnershipRule(Rule):
 
     def explain(self, finding: Finding) -> Diagnostic:
         # Routes a raw client import to the shared injected transport contract.
-        return Diagnostic(what_happened=f"{finding.rel_path}:{finding.line} imports raw HTTP client module {finding.extra.get('module', finding.symbol)} outside a transport adapter.", why_blocked="A second HTTP stack chooses its own timeout, retry, response-size, error, redaction, and test-injection behavior, so providers no longer share one reliable boundary.", how_to_fix="Add the needed method to HttpTransport or SyncHttpTransport in vidbyte/lib/http/transport.py, then inject and call that transport here. MCP protocol-specific transport behavior remains in vidbyte/tools/mcp/transport.py.", correct_examples=("vidbyte/lib/http/transport.py - canonical async/sync HTTP ownership",), will_not_work=("Wrapping the raw call in a local helper or aliasing the import.", "Adding another allowlisted provider module; providers consume transports rather than own clients."), verify=self.verify_command())
+        return Diagnostic(what_happened=f"{finding.rel_path}:{finding.line} imports raw HTTP client module {finding.extra.get('module', finding.symbol)} outside a transport adapter.", why_blocked=self.impact, how_to_fix=self.repair, correct_examples=self.examples, will_not_work=self.will_not_work, verify=self.verify_command())
 
 
 RULE = RawHttpClientOwnershipRule()
