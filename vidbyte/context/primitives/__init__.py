@@ -13,6 +13,11 @@ Architecture:
     - multi_agent: Request/team/ledger/report/limits/terminal orchestration primitives.
     - checkpoints: ReflexionContextItem and TrajectoryCheckpointContextItem for context algorithms.
     - framing/epistemics/decisions/execution/closure: General problem-solving challenges.
+    - reasoning_strategies: Deduction/induction/abduction/analogy/causal-chain/
+      Bayesian-update/differential-diagnosis/Fermi-estimate/steelman/falsify
+      primitives for the named-reasoning-strategy tools.
+    - reasoning_traces: Strategy-specific trace primitives for the built-in
+      reasoning trace catalog.
     - All concrete types support primitive_id and primitive_frozen for registry management.
 Relations:
     Used by vidbyte.context.manager and re-exported by vidbyte.context and
@@ -75,6 +80,18 @@ from vidbyte.context.primitives.multi_agent import (
     MultiAgentTerminalContextItem,
 )
 from vidbyte.context.primitives.reasoning import ErrorCorrectionContextItem, ProblemSpaceSearchContextItem
+from vidbyte.context.primitives.reasoning_strategies import (
+    AbductionContextItem,
+    AnalogyContextItem,
+    BayesianUpdateContextItem,
+    CausalChainContextItem,
+    DeductionContextItem,
+    DifferentialDiagnosisContextItem,
+    FalsifyContextItem,
+    FermiEstimateContextItem,
+    InductionContextItem,
+    SteelmanContextItem,
+)
 from vidbyte.context.primitives.reasoning_traces import ReasoningTraceContextItem
 from vidbyte.context.primitives.tasks import (
     PlanContextItem,
@@ -83,22 +100,31 @@ from vidbyte.context.primitives.tasks import (
 )
 
 __all__ = [
+    "AbductionContextItem",
     "AlternativeChallengeContextItem",
     "AmbiguityContextItem",
+    "AnalogyContextItem",
     "ArtifactContextItem",
     "AssumptionChallengeContextItem",
+    "BayesianUpdateContextItem",
     "BoundaryContextItem",
+    "CausalChainContextItem",
     "CompletionGateContextItem",
     "ContextItem",
     "DecisionChallengeContextItem",
+    "DeductionContextItem",
     "DependencyContextItem",
+    "DifferentialDiagnosisContextItem",
     "DocumentContextItem",
     "EnvironmentContextItem",
     "ErrorCorrectionContextItem",
     "EvidenceChallengeContextItem",
+    "FalsifyContextItem",
     "FeedbackGapContextItem",
+    "FermiEstimateContextItem",
     "FileContextItem",
     "GitDiffContextItem",
+    "InductionContextItem",
     "InterventionRiskContextItem",
     "InvariantContextItem",
     "MemoryContextItem",
@@ -122,6 +148,7 @@ __all__ = [
     "ReflexionContextItem",
     "ResponseContextItem",
     "RiskEscalationContextItem",
+    "SteelmanContextItem",
     "TaskContextItem",
     "TextContextItem",
     "ToolCallContextItem",
