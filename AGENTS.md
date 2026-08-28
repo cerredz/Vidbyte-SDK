@@ -337,3 +337,70 @@ In-package tracer implementations: `generic.py`, `langsmith.py`, and the in-memo
 #### `vidbyte/workflows/`
 
 Typed state graphs with validate-before-commit stages, conditional branches, cycles, guards, retries, declared jumps, and execution records. A workflow is deterministic control flow with typed state, as opposed to a pipeline's string-in/string-out composition or an agent's model-driven loop. Reach for it when the sequence is known in advance and the requirement is that invalid state cannot advance.
+
+## Command Deck
+
+This section is the common development and debugging command reference for this repository. It is deliberately **not** part of the Map's topology contract above - it exists so nobody burns tokens guessing or searching for an invocation. Each entry is the literal command, what it checks, and its notable parameters. Run everything from the repository root; Python 3.11+ is required.
+
+### Development environment
+
+- `python -m pip install -e ".[dev]"`
+  Installs the checkout editable with the development tools used by the local gates, including pytest, build, and Twine.
+  Params: `-e` keeps imports connected to the checkout; `.[dev]` selects development dependencies.
+- `python -m pip install semgrep==1.170.1`
+  Installs the Semgrep version used by the static-policy workflow. Run this once before the static-analysis commands below.
+  Params: the pinned version keeps local findings consistent with CI.
+- `python -c "import vidbyte; print(vidbyte.__file__)"`
+  Prints the package path resolved by the active interpreter. Use it first when a test appears to be running code from another checkout.
+  Params: none.
+
+### Verification gates
+
+- `python scripts/run_ci.py`
+  Runs the complete production gate: bytecode hygiene, compilation, context write-path checks, the full pytest suite, package build, metadata checks, and clean-install smoke tests.
+  Params: `--stage all|source|package` (default `all`); stage-specific runs are diagnostic-only.
+- `python scripts/run_ci.py --stage source`
+  Runs the source diagnostics: tracked-bytecode checks, `compileall`, context write-path checks, and all pytest tests.
+  Params: prepend `PYTHONPATH=$(pwd)` in a worktree so imports resolve to that worktree.
+- `$env:PYTHONPATH=(Get-Location).Path; python scripts/run_ci.py --stage source`
+  PowerShell equivalent of the worktree source-stage command. Clear the variable before the package stage so the clean-install smoke test uses the wheel.
+  Params: `PYTHONPATH` must point at the current worktree only for source diagnostics.
+- `python scripts/run_ci.py --stage package`
+  Runs package diagnostics: build, Twine metadata checks, wheel inspection, isolated installation, dependency checks, and installed-package smoke tests.
+  Params: `--dist-dir <path>` writes artifacts to an explicitly empty directory.
+
+### Tests
+
+- `python -m pytest`
+  Runs every pytest test discovered under `tests/`, matching the test command in the source gate.
+  Params: add `-q` for concise output, `-x` to stop after the first failure, or `--tb=short` for shorter tracebacks.
+- `python -m pytest tests/ -q`
+  Runs the full test suite quietly when the test output itself is not needed for diagnosis.
+  Params: `-q` quiet; combine with `-x` for a fast first-failure loop.
+- `python -m pytest tests/test_agent_base.py -q`
+  Runs one subsystem module without paying for the rest of the suite.
+  Params: replace the path with any test module; pass multiple paths for a focused slice.
+- `python -m pytest tests/ -k "compaction" -q`
+  Filters the suite by a test-name expression for a focused regression loop.
+  Params: `-k <expr>` supports `and`/`or`/`not`, for example `-k "handoff and not slow"`.
+- `python -m pytest tests/multi_agent/ -q`
+  Runs the multi-agent package, which has multi-participant fixtures and timing assumptions distinct from single-agent tests.
+  Params: none beyond the directory path.
+- `python scripts/test-<feature>.py`
+  Runs one of the repository's targeted feature checks when a full pytest run is too broad for a diagnosis. These scripts are intentionally separate from pytest discovery.
+  Params: replace `<feature>` with the exact script filename under `scripts/`.
+
+### Static analysis
+
+- `python -m compileall -q vidbyte`
+  Compiles every package module without running application code, catching syntax errors quickly.
+  Params: `-q` suppresses per-file success output.
+- `python scripts/check_context_write_paths.py`
+  Runs the repository's AST-based context write-path rules and their embedded self-check. This is also part of the source gate.
+  Params: `--root <path>` scans another checkout; `--skip-self-check` is for rule development only.
+- `semgrep --test --config .semgrep/typed-mapping-boundary-policy.yml .semgrep/typed-mapping-boundary-policy.py`
+  Runs the Semgrep rule's violating and compliant fixtures. Use this when changing the policy or its boundary exceptions.
+  Params: keep the config and fixture paths aligned with `.github/workflows/static-policy.yml`.
+- `semgrep scan --error --config .semgrep/typed-mapping-boundary-policy.yml vidbyte`
+  Applies every rule in the repository's current Semgrep policy configuration to the package and fails on any finding. This is the full Semgrep enforcement command, while the preceding command covers the rule fixtures.
+  Params: `--error` makes findings fail the command; the final argument is the scan target.
