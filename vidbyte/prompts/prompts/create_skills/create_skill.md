@@ -129,6 +129,15 @@ as code that can be reviewed, versioned, rebuilt, and rolled back. Scope egress
 and secrets to the smallest environment that needs them, and record setup
 changes in an audit trail.
 
+Plan the skill's lifecycle as well as its files. State where it will be
+distributed (for example, a repository or approved plugin marketplace), how it
+will be versioned, and which other skills it composes with. Reference a
+dependency by its capability and activation condition instead of copying its
+entire instructions into the new skill. When the harness can measure skill
+invocations, outcomes, under-triggering, and mistaken tool use, capture those
+signals without secrets or customer data and use them to refine routing and
+scope.
+
 # Phase 3: Design the skill directory
 
 Use a directory boundary that makes the capability portable and inspectable.
@@ -199,6 +208,11 @@ changes permissions, or otherwise affects people or systems outside the scoped
 working area, require confirmation before the action unless an explicit policy
 already authorizes that exact operation. Record the proposed action, scope,
 approval, result, and rollback path.
+
+If a typed question interface exists, use it with explicit choices and a known
+resume state. If it does not exist, ask the smallest plain-language question
+you can and report that the typed interface is unavailable; do not invent a
+brittle response format for the harness to parse.
 
 # Phase 5: Verify the product and the harness
 
@@ -291,7 +305,9 @@ Activate careful, frozen, or similarly opinionated hooks only when risk, review,
 debugging, or release conditions require them. This preserves speed for routine
 work without making the default harness permanently cumbersome. A hook must
 declare its matcher, scope, lifetime, blocked actions, and recovery path; it
-must not silently expand permissions. The tradeoff is maintaining a reliable
+must not silently expand permissions. When the harness supports session-scoped
+hooks, activate them only for the skill invocation and let them expire with the
+session unless an explicit policy says otherwise. The tradeoff is maintaining a reliable
 activation path for safety modes that are intentionally absent from routine
 execution.
 
@@ -331,7 +347,9 @@ Represent state changes through messages or tool calls rather than repeatedly
 changing the system prompt, tool set, or model. Stable surfaces improve
 continuity and reduce cache invalidation and tool-choice confusion. If a model,
 tool, or permission must change, make the reason and transition explicit in the
-session evidence. The tradeoff is less opportunistic reconfiguration in a run,
+session evidence. Revisit whether a tool is still helping as model capabilities
+change; remove or narrow tools that now constrain the agent more than they help.
+The tradeoff is less opportunistic reconfiguration in a run,
 but a clearer and more reproducible operating surface.
 
 ### 85. Order prompts from static to dynamic.
@@ -377,6 +395,11 @@ question contract, but the workflow avoids brittle free-text parsing.
 After the first implementation is complete, launch two or three fresh-eyes
 reviews. Use independent context or independent reviewers when the harness
 supports it; do not merely reread the same plan and call it adversarial.
+If the harness cannot spawn reviewers, run two or three separately scoped
+review passes with the implementation evidence minimized or reset as far as
+the environment allows, label them as fallback independent passes, and record
+that limitation. One repeated self-check is not a substitute for the minimum
+two reviews.
 
 Run these review lenses, combining them only when exactly two reviews are
 needed:
