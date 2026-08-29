@@ -102,7 +102,7 @@ freeze model catalogs, pricing, or rate limits in this repository.
 | Mistral | [Documentation](https://docs.mistral.ai/) | [SDKs](https://docs.mistral.ai/resources/sdks) |
 | OpenRouter | [Quickstart](https://openrouter.ai/docs/quickstart) | [API reference](https://openrouter.ai/docs/api-reference/overview) |
 | ElevenLabs | [API reference](https://elevenlabs.io/docs/api-reference/introduction/) | [Text to speech](https://elevenlabs.io/docs/api-reference/text-to-speech/convert) |
-| PlayAI | [Developer docs](https://docs.play.ai/) | [Text-to-speech guide](https://docs.play.ai/tts-api) |
+| PlayAI / Play | [API reference](https://docs.play.ht/reference/) | [API quickstart](https://docs.play.ht/reference/api-getting-started) |
 
 Two auth details are vendor-specific and neither is guessable from the code alone:
 
