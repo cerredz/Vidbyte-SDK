@@ -95,12 +95,12 @@ freeze model catalogs, pricing, or rate limits in this repository.
 | Gemini | [Gemini API docs](https://ai.google.dev/gemini-api/docs) | [Generate content](https://ai.google.dev/api/generate-content), [embeddings](https://ai.google.dev/api/embeddings) |
 | xAI | [Developer docs](https://docs.x.ai/) | [Inference API](https://docs.x.ai/developers/rest-api-reference/inference) |
 | DeepSeek | [API docs](https://api-docs.deepseek.com/) | [Chat completion](https://api-docs.deepseek.com/api/create-chat-completion) |
-| GLM / Z.AI | [Developer docs](https://docs.z.ai/) | [Chat completion](https://docs.z.ai/api-reference/llm/chat-completion) |
+| GLM / Z.AI | [API introduction](https://docs.z.ai/api-reference/introduction) | [Chat completion](https://docs.z.ai/api-reference/llm/chat-completion) |
 | MiniMax | [Developer docs](https://platform.minimaxi.com/docs/guides/text-generation) | [Image generation](https://platform.minimaxi.com/docs/api-reference/image-generation-t2i) |
 | Kimi / Moonshot | [API overview](https://platform.kimi.ai/docs/api/overview) | [Official tools](https://platform.kimi.ai/docs/guide/use-official-tools) |
 | Meta Llama | [Developer resources](https://ai.meta.com/llama/get-started/) | [Llama API docs](https://llama.developer.meta.com/docs) |
 | Mistral | [Documentation](https://docs.mistral.ai/) | [SDKs](https://docs.mistral.ai/resources/sdks) |
-| OpenRouter | [Quickstart](https://openrouter.ai/docs/quickstart) | [API reference](https://openrouter.ai/docs/api-reference/overview) |
+| OpenRouter | [Quickstart](https://openrouter.ai/docs/quickstart) | [API reference](https://openrouter.ai/docs/api_reference/overview) |
 | ElevenLabs | [API reference](https://elevenlabs.io/docs/api-reference/introduction/) | [Text to speech](https://elevenlabs.io/docs/api-reference/text-to-speech/convert) |
 | PlayAI / Play | [API reference](https://docs.play.ht/reference/) | [API quickstart](https://docs.play.ht/reference/api-getting-started) |
 
