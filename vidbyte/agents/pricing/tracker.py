@@ -15,6 +15,7 @@ Key Functions:
     - rollup: Folds both ledgers into an immutable UsageRollup.
     - reset: Clears both ledgers at the start of a new run.
     - _cache_hit_rate: Aggregates a run's cache hit rate, weighted by prompt size.
+    - _sum_int_or_none: Int-narrowed sibling of _sum_or_none for strictly-int fields.
 Relations:
     Created by BaseAgent, consumed by AgentRuntime; token pricing from
     vidbyte/lib/registries/pricing.py, operation pricing from
@@ -118,7 +119,7 @@ class UsageTracker:
             input_tokens=_sum_or_none(record.usage.input_tokens for record in records),
             output_tokens=_sum_or_none(record.usage.output_tokens for record in records),
             total_tokens=_sum_or_none(record.usage.total_tokens for record in records),
-            cached_input_tokens=_sum_or_none(record.usage.cached_input_tokens for record in records),
+            cached_input_tokens=_sum_int_or_none(record.usage.cached_input_tokens for record in records),
             cache_hit_rate=_cache_hit_rate(records),
             cost_usd=_sum_or_none(token_costs + operation_costs),
             cost_complete=bool(records or operations) and all(cost is not None for cost in token_costs + operation_costs),
@@ -194,6 +195,14 @@ def _sum_or_none(values: Iterable[int | float | None]) -> int | float | None:
         total += value
         seen = True
     return total if seen else None
+
+
+def _sum_int_or_none(values: Iterable[int | None]) -> int | None:
+    # Int-narrowed sibling of _sum_or_none for fields strictly typed int | None
+    # (UsageRollup.cached_input_tokens), avoiding a static-type mismatch against
+    # _sum_or_none's broader int | float | None return type.
+    total = _sum_or_none(values)
+    return int(total) if total is not None else None
 
 
 def _cache_hit_rate(records: Iterable[UsageRecord]) -> float | None:
