@@ -26,9 +26,9 @@ The design reasoning lives in `docs/design/harden-mcp-stdio-transport.md`. This 
 
 # External Contract
 
-> **source:** https://modelcontextprotocol.io/specification/2026-07-28/
+> **sources:** the first-party links in the MCP reference table below
 > **upstream_version:** MCP specification revision **2026-07-28** (latest at retrieval)
-> **retrieved:** 2026-08-16
+> **retrieved:** 2026-08-29
 > **verified_by:** `vidbyte/tools/mcp/transport.py`, `vidbyte/tools/mcp/client.py`,
 > `vidbyte/tools/mcp/bridge.py`
 > **scope:** Client-side `tools` capability and the stdio transport. Excludes resources, prompts,
@@ -36,6 +36,15 @@ The design reasoning lives in `docs/design/harden-mcp-stdio-transport.md`. This 
 >
 > Written in our own words: `vidbyte-sdk` is MIT-licensed and published to PyPI, and the
 > specification text is not MIT-licensed.
+
+## Official MCP Documentation
+
+| Surface | First-party reference | Why it matters here |
+| --- | --- | --- |
+| Specification | [MCP 2026-07-28 specification](https://modelcontextprotocol.io/specification/2026-07-28/) | Current protocol revision |
+| Tools | [Tools capability](https://modelcontextprotocol.io/specification/2026-07-28/server/tools) | Discovery and invocation payloads |
+| Transports | [Transport specification](https://modelcontextprotocol.io/specification/2026-07-28/basic/transports) | stdio and Streamable HTTP behavior |
+| Python SDK | [Official Python SDK](https://github.com/modelcontextprotocol/python-sdk) | Reference implementation and typed protocol surface |
 
 ## Wire Format — stdio
 

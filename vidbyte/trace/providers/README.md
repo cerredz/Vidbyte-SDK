@@ -25,15 +25,25 @@ instrumentation point.
 
 # External Contract
 
-> **sources:** LangSmith run-type documentation (`docs.smith.langchain.com`); Langfuse and Phoenix
-> observability documentation
-> **retrieved:** 2026-08-16
+> **sources:** the first-party links in the trace-provider reference table below
+> **retrieved:** 2026-08-29
 > **verified_by:** `vidbyte/trace/providers/langsmith.py`, `vidbyte/trace/schema.py`
 > **scope:** The `run_type` vocabulary and the pass-through contract. Excludes LangSmith's ingestion
 > API, auth, and project routing — those are handled in `vidbyte/trace/`.
 >
 > Written in our own words: `vidbyte-sdk` is MIT-licensed and published to PyPI, and vendor
 > documentation is not MIT-licensed.
+
+## Official Trace-Provider Documentation
+
+| Backend | First-party reference | Contract use |
+| --- | --- | --- |
+| LangSmith | [Run data format](https://docs.langchain.com/langsmith/run-data-format) | `run_type` vocabulary and trace fields |
+| LangSmith | [Trace with LangGraph](https://docs.langchain.com/langsmith/trace-with-langgraph) | Framework trace setup |
+| Langfuse | [Tracing quickstart](https://langfuse.com/docs/observability/get-started) | Trace ingestion and setup |
+| Langfuse | [Data model](https://langfuse.com/docs/observability/data-model) | Traces, observations, and sessions |
+| Phoenix | [Tracing integrations](https://arize.com/docs/phoenix/integrations) | OpenTelemetry/OpenInference integrations |
+| Phoenix | [Setup Phoenix OTEL](https://www.arize.com/docs/phoenix/tracing/how-to-tracing/setup-tracing/setup-using-phoenix-otel) | Export and collector setup |
 
 ## The `run_type` Coupling — Read This Before Renaming A `SpanKind`
 

@@ -63,9 +63,8 @@ that contract so an adapter can be reviewed without leaving the repository.
 > documentation is not MIT-licensed, so the contract below is written in our own words with
 > attribution rather than quoted verbatim.
 
-> **sources:** `developers.openai.com/api`, `docs.anthropic.com`, `ai.google.dev`,
-> `elevenlabs.io/docs`, `openrouter.ai/docs`, `docs.x.ai`
-> **retrieved:** 2026-08-16
+> **sources:** the first-party links in the provider reference table below
+> **retrieved:** 2026-08-29
 > **verified_by:** every module in `vidbyte/providers/`
 > **scope:** Endpoint paths, auth headers, and response usage/text extraction paths. Excludes
 > per-model parameter semantics and rate limits.
@@ -82,6 +81,28 @@ that contract so an adapter can be reviewed without leaving the repository.
 | OpenRouter | `openrouter.py` | `Authorization: Bearer` | OpenAI-compatible surface |
 | PlayAI | `playai.py` | vendor key header | text-to-speech |
 | Generic | `compatible.py` | `Authorization: Bearer` | any OpenAI-compatible endpoint |
+
+## Official Provider Documentation
+
+These are the current first-party references for the registered model providers.
+The links provide the external contract behind the matrix above; they do not
+freeze model catalogs, pricing, or rate limits in this repository.
+
+| Provider | API overview | Contract reference |
+| --- | --- | --- |
+| OpenAI | [API docs](https://developers.openai.com/api/docs/) | [Responses](https://developers.openai.com/api/docs/guides/text?api-mode=responses), [embeddings](https://developers.openai.com/api/docs/guides/embeddings) |
+| Anthropic | [API overview](https://docs.anthropic.com/en/api/overview) | [Messages API](https://docs.anthropic.com/en/api/messages) |
+| Gemini | [Gemini API docs](https://ai.google.dev/gemini-api/docs) | [Generate content](https://ai.google.dev/api/generate-content), [embeddings](https://ai.google.dev/api/embeddings) |
+| xAI | [Developer docs](https://docs.x.ai/) | [Inference API](https://docs.x.ai/developers/rest-api-reference/inference) |
+| DeepSeek | [API docs](https://api-docs.deepseek.com/) | [Chat completion](https://api-docs.deepseek.com/api/create-chat-completion) |
+| GLM / Z.AI | [Developer docs](https://docs.z.ai/) | [Chat completion](https://docs.z.ai/api-reference/llm/chat-completion) |
+| MiniMax | [Developer docs](https://platform.minimaxi.com/docs/guides/text-generation) | [Image generation](https://platform.minimaxi.com/docs/api-reference/image-generation-t2i) |
+| Kimi / Moonshot | [API overview](https://platform.kimi.ai/docs/api/overview) | [Official tools](https://platform.kimi.ai/docs/guide/use-official-tools) |
+| Meta Llama | [Developer resources](https://ai.meta.com/llama/get-started/) | [Llama API docs](https://llama.developer.meta.com/docs) |
+| Mistral | [Documentation](https://docs.mistral.ai/) | [SDKs](https://docs.mistral.ai/resources/sdks) |
+| OpenRouter | [Quickstart](https://openrouter.ai/docs/quickstart) | [API reference](https://openrouter.ai/docs/api-reference/overview) |
+| ElevenLabs | [API reference](https://elevenlabs.io/docs/api-reference/introduction/) | [Text to speech](https://elevenlabs.io/docs/api-reference/text-to-speech/convert) |
+| PlayAI | [Developer docs](https://docs.play.ai/) | [Text-to-speech guide](https://docs.play.ai/tts-api) |
 
 Two auth details are vendor-specific and neither is guessable from the code alone:
 
