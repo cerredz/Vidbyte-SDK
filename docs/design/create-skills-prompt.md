@@ -286,4 +286,3 @@ Complete list of every file that will be created, modified, or deleted:
 
 - What: Store the supplied principles as a reference list with no role, sequence, setup, verification, review, or output contract.
 - Why rejected: A list would preserve information but would not reliably cause an agent to create a bounded skill. The requested source review adds operational patterns that must be turned into decisions and checks.
-
