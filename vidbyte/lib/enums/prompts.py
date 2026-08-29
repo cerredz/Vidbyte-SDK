@@ -5,8 +5,8 @@ Description:
     single source of truth for prompt identifiers.
 
 Purpose:
-    Enables static typing, autocomplete, and validation for the 59 static prompt templates
-    across 21 JSON/Markdown-backed families, including multi-agent manager, isolated critic
+    Enables static typing, autocomplete, and validation for the 60 static prompt templates
+    across 22 JSON/Markdown-backed families, including multi-agent manager, isolated critic
     review, and prosecutor/defender/judge debate phases.
 
 Architecture and Key Functions:
@@ -33,6 +33,7 @@ from enum import Enum
 class Prompt(str, Enum):
     """Prompt keys for Vidbyte SDK prompt assets."""
 
+    CREATE_SKILLS_CREATE_SKILL = "create_skills.create_skill"
     AGENTIC_ENGINEERING_ERROR_MESSAGES = "agentic_engineering.error_messages"
     AGENTIC_ENGINEERING_FEATURE_TEST_PACKS = "agentic_engineering.feature_test_packs"
     AGENTIC_ENGINEERING_FILE_HEADERS = "agentic_engineering.file_headers"
