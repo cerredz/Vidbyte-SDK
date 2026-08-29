@@ -9,6 +9,10 @@ Architecture:
     - ProviderUsage: ABC exposing the uniform surface (input/output/total/cost_usd)
       and the shared token-coercion, nested-payload reads, derived accessors, and
       cost-math the subclasses build on.
+Key Functions:
+    - total_prompt_tokens: Prompt-size denominator for cache_hit_rate; defaults to
+      input_tokens, overridden by additive-bucket providers (Anthropic).
+    - cache_hit_rate: Fraction of a call's prompt tokens served from cache.
 Relations:
     Subclassed by the provider modules in this package; a provider's subclass is
     resolved from ModelProvider.usage_class and consumed by UsageTracker.
@@ -63,6 +67,24 @@ class ProviderUsage(ABC):
     def cached_input_tokens(self) -> int | None:
         # Billed cached-input subset of input tokens; None unless a provider reports it.
         return None
+
+    @property
+    def total_prompt_tokens(self) -> int | None:
+        # All tokens considered part of this call's prompt, cached or fresh — the
+        # denominator for cache_hit_rate. Subset-billing providers already fold the
+        # cached subset into input_tokens, so this defaults to input_tokens;
+        # additive-bucket providers (Anthropic) override it to include their
+        # separate cache-read/cache-write buckets.
+        return self.input_tokens
+
+    @property
+    def cache_hit_rate(self) -> float | None:
+        # Fraction of this call's prompt tokens served from cache; None when either
+        # prompt size or cache data is unreported by the provider.
+        total = self.total_prompt_tokens
+        if total is None or total <= 0 or self.cached_input_tokens is None:
+            return None
+        return min(self.cached_input_tokens, total) / total
 
     @staticmethod
     def coerce_int(value: Any) -> int | None:
