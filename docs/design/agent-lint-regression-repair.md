@@ -618,4 +618,3 @@ Complete list of every file that will be created, modified, or deleted:
 
 - What: Return a shortened `str(exc)`.
 - Why rejected: Truncation does not remove secrets, paths, payload fragments, or unstable dependency wording.
-
