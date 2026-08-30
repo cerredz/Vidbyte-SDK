@@ -182,7 +182,7 @@ class ReasoningTraceTool(BaseTool):
 
 #### Logic / Algorithm
 
-1. Validate immutable definitions with `ReasoningTraceDefinitionError` and safe reason/name details.
+1. Validate immutable definitions with `ReasoningTraceDefinitionError` and a canonical safe diagnostic packet.
 2. Dispatch one declaration to a class-bound type-specific normalizer.
 3. Raise `ReasoningTraceArgumentError` with parameter/expectation metadata, preserving parse causes with exception chaining.
 4. Materialize canonical string fields and confidence through narrow helpers before constructing the context item.
@@ -193,6 +193,7 @@ class ReasoningTraceTool(BaseTool):
 - NaN and infinity remain invalid.
 - Empty arrays and arrays that normalize entirely to blank strings remain invalid.
 - Unsupported declaration types fail with a typed contract error.
+- The manager-bound cast is limited to the frozen-dataclass/writable-protocol attribute mismatch; the item supplies every `ContextItem` field and method at runtime.
 
 ### 6.4 Redacted Context Write Failures
 

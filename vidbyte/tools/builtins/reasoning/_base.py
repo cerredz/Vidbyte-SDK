@@ -108,6 +108,7 @@ class ReasoningTraceTool(BaseTool):
         try:
             values = self._normalize_arguments(args)
             item = self._build_item(values)
+            # The frozen item satisfies ContextItem structurally; this bridges mypy's writable-protocol attribute check.
             self._manager.upsert(cast(ContextItem, item))
         except ReasoningTraceArgumentError as exc:
             return ToolResult.error(
