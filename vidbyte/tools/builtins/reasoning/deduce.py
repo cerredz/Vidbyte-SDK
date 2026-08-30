@@ -1,5 +1,14 @@
 """Context Protocol Header
 
+FILE: vidbyte/tools/builtins/reasoning/deduce.py
+PURPOSE: Implements the model-callable deduce reasoning tool and records its structured result in the active context manager.
+ROLE IN CODEBASE: The builtins catalog exports this hand-maintained strategy tool alongside the larger reasoning-trace catalog.
+ARCHITECTURE NOTE: This module owns its ToolSpec and context-item construction; _parsing.py owns shared input coercion and ContextManager owns placement.
+COMMON MODIFICATION PATTERNS: Keep tool and primitive fields synchronized, preserve model-facing semantics, and run focused lint plus canonical CI.
+KNOWN EDGE CASES: Model arguments may be JSON-encoded or malformed, and a context write may reject an otherwise parsed record.
+RELATED DOCS: vidbyte/tools/README.md and field-guide/vidbyte-sdk/model-facing-tool-contracts.md.
+TESTS: scripts/check_reasoning_trace_contracts.py and the source/package stages in scripts/run_ci.py.
+
 Description:
     Implements DeduceTool — a model-callable builtin for recording a deductive
     chain into the active ContextManager.
@@ -48,12 +57,12 @@ class DeduceTool(BaseTool):
         return ToolSpec(
             name="deduce",
             description=(
-                "Run a deductive inference: state the premises, name the logical rule that "
-                "connects them, and derive the conclusion that necessarily follows. Use this "
-                "when a conclusion should be checkable against explicit premises rather than "
-                "asserted from authority. Deductive validity guarantees the conclusion only if "
-                "every premise is true, so a soundness caveat naming the weakest premise is "
-                "required alongside the conclusion."
+                "Use this tool when a conclusion should follow necessarily from explicit "
+                "premises. It records the premises, the logical rule connecting them, and the "
+                "derived conclusion as one checkable chain. A soundness caveat identifies the "
+                "premise whose uncertainty most threatens the otherwise valid inference. The "
+                "resulting record should separate logical validity from confidence that the "
+                "premises are true."
             ),
             parameters=(
                 ToolParameter(
@@ -133,8 +142,12 @@ class DeduceTool(BaseTool):
 
         try:
             self._manager.upsert(item)
-        except ValueError as exc:
-            return ToolResult.error(call.tool_name, str(exc))
+        except ValueError:
+            return ToolResult.error(
+                call.tool_name,
+                "The reasoning record could not be stored because its context values were invalid.",
+                metadata={"error": "invalid_reasoning_context"},
+            )
 
         return ToolResult.success(call.tool_name, item.to_context_text())
 

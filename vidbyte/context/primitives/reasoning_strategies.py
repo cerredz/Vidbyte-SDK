@@ -1,5 +1,14 @@
 """Context Protocol Header
 
+FILE: vidbyte/context/primitives/reasoning_strategies.py
+PURPOSE: Defines bounded context records for the ten hand-maintained named reasoning strategy tools.
+ROLE IN CODEBASE: Named reasoning tools construct these immutable records and ContextManager renders them into later model context.
+ARCHITECTURE NOTE: Primitive classes own data shape and deterministic rendering; tool modules own model input parsing and placement calls.
+COMMON MODIFICATION PATTERNS: Change a tool and its matching primitive fields/rendering together, preserving bounds and package exports.
+KNOWN EDGE CASES: Nested mappings render selectively, long text is truncated at output, and metadata remains caller-supplied.
+RELATED DOCS: vidbyte/tools/README.md and docs/design/context-window-primitives.md.
+TESTS: scripts/check_context_primitive_introductions.py, scripts/check_reasoning_trace_contracts.py, and scripts/run_ci.py.
+
 Description:
     Defines context primitives for named scientific-reasoning strategies:
     deduction, induction, abduction, analogy, causal-chain reasoning, Bayesian

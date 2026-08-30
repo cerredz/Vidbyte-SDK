@@ -1,5 +1,14 @@
 """Context Protocol Header
 
+FILE: vidbyte/tools/builtins/reasoning/analogy.py
+PURPOSE: Implements the model-callable analogy reasoning tool and records its structured result in the active context manager.
+ROLE IN CODEBASE: The builtins catalog exports this hand-maintained strategy tool alongside the larger reasoning-trace catalog.
+ARCHITECTURE NOTE: This module owns its ToolSpec and context-item construction; _parsing.py owns shared input coercion and ContextManager owns placement.
+COMMON MODIFICATION PATTERNS: Keep tool and primitive fields synchronized, preserve model-facing semantics, and run focused lint plus canonical CI.
+KNOWN EDGE CASES: Model arguments may be JSON-encoded or malformed, and a context write may reject an otherwise parsed record.
+RELATED DOCS: vidbyte/tools/README.md and field-guide/vidbyte-sdk/model-facing-tool-contracts.md.
+TESTS: scripts/check_reasoning_trace_contracts.py and the source/package stages in scripts/run_ci.py.
+
 Description:
     Implements AnalogyTool — a model-callable builtin for recording an
     analogical transfer into the active ContextManager.
@@ -55,12 +64,12 @@ class AnalogyTool(BaseTool):
         return ToolSpec(
             name="analogy",
             description=(
-                "Reason from a familiar source domain to an unfamiliar target domain by naming "
-                "the specific structural correspondences between them. Use this to transfer "
-                "understanding, not just to decorate an explanation with a comparison. Every "
-                "analogy breaks down somewhere and this tool requires you to say where, and to "
-                "declare whether the analogy is only explaining an idea or is actually being "
-                "used to justify a decision."
+                "Use this tool when understanding can be transferred between domains through "
+                "shared structure. It records specific correspondences instead of relying on a "
+                "surface-level comparison. The breakdown point and intended use expose where "
+                "the transfer stops being reliable and whether it supports explanation or "
+                "decision-making. The resulting record should make both the useful mapping and "
+                "its limits inspectable."
             ),
             parameters=(
                 ToolParameter(
@@ -155,8 +164,12 @@ class AnalogyTool(BaseTool):
 
         try:
             self._manager.upsert(item)
-        except ValueError as exc:
-            return ToolResult.error(call.tool_name, str(exc))
+        except ValueError:
+            return ToolResult.error(
+                call.tool_name,
+                "The reasoning record could not be stored because its context values were invalid.",
+                metadata={"error": "invalid_reasoning_context"},
+            )
 
         return ToolResult.success(call.tool_name, item.to_context_text())
 
