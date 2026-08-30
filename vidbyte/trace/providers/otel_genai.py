@@ -1,4 +1,13 @@
-"""OpenTelemetry GenAI semantic conventions translator for Vidbyte semantic spans."""
+"""FILE: vidbyte/trace/providers/otel_genai.py
+
+PURPOSE: Maps Vidbyte SpanSpec objects into OpenTelemetry GenAI semantic convention attributes.
+ROLE IN CODEBASE: One ProviderTraceTranslator implementation selected via provider="otel-genai".
+ARCHITECTURE NOTE: Only agent/LLM/tool span kinds use verified gen_ai.* fields; everything else falls back to a namespaced vidbyte.* passthrough.
+COMMON MODIFICATION PATTERNS: Add a new _translate_* branch and its consumed-key set together when a new span kind's gen_ai.* mapping is verified against the live spec.
+KNOWN EDGE CASES: Missing model/tool_name/agent_name fall back to stable placeholders instead of raising.
+RELATED DOCS: docs/design/otel-genai-and-openinference-trace-shapes.md
+TESTS: tests/test_otel_genai_trace_shape.py
+"""
 
 from __future__ import annotations
 

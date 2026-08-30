@@ -1,4 +1,13 @@
-"""Public Trace facade for SDK tracing presets."""
+"""FILE: vidbyte/trace/base.py
+
+PURPOSE: Public Trace facade exposing built-in, provider-backed, and profiled tracing presets.
+ROLE IN CODEBASE: The single discoverable entry point users call instead of the lower-level TracerBase/TraceController/translator types directly.
+ARCHITECTURE NOTE: Every preset returns a TracerBase-compatible object; _TraceFactory resolves provider= strings into concrete ProviderTraceTranslator instances.
+COMMON MODIFICATION PATTERNS: Add a new provider by adding a raw Trace.<name>() constructor, a profiled Trace.<name>_default()-style helper, and a resolve_translator() string branch together.
+KNOWN EDGE CASES: Construction errors from provider adapters (missing package, missing credentials/endpoint) propagate unchanged; this facade never swallows them.
+RELATED DOCS: docs/design/trace-facade.md, docs/design/otel-genai-and-openinference-trace-shapes.md
+TESTS: tests/test_trace_facade.py, tests/test_otel_genai_trace_shape.py, tests/test_openinference_trace_shape.py
+"""
 
 from __future__ import annotations
 
@@ -158,7 +167,7 @@ class Trace:
         service_name: str | None = None,
         name: str | None = None,
         profile: TraceProfile | None = None,
-    ) -> SessionTraceController:
+    ) -> SessionTraceController | SessionTracer:
         # Builds an OTel tracer wrapped in a session-capable OTel GenAI trace root.
         inner = Trace.otel(endpoint=endpoint, headers=headers, service_name=service_name)
         return Trace.session(inner, name=name, profile=profile or TraceProfile.default(), provider="otel-genai")
@@ -184,7 +193,7 @@ class Trace:
         service_name: str | None = None,
         name: str | None = None,
         profile: TraceProfile | None = None,
-    ) -> SessionTraceController:
+    ) -> SessionTraceController | SessionTracer:
         # Builds an OTel tracer wrapped in a session-capable OpenInference trace root.
         inner = Trace.otel(endpoint=endpoint, headers=headers, service_name=service_name)
         return Trace.session(inner, name=name, profile=profile or TraceProfile.default(), provider="openinference")

@@ -1,4 +1,13 @@
-"""OpenInference semantic conventions translator for Vidbyte semantic spans."""
+"""FILE: vidbyte/trace/providers/openinference.py
+
+PURPOSE: Maps Vidbyte SpanSpec objects into OpenInference semantic convention attributes.
+ROLE IN CODEBASE: One ProviderTraceTranslator implementation selected via provider="openinference".
+ARCHITECTURE NOTE: openinference.span.kind is set on every span; only LLM/TOOL kinds get further verified field mappings.
+COMMON MODIFICATION PATTERNS: Add a new _translate_* branch and its consumed-key set together when a new span kind's field mapping is verified against the live spec.
+KNOWN EDGE CASES: Tool call arguments are JSON-encoded, never a Python repr, so downstream consumers can parse them.
+RELATED DOCS: docs/design/otel-genai-and-openinference-trace-shapes.md
+TESTS: tests/test_openinference_trace_shape.py
+"""
 
 from __future__ import annotations
 

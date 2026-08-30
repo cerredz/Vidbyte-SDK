@@ -1,3 +1,14 @@
+"""FILE: tests/test_openinference_trace_shape.py
+
+PURPOSE: Verifies OpenInferenceProviderTranslator output against the live OpenInference spec's required fields.
+ROLE IN CODEBASE: Golden-fixture, facade, and Phoenix-interop test suite for the "openinference" provider shape.
+ARCHITECTURE NOTE: Required field sets are hardcoded constants sourced from the spec doc cited in the design doc, not fetched live, to stay deterministic and offline.
+COMMON MODIFICATION PATTERNS: Update the golden field sets only after re-verifying the live spec document; keep translator, facade, and Phoenix interop coverage in this one file.
+KNOWN EDGE CASES: Phoenix interop tests never call end_span/end_trace on a live PhoenixTracer's real span to avoid a network export attempt, except through the balanced try/finally full-pipeline test, which must stay balanced to avoid leaking TraceController's shared span-stack ContextVar into other tests.
+RELATED DOCS: docs/design/otel-genai-and-openinference-trace-shapes.md
+TESTS: This file is the test.
+"""
+
 from __future__ import annotations
 
 import json

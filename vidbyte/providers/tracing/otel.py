@@ -1,3 +1,14 @@
+"""FILE: vidbyte/providers/tracing/otel.py
+
+PURPOSE: Ships Vidbyte semantic spans over standard OTLP/HTTP to any OTel-compatible collector.
+ROLE IN CODEBASE: Destination-agnostic transport paired with a ProviderTraceTranslator shape.
+ARCHITECTURE NOTE: Mirrors PhoenixTracer's OTel SDK plumbing but never guesses a semantic shape itself.
+COMMON MODIFICATION PATTERNS: Add new resolvable endpoint env vars or resource attributes here, not in a translator.
+KNOWN EDGE CASES: Missing opentelemetry-sdk or an unresolvable endpoint raise TracerConfigurationError at construction; every per-call method fails open.
+RELATED DOCS: docs/design/otel-genai-and-openinference-trace-shapes.md
+TESTS: tests/test_otel_tracer_transport.py
+"""
+
 from __future__ import annotations
 
 import json

@@ -1,3 +1,14 @@
+"""FILE: tests/test_otel_genai_trace_shape.py
+
+PURPOSE: Verifies OTelGenAIProviderTranslator output against the live OTel GenAI spec's required fields.
+ROLE IN CODEBASE: Golden-fixture and facade test suite for the "otel-genai" provider shape.
+ARCHITECTURE NOTE: Required field sets are hardcoded constants sourced from the spec docs cited in the design doc, not fetched live, to stay deterministic and offline.
+COMMON MODIFICATION PATTERNS: Update the golden field sets only after re-verifying the live spec document; keep translator and facade coverage in this one file.
+KNOWN EDGE CASES: Redaction inheritance from TraceController and profile-suppression composition are covered as full-path integration tests, not translator unit tests alone.
+RELATED DOCS: docs/design/otel-genai-and-openinference-trace-shapes.md
+TESTS: This file is the test.
+"""
+
 from __future__ import annotations
 
 import unittest
@@ -128,6 +139,28 @@ class OTelGenAIProfileCompositionTests(unittest.TestCase):
         controller.end_trace(root)
         names = [e.get("name") for e in events]
         self.assertNotIn("algorithm.reflexion.trial", names)
+
+
+class OTelGenAIWorksThroughExistingProvidersTests(unittest.TestCase):
+    def test_gen_ai_shaped_payload_survives_a_real_langsmith_tracer_unchanged(self) -> None:
+        # [Hidden Failure] "Works for all providers" means the shape must also survive a non-OTel
+        # inner tracer's real code path, not only the new OTelTracer/PhoenixTracer. Mocks langsmith.Client
+        # to avoid a real network call while exercising LangSmithTracer's actual start_span implementation.
+        from unittest.mock import MagicMock, patch
+
+        with patch("langsmith.Client", return_value=MagicMock()):
+            from vidbyte.providers.tracing import LangSmithTracer
+
+            langsmith_tracer = LangSmithTracer(api_key="fake-key", project="p")
+        controller = TraceController(inner=langsmith_tracer, profile=TraceProfile.default(), translator=OTelGenAIProviderTranslator())
+        root = controller.start_trace("agent.run", agent_name="a")
+        span = controller.start_span("tool.call", parent=root, tool_name="web_search", call_id="c1", arguments={"q": "x"})
+        controller.end_span(span)
+        controller.end_trace(root)
+        create_run_calls = langsmith_tracer._client.create_run.call_args_list
+        tool_call_kwargs = create_run_calls[-1].kwargs
+        self.assertEqual(tool_call_kwargs["inputs"]["gen_ai.tool.name"], "web_search")
+        self.assertEqual(tool_call_kwargs["inputs"]["gen_ai.tool.call.arguments"], {"q": "x"})
 
 
 class OTelGenAIFacadeTests(unittest.TestCase):

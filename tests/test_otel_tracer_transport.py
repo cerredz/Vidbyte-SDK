@@ -1,3 +1,14 @@
+"""FILE: tests/test_otel_tracer_transport.py
+
+PURPOSE: Verifies OTelTracer's construction failures, attribute coercion, and span lifecycle.
+ROLE IN CODEBASE: Transport-layer test suite shared by both new trace shape prebuilts.
+ARCHITECTURE NOTE: Uses OpenTelemetry's real InMemorySpanExporter, never the network, for genuine SDK round trips.
+COMMON MODIFICATION PATTERNS: Add a new coercion or lifecycle case here; add shape-specific field assertions to the per-shape test files instead.
+KNOWN EDGE CASES: Attribute coercion (dict->JSON, None skipped, primitives passthrough) and fail-open per-call behavior are covered explicitly.
+RELATED DOCS: docs/design/otel-genai-and-openinference-trace-shapes.md
+TESTS: This file is the test.
+"""
+
 from __future__ import annotations
 
 import json
