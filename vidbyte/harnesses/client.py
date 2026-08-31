@@ -18,7 +18,8 @@ ARCHITECTURE NOTE:
 
 PUBLIC API INVENTORY:
     HarnessClient.register(), load(), memory_store(), file_store(), memory_sink(),
-    file_sink(), and the sessions attribute retained for backward compatibility.
+    file_sink(), s3_sink(), gcs_sink(), azure_blob_sink(), and the sessions
+    attribute retained for backward compatibility.
 
 WHAT NOT TO DO IN THIS FILE:
     1. Do not persist or execute during load().
@@ -29,11 +30,13 @@ WHAT NOT TO DO IN THIS FILE:
 KNOWN EDGE CASES:
     load() requires either a direct foreign implementation or exactly one registered
     factory for the config's harness type; version now lives in code, so config-only
-    resolution selects by type. A future WarehouseTrajectorySink implements the same
-    TrajectorySink protocol with zero client changes.
+    resolution selects by type. s3_sink()/gcs_sink()/azure_blob_sink() are thin
+    pass-through constructors, exactly like file_sink(); all Config/Credentials
+    validation happens inside the sink's own construction, not here.
 
 RELATED DOCS:
     https://github.com/cerredz/Vidbyte-SDK/blob/main/docs/design/harness-execution-contract.md
+    https://github.com/cerredz/Vidbyte-SDK/blob/main/docs/design/cloud-trajectory-sinks.md
 
 TESTS:
     Exercised by inline direct/registered/session/sink smoke checks; no dedicated
@@ -49,7 +52,8 @@ from typing import Any
 from vidbyte.harnesses.config import HarnessConfigLoader
 from vidbyte.harnesses.execution import Harness, wrap_implementation
 from vidbyte.harnesses.registry import HarnessFactory, HarnessRegistry
-from vidbyte.harnesses.stores import FileTrajectorySink, InMemoryTrajectorySink, TrajectorySink
+from vidbyte.harnesses.stores import AzureBlobTrajectorySink, FileTrajectorySink, GcsTrajectorySink, InMemoryTrajectorySink, S3TrajectorySink, TrajectorySink
+from vidbyte.lib.dataclasses.cloud_sinks import AzureBlobCredentials, AzureBlobSinkConfig, GcsCredentials, GcsSinkConfig, S3Credentials, S3SinkConfig
 from vidbyte.sessions.client import SessionClient
 from vidbyte.sessions.store import SessionStore
 from vidbyte.sessions.stores.file import FileSessionStore
@@ -97,6 +101,18 @@ class HarnessClient:
     def file_sink(self, path: str | Path) -> FileTrajectorySink:
         # Creates an append-only JSONL trajectory sink at an explicit destination.
         return FileTrajectorySink(path)
+
+    def s3_sink(self, config: S3SinkConfig, *, credentials: S3Credentials | None = None) -> S3TrajectorySink:
+        # Creates a trajectory sink that writes one JSONL object per run into a customer-owned S3(-compatible) bucket.
+        return S3TrajectorySink(config, credentials=credentials)
+
+    def gcs_sink(self, config: GcsSinkConfig, *, credentials: GcsCredentials | None = None) -> GcsTrajectorySink:
+        # Creates a trajectory sink that writes one JSONL object per run into a customer-owned Google Cloud Storage bucket.
+        return GcsTrajectorySink(config, credentials=credentials)
+
+    def azure_blob_sink(self, config: AzureBlobSinkConfig, *, credentials: AzureBlobCredentials) -> AzureBlobTrajectorySink:
+        # Creates a trajectory sink that writes one JSONL object per run into a customer-owned Azure Blob Storage container.
+        return AzureBlobTrajectorySink(config, credentials=credentials)
 
 
 __all__ = ["HarnessClient"]
