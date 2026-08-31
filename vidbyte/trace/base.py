@@ -14,6 +14,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import Any
 
+from vidbyte.lib.enums.tracing import TraceProvider
 from vidbyte.lib.errors import ConfigurationError
 from vidbyte.lib.tracing import NullTracer, TracerBase
 from vidbyte.trace.controller import TraceController
@@ -98,7 +99,7 @@ class Trace:
         return Trace.profile(
             Trace.langsmith(api_key=api_key, project=project, endpoint=endpoint, strict=strict, include_runtime_info=include_runtime_info),
             profile=TraceProfile.default(),
-            provider="langsmith",
+            provider=TraceProvider.LANGSMITH.value,
         )
 
     @staticmethod
@@ -107,7 +108,7 @@ class Trace:
         return Trace.profile(
             Trace.langsmith(api_key=api_key, project=project, endpoint=endpoint, strict=strict, include_runtime_info=include_runtime_info),
             profile=TraceProfile.verbose(),
-            provider="langsmith",
+            provider=TraceProvider.LANGSMITH.value,
         )
 
     @staticmethod
@@ -127,7 +128,7 @@ class Trace:
         inner = Trace.langsmith(api_key=api_key, project=project, endpoint=endpoint, strict=strict, include_runtime_info=include_runtime_info)
         if default_name is not None or default_attributes is not None:
             return SessionTracer(inner, default_name=default_name or "session.run", default_attributes=default_attributes)
-        return Trace.session(inner, name=name, profile=profile or TraceProfile.default(), provider="langsmith")
+        return Trace.session(inner, name=name, profile=profile or TraceProfile.default(), provider=TraceProvider.LANGSMITH.value)
 
     @staticmethod
     def phoenix(endpoint: str | None = None) -> TracerBase:
@@ -138,7 +139,7 @@ class Trace:
     @staticmethod
     def phoenix_default(endpoint: str | None = None, profile: TraceProfile | None = None) -> TraceController:
         # Builds a Phoenix tracer wrapped in the OpenInference semantic profile.
-        return Trace.profile(Trace.phoenix(endpoint=endpoint), profile=profile or TraceProfile.default(), provider="openinference")
+        return Trace.profile(Trace.phoenix(endpoint=endpoint), profile=profile or TraceProfile.default(), provider=TraceProvider.OPENINFERENCE.value)
 
     @staticmethod
     def otel(endpoint: str | None = None, headers: Mapping[str, str] | None = None, service_name: str | None = None) -> TracerBase:
@@ -157,7 +158,7 @@ class Trace:
         return Trace.profile(
             Trace.otel(endpoint=endpoint, headers=headers, service_name=service_name),
             profile=profile or TraceProfile.default(),
-            provider="otel-genai",
+            provider=TraceProvider.OTEL_GENAI.value,
         )
 
     @staticmethod
@@ -170,7 +171,7 @@ class Trace:
     ) -> SessionTraceController | SessionTracer:
         # Builds an OTel tracer wrapped in a session-capable OTel GenAI trace root.
         inner = Trace.otel(endpoint=endpoint, headers=headers, service_name=service_name)
-        return Trace.session(inner, name=name, profile=profile or TraceProfile.default(), provider="otel-genai")
+        return Trace.session(inner, name=name, profile=profile or TraceProfile.default(), provider=TraceProvider.OTEL_GENAI.value)
 
     @staticmethod
     def openinference(
@@ -183,7 +184,7 @@ class Trace:
         return Trace.profile(
             Trace.otel(endpoint=endpoint, headers=headers, service_name=service_name),
             profile=profile or TraceProfile.default(),
-            provider="openinference",
+            provider=TraceProvider.OPENINFERENCE.value,
         )
 
     @staticmethod
@@ -196,7 +197,7 @@ class Trace:
     ) -> SessionTraceController | SessionTracer:
         # Builds an OTel tracer wrapped in a session-capable OpenInference trace root.
         inner = Trace.otel(endpoint=endpoint, headers=headers, service_name=service_name)
-        return Trace.session(inner, name=name, profile=profile or TraceProfile.default(), provider="openinference")
+        return Trace.session(inner, name=name, profile=profile or TraceProfile.default(), provider=TraceProvider.OPENINFERENCE.value)
 
 
 class _TraceFactory:
@@ -215,13 +216,13 @@ class _TraceFactory:
     @staticmethod
     def resolve_translator(provider: str | ProviderTraceTranslator | None) -> ProviderTraceTranslator:
         # Converts a provider name or translator instance into a concrete translator.
-        if provider is None or provider == "generic":
+        if provider is None or provider == TraceProvider.GENERIC.value:
             return GenericProviderTranslator()
-        if provider == "langsmith":
+        if provider == TraceProvider.LANGSMITH.value:
             return LangSmithProviderTranslator()
-        if provider == "otel-genai":
+        if provider == TraceProvider.OTEL_GENAI.value:
             return OTelGenAIProviderTranslator()
-        if provider == "openinference":
+        if provider == TraceProvider.OPENINFERENCE.value:
             return OpenInferenceProviderTranslator()
         if hasattr(provider, "translate_start"):
             return provider

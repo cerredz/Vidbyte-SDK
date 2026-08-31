@@ -13,28 +13,28 @@ from __future__ import annotations
 
 from typing import Any
 
+from vidbyte.lib.dataclasses.tracing import (
+    OTelGenAIAgentShape,
+    OTelGenAILLMShape,
+    OTelGenAIShapeDefinition,
+    OTelGenAIToolShape,
+)
+from vidbyte.lib.enums.tracing import GenAIAttribute, GenAIOperation, OTelDefault, TraceProvider, TraceShapeNamespace
 from vidbyte.trace.providers.base import ProviderSpanPayload
 from vidbyte.trace.schema import SpanKind, SpanSpec
 
-_LLM_CONSUMED_KEYS = {
-    "model",
-    "provider",
-    "input_messages",
-    "messages",
-    "system",
-    "system_prompt",
-    "input_tokens",
-    "output_tokens",
-    "finish_reason",
-}
-_TOOL_CONSUMED_KEYS = {"tool_name", "call_id", "arguments", "tool_input"}
-_AGENT_CONSUMED_KEYS = {"agent_name", "provider", "run_id"}
+# Validated shape contract declared at the provider line so consumed keys are a single frozen object.
+trace_shape = OTelGenAIShapeDefinition()
+_LLM_CONSUMED_KEYS: frozenset[str] = trace_shape.llm_consumed_keys
+_TOOL_CONSUMED_KEYS: frozenset[str] = trace_shape.tool_consumed_keys
+_AGENT_CONSUMED_KEYS: frozenset[str] = trace_shape.agent_consumed_keys
 
 
 class OTelGenAIProviderTranslator:
     """Maps semantic span specs into the OpenTelemetry GenAI semantic conventions shape."""
 
-    provider = "otel-genai"
+    provider = TraceProvider.OTEL_GENAI.value
+    shape = trace_shape
 
     def translate_start(self, spec: SpanSpec) -> ProviderSpanPayload:
         # Dispatches to the verified agent/LLM/tool mapping, or a generic namespaced fallback.
@@ -47,64 +47,98 @@ class OTelGenAIProviderTranslator:
         return self._translate_generic(spec)
 
     def _translate_agent(self, spec: SpanSpec) -> ProviderSpanPayload:
-        # Maps an agent.run span into an invoke_agent span per gen-ai-agent-spans.md.
+        # Maps an agent.run span into an invoke_agent span per gen-ai-agent-spans.md via a validated shape dataclass.
         attrs = dict(spec.attributes)
-        agent_name = attrs.get("agent_name") or "agent"
-        out: dict[str, Any] = {"gen_ai.operation.name": "invoke_agent", "gen_ai.agent.name": agent_name}
-        if "provider" in attrs:
-            out["gen_ai.provider.name"] = attrs["provider"]
-        if "run_id" in attrs:
-            out["gen_ai.conversation.id"] = attrs["run_id"]
-        out.update(self._namespaced_extras(attrs, _AGENT_CONSUMED_KEYS))
-        return ProviderSpanPayload(name=f"invoke_agent {agent_name}", attributes=out)
+        agent_name = str(attrs.get("agent_name") or OTelDefault.UNKNOWN_AGENT.value)
+        provider_name = attrs.get("provider")
+        conversation_id = attrs.get("run_id")
+        agent_shape = OTelGenAIAgentShape(
+            span_name=f"{GenAIOperation.INVOKE_AGENT.value} {agent_name}",
+            operation_name=GenAIOperation.INVOKE_AGENT.value,
+            agent_name=agent_name,
+            provider_name=str(provider_name) if provider_name is not None else None,
+            conversation_id=str(conversation_id) if conversation_id is not None else None,
+            extras=self._namespaced_extras(attrs, _AGENT_CONSUMED_KEYS),
+        )
+        out: dict[str, Any] = {
+            GenAIAttribute.OPERATION_NAME.value: agent_shape.operation_name,
+            GenAIAttribute.AGENT_NAME.value: agent_shape.agent_name,
+        }
+        if agent_shape.provider_name is not None:
+            out[GenAIAttribute.PROVIDER_NAME.value] = agent_shape.provider_name
+        if agent_shape.conversation_id is not None:
+            out[GenAIAttribute.CONVERSATION_ID.value] = agent_shape.conversation_id
+        out.update(agent_shape.extras)
+        return ProviderSpanPayload(name=agent_shape.span_name, attributes=out)
 
     def _translate_llm(self, spec: SpanSpec) -> ProviderSpanPayload:
-        # Maps an LLM-kind span into a chat span per gen-ai-spans.md.
+        # Maps an LLM-kind span into a chat span per gen-ai-spans.md via a validated shape dataclass.
         attrs = dict(spec.attributes)
-        model = attrs.get("model") or "unknown"
+        model = str(attrs.get("model") or OTelDefault.UNKNOWN_MODEL.value)
+        provider_name = str(attrs.get("provider") or OTelDefault.UNKNOWN_MODEL.value)
+        llm_shape = OTelGenAILLMShape(
+            span_name=f"{GenAIOperation.CHAT.value} {model}",
+            operation_name=GenAIOperation.CHAT.value,
+            provider_name=provider_name,
+            request_model=model,
+            input_messages=attrs.get("input_messages") or attrs.get("messages"),
+            system_instructions=attrs.get("system") or attrs.get("system_prompt"),
+            input_tokens=attrs.get("input_tokens") if isinstance(attrs.get("input_tokens"), int) else None,
+            output_tokens=attrs.get("output_tokens") if isinstance(attrs.get("output_tokens"), int) else None,
+            finish_reasons=attrs.get("finish_reason"),
+            extras=self._namespaced_extras(attrs, _LLM_CONSUMED_KEYS),
+        )
         out: dict[str, Any] = {
-            "gen_ai.operation.name": "chat",
-            "gen_ai.provider.name": attrs.get("provider") or "unknown",
-            "gen_ai.request.model": model,
+            GenAIAttribute.OPERATION_NAME.value: llm_shape.operation_name,
+            GenAIAttribute.PROVIDER_NAME.value: llm_shape.provider_name,
+            GenAIAttribute.REQUEST_MODEL.value: llm_shape.request_model,
         }
-        input_messages = attrs.get("input_messages") or attrs.get("messages")
-        if input_messages is not None:
-            out["gen_ai.input.messages"] = input_messages
-        system = attrs.get("system") or attrs.get("system_prompt")
-        if system is not None:
-            out["gen_ai.system_instructions"] = system
-        if "input_tokens" in attrs:
-            out["gen_ai.usage.input_tokens"] = attrs["input_tokens"]
-        if "output_tokens" in attrs:
-            out["gen_ai.usage.output_tokens"] = attrs["output_tokens"]
-        if "finish_reason" in attrs:
-            out["gen_ai.response.finish_reasons"] = attrs["finish_reason"]
-        out.update(self._namespaced_extras(attrs, _LLM_CONSUMED_KEYS))
-        return ProviderSpanPayload(name=f"chat {model}", attributes=out)
+        if llm_shape.input_messages is not None:
+            out[GenAIAttribute.INPUT_MESSAGES.value] = llm_shape.input_messages
+        if llm_shape.system_instructions is not None:
+            out[GenAIAttribute.SYSTEM_INSTRUCTIONS.value] = llm_shape.system_instructions
+        if llm_shape.input_tokens is not None:
+            out[GenAIAttribute.USAGE_INPUT_TOKENS.value] = llm_shape.input_tokens
+        if llm_shape.output_tokens is not None:
+            out[GenAIAttribute.USAGE_OUTPUT_TOKENS.value] = llm_shape.output_tokens
+        if llm_shape.finish_reasons is not None:
+            out[GenAIAttribute.RESPONSE_FINISH_REASONS.value] = llm_shape.finish_reasons
+        out.update(llm_shape.extras)
+        return ProviderSpanPayload(name=llm_shape.span_name, attributes=out)
 
     def _translate_tool(self, spec: SpanSpec) -> ProviderSpanPayload:
-        # Maps a TOOL-kind span into an execute_tool span per execute-tool-span.md.
+        # Maps a TOOL-kind span into an execute_tool span per execute-tool-span.md via a validated shape dataclass.
         attrs = dict(spec.attributes)
-        tool_name = attrs.get("tool_name") or "unknown_tool"
-        out: dict[str, Any] = {"gen_ai.operation.name": "execute_tool", "gen_ai.tool.name": tool_name}
-        if "call_id" in attrs:
-            out["gen_ai.tool.call.id"] = attrs["call_id"]
-        arguments = attrs.get("arguments", attrs.get("tool_input"))
-        if arguments is not None:
-            out["gen_ai.tool.call.arguments"] = arguments
-        out.update(self._namespaced_extras(attrs, _TOOL_CONSUMED_KEYS))
-        return ProviderSpanPayload(name=f"execute_tool {tool_name}", attributes=out)
+        tool_name = str(attrs.get("tool_name") or OTelDefault.UNKNOWN_TOOL.value)
+        tool_shape = OTelGenAIToolShape(
+            span_name=f"{GenAIOperation.EXECUTE_TOOL.value} {tool_name}",
+            operation_name=GenAIOperation.EXECUTE_TOOL.value,
+            tool_name=tool_name,
+            call_id=str(attrs["call_id"]) if "call_id" in attrs else None,
+            call_arguments=attrs.get("arguments", attrs.get("tool_input")),
+            extras=self._namespaced_extras(attrs, _TOOL_CONSUMED_KEYS),
+        )
+        out: dict[str, Any] = {
+            GenAIAttribute.OPERATION_NAME.value: tool_shape.operation_name,
+            GenAIAttribute.TOOL_NAME.value: tool_shape.tool_name,
+        }
+        if tool_shape.call_id is not None:
+            out[GenAIAttribute.TOOL_CALL_ID.value] = tool_shape.call_id
+        if tool_shape.call_arguments is not None:
+            out[GenAIAttribute.TOOL_CALL_ARGUMENTS.value] = tool_shape.call_arguments
+        out.update(tool_shape.extras)
+        return ProviderSpanPayload(name=tool_shape.span_name, attributes=out)
 
     def _translate_generic(self, spec: SpanSpec) -> ProviderSpanPayload:
         # Falls back to the semantic name with every attribute namespaced, since no gen_ai.* shape was verified for this span.
         attrs = dict(spec.attributes)
-        out = {"gen_ai.operation.name": spec.name, **self._namespaced_extras(attrs, set())}
+        out = {GenAIAttribute.OPERATION_NAME.value: spec.name, **self._namespaced_extras(attrs, frozenset())}
         return ProviderSpanPayload(name=spec.name, attributes=out)
 
     @staticmethod
-    def _namespaced_extras(attrs: dict[str, Any], consumed: set[str]) -> dict[str, Any]:
+    def _namespaced_extras(attrs: dict[str, Any], consumed: frozenset[str]) -> dict[str, Any]:
         # Prefixes every attribute not already mapped to a standard gen_ai.* field with vidbyte. to avoid collisions.
-        return {f"vidbyte.{key}": value for key, value in attrs.items() if key not in consumed}
+        return {f"{TraceShapeNamespace.VIDBYTE.value}.{key}": value for key, value in attrs.items() if key not in consumed}
 
 
-__all__ = ["OTelGenAIProviderTranslator"]
+__all__ = ["OTelGenAIProviderTranslator", "trace_shape"]

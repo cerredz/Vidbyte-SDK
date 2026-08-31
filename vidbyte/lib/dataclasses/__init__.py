@@ -177,6 +177,17 @@ from vidbyte.lib.dataclasses.trace import (
     TraceOption,
     TraceSchema,
 )
+from vidbyte.lib.dataclasses.tracing import (
+    OTelGenAIAgentShape,
+    OTelGenAILLMShape,
+    OTelGenAIShapeDefinition,
+    OTelGenAIToolShape,
+    OTelSpanContextData,
+    OTelTracerConfig,
+    OpenInferenceLLMShape,
+    OpenInferenceShapeDefinition,
+    OpenInferenceToolShape,
+)
 from vidbyte.lib.dataclasses.tools import (
     ToolActivity,
     ToolCall,
@@ -211,6 +222,15 @@ __all__ = [
     "AllegationRecord",
     "AllegationSeverity",
     "ArtifactRef",
+    "OTelGenAIAgentShape",
+    "OTelGenAILLMShape",
+    "OTelGenAIShapeDefinition",
+    "OTelGenAIToolShape",
+    "OTelSpanContextData",
+    "OTelTracerConfig",
+    "OpenInferenceLLMShape",
+    "OpenInferenceShapeDefinition",
+    "OpenInferenceToolShape",
     "ArtifactContextItem",
     "BaseAgentContext",
     "BaseContext",

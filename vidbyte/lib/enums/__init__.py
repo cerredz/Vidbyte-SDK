@@ -53,6 +53,18 @@ from vidbyte.lib.enums.skills import ContextMinimalFanoutSkill, Skill
 from vidbyte.lib.enums.skills import Skills as SkillEnums
 from vidbyte.lib.enums.sources import PinPolicy
 from vidbyte.lib.enums.structured_output import StructuredOutputSupport
+from vidbyte.lib.enums.tracing import (
+    GenAIAttribute,
+    GenAIOperation,
+    OTelDefault,
+    OTelEndpointEnvVar,
+    OpenInferenceAttribute,
+    OpenInferenceSpanKind,
+    PhoenixEndpoint,
+    SpanNamePrefix,
+    TraceProvider,
+    TraceShapeNamespace,
+)
 
 __all__ = [
     "AgentRuntimeStateKey",
@@ -64,14 +76,21 @@ __all__ = [
     "ContextMinimalFanoutSkill",
     "CotEventEnum",
     "DocumentType",
+    "GenAIAttribute",
+    "GenAIOperation",
     "HypothesisStatus",
     "ImpactLevel",
     "ModelModality",
     "ModelNameModality",
     "ModelProvider",
     "MultiAgentStopReason",
+    "OTelDefault",
+    "OTelEndpointEnvVar",
+    "OpenInferenceAttribute",
+    "OpenInferenceSpanKind",
     "OrchestratorAction",
     "PermissionPreset",
+    "PhoenixEndpoint",
     "PinPolicy",
     "Platform",
     "ProgressState",
@@ -80,6 +99,9 @@ __all__ = [
     "Reversibility",
     "Skill",
     "SkillEnums",
+    "SpanNamePrefix",
     "StructuredOutputSupport",
     "TaskStatus",
+    "TraceProvider",
+    "TraceShapeNamespace",
 ]

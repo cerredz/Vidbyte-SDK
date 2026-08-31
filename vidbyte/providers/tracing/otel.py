@@ -17,11 +17,13 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
+from vidbyte.lib.dataclasses.tracing import OTelSpanContextData, OTelTracerConfig
+from vidbyte.lib.enums.tracing import OTelDefault, OTelEndpointEnvVar
 from vidbyte.lib.errors import TracerConfigurationError
 from vidbyte.lib.tracing.base import SpanContext, TracerBase
 
-_ENDPOINT_ENV_VARS = ("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", "OTEL_EXPORTER_OTLP_ENDPOINT")
-_DEFAULT_SERVICE_NAME = "vidbyte-agent"
+_ENDPOINT_ENV_VARS = (OTelEndpointEnvVar.TRACES_ENDPOINT.value, OTelEndpointEnvVar.ENDPOINT.value)
+_DEFAULT_SERVICE_NAME = OTelDefault.SERVICE_NAME.value
 
 
 @dataclass
@@ -52,7 +54,15 @@ class OTelTracer(TracerBase):
         headers: Mapping[str, str] | None = None,
         service_name: str | None = None,
         exporter: Any = None,
+        config: OTelTracerConfig | None = None,
     ) -> None:
+        # Validates inputs through OTelTracerConfig dataclass before building the SDK pipeline.
+        if config is not None:
+            if any(value is not None for value in (endpoint, headers, service_name, exporter)):
+                raise TracerConfigurationError("OTelTracer accepts either config= or endpoint/headers/service_name/exporter, not both.")
+            validated = config
+        else:
+            validated = OTelTracerConfig(endpoint=endpoint, headers=headers, service_name=service_name, exporter=exporter)
         # Resolves the OTel exporter/resource and builds a tracer provider, or raises TracerConfigurationError.
         try:
             from opentelemetry import trace
@@ -65,8 +75,8 @@ class OTelTracer(TracerBase):
                 "pip install opentelemetry-sdk opentelemetry-exporter-otlp-proto-http"
             ) from exc
 
-        resolved_exporter = exporter or self._build_default_exporter(endpoint=endpoint, headers=headers)
-        resource = Resource.create({"service.name": service_name or _DEFAULT_SERVICE_NAME})
+        resolved_exporter = validated.exporter or self._build_default_exporter(endpoint=validated.endpoint, headers=validated.headers)
+        resource = Resource.create({OTelDefault.RESOURCE_SERVICE_NAME_KEY.value: validated.service_name or _DEFAULT_SERVICE_NAME})
         provider = TracerProvider(resource=resource)
         provider.add_span_processor(SimpleSpanProcessor(resolved_exporter))
 
@@ -125,9 +135,9 @@ class OTelTracer(TracerBase):
             return
         try:
             if output is not None:
-                context.span.set_attribute("output.value", output)
+                context.span.set_attribute(OTelDefault.OUTPUT_VALUE.value, output)
             if error is not None:
-                context.span.set_attribute("error.message", str(error))
+                context.span.set_attribute(OTelDefault.ERROR_MESSAGE.value, str(error))
                 context.span.record_exception(error)
             context.span.end()
         except Exception:
