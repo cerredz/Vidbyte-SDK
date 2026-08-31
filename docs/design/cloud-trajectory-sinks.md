@@ -1,6 +1,6 @@
 # Design Doc: Cloud Trajectory Sinks (S3 / GCS / Azure Blob)
 
-**Status:** Draft
+**Status:** Implemented
 **Author:** Claude
 **Created:** 2026-08-31
 **Last Updated:** 2026-08-31
