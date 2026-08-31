@@ -119,6 +119,10 @@ Group failures that escaped for the same reason at the same transition. Use cate
 
 A cluster must name its common gate repair. If one repair cannot address every member, split the cluster.
 
+Do not declare a systemic stage-gap pattern from one escape. Require at least two evidence-backed failures that share the transition and gate capability gap.
+
+Retain singleton failures and unsupported hypotheses in an unclustered ledger. They may enter the ordinary fixer loop, but they must not be discarded or forced into a stage-gap cluster merely to simplify reporting.
+
 ### 5. Specify the Stage Contract
 
 For each affected transition, write:

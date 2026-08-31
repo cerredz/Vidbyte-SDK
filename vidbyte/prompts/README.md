@@ -174,6 +174,14 @@ independent check explicit before advancement, and requires the checks to reject
 relevant known-bad controls so fluent completion text or brittle green results
 cannot stand in for correctness.
 
+Prompt links:
+
+- [rulebook_feedback_loop](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/failure_pattern_repair/rulebook_feedback_loop.md)
+- [dependency_shape_triage](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/failure_pattern_repair/dependency_shape_triage.md)
+- [stage_gate_controller](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/failure_pattern_repair/stage_gate_controller.md)
+- [evaluator_red_team](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/failure_pattern_repair/evaluator_red_team.md)
+- [selective_regeneration_loop](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/failure_pattern_repair/selective_regeneration_loop.md)
+
 Link: <https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/failure_pattern_repair>
 
 #### Goal Behavior — `goals`

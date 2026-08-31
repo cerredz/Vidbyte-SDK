@@ -346,7 +346,7 @@ FAILURE_PATTERN_REPAIR_SELECTIVE_REGENERATION_LOOP = "failure_pattern_repair.sel
 
 #### What it does
 
-Adds a quick-reference row listing all five sub-prompts and a description explaining their shared purpose, distinct strategies, and direct family link.
+Adds a quick-reference row listing all five sub-prompts and a description explaining their shared purpose, distinct strategies, direct leaf links, and family link.
 
 #### Interface / API
 
@@ -360,12 +360,13 @@ Sub-prompts: rulebook_feedback_loop, dependency_shape_triage, stage_gate_control
 
 1. Add one quick-reference row using the existing GitHub link convention.
 2. Add one description section near related prompt families.
-3. Describe the family without duplicating full prompt bodies.
+3. Add a direct canonical Markdown link for every leaf so the personal prompt-collection skill can install a specific sub-prompt without guessing a path.
+4. Describe the family without duplicating full prompt bodies.
 
 #### Edge Cases & Error Handling
 
 - All displayed leaf names must match the descriptor exactly.
-- The link must target the family directory on the `main` branch.
+- Leaf links must target their Markdown assets and the family link must target its directory on the `main` branch.
 
 ---
 

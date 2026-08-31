@@ -87,7 +87,7 @@ Generate competing explanations:
 - Shared input class not validated.
 - Independent local defects with similar symptoms.
 
-For each hypothesis, state supporting evidence, counterevidence, and a falsifying observation. A systemic cluster requires multiple outputs or a demonstrated generator mutation capable of affecting multiple outputs. Preserve singletons separately.
+For each hypothesis, state supporting evidence, counterevidence, and a falsifying observation. A systemic cluster requires at least two evidence-backed output failures tied to the shared producer characteristic. A generator mutation may strengthen the causal case but does not replace the second observation. Preserve singletons separately.
 
 ### 3. Pre-Register the Proof Contract
 

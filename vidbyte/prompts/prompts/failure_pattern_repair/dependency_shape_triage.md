@@ -10,7 +10,7 @@ Turn a batch of failures into evidence-backed topology clusters, identify the na
 
 Every proposed repair must predeclare:
 
-1. The allowed dependency behavior.
+1. **Expected behavior** — the allowed dependency behavior in observable, falsifiable terms.
 2. A mechanical or repeatable detector for structural violations.
 3. An independent behavior check at an affected consumer or public boundary.
 
@@ -126,6 +126,10 @@ Create a compact signature for each incident using facts such as:
 - Platform or feature-flag condition.
 
 Use signatures to generate candidate clusters, then confirm them causally. Two incidents belong together only if one boundary repair plausibly changes both.
+
+Do not declare a systemic topology pattern from one incident. Require at least two evidence-backed incidents with the shared shape and causal boundary before promoting the hypothesis to a pattern cluster.
+
+Retain failures without a supported shared topology as unclustered incidents. Route them to individual diagnosis or further evidence gathering; do not force them into the nearest graph shape.
 
 ### 5. Identify the Earliest Shared Boundary
 

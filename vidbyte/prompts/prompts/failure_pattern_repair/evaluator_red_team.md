@@ -10,9 +10,9 @@ Attack the referee before trusting the score. Convert evaluator failures into cl
 
 The production workflow remains blocked until:
 
-1. Expected behavior is decomposed into observable claims.
-2. The evaluator detects violations of those claims.
-3. An independent oracle or checker corroborates the critical judgments.
+1. **Expected behavior** is decomposed into observable claims.
+2. A **failure detector**—the evaluator component responsible for each claim—detects violations of those claims.
+3. An **independent check** or oracle corroborates the critical judgments.
 4. Relevant known-bad controls are rejected and known-good controls are accepted.
 
 ## Suitable Inputs
@@ -186,7 +186,7 @@ Group surviving controls and false rejects by shared weakness:
 - Ground-truth contamination.
 - Independence failure.
 
-One cluster repair must plausibly change every member. Preserve unclustered anomalies.
+Do not declare a systemic evaluator pattern from one anomaly. Require at least two evidence-backed false accepts, false rejects, or surviving controls with the shared weakness. One cluster repair must plausibly change every member. Preserve unclustered anomalies.
 
 ### 9. Repair the Evaluator
 
