@@ -17,7 +17,7 @@ ARCHITECTURE NOTE:
 
 PUBLIC API INVENTORY:
     Re-exports HARNESS_SCHEMA_VERSION, HarnessRunStatus, HarnessSpec, HarnessRun,
-    TrajectoryRecord, and HarnessExecutionResult.
+    TrajectoryRecord, HarnessExecutionResult, and SinkFailureEvent.
 
 WHAT NOT TO DO IN THIS FILE:
     1. Do not duplicate dataclass definitions.
@@ -40,6 +40,7 @@ from vidbyte.lib.dataclasses.harnesses import (
     HarnessRun,
     HarnessRunStatus,
     HarnessSpec,
+    SinkFailureEvent,
     TrajectoryRecord,
 )
 
@@ -49,5 +50,6 @@ __all__ = [
     "HarnessRun",
     "HarnessRunStatus",
     "HarnessSpec",
+    "SinkFailureEvent",
     "TrajectoryRecord",
 ]
