@@ -14,6 +14,7 @@ Relations:
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from contextvars import ContextVar
 from typing import Any
 
@@ -42,16 +43,17 @@ class TraceController(TracerBase):
         spec = self._spec_from_name(name, attributes=attributes, root=True)
         return self.open_span(spec, parent=None, as_trace=True)
 
-    def end_trace(self, context: SpanContext, *, output: str | None = None, error: BaseException | None = None) -> None:
+    def end_trace(self, context: SpanContext, *, output: str | None = None, error: BaseException | None = None, **attributes: Any) -> None:
         # Closes a root semantic trace and restores the context-local parent stack.
         semantic = self._coerce_context(context)
         if semantic is None or semantic.suppressed:
             self._pop_context(semantic)
             return
+        translated = self._translate_end(semantic.spec, attributes)
         if semantic.metadata.get("as_trace"):
-            self.inner.end_trace(semantic.provider_context or SpanContext(), output=output, error=error)
+            self.inner.end_trace(semantic.provider_context or SpanContext(), output=output, error=error, **translated)
         else:
-            self.inner.end_span(semantic.provider_context or SpanContext(), output=output, error=error)
+            self.inner.end_span(semantic.provider_context or SpanContext(), output=output, error=error, **translated)
         self._pop_context(semantic)
 
     def start_span(self, name: str, parent: SpanContext | None = None, **attributes: Any) -> SemanticSpanContext:
@@ -59,14 +61,29 @@ class TraceController(TracerBase):
         spec = self._spec_from_name(name, attributes=attributes, root=False)
         return self.open_span(spec, parent=parent)
 
-    def end_span(self, context: SpanContext, *, output: str | None = None, error: BaseException | None = None) -> None:
+    def end_span(self, context: SpanContext, *, output: str | None = None, error: BaseException | None = None, **attributes: Any) -> None:
         # Closes a child semantic span and restores the context-local parent stack.
         semantic = self._coerce_context(context)
         if semantic is None or semantic.suppressed:
             self._pop_context(semantic)
             return
-        self.inner.end_span(semantic.provider_context or SpanContext(), output=output, error=error)
+        translated = self._translate_end(semantic.spec, attributes)
+        self.inner.end_span(semantic.provider_context or SpanContext(), output=output, error=error, **translated)
         self._pop_context(semantic)
+
+    def _translate_end(self, spec: SpanSpec | None, attributes: Mapping[str, Any]) -> dict[str, Any]:
+        # @intent redact-before-translate
+        # Close-time attributes must pass through the same safe_trace_value redaction _sanitize_spec
+        # already applies to open-time attributes before any translator sees them, so a translator
+        # never needs its own redaction logic and a secret-shaped key can never reach the wire.
+        # Sanitizes and translates close-time attributes; returns {} when there is nothing to translate.
+        if not attributes or spec is None:
+            return {}
+        translate_end = getattr(self.translator, "translate_end", None)
+        if translate_end is None:
+            return {}
+        sanitized = safe_trace_value(dict(attributes), max_chars=self.profile.max_chars, redact=self.profile.redact)
+        return translate_end(spec, sanitized)
 
     def open_span(self, spec: SpanSpec, parent: SpanContext | None = None, *, as_trace: bool = False) -> SemanticSpanContext:
         # Applies the profile and opens the translated provider span when allowed.

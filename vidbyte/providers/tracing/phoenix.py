@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 import os
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -63,18 +65,9 @@ class PhoenixTracer(TracerBase):
         *,
         output: str | None = None,
         error: BaseException | None = None,
+        **attributes: Any,
     ) -> None:
-        if not isinstance(context, PhoenixSpanContext) or context.span is None:
-            return
-        try:
-            if output is not None:
-                context.span.set_attribute("output.value", output)
-            if error is not None:
-                context.span.set_attribute("error.message", str(error))
-                context.span.record_exception(error)
-            context.span.end()
-        except Exception:
-            pass
+        self._end(context, output=output, error=error, attributes=attributes)
 
     def start_span(
         self,
@@ -89,13 +82,14 @@ class PhoenixTracer(TracerBase):
             span = self._tracer.start_span(name, context=ctx)
             for key, value in attributes.items():
                 span.set_attribute(key, str(value))
-            run_type = str(attributes.get("run_type", ""))
-            if name.startswith("llm.") or run_type == "llm":
-                span.set_attribute("openinference.span.kind", "LLM")
-            elif name.startswith("tool.") or run_type == "tool":
-                span.set_attribute("openinference.span.kind", "TOOL")
-            elif run_type:
-                span.set_attribute("openinference.span.kind", run_type.upper())
+            if "openinference.span.kind" not in attributes:
+                run_type = str(attributes.get("run_type", ""))
+                if name.startswith("llm.") or run_type == "llm":
+                    span.set_attribute("openinference.span.kind", "LLM")
+                elif name.startswith("tool.") or run_type == "tool":
+                    span.set_attribute("openinference.span.kind", "TOOL")
+                elif run_type:
+                    span.set_attribute("openinference.span.kind", run_type.upper())
             return PhoenixSpanContext(span=span)
         except Exception:
             return PhoenixSpanContext()
@@ -106,10 +100,19 @@ class PhoenixTracer(TracerBase):
         *,
         output: str | None = None,
         error: BaseException | None = None,
+        **attributes: Any,
     ) -> None:
+        self._end(context, output=output, error=error, attributes=attributes)
+
+    @staticmethod
+    def _end(context: SpanContext, *, output: str | None, error: BaseException | None, attributes: Mapping[str, Any] | None = None) -> None:
+        # Shared close logic for both start_trace and start_span contexts.
         if not isinstance(context, PhoenixSpanContext) or context.span is None:
             return
         try:
+            if attributes:
+                for key, value in attributes.items():
+                    PhoenixTracer._set_close_attribute(context.span, key, value)
             if output is not None:
                 context.span.set_attribute("output.value", output)
             if error is not None:
@@ -118,6 +121,21 @@ class PhoenixTracer(TracerBase):
             context.span.end()
         except Exception:
             pass
+
+    @staticmethod
+    def _set_close_attribute(span: Any, key: str, value: Any) -> None:
+        # Coerces a close-time value for OTel's wire format: primitives pass through, everything
+        # else is JSON-encoded, never a Python repr (structured values like output_messages are
+        # tuples of dicts, which str() would otherwise corrupt into an unparseable string).
+        if value is None:
+            return
+        if isinstance(value, (str, bool, int, float)):
+            span.set_attribute(key, value)
+            return
+        try:
+            span.set_attribute(key, json.dumps(value, default=str))
+        except TypeError:
+            span.set_attribute(key, str(value))
 
 
 __all__ = ["PhoenixSpanContext", "PhoenixTracer"]

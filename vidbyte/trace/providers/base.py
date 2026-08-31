@@ -17,7 +17,15 @@ class ProviderSpanPayload:
 
 
 class ProviderTraceTranslator(Protocol):
-    """Protocol implemented by provider-specific semantic translators."""
+    """Protocol implemented by provider-specific semantic translators.
+
+    A translator may also define an optional translate_end(spec, attributes) -> dict[str, Any]
+    method to shape close-time data (response text, usage) the way translate_start shapes
+    open-time data. It is deliberately not part of this Protocol's required interface — mypy
+    would then require every structural implementer to define it, defeating the point of it
+    being optional — so callers detect it with getattr(translator, "translate_end", None)
+    (see TraceController._translate_end), never a static attribute access or isinstance check.
+    """
 
     provider: str
 
