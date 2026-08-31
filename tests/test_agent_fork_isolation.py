@@ -92,7 +92,7 @@ class RecordingTracer(TracerBase):
         self.started.append({"name": name, **attributes})
         return SpanContext()
 
-    def end_trace(self, context: SpanContext, *, output: str | None = None, error: BaseException | None = None) -> None:
+    def end_trace(self, context: SpanContext, *, output: str | None = None, error: BaseException | None = None, **attributes: Any) -> None:
         # Ignores trace closure details for these focused tests.
         return None
 
@@ -101,7 +101,7 @@ class RecordingTracer(TracerBase):
         self.spans.append({"name": name, **attributes})
         return SpanContext()
 
-    def end_span(self, context: SpanContext, *, output: str | None = None, error: BaseException | None = None) -> None:
+    def end_span(self, context: SpanContext, *, output: str | None = None, error: BaseException | None = None, **attributes: Any) -> None:
         # Ignores child span closure details for these focused tests.
         return None
 

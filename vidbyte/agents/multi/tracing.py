@@ -51,9 +51,9 @@ class MultiAgentTracer:
         # Collaborators use one adapter instead of depending directly on TracerBase.
         return self._tracer.start_span(name, **attributes)
 
-    def end_span(self, span: Any, *, output: str | None = None, error: BaseException | None = None) -> None:
+    def end_span(self, span: Any, *, output: str | None = None, error: BaseException | None = None, **attributes: Any) -> None:
         # Span closure remains consistent across successful and exceptional branches.
-        self._tracer.end_span(span, output=output, error=error)
+        self._tracer.end_span(span, output=output, error=error, **attributes)
 
     @classmethod
     def output(cls, **fields: Any) -> str:

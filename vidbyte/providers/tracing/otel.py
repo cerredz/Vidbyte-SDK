@@ -98,9 +98,9 @@ class OTelTracer(TracerBase):
         except Exception:
             return OTelSpanContext()
 
-    def end_trace(self, context: SpanContext, *, output: str | None = None, error: BaseException | None = None) -> None:
-        # Closes a root OTel span with output or error metadata, never raising.
-        self._end(context, output=output, error=error)
+    def end_trace(self, context: SpanContext, *, output: str | None = None, error: BaseException | None = None, **attributes: Any) -> None:
+        # Closes a root OTel span with output, error, and any close-time attributes, never raising.
+        self._end(context, output=output, error=error, attributes=attributes)
 
     def start_span(self, name: str, parent: SpanContext | None = None, **attributes: Any) -> OTelSpanContext:
         # Opens a child OTel span under the given parent, degrading safely on failure.
@@ -114,16 +114,18 @@ class OTelTracer(TracerBase):
         except Exception:
             return OTelSpanContext()
 
-    def end_span(self, context: SpanContext, *, output: str | None = None, error: BaseException | None = None) -> None:
-        # Closes a child OTel span with output or error metadata, never raising.
-        self._end(context, output=output, error=error)
+    def end_span(self, context: SpanContext, *, output: str | None = None, error: BaseException | None = None, **attributes: Any) -> None:
+        # Closes a child OTel span with output, error, and any close-time attributes, never raising.
+        self._end(context, output=output, error=error, attributes=attributes)
 
     @staticmethod
-    def _end(context: SpanContext, *, output: str | None, error: BaseException | None) -> None:
+    def _end(context: SpanContext, *, output: str | None, error: BaseException | None, attributes: Mapping[str, Any] | None = None) -> None:
         # Shared close logic for both start_trace and start_span contexts.
         if not isinstance(context, OTelSpanContext) or context.span is None:
             return
         try:
+            if attributes:
+                OTelTracer._set_attributes(context.span, attributes)
             if output is not None:
                 context.span.set_attribute("output.value", output)
             if error is not None:

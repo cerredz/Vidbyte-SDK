@@ -43,16 +43,16 @@ class RecordingTracer(TracerBase):
         self.traces_started.append({"name": name, "attributes": attributes, "ctx": ctx})
         return ctx
 
-    def end_trace(self, context: SpanContext, *, output: str | None = None, error: BaseException | None = None) -> None:
-        self.traces_ended.append({"ctx": context, "output": output, "error": error})
+    def end_trace(self, context: SpanContext, *, output: str | None = None, error: BaseException | None = None, **attributes: Any) -> None:
+        self.traces_ended.append({"ctx": context, "output": output, "error": error, "attributes": attributes})
 
     def start_span(self, name: str, parent: SpanContext | None = None, **attributes: Any) -> SpanContext:
         ctx = self._ctx("span")
         self.spans_started.append({"name": name, "parent": parent, "attributes": attributes, "ctx": ctx})
         return ctx
 
-    def end_span(self, context: SpanContext, *, output: str | None = None, error: BaseException | None = None) -> None:
-        self.spans_ended.append({"ctx": context, "output": output, "error": error})
+    def end_span(self, context: SpanContext, *, output: str | None = None, error: BaseException | None = None, **attributes: Any) -> None:
+        self.spans_ended.append({"ctx": context, "output": output, "error": error, "attributes": attributes})
 
 
 class FakeResponse:

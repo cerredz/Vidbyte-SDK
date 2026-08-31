@@ -627,7 +627,7 @@ class BaseAgent(McpAttachableMixin):
             )
             self._record_agent_stop(trace_ctx, result)
             if trace_ctx is not None:
-                self._tracer.end_trace(trace_ctx, output=_format_trace_output(result))
+                self._tracer.end_trace(trace_ctx, output=_format_trace_output(result), **self._usage_trace_attributes())
         except Exception as exc:
             if trace_ctx is not None:
                 self._tracer.end_trace(trace_ctx, error=exc)
@@ -724,6 +724,28 @@ class BaseAgent(McpAttachableMixin):
     def get_cost_usd(self) -> float | None:
         """Return total known USD cost for the current or most recent run, or None."""
         return self.get_usage().cost_usd
+
+    def _usage_trace_attributes(self) -> dict[str, Any]:
+        # Builds the whole-run usage rollup as close-time attributes for the agent.run trace.
+        # Returns {} for a run with no model calls, rather than zero/None placeholders.
+        rollup = self.get_usage()
+        if rollup.model_call_count == 0:
+            return {}
+        attributes: dict[str, Any] = {
+            "model_call_count": rollup.model_call_count,
+            "cost_complete": rollup.cost_complete,
+        }
+        if rollup.input_tokens is not None:
+            attributes["input_tokens"] = rollup.input_tokens
+        if rollup.output_tokens is not None:
+            attributes["output_tokens"] = rollup.output_tokens
+        if rollup.total_tokens is not None:
+            attributes["total_tokens"] = rollup.total_tokens
+        if rollup.cost_usd is not None:
+            attributes["cost_usd"] = rollup.cost_usd
+        if rollup.operation_count:
+            attributes["operation_count"] = rollup.operation_count
+        return attributes
 
     async def arun_sequentially(self, prompts: Sequence[str | AgentInput], **options: Any) -> list[AgentMessage]:
         # Runs each prompt through generate_reply in order, preserving self.history across all calls.

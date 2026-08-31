@@ -84,7 +84,7 @@ if TYPE_CHECKING:
 from vidbyte.agents.context_algorithms import AgentRuntimeContextAlgorithms
 from vidbyte.agents.contract import AgentLoopSettingsOutputContract
 from vidbyte.agents.contracts.schema import SchemaConformance
-from vidbyte.agents.pricing import UsageTracker
+from vidbyte.agents.pricing import UsageRecord, UsageTracker
 from vidbyte.agents.types import AgentMessage
 from vidbyte.context.algorithms import ContextWindowAlgorithm, ToolResultAdmission
 from vidbyte.context.manager import ContextManager
@@ -591,7 +591,8 @@ class AgentRuntime:
             try:
                 raw_result = await handle.invoke(message, **current_call_options)
                 output_text = handle.extract_text(raw_result)
-                self._tracer.end_span(llm_span, output=output_text)
+                usage_preview = self.usage_tracker.preview_call(raw_result)
+                self._tracer.end_span(llm_span, output=output_text, **self._llm_trace_outputs(output_text, usage_preview))
                 return raw_result, state.model_call_count, compaction_count
             except Exception as exc:
                 self._tracer.end_span(llm_span, error=exc)
@@ -1168,6 +1169,26 @@ class AgentRuntime:
         return inputs
 
     @staticmethod
+    def _llm_trace_outputs(output_text: str, usage_preview: UsageRecord | None) -> dict[str, Any]:
+        # Build close-time tracing outputs for the model-call child span: the response as a
+        # chat-shaped message (mirroring _llm_trace_inputs' message shape) plus, when a usage
+        # preview priced successfully, token counts. Omits fields entirely rather than emitting
+        # zero/None placeholders when usage is unavailable (e.g. an unrecognized provider).
+        outputs: dict[str, Any] = {"output_messages": ({"role": "assistant", "content": _trace_text(output_text)},)}
+        if usage_preview is None:
+            return outputs
+        usage = usage_preview.usage
+        if usage.input_tokens is not None:
+            outputs["input_tokens"] = usage.input_tokens
+        if usage.output_tokens is not None:
+            outputs["output_tokens"] = usage.output_tokens
+        if usage.total_tokens is not None:
+            outputs["total_tokens"] = usage.total_tokens
+        if usage.cached_input_tokens is not None:
+            outputs["cached_input_tokens"] = usage.cached_input_tokens
+        return outputs
+
+    @staticmethod
     def _runner_model_name(runner: object) -> str | None:
         config = getattr(runner, "_config", None)
         model = getattr(config, "model", None)
@@ -1694,11 +1715,11 @@ class AgentRuntime:
             return None
         return self._tracer.start_span(name, parent=parent, **attributes)
 
-    def _end_semantic_span(self, context: SpanContext | None, *, output: str | None = None, error: BaseException | None = None) -> None:
+    def _end_semantic_span(self, context: SpanContext | None, *, output: str | None = None, error: BaseException | None = None, **attributes: Any) -> None:
         # Closes optional semantic-only spans when one was opened.
         if context is None:
             return
-        self._tracer.end_span(context, output=output, error=error)
+        self._tracer.end_span(context, output=output, error=error, **attributes)
 
     def _record_parser_span(self, name: str, parent: SpanContext | None = None, **attributes: Any) -> None:
         # Records a short parser span without affecting parser behavior.

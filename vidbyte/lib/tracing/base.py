@@ -27,8 +27,9 @@ class TracerBase(ABC):
         *,
         output: str | None = None,
         error: BaseException | None = None,
+        **attributes: Any,
     ) -> None:
-        """Close the root trace, recording final output or error."""
+        """Close the root trace, recording final output, error, and any close-time attributes."""
 
     @abstractmethod
     def start_span(
@@ -46,8 +47,9 @@ class TracerBase(ABC):
         *,
         output: str | None = None,
         error: BaseException | None = None,
+        **attributes: Any,
     ) -> None:
-        """Close a child span."""
+        """Close a child span, recording final output, error, and any close-time attributes."""
 
 
 class NullTracer(TracerBase):

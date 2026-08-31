@@ -66,6 +66,7 @@ class LangfuseTracer(TracerBase):
         *,
         output: str | None = None,
         error: BaseException | None = None,
+        **attributes: Any,
     ) -> None:
         if not isinstance(context, LangfuseSpanContext) or context.handle is None:
             return
@@ -73,7 +74,7 @@ class LangfuseTracer(TracerBase):
             if error is not None:
                 context.handle.update(status_message=str(error), level="ERROR")
             elif output is not None:
-                context.handle.update(output=output)
+                context.handle.update(output=output, metadata=attributes or None)
             self._client.flush()
         except Exception:
             pass
@@ -108,6 +109,7 @@ class LangfuseTracer(TracerBase):
         *,
         output: str | None = None,
         error: BaseException | None = None,
+        **attributes: Any,
     ) -> None:
         if not isinstance(context, LangfuseSpanContext) or context.handle is None:
             return
@@ -115,7 +117,7 @@ class LangfuseTracer(TracerBase):
             if error is not None:
                 context.handle.update(status_message=str(error), level="ERROR")
             if hasattr(context.handle, "end"):
-                context.handle.end(output=output)
+                context.handle.end(output=output, metadata=attributes or None)
         except Exception:
             pass
 

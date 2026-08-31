@@ -39,12 +39,12 @@ class DebugTracer(TracerBase):
         )
         return context
 
-    def end_trace(self, context: SpanContext, *, output: str | None = None, error: BaseException | None = None) -> None:
+    def end_trace(self, context: SpanContext, *, output: str | None = None, error: BaseException | None = None, **attributes: Any) -> None:
         self.events.append(
             {
                 "type": "end_trace",
                 "name": None,
-                "attributes": {},
+                "attributes": dict(attributes),
                 "context": context,
                 "parent": None,
                 "output": output,
@@ -67,12 +67,12 @@ class DebugTracer(TracerBase):
         )
         return context
 
-    def end_span(self, context: SpanContext, *, output: str | None = None, error: BaseException | None = None) -> None:
+    def end_span(self, context: SpanContext, *, output: str | None = None, error: BaseException | None = None, **attributes: Any) -> None:
         self.events.append(
             {
                 "type": "end_span",
                 "name": None,
-                "attributes": {},
+                "attributes": dict(attributes),
                 "context": context,
                 "parent": None,
                 "output": output,

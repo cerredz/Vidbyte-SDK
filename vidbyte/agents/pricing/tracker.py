@@ -11,6 +11,9 @@ Architecture:
       priced via ModelPricingRegistry and OperationPricingRegistry.
 Key Functions:
     - record_call: Parses, prices, and stores one model call.
+    - preview_call: Parses and prices one model call without storing it, so a
+      caller (e.g. trace span close) can read priced usage before the real
+      record_call fires, without double-billing the ledger.
     - record_operation: Prices and stores one search/fetch operation.
     - rollup: Folds both ledgers into an immutable UsageRollup.
     - reset: Clears both ledgers at the start of a new run.
@@ -24,7 +27,7 @@ Similar Files:
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from typing import TYPE_CHECKING
 
 from vidbyte.agents.pricing.records import (
@@ -63,6 +66,19 @@ class UsageTracker:
 
     def record_call(self, response: object) -> UsageRecord | None:
         # Parses, prices, and stores one model call; returns None when unusable.
+        record = self._price_call(response, call_index=len(self._records) + 1, on_parse_error=self.mark_recording_corrupted)
+        if record is not None:
+            self._records.append(record)
+        return record
+
+    def preview_call(self, response: object) -> UsageRecord | None:
+        # Parses and prices one model call for display purposes only — never appends to the
+        # ledger, so calling this alongside record_call for the same response never double-bills.
+        # A parse failure here is not a lost real record, so recording_corrupted is not raised.
+        return self._price_call(response, call_index=len(self._records) + 1, on_parse_error=None)
+
+    def _price_call(self, response: object, *, call_index: int, on_parse_error: Callable[[], None] | None) -> UsageRecord | None:
+        # Shared parse/price logic behind record_call and preview_call; never mutates state itself.
         # The duck-typed response.provider is coerced to a ModelProvider once here,
         # so the pricing registry and parser downstream take only the strict enum.
         provider = _as_provider(getattr(response, "provider", None))
@@ -71,19 +87,18 @@ class UsageTracker:
         try:
             usage = _parse_usage(provider, payload)
         except Exception:
-            self.mark_recording_corrupted()
+            if on_parse_error is not None:
+                on_parse_error()
             return None
         if usage is None or provider is None:
             return None
-        record = UsageRecord(
-            call_index=len(self._records) + 1,
+        return UsageRecord(
+            call_index=call_index,
             provider=provider.value,
             model=str(model),
             usage=usage,
             cost_usd=usage.cost_usd(self._pricing.resolve(provider, str(model))),
         )
-        self._records.append(record)
-        return record
 
     def record_operation(self, operation: str, provider: str, *, mode: str = "default", units: int = 1, reported_cost_usd: float | None = None) -> OperationUsageRecord | None:
         # Prices and stores one search/fetch operation; returns None when unusable.

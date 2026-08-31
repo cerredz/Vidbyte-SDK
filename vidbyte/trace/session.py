@@ -59,13 +59,13 @@ class SessionTracer(TracerBase):
         self._state.set(_TraceSessionState(root_context=root))
         return root
 
-    def end_session(self, *, output: str | None = None, error: BaseException | None = None) -> None:
+    def end_session(self, *, output: str | None = None, error: BaseException | None = None, **attributes: Any) -> None:
         # Closes the active session root for this execution context, when present.
         state = self._state.get()
         if state is None:
             return
         try:
-            self._inner.end_trace(state.root_context, output=output, error=error)
+            self._inner.end_trace(state.root_context, output=output, error=error, **attributes)
         finally:
             self._state.set(None)
 
@@ -80,25 +80,25 @@ class SessionTracer(TracerBase):
             return self._inner.start_trace(name, **attributes)
         return self._inner.start_span(name, parent=root, **attributes)
 
-    def end_trace(self, context: SpanContext, *, output: str | None = None, error: BaseException | None = None) -> None:
+    def end_trace(self, context: SpanContext, *, output: str | None = None, error: BaseException | None = None, **attributes: Any) -> None:
         # Closes a root trace outside sessions, a session root, or a session child span.
         root = self.root_context
         if root is None:
-            self._inner.end_trace(context, output=output, error=error)
+            self._inner.end_trace(context, output=output, error=error, **attributes)
             return
         if context is root:
-            self.end_session(output=output, error=error)
+            self.end_session(output=output, error=error, **attributes)
             return
-        self._inner.end_span(context, output=output, error=error)
+        self._inner.end_span(context, output=output, error=error, **attributes)
 
     def start_span(self, name: str, parent: SpanContext | None = None, **attributes: Any) -> SpanContext:
         # Opens a child span, attaching parentless spans to the active session root.
         effective_parent = parent if parent is not None else self.root_context
         return self._inner.start_span(name, parent=effective_parent, **attributes)
 
-    def end_span(self, context: SpanContext, *, output: str | None = None, error: BaseException | None = None) -> None:
+    def end_span(self, context: SpanContext, *, output: str | None = None, error: BaseException | None = None, **attributes: Any) -> None:
         # Closes a child span on the wrapped tracer.
-        self._inner.end_span(context, output=output, error=error)
+        self._inner.end_span(context, output=output, error=error, **attributes)
 
     def _session_attributes(self, attributes: Mapping[str, Any]) -> dict[str, Any]:
         # Merges default root attributes with call-specific attributes.
@@ -184,12 +184,12 @@ class SessionTraceController(TraceController):
             return self.start_span(name, parent=root, **attributes)
         return super().start_trace(name, **attributes)
 
-    def end_trace(self, context: SpanContext, *, output: str | None = None, error: BaseException | None = None) -> None:
+    def end_trace(self, context: SpanContext, *, output: str | None = None, error: BaseException | None = None, **attributes: Any) -> None:
         # Ends child agent traces as spans while the session root remains open.
         root = self.root_context
         if root is None or context is root:
-            return super().end_trace(context, output=output, error=error)
-        return super().end_span(context, output=output, error=error)
+            return super().end_trace(context, output=output, error=error, **attributes)
+        return super().end_span(context, output=output, error=error, **attributes)
 
     def session(self, name: str | None = None, **attributes: Any) -> _SessionContext:
         # Returns a sync context manager for one active session root.

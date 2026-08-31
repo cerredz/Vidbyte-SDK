@@ -12,6 +12,7 @@ Relations:
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from typing import Any
@@ -153,9 +154,16 @@ def safe_trace_value(value: Any, *, max_chars: int = 12000, redact: bool = True)
 
 
 def _is_secret_key(key: str) -> bool:
-    # Detects credential-like trace payload keys.
+    # Detects credential-like trace payload keys. TOKEN is checked as a whole word (api_token,
+    # auth_token, token) rather than a raw substring, since a raw substring match would also
+    # strip legitimate LLM usage fields whose names happen to contain "tokens" as a plural
+    # (input_tokens, output_tokens, total_tokens, cached_input_tokens).
     upper = key.upper()
-    return upper.startswith("LANGSMITH_") or any(token in upper for token in ("API_KEY", "TOKEN", "SECRET", "PASSWORD", "CREDENTIAL", "AUTH"))
+    if upper.startswith("LANGSMITH_"):
+        return True
+    if any(word in upper for word in ("API_KEY", "SECRET", "PASSWORD", "CREDENTIAL", "AUTH")):
+        return True
+    return re.search(r"(?:^|_)TOKEN(?:$|_)", upper) is not None
 
 
 __all__ = ["TraceComponentSettings", "TraceProfile", "safe_trace_value"]

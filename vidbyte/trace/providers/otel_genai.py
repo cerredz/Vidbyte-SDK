@@ -2,15 +2,16 @@
 
 PURPOSE: Maps Vidbyte SpanSpec objects into OpenTelemetry GenAI semantic convention attributes.
 ROLE IN CODEBASE: One ProviderTraceTranslator implementation selected via provider="otel-genai".
-ARCHITECTURE NOTE: Only agent/LLM/tool span kinds use verified gen_ai.* fields; everything else falls back to a namespaced vidbyte.* passthrough.
+ARCHITECTURE NOTE: Only agent/LLM/tool span kinds use verified gen_ai.* fields; everything else falls back to a namespaced vidbyte.* passthrough. translate_end mirrors translate_start for close-time data (response text, usage) that only exists after a call returns.
 COMMON MODIFICATION PATTERNS: Add a new _translate_* branch and its consumed-key set together when a new span kind's gen_ai.* mapping is verified against the live spec.
-KNOWN EDGE CASES: Missing model/tool_name/agent_name fall back to stable placeholders instead of raising.
-RELATED DOCS: docs/design/otel-genai-and-openinference-trace-shapes.md
-TESTS: tests/test_otel_genai_trace_shape.py
+KNOWN EDGE CASES: Missing model/tool_name/agent_name fall back to stable placeholders instead of raising. agent.run's translate_end namespaces every field under vidbyte.usage. rather than gen_ai.usage.*, since that field is per-call scoped by spec, not whole-run.
+RELATED DOCS: docs/design/otel-genai-and-openinference-trace-shapes.md, docs/design/trace-output-and-usage-attributes.md
+TESTS: tests/test_otel_genai_trace_shape.py, tests/test_trace_close_attributes.py
 """
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
 
 from vidbyte.trace.providers.base import ProviderSpanPayload
@@ -29,6 +30,7 @@ _LLM_CONSUMED_KEYS = {
 }
 _TOOL_CONSUMED_KEYS = {"tool_name", "call_id", "arguments", "tool_input"}
 _AGENT_CONSUMED_KEYS = {"agent_name", "provider", "run_id"}
+_LLM_END_CONSUMED_KEYS = {"output_messages", "input_tokens", "output_tokens", "finish_reason"}
 
 
 class OTelGenAIProviderTranslator:
@@ -100,6 +102,34 @@ class OTelGenAIProviderTranslator:
         attrs = dict(spec.attributes)
         out = {"gen_ai.operation.name": spec.name, **self._namespaced_extras(attrs, set())}
         return ProviderSpanPayload(name=spec.name, attributes=out)
+
+    def translate_end(self, spec: SpanSpec, attributes: Mapping[str, Any]) -> dict[str, Any]:
+        # Dispatches close-time attributes (response text, usage) the same way translate_start dispatches open-time ones.
+        if spec.name == "agent.run":
+            return self._translate_agent_end(attributes)
+        if spec.kind is SpanKind.LLM:
+            return self._translate_llm_end(attributes)
+        return self._namespaced_extras(dict(attributes), set())
+
+    def _translate_llm_end(self, attributes: Mapping[str, Any]) -> dict[str, Any]:
+        # Maps close-time LLM fields per gen-ai-spans.md: response messages, usage, and finish reason.
+        attrs = dict(attributes)
+        out: dict[str, Any] = {}
+        output_messages = attrs.get("output_messages")
+        if output_messages:
+            out["gen_ai.output.messages"] = output_messages
+        if "input_tokens" in attrs:
+            out["gen_ai.usage.input_tokens"] = attrs["input_tokens"]
+        if "output_tokens" in attrs:
+            out["gen_ai.usage.output_tokens"] = attrs["output_tokens"]
+        if "finish_reason" in attrs:
+            out["gen_ai.response.finish_reasons"] = attrs["finish_reason"]
+        out.update(self._namespaced_extras(attrs, _LLM_END_CONSUMED_KEYS))
+        return out
+
+    def _translate_agent_end(self, attributes: Mapping[str, Any]) -> dict[str, Any]:
+        # gen_ai.usage.* is defined per-call, not per-run, so a whole-run rollup is namespaced rather than reusing that field.
+        return {f"vidbyte.usage.{key}": value for key, value in attributes.items()}
 
     @staticmethod
     def _namespaced_extras(attrs: dict[str, Any], consumed: set[str]) -> dict[str, Any]:
