@@ -28,6 +28,18 @@ WHAT NOT TO DO IN THIS FILE:
        bucket existence to an unauthorized caller; the raised error says so.
     3. Do not let a raw google.api_core exception escape write()/verify().
 
+COMMON MODIFICATION PATTERNS:
+    Add a new Config/Credentials field in
+    vidbyte/lib/dataclasses/cloud_sinks.py first, then thread it through
+    _build_client()/_put() here; add a new exception mapping in
+    _translate_error().
+
+KNOWN EDGE CASES:
+    GCS reports NotFound for both a genuinely missing bucket and a
+    permission-denied one, by design, to avoid leaking bucket existence to an
+    unauthorized caller — _translate_error() names this ambiguity in the
+    raised HarnessSinkSetupError rather than asserting which case occurred.
+
 RELATED DOCS:
     https://github.com/cerredz/Vidbyte-SDK/blob/main/docs/design/cloud-trajectory-sinks.md
 
@@ -63,13 +75,11 @@ class GcsTrajectorySink:
         self._credentials = credentials
         self._driver = self._import_driver()
         self._client = self._build_client()
-        self._verified = False
-        self._verify_lock = asyncio.Lock()
+        self._verify_task: asyncio.Task[None] | None = None
 
     async def verify(self) -> None:
         # Explicit, caller-invoked preflight check — call before a long run to fail fast on setup/auth problems.
-        await self._run_preflight()
-        self._verified = True
+        await self._ensure_ready()
 
     async def write(self, record: TrajectoryRecord) -> None:
         # Encodes one record, guards its size, and uploads it as a single blob keyed by run_id.
@@ -89,14 +99,10 @@ class GcsTrajectorySink:
             raise self._translate_error(exc) from exc
 
     async def _ensure_ready(self) -> None:
-        # Runs the preflight check once per instance, guarded so concurrent first-writes don't double-check.
-        if self._verified:
-            return
-        async with self._verify_lock:
-            if self._verified:
-                return
-            await self._run_preflight()
-            self._verified = True
+        # Memoizes the preflight check as one shared task; the synchronous check-and-create between await points needs no lock, since asyncio only yields control at an await.
+        if self._verify_task is None:
+            self._verify_task = asyncio.ensure_future(self._run_preflight())
+        await self._verify_task
 
     async def _run_preflight(self) -> None:
         # Confirms the bucket exists and is reachable before any write is attempted.

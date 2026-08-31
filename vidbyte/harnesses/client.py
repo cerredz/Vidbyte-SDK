@@ -27,6 +27,11 @@ WHAT NOT TO DO IN THIS FILE:
     3. Do not remove or shadow sdk.harnesses.sessions.
     4. Do not blend the operational store with the licensed sink.
 
+COMMON MODIFICATION PATTERNS:
+    Add a new store/sink backend's own class first, then add a thin
+    pass-through factory method here matching file_sink()/s3_sink()'s shape —
+    never validate Config/Credentials in this file.
+
 KNOWN EDGE CASES:
     load() requires either a direct foreign implementation or exactly one registered
     factory for the config's harness type; version now lives in code, so config-only

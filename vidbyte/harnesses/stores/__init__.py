@@ -14,9 +14,26 @@ ROLE IN CODEBASE:
     redacted export surface, kept deliberately distinct from the operational
     vidbyte.sessions SessionStore.
 
+ARCHITECTURE NOTE:
+    Export shims only; this module builds no backend at import time and calls
+    no vendor SDK. Each cloud sink lazily imports its own driver inside its
+    own constructor, not here.
+
+COMMON MODIFICATION PATTERNS:
+    Add a new backend's module under vidbyte/harnesses/stores/, then export
+    its sink class (and any Config/Credentials/enum types it needs) here.
+
+KNOWN EDGE CASES:
+    Importing this module never requires boto3/google-cloud-storage/
+    azure-storage-blob to be installed; only constructing a cloud sink does.
+
 RELATED DOCS:
     https://github.com/cerredz/Vidbyte-SDK/blob/main/docs/design/harness-execution-contract.md
     https://github.com/cerredz/Vidbyte-SDK/blob/main/docs/design/cloud-trajectory-sinks.md
+
+TESTS:
+    tests/test_cloud_trajectory_sinks.py exercises the cloud sinks re-exported
+    here; the two local backends are exercised inline elsewhere.
 """
 
 from __future__ import annotations

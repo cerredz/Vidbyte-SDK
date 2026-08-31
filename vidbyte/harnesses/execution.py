@@ -42,6 +42,12 @@ COMMON ERRORS:
     HarnessConfigurationError before load(); HarnessExecutionError for run()
     failures; HarnessTimeoutError for explicit deadlines.
 
+COMMON MODIFICATION PATTERNS:
+    Add a new run-lifecycle observer the same way on_sink_error was added:
+    a None-default constructor parameter, invoked from inside an existing
+    fail-open except clause, itself wrapped so a raising observer can never
+    break fail-open — never add a second bespoke callback shape.
+
 RELATED DOCS:
     https://github.com/cerredz/Vidbyte-SDK/blob/main/docs/design/harness-execution-contract.md
 
@@ -291,6 +297,9 @@ def wrap_implementation(implementation: object, *, store: SessionStore | None = 
     foreign_run = getattr(implementation, "run", None)
     if not callable(foreign_run):
         raise HarnessConfigurationError("Harness implementation must expose callable run(request).", details={"actual_type": type(implementation).__name__})
+    # Rebound to a variable whose only assignment is this callable, so the closure below carries a
+    # definitely-non-None type: narrowing from the callable() check above does not cross a closure boundary.
+    run_callable: Callable[[Any], Any] = foreign_run
     resolved_type = str(harness_type if harness_type is not None else getattr(implementation, "type", "") or "")
     resolved_version = str(harness_version if harness_version is not None else getattr(implementation, "version", "") or "")
 
@@ -299,7 +308,7 @@ def wrap_implementation(implementation: object, *, store: SessionStore | None = 
         version = resolved_version
 
         async def run(self, request: Any) -> Any:
-            result = foreign_run(request)
+            result = run_callable(request)
             return await result if inspect.isawaitable(result) else result
 
     return _ForeignHarness(store=store, sink=sink, collect=collect, on_sink_error=on_sink_error)
