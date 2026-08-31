@@ -33,6 +33,8 @@ Architecture:
     - SourcePinMismatchError: Raised when fetched content does not match the pinned hash.
     - SourceParseError: Raised when an artifact cannot be parsed into a valid typed IR.
     - SourceSecurityError: Raised when a URL is disallowed or a response violates a guard.
+    - AgentSpeedError: Base exception for agent speed-tracking failures.
+    - AgentSpeedValidationError: Raised when a speed-tracking dataclass has an invalid shape.
 Relations:
     Related to vidbyte.tools.executor, vidbyte.tools.registry, and vidbyte.tools.mcp.client.
 """
@@ -228,6 +230,14 @@ class SessionUsageError(VidbyteSdkError):
 
 class SessionUsageValidationError(SessionUsageError):
     """Raised when persisted usage rollup inputs have an invalid shape."""
+
+
+class AgentSpeedError(VidbyteSdkError):
+    """Base class for agent speed-tracking failures."""
+
+
+class AgentSpeedValidationError(AgentSpeedError):
+    """Raised when a speed-tracking dataclass receives an invalid shape."""
 
 
 class SourceError(VidbyteSdkError):

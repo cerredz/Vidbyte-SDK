@@ -52,11 +52,13 @@ from vidbyte.lib.enums.prompts import Prompt
 from vidbyte.lib.enums.skills import ContextMinimalFanoutSkill, Skill
 from vidbyte.lib.enums.skills import Skills as SkillEnums
 from vidbyte.lib.enums.sources import PinPolicy
+from vidbyte.lib.enums.speed import AgentSpeedRecordingIntegrity
 from vidbyte.lib.enums.structured_output import StructuredOutputSupport
 
 __all__ = [
     "AgentRuntimeStateKey",
     "AgentRuntimeType",
+    "AgentSpeedRecordingIntegrity",
     "AgentType",
     "AssumptionAction",
     "BasisType",
