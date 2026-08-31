@@ -179,24 +179,41 @@ class FakeS3Client:
             raise self.put_object_error
 
 
+class FakeStsClient:
+    """Records assume_role calls and raises a configured exception on demand."""
+
+    def __init__(self) -> None:
+        self.assume_role_calls: list[dict[str, Any]] = []
+        self.assume_role_error: Exception | None = None
+
+    def assume_role(self, **kwargs: Any) -> dict[str, Any]:
+        self.assume_role_calls.append(kwargs)
+        if self.assume_role_error is not None:
+            raise self.assume_role_error
+        return {"Credentials": {"AccessKeyId": "ASSUMED_KEY", "SecretAccessKey": "ASSUMED_SECRET", "SessionToken": "ASSUMED_TOKEN"}}
+
+
 class FakeBoto3:
     """Stand-in for the boto3 module surface this sink touches."""
 
-    def __init__(self, s3_client: FakeS3Client) -> None:
+    def __init__(self, s3_client: FakeS3Client, sts_client: FakeStsClient | None = None) -> None:
         self._s3_client = s3_client
+        self._sts_client = sts_client
         self.client_calls: list[tuple[str, dict[str, Any]]] = []
 
     def client(self, service_name: str, **kwargs: Any) -> Any:
         self.client_calls.append((service_name, kwargs))
         if service_name == "s3":
             return self._s3_client
+        if service_name == "sts" and self._sts_client is not None:
+            return self._sts_client
         raise AssertionError(f"unexpected boto3 service requested: {service_name}")
 
 
-def _fake_s3_driver(client: FakeS3Client) -> SimpleNamespace:
+def _fake_s3_driver(client: FakeS3Client, sts_client: FakeStsClient | None = None) -> SimpleNamespace:
     # Builds the SimpleNamespace S3TrajectorySink._import_driver() would normally return.
     return SimpleNamespace(
-        boto3=FakeBoto3(client),
+        boto3=FakeBoto3(client, sts_client),
         BotoConfig=lambda **kwargs: kwargs,
         ClientError=_FakeClientError,
         ConnectTimeoutError=_FakeConnectTimeoutError,
@@ -310,6 +327,27 @@ class TestS3TrajectorySink:
         with pytest.raises(HarnessSinkUnavailableError):
             await sink.write(_record())
 
+    def test_role_arn_assumption_resolves_temporary_credentials_onto_the_s3_client(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        client = FakeS3Client()
+        sts_client = FakeStsClient()
+        driver = _fake_s3_driver(client, sts_client)
+        monkeypatch.setattr(S3TrajectorySink, "_import_driver", staticmethod(lambda: driver))
+        S3TrajectorySink(S3SinkConfig(bucket="acme-bucket", role_arn="arn:aws:iam::123456789012:role/vidbyte-export", external_id="ext-123"))
+        assert len(sts_client.assume_role_calls) == 1
+        assert sts_client.assume_role_calls[0]["RoleArn"] == "arn:aws:iam::123456789012:role/vidbyte-export"
+        assert sts_client.assume_role_calls[0]["ExternalId"] == "ext-123"
+        s3_call_kwargs = next(kwargs for name, kwargs in driver.boto3.client_calls if name == "s3")
+        assert s3_call_kwargs["aws_access_key_id"] == "ASSUMED_KEY"
+        assert s3_call_kwargs["aws_session_token"] == "ASSUMED_TOKEN"
+
+    def test_role_arn_assumption_failure_raises_authentication_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        sts_client = FakeStsClient()
+        sts_client.assume_role_error = Exception("AccessDenied assuming role: trust policy does not list this caller")
+        driver = _fake_s3_driver(FakeS3Client(), sts_client)
+        monkeypatch.setattr(S3TrajectorySink, "_import_driver", staticmethod(lambda: driver))
+        with pytest.raises(HarnessSinkAuthenticationError):
+            S3TrajectorySink(S3SinkConfig(bucket="acme-bucket", role_arn="arn:aws:iam::123456789012:role/vidbyte-export"))
+
 
 # ---------------------------------------------------------------------------
 # GcsTrajectorySink — representative provider-specific behavior
@@ -407,6 +445,17 @@ class TestGcsTrajectorySink:
         with pytest.raises(HarnessSinkAuthorizationError):
             await sink.write(_record())
 
+    def test_missing_default_credentials_raises_authentication_error_at_construction(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        driver = _fake_gcs_driver(FakeGcsClient())
+
+        def _raise_no_adc(**kwargs: Any) -> None:
+            raise driver.DefaultCredentialsError("no Application Default Credentials found")
+
+        driver.storage.Client = _raise_no_adc
+        monkeypatch.setattr(GcsTrajectorySink, "_import_driver", staticmethod(lambda: driver))
+        with pytest.raises(HarnessSinkAuthenticationError):
+            GcsTrajectorySink(GcsSinkConfig(bucket="acme-bucket"))
+
 
 # ---------------------------------------------------------------------------
 # AzureBlobTrajectorySink — representative provider-specific behavior
@@ -503,6 +552,14 @@ class TestAzureBlobTrajectorySink:
         sink = AzureBlobTrajectorySink(AzureBlobSinkConfig(container="acme-container"), credentials=AzureBlobCredentials(account_url="https://acct.blob.core.windows.net", connection_string=Secret("conn-str")))
         with pytest.raises(HarnessSinkAuthorizationError):
             await sink.write(_record())
+
+    @pytest.mark.asyncio
+    async def test_translate_error_maps_service_request_error_to_unavailable(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        driver, _ = _fake_azure_driver(preflight_error=_FakeAzureServiceRequestError("network unreachable"))
+        monkeypatch.setattr(AzureBlobTrajectorySink, "_import_driver", staticmethod(lambda: driver))
+        sink = AzureBlobTrajectorySink(AzureBlobSinkConfig(container="acme-container"), credentials=AzureBlobCredentials(account_url="https://acct.blob.core.windows.net", connection_string=Secret("conn-str")))
+        with pytest.raises(HarnessSinkUnavailableError):
+            await sink.verify()
 
 
 # ---------------------------------------------------------------------------
