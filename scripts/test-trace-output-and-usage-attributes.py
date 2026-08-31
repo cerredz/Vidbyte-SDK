@@ -1,19 +1,12 @@
-"""Context Protocol Header
+"""FILE: scripts/test-trace-output-and-usage-attributes.py
 
-Description:
-    Standalone verification script for the trace close-time attributes and
-    usage wiring feature.
-Purpose:
-    Runs every test case from docs/design/trace-output-and-usage-attributes.md
-    Section 10 and prints PASS/FAIL per case with a final summary, exiting
-    non-zero on any failure.
-Architecture:
-    - Loads tests.test_trace_close_attributes and
-      tests.test_usage_preview_and_trace_wiring via unittest's TestLoader,
-      then runs them with a result class that prints one PASS/FAIL line per test.
-Relations:
-    Mirrors scripts/test-trace-shape-prebuilts.py's conventions for this
-    feature's two new test modules.
+PURPOSE: Standalone verification script for the trace close-time attributes and usage wiring feature.
+ROLE IN CODEBASE: Phase 5 verification script; runs every test case from the feature's design doc Section 10 and prints PASS/FAIL per case with a final summary, exiting non-zero on any failure.
+ARCHITECTURE NOTE: Loads tests.test_trace_close_attributes and tests.test_usage_preview_and_trace_wiring via unittest's TestLoader, then runs them with a result class that prints one PASS/FAIL line per test.
+COMMON MODIFICATION PATTERNS: Add a new test module name to _MODULES when this feature gains another test file; keep the printing/exit-code contract unchanged.
+KNOWN EDGE CASES: Exits 1 whenever any loaded test fails or errors, mirroring scripts/test-trace-shape-prebuilts.py's contract exactly.
+RELATED DOCS: docs/design/trace-output-and-usage-attributes.md
+TESTS: This file is itself the verification script for tests/test_trace_close_attributes.py and tests/test_usage_preview_and_trace_wiring.py.
 """
 
 from __future__ import annotations

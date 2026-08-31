@@ -72,6 +72,10 @@ class TraceController(TracerBase):
         self._pop_context(semantic)
 
     def _translate_end(self, spec: SpanSpec | None, attributes: Mapping[str, Any]) -> dict[str, Any]:
+        # @intent redact-before-translate
+        # Close-time attributes must pass through the same safe_trace_value redaction _sanitize_spec
+        # already applies to open-time attributes before any translator sees them, so a translator
+        # never needs its own redaction logic and a secret-shaped key can never reach the wire.
         # Sanitizes and translates close-time attributes; returns {} when there is nothing to translate.
         if not attributes or spec is None:
             return {}

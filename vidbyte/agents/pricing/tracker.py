@@ -72,13 +72,19 @@ class UsageTracker:
         return record
 
     def preview_call(self, response: object) -> UsageRecord | None:
+        # @intent never-append-on-preview
         # Parses and prices one model call for display purposes only — never appends to the
         # ledger, so calling this alongside record_call for the same response never double-bills.
         # A parse failure here is not a lost real record, so recording_corrupted is not raised.
+        # A repair must not make this method touch self._records under any code path.
         return self._price_call(response, call_index=len(self._records) + 1, on_parse_error=None)
 
     def _price_call(self, response: object, *, call_index: int, on_parse_error: Callable[[], None] | None) -> UsageRecord | None:
+        # @intent side-effect-free-shared-parser
         # Shared parse/price logic behind record_call and preview_call; never mutates state itself.
+        # Ledger mutation and corruption-flagging stay the caller's responsibility (via
+        # on_parse_error and its own append), so record_call and preview_call can share every
+        # parsing rule without this method silently becoming a second place billing happens.
         # The duck-typed response.provider is coerced to a ModelProvider once here,
         # so the pricing registry and parser downstream take only the strict enum.
         provider = _as_provider(getattr(response, "provider", None))

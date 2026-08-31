@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
@@ -18,18 +17,20 @@ class ProviderSpanPayload:
 
 
 class ProviderTraceTranslator(Protocol):
-    """Protocol implemented by provider-specific semantic translators."""
+    """Protocol implemented by provider-specific semantic translators.
+
+    A translator may also define an optional translate_end(spec, attributes) -> dict[str, Any]
+    method to shape close-time data (response text, usage) the way translate_start shapes
+    open-time data. It is deliberately not part of this Protocol's required interface — mypy
+    would then require every structural implementer to define it, defeating the point of it
+    being optional — so callers detect it with getattr(translator, "translate_end", None)
+    (see TraceController._translate_end), never a static attribute access or isinstance check.
+    """
 
     provider: str
 
     def translate_start(self, spec: SpanSpec) -> ProviderSpanPayload:
         # Converts a semantic span spec into provider-facing start payload.
-        ...
-
-    def translate_end(self, spec: SpanSpec, attributes: Mapping[str, Any]) -> dict[str, Any]:
-        # Converts close-time attributes (response/usage data) into provider-facing fields.
-        # Optional: callers must check hasattr(translator, "translate_end") before calling,
-        # since a translator written before this method existed will not define it.
         ...
 
 
