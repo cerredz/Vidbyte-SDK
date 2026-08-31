@@ -28,6 +28,12 @@ WHAT NOT TO DO IN THIS FILE:
        would double up an already-async client with a redundant thread hop.
     3. Do not let a raw azure.core exception escape write()/verify().
 
+COMMON MODIFICATION PATTERNS:
+    Add a new Config/Credentials field in
+    vidbyte/lib/dataclasses/cloud_sinks.py first, then thread it through
+    _build_client()/_put() here; add a new status-code mapping in
+    _translate_http_response_error().
+
 KNOWN EDGE CASES:
     Azure reports an expired SAS token as a 403 HttpResponseError, the same
     status a plain policy denial produces — the raised
@@ -61,6 +67,10 @@ from vidbyte.harnesses.stores._sink_support import SinkEncoding
 from vidbyte.lib.dataclasses.cloud_sinks import AzureBlobCredentials, AzureBlobSinkConfig
 from vidbyte.lib.errors import ConfigurationError
 
+_HTTP_FORBIDDEN = 403
+_HTTP_TOO_MANY_REQUESTS = 429
+_HTTP_SERVICE_UNAVAILABLE = 503
+
 
 class AzureBlobTrajectorySink:
     """TrajectorySink writing one JSONL object per run to an Azure Blob Storage container."""
@@ -71,13 +81,11 @@ class AzureBlobTrajectorySink:
         self._credentials = credentials
         self._driver = self._import_driver()
         self._client = self._build_client()
-        self._verified = False
-        self._verify_lock = asyncio.Lock()
+        self._verify_task: asyncio.Task[None] | None = None
 
     async def verify(self) -> None:
         # Explicit, caller-invoked preflight check — call before a long run to fail fast on setup/auth problems.
-        await self._run_preflight()
-        self._verified = True
+        await self._ensure_ready()
 
     async def write(self, record: TrajectoryRecord) -> None:
         # Encodes one record, guards its size, and uploads it as a single blob keyed by run_id.
@@ -87,7 +95,9 @@ class AzureBlobTrajectorySink:
         await self._put(self._object_key(record.run_id), payload)
 
     def _build_client(self) -> Any:
+        # @intent client-owns-its-own-retry-policy
         # Constructs the async BlobServiceClient, preferring connection_string, then sas_token, then keyless DefaultAzureCredential.
+        # retry_total is handed straight to the vendor client; this sink never loops or backs off on its own.
         retry_total = self._config.max_retries
         if self._credentials.connection_string is not None:
             return self._driver.BlobServiceClient.from_connection_string(self._credentials.connection_string.reveal(), retry_total=retry_total)
@@ -98,14 +108,10 @@ class AzureBlobTrajectorySink:
         return self._driver.BlobServiceClient(account_url=self._credentials.account_url, credential=identity_driver.DefaultAzureCredential(), retry_total=retry_total)
 
     async def _ensure_ready(self) -> None:
-        # Runs the preflight check once per instance, guarded so concurrent first-writes don't double-check.
-        if self._verified:
-            return
-        async with self._verify_lock:
-            if self._verified:
-                return
-            await self._run_preflight()
-            self._verified = True
+        # Memoizes the preflight check as one shared task; the synchronous check-and-create between await points needs no lock, since asyncio only yields control at an await.
+        if self._verify_task is None:
+            self._verify_task = asyncio.ensure_future(self._run_preflight())
+        await self._verify_task
 
     async def _run_preflight(self) -> None:
         # Confirms the container exists and is reachable before any write is attempted.
@@ -147,12 +153,12 @@ class AzureBlobTrajectorySink:
     def _translate_http_response_error(self, exc: Any) -> HarnessSinkError:
         # Maps an HttpResponseError's status_code to the matching subclass.
         status_code = getattr(exc, "status_code", None)
-        if status_code == 403:
+        if status_code == _HTTP_FORBIDDEN:
             return HarnessSinkAuthorizationError(
                 "Azure denied this write (403). This can mean a policy denial, or that a sas_token has expired — Azure reports both the same way.",
                 details={"container": self._config.container},
             )
-        if status_code in (429, 503):
+        if status_code in (_HTTP_TOO_MANY_REQUESTS, _HTTP_SERVICE_UNAVAILABLE):
             return HarnessSinkUnavailableError(f"Azure was unavailable after the client's own retries were exhausted ({status_code}).", details={"status_code": status_code})
         return HarnessSinkError(f"Azure Blob rejected the request ({status_code}).", details={"status_code": status_code})
 

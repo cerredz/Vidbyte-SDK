@@ -26,6 +26,16 @@ WHAT NOT TO DO IN THIS FILE:
        allow_nan) without confirming every existing FileTrajectorySink
        consumer still parses the result identically.
 
+COMMON MODIFICATION PATTERNS:
+    Add a new sink-wide encoding or size rule here, then update every
+    consumer (file.py, s3.py, gcs.py, azure_blob.py) rather than duplicating
+    the change per backend.
+
+KNOWN EDGE CASES:
+    guard_size measures the already-encoded UTF-8 byte length, not the
+    in-memory Python object size, so it correctly accounts for multi-byte
+    character expansion rather than undercounting non-ASCII content.
+
 RELATED DOCS:
     https://github.com/cerredz/Vidbyte-SDK/blob/main/docs/design/cloud-trajectory-sinks.md
 

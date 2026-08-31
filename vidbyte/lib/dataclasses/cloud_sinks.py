@@ -185,6 +185,9 @@ class S3Credentials:
     secret_access_key: Secret | None = None
     session_token: Secret | None = None
 
+    # @intent all-or-nothing-credential-pairing
+    # A lone access_key_id with no secret_access_key is a configuration mistake, not a valid
+    # "use the default chain" signal — that signal is only both fields left None.
     def __post_init__(self) -> None:
         """Require access_key_id and secret_access_key to be both set or both None."""
         has_key_id = self.access_key_id is not None

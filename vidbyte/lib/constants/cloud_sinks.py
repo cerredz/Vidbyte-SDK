@@ -30,6 +30,12 @@ WHAT NOT TO DO IN THIS FILE:
        S3-only multipart threshold) — this file is for bounds shared across
        every cloud sink.
 
+KNOWN EDGE CASES:
+    MAX_TRAJECTORY_RECORD_BYTES is a shared guard, not a per-vendor ceiling —
+    it stays well below any single provider's real single-PUT limit on
+    purpose, so raising it requires confirming every consuming sink's provider
+    can still hold the new size in one PUT before doing so.
+
 RELATED DOCS:
     https://github.com/cerredz/Vidbyte-SDK/blob/main/docs/design/cloud-trajectory-sinks.md
 

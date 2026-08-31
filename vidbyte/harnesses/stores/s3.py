@@ -17,8 +17,12 @@ ARCHITECTURE NOTE:
     makes a retried write() for the same run_id safely idempotent. boto3 is
     synchronous, so every network call runs via asyncio.to_thread to avoid
     blocking the event loop. Preflight verification (does the bucket exist and
-    accept writes) is cached per instance behind an asyncio.Lock so two
-    concurrent first-writes on one shared sink don't double-check.
+    accept writes) is memoized per instance as one shared asyncio.Task, so two
+    concurrent first-writes on one shared sink await the same in-flight check
+    rather than double-checking — asyncio.Lock is banned by this repo's
+    banned-api-policy (lint S039) with no built replacement yet, and the
+    synchronous check-then-create between await points needs no lock in the
+    first place, since asyncio only yields control at an await.
 
 PUBLIC API INVENTORY:
     S3TrajectorySink; verify(); write(record).
@@ -34,6 +38,13 @@ WHAT NOT TO DO IN THIS FILE:
     4. Do not implement multipart upload; SinkEncoding.guard_size() rejects an
        oversized record before any network call instead (see Alternative 4 in
        the design doc).
+
+COMMON MODIFICATION PATTERNS:
+    Add a new Config/Credentials field in
+    vidbyte/lib/dataclasses/cloud_sinks.py first, then thread it through
+    _build_client()/_put() here; add a new error-code mapping to
+    _SETUP_CODES/_AUTHENTICATION_CODES/_RETRYABLE_CODES or
+    _translate_client_error() rather than a new isinstance branch.
 
 KNOWN EDGE CASES:
     An S3 AccessDenied on a bucket that actually requires server-side
@@ -74,6 +85,7 @@ from vidbyte.lib.errors import ConfigurationError
 _RETRYABLE_CODES = {"SlowDown", "RequestTimeout"}
 _AUTHENTICATION_CODES = {"ExpiredToken", "InvalidAccessKeyId", "SignatureDoesNotMatch"}
 _SETUP_CODES = {"NoSuchBucket", "PermanentRedirect"}
+_HTTP_SERVER_ERROR_THRESHOLD = 500
 
 
 class S3TrajectorySink:
@@ -85,13 +97,11 @@ class S3TrajectorySink:
         self._credentials = credentials
         self._driver = self._import_driver()
         self._client = self._build_client()
-        self._verified = False
-        self._verify_lock = asyncio.Lock()
+        self._verify_task: asyncio.Task[None] | None = None
 
     async def verify(self) -> None:
         # Explicit, caller-invoked preflight check — call before a long run to fail fast on setup/auth problems.
-        await self._run_preflight()
-        self._verified = True
+        await self._ensure_ready()
 
     async def write(self, record: TrajectoryRecord) -> None:
         # Encodes one record, guards its size, and uploads it as a single object keyed by run_id.
@@ -101,16 +111,20 @@ class S3TrajectorySink:
         await self._put(self._object_key(record.run_id), payload)
 
     def _build_client(self) -> Any:
+        # @intent reveal-secret-only-at-client-construction
         # Constructs the boto3 S3 client, resolving cross-account role assumption first when configured.
+        # Retry/backoff is boto3's own Config, never a hand-rolled loop; .reveal() is called only here,
+        # right before the vendor client needs the real value, never logged or stored elsewhere.
         retry_config = self._driver.BotoConfig(retries={"max_attempts": self._config.max_retries, "mode": "adaptive"}, region_name=self._config.region)
         client_kwargs: dict[str, Any] = {"config": retry_config}
         if self._config.endpoint_url is not None:
             client_kwargs["endpoint_url"] = self._config.endpoint_url
-        if self._credentials is not None and self._credentials.access_key_id is not None:
-            client_kwargs["aws_access_key_id"] = self._credentials.access_key_id
-            client_kwargs["aws_secret_access_key"] = self._credentials.secret_access_key.reveal()
-            if self._credentials.session_token is not None:
-                client_kwargs["aws_session_token"] = self._credentials.session_token.reveal()
+        credentials = self._credentials
+        if credentials is not None and credentials.access_key_id is not None and credentials.secret_access_key is not None:
+            client_kwargs["aws_access_key_id"] = credentials.access_key_id
+            client_kwargs["aws_secret_access_key"] = credentials.secret_access_key.reveal()
+            if credentials.session_token is not None:
+                client_kwargs["aws_session_token"] = credentials.session_token.reveal()
         if self._config.role_arn is not None:
             client_kwargs = self._assume_role_if_configured(client_kwargs)
         return self._driver.boto3.client("s3", **client_kwargs)
@@ -134,14 +148,10 @@ class S3TrajectorySink:
         return resolved
 
     async def _ensure_ready(self) -> None:
-        # Runs the preflight check once per instance, guarded so concurrent first-writes don't double-check.
-        if self._verified:
-            return
-        async with self._verify_lock:
-            if self._verified:
-                return
-            await self._run_preflight()
-            self._verified = True
+        # Memoizes the preflight check as one shared task; the synchronous check-and-create between await points needs no lock, since asyncio only yields control at an await.
+        if self._verify_task is None:
+            self._verify_task = asyncio.ensure_future(self._run_preflight())
+        await self._verify_task
 
     async def _run_preflight(self) -> None:
         # Confirms the bucket exists and is reachable before any write is attempted.
@@ -195,7 +205,7 @@ class S3TrajectorySink:
                 "S3 denied this write. If this bucket requires server-side encryption, confirm sse/kms_key_id is set — a missing encryption header surfaces as AccessDenied too.",
                 details={"bucket": self._config.bucket, "code": code},
             )
-        if code in _RETRYABLE_CODES or (status_code is not None and status_code >= 500):
+        if code in _RETRYABLE_CODES or (status_code is not None and status_code >= _HTTP_SERVER_ERROR_THRESHOLD):
             return HarnessSinkUnavailableError(f"S3 was unavailable after boto3's own retries were exhausted ({code or status_code}).", details={"code": code, "status_code": status_code})
         return HarnessSinkError(f"S3 rejected the request ({code}).", details={"code": code, "status_code": status_code})
 

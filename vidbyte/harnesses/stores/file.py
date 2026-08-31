@@ -22,6 +22,17 @@ ARCHITECTURE NOTE:
 PUBLIC API INVENTORY:
     FileTrajectorySink; path; write(record).
 
+COMMON MODIFICATION PATTERNS:
+    Change the wire encoding or size guard in
+    vidbyte/harnesses/stores/_sink_support.SinkEncoding, shared with every
+    cloud sink, rather than editing the json.dumps(...) call here directly.
+
+KNOWN EDGE CASES:
+    Concurrent multi-process appends to the same file are not guaranteed and
+    are unsupported — see s3.py/gcs.py/azure_blob.py for cloud backends that
+    sidestep this by giving every run its own object instead of one shared,
+    growing file.
+
 RELATED DOCS:
     https://github.com/cerredz/Vidbyte-SDK/blob/main/docs/design/harness-execution-contract.md
     https://github.com/cerredz/Vidbyte-SDK/blob/main/docs/design/cloud-trajectory-sinks.md

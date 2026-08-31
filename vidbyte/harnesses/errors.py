@@ -30,7 +30,12 @@ WHAT NOT TO DO IN THIS FILE:
 
 KNOWN EDGE CASES:
     Execution errors carry a HarnessRun; configuration and setup failures occur
-    before a run exists and therefore expose only safe details.
+    before a run exists and therefore expose only safe details. Any class-level
+    tuple field (blast_radius, possible_causes, fix_approaches) that a subclass
+    re-declares needs an explicit `: tuple[str, ...]` annotation at that
+    re-declaration — mypy otherwise infers the field's type from the literal's
+    exact length, so a base class assigning a 1-tuple and a subclass assigning
+    a 3-tuple to the "same" field become incompatible types.
 
 RELATED DOCS:
     https://github.com/cerredz/Vidbyte-SDK/blob/main/docs/design/harness-execution-contract.md
@@ -55,13 +60,13 @@ _NO_TESTS = ("Approved no-tests workflow: run the repository suite and harness s
 class HarnessError(VidbyteSdkError):
     """Base class for harness failures with durable diagnostic context."""
 
-    description = "A harness execution-contract boundary rejected unsafe or inconsistent state."
-    expected_vs_actual = "Expected: the documented harness contract remains valid. Actual: a boundary observed state that violates it."
-    blast_radius = ("vidbyte/harnesses",)
-    possible_causes = ("Invalid caller input", "Corrupt or conflicting persisted state")
-    fix_approaches = ("Inspect the safe details and reproduce at the named boundary.", "Correct the caller input or backend record before retrying.")
-    doc_links = (_DESIGN_URL,)
-    test_files = _NO_TESTS
+    description: str = "A harness execution-contract boundary rejected unsafe or inconsistent state."
+    expected_vs_actual: str = "Expected: the documented harness contract remains valid. Actual: a boundary observed state that violates it."
+    blast_radius: tuple[str, ...] = ("vidbyte/harnesses",)
+    possible_causes: tuple[str, ...] = ("Invalid caller input", "Corrupt or conflicting persisted state")
+    fix_approaches: tuple[str, ...] = ("Inspect the safe details and reproduce at the named boundary.", "Correct the caller input or backend record before retrying.")
+    doc_links: tuple[str, ...] = (_DESIGN_URL,)
+    test_files: tuple[str, ...] = _NO_TESTS
 
     def __init__(self, message: str, *, details: Mapping[str, Any] | None = None) -> None:
         # Stores only caller-supplied safe details alongside static repair guidance.
@@ -88,7 +93,7 @@ class HarnessConfigurationError(HarnessError):
 
     description = "Harness configuration could not be validated before implementation construction."
     expected_vs_actual = "Expected: schema_version, harness, and agents follow the public envelope (metadata/orchestration optional). Actual: a required field, type, or value is invalid."
-    blast_radius = ("vidbyte/harnesses/config.py", "vidbyte/harnesses/execution.py")
+    blast_radius: tuple[str, ...] = ("vidbyte/harnesses/config.py", "vidbyte/harnesses/execution.py")
 
 
 class HarnessCredentialConfigError(HarnessConfigurationError):
@@ -137,8 +142,8 @@ class HarnessSinkError(HarnessError):
 
     description = "A TrajectorySink could not atomically publish one redacted trajectory record."
     expected_vs_actual = "Expected: the sink can encode the record and write its destination. Actual: encoding or destination I/O failed."
-    blast_radius = ("vidbyte/harnesses/stores/file.py", "vidbyte/harnesses/stores/memory.py")
-    fix_approaches = ("Confirm the destination path is writable.", "Inspect the safe error type; collection is fail-open inside execute() and never fails the run.")
+    blast_radius: tuple[str, ...] = ("vidbyte/harnesses/stores/file.py", "vidbyte/harnesses/stores/memory.py")
+    fix_approaches: tuple[str, ...] = ("Confirm the destination path is writable.", "Inspect the safe error type; collection is fail-open inside execute() and never fails the run.")
 
 
 class HarnessSinkSetupError(HarnessSinkError):

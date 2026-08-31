@@ -24,6 +24,16 @@ WHAT NOT TO DO IN THIS FILE:
     2. Do not import optional provider/database dependencies.
     3. Do not hide a public typed error from package callers.
 
+COMMON MODIFICATION PATTERNS:
+    Add a new public error, sink, or contract at its owning module first,
+    then re-export it here and add it to __all__ — never define new behavior
+    in this file directly.
+
+KNOWN EDGE CASES:
+    Re-exporting a cloud sink here does not require its vendor SDK to be
+    installed; only constructing that sink does, since every vendor import is
+    lazy inside the sink's own constructor.
+
 RELATED DOCS:
     https://github.com/cerredz/Vidbyte-SDK/blob/main/docs/design/harness-execution-contract.md
 
