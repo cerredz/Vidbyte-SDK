@@ -42,6 +42,7 @@ Related:
 - Design doc: `docs/design/otel-genai-and-openinference-trace-shapes.md`
 - The underlying semantic tracing system this builds on: `docs/design/semantic-trace-profiles.md`
 - The `Trace` facade this adds to: `docs/design/trace-facade.md`
+- The close-time follow-up (response text, usage data) this feature enabled: `skills/trace-close-attributes/SKILL.md`
 
 ---
 
@@ -198,16 +199,17 @@ say it accepts OTel GenAI and OpenInference directly, so no dedicated
 Datadog translator is currently needed — but if a future buyer speaks a third
 distinct wire format, the same translator + `OTelTracer` pattern applies.
 
-**Wiring existing SDK data into span attributes (a capture change, not a
-shape change).** Both new translators map `gen_ai.usage.*`/
-`llm.token_count.*` fields *opportunistically* — only when the data is
-already present on the span. Today it usually isn't: `AgentRuntime`'s
-usage/cost tracking (`get_usage`/`get_cost_usd`/`on_usage`/
-`metadata["usage_rollup"]`) is not currently attached to `llm.call` span
-attributes anywhere in the SDK. Wiring it in would make both shapes carry
-real token/cost data without any translator change — this is a **capture**
-change (see `vidbyte/trace/components/`), not a shape change, and belongs
-in that layer, not here.
+**Wiring existing SDK data into span attributes — done, see `trace-close-attributes`.**
+This section previously described this as future work, assuming it would be
+a pure *capture* change requiring no translator change. That assumption was
+wrong in one important way: `end_span`/`end_trace` had no attribute channel
+at all before that feature, since usage/response data is only known *after*
+a span opens, at close time, not before. Closing that gap needed a small,
+symmetric addition to the translator contract itself (`translate_end`,
+mirroring `translate_start`), not just a capture-layer change. See
+`skills/trace-close-attributes/SKILL.md` for the full design — both
+translators now carry real response text and token usage on `llm.call`
+spans, plus a whole-run rollup on the `agent.run` trace.
 
 **A richer, SOTA-signal-quality tracing initiative (a larger, separate,
 not-yet-scoped idea).** A broader conversation (not yet a design doc)
@@ -340,3 +342,4 @@ Update Section 3's table above, and add/extend the entry in
 | `docs/design/trace-facade.md` | The `Trace` public facade this adds new methods to |
 | `skills/vidbyte-sdk/SKILL.md` | Root SDK structure reference; "Semantic Trace Components" section |
 | `skills/sdk/update-skill-files.md` | Change-type → skill matrix |
+| `skills/trace-close-attributes/SKILL.md` | The close-time attribute follow-up: `translate_end`, usage wiring, the `_is_secret_key` redaction fix |

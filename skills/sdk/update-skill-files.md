@@ -145,6 +145,28 @@ destination transport under `vidbyte/providers/tracing/`.
 
 **Process skill:** follow `skills/trace-shape-prebuilts/SKILL.md` end-to-end before opening a PR.
 
+### Add or Change Close-Time Trace Attributes
+
+**Example:** Wiring a new source of close-time span data (a new usage axis,
+cache-hit stats, an evaluation score) into `translate_end`, or adding
+`translate_end` support to a translator that doesn't have it yet.
+
+**Do not confuse with a Trace Shape Prebuilt** — a new *shape* (translator)
+maps open-time data for a new company's spec. This entry is about data only
+known *after* a span opens (response text, usage) reaching an *existing*
+shape's close-time fields.
+
+**Files to update:**
+
+| File | What to add |
+|------|-------------|
+| `skills/trace-close-attributes/SKILL.md` | Process steps, the implemented-fields table, invariants, known gaps |
+| `vidbyte/trace/providers/<company>.py` | New/extended `translate_end` branch, consumed-keys set |
+| `vidbyte/agents/runtime.py` or `vidbyte/agents/base.py` | The runtime call site feeding the new data into `end_span`/`end_trace` as `**kwargs` |
+| `docs/design/trace-output-and-usage-attributes.md` or a new design doc | Non-trivial architecture changes |
+
+**Process skill:** follow `skills/trace-close-attributes/SKILL.md` end-to-end before opening a PR.
+
 ### Add or Change Repository Artifacts
 
 **Example:** Adding or regenerating `artifacts/file_index.md`.
