@@ -31,7 +31,7 @@ KNOWN EDGE CASES:
     directly constructed primitive preserves the caller's supplied value.
 RELATED DOCS:
     https://github.com/cerredz/Vidbyte-SDK/blob/main/docs/design/reasoning-deep-observability-tools.md
-TEST FILES:
+TESTS:
     Existing source compilation, context write-path, and package smoke gates in
     scripts/run_ci.py cover importability and rendering integration; no new
     feature test file is added by this no-tests design.

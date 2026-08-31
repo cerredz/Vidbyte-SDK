@@ -1,5 +1,14 @@
 """Context Protocol Header
 
+FILE: vidbyte/tools/builtins/reasoning/__init__.py
+PURPOSE: Exports ten named reasoning tools and the fixed catalog of 182 strategy-specific public reasoning trace tools.
+ROLE IN CODEBASE: vidbyte.tools.builtins imports this package to register reasoning tools in the SDK component registry.
+ARCHITECTURE NOTE: The catalog is an immutable name-to-class index; leaf modules own schemas and _base.py owns shared execution behavior.
+COMMON MODIFICATION PATTERNS: Add or remove a trace class and its export/catalog entry together, then run the contract checker.
+KNOWN EDGE CASES: Tool names must remain unique and every catalog class must expose a matching immutable definition.
+RELATED DOCS: docs/design/reasoning-deep-observability-tools.md and vidbyte/tools/README.md.
+TESTS: scripts/check_reasoning_trace_contracts.py and the source/package stages in scripts/run_ci.py.
+
 Description:
     Exports both named reasoning-strategy tools and the built-in reasoning trace
     catalog.

@@ -1,5 +1,14 @@
 """Context Protocol Header
 
+FILE: vidbyte/tools/builtins/reasoning/falsify.py
+PURPOSE: Implements the model-callable falsify reasoning tool and records its structured result in the active context manager.
+ROLE IN CODEBASE: The builtins catalog exports this hand-maintained strategy tool alongside the larger reasoning-trace catalog.
+ARCHITECTURE NOTE: This module owns its ToolSpec and context-item construction; _parsing.py owns shared input coercion and ContextManager owns placement.
+COMMON MODIFICATION PATTERNS: Keep tool and primitive fields synchronized, preserve model-facing semantics, and run focused lint plus canonical CI.
+KNOWN EDGE CASES: Model arguments may be JSON-encoded or malformed, and a context write may reject an otherwise parsed record.
+RELATED DOCS: vidbyte/tools/README.md and field-guide/vidbyte-sdk/model-facing-tool-contracts.md.
+TESTS: scripts/check_reasoning_trace_contracts.py and the source/package stages in scripts/run_ci.py.
+
 Description:
     Implements FalsifyTool — a model-callable builtin for recording a
     Popperian falsification test into the active ContextManager.
@@ -50,11 +59,11 @@ class FalsifyTool(BaseTool):
         return ToolSpec(
             name="falsify",
             description=(
-                "Subject a claim to a Popperian falsification test: design a test that could "
-                "refute the claim, name the boldest prediction the claim forbids, and record "
-                "whether that test has actually been run. Use this before treating a claim as "
-                "established, especially one that has only ever been checked in ways that could "
-                "confirm it, never in ways that could break it."
+                "Use this tool when a claim needs a genuine opportunity to fail before it is "
+                "treated as established. It records a refuting test and the bold prediction the "
+                "claim rules out. The test status distinguishes a designed challenge from one "
+                "that has actually produced evidence. The resulting record should make the "
+                "claim's exposure to disconfirmation and the next evidentiary step inspectable."
             ),
             parameters=(
                 ToolParameter(
@@ -132,8 +141,12 @@ class FalsifyTool(BaseTool):
 
         try:
             self._manager.upsert(item)
-        except ValueError as exc:
-            return ToolResult.error(call.tool_name, str(exc))
+        except ValueError:
+            return ToolResult.error(
+                call.tool_name,
+                "The reasoning record could not be stored because its context values were invalid.",
+                metadata={"error": "invalid_reasoning_context"},
+            )
 
         return ToolResult.success(call.tool_name, item.to_context_text())
 

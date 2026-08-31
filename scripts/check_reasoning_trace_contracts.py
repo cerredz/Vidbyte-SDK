@@ -1,4 +1,13 @@
-"""Validate the public contracts declared by all strategy-specific trace tools."""
+"""FILE: scripts/check_reasoning_trace_contracts.py
+
+PURPOSE: Validates the public schemas declared by all strategy-specific reasoning trace tools.
+ROLE IN CODEBASE: The canonical source CI stage uses this contract check to guard the fixed 182-tool catalog.
+ARCHITECTURE NOTE: It imports the worktree SDK, renders every ToolSpec, and verifies catalog identity, prose depth, and schema diversity.
+COMMON MODIFICATION PATTERNS: Update an assertion only with the matching public contract and design documentation change.
+KNOWN EDGE CASES: Example markers are rejected case-insensitively, sentence counts are bounded, and duplicate tool fields fail closed.
+RELATED DOCS: docs/design/reasoning-deep-observability-tools.md and field-guide/vidbyte-sdk/local-ci-verification.md.
+TESTS: The source stage in scripts/run_ci.py executes this script against every registered reasoning trace tool.
+"""
 
 from __future__ import annotations
 
