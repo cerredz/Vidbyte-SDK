@@ -1,30 +1,81 @@
-"""Context Protocol Header
+"""FILE: vidbyte/agents/speed/tracker.py
 
-Description:
-    Per-run accumulator turning timed model calls and tool calls into a speed
-    rollup, mirroring UsageTracker's role for cost.
-Purpose:
-    Owns the run's timing ledger so the agent runtime can record each model
-    call and tool call once and BaseAgent.get_speed_stats() can expose live or
-    final speed statistics.
-Architecture:
-    - AgentSpeedTracker: mutable per-run store holding three ledgers (model
-      calls, tool calls, loop steps) plus the run's start/end wall-clock marks.
-    - rollup() is a thin orchestrator over four private _build_*_stats helpers,
-      each producing one nested stats dataclass; no aggregation math lives in
-      rollup() itself.
-Key Functions:
-    - record_call: Duck-types provider/model off the response, prices nothing,
-      stores one CallSpeedRecord. Returns None and marks corrupted when the
-      response is unusable, exactly like UsageTracker.record_call.
-    - record_tool_call: Stores one ToolCallSpeedRecord.
-    - record_step: Stores one StepSpeedRecord. Not yet called by runtime.py.
-    - rollup: Folds all three ledgers into an immutable AgentSpeedRollup.
-Relations:
-    Created by BaseAgent, consumed by AgentRuntime; dataclasses from
-    vidbyte/lib/dataclasses/speed.py, math from vidbyte/lib/util/math.py.
-Similar Files:
-    - vidbyte/agents/pricing/tracker.py (UsageTracker)
+PURPOSE:
+    Owns one run's timing ledger so AgentRuntime can record each model call
+    and tool call once and BaseAgent.get_speed_stats() can expose live or
+    final speed statistics. This is the speed counterpart to
+    vidbyte/agents/pricing/tracker.py's UsageTracker (cost).
+
+ROLE IN CODEBASE:
+    Created by BaseAgent.__init__ (vidbyte/agents/base.py), reset and
+    run-boundary-marked in BaseAgent.generate_reply, and threaded into the
+    AgentRuntime BaseAgent._runtime() constructs for AgentRuntimeType.LINEAR.
+    Called by AgentRuntime (vidbyte/agents/runtime.py): record_call beside
+    usage_tracker.record_call in the model/tool loop, record_tool_call from
+    _execute_tool's finally block. Uses dataclasses from
+    vidbyte/lib/dataclasses/speed.py and MathHelper from
+    vidbyte/lib/util/math.py for aggregation.
+
+ARCHITECTURE NOTE:
+    AgentSpeedTracker is a mutable per-run accumulator holding three ledgers
+    (model calls, tool calls, loop steps) plus the run's start/end wall-clock
+    marks. rollup() is a thin orchestrator over four private _build_*_stats
+    helpers, each producing one nested stats dataclass; no aggregation math
+    lives in rollup() itself, per explicit instruction to split it into
+    smaller helper functions (docs/design/agent-speed-tracking.md).
+
+FUNCTION INVENTORY:
+    now() -> float: bare clock read, the one method that intentionally does
+    not return a dataclass (see the inline comment on the method).
+    record_run_start() / record_run_end() -> None: mark the run's wall-clock
+    boundary; called from every exit path of BaseAgent.generate_reply.
+    record_call(RecordModelCallInput) -> CallSpeedRecord | None: duck-types
+    provider/model off the response exactly like UsageTracker.record_call;
+    returns None and marks corrupted when the response or the constructed
+    record is unusable. Never raises.
+    record_tool_call(RecordToolCallInput) -> ToolCallSpeedRecord | None: same
+    fail-open contract; called from a `finally` block, so it must never raise.
+    record_step(RecordStepInput) -> StepSpeedRecord | None: same fail-open
+    contract; not yet called from vidbyte/agents/runtime.py.
+    rollup() -> AgentSpeedRollup: folds every ledger via the four
+    _build_*_stats helpers below.
+    reset() -> None: clears every ledger and both run-boundary marks.
+    Tests: tests/test_agent_speed.py
+    (AgentSpeedTrackerRecordCallTests/RecordToolCallTests/RollupTests/
+    BaseAgentIntegrationTests) and
+    tests/test_agent_runtime.py:AgentSpeedTrackingRuntimeTests.
+
+COMMON MODIFICATION PATTERNS:
+    Add a new speed metric by adding a field to the relevant *Stats
+    dataclass in vidbyte/lib/dataclasses/speed.py, then computing it in the
+    matching _build_*_stats helper here, using MathHelper for any general
+    statistic rather than inlining the math. Wire a new record_* call site
+    into vidbyte/agents/runtime.py or vidbyte/agents/base.py only after the
+    dataclass and tracker method both exist and are tested.
+
+WHAT NOT TO DO IN THIS FILE:
+    1. Do not define dataclasses or enums here; they belong in
+       vidbyte/lib/dataclasses/speed.py and vidbyte/lib/enums/speed.py.
+    2. Do not inline percentile/mean/max/argmax math; that belongs in
+       MathHelper (vidbyte/lib/util/math.py).
+    3. Do not let any record_* method raise out of the agent loop; every
+       call site in AgentRuntime relies on the fail-open contract documented
+       on each method above.
+
+KNOWN EDGE CASES:
+    record_tool_call and record_step re-validate on construction inside their
+    own try/except even though their input dataclasses already validated,
+    because a clock override that regresses between a caller-captured
+    started_at and the tracker's own completed_at read would otherwise raise
+    AgentSpeedValidationError from record_tool_call's call site inside
+    AgentRuntime._execute_tool's `finally` block, which would replace
+    whatever original exception was already propagating.
+
+RELATED DOCS:
+    https://github.com/cerredz/Vidbyte-SDK/blob/main/docs/design/agent-speed-tracking.md
+
+TESTS:
+    tests/test_agent_speed.py, tests/test_agent_runtime.py:AgentSpeedTrackingRuntimeTests.
 """
 
 from __future__ import annotations
@@ -48,6 +99,8 @@ from vidbyte.lib.dataclasses.speed import (
 from vidbyte.lib.enums.speed import AgentSpeedRecordingIntegrity
 from vidbyte.lib.errors import AgentSpeedValidationError
 from vidbyte.lib.util.math import MathHelper
+
+_FIRST_INDEX = 1  # Ledger indices are 1-based, matching UsageTracker's call_index convention.
 
 
 class AgentSpeedTracker:
@@ -88,6 +141,11 @@ class AgentSpeedTracker:
 
     def record_call(self, call_input: RecordModelCallInput) -> CallSpeedRecord | None:
         """Time one model call and store it. Returns None when the response is unusable."""
+        # @intent duck-typed-response-boundary-never-raises
+        # response crosses the AgentRuntime/provider boundary as an untyped object, and a
+        # fallback-chain retry can hand this the same call_index sequence a different
+        # provider already used. Failing to record here must degrade to None + corrupted,
+        # not raise, so a metering gap never turns into a broken agent run.
         provider = getattr(call_input.response, "provider", None)
         model = getattr(call_input.response, "model", None)
         if provider is None or model is None:
@@ -95,7 +153,7 @@ class AgentSpeedTracker:
             return None
         try:
             record = CallSpeedRecord(
-                call_index=len(self._calls) + 1,
+                call_index=len(self._calls) + _FIRST_INDEX,
                 provider=str(provider),
                 model=str(model),
                 dispatched_at=call_input.dispatched_at,
@@ -113,27 +171,39 @@ class AgentSpeedTracker:
         self._calls.append(record)
         return record
 
-    def record_tool_call(self, call_input: RecordToolCallInput) -> ToolCallSpeedRecord:
-        """Time one tool call and store it."""
-        record = ToolCallSpeedRecord(
-            call_index=len(self._tool_calls) + 1,
-            tool_name=call_input.tool_name,
-            started_at=call_input.started_at,
-            completed_at=self._clock(),
-            timed_out=call_input.timed_out,
-        )
+    def record_tool_call(self, call_input: RecordToolCallInput) -> ToolCallSpeedRecord | None:
+        """Time one tool call and store it. Returns None on an internal validation failure.
+
+        Called from AgentRuntime._execute_tool's `finally` block, where a raised exception
+        would replace whatever original exception was already propagating — so this must
+        never raise, even though RecordToolCallInput already validates its own fields."""
+        try:
+            record = ToolCallSpeedRecord(
+                call_index=len(self._tool_calls) + _FIRST_INDEX,
+                tool_name=call_input.tool_name,
+                started_at=call_input.started_at,
+                completed_at=self._clock(),
+                timed_out=call_input.timed_out,
+            )
+        except AgentSpeedValidationError:
+            self.mark_recording_corrupted()
+            return None
         self._tool_calls.append(record)
         return record
 
-    def record_step(self, step_input: RecordStepInput) -> StepSpeedRecord:
+    def record_step(self, step_input: RecordStepInput) -> StepSpeedRecord | None:
         """Time one loop iteration and store it. Not yet called from vidbyte/agents/runtime.py."""
-        record = StepSpeedRecord(
-            iteration_index=len(self._steps) + 1,
-            started_at=step_input.started_at,
-            completed_at=self._clock(),
-            model_call_index=step_input.model_call_index,
-            tool_call_indices=step_input.tool_call_indices,
-        )
+        try:
+            record = StepSpeedRecord(
+                iteration_index=len(self._steps) + _FIRST_INDEX,
+                started_at=step_input.started_at,
+                completed_at=self._clock(),
+                model_call_index=step_input.model_call_index,
+                tool_call_indices=step_input.tool_call_indices,
+            )
+        except AgentSpeedValidationError:
+            self.mark_recording_corrupted()
+            return None
         self._steps.append(record)
         return record
 

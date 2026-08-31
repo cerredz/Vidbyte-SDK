@@ -1,28 +1,77 @@
-"""Context Protocol Header
+"""FILE: vidbyte/lib/dataclasses/speed.py
 
-Description:
+PURPOSE:
     Defines every input, record, stats, and rollup dataclass AgentSpeedTracker
-    reads or produces.
-Purpose:
-    Gives the runtime and agent API stable, self-validating typed shapes for one
-    timed model call, one timed tool call, one timed loop iteration, and the
-    aggregate statistics folded over a whole run. Every dataclass validates its
-    own fields in __post_init__ and raises AgentSpeedValidationError on an
-    invalid shape, so a caller never builds a rollup out of nonsense timestamps.
-Architecture:
-    - RecordModelCallInput / CallSpeedRecord: one model call's timing.
-    - RecordToolCallInput / ToolCallSpeedRecord: one tool call's timing.
-    - RecordStepInput / StepSpeedRecord: one loop iteration's timing (not yet
-      produced by vidbyte/agents/runtime.py; see docs/design/agent-speed-tracking.md).
-    - CallSpeedStats / ToolCallSpeedStats / StepSpeedStats / RunSpeedStats: the
-      four nested aggregate dataclasses AgentSpeedTracker.rollup() assembles.
-    - AgentSpeedRollup: the whole-run ledger plus every stats dataclass.
-Relations:
-    Built by vidbyte/agents/speed/tracker.py using vidbyte/lib/util/math.py for
-    aggregation; surfaced on BaseAgent.get_speed_stats().
-Similar Files:
-    - vidbyte/lib/dataclasses/sessions.py (AgentUsage, UsageRollup)
-    - vidbyte/agents/pricing/records.py (UsageRecord, UsageRollup)
+    reads or produces: one timed model call, one timed tool call, one timed
+    loop iteration, and the aggregate statistics folded over a whole run.
+    Every dataclass validates its own fields in __post_init__ and raises
+    AgentSpeedValidationError on an invalid shape, so a caller never builds a
+    rollup out of nonsense timestamps.
+
+ROLE IN CODEBASE:
+    Built by vidbyte/agents/speed/tracker.py (AgentSpeedTracker.record_call,
+    record_tool_call, record_step, and rollup) using vidbyte/lib/util/math.py
+    for aggregation. AgentSpeedRollup is surfaced on
+    BaseAgent.get_speed_stats() (vidbyte/agents/base.py). Re-exported from
+    vidbyte/lib/dataclasses/__init__.py, vidbyte/agents/speed/__init__.py, and
+    the package root vidbyte/__init__.py.
+
+ARCHITECTURE NOTE:
+    RecordModelCallInput / CallSpeedRecord time one model call.
+    RecordToolCallInput / ToolCallSpeedRecord time one tool call.
+    RecordStepInput / StepSpeedRecord time one loop iteration (not yet
+    produced by vidbyte/agents/runtime.py; see
+    docs/design/agent-speed-tracking.md Non-Goals). CallSpeedStats /
+    ToolCallSpeedStats / StepSpeedStats / RunSpeedStats are the four nested
+    aggregate dataclasses AgentSpeedTracker.rollup() assembles.
+    AgentSpeedRollup is the whole-run ledger plus every stats dataclass. Every
+    enum/dataclass this feature introduces lives under vidbyte/lib/ rather
+    than beside the tracker (unlike vidbyte/agents/pricing/records.py's
+    UsageRecord/UsageRollup), per explicit design decision recorded in the
+    design doc's Alternatives Considered.
+
+FUNCTION INVENTORY:
+    RecordModelCallInput, CallSpeedRecord, RecordToolCallInput,
+    ToolCallSpeedRecord, RecordStepInput, StepSpeedRecord: frozen, validated
+    dataclasses; CallSpeedRecord/ToolCallSpeedRecord/StepSpeedRecord also
+    expose duration_ms (and ttft_ms/tokens_per_second on CallSpeedRecord) as
+    properties. CallSpeedStats, ToolCallSpeedStats, StepSpeedStats,
+    RunSpeedStats, AgentSpeedRollup: frozen, validated aggregate dataclasses,
+    each with an .empty() classmethod for the no-data case. Tests:
+    tests/test_agent_speed.py (RecordModelCallInputValidationTests,
+    CallSpeedRecordTests, ToolCallSpeedRecordTests).
+
+COMMON MODIFICATION PATTERNS:
+    Add a new speed metric by adding a field to the relevant *Stats
+    dataclass here, then computing it in the matching
+    AgentSpeedTracker._build_*_stats helper in vidbyte/agents/speed/tracker.py
+    in the same change. Add validation for any new field in that dataclass's
+    __post_init__ using the shared _require_* helpers at the top of this file.
+
+WHAT NOT TO DO IN THIS FILE:
+    1. Do not add mutable state or tracking logic; that belongs in
+       AgentSpeedTracker (vidbyte/agents/speed/tracker.py).
+    2. Do not add general numeric aggregation (percentile, mean, max,
+       argmax); that belongs in MathHelper (vidbyte/lib/util/math.py).
+    3. Do not import provider-specific response types to type `response` on
+       RecordModelCallInput; it is intentionally duck-typed with only an
+       is-not-None check, matching UsageTracker.record_call's own contract.
+
+KNOWN EDGE CASES:
+    A CallSpeedStats/ToolCallSpeedStats/StepSpeedStats/RunSpeedStats/
+    AgentSpeedRollup with all-None optional fields (via .empty()) is the
+    valid, expected shape for a run with no recorded activity of that kind —
+    not an error state. cold_start_overhead_ms and framework_overhead_ms on
+    RunSpeedStats may legitimately be negative (e.g. the first call was
+    faster than average) and are only type-checked, not sign-checked.
+
+RELATED DOCS:
+    https://github.com/cerredz/Vidbyte-SDK/blob/main/docs/design/agent-speed-tracking.md
+
+TESTS:
+    tests/test_agent_speed.py (RecordModelCallInputValidationTests,
+    CallSpeedRecordTests, ToolCallSpeedRecordTests, and indirectly every
+    AgentSpeedTrackerRollupTests case).
 """
 
 from __future__ import annotations
@@ -32,6 +81,9 @@ from typing import Any
 
 from vidbyte.lib.enums.speed import AgentSpeedRecordingIntegrity
 from vidbyte.lib.errors import AgentSpeedValidationError
+
+_MILLISECONDS_PER_SECOND = 1000
+_DEFAULT_RETRY_COUNT = 0
 
 
 def _require_not_none(value: Any, *, field_name: str) -> None:
@@ -73,6 +125,15 @@ def _require_non_empty_str(value: str, *, field_name: str) -> None:
         )
 
 
+def _require_bool(value: bool, *, field_name: str) -> None:
+    # One shared owner for the timed_out identity so RecordToolCallInput and
+    # ToolCallSpeedRecord can never drift onto different accepted shapes.
+    if not isinstance(value, bool):
+        raise AgentSpeedValidationError(
+            f"{field_name} must be a bool.", details={"field": field_name, "type": type(value).__name__}
+        )
+
+
 def _require_at_least_one(value: int, *, field_name: str) -> None:
     if isinstance(value, bool) or not isinstance(value, int) or value < 1:
         raise AgentSpeedValidationError(
@@ -103,10 +164,16 @@ class RecordModelCallInput:
     dispatched_at: float
     first_token_at: float | None = None
     output_tokens: int | None = None
-    retry_count: int = 0
+    retry_count: int = _DEFAULT_RETRY_COUNT
     fallback_index: int | None = None
 
     def __post_init__(self) -> None:
+        # @intent retry-and-fallback-fields-are-best-effort-not-authoritative
+        # retry_count/fallback_index describe what AgentRuntime's fallback chain observed
+        # at the call site, not a separately-metered retry duration (that time is already
+        # folded into duration_ms by construction — see docs/design/agent-speed-tracking.md
+        # Non-Goals). Only their shape is validated here; a caller across the
+        # AgentRuntime/provider boundary cannot make them negative or non-numeric.
         _require_not_none(self.response, field_name="response")
         _require_non_negative_float(self.dispatched_at, field_name="dispatched_at")
         if self.first_token_at is not None:
@@ -134,10 +201,15 @@ class CallSpeedRecord:
     completed_at: float
     first_token_at: float | None = None
     output_tokens: int | None = None
-    retry_count: int = 0
+    retry_count: int = _DEFAULT_RETRY_COUNT
     fallback_index: int | None = None
 
     def __post_init__(self) -> None:
+        # @intent provider-and-model-are-the-fallback-chains-real-answer
+        # A fallback transition can replace the provider mid-run (AgentRuntime's outer
+        # loop reassigns state.provider and restarts from the top), so provider/model on
+        # this record must reflect whichever attempt actually produced a usable response,
+        # not the run's original provider. fallback_index carries which attempt that was.
         _require_at_least_one(self.call_index, field_name="call_index")
         _require_non_empty_str(self.provider, field_name="provider")
         _require_non_empty_str(self.model, field_name="model")
@@ -168,14 +240,14 @@ class CallSpeedRecord:
     @property
     def duration_ms(self) -> float:
         """Total wall-clock time from dispatch to a completed response, in milliseconds."""
-        return (self.completed_at - self.dispatched_at) * 1000
+        return (self.completed_at - self.dispatched_at) * _MILLISECONDS_PER_SECOND
 
     @property
     def ttft_ms(self) -> float | None:
         """Time from dispatch to the first streamed token, or None when the call was not streamed."""
         if self.first_token_at is None:
             return None
-        return (self.first_token_at - self.dispatched_at) * 1000
+        return (self.first_token_at - self.dispatched_at) * _MILLISECONDS_PER_SECOND
 
     @property
     def tokens_per_second(self) -> float | None:
@@ -198,10 +270,7 @@ class RecordToolCallInput:
     def __post_init__(self) -> None:
         _require_non_empty_str(self.tool_name, field_name="tool_name")
         _require_non_negative_float(self.started_at, field_name="started_at")
-        if not isinstance(self.timed_out, bool):
-            raise AgentSpeedValidationError(
-                "timed_out must be a bool.", details={"field": "timed_out", "type": type(self.timed_out).__name__}
-            )
+        _require_bool(self.timed_out, field_name="timed_out")
 
 
 @dataclass(frozen=True, slots=True)
@@ -224,15 +293,12 @@ class ToolCallSpeedRecord:
                 "completed_at cannot precede started_at.",
                 details={"completed_at": self.completed_at, "started_at": self.started_at},
             )
-        if not isinstance(self.timed_out, bool):
-            raise AgentSpeedValidationError(
-                "timed_out must be a bool.", details={"field": "timed_out", "type": type(self.timed_out).__name__}
-            )
+        _require_bool(self.timed_out, field_name="timed_out")
 
     @property
     def duration_ms(self) -> float:
         """Total wall-clock time from dispatch to completion, in milliseconds."""
-        return (self.completed_at - self.started_at) * 1000
+        return (self.completed_at - self.started_at) * _MILLISECONDS_PER_SECOND
 
 
 @dataclass(frozen=True, slots=True)
@@ -276,7 +342,7 @@ class StepSpeedRecord:
     @property
     def duration_ms(self) -> float:
         """Total wall-clock time for this loop iteration, in milliseconds."""
-        return (self.completed_at - self.started_at) * 1000
+        return (self.completed_at - self.started_at) * _MILLISECONDS_PER_SECOND
 
 
 def _validate_tool_call_indices(indices: tuple[int, ...]) -> None:

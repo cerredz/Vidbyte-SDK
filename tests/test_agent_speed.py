@@ -1,28 +1,62 @@
-"""Context Protocol Header
+"""FILE: tests/test_agent_speed.py
 
-Description:
+PURPOSE:
     Feature tests for agent speed tracking: MathHelper, the speed dataclasses'
     validation, AgentSpeedTracker's accumulation/rollup logic, and BaseAgent's
-    reset/run-boundary/get_speed_stats() wiring.
-Purpose:
-    Locks the behavior docs/design/agent-speed-tracking.md specifies: fail-open
-    recording, validated dataclasses, a rollup that never double-counts, and a
-    tracker lifecycle that mirrors UsageTracker's (reset every run, closed on
-    every exit path including exceptions).
-Architecture:
-    - MathHelperTests: mean/percentile/max/argmax on plain sequences.
-    - RecordModelCallInputValidationTests / CallSpeedRecordTests /
-      ToolCallSpeedRecordTests: dataclass __post_init__ validation.
-    - AgentSpeedTrackerRecordCallTests / AgentSpeedTrackerRecordToolCallTests:
-      the tracker's fail-open recording contract.
-    - AgentSpeedTrackerRollupTests: rollup composition and derived statistics.
-    - AgentSpeedTrackerBaseAgentIntegrationTests: the real generate_reply()
-      lifecycle through get_speed_stats().
-Relations:
-    Exercises vidbyte/lib/util/math.py, vidbyte/lib/dataclasses/speed.py,
-    vidbyte/agents/speed/tracker.py, and vidbyte/agents/base.py.
-Similar Files:
-    - tests/test_agent_pricing.py
+    reset/run-boundary/get_speed_stats() wiring. Locks the behavior
+    docs/design/agent-speed-tracking.md specifies: fail-open recording,
+    validated dataclasses, a rollup that never double-counts, and a tracker
+    lifecycle that mirrors UsageTracker's (reset every run, closed on every
+    exit path including exceptions).
+
+ROLE IN CODEBASE:
+    Exercises vidbyte/lib/util/math.py (MathHelper), vidbyte/lib/dataclasses/speed.py
+    (every dataclass's __post_init__ validation), vidbyte/agents/speed/tracker.py
+    (AgentSpeedTracker), and vidbyte/agents/base.py (BaseAgent's speed-tracker
+    wiring) via tests.agent_test_support.build_test_agent.
+
+ARCHITECTURE NOTE:
+    MathHelperTests covers mean/percentile/max/argmax on plain sequences.
+    RecordModelCallInputValidationTests / CallSpeedRecordTests /
+    ToolCallSpeedRecordTests cover dataclass __post_init__ validation.
+    AgentSpeedTrackerRecordCallTests / AgentSpeedTrackerRecordToolCallTests
+    cover the tracker's fail-open recording contract.
+    AgentSpeedTrackerRollupTests covers rollup composition and derived
+    statistics. AgentSpeedTrackerBaseAgentIntegrationTests covers the real
+    generate_reply() lifecycle through get_speed_stats().
+
+FUNCTION INVENTORY:
+    No production functions; see the ARCHITECTURE NOTE above for the test
+    class breakdown. Runtime-loop-level coverage (model-call and tool-call
+    timing through AgentRuntime.arun) lives in
+    tests/test_agent_runtime.py:AgentSpeedTrackingRuntimeTests instead.
+
+COMMON MODIFICATION PATTERNS:
+    Add a new AgentSpeedTracker method or dataclass field, then add its test
+    to the matching class here in the same change. If the change also affects
+    a real AgentRuntime call site, add the runtime-level assertion to
+    tests/test_agent_runtime.py:AgentSpeedTrackingRuntimeTests instead.
+
+WHAT NOT TO DO IN THIS FILE:
+    1. Do not test AgentRuntime's real model/tool loop here; that belongs in
+       tests/test_agent_runtime.py, which already owns FakeRunner/FakeResponse
+       fixtures for that loop.
+    2. Do not duplicate vidbyte/agents/pricing's own tests
+       (tests/test_agent_pricing.py); this file covers speed only.
+
+KNOWN EDGE CASES:
+    _FakeModelResponse/_NoProviderResponse are minimal duck-typed fixtures
+    distinct from tests/test_agent_runtime.py's FakeResponse, because
+    AgentSpeedTracker.record_call reads .provider/.model directly off the
+    response object rather than through a RunnerHandle.
+
+RELATED DOCS:
+    https://github.com/cerredz/Vidbyte-SDK/blob/main/docs/design/agent-speed-tracking.md
+
+TESTS:
+    This file is itself the test suite; run with
+    `python -m pytest tests/test_agent_speed.py` or via
+    scripts/test-agent-speed-tracking.py.
 """
 
 from __future__ import annotations
@@ -183,6 +217,19 @@ class AgentSpeedTrackerRecordToolCallTests(unittest.TestCase):
         second = tracker.record_tool_call(RecordToolCallInput(tool_name="search", started_at=0.0))
         self.assertEqual(first.call_index, 1)
         self.assertEqual(second.call_index, 2)
+
+    def test_record_tool_call_never_raises_when_the_clock_goes_backwards(self) -> None:
+        # _execute_tool calls record_tool_call from a `finally` block, where a raised
+        # exception would replace whatever original exception was already propagating.
+        # A clock that regresses between started_at capture and the internal completed_at
+        # read would otherwise raise AgentSpeedValidationError (completed_at < started_at)
+        # straight out of that finally block; this must degrade to None instead.
+        clock_values = iter([5.0, 1.0])
+        tracker = AgentSpeedTracker(clock=lambda: next(clock_values))
+        started_at = tracker.now()  # consumes 5.0
+        record = tracker.record_tool_call(RecordToolCallInput(tool_name="search", started_at=started_at))
+        self.assertIsNone(record)
+        self.assertTrue(tracker.recording_corrupted)
 
 
 class AgentSpeedTrackerRollupTests(unittest.TestCase):
