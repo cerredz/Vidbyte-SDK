@@ -141,7 +141,7 @@ SymmetricFlatTrace = TraceSchema.from_model(
 #   SymmetricEvidenceTraceModel / SymmetricEvidenceTrace
 ```
 
-The full field lists (with production-quality 2-4 sentence descriptions per field, matching the bar set by `ActionTraceModel`) are:
+The full field lists (with production-quality 4-5 sentence descriptions per field, matching the bar set by `ActionTraceModel` and the continual-tracing skill's explicit "4–5 sentence description" guidance) are:
 
 **`SymmetricChecklistTraceModel`** — `goal_success_checks`, `path_quality_checks`, `answer_correctness_checks`, each `list[dict[str, Any]]` holding `{criterion: str, met: bool, evidence: str, iteration: int}` entries.
 

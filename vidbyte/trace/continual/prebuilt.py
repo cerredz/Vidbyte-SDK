@@ -250,62 +250,90 @@ class SymmetricSubScoreTraceModel(BaseModel):
 
     goal_intent_alignment: float = Field(
         description=(
-            "0-1. How closely the current output matches the user's explicit intent, independent "
-            "of goal_constraint_satisfaction and goal_completion_pct. Replaced in full on every "
-            "update."
+            "0-1. How closely the current output matches the user's explicit intent, as opposed "
+            "to a technically-responsive but off-target answer. Scored independently of "
+            "goal_constraint_satisfaction and goal_completion_pct — an output can be perfectly "
+            "aligned with intent while still missing a constraint or being incomplete. Replaced "
+            "in full on every update rather than averaged with the prior value, so always write "
+            "the current best read, not a nudge up or down from the last one."
         ),
     )
     goal_constraint_satisfaction: float = Field(
         description=(
-            "0-1. The fraction of the goal's stated constraints currently satisfied, independent "
-            "of goal_intent_alignment and goal_completion_pct. Replaced in full on every update."
+            "0-1. The fraction of the goal's explicitly stated constraints — format, scope, "
+            "length, exclusions, and similar hard requirements — currently satisfied. Scored "
+            "independently of goal_intent_alignment and goal_completion_pct: an output can "
+            "satisfy every constraint while still misreading the user's underlying intent. "
+            "Replaced in full on every update; a value below 1.0 should correspond to at least "
+            "one identifiable violated constraint, not a vague sense of incompleteness."
         ),
     )
     goal_completion_pct: float = Field(
         description=(
-            "0-1. How much of the goal is done, independent of goal_intent_alignment and "
+            "0-1. How much of the goal's scope is done, independent of goal_intent_alignment and "
             "goal_constraint_satisfaction — a partially-aligned output can still be near-complete "
-            "on scope. Replaced in full on every update."
+            "on scope, and a fully scoped output can still misread intent. Replaced in full on "
+            "every update. For a multi-part goal, base this on the fraction of parts addressed, "
+            "not a subjective sense of overall progress."
         ),
     )
     path_efficiency: float = Field(
         description=(
-            "0-1. The absence of redundant or wasted steps in the actions taken so far, "
-            "independent of path_safety and path_plan_adherence. Replaced in full on every "
-            "update."
+            "0-1. The absence of redundant or wasted steps in the actions taken so far — repeated "
+            "lookups, abandoned approaches re-tried without new information, or tool calls that "
+            "added nothing. Scored independently of path_safety and path_plan_adherence, so a "
+            "highly efficient path can still be unsafe or off-plan. Replaced in full on every "
+            "update, based on the actions taken up to that point, not a prediction of future "
+            "efficiency."
         ),
     )
     path_safety: float = Field(
         description=(
-            "0-1. The absence of risky or blocked actions, independent of path_efficiency and "
-            "path_plan_adherence — an efficient path can still be unsafe. Replaced in full on "
-            "every update."
+            "0-1. The absence of risky or blocked actions among everything taken so far — actions "
+            "with side effects, destructive potential, or that required a safeguard to stop. "
+            "Scored independently of path_efficiency and path_plan_adherence — an efficient, "
+            "on-plan path can still be unsafe if even one action carried real risk. Replaced in "
+            "full on every update; a single risky action should visibly lower this value even if "
+            "most of the run was clean."
         ),
     )
     path_plan_adherence: float = Field(
         description=(
-            "0-1. How closely the actions taken matched the agent's own stated plan, independent "
-            "of path_efficiency and path_safety. Replaced in full on every update."
+            "0-1. How closely the actions actually taken matched the agent's own stated plan or "
+            "stated next step, independent of path_efficiency and path_safety — a low-efficiency "
+            "path can still faithfully follow the plan, and a fast path can still improvise away "
+            "from it. Replaced in full on every update. A value well below 1.0 should correspond "
+            "to a concrete deviation, such as skipping a stated step or taking an unannounced "
+            "detour."
         ),
     )
     correctness_grounding: float = Field(
         description=(
-            "0-1. The fraction of claims traceable to a checkable source, independent of "
-            "correctness_consistency and correctness_completeness. Replaced in full on every "
-            "update."
+            "0-1. The fraction of claims in the current output that are traceable to a checkable "
+            "source — a document, a tool result, or a verifiable fact — rather than asserted "
+            "outright. Scored independently of correctness_consistency and "
+            "correctness_completeness: claims can be internally consistent and cover everything "
+            "asked while still being entirely unsourced. Replaced in full on every update as new "
+            "claims are made or existing ones are checked."
         ),
     )
     correctness_consistency: float = Field(
         description=(
-            "0-1. The absence of internal contradictions among the claims made, independent of "
-            "correctness_grounding and correctness_completeness. Replaced in full on every "
-            "update."
+            "0-1. The absence of internal contradictions among the claims made so far — no two "
+            "claims asserting incompatible things. Scored independently of correctness_grounding "
+            "and correctness_completeness, since a set of claims can be perfectly consistent with "
+            "each other while still being ungrounded or incomplete. Replaced in full on every "
+            "update; drop it as soon as any contradiction between two claims is detected, even if "
+            "each individual claim is otherwise well-sourced."
         ),
     )
     correctness_completeness: float = Field(
         description=(
-            "0-1. The absence of gaps the answer should cover but doesn't, independent of "
-            "correctness_grounding and correctness_consistency. Replaced in full on every update."
+            "0-1. The absence of gaps the answer should cover but doesn't, given what the goal "
+            "and prior claims imply is in scope. Scored independently of correctness_grounding and "
+            "correctness_consistency — an answer can be fully grounded and internally consistent "
+            "while still leaving an implied sub-question unaddressed. Replaced in full on every "
+            "update as more of the answer's expected scope is covered or a new gap is identified."
         ),
     )
 
@@ -363,26 +391,35 @@ class SymmetricTimelineTraceModel(BaseModel):
     goal_success_timeline: list[dict[str, Any]] = Field(
         default_factory=list,
         description=(
-            "One snapshot appended per pass. Shape per entry: {iteration: int, status: string, "
+            "One snapshot of goal status appended per trace-agent pass, building a trend line "
+            "instead of only the latest value. Shape per entry: {iteration: int, status: string, "
             "confidence: float, note: string}. Append exactly one new entry per update rather "
             "than editing a prior one, so the full sequence of goal-status readings across the "
-            "run is preserved."
+            "run is preserved and never overwritten. A reversal — status moving backward from a "
+            "later iteration to an earlier one, such as 'achieved' regressing to 'in_progress' — "
+            "should be visible in the sequence, not smoothed away."
         ),
     )
     path_quality_timeline: list[dict[str, Any]] = Field(
         default_factory=list,
         description=(
-            "One snapshot appended per pass. Shape per entry: {iteration: int, efficiency: "
-            "float, risky_action_count: int, note: string}. Append exactly one new entry per "
-            "update."
+            "One snapshot of path quality appended per trace-agent pass, building a trend line of "
+            "efficiency and risk over the run rather than only a final value. Shape per entry: "
+            "{iteration: int, efficiency: float, risky_action_count: int, note: string}. Append "
+            "exactly one new entry per update; risky_action_count should be the cumulative count "
+            "up to that iteration, not a per-pass delta, so a single entry is enough to read the "
+            "running total at that point in the run."
         ),
     )
     answer_correctness_timeline: list[dict[str, Any]] = Field(
         default_factory=list,
         description=(
-            "One snapshot appended per pass. Shape per entry: {iteration: int, "
-            "verified_claim_count: int, contradiction_count: int, note: string}. Append exactly "
-            "one new entry per update."
+            "One snapshot of claim correctness appended per trace-agent pass, building a trend "
+            "line of verification progress over the run rather than only a final tally. Shape per "
+            "entry: {iteration: int, verified_claim_count: int, contradiction_count: int, note: "
+            "string}. Append exactly one new entry per update; both counts should be cumulative "
+            "totals as of that iteration. A contradiction_count that rises partway through the "
+            "run and never falls back is a meaningful signal this timeline is meant to preserve."
         ),
     )
 
@@ -400,62 +437,92 @@ class SymmetricEvidenceTraceModel(BaseModel):
     goal_success_supporting: list[str] = Field(
         default_factory=list,
         description=(
-            "Append-only. Facts supporting that the goal is being met. Add a new entry only when "
-            "a new supporting fact appears; exact duplicates are skipped automatically."
+            "Append-only list of short, concrete facts supporting that the goal is being met — a "
+            "specific requirement satisfied, or a stated sub-goal completed. Add a new entry only "
+            "when a new supporting fact appears in the context; exact duplicates are skipped "
+            "automatically by the merge logic, so re-stating an already-recorded fact is harmless "
+            "but adds nothing. This list, together with goal_success_contradicting, is the "
+            "auditable basis for goal_success_verdict."
         ),
     )
     goal_success_contradicting: list[str] = Field(
         default_factory=list,
         description=(
-            "Append-only. Facts suggesting the goal is not being met, tracked separately from "
-            "goal_success_supporting rather than netted against it — both lists are meant to "
-            "grow, and goal_success_verdict is where they get weighed."
+            "Append-only list of short, concrete facts suggesting the goal is not being met — a "
+            "missed requirement, a violated constraint, or an abandoned sub-goal. Tracked "
+            "separately from goal_success_supporting rather than netted against it as the run "
+            "progresses; both lists are meant to keep growing so a reader can see the full case on "
+            "each side. goal_success_verdict is where the two get weighed into one current read."
         ),
     )
     goal_success_verdict: str = Field(
         description=(
-            "'achieved'|'in_progress'|'failed'|'partial'. Replaced in full each pass, weighing "
-            "goal_success_supporting against goal_success_contradicting; scored only on goal "
-            "completion, independent of path_quality_verdict and answer_correctness_verdict."
+            "'achieved'|'in_progress'|'failed'|'partial'. The current weighing of "
+            "goal_success_supporting against goal_success_contradicting into one read on goal "
+            "completion. Scored only on whether the goal was reached, independent of "
+            "path_quality_verdict and answer_correctness_verdict — a 'failed' goal can still have "
+            "an 'efficient' path_quality_verdict. Replaced in full each pass rather than appended, "
+            "since only the latest weighing matters."
         ),
     )
 
     path_quality_supporting: list[str] = Field(
         default_factory=list,
-        description="Append-only. Facts supporting that the path taken is efficient and safe.",
+        description=(
+            "Append-only list of short, concrete facts supporting that the path taken is "
+            "efficient and safe — a well-chosen tool call, or a plan followed precisely. Add a new "
+            "entry only when a new supporting fact appears; exact duplicates are skipped "
+            "automatically. This list, together with path_quality_contradicting, is the auditable "
+            "basis for path_quality_verdict."
+        ),
     )
     path_quality_contradicting: list[str] = Field(
         default_factory=list,
         description=(
-            "Append-only. Facts suggesting the path is inefficient or risky, tracked separately "
-            "from path_quality_supporting."
+            "Append-only list of short, concrete facts suggesting the path is inefficient or "
+            "risky — a redundant tool call, a risky action, or an unannounced deviation from the "
+            "stated plan. Tracked separately from path_quality_supporting rather than netted "
+            "against it; both lists keep growing across the run. path_quality_verdict is where the "
+            "two get weighed into one current read."
         ),
     )
     path_quality_verdict: str = Field(
         description=(
-            "'efficient'|'inefficient'|'risky'|'blocked'. Replaced in full each pass, weighing "
-            "path_quality_supporting against path_quality_contradicting; scored only on the "
-            "path, independent of goal_success_verdict and answer_correctness_verdict."
+            "'efficient'|'inefficient'|'risky'|'blocked'. The current weighing of "
+            "path_quality_supporting against path_quality_contradicting into one read on the path "
+            "taken. Scored only on the path itself, independent of goal_success_verdict and "
+            "answer_correctness_verdict — an 'efficient' path can still accompany a 'contradicted' "
+            "answer. Replaced in full each pass rather than appended."
         ),
     )
 
     answer_correctness_supporting: list[str] = Field(
         default_factory=list,
-        description="Append-only. Facts supporting that current claims are correct.",
+        description=(
+            "Append-only list of short, concrete facts supporting that current claims are correct "
+            "— a claim confirmed against a source, or two claims found mutually consistent. Add a "
+            "new entry only when a new supporting fact appears; exact duplicates are skipped "
+            "automatically. This list, together with answer_correctness_contradicting, is the "
+            "auditable basis for answer_correctness_verdict."
+        ),
     )
     answer_correctness_contradicting: list[str] = Field(
         default_factory=list,
         description=(
-            "Append-only. Facts suggesting current claims are wrong or unverified, tracked "
-            "separately from answer_correctness_supporting."
+            "Append-only list of short, concrete facts suggesting current claims are wrong or "
+            "unverified — a claim that conflicts with a source, or two claims that conflict with "
+            "each other. Tracked separately from answer_correctness_supporting rather than netted "
+            "against it; both lists keep growing across the run. answer_correctness_verdict is "
+            "where the two get weighed into one current read."
         ),
     )
     answer_correctness_verdict: str = Field(
         description=(
-            "'verified'|'unverified'|'contradicted'|'partial'. Replaced in full each pass, "
-            "weighing answer_correctness_supporting against answer_correctness_contradicting; "
-            "scored only on claim correctness, independent of goal_success_verdict and "
-            "path_quality_verdict."
+            "'verified'|'unverified'|'contradicted'|'partial'. The current weighing of "
+            "answer_correctness_supporting against answer_correctness_contradicting into one read "
+            "on claim correctness. Scored only on the claims themselves, independent of "
+            "goal_success_verdict and path_quality_verdict — a 'verified' answer can still follow "
+            "a 'risky' path. Replaced in full each pass rather than appended."
         ),
     )
 
