@@ -21,6 +21,9 @@ from pydantic import BaseModel, model_validator
 
 from vidbyte.lib.constants.trace import MAX_TRACE_FIELD_NESTING_DEPTH
 
+_ROOT_FIELD_DEPTH = 1
+_CHILD_DEPTH_STEP = 1
+
 
 class TraceMode(str, Enum):
     """Supported trace execution modes."""
@@ -105,7 +108,7 @@ class TraceSchema:
     @classmethod
     def from_model(cls, model: type[BaseModel], *, name: str | None = None, description: str | None = None) -> "TraceSchema":
         # Builds a typed TraceSchema from a pydantic model, recursing into nested submodels for their declared shape.
-        fields = cls._fields_from_model(model, depth=1)
+        fields = cls._fields_from_model(model, depth=_ROOT_FIELD_DEPTH)
         schema_name = (name or model.__name__).strip()
         schema_description = description if description is not None else (model.__doc__ or "").strip()
         return cls(name=schema_name, fields=fields, description=schema_description)
@@ -159,7 +162,7 @@ class TraceSchema:
         origin = typing.get_origin(annotation)
         target = origin if origin is not None else annotation
         if isinstance(target, type) and issubclass(target, BaseModel):
-            return TraceField(description=description, type=TraceFieldType.OBJECT, fields=cls._fields_from_model(target, depth=depth + 1))
+            return TraceField(description=description, type=TraceFieldType.OBJECT, fields=cls._fields_from_model(target, depth=depth + _CHILD_DEPTH_STEP))
         if origin in (list, tuple, set, frozenset):
             item_field = cls._item_field_from_args(typing.get_args(annotation), depth=depth)
             return TraceField(description=description, type=TraceFieldType.ARRAY, items=item_field)
@@ -176,7 +179,7 @@ class TraceSchema:
         if not (isinstance(item_target, type) and issubclass(item_target, BaseModel)):
             return None
         item_description = (item_target.__doc__ or "").strip() or f"One entry in this list, each describing a single {item_target.__name__} record."
-        return TraceField(description=item_description, type=TraceFieldType.OBJECT, fields=cls._fields_from_model(item_target, depth=depth + 1))
+        return TraceField(description=item_description, type=TraceFieldType.OBJECT, fields=cls._fields_from_model(item_target, depth=depth + _CHILD_DEPTH_STEP))
 
     @staticmethod
     def _annotation_to_type(annotation: Any) -> TraceFieldType:
