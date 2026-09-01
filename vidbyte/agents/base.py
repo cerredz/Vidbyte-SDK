@@ -629,6 +629,7 @@ class BaseAgent(McpAttachableMixin):
             if trace_ctx is not None:
                 self._tracer.end_trace(trace_ctx, output=_format_trace_output(result))
         except Exception as exc:
+            self._notify_session_exception(exc)
             if trace_ctx is not None:
                 self._tracer.end_trace(trace_ctx, error=exc)
             self._active_prompt = ""
@@ -639,6 +640,7 @@ class BaseAgent(McpAttachableMixin):
         except BaseException as exc:
             # Catches CancelledError and other BaseException subclasses that bypass
             # the Exception handler, ensuring the root trace is always finalized.
+            self._notify_session_exception(exc)
             if trace_ctx is not None:
                 self._tracer.end_trace(trace_ctx, error=exc)
             self._active_prompt = ""
@@ -688,6 +690,20 @@ class BaseAgent(McpAttachableMixin):
             validation_error=self._schema_violation_detail(result),
             stop_reason=str(result.metadata.get("stop_reason") or ""),
         )
+
+    def _notify_session_exception(self, exc: BaseException) -> None:
+        # Record direct agent failures through the bound Session without changing the exception path.
+        session = self._active_session
+        failures = getattr(session, "failures", None)
+        capture = getattr(failures, "capture_exception", None)
+        if not callable(capture):
+            return
+        try:
+            from vidbyte.sessions.failure import FailurePhase
+
+            capture(exc, phase=FailurePhase.RUNTIME, source="agent.generate_reply")
+        except Exception:
+            return
 
     @staticmethod
     def _schema_violation_detail(result: AgentResult) -> str | None:
@@ -996,6 +1012,10 @@ class BaseAgent(McpAttachableMixin):
     def _runtime_middleware(self) -> tuple[AgentMiddleware, ...]:
         # Appends settings-driven and tracing middleware to the user middleware.
         middleware = self.middleware
+        active_session = getattr(self, "_active_session", None)
+        session_failures = getattr(active_session, "failures", None)
+        if self.runtime_type is AgentRuntimeType.LINEAR and session_failures is not None and getattr(session_failures, "has_rules", False):
+            middleware = (*middleware, session_failures.middleware())
         if self.agent_loop_settings.tool_error_policy is not None:
             from vidbyte.middleware.builtins import ToolErrorPolicyMiddleware
             middleware = (*middleware, ToolErrorPolicyMiddleware(self.agent_loop_settings.tool_error_policy))

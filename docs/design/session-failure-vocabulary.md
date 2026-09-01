@@ -102,7 +102,8 @@ matched rule and for errors thrown by the rule or recovery handler.
    middleware events, fallback metadata, tool-call states, usage integrity, and
    Session persistence markers into canonical failures.
 6. Session exception capture must map known SDK exception families to canonical
-   failure codes and preserve the original exception for optional re-raising.
+   failure codes while preserving exception chaining at the runtime boundary for
+   optional re-raising.
 7. Existing local retry/fallback/validation/budget decisions remain the first
    recovery owner; Session routes only after exhaustion unless a rule explicitly
    requests immediate routing.
@@ -426,8 +427,8 @@ result; they do not hide side effects.
 - Callback recovery requires a callable and rejects absent callbacks.
 - Compact/handoff/aggregate callbacks may be async; the router's async route
   method awaits them.
-- `RaiseRecovery` re-raises the original exception only when one is available;
-  otherwise it raises the typed `FailureRaisedError`.
+- `RaiseRecovery` raises the typed `FailureRaisedError`; the owning Session
+  boundary preserves and re-raises the original exception after open recovery.
 
 ### 6.5 Session integration
 
@@ -713,4 +714,3 @@ No external service or dependency is added.
 - What: Add one durable checkpoint for every intermediate failure.
 - Why rejected: It changes checkpoint semantics and storage cost. Failure history
   can be made durable later through an explicit schema/version design.
-
