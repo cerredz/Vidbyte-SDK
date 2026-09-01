@@ -18,8 +18,8 @@ from vidbyte.context.primitives.base import ContextItem
 from vidbyte.lib.constants.reasoning_strategies import (
     TESTIMONY_REQUIRED_FIELDS,
     TESTIMONY_REQUIRED_PRESENT_FIELDS,
-    TESTIMONY_TRUST_VALUES,
 )
+from vidbyte.lib.enums.reasoning_strategies import TestimonyTrust
 from vidbyte.tools.base import BaseTool
 from vidbyte.tools.builtins.reasoning._parsing import ReasoningToolInput
 from vidbyte.tools.types import (
@@ -178,7 +178,7 @@ class TestimonyTool(BaseTool):
             return "Field 'reliability_factors' requires at least one entry."
         return ReasoningToolInput.enum_error(
             ReasoningToolInput.text(args, "trust_verdict"),
-            TESTIMONY_TRUST_VALUES,
+            TestimonyTrust.values(),
             "trust_verdict",
         )
 

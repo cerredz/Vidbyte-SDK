@@ -15,10 +15,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, cast
 
 from vidbyte.context.primitives.base import ContextItem
-from vidbyte.lib.constants.reasoning_strategies import (
-    PARTITION_REQUIRED_FIELDS,
-    PARTITION_VERDICT_VALUES,
-)
+from vidbyte.lib.constants.reasoning_strategies import PARTITION_REQUIRED_FIELDS
+from vidbyte.lib.enums.reasoning_strategies import PartitionVerdict
 from vidbyte.tools.base import BaseTool
 from vidbyte.tools.builtins.reasoning._parsing import ReasoningToolInput
 from vidbyte.tools.types import (
@@ -160,7 +158,7 @@ class PartitionTool(BaseTool):
             return "Field 'membership_rules' requires at least one entry."
         return ReasoningToolInput.enum_error(
             ReasoningToolInput.text(args, "verdict"),
-            PARTITION_VERDICT_VALUES,
+            PartitionVerdict.values(),
             "verdict",
         )
 

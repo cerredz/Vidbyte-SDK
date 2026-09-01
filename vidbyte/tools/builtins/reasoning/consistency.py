@@ -18,8 +18,8 @@ from vidbyte.context.primitives.base import ContextItem
 from vidbyte.lib.constants.reasoning_strategies import (
     CONSISTENCY_REQUIRED_FIELDS,
     CONSISTENCY_REQUIRED_PRESENT_FIELDS,
-    CONSISTENCY_STATUS_VALUES,
 )
+from vidbyte.lib.enums.reasoning_strategies import ConsistencyStatus
 from vidbyte.tools.base import BaseTool
 from vidbyte.tools.builtins.reasoning._parsing import ReasoningToolInput
 from vidbyte.tools.types import (
@@ -143,7 +143,7 @@ class ConsistencyTool(BaseTool):
             return "Field 'claims' requires at least two claims to audit."
         return ReasoningToolInput.enum_error(
             ReasoningToolInput.text(args, "consistency_status"),
-            CONSISTENCY_STATUS_VALUES,
+            ConsistencyStatus.values(),
             "consistency_status",
         )
 

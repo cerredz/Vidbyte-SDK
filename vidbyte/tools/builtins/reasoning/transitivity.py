@@ -15,10 +15,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, cast
 
 from vidbyte.context.primitives.base import ContextItem
-from vidbyte.lib.constants.reasoning_strategies import (
-    TRANSITIVITY_CONSISTENCY_VALUES,
-    TRANSITIVITY_REQUIRED_FIELDS,
-)
+from vidbyte.lib.constants.reasoning_strategies import TRANSITIVITY_REQUIRED_FIELDS
+from vidbyte.lib.enums.reasoning_strategies import TransitivityConsistency
 from vidbyte.tools.base import BaseTool
 from vidbyte.tools.builtins.reasoning._parsing import ReasoningToolInput
 from vidbyte.tools.types import (
@@ -162,7 +160,7 @@ class TransitivityTool(BaseTool):
             return "Field 'pairwise_links' requires at least one entry."
         return ReasoningToolInput.enum_error(
             ReasoningToolInput.text(args, "consistency"),
-            TRANSITIVITY_CONSISTENCY_VALUES,
+            TransitivityConsistency.values(),
             "consistency",
         )
 

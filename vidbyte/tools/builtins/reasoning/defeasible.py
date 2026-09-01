@@ -15,10 +15,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, cast
 
 from vidbyte.context.primitives.base import ContextItem
-from vidbyte.lib.constants.reasoning_strategies import (
-    DEFEASIBLE_REQUIRED_FIELDS,
-    DEFEASIBLE_RULE_APPLIES_VALUES,
-)
+from vidbyte.lib.constants.reasoning_strategies import DEFEASIBLE_REQUIRED_FIELDS
+from vidbyte.lib.enums.reasoning_strategies import DefeasibleRuleApplies
 from vidbyte.tools.base import BaseTool
 from vidbyte.tools.builtins.reasoning._parsing import ReasoningToolInput
 from vidbyte.tools.types import (
@@ -164,7 +162,7 @@ class DefeasibleTool(BaseTool):
             return "Field 'defeaters' requires at least one entry."
         return ReasoningToolInput.enum_error(
             ReasoningToolInput.text(args, "rule_applies"),
-            DEFEASIBLE_RULE_APPLIES_VALUES,
+            DefeasibleRuleApplies.values(),
             "rule_applies",
         )
 

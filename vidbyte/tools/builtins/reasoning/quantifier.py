@@ -15,11 +15,9 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, cast
 
 from vidbyte.context.primitives.base import ContextItem
-from vidbyte.lib.constants.reasoning_strategies import (
-    QUANTIFIER_KIND_VALUES,
-    QUANTIFIER_REQUIRED_FIELDS,
-    QUANTIFIER_VERDICT_VALUES,
-)
+from vidbyte.lib.constants.reasoning_strategies import QUANTIFIER_REQUIRED_FIELDS
+from vidbyte.lib.enums.reasoning_strategies import QuantifierKind
+from vidbyte.lib.enums.reasoning_strategies import QuantifierVerdict
 from vidbyte.tools.base import BaseTool
 from vidbyte.tools.builtins.reasoning._parsing import ReasoningToolInput
 from vidbyte.tools.types import (
@@ -165,14 +163,14 @@ class QuantifierTool(BaseTool):
             return error
         enum_error = ReasoningToolInput.enum_error(
             ReasoningToolInput.text(args, "quantifier"),
-            QUANTIFIER_KIND_VALUES,
+            QuantifierKind.values(),
             "quantifier",
         )
         if enum_error:
             return enum_error
         return ReasoningToolInput.enum_error(
             ReasoningToolInput.text(args, "verdict"),
-            QUANTIFIER_VERDICT_VALUES,
+            QuantifierVerdict.values(),
             "verdict",
         )
 

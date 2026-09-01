@@ -15,10 +15,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, cast
 
 from vidbyte.context.primitives.base import ContextItem
-from vidbyte.lib.constants.reasoning_strategies import (
-    EQUIVOCATION_FALLACY_VALUES,
-    EQUIVOCATION_REQUIRED_FIELDS,
-)
+from vidbyte.lib.constants.reasoning_strategies import EQUIVOCATION_REQUIRED_FIELDS
+from vidbyte.lib.enums.reasoning_strategies import EquivocationFallacy
 from vidbyte.tools.base import BaseTool
 from vidbyte.tools.builtins.reasoning._parsing import ReasoningToolInput
 from vidbyte.tools.types import (
@@ -169,7 +167,7 @@ class EquivocationTool(BaseTool):
             return "Field 'occurrences' requires at least one entry."
         return ReasoningToolInput.enum_error(
             ReasoningToolInput.text(args, "fallacy_present"),
-            EQUIVOCATION_FALLACY_VALUES,
+            EquivocationFallacy.values(),
             "fallacy_present",
         )
 

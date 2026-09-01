@@ -15,10 +15,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, cast
 
 from vidbyte.context.primitives.base import ContextItem
-from vidbyte.lib.constants.reasoning_strategies import (
-    ABSENCE_EVIDENCE_REQUIRED_FIELDS,
-    ABSENCE_EVIDENCE_SIGNIFICANCE_VALUES,
-)
+from vidbyte.lib.constants.reasoning_strategies import ABSENCE_EVIDENCE_REQUIRED_FIELDS
+from vidbyte.lib.enums.reasoning_strategies import AbsenceEvidenceSignificance
 from vidbyte.tools.base import BaseTool
 from vidbyte.tools.builtins.reasoning._parsing import ReasoningToolInput
 from vidbyte.tools.types import (
@@ -166,7 +164,7 @@ class AbsenceEvidenceTool(BaseTool):
             return error
         return ReasoningToolInput.enum_error(
             ReasoningToolInput.text(args, "significance"),
-            ABSENCE_EVIDENCE_SIGNIFICANCE_VALUES,
+            AbsenceEvidenceSignificance.values(),
             "significance",
         )
 

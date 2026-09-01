@@ -17,8 +17,8 @@ from typing import TYPE_CHECKING, cast
 from vidbyte.context.primitives.base import ContextItem
 from vidbyte.lib.constants.reasoning_strategies import (
     COMPOSITION_DIVISION_REQUIRED_FIELDS,
-    COMPOSITION_DIVISION_VALIDITY_VALUES,
 )
+from vidbyte.lib.enums.reasoning_strategies import CompositionDivisionValidity
 from vidbyte.tools.base import BaseTool
 from vidbyte.tools.builtins.reasoning._parsing import ReasoningToolInput
 from vidbyte.tools.types import (
@@ -166,7 +166,7 @@ class CompositionDivisionTool(BaseTool):
             return "Field 'parts' requires at least one part."
         return ReasoningToolInput.enum_error(
             ReasoningToolInput.text(args, "validity"),
-            COMPOSITION_DIVISION_VALIDITY_VALUES,
+            CompositionDivisionValidity.values(),
             "validity",
         )
 

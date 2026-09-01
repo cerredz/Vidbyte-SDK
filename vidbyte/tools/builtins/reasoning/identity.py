@@ -15,10 +15,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, cast
 
 from vidbyte.context.primitives.base import ContextItem
-from vidbyte.lib.constants.reasoning_strategies import (
-    IDENTITY_REQUIRED_FIELDS,
-    IDENTITY_VERDICT_VALUES,
-)
+from vidbyte.lib.constants.reasoning_strategies import IDENTITY_REQUIRED_FIELDS
+from vidbyte.lib.enums.reasoning_strategies import IdentityVerdict
 from vidbyte.tools.base import BaseTool
 from vidbyte.tools.builtins.reasoning._parsing import ReasoningToolInput
 from vidbyte.tools.types import (
@@ -159,7 +157,9 @@ class IdentityTool(BaseTool):
         if error:
             return error
         return ReasoningToolInput.enum_error(
-            ReasoningToolInput.text(args, "verdict"), IDENTITY_VERDICT_VALUES, "verdict"
+            ReasoningToolInput.text(args, "verdict"),
+            IdentityVerdict.values(),
+            "verdict",
         )
 
     def _build_item(self, args: dict, primitive_id: str) -> ContextItem:

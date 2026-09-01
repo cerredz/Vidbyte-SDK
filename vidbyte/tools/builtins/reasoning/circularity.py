@@ -15,10 +15,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, cast
 
 from vidbyte.context.primitives.base import ContextItem
-from vidbyte.lib.constants.reasoning_strategies import (
-    CIRCULARITY_REQUIRED_FIELDS,
-    CIRCULARITY_VERDICT_VALUES,
-)
+from vidbyte.lib.constants.reasoning_strategies import CIRCULARITY_REQUIRED_FIELDS
+from vidbyte.lib.enums.reasoning_strategies import CircularityVerdict
 from vidbyte.tools.base import BaseTool
 from vidbyte.tools.builtins.reasoning._parsing import ReasoningToolInput
 from vidbyte.tools.types import (
@@ -177,7 +175,7 @@ class CircularityTool(BaseTool):
             return "Field 'dependency_map' requires at least one entry."
         return ReasoningToolInput.enum_error(
             ReasoningToolInput.text(args, "verdict"),
-            CIRCULARITY_VERDICT_VALUES,
+            CircularityVerdict.values(),
             "verdict",
         )
 

@@ -15,10 +15,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, cast
 
 from vidbyte.context.primitives.base import ContextItem
-from vidbyte.lib.constants.reasoning_strategies import (
-    STRAWMAN_CRITICISM_VALUES,
-    STRAWMAN_REQUIRED_FIELDS,
-)
+from vidbyte.lib.constants.reasoning_strategies import STRAWMAN_REQUIRED_FIELDS
+from vidbyte.lib.enums.reasoning_strategies import StrawmanCriticism
 from vidbyte.tools.base import BaseTool
 from vidbyte.tools.builtins.reasoning._parsing import ReasoningToolInput
 from vidbyte.tools.types import (
@@ -164,7 +162,7 @@ class StrawmanTool(BaseTool):
             return error
         return ReasoningToolInput.enum_error(
             ReasoningToolInput.text(args, "criticism_applies"),
-            STRAWMAN_CRITICISM_VALUES,
+            StrawmanCriticism.values(),
             "criticism_applies",
         )
 

@@ -15,10 +15,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, cast
 
 from vidbyte.context.primitives.base import ContextItem
-from vidbyte.lib.constants.reasoning_strategies import (
-    REGRESS_REQUIRED_FIELDS,
-    REGRESS_STYLE_VALUES,
-)
+from vidbyte.lib.constants.reasoning_strategies import REGRESS_REQUIRED_FIELDS
+from vidbyte.lib.enums.reasoning_strategies import RegressStyle
 from vidbyte.tools.base import BaseTool
 from vidbyte.tools.builtins.reasoning._parsing import ReasoningToolInput
 from vidbyte.tools.types import (
@@ -149,7 +147,7 @@ class RegressTool(BaseTool):
         if error:
             return error
         return ReasoningToolInput.enum_error(
-            ReasoningToolInput.text(args, "style"), REGRESS_STYLE_VALUES, "style"
+            ReasoningToolInput.text(args, "style"), RegressStyle.values(), "style"
         )
 
     def _build_item(self, args: dict, primitive_id: str) -> ContextItem:

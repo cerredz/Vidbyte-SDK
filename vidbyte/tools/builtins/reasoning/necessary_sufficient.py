@@ -17,8 +17,8 @@ from typing import TYPE_CHECKING, cast
 from vidbyte.context.primitives.base import ContextItem
 from vidbyte.lib.constants.reasoning_strategies import (
     NECESSARY_SUFFICIENT_REQUIRED_FIELDS,
-    NECESSARY_SUFFICIENT_VERDICT_VALUES,
 )
+from vidbyte.lib.enums.reasoning_strategies import NecessarySufficientVerdict
 from vidbyte.tools.base import BaseTool
 from vidbyte.tools.builtins.reasoning._parsing import ReasoningToolInput
 from vidbyte.tools.types import (
@@ -161,7 +161,7 @@ class NecessarySufficientTool(BaseTool):
             return error
         return ReasoningToolInput.enum_error(
             ReasoningToolInput.text(args, "verdict"),
-            NECESSARY_SUFFICIENT_VERDICT_VALUES,
+            NecessarySufficientVerdict.values(),
             "verdict",
         )
 

@@ -15,10 +15,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, cast
 
 from vidbyte.context.primitives.base import ContextItem
-from vidbyte.lib.constants.reasoning_strategies import (
-    PREDICT_MATCH_VALUES,
-    PREDICT_REQUIRED_FIELDS,
-)
+from vidbyte.lib.constants.reasoning_strategies import PREDICT_REQUIRED_FIELDS
+from vidbyte.lib.enums.reasoning_strategies import PredictMatch
 from vidbyte.tools.base import BaseTool
 from vidbyte.tools.builtins.reasoning._parsing import ReasoningToolInput
 from vidbyte.tools.types import (
@@ -162,7 +160,7 @@ class PredictTool(BaseTool):
         if not ReasoningToolInput.string_list(args.get("initial_conditions")):
             return "Field 'initial_conditions' requires at least one entry."
         return ReasoningToolInput.enum_error(
-            ReasoningToolInput.text(args, "match"), PREDICT_MATCH_VALUES, "match"
+            ReasoningToolInput.text(args, "match"), PredictMatch.values(), "match"
         )
 
     def _build_item(self, args: dict, primitive_id: str) -> ContextItem:

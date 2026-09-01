@@ -15,10 +15,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, cast
 
 from vidbyte.context.primitives.base import ContextItem
-from vidbyte.lib.constants.reasoning_strategies import (
-    MODAL_REQUIRED_FIELDS,
-    MODAL_STATUS_VALUES,
-)
+from vidbyte.lib.constants.reasoning_strategies import MODAL_REQUIRED_FIELDS
+from vidbyte.lib.enums.reasoning_strategies import ModalStatus
 from vidbyte.tools.base import BaseTool
 from vidbyte.tools.builtins.reasoning._parsing import ReasoningToolInput
 from vidbyte.tools.types import (
@@ -149,7 +147,7 @@ class ModalTool(BaseTool):
             return error
         return ReasoningToolInput.enum_error(
             ReasoningToolInput.text(args, "modal_status"),
-            MODAL_STATUS_VALUES,
+            ModalStatus.values(),
             "modal_status",
         )
 
