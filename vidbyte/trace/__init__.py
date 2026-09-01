@@ -22,7 +22,18 @@ from __future__ import annotations
 from vidbyte.lib.dataclasses.trace import TraceField, TraceFieldType, TraceMode, TraceOption, TraceSchema
 from vidbyte.trace.base import Trace
 from vidbyte.trace.controller import TraceController
-from vidbyte.trace.continual import ActionTrace, ContinualTraceAgent, ContinualTraceMiddleware, ContinualTracer
+from vidbyte.trace.continual import (
+    ActionTrace,
+    ContinualTraceAgent,
+    ContinualTraceMiddleware,
+    ContinualTracer,
+    SymmetricChecklistTrace,
+    SymmetricEventLedgerTrace,
+    SymmetricEvidenceTrace,
+    SymmetricFlatTrace,
+    SymmetricSubScoreTrace,
+    SymmetricTimelineTrace,
+)
 from vidbyte.trace.debug import DebugTracer
 from vidbyte.trace.profiles import TraceComponentSettings, TraceProfile
 from vidbyte.trace.schema import ParentPolicy, SemanticSpanContext, SpanKind, SpanSpec, TraceDetail
@@ -40,6 +51,12 @@ __all__ = [
     "SessionTracer",
     "SpanKind",
     "SpanSpec",
+    "SymmetricChecklistTrace",
+    "SymmetricEventLedgerTrace",
+    "SymmetricEvidenceTrace",
+    "SymmetricFlatTrace",
+    "SymmetricSubScoreTrace",
+    "SymmetricTimelineTrace",
     "Trace",
     "TraceComponentSettings",
     "TraceController",

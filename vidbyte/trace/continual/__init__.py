@@ -19,7 +19,22 @@ from __future__ import annotations
 from vidbyte.trace.continual.base import ContinualTracer
 from vidbyte.agents.continual_trace import ContinualTraceAgent
 from vidbyte.middleware.continual_trace import ContinualTraceMiddleware
-from vidbyte.trace.continual.prebuilt import ActionTrace, ActionTraceModel
+from vidbyte.trace.continual.prebuilt import (
+    ActionTrace,
+    ActionTraceModel,
+    SymmetricChecklistTrace,
+    SymmetricChecklistTraceModel,
+    SymmetricEventLedgerTrace,
+    SymmetricEventLedgerTraceModel,
+    SymmetricEvidenceTrace,
+    SymmetricEvidenceTraceModel,
+    SymmetricFlatTrace,
+    SymmetricFlatTraceModel,
+    SymmetricSubScoreTrace,
+    SymmetricSubScoreTraceModel,
+    SymmetricTimelineTrace,
+    SymmetricTimelineTraceModel,
+)
 
 __all__ = [
     "ActionTrace",
@@ -27,4 +42,16 @@ __all__ = [
     "ContinualTraceAgent",
     "ContinualTraceMiddleware",
     "ContinualTracer",
+    "SymmetricChecklistTrace",
+    "SymmetricChecklistTraceModel",
+    "SymmetricEventLedgerTrace",
+    "SymmetricEventLedgerTraceModel",
+    "SymmetricEvidenceTrace",
+    "SymmetricEvidenceTraceModel",
+    "SymmetricFlatTrace",
+    "SymmetricFlatTraceModel",
+    "SymmetricSubScoreTrace",
+    "SymmetricSubScoreTraceModel",
+    "SymmetricTimelineTrace",
+    "SymmetricTimelineTraceModel",
 ]
