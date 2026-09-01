@@ -19,12 +19,35 @@ from __future__ import annotations
 from vidbyte.trace.continual.base import ContinualTracer
 from vidbyte.agents.continual_trace import ContinualTraceAgent
 from vidbyte.middleware.continual_trace import ContinualTraceMiddleware
-from vidbyte.trace.continual.prebuilt import ActionTrace, ActionTraceModel
+from vidbyte.trace.continual.prebuilt import (
+    ActionTrace,
+    ActionTraceModel,
+    CalibrationTrace,
+    CalibrationTraceModel,
+    CounterfactualAlternativesTrace,
+    CounterfactualAlternativesTraceModel,
+    ErrorTaxonomyTrace,
+    ErrorTaxonomyTraceModel,
+    HierarchicalTaskTreeTrace,
+    HierarchicalTaskTreeTraceModel,
+    SelfConsistencyEnsembleTrace,
+    SelfConsistencyEnsembleTraceModel,
+)
 
 __all__ = [
     "ActionTrace",
     "ActionTraceModel",
+    "CalibrationTrace",
+    "CalibrationTraceModel",
     "ContinualTraceAgent",
     "ContinualTraceMiddleware",
     "ContinualTracer",
+    "CounterfactualAlternativesTrace",
+    "CounterfactualAlternativesTraceModel",
+    "ErrorTaxonomyTrace",
+    "ErrorTaxonomyTraceModel",
+    "HierarchicalTaskTreeTrace",
+    "HierarchicalTaskTreeTraceModel",
+    "SelfConsistencyEnsembleTrace",
+    "SelfConsistencyEnsembleTraceModel",
 ]
