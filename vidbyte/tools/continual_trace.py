@@ -35,9 +35,10 @@ _TOOL_DESCRIPTION = (
     "are replaced outright. Fields you omit are left unchanged from the prior value. Only "
     "fields declared in the schema are accepted; any extra keys are silently dropped. Some "
     "object and array fields declare their own nested subfields or item shape below — that "
-    "nested shape only tells you what to write, it does not change the merge rule above; a "
-    "nested array inside an object field is still replaced whole, not appended to, whenever you "
-    "resend that object field."
+    "nested shape only tells you what to write, it does not change the merge rule above: within "
+    "an object field, a subfield you omit keeps its prior value, but a subfield you do include — "
+    "even one shaped as a list — is replaced with the new value you send whole, not merged "
+    "element-wise with what was there before."
 )
 
 _TRACE_PARAM_DESCRIPTION = (
