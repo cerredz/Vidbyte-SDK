@@ -15,6 +15,10 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, cast
 
 from vidbyte.context.primitives.base import ContextItem
+from vidbyte.lib.constants.reasoning_strategies import (
+    ABSENCE_EVIDENCE_REQUIRED_FIELDS,
+    ABSENCE_EVIDENCE_SIGNIFICANCE_VALUES,
+)
 from vidbyte.tools.base import BaseTool
 from vidbyte.tools.builtins.reasoning._parsing import ReasoningToolInput
 from vidbyte.tools.types import (
@@ -27,16 +31,6 @@ from vidbyte.tools.types import (
 
 if TYPE_CHECKING:
     from vidbyte.context.manager import ContextManager
-
-_REQUIRED_FIELDS = (
-    "hypothesis",
-    "expected_evidence_if_true",
-    "search_conducted",
-    "search_adequacy",
-    "significance",
-    "conclusion",
-)
-_SIGNIFICANCE_VALUES = ("evidence_against", "neutral", "evidence_for")
 
 
 class AbsenceEvidenceTool(BaseTool):
@@ -165,12 +159,14 @@ class AbsenceEvidenceTool(BaseTool):
 
     def _validate(self, args: dict) -> str | None:
         # Returns an error string for a missing field or a bad significance enum.
-        error = ReasoningToolInput.missing_required(args, _REQUIRED_FIELDS)
+        error = ReasoningToolInput.missing_required(
+            args, ABSENCE_EVIDENCE_REQUIRED_FIELDS
+        )
         if error:
             return error
         return ReasoningToolInput.enum_error(
             ReasoningToolInput.text(args, "significance"),
-            _SIGNIFICANCE_VALUES,
+            ABSENCE_EVIDENCE_SIGNIFICANCE_VALUES,
             "significance",
         )
 

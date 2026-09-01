@@ -15,6 +15,10 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, cast
 
 from vidbyte.context.primitives.base import ContextItem
+from vidbyte.lib.constants.reasoning_strategies import (
+    EQUIVOCATION_FALLACY_VALUES,
+    EQUIVOCATION_REQUIRED_FIELDS,
+)
 from vidbyte.tools.base import BaseTool
 from vidbyte.tools.builtins.reasoning._parsing import ReasoningToolInput
 from vidbyte.tools.types import (
@@ -27,16 +31,6 @@ from vidbyte.tools.types import (
 
 if TYPE_CHECKING:
     from vidbyte.context.manager import ContextManager
-
-_REQUIRED_FIELDS = (
-    "term",
-    "senses",
-    "occurrences",
-    "drift",
-    "corrected_argument",
-    "fallacy_present",
-)
-_FALLACY_VALUES = ("yes", "no", "uncertain")
 
 
 class EquivocationTool(BaseTool):
@@ -164,7 +158,7 @@ class EquivocationTool(BaseTool):
 
     def _validate(self, args: dict) -> str | None:
         # Returns an error string for a missing field, undersized senses, empty occurrences, or a bad enum.
-        error = ReasoningToolInput.missing_required(args, _REQUIRED_FIELDS)
+        error = ReasoningToolInput.missing_required(args, EQUIVOCATION_REQUIRED_FIELDS)
         if error:
             return error
         if len(ReasoningToolInput.string_list(args.get("senses"))) < 2:
@@ -175,7 +169,7 @@ class EquivocationTool(BaseTool):
             return "Field 'occurrences' requires at least one entry."
         return ReasoningToolInput.enum_error(
             ReasoningToolInput.text(args, "fallacy_present"),
-            _FALLACY_VALUES,
+            EQUIVOCATION_FALLACY_VALUES,
             "fallacy_present",
         )
 

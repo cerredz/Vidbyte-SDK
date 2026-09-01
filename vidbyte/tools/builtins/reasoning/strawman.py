@@ -15,6 +15,10 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, cast
 
 from vidbyte.context.primitives.base import ContextItem
+from vidbyte.lib.constants.reasoning_strategies import (
+    STRAWMAN_CRITICISM_VALUES,
+    STRAWMAN_REQUIRED_FIELDS,
+)
 from vidbyte.tools.base import BaseTool
 from vidbyte.tools.builtins.reasoning._parsing import ReasoningToolInput
 from vidbyte.tools.types import (
@@ -27,16 +31,6 @@ from vidbyte.tools.types import (
 
 if TYPE_CHECKING:
     from vidbyte.context.manager import ContextManager
-
-_REQUIRED_FIELDS = (
-    "original_argument",
-    "restated_argument",
-    "distortion",
-    "fair_restatement",
-    "criticism_applies",
-    "residual_critique",
-)
-_CRITICISM_VALUES = ("yes", "no", "partially")
 
 
 class StrawmanTool(BaseTool):
@@ -165,12 +159,12 @@ class StrawmanTool(BaseTool):
 
     def _validate(self, args: dict) -> str | None:
         # Returns an error string for a missing field or a bad criticism enum.
-        error = ReasoningToolInput.missing_required(args, _REQUIRED_FIELDS)
+        error = ReasoningToolInput.missing_required(args, STRAWMAN_REQUIRED_FIELDS)
         if error:
             return error
         return ReasoningToolInput.enum_error(
             ReasoningToolInput.text(args, "criticism_applies"),
-            _CRITICISM_VALUES,
+            STRAWMAN_CRITICISM_VALUES,
             "criticism_applies",
         )
 

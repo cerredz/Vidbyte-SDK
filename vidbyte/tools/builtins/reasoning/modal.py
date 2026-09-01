@@ -15,6 +15,10 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, cast
 
 from vidbyte.context.primitives.base import ContextItem
+from vidbyte.lib.constants.reasoning_strategies import (
+    MODAL_REQUIRED_FIELDS,
+    MODAL_STATUS_VALUES,
+)
 from vidbyte.tools.base import BaseTool
 from vidbyte.tools.builtins.reasoning._parsing import ReasoningToolInput
 from vidbyte.tools.types import (
@@ -27,15 +31,6 @@ from vidbyte.tools.types import (
 
 if TYPE_CHECKING:
     from vidbyte.context.manager import ContextManager
-
-_REQUIRED_FIELDS = (
-    "claim",
-    "modal_status",
-    "possible_world_evidence",
-    "actuality",
-    "reasoning",
-)
-_MODAL_VALUES = ("necessary", "possible", "contingent", "impossible")
 
 
 class ModalTool(BaseTool):
@@ -149,11 +144,13 @@ class ModalTool(BaseTool):
 
     def _validate(self, args: dict) -> str | None:
         # Returns an error string for a missing field or a bad modal enum.
-        error = ReasoningToolInput.missing_required(args, _REQUIRED_FIELDS)
+        error = ReasoningToolInput.missing_required(args, MODAL_REQUIRED_FIELDS)
         if error:
             return error
         return ReasoningToolInput.enum_error(
-            ReasoningToolInput.text(args, "modal_status"), _MODAL_VALUES, "modal_status"
+            ReasoningToolInput.text(args, "modal_status"),
+            MODAL_STATUS_VALUES,
+            "modal_status",
         )
 
     def _build_item(self, args: dict, primitive_id: str) -> ContextItem:

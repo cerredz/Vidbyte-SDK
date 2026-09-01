@@ -15,6 +15,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, cast
 
 from vidbyte.context.primitives.base import ContextItem
+from vidbyte.lib.constants.reasoning_strategies import SOCRATIC_REQUIRED_FIELDS
 from vidbyte.tools.base import BaseTool
 from vidbyte.tools.builtins.reasoning._parsing import ReasoningToolInput
 from vidbyte.tools.types import (
@@ -27,15 +28,6 @@ from vidbyte.tools.types import (
 
 if TYPE_CHECKING:
     from vidbyte.context.manager import ContextManager
-
-_REQUIRED_FIELDS = (
-    "claim",
-    "probing_question",
-    "assumption_surfaced",
-    "contradiction_found",
-    "revised_claim",
-    "depth_reached",
-)
 
 
 class SocraticTool(BaseTool):
@@ -162,7 +154,7 @@ class SocraticTool(BaseTool):
 
     def _validate(self, args: dict) -> str | None:
         # Returns an error string if any required field is missing or empty.
-        return ReasoningToolInput.missing_required(args, _REQUIRED_FIELDS)
+        return ReasoningToolInput.missing_required(args, SOCRATIC_REQUIRED_FIELDS)
 
     def _build_item(self, args: dict, primitive_id: str) -> ContextItem:
         # Constructs the SocraticContextItem from validated call arguments.

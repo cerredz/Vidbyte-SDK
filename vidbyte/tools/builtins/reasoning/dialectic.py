@@ -15,6 +15,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, cast
 
 from vidbyte.context.primitives.base import ContextItem
+from vidbyte.lib.constants.reasoning_strategies import DIALECTIC_REQUIRED_FIELDS
 from vidbyte.tools.base import BaseTool
 from vidbyte.tools.builtins.reasoning._parsing import ReasoningToolInput
 from vidbyte.tools.types import (
@@ -27,15 +28,6 @@ from vidbyte.tools.types import (
 
 if TYPE_CHECKING:
     from vidbyte.context.manager import ContextManager
-
-_REQUIRED_FIELDS = (
-    "thesis",
-    "antithesis",
-    "synthesis",
-    "preserved_insight",
-    "discarded_insight",
-    "synthesis_stability",
-)
 
 
 class DialecticTool(BaseTool):
@@ -162,7 +154,7 @@ class DialecticTool(BaseTool):
 
     def _validate(self, args: dict) -> str | None:
         # Returns an error string for a missing field or an antithesis that equals the thesis.
-        error = ReasoningToolInput.missing_required(args, _REQUIRED_FIELDS)
+        error = ReasoningToolInput.missing_required(args, DIALECTIC_REQUIRED_FIELDS)
         if error:
             return error
         thesis = ReasoningToolInput.text(args, "thesis")

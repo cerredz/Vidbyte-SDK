@@ -15,6 +15,11 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, cast
 
 from vidbyte.context.primitives.base import ContextItem
+from vidbyte.lib.constants.reasoning_strategies import (
+    QUANTIFIER_KIND_VALUES,
+    QUANTIFIER_REQUIRED_FIELDS,
+    QUANTIFIER_VERDICT_VALUES,
+)
 from vidbyte.tools.base import BaseTool
 from vidbyte.tools.builtins.reasoning._parsing import ReasoningToolInput
 from vidbyte.tools.types import (
@@ -27,17 +32,6 @@ from vidbyte.tools.types import (
 
 if TYPE_CHECKING:
     from vidbyte.context.manager import ContextManager
-
-_REQUIRED_FIELDS = (
-    "claim",
-    "quantifier",
-    "instance_checked",
-    "counterexample",
-    "scope_restriction",
-    "verdict",
-)
-_QUANTIFIER_VALUES = ("all", "some", "none", "most")
-_VERDICT_VALUES = ("holds", "fails", "unverifiable")
 
 
 class QuantifierTool(BaseTool):
@@ -166,18 +160,20 @@ class QuantifierTool(BaseTool):
 
     def _validate(self, args: dict) -> str | None:
         # Returns an error string for a missing field or a bad quantifier/verdict enum.
-        error = ReasoningToolInput.missing_required(args, _REQUIRED_FIELDS)
+        error = ReasoningToolInput.missing_required(args, QUANTIFIER_REQUIRED_FIELDS)
         if error:
             return error
         enum_error = ReasoningToolInput.enum_error(
             ReasoningToolInput.text(args, "quantifier"),
-            _QUANTIFIER_VALUES,
+            QUANTIFIER_KIND_VALUES,
             "quantifier",
         )
         if enum_error:
             return enum_error
         return ReasoningToolInput.enum_error(
-            ReasoningToolInput.text(args, "verdict"), _VERDICT_VALUES, "verdict"
+            ReasoningToolInput.text(args, "verdict"),
+            QUANTIFIER_VERDICT_VALUES,
+            "verdict",
         )
 
     def _build_item(self, args: dict, primitive_id: str) -> ContextItem:

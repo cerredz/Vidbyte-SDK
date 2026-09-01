@@ -15,6 +15,10 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, cast
 
 from vidbyte.context.primitives.base import ContextItem
+from vidbyte.lib.constants.reasoning_strategies import (
+    REGRESS_REQUIRED_FIELDS,
+    REGRESS_STYLE_VALUES,
+)
 from vidbyte.tools.base import BaseTool
 from vidbyte.tools.builtins.reasoning._parsing import ReasoningToolInput
 from vidbyte.tools.types import (
@@ -27,15 +31,6 @@ from vidbyte.tools.types import (
 
 if TYPE_CHECKING:
     from vidbyte.context.manager import ContextManager
-
-_REQUIRED_FIELDS = (
-    "claim",
-    "justification_chain",
-    "terminates_at",
-    "style",
-    "adequacy",
-)
-_STYLE_VALUES = ("foundational", "circular", "infinite")
 
 
 class RegressTool(BaseTool):
@@ -150,11 +145,11 @@ class RegressTool(BaseTool):
 
     def _validate(self, args: dict) -> str | None:
         # Returns an error string for a missing field or a bad style enum.
-        error = ReasoningToolInput.missing_required(args, _REQUIRED_FIELDS)
+        error = ReasoningToolInput.missing_required(args, REGRESS_REQUIRED_FIELDS)
         if error:
             return error
         return ReasoningToolInput.enum_error(
-            ReasoningToolInput.text(args, "style"), _STYLE_VALUES, "style"
+            ReasoningToolInput.text(args, "style"), REGRESS_STYLE_VALUES, "style"
         )
 
     def _build_item(self, args: dict, primitive_id: str) -> ContextItem:

@@ -15,6 +15,10 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, cast
 
 from vidbyte.context.primitives.base import ContextItem
+from vidbyte.lib.constants.reasoning_strategies import (
+    IDENTITY_REQUIRED_FIELDS,
+    IDENTITY_VERDICT_VALUES,
+)
 from vidbyte.tools.base import BaseTool
 from vidbyte.tools.builtins.reasoning._parsing import ReasoningToolInput
 from vidbyte.tools.types import (
@@ -27,16 +31,6 @@ from vidbyte.tools.types import (
 
 if TYPE_CHECKING:
     from vidbyte.context.manager import ContextManager
-
-_REQUIRED_FIELDS = (
-    "entity_a",
-    "entity_b",
-    "shared_properties",
-    "distinguishing_property",
-    "grounds",
-    "verdict",
-)
-_VERDICT_VALUES = ("same", "different", "indeterminate")
 
 
 class IdentityTool(BaseTool):
@@ -161,11 +155,11 @@ class IdentityTool(BaseTool):
 
     def _validate(self, args: dict) -> str | None:
         # Returns an error string for a missing field or a bad verdict enum.
-        error = ReasoningToolInput.missing_required(args, _REQUIRED_FIELDS)
+        error = ReasoningToolInput.missing_required(args, IDENTITY_REQUIRED_FIELDS)
         if error:
             return error
         return ReasoningToolInput.enum_error(
-            ReasoningToolInput.text(args, "verdict"), _VERDICT_VALUES, "verdict"
+            ReasoningToolInput.text(args, "verdict"), IDENTITY_VERDICT_VALUES, "verdict"
         )
 
     def _build_item(self, args: dict, primitive_id: str) -> ContextItem:

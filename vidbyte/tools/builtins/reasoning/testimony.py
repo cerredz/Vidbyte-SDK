@@ -15,6 +15,11 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, cast
 
 from vidbyte.context.primitives.base import ContextItem
+from vidbyte.lib.constants.reasoning_strategies import (
+    TESTIMONY_REQUIRED_FIELDS,
+    TESTIMONY_REQUIRED_PRESENT_FIELDS,
+    TESTIMONY_TRUST_VALUES,
+)
 from vidbyte.tools.base import BaseTool
 from vidbyte.tools.builtins.reasoning._parsing import ReasoningToolInput
 from vidbyte.tools.types import (
@@ -27,16 +32,6 @@ from vidbyte.tools.types import (
 
 if TYPE_CHECKING:
     from vidbyte.context.manager import ContextManager
-
-_REQUIRED_FIELDS = (
-    "source",
-    "claim",
-    "reliability_factors",
-    "trust_verdict",
-    "residual_uncertainty",
-)
-_REQUIRED_PRESENT_FIELDS = ("corroboration", "conflicts")
-_TRUST_VALUES = ("high", "moderate", "low", "withheld")
 
 
 class TestimonyTool(BaseTool):
@@ -173,17 +168,17 @@ class TestimonyTool(BaseTool):
 
     def _validate(self, args: dict) -> str | None:
         # Returns an error string for a missing field, a missing corroboration/conflicts key, empty factors, or a bad trust enum.
-        error = ReasoningToolInput.missing_required(args, _REQUIRED_FIELDS)
+        error = ReasoningToolInput.missing_required(args, TESTIMONY_REQUIRED_FIELDS)
         if error:
             return error
-        for name in _REQUIRED_PRESENT_FIELDS:
+        for name in TESTIMONY_REQUIRED_PRESENT_FIELDS:
             if name not in args:
                 return f"Missing or empty required field: '{name}'."
         if not ReasoningToolInput.object_list(args.get("reliability_factors")):
             return "Field 'reliability_factors' requires at least one entry."
         return ReasoningToolInput.enum_error(
             ReasoningToolInput.text(args, "trust_verdict"),
-            _TRUST_VALUES,
+            TESTIMONY_TRUST_VALUES,
             "trust_verdict",
         )
 
