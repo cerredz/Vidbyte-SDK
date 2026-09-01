@@ -1,3 +1,14 @@
+"""Context Protocol Header
+
+PURPOSE: Unit and integration coverage for the six symmetric continual trace schemas added to vidbyte/trace/continual/prebuilt.py.
+ROLE IN CODEBASE: Verifies schema shape (field count/type per axis), UpdateTraceTool merge behavior per field type, and one end-to-end agent run per schema family.
+ARCHITECTURE NOTE: Mirrors tests/test_continual_trace.py's structure (SchemaShapeTests / MergeBehaviorTests / integration tests) scoped to the six new symmetric schemas instead of ActionTrace.
+COMMON MODIFICATION PATTERNS: Add a new schema-shape test to SchemaShapeTests when a new symmetric schema is added; add a merge-behavior test whenever a field's accumulate-vs-replace semantics needs regression coverage.
+KNOWN EDGE CASES: Array fields nested inside OBJECT-typed fields would silently fail to accumulate across updates (UpdateTraceTool's object merge is a shallow dict.update()); every array field in these schemas is declared top-level specifically to avoid that, and MergeBehaviorTests asserts the accumulation directly.
+RELATED DOCS: docs/design/symmetric-continual-trace-schemas.md and skills/vidbyte-sdk/continual-tracing.md.
+TESTS: This file; run via `python -m pytest tests/test_symmetric_continual_traces.py` or `python -m unittest tests.test_symmetric_continual_traces`.
+"""
+
 from __future__ import annotations
 
 import unittest

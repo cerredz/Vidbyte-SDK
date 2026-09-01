@@ -1,5 +1,13 @@
 """Context Protocol Header
 
+PURPOSE: Standalone, dependency-free verification of the six symmetric continual trace schemas against the public vidbyte import surface.
+ROLE IN CODEBASE: Runnable companion to tests/test_symmetric_continual_traces.py; exercises schema shape, merge behavior, and one end-to-end agent run without pytest.
+ARCHITECTURE NOTE: CHECKS is an ordered list of named async callables; main() runs each, prints PASS/FAIL, and exits non-zero on any failure, mirroring scripts/test-continual-trace.py's structure.
+COMMON MODIFICATION PATTERNS: Add a new (name, case_fn) tuple to CHECKS when a new symmetric schema or merge behavior needs coverage; keep each case_fn a single focused assertion.
+KNOWN EDGE CASES: Integration cases must use tests.agent_test_support.build_test_agent, not Agent(runner=...) directly, since the public Agent constructor no longer accepts a runner kwarg.
+RELATED DOCS: docs/design/symmetric-continual-trace-schemas.md and skills/vidbyte-sdk/continual-tracing.md.
+TESTS: Run directly via `python scripts/test-symmetric-continual-traces.py`; mirrored by tests/test_symmetric_continual_traces.py.
+
 Description:
     Standalone verification script for the six symmetric continual trace schemas.
 Purpose:
