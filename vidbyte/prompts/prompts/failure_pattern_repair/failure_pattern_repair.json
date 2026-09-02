@@ -1,0 +1,27 @@
+{
+  "name": "Failure Pattern Repair",
+  "description": "Five alternative operational prompts for clustering repeated agent failures, repairing the upstream process that produced them, and requiring challenged independent evidence before work advances.",
+  "key": "failure_pattern_repair",
+  "prompts": {
+    "rulebook_feedback_loop": {
+      "path": "rulebook_feedback_loop.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/failure_pattern_repair/rulebook_feedback_loop.md"
+    },
+    "dependency_shape_triage": {
+      "path": "dependency_shape_triage.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/failure_pattern_repair/dependency_shape_triage.md"
+    },
+    "stage_gate_controller": {
+      "path": "stage_gate_controller.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/failure_pattern_repair/stage_gate_controller.md"
+    },
+    "evaluator_red_team": {
+      "path": "evaluator_red_team.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/failure_pattern_repair/evaluator_red_team.md"
+    },
+    "selective_regeneration_loop": {
+      "path": "selective_regeneration_loop.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/failure_pattern_repair/selective_regeneration_loop.md"
+    }
+  }
+}

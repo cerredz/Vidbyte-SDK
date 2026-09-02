@@ -26,9 +26,9 @@ The design reasoning lives in `docs/design/harden-mcp-stdio-transport.md`. This 
 
 # External Contract
 
-> **source:** https://modelcontextprotocol.io/specification/2026-07-28/
+> **sources:** the first-party links in the MCP reference table below
 > **upstream_version:** MCP specification revision **2026-07-28** (latest at retrieval)
-> **retrieved:** 2026-08-16
+> **retrieved:** 2026-08-29
 > **verified_by:** `vidbyte/tools/mcp/transport.py`, `vidbyte/tools/mcp/client.py`,
 > `vidbyte/tools/mcp/bridge.py`
 > **scope:** Client-side `tools` capability and the stdio transport. Excludes resources, prompts,
@@ -36,6 +36,52 @@ The design reasoning lives in `docs/design/harden-mcp-stdio-transport.md`. This 
 >
 > Written in our own words: `vidbyte-sdk` is MIT-licensed and published to PyPI, and the
 > specification text is not MIT-licensed.
+
+## Official MCP Documentation
+
+| Surface | First-party reference | Why it matters here |
+| --- | --- | --- |
+| Specification | [MCP 2026-07-28 specification](https://modelcontextprotocol.io/specification/2026-07-28/) | Current protocol revision |
+| Tools | [Tools capability](https://modelcontextprotocol.io/specification/2026-07-28/server/tools) | Discovery and invocation payloads |
+| Transports | [Transport specification](https://modelcontextprotocol.io/specification/2026-07-28/basic/transports) | stdio and Streamable HTTP behavior |
+| Python SDK | [Official Python SDK](https://github.com/modelcontextprotocol/python-sdk) | Reference implementation and typed protocol surface |
+
+## Expanded MCP Reading Map
+
+The implementation currently targets the client-side `tools` capability and
+stdio transport. The wider map is kept here because protocol negotiation,
+transport changes, content blocks, and authorization are the likely insertion
+points when the client grows. **Retrieved:** 2026-08-29.
+
+- [MCP specification](https://modelcontextprotocol.io/specification/2026-07-28/)
+- [Specification versioning](https://modelcontextprotocol.io/specification/2026-07-28/basic/versioning)
+- [Architecture](https://modelcontextprotocol.io/specification/2026-07-28/architecture)
+- [Lifecycle](https://modelcontextprotocol.io/specification/2026-07-28/basic/lifecycle)
+- [Authorization](https://modelcontextprotocol.io/specification/2026-07-28/basic/authorization)
+- [Transports overview](https://modelcontextprotocol.io/specification/2026-07-28/basic/transports)
+- [Stdio transport](https://modelcontextprotocol.io/specification/2026-07-28/basic/transports#stdio)
+- [Streamable HTTP transport](https://modelcontextprotocol.io/specification/2026-07-28/basic/transports/streamable-http)
+- [Server overview](https://modelcontextprotocol.io/specification/2026-07-28/server)
+- [Server initialization](https://modelcontextprotocol.io/specification/2026-07-28/basic/lifecycle#initialization)
+- [Tools capability](https://modelcontextprotocol.io/specification/2026-07-28/server/tools)
+- [Resources capability](https://modelcontextprotocol.io/specification/2026-07-28/server/resources)
+- [Resource links](https://modelcontextprotocol.io/specification/2026-07-28/server/resources#resource-links)
+- [Prompts capability](https://modelcontextprotocol.io/specification/2026-07-28/server/prompts)
+- [Completions capability](https://modelcontextprotocol.io/specification/2026-07-28/server/utilities/completion)
+- [Logging capability](https://modelcontextprotocol.io/specification/2026-07-28/server/utilities/logging)
+- [Ping](https://modelcontextprotocol.io/specification/2026-07-28/basic/utilities/ping)
+- [Client roots](https://modelcontextprotocol.io/specification/2026-07-28/client/roots)
+- [Client sampling](https://modelcontextprotocol.io/specification/2026-07-28/client/sampling)
+- [Client elicitation](https://modelcontextprotocol.io/specification/2026-07-28/client/elicitation)
+- [Schema reference](https://modelcontextprotocol.io/specification/2026-07-28/schema)
+- [Security best practices](https://modelcontextprotocol.io/specification/2025-06-18/basic/security_best_practices)
+- [Official Python SDK repository](https://github.com/modelcontextprotocol/python-sdk)
+- [Python SDK documentation](https://modelcontextprotocol.github.io/python-sdk/)
+- [Python SDK PyPI package](https://pypi.org/project/mcp/)
+- [Official TypeScript SDK](https://github.com/modelcontextprotocol/typescript-sdk)
+- [Official MCP Inspector](https://github.com/modelcontextprotocol/inspector)
+- [Official MCP servers](https://github.com/modelcontextprotocol/servers)
+- [MCP documentation index](https://modelcontextprotocol.io/llms.txt)
 
 ## Wire Format — stdio
 

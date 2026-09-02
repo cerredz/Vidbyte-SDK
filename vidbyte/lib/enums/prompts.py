@@ -1,32 +1,59 @@
-"""Context Protocol Header
+"""Agent-readable contract for ``vidbyte/lib/enums/prompts.py``.
 
-Description:
-    Defines the central Prompt enum keys for Vidbyte SDK prompt assets. This file acts as a
-    single source of truth for prompt identifiers.
+FILE:
+    vidbyte/lib/enums/prompts.py
 
-Purpose:
-    Enables static typing, autocomplete, and validation for the 60 static prompt templates
-    across 22 JSON/Markdown-backed families, including multi-agent manager, isolated critic
-    review, and prosecutor/defender/judge debate phases.
+PURPOSE:
+    Defines the stable typed identifiers for all 65 static prompt assets across 23
+    JSON/Markdown-backed families. This file owns identifiers only; prompt text and
+    family metadata belong under ``vidbyte/prompts/prompts/``.
 
-Architecture and Key Functions:
-    - Prompt (Enum): Inherits from `str` and `Enum`. It maps high-level, semantic prompt
-    identifiers (constants) to their corresponding catalog-relative string paths,
-    including the six prosecutor/defender/judge role prompts.
-      Keys are used programmatically, while values map to assets under `vidbyte/prompts/prompts/`.
+ROLE IN CODEBASE:
+    ``vidbyte/prompts/catalog.py`` converts descriptor keys into these enum values and
+    fails import when an asset lacks a matching member. ``vidbyte/prompts/__init__.py``
+    uses the resulting catalog to generate direct string exports. Agents, algorithms,
+    evaluations, and MCP handlers use these members instead of filesystem paths.
 
-Relation to the codebase as a whole:
-    Provides identifiers that are referenced across agents, context window management algorithms,
-    and evaluations to fetch compiled prompt assets from the global prompt catalog.
-    Used heavily by `vidbyte.prompts.catalog.Prompts` to load and cache text templates, and by
-    MCP server handlers to list or resolve prompts.
+ARCHITECTURE NOTE:
+    Enum values are flattened ``family.leaf`` catalog identities. The asset descriptor,
+    enum member, README entry, generated direct import, and installed package resource
+    form one public contract; additions must update them atomically.
 
-Similar Files:
-    - `vidbyte/lib/enums/model_provider.py`: Defines supported model providers.
-    - `vidbyte/lib/enums/model_modality.py`: Defines modalities.
+CLASS INVENTORY:
+    Prompt(str, Enum): Typed keys accepted by ``Prompts.get()`` and returned by
+    ``Prompts.keys()``. Contract coverage lives in ``tests/test_prompts_interface.py``.
+
+COMMON MODIFICATION PATTERNS:
+    Add one member for each new descriptor leaf, preserve every published value, update
+    the prompt and family counts above, then run the source and installed-package gates.
+
+WHAT NOT TO DO IN THIS FILE:
+    1. Do not store prompt text here; assets are owned by ``vidbyte/prompts/prompts/``.
+    2. Do not implement loading or validation here; that belongs to
+       ``vidbyte/prompts/catalog.py``.
+    3. Do not hand-maintain direct imports here; ``vidbyte/prompts/__init__.py`` derives
+       them from catalog records.
+
+KNOWN EDGE CASES:
+    A descriptor leaf without an exactly matching enum value raises ConfigurationError
+    during prompt-package import. Renaming an existing value is a public compatibility
+    break even when the Markdown path is unchanged. The asset and family counts in this
+    header are maintained manually and must be reconciled after additions or removals.
+
+RELATED DOCS:
+    https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/README.md
+        Catalog conventions, public usage, family descriptions, and canonical links.
+    https://github.com/cerredz/Vidbyte-SDK/blob/main/docs/design/failure-pattern-repair-prompts.md
+        Requirements and rollout for the five failure-pattern-repair prompt keys.
+
+TESTS:
+    ``tests/test_prompts_interface.py`` protects enum/asset synchronization and dynamic
+    exports; the package stage verifies installed resource loading. This repository does
+    not publish a per-file coverage percentage for enum declarations.
 """
 
 from __future__ import annotations
+
 from enum import Enum
 
 
@@ -48,6 +75,11 @@ class Prompt(str, Enum):
     CONTINUAL_TRACE_SYSTEM_PROMPT = "continual_trace.system_prompt"
     CONTEXT_ENGINEERING_GUIDELINE_PROMPT = "context_engineering.guideline_prompt"
     EXPERT_PROMPTING_EXPERT_PROMPT = "expert_prompting.expert_prompt"
+    FAILURE_PATTERN_REPAIR_RULEBOOK_FEEDBACK_LOOP = "failure_pattern_repair.rulebook_feedback_loop"
+    FAILURE_PATTERN_REPAIR_DEPENDENCY_SHAPE_TRIAGE = "failure_pattern_repair.dependency_shape_triage"
+    FAILURE_PATTERN_REPAIR_STAGE_GATE_CONTROLLER = "failure_pattern_repair.stage_gate_controller"
+    FAILURE_PATTERN_REPAIR_EVALUATOR_RED_TEAM = "failure_pattern_repair.evaluator_red_team"
+    FAILURE_PATTERN_REPAIR_SELECTIVE_REGENERATION_LOOP = "failure_pattern_repair.selective_regeneration_loop"
     GOALS_GOAL_PROMPT = "goals.goal_prompt"
     MIMIC_BEHAVIOR_MIMIC_PROMPT = "mimic_behavior.mimic_prompt"
     REFLEXION_AGENT_SYSTEM_PROMPT = "reflexion.agent_system_prompt"

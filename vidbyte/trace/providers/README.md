@@ -25,15 +25,116 @@ instrumentation point.
 
 # External Contract
 
-> **sources:** LangSmith run-type documentation (`docs.smith.langchain.com`); Langfuse and Phoenix
-> observability documentation
-> **retrieved:** 2026-08-16
+> **sources:** the first-party links in the trace-provider reference table below
+> **retrieved:** 2026-08-29
 > **verified_by:** `vidbyte/trace/providers/langsmith.py`, `vidbyte/trace/schema.py`
 > **scope:** The `run_type` vocabulary and the pass-through contract. Excludes LangSmith's ingestion
 > API, auth, and project routing — those are handled in `vidbyte/trace/`.
 >
 > Written in our own words: `vidbyte-sdk` is MIT-licensed and published to PyPI, and vendor
 > documentation is not MIT-licensed.
+
+## Official Trace-Provider Documentation
+
+| Backend | First-party reference | Contract use |
+| --- | --- | --- |
+| LangSmith | [Run data format](https://docs.langchain.com/langsmith/run-data-format) | `run_type` vocabulary and trace fields |
+| LangSmith | [Trace with LangGraph](https://docs.langchain.com/langsmith/trace-with-langgraph) | Framework trace setup |
+| Langfuse | [Tracing quickstart](https://langfuse.com/docs/observability/get-started) | Trace ingestion and setup |
+| Langfuse | [Data model](https://langfuse.com/docs/observability/data-model) | Traces, observations, and sessions |
+| Phoenix | [Tracing integrations](https://arize.com/docs/phoenix/integrations) | OpenTelemetry/OpenInference integrations |
+| Phoenix | [Setup Phoenix OTEL](https://www.arize.com/docs/phoenix/tracing/how-to-tracing/setup-tracing/setup-using-phoenix-otel) | Export and collector setup |
+
+## Expanded Trace-Provider Reading Maps
+
+The translator contract is small, but the systems receiving these spans are
+not. These maps keep the operational pages that explain the fields, SDKs,
+instrumentation, retention, evaluation, and integrations adjacent to the
+translator boundary. **Retrieved:** 2026-08-29.
+
+### LangSmith
+
+- [Tracing quickstart](https://docs.langchain.com/langsmith/observability-quickstart)
+- [Observability concepts](https://docs.langchain.com/langsmith/observability-concepts)
+- [Run data format](https://docs.langchain.com/langsmith/run-data-format)
+- [Trace with LangGraph](https://docs.langchain.com/langsmith/trace-with-langgraph)
+- [Trace with OpenTelemetry](https://docs.langchain.com/langsmith/trace-with-opentelemetry)
+- [Trace with Codex](https://docs.langchain.com/langsmith/trace-with-codex)
+- [Trace with Cursor](https://docs.langchain.com/langsmith/trace-with-cursor)
+- [Trace Bedrock](https://docs.langchain.com/langsmith/trace-bedrock)
+- [LangSmith reference](https://docs.langchain.com/langsmith/reference)
+- [Custom endpoint](https://docs.langchain.com/langsmith/custom-endpoint)
+- [Custom middleware](https://docs.langchain.com/langsmith/custom-middleware)
+- [Cloud environment variables](https://docs.langchain.com/langsmith/env-var-cloud)
+- [Agent-server distributed tracing](https://docs.langchain.com/langsmith/agent-server-distributed-tracing)
+- [Audit evaluator scores](https://docs.langchain.com/langsmith/audit-evaluator-scores)
+- [Cron jobs](https://docs.langchain.com/langsmith/cron-jobs)
+- [Remote MCP servers](https://docs.langchain.com/langsmith/fleet/remote-mcp-servers)
+- [Terraform management](https://docs.langchain.com/langsmith/manage-with-terraform)
+- [Prompt engineering concepts](https://docs.langchain.com/langsmith/prompt-engineering-concepts)
+- [Delete traces](https://docs.langchain.com/langsmith/script-delete-traces)
+- [Self-hosted agent-server metrics](https://docs.langchain.com/langsmith/self-hosted-agent-server-metrics)
+- [Shared run API](https://docs.langchain.com/langsmith/smith-api/public/get-shared-run-by-id)
+- [Feedback configuration API](https://docs.langchain.com/langsmith/smith-api/feedback-configs/delete-feedback-config-endpoint)
+- [Server information API](https://docs.langchain.com/langsmith/smith-api/info/get-server-info)
+- [Query threads API](https://docs.langchain.com/langsmith/smith-api/threads/query-threads)
+- [Workspace secrets API](https://docs.langchain.com/langsmith/smith-api/workspaces/list-current-workspace-secrets)
+
+### Langfuse
+
+- [Observability quickstart](https://langfuse.com/docs/observability/get-started)
+- [Observability data model](https://langfuse.com/docs/observability/data-model)
+- [SDK overview](https://langfuse.com/docs/observability/sdk/overview)
+- [Python SDK](https://langfuse.com/docs/observability/sdk/python)
+- [JavaScript and TypeScript SDK](https://langfuse.com/docs/observability/sdk/js)
+- [Tracing](https://langfuse.com/docs/observability/features/tracing)
+- [Observations](https://langfuse.com/docs/observability/features/observations)
+- [Generations](https://langfuse.com/docs/observability/features/generations)
+- [Sessions](https://langfuse.com/docs/observability/features/sessions)
+- [Scores](https://langfuse.com/docs/observability/features/scores)
+- [User feedback](https://langfuse.com/docs/observability/features/user-feedback)
+- [Prompt management](https://langfuse.com/docs/prompt-management/get-started)
+- [Prompt versioning](https://langfuse.com/docs/prompt-management/features/overview)
+- [Datasets](https://langfuse.com/docs/datasets/overview)
+- [Evaluations](https://langfuse.com/docs/evaluation/overview)
+- [Annotation queues](https://langfuse.com/docs/evaluation/evaluation-methods/annotation)
+- [LangChain integration](https://langfuse.com/docs/integrations/langchain)
+- [LangGraph integration](https://langfuse.com/docs/integrations/langgraph)
+- [OpenAI integration](https://langfuse.com/docs/integrations/openai)
+- [Anthropic integration](https://langfuse.com/docs/integrations/anthropic)
+- [Vercel AI SDK integration](https://langfuse.com/docs/integrations/vercel-ai-sdk)
+- [LlamaIndex integration](https://langfuse.com/docs/integrations/llama-index)
+- [OpenTelemetry](https://langfuse.com/docs/opentelemetry/get-started)
+- [Self-hosting](https://langfuse.com/docs/deployment/self-host)
+- [Cloud deployment](https://langfuse.com/docs/deployment/cloud)
+
+### Phoenix
+
+- [Phoenix overview](https://arize.com/docs/phoenix)
+- [Tracing overview](https://arize.com/docs/phoenix/tracing)
+- [Tracing integrations](https://arize.com/docs/phoenix/tracing/integrations-tracing)
+- [Your first traces](https://arize.com/docs/phoenix/tracing/tutorial/your-first-traces)
+- [Phoenix OTEL setup](https://arize.com/docs/phoenix/tracing/how-to-tracing/setup-tracing/setup-using-phoenix-otel)
+- [Phoenix client setup](https://arize.com/docs/phoenix/tracing/how-to-tracing/setup-tracing/setup-using-phoenix-client)
+- [OpenTelemetry setup](https://arize.com/docs/phoenix/tracing/how-to-tracing/setup-tracing/setup-using-opentelemetry)
+- [Collect traces](https://arize.com/docs/phoenix/tracing/how-to-tracing/collect-traces)
+- [Trace attributes](https://arize.com/docs/phoenix/tracing/how-to-tracing/trace-attributes)
+- [Trace annotations](https://arize.com/docs/phoenix/tracing/how-to-tracing/trace-annotations)
+- [Tracing monitoring](https://arize.com/docs/phoenix/tracing/how-to-tracing/monitoring)
+- [Integrations overview](https://arize.com/docs/phoenix/integrations)
+- [Tracing integrations index](https://arize.com/docs/phoenix/tracing/integrations-tracing)
+- [Python API](https://arize.com/docs/phoenix/resources/python-api)
+- [Phoenix OTEL Python API](https://arize.com/docs/phoenix/sdk-api-reference/python/arize-phoenix-otel)
+- [Phoenix client API](https://arize.com/docs/phoenix/sdk-api-reference/python/arize-phoenix-client)
+- [Phoenix evaluation](https://arize.com/docs/phoenix/evaluation)
+- [Datasets and experiments](https://arize.com/docs/phoenix/datasets-and-experiments)
+- [Prompt engineering](https://arize.com/docs/phoenix/prompt-engineering)
+- [LangChain integration](https://arize.com/docs/phoenix/integrations/frameworks/langchain)
+- [LangGraph integration](https://arize.com/docs/phoenix/integrations/frameworks/langgraph)
+- [OpenAI integration](https://arize.com/docs/phoenix/integrations/llm-providers/openai)
+- [Anthropic integration](https://arize.com/docs/phoenix/integrations/llm-providers/anthropic)
+- [Deployment](https://arize.com/docs/phoenix/deployment)
+- [Self-hosting](https://arize.com/docs/phoenix/deployment/self-hosting)
 
 ## The `run_type` Coupling — Read This Before Renaming A `SpanKind`
 
