@@ -77,9 +77,7 @@ class DeductionContextItem:
     def to_context_text(self) -> str:
         # Renders premises, the named rule, the conclusion, and the soundness caveat.
         lines: list[str] = [
-            "This note records a deductive chain for the model to inspect later.",
-            "The premises and named inference rule show how the conclusion was derived.",
-            "Use the soundness caveat to separate logical validity from confidence in the premises.",
+            "This note records a deductive chain for the model to inspect later. The premises and named inference rule show how the conclusion was derived. Use the soundness caveat to separate logical validity from confidence in the premises. Keep the conclusion tied to the stated premises rather than to later context.",
             "",
         ]
         _extend_section(lines, "Premises", self.premises)
@@ -110,9 +108,7 @@ class InductionContextItem:
         # Renders observations, the noticed pattern, the generalization, and its risks.
         confidence_text = "N/A" if self.confidence is None else f"{self.confidence:.2f}"
         lines: list[str] = [
-            "This note records an inductive generalization from specific observations.",
-            "The observations and pattern show what was seen before the broader claim was formed.",
-            "Use the confidence, bias risk, and falsifying case to judge how far the claim can be trusted.",
+            "This note records an inductive generalization from specific observations. The observations and pattern show what was seen before the broader claim was formed. Use the confidence, bias risk, and falsifying case to judge how far the claim can be trusted. Treat the generalization as provisional until its evidence survives that check.",
             "",
         ]
         _extend_section(lines, "Observations", self.observations)
@@ -143,9 +139,7 @@ class AbductionContextItem:
     def to_context_text(self) -> str:
         # Renders evidence, each scored hypothesis, the winner, and the discriminating test.
         lines: list[str] = [
-            "This note records a comparison of competing explanations for observed evidence.",
-            "The evidence and hypothesis summaries show why one explanation was selected over its rivals.",
-            "Use the discriminating test to identify what could resolve any remaining ambiguity.",
+            "This note records a comparison of competing explanations for observed evidence. The evidence and hypothesis summaries show why one explanation was selected over its rivals. Use the discriminating test to identify what could resolve any remaining ambiguity. The selected explanation remains a hypothesis until the test separates it from alternatives.",
             "",
         ]
         _extend_section(lines, "Evidence", self.evidence)
@@ -180,9 +174,7 @@ class AnalogyContextItem:
     def to_context_text(self) -> str:
         # Renders the source/target domains, mapped relations, breakdown point, and weight.
         lines = [
-            "This note records a transfer of structure from a familiar domain to a target domain.",
-            "The mapped relations show what the comparison explains and where the two domains align.",
-            "Use the breakdown point and weight classification before treating the analogy as decision evidence.",
+            "This note records a transfer of structure from a familiar domain to a target domain. The mapped relations show what the comparison explains and where the two domains align. Use the breakdown point and weight classification before treating the analogy as decision evidence. This record marks comparison boundaries so similarity is not mistaken for identity.",
             "",
             f"Source Domain: {self.source_domain}",
             f"Target Domain: {self.target_domain}",
@@ -212,9 +204,7 @@ class CausalChainContextItem:
     def to_context_text(self) -> str:
         # Renders cause, mechanism, effect, confounders, and the intervention test.
         lines = [
-            "This note records a proposed cause-and-effect relationship with its explanatory mechanism.",
-            "The mechanism and confounders show why the relationship may be causal or merely correlational.",
-            "Use the intervention test to identify what observation could distinguish those possibilities.",
+            "This note records a proposed cause-and-effect relationship with its explanatory mechanism. The mechanism and confounders show why the relationship may be causal or merely correlational. Use the intervention test to identify what observation could distinguish those possibilities. Keep correlation and causation distinct until the proposed test provides support.",
             "",
             f"Cause: {self.cause}",
         ]
@@ -246,9 +236,7 @@ class BayesianUpdateContextItem:
     def to_context_text(self) -> str:
         # Renders the hypothesis, prior, evidence, both likelihoods, posterior, and explanation.
         lines = [
-            "This note records how evidence changes a stated belief.",
-            "The prior, likelihoods, and posterior make the direction and size of the update explicit.",
-            "Use the shift explanation to connect the numbers to the reasoning behind the belief revision.",
+            "This note records how evidence changes a stated belief. The prior, likelihoods, and posterior make the direction and size of the update explicit. Use the shift explanation to connect the numbers to the reasoning behind the belief revision. Read the probabilities as a recorded update, not as certainty beyond the supplied evidence.",
             "",
             f"Hypothesis: {self.hypothesis}",
             f"Prior: {self.prior:.3f}",
@@ -279,9 +267,7 @@ class DifferentialDiagnosisContextItem:
     def to_context_text(self) -> str:
         # Renders the full candidate set, eliminations, survivors, and the next check.
         lines: list[str] = [
-            "This note records a candidate set narrowed by evidence and elimination.",
-            "The ruled-out and remaining sections show which explanations still deserve attention.",
-            "Use the next discriminator to choose the check that most efficiently separates the survivors.",
+            "This note records a candidate set narrowed by evidence and elimination. The ruled-out and remaining sections show which explanations still deserve attention. Use the next discriminator to choose the check that most efficiently separates the survivors. This keeps the search state explicit without declaring the surviving candidates correct.",
             "",
         ]
         _extend_section(lines, "Candidate Set", self.candidate_set)
@@ -313,9 +299,7 @@ class FermiEstimateContextItem:
     def to_context_text(self) -> str:
         # Renders the quantity, its decomposition, the arithmetic, and the resulting estimate.
         lines = [
-            "This note records an order-of-magnitude estimate built from smaller assumptions.",
-            "The decomposition and arithmetic show how the point estimate was produced.",
-            "Use the sanity band and anchor-risk note to judge whether the estimate is independently plausible.",
+            "This note records an order-of-magnitude estimate built from smaller assumptions. The decomposition and arithmetic show how the point estimate was produced. Use the sanity band and anchor-risk note to judge whether the estimate is independently plausible. The result is a scale estimate, not a precise measurement.",
             "",
             f"Quantity: {self.quantity}",
         ]
@@ -345,9 +329,7 @@ class SteelmanContextItem:
     def to_context_text(self) -> str:
         # Renders the position, its strongest opposition, the verdict, and any revision.
         lines = [
-            "This note records a position tested against its strongest credible opposition.",
-            "The opposition and verdict show whether the original position still stands.",
-            "Use the revision to carry any qualification or change into the next decision.",
+            "This note records a position tested against its strongest credible opposition. The opposition and verdict show whether the original position still stands. Use the revision to carry any qualification or change into the next decision. This makes the revision traceable rather than silently changing the original position.",
             "",
             "### My Position",
             self.my_position,
@@ -377,9 +359,7 @@ class FalsifyContextItem:
     def to_context_text(self) -> str:
         # Renders the claim, its test design, the riskiest prediction, and current status.
         lines = [
-            "This note records a claim together with a test designed to expose when it fails.",
-            "The test design and riskiest prediction show what evidence would put the claim at risk.",
-            "Use the status to distinguish a claim that survived a real test from one that is still untested.",
+            "This note records a claim together with a test designed to expose when it fails. The test design and riskiest prediction show what evidence would put the claim at risk. Use the status to distinguish a claim that survived a real test from one that is still untested. A surviving test raises confidence but does not prove the claim universally.",
             "",
             "### Claim",
             self.claim,

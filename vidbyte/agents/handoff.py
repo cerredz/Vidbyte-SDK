@@ -232,7 +232,7 @@ class HandoffAgent(BaseAgent):
     def _coerce_payload(value: Any) -> Mapping[str, Any] | None:
         # Normalize dict-like structured outputs, including Pydantic model instances.
         if hasattr(value, "model_dump"):
-            value = value.model_dump()
+            value = value.model_dump(mode="json")
         if isinstance(value, Mapping):
             return value
         return None

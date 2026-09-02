@@ -78,7 +78,12 @@ class ReasoningTraceContextItem:
 
     def to_context_text(self) -> str:
         # Renders strategy-owned fields in declaration order under one context bound.
-        lines = [f"Strategy: {self.strategy_name}", f"Strategy Purpose: {self.strategy_purpose}"]
+        lines = [
+            "This primitive carries a strategy-specific reasoning checkpoint for later model iterations. The strategy name and purpose identify the reasoning method, while the following fields record its question, application, evidence, assumptions, alternatives, signals, confidence, and next action. Some records use dynamic strategy-owned fields instead of the fallback field set, and both forms remain descriptive observations. Use this trace to inspect reasoning state without treating it as verified truth or executable strategy logic.",
+            "",
+            f"Strategy: {self.strategy_name}",
+            f"Strategy Purpose: {self.strategy_purpose}",
+        ]
         if self.strategy_fields:
             lines.extend(
                 f"{name.replace('_', ' ').title()}: {self._render_value(value)}"

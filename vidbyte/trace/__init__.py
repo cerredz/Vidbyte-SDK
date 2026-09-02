@@ -24,9 +24,14 @@ from vidbyte.trace.base import Trace
 from vidbyte.trace.controller import TraceController
 from vidbyte.trace.continual import (
     ActionTrace,
+    CalibrationTrace,
     ContinualTraceAgent,
     ContinualTraceMiddleware,
     ContinualTracer,
+    CounterfactualAlternativesTrace,
+    ErrorTaxonomyTrace,
+    HierarchicalTaskTreeTrace,
+    SelfConsistencyEnsembleTrace,
     SymmetricChecklistTrace,
     SymmetricEventLedgerTrace,
     SymmetricEvidenceTrace,
@@ -41,11 +46,16 @@ from vidbyte.trace.session import SessionTraceController, SessionTracer
 
 __all__ = [
     "ActionTrace",
+    "CalibrationTrace",
     "ContinualTraceAgent",
     "ContinualTraceMiddleware",
     "ContinualTracer",
+    "CounterfactualAlternativesTrace",
     "DebugTracer",
+    "ErrorTaxonomyTrace",
+    "HierarchicalTaskTreeTrace",
     "ParentPolicy",
+    "SelfConsistencyEnsembleTrace",
     "SemanticSpanContext",
     "SessionTraceController",
     "SessionTracer",

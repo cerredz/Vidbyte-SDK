@@ -1,31 +1,31 @@
 """Epistemic challenge context primitives for general problem solving.
 
-FILE
+FILE:
     vidbyte/context/primitives/epistemics.py
-PURPOSE
+PURPOSE:
     Preserve challenges to assumptions, mental or causal models, and evidence
     so unresolved uncertainty remains visible across agent iterations.
-ROLE IN CODEBASE
+ROLE IN CODEBASE:
     Supplies descriptive ContextItem implementations for ContextManager without
     deciding truth, source authority, or sufficient proof.
-ARCHITECTURE NOTE
+ARCHITECTURE NOTE:
     Frozen, slotted dataclasses keep the records lightweight; each renderer is
     deterministic and applies the shared context-size bound once at the end.
-FUNCTION INVENTORY
+FUNCTION INVENTORY:
     AssumptionChallengeContextItem, ModelChallengeContextItem, and
     EvidenceChallengeContextItem render distinct epistemic disputes.
-COMMON MODIFICATION PATTERNS
+COMMON MODIFICATION PATTERNS:
     Add opaque evidence or model fields before the lifecycle tail, preserve
     balanced ordering, and render tuple fields with _extend_section.
-WHAT NOT TO DO
+WHAT NOT TO DO IN THIS FILE:
     Do not clamp confidence, authenticate evidence, select a winning model, or
     register automatic investigation or enforcement behavior here.
-KNOWN EDGE CASES
+KNOWN EDGE CASES:
     Confidence values outside zero-to-one are preserved; empty evidence sections
     mean only that nothing was recorded, not that no evidence exists.
-RELATED DOCS
+RELATED DOCS:
     https://github.com/cerredz/Vidbyte-SDK/blob/main/docs/design/general-problem-solving-context-primitives.md
-TESTS
+TESTS:
     The approved no-tests workflow uses package compilation and import/render
     smoke checks described in the design document.
 """
@@ -63,7 +63,12 @@ class AssumptionChallengeContextItem:
 
     def to_context_text(self) -> str:
         # Renders this problem-solving record in deterministic order, bounded by max_chars.
-        lines = [f"Status: {self.status}", f"Severity: {self.severity}"]
+        lines = [
+            "This primitive carries an assumption that the current reasoning depends on. Basis and evidence show why it was accepted, while confidence indicates how strongly it is held. The falsifier and validation method define what could disprove or test it. Use the resolution condition to track when the assumption no longer needs active scrutiny.",
+            "",
+            f"Status: {self.status}",
+            f"Severity: {self.severity}",
+        ]
         if self.raised_by:
             lines.append(f"Raised by: {self.raised_by}")
         if self.owner:
@@ -105,7 +110,12 @@ class ModelChallengeContextItem:
 
     def to_context_text(self) -> str:
         # Renders this problem-solving record in deterministic order, bounded by max_chars.
-        lines = [f"Status: {self.status}", f"Severity: {self.severity}"]
+        lines = [
+            "This primitive carries a challenge to the model used to explain a system or relationship. Questionable relationships identify links that may be wrong, and competing models provide alternative explanations. Distinguishing observations identify evidence that could tell those models apart. Use this record before relying on a model whose structure has not been separated from its alternatives.",
+            "",
+            f"Status: {self.status}",
+            f"Severity: {self.severity}",
+        ]
         if self.raised_by:
             lines.append(f"Raised by: {self.raised_by}")
         if self.owner:
@@ -149,7 +159,12 @@ class EvidenceChallengeContextItem:
 
     def to_context_text(self) -> str:
         # Renders this problem-solving record in deterministic order, bounded by max_chars.
-        lines = [f"Status: {self.status}", f"Severity: {self.severity}"]
+        lines = [
+            "This primitive carries an audit of evidence supporting a claim. Supporting and counterevidence show the balance of observations, while provenance and freshness concerns qualify their reliability. Bias risks, missing evidence, and the observation-inference gap identify how the claim could be overstated. Use the resolution condition to decide when the evidence review is sufficient.",
+            "",
+            f"Status: {self.status}",
+            f"Severity: {self.severity}",
+        ]
         if self.raised_by:
             lines.append(f"Raised by: {self.raised_by}")
         if self.owner:

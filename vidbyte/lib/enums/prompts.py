@@ -4,7 +4,7 @@ FILE:
     vidbyte/lib/enums/prompts.py
 
 PURPOSE:
-    Defines the stable typed identifiers for all 64 static prompt assets across 22
+    Defines the stable typed identifiers for all 65 static prompt assets across 23
     JSON/Markdown-backed families. This file owns identifiers only; prompt text and
     family metadata belong under ``vidbyte/prompts/prompts/``.
 
@@ -60,6 +60,7 @@ from enum import Enum
 class Prompt(str, Enum):
     """Prompt keys for Vidbyte SDK prompt assets."""
 
+    CREATE_SKILLS_CREATE_SKILL = "create_skills.create_skill"
     AGENTIC_ENGINEERING_ERROR_MESSAGES = "agentic_engineering.error_messages"
     AGENTIC_ENGINEERING_FEATURE_TEST_PACKS = "agentic_engineering.feature_test_packs"
     AGENTIC_ENGINEERING_FILE_HEADERS = "agentic_engineering.file_headers"

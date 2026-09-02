@@ -69,6 +69,17 @@ cached external findings; semantic rules inspect the shared source catalogue.
 - `s048_blocking_sleep_in_async_function.py` -- cooperative async delays.
 - `s049_unsafe_yaml_load.py` -- safe YAML construction.
 - `s050_insecure_hash.py` -- security-appropriate hashing.
+- `s051_modernized_import_and_syntax_hygiene.py` -- sorted imports, non-deprecated typing syntax.
+- `s052_async_blocking_io.py` -- blocking calls inside async functions not already owned by S045-S048.
+- `s053_defensive_python_bugbear.py` -- warning stacklevel, test exceptions, closures, ContextVars.
+- `s054_bandit_security_subset.py` -- unsafe deserialization, TLS bypass, credentials (weak-hash/unsafe-YAML in S049/S050).
+- `s055_no_shell_subprocess.py` -- shell-interpreting subprocess execution.
+- `s056_retryable_idempotent_methods.py` -- idempotency guard on retrying HTTP transports.
+- `s057_no_model_construct_without_review.py` -- validation-skipping Pydantic construction.
+- `s058_forbid_unknown_fields_at_boundary.py` -- explicit extra-field policy at public seams.
+- `s059_explicit_serialization_mode.py` -- explicit model_dump() wire/Python mode.
+- `s060_typed_public_seam_mappings.py` -- named mapping shapes at public seams.
+- `s061_bounded_safe_path.py` -- resolved, contained file/archive I/O paths.
 - `a001_agent_readable_file_headers.py` -- structured SDK source headers.
 - `a002_intent_comments.py` -- intent markers for load-bearing policy functions.
 - `a003_context_rich_error_packets.py` -- stable diagnostic fields on errors.
@@ -84,3 +95,6 @@ cached external findings; semantic rules inspect the shared source catalogue.
 - 2026-08-27: Added S025 model-facing tool/parameter description depth policy.
 - 2026-08-28: Added the sequential S026-S050 analyzer-backed policy catalogue.
 - 2026-08-28: Added C001-C005 SDK domain-contract policies.
+- 2026-08-28: Added catalog-expansion S051-S061 policies (renumbered from an initial S025-S035
+  draft after S025-S050 landed on main concurrently; S052/S054 dropped the Ruff codes S045-S050
+  already own).

@@ -67,6 +67,7 @@ from vidbyte.agents.multi import (
 )
 from vidbyte.agents.context_algorithms import AgentRuntimeContextAlgorithms
 from vidbyte.agents.pricing import ProviderUsage, UsageRecord, UsageRollup, UsageTracker
+from vidbyte.agents.speed import AgentSpeedRollup, AgentSpeedTracker
 from vidbyte.lib.dataclasses.multi_agent import AggregateConfig, ProposerSpec
 from vidbyte.lib.registries import AgentRegistry
 from vidbyte.agents.runtimes import (
@@ -156,6 +157,8 @@ __all__ = [
     "TaskSpec",
     "TaskStatus",
     "AgentRuntime",
+    "AgentSpeedRollup",
+    "AgentSpeedTracker",
     "ProviderUsage",
     "UsageRecord",
     "UsageRollup",
