@@ -1,18 +1,41 @@
+"""Context Protocol Header
+
+Description:
+    Shared asynchronous and synchronous HTTP transports for SDK integrations.
+Purpose:
+    Sends bounded JSON, byte, multipart, and streaming requests while preserving
+    caller headers, applying retries, and normalizing responses.
+Architecture:
+    - HttpTransport: Async httpx transport with retry and response-size policy.
+    - SyncHttpTransport: Blocking urllib transport for sync and binary callers.
+    - _headers_with_json_content_type: Adds one JSON content type without
+      duplicating a caller-provided header whose casing differs.
+Relations:
+    Used by provider adapters and operation clients at every external HTTP seam.
+"""
+
 from __future__ import annotations
 
 import asyncio
 import json
 import time
 import uuid
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass, replace
-from typing import Mapping
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 import httpx
 
 from vidbyte.lib.errors import ProviderRequestError
+
+
+def _headers_with_json_content_type(headers: Mapping[str, str]) -> dict[str, str]:
+    """Copy headers and add the JSON content type only when the caller omitted it."""
+    request_headers = dict(headers)
+    if not any(name.lower() == "content-type" for name in request_headers):
+        request_headers["content-type"] = "application/json"
+    return request_headers
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,11 +70,10 @@ class HttpTransport:
 
     async def _send_once(self, client: httpx.AsyncClient, *, method: str, url: str, headers: Mapping[str, str], json_body: Mapping[str, object] | None, timeout_seconds: float, max_response_bytes: int | None = None) -> HttpResponse:
         # Execute a single httpx request and return HTTP errors as responses rather than exceptions.
-        request_headers = dict(headers)
+        request_headers = _headers_with_json_content_type(headers) if json_body is not None else dict(headers)
         content: bytes | None = None
         if json_body is not None:
             content = json.dumps(json_body).encode("utf-8")
-            request_headers.setdefault("content-type", "application/json")
         request = client.build_request(method, url, headers=request_headers, content=content)
         if max_response_bytes is not None:
             return await self._send_bounded(client, request, max_response_bytes=max_response_bytes)
@@ -101,11 +123,10 @@ class SyncHttpTransport:
 
     def request_bytes(self, *, method: str, url: str, headers: Mapping[str, str], json_body: Mapping[str, object] | None = None, timeout_seconds: float = 120.0) -> HttpResponse:
         # Send a request and store the response body as raw bytes instead of decoded text.
-        request_headers = dict(headers)
+        request_headers = _headers_with_json_content_type(headers) if json_body is not None else dict(headers)
         body_data: bytes | None = None
         if json_body is not None:
             body_data = json.dumps(json_body).encode("utf-8")
-            request_headers.setdefault("content-type", "application/json")
         request = Request(url=url, data=body_data, headers=request_headers, method=method)
         try:
             with urlopen(request, timeout=timeout_seconds) as response:
@@ -136,12 +157,11 @@ class SyncHttpTransport:
 
     def stream_request(self, *, method: str, url: str, headers: Mapping[str, str], json_body: Mapping[str, object] | None = None, timeout_seconds: float = 120.0) -> Iterator[str]:
         # Open an SSE connection and yield each data-line payload, stopping at [DONE].
-        request_headers = dict(headers)
+        request_headers = _headers_with_json_content_type(headers) if json_body is not None else dict(headers)
         request_headers["accept"] = "text/event-stream"
         body_data: bytes | None = None
         if json_body is not None:
             body_data = json.dumps(json_body).encode("utf-8")
-            request_headers.setdefault("content-type", "application/json")
         request = Request(url=url, data=body_data, headers=request_headers, method=method)
         try:
             with urlopen(request, timeout=timeout_seconds) as response:
@@ -155,10 +175,9 @@ class SyncHttpTransport:
     def _send_once(self, *, method: str, url: str, headers: Mapping[str, str], json_body: Mapping[str, object] | None, timeout_seconds: float) -> HttpResponse:
         # Execute a single stdlib urllib request and return HTTP errors as responses.
         body: bytes | None = None
-        request_headers = dict(headers)
+        request_headers = _headers_with_json_content_type(headers) if json_body is not None else dict(headers)
         if json_body is not None:
             body = json.dumps(json_body).encode("utf-8")
-            request_headers.setdefault("content-type", "application/json")
         request = Request(url=url, data=body, headers=request_headers, method=method)
         try:
             with urlopen(request, timeout=timeout_seconds) as response:
@@ -173,17 +192,17 @@ class SyncHttpTransport:
         parts: list[bytes] = []
         for name, value in fields.items():
             if value:
-                parts.append(f'--{boundary}\r\nContent-Disposition: form-data; name="{name}"\r\n\r\n{value}\r\n'.encode("utf-8"))
-        parts.append(f'--{boundary}\r\nContent-Disposition: form-data; name="{file_field}"; filename="{file_name}"\r\nContent-Type: {file_content_type}\r\n\r\n'.encode("utf-8"))
+                parts.append(f'--{boundary}\r\nContent-Disposition: form-data; name="{name}"\r\n\r\n{value}\r\n'.encode())
+        parts.append(f'--{boundary}\r\nContent-Disposition: form-data; name="{file_field}"; filename="{file_name}"\r\nContent-Type: {file_content_type}\r\n\r\n'.encode())
         parts.append(file_bytes)
-        parts.append(f'\r\n--{boundary}--\r\n'.encode("utf-8"))
+        parts.append(f'\r\n--{boundary}--\r\n'.encode())
         return b"".join(parts)
 
     def _iter_sse_lines(self, response: object) -> Iterator[str]:
         # Read the SSE response line by line, yielding data payloads and stopping at [DONE].
         for raw_line in response:
             line = raw_line.decode("utf-8").rstrip("\r\n") if isinstance(raw_line, bytes) else raw_line.rstrip("\r\n")
-            if not line or line.startswith(":") or line.startswith("event:"):
+            if not line or line.startswith((":", "event:")):
                 continue
             if line.startswith("data: "):
                 payload = line[6:]
