@@ -57,6 +57,7 @@ prompt text.
 | Agentic Engineering | `agentic_engineering` | system_prompt, error_messages, file_headers, folder_readme, function_design, intent_based_commenting, feature_test_packs | [agentic_engineering/](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/agentic_engineering) |
 | Agentic Loop | `agentic_loop` | context_prompt | [agentic_loop.json](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/agentic_loop.json) |
 | Context Engineering | `context_engineering` | guideline_prompt | [context_engineering.json](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/context_engineering.json) |
+| Create Skills | `create_skills` | create_skill | [create_skills/create_skill.md](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/create_skills/create_skill.md) |
 | Continual Trace | `continual_trace` | system_prompt | [continual_trace/system_prompt.md](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/continual_trace/system_prompt.md) |
 | Evals | `evals` | llm_judge, rubric | [evals.json](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/evals.json) |
 | Expert Prompting | `expert_prompting` | expert_prompt | [expert_prompting.json](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/expert_prompting.json) |
@@ -129,6 +130,19 @@ prompts integrated into the SDK maintain the same rigorous inspectable quality a
 the built-in strategies.
 
 Link: <https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/context_engineering.json>
+
+#### Create Skills — `create_skills`
+
+An operational prompt for creating or revising one narrowly scoped, portable
+agent skill directory. It guides activation-oriented descriptions, progressive
+disclosure, setup validation, deterministic scripts, append-only evidence,
+on-demand safety hooks, stable tool and model surfaces, cache-aware context
+ordering, structured user questions, and visual plus programmatic verification.
+It requires two or three adversarial review passes after the first
+implementation and resolution of all critical and notable findings before
+completion.
+
+Link: <https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/create_skills/create_skill.md>
 
 #### Continual Trace — `continual_trace`
 
