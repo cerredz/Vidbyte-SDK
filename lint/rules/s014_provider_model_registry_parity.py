@@ -106,7 +106,17 @@ class ProviderModelRegistryParityRule(Rule):
     id = "S014"
     name = "provider-model-registry-parity"
     severity = "blocking"
-    summary = "Provider enums, defaults, endpoints, credentials, and runner maps agree."
+    summary = "This rule treats provider and model configuration as one declarative catalogue with several parallel views. It compares provider enum members, default models, API-key names, endpoint maps, qualified runner keys, and bare model runners. A finding names the exact map or member whose parity has drifted instead of waiting for a late runtime lookup failure. The rule preserves the intentional bare auto alias while requiring every other provider and model relationship to be explicit. Declarative parity keeps configuration validation and runtime dispatch driven by the same set of names."
+    impact = "Registry drift can allow configuration validation to accept a provider that dispatch cannot execute. A default model may lack an endpoint, credential mapping, or qualified runner while appearing valid until the first user request. That delayed failure is harder to diagnose because the original configuration edit and the runtime symptom may occur in different files. Incomplete parity can also route a request to the wrong provider, causing incorrect behavior or confusing authentication errors. A fallback that masks the missing key makes the accepted configuration look healthy while preserving the same latent dispatch defect."
+    repair = "Read the finding's map name, provider member, model, and reason before editing any registry literal. Update the enum, defaults, credential environment map, endpoint map, and qualified and bare runner maps together when the provider contract changes. Add aliases deliberately, preserve the documented bare auto exception, and avoid fallback branches that conceal missing declarative data. Run the focused rule and the provider configuration and runner smoke checks after confirming every parallel key has the intended value. Test both the default selection and an explicit qualified selection so parity is proven across the normal dispatch paths."
+    examples = (
+        "vidbyte/lib/registries/models.py - central provider configuration maps",
+        "vidbyte/lib/constants/runners.py - qualified and bare runner catalogue parity",
+    )
+    will_not_work = (
+        "Adding a fallback branch in a caller or disabling strict registry validation.",
+        "Updating only the default model while omitting its provider-qualified runner, endpoint, or credential entry.",
+    )
 
     def check(self, catalog: SourceCatalog) -> list[Finding]:
         # Loads required source records and reports a clear missing-file analyzer error.
@@ -118,7 +128,7 @@ class ProviderModelRegistryParityRule(Rule):
 
     def explain(self, finding: Finding) -> Diagnostic:
         # Names the exact parallel registry that drifted and the synchronized repair.
-        return Diagnostic(what_happened=f"{finding.rel_path}:{finding.line} registry item {finding.symbol} is inconsistent: {finding.extra.get('reason', 'registry drift')}.", why_blocked="Provider validation can accept a value that dispatch cannot run, or a configured default can have no endpoint/API key/runner. The user sees a late runtime failure instead of a configuration error.", how_to_fix="Update ModelProvider, DEFAULT_PROVIDER_MODELS, API_KEY_ENV_VARS, DEFAULT_ENDPOINTS, and both runner maps as one declarative change. Add aliases deliberately and preserve the documented bare auto exception.", correct_examples=("vidbyte/lib/registries/models.py - central provider configuration maps", "vidbyte/lib/constants/runners.py - qualified and bare runner catalogs"), will_not_work=("Adding a fallback branch in a caller or disabling strict validation.", "Updating only the default model without its provider-qualified runner key."), verify=self.verify_command())
+        return Diagnostic(what_happened=f"{finding.rel_path}:{finding.line} registry item {finding.symbol} is inconsistent: {finding.extra.get('reason', 'registry drift')}.", why_blocked=self.impact, how_to_fix=self.repair, correct_examples=self.examples, will_not_work=self.will_not_work, verify=self.verify_command())
 
 
 RULE = ProviderModelRegistryParityRule()

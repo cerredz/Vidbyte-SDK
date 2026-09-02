@@ -1,5 +1,14 @@
 """Context Protocol Header
 
+FILE: vidbyte/tools/builtins/reasoning/_parsing.py
+PURPOSE: Normalizes the raw model arguments shared by the ten hand-maintained reasoning strategy tools.
+ROLE IN CODEBASE: Named reasoning tools call ReasoningToolInput for required fields, text, JSON collections, and bounded probabilities.
+ARCHITECTURE NOTE: The static helper class centralizes coercion without owning ToolSpecs, context-item construction, or ContextManager placement.
+COMMON MODIFICATION PATTERNS: Add a parser only for repeated input shapes and preserve each caller's existing validation/error contract.
+KNOWN EDGE CASES: JSON strings may decode to the wrong shape, mappings are not arrays, blank values are removed, and booleans are not probabilities.
+RELATED DOCS: field-guide/vidbyte-sdk/class-bound-helpers.md and vidbyte/tools/README.md.
+TESTS: scripts/check_reasoning_trace_contracts.py and the source/package stages in scripts/run_ci.py.
+
 Description:
     Implements ReasoningToolInput — a package-private static helper class that
     normalizes and validates the raw ToolCall.arguments shared across every

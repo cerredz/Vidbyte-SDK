@@ -1,25 +1,12 @@
-"""Context Protocol Header
+"""FILE: vidbyte/tools/base.py
 
-Description:
-    Defines the abstract base class and structural protocol for all Vidbyte SDK tools.
-Purpose:
-    Provides shared call validation, model-facing description customization, and a small
-    async execution contract while supporting both class-based and protocol-based developer
-    tools. Customization is limited to descriptions; this file must not add business
-    parameters or alter a tool's execution contract.
-Architecture:
-    - BaseTool: Abstract contract requiring spec() and execute(), plus the
-      with_activity() and customize() bindings used to add controlled model-facing views.
-      customize() requires a concrete tool description and parameter-description mapping.
-    - _ToolWrapper and _unwrap_tool: Private shared wrapper identity used by activity and
-      specification customization so runtime pricing can recover the original tool.
-    - ToolLike: Structural protocol for developer-provided tools.
-Relations:
-    Called by vidbyte.tools.activity, vidbyte.tools.customization, vidbyte.tools.adapters,
-    and built-in tool modules. It calls vidbyte.tools.types for tool contracts and lazily
-    calls vidbyte.lib.dataclasses.tools for customization validation, plus
-    vidbyte.tools.activity and vidbyte.tools.customization for wrapper construction.
-    vidbyte.agents.runtime relies on the wrapper unwrapping path for priced operations.
+PURPOSE: Defines the abstract SDK tool contract, shared wrapper identity, immutable customized wrapper, and developer ToolLike protocol.
+ROLE IN CODEBASE: Builtins and adapters subclass BaseTool; activity/customization views delegate through _ToolWrapper so runtime pricing can unwrap them.
+ARCHITECTURE NOTE: Base owns wrapper lifecycle and execution delegation, while activity and customization modules own presentation transformations.
+COMMON MODIFICATION PATTERNS: Add only behavior shared by every tool and preserve spec, validation, execution, and unwrapping semantics together.
+KNOWN EDGE CASES: Wrappers may compose in either order, protocol tools need not subclass BaseTool, and customization may not add arguments.
+RELATED DOCS: docs/design/tool-spec-customization.md and vidbyte/tools/README.md.
+TESTS: tests/test_tool_core.py, tests/test_provider_tool_schema_translation.py, and scripts/run_ci.py.
 """
 
 from __future__ import annotations
@@ -27,9 +14,12 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from collections.abc import Mapping
 from types import MappingProxyType
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 from vidbyte.tools.types import ToolActivity, ToolCall, ToolResult, ToolSpec
+
+if TYPE_CHECKING:
+    from vidbyte.lib.dataclasses.tools import ToolCustomization
 
 _EMPTY_PARAMETER_DESCRIPTIONS: Mapping[str, str] = MappingProxyType({})
 
@@ -64,7 +54,6 @@ class BaseTool(ABC):
     ) -> "BaseTool":
         """Return a validated model-facing description view over this tool."""
         from vidbyte.lib.dataclasses.tools import ToolCustomization
-        from vidbyte.tools.customization import _CustomizedTool
 
         customization = ToolCustomization(
             tool_spec=self.spec(),
@@ -102,6 +91,34 @@ class _ToolWrapper(BaseTool, ABC):
     def wrapped_tool(self) -> BaseTool:
         # Return the implementation whose runtime behavior the wrapper preserves.
         raise NotImplementedError
+
+
+class _CustomizedTool(_ToolWrapper):
+    """Private wrapper that changes model-facing descriptions only."""
+
+    def __init__(self, tool: BaseTool, customization: ToolCustomization) -> None:
+        # Retains validated immutable replacement data beside the shared wrapper contract.
+        self._tool = tool
+        self._customization = customization
+
+    @property
+    def wrapped_tool(self) -> BaseTool:
+        """Return the original tool whose runtime behavior this view preserves."""
+        return self._tool
+
+    def spec(self) -> ToolSpec:
+        """Return a fresh model-facing spec with validated descriptions replaced."""
+        from vidbyte.tools.customization import _ToolSpecCustomizer
+
+        return _ToolSpecCustomizer.apply(self._tool.spec(), self._customization)
+
+    def validate_call(self, call: ToolCall) -> str | None:
+        """Delegate call validation without changing arguments or errors."""
+        return self._tool.validate_call(call)
+
+    async def execute(self, call: ToolCall) -> ToolResult:
+        """Delegate execution without changing business behavior."""
+        return await self._tool.execute(call)
 
 
 def _unwrap_tool(tool: BaseTool) -> BaseTool:

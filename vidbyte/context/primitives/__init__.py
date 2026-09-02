@@ -12,6 +12,7 @@ Architecture:
     - records: Artifact/Response/ToolCall primitives for existing context records.
     - multi_agent: Request/team/ledger/report/limits/terminal orchestration primitives.
     - checkpoints: ReflexionContextItem and TrajectoryCheckpointContextItem for context algorithms.
+    - cot_events: Deep CoT monitoring event primitives (hypothesis, decision, assumption_check, uncertainty, backtrack).
     - framing/epistemics/decisions/execution/closure: General problem-solving challenges.
     - reasoning_strategies: Deduction/induction/abduction/analogy/causal-chain/
       Bayesian-update/differential-diagnosis/Fermi-estimate/steelman/falsify
@@ -27,11 +28,21 @@ Relations:
 from __future__ import annotations
 
 from vidbyte.context.primitives.base import ContextItem
-from vidbyte.context.primitives.checkpoints import ReflexionContextItem, TrajectoryCheckpointContextItem
+from vidbyte.context.primitives.checkpoints import (
+    ReflexionContextItem,
+    TrajectoryCheckpointContextItem,
+)
 from vidbyte.context.primitives.closure import (
     CompletionGateContextItem,
     ProcessStallContextItem,
     RiskEscalationContextItem,
+)
+from vidbyte.context.primitives.cot_events import (
+    AssumptionCheckContextItem,
+    BacktrackContextItem,
+    DecisionContextItem,
+    HypothesisContextItem,
+    UncertaintyContextItem,
 )
 from vidbyte.context.primitives.decisions import (
     AlternativeChallengeContextItem,
@@ -65,11 +76,6 @@ from vidbyte.context.primitives.framing import (
     PerspectiveGapContextItem,
     ProblemFrameContextItem,
 )
-from vidbyte.context.primitives.records import (
-    ArtifactContextItem,
-    ResponseContextItem,
-    ToolCallContextItem,
-)
 from vidbyte.context.primitives.multi_agent import (
     MultiAgentContextSerializer,
     MultiAgentLedgerContextItem,
@@ -79,7 +85,10 @@ from vidbyte.context.primitives.multi_agent import (
     MultiAgentTeamContextItem,
     MultiAgentTerminalContextItem,
 )
-from vidbyte.context.primitives.reasoning import ErrorCorrectionContextItem, ProblemSpaceSearchContextItem
+from vidbyte.context.primitives.reasoning import (
+    ErrorCorrectionContextItem,
+    ProblemSpaceSearchContextItem,
+)
 from vidbyte.context.primitives.reasoning_strategies import (
     AbductionContextItem,
     AnalogyContextItem,
@@ -93,6 +102,11 @@ from vidbyte.context.primitives.reasoning_strategies import (
     SteelmanContextItem,
 )
 from vidbyte.context.primitives.reasoning_traces import ReasoningTraceContextItem
+from vidbyte.context.primitives.records import (
+    ArtifactContextItem,
+    ResponseContextItem,
+    ToolCallContextItem,
+)
 from vidbyte.context.primitives.tasks import (
     PlanContextItem,
     ProgressContextItem,
@@ -106,12 +120,15 @@ __all__ = [
     "AnalogyContextItem",
     "ArtifactContextItem",
     "AssumptionChallengeContextItem",
+    "AssumptionCheckContextItem",
+    "BacktrackContextItem",
     "BayesianUpdateContextItem",
     "BoundaryContextItem",
     "CausalChainContextItem",
     "CompletionGateContextItem",
     "ContextItem",
     "DecisionChallengeContextItem",
+    "DecisionContextItem",
     "DeductionContextItem",
     "DependencyContextItem",
     "DifferentialDiagnosisContextItem",
@@ -124,6 +141,7 @@ __all__ = [
     "FermiEstimateContextItem",
     "FileContextItem",
     "GitDiffContextItem",
+    "HypothesisContextItem",
     "InductionContextItem",
     "InterventionRiskContextItem",
     "InvariantContextItem",
@@ -138,13 +156,13 @@ __all__ = [
     "MultiAgentTerminalContextItem",
     "ObjectiveConflictContextItem",
     "ObjectiveGapContextItem",
-    "PlanContextItem",
     "PerspectiveGapContextItem",
+    "PlanContextItem",
     "ProblemFrameContextItem",
     "ProblemSpaceSearchContextItem",
-    "ReasoningTraceContextItem",
     "ProcessStallContextItem",
     "ProgressContextItem",
+    "ReasoningTraceContextItem",
     "ReflexionContextItem",
     "ResponseContextItem",
     "RiskEscalationContextItem",
@@ -154,4 +172,5 @@ __all__ = [
     "ToolCallContextItem",
     "TradeoffContextItem",
     "TrajectoryCheckpointContextItem",
+    "UncertaintyContextItem",
 ]

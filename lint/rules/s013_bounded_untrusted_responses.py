@@ -44,7 +44,17 @@ class BoundedUntrustedResponsesRule(Rule):
     id = "S013"
     name = "bounded-untrusted-responses"
     severity = "blocking"
-    summary = "Search, fetch, code-search, and MCP response bodies have byte ceilings."
+    summary = "This rule requires every untrusted ingestion boundary to declare a maximum response size. It covers search, fetch, browser, code-search, and MCP content before that content becomes an in-memory SDK result or agent context. A finding identifies a remote body that can be read without a transport-enforced byte ceiling or bounded streaming path. The rule keeps resource protection at the boundary where the remote party still controls the amount of data received. The byte budget is part of the operation contract and must apply before full buffering or downstream parsing."
+    impact = "A remote endpoint controls response size and can send much more data than the operation's normal result requires. Reading that body in full can exhaust process memory, delay an agent run, or inject an unbounded amount of untrusted text into later reasoning. Post-read truncation does not prevent the allocation or the network cost, and Content-Length cannot be trusted for every transfer mode. The missing ceiling therefore creates a denial-of-service and context-integrity risk at a high-leverage boundary. A limit applied only after decoding also leaves parsers, logs, and token budgets exposed to the oversized body."
+    repair = "Identify the untrusted response boundary and choose the maximum byte budget from the operation's typed policy or named configuration. Pass max_response_bytes to the owning HTTP transport and keep enforcement in its bounded streaming or read helper. For synchronous or MCP transports, add the equivalent bounded-read capability to the adapter before changing the caller. Run the focused rule and a response-size failure check that proves oversized chunked and ordinary responses stop before full buffering. Confirm the failure is translated into the SDK's safe error contract and that the accepted boundary still preserves complete normal responses."
+    examples = (
+        "vidbyte/lib/http/transport.py - _send_bounded enforces the response ceiling while reading",
+        "A search or fetch call that passes a configured max_response_bytes value",
+    )
+    will_not_work = (
+        "Truncating decoded text after the entire remote body has already been read.",
+        "Checking only Content-Length while allowing chunked responses to bypass the byte budget.",
+    )
 
     def check(self, catalog: SourceCatalog) -> list[Finding]:
         # Scans only paths that ingest externally controlled content into agent context.
@@ -59,7 +69,7 @@ class BoundedUntrustedResponsesRule(Rule):
 
     def explain(self, finding: Finding) -> Diagnostic:
         # Directs the boundary to streaming/bounded transport behavior.
-        return Diagnostic(what_happened=f"{finding.rel_path}:{finding.line} ingests an untrusted {finding.symbol} response without max_response_bytes.", why_blocked="A remote endpoint controls body size; buffering it whole can exhaust memory and inject unbounded content into an agent context before parsing or truncation runs.", how_to_fix="Pass a named/configured max_response_bytes ceiling to HttpTransport and keep its bounded streaming implementation. For sync/MCP transports, add an equivalent bounded-read parameter to the owning transport before calling it here.", correct_examples=("vidbyte/lib/http/transport.py - _send_bounded streams and enforces the ceiling",), will_not_work=("Truncating decoded text after the entire body has already been read.", "Checking only Content-Length; chunked responses may omit or lie about it."), verify=self.verify_command())
+        return Diagnostic(what_happened=f"{finding.rel_path}:{finding.line} ingests an untrusted {finding.symbol} response without max_response_bytes.", why_blocked=self.impact, how_to_fix=self.repair, correct_examples=self.examples, will_not_work=self.will_not_work, verify=self.verify_command())
 
 
 RULE = BoundedUntrustedResponsesRule()

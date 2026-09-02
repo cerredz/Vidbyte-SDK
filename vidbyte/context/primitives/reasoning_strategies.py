@@ -1,32 +1,38 @@
-"""FILE: vidbyte/context/primitives/reasoning_strategies.py
+"""Context Protocol Header
 
-PURPOSE:
-    Defines typed, bounded records for deduction, induction, abduction, analogy,
-    causal chains, Bayesian updates, differential diagnosis, Fermi estimates,
-    steelmanning, and falsification.
-ROLE IN CODEBASE:
-    Reasoning tools write these records, ContextManager renders them, and
-    vidbyte.context.primitives re-exports the public strategy-specific classes.
-ARCHITECTURE NOTE:
-    Each frozen slotted dataclass owns its strategy's output shape; shared helpers
-    format tuple sections and apply the managed-context size boundary.
-FUNCTION INVENTORY:
-    Ten strategy-specific ContextItem classes each render one reasoning record.
-    _render_object_bullets() formats bounded mapping-based hypothesis sections.
-COMMON MODIFICATION PATTERNS:
-    Keep strategy fields in semantic order, preserve four-sentence prefaces, and
-    update the corresponding reasoning tool when a record shape changes.
-WHAT NOT TO DO IN THIS FILE:
-    Do not execute reasoning strategies, score truth, or choose a model's next
-    action; those responsibilities belong to the built-in tools and callers.
-KNOWN EDGE CASES:
-    Mapping fields may omit optional keys, tuple sections may be empty, and
-    probability or confidence values are rendered as supplied by the caller.
-RELATED DOCS:
-    https://github.com/cerredz/Vidbyte-SDK/tree/main/vidbyte/context/primitives
-TESTS:
-    Existing reasoning-tool tests plus source compilation and package smoke gates
-    cover imports, bounded rendering, and strategy record integration.
+FILE: vidbyte/context/primitives/reasoning_strategies.py
+PURPOSE: Defines bounded context records for the ten hand-maintained named reasoning strategy tools.
+ROLE IN CODEBASE: Named reasoning tools construct these immutable records and ContextManager renders them into later model context.
+ARCHITECTURE NOTE: Primitive classes own data shape and deterministic rendering; tool modules own model input parsing and placement calls.
+COMMON MODIFICATION PATTERNS: Change a tool and its matching primitive fields/rendering together, preserving bounds and package exports.
+KNOWN EDGE CASES: Nested mappings render selectively, long text is truncated at output, and metadata remains caller-supplied.
+RELATED DOCS: vidbyte/tools/README.md and docs/design/context-window-primitives.md.
+TESTS: scripts/check_context_primitive_introductions.py, scripts/check_reasoning_trace_contracts.py, and scripts/run_ci.py.
+
+Description:
+    Defines context primitives for named scientific-reasoning strategies:
+    deduction, induction, abduction, analogy, causal-chain reasoning, Bayesian
+    updating, differential diagnosis, Fermi estimation, steelmanning, and
+    falsification.
+Purpose:
+    Gives each reasoning-strategy tool a typed, bounded ContextItem that renders
+    the strategy's characteristic output shape into the context window.
+Architecture:
+    - DeductionContextItem: Premises, named inference rule, conclusion, caveat.
+    - InductionContextItem: Observations, pattern, generalization, falsifier.
+    - AbductionContextItem: Evidence, scored competing hypotheses, best pick.
+    - AnalogyContextItem: Source/target domains, mapped relations, breakdown point.
+    - CausalChainContextItem: Cause, mechanism, effect, confounders, test.
+    - BayesianUpdateContextItem: Prior/posterior probabilities and likelihoods.
+    - DifferentialDiagnosisContextItem: Candidate set, eliminations, next check.
+    - FermiEstimateContextItem: Decomposed quantity estimate with sanity band.
+    - SteelmanContextItem: A position against its strongest opposition.
+    - FalsifyContextItem: A claim against its designed falsification test.
+Relations:
+    Written by the tools in vidbyte.tools.builtins.reasoning and re-exported
+    through vidbyte.context.primitives.
+Similar Files:
+    - `vidbyte/context/primitives/checkpoints.py`
 """
 
 from __future__ import annotations
