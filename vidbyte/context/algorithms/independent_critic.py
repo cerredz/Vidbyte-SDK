@@ -262,7 +262,7 @@ def _validate_metadata(value: Mapping[str, Any]) -> None:
 def _review_mapping(value: object) -> Mapping[str, Any]:
     # Accept provider-structured objects or JSON text, stripping a single code fence.
     if hasattr(value, "model_dump") and callable(value.model_dump):
-        value = value.model_dump()
+        value = value.model_dump(mode="json")
     if isinstance(value, Mapping):
         return value
     if not isinstance(value, str):
