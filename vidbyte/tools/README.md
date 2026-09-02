@@ -48,7 +48,56 @@ print(catalog.provider_schemas("openai"))
 - `executor.py`: local tool call execution.
 - `security/`: permission policies and sandbox contracts.
 - `mcp/`: MCP clients, transports, presets, and bridged tools.
-- `builtins/`: code search, context, context primitives, editing, memory, MCP, handoff, and utility tools.
+- `builtins/`: adversarial review scaffolds, code search, context, context primitives, editing, memory, MCP, handoff, and utility tools.
+
+## Adversarial Review Scaffolds
+
+The built-in package exposes sixteen zero-argument tools that reserve stable
+model-facing names and review-subject schemas for future adversarial-agent
+topologies. Developers may construct them and place them in an agent-local
+catalog today:
+
+```python
+from vidbyte.tools.builtins import (
+    LaunchSelfReflectionAgentTool,
+    LaunchSpecialistPanelTool,
+)
+
+tools = [
+    LaunchSelfReflectionAgentTool(),
+    LaunchSpecialistPanelTool(),
+]
+```
+
+These classes are integration scaffolds, not production-ready launchers. Every
+call fails closed with a `ToolResult.error` whose error code is
+`adversarial_agent_unavailable`; no model, task, or child agent is launched.
+They are not auto-attached to agents and are not re-exported from the root
+`vidbyte` package.
+
+| Class | Model-facing tool name |
+| --- | --- |
+| `LaunchSelfReflectionAgentTool` | `launch_self_reflection_agent` |
+| `LaunchIndependentCriticAgentTool` | `launch_independent_critic_agent` |
+| `LaunchParallelPanelTool` | `launch_parallel_panel` |
+| `LaunchSpecialistPanelTool` | `launch_specialist_panel` |
+| `LaunchCrossProviderPanelTool` | `launch_cross_provider_panel` |
+| `LaunchCritiqueReviseAgentTool` | `launch_critique_revise_agent` |
+| `LaunchCritiqueAdjudicateReviseAgentTool` | `launch_critique_adjudicate_revise_agent` |
+| `LaunchProsecutorDefenderJudgeTool` | `launch_prosecutor_defender_judge` |
+| `LaunchAdversarialDebateTool` | `launch_adversarial_debate` |
+| `LaunchDelphiReviewTool` | `launch_delphi_review` |
+| `LaunchCandidateTournamentTool` | `launch_candidate_tournament` |
+| `LaunchAdversarialSelectorTool` | `launch_adversarial_selector` |
+| `LaunchCounterexampleSearchTool` | `launch_counterexample_search` |
+| `LaunchMutationReviewTool` | `launch_mutation_review` |
+| `LaunchToolBackedVerifierTool` | `launch_tool_backed_verifier` |
+| `LaunchEvidenceVerifierTool` | `launch_evidence_verifier` |
+
+The future `AdversarialAgent` integration must add recursion guards, bounded
+nested usage budgets, child-tool filtering, and explicit child permission
+policy before any scaffold can execute. None of those controls are implied or
+implemented by the current placeholders.
 
 ## Related Layers
 

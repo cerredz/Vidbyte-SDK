@@ -6,6 +6,7 @@ Purpose:
     Provides convenient imports for safe built-in tools without auto-registering
     environment-specific instances.
 Architecture:
+    - Pending adversarial review launch tools from builtins.adversarial.
     - Code search tools from builtins.code_search.
     - Patch/edit tools from builtins.editing.
     - Context compaction tools from builtins.context.
@@ -20,6 +21,24 @@ Relations:
 
 from __future__ import annotations
 
+from vidbyte.tools.builtins.adversarial import (
+    LaunchAdversarialDebateTool,
+    LaunchAdversarialSelectorTool,
+    LaunchCandidateTournamentTool,
+    LaunchCounterexampleSearchTool,
+    LaunchCritiqueAdjudicateReviseAgentTool,
+    LaunchCritiqueReviseAgentTool,
+    LaunchCrossProviderPanelTool,
+    LaunchDelphiReviewTool,
+    LaunchEvidenceVerifierTool,
+    LaunchIndependentCriticAgentTool,
+    LaunchMutationReviewTool,
+    LaunchParallelPanelTool,
+    LaunchProsecutorDefenderJudgeTool,
+    LaunchSelfReflectionAgentTool,
+    LaunchSpecialistPanelTool,
+    LaunchToolBackedVerifierTool,
+)
 from vidbyte.tools.builtins.code_execution import CodeExecutionTool
 from vidbyte.tools.builtins.code_search import GlobTool, GrepTool, SemanticSearchTool
 from vidbyte.tools.builtins.output_schema import (
@@ -103,6 +122,23 @@ from vidbyte.tools.builtins.memory import (
 )
 
 __all__ = [
+    # Adversarial review scaffolds
+    "LaunchAdversarialDebateTool",
+    "LaunchAdversarialSelectorTool",
+    "LaunchCandidateTournamentTool",
+    "LaunchCounterexampleSearchTool",
+    "LaunchCritiqueAdjudicateReviseAgentTool",
+    "LaunchCritiqueReviseAgentTool",
+    "LaunchCrossProviderPanelTool",
+    "LaunchDelphiReviewTool",
+    "LaunchEvidenceVerifierTool",
+    "LaunchIndependentCriticAgentTool",
+    "LaunchMutationReviewTool",
+    "LaunchParallelPanelTool",
+    "LaunchProsecutorDefenderJudgeTool",
+    "LaunchSelfReflectionAgentTool",
+    "LaunchSpecialistPanelTool",
+    "LaunchToolBackedVerifierTool",
     "AppendOutputTool",
     "AttachMcpServerTool",
     "BatchForkTool",
