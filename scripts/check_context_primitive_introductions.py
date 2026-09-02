@@ -1,4 +1,13 @@
-"""Enforce the shared introduction on every concrete context primitive renderer."""
+"""FILE: scripts/check_context_primitive_introductions.py
+
+PURPOSE: Enforces the shared introduction on every concrete context primitive renderer.
+ROLE IN CODEBASE: The canonical source CI stage runs this repository contract before packaging the SDK.
+ARCHITECTURE NOTE: Static AST inspection finds concrete ContextItem renderers without importing runtime modules.
+COMMON MODIFICATION PATTERNS: Update recognized renderer/helper shapes only when the context primitive contract changes.
+KNOWN EDGE CASES: Parse failures fail closed, abstract ContextItem is excluded, and every concrete class must define its own renderer.
+RELATED DOCS: docs/design/context-window-primitives.md and field-guide/vidbyte-sdk/local-ci-verification.md.
+TESTS: Its embedded fixture checks and the source stage in scripts/run_ci.py exercise this script.
+"""
 
 from __future__ import annotations
 

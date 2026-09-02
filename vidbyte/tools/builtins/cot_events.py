@@ -61,7 +61,7 @@ convention that keeps the parser class-bound.
 
 AUTO-GENERATED FLAG: No; maintained source code.
 
-TEST FILES: No dedicated feature test file exists in the source PR. Resolver
+TESTS: No dedicated feature test file exists in the source PR. Resolver
 verification covers import/export, specification shape, parser boundaries,
 primitive rendering, and async execution smoke paths.
 
@@ -214,15 +214,19 @@ class _CotEventToolBase(BaseTool):
         # @intent stable_ledger_identity
         # Repeated statements must overwrite one ledger record so updates remain visible rather
         # than allowing stale and current versions to compete in the context window.
-        digest = hashlib.sha1(statement.strip().lower().encode("utf-8")).hexdigest()[:12]
+        digest = hashlib.sha256(statement.strip().lower().encode("utf-8")).hexdigest()[:12]
         return f"{prefix}:{digest}"
 
     async def _record(self, item: Any, call: ToolCall, metadata: dict[str, Any]) -> ToolResult:
         """Upsert one primitive and convert manager validation failures into a tool result."""
         try:
             self._manager.upsert(item)
-        except ValueError as exc:
-            return ToolResult.error(call.tool_name, str(exc))
+        except ValueError:
+            return ToolResult.error(
+                call.tool_name,
+                "The reasoning event could not be stored because its context values were invalid.",
+                metadata={"error": "invalid_reasoning_event_context"},
+            )
         return ToolResult.success(call.tool_name, item.to_context_text(), metadata=metadata)
 
 

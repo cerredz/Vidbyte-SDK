@@ -1,5 +1,14 @@
 """Context Protocol Header
 
+FILE: vidbyte/tools/builtins/reasoning/induce.py
+PURPOSE: Implements the model-callable induce reasoning tool and records its structured result in the active context manager.
+ROLE IN CODEBASE: The builtins catalog exports this hand-maintained strategy tool alongside the larger reasoning-trace catalog.
+ARCHITECTURE NOTE: This module owns its ToolSpec and context-item construction; _parsing.py owns shared input coercion and ContextManager owns placement.
+COMMON MODIFICATION PATTERNS: Keep tool and primitive fields synchronized, preserve model-facing semantics, and run focused lint plus canonical CI.
+KNOWN EDGE CASES: Model arguments may be JSON-encoded or malformed, and a context write may reject an otherwise parsed record.
+RELATED DOCS: vidbyte/tools/README.md and field-guide/vidbyte-sdk/model-facing-tool-contracts.md.
+TESTS: scripts/check_reasoning_trace_contracts.py and the source/package stages in scripts/run_ci.py.
+
 Description:
     Implements InduceTool — a model-callable builtin for recording an inductive
     generalization into the active ContextManager.
@@ -49,11 +58,11 @@ class InduceTool(BaseTool):
         return ToolSpec(
             name="induce",
             description=(
-                "Run an inductive generalization: list the specific observations, name the "
-                "pattern they share, and state the general claim projected beyond them. Use "
-                "this when reasoning from particular cases to a general rule. Inductive "
-                "conclusions are never certain by construction, so a sample-bias risk and a "
-                "concrete falsifying case are required alongside the generalization itself."
+                "Use this tool when repeated observations support a tentative general rule. It "
+                "records the observations, their shared pattern, and the claim projected beyond "
+                "the observed cases. A sample-bias risk and a falsifying case keep the "
+                "generalization explicitly uncertain and revisable. The resulting record should "
+                "make the evidentiary base, extrapolation, and limits of the inference inspectable."
             ),
             parameters=(
                 ToolParameter(
@@ -157,8 +166,12 @@ class InduceTool(BaseTool):
 
         try:
             self._manager.upsert(item)
-        except ValueError as exc:
-            return ToolResult.error(call.tool_name, str(exc))
+        except ValueError:
+            return ToolResult.error(
+                call.tool_name,
+                "The reasoning record could not be stored because its context values were invalid.",
+                metadata={"error": "invalid_reasoning_context"},
+            )
 
         return ToolResult.success(call.tool_name, item.to_context_text())
 

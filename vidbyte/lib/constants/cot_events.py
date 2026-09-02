@@ -39,7 +39,7 @@ describes the values' consumers and lifecycle.
 
 AUTO-GENERATED FLAG: No; maintained source data.
 
-TEST FILES: No dedicated test file exists in the source PR; import and value
+TESTS: No dedicated test file exists in the source PR; import and value
 smoke checks are part of resolver verification.
 
 CONCURRENCY MODEL: Immutable module-level values; no shared mutable state.

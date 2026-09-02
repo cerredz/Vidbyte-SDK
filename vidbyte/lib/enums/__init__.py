@@ -30,6 +30,14 @@ from __future__ import annotations
 from vidbyte.lib.enums.agent_runtime import AgentRuntimeStateKey, AgentRuntimeType
 from vidbyte.lib.enums.config import AgentType, DocumentType
 from vidbyte.lib.enums.context import BudgetPreset, PermissionPreset
+from vidbyte.lib.enums.failure import (
+    FailureCode,
+    FailureDisposition,
+    FailurePhase,
+    FailureSeverity,
+    FailureStatus,
+    RuleErrorMode,
+)
 from vidbyte.lib.enums.cot_events import (
     AssumptionAction,
     BasisType,
@@ -73,12 +81,14 @@ from vidbyte.lib.enums.reasoning_strategies import (
 from vidbyte.lib.enums.skills import ContextMinimalFanoutSkill, Skill
 from vidbyte.lib.enums.skills import Skills as SkillEnums
 from vidbyte.lib.enums.sources import PinPolicy
+from vidbyte.lib.enums.speed import AgentSpeedRecordingIntegrity
 from vidbyte.lib.enums.structured_output import StructuredOutputSupport
 
 __all__ = [
     "AbsenceEvidenceSignificance",
     "AgentRuntimeStateKey",
     "AgentRuntimeType",
+    "AgentSpeedRecordingIntegrity",
     "AgentType",
     "AssumptionAction",
     "BasisType",
@@ -92,6 +102,11 @@ __all__ = [
     "DefeasibleRuleApplies",
     "DocumentType",
     "EquivocationFallacy",
+    "FailureCode",
+    "FailureDisposition",
+    "FailurePhase",
+    "FailureSeverity",
+    "FailureStatus",
     "HypothesisStatus",
     "IdentityVerdict",
     "ImpactLevel",
@@ -115,6 +130,7 @@ __all__ = [
     "RegressStyle",
     "ReturnableOption",
     "Reversibility",
+    "RuleErrorMode",
     "Skill",
     "SkillEnums",
     "StrawmanCriticism",

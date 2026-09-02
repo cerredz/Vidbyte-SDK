@@ -3,44 +3,32 @@
 FILE: vidbyte/tools/customization.py
 
 PURPOSE:
-    Owns the private delegating wrapper behind BaseTool.customize(). It creates
-    immutable model-facing views that replace a tool description or existing
-    top-level parameter descriptions while leaving validation and execution on
-    the original tool. Do not add behavior-changing parameters here; semantic
-    extensions belong to a real tool or a future typed adapter contract.
+    Owns the pure spec transformer behind BaseTool.customize(). It creates
+    immutable model-facing specs that replace a tool description or existing
+    top-level parameter descriptions. Do not add behavior-changing parameters
+    here; semantic extensions belong to a real tool or typed adapter contract.
 
 ROLE IN CODEBASE:
-    Called lazily by vidbyte.tools.base.BaseTool.customize(). It calls
-    vidbyte.tools.base._ToolWrapper and the validated
-    vidbyte.lib.dataclasses.tools.ToolCustomization, ToolSpec, and ToolParameter
-    contracts plus the standard dataclass replacement machinery. Its
-    returned spec flows through vidbyte.tools.catalog.Tools, vidbyte.lib.tools
-    formatter.ToolsFormatter, and provider clients. Its execution delegation
-    flows through vidbyte.tools.executor.ToolExecutor and vidbyte.agents.runtime.
+    Called lazily by the _CustomizedTool wrapper in vidbyte.tools.base. It uses
+    the validated vidbyte.lib.dataclasses.tools.ToolCustomization, ToolSpec,
+    and ToolParameter contracts plus standard dataclass replacement machinery.
+    Returned specs flow through the tool catalog, formatter, and providers.
 
 ARCHITECTURE NOTE:
-    This is a presentation-only decorator. The wrapped BaseTool remains the
-    source of truth for call validation, execution, permissions, billing, and
-    output behavior. Both ToolSpec.parameters and explicit input_schema
-    properties are copied so prompt rendering and provider schemas cannot drift.
+    This module is deliberately independent of vidbyte.tools.base so a pure
+    presentation transform cannot enlarge the base/activity dependency cycle.
+    Both ToolSpec.parameters and explicit input_schema properties are copied so
+    prompt rendering and provider schemas cannot drift.
 
 FUNCTION INVENTORY:
-    _CustomizedTool.__init__(tool, customization) -> None
-        Stores the already-validated description replacements.
-    _CustomizedTool.spec() -> ToolSpec
-        Returns a copied model-facing spec with replacements applied.
-    _CustomizedTool.validate_call(call) -> str | None
-        Delegates call validation to the original tool.
-    _CustomizedTool.execute(call) -> ToolResult
-        Delegates execution to the original tool without changing arguments.
     _ToolSpecCustomizer.apply(spec, customization) -> ToolSpec
         Applies validated description replacements to both schema representations.
     _ToolSpecCustomizer._replace_parameters(parameters, descriptions) -> tuple[ToolParameter, ...]
         Replaces matching ToolParameter descriptions immutably.
     _ToolSpecCustomizer._replace_input_schema(schema, descriptions) -> Mapping[str, Any] | None
         Deep-copies and updates validated explicit input-schema property descriptions.
-    No validation functions live here; ToolCustomization owns all input and
-        source-schema validation before this module is constructed.
+    No validation or execution functions live here; ToolCustomization validates
+        input before the base-owned wrapper invokes this transformer.
 
 COMMON MODIFICATION PATTERNS:
     Add only model-facing presentation fields here. If a change needs a new
@@ -55,7 +43,7 @@ WHAT NOT TO DO IN THIS FILE:
     2. Do not mutate a wrapped ToolSpec or caller-owned input_schema mapping.
     3. Do not perform provider-specific formatting; that belongs to
        vidbyte/lib/tools/formatter.py.
-    4. Do not unwrap tools here; wrapper identity belongs to vidbyte/tools/base.py.
+    4. Do not import or unwrap BaseTool here; wrapper identity belongs to base.py.
 
 KNOWN EDGE CASES:
     - Tools may represent inputs through parameters, explicit input_schema, or
@@ -73,14 +61,14 @@ RELATED DOCS:
 
 AUTO-GENERATED FLAG: No. This file is maintained by hand.
 
-TEST FILES:
+TESTS:
     tests/test_tool_core.py and tests/test_provider_tool_schema_translation.py
     cover validation, delegation, prompt rendering, explicit schemas, and
     provider schema output. Coverage percentage is not tracked for this module.
 
 CONCURRENCY MODEL:
-    No shared mutable state or locks. Each wrapper freezes its own replacement
-    mapping and creates a fresh ToolSpec on every spec() call.
+    No shared mutable state or locks. Each call creates a fresh ToolSpec from
+    immutable validated replacement data.
 """
 
 from __future__ import annotations
@@ -91,34 +79,7 @@ from dataclasses import replace
 from typing import Any
 
 from vidbyte.lib.dataclasses.tools import ToolCustomization
-from vidbyte.tools.base import BaseTool, _ToolWrapper
-from vidbyte.tools.types import ToolCall, ToolParameter, ToolResult, ToolSpec
-
-
-class _CustomizedTool(_ToolWrapper):
-    """Private wrapper that changes model-facing descriptions only."""
-
-    def __init__(self, tool: BaseTool, customization: ToolCustomization) -> None:
-        # The dataclass owns validation; this wrapper only preserves the tool boundary.
-        self._tool = tool
-        self._customization = customization
-
-    @property
-    def wrapped_tool(self) -> BaseTool:
-        # Return the original tool for shared runtime identity handling.
-        return self._tool
-
-    def spec(self) -> ToolSpec:
-        # Return a fresh customized spec while preserving the wrapped contract.
-        return _ToolSpecCustomizer.apply(self._tool.spec(), self._customization)
-
-    def validate_call(self, call: ToolCall) -> str | None:
-        # Preserve the original validation contract and error wording.
-        return self._tool.validate_call(call)
-
-    async def execute(self, call: ToolCall) -> ToolResult:
-        # Execute the original tool with the original business arguments.
-        return await self._tool.execute(call)
+from vidbyte.tools.types import ToolParameter, ToolSpec
 
 
 class _ToolSpecCustomizer:

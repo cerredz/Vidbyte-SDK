@@ -1,31 +1,31 @@
 """Decision challenge context primitives for general problem solving.
 
-FILE
+FILE:
     vidbyte/context/primitives/decisions.py
-PURPOSE
+PURPOSE:
     Keep questionable decisions, competitive alternatives, and consequential
     tradeoffs visible instead of allowing them to disappear after selection.
-ROLE IN CODEBASE
+ROLE IN CODEBASE:
     Supplies descriptive ContextItem implementations that ContextManager can
     place and persist without becoming a decision engine.
-ARCHITECTURE NOTE
+ARCHITECTURE NOTE:
     Each frozen, slotted record renders its own fields in a stable order and
     delegates only bullet formatting and final truncation to shared helpers.
-FUNCTION INVENTORY
+FUNCTION INVENTORY:
     DecisionChallengeContextItem, AlternativeChallengeContextItem, and
     TradeoffContextItem render three complementary forms of decision scrutiny.
-COMMON MODIFICATION PATTERNS
+COMMON MODIFICATION PATTERNS:
     Add descriptive decision fields before the shared lifecycle tail and keep
     benefits, costs, uncertainty, and downstream effects explicitly separated.
-WHAT NOT TO DO
+WHAT NOT TO DO IN THIS FILE:
     Do not score alternatives, synthesize rejection rationales, enforce reopen
     conditions, or register these records as automatic model tools here.
-KNOWN EDGE CASES
+KNOWN EDGE CASES:
     Confidence is descriptive and unbounded; tradeoff lists need not be balanced
     or quantified; a counterexample is recorded but never executed.
-RELATED DOCS
+RELATED DOCS:
     https://github.com/cerredz/Vidbyte-SDK/blob/main/docs/design/general-problem-solving-context-primitives.md
-TESTS
+TESTS:
     The approved no-tests workflow uses package compilation and import/render
     smoke checks described in the design document.
 """
@@ -63,7 +63,12 @@ class DecisionChallengeContextItem:
 
     def to_context_text(self) -> str:
         # Renders this problem-solving record in deterministic order, bounded by max_chars.
-        lines = [f"Status: {self.status}", f"Severity: {self.severity}"]
+        lines = [
+            "This primitive carries a decision under active scrutiny rather than a final answer. The decision and rationale state the selected course, while confidence, uncertainties, and failure modes expose its support and fragility. Reopen and resolution conditions describe what would justify revisiting or closing the challenge. Use this record to preserve decision quality across later iterations.",
+            "",
+            f"Status: {self.status}",
+            f"Severity: {self.severity}",
+        ]
         if self.raised_by:
             lines.append(f"Raised by: {self.raised_by}")
         if self.owner:
@@ -106,7 +111,12 @@ class AlternativeChallengeContextItem:
 
     def to_context_text(self) -> str:
         # Renders this problem-solving record in deterministic order, bounded by max_chars.
-        lines = [f"Status: {self.status}", f"Severity: {self.severity}"]
+        lines = [
+            "This primitive carries a challenge from a competing option to an existing decision. The target and alternative name the comparison, while mechanism and competitiveness explain how the alternative could win. Rejection rationale and counterexample preserve the strongest reasons not to choose it. Use the resolution condition to know what future evidence could settle the comparison.",
+            "",
+            f"Status: {self.status}",
+            f"Severity: {self.severity}",
+        ]
         if self.raised_by:
             lines.append(f"Raised by: {self.raised_by}")
         if self.owner:
@@ -155,7 +165,12 @@ class TradeoffContextItem:
 
     def to_context_text(self) -> str:
         # Renders this problem-solving record in deterministic order, bounded by max_chars.
-        lines = [f"Status: {self.status}", f"Severity: {self.severity}"]
+        lines = [
+            "This primitive carries a consequence map for one choice. Benefits and costs describe direct effects, while affected parties and externalities show who else may be changed by the decision. Opportunity costs and second-order effects capture what is forgone or may follow later. Use this record to evaluate the choice beyond its immediate upside.",
+            "",
+            f"Status: {self.status}",
+            f"Severity: {self.severity}",
+        ]
         if self.raised_by:
             lines.append(f"Raised by: {self.raised_by}")
         if self.owner:

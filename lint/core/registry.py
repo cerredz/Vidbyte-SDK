@@ -79,6 +79,17 @@ RULE_MODULES = (
     "lint.rules.s048_blocking_sleep_in_async_function",
     "lint.rules.s049_unsafe_yaml_load",
     "lint.rules.s050_insecure_hash",
+    "lint.rules.s051_modernized_import_and_syntax_hygiene",
+    "lint.rules.s052_async_blocking_io",
+    "lint.rules.s053_defensive_python_bugbear",
+    "lint.rules.s054_bandit_security_subset",
+    "lint.rules.s055_no_shell_subprocess",
+    "lint.rules.s056_retryable_idempotent_methods",
+    "lint.rules.s057_no_model_construct_without_review",
+    "lint.rules.s058_forbid_unknown_fields_at_boundary",
+    "lint.rules.s059_explicit_serialization_mode",
+    "lint.rules.s060_typed_public_seam_mappings",
+    "lint.rules.s061_bounded_safe_path",
 )
 
 
