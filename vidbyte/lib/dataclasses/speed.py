@@ -14,7 +14,12 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from vidbyte.lib.constants.speed import AGENT_SPEED_FIRST_INDEX, AGENT_SPEED_FIRST_RETRY_INDEX, AGENT_SPEED_ZERO_COUNT, AGENT_SPEED_ZERO_SECONDS
+from vidbyte.lib.constants.speed import (
+    AGENT_SPEED_FIRST_INDEX,
+    AGENT_SPEED_FIRST_RETRY_INDEX,
+    AGENT_SPEED_ZERO_COUNT,
+    AGENT_SPEED_ZERO_SECONDS,
+)
 from vidbyte.lib.enums.speed import AgentSpeedRecordingIntegrity
 from vidbyte.lib.errors import AgentSpeedValidationError
 

@@ -115,16 +115,16 @@ from vidbyte.lib.dataclasses.middleware import (
     MiddlewareHookInvocation,
 )
 from vidbyte.lib.dataclasses.runner import RunnerHandle
+from vidbyte.lib.constants.speed import (
+    AGENT_SPEED_FIRST_INDEX,
+    AGENT_SPEED_FIRST_RETRY_INDEX,
+    AGENT_SPEED_ZERO_COUNT,
+)
 from vidbyte.lib.dataclasses.speed import (
     RecordModelCallFailureInput,
     RecordModelCallInput,
     RecordRetryWaitInput,
     RecordToolCallInput,
-)
-from vidbyte.lib.constants.speed import (
-    AGENT_SPEED_FIRST_INDEX,
-    AGENT_SPEED_FIRST_RETRY_INDEX,
-    AGENT_SPEED_ZERO_COUNT,
 )
 from vidbyte.lib.dataclasses.strategies import AgentResult
 from vidbyte.lib.enums import AgentRuntimeStateKey, ModelModality
