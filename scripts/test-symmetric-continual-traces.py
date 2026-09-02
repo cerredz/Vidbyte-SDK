@@ -1,11 +1,11 @@
 """Context Protocol Header
 
-PURPOSE: Standalone, dependency-free verification of the six symmetric continual trace schemas against the public vidbyte import surface.
-ROLE IN CODEBASE: Runnable companion to tests/test_symmetric_continual_traces.py; exercises schema shape, merge behavior, and one end-to-end agent run without pytest.
+PURPOSE: Standalone, dependency-free verification of the six symmetric continual trace schemas against the public vidbyte import surface, including the nested per-entry subschemas in vidbyte/trace/continual/prebuilt_events.py.
+ROLE IN CODEBASE: Runnable companion to tests/test_symmetric_continual_traces.py; exercises schema shape, nested item shape, merge behavior, and one end-to-end agent run without pytest.
 ARCHITECTURE NOTE: CHECKS is an ordered list of named async callables; main() runs each, prints PASS/FAIL, and exits non-zero on any failure, mirroring scripts/test-continual-trace.py's structure.
 COMMON MODIFICATION PATTERNS: Add a new (name, case_fn) tuple to CHECKS when a new symmetric schema or merge behavior needs coverage; keep each case_fn a single focused assertion.
 KNOWN EDGE CASES: Integration cases must use tests.agent_test_support.build_test_agent, not Agent(runner=...) directly, since the public Agent constructor no longer accepts a runner kwarg.
-RELATED DOCS: docs/design/symmetric-continual-trace-schemas.md and skills/vidbyte-sdk/continual-tracing.md.
+RELATED DOCS: docs/design/symmetric-continual-trace-schemas.md, field-guide/vidbyte-sdk/tracing-shape-contracts.md, skills/vidbyte-sdk/continual-tracing.md.
 TESTS: Run directly via `python scripts/test-symmetric-continual-traces.py`; mirrored by tests/test_symmetric_continual_traces.py.
 
 Description:
@@ -88,7 +88,16 @@ class EventLedgerScriptedRunner:
         if is_trace:
             if not has_messages:
                 self._trace_call += 1
-                event = {"iteration": self._trace_call, "subgoal_id": "s1", "status": "in_progress", "description": "pass-%d" % self._trace_call}
+                event = {
+                    "iteration": self._trace_call,
+                    "subgoal_id": "s1",
+                    "status": "in_progress",
+                    "previous_status": None,
+                    "description": "pass-%d" % self._trace_call,
+                    "confidence": 0.5,
+                    "triggered_by": "scripted trace pass",
+                    "blocking": True,
+                }
                 return Resp(fc("updateTrace", '{"trace": {"goal_success_events": [%s]}}' % json.dumps(event), "t1"))
             return Resp(fc("isDone", '{"final_answer": "traced"}', "t2"))
         self.main_payloads.append(prompt + str(kwargs.get("messages", "")))
@@ -120,7 +129,10 @@ async def case_flat_types_correct() -> None:
 async def case_checklist_all_array() -> None:
     assert_true(len(SymmetricChecklistTrace.fields) == 3, "expected 3 fields")
     for axis in AXES:
-        assert_true(SymmetricChecklistTrace.fields[f"{axis}_checks"].type is TraceFieldType.ARRAY, "checks should be ARRAY")
+        spec = SymmetricChecklistTrace.fields[f"{axis}_checks"]
+        assert_true(spec.type is TraceFieldType.ARRAY, "checks should be ARRAY")
+        assert_true(spec.items is not None and spec.items.type is TraceFieldType.OBJECT, f"{axis}_checks item should be a declared OBJECT shape")
+        assert_true(len(spec.items.fields) == 8, f"{axis}_checks item should declare 8 fields")
 
 
 async def case_subscore_nine_fields_all_number() -> None:
@@ -130,12 +142,16 @@ async def case_subscore_nine_fields_all_number() -> None:
 
 async def case_event_ledger_three_array_fields() -> None:
     assert_true(len(SymmetricEventLedgerTrace.fields) == 3, "expected 3 fields")
-    assert_true(all(spec.type is TraceFieldType.ARRAY for spec in SymmetricEventLedgerTrace.fields.values()), "all should be ARRAY")
+    for spec in SymmetricEventLedgerTrace.fields.values():
+        assert_true(spec.type is TraceFieldType.ARRAY, "all should be ARRAY")
+        assert_true(spec.items is not None and len(spec.items.fields) == 8, "each event item should declare 8 fields")
 
 
 async def case_timeline_three_array_fields() -> None:
     assert_true(len(SymmetricTimelineTrace.fields) == 3, "expected 3 fields")
-    assert_true(all(spec.type is TraceFieldType.ARRAY for spec in SymmetricTimelineTrace.fields.values()), "all should be ARRAY")
+    for spec in SymmetricTimelineTrace.fields.values():
+        assert_true(spec.type is TraceFieldType.ARRAY, "all should be ARRAY")
+        assert_true(spec.items is not None and len(spec.items.fields) == 8, "each snapshot item should declare 8 fields")
 
 
 async def case_evidence_nine_fields_shape() -> None:
@@ -176,16 +192,64 @@ async def case_trace_option_accepts_each_schema() -> None:
 # --- Merge behavior checks ---------------------------------------------------
 async def case_event_ledger_accumulates() -> None:
     tool = UpdateTraceTool(SymmetricEventLedgerTrace)
-    await tool.execute(call({"goal_success_events": [{"iteration": 1, "subgoal_id": "s1", "status": "pending", "description": "started"}]}))
-    await tool.execute(call({"goal_success_events": [{"iteration": 2, "subgoal_id": "s1", "status": "done", "description": "finished"}]}))
+    first = {
+        "iteration": 1,
+        "subgoal_id": "s1",
+        "status": "in_progress",
+        "previous_status": None,
+        "description": "started",
+        "confidence": 0.4,
+        "triggered_by": "initial plan",
+        "blocking": True,
+    }
+    second = {
+        "iteration": 2,
+        "subgoal_id": "s1",
+        "status": "achieved",
+        "previous_status": "in_progress",
+        "description": "finished",
+        "confidence": 0.9,
+        "triggered_by": "final verification",
+        "blocking": False,
+    }
+    await tool.execute(call({"goal_success_events": [first]}))
+    await tool.execute(call({"goal_success_events": [second]}))
     events = tool.current_trace()["goal_success_events"]
     assert_true(len(events) == 2, "events should accumulate across calls")
 
 
+async def case_event_ledger_accepts_partial_nested_item() -> None:
+    tool = UpdateTraceTool(SymmetricEventLedgerTrace)
+    result = await tool.execute(call({"goal_success_events": [{"iteration": 1, "subgoal_id": "s1", "status": "in_progress"}]}))
+    assert_true(tool.last_error is None, "a nested item omitting optional fields should not error")
+    assert_true(len(tool.current_trace()["goal_success_events"]) == 1, "partial item should still be accepted")
+    assert_true(result.metadata["trace"]["goal_success_events"][0]["subgoal_id"] == "s1", "accepted item should carry the provided fields")
+
+
 async def case_checklist_appends_distinct_entries() -> None:
     tool = UpdateTraceTool(SymmetricChecklistTrace)
-    await tool.execute(call({"path_quality_checks": [{"criterion": "no redundant calls", "met": True, "evidence": "e1", "iteration": 1}]}))
-    await tool.execute(call({"path_quality_checks": [{"criterion": "no risky actions", "met": False, "evidence": "e2", "iteration": 2}]}))
+    first = {
+        "criterion_id": "no-redundant-calls",
+        "criterion": "no redundant calls",
+        "met": True,
+        "verdict": "efficient",
+        "evidence": "e1",
+        "confidence": 0.8,
+        "blocking": False,
+        "iteration": 1,
+    }
+    second = {
+        "criterion_id": "no-risky-actions",
+        "criterion": "no risky actions",
+        "met": False,
+        "verdict": "risky",
+        "evidence": "e2",
+        "confidence": 0.6,
+        "blocking": True,
+        "iteration": 2,
+    }
+    await tool.execute(call({"path_quality_checks": [first]}))
+    await tool.execute(call({"path_quality_checks": [second]}))
     checks = tool.current_trace()["path_quality_checks"]
     assert_true(len(checks) == 2, "checks should accumulate")
 
@@ -267,6 +331,7 @@ CHECKS = [
     ("no_duplicate_field_names", case_no_duplicate_field_names),
     ("trace_option_accepts_each_schema", case_trace_option_accepts_each_schema),
     ("event_ledger_accumulates", case_event_ledger_accumulates),
+    ("event_ledger_accepts_partial_nested_item", case_event_ledger_accepts_partial_nested_item),
     ("checklist_appends_distinct_entries", case_checklist_appends_distinct_entries),
     ("flat_status_replaces", case_flat_status_replaces),
     ("flat_evidence_appends_and_dedupes", case_flat_evidence_appends_and_dedupes),

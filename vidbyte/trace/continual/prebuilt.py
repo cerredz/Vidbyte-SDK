@@ -1,35 +1,35 @@
-"""Context Protocol Header
+"""FILE: vidbyte/trace/continual/prebuilt.py
 
-Description:
-    Defines the default action-oriented continual trace schema plus six symmetric
-    three-axis trace schemas.
-Purpose:
-    Gives developers ready-made typed schemas for summarizing an agent's goal,
-    actions, mistakes, and current status during execution, and — separately —
-    schemas that keep goal success, path quality, and answer correctness as three
-    equally-decomposed, never-blended axes.
-Architecture:
-    Pydantic models declaring typed, described fields, converted to module-level
-    TraceSchema constants via TraceSchema.from_model. Every symmetric schema below
-    groups its fields into exactly three axis-prefixed groups (goal_success_*,
-    path_quality_*, answer_correctness_*) with identical field count and shape per
-    group within that schema. Every field meant to accumulate history across
-    updates is declared as a top-level ARRAY field rather than nested inside an
-    OBJECT field, because UpdateTraceTool's object merge is a one-level shallow
-    dict.update() (vidbyte/tools/continual_trace.py:154-164) — a list nested inside
-    an OBJECT field would be silently overwritten, not appended, on every update
-    that touches that field.
-Relations:
-    Re-exported by vidbyte.trace.continual and vidbyte.trace.
+PURPOSE: Defines the default action-oriented continual trace schema (ActionTrace) plus six symmetric three-axis trace schemas that keep goal success, path quality, and answer correctness as three equally-decomposed, never-blended axes, varying only the group-shape used to express that separation.
+ROLE IN CODEBASE: Every schema here is a Pydantic model converted to a module-level TraceSchema constant via TraceSchema.from_model, re-exported by vidbyte.trace.continual, vidbyte.trace, and vidbyte.__init__ in that order. SymmetricChecklistTrace, SymmetricEventLedgerTrace, and SymmetricTimelineTrace use TraceField's nested fields/items capability (vidbyte/lib/dataclasses/trace.py) by annotating a list field with `list[SubModel]` instead of `list[dict[str, Any]]` — the nine smaller per-check/per-event/per-snapshot submodels those three schemas need live in the sibling vidbyte/trace/continual/prebuilt_events.py rather than inline here, matching the split documented at field-guide/vidbyte-sdk/tracing-shape-contracts.md. Closed-vocabulary fields (status/verdict) reuse the shared GoalSuccessVerdict/PathQualityVerdict/AnswerCorrectnessVerdict enums from vidbyte/lib/enums/continual_trace.py rather than declaring a schema-local vocabulary.
+ARCHITECTURE NOTE: Every symmetric schema groups its fields into exactly three axis-prefixed groups (goal_success_*, path_quality_*, answer_correctness_*) with identical field count and shape per group within that schema. Every field meant to accumulate history across updates is declared as a top-level ARRAY field rather than nested inside an OBJECT field, because UpdateTraceTool's object merge is a one-level shallow dict.update() (vidbyte/tools/continual_trace.py) — a list nested inside an OBJECT field would be silently overwritten, not appended, on every update that touches that field; this holds regardless of whether that OBJECT field's own shape is opaque or, as with the nested submodels here, fully typed. SymmetricFlatTrace, SymmetricSubScoreTrace, and SymmetricEvidenceTrace have no list-of-record fields and so need no helper submodel — only their closed-vocabulary status/verdict fields were upgraded from plain `str` to the shared verdict enums.
+COMMON MODIFICATION PATTERNS: Add a new prebuilt schema as a Pydantic model plus a TraceSchema.from_model(...) constant, then export both from vidbyte/trace/continual/__init__.py, vidbyte/trace/__init__.py, and vidbyte/__init__.py in that order, matching ActionTrace's existing position in all three files. Any helper submodel a new schema's list fields need belongs in vidbyte/trace/continual/prebuilt_events.py, imported here by name — do not define a new helper class inline in this file. Add a new closed vocabulary to vidbyte/lib/enums/continual_trace.py rather than a schema-local Literal or hardcoded string list.
+KNOWN EDGE CASES: A `str, Enum` field (every status/verdict field below) type-maps to TraceFieldType.STRING with no special-casing (vidbyte/lib/dataclasses/trace.py's `_annotation_to_type` checks `issubclass(target, str)` before Mapping), so the model-facing JSON Schema does not itself enforce the closed set — the field's own description is what communicates the vocabulary to the trace agent.
+RELATED DOCS: docs/design/symmetric-continual-trace-schemas.md, field-guide/vidbyte-sdk/tracing-shape-contracts.md, field-guide/vidbyte-sdk/model-facing-tool-contracts.md
+TESTS: tests/test_symmetric_continual_traces.py, scripts/test-symmetric-continual-traces.py
 """
 
 from __future__ import annotations
 
-from typing import Any
-
 from pydantic import BaseModel, Field
 
 from vidbyte.lib.dataclasses.trace import TraceSchema
+from vidbyte.lib.enums.continual_trace import (
+    AnswerCorrectnessVerdict,
+    GoalSuccessVerdict,
+    PathQualityVerdict,
+)
+from vidbyte.trace.continual.prebuilt_events import (
+    AnswerCorrectnessCheckEntry,
+    AnswerCorrectnessEvent,
+    AnswerCorrectnessSnapshot,
+    GoalSuccessCheckEntry,
+    GoalSuccessEvent,
+    GoalSuccessSnapshot,
+    PathQualityCheckEntry,
+    PathQualityEvent,
+    PathQualitySnapshot,
+)
 
 
 class ActionTraceModel(BaseModel):
@@ -85,14 +85,14 @@ ActionTrace = TraceSchema.from_model(
 class SymmetricFlatTraceModel(BaseModel):
     """Three axes — goal success, path quality, answer correctness — each given the identical four-field shape: status, confidence, evidence, rationale. No field can silently absorb another axis's signal."""
 
-    goal_success_status: str = Field(
+    goal_success_status: GoalSuccessVerdict = Field(
         description=(
-            "The current read on whether the agent's output satisfies the user's stated goal — "
-            "one of 'achieved', 'in_progress', 'failed', or 'partial'. Scored purely on goal "
-            "completion, independent of path_quality_status and answer_correctness_status: a "
-            "messy path can still reach the goal, and a clean path can still fail to. This is a "
-            "scalar field, so each update replaces the previous value outright — always write the "
-            "full current status, not a delta."
+            "The current read on whether the agent's output satisfies the user's stated goal, drawn "
+            "from the shared GoalSuccessVerdict vocabulary. Scored purely on goal completion, "
+            "independent of path_quality_status and answer_correctness_status: a messy path can still "
+            "reach the goal, and a clean path can still fail to. This is a scalar field, so each "
+            "update replaces the previous value outright — always write the full current status, not "
+            "a delta."
         ),
     )
     goal_success_confidence: float = Field(
@@ -123,13 +123,13 @@ class SymmetricFlatTraceModel(BaseModel):
         ),
     )
 
-    path_quality_status: str = Field(
+    path_quality_status: PathQualityVerdict = Field(
         description=(
-            "The current read on whether the actions taken so far have been efficient and safe — "
-            "one of 'efficient', 'inefficient', 'risky', or 'blocked'. Scored purely on the path: "
-            "it does not move just because goal_success_status changed. Replaced in full on every "
-            "update. Use 'risky' when at least one action carried meaningful risk even if none has "
-            "caused harm yet, and 'blocked' when the agent is currently unable to proceed."
+            "The current read on whether the actions taken so far have been efficient and safe, drawn "
+            "from the shared PathQualityVerdict vocabulary. Scored purely on the path: it does not "
+            "move just because goal_success_status changed. Replaced in full on every update. Use "
+            "'risky' when at least one action carried meaningful risk even if none has caused harm "
+            "yet, and 'blocked' when the agent is currently unable to proceed."
         ),
     )
     path_quality_confidence: float = Field(
@@ -159,14 +159,14 @@ class SymmetricFlatTraceModel(BaseModel):
         ),
     )
 
-    answer_correctness_status: str = Field(
+    answer_correctness_status: AnswerCorrectnessVerdict = Field(
         description=(
             "The current read on whether the specific factual claims in the agent's output are "
-            "verifiably true — one of 'verified', 'unverified', 'contradicted', or 'partial'. "
-            "Scored purely on claim correctness against available evidence; it does not move just "
-            "because the goal was reached or the path was clean. Replaced in full on every update. "
-            "Use 'contradicted' as soon as any claim conflicts with a source or another claim, "
-            "even if other claims in the same output are fine."
+            "verifiably true, drawn from the shared AnswerCorrectnessVerdict vocabulary. Scored purely "
+            "on claim correctness against available evidence; it does not move just because the goal "
+            "was reached or the path was clean. Replaced in full on every update. Use 'contradicted' "
+            "as soon as any claim conflicts with a source or another claim, even if other claims in "
+            "the same output are fine."
         ),
     )
     answer_correctness_confidence: float = Field(
@@ -204,36 +204,38 @@ SymmetricFlatTrace = TraceSchema.from_model(
 class SymmetricChecklistTraceModel(BaseModel):
     """Each axis is its own append-only checklist of independently-evaluated criteria, so a single axis can gain many entries over a run without any of them being averaged into one pass/fail per axis, let alone across axes."""
 
-    goal_success_checks: list[dict[str, Any]] = Field(
+    goal_success_checks: list[GoalSuccessCheckEntry] = Field(
         default_factory=list,
         description=(
             "One entry per criterion evaluated against the goal, such as 'matches explicit user "
-            "intent' or 'satisfies stated constraints'. Shape per entry: {criterion: string, met: "
-            "bool, evidence: string, iteration: int}. Scored purely on criteria the goal itself "
-            "implies — never let a path_quality or answer_correctness finding change an entry "
-            "here. Append a new entry each time a criterion is newly evaluated or re-evaluated; "
-            "do not edit a prior entry, since a criterion whose answer changes gets a new entry "
-            "with the current iteration."
+            "intent' or 'satisfies stated constraints' — see GoalSuccessCheckEntry "
+            "(vidbyte/trace/continual/prebuilt_events.py) for the full per-entry shape. Scored purely "
+            "on criteria the goal itself implies — never let a path_quality or answer_correctness "
+            "finding change an entry here. Append a new entry each time a criterion is newly "
+            "evaluated or re-evaluated; do not edit a prior entry, since a criterion whose answer "
+            "changes gets a new entry with the current iteration and the same criterion_id."
         ),
     )
-    path_quality_checks: list[dict[str, Any]] = Field(
+    path_quality_checks: list[PathQualityCheckEntry] = Field(
         default_factory=list,
         description=(
             "One entry per criterion evaluated against the actions taken, such as 'no redundant "
-            "tool calls' or 'followed the stated plan'. Shape per entry: {criterion: string, met: "
-            "bool, evidence: string, iteration: int}. Scored purely on the path — a path criterion "
-            "should never fail just because the goal ultimately wasn't reached. Append a new entry "
-            "per (re-)evaluation; never edit an existing one in place."
+            "tool calls' or 'followed the stated plan' — see PathQualityCheckEntry "
+            "(vidbyte/trace/continual/prebuilt_events.py) for the full per-entry shape. Scored purely "
+            "on the path — a path criterion should never fail just because the goal ultimately "
+            "wasn't reached. Append a new entry per (re-)evaluation; never edit an existing one in "
+            "place."
         ),
     )
-    answer_correctness_checks: list[dict[str, Any]] = Field(
+    answer_correctness_checks: list[AnswerCorrectnessCheckEntry] = Field(
         default_factory=list,
         description=(
             "One entry per criterion evaluated against the answer's claims, such as 'claims are "
-            "sourced' or 'no contradictions'. Shape per entry: {criterion: string, met: bool, "
-            "evidence: string, iteration: int}. Scored purely on claim correctness — a criterion "
-            "here should never be marked met just because the goal was reached through a clean "
-            "path. Append a new entry per (re-)evaluation; never edit an existing one in place."
+            "sourced' or 'no contradictions' — see AnswerCorrectnessCheckEntry "
+            "(vidbyte/trace/continual/prebuilt_events.py) for the full per-entry shape. Scored purely "
+            "on claim correctness — a criterion here should never be marked met just because the "
+            "goal was reached through a clean path. Append a new entry per (re-)evaluation; never "
+            "edit an existing one in place."
         ),
     )
 
@@ -348,32 +350,33 @@ SymmetricSubScoreTrace = TraceSchema.from_model(
 class SymmetricEventLedgerTraceModel(BaseModel):
     """Each axis gets its own append-only event log, all three the same shape, so history accumulates symmetrically across all three instead of one axis being logged in detail while the others are only scored."""
 
-    goal_success_events: list[dict[str, Any]] = Field(
+    goal_success_events: list[GoalSuccessEvent] = Field(
         default_factory=list,
         description=(
-            "One entry per meaningful change in goal status. Shape per entry: {iteration: int, "
-            "subgoal_id: string, status: string, description: string}. Append a new event "
-            "whenever a subgoal's status changes; do not resend an existing subgoal_id to update "
-            "it in place — the latest event for a given subgoal_id is what readers should treat "
-            "as current."
+            "One entry per meaningful change in a subgoal's status — see GoalSuccessEvent "
+            "(vidbyte/trace/continual/prebuilt_events.py) for the full per-entry shape. Append a new "
+            "event whenever a subgoal's status changes; do not resend an existing subgoal_id to "
+            "update it in place — the event with the highest iteration for a given subgoal_id is "
+            "what readers should treat as current."
         ),
     )
-    path_quality_events: list[dict[str, Any]] = Field(
+    path_quality_events: list[PathQualityEvent] = Field(
         default_factory=list,
         description=(
-            "One entry per meaningful action taken. Shape per entry: {iteration: int, step_id: "
-            "string, action: string, risk_flag: string}. Append a new event per action; a retried "
-            "action gets a new step_id rather than mutating a prior entry."
+            "One entry per meaningful action taken — see PathQualityEvent "
+            "(vidbyte/trace/continual/prebuilt_events.py) for the full per-entry shape. Append a new "
+            "event per action; a retried action gets a new step_id rather than mutating a prior "
+            "entry."
         ),
     )
-    answer_correctness_events: list[dict[str, Any]] = Field(
+    answer_correctness_events: list[AnswerCorrectnessEvent] = Field(
         default_factory=list,
         description=(
-            "One entry per claim checked. Shape per entry: {iteration: int, claim_id: string, "
-            "claim_text: string, verified: bool}. Append a new event each time a claim is "
-            "(re-)checked; a claim re-verified later produces a new event with the same claim_id "
-            "rather than replacing the earlier one — readers should fold the log and take the "
-            "latest verified value per claim_id."
+            "One entry per claim checked — see AnswerCorrectnessEvent "
+            "(vidbyte/trace/continual/prebuilt_events.py) for the full per-entry shape. Append a new "
+            "event each time a claim is (re-)checked; a claim re-verified later produces a new event "
+            "with the same claim_id rather than replacing the earlier one — readers should fold the "
+            "log and take the highest-iteration event's verified value per claim_id."
         ),
     )
 
@@ -388,38 +391,39 @@ SymmetricEventLedgerTrace = TraceSchema.from_model(
 class SymmetricTimelineTraceModel(BaseModel):
     """Each axis gets its own time series — one snapshot appended per trace-agent pass — so the trend of that axis over the run, not just its final value, is preserved and stays separate from the other two axes' trends."""
 
-    goal_success_timeline: list[dict[str, Any]] = Field(
+    goal_success_timeline: list[GoalSuccessSnapshot] = Field(
         default_factory=list,
         description=(
             "One snapshot of goal status appended per trace-agent pass, building a trend line "
-            "instead of only the latest value. Shape per entry: {iteration: int, status: string, "
-            "confidence: float, note: string}. Append exactly one new entry per update rather "
-            "than editing a prior one, so the full sequence of goal-status readings across the "
-            "run is preserved and never overwritten. A reversal — status moving backward from a "
-            "later iteration to an earlier one, such as 'achieved' regressing to 'in_progress' — "
-            "should be visible in the sequence, not smoothed away."
+            "instead of only the latest value — see GoalSuccessSnapshot "
+            "(vidbyte/trace/continual/prebuilt_events.py) for the full per-snapshot shape. Append "
+            "exactly one new entry per update rather than editing a prior one, so the full sequence "
+            "of goal-status readings across the run is preserved and never overwritten. A reversal — "
+            "status moving backward from a later iteration to an earlier one — should be visible in "
+            "the sequence, not smoothed away."
         ),
     )
-    path_quality_timeline: list[dict[str, Any]] = Field(
+    path_quality_timeline: list[PathQualitySnapshot] = Field(
         default_factory=list,
         description=(
             "One snapshot of path quality appended per trace-agent pass, building a trend line of "
-            "efficiency and risk over the run rather than only a final value. Shape per entry: "
-            "{iteration: int, efficiency: float, risky_action_count: int, note: string}. Append "
-            "exactly one new entry per update; risky_action_count should be the cumulative count "
-            "up to that iteration, not a per-pass delta, so a single entry is enough to read the "
-            "running total at that point in the run."
+            "efficiency and risk over the run rather than only a final value — see "
+            "PathQualitySnapshot (vidbyte/trace/continual/prebuilt_events.py) for the full "
+            "per-snapshot shape. Append exactly one new entry per update; risky_action_count should "
+            "be the cumulative count up to that iteration, not a per-pass delta, so a single entry "
+            "is enough to read the running total at that point in the run."
         ),
     )
-    answer_correctness_timeline: list[dict[str, Any]] = Field(
+    answer_correctness_timeline: list[AnswerCorrectnessSnapshot] = Field(
         default_factory=list,
         description=(
-            "One snapshot of claim correctness appended per trace-agent pass, building a trend "
-            "line of verification progress over the run rather than only a final tally. Shape per "
-            "entry: {iteration: int, verified_claim_count: int, contradiction_count: int, note: "
-            "string}. Append exactly one new entry per update; both counts should be cumulative "
-            "totals as of that iteration. A contradiction_count that rises partway through the "
-            "run and never falls back is a meaningful signal this timeline is meant to preserve."
+            "One snapshot of claim correctness appended per trace-agent pass, building a trend line "
+            "of verification progress over the run rather than only a final tally — see "
+            "AnswerCorrectnessSnapshot (vidbyte/trace/continual/prebuilt_events.py) for the full "
+            "per-snapshot shape. Append exactly one new entry per update; the counts should be "
+            "cumulative totals as of that iteration. A contradiction_count that rises partway "
+            "through the run and never falls back is a meaningful signal this timeline is meant to "
+            "preserve."
         ),
     )
 
@@ -455,14 +459,14 @@ class SymmetricEvidenceTraceModel(BaseModel):
             "each side. goal_success_verdict is where the two get weighed into one current read."
         ),
     )
-    goal_success_verdict: str = Field(
+    goal_success_verdict: GoalSuccessVerdict = Field(
         description=(
-            "'achieved'|'in_progress'|'failed'|'partial'. The current weighing of "
-            "goal_success_supporting against goal_success_contradicting into one read on goal "
-            "completion. Scored only on whether the goal was reached, independent of "
-            "path_quality_verdict and answer_correctness_verdict — a 'failed' goal can still have "
-            "an 'efficient' path_quality_verdict. Replaced in full each pass rather than appended, "
-            "since only the latest weighing matters."
+            "The current weighing of goal_success_supporting against goal_success_contradicting "
+            "into one read on goal completion, drawn from the shared GoalSuccessVerdict vocabulary. "
+            "Scored only on whether the goal was reached, independent of path_quality_verdict and "
+            "answer_correctness_verdict — a 'failed' goal can still have an 'efficient' "
+            "path_quality_verdict. Replaced in full each pass rather than appended, since only the "
+            "latest weighing matters."
         ),
     )
 
@@ -486,11 +490,11 @@ class SymmetricEvidenceTraceModel(BaseModel):
             "two get weighed into one current read."
         ),
     )
-    path_quality_verdict: str = Field(
+    path_quality_verdict: PathQualityVerdict = Field(
         description=(
-            "'efficient'|'inefficient'|'risky'|'blocked'. The current weighing of "
-            "path_quality_supporting against path_quality_contradicting into one read on the path "
-            "taken. Scored only on the path itself, independent of goal_success_verdict and "
+            "The current weighing of path_quality_supporting against path_quality_contradicting "
+            "into one read on the path taken, drawn from the shared PathQualityVerdict vocabulary. "
+            "Scored only on the path itself, independent of goal_success_verdict and "
             "answer_correctness_verdict — an 'efficient' path can still accompany a 'contradicted' "
             "answer. Replaced in full each pass rather than appended."
         ),
@@ -516,13 +520,13 @@ class SymmetricEvidenceTraceModel(BaseModel):
             "where the two get weighed into one current read."
         ),
     )
-    answer_correctness_verdict: str = Field(
+    answer_correctness_verdict: AnswerCorrectnessVerdict = Field(
         description=(
-            "'verified'|'unverified'|'contradicted'|'partial'. The current weighing of "
-            "answer_correctness_supporting against answer_correctness_contradicting into one read "
-            "on claim correctness. Scored only on the claims themselves, independent of "
-            "goal_success_verdict and path_quality_verdict — a 'verified' answer can still follow "
-            "a 'risky' path. Replaced in full each pass rather than appended."
+            "The current weighing of answer_correctness_supporting against "
+            "answer_correctness_contradicting into one read on claim correctness, drawn from the "
+            "shared AnswerCorrectnessVerdict vocabulary. Scored only on the claims themselves, "
+            "independent of goal_success_verdict and path_quality_verdict — a 'verified' answer can "
+            "still follow a 'risky' path. Replaced in full each pass rather than appended."
         ),
     )
 

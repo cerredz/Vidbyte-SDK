@@ -3,7 +3,7 @@
 **Status:** Draft
 **Author:** Claude
 **Created:** 2026-08-31
-**Last Updated:** 2026-08-31
+**Last Updated:** 2026-09-02 (see Section 15 for the subschema-based revision)
 
 ---
 
@@ -251,12 +251,18 @@ N/A — no HTTP/RPC endpoints exist in this SDK layer. The only "API" surface is
 
 | Action | File Path | Reason |
 |--------|-----------|--------|
-| MODIFY | `vidbyte/trace/continual/prebuilt.py` | Add six new `BaseModel`/`TraceSchema` pairs |
+| MODIFY | `vidbyte/trace/continual/prebuilt.py` | Add six new `BaseModel`/`TraceSchema` pairs; three of them use `list[SubModel]` subschema fields (Section 15) |
+| CREATE | `vidbyte/trace/continual/prebuilt_events.py` | Nine helper `BaseModel` subschemas backing the three list-of-record schemas (Section 15) |
 | MODIFY | `vidbyte/trace/continual/__init__.py` | Export the six new pairs |
 | MODIFY | `vidbyte/trace/__init__.py` | Export the six new `TraceSchema` constants |
 | MODIFY | `vidbyte/__init__.py` | Export the six new `TraceSchema` constants at top level |
-| CREATE | `tests/test_symmetric_continual_traces.py` | `unittest` coverage per Section 10 |
-| CREATE | `scripts/test-symmetric-continual-traces.py` | Standalone verification script per Phase 5 |
+| CREATE | `vidbyte/lib/constants/trace.py` | `MAX_TRACE_FIELD_NESTING_DEPTH`; nested-shape infra ported from PR #398 (Section 15) |
+| MODIFY | `vidbyte/lib/dataclasses/trace.py` | `TraceField.fields`/`.items` + recursive `TraceSchema.from_model`; ported from PR #398 (Section 15) |
+| MODIFY | `vidbyte/tools/continual_trace.py` | Recursive JSON-Schema rendering + shape validation; ported from PR #398 (Section 15) |
+| CREATE | `vidbyte/lib/enums/continual_trace.py` | Shared closed-vocabulary enums (`GoalSuccessVerdict` etc.), each 8+ members; ported from PR #398 (Section 15) |
+| MODIFY | `docs/design/symmetric-continual-trace-schemas.md` | This file — Section 15 records the subschema-based revision |
+| MODIFY | `tests/test_symmetric_continual_traces.py` | `unittest` coverage per Section 10, extended with `NestedItemShapeTests` |
+| MODIFY | `scripts/test-symmetric-continual-traces.py` | Standalone verification script per Phase 5, extended with nested-item and partial-item cases |
 
 ---
 
@@ -325,3 +331,20 @@ N/A — no new dependencies; uses only `pydantic` (already a core dependency, se
 ### Alternative 3: Upsert-by-id semantics for event/checklist arrays
 - What: give ledger entries a stable id and have the trace agent "update" an existing entry by id instead of always appending a new one.
 - Why rejected: `UpdateTraceTool._append_unique` has no upsert-by-key behavior and changing it is explicitly out of scope (Non-Goals) — it's shared runtime code used by `ActionTrace` and any other schema, not something to special-case for six new schemas. The event-log convention (append a new entry per change, tagged with `iteration`) works within the existing merge contract instead of requiring a change to it.
+
+---
+
+## 15. Revision: Subschema-Based Redesign (PR Comment Resolution)
+
+**Date:** 2026-09-02
+**Trigger:** Review comment on PR #397 (`vidbyte/trace/continual/prebuilt.py:238`): "should not have shape like this in description, should define like subschemas and then use the subschemas in the main trace, see pr #398 and look at comments on that pr as well and apply those comments and this comment to this pr."
+
+The original submission described the `list[dict[str, Any]]` shape of `SymmetricChecklistTrace`, `SymmetricEventLedgerTrace`, and `SymmetricTimelineTrace` entries in prose ("Shape per entry: {criterion: string, met: bool, evidence: string, iteration: int}") because, at the time this doc was first written, `TraceField`/`TraceSchema.from_model` had no way to declare a nested shape — only opaque `OBJECT`/`ARRAY` types existed. PR #398 (`feat/nested-continual-trace-shapes`) added that capability afterward: `TraceField.fields`/`.items` let an `OBJECT`/`ARRAY` field declare real typed subfields, and `TraceSchema.from_model` recurses into a nested `BaseModel`/`list[BaseModel]` annotation to build it automatically, with `UpdateTraceTool` rendering and validating the nested shape recursively (its merge policy stays exactly one level deep regardless of nesting — see Alternative 1 above, which still holds).
+
+Resolving the PR #397 comment required three changes, all applied directly to this PR rather than by depending on PR #398 merging first (PR #398 was still unmerged; the nested-shape infrastructure — `vidbyte/lib/constants/trace.py`, the `TraceField.fields`/`.items` additions to `vidbyte/lib/dataclasses/trace.py`, and the recursive JSON-Schema/validation additions to `vidbyte/tools/continual_trace.py` — was ported byte-for-byte from PR #398's implementation so this PR stays self-contained and mergeable independently):
+
+1. **Real subschemas instead of prose shape.** `goal_success_checks`/`path_quality_checks`/`answer_correctness_checks` (`SymmetricChecklistTrace`), the three `*_events` fields (`SymmetricEventLedgerTrace`), and the three `*_timeline` fields (`SymmetricTimelineTrace`) now annotate `list[SubModel]` instead of `list[dict[str, Any]]`, where each `SubModel` is a `pydantic.BaseModel` in the new sibling file `vidbyte/trace/continual/prebuilt_events.py` — mirroring the `prebuilt.py`/`prebuilt_events.py` split PR #398's own review comments established (field-guide/vidbyte-sdk/tracing-shape-contracts.md, "Helper submodels ... live in a sibling `prebuilt_events.py`"). `SymmetricFlatTrace`, `SymmetricSubScoreTrace`, and `SymmetricEvidenceTrace` needed no such change — none of their fields are `list[dict]`-shaped.
+2. **Applying PR #398's own review comments (8+ fields, deeper descriptions, enum reuse).** Each of the nine new helper submodels (`GoalSuccessCheckEntry`/`PathQualityCheckEntry`/`AnswerCorrectnessCheckEntry`, `GoalSuccessEvent`/`PathQualityEvent`/`AnswerCorrectnessEvent`, `GoalSuccessSnapshot`/`PathQualitySnapshot`/`AnswerCorrectnessSnapshot`) grew from the original 4-key prose shape to 8 typed fields with 3-5 sentence descriptions, matching the "6-9 meaningful fields... 4-5 sentence description" bar in field-guide/vidbyte-sdk/model-facing-tool-contracts.md and the field-count bar PR #398's own review comments set (e.g. "not big enough trace, only 3, should be bigger, 8+"). Every closed-vocabulary field (status/verdict) reuses `GoalSuccessVerdict`/`PathQualityVerdict`/`AnswerCorrectnessVerdict`/`ErrorSeverity`/`JudgmentStability`/the `*ErrorType` enums from `vidbyte/lib/enums/continual_trace.py` (ported from PR #398, each already at 8+ non-overlapping members) rather than declaring a new schema-local vocabulary — including on `SymmetricFlatTrace`'s and `SymmetricEvidenceTrace`'s status/verdict fields, which moved from a plain `str` with a hardcoded 4-value list in the description to the same shared `GoalSuccessVerdict`/`PathQualityVerdict`/`AnswerCorrectnessVerdict` enums.
+3. **Everything else in this doc is unchanged.** Section counts, `TraceSchema` names, `TraceOption.continual(...)` usage, and the axis-separation invariant (Section 5's comparison table) all still hold exactly as originally designed — only the field-level shape of three schemas' list entries and the type of six status/verdict fields changed.
+
+One new known edge case this revision introduces: `_annotation_to_type` maps `str, Enum` to `TraceFieldType.STRING` with no special-casing (confirmed against `vidbyte/lib/dataclasses/trace.py`), so the model-facing JSON Schema does not itself enforce a status/verdict field's closed set — only the field's own description does. This matches PR #398's own established pattern (its helper submodels' enum-typed fields do not enumerate every member in prose either) and is called out in `vidbyte/trace/continual/prebuilt.py`'s file header rather than worked around here.
