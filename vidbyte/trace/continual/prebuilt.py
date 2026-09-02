@@ -1,12 +1,12 @@
 """FILE: vidbyte/trace/continual/prebuilt.py
 
-PURPOSE: Defines ready-made continual trace schemas developers can pass directly to TraceOption.continual, covering a general action log (ActionTrace) and five schemas scoring pure agent task performance across three separately-tracked axes: goal success, path quality, and answer correctness.
+PURPOSE: Defines ready-made continual trace schemas developers can pass directly to TraceOption.continual, covering a general action log (ActionTrace), five schemas scoring pure agent task performance (HierarchicalTaskTreeTrace, CalibrationTrace, ErrorTaxonomyTrace, SelfConsistencyEnsembleTrace, CounterfactualAlternativesTrace) and six symmetric three-axis schemas that keep goal success, path quality, and answer correctness as three equally-decomposed, never-blended axes (SymmetricFlatTrace, SymmetricChecklistTrace, SymmetricSubScoreTrace, SymmetricEventLedgerTrace, SymmetricTimelineTrace, SymmetricEvidenceTrace).
 ROLE IN CODEBASE: Every schema here is a Pydantic model converted to a module-level TraceSchema constant via TraceSchema.from_model, re-exported by vidbyte.trace.continual, vidbyte.trace, and vidbyte.__init__ in that order. The many smaller per-event/per-prediction submodels each schema's list and nested-object fields are shaped by live in vidbyte/trace/continual/prebuilt_events.py and are imported from there rather than defined here.
-ARCHITECTURE NOTE: The five performance schemas use TraceField's nested fields/items capability by annotating a field with a submodel (or list[submodel]) instead of dict[str, Any] — each submodel field still needs its own Field(description=...), recursively, the same requirement TraceSchema.from_model already enforces at the top level. No schema here ever combines the three axes into one number; each stays a separate field, and any array meant to accumulate across trace-agent passes is declared as its own top-level ARRAY field rather than nested inside an OBJECT field. Only the top-level TraceModel/TraceSchema pairs a caller actually imports live in this file; every smaller helper submodel lives in the sibling prebuilt_events.py so this file stays a readable index of what a caller can pass to TraceOption.continual.
+ARCHITECTURE NOTE: The five performance schemas and six symmetric schemas both use TraceField's nested fields/items capability by annotating a field with a submodel (or list[submodel]) instead of dict[str, Any] — each submodel field still needs its own Field(description=...), recursively, the same requirement TraceSchema.from_model already enforces at the top level. No schema here ever combines the three axes into one number; each stays a separate field, and any array meant to accumulate across trace-agent passes is declared as its own top-level ARRAY field rather than nested inside an OBJECT field. Only the top-level TraceModel/TraceSchema pairs a caller actually imports live in this file; every smaller helper submodel lives in the sibling prebuilt_events.py so this file stays a readable index of what a caller can pass to TraceOption.continual.
 COMMON MODIFICATION PATTERNS: Add a new prebuilt schema as a Pydantic model plus a TraceSchema.from_model(...) constant, then export both from vidbyte/trace/continual/__init__.py, vidbyte/trace/__init__.py, and vidbyte/__init__.py in that order, matching ActionTrace's existing position in all three files. Any helper submodel the new schema's list/nested-object fields need belongs in vidbyte/trace/continual/prebuilt_events.py, imported here by name — do not define a new helper class inline in this file.
-KNOWN EDGE CASES: A submodel used only as an OBJECT field's shape (not a list item) needs no docstring, since only a list[SubModel] item shape falls back to a generated description when the submodel's own docstring is empty.
-RELATED DOCS: docs/design/nested-continual-trace-shapes.md, docs/design/continual-trace-agent.md, skills/vidbyte-sdk/continual-tracing.md
-TESTS: tests/test_continual_trace.py, scripts/test-continual-trace.py
+KNOWN EDGE CASES: A submodel used only as an OBJECT field's shape (not a list item) needs no docstring, since only a list[SubModel] item shape falls back to a generated description when the submodel's own docstring is empty. A `str, Enum` field (every status/verdict field in the symmetric schemas) type-maps to TraceFieldType.STRING with no special-casing (vidbyte/lib/dataclasses/trace.py's `_annotation_to_type` checks `issubclass(target, str)` before Mapping), so the model-facing JSON Schema does not itself enforce the closed set — the field's own description is what communicates the vocabulary to the trace agent.
+RELATED DOCS: docs/design/nested-continual-trace-shapes.md, docs/design/symmetric-continual-trace-schemas.md, docs/design/continual-trace-agent.md, skills/vidbyte-sdk/continual-tracing.md, field-guide/vidbyte-sdk/tracing-shape-contracts.md
+TESTS: tests/test_continual_trace.py, tests/test_symmetric_continual_traces.py, scripts/test-continual-trace.py, scripts/test-symmetric-continual-traces.py
 """
 
 from __future__ import annotations
@@ -15,14 +15,19 @@ from pydantic import BaseModel, Field
 
 from vidbyte.lib.dataclasses.trace import TraceSchema
 from vidbyte.lib.enums.continual_trace import (
+    AnswerCorrectnessVerdict,
     CalibratedAxis,
     CalibrationTrend,
+    GoalSuccessVerdict,
     JudgmentStability,
     PathQualityVerdict,
 )
 from vidbyte.trace.continual.prebuilt_events import (
+    AnswerCorrectnessCheckEntry,
     AnswerCorrectnessErrorEvent,
+    AnswerCorrectnessEvent,
     AnswerCorrectnessJudgment,
+    AnswerCorrectnessSnapshot,
     ClaimConfidencePrediction,
     ClaimConfidenceResolution,
     CorrectnessSourceAlternative,
@@ -31,17 +36,24 @@ from vidbyte.trace.continual.prebuilt_events import (
     GoalCompletionResolution,
     GoalInterpretationAlternative,
     GoalInterpretationSwitchEvent,
+    GoalSuccessCheckEntry,
     GoalSuccessErrorEvent,
+    GoalSuccessEvent,
     GoalSuccessJudgment,
+    GoalSuccessSnapshot,
     PathDecisionPoint,
     PathEfficiencyPrediction,
     PathEfficiencyResolution,
+    PathQualityCheckEntry,
     PathQualityErrorEvent,
+    PathQualityEvent,
     PathQualityJudgment,
+    PathQualitySnapshot,
     PathRegretEvent,
     ReworkEvent,
     TaskNodeEvent,
 )
+
 
 
 class ActionTraceModel(BaseModel):
@@ -121,7 +133,7 @@ class HierarchicalTaskTreeTraceModel(BaseModel):
     deepest_unresolved_node: str = Field(
         description=(
             "The identifier and description of the single deepest node in the tree that is still "
-            "unresolved on any of the three axes — the actual bottleneck the run is currently working "
+            "unresolved on any of the three axes ΓÇö the actual bottleneck the run is currently working "
             "through. When several nodes at the same depth are unresolved, name the one blocking the "
             "most other work. Replace this in full every update."
         )
@@ -162,7 +174,7 @@ class HierarchicalTaskTreeTraceModel(BaseModel):
         default_factory=list,
         description=(
             "The full chain of node identifiers from the root task down to whatever is currently "
-            "blocking overall progress, in order — not just the blocking node itself but every node "
+            "blocking overall progress, in order ΓÇö not just the blocking node itself but every node "
             "that has to resolve before it can. This is what a reader should look at first to understand "
             "what actually stands between the current state and completion."
         ),
@@ -206,12 +218,12 @@ class HierarchicalTaskTreeTraceModel(BaseModel):
             "The maximum depth value observed across task_nodes so far. A steadily growing value shows "
             "the agent is continuing to decompose the task further; a value that stops growing while "
             "work continues can mean the current decomposition has stabilized or that decomposition has "
-            "stalled — the other fields on this schema are what distinguish the two."
+            "stalled ΓÇö the other fields on this schema are what distinguish the two."
         )
     )
     leaf_node_count: int = Field(
         description=(
-            "How many distinct nodes have been identified with no children recorded against them — the "
+            "How many distinct nodes have been identified with no children recorded against them ΓÇö the "
             "actual count of indivisible units of work this run currently believes the task breaks down "
             "into. This number can rise across the run as further decomposition uncovers more leaf-level "
             "work."
@@ -315,7 +327,7 @@ class CalibrationTraceModel(BaseModel):
     best_calibrated_axis: CalibratedAxis = Field(
         description=(
             "Which of the three performance axes currently has the smallest average calibration_gap "
-            "across its resolved predictions — in other words, where the agent's own stated confidence "
+            "across its resolved predictions ΓÇö in other words, where the agent's own stated confidence "
             "can currently be trusted the most. Use one of the *_TIED members, or ALL_AXES_EQUAL, when "
             "two or more axes are genuinely too close to call rather than arbitrarily picking one as "
             "best. Replace this in full every update as more resolutions accumulate."
@@ -324,7 +336,7 @@ class CalibrationTraceModel(BaseModel):
     worst_calibrated_axis: CalibratedAxis = Field(
         description=(
             "Which axis currently has the largest average calibration_gap across its resolved "
-            "predictions — where a reader should discount the agent's own stated confidence and check "
+            "predictions ΓÇö where a reader should discount the agent's own stated confidence and check "
             "independently rather than take it at face value. Use one of the *_TIED members, or "
             "ALL_AXES_EQUAL, when two or more axes are genuinely tied for worst rather than arbitrarily "
             "picking one. Replace this in full every update."
@@ -334,7 +346,7 @@ class CalibrationTraceModel(BaseModel):
         description=(
             "How many predictions across all three axes currently have no matching resolution yet. This "
             "tells a reader how much of the calibration picture is still open and therefore how much "
-            "weight the other summary fields on this schema currently deserve — a small number of "
+            "weight the other summary fields on this schema currently deserve ΓÇö a small number of "
             "resolutions supports much weaker conclusions than a large one."
         )
     )
@@ -504,7 +516,7 @@ class SelfConsistencyEnsembleTraceModel(BaseModel):
     )
     path_quality_majority_verdict: PathQualityVerdict = Field(
         description=(
-            "The current consolidated majority verdict across the path-quality judgment log — the "
+            "The current consolidated majority verdict across the path-quality judgment log ΓÇö the "
             "conclusion itself, as distinct from the disagreement notes above which describe why any "
             "dissent exists rather than what the ensemble currently concludes. Replace this in full every "
             "update."
@@ -586,7 +598,7 @@ class CounterfactualAlternativesTraceModel(BaseModel):
     goal_alternative_confidence_gap: float = Field(
         description=(
             "How close the second-best interpretation was to the one actually chosen, in the agent's own "
-            "confidence, at the most recent interpretation decision — a low value means no real "
+            "confidence, at the most recent interpretation decision ΓÇö a low value means no real "
             "alternative existed, a high value means the choice was close to arbitrary. Replace this in "
             "full every update."
         )
@@ -602,7 +614,7 @@ class CounterfactualAlternativesTraceModel(BaseModel):
     path_regret_events: list[PathRegretEvent] = Field(
         default_factory=list,
         description=(
-            "The append-only log of past decisions realized, later, to have been the wrong call — "
+            "The append-only log of past decisions realized, later, to have been the wrong call ΓÇö "
             "distinct from the regret_assessment already recorded on each path-decision-point entry, "
             "since this log specifically captures realizations that came after the decision was logged, "
             "not judgments made at the time of the decision itself."
@@ -663,6 +675,460 @@ CounterfactualAlternativesTrace = TraceSchema.from_model(
     description="Records what alternatives genuinely existed at key points on each performance axis and whether the choice made held up.",
 )
 
+class SymmetricFlatTraceModel(BaseModel):
+    """Three axes ΓÇö goal success, path quality, answer correctness ΓÇö each given the identical four-field shape: status, confidence, evidence, rationale. No field can silently absorb another axis's signal."""
+
+    goal_success_status: GoalSuccessVerdict = Field(
+        description=(
+            "The current read on whether the agent's output satisfies the user's stated goal, drawn "
+            "from the shared GoalSuccessVerdict vocabulary. Scored purely on goal completion, "
+            "independent of path_quality_status and answer_correctness_status: a messy path can still "
+            "reach the goal, and a clean path can still fail to. This is a scalar field, so each "
+            "update replaces the previous value outright ΓÇö always write the full current status, not "
+            "a delta."
+        ),
+    )
+    goal_success_confidence: float = Field(
+        description=(
+            "A 0-1 estimate of confidence in goal_success_status, tracked independently of "
+            "path_quality_confidence and answer_correctness_confidence ΓÇö a high-confidence "
+            "'failed' is as valid a state as a low-confidence 'achieved'. Replaced in full on "
+            "every update; base it on how much of the goal's success criteria could actually be "
+            "checked against the current context."
+        ),
+    )
+    goal_success_evidence: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Append-only list of short, concrete facts supporting the current "
+            "goal_success_status ΓÇö for example a specific requirement that was met, or a stated "
+            "constraint that was violated. New entries are appended across updates and exact "
+            "duplicates are automatically skipped, so only add an entry when there is a new fact. "
+            "This is what lets a reader audit goal_success_status instead of taking it on faith."
+        ),
+    )
+    goal_success_rationale: str = Field(
+        description=(
+            "A one- or two-sentence prose justification tying goal_success_evidence to "
+            "goal_success_status, written fresh on every update. Replaced in full each pass ΓÇö do "
+            "not append to it. Use it to explain any change in goal_success_status since the last "
+            "update, especially reversals."
+        ),
+    )
+
+    path_quality_status: PathQualityVerdict = Field(
+        description=(
+            "The current read on whether the actions taken so far have been efficient and safe, drawn "
+            "from the shared PathQualityVerdict vocabulary. Scored purely on the path: it does not "
+            "move just because goal_success_status changed. Replaced in full on every update. Use "
+            "'risky' when at least one action carried meaningful risk even if none has caused harm "
+            "yet, and 'blocked' when the agent is currently unable to proceed."
+        ),
+    )
+    path_quality_confidence: float = Field(
+        description=(
+            "A 0-1 estimate of confidence in path_quality_status, tracked independently of "
+            "goal_success_confidence and answer_correctness_confidence. Replaced in full each "
+            "update. A low value here alongside a high goal_success_confidence is a legitimate "
+            "combination ΓÇö it means the outcome looks good but the process behind it is not well "
+            "understood yet."
+        ),
+    )
+    path_quality_evidence: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Append-only list of short facts supporting the current path_quality_status ΓÇö a "
+            "specific redundant step, a specific risky tool call, or a specific instance of "
+            "following the stated plan well. Appended across updates with exact duplicates "
+            "skipped; add a new entry only when a new relevant action occurs."
+        ),
+    )
+    path_quality_rationale: str = Field(
+        description=(
+            "A one- or two-sentence justification tying path_quality_evidence to "
+            "path_quality_status, rewritten fresh on every update and replaced in full each pass. "
+            "Call out any change since the last update, such as a new risky action or a recovery "
+            "from one."
+        ),
+    )
+
+    answer_correctness_status: AnswerCorrectnessVerdict = Field(
+        description=(
+            "The current read on whether the specific factual claims in the agent's output are "
+            "verifiably true, drawn from the shared AnswerCorrectnessVerdict vocabulary. Scored purely "
+            "on claim correctness against available evidence; it does not move just because the goal "
+            "was reached or the path was clean. Replaced in full on every update. Use 'contradicted' "
+            "as soon as any claim conflicts with a source or another claim, even if other claims in "
+            "the same output are fine."
+        ),
+    )
+    answer_correctness_confidence: float = Field(
+        description=(
+            "A 0-1 estimate of confidence in answer_correctness_status, tracked independently of "
+            "goal_success_confidence and path_quality_confidence. Replaced in full each update. "
+            "This should reflect how much of the answer's claims could actually be checked, not "
+            "how plausible the answer sounds."
+        ),
+    )
+    answer_correctness_evidence: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Append-only list of short facts supporting the current answer_correctness_status ΓÇö a "
+            "specific claim that was verified against a source, or a specific contradiction found "
+            "between two claims. Appended across updates with exact duplicates skipped."
+        ),
+    )
+    answer_correctness_rationale: str = Field(
+        description=(
+            "A one- or two-sentence justification tying answer_correctness_evidence to "
+            "answer_correctness_status, rewritten fresh on every update and replaced in full each "
+            "pass. Call out any newly verified or newly contradicted claim since the last update."
+        ),
+    )
+
+
+SymmetricFlatTrace = TraceSchema.from_model(
+    SymmetricFlatTraceModel,
+    name="symmetric_flat_trace",
+    description="Goal success, path quality, and answer correctness as three parallel current-value reads, never blended.",
+)
+
+
+class SymmetricChecklistTraceModel(BaseModel):
+    """Each axis is its own append-only checklist of independently-evaluated criteria, so a single axis can gain many entries over a run without any of them being averaged into one pass/fail per axis, let alone across axes."""
+
+    goal_success_checks: list[GoalSuccessCheckEntry] = Field(
+        default_factory=list,
+        description=(
+            "One entry per criterion evaluated against the goal, such as 'matches explicit user "
+            "intent' or 'satisfies stated constraints' ΓÇö see GoalSuccessCheckEntry "
+            "(vidbyte/trace/continual/prebuilt_events.py) for the full per-entry shape. Scored purely "
+            "on criteria the goal itself implies ΓÇö never let a path_quality or answer_correctness "
+            "finding change an entry here. Append a new entry each time a criterion is newly "
+            "evaluated or re-evaluated; do not edit a prior entry, since a criterion whose answer "
+            "changes gets a new entry with the current iteration and the same criterion_id."
+        ),
+    )
+    path_quality_checks: list[PathQualityCheckEntry] = Field(
+        default_factory=list,
+        description=(
+            "One entry per criterion evaluated against the actions taken, such as 'no redundant "
+            "tool calls' or 'followed the stated plan' ΓÇö see PathQualityCheckEntry "
+            "(vidbyte/trace/continual/prebuilt_events.py) for the full per-entry shape. Scored purely "
+            "on the path ΓÇö a path criterion should never fail just because the goal ultimately "
+            "wasn't reached. Append a new entry per (re-)evaluation; never edit an existing one in "
+            "place."
+        ),
+    )
+    answer_correctness_checks: list[AnswerCorrectnessCheckEntry] = Field(
+        default_factory=list,
+        description=(
+            "One entry per criterion evaluated against the answer's claims, such as 'claims are "
+            "sourced' or 'no contradictions' ΓÇö see AnswerCorrectnessCheckEntry "
+            "(vidbyte/trace/continual/prebuilt_events.py) for the full per-entry shape. Scored purely "
+            "on claim correctness ΓÇö a criterion here should never be marked met just because the "
+            "goal was reached through a clean path. Append a new entry per (re-)evaluation; never "
+            "edit an existing one in place."
+        ),
+    )
+
+
+SymmetricChecklistTrace = TraceSchema.from_model(
+    SymmetricChecklistTraceModel,
+    name="symmetric_checklist_trace",
+    description="Goal success, path quality, and answer correctness as three parallel growing checklists of criteria.",
+)
+
+
+class SymmetricSubScoreTraceModel(BaseModel):
+    """Each axis is decomposed into three independent named metrics. The metrics inside one axis are never averaged into a single axis score, and the three axes are never averaged into each other."""
+
+    goal_intent_alignment: float = Field(
+        description=(
+            "0-1. How closely the current output matches the user's explicit intent, as opposed "
+            "to a technically-responsive but off-target answer. Scored independently of "
+            "goal_constraint_satisfaction and goal_completion_pct ΓÇö an output can be perfectly "
+            "aligned with intent while still missing a constraint or being incomplete. Replaced "
+            "in full on every update rather than averaged with the prior value, so always write "
+            "the current best read, not a nudge up or down from the last one."
+        ),
+    )
+    goal_constraint_satisfaction: float = Field(
+        description=(
+            "0-1. The fraction of the goal's explicitly stated constraints ΓÇö format, scope, "
+            "length, exclusions, and similar hard requirements ΓÇö currently satisfied. Scored "
+            "independently of goal_intent_alignment and goal_completion_pct: an output can "
+            "satisfy every constraint while still misreading the user's underlying intent. "
+            "Replaced in full on every update; a value below 1.0 should correspond to at least "
+            "one identifiable violated constraint, not a vague sense of incompleteness."
+        ),
+    )
+    goal_completion_pct: float = Field(
+        description=(
+            "0-1. How much of the goal's scope is done, independent of goal_intent_alignment and "
+            "goal_constraint_satisfaction ΓÇö a partially-aligned output can still be near-complete "
+            "on scope, and a fully scoped output can still misread intent. Replaced in full on "
+            "every update. For a multi-part goal, base this on the fraction of parts addressed, "
+            "not a subjective sense of overall progress."
+        ),
+    )
+    path_efficiency: float = Field(
+        description=(
+            "0-1. The absence of redundant or wasted steps in the actions taken so far ΓÇö repeated "
+            "lookups, abandoned approaches re-tried without new information, or tool calls that "
+            "added nothing. Scored independently of path_safety and path_plan_adherence, so a "
+            "highly efficient path can still be unsafe or off-plan. Replaced in full on every "
+            "update, based on the actions taken up to that point, not a prediction of future "
+            "efficiency."
+        ),
+    )
+    path_safety: float = Field(
+        description=(
+            "0-1. The absence of risky or blocked actions among everything taken so far ΓÇö actions "
+            "with side effects, destructive potential, or that required a safeguard to stop. "
+            "Scored independently of path_efficiency and path_plan_adherence ΓÇö an efficient, "
+            "on-plan path can still be unsafe if even one action carried real risk. Replaced in "
+            "full on every update; a single risky action should visibly lower this value even if "
+            "most of the run was clean."
+        ),
+    )
+    path_plan_adherence: float = Field(
+        description=(
+            "0-1. How closely the actions actually taken matched the agent's own stated plan or "
+            "stated next step, independent of path_efficiency and path_safety ΓÇö a low-efficiency "
+            "path can still faithfully follow the plan, and a fast path can still improvise away "
+            "from it. Replaced in full on every update. A value well below 1.0 should correspond "
+            "to a concrete deviation, such as skipping a stated step or taking an unannounced "
+            "detour."
+        ),
+    )
+    correctness_grounding: float = Field(
+        description=(
+            "0-1. The fraction of claims in the current output that are traceable to a checkable "
+            "source ΓÇö a document, a tool result, or a verifiable fact ΓÇö rather than asserted "
+            "outright. Scored independently of correctness_consistency and "
+            "correctness_completeness: claims can be internally consistent and cover everything "
+            "asked while still being entirely unsourced. Replaced in full on every update as new "
+            "claims are made or existing ones are checked."
+        ),
+    )
+    correctness_consistency: float = Field(
+        description=(
+            "0-1. The absence of internal contradictions among the claims made so far ΓÇö no two "
+            "claims asserting incompatible things. Scored independently of correctness_grounding "
+            "and correctness_completeness, since a set of claims can be perfectly consistent with "
+            "each other while still being ungrounded or incomplete. Replaced in full on every "
+            "update; drop it as soon as any contradiction between two claims is detected, even if "
+            "each individual claim is otherwise well-sourced."
+        ),
+    )
+    correctness_completeness: float = Field(
+        description=(
+            "0-1. The absence of gaps the answer should cover but doesn't, given what the goal "
+            "and prior claims imply is in scope. Scored independently of correctness_grounding and "
+            "correctness_consistency ΓÇö an answer can be fully grounded and internally consistent "
+            "while still leaving an implied sub-question unaddressed. Replaced in full on every "
+            "update as more of the answer's expected scope is covered or a new gap is identified."
+        ),
+    )
+
+
+SymmetricSubScoreTrace = TraceSchema.from_model(
+    SymmetricSubScoreTraceModel,
+    name="symmetric_subscore_trace",
+    description="Goal success, path quality, and answer correctness, each decomposed into three independent 0-1 metrics that are never averaged.",
+)
+
+
+class SymmetricEventLedgerTraceModel(BaseModel):
+    """Each axis gets its own append-only event log, all three the same shape, so history accumulates symmetrically across all three instead of one axis being logged in detail while the others are only scored."""
+
+    goal_success_events: list[GoalSuccessEvent] = Field(
+        default_factory=list,
+        description=(
+            "One entry per meaningful change in a subgoal's status ΓÇö see GoalSuccessEvent "
+            "(vidbyte/trace/continual/prebuilt_events.py) for the full per-entry shape. Append a new "
+            "event whenever a subgoal's status changes; do not resend an existing subgoal_id to "
+            "update it in place ΓÇö the event with the highest iteration for a given subgoal_id is "
+            "what readers should treat as current."
+        ),
+    )
+    path_quality_events: list[PathQualityEvent] = Field(
+        default_factory=list,
+        description=(
+            "One entry per meaningful action taken ΓÇö see PathQualityEvent "
+            "(vidbyte/trace/continual/prebuilt_events.py) for the full per-entry shape. Append a new "
+            "event per action; a retried action gets a new step_id rather than mutating a prior "
+            "entry."
+        ),
+    )
+    answer_correctness_events: list[AnswerCorrectnessEvent] = Field(
+        default_factory=list,
+        description=(
+            "One entry per claim checked ΓÇö see AnswerCorrectnessEvent "
+            "(vidbyte/trace/continual/prebuilt_events.py) for the full per-entry shape. Append a new "
+            "event each time a claim is (re-)checked; a claim re-verified later produces a new event "
+            "with the same claim_id rather than replacing the earlier one ΓÇö readers should fold the "
+            "log and take the highest-iteration event's verified value per claim_id."
+        ),
+    )
+
+
+SymmetricEventLedgerTrace = TraceSchema.from_model(
+    SymmetricEventLedgerTraceModel,
+    name="symmetric_event_ledger_trace",
+    description="Goal success, path quality, and answer correctness as three parallel append-only event logs.",
+)
+
+
+class SymmetricTimelineTraceModel(BaseModel):
+    """Each axis gets its own time series ΓÇö one snapshot appended per trace-agent pass ΓÇö so the trend of that axis over the run, not just its final value, is preserved and stays separate from the other two axes' trends."""
+
+    goal_success_timeline: list[GoalSuccessSnapshot] = Field(
+        default_factory=list,
+        description=(
+            "One snapshot of goal status appended per trace-agent pass, building a trend line "
+            "instead of only the latest value ΓÇö see GoalSuccessSnapshot "
+            "(vidbyte/trace/continual/prebuilt_events.py) for the full per-snapshot shape. Append "
+            "exactly one new entry per update rather than editing a prior one, so the full sequence "
+            "of goal-status readings across the run is preserved and never overwritten. A reversal ΓÇö "
+            "status moving backward from a later iteration to an earlier one ΓÇö should be visible in "
+            "the sequence, not smoothed away."
+        ),
+    )
+    path_quality_timeline: list[PathQualitySnapshot] = Field(
+        default_factory=list,
+        description=(
+            "One snapshot of path quality appended per trace-agent pass, building a trend line of "
+            "efficiency and risk over the run rather than only a final value ΓÇö see "
+            "PathQualitySnapshot (vidbyte/trace/continual/prebuilt_events.py) for the full "
+            "per-snapshot shape. Append exactly one new entry per update; risky_action_count should "
+            "be the cumulative count up to that iteration, not a per-pass delta, so a single entry "
+            "is enough to read the running total at that point in the run."
+        ),
+    )
+    answer_correctness_timeline: list[AnswerCorrectnessSnapshot] = Field(
+        default_factory=list,
+        description=(
+            "One snapshot of claim correctness appended per trace-agent pass, building a trend line "
+            "of verification progress over the run rather than only a final tally ΓÇö see "
+            "AnswerCorrectnessSnapshot (vidbyte/trace/continual/prebuilt_events.py) for the full "
+            "per-snapshot shape. Append exactly one new entry per update; the counts should be "
+            "cumulative totals as of that iteration. A contradiction_count that rises partway "
+            "through the run and never falls back is a meaningful signal this timeline is meant to "
+            "preserve."
+        ),
+    )
+
+
+SymmetricTimelineTrace = TraceSchema.from_model(
+    SymmetricTimelineTraceModel,
+    name="symmetric_timeline_trace",
+    description="Goal success, path quality, and answer correctness as three parallel per-pass timelines.",
+)
+
+
+class SymmetricEvidenceTraceModel(BaseModel):
+    """Each axis carries its own for/against evidence ledgers plus a verdict ΓÇö three parallel three-part structures, so the reasoning behind each axis's current state is auditable on its own terms without folding into the other two axes."""
+
+    goal_success_supporting: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Append-only list of short, concrete facts supporting that the goal is being met ΓÇö a "
+            "specific requirement satisfied, or a stated sub-goal completed. Add a new entry only "
+            "when a new supporting fact appears in the context; exact duplicates are skipped "
+            "automatically by the merge logic, so re-stating an already-recorded fact is harmless "
+            "but adds nothing. This list, together with goal_success_contradicting, is the "
+            "auditable basis for goal_success_verdict."
+        ),
+    )
+    goal_success_contradicting: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Append-only list of short, concrete facts suggesting the goal is not being met ΓÇö a "
+            "missed requirement, a violated constraint, or an abandoned sub-goal. Tracked "
+            "separately from goal_success_supporting rather than netted against it as the run "
+            "progresses; both lists are meant to keep growing so a reader can see the full case on "
+            "each side. goal_success_verdict is where the two get weighed into one current read."
+        ),
+    )
+    goal_success_verdict: GoalSuccessVerdict = Field(
+        description=(
+            "The current weighing of goal_success_supporting against goal_success_contradicting "
+            "into one read on goal completion, drawn from the shared GoalSuccessVerdict vocabulary. "
+            "Scored only on whether the goal was reached, independent of path_quality_verdict and "
+            "answer_correctness_verdict ΓÇö a 'failed' goal can still have an 'efficient' "
+            "path_quality_verdict. Replaced in full each pass rather than appended, since only the "
+            "latest weighing matters."
+        ),
+    )
+
+    path_quality_supporting: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Append-only list of short, concrete facts supporting that the path taken is "
+            "efficient and safe ΓÇö a well-chosen tool call, or a plan followed precisely. Add a new "
+            "entry only when a new supporting fact appears; exact duplicates are skipped "
+            "automatically. This list, together with path_quality_contradicting, is the auditable "
+            "basis for path_quality_verdict."
+        ),
+    )
+    path_quality_contradicting: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Append-only list of short, concrete facts suggesting the path is inefficient or "
+            "risky ΓÇö a redundant tool call, a risky action, or an unannounced deviation from the "
+            "stated plan. Tracked separately from path_quality_supporting rather than netted "
+            "against it; both lists keep growing across the run. path_quality_verdict is where the "
+            "two get weighed into one current read."
+        ),
+    )
+    path_quality_verdict: PathQualityVerdict = Field(
+        description=(
+            "The current weighing of path_quality_supporting against path_quality_contradicting "
+            "into one read on the path taken, drawn from the shared PathQualityVerdict vocabulary. "
+            "Scored only on the path itself, independent of goal_success_verdict and "
+            "answer_correctness_verdict ΓÇö an 'efficient' path can still accompany a 'contradicted' "
+            "answer. Replaced in full each pass rather than appended."
+        ),
+    )
+
+    answer_correctness_supporting: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Append-only list of short, concrete facts supporting that current claims are correct "
+            "ΓÇö a claim confirmed against a source, or two claims found mutually consistent. Add a "
+            "new entry only when a new supporting fact appears; exact duplicates are skipped "
+            "automatically. This list, together with answer_correctness_contradicting, is the "
+            "auditable basis for answer_correctness_verdict."
+        ),
+    )
+    answer_correctness_contradicting: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Append-only list of short, concrete facts suggesting current claims are wrong or "
+            "unverified ΓÇö a claim that conflicts with a source, or two claims that conflict with "
+            "each other. Tracked separately from answer_correctness_supporting rather than netted "
+            "against it; both lists keep growing across the run. answer_correctness_verdict is "
+            "where the two get weighed into one current read."
+        ),
+    )
+    answer_correctness_verdict: AnswerCorrectnessVerdict = Field(
+        description=(
+            "The current weighing of answer_correctness_supporting against "
+            "answer_correctness_contradicting into one read on claim correctness, drawn from the "
+            "shared AnswerCorrectnessVerdict vocabulary. Scored only on the claims themselves, "
+            "independent of goal_success_verdict and path_quality_verdict ΓÇö a 'verified' answer can "
+            "still follow a 'risky' path. Replaced in full each pass rather than appended."
+        ),
+    )
+
+
+SymmetricEvidenceTrace = TraceSchema.from_model(
+    SymmetricEvidenceTraceModel,
+    name="symmetric_evidence_trace",
+    description="Goal success, path quality, and answer correctness as three parallel evidence-for/against ledgers with a verdict.",
+)
 
 __all__ = [
     "ActionTrace",
@@ -677,4 +1143,16 @@ __all__ = [
     "HierarchicalTaskTreeTraceModel",
     "SelfConsistencyEnsembleTrace",
     "SelfConsistencyEnsembleTraceModel",
+    "SymmetricChecklistTrace",
+    "SymmetricChecklistTraceModel",
+    "SymmetricEventLedgerTrace",
+    "SymmetricEventLedgerTraceModel",
+    "SymmetricEvidenceTrace",
+    "SymmetricEvidenceTraceModel",
+    "SymmetricFlatTrace",
+    "SymmetricFlatTraceModel",
+    "SymmetricSubScoreTrace",
+    "SymmetricSubScoreTraceModel",
+    "SymmetricTimelineTrace",
+    "SymmetricTimelineTraceModel",
 ]

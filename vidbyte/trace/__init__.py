@@ -32,6 +32,12 @@ from vidbyte.trace.continual import (
     ErrorTaxonomyTrace,
     HierarchicalTaskTreeTrace,
     SelfConsistencyEnsembleTrace,
+    SymmetricChecklistTrace,
+    SymmetricEventLedgerTrace,
+    SymmetricEvidenceTrace,
+    SymmetricFlatTrace,
+    SymmetricSubScoreTrace,
+    SymmetricTimelineTrace,
 )
 from vidbyte.trace.debug import DebugTracer
 from vidbyte.trace.profiles import TraceComponentSettings, TraceProfile
@@ -55,6 +61,12 @@ __all__ = [
     "SessionTracer",
     "SpanKind",
     "SpanSpec",
+    "SymmetricChecklistTrace",
+    "SymmetricEventLedgerTrace",
+    "SymmetricEvidenceTrace",
+    "SymmetricFlatTrace",
+    "SymmetricSubScoreTrace",
+    "SymmetricTimelineTrace",
     "Trace",
     "TraceComponentSettings",
     "TraceController",
