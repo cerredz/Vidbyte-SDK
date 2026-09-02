@@ -15,6 +15,11 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, cast
 
 from vidbyte.context.primitives.base import ContextItem
+from vidbyte.lib.constants.reasoning_strategies import (
+    CONSISTENCY_REQUIRED_FIELDS,
+    CONSISTENCY_REQUIRED_PRESENT_FIELDS,
+)
+from vidbyte.lib.enums.reasoning_strategies import ConsistencyStatus
 from vidbyte.tools.base import BaseTool
 from vidbyte.tools.builtins.reasoning._parsing import ReasoningToolInput
 from vidbyte.tools.types import (
@@ -27,10 +32,6 @@ from vidbyte.tools.types import (
 
 if TYPE_CHECKING:
     from vidbyte.context.manager import ContextManager
-
-_REQUIRED_FIELDS = ("claims", "consistency_status", "resolution")
-_REQUIRED_PRESENT_FIELDS = ("pairwise_conflicts",)
-_STATUS_VALUES = ("consistent", "contradictory", "unresolved")
 
 
 class ConsistencyTool(BaseTool):
@@ -131,10 +132,10 @@ class ConsistencyTool(BaseTool):
 
     def _validate(self, args: dict) -> str | None:
         # Returns an error string for a missing field, an undersized claim set, or a bad enum.
-        error = ReasoningToolInput.missing_required(args, _REQUIRED_FIELDS)
+        error = ReasoningToolInput.missing_required(args, CONSISTENCY_REQUIRED_FIELDS)
         if error:
             return error
-        for name in _REQUIRED_PRESENT_FIELDS:
+        for name in CONSISTENCY_REQUIRED_PRESENT_FIELDS:
             if name not in args:
                 return f"Missing or empty required field: '{name}'."
         claims = ReasoningToolInput.string_list(args.get("claims"))
@@ -142,7 +143,7 @@ class ConsistencyTool(BaseTool):
             return "Field 'claims' requires at least two claims to audit."
         return ReasoningToolInput.enum_error(
             ReasoningToolInput.text(args, "consistency_status"),
-            _STATUS_VALUES,
+            ConsistencyStatus.values(),
             "consistency_status",
         )
 

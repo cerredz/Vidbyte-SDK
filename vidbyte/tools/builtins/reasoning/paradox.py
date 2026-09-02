@@ -15,6 +15,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, cast
 
 from vidbyte.context.primitives.base import ContextItem
+from vidbyte.lib.constants.reasoning_strategies import PARADOX_REQUIRED_FIELDS
 from vidbyte.tools.base import BaseTool
 from vidbyte.tools.builtins.reasoning._parsing import ReasoningToolInput
 from vidbyte.tools.types import (
@@ -27,15 +28,6 @@ from vidbyte.tools.types import (
 
 if TYPE_CHECKING:
     from vidbyte.context.manager import ContextManager
-
-_REQUIRED_FIELDS = (
-    "paradox",
-    "premises",
-    "hidden_assumption",
-    "premise_to_drop",
-    "resolution",
-    "what_it_reveals",
-)
 
 
 class ParadoxTool(BaseTool):
@@ -166,7 +158,7 @@ class ParadoxTool(BaseTool):
 
     def _validate(self, args: dict) -> str | None:
         # Returns an error string for a missing field, undersized premises, or a premise_to_drop not in premises.
-        error = ReasoningToolInput.missing_required(args, _REQUIRED_FIELDS)
+        error = ReasoningToolInput.missing_required(args, PARADOX_REQUIRED_FIELDS)
         if error:
             return error
         premises = ReasoningToolInput.string_list(args.get("premises"))

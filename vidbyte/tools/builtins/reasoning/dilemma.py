@@ -15,6 +15,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, cast
 
 from vidbyte.context.primitives.base import ContextItem
+from vidbyte.lib.constants.reasoning_strategies import DILEMMA_REQUIRED_FIELDS
 from vidbyte.tools.base import BaseTool
 from vidbyte.tools.builtins.reasoning._parsing import ReasoningToolInput
 from vidbyte.tools.types import (
@@ -27,8 +28,6 @@ from vidbyte.tools.types import (
 
 if TYPE_CHECKING:
     from vidbyte.context.manager import ContextManager
-
-_REQUIRED_FIELDS = ("case_reasoning", "conclusion", "exhaustiveness")
 
 
 class DilemmaTool(BaseTool):
@@ -128,7 +127,7 @@ class DilemmaTool(BaseTool):
 
     def _validate(self, args: dict) -> str | None:
         # Returns an error string for a missing field, undersized alternatives, or empty case reasoning.
-        error = ReasoningToolInput.missing_required(args, _REQUIRED_FIELDS)
+        error = ReasoningToolInput.missing_required(args, DILEMMA_REQUIRED_FIELDS)
         if error:
             return error
         alternatives = ReasoningToolInput.string_list(args.get("alternatives"))

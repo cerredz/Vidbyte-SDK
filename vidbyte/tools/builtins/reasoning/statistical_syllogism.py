@@ -15,6 +15,9 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, cast
 
 from vidbyte.context.primitives.base import ContextItem
+from vidbyte.lib.constants.reasoning_strategies import (
+    STATISTICAL_SYLLOGISM_REQUIRED_FIELDS,
+)
 from vidbyte.tools.base import BaseTool
 from vidbyte.tools.builtins.reasoning._parsing import ReasoningToolInput
 from vidbyte.tools.types import (
@@ -27,15 +30,6 @@ from vidbyte.tools.types import (
 
 if TYPE_CHECKING:
     from vidbyte.context.manager import ContextManager
-
-_REQUIRED_FIELDS = (
-    "population_claim",
-    "frequency",
-    "individual",
-    "membership",
-    "defeater",
-    "probable_conclusion",
-)
 
 
 class StatisticalSyllogismTool(BaseTool):
@@ -174,7 +168,9 @@ class StatisticalSyllogismTool(BaseTool):
 
     def _validate(self, args: dict) -> str | None:
         # Returns an error string for a missing field or an unparsable frequency/confidence.
-        error = ReasoningToolInput.missing_required(args, _REQUIRED_FIELDS)
+        error = ReasoningToolInput.missing_required(
+            args, STATISTICAL_SYLLOGISM_REQUIRED_FIELDS
+        )
         if error:
             return error
         if ReasoningToolInput.probability(args.get("frequency")) is None:

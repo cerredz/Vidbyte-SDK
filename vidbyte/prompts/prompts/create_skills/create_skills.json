@@ -1,0 +1,11 @@
+{
+  "name": "Create Skills",
+  "description": "Use when creating, revising, or packaging an agent skill. It guides the agent to choose one activation condition, build a portable skill directory, validate its environment, and verify the result with evidence. It also enforces context-efficient surfaces, on-demand safety, append-only records, and adversarial review before completion.",
+  "key": "create_skills",
+  "prompts": {
+    "create_skill": {
+      "path": "create_skill.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/create_skills/create_skill.md"
+    }
+  }
+}

@@ -369,6 +369,16 @@ agent = Agent(
 - `Trace.langsmith_verbose(...)` uses the verbose semantic profile for runtime iteration, context-window, algorithm, aggregate, parser, and middleware-decision spans.
 - `Trace.continual(...)` records lifecycle events and stores settings for trace-to-context style workflows, but does not automatically inject hidden trace memory into the agent context.
 
+### External Provider References
+
+Use the colocated, first-party link indexes before changing a provider boundary:
+
+- [Model providers](vidbyte/providers/README.md) — API, modality, authentication, and response-contract references for all registered model providers.
+- [MCP tools](vidbyte/tools/mcp/README.md) — current MCP specification, tools, transports, and Python SDK references.
+- [Trace providers](vidbyte/trace/providers/README.md) — LangSmith, Langfuse, and Phoenix references.
+- [Web-operation providers](vidbyte/tools/builtins/operations/clients/README.md) — Brave, Browserbase, Exa, Firecrawl, Parallel, and Tavily references.
+- [Session-store providers](vidbyte/lib/providers/README.md) — MongoDB, PostgreSQL, SQLite, and Supabase references.
+
 ```python
 from vidbyte import Agent, Trace
 

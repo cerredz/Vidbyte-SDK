@@ -15,6 +15,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, cast
 
 from vidbyte.context.primitives.base import ContextItem
+from vidbyte.lib.constants.reasoning_strategies import CIRCULARITY_REQUIRED_FIELDS
+from vidbyte.lib.enums.reasoning_strategies import CircularityVerdict
 from vidbyte.tools.base import BaseTool
 from vidbyte.tools.builtins.reasoning._parsing import ReasoningToolInput
 from vidbyte.tools.types import (
@@ -27,17 +29,6 @@ from vidbyte.tools.types import (
 
 if TYPE_CHECKING:
     from vidbyte.context.manager import ContextManager
-
-_REQUIRED_FIELDS = (
-    "argument",
-    "premises",
-    "conclusion",
-    "dependency_map",
-    "circle_found",
-    "fix",
-    "verdict",
-)
-_VERDICT_VALUES = ("circular", "not_circular", "partially")
 
 
 class CircularityTool(BaseTool):
@@ -175,7 +166,7 @@ class CircularityTool(BaseTool):
 
     def _validate(self, args: dict) -> str | None:
         # Returns an error string for a missing field, empty premises, empty dependency map, or a bad enum.
-        error = ReasoningToolInput.missing_required(args, _REQUIRED_FIELDS)
+        error = ReasoningToolInput.missing_required(args, CIRCULARITY_REQUIRED_FIELDS)
         if error:
             return error
         if not ReasoningToolInput.string_list(args.get("premises")):
@@ -183,7 +174,9 @@ class CircularityTool(BaseTool):
         if not ReasoningToolInput.object_list(args.get("dependency_map")):
             return "Field 'dependency_map' requires at least one entry."
         return ReasoningToolInput.enum_error(
-            ReasoningToolInput.text(args, "verdict"), _VERDICT_VALUES, "verdict"
+            ReasoningToolInput.text(args, "verdict"),
+            CircularityVerdict.values(),
+            "verdict",
         )
 
     def _build_item(self, args: dict, primitive_id: str) -> ContextItem:

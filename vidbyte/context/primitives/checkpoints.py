@@ -1,16 +1,31 @@
-"""Context Protocol Header
+"""FILE: vidbyte/context/primitives/checkpoints.py
 
-Description:
-    Defines the trajectory checkpoint context primitive.
-Purpose:
-    Gives the trajectory checkpoint algorithm a typed, bounded context unit that
-    renders observable runtime progress for the next model call.
-Architecture:
-    - TrajectoryCheckpointContextItem: Ordered checkpoint sections with bounding.
-    - ReflexionContextItem: Ordered critique/correction sections with bounding.
-Relations:
-    Written by TrajectoryCheckpointAlgorithm and re-exported through
-    vidbyte.context.primitives.
+PURPOSE:
+    Defines bounded trajectory-checkpoint and reflexion records for model-visible
+    progress and correction context.
+ROLE IN CODEBASE:
+    Written by context algorithms, rendered by ContextManager, and re-exported
+    through vidbyte.context.primitives for callers that compose context windows.
+ARCHITECTURE NOTE:
+    Frozen slotted dataclasses own deterministic field rendering while shared
+    truncation preserves the managed-context boundary and character limit.
+FUNCTION INVENTORY:
+    TrajectoryCheckpointContextItem.to_context_text() renders runtime progress.
+    ReflexionContextItem.to_context_text() renders critique and correction plan.
+COMMON MODIFICATION PATTERNS:
+    Add checkpoint fields before the metadata tail, render them in stable order,
+    and preserve the existing truncation helper and optional failed attempt.
+WHAT NOT TO DO IN THIS FILE:
+    Do not execute trajectory steps, evaluate scores, or control context placement;
+    those responsibilities belong to the calling algorithms and ContextManager.
+KNOWN EDGE CASES:
+    Scores may be absent and failed attempts are optional; oversized text remains
+    stored but is bounded only when rendered.
+RELATED DOCS:
+    https://github.com/cerredz/Vidbyte-SDK/tree/main/vidbyte/context/primitives
+TESTS:
+    Existing context algorithm tests, package compilation, and source/package
+    smoke gates cover importability and rendering behavior.
 """
 
 from __future__ import annotations
@@ -43,27 +58,28 @@ class TrajectoryCheckpointContextItem:
     def to_context_text(self) -> str:
         # Renders required checkpoint sections in deterministic order.
         score_text = "N/A" if self.score is None else f"{self.score:.2f}"
-        text = "\n".join(
-            (
-                f"Iteration: {self.iteration}",
-                f"Checkpoint: {self.checkpoint_index}",
-                "",
-                "### Reasoning Summary",
-                self.reasoning_summary,
-                "",
-                "### Trajectory",
-                self.trajectory,
-                "",
-                "### Output",
-                self.output,
-                "",
-                "### Score",
-                score_text,
-                "",
-                "### Feedback",
-                self.feedback,
-            )
-        )
+        lines = [
+            "This primitive carries a bounded runtime checkpoint from an agent's trajectory. Iteration and checkpoint index locate the snapshot, while reasoning summary and trajectory show how the state was reached. Output, score, and feedback record the observed result and evaluation at that point. Use it to continue or audit progress without treating the checkpoint as a live execution state.",
+            "",
+            f"Iteration: {self.iteration}",
+            f"Checkpoint: {self.checkpoint_index}",
+            "",
+            "### Reasoning Summary",
+            self.reasoning_summary,
+            "",
+            "### Trajectory",
+            self.trajectory,
+            "",
+            "### Output",
+            self.output,
+            "",
+            "### Score",
+            score_text,
+            "",
+            "### Feedback",
+            self.feedback,
+        ]
+        text = "\n".join(lines)
         return _truncate_text(text, self.max_chars)
 
 
@@ -84,6 +100,8 @@ class ReflexionContextItem:
     def to_context_text(self) -> str:
         # Renders critique, correction plan, and optional failed attempt, bounded by max_chars.
         lines = [
+            "This primitive carries a self-critique produced after a reasoning attempt needs review. The critique identifies the perceived failure, and the correction plan describes how the next attempt should change. An optional failed-attempt section preserves the concrete work that motivated the reflection. Use this note to guide revision while checking its claims against the surrounding context.",
+            "",
             "### Critique",
             self.critique,
             "",

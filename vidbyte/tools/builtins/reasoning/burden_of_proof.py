@@ -15,6 +15,11 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, cast
 
 from vidbyte.context.primitives.base import ContextItem
+from vidbyte.lib.constants.reasoning_strategies import (
+    BURDEN_OF_PROOF_REQUIRED_FIELDS,
+    BURDEN_OF_PROOF_REQUIRED_PRESENT_FIELDS,
+)
+from vidbyte.lib.enums.reasoning_strategies import BurdenOfProofVerdict
 from vidbyte.tools.base import BaseTool
 from vidbyte.tools.builtins.reasoning._parsing import ReasoningToolInput
 from vidbyte.tools.types import (
@@ -27,16 +32,6 @@ from vidbyte.tools.types import (
 
 if TYPE_CHECKING:
     from vidbyte.context.manager import ContextManager
-
-_REQUIRED_FIELDS = (
-    "claim",
-    "default_presumption",
-    "burden_holder",
-    "verdict",
-    "decision",
-)
-_REQUIRED_PRESENT_FIELDS = ("supporting_evidence", "opposing_evidence")
-_VERDICT_VALUES = ("established", "not_established", "contested")
 
 
 class BurdenOfProofTool(BaseTool):
@@ -173,14 +168,18 @@ class BurdenOfProofTool(BaseTool):
 
     def _validate(self, args: dict) -> str | None:
         # Returns an error string for a missing field, a missing evidence key, or a bad verdict enum.
-        error = ReasoningToolInput.missing_required(args, _REQUIRED_FIELDS)
+        error = ReasoningToolInput.missing_required(
+            args, BURDEN_OF_PROOF_REQUIRED_FIELDS
+        )
         if error:
             return error
-        for name in _REQUIRED_PRESENT_FIELDS:
+        for name in BURDEN_OF_PROOF_REQUIRED_PRESENT_FIELDS:
             if name not in args:
                 return f"Missing or empty required field: '{name}'."
         return ReasoningToolInput.enum_error(
-            ReasoningToolInput.text(args, "verdict"), _VERDICT_VALUES, "verdict"
+            ReasoningToolInput.text(args, "verdict"),
+            BurdenOfProofVerdict.values(),
+            "verdict",
         )
 
     def _build_item(self, args: dict, primitive_id: str) -> ContextItem:

@@ -15,6 +15,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, cast
 
 from vidbyte.context.primitives.base import ContextItem
+from vidbyte.lib.constants.reasoning_strategies import INSTANTIATE_REQUIRED_FIELDS
 from vidbyte.tools.base import BaseTool
 from vidbyte.tools.builtins.reasoning._parsing import ReasoningToolInput
 from vidbyte.tools.types import (
@@ -27,15 +28,6 @@ from vidbyte.tools.types import (
 
 if TYPE_CHECKING:
     from vidbyte.context.manager import ContextManager
-
-_REQUIRED_FIELDS = (
-    "general_rule",
-    "case",
-    "applicability_conditions",
-    "conditions_met",
-    "derived_conclusion",
-    "scope_check",
-)
 
 
 class InstantiateTool(BaseTool):
@@ -164,7 +156,7 @@ class InstantiateTool(BaseTool):
 
     def _validate(self, args: dict) -> str | None:
         # Returns an error string for a missing field, empty conditions, or empty conditions_met.
-        error = ReasoningToolInput.missing_required(args, _REQUIRED_FIELDS)
+        error = ReasoningToolInput.missing_required(args, INSTANTIATE_REQUIRED_FIELDS)
         if error:
             return error
         if not ReasoningToolInput.string_list(args.get("applicability_conditions")):

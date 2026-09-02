@@ -15,6 +15,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, cast
 
 from vidbyte.context.primitives.base import ContextItem
+from vidbyte.lib.constants.reasoning_strategies import DEFEASIBLE_REQUIRED_FIELDS
+from vidbyte.lib.enums.reasoning_strategies import DefeasibleRuleApplies
 from vidbyte.tools.base import BaseTool
 from vidbyte.tools.builtins.reasoning._parsing import ReasoningToolInput
 from vidbyte.tools.types import (
@@ -27,16 +29,6 @@ from vidbyte.tools.types import (
 
 if TYPE_CHECKING:
     from vidbyte.context.manager import ContextManager
-
-_REQUIRED_FIELDS = (
-    "default_rule",
-    "case",
-    "rule_applies",
-    "defeaters",
-    "final_conclusion",
-    "retraction_note",
-)
-_RULE_APPLIES_VALUES = ("yes", "no", "borderline")
 
 
 class DefeasibleTool(BaseTool):
@@ -163,14 +155,14 @@ class DefeasibleTool(BaseTool):
 
     def _validate(self, args: dict) -> str | None:
         # Returns an error string for a missing field, empty defeaters, or a bad enum.
-        error = ReasoningToolInput.missing_required(args, _REQUIRED_FIELDS)
+        error = ReasoningToolInput.missing_required(args, DEFEASIBLE_REQUIRED_FIELDS)
         if error:
             return error
         if not ReasoningToolInput.object_list(args.get("defeaters")):
             return "Field 'defeaters' requires at least one entry."
         return ReasoningToolInput.enum_error(
             ReasoningToolInput.text(args, "rule_applies"),
-            _RULE_APPLIES_VALUES,
+            DefeasibleRuleApplies.values(),
             "rule_applies",
         )
 

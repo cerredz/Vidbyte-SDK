@@ -32,6 +32,7 @@ from vidbyte.sessions.contracts import (
 )
 from vidbyte.lib.errors import AgentExecutionError
 from vidbyte.sessions.errors import SessionError
+from vidbyte.sessions.failure import Failure, FailurePhase, FailureRouter
 from vidbyte.sessions.portable import SessionBundleExporter
 from vidbyte.sessions.serialization import SessionSerializer
 from vidbyte.sessions.store import SessionStore
@@ -109,6 +110,7 @@ class Session:
         self._tags = tuple(tags)
         self._parent_session_id = parent_session_id
         self._head_id: str | None = None
+        self._failures = FailureRouter(self)
         if _existing:
             self._adopt_existing_head()
         else:
@@ -130,11 +132,32 @@ class Session:
         """Return the wrapped agent."""
         return self._agent
 
+    @property
+    def failures(self) -> FailureRouter:
+        """Return this Session's bounded failure ledger and recovery router."""
+        return self._failures
+
+    def notify_exception(self, exc: BaseException, *, source: str = "session") -> Failure:
+        """Record one SDK exception through this Session's failure router.
+
+        This is the single public boundary every caller (BaseAgent, Session.arun,
+        or a developer's own code) should use to report an exception into
+        Session.failures, so capture and deduplication logic lives in one place
+        instead of being re-implemented per call site.
+        """
+        return self._failures.capture_exception(exc, phase=FailurePhase.RUNTIME, source=source)
+
     async def arun(self, message: str | AgentInput, **options: Any) -> AgentMessage:
         """Run the agent, persisting from the agent hook when available."""
-        reply = await self._agent.arun(message, **options)
+        try:
+            reply = await self._agent.arun(message, **options)
+        except BaseException as exc:
+            self.notify_exception(exc, source="session.arun")
+            await self._failures.route_pending()
+            raise
         if not self._agent_records_turns():
             self.record_turn(reply)
+        await self._failures.route_pending()
         return reply
 
     def run(self, message: str | AgentInput, **options: Any) -> AgentMessage:
@@ -153,8 +176,10 @@ class Session:
     def record_turn(self, reply: AgentMessage) -> None:
         # Persist one completed agent turn according to this session's checkpoint policy.
         if self._policy is CheckpointPolicy.MANUAL:
+            self._failures.capture_reply(reply)
             return
         self._persist_fail_open(reply, label="")
+        self._failures.capture_reply(reply)
 
     def fork(self, *, at: str | None = None, tools: Sequence[object] | None = None, middleware: Sequence[object] | None = None) -> "Session":
         """Branch a new session from a checkpoint (defaults to head), recording lineage."""

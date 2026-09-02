@@ -15,6 +15,9 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, cast
 
 from vidbyte.context.primitives.base import ContextItem
+from vidbyte.lib.constants.reasoning_strategies import (
+    THOUGHT_EXPERIMENT_REQUIRED_FIELDS,
+)
 from vidbyte.tools.base import BaseTool
 from vidbyte.tools.builtins.reasoning._parsing import ReasoningToolInput
 from vidbyte.tools.types import (
@@ -27,8 +30,6 @@ from vidbyte.tools.types import (
 
 if TYPE_CHECKING:
     from vidbyte.context.manager import ContextManager
-
-_REQUIRED_FIELDS = ("setup", "manipulation", "predicted_outcome", "insight", "limits")
 
 
 class ThoughtExperimentTool(BaseTool):
@@ -144,7 +145,9 @@ class ThoughtExperimentTool(BaseTool):
 
     def _validate(self, args: dict) -> str | None:
         # Returns an error string if any required field is missing or empty.
-        return ReasoningToolInput.missing_required(args, _REQUIRED_FIELDS)
+        return ReasoningToolInput.missing_required(
+            args, THOUGHT_EXPERIMENT_REQUIRED_FIELDS
+        )
 
     def _build_item(self, args: dict, primitive_id: str) -> ContextItem:
         # Constructs the ThoughtExperimentContextItem from validated call arguments.

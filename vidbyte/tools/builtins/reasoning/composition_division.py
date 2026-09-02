@@ -15,6 +15,10 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, cast
 
 from vidbyte.context.primitives.base import ContextItem
+from vidbyte.lib.constants.reasoning_strategies import (
+    COMPOSITION_DIVISION_REQUIRED_FIELDS,
+)
+from vidbyte.lib.enums.reasoning_strategies import CompositionDivisionValidity
 from vidbyte.tools.base import BaseTool
 from vidbyte.tools.builtins.reasoning._parsing import ReasoningToolInput
 from vidbyte.tools.types import (
@@ -27,16 +31,6 @@ from vidbyte.tools.types import (
 
 if TYPE_CHECKING:
     from vidbyte.context.manager import ContextManager
-
-_REQUIRED_FIELDS = (
-    "parts",
-    "whole",
-    "property",
-    "aggregation_claim",
-    "validity",
-    "counterexample",
-)
-_VALIDITY_VALUES = ("valid", "fallacy_of_composition", "fallacy_of_division", "unknown")
 
 
 class CompositionDivisionTool(BaseTool):
@@ -163,13 +157,17 @@ class CompositionDivisionTool(BaseTool):
 
     def _validate(self, args: dict) -> str | None:
         # Returns an error string for a missing field, empty parts, or a bad validity enum.
-        error = ReasoningToolInput.missing_required(args, _REQUIRED_FIELDS)
+        error = ReasoningToolInput.missing_required(
+            args, COMPOSITION_DIVISION_REQUIRED_FIELDS
+        )
         if error:
             return error
         if not ReasoningToolInput.string_list(args.get("parts")):
             return "Field 'parts' requires at least one part."
         return ReasoningToolInput.enum_error(
-            ReasoningToolInput.text(args, "validity"), _VALIDITY_VALUES, "validity"
+            ReasoningToolInput.text(args, "validity"),
+            CompositionDivisionValidity.values(),
+            "validity",
         )
 
     def _build_item(self, args: dict, primitive_id: str) -> ContextItem:

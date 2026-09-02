@@ -15,6 +15,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, cast
 
 from vidbyte.context.primitives.base import ContextItem
+from vidbyte.lib.constants.reasoning_strategies import TRANSITIVITY_REQUIRED_FIELDS
+from vidbyte.lib.enums.reasoning_strategies import TransitivityConsistency
 from vidbyte.tools.base import BaseTool
 from vidbyte.tools.builtins.reasoning._parsing import ReasoningToolInput
 from vidbyte.tools.types import (
@@ -27,9 +29,6 @@ from vidbyte.tools.types import (
 
 if TYPE_CHECKING:
     from vidbyte.context.manager import ContextManager
-
-_REQUIRED_FIELDS = ("pairwise_links", "derived_chain", "cycle_detected", "consistency")
-_CONSISTENCY_VALUES = ("consistent", "cyclic", "intransitive")
 
 
 class TransitivityTool(BaseTool):
@@ -154,14 +153,14 @@ class TransitivityTool(BaseTool):
 
     def _validate(self, args: dict) -> str | None:
         # Returns an error string for a missing field, empty links, or a bad consistency enum.
-        error = ReasoningToolInput.missing_required(args, _REQUIRED_FIELDS)
+        error = ReasoningToolInput.missing_required(args, TRANSITIVITY_REQUIRED_FIELDS)
         if error:
             return error
         if not ReasoningToolInput.object_list(args.get("pairwise_links")):
             return "Field 'pairwise_links' requires at least one entry."
         return ReasoningToolInput.enum_error(
             ReasoningToolInput.text(args, "consistency"),
-            _CONSISTENCY_VALUES,
+            TransitivityConsistency.values(),
             "consistency",
         )
 

@@ -233,6 +233,9 @@ class AggregateAgent(BaseAgent):
             self._tracer.end_trace(trace_ctx, output=result.content)
             return reply
         except BaseException as exc:
+            # AggregateAgent overrides generate_reply entirely and does not go through
+            # BaseAgent's own try/except, so it must notify the Session boundary itself.
+            self._notify_session_exception(exc)
             self._tracer.end_trace(trace_ctx, error=exc)
             raise
         finally:

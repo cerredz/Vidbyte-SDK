@@ -15,6 +15,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, cast
 
 from vidbyte.context.primitives.base import ContextItem
+from vidbyte.lib.constants.reasoning_strategies import PREDICT_REQUIRED_FIELDS
+from vidbyte.lib.enums.reasoning_strategies import PredictMatch
 from vidbyte.tools.base import BaseTool
 from vidbyte.tools.builtins.reasoning._parsing import ReasoningToolInput
 from vidbyte.tools.types import (
@@ -27,16 +29,6 @@ from vidbyte.tools.types import (
 
 if TYPE_CHECKING:
     from vidbyte.context.manager import ContextManager
-
-_REQUIRED_FIELDS = (
-    "theory",
-    "initial_conditions",
-    "derived_prediction",
-    "observed_outcome",
-    "match",
-    "revision",
-)
-_MATCH_VALUES = ("yes", "no", "partial")
 
 
 class PredictTool(BaseTool):
@@ -162,13 +154,13 @@ class PredictTool(BaseTool):
 
     def _validate(self, args: dict) -> str | None:
         # Returns an error string for a missing field, empty conditions, or a bad match enum.
-        error = ReasoningToolInput.missing_required(args, _REQUIRED_FIELDS)
+        error = ReasoningToolInput.missing_required(args, PREDICT_REQUIRED_FIELDS)
         if error:
             return error
         if not ReasoningToolInput.string_list(args.get("initial_conditions")):
             return "Field 'initial_conditions' requires at least one entry."
         return ReasoningToolInput.enum_error(
-            ReasoningToolInput.text(args, "match"), _MATCH_VALUES, "match"
+            ReasoningToolInput.text(args, "match"), PredictMatch.values(), "match"
         )
 
     def _build_item(self, args: dict, primitive_id: str) -> ContextItem:

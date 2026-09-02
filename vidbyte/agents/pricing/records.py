@@ -9,7 +9,8 @@ Architecture:
     - UsageRecord: One model call with its provider-native usage and USD cost.
     - OperationUsageRecord: One priced search/fetch operation and its USD cost.
     - UsageRecordingIntegrity: Whether metering itself stayed intact for a run.
-    - UsageRollup: The per-call and per-operation ledgers plus None-aware totals.
+    - UsageRollup: The per-call and per-operation ledgers plus None-aware totals,
+      including a run-level cache hit rate.
 Relations:
     Built by vidbyte/agents/pricing/tracker.py; surfaced on
     AgentMessage.metadata["usage_rollup"] and BaseAgent.get_usage().
@@ -64,6 +65,8 @@ class UsageRollup:
     input_tokens: int | None = None
     output_tokens: int | None = None
     total_tokens: int | None = None
+    cached_input_tokens: int | None = None
+    cache_hit_rate: float | None = None
     cost_usd: float | None = None
     cost_complete: bool = False
     operations: tuple[OperationUsageRecord, ...] = field(default_factory=tuple)

@@ -15,6 +15,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, cast
 
 from vidbyte.context.primitives.base import ContextItem
+from vidbyte.lib.constants.reasoning_strategies import PARTITION_REQUIRED_FIELDS
+from vidbyte.lib.enums.reasoning_strategies import PartitionVerdict
 from vidbyte.tools.base import BaseTool
 from vidbyte.tools.builtins.reasoning._parsing import ReasoningToolInput
 from vidbyte.tools.types import (
@@ -27,9 +29,6 @@ from vidbyte.tools.types import (
 
 if TYPE_CHECKING:
     from vidbyte.context.manager import ContextManager
-
-_REQUIRED_FIELDS = ("membership_rules", "coverage", "overlap", "verdict")
-_VERDICT_VALUES = ("exhaustive_disjoint", "gaps", "overlaps")
 
 
 class PartitionTool(BaseTool):
@@ -152,13 +151,15 @@ class PartitionTool(BaseTool):
 
     def _validate(self, args: dict) -> str | None:
         # Returns an error string for a missing field, empty rules, or a bad verdict enum.
-        error = ReasoningToolInput.missing_required(args, _REQUIRED_FIELDS)
+        error = ReasoningToolInput.missing_required(args, PARTITION_REQUIRED_FIELDS)
         if error:
             return error
         if not ReasoningToolInput.object_list(args.get("membership_rules")):
             return "Field 'membership_rules' requires at least one entry."
         return ReasoningToolInput.enum_error(
-            ReasoningToolInput.text(args, "verdict"), _VERDICT_VALUES, "verdict"
+            ReasoningToolInput.text(args, "verdict"),
+            PartitionVerdict.values(),
+            "verdict",
         )
 
     def _build_item(self, args: dict, primitive_id: str) -> ContextItem:
