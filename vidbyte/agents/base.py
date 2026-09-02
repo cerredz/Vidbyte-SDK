@@ -21,6 +21,7 @@ Relations:
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import inspect
 from collections.abc import Callable, Mapping, Sequence
 from typing import TYPE_CHECKING, Any
@@ -637,6 +638,7 @@ class BaseAgent(McpAttachableMixin):
                 self._tracer.end_trace(trace_ctx, output=_format_trace_output(result))
             self._speed_tracker.record_run_end()
         except Exception as exc:
+            self._notify_session_exception(exc)
             if trace_ctx is not None:
                 self._tracer.end_trace(trace_ctx, error=exc)
             self._speed_tracker.record_run_end()
@@ -648,6 +650,7 @@ class BaseAgent(McpAttachableMixin):
         except BaseException as exc:
             # Catches CancelledError and other BaseException subclasses that bypass
             # the Exception handler, ensuring the root trace is always finalized.
+            self._notify_session_exception(exc)
             if trace_ctx is not None:
                 self._tracer.end_trace(trace_ctx, error=exc)
             self._speed_tracker.record_run_end()
@@ -692,12 +695,25 @@ class BaseAgent(McpAttachableMixin):
         # session keeps the evidence of what the model actually said instead of losing the turn.
         if self.output_schema is None or result.structured is not None:
             return
-        raise OutputSchemaViolationError(
+        error = OutputSchemaViolationError(
             f"Agent '{self.name}' declared an output_schema but produced no valid instance.",
             raw_output=result.output,
             validation_error=self._schema_violation_detail(result),
             stop_reason=str(result.metadata.get("stop_reason") or ""),
         )
+        # This raises after generate_reply()'s own try/except has already returned, so it must
+        # notify the Session boundary itself rather than relying on that method's exception path.
+        self._notify_session_exception(error)
+        raise error
+
+    def _notify_session_exception(self, exc: BaseException) -> None:
+        # Delegate to the Session's own notification boundary so failure capture logic lives in
+        # one place (Session.notify_exception) instead of being re-implemented at every call site.
+        session = self._active_session
+        if session is None:
+            return
+        with contextlib.suppress(Exception):
+            session.notify_exception(exc, source="agent.generate_reply")
 
     @staticmethod
     def _schema_violation_detail(result: AgentResult) -> str | None:
@@ -790,8 +806,10 @@ class BaseAgent(McpAttachableMixin):
                 metadata["queued_prompts_truncated"] = len(self._queued_prompts)
                 self._queued_prompts.clear()
         except Exception as exc:
-            # A drained-run failure must not fail the already-successful primary reply.
+            # A drained-run failure must not fail the already-successful primary reply, but it must
+            # still reach Session.failures — this metadata key is not read by FailureMetadataNormalizer.
             metadata["queued_prompt_error"] = repr(exc)
+            self._notify_session_exception(exc)
             self._queued_prompts.clear()
         finally:
             self._draining_queued_prompts = False
@@ -828,7 +846,10 @@ class BaseAgent(McpAttachableMixin):
             self.record_handoff(produced)
             metadata["handoff"] = produced
         except Exception as exc:
+            # As with the queued-prompt drain above, this metadata key is not read by
+            # FailureMetadataNormalizer, so the Session boundary must be notified directly.
             metadata["handoff_error"] = repr(exc)
+            self._notify_session_exception(exc)
             self.last_handoff = None
 
     def _build_context(
@@ -1011,6 +1032,11 @@ class BaseAgent(McpAttachableMixin):
     def _runtime_middleware(self) -> tuple[AgentMiddleware, ...]:
         # Appends settings-driven and tracing middleware to the user middleware.
         middleware = self.middleware
+        active_session = getattr(self, "_active_session", None)
+        session_failures = getattr(active_session, "failures", None)
+        if self.runtime_type is AgentRuntimeType.LINEAR and session_failures is not None and getattr(session_failures, "has_rules", False):
+            from vidbyte.middleware.builtins import FailureMiddleware
+            middleware = (*middleware, FailureMiddleware(session_failures))
         if self.agent_loop_settings.tool_error_policy is not None:
             from vidbyte.middleware.builtins import ToolErrorPolicyMiddleware
             middleware = (*middleware, ToolErrorPolicyMiddleware(self.agent_loop_settings.tool_error_policy))

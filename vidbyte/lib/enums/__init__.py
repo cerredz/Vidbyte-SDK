@@ -30,6 +30,14 @@ from __future__ import annotations
 from vidbyte.lib.enums.agent_runtime import AgentRuntimeStateKey, AgentRuntimeType
 from vidbyte.lib.enums.config import AgentType, DocumentType
 from vidbyte.lib.enums.context import BudgetPreset, PermissionPreset
+from vidbyte.lib.enums.failure import (
+    FailureCode,
+    FailureDisposition,
+    FailurePhase,
+    FailureSeverity,
+    FailureStatus,
+    RuleErrorMode,
+)
 from vidbyte.lib.enums.cot_events import (
     AssumptionAction,
     BasisType,
@@ -66,6 +74,11 @@ __all__ = [
     "ContextMinimalFanoutSkill",
     "CotEventEnum",
     "DocumentType",
+    "FailureCode",
+    "FailureDisposition",
+    "FailurePhase",
+    "FailureSeverity",
+    "FailureStatus",
     "HypothesisStatus",
     "ImpactLevel",
     "ModelModality",
@@ -80,6 +93,7 @@ __all__ = [
     "Prompt",
     "ReturnableOption",
     "Reversibility",
+    "RuleErrorMode",
     "Skill",
     "SkillEnums",
     "StructuredOutputSupport",
