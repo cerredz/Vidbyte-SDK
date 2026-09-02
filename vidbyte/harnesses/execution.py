@@ -254,12 +254,22 @@ class Harness:
         # Notifies an opted-in observer of a swallowed collection/sink failure; never raises itself.
         if self._on_sink_error is None:
             return
+        to_context_packet = getattr(exc, "to_context_packet", None)
+        if callable(to_context_packet):
+            error_packet = dict(to_context_packet())
+        else:
+            error_packet = {
+                "error_type": type(exc).__name__,
+                "message": self._redactor.safe_error_message(exc),
+                "details": {},
+            }
         event = SinkFailureEvent(
             run_id=self._run_id or "",
             sink_type=type(self._sink).__name__,
             error_type=type(exc).__name__,
             message=self._redactor.safe_error_message(exc),
             occurred_at=_utc_now(),
+            error=error_packet,
         )
         try:
             self._on_sink_error(event)

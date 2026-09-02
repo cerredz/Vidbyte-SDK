@@ -52,6 +52,8 @@ TESTS:
 from __future__ import annotations
 
 import asyncio
+import base64
+import hashlib
 from types import SimpleNamespace
 from typing import Any
 
@@ -68,6 +70,8 @@ from vidbyte.lib.dataclasses.cloud_sinks import AzureBlobCredentials, AzureBlobS
 from vidbyte.lib.errors import ConfigurationError
 
 _HTTP_FORBIDDEN = 403
+_HTTP_CONFLICT = 409
+_HTTP_PRECONDITION_FAILED = 412
 _HTTP_TOO_MANY_REQUESTS = 429
 _HTTP_SERVICE_UNAVAILABLE = 503
 
@@ -89,9 +93,8 @@ class AzureBlobTrajectorySink:
 
     async def write(self, record: TrajectoryRecord) -> None:
         # Encodes one record, guards its size, and uploads it as a single blob keyed by run_id.
+        payload = SinkEncoding.prepare_payload(record, content_encoding=self._config.content_encoding)
         await self._ensure_ready()
-        payload = SinkEncoding.encode_record(record)
-        SinkEncoding.guard_size(payload, run_id=record.run_id)
         await self._put(self._object_key(record.run_id), payload)
 
     def _build_client(self) -> Any:
@@ -102,7 +105,9 @@ class AzureBlobTrajectorySink:
         if self._credentials.connection_string is not None:
             return self._driver.BlobServiceClient.from_connection_string(self._credentials.connection_string.reveal(), retry_total=retry_total)
         if self._credentials.sas_token is not None:
-            account_url = f"{self._credentials.account_url}?{self._credentials.sas_token.reveal()}"
+            sas_token = self._credentials.sas_token.reveal()
+            sas_value = sas_token.decode("utf-8") if isinstance(sas_token, bytes) else sas_token
+            account_url = f"{self._credentials.account_url}?{sas_value}"
             return self._driver.BlobServiceClient(account_url=account_url, retry_total=retry_total)
         identity_driver = self._import_identity_driver()
         return self._driver.BlobServiceClient(account_url=self._credentials.account_url, credential=identity_driver.DefaultAzureCredential(), retry_total=retry_total)
@@ -126,14 +131,83 @@ class AzureBlobTrajectorySink:
         prefix = self._config.prefix.rstrip("/")
         return f"{prefix}/{run_id}.jsonl" if prefix else f"{run_id}.jsonl"
 
+    # @intent preserve-azure-object-contract
+    # Keep Azure's content, condition, governance, and encryption controls in the native upload call.
     async def _put(self, key: str, payload: bytes) -> None:
-        # Issues one atomic, overwriting upload carrying the configured access tier.
         try:
             blob_client = self._client.get_blob_client(container=self._config.container, blob=key)
-            content_settings = self._driver.ContentSettings(content_type="application/x-ndjson")
-            await blob_client.upload_blob(payload, overwrite=True, standard_blob_tier=self._config.tier.value, content_settings=content_settings)
+            await blob_client.upload_blob(payload, **self._upload_kwargs())
         except Exception as exc:
             raise self._translate_error(exc) from exc
+
+    # @intent preserve-azure-upload-options
+    # Compose independent provider option groups so conditional writes never silently become overwrites.
+    def _upload_kwargs(self) -> dict[str, Any]:
+        kwargs: dict[str, Any] = {
+            "overwrite": not self._config.if_none_match,
+            "standard_blob_tier": self._config.tier.value,
+            "content_settings": self._content_settings(),
+        }
+        kwargs.update({"metadata": dict(self._config.metadata)} if self._config.metadata else {})
+        kwargs.update({"tags": dict(self._config.tags)} if self._config.tags else {})
+        if self._config.validate_content:
+            kwargs["validate_content"] = True
+        kwargs.update(self._condition_kwargs())
+        kwargs.update(self._governance_kwargs())
+        kwargs.update(self._encryption_kwargs())
+        return kwargs
+
+    def _content_settings(self) -> Any:
+        return self._driver.ContentSettings(
+            content_type=self._config.content_type,
+            content_encoding=self._config.content_encoding,
+            cache_control=self._config.cache_control,
+            content_disposition=self._config.content_disposition,
+            content_md5=self._config.content_md5,
+        )
+
+    # @intent preserve-azure-preconditions
+    # Map If-Match/If-None-Match and tag conditions to Azure's explicit match-condition enum.
+    def _condition_kwargs(self) -> dict[str, Any]:
+        kwargs: dict[str, Any] = {}
+        if self._config.if_match is not None:
+            kwargs["etag"] = self._config.if_match
+            kwargs["match_condition"] = self._driver.MatchConditions.IfNotModified
+        elif self._config.if_none_match:
+            kwargs["etag"] = "*"
+            kwargs["match_condition"] = self._driver.MatchConditions.IfMissing
+        if self._config.if_tags_match_condition is not None:
+            kwargs["if_tags_match_condition"] = self._config.if_tags_match_condition
+        return kwargs
+
+    # @intent preserve-azure-immutability
+    # Send retention policy and legal hold as one governance group so audit objects are not partially protected.
+    def _governance_kwargs(self) -> dict[str, Any]:
+        kwargs: dict[str, Any] = {}
+        if self._config.immutability_policy_expiry_time is not None:
+            kwargs["immutability_policy"] = self._driver.ImmutabilityPolicy(
+                expiry_time=self._config.immutability_policy_expiry_time,
+                policy_mode=self._config.immutability_policy_mode,
+            )
+        if self._config.legal_hold is not None:
+            kwargs["legal_hold"] = self._config.legal_hold
+        return kwargs
+
+    # @intent preserve-azure-encryption
+    # Derive only the base64 SHA-256 key hash required by Azure; never persist or log the raw customer key.
+    def _encryption_kwargs(self) -> dict[str, Any]:
+        kwargs: dict[str, Any] = {}
+        if self._credentials.customer_provided_key is not None:
+            key_b64 = self._credentials.customer_provided_key.reveal()
+            assert isinstance(key_b64, str)
+            raw_key = base64.b64decode(key_b64)
+            kwargs["cpk"] = self._driver.CustomerProvidedEncryptionKey(
+                key_value=key_b64,
+                key_hash=base64.b64encode(hashlib.sha256(raw_key).digest()).decode("ascii"),
+            )
+        if self._config.encryption_scope is not None:
+            kwargs["encryption_scope"] = self._config.encryption_scope
+        return kwargs
 
     def _translate_error(self, exc: Exception) -> HarnessSinkError:
         # Maps an azure.core exception to the specific HarnessSinkError subclass a caller can act on.
@@ -158,6 +232,11 @@ class AzureBlobTrajectorySink:
                 "Azure denied this write (403). This can mean a policy denial, or that a sas_token has expired — Azure reports both the same way.",
                 details={"container": self._config.container},
             )
+        if status_code in (_HTTP_CONFLICT, _HTTP_PRECONDITION_FAILED):
+            return HarnessSinkAuthorizationError(
+                "Azure rejected the conditional write because the blob ETag, tags, or immutability state did not match.",
+                details={"container": self._config.container, "status_code": status_code},
+            )
         if status_code in (_HTTP_TOO_MANY_REQUESTS, _HTTP_SERVICE_UNAVAILABLE):
             return HarnessSinkUnavailableError(f"Azure was unavailable after the client's own retries were exhausted ({status_code}).", details={"status_code": status_code})
         return HarnessSinkError(f"Azure Blob rejected the request ({status_code}).", details={"status_code": status_code})
@@ -167,13 +246,17 @@ class AzureBlobTrajectorySink:
         # Lazily imports azure-storage-blob and the exception types this sink translates, raising a helpful error when absent.
         try:
             from azure.core.exceptions import ClientAuthenticationError, HttpResponseError, ResourceNotFoundError, ServiceRequestError
-            from azure.storage.blob import ContentSettings
+            from azure.core import MatchConditions
+            from azure.storage.blob import ContentSettings, CustomerProvidedEncryptionKey, ImmutabilityPolicy
             from azure.storage.blob.aio import BlobServiceClient
         except ImportError as exc:
             raise ConfigurationError("AzureBlobTrajectorySink requires the 'azure-storage-blob' package. Install it with `pip install azure-storage-blob`.") from exc
         return SimpleNamespace(
             BlobServiceClient=BlobServiceClient,
             ContentSettings=ContentSettings,
+            CustomerProvidedEncryptionKey=CustomerProvidedEncryptionKey,
+            ImmutabilityPolicy=ImmutabilityPolicy,
+            MatchConditions=MatchConditions,
             ClientAuthenticationError=ClientAuthenticationError,
             HttpResponseError=HttpResponseError,
             ResourceNotFoundError=ResourceNotFoundError,

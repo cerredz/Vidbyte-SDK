@@ -73,6 +73,8 @@ class GcsTrajectorySink:
         # Binds config/credentials, lazily imports google-cloud-storage, and eagerly builds the client.
         self._config = config
         self._credentials = credentials
+        if config.kms_key_name is not None and credentials is not None and credentials.customer_supplied_encryption_key is not None:
+            raise ConfigurationError("kms_key_name and customer_supplied_encryption_key are mutually exclusive.")
         self._driver = self._import_driver()
         self._client = self._build_client()
         self._verify_task: asyncio.Task[None] | None = None
@@ -83,9 +85,8 @@ class GcsTrajectorySink:
 
     async def write(self, record: TrajectoryRecord) -> None:
         # Encodes one record, guards its size, and uploads it as a single blob keyed by run_id.
+        payload = SinkEncoding.prepare_payload(record, content_encoding=self._config.content_encoding)
         await self._ensure_ready()
-        payload = SinkEncoding.encode_record(record)
-        SinkEncoding.guard_size(payload, run_id=record.run_id)
         await self._put(self._object_key(record.run_id), payload)
 
     def _build_client(self) -> Any:
@@ -107,7 +108,14 @@ class GcsTrajectorySink:
     async def _run_preflight(self) -> None:
         # Confirms the bucket exists and is reachable before any write is attempted.
         try:
-            await asyncio.to_thread(self._client.get_bucket, self._config.bucket)
+            if self._config.user_project is None:
+                bucket = await asyncio.to_thread(self._client.get_bucket, self._config.bucket)
+            else:
+                bucket = await asyncio.to_thread(self._client.get_bucket, self._config.bucket, user_project=self._config.user_project)
+            if self._config.bucket_retention_period is not None and bucket is not None:
+                if getattr(bucket, "retention_period", None) != self._config.bucket_retention_period:
+                    bucket.retention_period = self._config.bucket_retention_period
+                    await asyncio.to_thread(bucket.patch)
         except Exception as exc:
             raise self._translate_error(exc) from exc
 
@@ -116,15 +124,64 @@ class GcsTrajectorySink:
         prefix = self._config.prefix.rstrip("/")
         return f"{prefix}/{run_id}.jsonl" if prefix else f"{run_id}.jsonl"
 
+    # @intent preserve-gcs-object-contract
+    # Keep Blob properties and upload preconditions explicit so warehouse metadata and generation safety survive refactors.
     async def _put(self, key: str, payload: bytes) -> None:
-        # Issues one atomic upload carrying the configured storage class and CMEK settings.
         try:
-            bucket = self._client.bucket(self._config.bucket)
-            blob = bucket.blob(key, kms_key_name=self._config.kms_key_name) if self._config.kms_key_name is not None else bucket.blob(key)
-            blob.storage_class = self._config.storage_class.value
-            await asyncio.to_thread(blob.upload_from_string, payload, content_type="application/x-ndjson")
+            blob = self._build_blob(key)
+            self._configure_blob(blob)
+            await asyncio.to_thread(blob.upload_from_string, payload, **self._upload_kwargs())
         except Exception as exc:
             raise self._translate_error(exc) from exc
+
+    # @intent select-gcs-encryption-and-billing
+    # Choose requester billing and exactly one of CMEK/customer-supplied encryption before upload.
+    def _build_blob(self, key: str) -> Any:
+        bucket_kwargs: dict[str, Any] = {}
+        if self._config.user_project is not None:
+            bucket_kwargs["user_project"] = self._config.user_project
+        bucket = self._client.bucket(self._config.bucket, **bucket_kwargs)
+        blob_kwargs: dict[str, Any] = {}
+        if self._config.kms_key_name is not None:
+            blob_kwargs["kms_key_name"] = self._config.kms_key_name
+        if self._credentials is not None and self._credentials.customer_supplied_encryption_key is not None:
+            encryption_key = self._credentials.customer_supplied_encryption_key.reveal()
+            blob_kwargs["encryption_key"] = encryption_key if isinstance(encryption_key, bytes) else encryption_key.encode("utf-8")
+        return bucket.blob(key, **blob_kwargs)
+
+    # @intent preserve-gcs-object-properties
+    # Assign metadata, cache headers, holds, and retention before the SDK creates the object.
+    def _configure_blob(self, blob: Any) -> None:
+        blob.storage_class = self._config.storage_class.value
+        if self._config.metadata:
+            blob.metadata = dict(self._config.metadata)
+        if self._config.cache_control is not None:
+            blob.cache_control = self._config.cache_control
+        if self._config.content_disposition is not None:
+            blob.content_disposition = self._config.content_disposition
+        if self._config.content_encoding is not None:
+            blob.content_encoding = self._config.content_encoding
+        if self._config.event_based_hold is not None:
+            blob.event_based_hold = self._config.event_based_hold
+        if self._config.temporary_hold is not None:
+            blob.temporary_hold = self._config.temporary_hold
+        if self._config.retention_mode is not None and self._config.retain_until_time is not None:
+            blob.retention.mode = self._config.retention_mode
+            blob.retention.retain_until_time = self._config.retain_until_time
+
+    # @intent preserve-gcs-upload-conditions
+    # Return only configured upload fields, preserving GCS defaults for an unconfigured sink.
+    def _upload_kwargs(self) -> dict[str, Any]:
+        upload_kwargs: dict[str, Any] = {}
+        if self._config.content_type is not None:
+            upload_kwargs["content_type"] = self._config.content_type
+        if self._config.checksum is not None:
+            upload_kwargs["checksum"] = self._config.checksum
+        for name in ("if_generation_match", "if_generation_not_match", "if_metageneration_match", "if_metageneration_not_match", "predefined_acl"):
+            value = getattr(self._config, name)
+            if value is not None:
+                upload_kwargs[name] = value
+        return upload_kwargs
 
     def _translate_error(self, exc: Exception) -> HarnessSinkError:
         # Maps a google-cloud-storage/google-auth exception to the specific HarnessSinkError subclass a caller can act on.
@@ -136,6 +193,11 @@ class GcsTrajectorySink:
         if isinstance(exc, self._driver.NotFound):
             return HarnessSinkSetupError(
                 "GCS reported the bucket could not be resolved. This can also mean the credentials lack permission on it — GCS reports both cases as NotFound to avoid leaking bucket existence.",
+                details={"bucket": self._config.bucket},
+            )
+        if isinstance(exc, self._driver.PreconditionFailed):
+            return HarnessSinkAuthorizationError(
+                "GCS rejected the conditional write because the object's generation or metageneration did not match.",
                 details={"bucket": self._config.bucket},
             )
         if isinstance(exc, (self._driver.Forbidden, self._driver.Unauthorized)):
@@ -151,7 +213,7 @@ class GcsTrajectorySink:
     def _import_driver() -> Any:
         # Lazily imports google-cloud-storage and the exception types this sink translates, raising a helpful error when absent.
         try:
-            from google.api_core.exceptions import DeadlineExceeded, Forbidden, NotFound, ServiceUnavailable, TooManyRequests, Unauthorized
+            from google.api_core.exceptions import DeadlineExceeded, Forbidden, NotFound, PreconditionFailed, ServiceUnavailable, TooManyRequests, Unauthorized
             from google.auth.exceptions import DefaultCredentialsError
             from google.cloud import storage
             from google.oauth2 import service_account
@@ -164,6 +226,7 @@ class GcsTrajectorySink:
             NotFound=NotFound,
             Forbidden=Forbidden,
             Unauthorized=Unauthorized,
+            PreconditionFailed=PreconditionFailed,
             TooManyRequests=TooManyRequests,
             ServiceUnavailable=ServiceUnavailable,
             DeadlineExceeded=DeadlineExceeded,

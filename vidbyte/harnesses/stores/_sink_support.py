@@ -45,6 +45,7 @@ TESTS:
 
 from __future__ import annotations
 
+import gzip
 import json
 from dataclasses import asdict
 
@@ -73,6 +74,16 @@ class SinkEncoding:
                 "Trajectory record exceeds the sink's size guard; multipart upload is not implemented by this sink.",
                 details={"run_id": run_id, "actual_bytes": len(payload), "max_bytes": MAX_TRAJECTORY_RECORD_BYTES},
             )
+
+    @staticmethod
+    def prepare_payload(record: TrajectoryRecord, *, content_encoding: str | None = None) -> bytes:
+        """Encode, guard, and optionally gzip a record before any provider preflight."""
+        payload = SinkEncoding.encode_record(record)
+        SinkEncoding.guard_size(payload, run_id=record.run_id)
+        if content_encoding == "gzip":
+            payload = gzip.compress(payload, compresslevel=6, mtime=0)
+            SinkEncoding.guard_size(payload, run_id=record.run_id)
+        return payload
 
 
 __all__ = ["SinkEncoding"]

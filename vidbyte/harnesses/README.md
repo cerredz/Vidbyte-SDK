@@ -214,6 +214,62 @@ turn into a broken run. Full design rationale, the error taxonomy, and the
 per-provider implementation notes are in
 [`docs/design/cloud-trajectory-sinks.md`](../../docs/design/cloud-trajectory-sinks.md).
 
+### Provider-native object controls
+
+The configs preserve each cloud API's useful knobs instead of collapsing them
+into a lowest-common-denominator field set. For example:
+
+```python
+from datetime import datetime, timezone
+
+config = S3SinkConfig(
+    bucket="acme-corp-vidbyte",
+    tags={"cost-center": "research", "lineage": "agent-run"},
+    metadata={"source": "trajectory"},
+    content_type="application/x-ndjson",
+    content_encoding="gzip",
+    cache_control="no-store",
+    sse="aws:kms",
+    kms_key_id="arn:aws:kms:us-east-1:123456789012:key/example",
+    bucket_key_enabled=True,
+    kms_encryption_context={"purpose": "audit"},
+    object_lock_mode="GOVERNANCE",
+    object_lock_retain_until_date=datetime(2027, 1, 1, tzinfo=timezone.utc),
+    if_none_match="*",
+    checksum_algorithm="SHA256",
+    request_payer="requester",
+    use_dualstack_endpoint=True,
+)
+```
+
+S3 `metadata` becomes `x-amz-meta-*` and `tags` becomes the URL-encoded
+`Tagging` header. Use `sse_customer_algorithm="AES256"` with
+`S3Credentials(sse_customer_key=Secret(raw_32_byte_key))` for SSE-C; the raw
+key is sent on each request and must be managed securely. `aws:kms:dsse` adds
+dual-layer KMS encryption. `OUTPOSTS` and `EXPRESS_ONEZONE` are available as
+S3 storage classes, and `Expires`/`WebsiteRedirectLocation` are available for
+the uncommon object-routing cases.
+
+GCS uses `metadata`, content properties, `checksum`, generation/metageneration
+preconditions, `retention_mode`/`retain_until_time`, holds, and optional
+`GcsCredentials(customer_supplied_encryption_key=Secret(raw_32_byte_key))`.
+`kms_key_name` selects CMEK and cannot be combined with that customer key.
+`user_project` charges requester-pays operations to the billing project.
+
+Azure uses `metadata`, `tags`, `content_encoding`, `content_md5`, ETag/tag
+conditions, and `immutability_policy_*`/`legal_hold`. Supply a base64-encoded
+32-byte AES key as `AzureBlobCredentials.customer_provided_key` for customer-
+provided encryption. `validate_content=True` asks the SDK to send a wire MD5
+check; it is not a substitute for a stored warehouse checksum.
+
+Versioning, soft delete, and lifecycle/expiration rules are bucket/account
+policies—not per-object PUT fields—so configure them with S3, GCS, or Azure
+management APIs. GCS's optional `bucket_retention_period` is the one explicit
+bucket-policy operation performed during preflight. The sink does not use
+multipart upload: records over the 100 MiB guard fail before preflight/network
+activity, and the bound should only be raised after checking all provider
+single-PUT ceilings.
+
 ## Relationship to adjacent layers
 
 - `vidbyte.sessions` is the operational persistence layer this envelope binds; a

@@ -58,7 +58,8 @@ asked to add a fourth cloud provider, extend `TrajectorySink`'s family under
   beneath `vidbyte/harnesses` — so it must never import from `vidbyte.harnesses`.
 - **Stage 2 — remote, semantic, at `verify()`/first `write()`:** each sink's
   `_translate_error()` maps a vendor exception to one of five
-  `HarnessSinkError` subclasses in `vidbyte/harnesses/errors.py`:
+  `HarnessSinkError` subclasses owned by `vidbyte/lib/errors` and re-exported
+  from `vidbyte/harnesses/errors.py`:
   `HarnessSinkSetupError` (bucket doesn't exist / wrong region / bad
   endpoint), `HarnessSinkAuthenticationError` (no usable identity),
   `HarnessSinkAuthorizationError` (a valid identity without permission —
@@ -130,6 +131,33 @@ itself is wrapped so a broken observer can never turn into a broken run.
 If adding a new run-lifecycle observer, follow this exact shape — a
 `None`-default constructor parameter invoked from inside an existing fail-open
 `except` clause, itself swallowed. Don't add a second bespoke callback shape.
+
+## Provider-native object controls
+
+The three configs intentionally expose the native vocabulary needed by FinOps,
+lineage, warehouse readers, and audit teams:
+
+- S3 maps `metadata` to `x-amz-meta-*`, `tags` to URL-encoded `Tagging`, and
+  content controls to `ContentType`, `ContentEncoding`, `CacheControl`, and
+  `ContentDisposition`. It also supports SSE-C, `aws:kms:dsse`, KMS encryption
+  context, bucket keys, Object Lock, conditional headers, ACL/grants, checksums,
+  requester-pays, dual-stack/acceleration endpoints, Outposts/Express classes,
+  `Expires`, and `WebsiteRedirectLocation`.
+- GCS maps `metadata` and content properties onto `Blob`, supports a raw
+  customer-supplied encryption key or CMEK, object retention/holds, generation
+  and metageneration preconditions, upload checksums, predefined ACLs, and
+  requester billing through `user_project`. `bucket_retention_period` is
+  explicitly bucket-level and is applied during preflight.
+- Azure maps `metadata`/`tags` and `ContentSettings`, supports a customer-
+  provided AES-256 key, ETag/tag conditions, MD5 validation, immutability
+  policy, legal hold, encryption scope, and the native access tiers.
+
+`content_encoding="gzip"` compresses the JSONL bytes before the provider call
+and sets the provider's content-encoding field. The 100 MiB guard runs before
+preflight and again after compression. Versioning, soft delete, and lifecycle
+rules are bucket/account policies, so configure them with provider management
+APIs; they are not incorrectly modeled as per-object PUT fields. Multipart is
+intentionally absent until the single-PUT bound is proven insufficient.
 
 ## Verification
 

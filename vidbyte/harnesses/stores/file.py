@@ -72,7 +72,7 @@ class FileTrajectorySink:
 
     def _append(self, record: TrajectoryRecord) -> None:
         # Encodes one compact JSON object followed by exactly one newline under a lock.
-        payload = SinkEncoding.encode_record(record)
+        payload = SinkEncoding.prepare_payload(record)
         try:
             with self._lock:
                 self._path.parent.mkdir(parents=True, exist_ok=True)

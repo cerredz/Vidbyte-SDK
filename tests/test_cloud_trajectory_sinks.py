@@ -10,8 +10,12 @@ these tests exercise the sink's own translation/encoding/shape logic only.
 from __future__ import annotations
 
 import asyncio
+import base64
+import gzip
+import hashlib
 import sys
 from dataclasses import asdict
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from typing import Any
 
@@ -95,6 +99,51 @@ class TestSinkConfigValidation:
         credentials = S3Credentials()
         assert credentials.access_key_id is None
         assert credentials.secret_access_key is None
+
+    def test_provider_config_copies_object_maps_and_accepts_retention_controls(self) -> None:
+        tags = {"team": "finops"}
+        metadata = {"lineage": "run"}
+        s3 = S3SinkConfig(bucket="acme-bucket", tags=tags, metadata=metadata)
+        tags["mutated"] = "after-construction"
+        metadata["mutated"] = "after-construction"
+        assert s3.tags == {"team": "finops"}
+        assert s3.metadata == {"lineage": "run"}
+        gcs = GcsSinkConfig(
+            bucket="acme-bucket",
+            retention_mode="Unlocked",
+            retain_until_time=datetime(2026, 9, 3, tzinfo=timezone.utc),
+            if_generation_match=0,
+        )
+        assert gcs.content_type == "application/x-ndjson"
+        azure = AzureBlobSinkConfig(container="acme-container", tags={"team": "finops"})
+        assert azure.tags == {"team": "finops"}
+
+    def test_s3_supports_dsse_and_provider_endpoint_controls(self) -> None:
+        config = S3SinkConfig(
+            bucket="acme-bucket",
+            sse="aws:kms:dsse",
+            storage_class=S3StorageClass.EXPRESS_ONEZONE,
+            use_dualstack_endpoint=True,
+        )
+        assert config.sse == "aws:kms:dsse"
+
+    def test_sse_c_keys_are_length_checked_and_md5_checked(self) -> None:
+        raw_key = b"k" * 32
+        md5 = base64.b64encode(hashlib.md5(raw_key, usedforsecurity=False).digest()).decode("ascii")
+        credentials = S3Credentials(sse_customer_key=Secret(raw_key), sse_customer_key_md5=md5)
+        assert credentials.sse_customer_key is not None
+        with pytest.raises(ConfigurationError):
+            S3Credentials(sse_customer_key=Secret(b"short"))
+
+    def test_customer_key_and_object_conditions_are_validated_per_provider(self) -> None:
+        with pytest.raises(ConfigurationError):
+            S3SinkConfig(bucket="acme-bucket", sse="AES256", sse_customer_algorithm="AES256")
+        with pytest.raises(ConfigurationError):
+            GcsSinkConfig(bucket="acme-bucket", if_generation_match=1, if_generation_not_match=2)
+        with pytest.raises(ConfigurationError):
+            AzureBlobSinkConfig(container="acme-container", if_match="etag", if_none_match=True)
+        with pytest.raises(ConfigurationError):
+            AzureBlobCredentials(account_url="http://acct.blob.core.windows.net", customer_provided_key=Secret(base64.b64encode(b"k" * 32).decode("ascii")))
 
 
 class TestSecret:
@@ -222,10 +271,10 @@ def _fake_s3_driver(client: FakeS3Client, sts_client: FakeStsClient | None = Non
     )
 
 
-def _make_s3_sink(monkeypatch: pytest.MonkeyPatch, client: FakeS3Client, *, config: S3SinkConfig | None = None) -> S3TrajectorySink:
+def _make_s3_sink(monkeypatch: pytest.MonkeyPatch, client: FakeS3Client, *, config: S3SinkConfig | None = None, credentials: S3Credentials | None = None) -> S3TrajectorySink:
     # Constructs a real S3TrajectorySink wired to a fake boto3 driver instead of the real package.
     monkeypatch.setattr(S3TrajectorySink, "_import_driver", staticmethod(lambda: _fake_s3_driver(client)))
-    return S3TrajectorySink(config or S3SinkConfig(bucket="acme-bucket", prefix="runs"))
+    return S3TrajectorySink(config or S3SinkConfig(bucket="acme-bucket", prefix="runs"), credentials=credentials)
 
 
 class TestS3TrajectorySink:
@@ -262,6 +311,97 @@ class TestS3TrajectorySink:
         sink = _make_s3_sink(monkeypatch, client, config=S3SinkConfig(bucket="acme-bucket", storage_class=S3StorageClass.GLACIER_IR))
         await sink.write(_record())
         assert client.put_object_calls[0]["StorageClass"] == "GLACIER_IR"
+
+    @pytest.mark.asyncio
+    async def test_write_maps_s3_object_controls_and_compression(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        client = FakeS3Client()
+        config = S3SinkConfig(
+            bucket="acme-bucket",
+            tags={"team": "fin ops"},
+            metadata={"lineage": "trajectory"},
+            content_type="application/x-ndjson",
+            content_encoding="gzip",
+            cache_control="max-age=60",
+            content_disposition="attachment; filename=run.jsonl.gz",
+            sse="aws:kms",
+            kms_key_id="arn:aws:kms:us-east-1:123456789012:key/example",
+            bucket_key_enabled=True,
+            kms_encryption_context={"purpose": "audit"},
+            object_lock_mode="GOVERNANCE",
+            object_lock_retain_until_date=datetime(2026, 9, 3, tzinfo=timezone.utc),
+            object_lock_legal_hold_status="ON",
+            if_none_match="*",
+            acl="bucket-owner-full-control",
+            grant_read="id=abc",
+            grant_read_acp="id=abc",
+            grant_write_acp="id=abc",
+            checksum_algorithm="SHA256",
+            content_md5=base64.b64encode(hashlib.md5(b"content", usedforsecurity=False).digest()).decode("ascii"),
+            request_payer="requester",
+            use_dualstack_endpoint=True,
+            expires=datetime(2026, 9, 4, tzinfo=timezone.utc),
+            website_redirect_location="https://example.test/redirect",
+        )
+        sink = _make_s3_sink(monkeypatch, client, config=config)
+        await sink.write(_record(output="repeated " * 100))
+        call = client.put_object_calls[0]
+        assert call["Tagging"] == "team=fin+ops"
+        assert call["Metadata"] == {"lineage": "trajectory"}
+        assert call["ContentEncoding"] == "gzip"
+        assert gzip.decompress(call["Body"]).startswith(b"{")
+        assert call["ServerSideEncryption"] == "aws:kms"
+        assert call["BucketKeyEnabled"] is True
+        assert base64.b64decode(call["SSEKMSEncryptionContext"]) == b'{"purpose":"audit"}'
+        assert call["ObjectLockMode"] == "GOVERNANCE"
+        assert call["IfNoneMatch"] == "*"
+        assert call["ChecksumAlgorithm"] == "SHA256"
+        assert call["WebsiteRedirectLocation"] == "https://example.test/redirect"
+
+    @pytest.mark.asyncio
+    async def test_write_maps_s3_dsse(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        client = FakeS3Client()
+        sink = _make_s3_sink(
+            monkeypatch,
+            client,
+            config=S3SinkConfig(
+                bucket="acme-bucket",
+                sse="aws:kms:dsse",
+                kms_key_id="arn:aws:kms:us-east-1:123456789012:key/example",
+            ),
+        )
+        await sink.write(_record())
+        assert client.put_object_calls[0]["ServerSideEncryption"] == "aws:kms:dsse"
+
+    @pytest.mark.asyncio
+    async def test_write_maps_s3_customer_provided_key(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        client = FakeS3Client()
+        sink = _make_s3_sink(
+            monkeypatch,
+            client,
+            config=S3SinkConfig(bucket="acme-bucket", sse_customer_algorithm="AES256"),
+            credentials=S3Credentials(sse_customer_key=Secret(b"k" * 32)),
+        )
+        await sink.write(_record())
+        call = client.put_object_calls[0]
+        assert call["SSECustomerAlgorithm"] == "AES256"
+        assert call["SSECustomerKey"] == b"k" * 32
+        assert base64.b64decode(call["SSECustomerKeyMD5"]) == hashlib.md5(b"k" * 32, usedforsecurity=False).digest()
+
+    @pytest.mark.asyncio
+    async def test_size_guard_runs_before_s3_preflight(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        client = FakeS3Client()
+        sink = _make_s3_sink(monkeypatch, client)
+        with pytest.raises(HarnessSinkPayloadError):
+            await sink.write(_record(output="x" * (MAX_TRAJECTORY_RECORD_BYTES + 1)))
+        assert client.head_bucket_calls == []
+
+    def test_s3_endpoint_flags_reach_botocore_config(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        client = FakeS3Client()
+        driver = _fake_s3_driver(client)
+        monkeypatch.setattr(S3TrajectorySink, "_import_driver", staticmethod(lambda: driver))
+        S3TrajectorySink(S3SinkConfig(bucket="acme-bucket", use_accelerate_endpoint=True))
+        config = next(kwargs["config"] for name, kwargs in driver.boto3.client_calls if name == "s3")
+        assert config["s3"] == {"use_accelerate_endpoint": True}
 
     @pytest.mark.asyncio
     async def test_write_overwrites_rather_than_erroring_on_retried_run_id(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -361,21 +501,32 @@ class FakeGcsBlob:
         self.storage_class: str | None = None
         self._upload_error = upload_error
         self.uploaded_payload: bytes | None = None
+        self.metadata: dict[str, str] | None = None
+        self.cache_control: str | None = None
+        self.content_disposition: str | None = None
+        self.content_encoding: str | None = None
+        self.event_based_hold: bool | None = None
+        self.temporary_hold: bool | None = None
+        self.retention = SimpleNamespace(mode=None, retain_until_time=None)
+        self.upload_kwargs: dict[str, Any] = {}
 
-    def upload_from_string(self, payload: bytes, content_type: str) -> None:
+    def upload_from_string(self, payload: bytes, **kwargs: Any) -> None:
         if self._upload_error is not None:
             raise self._upload_error
         self.uploaded_payload = payload
+        self.upload_kwargs = kwargs
 
 
 class FakeGcsBucket:
     def __init__(self, upload_error: Exception | None) -> None:
         self._upload_error = upload_error
         self.blobs: list[FakeGcsBlob] = []
+        self.blob_kwargs: list[dict[str, Any]] = []
 
-    def blob(self, key: str, kms_key_name: str | None = None) -> FakeGcsBlob:
+    def blob(self, key: str, **kwargs: Any) -> FakeGcsBlob:
         blob = FakeGcsBlob(self._upload_error)
         self.blobs.append(blob)
+        self.blob_kwargs.append(kwargs)
         return blob
 
 
@@ -384,12 +535,16 @@ class FakeGcsClient:
         self.get_bucket_error: Exception | None = None
         self.upload_error: Exception | None = None
         self.bucket_instance: FakeGcsBucket | None = None
+        self.preflight_bucket = SimpleNamespace(retention_period=None, patch=lambda: None)
+        self.get_bucket_calls: list[str] = []
 
-    def get_bucket(self, name: str) -> None:
+    def get_bucket(self, name: str, **kwargs: Any) -> Any:
+        self.get_bucket_calls.append(name)
         if self.get_bucket_error is not None:
             raise self.get_bucket_error
+        return self.preflight_bucket
 
-    def bucket(self, name: str) -> FakeGcsBucket:
+    def bucket(self, name: str, **kwargs: Any) -> FakeGcsBucket:
         self.bucket_instance = FakeGcsBucket(self.upload_error)
         return self.bucket_instance
 
@@ -402,16 +557,17 @@ def _fake_gcs_driver(client: FakeGcsClient) -> SimpleNamespace:
         NotFound=type("NotFound", (_FakeGcsApiError,), {}),
         Forbidden=type("Forbidden", (_FakeGcsApiError,), {}),
         Unauthorized=type("Unauthorized", (_FakeGcsApiError,), {}),
+        PreconditionFailed=type("PreconditionFailed", (_FakeGcsApiError,), {}),
         TooManyRequests=type("TooManyRequests", (_FakeGcsApiError,), {}),
         ServiceUnavailable=type("ServiceUnavailable", (_FakeGcsApiError,), {}),
         DeadlineExceeded=type("DeadlineExceeded", (_FakeGcsApiError,), {}),
     )
 
 
-def _make_gcs_sink(monkeypatch: pytest.MonkeyPatch, client: FakeGcsClient, *, config: GcsSinkConfig | None = None) -> GcsTrajectorySink:
+def _make_gcs_sink(monkeypatch: pytest.MonkeyPatch, client: FakeGcsClient, *, config: GcsSinkConfig | None = None, credentials: GcsCredentials | None = None) -> GcsTrajectorySink:
     driver = _fake_gcs_driver(client)
     monkeypatch.setattr(GcsTrajectorySink, "_import_driver", staticmethod(lambda: driver))
-    sink = GcsTrajectorySink(config or GcsSinkConfig(bucket="acme-bucket"))
+    sink = GcsTrajectorySink(config or GcsSinkConfig(bucket="acme-bucket"), credentials=credentials)
     return sink
 
 
@@ -423,6 +579,54 @@ class TestGcsTrajectorySink:
         await sink.write(_record())
         assert client.bucket_instance is not None
         assert client.bucket_instance.blobs[0].storage_class == "COLDLINE"
+
+    @pytest.mark.asyncio
+    async def test_write_maps_gcs_metadata_controls_conditions_checksum_and_compression(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        client = FakeGcsClient()
+        config = GcsSinkConfig(
+            bucket="acme-bucket",
+            metadata={"lineage": "trajectory", "team": "finops"},
+            content_encoding="gzip",
+            cache_control="no-store",
+            content_disposition="attachment; filename=run.jsonl.gz",
+            if_generation_match=0,
+            if_metageneration_match=1,
+            checksum="crc32c",
+            predefined_acl="bucketOwnerFullControl",
+            user_project="billing-project",
+        )
+        sink = _make_gcs_sink(monkeypatch, client, config=config)
+        await sink.write(_record(output="repeated " * 100))
+        assert client.bucket_instance is not None
+        blob = client.bucket_instance.blobs[0]
+        assert blob.metadata == {"lineage": "trajectory", "team": "finops"}
+        assert blob.content_encoding == "gzip"
+        assert blob.cache_control == "no-store"
+        assert blob.content_disposition == "attachment; filename=run.jsonl.gz"
+        assert gzip.decompress(blob.uploaded_payload or b"").startswith(b"{")
+        assert blob.upload_kwargs["if_generation_match"] == 0
+        assert blob.upload_kwargs["if_metageneration_match"] == 1
+        assert blob.upload_kwargs["checksum"] == "crc32c"
+        assert blob.upload_kwargs["predefined_acl"] == "bucketOwnerFullControl"
+
+    @pytest.mark.asyncio
+    async def test_write_maps_gcs_customer_key_and_bucket_retention(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        client = FakeGcsClient()
+        config = GcsSinkConfig(bucket="acme-bucket", bucket_retention_period=3600)
+        credentials = GcsCredentials(customer_supplied_encryption_key=Secret(b"k" * 32))
+        sink = _make_gcs_sink(monkeypatch, client, config=config, credentials=credentials)
+        await sink.write(_record())
+        assert client.preflight_bucket.retention_period == 3600
+        assert client.bucket_instance is not None
+        assert client.bucket_instance.blob_kwargs[0]["encryption_key"] == b"k" * 32
+
+    @pytest.mark.asyncio
+    async def test_size_guard_runs_before_gcs_preflight(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        client = FakeGcsClient()
+        sink = _make_gcs_sink(monkeypatch, client)
+        with pytest.raises(HarnessSinkPayloadError):
+            await sink.write(_record(output="x" * (MAX_TRAJECTORY_RECORD_BYTES + 1)))
+        assert client.get_bucket_calls == []
 
     @pytest.mark.asyncio
     async def test_translate_error_maps_not_found_to_setup_error_with_ambiguity_noted(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -511,9 +715,13 @@ class FakeAzureBlobServiceClient:
 
 def _fake_azure_driver(preflight_error: Exception | None = None, upload_error: Exception | None = None) -> SimpleNamespace:
     client = FakeAzureBlobServiceClient(preflight_error, upload_error)
+    match_conditions = SimpleNamespace(IfNotModified="IfNotModified", IfMissing="IfMissing")
     return SimpleNamespace(
         BlobServiceClient=SimpleNamespace(from_connection_string=lambda *a, **k: client),
         ContentSettings=lambda **kwargs: kwargs,
+        CustomerProvidedEncryptionKey=lambda **kwargs: kwargs,
+        ImmutabilityPolicy=lambda **kwargs: kwargs,
+        MatchConditions=match_conditions,
         ClientAuthenticationError=_FakeAzureAuthError,
         HttpResponseError=_FakeHttpResponseError,
         ResourceNotFoundError=_FakeAzureResourceNotFoundError,
@@ -544,6 +752,59 @@ class TestAzureBlobTrajectorySink:
         sink = AzureBlobTrajectorySink(AzureBlobSinkConfig(container="acme-container", tier=AzureBlobTier.COOL), credentials=AzureBlobCredentials(account_url="https://acct.blob.core.windows.net", connection_string=Secret("conn-str")))
         await sink.write(_record())
         assert service_client.last_blob_client.upload_calls[0]["standard_blob_tier"] == "Cool"
+
+    @pytest.mark.asyncio
+    async def test_write_maps_azure_metadata_tags_content_conditions_and_immutability(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        driver, service_client = _fake_azure_driver()
+        monkeypatch.setattr(AzureBlobTrajectorySink, "_import_driver", staticmethod(lambda: driver))
+        config = AzureBlobSinkConfig(
+            container="acme-container",
+            metadata={"lineage": "trajectory"},
+            tags={"team": "finops"},
+            content_encoding="gzip",
+            cache_control="no-store",
+            content_disposition="attachment; filename=run.jsonl.gz",
+            content_md5=hashlib.md5(b"content", usedforsecurity=False).digest(),
+            validate_content=True,
+            if_match="etag-1",
+            if_tags_match_condition='"team" = \'finops\'',
+            immutability_policy_expiry_time=datetime(2026, 9, 3, tzinfo=timezone.utc),
+            immutability_policy_mode="Locked",
+            legal_hold=True,
+        )
+        credentials = AzureBlobCredentials(
+            account_url="https://acct.blob.core.windows.net",
+            connection_string=Secret("conn-str"),
+            customer_provided_key=Secret(base64.b64encode(b"k" * 32).decode("ascii")),
+        )
+        sink = AzureBlobTrajectorySink(config, credentials=credentials)
+        await sink.write(_record(output="repeated " * 100))
+        call = service_client.last_blob_client.upload_calls[0]
+        assert call["metadata"] == {"lineage": "trajectory"}
+        assert call["tags"] == {"team": "finops"}
+        assert call["overwrite"] is True
+        assert call["etag"] == "etag-1"
+        assert call["match_condition"] == "IfNotModified"
+        assert call["if_tags_match_condition"] == '"team" = \'finops\''
+        assert call["legal_hold"] is True
+        assert call["validate_content"] is True
+        assert call["immutability_policy"]["policy_mode"] == "Locked"
+        assert call["cpk"]["key_value"] == base64.b64encode(b"k" * 32).decode("ascii")
+        assert call["content_settings"]["content_encoding"] == "gzip"
+
+    @pytest.mark.asyncio
+    async def test_write_maps_azure_if_missing_condition(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        driver, service_client = _fake_azure_driver()
+        monkeypatch.setattr(AzureBlobTrajectorySink, "_import_driver", staticmethod(lambda: driver))
+        sink = AzureBlobTrajectorySink(
+            AzureBlobSinkConfig(container="acme-container", if_none_match=True),
+            credentials=AzureBlobCredentials(account_url="https://acct.blob.core.windows.net", connection_string=Secret("conn-str")),
+        )
+        await sink.write(_record())
+        call = service_client.last_blob_client.upload_calls[0]
+        assert call["overwrite"] is False
+        assert call["etag"] == "*"
+        assert call["match_condition"] == "IfMissing"
 
     @pytest.mark.asyncio
     async def test_translate_error_maps_403_to_authorization_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -622,6 +883,17 @@ class TestOnSinkErrorHook:
         harness = _loaded_harness(sink=_FailingSink(RuntimeError("upload failed, api_key=sk-live-abc123")), on_sink_error=events.append)
         await harness.execute({"topic": "x"})
         assert "sk-live-abc123" not in events[0].message
+
+    @pytest.mark.asyncio
+    async def test_event_attaches_complete_shared_sink_error_packet(self) -> None:
+        events: list[SinkFailureEvent] = []
+        error = HarnessSinkAuthorizationError("write denied", details={"provider": "s3"})
+        harness = _loaded_harness(sink=_FailingSink(error), on_sink_error=events.append)
+        await harness.execute({"topic": "x"})
+        assert events[0].error["error_type"] == "HarnessSinkAuthorizationError"
+        assert "description" in events[0].error
+        assert "fix_approaches" in events[0].error
+        assert events[0].error["details"] == {"provider": "s3"}
 
     @pytest.mark.asyncio
     async def test_hook_fires_for_a_collection_failure_not_only_a_sink_write_failure(self) -> None:

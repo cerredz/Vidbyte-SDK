@@ -133,10 +133,9 @@ class SinkFailureEvent:
     """Credential-free record of one swallowed collection/sink failure.
 
     Built by Harness._report_sink_failure() and handed to the optional
-    on_sink_error callback. `message` has already passed through
-    HarnessRedactor.safe_error_message(); `sink_type`/`error_type` are class
-    names only, never instance state, so nothing sink-instance-specific
-    (bucket name, endpoint, credentials) can leak through this event.
+    on_sink_error callback. `error` is the complete safe diagnostic packet
+    authored by the shared error class; it contains no raw exception, payload,
+    or credential material.
     """
 
     run_id: str
@@ -144,6 +143,7 @@ class SinkFailureEvent:
     error_type: str
     message: str
     occurred_at: str
+    error: Mapping[str, Any] = field(default_factory=dict)
 
 
 __all__ = [

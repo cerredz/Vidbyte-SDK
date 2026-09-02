@@ -120,7 +120,8 @@ Sinks are NOT SessionStores: the SessionStore is typed to the agent checkpoint d
 
 ## Errors
 
-Use the typed families in `vidbyte/harnesses/errors.py`: `HarnessConfigurationError`
+Use the typed families in `vidbyte/harnesses/errors.py` and `vidbyte/lib/errors`:
+`HarnessConfigurationError`
 (and `HarnessCredentialConfigError`, `HarnessVersionError`, `HarnessFileReferenceError`)
 before/at load; `HarnessExecutionError`/`HarnessTimeoutError` at run; `HarnessSinkError`
 for sink I/O — including its five cloud-specific subclasses
@@ -130,7 +131,10 @@ for sink I/O — including its five cloud-specific subclasses
 diagnostic fields — see skills/harnesses/cloud-trajectory-sinks.md); a missing vendor
 SDK raises `vidbyte.lib.errors.ConfigurationError`, not a new harness-specific type;
 `HarnessRegistrationError`/`HarnessDuplicateRegistrationError` for the registry. Keep
-every public error re-exported from the package `__init__`.
+every public error re-exported from the package `__init__`. Sink errors are owned
+by `vidbyte.lib.errors` and re-exported by the harness package; attach their full
+safe `to_context_packet()` to `SinkFailureEvent.error` when reporting a swallowed
+collection failure.
 
 ## Verification
 

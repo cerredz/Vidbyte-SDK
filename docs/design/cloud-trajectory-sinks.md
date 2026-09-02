@@ -3,7 +3,7 @@
 **Status:** Implemented
 **Author:** Claude
 **Created:** 2026-08-31
-**Last Updated:** 2026-08-31
+**Last Updated:** 2026-09-02
 
 ---
 
@@ -20,14 +20,14 @@ Enterprise buyers — AWS-run ones especially — want a harness's output to lan
 - Let a customer choose their storage tier natively per provider (S3 storage class, GCS storage class, Azure Blob access tier) and encryption settings, without inventing one fake cross-vendor abstraction.
 - Support keyless/short-lived credentials as the preferred path for every provider (AWS cross-account role assumption, GCP Application Default Credentials / Workload Identity, Azure Managed Identity / SAS token), with static keys as an explicit fallback.
 - Guarantee credentials never cross into a `HarnessSpec`, a `TrajectoryRecord`, or any hashed/persisted structure — only ever passed as runtime Python objects.
-- Handle every failure category in the checklist below (Section 4) with a specific, typed, richly-diagnosed error, matching the existing `harnesses/errors.py` convention.
+- Handle every failure category in the checklist below (Section 4) with a specific, typed, richly-diagnosed error owned by the dependency-light `vidbyte/lib/errors` layer and re-exported by `harnesses/errors.py`.
 - Preserve the documented fail-open guarantee: a cloud sink failure must never fail a harness run, exactly like the existing file/memory sinks today.
 - Close the silent-failure gap that fail-open currently creates, via an opt-in, backward-compatible observability hook — without changing default behavior for any existing caller.
 - Cover every new class with unit tests using mocked vendor clients (this repo's `harnesses/` package currently ships with zero dedicated test files under an "approved no-tests workflow" — Section 14 explains why this PR deviates from that for cloud-credential code specifically).
 
 ### Non-Goals
 - Not building multipart/chunked upload. A size guard rejects a record before the network call instead; see Section 6.3 and Section 14.
-- Not exposing the full API surface of any vendor SDK (versioning, lifecycle policies, ACLs, object tagging beyond what encryption requires). The sink is a write-only export target, not a general-purpose cloud storage client.
+- Not exposing the full API surface of any vendor SDK. Destination-wide versioning, soft delete, lifecycle, and retention policies remain management-plane concerns; the sink exposes the per-object controls that belong on a single write, plus conditional writes so callers can safely use those destination policies.
 - Not building a universal cross-vendor "storage tier" enum. Each sink exposes that provider's real tier vocabulary.
 - Not adding retry-loop code of our own. Each vendor SDK's native retry/backoff configuration is used instead (see Section 6, "Network & availability").
 - Not adding cloud storage as an MCP-attachable tool — that already exists (`AwsS3MCP`, `GcpStorageMCP`, `AzureBlobMCP` in `vidbyte/lib/config/mcp_presets.py`) and serves a different purpose (an agent calling storage as a tool mid-run, not the harness envelope auto-exporting its own output).
@@ -56,18 +56,18 @@ This follows directly from a prior investigation (recorded in this session's mem
 2. Each sink's `Config` dataclass exposes that provider's native storage tier as a required-or-defaulted enum field (`S3StorageClass`, `GcsStorageClass`, `AzureBlobTier`), plus server-side encryption settings where the provider supports customer-managed keys.
 3. Each sink accepts credentials as a separate, distinct object from its `Config` — never merged — and falls back to that provider's default/keyless credential resolution when no explicit credentials object is supplied.
 4. `S3SinkConfig` supports cross-account role assumption (`role_arn`, `external_id`) as a first-class option, not a workaround.
-5. A retried `write()` call for the same `run_id` overwrites the same object idempotently — no "already exists" error.
+5. A retried `write()` call for the same `run_id` overwrites the same object idempotently by default; provider-native conditional fields are available when callers need no-clobber or compare-and-swap semantics.
 6. A record whose encoded size exceeds `MAX_TRAJECTORY_RECORD_BYTES` (Section 6.1) raises before any network call is attempted.
 7. `HarnessClient` (`vidbyte/harnesses/client.py`) gains `s3_sink()`, `gcs_sink()`, and `azure_blob_sink()` factory methods, matching the shape of the existing `file_sink()`/`memory_sink()`.
 8. `Harness.__init__` gains an optional `on_sink_error: Callable[[SinkFailureEvent], None] | None = None` parameter. When set, a swallowed collection/sink failure invokes it with a credential-free, structured event before `_maybe_collect()` returns. When unset (the default), behavior is byte-for-byte identical to today.
-9. Every failure category in the checklist (Setup & configuration, Authentication & authorization, Network & availability, Data & encoding, Concurrency & idempotency) raises one of five new `HarnessSinkError` subclasses (Section 6.5), each carrying the same rich diagnostic fields (`description`, `expected_vs_actual`, `blast_radius`, `possible_causes`, `fix_approaches`, `doc_links`, `test_files`) every existing `harnesses/errors.py` class already carries.
+9. Every failure category in the checklist (Setup & configuration, Authentication & authorization, Network & availability, Data & encoding, Concurrency & idempotency) raises one of five new `HarnessSinkError` subclasses (Section 6.7), each carrying a complete safe diagnostic packet. The hierarchy lives in `vidbyte/lib/errors`; `harnesses/errors.py` re-exports it for compatibility.
 10. A missing vendor SDK (`boto3` / `google-cloud-storage` / `azure-storage-blob`) raises `vidbyte.lib.errors.ConfigurationError` naming the exact `pip install` command — matching `SupabaseSessionStore._import_driver()` exactly, not a new error type.
 
 ### Non-Functional Requirements
 - **Security:** credentials are structurally distinct from config (separate dataclasses), secret fields are wrapped in a masked `Secret` value type so an accidental `print()`/log statement cannot leak them, and no credential object is ever passed through `HarnessConfigLoader`/`harness.yaml` (which gets hashed into `spec_id` and persisted — `HarnessCredentialConfigError` already exists to police the YAML path; this design keeps sink credentials entirely outside that path).
 - **Reliability:** a cloud sink failure never fails a harness run (existing invariant, preserved exactly).
 - **Observability:** a cloud sink failure is no longer silent by default *when the caller opts in* via `on_sink_error`; silent-by-default behavior is preserved for callers who don't opt in, so this is additive, not a behavior change.
-- **Concurrency:** two concurrent `write()` calls on one sink instance (e.g. two harness runs sharing one long-lived sink) must not run preflight verification twice or interleave badly; two different processes writing the same `run_id` must not corrupt either object (guaranteed by construction — every write is a single, whole-object `PutObject`/`upload_blob` call, never a partial append).
+- **Concurrency:** two concurrent `write()` calls on one sink instance (e.g. two harness runs sharing one long-lived sink) must not run preflight verification twice or interleave badly; two different processes writing the same `run_id` must not corrupt either object (guaranteed by construction — every write is a single, whole-object `PutObject`/`upload_blob` call, never a partial append). Provider-native conditional fields opt into no-clobber or compare-and-swap behavior when overwrite-by-default is unsafe.
 - **Performance:** no additional latency for existing sinks (file/memory) — the shared encoding helper introduced in Section 6.2 is a pure refactor of logic `FileTrajectorySink` already runs.
 
 ---
@@ -90,18 +90,18 @@ Harness.execute()
 Each new sink follows the same three-stage shape:
 
 1. **Construction (sync, no network):** build a `Config` dataclass (validates syntactically in `__post_init__`, raising `vidbyte.lib.errors.ConfigurationError` — same layer, same error type the dataclass's own guide prescribes) and an optional `Credentials` object; lazily import the vendor SDK (raising `ConfigurationError` with a `pip install` message if missing, exactly like `SupabaseSessionStore`); construct the vendor client.
-2. **Verification (async, first-write-or-explicit, cached):** an internal `_ensure_ready()` — or an explicit `verify()` a caller can invoke eagerly — confirms the bucket/container exists and is writable, translating any remote failure into one of the five new `HarnessSinkError` subclasses. Guarded by an `asyncio.Lock` so concurrent first-writes on one instance don't double-verify.
-3. **Write (async, one object per call):** encode the record via the shared `SinkEncoding` helper (also used by the refactored `FileTrajectorySink`), guard its size, and issue exactly one `PutObject`/`upload_blob`/`upload_from_string` call keyed by `run_id`. Any vendor exception is translated into the matching typed error before propagating — `_maybe_collect()` still swallows it, but now it's a specific, diagnosable type instead of an opaque one, and (if the caller opted in) `on_sink_error` sees it.
+2. **Verification (async, first-write-or-explicit, cached):** an internal `_ensure_ready()` — or an explicit `verify()` a caller can invoke eagerly — confirms the bucket/container exists and is writable, translating any remote failure into one of the five new `HarnessSinkError` subclasses. A shared `asyncio.Task` memoizes the in-flight preflight without introducing a banned lock primitive.
+3. **Write (async, one object per call):** encode the record via the shared `SinkEncoding` helper (also used by the refactored `FileTrajectorySink`), guard its size, and issue exactly one `PutObject`/`upload_blob`/`upload_from_string` call keyed by `run_id`. Encoding and the 100 MiB guard happen before preflight, so an oversized record causes zero provider activity. Any vendor exception is translated into the matching typed error before propagating — `_maybe_collect()` still swallows it, but now it's a specific, diagnosable type instead of an opaque one, and (if the caller opted in) `on_sink_error` sees it.
 
 This keeps the change entirely additive at the harness layer: `Harness.execute()`, `TrajectoryCollector`, and the `TrajectorySink` protocol itself are untouched. The only modification to `execution.py` is the observability hook, which is `None`-by-default and therefore invisible to every existing caller.
 
 Key design decisions:
 - **Config vs. Credentials as separate types**, not one merged object, so the non-secret half stays freely loggable/inspectable and the secret half is structurally distinguishable at a glance in every constructor signature.
 - **One JSONL object per run, not one growing object per bucket.** S3/GCS/Azure have no cheap append primitive; since `write()` is already called exactly once per finished run (never mid-run), one object per `run_id` maps perfectly onto a single atomic PUT, sidesteps the multi-process-append limitation `FileTrajectorySink`'s own docstring already admits to, and matches the many-small-JSONL-files-under-a-prefix shape data lake tooling (Athena, Redshift COPY, Snowflake external stages) already expects.
-- **Five new error subclasses under the existing `HarnessSinkError`, not a `details["category"]` field on the existing one.** `harnesses/errors.py`'s own `COMMON MODIFICATION PATTERNS` section states the rule directly: *"Add one subclass per distinct failure mode."* This repo already has nine such subclasses; this design adds five more following the identical shape.
+- **Five new error subclasses under the existing `HarnessSinkError`, not a `details["category"]` field on the existing one.** `vidbyte/lib/errors` owns the hierarchy so dataclasses and stores can share it without an upward import; `harnesses/errors.py` re-exports the types for compatibility. The classes follow the existing rule: one subclass per distinct failure mode, each carrying a complete safe context packet.
 - **A two-stage validation split**, driven by the "Strict Config Dataclasses" field-guide rule that a dataclass's `__post_init__` must raise the same error type its old call site raised, combined with `AGENTS.md`'s one-directional layering rule (`vidbyte/lib/dataclasses` may not import from the `vidbyte/harnesses` domain layer above it):
   - **Stage 1 — local, syntactic, at config construction:** `vidbyte.lib.errors.ConfigurationError` (empty bucket name, invalid character, `storage_class` not a member of its enum, negative `max_retries`).
-  - **Stage 2 — remote, semantic, at verify()/first-write:** the five new `harnesses/errors.py` subclasses (bucket doesn't exist, wrong region, access denied, credentials expired, throttled after retries).
+  - **Stage 2 — remote, semantic, at verify()/first-write:** the five new `vidbyte.lib.errors` subclasses (bucket doesn't exist, wrong region, access denied, credentials expired, throttled after retries), re-exported from `harnesses.errors`.
 
 ---
 
@@ -149,6 +149,8 @@ class S3StorageClass(str, Enum):
     GLACIER = "GLACIER"
     DEEP_ARCHIVE = "DEEP_ARCHIVE"
     ONEZONE_IA = "ONEZONE_IA"
+    OUTPOSTS = "OUTPOSTS"
+    EXPRESS_ONEZONE = "EXPRESS_ONEZONE"
 
 class GcsStorageClass(str, Enum):
     STANDARD = "STANDARD"
@@ -165,7 +167,7 @@ class AzureBlobTier(str, Enum):
 @dataclass(frozen=True, slots=True)
 class Secret:
     """Wraps one credential value so repr()/str() never renders it."""
-    value: str
+    value: str | bytes
     def __post_init__(self) -> None: ...        # rejects empty string
     def __repr__(self) -> str: ...               # always returns "Secret(<redacted>)"
     def reveal(self) -> str: ...                 # the only way to read the real value
@@ -177,7 +179,7 @@ class S3SinkConfig:
     region: str | None = None
     endpoint_url: str | None = None              # S3-compatible vendors: R2, MinIO, B2, Spaces
     storage_class: S3StorageClass = S3StorageClass.STANDARD
-    sse: Literal["AES256", "aws:kms"] | None = None
+    sse: Literal["AES256", "aws:kms", "aws:kms:dsse"] | None = None
     kms_key_id: str | None = None
     role_arn: str | None = None                  # cross-account AssumeRole target
     external_id: str | None = None                # confused-deputy protection for AssumeRole
@@ -220,6 +222,21 @@ class AzureBlobCredentials:
     sas_token: Secret | None = None                  # scoped, time-limited — preferred over connection_string
     def __post_init__(self) -> None: ...             # both None => DefaultAzureCredential (managed identity / AAD)
 ```
+
+The implemented configs extend these shapes with provider-native object
+controls. `S3SinkConfig` adds `metadata`, `tags`, content headers, SSE-C
+algorithm, `aws:kms:dsse`, KMS encryption context, bucket-key selection,
+Object Lock, `IfMatch`/`IfNoneMatch`, ACL/grants, checksums, requester-pays,
+accelerate/dual-stack endpoints, `Expires`, and
+`WebsiteRedirectLocation`; `S3Credentials` carries the raw 32-byte SSE-C key
+and optional MD5. `GcsSinkConfig` adds metadata/content properties,
+generation/metageneration conditions, checksum, holds, object retention,
+`bucket_retention_period`, and `user_project`; `GcsCredentials` carries the
+optional raw customer-supplied key. `AzureBlobSinkConfig` adds metadata/tags,
+content settings, MD5 validation, ETag/tag conditions, immutability/legal
+hold, and encryption scope; `AzureBlobCredentials` carries an optional
+base64-encoded 32-byte customer-provided key. These fields stay out of
+`HarnessSpec` and are never serialized into the run manifest.
 
 #### Logic / Algorithm
 1. Each `*SinkConfig.__post_init__` strips and validates its bucket/container name: non-empty, within `MIN_BUCKET_NAME_LENGTH`–`MAX_BUCKET_NAME_LENGTH`, matches a conservative `^[a-z0-9.-]+$`-style pattern. This is deliberately *not* the full AWS/GCS/Azure naming spec (consecutive dots, IP-address-shaped names, per-region reserved prefixes) — the real source of truth for "does this bucket actually exist and work" is the Stage 2 preflight check against the live API, not a hand-rolled regex trying to replicate vendor documentation.
@@ -292,14 +309,14 @@ class S3TrajectorySink:
 ```
 
 #### Logic / Algorithm
-1. `__init__`: stores `config`/`credentials`; calls `_import_driver()` (lazy `import boto3`, `botocore.config.Config`, `botocore.exceptions`; on `ImportError`, raises `vidbyte.lib.errors.ConfigurationError("S3TrajectorySink requires the 'boto3' package. Install it with `pip install boto3`.")` — exact mirror of `SupabaseSessionStore`); calls `_build_client()` (sync, no network — botocore client construction doesn't itself call the network); creates an `asyncio.Lock()` for verification and a `_verified = False` flag.
+1. `__init__`: stores `config`/`credentials`; calls `_import_driver()` (lazy `import boto3`, `botocore.config.Config`, `botocore.exceptions`; on `ImportError`, raises `vidbyte.lib.errors.ConfigurationError("S3TrajectorySink requires the 'boto3' package. Install it with `pip install boto3`.")` — exact mirror of `SupabaseSessionStore`); calls `_build_client()` (sync, no network — botocore client construction doesn't itself call the network); creates a nullable `asyncio.Task` slot for verification.
 2. `_build_client()`: constructs a `botocore.config.Config(retries={"max_attempts": config.max_retries, "mode": "adaptive"}, region_name=config.region)`; if `config.role_arn` is set, calls `_assume_role_if_configured` first to obtain temporary credentials via STS (`sts.assume_role(RoleArn=..., RoleSessionName=f"vidbyte-{uuid4().hex[:8]}", ExternalId=config.external_id)`), using whichever base credentials resolved (explicit static keys or boto3's own default chain); constructs `boto3.client("s3", endpoint_url=config.endpoint_url, config=that_config, **resolved_credential_kwargs)`. When `credentials` is `None` and `role_arn` is unset, no explicit credential kwargs are passed at all — boto3's own default chain (env vars → shared config file → IAM role) resolves it, which is the preferred keyless path.
 3. `verify()`: calls `_run_preflight()` directly (explicit, caller-invoked, not cached against `_ensure_ready`'s cache — callable any time, e.g. right after building the harness, to fail fast before a long run).
 4. `_run_preflight()`: runs `head_bucket(Bucket=config.bucket)` via `asyncio.to_thread` (boto3 is synchronous); on success, sets nothing itself (caller sets `_verified`); on failure, calls `_translate_error` and raises.
-5. `write(record)`: calls `_ensure_ready()`; encodes via `SinkEncoding.encode_record`; guards via `SinkEncoding.guard_size`; computes `_object_key(record.run_id)`; calls `_put`.
+5. `write(record)`: encodes and guards via `SinkEncoding.prepare_payload` before calling `_ensure_ready()`, computes `_object_key(record.run_id)`, and calls `_put`. This ordering makes the 100 MiB rejection a zero-network operation, including when preflight would otherwise be the first remote call.
 6. `_ensure_ready()`: if `_verified`, returns immediately; otherwise acquires the lock, re-checks `_verified` inside it (double-checked locking — avoids two concurrent first-writes both running preflight), runs `_run_preflight()`, sets `_verified = True`.
 7. `_object_key(run_id)`: `f"{self._config.prefix.rstrip('/')}/{run_id}.jsonl"` if `prefix` is non-empty, else `f"{run_id}.jsonl"`.
-8. `_put(key, payload)`: builds `put_object` kwargs (`Bucket`, `Key`, `Body=payload`, `StorageClass=config.storage_class.value`, and `ServerSideEncryption`/`SSEKMSKeyId` when `config.sse` is set); calls it via `asyncio.to_thread`; on any `botocore.exceptions.ClientError`/`NoCredentialsError`/`EndpointConnectionError`/`ConnectTimeoutError`, calls `_translate_error` and raises the result.
+8. `_put(key, payload)`: builds `put_object` kwargs from four explicit groups: object identity/content (`StorageClass`, content headers, metadata, URL-encoded tags, expiry/redirect), retention (`ObjectLock*`), encryption (`AES256`, `aws:kms`, `aws:kms:dsse`, KMS context/bucket key, or per-request SSE-C), and safety/billing (`IfMatch`/`IfNoneMatch`, ACL/grants, checksums, `RequestPayer`). It calls the synchronous SDK via `asyncio.to_thread`; on any vendor exception, `_translate_error` raises the matching shared error type.
 9. `_translate_error(exc)`: inspects the exception type and, for `ClientError`, `exc.response["Error"]["Code"]` / `exc.response["ResponseMetadata"]["HTTPStatusCode"]`, mapping:
    - `NoSuchBucket`, `PermanentRedirect` (wrong region) → `HarnessSinkSetupError`
    - `NoCredentialsError`, `ExpiredToken`, `InvalidAccessKeyId`, `SignatureDoesNotMatch`, AssumeRole failures → `HarnessSinkAuthenticationError`
@@ -317,7 +334,7 @@ class S3TrajectorySink:
 - Session token expires between `verify()` and a `write()` minutes later → caught by `_put`'s own `_translate_error` at write time (expiry isn't and can't be checked proactively) → `HarnessSinkAuthenticationError`.
 - Bucket requires `aws:kms` SSE but `config.sse` is unset → `AccessDenied` → `HarnessSinkAuthorizationError`, `fix_approaches` explicitly names "set sse='aws:kms' and kms_key_id" as the likely fix, not just "check your IAM policy."
 - Two harness runs finish within the same millisecond with different `run_id`s → two independent `PutObject` calls to two different keys; no collision possible by construction.
-- The same `run_id` retried after a transient failure → overwrites the same key with (expected-identical) content; no "already exists" check is performed, matching the required idempotent-retry behavior.
+- The same `run_id` retried after a transient failure → overwrites the same key with (expected-identical) content by default; configure provider-native generation, ETag, or `IfNoneMatch` conditions when a retry must not clobber a newer object.
 - Corporate egress firewall blocks `*.amazonaws.com` → `EndpointConnectionError`/`ConnectTimeoutError` → `HarnessSinkUnavailableError`, message names this as a likely cause distinct from a generic timeout.
 - `endpoint_url` set to a Cloudflare R2 endpoint with the wrong signature version → R2-specific `ClientError` surfaces through the same `_translate_error` path; `S3SinkConfig`'s docstring documents that `endpoint_url` targets any S3-compatible vendor and that `region_name` still must be set (R2 requires `"auto"`).
 
@@ -351,8 +368,8 @@ class GcsTrajectorySink:
 Mirrors S3 exactly except:
 1. `_import_driver()` lazily imports `google.cloud.storage` and `google.api_core.exceptions`; missing → `ConfigurationError("...requires the 'google-cloud-storage' package. Install it with `pip install google-cloud-storage`.")`.
 2. `_build_client()`: if `credentials.service_account_json_path` is set, loads explicit credentials via `google.oauth2.service_account.Credentials.from_service_account_file(path)` and passes them to `storage.Client(credentials=...)`; otherwise constructs `storage.Client()` with no arguments, letting google-auth resolve Application Default Credentials (env var, `gcloud` user login, or the GCE/GKE/Cloud Run metadata server — Workload Identity, keyless) automatically.
-3. `_run_preflight()`: `client.get_bucket(config.bucket)` via `asyncio.to_thread` (the google-cloud-storage client is synchronous, same as boto3).
-4. `_put()`: builds a `Blob(key, bucket)`, sets `blob.storage_class = config.storage_class.value` and `kms_key_name` when configured, calls `blob.upload_from_string(payload, content_type="application/x-ndjson")` via `asyncio.to_thread`.
+3. `_run_preflight()`: `client.get_bucket(config.bucket)` via `asyncio.to_thread` (the google-cloud-storage client is synchronous, same as boto3). When `bucket_retention_period` is configured, the returned bucket's retention period is reconciled with that value and patched; this is the only explicit bucket-policy mutation in the sink.
+4. `_put()`: builds a `Blob(key, bucket)` with either `kms_key_name` or the per-request customer-supplied encryption key, sets storage class/metadata/cache/content-encoding/disposition/holds/retention properties, then calls `upload_from_string` with content type, checksum, generation/metageneration preconditions, and optional predefined ACL. `user_project` is passed to bucket construction and preflight for requester-pays billing.
 5. `_translate_error(exc)` maps `google.api_core.exceptions.NotFound` → `HarnessSinkSetupError`; `Forbidden`/`Unauthorized` → distinguished the same way as S3 (`Forbidden` with valid-looking credentials → `HarnessSinkAuthorizationError`; credential resolution itself failing, e.g. `google.auth.exceptions.DefaultCredentialsError` → `HarnessSinkAuthenticationError`); `TooManyRequests`/`ServiceUnavailable`/`DeadlineExceeded` → `HarnessSinkUnavailableError`.
 
 #### Edge Cases & Error Handling
@@ -394,7 +411,7 @@ Note the one intentional signature difference from S3/GCS: `credentials` is **re
 1. `_import_driver()` lazily imports `azure.storage.blob.aio` (the **native async client** — unlike boto3/google-cloud-storage, `azure-storage-blob` ships a first-party asyncio surface, so this sink does not use `asyncio.to_thread` at all) plus `azure.core.exceptions`; if `credentials.connection_string`/`sas_token` are both unset, also lazily imports `azure.identity.aio.DefaultAzureCredential`. Missing package → `ConfigurationError("...requires the 'azure-storage-blob' package (and 'azure-identity' for keyless auth). Install with `pip install azure-storage-blob azure-identity`.")`.
 2. `_build_client()`: if `connection_string` is set, `BlobServiceClient.from_connection_string(credentials.connection_string.reveal())`; elif `sas_token` is set, `BlobServiceClient(account_url=f"{credentials.account_url}?{credentials.sas_token.reveal()}")`; else `BlobServiceClient(account_url=credentials.account_url, credential=DefaultAzureCredential())` (managed identity / AAD — the keyless path). Retry policy is passed via `retry_total=config.max_retries` on the client constructor, Azure's own native retry configuration.
 3. `_run_preflight()`: `await container_client.get_container_properties()` — genuinely async, no thread wrapping needed.
-4. `_put()`: `await blob_client.upload_blob(payload, overwrite=True, standard_blob_tier=config.tier.value, content_settings=ContentSettings(content_type="application/x-ndjson"))`. `overwrite=True` is what makes the idempotent-retry requirement explicit and intentional here, rather than implicit the way S3/GCS's plain object-replace semantics make it.
+4. `_put()`: builds `ContentSettings` from content type/encoding/cache/disposition/MD5 and calls `upload_blob` with metadata, tags, the native access tier, optional wire validation, ETag/tag conditions, immutability policy/legal hold, customer-provided encryption key, and encryption scope. `overwrite=True` remains the default, but `if_none_match=True` switches to `If-Missing` so callers can reject an existing blob.
 5. `_translate_error(exc)` maps `azure.core.exceptions.ResourceNotFoundError` → `HarnessSinkSetupError`; `ClientAuthenticationError` → `HarnessSinkAuthenticationError`; `HttpResponseError` with `status_code == 403` → `HarnessSinkAuthorizationError`; `ServiceRequestError` (network-level) and `HttpResponseError` with `status_code in (429, 503)` → `HarnessSinkUnavailableError`.
 
 #### Edge Cases & Error Handling
@@ -406,13 +423,50 @@ Note the one intentional signature difference from S3/GCS: `credentials` is **re
 
 ---
 
-### 6.7 `vidbyte/harnesses/errors.py` (MODIFY)
+### 6.6.1 Provider-native object contract
 
-**File(s):** `vidbyte/harnesses/errors.py`
+The sink configs preserve each provider's real object API instead of collapsing
+important governance controls into a lowest-common-denominator abstraction.
+Unset fields are omitted from the request so the original PR behavior and
+provider defaults remain intact.
+
+| Concern | S3 | GCS | Azure Blob |
+|---|---|---|---|
+| Lineage/cost metadata | `metadata` -> `x-amz-meta-*`; `tags` -> URL-encoded `Tagging` | `metadata` -> `blob.metadata` | `metadata` and `tags` on `upload_blob` |
+| Content controls | `ContentType`, `ContentEncoding`, `CacheControl`, `ContentDisposition` | blob content properties and upload `content_type` | `ContentSettings` |
+| Customer key | `SSECustomerAlgorithm`, `SSECustomerKey`, `SSECustomerKeyMD5` | `Blob(encryption_key=...)` | `CustomerProvidedEncryptionKey` as `cpk` |
+| Managed encryption | `AES256`, `aws:kms`, `aws:kms:dsse`, KMS context, bucket key | `kms_key_name` or customer key | customer-provided key, encryption scope, or account defaults |
+| Retention | `ObjectLockMode`, `ObjectLockRetainUntilDate`, legal hold | object retention mode/time and holds | `immutability_policy`, legal hold |
+| Safe concurrency | `IfMatch` / `IfNoneMatch` | generation and metageneration preconditions | ETag match conditions and tag condition |
+| Integrity/billing | checksum algorithm, `ContentMD5`, `RequestPayer` | upload checksum, `user_project` | `content_md5`, `validate_content` |
+
+S3 also exposes canned ACL/grants, `Expires`, `WebsiteRedirectLocation`,
+dual-stack and transfer-acceleration endpoint flags, and `OUTPOSTS`/
+`EXPRESS_ONEZONE` storage classes. `aws:kms:dsse` is a distinct encryption
+mode; bucket keys and KMS encryption context are modeled for `aws:kms`.
+SSE-C is deliberately separate from managed encryption: the caller supplies a
+raw 32-byte key on each request and is responsible for secure key lifecycle.
+
+GCS's `bucket_retention_period` is applied during preflight because retention
+policy is a bucket property, not an object PUT field. GCS soft delete and
+object versioning, S3 versioning, Azure soft delete, and every lifecycle or
+expiration rule are likewise destination policies. Configure those with the
+provider management plane; the sink does not mutate them during object upload.
+
+`content_encoding="gzip"` compresses the JSONL bytes before the provider call
+and sets the corresponding content header/property. The shared encoder guards
+the uncompressed representation and then the compressed bytes before
+preflight/network activity. Multipart/chunked upload remains intentionally
+absent: if the 100 MiB guard is reached, raise the bound only after confirming
+all provider single-PUT ceilings and downstream reader support.
+
+### 6.7 `vidbyte/lib/errors` and `vidbyte/harnesses/errors.py` (MODIFY)
+
+**File(s):** `vidbyte/lib/errors/base.py`, `vidbyte/lib/errors/__init__.py`, and `vidbyte/harnesses/errors.py`
 **Type:** Modified
 
 #### What it does
-Adds the five new `HarnessSinkError` subclasses referenced throughout Section 6, each following the exact existing shape (`description`, `expected_vs_actual`, `blast_radius`, `possible_causes`, `fix_approaches`, `doc_links`, `test_files`, inherited `to_context_packet()`).
+Adds the five new `HarnessSinkError` subclasses to the dependency-light shared error layer, each following the exact existing shape (`description`, `expected_vs_actual`, `blast_radius`, `possible_causes`, `fix_approaches`, `doc_links`, `test_files`, inherited `to_context_packet()`). `vidbyte/harnesses/errors.py` re-exports them for compatibility; it does not own the provider error hierarchy.
 
 #### Interface / API
 ```python
@@ -536,8 +590,9 @@ class SinkFailureEvent:
     error_type: str
     message: str
     occurred_at: str
+    error: Mapping[str, Any]  # complete safe packet from HarnessSinkError.to_context_packet()
 ```
-`message` is passed through `HarnessRedactor.safe_error_message()` (already exists, already used elsewhere for exactly this purpose) before being placed on the event — so even if a vendor exception's string representation happened to echo back part of a request (some SDKs include request parameters in error text), the existing credential-assignment redaction pass still runs over it. `sink_type`/`error_type` are `type(sink).__name__`/`type(exc).__name__` — class names, never instance state, so nothing sink-instance-specific (bucket name, endpoint, credentials) can leak through them either.
+`message` is passed through `HarnessRedactor.safe_error_message()` (already exists, already used elsewhere for exactly this purpose) before being placed on the event — so even if a vendor exception's string representation happened to echo back part of a request (some SDKs include request parameters in error text), the existing credential-assignment redaction pass still runs over it. `error` contains the complete safe diagnostic packet (`expected`, `actual`, causes, repairs, docs, tests, and provider-safe runtime details) when the exception implements `to_context_packet()`, with a minimal type/message/details fallback for unrelated collection failures. `sink_type`/`error_type` are `type(sink).__name__`/`type(exc).__name__` — class names, never instance state, so nothing sink-instance-specific (bucket name, endpoint, credentials) can leak through them either.
 
 #### Logic / Algorithm
 1. `Harness.__init__` stores `self._on_sink_error = on_sink_error`.
@@ -568,7 +623,14 @@ class SinkFailureEvent:
     error_type: str
     message: str
     occurred_at: str
+    error: Mapping[str, Any]
 ```
+
+`error` is the complete safe packet returned by `HarnessSinkError.to_context_packet()`;
+it includes the expected/actual boundary, runtime-safe details, likely causes,
+repair approaches, related docs, and relevant tests. Unrelated collection
+failures use a minimal type/message/details packet. No credentials or raw
+payloads are included.
 
 **Migration strategy:** N/A — purely additive, no existing data affected. Not persisted anywhere; it exists only as an in-process callback argument.
 
@@ -598,7 +660,7 @@ N/A — this SDK has no network-facing API surface of its own; `vidbyte/harnesse
 | CREATE | `vidbyte/harnesses/stores/azure_blob.py` | `AzureBlobTrajectorySink` (Section 6.6) |
 | CREATE | `tests/test_cloud_trajectory_sinks.py` | Unit/integration tests (Section 10) |
 | CREATE | `scripts/test_cloud_trajectory_sinks.py` | Phase 5 standalone verification script |
-| MODIFY | `vidbyte/harnesses/errors.py` | +5 `HarnessSinkError` subclasses (Section 6.7) |
+| MODIFY | `vidbyte/lib/errors/base.py`, `vidbyte/lib/errors/__init__.py`, `vidbyte/harnesses/errors.py` | Shared +5 `HarnessSinkError` subclasses and compatibility re-exports (Section 6.7) |
 | MODIFY | `vidbyte/harnesses/stores/file.py` | Shares `SinkEncoding`; raises `HarnessSinkPayloadError` (Section 6.8) |
 | MODIFY | `vidbyte/harnesses/stores/__init__.py` | Exports the three new sinks (Section 6.9) |
 | MODIFY | `vidbyte/harnesses/client.py` | +`s3_sink()`/`gcs_sink()`/`azure_blob_sink()` (Section 6.10) |
@@ -706,8 +768,8 @@ No new dependency is added to `[project.optional-dependencies]` in `pyproject.to
 
 ## 13. Open Questions
 
-- [ ] Should `S3SinkConfig`/`GcsSinkConfig`/`AzureBlobSinkConfig` validation constants (bucket name length bounds) live in the new `vidbyte/lib/constants/cloud_sinks.py`, or is there a preference to fold them into an existing constants file instead? This design creates a new file matching the one-file-per-feature-area precedent (`cot_events.py`, `runners.py`), but confirm before implementation.
-- [ ] Is `MAX_TRAJECTORY_RECORD_BYTES = 100 MiB` the right default, or should it be a per-sink-instance override rather than a fixed shared constant? Current design treats it as a shared, non-configurable guard; making it configurable is a small addition if wanted.
+- [x] Validation bounds live in `vidbyte/lib/constants/cloud_sinks.py`, matching the one-file-per-feature-area precedent.
+- [x] `MAX_TRAJECTORY_RECORD_BYTES = 100 MiB` remains a shared guard. It is checked before preflight/network activity, and multipart is deferred until a real workload demonstrates that a larger single-PUT bound is necessary.
 - [ ] Should the manual QA cases in Section 10 be run against real Vidbyte-owned or engineer-owned cloud accounts before merge, or is mocked-only coverage sufficient for the initial PR, with manual verification tracked as a follow-up?
 - [ ] Should `HarnessSinkAuthenticationError`/`HarnessSinkAuthorizationError` also be added as importable names from `vidbyte.harnesses` (the top-level package `__init__.py`), matching how deeply callers are expected to catch specific sink failures versus the broader `HarnessSinkError`?
 
@@ -743,13 +805,11 @@ No new dependency is added to `[project.optional-dependencies]` in `pyproject.to
 
 ## Summary
 
-**File changes:** 8 new files, 8 modified files, 0 deleted files (16 total).
+**Implementation status:** Complete. The provider-native object contract, shared error packets, preflight-before-write flow, and focused tests described above are implemented. The design remains intentionally write-only: destination lifecycle, versioning, soft delete, and bucket/account retention policies are configured outside an object PUT.
 
 **Key risks:**
 - Getting each vendor's error-code-to-`HarnessSinkError`-subclass mapping right depends on details (exact `botocore` error codes, `google.api_core.exceptions` class names, Azure `status_code` values) that are best double-checked against each SDK's current version during implementation, not assumed from this doc alone.
 - The `AzureBlobTrajectorySink` async-native-client vs. `asyncio.to_thread`-wrapped-sync-client asymmetry (Section 6.6) is a real implementation detail that needs care — mixing the two styles inconsistently across the three sinks would be an easy, subtle bug.
-- Section 13's open questions (constant placement, guard configurability, real-account manual QA scope, top-level error exports) are small but worth resolving before or during implementation rather than guessed.
+- Real-account manual QA remains deployment-specific because the automated suite uses mocked vendor clients; the provider mappings are covered by focused request-shape tests and the public configuration exports are smoke-tested.
 
 **Deviations from local convention, called out explicitly rather than silently:** this PR adds real pytest tests to `vidbyte/harnesses/`, the first in that package, departing from its "approved no-tests workflow" precedent — reasoning in Alternative 6.
-
-Requesting explicit approval before proceeding to Phase 3 (worktree setup) and implementation.
