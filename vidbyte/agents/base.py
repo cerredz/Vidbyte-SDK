@@ -22,12 +22,12 @@ from __future__ import annotations
 
 import asyncio
 import inspect
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
 from vidbyte.agents.mixins import McpAttachableMixin
 from vidbyte.agents.pricing import UsageRollup, UsageTracker
-from vidbyte.agents.speed import AgentSpeedRollup, AgentSpeedTracker
+from vidbyte.agents.speed import AgentSpeedHistory, AgentSpeedRollup, AgentSpeedTracker
 from vidbyte.agents.settings import AgentLoopSettings
 from vidbyte.agents.types import AgentCard, AgentInput, AgentMessage
 from vidbyte.context.manager import ContextManager
@@ -37,6 +37,7 @@ from vidbyte.context.handoff import Handoff, MinimalHandoff
 from vidbyte.lib.dataclasses.agents import AgentForkSettings, AgentMetadata, AgentRunnerConfig, AgentRuntimeConfig, FallbackModel, PauseDuration
 from vidbyte.lib.dataclasses.runner import RunnerHandle
 from vidbyte.lib.dataclasses.sessions import SESSION_SCHEMA_VERSION, RunState
+from vidbyte.lib.dataclasses.speed import RecordStreamInput
 from vidbyte.lib.dataclasses.strategies import AgentResult
 from vidbyte.lib.dataclasses.trace import TraceOption
 from vidbyte.lib.constants import RUNNER_TYPE_TEXT
@@ -738,6 +739,25 @@ class BaseAgent(McpAttachableMixin):
     def get_speed_stats(self) -> AgentSpeedRollup:
         """Return the live or final speed rollup for the current or most recent run."""
         return self._speed_tracker.rollup()
+
+    def get_speed_history(self) -> AgentSpeedHistory:
+        """Return bounded speed summaries for completed runs of this agent."""
+        # @intent expose-bounded-speed-history
+        # History is separate from the current-run rollup so reset does not erase it.
+        return self._speed_tracker.history()
+
+    def measure_stream(self, source: Iterable[str], *, dispatched_at: float | None = None) -> Iterator[str]:
+        """Yield an existing stream unchanged while adding chunk timing to speed stats."""
+        # @intent expose-opt-in-stream-speed
+        # Streaming stays opt-in; this helper only wraps a stream the caller already owns.
+        return self._speed_tracker.measure_stream(
+            RecordStreamInput(
+                provider=str(self.runner_config.provider or "unknown"),
+                model=str(self.runner_config.model_name or "unknown"),
+                source=source,
+                dispatched_at=self._speed_tracker.now() if dispatched_at is None else dispatched_at,
+            )
+        )
 
     async def arun_sequentially(self, prompts: Sequence[str | AgentInput], **options: Any) -> list[AgentMessage]:
         # Runs each prompt through generate_reply in order, preserving self.history across all calls.

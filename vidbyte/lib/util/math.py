@@ -92,5 +92,55 @@ class MathHelper:
         """Return the key with the largest value in scored, or None when scored is empty."""
         return max(scored, key=lambda key: scored[key]) if scored else None
 
+    @staticmethod
+    def min_or_none(values: Sequence[float]) -> float | None:
+        """Return the minimum value in values, or None when values is empty."""
+        return min(values) if values else None
+
+    @staticmethod
+    def stdev_or_none(values: Sequence[float]) -> float | None:
+        """Return population standard deviation, or None when values is empty."""
+        return statistics.pstdev(values) if values else None
+
+    @staticmethod
+    def sum_or_none(values: Sequence[float]) -> float | None:
+        """Return the sum of values, or None when values is empty."""
+        return sum(values) if values else None
+
+    @staticmethod
+    def weighted_rate_or_none(numerator: Sequence[float], denominator_seconds: Sequence[float]) -> float | None:
+        """Return total numerator divided by total positive seconds, or None when unavailable."""
+        seconds = sum(value for value in denominator_seconds if value > 0)
+        return sum(numerator) / seconds if numerator and seconds > 0 else None
+
+    @staticmethod
+    def interval_union_seconds(intervals: Sequence[tuple[float, float]]) -> float | None:
+        """Return elapsed seconds covered by the union of intervals, or None when empty."""
+        if not intervals:
+            return None
+        ordered = sorted(intervals)
+        start, end = ordered[0]
+        total = 0.0
+        for next_start, next_end in ordered[1:]:
+            if next_start > end:
+                total += end - start
+                start, end = next_start, next_end
+            else:
+                end = max(end, next_end)
+        return total + end - start
+
+    @staticmethod
+    def max_concurrency(intervals: Sequence[tuple[float, float]]) -> int | None:
+        """Return the greatest number of intervals active at one time, or None when empty."""
+        if not intervals:
+            return None
+        events = [(start, 1) for start, _ in intervals] + [(end, -1) for _, end in intervals]
+        active = 0
+        maximum = 0
+        for _, delta in sorted(events, key=lambda event: (event[0], -event[1])):
+            active += delta
+            maximum = max(maximum, active)
+        return maximum
+
 
 __all__ = ["MathHelper"]
