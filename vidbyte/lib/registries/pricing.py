@@ -12,9 +12,6 @@ Architecture:
       rate metadata with short/long context fields.
     - PROVIDER_PRICING: Built-in rate table keyed by provider then model string.
     - PRICING_SOURCE_URL / PRICING_AS_OF: Audit metadata for the live source.
-    - CACHE_PRICING_SOURCE_URLS / CACHE_PRICING_SOURCES_AS_OF: Per-provider
-      citation of the first-party documentation page describing that provider's
-      cache-pricing mechanics.
     - ModelPricingRegistry: Resolves (provider, model) to rates with prefix
       matching and supports caller overrides.
 Key Functions:
@@ -157,27 +154,6 @@ PROVIDER_PRICING: dict[ModelProvider, dict[str, ModelPricing]] = {
     },
 }
 
-CACHE_PRICING_SOURCES_AS_OF: str = "2026-08-29"
-
-# First-party documentation for each provider's cache-pricing mechanics, checked
-# on CACHE_PRICING_SOURCES_AS_OF. ModelProvider.META is deliberately absent: no
-# first-party Meta Model API documentation page could be located for Muse Spark's
-# cache pricing despite the $0.15/M cache_read_per_million rate above being
-# corroborated by multiple independent third-party sources. Omitted rather than
-# guessed, per the same discipline docs/design/openai-gpt-5-6-catalog-pricing.md
-# applies to the rate table itself.
-CACHE_PRICING_SOURCE_URLS: dict[ModelProvider, str] = {
-    ModelProvider.OPENAI: "https://developers.openai.com/api/docs/guides/prompt-caching",
-    ModelProvider.ANTHROPIC: "https://platform.claude.com/docs/en/build-with-claude/prompt-caching",
-    ModelProvider.GEMINI: "https://ai.google.dev/gemini-api/docs/caching",
-    ModelProvider.XAI: "https://docs.x.ai/developers/advanced-api-usage/prompt-caching",
-    ModelProvider.DEEPSEEK: "https://api-docs.deepseek.com/guides/kv_cache/",
-    ModelProvider.GLM: "https://docs.z.ai/guides/capabilities/cache",
-    ModelProvider.MINIMAX: "https://platform.minimax.io/docs/api-reference/text-prompt-caching",
-    ModelProvider.KIMI: "https://platform.moonshot.ai/docs/guide/use-context-caching-feature-of-kimi-api",
-    ModelProvider.OPENROUTER: "https://openrouter.ai/docs/guides/best-practices/prompt-caching",
-}
-
 
 class ModelPricingRegistry:
     """Resolves (provider, model) pairs to ModelPricing with override support."""
@@ -227,8 +203,6 @@ class ModelPricingRegistry:
 
 
 __all__ = [
-    "CACHE_PRICING_SOURCES_AS_OF",
-    "CACHE_PRICING_SOURCE_URLS",
     "ModelPricing",
     "ModelPricingRegistry",
     "OPENAI_GPT56_TIER_RATES",
