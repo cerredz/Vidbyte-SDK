@@ -9,6 +9,9 @@ Purpose:
 Architecture:
     - BaseAgent: Primary agent class inheriting MCP attachment capabilities and
       exposing shared async execution and pause behavior.
+    - Owns one UsageTracker (cost) and one AgentSpeedTracker (latency) for its
+      lifetime, both reset at the top of every generate_reply() and threaded
+      into the AgentRuntime it constructs for AgentRuntimeType.LINEAR.
 Relations:
     Inherits from McpAttachableMixin. Used by registries, harnesses, and
     multi-agent orchestration. Agent-bound built-ins are wired in
@@ -25,6 +28,7 @@ from typing import TYPE_CHECKING, Any
 
 from vidbyte.agents.mixins import McpAttachableMixin
 from vidbyte.agents.pricing import UsageRollup, UsageTracker
+from vidbyte.agents.speed import AgentSpeedRollup, AgentSpeedTracker
 from vidbyte.agents.settings import AgentLoopSettings
 from vidbyte.agents.types import AgentCard, AgentInput, AgentMessage
 from vidbyte.context.manager import ContextManager
@@ -223,6 +227,7 @@ class BaseAgent(McpAttachableMixin):
         # default rate table prices every model the agent can run. Per-call usage
         # is observable mid-run through MiddlewareContext.model_usage.
         self._usage_tracker = UsageTracker()
+        self._speed_tracker = AgentSpeedTracker()
         self._behavior_view: Any = None
         self._active_session: Session | None = None
         self._queued_prompts: list[str] = []
@@ -594,6 +599,8 @@ class BaseAgent(McpAttachableMixin):
             input_context_items, input_context_manager = self._normalize_input_context(message)
             self._active_prompt = prompt
             self._usage_tracker.reset()
+            self._speed_tracker.reset()
+            self._speed_tracker.record_run_start()
             self._behavior_view = None
             runner, runner_type = self._runner_for_model()
             trace_ctx = self._tracer.start_trace(
@@ -629,10 +636,12 @@ class BaseAgent(McpAttachableMixin):
             self._record_agent_stop(trace_ctx, result)
             if trace_ctx is not None:
                 self._tracer.end_trace(trace_ctx, output=_format_trace_output(result))
+            self._speed_tracker.record_run_end()
         except Exception as exc:
             self._notify_session_exception(exc)
             if trace_ctx is not None:
                 self._tracer.end_trace(trace_ctx, error=exc)
+            self._speed_tracker.record_run_end()
             self._active_prompt = ""
             raise AgentExecutionError(
                 f"Agent '{self.name}' failed to generate a reply.",
@@ -644,6 +653,7 @@ class BaseAgent(McpAttachableMixin):
             self._notify_session_exception(exc)
             if trace_ctx is not None:
                 self._tracer.end_trace(trace_ctx, error=exc)
+            self._speed_tracker.record_run_end()
             self._active_prompt = ""
             raise
         self._active_prompt = ""
@@ -740,6 +750,10 @@ class BaseAgent(McpAttachableMixin):
     def get_cost_usd(self) -> float | None:
         """Return total known USD cost for the current or most recent run, or None."""
         return self.get_usage().cost_usd
+
+    def get_speed_stats(self) -> AgentSpeedRollup:
+        """Return the live or final speed rollup for the current or most recent run."""
+        return self._speed_tracker.rollup()
 
     async def arun_sequentially(self, prompts: Sequence[str | AgentInput], **options: Any) -> list[AgentMessage]:
         # Runs each prompt through generate_reply in order, preserving self.history across all calls.
@@ -997,6 +1011,7 @@ class BaseAgent(McpAttachableMixin):
         if self.runtime_type is AgentRuntimeType.LINEAR:
             kwargs["output_contract"] = self._output_contract_with_schema()
             kwargs["usage_tracker"] = self._usage_tracker
+            kwargs["speed_tracker"] = self._speed_tracker
             kwargs["fallback"] = self.fallback
 
         return runtime_cls(

@@ -1,14 +1,14 @@
 """FILE: lint/core/ruff.py
 
 PURPOSE: Runs pinned Ruff once and adapts records to native SDK lint rules.
-ROLE IN CODEBASE: S001-S050 share analyzer work while retaining separate baselines.
+ROLE IN CODEBASE: S001-S002, S007-S008, S025-S054 share analyzer work while retaining separate baselines.
 ARCHITECTURE NOTE: Isolated selectors prevent ambient repo/user config drift.
 FUNCTION INVENTORY: RuffStore.records(); RuffBackedRule check/explain.
 WHAT NOT TO DO: Never accept a missing analyzer, malformed JSON, or nonzero engine error.
 COMMON MODIFICATION PATTERNS: Change scope, detection, and diagnostics together; rerun the focused rule.
 KNOWN EDGE CASES: Existing debt is count-ratcheted; analyzer and parse failures fail closed.
 RELATED DOCS: docs/design/sdk-agent-facing-lint-suite.md
-TESTS: Exercised by S001-S008 and S026-S050 through python lint/run.py.
+TESTS: Exercised by S001-S002, S007-S008, and S025-S054 through python lint/run.py.
 """
 
 from __future__ import annotations
@@ -23,7 +23,16 @@ from lint.core.diagnostic import Diagnostic, Finding
 from lint.core.discovery import SourceCatalog, repo_root
 from lint.core.registry import Rule
 
-SELECTORS = "ANN,B904,B905,C901,DTZ,E4,E7,E9,F,PLR0912,PLR0915,RUF006,RUF012,RUF007,RUF008,RUF009,RUF015,RUF017,RUF018,RUF019,RUF024,RUF043,RUF100,RUF200,PGH003,PGH004,TID251,TID252,PLW1514,TRY002,TRY401,G004,ASYNC109,ASYNC210,ASYNC230,ASYNC251,S506,S324"
+SELECTORS = (
+    "ANN,B904,B905,C901,DTZ,E4,E7,E9,F,PLR0912,PLR0915,RUF006,RUF012,"
+    "RUF007,RUF008,RUF009,RUF015,RUF017,RUF018,RUF019,RUF024,RUF043,RUF100,RUF200,"
+    "PGH003,PGH004,TID251,TID252,PLW1514,TRY002,TRY401,G004,"
+    "ASYNC109,ASYNC210,ASYNC230,ASYNC251,S506,S324,"
+    "I001,UP006,UP007,UP035,UP045,"
+    "ASYNC100,ASYNC105,ASYNC110,ASYNC220,ASYNC221,"
+    "B017,B023,B028,B039,"
+    "S105,S106,S107,S108,S301,S302,S501"
+)
 
 
 class RuffAnalyzerError(RuntimeError):

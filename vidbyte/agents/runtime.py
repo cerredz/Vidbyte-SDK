@@ -3,17 +3,19 @@
 PURPOSE:
     Owns direct agent execution: per-attempt loop state, middleware hook
     dispatch, context-window algorithm callbacks, model invocation, tool
-    authorization/execution, usage accounting, fallback transitions, and final
-    result metadata. Do not place runner construction or public agent input
-    normalization here; those responsibilities belong to ``base.py``.
+    authorization/execution, usage and speed accounting, fallback transitions,
+    and final result metadata. Do not place runner construction or public
+    agent input normalization here; those responsibilities belong to
+    ``base.py``.
 
 ROLE IN CODEBASE:
     Called by ``vidbyte/agents/base.py`` for linear agent runs and called
     directly by the Reflexion and multi-provider grader runtime algorithms for
     middleware-wrapped model calls. Calls ``vidbyte/middleware``, context
     managers and algorithms, provider runner handles, tool catalogs/security,
-    tracing, and usage tracking. ``BaseAgentRuntimeLoopState`` owns mutable
-    state for exactly one runtime attempt so nested runs do not share counters.
+    tracing, usage tracking, and speed tracking. ``BaseAgentRuntimeLoopState``
+    owns mutable state for exactly one runtime attempt so nested runs do not
+    share counters.
 
 ARCHITECTURE NOTE:
     This is the imperative boundary between reusable agent contracts and model
@@ -58,6 +60,7 @@ KNOWN EDGE CASES:
 RELATED DOCS:
     https://github.com/cerredz/Vidbyte-SDK/blob/main/docs/design/agent-runtime-loop-state.md
     https://github.com/cerredz/Vidbyte-SDK/blob/main/field-guide/vidbyte-sdk/runtime-boundaries.md
+    https://github.com/cerredz/Vidbyte-SDK/blob/main/docs/design/agent-speed-tracking.md
 
 TEST FILES:
     ``tests/test_agent_runtime.py``, ``tests/test_agent_tool_loop.py``,
@@ -85,6 +88,7 @@ from vidbyte.agents.context_algorithms import AgentRuntimeContextAlgorithms
 from vidbyte.agents.contract import AgentLoopSettingsOutputContract
 from vidbyte.agents.contracts.schema import SchemaConformance
 from vidbyte.agents.pricing import UsageTracker
+from vidbyte.agents.speed import AgentSpeedTracker
 from vidbyte.agents.types import AgentMessage
 from vidbyte.context.algorithms import ContextWindowAlgorithm, ToolResultAdmission
 from vidbyte.context.manager import ContextManager
@@ -111,6 +115,7 @@ from vidbyte.lib.dataclasses.middleware import (
     MiddlewareHookInvocation,
 )
 from vidbyte.lib.dataclasses.runner import RunnerHandle
+from vidbyte.lib.dataclasses.speed import RecordModelCallInput, RecordToolCallInput
 from vidbyte.lib.dataclasses.strategies import AgentResult
 from vidbyte.lib.enums import AgentRuntimeStateKey, ModelModality
 from vidbyte.lib.errors import (
@@ -165,7 +170,7 @@ class BaseAgentRuntimeLoopState:
 class AgentRuntime:
     """Internal runtime for direct agent execution."""
 
-    def __init__(self, *, agent_name: str, system_prompt: str, tools: Tools, permission_policy: PermissionPolicy, config: AgentRuntimeConfig | None = None, tracer: TracerBase | None = None, middleware: Sequence[AgentMiddleware] = (), run_id: str | None = None, algorithm: ContextWindowAlgorithm | str | None = None, context_manager: ContextManager | None = None, recorder: RecorderBase | None = None, output_schema: type | Mapping[str, Any] | None = None, output_contract: "AgentLoopSettingsOutputContract | None" = None, include_internal_tools: bool = True, usage_tracker: UsageTracker | None = None, fallback: "AgentFallback | None" = None) -> None:
+    def __init__(self, *, agent_name: str, system_prompt: str, tools: Tools, permission_policy: PermissionPolicy, config: AgentRuntimeConfig | None = None, tracer: TracerBase | None = None, middleware: Sequence[AgentMiddleware] = (), run_id: str | None = None, algorithm: ContextWindowAlgorithm | str | None = None, context_manager: ContextManager | None = None, recorder: RecorderBase | None = None, output_schema: type | Mapping[str, Any] | None = None, output_contract: "AgentLoopSettingsOutputContract | None" = None, include_internal_tools: bool = True, usage_tracker: UsageTracker | None = None, speed_tracker: AgentSpeedTracker | None = None, fallback: "AgentFallback | None" = None) -> None:
         # Configure one direct runtime; isolated review child runtimes may disable implicit internal tools.
         self.agent_name = agent_name
         self.system_prompt = system_prompt
@@ -184,6 +189,7 @@ class AgentRuntime:
         self._wire_schema_cache: dict[str, Any] | None = None
         self.output_contract = output_contract or AgentLoopSettingsOutputContract(())
         self.usage_tracker = usage_tracker or UsageTracker()
+        self.speed_tracker = speed_tracker or AgentSpeedTracker()
         self.fallback = fallback
 
     def _context_window_admission_middleware(self) -> tuple[AgentMiddleware, ...]:
@@ -356,6 +362,7 @@ class AgentRuntime:
                 tokens_used=state.tokens_used,
                 tool_call_count=state.tool_call_count,
             )
+            call_dispatched_at = self.speed_tracker.now()
             try:
                 raw_result, state.model_call_count, compaction_count = await self._invoke_with_middleware(
                     handle,
@@ -410,6 +417,14 @@ class AgentRuntime:
             runner_metadata = dict(handle.extract_metadata(raw_result))
             state.tokens_used = self._add_token_usage(state.tokens_used, token_usage_from_response(raw_result, runner_metadata))
             usage_record = self.usage_tracker.record_call(raw_result)
+            self.speed_tracker.record_call(
+                RecordModelCallInput(
+                    response=raw_result,
+                    dispatched_at=call_dispatched_at,
+                    output_tokens=usage_record.usage.output_tokens if usage_record is not None else None,
+                    fallback_index=fallback_index if fallback_index else None,
+                )
+            )
 
             decision = await self.middleware.after_model_response(
                 self._middleware_context(
@@ -1090,15 +1105,22 @@ class AgentRuntime:
 
     async def _execute_tool(self, tool: object, call: ToolCall, *, tool_is_internal: bool = False) -> ToolResult:
         # Executes the tool, optionally under tool_timeout_seconds, raising ToolExecutionError on failure.
+        started_at = self.speed_tracker.now()
+        timed_out = False
         try:
             return await self._run_tool_execute(tool, call, tool_is_internal=tool_is_internal)
-        except ToolExecutionError:
+        except ToolExecutionError as exc:
+            timed_out = exc.details.get("error") == "timeout"
             raise
         except Exception as exc:
             raise ToolExecutionError(
                 f"Tool execution failed: {exc}",
                 details={"tool_name": call.tool_name, "error_type": type(exc).__name__},
             ) from exc
+        finally:
+            self.speed_tracker.record_tool_call(
+                RecordToolCallInput(tool_name=call.tool_name, started_at=started_at, timed_out=timed_out)
+            )
 
     async def _run_tool_execute(self, tool: object, call: ToolCall, *, tool_is_internal: bool) -> ToolResult:
         # Runs tool.execute, wrapping non-internal calls with ToolSettings.tool_timeout_seconds when set.

@@ -44,6 +44,8 @@ Architecture:
     - SourceParseError: Raised when an artifact cannot be parsed into a valid typed IR.
     - SourceSecurityError: Raised when a URL is disallowed or a response violates a guard.
     - FailureRaisedError: Raised when a Session recovery policy escalates a deterministic failure to raise.
+    - AgentSpeedError: Base exception for agent speed-tracking failures.
+    - AgentSpeedValidationError: Raised when a speed-tracking dataclass has an invalid shape.
 Relations:
     Related to vidbyte.tools.executor, vidbyte.tools.registry, and vidbyte.tools.mcp.client.
 """
@@ -366,6 +368,56 @@ class FailureRaisedError(VidbyteSdkError):
                 "related_docs": self.related_docs,
                 "relevant_tests": self.relevant_tests,
             },
+        )
+
+
+class AgentSpeedError(VidbyteSdkError):
+    """Base class for agent speed-tracking failures."""
+
+    DIAGNOSTIC_FIELDS = (
+        "error_kind",
+        "expected",
+        "actual",
+        "safe_runtime_details",
+        "likely_causes",
+        "repair_approaches",
+        "related_docs",
+        "relevant_tests",
+    )
+
+    def __init__(self, message: str, *, details: Mapping[str, Any] | None = None) -> None:
+        """Populate the shared speed-tracking diagnostic packet from message/details alone."""
+        super().__init__(message, details=details)
+        self.error_kind = "agent_speed_tracking"
+        self.expected = "AgentSpeedTracker recording/rollup completing without an internal contract violation."
+        self.actual = message
+        self.safe_runtime_details = dict(self.details)
+        self.likely_causes = ("An internal AgentSpeedTracker invariant was violated; see subclasses for specifics.",)
+        self.repair_approaches = ("Inspect safe_runtime_details, then fix the AgentSpeedTracker call site that produced it.",)
+        self.related_docs = ("https://github.com/cerredz/Vidbyte-SDK/blob/main/docs/design/agent-speed-tracking.md",)
+        self.relevant_tests = ("tests/test_agent_speed.py",)
+
+
+class AgentSpeedValidationError(AgentSpeedError):
+    """Raised when a speed-tracking dataclass receives an invalid shape."""
+
+    def __init__(self, message: str, *, details: Mapping[str, Any] | None = None) -> None:
+        """Populate the diagnostic packet with the specific field/value that failed validation."""
+        super().__init__(message, details=details)
+        self.error_kind = "agent_speed_validation"
+        self.expected = (
+            "A speed-tracking dataclass field within its documented range: non-negative timestamps, "
+            "first_token_at no earlier than dispatched_at, non-empty tool names, and ordered percentiles."
+        )
+        self.actual = message
+        self.likely_causes = (
+            "A caller assembled a speed dataclass from a raw timestamp/count computed incorrectly, e.g. "
+            "first_token_at captured before dispatched_at, or a negative duration from a non-monotonic "
+            "clock override in a test.",
+        )
+        self.repair_approaches = (
+            "Inspect safe_runtime_details for the offending field and value, then fix the call site in "
+            "vidbyte/agents/runtime.py or vidbyte/agents/base.py that assembled the dataclass.",
         )
 
 
