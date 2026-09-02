@@ -1,7 +1,7 @@
 # Vidbyte Failure Vocabulary
 
 The code enum is the source of truth:
-`vidbyte/sessions/failure/types.py`. This file is the human-readable catalogue.
+`vidbyte/lib/enums/failure.py`. This file is the human-readable catalogue.
 Use the most specific existing code. Do not create a new code because an error
 message has a different wording.
 
