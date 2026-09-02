@@ -18,10 +18,10 @@ from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
 from vidbyte.context.algorithms import ReflexionAlgorithm
-from vidbyte.lib.dataclasses.context import BaseAgentContext
 from vidbyte.lib.dataclasses.runner import RunnerHandle
-from vidbyte.lib.dataclasses.strategies import AgentResult
 from vidbyte.lib.tracing import SpanContext
+from vidbyte.lib.dataclasses.context import BaseAgentContext
+from vidbyte.lib.dataclasses.strategies import AgentResult
 
 if TYPE_CHECKING:
     from vidbyte.agents import AgentRuntime

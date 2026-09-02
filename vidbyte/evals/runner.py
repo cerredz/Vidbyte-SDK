@@ -21,19 +21,17 @@ Relations:
 
 from __future__ import annotations
 
-import asyncio
-import inspect
 import time
-from collections.abc import Sequence
+import inspect
+import asyncio
 from datetime import datetime
-from typing import Any
-
+from typing import Any, Sequence
 from vidbyte.agents.base import BaseAgent
 from vidbyte.agents.types import AgentForkSettings, AgentInput
-from vidbyte.evals.base import BaseGrader
 from vidbyte.evals.behavior.probe import RunProbe
-from vidbyte.evals.templates import default_template_registry
 from vidbyte.evals.types import EvalCase, EvalResult, EvalSuiteResult, GraderResult
+from vidbyte.evals.base import BaseGrader
+from vidbyte.evals.templates import default_template_registry
 
 
 class EvalRunner:

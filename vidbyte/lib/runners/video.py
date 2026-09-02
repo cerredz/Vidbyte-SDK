@@ -1,8 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Mapping
-from typing import Any
+from typing import Any, Mapping
 
 from vidbyte.lib.config import VideoModelConfig
 from vidbyte.lib.enums import ModelProvider

@@ -17,17 +17,11 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from vidbyte.lib.registries.tools import ToolRegistry
 from vidbyte.tools.base import BaseTool
 from vidbyte.tools.mcp.client import McpClient
 from vidbyte.tools.mcp.types import McpToolDefinition
-from vidbyte.tools.types import (
-    ToolCall,
-    ToolParameter,
-    ToolPermission,
-    ToolResult,
-    ToolSpec,
-)
+from vidbyte.lib.registries.tools import ToolRegistry
+from vidbyte.tools.types import ToolCall, ToolParameter, ToolPermission, ToolResult, ToolSpec
 
 
 class McpBridgedTool(BaseTool):

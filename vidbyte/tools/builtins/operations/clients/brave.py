@@ -23,10 +23,7 @@ from typing import Any
 from vidbyte.lib.dataclasses.operations import SearchHit, SearchPayload
 from vidbyte.lib.errors import ProviderResponseError
 from vidbyte.lib.http.transport import HttpTransport
-from vidbyte.tools.builtins.operations.clients._base import (
-    RetryPolicy,
-    WebOperationClient,
-)
+from vidbyte.tools.builtins.operations.clients._base import RetryPolicy, WebOperationClient
 
 _MAX_RESULTS = 20
 _MAX_QUERY_WORDS = 50

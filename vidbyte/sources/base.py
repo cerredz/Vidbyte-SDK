@@ -26,12 +26,7 @@ from vidbyte.lib.config.sources import (
     UNTRUSTED_CONTENT_BEGIN,
     UNTRUSTED_CONTENT_END,
 )
-from vidbyte.lib.dataclasses.sources import (
-    ArtifactRef,
-    Selection,
-    SourceResult,
-    SourceSnapshot,
-)
+from vidbyte.lib.dataclasses.sources import ArtifactRef, Selection, SourceResult, SourceSnapshot
 from vidbyte.lib.enums import PinPolicy
 from vidbyte.lib.errors import SourcePinMismatchError, SourceSecurityError
 from vidbyte.sources.cache import SnapshotCache

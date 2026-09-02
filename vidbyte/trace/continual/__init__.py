@@ -16,9 +16,9 @@ Relations:
 
 from __future__ import annotations
 
+from vidbyte.trace.continual.base import ContinualTracer
 from vidbyte.agents.continual_trace import ContinualTraceAgent
 from vidbyte.middleware.continual_trace import ContinualTraceMiddleware
-from vidbyte.trace.continual.base import ContinualTracer
 from vidbyte.trace.continual.prebuilt import ActionTrace, ActionTraceModel
 
 __all__ = [

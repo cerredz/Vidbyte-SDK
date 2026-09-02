@@ -13,7 +13,6 @@ Relations:
 from __future__ import annotations
 
 from typing import ClassVar
-
 from vidbyte.evals.base import BaseGrader
 from vidbyte.evals.types import EvalCase, GraderResult
 

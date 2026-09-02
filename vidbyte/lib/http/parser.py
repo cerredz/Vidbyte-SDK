@@ -1,8 +1,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping
-from typing import Any
+from typing import Any, Mapping
 
 from vidbyte.lib.errors import ProviderRequestError
 from vidbyte.lib.http.transport import HttpResponse

@@ -21,13 +21,7 @@ from typing import Protocol
 
 from vidbyte.lib.dataclasses.code_search import _CodeChunk
 from vidbyte.tools.builtins.code_search.base import BaseCodeSearchTool
-from vidbyte.tools.types import (
-    ToolCall,
-    ToolParameter,
-    ToolPermission,
-    ToolResult,
-    ToolSpec,
-)
+from vidbyte.tools.types import ToolCall, ToolParameter, ToolPermission, ToolResult, ToolSpec
 
 
 class EmbeddingProvider(Protocol):

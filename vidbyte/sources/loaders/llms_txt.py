@@ -16,17 +16,10 @@ from __future__ import annotations
 from dataclasses import replace
 
 from vidbyte.context.primitives.documents import DocumentContextItem
-from vidbyte.lib.dataclasses.sources import (
-    ArtifactRef,
-    LlmsTxtDocument,
-    LlmsTxtLink,
-    LlmsTxtSection,
-    Selection,
-    SourceSnapshot,
-)
+from vidbyte.lib.dataclasses.sources import ArtifactRef, LlmsTxtDocument, LlmsTxtLink, LlmsTxtSection, Selection, SourceSnapshot
 from vidbyte.sources.base import Source
-from vidbyte.sources.llms_txt.parser import parse_llms_txt
 from vidbyte.sources.loaders.document import DocumentSource
+from vidbyte.sources.llms_txt.parser import parse_llms_txt
 from vidbyte.sources.regex import SourcesRegex
 
 

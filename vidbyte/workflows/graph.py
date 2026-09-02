@@ -60,16 +60,7 @@ from typing import Any, Generic
 
 from pydantic import TypeAdapter
 
-from vidbyte.workflows.contracts import (
-    MachineStatus,
-    Router,
-    RouteTarget,
-    Stage,
-    StagePolicy,
-    StateMachineSettings,
-    StateT,
-    Validator,
-)
+from vidbyte.workflows.contracts import MachineStatus, RouteTarget, Router, Stage, StagePolicy, StateMachineSettings, StateT, Validator
 from vidbyte.workflows.errors import WorkflowDefinitionError
 
 

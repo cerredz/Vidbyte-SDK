@@ -16,8 +16,8 @@ Non-Goals:
 from vidbyte.config.loader import YamlLoader
 from vidbyte.config.types import (
     AdversarialAgentSettings,
-    AgentSettings,
     AggregateAgentSettings,
+    AgentSettings,
     BaseAgentSettings,
     ContinualTraceAgentSettings,
     HandoffAgentSettings,

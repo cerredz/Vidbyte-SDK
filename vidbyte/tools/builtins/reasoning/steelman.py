@@ -1,5 +1,14 @@
 """Context Protocol Header
 
+FILE: vidbyte/tools/builtins/reasoning/steelman.py
+PURPOSE: Implements the model-callable steelman reasoning tool and records its structured result in the active context manager.
+ROLE IN CODEBASE: The builtins catalog exports this hand-maintained strategy tool alongside the larger reasoning-trace catalog.
+ARCHITECTURE NOTE: This module owns its ToolSpec and context-item construction; _parsing.py owns shared input coercion and ContextManager owns placement.
+COMMON MODIFICATION PATTERNS: Keep tool and primitive fields synchronized, preserve model-facing semantics, and run focused lint plus canonical CI.
+KNOWN EDGE CASES: Model arguments may be JSON-encoded or malformed, and a context write may reject an otherwise parsed record.
+RELATED DOCS: vidbyte/tools/README.md and field-guide/vidbyte-sdk/model-facing-tool-contracts.md.
+TESTS: scripts/check_reasoning_trace_contracts.py and the source/package stages in scripts/run_ci.py.
+
 Description:
     Implements SteelmanTool — a model-callable builtin for recording a
     position tested against its strongest opposition into the active
@@ -51,12 +60,12 @@ class SteelmanTool(BaseTool):
         return ToolSpec(
             name="steelman",
             description=(
-                "Pressure-test a current position by constructing the strongest possible case "
-                "against it — as carefully as the position itself was built — then decide "
-                "whether the position survives. Use this before committing to a plan, decision, "
-                "or claim that could be wrong. If the position does not survive unchanged, a "
-                "concrete revision is required; a steelman that never changes anything is not "
-                "being taken seriously."
+                "Use this tool when a current position should be tested against the strongest "
+                "opposition available. It reconstructs the opposing case with the same care "
+                "given to the original position and then assesses what survives. A position that "
+                "does not survive unchanged must produce a concrete revision rather than a vague "
+                "acknowledgment. The resulting record should make the challenge, response, and "
+                "revision decision inspectable."
             ),
             parameters=(
                 ToolParameter(
@@ -136,8 +145,12 @@ class SteelmanTool(BaseTool):
 
         try:
             self._manager.upsert(item)
-        except ValueError as exc:
-            return ToolResult.error(call.tool_name, str(exc))
+        except ValueError:
+            return ToolResult.error(
+                call.tool_name,
+                "The reasoning record could not be stored because its context values were invalid.",
+                metadata={"error": "invalid_reasoning_context"},
+            )
 
         return ToolResult.success(call.tool_name, item.to_context_text())
 

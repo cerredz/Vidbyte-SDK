@@ -4,13 +4,7 @@ import base64
 
 from vidbyte.lib.tools.filesystem import FileSystemPermissions
 from vidbyte.tools.filesystem._base_tool import FileSystemTool
-from vidbyte.tools.types import (
-    ToolCall,
-    ToolParameter,
-    ToolPermission,
-    ToolResult,
-    ToolSpec,
-)
+from vidbyte.tools.types import ToolCall, ToolParameter, ToolPermission, ToolResult, ToolSpec
 
 
 class ReadBinaryTool(FileSystemTool):

@@ -21,20 +21,14 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
-from vidbyte.context.algorithms.error_correction import ErrorCorrectionAlgorithm
-from vidbyte.context.algorithms.independent_critic import IndependentCriticAlgorithm
-from vidbyte.context.algorithms.multi_provider_agentic_grader import (
-    MultiProviderAgenticGraderAlgorithm,
-)
-from vidbyte.context.algorithms.problem_space_search import ProblemSpaceSearchAlgorithm
-from vidbyte.context.algorithms.prosecutor_defender_judge import (
-    ProsecutorDefenderJudgeAlgorithm,
-)
-from vidbyte.context.algorithms.reflexion import ReflexionAlgorithm
-from vidbyte.context.algorithms.trajectory_checkpoints import (
-    TrajectoryCheckpointAlgorithm,
-)
 from vidbyte.context.compaction import CompactionMode, ContextCompactionEngine
+from vidbyte.context.algorithms.reflexion import ReflexionAlgorithm
+from vidbyte.context.algorithms.independent_critic import IndependentCriticAlgorithm
+from vidbyte.context.algorithms.multi_provider_agentic_grader import MultiProviderAgenticGraderAlgorithm
+from vidbyte.context.algorithms.prosecutor_defender_judge import ProsecutorDefenderJudgeAlgorithm
+from vidbyte.context.algorithms.trajectory_checkpoints import TrajectoryCheckpointAlgorithm
+from vidbyte.context.algorithms.problem_space_search import ProblemSpaceSearchAlgorithm
+from vidbyte.context.algorithms.error_correction import ErrorCorrectionAlgorithm
 from vidbyte.lib.dataclasses.tools import ToolCall, ToolResult
 
 

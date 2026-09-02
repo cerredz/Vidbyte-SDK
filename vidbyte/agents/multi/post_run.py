@@ -20,11 +20,7 @@ from vidbyte.agents.multi.ledger_controller import MultiAgentOrchestratorLedger
 from vidbyte.agents.multi.orchestrator_runtime import MultiAgentOrchestratorRunner
 from vidbyte.agents.multi.validation import MultiAgentValidator
 from vidbyte.agents.types import AgentMessage
-from vidbyte.lib.dataclasses.multi_agent import (
-    FinalizationContext,
-    MultiAgentResult,
-    MultiAgentRunState,
-)
+from vidbyte.lib.dataclasses.multi_agent import FinalizationContext, MultiAgentResult, MultiAgentRunState
 from vidbyte.lib.enums.multi_agent import MultiAgentStopReason
 from vidbyte.lib.errors import MultiAgentExecutionError
 

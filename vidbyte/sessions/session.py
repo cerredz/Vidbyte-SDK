@@ -23,7 +23,6 @@ from typing import TYPE_CHECKING, Any, ClassVar
 from uuid import uuid4
 
 from vidbyte.agents.types import AgentInput, AgentMessage
-from vidbyte.lib.errors import AgentExecutionError
 from vidbyte.sessions.contracts import (
     Checkpoint,
     CheckpointPolicy,
@@ -31,6 +30,7 @@ from vidbyte.sessions.contracts import (
     SessionStatus,
     TraceCapture,
 )
+from vidbyte.lib.errors import AgentExecutionError
 from vidbyte.sessions.errors import SessionError
 from vidbyte.sessions.portable import SessionBundleExporter
 from vidbyte.sessions.serialization import SessionSerializer

@@ -15,13 +15,7 @@
 from __future__ import annotations
 
 from vidbyte.tools.base import BaseTool
-from vidbyte.tools.types import (
-    ToolCall,
-    ToolParameter,
-    ToolResult,
-    ToolSpec,
-    ToolStatus,
-)
+from vidbyte.tools.types import ToolCall, ToolParameter, ToolResult, ToolSpec, ToolStatus
 
 
 class DocumentRetrievalTool(BaseTool):

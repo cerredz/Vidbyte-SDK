@@ -22,7 +22,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from vidbyte.lib.tools import ToolsFormatter
 from vidbyte.tools.adapters import ToolInput, ensure_tool, ensure_tools
 from vidbyte.tools.agent_tool import AgentTool
 from vidbyte.tools.base import BaseTool, ToolLike
@@ -31,6 +30,7 @@ from vidbyte.tools.client import ToolsClient
 from vidbyte.tools.decorators import tool, vidbyte_tool
 from vidbyte.tools.executor import ToolExecutor
 from vidbyte.tools.function_tool import FunctionTool
+from vidbyte.lib.tools import ToolsFormatter
 from vidbyte.tools.mixins import ToolMixin
 from vidbyte.tools.types import (
     ToolActivity,

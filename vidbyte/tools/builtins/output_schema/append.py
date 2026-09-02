@@ -16,13 +16,7 @@ from __future__ import annotations
 
 from vidbyte.tools.base import BaseTool
 from vidbyte.tools.builtins.output_schema.builder import OutputSchemaBuilder
-from vidbyte.tools.types import (
-    ToolCall,
-    ToolParameter,
-    ToolPermission,
-    ToolResult,
-    ToolSpec,
-)
+from vidbyte.tools.types import ToolCall, ToolParameter, ToolPermission, ToolResult, ToolSpec
 
 
 class AppendOutputTool(BaseTool):

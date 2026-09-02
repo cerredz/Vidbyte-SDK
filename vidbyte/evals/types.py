@@ -17,10 +17,9 @@ Relations:
 from __future__ import annotations
 
 import statistics
-from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Mapping, Sequence
 
 if TYPE_CHECKING:
     from vidbyte.evals.base import BaseGrader

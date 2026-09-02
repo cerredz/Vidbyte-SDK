@@ -18,12 +18,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from vidbyte.lib.dataclasses.middleware import (
-    MiddlewareContext,
-    MiddlewareDecision,
-    MiddlewareTransform,
-)
+from vidbyte.lib.dataclasses.middleware import MiddlewareContext, MiddlewareDecision, MiddlewareTransform
 from vidbyte.middleware.base import AgentMiddleware
+
 
 TOKEN_BUDGET_FINAL_RESPONSE_NOTICE = (
     "Token budget notice: this run has reached or exceeded its configured token budget. "

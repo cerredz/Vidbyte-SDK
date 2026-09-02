@@ -17,13 +17,7 @@ import difflib
 from pathlib import Path
 
 from vidbyte.tools.base import BaseTool
-from vidbyte.tools.types import (
-    ToolCall,
-    ToolParameter,
-    ToolPermission,
-    ToolResult,
-    ToolSpec,
-)
+from vidbyte.tools.types import ToolCall, ToolParameter, ToolPermission, ToolResult, ToolSpec
 
 
 class PatchTool(BaseTool):

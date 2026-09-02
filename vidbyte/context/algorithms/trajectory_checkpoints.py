@@ -24,11 +24,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from vidbyte.context.primitives import TrajectoryCheckpointContextItem
-from vidbyte.context.runtime import (
-    ContextWindowPlacement,
-    ContextWindowRunContext,
-    InnerContextWindowAlgorithm,
-)
+from vidbyte.context.runtime import ContextWindowPlacement, ContextWindowRunContext, InnerContextWindowAlgorithm
 from vidbyte.lib.dataclasses.agents import AgentIterationSnapshot
 from vidbyte.lib.enums.prompts import Prompt
 from vidbyte.lib.errors import ConfigurationError

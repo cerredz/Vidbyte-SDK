@@ -1,5 +1,14 @@
 """Context Protocol Header
 
+FILE: vidbyte/tools/builtins/reasoning/differential_diagnosis.py
+PURPOSE: Implements the model-callable differential-diagnosis reasoning tool and records its structured result in the active context manager.
+ROLE IN CODEBASE: The builtins catalog exports this hand-maintained strategy tool alongside the larger reasoning-trace catalog.
+ARCHITECTURE NOTE: This module owns its ToolSpec and context-item construction; _parsing.py owns shared input coercion and ContextManager owns placement.
+COMMON MODIFICATION PATTERNS: Keep tool and primitive fields synchronized, preserve model-facing semantics, and run focused lint plus canonical CI.
+KNOWN EDGE CASES: Model arguments may be JSON-encoded or malformed, and a context write may reject an otherwise parsed record.
+RELATED DOCS: vidbyte/tools/README.md and field-guide/vidbyte-sdk/model-facing-tool-contracts.md.
+TESTS: scripts/check_reasoning_trace_contracts.py and the source/package stages in scripts/run_ci.py.
+
 Description:
     Implements DifferentialDiagnosisTool — a model-callable builtin for
     recording an elimination-based narrowing pass into the active
@@ -52,11 +61,12 @@ class DifferentialDiagnosisTool(BaseTool):
         return ToolSpec(
             name="differential_diagnosis",
             description=(
-                "Narrow a set of candidate explanations (diagnoses, root causes, culprits) by "
-                "elimination: cast the field wide, remove only the candidates a concrete "
-                "observation contradicts, and commit to the single next check that best splits "
-                "what remains. Use this for debugging, root-cause analysis, or any 'what is "
-                "actually going on' question with more than one live possibility."
+                "Use this tool when several candidate explanations remain plausible and must be "
+                "narrowed systematically. It starts from a broad candidate set and eliminates "
+                "only candidates contradicted by a concrete observation. The next check must be "
+                "chosen for how effectively it separates the remaining possibilities. The "
+                "resulting record should make every elimination and the priority of the next "
+                "diagnostic action inspectable."
             ),
             parameters=(
                 ToolParameter(
@@ -139,8 +149,12 @@ class DifferentialDiagnosisTool(BaseTool):
 
         try:
             self._manager.upsert(item)
-        except ValueError as exc:
-            return ToolResult.error(call.tool_name, str(exc))
+        except ValueError:
+            return ToolResult.error(
+                call.tool_name,
+                "The reasoning record could not be stored because its context values were invalid.",
+                metadata={"error": "invalid_reasoning_context"},
+            )
 
         return ToolResult.success(call.tool_name, item.to_context_text())
 

@@ -6,12 +6,8 @@ import re
 from collections.abc import Callable, Mapping, Sequence
 
 from vidbyte.lib.dataclasses.context import ContextMessage, ProgressLog
-from vidbyte.middleware.compaction.base import (
-    BaseCompaction,
-    CompactionMode,
-    Summarizer,
-    TokenCounter,
-)
+from vidbyte.middleware.compaction.base import BaseCompaction, CompactionMode, Summarizer, TokenCounter
+
 
 _ANSI_PATTERN = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 _BASE64_PATTERN = re.compile(r"\b[A-Za-z0-9+/]+={0,2}\b")

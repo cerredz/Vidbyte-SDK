@@ -28,35 +28,8 @@ Similar files:
 
 from __future__ import annotations
 
-from vidbyte.context.algorithms import (
-    ContextWindowAlgorithm,
-    CriticFailurePolicy,
-    DebateStageSettings,
-    ErrorCorrectionAlgorithm,
-    IndependentCriticAlgorithm,
-    MultiProviderAgenticGraderAlgorithm,
-    ProblemSpaceSearchAlgorithm,
-    ProsecutorDefenderJudgeAlgorithm,
-    ProsecutorDefenderJudgeFailurePolicy,
-    ReflexionAlgorithm,
-    ToolResultAdmission,
-    TrajectoryCheckpointAlgorithm,
-)
-from vidbyte.context.compaction import (
-    CompactionMode,
-    CompactionStats,
-    ContextCompactionEngine,
-    Summarizer,
-)
-from vidbyte.context.handoff import (
-    EngineeringHandoff,
-    Handoff,
-    MinimalHandoff,
-    ResearchHandoff,
-)
-from vidbyte.context.manager import ContextManager
-from vidbyte.context.multi_agent import MultiAgentContext
-from vidbyte.context.presets import ContextWindowPresets
+from vidbyte.context.algorithms import ContextWindowAlgorithm, CriticFailurePolicy, DebateStageSettings, ErrorCorrectionAlgorithm, IndependentCriticAlgorithm, MultiProviderAgenticGraderAlgorithm, ProblemSpaceSearchAlgorithm, ProsecutorDefenderJudgeAlgorithm, ProsecutorDefenderJudgeFailurePolicy, ReflexionAlgorithm, ToolResultAdmission, TrajectoryCheckpointAlgorithm
+from vidbyte.context.compaction import CompactionMode, CompactionStats, ContextCompactionEngine, Summarizer
 from vidbyte.context.primitives import (
     AlternativeChallengeContextItem,
     AmbiguityContextItem,
@@ -87,13 +60,13 @@ from vidbyte.context.primitives import (
     MultiAgentTerminalContextItem,
     ObjectiveConflictContextItem,
     ObjectiveGapContextItem,
-    PerspectiveGapContextItem,
     PlanContextItem,
+    PerspectiveGapContextItem,
     ProblemFrameContextItem,
     ProblemSpaceSearchContextItem,
+    ReasoningTraceContextItem,
     ProcessStallContextItem,
     ProgressContextItem,
-    ReasoningTraceContextItem,
     ResponseContextItem,
     RiskEscalationContextItem,
     TaskContextItem,
@@ -102,12 +75,7 @@ from vidbyte.context.primitives import (
     TradeoffContextItem,
     TrajectoryCheckpointContextItem,
 )
-from vidbyte.context.runtime import (
-    ContextWindowPlacement,
-    ContextWindowRunContext,
-    InnerContextWindowAlgorithm,
-)
-from vidbyte.context.window import ContextWindow
+from vidbyte.context.runtime import ContextWindowPlacement, ContextWindowRunContext, InnerContextWindowAlgorithm
 from vidbyte.lib.dataclasses.context import (
     BaseAgentContext,
     BaseContext,
@@ -117,6 +85,16 @@ from vidbyte.lib.dataclasses.context import (
     ContextResponse,
     ContextToolCall,
 )
+from vidbyte.context.handoff import (
+    EngineeringHandoff,
+    Handoff,
+    MinimalHandoff,
+    ResearchHandoff,
+)
+from vidbyte.context.manager import ContextManager
+from vidbyte.context.multi_agent import MultiAgentContext
+from vidbyte.context.presets import ContextWindowPresets
+from vidbyte.context.window import ContextWindow
 
 __all__ = [
     "AlternativeChallengeContextItem",

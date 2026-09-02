@@ -27,21 +27,17 @@ import yaml
 
 from vidbyte.agents.settings.loop import AgentLoopSettings
 from vidbyte.agents.settings.tool import ToolSettings
-from vidbyte.lib.dataclasses.adversarial_agent_descriptor import (
-    AdversarialAgentDescriptor,
-)
+from vidbyte.lib.dataclasses.adversarial_agent_descriptor import AdversarialAgentDescriptor
+from vidbyte.lib.dataclasses.aggregate_agent_descriptor import AggregateAgentDescriptor
 from vidbyte.lib.dataclasses.agent_descriptor import AgentDescriptor
 from vidbyte.lib.dataclasses.agents import AgentMetadata
-from vidbyte.lib.dataclasses.aggregate_agent_descriptor import AggregateAgentDescriptor
-from vidbyte.lib.dataclasses.continual_trace_descriptor import (
-    ContinualTraceAgentDescriptor,
-)
+from vidbyte.lib.dataclasses.continual_trace_descriptor import ContinualTraceAgentDescriptor
 from vidbyte.lib.dataclasses.environment_descriptor import EnvironmentDescriptor
-from vidbyte.lib.dataclasses.handoff_agent_descriptor import HandoffAgentDescriptor
 from vidbyte.lib.dataclasses.harness_descriptor import HarnessDescriptor
 from vidbyte.lib.dataclasses.multi_agent_descriptor import MultiAgentDescriptor
 from vidbyte.lib.dataclasses.tools import ToolSpec
 from vidbyte.lib.dataclasses.trace import TraceOption
+from vidbyte.lib.dataclasses.handoff_agent_descriptor import HandoffAgentDescriptor
 from vidbyte.lib.enums.agent_runtime import AgentRuntimeType
 from vidbyte.lib.enums.config import AgentType, DocumentType
 from vidbyte.lib.errors import ConfigurationError
@@ -256,9 +252,7 @@ class YamlLoader:
             settings_raw = raw.get("settings")
             settings = None
             if settings_raw:
-                from vidbyte.paradigms.context_minimal_fanout.types import (
-                    ContextMinimalFanoutSettings,
-                )
+                from vidbyte.paradigms.context_minimal_fanout.types import ContextMinimalFanoutSettings
                 settings = ContextMinimalFanoutSettings(**settings_raw)
             return EnvironmentDescriptor(
                 name=str(raw.get("name", "")),
@@ -323,9 +317,7 @@ class YamlLoader:
     @staticmethod
     def _build_adversarial_agent(raw: dict[str, Any], path: str | Path) -> AdversarialAgentDescriptor:
         # Builds an AdversarialAgentDescriptor from raw YAML, composing nested AgentDescriptors.
-        from vidbyte.lib.dataclasses.adversarial_agent_descriptor import (
-            AdversarialSettings,
-        )
+        from vidbyte.lib.dataclasses.adversarial_agent_descriptor import AdversarialSettings
         worker_raw = raw.get("worker")
         worker = YamlLoader._build_agent_from_raw(worker_raw, path) if worker_raw else None
         adversary_raw = raw.get("adversary")

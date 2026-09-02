@@ -2,13 +2,8 @@ from __future__ import annotations
 
 from vidbyte.tools.base import BaseTool
 from vidbyte.tools.catalog import Tools
-from vidbyte.tools.types import (
-    ToolCall,
-    ToolParameter,
-    ToolPermission,
-    ToolResult,
-    ToolSpec,
-)
+from vidbyte.tools.types import ToolCall, ToolParameter, ToolPermission, ToolResult, ToolSpec
+
 
 IS_DONE_TOOL_NAME = "isDone"
 

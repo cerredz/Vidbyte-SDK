@@ -21,13 +21,7 @@ from typing import TYPE_CHECKING, Any
 from vidbyte.lib.errors import McpError
 from vidbyte.tools.base import BaseTool
 from vidbyte.tools.mcp.types import McpToolPermission
-from vidbyte.tools.types import (
-    ToolCall,
-    ToolParameter,
-    ToolPermission,
-    ToolResult,
-    ToolSpec,
-)
+from vidbyte.tools.types import ToolCall, ToolParameter, ToolPermission, ToolResult, ToolSpec
 
 if TYPE_CHECKING:
     from vidbyte.agents.mixins import McpAttachableMixin

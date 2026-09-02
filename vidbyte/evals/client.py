@@ -17,15 +17,13 @@ Relations:
 
 from __future__ import annotations
 
-from collections.abc import Sequence
 from pathlib import Path
-from typing import Any
-
+from typing import Any, Sequence
 from vidbyte.evals.base import BaseGrader
-from vidbyte.evals.registry import EvalRegistry
-from vidbyte.evals.runner import EvalRunner
-from vidbyte.evals.suite import EvalSuite
 from vidbyte.evals.types import EvalCase
+from vidbyte.evals.suite import EvalSuite
+from vidbyte.evals.runner import EvalRunner
+from vidbyte.evals.registry import EvalRegistry
 
 
 class EvalClient:

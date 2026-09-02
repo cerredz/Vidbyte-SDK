@@ -19,9 +19,7 @@ Similar Files:
 """
 
 from __future__ import annotations
-
-from typing import TYPE_CHECKING, Any
-
+from typing import Any, TYPE_CHECKING
 from vidbyte.lib.errors import ConfigurationError
 
 if TYPE_CHECKING:

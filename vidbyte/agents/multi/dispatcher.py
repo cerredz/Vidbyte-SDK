@@ -22,13 +22,7 @@ from vidbyte.agents.multi.tracing import MultiAgentTracer
 from vidbyte.agents.multi.transfer import AgentBinding
 from vidbyte.agents.multi.validation import MultiAgentValidator
 from vidbyte.agents.types import AgentInput, AgentMessage
-from vidbyte.lib.dataclasses.multi_agent import (
-    AgentDispatch,
-    AgentReport,
-    MultiAgentRunState,
-    OrchestratorDecision,
-    TaskBlocker,
-)
+from vidbyte.lib.dataclasses.multi_agent import AgentDispatch, AgentReport, MultiAgentRunState, OrchestratorDecision, TaskBlocker
 from vidbyte.lib.enums.multi_agent import TaskStatus
 from vidbyte.lib.errors import AgentTransferError, TaskLedgerError
 

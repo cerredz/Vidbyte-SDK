@@ -52,7 +52,7 @@ defines the primitive fields and lifecycle.
 
 AUTO-GENERATED FLAG: No; maintained source code.
 
-TEST FILES: No dedicated feature test file exists in the source PR. Resolver
+TESTS: No dedicated feature test file exists in the source PR. Resolver
 verification covers dataclass construction, export identity, render bounds,
 and registry smoke paths.
 

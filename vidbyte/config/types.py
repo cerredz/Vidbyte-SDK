@@ -18,8 +18,8 @@ Non-Goals:
 
 from vidbyte.lib.dataclasses.config import (
     AdversarialAgentSettings,
-    AgentSettings,
     AggregateAgentSettings,
+    AgentSettings,
     BaseAgentSettings,
     ContinualTraceAgentSettings,
     HandoffAgentSettings,

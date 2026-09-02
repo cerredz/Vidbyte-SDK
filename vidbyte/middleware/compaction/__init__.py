@@ -1,19 +1,7 @@
 from __future__ import annotations
 
-from vidbyte.middleware.compaction.base import (
-    BaseCompaction,
-    CompactionMode,
-    CompactionStats,
-    Summarizer,
-    TokenCounter,
-)
-from vidbyte.middleware.compaction.context_compaction import (
-    MessageHistoryCompactionMiddleware,
-    SummaryCompactionMiddleware,
-    ToolResultCompactionMiddleware,
-    TraceReplacementCompactionMiddleware,
-    TraceSummaryTailCompactionMiddleware,
-)
+from vidbyte.middleware.compaction.base import BaseCompaction, CompactionMode, CompactionStats, Summarizer, TokenCounter
+from vidbyte.middleware.compaction.context_compaction import MessageHistoryCompactionMiddleware, SummaryCompactionMiddleware, ToolResultCompactionMiddleware, TraceReplacementCompactionMiddleware, TraceSummaryTailCompactionMiddleware
 from vidbyte.middleware.compaction.engine import ContextCompactionEngine
 from vidbyte.middleware.compaction.strategies import (
     ClearExceptSystemAndLogCompaction,
@@ -32,10 +20,10 @@ from vidbyte.middleware.compaction.strategies import (
     SalienceScoreEvictionCompaction,
     SelectiveContextPruningCompaction,
     StripToolResultBodiesCompaction,
+    SummaryWithBackrefsCompaction,
     SummarizeByTopicBlocksCompaction,
     SummarizeOldestNCompaction,
     SummarizeRangeCompaction,
-    SummaryWithBackrefsCompaction,
     ToolOutputSlidingWindowCompaction,
     ToolResultClearingWithExclusionsCompaction,
     TrimToTokenBudgetCompaction,

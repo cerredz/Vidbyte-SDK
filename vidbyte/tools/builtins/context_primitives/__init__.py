@@ -21,17 +21,11 @@ from __future__ import annotations
 
 from vidbyte.tools.builtins.context_primitives.create import CreateContextPrimitiveTool
 from vidbyte.tools.builtins.context_primitives.edit import ContextEditTool
-from vidbyte.tools.builtins.context_primitives.factory import (
-    ContextWindowFactory,
-    context_window_tools,
-)
+from vidbyte.tools.builtins.context_primitives.factory import ContextWindowFactory, context_window_tools
 from vidbyte.tools.builtins.context_primitives.list_tool import ContextListTool
 from vidbyte.tools.builtins.context_primitives.move import ContextMoveTool
 from vidbyte.tools.builtins.context_primitives.recite import ContextReciteTool
-from vidbyte.tools.builtins.context_primitives.registry import (
-    CREATE_TOOL_REGISTRY,
-    PrimitiveToolDefinition,
-)
+from vidbyte.tools.builtins.context_primitives.registry import CREATE_TOOL_REGISTRY, PrimitiveToolDefinition
 from vidbyte.tools.builtins.context_primitives.remove import ContextRemoveTool
 from vidbyte.tools.builtins.context_primitives.stats import ContextStatsTool
 from vidbyte.tools.builtins.context_primitives.upsert import ContextUpsertTool

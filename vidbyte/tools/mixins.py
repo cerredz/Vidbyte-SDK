@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
-from typing import TYPE_CHECKING, Self
+from typing import Self, TYPE_CHECKING
 
 from vidbyte.tools.adapters import ToolInput
 from vidbyte.tools.base import BaseTool

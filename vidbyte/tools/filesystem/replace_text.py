@@ -3,13 +3,7 @@ from __future__ import annotations
 from vidbyte.lib.errors import ToolExecutionError
 from vidbyte.lib.tools.filesystem import FileSystemPermissions
 from vidbyte.tools.filesystem._base_tool import FileSystemTool
-from vidbyte.tools.types import (
-    ToolCall,
-    ToolParameter,
-    ToolPermission,
-    ToolResult,
-    ToolSpec,
-)
+from vidbyte.tools.types import ToolCall, ToolParameter, ToolPermission, ToolResult, ToolSpec
 
 
 class ReplaceTextTool(FileSystemTool):

@@ -13,7 +13,6 @@ Relations:
 
 from __future__ import annotations
 
-from vidbyte.evals import templates
 from vidbyte.evals.base import BaseGrader
 from vidbyte.evals.behavior import Behavior, RunProbe
 from vidbyte.evals.client import EvalClient
@@ -39,6 +38,7 @@ from vidbyte.evals.graders import (
 from vidbyte.evals.registry import ComparisonReport, EvalRegistry
 from vidbyte.evals.runner import EvalRunner
 from vidbyte.evals.suite import EvalSuite
+from vidbyte.evals import templates
 from vidbyte.evals.templates import (
     ClassificationTemplate,
     ConciseGroundedAnswerTemplate,

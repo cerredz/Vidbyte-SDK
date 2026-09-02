@@ -17,14 +17,12 @@ Similar Files:
 """
 
 from __future__ import annotations
-
 import asyncio
-from typing import TYPE_CHECKING, Any
-
+from typing import Any, TYPE_CHECKING
 from vidbyte.agents.runtimes.actor.inbox import ActorInbox
 from vidbyte.agents.runtimes.actor.message import ActorMessage
-from vidbyte.lib.enums.prompts import Prompt
 from vidbyte.prompts.catalog import Prompts
+from vidbyte.lib.enums.prompts import Prompt
 
 if TYPE_CHECKING:
     from vidbyte.agents.runtimes.actor.broker import BaseActorRuntime

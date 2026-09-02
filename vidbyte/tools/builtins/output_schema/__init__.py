@@ -15,10 +15,7 @@ Relations:
 from __future__ import annotations
 
 from vidbyte.tools.builtins.output_schema.append import AppendOutputTool
-from vidbyte.tools.builtins.output_schema.builder import (
-    OutputSchemaBuilder,
-    OutputSchemaField,
-)
+from vidbyte.tools.builtins.output_schema.builder import OutputSchemaBuilder, OutputSchemaField
 from vidbyte.tools.builtins.output_schema.declare import DeclareOutputSchemaTool
 from vidbyte.tools.builtins.output_schema.extend import ExtendOutputSchemaTool
 

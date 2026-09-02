@@ -24,7 +24,7 @@ Relations:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import Any, TYPE_CHECKING
 
 from vidbyte.lib.errors import ConfigurationError
 

@@ -16,6 +16,33 @@ Relations:
 
 from __future__ import annotations
 
+from vidbyte.lib.dataclasses.adversarial_agent_descriptor import AdversarialAgentDescriptor
+from vidbyte.lib.dataclasses.aggregate_agent_descriptor import AggregateAgentDescriptor
+from vidbyte.lib.dataclasses.agent_descriptor import AgentDescriptor
+from vidbyte.lib.dataclasses.agents import (
+    AgentCard,
+    AgentIterationSnapshot,
+    AgentMessage,
+    AgentRunnerConfig,
+    AgentRuntimeConfig,
+    AgentRuntimeStats,
+    AgentSpec,
+    AgentStopReason,
+)
+from vidbyte.lib.dataclasses.continual_trace_descriptor import ContinualTraceAgentDescriptor
+from vidbyte.lib.dataclasses.environment_descriptor import EnvironmentDescriptor
+from vidbyte.lib.dataclasses.context import (
+    BaseAgentContext,
+    BaseContext,
+    ContextArtifact,
+    ContextBudget,
+    ContextMessage,
+    ContextPermissions,
+    ContextResponse,
+    ContextState,
+    ContextToolCall,
+    ProgressLog,
+)
 from vidbyte.context.primitives import (
     ArtifactContextItem,
     ContextItem,
@@ -31,45 +58,9 @@ from vidbyte.context.primitives import (
     ToolCallContextItem,
     TrajectoryCheckpointContextItem,
 )
-from vidbyte.lib.dataclasses.adversarial_agent_descriptor import (
-    AdversarialAgentDescriptor,
-)
-from vidbyte.lib.dataclasses.agent_descriptor import AgentDescriptor
-from vidbyte.lib.dataclasses.agents import (
-    AgentCard,
-    AgentIterationSnapshot,
-    AgentMessage,
-    AgentRunnerConfig,
-    AgentRuntimeConfig,
-    AgentRuntimeStats,
-    AgentSpec,
-    AgentStopReason,
-)
-from vidbyte.lib.dataclasses.aggregate_agent_descriptor import AggregateAgentDescriptor
-from vidbyte.lib.dataclasses.config import (
-    AgentSettings,
-    MiddlewareDefinition,
-    ToolDefinition,
-)
-from vidbyte.lib.dataclasses.context import (
-    BaseAgentContext,
-    BaseContext,
-    ContextArtifact,
-    ContextBudget,
-    ContextMessage,
-    ContextPermissions,
-    ContextResponse,
-    ContextState,
-    ContextToolCall,
-    ProgressLog,
-)
-from vidbyte.lib.dataclasses.continual_trace_descriptor import (
-    ContinualTraceAgentDescriptor,
-)
-from vidbyte.lib.dataclasses.environment_descriptor import EnvironmentDescriptor
 from vidbyte.lib.dataclasses.filesystem import FileStat, FileSystemToolConfig
-from vidbyte.lib.dataclasses.handoff_agent_descriptor import HandoffAgentDescriptor
 from vidbyte.lib.dataclasses.harness_descriptor import HarnessDescriptor
+from vidbyte.lib.dataclasses.handoff_agent_descriptor import HandoffAgentDescriptor
 from vidbyte.lib.dataclasses.harnesses import (
     HARNESS_SCHEMA_VERSION,
     HarnessExecutionResult,
@@ -96,12 +87,12 @@ from vidbyte.lib.dataclasses.multi_agent import (
     CandidateResult,
     CompletionCheck,
     DagNode,
-    EvaluationDecision,
     EventHandler,
+    EvaluationDecision,
     FinalizationContext,
     FinalizationRenderer,
-    LedgerEvent,
     LedgerFactory,
+    LedgerEvent,
     ManagerAgentCloser,
     ManagerAgentFactory,
     MultiAgentEventCallback,
@@ -125,13 +116,52 @@ from vidbyte.lib.dataclasses.multi_agent import (
     WorkerCloser,
     WorkerForkFactory,
 )
+from vidbyte.lib.dataclasses.config import AgentSettings, MiddlewareDefinition, ToolDefinition
 from vidbyte.lib.dataclasses.multi_agent_descriptor import MultiAgentDescriptor
 from vidbyte.lib.dataclasses.operations import (
-    FetchedPage,
     FetchPayload,
+    FetchedPage,
     SearchHit,
     SearchPayload,
 )
+from vidbyte.lib.dataclasses.sandbox import SandboxRequest, SandboxResult, SandboxTransport
+from vidbyte.lib.dataclasses.security import PermissionDecision, PermissionPolicy
+from vidbyte.lib.dataclasses.sessions import (
+    SESSION_SCHEMA_VERSION,
+    AgentUsage,
+    Checkpoint,
+    CheckpointPolicy,
+    RunState,
+    SessionMeta,
+    SessionStatus,
+    TraceCapture,
+    UsageRollup,
+)
+from vidbyte.lib.dataclasses.speed import (
+    AgentSpeedRollup,
+    CallSpeedRecord,
+    CallSpeedStats,
+    RecordModelCallInput,
+    RecordStepInput,
+    RecordToolCallInput,
+    RunSpeedStats,
+    StepSpeedRecord,
+    StepSpeedStats,
+    ToolCallSpeedRecord,
+    ToolCallSpeedStats,
+)
+from vidbyte.lib.dataclasses.sources import (
+    ArtifactRef,
+    FetchResponse,
+    LlmsTxtDocument,
+    LlmsTxtLink,
+    LlmsTxtSection,
+    MarkdownDocument,
+    Selection,
+    SourceResult,
+    SourceSnapshot,
+)
+from vidbyte.lib.dataclasses.runner import RunnerHandle
 from vidbyte.lib.dataclasses.prosecutor_defender_judge import (
     AllegationRecord,
     AllegationSeverity,
@@ -152,36 +182,14 @@ from vidbyte.lib.dataclasses.prosecutor_defender_judge import (
     ProsecutorDefenderJudgeReport,
     ProsecutorReportPayload,
 )
-from vidbyte.lib.dataclasses.runner import RunnerHandle
-from vidbyte.lib.dataclasses.sandbox import (
-    SandboxRequest,
-    SandboxResult,
-    SandboxTransport,
-)
-from vidbyte.lib.dataclasses.security import PermissionDecision, PermissionPolicy
-from vidbyte.lib.dataclasses.sessions import (
-    SESSION_SCHEMA_VERSION,
-    AgentUsage,
-    Checkpoint,
-    CheckpointPolicy,
-    RunState,
-    SessionMeta,
-    SessionStatus,
-    TraceCapture,
-    UsageRollup,
-)
-from vidbyte.lib.dataclasses.sources import (
-    ArtifactRef,
-    FetchResponse,
-    LlmsTxtDocument,
-    LlmsTxtLink,
-    LlmsTxtSection,
-    MarkdownDocument,
-    Selection,
-    SourceResult,
-    SourceSnapshot,
-)
 from vidbyte.lib.dataclasses.strategies import AgentResult
+from vidbyte.lib.dataclasses.trace import (
+    TraceField,
+    TraceFieldType,
+    TraceMode,
+    TraceOption,
+    TraceSchema,
+)
 from vidbyte.lib.dataclasses.tools import (
     ToolActivity,
     ToolCall,
@@ -194,13 +202,6 @@ from vidbyte.lib.dataclasses.tools import (
     ToolResult,
     ToolSpec,
     ToolStatus,
-)
-from vidbyte.lib.dataclasses.trace import (
-    TraceField,
-    TraceFieldType,
-    TraceMode,
-    TraceOption,
-    TraceSchema,
 )
 
 __all__ = [
@@ -218,6 +219,7 @@ __all__ = [
     "AgentRuntimeStats",
     "AgentSettings",
     "AgentSpec",
+    "AgentSpeedRollup",
     "AgentStopReason",
     "AgentUsage",
     "AllegationRecord",
@@ -329,6 +331,16 @@ __all__ = [
     "SessionStatus",
     "SourceResult",
     "SourceSnapshot",
+    "CallSpeedRecord",
+    "CallSpeedStats",
+    "RecordModelCallInput",
+    "RecordStepInput",
+    "RecordToolCallInput",
+    "RunSpeedStats",
+    "StepSpeedRecord",
+    "StepSpeedStats",
+    "ToolCallSpeedRecord",
+    "ToolCallSpeedStats",
     "TaskContextItem",
     "TaskBlocker",
     "TaskEvidence",

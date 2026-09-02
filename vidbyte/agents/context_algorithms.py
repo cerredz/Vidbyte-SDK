@@ -17,17 +17,12 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
-from vidbyte.agents.algorithms import (
-    IndependentCriticRuntimeAlgorithm,
-    MultiProviderAgenticGraderRuntimeAlgorithm,
-    ProsecutorDefenderJudgeRuntimeAlgorithm,
-    ReflexionRuntimeAlgorithm,
-)
+from vidbyte.agents.algorithms import IndependentCriticRuntimeAlgorithm, MultiProviderAgenticGraderRuntimeAlgorithm, ProsecutorDefenderJudgeRuntimeAlgorithm, ReflexionRuntimeAlgorithm
 from vidbyte.context.runtime import InnerContextWindowAlgorithm
-from vidbyte.lib.dataclasses.context import BaseAgentContext
 from vidbyte.lib.dataclasses.runner import RunnerHandle
-from vidbyte.lib.dataclasses.strategies import AgentResult
 from vidbyte.lib.tracing import SpanContext
+from vidbyte.lib.dataclasses.context import BaseAgentContext
+from vidbyte.lib.dataclasses.strategies import AgentResult
 
 if TYPE_CHECKING:
     from vidbyte.agents.runtimes import LinearAgentRuntime as AgentRuntime

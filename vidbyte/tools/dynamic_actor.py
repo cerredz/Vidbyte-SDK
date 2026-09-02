@@ -13,17 +13,9 @@ Similar Files:
 """
 
 from __future__ import annotations
-
 from typing import Any
-
 from vidbyte.tools.base import BaseTool
-from vidbyte.tools.types import (
-    ToolCall,
-    ToolParameter,
-    ToolPermission,
-    ToolResult,
-    ToolSpec,
-)
+from vidbyte.tools.types import ToolCall, ToolPermission, ToolResult, ToolSpec, ToolParameter
 
 
 class DynamicActorTool(BaseTool):

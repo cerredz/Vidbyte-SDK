@@ -23,6 +23,7 @@ from vidbyte.lib.dataclasses.trace import TraceField, TraceFieldType, TraceSchem
 from vidbyte.tools.base import BaseTool
 from vidbyte.tools.types import ToolCall, ToolParameter, ToolResult, ToolSpec
 
+
 UPDATE_TRACE_TOOL_NAME = "updateTrace"
 
 _TOOL_DESCRIPTION = (

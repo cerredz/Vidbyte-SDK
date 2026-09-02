@@ -7,8 +7,7 @@ from importlib import resources
 from pathlib import Path
 from typing import Any, ClassVar
 
-from vidbyte.lib.enums.skills import Skill, iter_skill_values, skill_from_value
-from vidbyte.lib.enums.skills import Skills as SkillEnums
+from vidbyte.lib.enums.skills import Skill, Skills as SkillEnums, iter_skill_values, skill_from_value
 from vidbyte.lib.errors import ConfigurationError
 
 

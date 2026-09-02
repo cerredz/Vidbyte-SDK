@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
-from typing import ClassVar
+from typing import ClassVar, Sequence
 
 from vidbyte.evals.base import BaseGrader
 from vidbyte.evals.types import EvalCase, GraderResult

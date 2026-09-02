@@ -79,9 +79,7 @@ class AgentFallback:
         prepends the agent's own provider/model as chain index 0, the model every
         entry falls back from.
         """
-        from vidbyte.agents.settings import (
-            AgentFallbackSettings as _AgentFallbackSettings,
-        )
+        from vidbyte.agents.settings import AgentFallbackSettings as _AgentFallbackSettings
 
         if spec is None:
             return None

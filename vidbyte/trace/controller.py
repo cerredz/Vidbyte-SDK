@@ -20,13 +20,7 @@ from typing import Any
 from vidbyte.lib.tracing import NullTracer, SpanContext, TracerBase
 from vidbyte.trace.profiles import TraceProfile, safe_trace_value
 from vidbyte.trace.providers import GenericProviderTranslator, ProviderTraceTranslator
-from vidbyte.trace.schema import (
-    ParentPolicy,
-    SemanticSpanContext,
-    SpanKind,
-    SpanSpec,
-    TraceDetail,
-)
+from vidbyte.trace.schema import ParentPolicy, SemanticSpanContext, SpanKind, SpanSpec, TraceDetail
 
 _SPAN_STACK: ContextVar[tuple[SemanticSpanContext, ...]] = ContextVar("vidbyte_trace_span_stack", default=())
 

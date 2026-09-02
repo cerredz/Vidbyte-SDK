@@ -14,4 +14,5 @@ from __future__ import annotations
 
 from vidbyte.cli import main
 
+
 raise SystemExit(main())

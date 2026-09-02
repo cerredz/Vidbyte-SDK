@@ -1,27 +1,14 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Iterator, Mapping
-from typing import Any
+from collections.abc import Iterator
+from typing import Any, Mapping
 
-from vidbyte.lib.config import (
-    AudioModelConfig,
-    EmbeddingModelConfig,
-    ImageModelConfig,
-    TextModelConfig,
-    VideoModelConfig,
-)
+from vidbyte.lib.config import AudioModelConfig, EmbeddingModelConfig, ImageModelConfig, TextModelConfig, VideoModelConfig
 from vidbyte.lib.enums import ModelProvider
 from vidbyte.lib.errors import ProviderConfigurationError, ProviderResponseError
 from vidbyte.lib.http import HttpResponseParser, HttpTransport
-from vidbyte.lib.runners.types import (
-    AudioModelResponse,
-    EmbeddingResponse,
-    GeneratedImage,
-    ImageModelResponse,
-    TextModelResponse,
-    VideoModelJob,
-)
+from vidbyte.lib.runners.types import AudioModelResponse, EmbeddingResponse, GeneratedImage, ImageModelResponse, TextModelResponse, VideoModelJob
 
 
 class OpenAIProvider:

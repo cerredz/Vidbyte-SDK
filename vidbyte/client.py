@@ -17,10 +17,10 @@ from __future__ import annotations
 
 from vidbyte.agents.client import AgentClient
 from vidbyte.config import YamlLoader
-from vidbyte.evals.client import EvalClient
-from vidbyte.harnesses.client import HarnessClient
 from vidbyte.paradigms.client import ParadigmClient
+from vidbyte.harnesses.client import HarnessClient
 from vidbyte.providers.client import ProvidersClient
+from vidbyte.evals.client import EvalClient
 from vidbyte.tools.client import ToolsClient
 
 

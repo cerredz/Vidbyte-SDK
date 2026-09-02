@@ -20,17 +20,7 @@ from typing import Any
 
 from vidbyte.agents.multi.ledger_reports import TaskLedgerReportReducer
 from vidbyte.agents.multi.ledger_validation import TaskLedgerValidator
-from vidbyte.lib.dataclasses.multi_agent import (
-    AgentDispatch,
-    AgentReport,
-    LedgerEvent,
-    MultiAgentSettings,
-    OrchestratorPlan,
-    TaskBlocker,
-    TaskLedgerSnapshot,
-    TaskRecord,
-    TaskSpec,
-)
+from vidbyte.lib.dataclasses.multi_agent import AgentDispatch, AgentReport, LedgerEvent, MultiAgentSettings, OrchestratorPlan, TaskBlocker, TaskLedgerSnapshot, TaskRecord, TaskSpec
 from vidbyte.lib.enums.multi_agent import TaskStatus
 from vidbyte.lib.errors import TaskLedgerError
 

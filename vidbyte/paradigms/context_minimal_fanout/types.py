@@ -144,11 +144,7 @@ class EnvironmentContext:
     @classmethod
     def from_manager(cls, manager: ContextManager, *, fallback_text: str = "") -> "EnvironmentContext":
         # Builds an EnvironmentContext from a ContextManager's primitives.
-        from vidbyte.context.primitives import (
-            FileContextItem,
-            MemoryContextItem,
-            TextContextItem,
-        )
+        from vidbyte.context.primitives import FileContextItem, MemoryContextItem, TextContextItem
         items = list(manager.items())
         files = tuple(
             ContextFile(

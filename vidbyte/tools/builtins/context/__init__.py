@@ -13,15 +13,8 @@ Relations:
 
 from __future__ import annotations
 
-from vidbyte.tools.builtins.context.compaction import (
-    CompactionMode,
-    ContextCompactionTool,
-)
-from vidbyte.tools.builtins.context.types import (
-    ContextMessage,
-    ContextState,
-    ProgressLog,
-)
+from vidbyte.tools.builtins.context.compaction import CompactionMode, ContextCompactionTool
+from vidbyte.tools.builtins.context.types import ContextMessage, ContextState, ProgressLog
 
 __all__ = [
     "CompactionMode",

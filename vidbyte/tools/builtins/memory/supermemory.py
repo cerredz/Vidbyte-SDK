@@ -22,13 +22,7 @@ Similar Files:
 from __future__ import annotations
 
 from vidbyte.tools.builtins.memory.base import BaseMemoryTool
-from vidbyte.tools.types import (
-    ToolCall,
-    ToolParameter,
-    ToolPermission,
-    ToolResult,
-    ToolSpec,
-)
+from vidbyte.tools.types import ToolCall, ToolParameter, ToolPermission, ToolResult, ToolSpec
 
 _BASE_URL = "https://api.supermemory.ai"
 

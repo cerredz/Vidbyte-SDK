@@ -20,13 +20,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from vidbyte.tools.base import BaseTool
-from vidbyte.tools.types import (
-    ToolCall,
-    ToolParameter,
-    ToolPermission,
-    ToolResult,
-    ToolSpec,
-)
+from vidbyte.tools.types import ToolCall, ToolPermission, ToolResult, ToolSpec, ToolParameter
 
 if TYPE_CHECKING:
     from vidbyte.context.manager import ContextManager

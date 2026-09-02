@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Iterator, Mapping
-from typing import Any
+from collections.abc import Iterator
+from typing import Any, Mapping
 
 from vidbyte.lib.config import TextModelConfig
 from vidbyte.lib.enums import ModelProvider

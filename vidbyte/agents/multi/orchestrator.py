@@ -26,17 +26,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from vidbyte.agents.base import BaseAgent
 from vidbyte.context.multi_agent import MultiAgentContext
 from vidbyte.lib.dataclasses.agents import AgentForkSettings
-from vidbyte.lib.dataclasses.multi_agent import (
-    FinalizationContext,
-    FinalizationRenderer,
-    ManagerAgentCloser,
-    ManagerAgentFactory,
-    OrchestrationContext,
-    OrchestrationRenderer,
-    OrchestratorDecision,
-    OrchestratorPlan,
-    TaskSpec,
-)
+from vidbyte.lib.dataclasses.multi_agent import FinalizationContext, FinalizationRenderer, ManagerAgentCloser, ManagerAgentFactory, OrchestrationContext, OrchestrationRenderer, OrchestratorDecision, OrchestratorPlan, TaskSpec
 from vidbyte.lib.enums.multi_agent import OrchestratorAction
 from vidbyte.lib.enums.prompts import Prompt
 from vidbyte.lib.errors import ConfigurationError, MultiAgentExecutionError

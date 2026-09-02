@@ -1,11 +1,5 @@
 from __future__ import annotations
 
-from vidbyte.lib.agents import ModalityDetector
-from vidbyte.lib.runners.router import (
-    coerce_modality,
-    create_runner_for_modality,
-    resolve_modality,
-)
 from vidbyte.lib.runners.types import (
     AudioModelResponse,
     EmbeddingResponse,
@@ -14,7 +8,9 @@ from vidbyte.lib.runners.types import (
     TextModelResponse,
     VideoModelJob,
 )
+from vidbyte.lib.runners.router import coerce_modality, create_runner_for_modality, resolve_modality
 from vidbyte.lib.runners.utility import Runner
+from vidbyte.lib.agents import ModalityDetector
 
 __all__ = [
     "AudioModelResponse",
@@ -58,8 +54,6 @@ def __getattr__(name: str) -> object:
         from vidbyte.lib.runners.streaming_text import StreamingTextModelRunner
         return StreamingTextModelRunner
     if name == "EmbeddingModelRunnerProvider":
-        from vidbyte.tools.builtins.code_search.semantic import (
-            EmbeddingModelRunnerProvider,
-        )
+        from vidbyte.tools.builtins.code_search.semantic import EmbeddingModelRunnerProvider
         return EmbeddingModelRunnerProvider
     raise AttributeError(name)

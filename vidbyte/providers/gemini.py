@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
-from typing import Any
+from typing import Any, Mapping
 from urllib.parse import quote
 
 from vidbyte.lib.config import EmbeddingModelConfig, TextModelConfig

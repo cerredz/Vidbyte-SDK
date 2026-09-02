@@ -17,29 +17,27 @@ Similar Files:
 """
 
 from __future__ import annotations
-
 import asyncio
 import uuid
 from abc import ABC, abstractmethod
-from collections.abc import Mapping, Sequence
-from typing import Any
+from typing import Any, Mapping, Sequence
 
 from vidbyte.agents.runtimes.actor.actor import AgentActor, PrebuiltActorFactory
 from vidbyte.agents.runtimes.actor.message import ActorMessage
-from vidbyte.agents.types import AgentMessage
-from vidbyte.context.manager import ContextManager
 from vidbyte.context.primitives import ContextItem
-from vidbyte.context.window import ContextWindowAlgorithm
-from vidbyte.lib.dataclasses.agents import AgentRuntimeConfig
+from vidbyte.context.manager import ContextManager
 from vidbyte.lib.dataclasses.context import BaseAgentContext, StrategyContext
 from vidbyte.lib.dataclasses.runner import RunnerHandle
 from vidbyte.lib.dataclasses.strategies import StrategyResult
+from vidbyte.agents.types import AgentMessage
 from vidbyte.lib.enums import ModelModality
-from vidbyte.lib.tracing import TracerBase
-from vidbyte.middleware import AgentMiddleware
+from vidbyte.tools.types import ToolCallContext
+from vidbyte.lib.dataclasses.agents import AgentRuntimeConfig
 from vidbyte.tools.catalog import Tools
 from vidbyte.tools.security import PermissionPolicy
-from vidbyte.tools.types import ToolCallContext
+from vidbyte.lib.tracing import TracerBase
+from vidbyte.context.window import ContextWindowAlgorithm
+from vidbyte.middleware import AgentMiddleware
 
 
 class BaseActorRuntime(ABC):
@@ -187,12 +185,12 @@ class BaseActorRuntime(ABC):
             actor_classes = self.include_actors
             if actor_classes is None:
                 from vidbyte.agents.runtimes.actor.actor import (
-                    CoderActor,
-                    CriticActor,
-                    GeneratorActor,
                     PlannerActor,
-                    ReasonerActor,
+                    CoderActor,
                     ReviewerActor,
+                    GeneratorActor,
+                    CriticActor,
+                    ReasonerActor,
                 )
                 actor_classes = [
                     PlannerActor,

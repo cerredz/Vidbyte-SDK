@@ -1,5 +1,14 @@
 """Context Protocol Header
 
+FILE: vidbyte/tools/builtins/reasoning/__init__.py
+PURPOSE: Exports ten named reasoning tools and the fixed catalog of 182 strategy-specific public reasoning trace tools.
+ROLE IN CODEBASE: vidbyte.tools.builtins imports this package to register reasoning tools in the SDK component registry.
+ARCHITECTURE NOTE: The catalog is an immutable name-to-class index; leaf modules own schemas and _base.py owns shared execution behavior.
+COMMON MODIFICATION PATTERNS: Add or remove a trace class and its export/catalog entry together, then run the contract checker.
+KNOWN EDGE CASES: Tool names must remain unique and every catalog class must expose a matching immutable definition.
+RELATED DOCS: docs/design/reasoning-deep-observability-tools.md and vidbyte/tools/README.md.
+TESTS: scripts/check_reasoning_trace_contracts.py and the source/package stages in scripts/run_ci.py.
+
 Description:
     Exports both named reasoning-strategy tools and the built-in reasoning trace
     catalog.
@@ -24,20 +33,17 @@ from collections.abc import Mapping
 from types import MappingProxyType
 from typing import ClassVar
 
+from ._base import ReasoningTraceDefinition, ReasoningTraceTool, parameter
 from vidbyte.tools.builtins.reasoning.abduce import AbduceTool
 from vidbyte.tools.builtins.reasoning.analogy import AnalogyTool
 from vidbyte.tools.builtins.reasoning.bayesian_update import BayesianUpdateTool
 from vidbyte.tools.builtins.reasoning.causal_chain import CausalChainTool
 from vidbyte.tools.builtins.reasoning.deduce import DeduceTool
-from vidbyte.tools.builtins.reasoning.differential_diagnosis import (
-    DifferentialDiagnosisTool,
-)
+from vidbyte.tools.builtins.reasoning.differential_diagnosis import DifferentialDiagnosisTool
 from vidbyte.tools.builtins.reasoning.falsify import FalsifyTool
 from vidbyte.tools.builtins.reasoning.fermi_estimate import FermiEstimateTool
 from vidbyte.tools.builtins.reasoning.induce import InduceTool
 from vidbyte.tools.builtins.reasoning.steelman import SteelmanTool
-
-from ._base import ReasoningTraceDefinition, ReasoningTraceTool, parameter
 from .a3_problem_solving_trace import A3ProblemSolvingTraceTool
 from .ab_testing_trace import AbTestingTraceTool
 from .abductive_trace import AbductiveTraceTool

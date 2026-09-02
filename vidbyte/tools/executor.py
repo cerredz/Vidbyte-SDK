@@ -15,8 +15,8 @@ from __future__ import annotations
 
 import json
 import re
-from typing import TYPE_CHECKING
 
+from typing import TYPE_CHECKING
 from vidbyte.lib.errors import ToolRegistryError
 from vidbyte.tools.activity import ActivityToolFormatter
 from vidbyte.tools.catalog import Tools

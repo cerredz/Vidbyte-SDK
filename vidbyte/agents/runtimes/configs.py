@@ -16,10 +16,7 @@ Similar Files:
 """
 
 from __future__ import annotations
-
-from collections.abc import Sequence
-from typing import TYPE_CHECKING, Any
-
+from typing import Any, Sequence, TYPE_CHECKING
 from vidbyte.lib.enums import AgentRuntimeType
 from vidbyte.lib.errors import ConfigurationError
 

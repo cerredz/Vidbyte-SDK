@@ -32,12 +32,7 @@ from vidbyte.paradigms.context_minimal_fanout.types import (
     PromptSplitPlan,
     SplitPrompt,
 )
-from vidbyte.tools.builtins.output_schema import (
-    AppendOutputTool,
-    DeclareOutputSchemaTool,
-    ExtendOutputSchemaTool,
-    OutputSchemaBuilder,
-)
+from vidbyte.tools.builtins.output_schema import AppendOutputTool, DeclareOutputSchemaTool, ExtendOutputSchemaTool, OutputSchemaBuilder
 from vidbyte.tools.toolsets import ParadigmMinimalToolset
 
 

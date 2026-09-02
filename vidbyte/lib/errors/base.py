@@ -1,5 +1,13 @@
 """Context Protocol Header
 
+PURPOSE: Defines the canonical typed SDK exception hierarchy and safe structured failure details.
+ROLE IN CODEBASE: Provider, tool, runner, registry, source, and agent boundaries translate failures into these stable caller-facing types.
+ARCHITECTURE NOTE: Error classes remain dependency-light and carry safe fields without importing their higher-level boundary owners.
+COMMON MODIFICATION PATTERNS: Add one type for a distinct remediation category, export it from errors.__init__, and preserve chained causes.
+KNOWN EDGE CASES: Public details must exclude secrets and raw payloads; aggregate errors retain causes only for programmatic inspection.
+RELATED DOCS: field-guide/vidbyte-sdk/runtime-boundaries.md and field-guide/vidbyte-sdk/model-facing-tool-contracts.md.
+TESTS: Existing error-path tests and the source/package stages in scripts/run_ci.py.
+
 Description:
     Defines the shared SDK exception hierarchy used by public Vidbyte SDK modules.
 Purpose:
@@ -9,6 +17,7 @@ Architecture:
     - VidbyteSdkError: Root SDK exception with optional safe detail metadata.
     - ToolRegistryError: Raised when registry state or lookups are invalid.
     - ToolExecutionError: Raised for tool execution pipeline failures.
+    - ReasoningTraceArgumentError: Raised when a reasoning trace argument violates its declared contract.
     - PermissionDeniedError: Raised when a policy refuses a tool call.
     - McpProtocolError: Raised when an MCP transport returns malformed data.
     - AgentExecutionError: Raised when an agent cannot generate a reply.
@@ -24,6 +33,7 @@ Architecture:
     - McpInitializeError: Raised when an MCP connection handshake fails or times out.
     - McpToolDiscoveryError: Raised when remote tools/list discovery returns an invalid response.
     - McpToolExecutionError: Raised when a remote MCP tool execution returns an error result.
+    - ReasoningTraceDefinitionError: Raised when a reasoning trace definition is invalid.
     - McpAttachmentError: Composite error tracking failures from concurrent server startup.
     - ProviderRequestError: Raised when a provider request fails or returns an invalid response.
     - ProviderConfigurationError: Raised when a provider adapter is missing required configuration.
@@ -33,6 +43,8 @@ Architecture:
     - SourcePinMismatchError: Raised when fetched content does not match the pinned hash.
     - SourceParseError: Raised when an artifact cannot be parsed into a valid typed IR.
     - SourceSecurityError: Raised when a URL is disallowed or a response violates a guard.
+    - AgentSpeedError: Base exception for agent speed-tracking failures.
+    - AgentSpeedValidationError: Raised when a speed-tracking dataclass has an invalid shape.
 Relations:
     Related to vidbyte.tools.executor, vidbyte.tools.registry, and vidbyte.tools.mcp.client.
 """
@@ -59,6 +71,46 @@ class ToolRegistryError(VidbyteSdkError):
 
 class ToolExecutionError(VidbyteSdkError):
     """Signals failures in the generic tool execution pipeline."""
+
+
+class ReasoningTraceArgumentError(ToolExecutionError):
+    """Signals a model argument that violates a reasoning trace parameter contract."""
+
+    DIAGNOSTIC_FIELDS = (
+        "error_kind",
+        "expected",
+        "actual",
+        "safe_runtime_details",
+        "likely_causes",
+        "repair_approaches",
+        "related_docs",
+        "relevant_tests",
+    )
+
+    def __init__(self, parameter_name: str, expected: str) -> None:
+        # Exposes only SDK-authored contract data; the rejected model value is intentionally omitted.
+        self.parameter_name = parameter_name
+        self.error_kind = "reasoning_trace_argument"
+        self.expected = expected
+        self.actual = "invalid or missing model-provided value"
+        self.safe_runtime_details = {"parameter_name": parameter_name}
+        self.likely_causes = ("The model supplied a value outside the parameter contract.",)
+        self.repair_approaches = ("Retry with a value matching the declared tool parameter.",)
+        self.related_docs = ("docs/design/reasoning-deep-observability-tools.md",)
+        self.relevant_tests = ("scripts/check_reasoning_trace_contracts.py",)
+        super().__init__(
+            f"Invalid reasoning trace parameter '{parameter_name}': expected {expected}.",
+            details={
+                "error_kind": self.error_kind,
+                "expected": self.expected,
+                "actual": self.actual,
+                "safe_runtime_details": self.safe_runtime_details,
+                "likely_causes": self.likely_causes,
+                "repair_approaches": self.repair_approaches,
+                "related_docs": self.related_docs,
+                "relevant_tests": self.relevant_tests,
+            },
+        )
 
 
 class PermissionDeniedError(VidbyteSdkError):
@@ -166,14 +218,7 @@ class ProviderSelectionError(VidbyteSdkError):
 class ProviderRequestError(VidbyteSdkError):
     """Raised when a provider request fails or returns an invalid response."""
 
-    def __init__(
-        self,
-        message: str,
-        *,
-        provider: str,
-        status_code: int | None = None,
-        response_excerpt: str | None = None,
-    ) -> None:
+    def __init__(self, message: str, *, provider: str, status_code: int | None = None, response_excerpt: str | None = None) -> None:
         details: dict[str, Any] = {"provider": provider}
         if status_code is not None:
             details["status_code"] = status_code
@@ -197,7 +242,14 @@ class ProviderConfigurationError(VidbyteSdkError):
 class ProviderResponseError(VidbyteSdkError):
     """Raised when a provider response cannot be normalized."""
 
-    def __init__(self, message: str, *, provider: str, status_code: int | None = None, response_excerpt: str | None = None) -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        provider: str,
+        status_code: int | None = None,
+        response_excerpt: str | None = None,
+    ) -> None:
         # Initializes the error with response failure context, including status code and response body excerpt.
         details: dict[str, Any] = {"provider": provider}
         if status_code is not None:
@@ -214,6 +266,48 @@ class ToolRegistrationError(ToolRegistryError):
     """Raised when a tool cannot be registered due to validation or conflict."""
 
 
+class ReasoningTraceDefinitionError(ToolRegistrationError):
+    """Signals an invalid immutable reasoning trace definition."""
+
+    DIAGNOSTIC_FIELDS = (
+        "error_kind",
+        "expected",
+        "actual",
+        "safe_runtime_details",
+        "likely_causes",
+        "repair_approaches",
+        "related_docs",
+        "relevant_tests",
+    )
+
+    def __init__(self, reason: str, *, skill_name: str = "") -> None:
+        # Keeps source-authored definition identity available without including model input.
+        self.reason = reason
+        self.skill_name = skill_name
+        self.error_kind = "reasoning_trace_definition"
+        self.expected = "a complete definition with unique parameters"
+        self.actual = reason
+        self.safe_runtime_details = {"skill_name": skill_name}
+        self.likely_causes = ("A built-in trace definition violates its construction invariant.",)
+        self.repair_approaches = ("Correct the named trace definition and rerun its contract check.",)
+        self.related_docs = ("docs/design/reasoning-deep-observability-tools.md",)
+        self.relevant_tests = ("scripts/check_reasoning_trace_contracts.py",)
+        label = f" for '{skill_name}'" if skill_name else ""
+        super().__init__(
+            f"Invalid reasoning trace definition{label}: {reason}.",
+            details={
+                "error_kind": self.error_kind,
+                "expected": self.expected,
+                "actual": self.actual,
+                "safe_runtime_details": self.safe_runtime_details,
+                "likely_causes": self.likely_causes,
+                "repair_approaches": self.repair_approaches,
+                "related_docs": self.related_docs,
+                "relevant_tests": self.relevant_tests,
+            },
+        )
+
+
 class PipelineExecutionError(VidbyteSdkError):
     """Raised when a pipeline cannot complete execution."""
 
@@ -228,6 +322,56 @@ class SessionUsageError(VidbyteSdkError):
 
 class SessionUsageValidationError(SessionUsageError):
     """Raised when persisted usage rollup inputs have an invalid shape."""
+
+
+class AgentSpeedError(VidbyteSdkError):
+    """Base class for agent speed-tracking failures."""
+
+    DIAGNOSTIC_FIELDS = (
+        "error_kind",
+        "expected",
+        "actual",
+        "safe_runtime_details",
+        "likely_causes",
+        "repair_approaches",
+        "related_docs",
+        "relevant_tests",
+    )
+
+    def __init__(self, message: str, *, details: Mapping[str, Any] | None = None) -> None:
+        """Populate the shared speed-tracking diagnostic packet from message/details alone."""
+        super().__init__(message, details=details)
+        self.error_kind = "agent_speed_tracking"
+        self.expected = "AgentSpeedTracker recording/rollup completing without an internal contract violation."
+        self.actual = message
+        self.safe_runtime_details = dict(self.details)
+        self.likely_causes = ("An internal AgentSpeedTracker invariant was violated; see subclasses for specifics.",)
+        self.repair_approaches = ("Inspect safe_runtime_details, then fix the AgentSpeedTracker call site that produced it.",)
+        self.related_docs = ("https://github.com/cerredz/Vidbyte-SDK/blob/main/docs/design/agent-speed-tracking.md",)
+        self.relevant_tests = ("tests/test_agent_speed.py",)
+
+
+class AgentSpeedValidationError(AgentSpeedError):
+    """Raised when a speed-tracking dataclass receives an invalid shape."""
+
+    def __init__(self, message: str, *, details: Mapping[str, Any] | None = None) -> None:
+        """Populate the diagnostic packet with the specific field/value that failed validation."""
+        super().__init__(message, details=details)
+        self.error_kind = "agent_speed_validation"
+        self.expected = (
+            "A speed-tracking dataclass field within its documented range: non-negative timestamps, "
+            "first_token_at no earlier than dispatched_at, non-empty tool names, and ordered percentiles."
+        )
+        self.actual = message
+        self.likely_causes = (
+            "A caller assembled a speed dataclass from a raw timestamp/count computed incorrectly, e.g. "
+            "first_token_at captured before dispatched_at, or a negative duration from a non-monotonic "
+            "clock override in a test.",
+        )
+        self.repair_approaches = (
+            "Inspect safe_runtime_details for the offending field and value, then fix the call site in "
+            "vidbyte/agents/runtime.py or vidbyte/agents/base.py that assembled the dataclass.",
+        )
 
 
 class SourceError(VidbyteSdkError):

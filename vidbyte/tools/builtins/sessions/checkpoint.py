@@ -21,12 +21,8 @@ from typing import Any
 from uuid import uuid4
 
 from vidbyte.sessions.contracts import Checkpoint, SessionStatus
+from vidbyte.tools.builtins.sessions.descriptions import CHECKPOINT_TOOL_DESCRIPTION, LABEL_DESCRIPTION, SESSION_ID_DESCRIPTION
 from vidbyte.tools.builtins.sessions._base import _SessionBuiltinTool
-from vidbyte.tools.builtins.sessions.descriptions import (
-    CHECKPOINT_TOOL_DESCRIPTION,
-    LABEL_DESCRIPTION,
-    SESSION_ID_DESCRIPTION,
-)
 from vidbyte.tools.types import ToolCall, ToolPermission, ToolResult, ToolSpec
 
 _TOOL_NAME = "checkpoint"

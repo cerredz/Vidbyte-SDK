@@ -16,20 +16,10 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from vidbyte.context.compaction import (
-    CompactionMode,
-    ContextCompactionEngine,
-    Summarizer,
-)
+from vidbyte.context.compaction import CompactionMode, ContextCompactionEngine, Summarizer
 from vidbyte.tools.base import BaseTool
 from vidbyte.tools.builtins.context.types import ContextState
-from vidbyte.tools.types import (
-    ToolCall,
-    ToolParameter,
-    ToolPermission,
-    ToolResult,
-    ToolSpec,
-)
+from vidbyte.tools.types import ToolCall, ToolParameter, ToolPermission, ToolResult, ToolSpec
 
 
 class ContextCompactionTool(BaseTool):

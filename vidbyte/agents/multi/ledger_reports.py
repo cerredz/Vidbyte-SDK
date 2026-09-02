@@ -14,12 +14,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-from vidbyte.lib.dataclasses.multi_agent import (
-    AgentReport,
-    TaskBlocker,
-    TaskEvidence,
-    TaskRecord,
-)
+from vidbyte.lib.dataclasses.multi_agent import AgentReport, TaskBlocker, TaskEvidence, TaskRecord
 from vidbyte.lib.enums.multi_agent import TaskStatus
 
 

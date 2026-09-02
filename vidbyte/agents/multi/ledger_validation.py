@@ -15,12 +15,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Sequence
 
-from vidbyte.lib.dataclasses.multi_agent import (
-    AgentDispatch,
-    MultiAgentSettings,
-    TaskRecord,
-    TaskSpec,
-)
+from vidbyte.lib.dataclasses.multi_agent import AgentDispatch, MultiAgentSettings, TaskRecord, TaskSpec
 from vidbyte.lib.enums.multi_agent import TaskStatus
 from vidbyte.lib.errors import TaskLedgerError
 

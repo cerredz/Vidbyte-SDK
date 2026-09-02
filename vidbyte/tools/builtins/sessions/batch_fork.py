@@ -18,10 +18,7 @@ import json
 from typing import TYPE_CHECKING, Any
 
 from vidbyte.tools.builtins.sessions._base import _SessionBuiltinTool
-from vidbyte.tools.builtins.sessions.descriptions import (
-    BATCH_FORK_TOOL_DESCRIPTION,
-    CHECKPOINT_ID_DESCRIPTION,
-)
+from vidbyte.tools.builtins.sessions.descriptions import BATCH_FORK_TOOL_DESCRIPTION, CHECKPOINT_ID_DESCRIPTION
 from vidbyte.tools.types import ToolCall, ToolPermission, ToolResult, ToolSpec
 
 if TYPE_CHECKING:

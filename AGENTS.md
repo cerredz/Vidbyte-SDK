@@ -32,11 +32,13 @@ Generated, code-free reference material that describes the repository rather tha
 
 ### `docs/`
 
-Design documentation for the package, and by volume the largest documentation surface in the repository. Every non-trivial change lands a design document before implementation begins, which makes this folder the decision history for the whole package rather than an afterthought. It is substantially larger than the automated test suite, which is a fair reflection of how deliberately this repository is built — decisions are argued for in writing before they are coded. Reading here first is usually faster than reverse-engineering intent from the implementation alone.
+Design documentation for the package, and by volume the largest documentation surface in the repository. Every non-trivial change lands a design document before implementation begins, which makes this folder the decision history for the whole package rather than an afterthought.
+
+**Do not grep, glob, or read files under `docs/` as part of ordinary work.** These documents are written for pre-implementation planning, not as reference material an agent should pull into its own context — they are large, they are not kept in sync with the implementation, and loading them burns tokens without a corresponding benefit. Treat this folder as opaque unless a human explicitly names a specific document and asks you to read it.
 
 #### `docs/design/`
 
-One design document per feature, each walking through the problem being solved, the approach chosen, the alternatives that were considered and rejected, and why. This is the first place to look when a public interface's shape seems arbitrary, since the reasoning behind it is recorded here rather than scattered across code comments. Documents are organized so the rationale behind any given subsystem can be found without first reading its implementation. Consulting this folder before proposing a change to an existing interface avoids relitigating a decision that was already made deliberately.
+One design document per feature, each walking through the problem being solved, the approach chosen, the alternatives that were considered and rejected, and why. Documents are organized so the rationale behind any given subsystem can be found without first reading its implementation. Do not open these files unprompted; see the note in the parent section above.
 
 ### `scripts/`
 

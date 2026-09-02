@@ -11,13 +11,7 @@ from vidbyte.tools.builtins.providers._descriptions import (
     STORE_BOUND_DESCRIPTION,
     WHERE_DESCRIPTION,
 )
-from vidbyte.tools.types import (
-    ToolCall,
-    ToolParameter,
-    ToolPermission,
-    ToolResult,
-    ToolSpec,
-)
+from vidbyte.tools.types import ToolCall, ToolParameter, ToolPermission, ToolResult, ToolSpec
 
 
 class MongoCreateCollectionTool(ProviderOperationTool):

@@ -33,39 +33,13 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, ValidationError
 
-from vidbyte.context.algorithms.prosecutor_defender_judge import (
-    DebateStageSettings,
-    ProsecutorDefenderJudgeAlgorithm,
-    ProsecutorDefenderJudgeFailurePolicy,
-)
+from vidbyte.context.algorithms.prosecutor_defender_judge import DebateStageSettings, ProsecutorDefenderJudgeAlgorithm, ProsecutorDefenderJudgeFailurePolicy
 from vidbyte.context.templates import NullRecorder
 from vidbyte.lib.agents.modality_detector import ModalityDetector
-from vidbyte.lib.agents.prosecutor_defender_judge import (
-    dump_payload,
-    json_safe_mapping,
-    optional_int,
-    runner_model_name,
-    safe_error_category,
-    safe_tool_call_summary,
-    safe_trace_error,
-)
+from vidbyte.lib.agents.prosecutor_defender_judge import dump_payload, json_safe_mapping, optional_int, runner_model_name, safe_error_category, safe_tool_call_summary, safe_trace_error
 from vidbyte.lib.dataclasses.agents import AgentRuntimeConfig
 from vidbyte.lib.dataclasses.context import BaseAgentContext, ContextArtifact
-from vidbyte.lib.dataclasses.prosecutor_defender_judge import (
-    AllegationRecord,
-    DebateStageRecord,
-    DefenderReportPayload,
-    DefenseRecord,
-    EvidenceCitationPayload,
-    EvidenceCitationRecord,
-    EvidenceSource,
-    JudgeDecision,
-    JudgeDecisionRecord,
-    JudgeReasonCode,
-    JudgeReportPayload,
-    ProsecutorDefenderJudgeReport,
-    ProsecutorReportPayload,
-)
+from vidbyte.lib.dataclasses.prosecutor_defender_judge import AllegationRecord, DebateStageRecord, DefenderReportPayload, DefenseRecord, EvidenceCitationPayload, EvidenceCitationRecord, EvidenceSource, JudgeDecision, JudgeDecisionRecord, JudgeReasonCode, JudgeReportPayload, ProsecutorDefenderJudgeReport, ProsecutorReportPayload
 from vidbyte.lib.dataclasses.runner import RunnerHandle
 from vidbyte.lib.dataclasses.strategies import AgentResult
 from vidbyte.lib.enums import ModelModality

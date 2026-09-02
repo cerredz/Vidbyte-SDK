@@ -41,10 +41,7 @@ from collections.abc import Mapping
 from typing import Any, ClassVar
 
 from vidbyte.lib.agents.modality_detector import ModalityDetector
-from vidbyte.lib.constants.runners import (
-    MODEL_PROVIDER_RUNNER_TYPE_MAP,
-    MODEL_RUNNER_TYPE_MAP,
-)
+from vidbyte.lib.constants.runners import MODEL_PROVIDER_RUNNER_TYPE_MAP, MODEL_RUNNER_TYPE_MAP
 from vidbyte.lib.enums import ModelModality, ModelProvider
 from vidbyte.lib.errors import ConfigurationError
 

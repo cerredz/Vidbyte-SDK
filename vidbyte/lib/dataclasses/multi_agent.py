@@ -21,18 +21,9 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, TypeAlias
 
-from vidbyte.lib.dataclasses.agents import (
-    AgentCard,
-    AgentForkSettings,
-    AgentInput,
-    AgentMessage,
-)
+from vidbyte.lib.dataclasses.agents import AgentCard, AgentForkSettings, AgentInput, AgentMessage
 from vidbyte.lib.dataclasses.context import BaseContext
-from vidbyte.lib.enums.multi_agent import (
-    MultiAgentStopReason,
-    OrchestratorAction,
-    TaskStatus,
-)
+from vidbyte.lib.enums.multi_agent import MultiAgentStopReason, OrchestratorAction, TaskStatus
 
 if TYPE_CHECKING:
     from vidbyte.agents.base import BaseAgent

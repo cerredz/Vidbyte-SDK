@@ -19,11 +19,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from vidbyte.tools.builtins.sessions.descriptions import RESUME_OUTPUT_TOOL_DESCRIPTION, SESSION_ID_DESCRIPTION
 from vidbyte.tools.builtins.sessions._base import _SessionBuiltinTool
-from vidbyte.tools.builtins.sessions.descriptions import (
-    RESUME_OUTPUT_TOOL_DESCRIPTION,
-    SESSION_ID_DESCRIPTION,
-)
 from vidbyte.tools.types import ToolCall, ToolPermission, ToolResult, ToolSpec
 
 _TOOL_NAME = "resume_output"
