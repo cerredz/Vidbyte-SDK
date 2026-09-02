@@ -9,7 +9,13 @@ from typing import Any, get_type_hints
 from pydantic import BaseModel, ValidationError, create_model
 
 from vidbyte.tools.base import BaseTool
-from vidbyte.tools.types import ToolCall, ToolParameter, ToolPermission, ToolResult, ToolSpec
+from vidbyte.tools.types import (
+    ToolCall,
+    ToolParameter,
+    ToolPermission,
+    ToolResult,
+    ToolSpec,
+)
 
 
 class FunctionTool(BaseTool):
@@ -54,7 +60,7 @@ class FunctionTool(BaseTool):
         except ValidationError as exc:
             return ToolResult.failure(self.name, _validation_message(exc), metadata={"error_type": "validation"})
 
-        kwargs = model.model_dump()
+        kwargs = model.model_dump(mode="python")
         try:
             if inspect.iscoroutinefunction(self.func):
                 value = await self.func(**kwargs)

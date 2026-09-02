@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, ConfigDict, model_validator
 
 from vidbyte.lib.constants.trace import MAX_TRACE_FIELD_NESTING_DEPTH
 
@@ -44,6 +44,8 @@ class TraceFieldType(str, Enum):
 
 class TraceField(BaseModel):
     """Typed description object for one continual trace field, optionally declaring its own nested subfield or item shape."""
+
+    model_config = ConfigDict(extra="forbid")
 
     description: str
     type: TraceFieldType = TraceFieldType.STRING

@@ -1,16 +1,31 @@
-"""Context Protocol Header
+"""FILE: vidbyte/context/primitives/documents.py
 
-Description:
-    Defines document- and environment-style context primitives.
-Purpose:
-    Gives developers immutable units of textual context such as raw text, files,
-    git diffs, reference documents, environment state, and memory summaries.
-Architecture:
-    - Text/File/GitDiff/Document/Environment/Memory context primitives.
-    - TOOL_CREATE_META ClassVar on create-enabled primitives holds model-facing
-      tool strings (description + field schemas) for the create-tool registry.
-Relations:
-    Re-exported through vidbyte.context.primitives.
+PURPOSE:
+    Defines immutable text, file, diff, document, environment, and memory
+    records that carry source material into a later context-window iteration.
+ROLE IN CODEBASE:
+    ContextManager renders these records, create-tool registry builders construct
+    the create-enabled types, and vidbyte.context.primitives re-exports them.
+ARCHITECTURE NOTE:
+    Dataclasses own source-oriented field rendering while shared helpers add the
+    managed-context boundary; filesystem reads are isolated to FileContextItem.
+FUNCTION INVENTORY:
+    TextContextItem, FileContextItem, GitDiffContextItem, DocumentContextItem,
+    EnvironmentContextItem, and MemoryContextItem each render one record type.
+COMMON MODIFICATION PATTERNS:
+    Keep source metadata before body content, preserve excerpt fallback behavior,
+    and retain TOOL_CREATE_META synchronization for create-enabled records.
+WHAT NOT TO DO IN THIS FILE:
+    Do not place records, mutate ContextManager state, or validate source truth;
+    registry, placement, and caller-owned freshness belong elsewhere.
+KNOWN EDGE CASES:
+    File content may be absent in favor of an excerpt, environment values may be
+    missing, and optional source metadata is omitted when empty.
+RELATED DOCS:
+    https://github.com/cerredz/Vidbyte-SDK/tree/main/vidbyte/context/primitives
+TESTS:
+    Existing context primitive registry tests plus source/package smoke gates cover
+    imports, create-tool rendering, and context integration.
 """
 
 from __future__ import annotations
@@ -71,7 +86,13 @@ class TextContextItem:
     def to_context_text(self) -> str:
         # Renders title, optional source, and content.
         source = f"\nSource: {self.source}" if self.source else ""
-        return _with_context_intro(f"{self.title}{source}\n{self.content}")
+        lines = [
+            "This primitive carries free-form text intended to remain available in the next context-window iteration. The title identifies the kind of note being preserved, while the optional source records where it came from. The content line contains the actual prose or instruction supplied by the caller. Read this as a text record whose meaning comes from its body rather than from structured task or evidence fields.",
+            "",
+            f"{self.title}{source}",
+            self.content,
+        ]
+        return _with_context_intro("\n".join(lines))
 
 
 @dataclass(frozen=True, slots=True)
@@ -115,6 +136,8 @@ class FileContextItem:
     def to_context_text(self) -> str:
         # Renders file path, language, and content or excerpt.
         lines = [
+            "This primitive carries a file snapshot for code or document-oriented work. The path and absolute path identify the source location, and the size and language describe the captured file. The following content is either the full file body or the selected excerpt when full content is absent. Use this record to reason about source material, not as proof that the file still matches the live filesystem.",
+            "",
             f"File: {self.path}",
             f"Absolute path: {self.absolute_path}",
             f"Size bytes: {self.size_bytes}",
@@ -212,7 +235,11 @@ class GitDiffContextItem:
 
     def to_context_text(self) -> str:
         # Renders repo context, range, changed files, and raw diff.
-        lines = ["Git diff:"]
+        lines = [
+            "This primitive carries a repository change set for reviewing implementation state. Repository, branch, range, and file entries locate the change within version control. The diff section contains the textual modifications that a reviewer should inspect. Treat the diff as captured context whose freshness depends on the caller's snapshot time.",
+            "",
+            "Git diff:",
+        ]
         if self.repo_root:
             lines.append(f"Repo root: {self.repo_root}")
         if self.branch:
@@ -283,7 +310,12 @@ class DocumentContextItem:
 
     def to_context_text(self) -> str:
         # Renders document title, source, optional ID, and content.
-        lines = [f"Document: {self.title}", f"Source: {self.source}"]
+        lines = [
+            "This primitive carries a named document from an explicit source. The title, source, and optional document ID identify the reference before its body is shown. The content section contains the document text that later reasoning may quote or compare. Use the source metadata to distinguish this record from free-form notes or transient responses.",
+            "",
+            f"Document: {self.title}",
+            f"Source: {self.source}",
+        ]
         if self.document_id:
             lines.append(f"Document ID: {self.document_id}")
         lines.append("Content:")
@@ -346,7 +378,11 @@ class EnvironmentContextItem:
 
     def to_context_text(self) -> str:
         # Renders OS, working directory, and shell if set.
-        lines = ["Environment:"]
+        lines = [
+            "This primitive carries execution-environment context relevant to interpreting commands and paths. The following fields identify the operating system, current working directory, and shell when those values are known. Missing values mean the caller did not provide that detail, not that the environment has no such value. Use this record to qualify operational assumptions made from the other context.",
+            "",
+            "Environment:",
+        ]
         if self.os_name:
             lines.append(f"OS: {self.os_name}")
         if self.cwd:
@@ -404,7 +440,13 @@ class MemoryContextItem:
     def to_context_text(self) -> str:
         # Renders memory summary with optional source attribution.
         source = f"\nSource: {self.source}" if self.source else ""
-        return _with_context_intro(f"Memory summary:{source}\n{self.content}")
+        lines = [
+            "This primitive carries a retained memory summary for later reasoning. The optional source identifies the origin of the memory, and the following body preserves the remembered content. A memory summary is durable context but is not independently verified by this renderer. Treat it as a clue to incorporate or validate rather than as a current observation.",
+            "",
+            f"Memory summary:{source}",
+            self.content,
+        ]
+        return _with_context_intro("\n".join(lines))
 
 
 __all__ = [
