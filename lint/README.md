@@ -8,7 +8,7 @@ repair, local precedent, rejected shortcuts, and focused verification command.
 ## Responsibilities
 
 - Run pinned Ruff once and expose the independently baselined analyzer policies,
-  including 33 Ruff policies.
+  including 37 Ruff policies.
 - Enforce five SDK domain-contract policies (C001-C005) over the same source
   catalogue.
 - Run pinned mypy once and ratchet every package type-contract error.
@@ -125,6 +125,17 @@ Nested folders:
 | S048 | blocking-sleep-in-async-function | Async backoff yields to the event loop |
 | S049 | unsafe-yaml-load | YAML parsing uses safe construction boundaries |
 | S050 | insecure-hash | Hash primitives match the operation's security property |
+| S051 | modernized-import-and-syntax-hygiene | Sorted imports and non-deprecated typing syntax |
+| S052 | async-blocking-io | Async functions never block the event loop (blocking calls not already owned by S045-S048) |
+| S053 | defensive-python-bugbear | Warning stacklevel, specific test exceptions, closure binding, ContextVar defaults |
+| S054 | bandit-security-subset | No unsafe pickle/marshal load, disabled TLS verification, hardcoded credentials (weak-hash/unsafe-YAML in S049/S050) |
+| S055 | no-shell-subprocess | Subprocess execution never routes through a shell |
+| S056 | retryable-idempotent-methods | HTTP transports guard non-idempotent retries with a key |
+| S057 | no-model-construct-without-review | Pydantic validation-skipping construction is reviewed |
+| S058 | forbid-unknown-fields-at-boundary | Public-seam models declare an explicit extra-field policy |
+| S059 | explicit-serialization-mode | model_dump() declares its wire/Python mode explicitly |
+| S060 | typed-public-seam-mappings | Public seams name their mapping shape instead of dict[str, Any] |
+| S061 | bounded-safe-path | File/archive I/O on a dynamic path is resolved and contained |
 
 ### Agent-native rules
 

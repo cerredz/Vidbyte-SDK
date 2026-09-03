@@ -43,6 +43,7 @@ Architecture:
     - SourcePinMismatchError: Raised when fetched content does not match the pinned hash.
     - SourceParseError: Raised when an artifact cannot be parsed into a valid typed IR.
     - SourceSecurityError: Raised when a URL is disallowed or a response violates a guard.
+    - FailureRaisedError: Raised when a Session recovery policy escalates a deterministic failure to raise.
     - AgentSpeedError: Base exception for agent speed-tracking failures.
     - AgentSpeedValidationError: Raised when a speed-tracking dataclass has an invalid shape.
 Relations:
@@ -431,6 +432,52 @@ class SessionUsageError(VidbyteSdkError):
 
 class SessionUsageValidationError(SessionUsageError):
     """Raised when persisted usage rollup inputs have an invalid shape."""
+
+
+class FailureRaisedError(VidbyteSdkError):
+    """Raised when a Session recovery policy escalates a deterministic failure to raise."""
+
+    DIAGNOSTIC_FIELDS = (
+        "error_kind",
+        "expected",
+        "actual",
+        "safe_runtime_details",
+        "likely_causes",
+        "repair_approaches",
+        "related_docs",
+        "relevant_tests",
+    )
+
+    def __init__(self, failure: object) -> None:
+        # Kept loosely typed (not vidbyte.lib.dataclasses.failure.Failure) so this substrate
+        # module stays independent of the dataclasses module, mirroring how MiddlewareContext
+        # keeps model_usage loosely typed to avoid a lib-internal cross-module dependency.
+        self.failure = failure
+        code = getattr(getattr(failure, "code", None), "value", None) or str(getattr(failure, "code", "unknown"))
+        source = str(getattr(failure, "source", "unknown"))
+        summary = getattr(failure, "summary", None) or code
+        phase = getattr(getattr(failure, "phase", None), "value", None) or str(getattr(failure, "phase", "unknown"))
+        self.error_kind = "session_failure_raised"
+        self.expected = "a Session failure whose disposition allows the run to continue or stop cleanly"
+        self.actual = f"failure {code!r} from {source!r} was routed to raise: {summary}"
+        self.safe_runtime_details = {"code": code, "failure_id": getattr(failure, "id", None), "phase": phase, "source": source, "handled_by": getattr(failure, "handled_by", None)}
+        self.likely_causes = ("No local retry, fallback, or contract mechanism could recover this failure.", "A developer rule or recovery handler explicitly requested the raise disposition.")
+        self.repair_approaches = ("Bind a Session recovery handler for this failure code with session.failures.on(...).", "Change the matching @rule's on_match to a less severe disposition if raising is not intended.")
+        self.related_docs = ("docs/design/session-failure-vocabulary.md", "skills/failure/vocabulary.md")
+        self.relevant_tests = ("python -m pytest -q tests/test_session_failures.py",)
+        super().__init__(
+            f"Session failure '{code}' from {source!r} was routed to raise: {summary}.",
+            details={
+                "error_kind": self.error_kind,
+                "expected": self.expected,
+                "actual": self.actual,
+                "safe_runtime_details": self.safe_runtime_details,
+                "likely_causes": self.likely_causes,
+                "repair_approaches": self.repair_approaches,
+                "related_docs": self.related_docs,
+                "relevant_tests": self.relevant_tests,
+            },
+        )
 
 
 class AgentSpeedError(VidbyteSdkError):
