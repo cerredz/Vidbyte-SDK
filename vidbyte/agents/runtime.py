@@ -149,7 +149,7 @@ from vidbyte.tools.base import BaseTool
 from vidbyte.tools.builtins.operations.base import PricedOperationTool
 from vidbyte.tools.catalog import Tools
 from vidbyte.tools.security import PermissionDecision, PermissionPolicy
-from vidbyte.tools.types import ToolCall, ToolCallContext, ToolCallState, ToolResult
+from vidbyte.tools.types import ToolActivity, ToolCall, ToolCallContext, ToolCallState, ToolResult
 
 
 @dataclass(slots=True)
@@ -180,12 +180,12 @@ class BaseAgentRuntimeLoopState:
 class AgentRuntime:
     """Internal runtime for direct agent execution."""
 
-    def __init__(self, *, agent_name: str, system_prompt: str, tools: Tools, permission_policy: PermissionPolicy, config: AgentRuntimeConfig | None = None, tracer: TracerBase | None = None, middleware: Sequence[AgentMiddleware] = (), run_id: str | None = None, algorithm: ContextWindowAlgorithm | str | None = None, context_manager: ContextManager | None = None, recorder: RecorderBase | None = None, output_schema: type | Mapping[str, Any] | None = None, output_contract: "AgentLoopSettingsOutputContract | None" = None, include_internal_tools: bool = True, usage_tracker: UsageTracker | None = None, speed_tracker: AgentSpeedTracker | None = None, fallback: "AgentFallback | None" = None) -> None:
+    def __init__(self, *, agent_name: str, system_prompt: str, tools: Tools, permission_policy: PermissionPolicy, config: AgentRuntimeConfig | None = None, tracer: TracerBase | None = None, middleware: Sequence[AgentMiddleware] = (), run_id: str | None = None, algorithm: ContextWindowAlgorithm | str | None = None, context_manager: ContextManager | None = None, recorder: RecorderBase | None = None, output_schema: type | Mapping[str, Any] | None = None, output_contract: "AgentLoopSettingsOutputContract | None" = None, include_internal_tools: bool = True, is_done_activity: ToolActivity | None = None, usage_tracker: UsageTracker | None = None, speed_tracker: AgentSpeedTracker | None = None, fallback: "AgentFallback | None" = None) -> None:
         # Configure one direct runtime; isolated review child runtimes may disable implicit internal tools.
         self.agent_name = agent_name
         self.system_prompt = system_prompt
         self.user_tools = tools
-        self.tools = with_internal_agent_tools(tools) if include_internal_tools else tools
+        self.tools = with_internal_agent_tools(tools, is_done_activity=is_done_activity) if include_internal_tools else tools
         self.permission_policy = permission_policy
         self.config = config or AgentRuntimeConfig()
         self.run_id = run_id

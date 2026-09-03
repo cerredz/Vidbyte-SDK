@@ -50,7 +50,7 @@ from vidbyte.agents.runtimes.configs import ActorRuntime, LinearRuntime, MctsSea
 from vidbyte.middleware import AgentMiddleware
 from vidbyte.tools.catalog import Tools
 from vidbyte.tools.security import PermissionPolicy
-from vidbyte.tools.types import ToolCallContext, ToolSpec
+from vidbyte.tools.types import ToolActivity, ToolCallContext, ToolSpec
 
 if TYPE_CHECKING:
     from vidbyte.agents.contract import AgentLoopSettingsOutputContract
@@ -69,6 +69,7 @@ class BaseAgent(McpAttachableMixin):
         system_prompt: str,
         runtime: AgentRuntimeType | str = AgentRuntimeType.LINEAR,
         tools: Sequence[object] | Tools = (),
+        is_done_activity: ToolActivity | None = None,
         permission_policy: PermissionPolicy | None = None,
         agent_loop_settings: AgentLoopSettings | None = None,
         max_tool_rounds: int | None = None,
@@ -168,6 +169,7 @@ class BaseAgent(McpAttachableMixin):
         self._runner_cache: dict[str, object] = {}
         self._agent_tool_items = tools.all() if isinstance(tools, Tools) else tuple(tools)
         self.tools = tools if isinstance(tools, Tools) else self._catalog_from_agent_tools(self._agent_tool_items)
+        self.is_done_activity = is_done_activity
         self.permission_policy = permission_policy or PermissionPolicy()
         effective_max_iterations = max_iterations if max_iterations is not None else max_tool_rounds
         self.agent_loop_settings = self._resolve_loop_settings(
@@ -296,6 +298,11 @@ class BaseAgent(McpAttachableMixin):
         except TypeError:
             pass
         self._bind_agent_tool_context(tool)
+        return self
+
+    def with_is_done_activity(self, activity: ToolActivity | None) -> BaseAgent:
+        """Attach a typed activity annotation to the internal completion tool."""
+        self.is_done_activity = activity
         return self
 
     def as_tool(self) -> object:
@@ -1033,6 +1040,7 @@ class BaseAgent(McpAttachableMixin):
             kwargs["usage_tracker"] = self._usage_tracker
             kwargs["speed_tracker"] = self._speed_tracker
             kwargs["fallback"] = self.fallback
+            kwargs["is_done_activity"] = self.is_done_activity
 
         return runtime_cls(
             agent_name=self.name,

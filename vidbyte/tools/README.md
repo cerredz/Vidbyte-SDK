@@ -39,6 +39,38 @@ custom tool or adapter when an application needs new business inputs or
 behavior. Use `with_activity()` for a separate typed model-authored annotation
 that should be captured and removed before the wrapped tool executes.
 
+## Completion Activity
+
+The direct linear runtime owns the internal `isDone` loop-control tool. Developers
+can add a typed, model-authored completion annotation without replacing that tool:
+
+```python
+from pydantic import BaseModel, Field
+from vidbyte import BaseAgent, ToolActivity
+
+class CompletionActivity(BaseModel):
+    next_step: str = Field(min_length=1, max_length=240)
+
+agent = BaseAgent(
+    name="researcher",
+    system_prompt="Complete the task and describe the handoff.",
+    provider="openai",
+    model_name="gpt-4.1",
+    is_done_activity=ToolActivity(
+        schema=CompletionActivity,
+        description="Describe the next step another person or agent should take.",
+    ),
+)
+```
+
+The provider sees `activity` nested in the `isDone` input. The SDK validates the
+payload, removes it before `IsDoneTool.execute()` runs, and preserves the
+normalized value on `ToolCall.activity` and `ToolCallContext.activity`. The
+completion annotation is separate from `final_answer`; `isDone` remains an
+internal runtime-owned tool and still stops the linear loop. Applications own
+the annotation schema and its interpretation. Non-linear runtimes do not use
+this setting.
+
 ## Deep Reasoning Traces
 
 `vidbyte.tools.builtins.reasoning` exposes 182 strategy-specific tools derived
