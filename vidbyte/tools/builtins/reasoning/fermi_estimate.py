@@ -1,5 +1,14 @@
 """Context Protocol Header
 
+FILE: vidbyte/tools/builtins/reasoning/fermi_estimate.py
+PURPOSE: Implements the model-callable fermi-estimate reasoning tool and records its structured result in the active context manager.
+ROLE IN CODEBASE: The builtins catalog exports this hand-maintained strategy tool alongside the larger reasoning-trace catalog.
+ARCHITECTURE NOTE: This module owns its ToolSpec and context-item construction; _parsing.py owns shared input coercion and ContextManager owns placement.
+COMMON MODIFICATION PATTERNS: Keep tool and primitive fields synchronized, preserve model-facing semantics, and run focused lint plus canonical CI.
+KNOWN EDGE CASES: Model arguments may be JSON-encoded or malformed, and a context write may reject an otherwise parsed record.
+RELATED DOCS: vidbyte/tools/README.md and field-guide/vidbyte-sdk/model-facing-tool-contracts.md.
+TESTS: scripts/check_reasoning_trace_contracts.py and the source/package stages in scripts/run_ci.py.
+
 Description:
     Implements FermiEstimateTool — a model-callable builtin for recording a
     decomposed order-of-magnitude estimate into the active ContextManager.
@@ -51,12 +60,12 @@ class FermiEstimateTool(BaseTool):
         return ToolSpec(
             name="fermi_estimate",
             description=(
-                "Estimate an unknown quantity by decomposing it into sub-estimates that are "
-                "individually easier to guess than the whole, then combining them with explicit "
-                "arithmetic. Use this whenever a number is needed and no direct measurement "
-                "exists — the core move is to never guess the answer directly, only its "
-                "factored inputs. A sanity band and an anchor-risk note are required so an "
-                "order-of-magnitude error can be caught."
+                "Use this tool when an unknown quantity must be estimated without a direct "
+                "measurement. It decomposes the quantity into simpler factors and combines "
+                "their estimates through explicit arithmetic. A sanity band and anchor-risk "
+                "note expose the assumptions most likely to create an order-of-magnitude error. "
+                "The resulting record should make the calculation reproducible and identify "
+                "which input would most improve the estimate."
             ),
             parameters=(
                 ToolParameter(
@@ -160,8 +169,12 @@ class FermiEstimateTool(BaseTool):
 
         try:
             self._manager.upsert(item)
-        except ValueError as exc:
-            return ToolResult.error(call.tool_name, str(exc))
+        except ValueError:
+            return ToolResult.error(
+                call.tool_name,
+                "The reasoning record could not be stored because its context values were invalid.",
+                metadata={"error": "invalid_reasoning_context"},
+            )
 
         return ToolResult.success(call.tool_name, item.to_context_text())
 

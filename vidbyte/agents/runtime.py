@@ -3,17 +3,19 @@
 PURPOSE:
     Owns direct agent execution: per-attempt loop state, middleware hook
     dispatch, context-window algorithm callbacks, model invocation, tool
-    authorization/execution, usage accounting, fallback transitions, and final
-    result metadata. Do not place runner construction or public agent input
-    normalization here; those responsibilities belong to ``base.py``.
+    authorization/execution, usage and speed accounting, fallback transitions,
+    and final result metadata. Do not place runner construction or public
+    agent input normalization here; those responsibilities belong to
+    ``base.py``.
 
 ROLE IN CODEBASE:
     Called by ``vidbyte/agents/base.py`` for linear agent runs and called
     directly by the Reflexion and multi-provider grader runtime algorithms for
     middleware-wrapped model calls. Calls ``vidbyte/middleware``, context
     managers and algorithms, provider runner handles, tool catalogs/security,
-    tracing, and usage tracking. ``BaseAgentRuntimeLoopState`` owns mutable
-    state for exactly one runtime attempt so nested runs do not share counters.
+    tracing, usage tracking, and speed tracking. ``BaseAgentRuntimeLoopState``
+    owns mutable state for exactly one runtime attempt so nested runs do not
+    share counters.
 
 ARCHITECTURE NOTE:
     This is the imperative boundary between reusable agent contracts and model
@@ -58,6 +60,7 @@ KNOWN EDGE CASES:
 RELATED DOCS:
     https://github.com/cerredz/Vidbyte-SDK/blob/main/docs/design/agent-runtime-loop-state.md
     https://github.com/cerredz/Vidbyte-SDK/blob/main/field-guide/vidbyte-sdk/runtime-boundaries.md
+    https://github.com/cerredz/Vidbyte-SDK/blob/main/docs/design/agent-speed-tracking.md
 
 TEST FILES:
     ``tests/test_agent_runtime.py``, ``tests/test_agent_tool_loop.py``,
@@ -85,6 +88,7 @@ from vidbyte.agents.context_algorithms import AgentRuntimeContextAlgorithms
 from vidbyte.agents.contract import AgentLoopSettingsOutputContract
 from vidbyte.agents.contracts.schema import SchemaConformance
 from vidbyte.agents.pricing import UsageTracker
+from vidbyte.agents.speed import AgentSpeedTracker
 from vidbyte.agents.types import AgentMessage
 from vidbyte.context.algorithms import ContextWindowAlgorithm, ToolResultAdmission
 from vidbyte.context.manager import ContextManager
@@ -111,6 +115,17 @@ from vidbyte.lib.dataclasses.middleware import (
     MiddlewareHookInvocation,
 )
 from vidbyte.lib.dataclasses.runner import RunnerHandle
+from vidbyte.lib.constants.speed import (
+    AGENT_SPEED_FIRST_INDEX,
+    AGENT_SPEED_FIRST_RETRY_INDEX,
+    AGENT_SPEED_ZERO_COUNT,
+)
+from vidbyte.lib.dataclasses.speed import (
+    RecordModelCallFailureInput,
+    RecordModelCallInput,
+    RecordRetryWaitInput,
+    RecordToolCallInput,
+)
 from vidbyte.lib.dataclasses.strategies import AgentResult
 from vidbyte.lib.enums import AgentRuntimeStateKey, ModelModality
 from vidbyte.lib.errors import (
@@ -165,7 +180,7 @@ class BaseAgentRuntimeLoopState:
 class AgentRuntime:
     """Internal runtime for direct agent execution."""
 
-    def __init__(self, *, agent_name: str, system_prompt: str, tools: Tools, permission_policy: PermissionPolicy, config: AgentRuntimeConfig | None = None, tracer: TracerBase | None = None, middleware: Sequence[AgentMiddleware] = (), run_id: str | None = None, algorithm: ContextWindowAlgorithm | str | None = None, context_manager: ContextManager | None = None, recorder: RecorderBase | None = None, output_schema: type | Mapping[str, Any] | None = None, output_contract: "AgentLoopSettingsOutputContract | None" = None, include_internal_tools: bool = True, usage_tracker: UsageTracker | None = None, fallback: "AgentFallback | None" = None) -> None:
+    def __init__(self, *, agent_name: str, system_prompt: str, tools: Tools, permission_policy: PermissionPolicy, config: AgentRuntimeConfig | None = None, tracer: TracerBase | None = None, middleware: Sequence[AgentMiddleware] = (), run_id: str | None = None, algorithm: ContextWindowAlgorithm | str | None = None, context_manager: ContextManager | None = None, recorder: RecorderBase | None = None, output_schema: type | Mapping[str, Any] | None = None, output_contract: "AgentLoopSettingsOutputContract | None" = None, include_internal_tools: bool = True, usage_tracker: UsageTracker | None = None, speed_tracker: AgentSpeedTracker | None = None, fallback: "AgentFallback | None" = None) -> None:
         # Configure one direct runtime; isolated review child runtimes may disable implicit internal tools.
         self.agent_name = agent_name
         self.system_prompt = system_prompt
@@ -184,6 +199,7 @@ class AgentRuntime:
         self._wire_schema_cache: dict[str, Any] | None = None
         self.output_contract = output_contract or AgentLoopSettingsOutputContract(())
         self.usage_tracker = usage_tracker or UsageTracker()
+        self.speed_tracker = speed_tracker or AgentSpeedTracker()
         self.fallback = fallback
 
     def _context_window_admission_middleware(self) -> tuple[AgentMiddleware, ...]:
@@ -243,24 +259,27 @@ class AgentRuntime:
 
     async def arun(self, message: str, *, handle: RunnerHandle, context: BaseAgentContext, metadata: Mapping[str, Any] | None = None, options: Mapping[str, Any] | None = None, trace_context: SpanContext | None = None) -> AgentResult:
         """Run the direct model/tool loop until isDone or a budget stop."""
-        algorithm_result = await AgentRuntimeContextAlgorithms(self).arun(
-            message,
-            handle=handle,
-            context=context,
-            metadata=metadata,
-            options=options,
-            trace_context=trace_context,
-        )
-        if algorithm_result is not None:
-            return algorithm_result
-        return await self._arun_once(
-            message,
-            handle=handle,
-            context=context,
-            metadata=metadata,
-            options=options,
-            trace_context=trace_context,
-        )
+        try:
+            algorithm_result = await AgentRuntimeContextAlgorithms(self).arun(
+                message,
+                handle=handle,
+                context=context,
+                metadata=metadata,
+                options=options,
+                trace_context=trace_context,
+            )
+            if algorithm_result is not None:
+                return algorithm_result
+            return await self._arun_once(
+                message,
+                handle=handle,
+                context=context,
+                metadata=metadata,
+                options=options,
+                trace_context=trace_context,
+            )
+        finally:
+            self.speed_tracker.end_step()
 
     async def _arun_once(self, message: str, *, handle: RunnerHandle, context: BaseAgentContext, metadata: Mapping[str, Any] | None = None, options: Mapping[str, Any] | None = None, trace_context: SpanContext | None = None) -> AgentResult:
         """Run one direct model/tool attempt until isDone or a budget stop."""
@@ -299,6 +318,7 @@ class AgentRuntime:
             return await self._finish_result(result, state)
 
         while True:
+            self.speed_tracker.begin_step()
             # Single inner-loop context-window point: after the prior iteration's tool calls finished.
             if state.iteration_count > 0:
                 await self._run_inner_context_window_hook(
@@ -356,6 +376,9 @@ class AgentRuntime:
                 tokens_used=state.tokens_used,
                 tool_call_count=state.tool_call_count,
             )
+            call_dispatched_at = self.speed_tracker.now()
+            model_call_count_before = state.model_call_count
+            state.run_state["_speed_fallback_index"] = fallback_index
             try:
                 raw_result, state.model_call_count, compaction_count = await self._invoke_with_middleware(
                     handle,
@@ -410,6 +433,17 @@ class AgentRuntime:
             runner_metadata = dict(handle.extract_metadata(raw_result))
             state.tokens_used = self._add_token_usage(state.tokens_used, token_usage_from_response(raw_result, runner_metadata))
             usage_record = self.usage_tracker.record_call(raw_result)
+            self.speed_tracker.record_call(
+                RecordModelCallInput(
+                    response=raw_result,
+                    dispatched_at=call_dispatched_at,
+                    input_tokens=usage_record.usage.input_tokens if usage_record is not None else None,
+                    output_tokens=usage_record.usage.output_tokens if usage_record is not None else None,
+                    retry_count=max(AGENT_SPEED_ZERO_COUNT, state.model_call_count - model_call_count_before - AGENT_SPEED_FIRST_INDEX),
+                    fallback_index=fallback_index if fallback_index else None,
+                    iteration_index=state.iteration_count,
+                )
+            )
 
             decision = await self.middleware.after_model_response(
                 self._middleware_context(
@@ -551,6 +585,7 @@ class AgentRuntime:
             model_call_count=model_call_count,
             tokens_used=tokens_used,
         )
+        retry_ordinal = AGENT_SPEED_ZERO_COUNT
         while True:
             current_call_options = dict(call_options)
             decision = await self.middleware.before_model_call(
@@ -589,18 +624,31 @@ class AgentRuntime:
                 ),
             )
             try:
+                attempt_dispatched_at = self.speed_tracker.now()
                 raw_result = await handle.invoke(message, **current_call_options)
                 output_text = handle.extract_text(raw_result)
                 self._tracer.end_span(llm_span, output=output_text)
                 return raw_result, state.model_call_count, compaction_count
             except Exception as exc:
                 self._tracer.end_span(llm_span, error=exc)
+                self.speed_tracker.record_call_failure(
+                    RecordModelCallFailureInput(
+                        provider=str(getattr(handle.provider, "value", handle.provider)),
+                        model=self._speed_model_name(handle),
+                        dispatched_at=attempt_dispatched_at,
+                        retry_count=retry_ordinal,
+                        fallback_index=int(state.run_state.get("_speed_fallback_index", AGENT_SPEED_ZERO_COUNT)) or None,
+                        iteration_index=iteration_count or None,
+                        error_type=type(exc).__name__,
+                    )
+                )
                 decision = await self.middleware.on_model_error(
                     self._middleware_context(MiddlewareHook.ON_MODEL_ERROR, state, error=exc)
                 )
                 if decision.action is MiddlewareAction.RETRY:
                     if decision.sleep_seconds:
-                        await self.middleware.sleep(decision.sleep_seconds)
+                        await self._sleep_for_model_retry(decision.sleep_seconds, retry_index=retry_ordinal + AGENT_SPEED_FIRST_RETRY_INDEX)
+                    retry_ordinal += AGENT_SPEED_FIRST_INDEX
                     continue
                 if decision.action is MiddlewareAction.ABORT_RUN:
                     return (
@@ -618,7 +666,42 @@ class AgentRuntime:
                 # Catches CancelledError and other BaseException subclasses so the
                 # llm.call span is always finalized before propagating.
                 self._tracer.end_span(llm_span, error=exc)
+                self.speed_tracker.record_call_failure(
+                    RecordModelCallFailureInput(
+                        provider=str(getattr(handle.provider, "value", handle.provider)),
+                        model=self._speed_model_name(handle),
+                        dispatched_at=attempt_dispatched_at,
+                        retry_count=retry_ordinal,
+                        fallback_index=int(state.run_state.get("_speed_fallback_index", AGENT_SPEED_ZERO_COUNT)) or None,
+                        iteration_index=iteration_count or None,
+                        error_type=type(exc).__name__,
+                        cancelled=True,
+                    )
+                )
                 raise
+
+    async def _sleep_for_model_retry(self, seconds: float, *, retry_index: int) -> None:
+        """Sleep for a model retry and record the full backoff interval."""
+        # @intent measure-retry-backoff-boundary
+        wait_started_at = self.speed_tracker.now()
+        try:
+            await self.middleware.sleep(seconds)
+        finally:
+            self.speed_tracker.record_retry_wait(
+                RecordRetryWaitInput(started_at=wait_started_at, retry_index=retry_index)
+            )
+
+    @staticmethod
+    def _speed_model_name(handle: RunnerHandle) -> str:
+        # Read a stable model label from the runner config or its model_name method.
+        config = getattr(handle.runner, "_config", None)
+        model = getattr(config, "model", None)
+        if model is not None:
+            return str(model)
+        model_name = getattr(handle.runner, "model_name", None)
+        if callable(model_name):
+            return str(model_name())
+        return str(model_name or "unknown")
 
     def _fallback_transition(self, error: BaseException, *, index: int, handle: RunnerHandle, provider: str, messages: list[dict[str, Any]], attempts: list[dict[str, str]], errors: list[BaseException], parent_span: SpanContext | None) -> "FallbackTransform | None":
         """Return rebuilt state for the next model in the chain, or None when the caller must re-raise."""
@@ -680,7 +763,10 @@ class AgentRuntime:
             )
         result = self._with_context_window_metadata(result, state)
         result = self._with_run_state_metadata(result, state.run_state)
-        return self._with_middleware_metadata(result)
+        result = self._with_middleware_metadata(result)
+        self.speed_tracker.end_step()
+        self.speed_tracker.record_result_ready()
+        return result
 
     @staticmethod
     def _with_run_state_metadata(result: AgentResult, run_state: dict[Any, Any] | None) -> AgentResult:
@@ -928,7 +1014,38 @@ class AgentRuntime:
         )
 
     async def execute_tool_call(self, call: ToolCall, *, provider: str, trace_context: SpanContext | None = None, iteration_count: int | None = None, tool_is_internal: bool = False) -> tuple[ToolCallContext, ToolResult]:
-        # Resolves, authorizes, validates, executes, and records one tool call with optional timeout.
+        # @intent record-full-tool-speed-boundary
+        started_at = self.speed_tracker.now()
+        succeeded = False
+        timed_out = False
+        cancelled = False
+        error_type: str | None = None
+        try:
+            context, result, succeeded, timed_out, error_type = await self._run_tool_call(
+                call,
+                provider=provider,
+                trace_context=trace_context,
+                iteration_count=iteration_count,
+                tool_is_internal=tool_is_internal,
+            )
+            return context, result
+        except BaseException as exc:
+            cancelled = True
+            error_type = type(exc).__name__
+            raise
+        finally:
+            self._record_tool_speed(
+                call,
+                started_at=started_at,
+                iteration_count=iteration_count,
+                succeeded=succeeded,
+                timed_out=timed_out,
+                error_type=error_type,
+                cancelled=cancelled,
+            )
+
+    async def _run_tool_call(self, call: ToolCall, *, provider: str, trace_context: SpanContext | None = None, iteration_count: int | None = None, tool_is_internal: bool = False) -> tuple[ToolCallContext, ToolResult, bool, bool, str | None]:
+        # @intent preserve-tool-execution-boundary
         tool_input = _safe_trace_value(dict(call.arguments))
         tool_span = self._tracer.start_span(
             "tool.call",
@@ -940,6 +1057,10 @@ class AgentRuntime:
             provider=provider,
             metadata=_safe_trace_mapping(call.metadata),
         )
+        succeeded = False
+        timed_out = False
+        error_type: str | None = None
+        state = ToolCallState.FAILED
         try:
             tool = self._get_tool(call)
             call = ActivityToolFormatter.prepare_call(tool, call)
@@ -956,11 +1077,13 @@ class AgentRuntime:
                         metadata={"error": "output_schema_violation", "detail": error},
                     )
             self._record_operation_usage(tool, call, result)
-            state = ToolCallState.SUCCEEDED if result.status.value == "success" else ToolCallState.FAILED
+            succeeded = result.status.value == "success"
+            if not succeeded:
+                error_type = str(dict(result.metadata).get("error_type") or dict(result.metadata).get("error") or "ToolExecutionError")
             self._tracer.end_span(tool_span, output=result.output)
         except ToolRegistryError as exc:
             result = ToolResult.error(call.tool_name, str(exc), metadata={"error": "unknown_tool", "detail": str(exc)})
-            state = ToolCallState.FAILED
+            error_type = type(exc).__name__
             self._tracer.end_span(tool_span, error=exc)
         except PermissionDeniedError as exc:
             permission = exc.details.get("permission", "")
@@ -970,6 +1093,7 @@ class AgentRuntime:
                 metadata={"error": "permission_denied", "permission": permission},
             )
             state = ToolCallState.DENIED
+            error_type = type(exc).__name__
             self._tracer.end_span(tool_span, error=exc)
         except ToolExecutionError as exc:
             error_code = str(exc.details.get("error", "execution_error"))
@@ -979,7 +1103,7 @@ class AgentRuntime:
                 str(exc),
                 metadata={"error": error_code, "error_type": error_type},
             )
-            state = ToolCallState.FAILED
+            timed_out = error_code == "timeout"
             self._tracer.end_span(tool_span, error=exc)
         except Exception as exc:
             result = ToolResult.error(
@@ -987,12 +1111,34 @@ class AgentRuntime:
                 f"Tool execution failed: {exc}",
                 metadata={"error": "execution_error", "error_type": type(exc).__name__},
             )
-            state = ToolCallState.FAILED
+            error_type = type(exc).__name__
             self._tracer.end_span(tool_span, error=exc)
+        except BaseException as exc:
+            self._tracer.end_span(tool_span, error=exc)
+            raise
 
+        if succeeded:
+            state = ToolCallState.SUCCEEDED
         return (
             self._build_tool_call_context(call, provider=provider, state=state, result=result, iteration_count=iteration_count, tool_is_internal=tool_is_internal),
             result,
+            succeeded,
+            timed_out,
+            error_type,
+        )
+
+    def _record_tool_speed(self, call: ToolCall, *, started_at: float, iteration_count: int | None, succeeded: bool, timed_out: bool, error_type: str | None, cancelled: bool) -> None:
+        # @intent preserve-tool-speed-fail-open
+        self.speed_tracker.record_tool_call(
+            RecordToolCallInput(
+                tool_name=call.tool_name,
+                started_at=started_at,
+                timed_out=timed_out,
+                succeeded=succeeded,
+                error_type=error_type,
+                iteration_index=iteration_count,
+                cancelled=cancelled,
+            )
         )
 
     def _record_operation_usage(self, tool: object, call: ToolCall, result: ToolResult) -> None:
@@ -1332,7 +1478,17 @@ class AgentRuntime:
             # this loop into call_contexts/messages, keeping intermediate failure
             # attempts out of the model-visible conversation history.
             if decision.action is MiddlewareAction.DENY_TOOL:
+                denied_started_at = self.speed_tracker.now()
                 context_record, result = self._middleware_denied_tool(call, state.provider, decision, iteration_count=state.iteration_count)
+                self.speed_tracker.record_tool_call(
+                    RecordToolCallInput(
+                        tool_name=call.tool_name,
+                        started_at=denied_started_at,
+                        succeeded=False,
+                        error_type="MiddlewareDenied",
+                        iteration_index=state.iteration_count,
+                    )
+                )
             else:
                 context_record, result = await self.execute_tool_call(call, provider=state.provider, trace_context=trace_context, iteration_count=state.iteration_count, tool_is_internal=tool_is_internal)
             after_decision = await self.middleware.after_tool_call(

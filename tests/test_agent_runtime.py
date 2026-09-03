@@ -780,6 +780,88 @@ class ToolActivityRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.metadata["tool_call_states"], ("failed", "succeeded"))
 
 
+class _ProviderTaggedResponse(FakeResponse):
+    """FakeResponse with the provider/model attributes AgentSpeedTracker.record_call reads."""
+
+    def __init__(self, text: str, raw: dict, *, provider: str = "openai", model: str = "fake") -> None:
+        super().__init__(text, raw)
+        self.provider = provider
+        self.model = model
+
+
+class SlowTool(BaseTool):
+    """Tool that sleeps past a configured tool_timeout_seconds to exercise timeout recording."""
+
+    def __init__(self, sleep_seconds: float) -> None:
+        self._sleep_seconds = sleep_seconds
+
+    def spec(self) -> ToolSpec:
+        return ToolSpec(name="slow_tool", description="Sleeps past its timeout.")
+
+    async def execute(self, call: ToolCall) -> ToolResult:
+        import asyncio
+
+        await asyncio.sleep(self._sleep_seconds)
+        return ToolResult.success("slow_tool", "should not reach here")
+
+
+class AgentSpeedTrackingRuntimeTests(unittest.IsolatedAsyncioTestCase):
+    """Verifies AgentRuntime records model-call and tool-call speed through the real loop."""
+
+    async def test_successful_model_call_produces_a_call_speed_record(self) -> None:
+        runner = FakeRunner(
+            [_ProviderTaggedResponse("", {"output": [{"type": "function_call", "name": "isDone", "arguments": '{"final_answer": "done"}'}]})]
+        )
+        runtime = AgentRuntime(
+            agent_name="worker",
+            system_prompt="Work.",
+            tools=Tools([]),
+            permission_policy=PermissionPolicy(),
+        )
+        context = runtime.build_context("task", base_context=None, history=(), agent_history=(), agent_metadata={}, existing_tool_calls=())
+
+        await runtime.arun(
+            "task",
+            handle=RunnerHandle(runner=runner, provider="openai", invoke=invoke_runner, extract_text=runner_output_text, extract_metadata=runner_output_metadata),
+            context=context,
+        )
+
+        calls = runtime.speed_tracker.calls
+        self.assertEqual(len(calls), 1)
+        self.assertGreaterEqual(calls[0].duration_ms, 0.0)
+        self.assertEqual(calls[0].provider, "openai")
+
+    async def test_tool_timeout_is_recorded_with_timed_out_true(self) -> None:
+        slow_tool = SlowTool(sleep_seconds=0.05)
+        runner = FakeRunner(
+            [
+                _ProviderTaggedResponse("", {"output": [{"type": "function_call", "name": "slow_tool", "arguments": "{}", "call_id": "call_1"}]}),
+                _ProviderTaggedResponse("", {"output": [{"type": "function_call", "name": "isDone", "arguments": '{"final_answer": "done"}'}]}),
+            ]
+        )
+        runtime = AgentRuntime(
+            agent_name="worker",
+            system_prompt="Work.",
+            tools=Tools([slow_tool]),
+            permission_policy=PermissionPolicy(),
+            config=AgentRuntimeConfig(tool_settings=ToolSettings(tool_timeout_seconds=0.01)),
+        )
+        context = runtime.build_context("task", base_context=None, history=(), agent_history=(), agent_metadata={}, existing_tool_calls=())
+
+        await runtime.arun(
+            "task",
+            handle=RunnerHandle(runner=runner, provider="openai", invoke=invoke_runner, extract_text=runner_output_text, extract_metadata=runner_output_metadata),
+            context=context,
+        )
+
+        # Two tool calls happen (slow_tool, then the internal isDone completion tool);
+        # exactly one must be recorded as timed out.
+        tool_calls = runtime.speed_tracker.tool_calls
+        timed_out_calls = [call for call in tool_calls if call.timed_out]
+        self.assertEqual(len(timed_out_calls), 1)
+        self.assertEqual(timed_out_calls[0].tool_name, "slow_tool")
+
+
 if __name__ == "__main__":
     unittest.main()
 

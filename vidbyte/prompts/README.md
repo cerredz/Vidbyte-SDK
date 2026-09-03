@@ -57,9 +57,11 @@ prompt text.
 | Agentic Engineering | `agentic_engineering` | system_prompt, error_messages, file_headers, folder_readme, function_design, intent_based_commenting, feature_test_packs | [agentic_engineering/](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/agentic_engineering) |
 | Agentic Loop | `agentic_loop` | context_prompt | [agentic_loop.json](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/agentic_loop.json) |
 | Context Engineering | `context_engineering` | guideline_prompt | [context_engineering.json](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/context_engineering.json) |
+| Create Skills | `create_skills` | create_skill | [create_skills/create_skill.md](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/create_skills/create_skill.md) |
 | Continual Trace | `continual_trace` | system_prompt | [continual_trace/system_prompt.md](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/continual_trace/system_prompt.md) |
 | Evals | `evals` | llm_judge, rubric | [evals.json](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/evals.json) |
 | Expert Prompting | `expert_prompting` | expert_prompt | [expert_prompting.json](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/expert_prompting.json) |
+| Failure Pattern Repair | `failure_pattern_repair` | rulebook_feedback_loop, dependency_shape_triage, stage_gate_controller, evaluator_red_team, selective_regeneration_loop | [failure_pattern_repair/](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/failure_pattern_repair) |
 | Goal Behavior | `goals` | goal_prompt | [goals/goal_prompt.md](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/goals/goal_prompt.md) |
 | Handoff | `handoff` | system_prompt | [handoff/handoff.md](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/handoff/handoff.md) |
 | Mimic Behavior | `mimic_behavior` | mimic_prompt | [mimic_behavior/mimic_prompt.md](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/mimic_behavior/mimic_prompt.md) |
@@ -129,6 +131,19 @@ the built-in strategies.
 
 Link: <https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/context_engineering.json>
 
+#### Create Skills — `create_skills`
+
+An operational prompt for creating or revising one narrowly scoped, portable
+agent skill directory. It guides activation-oriented descriptions, progressive
+disclosure, setup validation, deterministic scripts, append-only evidence,
+on-demand safety hooks, stable tool and model surfaces, cache-aware context
+ordering, structured user questions, and visual plus programmatic verification.
+It requires two or three adversarial review passes after the first
+implementation and resolution of all critical and notable findings before
+completion.
+
+Link: <https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/create_skills/create_skill.md>
+
 #### Continual Trace — `continual_trace`
 
 System prompt for the continual trace agent that incrementally fills a typed
@@ -161,6 +176,27 @@ strategy is lightweight — requiring only a single model call — and pairs wel
 with any other reasoning strategy to add domain depth to the reasoning process.
 
 Link: <https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/expert_prompting.json>
+
+#### Failure Pattern Repair — `failure_pattern_repair`
+
+Five independent operational prompts for repairing classes of repeated agent
+failures instead of hand-patching isolated symptoms. The family offers distinct
+lenses for versioned rulebook feedback, dependency-topology triage, workflow
+stage gates, adversarial evaluator calibration, and provenance-based selective
+regeneration. Every strategy makes expected behavior, a failure detector, and an
+independent check explicit before advancement, and requires the checks to reject
+relevant known-bad controls so fluent completion text or brittle green results
+cannot stand in for correctness.
+
+Prompt links:
+
+- [rulebook_feedback_loop](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/failure_pattern_repair/rulebook_feedback_loop.md)
+- [dependency_shape_triage](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/failure_pattern_repair/dependency_shape_triage.md)
+- [stage_gate_controller](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/failure_pattern_repair/stage_gate_controller.md)
+- [evaluator_red_team](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/failure_pattern_repair/evaluator_red_team.md)
+- [selective_regeneration_loop](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/failure_pattern_repair/selective_regeneration_loop.md)
+
+Link: <https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/failure_pattern_repair>
 
 #### Goal Behavior — `goals`
 

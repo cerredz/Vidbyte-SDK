@@ -7,6 +7,10 @@ Purpose:
     are additive billable buckets rather than subsets of the reported input.
 Architecture:
     - AnthropicUsage: ProviderUsage bound to ModelProvider.ANTHROPIC.
+Key Functions:
+    - cached_input_tokens: Maps cache_read_input_tokens onto the shared accessor.
+    - total_prompt_tokens: Sums all three input-side buckets (Anthropic's
+      input_tokens alone excludes both cache buckets).
 Relations:
     Registered in vidbyte/agents/pricing/base.py; rates from PROVIDER_PRICING.
 Similar Files:
@@ -51,6 +55,20 @@ class AnthropicUsage(ProviderUsage):
     def total_tokens(self) -> int | None:
         # Sums all four additive buckets; None when the payload had none of them.
         parts = (self.input_tokens, self.output_tokens, self.cache_creation_input_tokens, self.cache_read_input_tokens)
+        if all(part is None for part in parts):
+            return None
+        return sum(part or 0 for part in parts)
+
+    @property
+    def cached_input_tokens(self) -> int | None:
+        # Maps Anthropic's cache-read bucket onto the shared cached-input accessor.
+        return self.cache_read_input_tokens
+
+    @property
+    def total_prompt_tokens(self) -> int | None:
+        # Anthropic's input_tokens excludes both cache buckets (additive billing),
+        # so the prompt total is all three buckets combined.
+        parts = (self.input_tokens, self.cache_creation_input_tokens, self.cache_read_input_tokens)
         if all(part is None for part in parts):
             return None
         return sum(part or 0 for part in parts)

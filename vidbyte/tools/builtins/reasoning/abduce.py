@@ -1,5 +1,14 @@
 """Context Protocol Header
 
+FILE: vidbyte/tools/builtins/reasoning/abduce.py
+PURPOSE: Implements the model-callable abduce reasoning tool and records its structured result in the active context manager.
+ROLE IN CODEBASE: The builtins catalog exports this hand-maintained strategy tool alongside the larger reasoning-trace catalog.
+ARCHITECTURE NOTE: This module owns its ToolSpec and context-item construction; _parsing.py owns shared input coercion and ContextManager owns placement.
+COMMON MODIFICATION PATTERNS: Keep tool and primitive fields synchronized, preserve model-facing semantics, and run focused lint plus canonical CI.
+KNOWN EDGE CASES: Model arguments may be JSON-encoded or malformed, and a context write may reject an otherwise parsed record.
+RELATED DOCS: vidbyte/tools/README.md and field-guide/vidbyte-sdk/model-facing-tool-contracts.md.
+TESTS: scripts/check_reasoning_trace_contracts.py and the source/package stages in scripts/run_ci.py.
+
 Description:
     Implements AbduceTool — a model-callable builtin for recording an
     inference-to-the-best-explanation pass into the active ContextManager.
@@ -50,12 +59,13 @@ class AbduceTool(BaseTool):
         return ToolSpec(
             name="abduce",
             description=(
-                "Run an abductive inference (inference to the best explanation): list the "
-                "evidence that needs explaining, score at least two genuinely competing "
-                "hypotheses against it, and pick the best. Use this when choosing among "
-                "possible explanations for observed facts — a debugging root cause, a "
-                "diagnosis, a why-did-this-happen question. A single hypothesis is not "
-                "abduction; it requires real competitors."
+                "Use this tool when observed evidence permits multiple plausible explanations "
+                "and the task requires choosing among them. It compares at least two genuine "
+                "hypotheses against the same evidence and records which account explains the "
+                "evidence with the fewest unsupported assumptions. The discriminating test "
+                "keeps the preferred explanation provisional by naming evidence that could "
+                "separate it from competitors. The resulting record should make the choice, "
+                "uncertainty, and next verification step inspectable."
             ),
             parameters=(
                 ToolParameter(
@@ -153,8 +163,12 @@ class AbduceTool(BaseTool):
 
         try:
             self._manager.upsert(item)
-        except ValueError as exc:
-            return ToolResult.error(call.tool_name, str(exc))
+        except ValueError:
+            return ToolResult.error(
+                call.tool_name,
+                "The reasoning record could not be stored because its context values were invalid.",
+                metadata={"error": "invalid_reasoning_context"},
+            )
 
         return ToolResult.success(call.tool_name, item.to_context_text())
 

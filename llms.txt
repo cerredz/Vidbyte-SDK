@@ -369,6 +369,16 @@ agent = Agent(
 - `Trace.langsmith_verbose(...)` uses the verbose semantic profile for runtime iteration, context-window, algorithm, aggregate, parser, and middleware-decision spans.
 - `Trace.continual(...)` records lifecycle events and stores settings for trace-to-context style workflows, but does not automatically inject hidden trace memory into the agent context.
 
+### External Provider References
+
+Use the colocated, first-party link indexes before changing a provider boundary:
+
+- [Model providers](vidbyte/providers/README.md) — API, modality, authentication, and response-contract references for all registered model providers.
+- [MCP tools](vidbyte/tools/mcp/README.md) — current MCP specification, tools, transports, and Python SDK references.
+- [Trace providers](vidbyte/trace/providers/README.md) — LangSmith, Langfuse, and Phoenix references.
+- [Web-operation providers](vidbyte/tools/builtins/operations/clients/README.md) — Brave, Browserbase, Exa, Firecrawl, Parallel, and Tavily references.
+- [Session-store providers](vidbyte/lib/providers/README.md) — MongoDB, PostgreSQL, SQLite, and Supabase references.
+
 ```python
 from vidbyte import Agent, Trace
 
@@ -805,7 +815,7 @@ session, and memory/MCP/provider tools may require configured external services.
 | Direct utilities and search | `CalculatorTool` (`vidbyte.tools.builtins.calculator`), `CodeExecutionTool`, `DocumentRetrievalTool` (`vidbyte.tools.builtins.document_retrieval`), `GlobTool`, `GrepTool`, `SemanticSearchTool` |
 | Filesystem | `AppendTool`, `ChecksumTool`, `CopyTool`, `DeleteTool`, `DiffTool`, `ExistsTool`, `FindTool`, `ListDirTool`, `MakeDirTool`, `MoveTool`, `RenameTool`, `ReadBinaryTool`, `ReadLinesTool`, `ReadTextTool`, `ReplaceTextTool`, `StatTool`, `TouchTool`, `TreeTool`, `UnzipTool`, `WriteTextTool`, `ZipTool` (from `vidbyte.tools.filesystem`; configure their filesystem permissions and root) |
 | Context and reflection | `ContextCompactionTool`, `CreateContextPrimitiveTool`, `ContextEditTool`, `ContextListTool`, `ContextMoveTool`, `ContextReciteTool`, `ContextRemoveTool`, `ContextStatsTool`, `ContextUpsertTool`, `ReflexionTool`, `TrajectoryCheckpointTool` |
-| Reasoning strategies | `DeduceTool`, `InduceTool`, `AbduceTool`, `AnalogyTool`, `CausalChainTool`, `BayesianUpdateTool`, `DifferentialDiagnosisTool`, `FermiEstimateTool`, `SteelmanTool`, `FalsifyTool` |
+| Reasoning strategies | `DeduceTool`, `InduceTool`, `AbduceTool`, `AnalogyTool`, `CausalChainTool`, `BayesianUpdateTool`, `DifferentialDiagnosisTool`, `FermiEstimateTool`, `SteelmanTool`, `FalsifyTool`, `CounterexampleTool`, `ConsistencyTool`, `DilemmaTool`, `QuantifierTool`, `TransitivityTool`, `IdentityTool`, `PartitionTool`, `ModalTool`, `EquivocationTool`, `NecessarySufficientTool`, `CompositionDivisionTool`, `CircularityTool`, `RegressTool`, `BurdenOfProofTool`, `TestimonyTool`, `AbsenceEvidenceTool`, `DefeasibleTool`, `StatisticalSyllogismTool`, `SocraticTool`, `DialecticTool`, `ParadoxTool`, `StrawmanTool`, `PredictTool`, `ThoughtExperimentTool`, `InstantiateTool` |
 | Structured-output, editing, and control | `DeclareOutputSchemaTool`, `AppendOutputTool`, `ExtendOutputSchemaTool`, `PatchTool`, `ForkConversationTool`, `CreateHandoffTool`, `RunPromptsSequentiallyTool` |
 | MCP | `SearchMcpServersTool`, `AttachMcpServerTool` |
 | Durable sessions | `SessionTool`, `CheckpointTool`, `ForkTool`, `BatchForkTool`, `RewindTool`, `ResumeReplaceTool`, `ResumeAppendTool`, `ResumeOutputTool` |
