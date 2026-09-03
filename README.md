@@ -88,6 +88,28 @@ sdk.tools
 sdk.providers
 ```
 
+## Agent Speed Tracking
+
+Every `BaseAgent` keeps speed metrics for its most recent run. Use
+`agent.get_speed_stats()` for model-call latency, TTFT, output generation rate,
+tool latency, step timing, retries, fallback overhead, stream chunk timing,
+token denominators, provider/model rollups, and tool-name rollups. Failed and
+cancelled attempts are included in counts, so failure rates do not look faster
+than the successful-only path.
+
+```python
+stats = agent.get_speed_stats()
+print(stats.call_stats.duration_ms_p95)
+print(stats.call_stats.weighted_output_tokens_per_second)
+print(stats.run_stats.max_concurrency)
+```
+
+Completed-run history is bounded to the latest 100 runs and is available with
+`agent.get_speed_history()`. To measure an existing synchronous stream without
+changing how it is produced, wrap its iterator with
+`agent.measure_stream(...)`. Stream metrics are chunk-based; the tracker does
+not guess token counts from text chunks.
+
 ## YAML Configuration
 
 Use `YamlLoader` when an application wants data-only YAML settings. Loading
