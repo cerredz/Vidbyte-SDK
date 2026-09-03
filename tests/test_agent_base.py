@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import unittest
 
+from pydantic import BaseModel, Field
+
 from tests.agent_test_support import build_test_agent
 from vidbyte.agents import AgentForkSettings, AgentInput, AgentMessage, BaseAgent
 from vidbyte.context import ContextManager, ContextWindow, TaskContextItem, TextContextItem
@@ -10,7 +12,7 @@ from vidbyte.middleware import AgentMiddleware
 from vidbyte.lib.errors import AgentExecutionError
 from vidbyte.lib.runners import TextModelResponse
 from vidbyte.context.handoff import MinimalHandoff
-from vidbyte.tools import ToolSpec
+from vidbyte.tools import ToolActivity, ToolSpec
 from vidbyte.tools.builtins.handoff import CreateHandoffTool
 from vidbyte.tools.types import ToolCallContext
 
@@ -45,6 +47,12 @@ class FakeResponse:
 
 class FakeMiddleware(AgentMiddleware):
     pass
+
+
+class CompletionActivity(BaseModel):
+    """Bounded completion annotation used by BaseAgent wiring tests."""
+
+    handoff: str = Field(min_length=1, max_length=60)
 
 
 class TextRunner:
@@ -89,6 +97,21 @@ class OptionCaptureRunner:
 
 
 class AgentBaseTests(unittest.IsolatedAsyncioTestCase):
+    async def test_is_done_activity_is_attached_to_the_lazy_linear_runtime(self) -> None:
+        """The public setting reaches the runtime-owned completion tool."""
+        activity = ToolActivity(schema=CompletionActivity, description="Describe the next handoff.")
+        agent = build_test_agent(
+            name="worker",
+            system_prompt="Work carefully.",
+            runner=EchoRunner(),
+            is_done_activity=activity,
+        )
+
+        runtime = agent._runtime()
+
+        self.assertIs(runtime.tools._get("isDone").spec().activity, activity)
+        self.assertIs(agent.with_is_done_activity(activity), agent)
+
     async def test_card_and_generate_reply_pass_tools(self) -> None:
         tool = FakeTool()
         agent = build_test_agent(
