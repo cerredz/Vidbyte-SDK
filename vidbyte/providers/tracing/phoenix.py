@@ -1,21 +1,24 @@
+"""FILE: vidbyte/providers/tracing/phoenix.py
+
+PURPOSE: Exports legacy semantic spans to an Arize Phoenix OpenTelemetry collector.
+ROLE IN CODEBASE: Preserves the existing PhoenixTracer adapter used by the legacy Trace facade.
+ARCHITECTURE NOTE: This module is an exporter adapter and is separate from the new in-memory provider shape builders.
+COMMON MODIFICATION PATTERNS: Keep endpoint resolution and OTLP export behavior compatible with the existing adapter contract.
+KNOWN EDGE CASES: Missing OpenTelemetry dependencies and collector configuration produce the established configuration errors.
+RELATED DOCS: docs/design/trace-facade.md
+TESTS: tests/test_trace_facade.py, tests/test_semantic_tracing.py
+"""
+
 from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
 from typing import Any
 
-from vidbyte.lib.dataclasses.tracing import OTelSpanContextData
-from vidbyte.lib.enums.tracing import (
-    OTelDefault,
-    OpenInferenceAttribute,
-    OpenInferenceSpanKind,
-    PhoenixEndpoint,
-    SpanNamePrefix,
-)
 from vidbyte.lib.errors import TracerConfigurationError
 from vidbyte.lib.tracing.base import SpanContext, TracerBase
 
-_DEFAULT_ENDPOINT = PhoenixEndpoint.DEFAULT_ENDPOINT.value
+_DEFAULT_ENDPOINT = "http://localhost:6006/v1/traces"
 
 
 @dataclass
@@ -47,7 +50,7 @@ class PhoenixTracer(TracerBase):
                 "pip install opentelemetry-sdk opentelemetry-exporter-otlp-proto-http"
             ) from exc
 
-        resolved_endpoint = endpoint or os.environ.get(PhoenixEndpoint.ENV_VAR.value, _DEFAULT_ENDPOINT)
+        resolved_endpoint = endpoint or os.environ.get("PHOENIX_COLLECTOR_ENDPOINT", _DEFAULT_ENDPOINT)
         exporter = OTLPSpanExporter(endpoint=resolved_endpoint)
         provider = TracerProvider()
         provider.add_span_processor(SimpleSpanProcessor(exporter))
@@ -76,9 +79,9 @@ class PhoenixTracer(TracerBase):
             return
         try:
             if output is not None:
-                context.span.set_attribute(OTelDefault.OUTPUT_VALUE.value, output)
+                context.span.set_attribute("output.value", output)
             if error is not None:
-                context.span.set_attribute(OTelDefault.ERROR_MESSAGE.value, str(error))
+                context.span.set_attribute("error.message", str(error))
                 context.span.record_exception(error)
             context.span.end()
         except Exception:
@@ -97,14 +100,13 @@ class PhoenixTracer(TracerBase):
             span = self._tracer.start_span(name, context=ctx)
             for key, value in attributes.items():
                 span.set_attribute(key, str(value))
-            if OpenInferenceAttribute.SPAN_KIND.value not in attributes:
-                run_type = str(attributes.get("run_type", ""))
-                if name.startswith(SpanNamePrefix.LLM.value) or run_type == SpanNamePrefix.LLM.value.rstrip("."):
-                    span.set_attribute(OpenInferenceAttribute.SPAN_KIND.value, OpenInferenceSpanKind.LLM.value)
-                elif name.startswith(SpanNamePrefix.TOOL.value) or run_type == SpanNamePrefix.TOOL.value.rstrip("."):
-                    span.set_attribute(OpenInferenceAttribute.SPAN_KIND.value, OpenInferenceSpanKind.TOOL.value)
-                elif run_type:
-                    span.set_attribute(OpenInferenceAttribute.SPAN_KIND.value, run_type.upper())
+            run_type = str(attributes.get("run_type", ""))
+            if name.startswith("llm.") or run_type == "llm":
+                span.set_attribute("openinference.span.kind", "LLM")
+            elif name.startswith("tool.") or run_type == "tool":
+                span.set_attribute("openinference.span.kind", "TOOL")
+            elif run_type:
+                span.set_attribute("openinference.span.kind", run_type.upper())
             return PhoenixSpanContext(span=span)
         except Exception:
             return PhoenixSpanContext()
@@ -120,9 +122,9 @@ class PhoenixTracer(TracerBase):
             return
         try:
             if output is not None:
-                context.span.set_attribute(OTelDefault.OUTPUT_VALUE.value, output)
+                context.span.set_attribute("output.value", output)
             if error is not None:
-                context.span.set_attribute(OTelDefault.ERROR_MESSAGE.value, str(error))
+                context.span.set_attribute("error.message", str(error))
                 context.span.record_exception(error)
             context.span.end()
         except Exception:

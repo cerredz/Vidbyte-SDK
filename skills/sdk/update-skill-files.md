@@ -129,18 +129,20 @@ agent may stop). `max_iterations` / `max_tokens` / `max_tool_calls` are **ceilin
 
 ### Add or Change a Trace Shape Prebuilt
 
-**Example:** Adding a new `ProviderTraceTranslator` for a company's published
-trace format (e.g. the OTel GenAI or OpenInference shapes), or adding a new
-destination transport under `vidbyte/providers/tracing/`.
+**Example:** Adding a direct in-memory provider shape for a company's published
+trace format (e.g. the OTel GenAI or OpenInference shapes). Shape providers
+consume the runtime's `TracerBase` calls and return caller-owned dictionaries;
+they do not export data or choose a destination.
 
 **Files to update:**
 
 | File | What to add |
 |------|-------------|
 | `skills/trace-shape-prebuilts/SKILL.md` | Process steps, the implemented-shapes table, invariants |
-| `vidbyte/trace/providers/<company>.py` | New translator implementing `ProviderTraceTranslator` |
-| `vidbyte/trace/base.py` | `_TraceFactory.resolve_translator` entry, `Trace.<company>(...)` / `Trace.<company>_session(...)` helpers |
-| `vidbyte/providers/tracing/` | New destination transport only if the destination cannot ride on the existing `OTelTracer` |
+| `vidbyte/trace/providers/<company>.py` | Direct `TracerBase` implementation that builds the provider shape |
+| `vidbyte/trace/providers/base.py` | Shared in-memory lifecycle bookkeeping without a provider-neutral payload model |
+| `vidbyte/trace/base.py` | `Trace.<company>(events=None)` facade helper |
+| `vidbyte/trace/providers/README.md` | Direct provider-manual links and usage documentation |
 | `docs/design/otel-genai-and-openinference-trace-shapes.md` or a new design doc | Non-trivial architecture changes |
 
 **Process skill:** follow `skills/trace-shape-prebuilts/SKILL.md` end-to-end before opening a PR.

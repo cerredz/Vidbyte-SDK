@@ -63,6 +63,10 @@ TEST FILES:
     ``tests/test_agent_runtime.py``, ``tests/test_agent_tool_loop.py``,
     ``tests/test_tracing.py``, and the context algorithm integration tests.
 
+TESTS:
+    ``tests/test_agent_runtime.py``, ``tests/test_agent_tool_loop.py``,
+    ``tests/test_tracing.py``, and the context algorithm integration tests.
+
 CONCURRENCY MODEL:
     Runtime attempts are run-local and reentrant. Never store loop counters or
     mutable attempt state on ``AgentRuntime`` itself; nested/concurrent calls
@@ -591,6 +595,7 @@ class AgentRuntime:
             try:
                 raw_result = await handle.invoke(message, **current_call_options)
                 output_text = handle.extract_text(raw_result)
+                self._tracer.update_span(llm_span, **self._llm_trace_outputs(handle, raw_result))
                 self._tracer.end_span(llm_span, output=output_text)
                 return raw_result, state.model_call_count, compaction_count
             except Exception as exc:
@@ -1166,6 +1171,16 @@ class AgentRuntime:
             f"tools={len(list(tools)) if tools else 0}"
         )
         return inputs
+
+    def _llm_trace_outputs(self, handle: RunnerHandle, response: object) -> dict[str, Any]:
+        # Sends provider-reported response fields directly to shape tracers after invocation.
+        metadata = handle.extract_metadata(response)
+        usage = _trace_usage_mapping(response, metadata)
+        attributes = _trace_usage_attributes(usage)
+        finish_reason = _trace_finish_reason(response, metadata)
+        if finish_reason is not None:
+            attributes["finish_reason"] = finish_reason
+        return attributes
 
     @staticmethod
     def _runner_model_name(runner: object) -> str | None:
@@ -1772,6 +1787,89 @@ def _safe_trace_value(value: Any) -> Any:
     if isinstance(value, str):
         return _trace_text(value)
     return value
+
+
+def _trace_usage_mapping(response: object, metadata: Mapping[str, Any]) -> Mapping[str, Any] | None:
+    # Reads the provider response's existing usage mapping without creating a usage model.
+    direct_usage = getattr(response, "usage", None)
+    if isinstance(direct_usage, Mapping):
+        return direct_usage
+    metadata_usage = metadata.get("usage")
+    if isinstance(metadata_usage, Mapping):
+        return metadata_usage
+    raw = getattr(response, "raw", None)
+    if not isinstance(raw, Mapping):
+        return None
+    for key in ("usage", "usageMetadata"):
+        candidate = raw.get(key)
+        if isinstance(candidate, Mapping):
+            return candidate
+    return None
+
+
+def _trace_usage_attributes(usage: Mapping[str, Any] | None) -> dict[str, Any]:
+    # Normalizes known provider token keys directly into the runtime trace call attributes.
+    if usage is None:
+        return {}
+    aliases = {
+        "input_tokens": ("input_tokens", "prompt_tokens", "promptTokenCount"),
+        "output_tokens": ("output_tokens", "completion_tokens", "candidatesTokenCount"),
+        "total_tokens": ("total_tokens", "total", "totalTokenCount"),
+    }
+    attributes: dict[str, Any] = {}
+    for target, keys in aliases.items():
+        for key in keys:
+            value = usage.get(key)
+            if isinstance(value, int) and not isinstance(value, bool):
+                attributes[target] = value
+                break
+    return attributes
+
+
+def _trace_finish_reason(response: object, metadata: Mapping[str, Any]) -> Any:
+    # Finds provider finish metadata already present on the response without guessing a reason.
+    raw = getattr(response, "raw", None)
+    sources = (metadata, raw) if isinstance(raw, Mapping) else (metadata,)
+    for source in sources:
+        value = _trace_reason_from_mapping(source)
+        if value is not None:
+            return value
+    return None
+
+
+def _trace_reason_from_mapping(source: Mapping[str, Any]) -> Any:
+    # Reads direct finish fields and then checks common provider result collections.
+    for key in ("finish_reason", "finish_reasons", "stop_reason", "stopReason"):
+        value = source.get(key)
+        if value is not None:
+            return value
+    for collection_key in ("choices", "candidates"):
+        value = _trace_reason_from_collection(source.get(collection_key))
+        if value is not None:
+            return value
+    return None
+
+
+def _trace_reason_from_collection(collection: object) -> Any:
+    # Reads the first provider result item carrying an explicit finish field.
+    if not isinstance(collection, (list, tuple)):
+        return None
+    for item in collection:
+        value = _trace_reason_from_item(item)
+        if value is not None:
+            return value
+    return None
+
+
+def _trace_reason_from_item(item: object) -> Any:
+    # Extracts finish metadata from one provider result mapping.
+    if not isinstance(item, Mapping):
+        return None
+    for key in ("finish_reason", "finishReason", "stop_reason", "stopReason"):
+        value = item.get(key)
+        if value is not None:
+            return value
+    return None
 
 
 def _is_semantic_tracer(tracer: TracerBase) -> bool:

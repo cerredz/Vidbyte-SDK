@@ -1,17 +1,12 @@
-"""Context Protocol Header
+"""FILE: vidbyte/lib/dataclasses/__init__.py
 
-Description:
-    Exports SDK dataclass contracts from the central Vidbyte lib namespace.
-Purpose:
-    Keeps reusable immutable data contracts in one package while feature
-    packages provide compatibility import shims.
-Architecture:
-    - Tool contracts from tools.
-    - Context, MCP, security, sandbox, and multi-agent contracts.
-    - Harness specification, run manifest, trajectory-record, and middleware
-      diagnostic invocation contracts.
-Relations:
-    Related to vidbyte.tools, vidbyte.agents, and vidbyte.harnesses.
+PURPOSE: Re-exports the SDK's dataclass contracts from the central Vidbyte lib namespace.
+ROLE IN CODEBASE: Provides stable package imports for reusable agent, context, tool, harness, and runtime contracts.
+ARCHITECTURE NOTE: Concrete dataclasses remain in focused sibling modules; this package owns exports and compatibility imports.
+COMMON MODIFICATION PATTERNS: Update imports and __all__ together when removing or adding a public dataclass contract.
+KNOWN EDGE CASES: Removing a re-export can break compatibility even when the owning dataclass module is otherwise unused.
+RELATED DOCS: docs/design/agent-native-lint-rules.md
+TESTS: tests/test_dataclasses.py, tests/test_trace_facade.py
 """
 
 from __future__ import annotations
@@ -177,17 +172,6 @@ from vidbyte.lib.dataclasses.trace import (
     TraceOption,
     TraceSchema,
 )
-from vidbyte.lib.dataclasses.tracing import (
-    OTelGenAIAgentShape,
-    OTelGenAILLMShape,
-    OTelGenAIShapeDefinition,
-    OTelGenAIToolShape,
-    OTelSpanContextData,
-    OTelTracerConfig,
-    OpenInferenceLLMShape,
-    OpenInferenceShapeDefinition,
-    OpenInferenceToolShape,
-)
 from vidbyte.lib.dataclasses.tools import (
     ToolActivity,
     ToolCall,
@@ -222,15 +206,6 @@ __all__ = [
     "AllegationRecord",
     "AllegationSeverity",
     "ArtifactRef",
-    "OTelGenAIAgentShape",
-    "OTelGenAILLMShape",
-    "OTelGenAIShapeDefinition",
-    "OTelGenAIToolShape",
-    "OTelSpanContextData",
-    "OTelTracerConfig",
-    "OpenInferenceLLMShape",
-    "OpenInferenceShapeDefinition",
-    "OpenInferenceToolShape",
     "ArtifactContextItem",
     "BaseAgentContext",
     "BaseContext",

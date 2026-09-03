@@ -14,6 +14,17 @@ ARCHITECTURE NOTE:
     runtime modules from duplicating string constants while preserving a single
     public import path.
 
+COMMON MODIFICATION PATTERNS:
+    Update imports and ``__all__`` together when changing the public enum
+    namespace; keep behavior in the owning sibling module.
+
+KNOWN EDGE CASES:
+    Removing a re-export can break compatibility even when the owning enum
+    module remains present.
+
+RELATED DOCS:
+    docs/design/agent-native-lint-rules.md
+
 FUNCTION INVENTORY:
     No functions. ``__all__`` lists the public enum classes.
 
@@ -22,6 +33,9 @@ WHAT NOT TO DO IN THIS FILE:
     2. Do not import runtime instances or add import-time side effects.
 
 TEST FILES:
+    Configuration and runtime tests cover the exported enum namespace.
+
+TESTS:
     Configuration and runtime tests cover the exported enum namespace.
 """
 
@@ -53,18 +67,6 @@ from vidbyte.lib.enums.skills import ContextMinimalFanoutSkill, Skill
 from vidbyte.lib.enums.skills import Skills as SkillEnums
 from vidbyte.lib.enums.sources import PinPolicy
 from vidbyte.lib.enums.structured_output import StructuredOutputSupport
-from vidbyte.lib.enums.tracing import (
-    GenAIAttribute,
-    GenAIOperation,
-    OTelDefault,
-    OTelEndpointEnvVar,
-    OpenInferenceAttribute,
-    OpenInferenceSpanKind,
-    PhoenixEndpoint,
-    SpanNamePrefix,
-    TraceProvider,
-    TraceShapeNamespace,
-)
 
 __all__ = [
     "AgentRuntimeStateKey",
@@ -76,21 +78,14 @@ __all__ = [
     "ContextMinimalFanoutSkill",
     "CotEventEnum",
     "DocumentType",
-    "GenAIAttribute",
-    "GenAIOperation",
     "HypothesisStatus",
     "ImpactLevel",
     "ModelModality",
     "ModelNameModality",
     "ModelProvider",
     "MultiAgentStopReason",
-    "OTelDefault",
-    "OTelEndpointEnvVar",
-    "OpenInferenceAttribute",
-    "OpenInferenceSpanKind",
     "OrchestratorAction",
     "PermissionPreset",
-    "PhoenixEndpoint",
     "PinPolicy",
     "Platform",
     "ProgressState",
@@ -99,9 +94,6 @@ __all__ = [
     "Reversibility",
     "Skill",
     "SkillEnums",
-    "SpanNamePrefix",
     "StructuredOutputSupport",
     "TaskStatus",
-    "TraceProvider",
-    "TraceShapeNamespace",
 ]

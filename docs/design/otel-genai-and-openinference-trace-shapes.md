@@ -31,7 +31,7 @@ This revision makes the OTel GenAI and OpenInference providers in-process trace-
 - No new dataclasses, enums, payload objects, or provider-neutral shape model for this feature.
 - No automatic serialization, network delivery, batching, retrying, or destination selection.
 - No attempt to invent token counts, finish reasons, output messages, or other values absent from the runtime lifecycle call.
-- No change to the existing usage tracker. Token attributes are mapped only when a caller or future runtime call supplies input_tokens/output_tokens; the current runtime does not attach those keys to llm.call start attributes.
+- No new usage model or exporter is added. The existing runtime passes provider-reported usage and finish metadata directly to the active tracer after an LLM response; the direct providers map those raw values when the response supplies them.
 - No removal of the pre-existing SpanSpec/ProviderSpanPayload contracts because existing LangSmith and generic semantic tracing still use them.
 - No new session/profile facade variants for the two direct shape tracers.
 
@@ -41,7 +41,7 @@ This revision makes the OTel GenAI and OpenInference providers in-process trace-
 
 PR #395 originally added two semantic translators, a destination-agnostic OTelTracer, endpoint parameters, transport tests, and typed shape/configuration contracts. That design mixed two responsibilities: choosing a provider's attribute shape and exporting spans to a destination. The requested behavior is narrower: automatically build provider-shaped records during an agent run and leave handling of those records to the developer.
 
-The relevant runtime boundary is already present. BaseAgent.generate_reply() opens agent.run; AgentRuntime._invoke_with_middleware() opens and closes llm.call; and AgentRuntime.execute_tool_call() opens and closes tool.call. Their attributes contain the agent name, run ID, provider, model, messages, prompts, tool names, call IDs, arguments, metadata, and lifecycle output/error values. The new providers therefore need only implement TracerBase and map those direct calls.
+The relevant runtime boundary is already present. BaseAgent.generate_reply() opens agent.run; AgentRuntime._invoke_with_middleware() opens and closes llm.call; and AgentRuntime.execute_tool_call() opens and closes tool.call. Their attributes contain the agent name, run ID, provider, model, messages, prompts, tool names, call IDs, arguments, metadata, and lifecycle output/error values. After a model response, the runtime also forwards the response's existing usage and finish metadata through the optional TracerBase update hook. The new providers therefore map those direct calls without introducing an intermediate trace model.
 
 The field names are based on the official specifications:
 
@@ -252,12 +252,12 @@ Removes only the destination transport, transport README, shape/configuration da
 
 ### 6.6 Runtime boundary and documentation
 
-**File(s):** skills/sdk/update-skill-files.md, vidbyte/trace/providers/README.md, tests/test_otel_genai_trace_shape.py, tests/test_openinference_trace_shape.py
+**File(s):** vidbyte/lib/tracing/base.py, vidbyte/agents/runtime.py, skills/sdk/update-skill-files.md, vidbyte/trace/providers/README.md, tests/test_otel_genai_trace_shape.py, tests/test_openinference_trace_shape.py
 **Type:** Modified
 
 #### What it does
 
-Documents and tests the direct runtime boundary. No new intermediate runtime model is added. The runtime's existing lifecycle calls are the source of truth; the providers map what is present and leave absent spec fields absent.
+Documents and tests the direct runtime boundary. No new intermediate runtime model is added. The runtime's existing lifecycle calls are the source of truth; a compatibility-preserving update hook forwards response metadata directly, and the providers map what is present while leaving absent spec fields absent.
 
 #### Interface / API
 
@@ -271,13 +271,15 @@ await agent.arun("hello")
 #### Logic / Algorithm
 
 1. Keep the existing agent.run, llm.call, and tool.call start/end calls.
-2. Ensure the direct classes can be installed through the agent's existing tracer resolution path.
-3. Update the SDK skill map and provider README so the direct shape providers, not an exporter destination, are discoverable.
+2. Add a default no-op TracerBase.update_span() hook so existing custom tracers remain compatible.
+3. Forward response usage and finish metadata directly from AgentRuntime to that hook after each successful model response.
+4. Ensure the direct classes can be installed through the agent's existing tracer path.
+5. Update the SDK skill map and provider README so the direct shape providers, not an exporter destination, are discoverable.
 
 #### Edge Cases & Error Handling
 
 - A runtime operation not covered by a provider-specific convention is still captured with a namespaced passthrough.
-- Missing runtime response usage remains an honest omission rather than a guessed value.
+- Missing runtime response usage or finish metadata remains an honest omission rather than a guessed value.
 
 ---
 
@@ -354,6 +356,8 @@ Complete list of every file changed by this revision:
 | Action | File Path | Reason |
 |--------|-----------|--------|
 | MODIFY | docs/design/otel-genai-and-openinference-trace-shapes.md | Replace the endpoint/export design with the direct in-memory design. |
+| MODIFY | vidbyte/lib/tracing/base.py | Add the optional post-response span-attribute hook with a no-op default. |
+| MODIFY | vidbyte/agents/runtime.py | Forward response usage and finish metadata directly to the active tracer. |
 | MODIFY | vidbyte/trace/providers/base.py | Add shared in-memory lifecycle mechanics while preserving legacy translator contracts. |
 | MODIFY | vidbyte/trace/providers/otel_genai.py | Replace the SpanSpec translator with OTelGenAITrace. |
 | MODIFY | vidbyte/trace/providers/openinference.py | Replace the SpanSpec translator with OpenInferenceTrace. |
@@ -430,7 +434,7 @@ No external service is contacted by this feature.
 ## 13. Open Questions
 
 - [ ] Should a future revision add a session/root grouping helper around the caller-owned event list, after the direct single-run shape is established?
-- [ ] Should a future runtime change pass provider-reported token counts and finish reasons to end_span so the optional fields are populated automatically?
+- [x] Should the runtime pass provider-reported token counts and finish reasons to the direct shape provider automatically? Yes; it uses the compatibility-preserving update hook and leaves missing values absent.
 - [ ] Should a future revision define output-message mappings after confirming the exact current provider specification versions?
 
 ---
