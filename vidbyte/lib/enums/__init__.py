@@ -30,6 +30,14 @@ from __future__ import annotations
 from vidbyte.lib.enums.agent_runtime import AgentRuntimeStateKey, AgentRuntimeType
 from vidbyte.lib.enums.config import AgentType, DocumentType
 from vidbyte.lib.enums.context import BudgetPreset, PermissionPreset
+from vidbyte.lib.enums.failure import (
+    FailureCode,
+    FailureDisposition,
+    FailurePhase,
+    FailureSeverity,
+    FailureStatus,
+    RuleErrorMode,
+)
 from vidbyte.lib.enums.cot_events import (
     AssumptionAction,
     BasisType,
@@ -49,6 +57,27 @@ from vidbyte.lib.enums.multi_agent import (
 )
 from vidbyte.lib.enums.platform import Platform
 from vidbyte.lib.enums.prompts import Prompt
+from vidbyte.lib.enums.reasoning_strategies import (
+    AbsenceEvidenceSignificance,
+    BurdenOfProofVerdict,
+    CircularityVerdict,
+    CompositionDivisionValidity,
+    ConsistencyStatus,
+    DefeasibleRuleApplies,
+    EquivocationFallacy,
+    IdentityVerdict,
+    ModalStatus,
+    NecessarySufficientVerdict,
+    PartitionVerdict,
+    PredictMatch,
+    QuantifierKind,
+    QuantifierVerdict,
+    ReasoningStrategyEnum,
+    RegressStyle,
+    StrawmanCriticism,
+    TestimonyTrust,
+    TransitivityConsistency,
+)
 from vidbyte.lib.enums.skills import ContextMinimalFanoutSkill, Skill
 from vidbyte.lib.enums.skills import Skills as SkillEnums
 from vidbyte.lib.enums.sources import PinPolicy
@@ -56,6 +85,7 @@ from vidbyte.lib.enums.speed import AgentSpeedRecordingIntegrity
 from vidbyte.lib.enums.structured_output import StructuredOutputSupport
 
 __all__ = [
+    "AbsenceEvidenceSignificance",
     "AgentRuntimeStateKey",
     "AgentRuntimeType",
     "AgentSpeedRecordingIntegrity",
@@ -63,25 +93,49 @@ __all__ = [
     "AssumptionAction",
     "BasisType",
     "BudgetPreset",
+    "BurdenOfProofVerdict",
+    "CircularityVerdict",
+    "CompositionDivisionValidity",
+    "ConsistencyStatus",
     "ContextMinimalFanoutSkill",
     "CotEventEnum",
+    "DefeasibleRuleApplies",
     "DocumentType",
+    "EquivocationFallacy",
+    "FailureCode",
+    "FailureDisposition",
+    "FailurePhase",
+    "FailureSeverity",
+    "FailureStatus",
     "HypothesisStatus",
+    "IdentityVerdict",
     "ImpactLevel",
+    "ModalStatus",
     "ModelModality",
     "ModelNameModality",
     "ModelProvider",
     "MultiAgentStopReason",
+    "NecessarySufficientVerdict",
     "OrchestratorAction",
+    "PartitionVerdict",
     "PermissionPreset",
     "PinPolicy",
     "Platform",
+    "PredictMatch",
     "ProgressState",
     "Prompt",
+    "QuantifierKind",
+    "QuantifierVerdict",
+    "ReasoningStrategyEnum",
+    "RegressStyle",
     "ReturnableOption",
     "Reversibility",
+    "RuleErrorMode",
     "Skill",
     "SkillEnums",
+    "StrawmanCriticism",
     "StructuredOutputSupport",
     "TaskStatus",
+    "TestimonyTrust",
+    "TransitivityConsistency",
 ]
