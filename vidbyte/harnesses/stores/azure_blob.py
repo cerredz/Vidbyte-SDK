@@ -46,14 +46,15 @@ RELATED DOCS:
     https://github.com/cerredz/Vidbyte-SDK/blob/main/docs/design/cloud-trajectory-sinks.md
 
 TESTS:
-    tests/test_cloud_trajectory_sinks.py.
+    tests/test_cloud_trajectory_sinks.py and
+    tests/features/cloud_trajectory_provider_expansion/.
 """
 
 from __future__ import annotations
 
-import asyncio
 from types import SimpleNamespace
 from typing import Any
+from uuid import uuid4
 
 from vidbyte.harnesses.contracts import TrajectoryRecord
 from vidbyte.harnesses.errors import (
@@ -63,8 +64,10 @@ from vidbyte.harnesses.errors import (
     HarnessSinkSetupError,
     HarnessSinkUnavailableError,
 )
-from vidbyte.harnesses.stores._sink_support import SinkEncoding
+from vidbyte.harnesses.stores._cloud_common import CloudTrajectorySinkMixin, SinkWriteReceipt, make_receipt, pair_mapping
 from vidbyte.lib.dataclasses.cloud_sinks import AzureBlobCredentials, AzureBlobSinkConfig
+from vidbyte.lib.dataclasses.cloud_sinks import SinkOverwriteMode
+from vidbyte.lib.constants.cloud_sinks import MIN_SINGLE_PUT_BYTES
 from vidbyte.lib.errors import ConfigurationError
 
 _HTTP_FORBIDDEN = 403
@@ -72,7 +75,7 @@ _HTTP_TOO_MANY_REQUESTS = 429
 _HTTP_SERVICE_UNAVAILABLE = 503
 
 
-class AzureBlobTrajectorySink:
+class AzureBlobTrajectorySink(CloudTrajectorySinkMixin):
     """TrajectorySink writing one JSONL object per run to an Azure Blob Storage container."""
 
     def __init__(self, config: AzureBlobSinkConfig, *, credentials: AzureBlobCredentials) -> None:
@@ -81,39 +84,37 @@ class AzureBlobTrajectorySink:
         self._credentials = credentials
         self._driver = self._import_driver()
         self._client = self._build_client()
-        self._verify_task: asyncio.Task[None] | None = None
-
-    async def verify(self) -> None:
-        # Explicit, caller-invoked preflight check — call before a long run to fail fast on setup/auth problems.
-        await self._ensure_ready()
+        self._initialize_cloud_lifecycle("azure_blob")
 
     async def write(self, record: TrajectoryRecord) -> None:
-        # Encodes one record, guards its size, and uploads it as a single blob keyed by run_id.
-        await self._ensure_ready()
-        payload = SinkEncoding.encode_record(record)
-        SinkEncoding.guard_size(payload, run_id=record.run_id)
-        await self._put(self._object_key(record.run_id), payload)
+        # Encodes before preflight so payload failures never trigger provider I/O.
+        await super().write(record)
+
+    async def write_with_receipt(self, record: TrajectoryRecord) -> SinkWriteReceipt:
+        # Exposes the normalized object acknowledgement while preserving write()'s protocol return type.
+        return await super().write_with_receipt(record)
 
     def _build_client(self) -> Any:
         # @intent client-owns-its-own-retry-policy
         # Constructs the async BlobServiceClient, preferring connection_string, then sas_token, then keyless DefaultAzureCredential.
         # retry_total is handed straight to the vendor client; this sink never loops or backs off on its own.
         retry_total = self._config.max_retries
+        timeout_kwargs = {
+            "connection_timeout": self._config.connect_timeout_seconds,
+            "read_timeout": self._config.read_timeout_seconds,
+            "max_single_put_size": max(MIN_SINGLE_PUT_BYTES, self._config.multipart_threshold_bytes),
+            "max_block_size": self._config.multipart_part_size_bytes,
+        }
         if self._credentials.connection_string is not None:
-            return self._driver.BlobServiceClient.from_connection_string(self._credentials.connection_string.reveal(), retry_total=retry_total)
+            return self._driver.BlobServiceClient.from_connection_string(self._credentials.connection_string.reveal(), retry_total=retry_total, **timeout_kwargs)
         if self._credentials.sas_token is not None:
             account_url = f"{self._credentials.account_url}?{self._credentials.sas_token.reveal()}"
-            return self._driver.BlobServiceClient(account_url=account_url, retry_total=retry_total)
+            return self._driver.BlobServiceClient(account_url=account_url, retry_total=retry_total, **timeout_kwargs)
         identity_driver = self._import_identity_driver()
-        return self._driver.BlobServiceClient(account_url=self._credentials.account_url, credential=identity_driver.DefaultAzureCredential(), retry_total=retry_total)
+        self._credential = identity_driver.DefaultAzureCredential()
+        return self._driver.BlobServiceClient(account_url=self._credentials.account_url, credential=self._credential, retry_total=retry_total, **timeout_kwargs)
 
-    async def _ensure_ready(self) -> None:
-        # Memoizes the preflight check as one shared task; the synchronous check-and-create between await points needs no lock, since asyncio only yields control at an await.
-        if self._verify_task is None:
-            self._verify_task = asyncio.ensure_future(self._run_preflight())
-        await self._verify_task
-
-    async def _run_preflight(self) -> None:
+    async def _run_metadata_preflight(self) -> None:
         # Confirms the container exists and is reachable before any write is attempted.
         try:
             container_client = self._client.get_container_client(self._config.container)
@@ -121,19 +122,34 @@ class AzureBlobTrajectorySink:
         except Exception as exc:
             raise self._translate_error(exc) from exc
 
-    def _object_key(self, run_id: str) -> str:
-        # Builds "{prefix}/{run_id}.jsonl", or "{run_id}.jsonl" when prefix is empty.
-        prefix = self._config.prefix.rstrip("/")
-        return f"{prefix}/{run_id}.jsonl" if prefix else f"{run_id}.jsonl"
-
-    async def _put(self, key: str, payload: bytes) -> None:
-        # Issues one atomic, overwriting upload carrying the configured access tier.
+    async def _run_write_probe(self) -> None:
+        # Uses a reserved marker and deletes it only when the caller explicitly requested a write probe.
+        key = self._object_key(f".vidbyte-preflight-{uuid4().hex}")
+        await self._put_record(key, b"{}\n")
         try:
             blob_client = self._client.get_blob_client(container=self._config.container, blob=key)
-            content_settings = self._driver.ContentSettings(content_type="application/x-ndjson")
-            await blob_client.upload_blob(payload, overwrite=True, standard_blob_tier=self._config.tier.value, content_settings=content_settings)
+            await blob_client.delete_blob()
         except Exception as exc:
             raise self._translate_error(exc) from exc
+
+    async def _put_record(self, key: str, payload: bytes) -> SinkWriteReceipt:
+        # Uses Azure's upload helper, which switches to block upload for larger payloads.
+        try:
+            blob_client = self._client.get_blob_client(container=self._config.container, blob=key)
+            content_settings = self._driver.ContentSettings(content_type=self._config.content_type)
+            kwargs: dict[str, Any] = {
+                "overwrite": self._config.overwrite_mode is SinkOverwriteMode.OVERWRITE,
+                "standard_blob_tier": self._config.tier.value,
+                "content_settings": content_settings,
+                "metadata": pair_mapping(self._config.metadata),
+                "tags": pair_mapping(self._config.tags),
+                "max_concurrency": self._config.multipart_max_concurrency,
+                "timeout": self._config.read_timeout_seconds,
+            }
+            response = await blob_client.upload_blob(payload, **kwargs)
+        except Exception as exc:
+            raise self._translate_error(exc) from exc
+        return make_receipt("azure_blob", key, payload, response)
 
     def _translate_error(self, exc: Exception) -> HarnessSinkError:
         # Maps an azure.core exception to the specific HarnessSinkError subclass a caller can act on.
@@ -147,7 +163,7 @@ class AzureBlobTrajectorySink:
         if isinstance(exc, self._driver.HttpResponseError):
             return self._translate_http_response_error(exc)
         if isinstance(exc, self._driver.ServiceRequestError):
-            return HarnessSinkUnavailableError("Could not reach the configured Azure Blob endpoint.", details={"account_url": self._credentials.account_url, "error_type": type(exc).__name__})
+            return HarnessSinkUnavailableError("Could not reach the configured Azure Blob endpoint.", details={"error_type": type(exc).__name__})
         return HarnessSinkError("Azure Blob request failed for an unrecognized reason.", details={"error_type": type(exc).__name__})
 
     def _translate_http_response_error(self, exc: Any) -> HarnessSinkError:

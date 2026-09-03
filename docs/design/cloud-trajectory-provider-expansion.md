@@ -11,6 +11,11 @@ Object Storage, and Alibaba Cloud OSS. The S3-compatible implementation also
 gets named profiles for IBM Cloud Object Storage, Wasabi, and MinIO so callers
 do not need to hand-build endpoints for those compatible targets.
 
+Implementation status: complete on branch `feat/cloud-trajectory-provider-expansion`.
+The focused feature pack passes 33 cases, and the package gate passes. The
+repository-wide source gate remains blocked by unrelated lint debt already
+present in this SDK baseline; provider-file focused lint checks are clean.
+
 The expansion is intentionally additive. Existing `TrajectorySink` callers
 continue to receive a redacted `TrajectoryRecord`, and `Harness.execute()`
 continues to fail open when export fails. The new provider code stays behind
@@ -96,9 +101,11 @@ The audit found five correctness gaps that this expansion closes:
    access-key credentials, and STS security tokens.
 4. All providers must support prefix-safe deterministic keys and one JSONL
    record per run.
-5. All providers must support content type, user metadata, tags where the
-   provider SDK supports tags, storage tier, encryption settings, bounded
-   retries, connect/read timeouts, and optional create-only semantics.
+5. All providers must support content type, user metadata, native tags where
+   the provider SDK supports tags, storage tier, encryption settings, bounded
+   retries, connect/read timeouts, and optional create-only semantics. GCS
+   callers use custom metadata because its object API has no S3-style tags;
+   OCI maps tags to reserved user metadata.
 6. Providers with a native multipart/resumable API must expose a threshold and
    part/concurrency settings; below the threshold they should use the simplest
    atomic single-object operation.
@@ -188,9 +195,9 @@ and capability facts:
 | Profile | Endpoint/region behavior | Supported object features |
 |---|---|---|
 | AWS | caller supplies region; AWS endpoint resolution remains available | S3 tiers, SSE-S3/SSE-KMS/SSE-C, checksums, tags, object lock fields |
-| Cloudflare R2 | account endpoint; region is `auto` | Standard/Infrequent Access, SSE-S3-compatible encryption, checksums, multipart, object-lock fields where enabled |
-| Backblaze B2 | regional `s3.<region>.backblazeb2.com` endpoint | Standard storage, SSE-B2/SSE-C request fields, multipart, object-lock fields where enabled |
-| DigitalOcean Spaces | regional Spaces endpoint | Standard/Cold Storage profile, multipart, limited S3 metadata; unsupported lifecycle/tag/version management is rejected as sink behavior |
+| Cloudflare R2 | account endpoint; region is `auto` | Standard/Infrequent Access, SSE-C, checksums, multipart; S3-style tags and object lock remain unsupported/control-plane concerns |
+| Backblaze B2 | regional `s3.<region>.backblazeb2.com` endpoint | Standard storage, supported S3 encryption request fields, multipart; object lock remains a provider policy prerequisite |
+| DigitalOcean Spaces | regional Spaces endpoint | Standard storage, multipart, limited S3 metadata; unsupported lifecycle/tag/version management is rejected as sink behavior |
 | IBM COS | caller supplies endpoint/region | S3-compatible standard storage and provider-specific endpoint behavior |
 | Wasabi | caller supplies region endpoint | S3-compatible standard storage, versioning/object lock controlled outside sink |
 | MinIO | caller supplies endpoint and region | S3-compatible local/private deployment behavior; no cloud-only capability is assumed |
@@ -264,7 +271,9 @@ Credential modes:
 - environment/default provider chain;
 - explicit AccessKey ID + secret;
 - STS access key + security token;
-- optional RAM role/role-session settings when supported by the installed SDK.
+- optional STS session-token settings; `role_arn` and `role_session_name` are
+  retained for callers that obtain the token through an external RAM/STS
+  broker, because the OSS v2 SDK does not ship an STS role-assumption client.
 
 Object requests attach `Content-Type`, user metadata, tags, storage class,
 SSE-OSS/SSE-KMS settings, CRC/checksum settings, and overwrite prevention when
@@ -377,8 +386,6 @@ when callers only import `vidbyte` or `vidbyte.harnesses`.
 - `vidbyte/lib/dataclasses/cloud_sinks.py` - new configs, credentials, enums,
   shared option validation, and S3 profile capabilities.
 - `vidbyte/lib/constants/cloud_sinks.py` - shared multipart/time bounds.
-- `vidbyte/harnesses/stores/_sink_support.py` - shared key/receipt/preflight
-  helpers and encode-before-network ordering.
 - `vidbyte/harnesses/stores/s3.py` - named profiles and advanced request paths.
 - `vidbyte/harnesses/stores/gcs.py` - retry/timeout, receipts, and lifecycle
   fixes.
@@ -388,7 +395,6 @@ when callers only import `vidbyte` or `vidbyte.harnesses`.
 - `vidbyte/harnesses/__init__.py` - public exports.
 - `vidbyte/harnesses/client.py` - new provider factories.
 - `vidbyte/harnesses/errors.py` - expanded safe blast radius and diagnostics.
-- `docs/design/cloud-trajectory-sinks.md` - extension guidance and gaps closed.
 - `skills/harnesses/cloud-trajectory-sinks.md` - provider matrix and feature
   checklist.
 

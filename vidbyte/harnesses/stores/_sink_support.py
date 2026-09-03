@@ -6,8 +6,8 @@ PURPOSE:
     exactly one place instead of four.
 
 ROLE IN CODEBASE:
-    FileTrajectorySink, S3TrajectorySink, GcsTrajectorySink, and
-    AzureBlobTrajectorySink all call SinkEncoding.encode_record() then
+    FileTrajectorySink, S3TrajectorySink, GcsTrajectorySink, AzureBlobTrajectorySink,
+    OciTrajectorySink, and OssTrajectorySink all call SinkEncoding.encode_record() then
     SinkEncoding.guard_size() before attempting any I/O.
 
 ARCHITECTURE NOTE:
@@ -70,7 +70,7 @@ class SinkEncoding:
         # Rejects an oversized payload before any caller attempts a network call.
         if len(payload) > MAX_TRAJECTORY_RECORD_BYTES:
             raise HarnessSinkPayloadError(
-                "Trajectory record exceeds the sink's size guard; multipart upload is not implemented by this sink.",
+                "Trajectory record exceeds the shared sink size guard.",
                 details={"run_id": run_id, "actual_bytes": len(payload), "max_bytes": MAX_TRAJECTORY_RECORD_BYTES},
             )
 

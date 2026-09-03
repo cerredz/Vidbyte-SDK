@@ -54,7 +54,12 @@ from vidbyte.lib.dataclasses.harnesses import HarnessRun
 from vidbyte.lib.errors import VidbyteSdkError
 
 _DESIGN_URL = "https://github.com/cerredz/Vidbyte-SDK/blob/main/docs/design/harness-execution-contract.md"
+_CLOUD_DESIGN_URL = "https://github.com/cerredz/Vidbyte-SDK/blob/main/docs/design/cloud-trajectory-provider-expansion.md"
 _NO_TESTS = ("Approved no-tests workflow: run the repository suite and harness smoke verification.",)
+_CLOUD_TESTS = (
+    "tests/test_cloud_trajectory_sinks.py",
+    "tests/features/cloud_trajectory_provider_expansion/",
+)
 
 
 class HarnessError(VidbyteSdkError):
@@ -142,8 +147,8 @@ class HarnessSinkError(HarnessError):
 
     description = "A TrajectorySink could not atomically publish one redacted trajectory record."
     expected_vs_actual = "Expected: the sink can encode the record and write its destination. Actual: encoding or destination I/O failed."
-    blast_radius: tuple[str, ...] = ("vidbyte/harnesses/stores/file.py", "vidbyte/harnesses/stores/memory.py")
-    fix_approaches: tuple[str, ...] = ("Confirm the destination path is writable.", "Inspect the safe error type; collection is fail-open inside execute() and never fails the run.")
+    blast_radius: tuple[str, ...] = ("vidbyte/harnesses/stores/file.py", "vidbyte/harnesses/stores/memory.py", "vidbyte/harnesses/stores/_cloud_common.py")
+    fix_approaches: tuple[str, ...] = ("Confirm the destination path or provider endpoint is reachable.", "Inspect the safe error type; collection is fail-open inside execute() and never fails the run.")
 
 
 class HarnessSinkSetupError(HarnessSinkError):
@@ -151,7 +156,9 @@ class HarnessSinkSetupError(HarnessSinkError):
 
     description = "A cloud TrajectorySink's configured bucket/container could not be resolved: it does not exist, sits in a different region than configured, or the endpoint is unreachable at the address given."
     expected_vs_actual = "Expected: the configured bucket/container exists and is reachable at the configured region/endpoint. Actual: the provider reported the destination itself could not be resolved."
-    blast_radius = ("vidbyte/harnesses/stores/s3.py", "vidbyte/harnesses/stores/gcs.py", "vidbyte/harnesses/stores/azure_blob.py")
+    blast_radius = ("vidbyte/harnesses/stores/s3.py", "vidbyte/harnesses/stores/gcs.py", "vidbyte/harnesses/stores/azure_blob.py", "vidbyte/harnesses/stores/oci.py", "vidbyte/harnesses/stores/oss.py")
+    doc_links: tuple[str, ...] = (_DESIGN_URL, _CLOUD_DESIGN_URL)
+    test_files: tuple[str, ...] = _CLOUD_TESTS
     possible_causes = ("The bucket/container name is syntactically valid but does not exist.", "The bucket exists in a different region than the configured `region`.", "`endpoint_url`/`account_url` points at the wrong host or a host requiring different signing.")
     fix_approaches = (
         "Confirm the bucket/container exists in the account and region the credentials resolve to.",
@@ -165,7 +172,9 @@ class HarnessSinkAuthenticationError(HarnessSinkError):
 
     description = "A cloud TrajectorySink could not resolve any usable credentials: none were supplied and the provider's default/keyless credential chain came up empty, a supplied credential was invalid or expired, or cross-account role assumption failed."
     expected_vs_actual = "Expected: static credentials, a keyless default chain (AWS default chain / GCP Application Default Credentials / Azure DefaultAzureCredential), or a role-assumption grant resolves to a usable identity. Actual: the provider could not establish who the sink is at all, before ever reaching a permissions check."
-    blast_radius = ("vidbyte/harnesses/stores/s3.py", "vidbyte/harnesses/stores/gcs.py", "vidbyte/harnesses/stores/azure_blob.py")
+    blast_radius = ("vidbyte/harnesses/stores/s3.py", "vidbyte/harnesses/stores/gcs.py", "vidbyte/harnesses/stores/azure_blob.py", "vidbyte/harnesses/stores/oci.py", "vidbyte/harnesses/stores/oss.py")
+    doc_links: tuple[str, ...] = (_DESIGN_URL, _CLOUD_DESIGN_URL)
+    test_files: tuple[str, ...] = _CLOUD_TESTS
     possible_causes = (
         "No static credentials were supplied and no keyless credential source is available in this environment.",
         "A supplied static credential, session token, or SAS token is invalid or has expired.",
@@ -183,7 +192,9 @@ class HarnessSinkAuthorizationError(HarnessSinkError):
 
     description = "A cloud TrajectorySink established a valid identity, but the provider rejected the write as a policy/permission denial — including the case where a bucket requires server-side encryption and the sink's request did not include the matching encryption header, which surfaces as a permission denial rather than a distinct encryption error."
     expected_vs_actual = "Expected: the resolved identity has write permission on the configured bucket/container/prefix, including any required encryption grant. Actual: the provider accepted the identity but denied the specific write."
-    blast_radius = ("vidbyte/harnesses/stores/s3.py", "vidbyte/harnesses/stores/gcs.py", "vidbyte/harnesses/stores/azure_blob.py")
+    blast_radius = ("vidbyte/harnesses/stores/s3.py", "vidbyte/harnesses/stores/gcs.py", "vidbyte/harnesses/stores/azure_blob.py", "vidbyte/harnesses/stores/oci.py", "vidbyte/harnesses/stores/oss.py")
+    doc_links: tuple[str, ...] = (_DESIGN_URL, _CLOUD_DESIGN_URL)
+    test_files: tuple[str, ...] = _CLOUD_TESTS
     possible_causes = (
         "The bucket/container policy does not grant PutObject/upload on this prefix to this identity.",
         "The bucket requires customer-managed encryption (aws:kms SSE, GCS CMEK) but `sse`/`kms_key_id` (S3) or `kms_key_name` (GCS) was not set, or the identity lacks Encrypt/Decrypt on that key.",
@@ -201,7 +212,9 @@ class HarnessSinkUnavailableError(HarnessSinkError):
 
     description = "A cloud TrajectorySink's network call failed after the vendor SDK's own retry/backoff policy was exhausted — a timeout, a dropped connection, throttling, or a 5xx response from the provider."
     expected_vs_actual = "Expected: the provider's endpoint is reachable and responds within the configured retry budget. Actual: every attempt failed for a transport- or availability-level reason, not a policy or identity reason."
-    blast_radius = ("vidbyte/harnesses/stores/s3.py", "vidbyte/harnesses/stores/gcs.py", "vidbyte/harnesses/stores/azure_blob.py")
+    blast_radius = ("vidbyte/harnesses/stores/s3.py", "vidbyte/harnesses/stores/gcs.py", "vidbyte/harnesses/stores/azure_blob.py", "vidbyte/harnesses/stores/oci.py", "vidbyte/harnesses/stores/oss.py")
+    doc_links: tuple[str, ...] = (_DESIGN_URL, _CLOUD_DESIGN_URL)
+    test_files: tuple[str, ...] = _CLOUD_TESTS
     possible_causes = (
         "A corporate firewall or VPC egress rule blocks the provider's endpoint entirely.",
         "The provider is throttling this identity/bucket (S3 SlowDown, GCS TooManyRequests, Azure 429).",
@@ -219,14 +232,16 @@ class HarnessSinkPayloadError(HarnessSinkError):
 
     description = "A TrajectoryRecord could not be turned into bytes safe to write, or the encoded payload exceeded the sink's size guard — caught locally, before any network or disk write was attempted."
     expected_vs_actual = "Expected: json.dumps(asdict(record), ...) succeeds and the encoded payload stays within MAX_TRAJECTORY_RECORD_BYTES. Actual: encoding raised, or the payload exceeded the guard."
-    blast_radius = ("vidbyte/harnesses/stores/file.py", "vidbyte/harnesses/stores/_sink_support.py", "vidbyte/harnesses/stores/s3.py", "vidbyte/harnesses/stores/gcs.py", "vidbyte/harnesses/stores/azure_blob.py")
+    blast_radius = ("vidbyte/harnesses/stores/file.py", "vidbyte/harnesses/stores/_sink_support.py", "vidbyte/harnesses/stores/_cloud_common.py", "vidbyte/harnesses/stores/s3.py", "vidbyte/harnesses/stores/gcs.py", "vidbyte/harnesses/stores/azure_blob.py", "vidbyte/harnesses/stores/oci.py", "vidbyte/harnesses/stores/oss.py")
+    doc_links: tuple[str, ...] = (_DESIGN_URL, _CLOUD_DESIGN_URL)
+    test_files: tuple[str, ...] = _CLOUD_TESTS
     possible_causes = (
         "A value in the record is not JSON-serializable — this should not happen post-redaction, but HarnessRedactor cannot guarantee every possible object type.",
         "The record's encoded payload exceeds MAX_TRAJECTORY_RECORD_BYTES, most likely because of an unusually large captured tool output.",
     )
     fix_approaches = (
         "If the redactor let through a non-JSON-safe value, treat it as a redactor bug and file it there rather than widening this guard.",
-        "If a genuinely large record is expected, this sink deliberately does not implement multipart upload; raise the guard only if you also confirm the destination provider's single-PUT size ceiling can hold it.",
+        "If a genuinely large record is expected, confirm the selected provider's multipart threshold, part size, and concurrency settings before raising the shared guard.",
     )
 
 

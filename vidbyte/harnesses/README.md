@@ -214,6 +214,36 @@ turn into a broken run. Full design rationale, the error taxonomy, and the
 per-provider implementation notes are in
 [`docs/design/cloud-trajectory-sinks.md`](../../docs/design/cloud-trajectory-sinks.md).
 
+### Expanded provider coverage
+
+The S3 adapter also exposes named profiles for Cloudflare R2, Backblaze B2,
+DigitalOcean Spaces, IBM Cloud Object Storage, Wasabi, and MinIO. Use the
+short factories (`r2_sink`, `b2_sink`, and `spaces_sink`) or their explicit
+names, and pass the matching `S3CompatibleProvider` so unsupported tiers,
+checksums, tags, or encryption modes fail before network I/O.
+
+OCI and Alibaba OSS have native adapters:
+
+```python
+from vidbyte.harnesses import OciSinkConfig, OssSinkConfig
+
+oci_sink = sdk.harnesses.oci_sink(OciSinkConfig(namespace="acme", bucket="runs", prefix="exports"))
+oss_sink = sdk.harnesses.oss_sink(OssSinkConfig(bucket="runs", region="cn-hangzhou", prefix="exports"))
+```
+
+All cloud configs support deterministic per-run keys, JSONL content type,
+sorted metadata, explicit connect/read timeouts, provider-owned retries,
+overwrite or create-only writes, metadata-only or write/delete preflight,
+optional checksums and encryption, and safe `write_with_receipt()` results.
+Native object tags are supported by S3-compatible profiles, Azure, and OSS;
+GCS rejects them so callers use its custom metadata, while OCI represents tags
+as reserved `tag-` metadata. OCI uses config-file/API-key/session-token/principal
+signers and native `UploadManager`; OSS uses default/static/STS credentials and
+its native resumable uploader with bounded parts, concurrency, optional
+checkpoints, SSE-KMS, CRC64, object WORM fields, and cleanup on failure.
+Install only the optional SDK for the provider you use; none is required to
+import the SDK.
+
 ## Relationship to adjacent layers
 
 - `vidbyte.sessions` is the operational persistence layer this envelope binds; a
@@ -233,8 +263,8 @@ per-provider implementation notes are in
 - `dataset.py`: `TrajectoryCollector` — joins tagged Sessions into one redacted record.
 - `stores/`: `TrajectorySink` port (`base.py`) plus in-memory and atomic-JSONL file
   sinks (`memory.py`, `file.py`), mirroring the `vidbyte/sessions/stores/` layout,
-  plus the three cloud sinks (`s3.py`, `gcs.py`, `azure_blob.py`) and the shared
-  encoding/size-guard helper they and `file.py` all use (`_sink_support.py`).
+  plus S3-compatible profiles, native OCI/OSS adapters, and the shared cloud
+  lifecycle/receipt helper (`_cloud_common.py`).
 - `serialization.py`: the single redaction pass and shared secret-key policy.
 
 Cloud sink `Config`/`Credentials`/enum construction types live in

@@ -3,7 +3,8 @@
 PURPOSE:
     TrajectorySink backed by AWS S3 (and any S3-API-compatible vendor via
     S3SinkConfig.endpoint_url — Cloudflare R2, Backblaze B2, DigitalOcean
-    Spaces, MinIO). Writes one JSONL object per finished run, keyed by run_id.
+    Spaces, IBM COS, Wasabi, and MinIO). Writes one JSONL object per finished
+    run, keyed by run_id.
 
 ROLE IN CODEBASE:
     Bound to a Harness via sink=sdk.harnesses.s3_sink(...); receives one
@@ -25,7 +26,7 @@ ARCHITECTURE NOTE:
     first place, since asyncio only yields control at an await.
 
 PUBLIC API INVENTORY:
-    S3TrajectorySink; verify(); write(record).
+    S3TrajectorySink; verify(); write(record); write_with_receipt(); aclose().
 
 WHAT NOT TO DO IN THIS FILE:
     1. Do not import boto3 at module level; every symbol comes from the lazy
@@ -35,9 +36,9 @@ WHAT NOT TO DO IN THIS FILE:
     3. Do not let a raw ClientError/NoCredentialsError/etc. escape write() or
        verify(); every vendor exception must pass through _translate_error()
        first so callers see a specific HarnessSinkError subclass.
-    4. Do not implement multipart upload; SinkEncoding.guard_size() rejects an
-       oversized record before any network call instead (see Alternative 4 in
-       the design doc).
+    4. Keep multipart transfer behind the configured threshold and preserve
+       abort-on-failure cleanup; create-only writes must remain single-request
+       so their conditional semantics stay atomic.
 
 COMMON MODIFICATION PATTERNS:
     Add a new Config/Credentials field in
@@ -60,7 +61,8 @@ RELATED DOCS:
     https://github.com/cerredz/Vidbyte-SDK/blob/main/docs/design/cloud-trajectory-sinks.md
 
 TESTS:
-    tests/test_cloud_trajectory_sinks.py.
+    tests/test_cloud_trajectory_sinks.py and
+    tests/features/cloud_trajectory_provider_expansion/.
 """
 
 from __future__ import annotations
@@ -78,8 +80,19 @@ from vidbyte.harnesses.errors import (
     HarnessSinkSetupError,
     HarnessSinkUnavailableError,
 )
-from vidbyte.harnesses.stores._sink_support import SinkEncoding
-from vidbyte.lib.dataclasses.cloud_sinks import S3Credentials, S3SinkConfig
+from vidbyte.harnesses.stores._cloud_common import (
+    CloudTrajectorySinkMixin,
+    SinkWriteReceipt,
+    make_receipt,
+    pair_mapping,
+    s3_tagging,
+)
+from vidbyte.lib.dataclasses.cloud_sinks import (
+    S3CompatibleProfiles,
+    S3Credentials,
+    S3SinkConfig,
+    SinkOverwriteMode,
+)
 from vidbyte.lib.errors import ConfigurationError
 
 _RETRYABLE_CODES = {"SlowDown", "RequestTimeout"}
@@ -88,34 +101,47 @@ _SETUP_CODES = {"NoSuchBucket", "PermanentRedirect"}
 _HTTP_SERVER_ERROR_THRESHOLD = 500
 
 
-class S3TrajectorySink:
+class S3TrajectorySink(CloudTrajectorySinkMixin):
     """TrajectorySink writing one JSONL object per run to an S3(-compatible) bucket."""
 
     def __init__(self, config: S3SinkConfig, *, credentials: S3Credentials | None = None) -> None:
         # Binds config/credentials, lazily imports boto3, and eagerly builds the client (no network call yet).
+        # @intent client-is-built-without-network
+        # Construction resolves local credential material but defers bucket
+        # access until verify()/the first write.
         self._config = config
         self._credentials = credentials
         self._driver = self._import_driver()
+        if config.sse == "AES256-C" and (credentials is None or credentials.customer_encryption_key is None):
+            raise ConfigurationError("S3 SSE-C requires credentials.customer_encryption_key.")
         self._client = self._build_client()
-        self._verify_task: asyncio.Task[None] | None = None
+        self._initialize_cloud_lifecycle(config.provider.value)
 
     async def verify(self) -> None:
         # Explicit, caller-invoked preflight check — call before a long run to fail fast on setup/auth problems.
-        await self._ensure_ready()
+        await super().verify()
 
     async def write(self, record: TrajectoryRecord) -> None:
-        # Encodes one record, guards its size, and uploads it as a single object keyed by run_id.
-        await self._ensure_ready()
-        payload = SinkEncoding.encode_record(record)
-        SinkEncoding.guard_size(payload, run_id=record.run_id)
-        await self._put(self._object_key(record.run_id), payload)
+        # Encodes before preflight so payload failures never trigger provider I/O.
+        await super().write(record)
+
+    async def write_with_receipt(self, record: TrajectoryRecord) -> SinkWriteReceipt:
+        # Exposes the normalized object acknowledgement while preserving write()'s protocol return type.
+        return await super().write_with_receipt(record)
 
     def _build_client(self) -> Any:
         # @intent reveal-secret-only-at-client-construction
         # Constructs the boto3 S3 client, resolving cross-account role assumption first when configured.
         # Retry/backoff is boto3's own Config, never a hand-rolled loop; .reveal() is called only here,
         # right before the vendor client needs the real value, never logged or stored elsewhere.
-        retry_config = self._driver.BotoConfig(retries={"max_attempts": self._config.max_retries, "mode": "adaptive"}, region_name=self._config.region)
+        profile = S3CompatibleProfiles.get(self._config.provider)
+        region = self._config.region or profile.default_region
+        retry_config = self._driver.BotoConfig(
+            retries={"max_attempts": self._config.max_retries, "mode": "adaptive"},
+            region_name=region,
+            connect_timeout=self._config.connect_timeout_seconds,
+            read_timeout=self._config.read_timeout_seconds,
+        )
         client_kwargs: dict[str, Any] = {"config": retry_config}
         if self._config.endpoint_url is not None:
             client_kwargs["endpoint_url"] = self._config.endpoint_url
@@ -147,36 +173,138 @@ class S3TrajectorySink:
         resolved["aws_session_token"] = temp_credentials["SessionToken"]
         return resolved
 
-    async def _ensure_ready(self) -> None:
-        # Memoizes the preflight check as one shared task; the synchronous check-and-create between await points needs no lock, since asyncio only yields control at an await.
-        if self._verify_task is None:
-            self._verify_task = asyncio.ensure_future(self._run_preflight())
-        await self._verify_task
-
-    async def _run_preflight(self) -> None:
+    async def _run_metadata_preflight(self) -> None:
         # Confirms the bucket exists and is reachable before any write is attempted.
         try:
             await asyncio.to_thread(self._client.head_bucket, Bucket=self._config.bucket)
         except Exception as exc:
             raise self._translate_error(exc) from exc
 
-    def _object_key(self, run_id: str) -> str:
-        # Builds "{prefix}/{run_id}.jsonl", or "{run_id}.jsonl" when prefix is empty.
-        prefix = self._config.prefix.rstrip("/")
-        return f"{prefix}/{run_id}.jsonl" if prefix else f"{run_id}.jsonl"
-
-    async def _put(self, key: str, payload: bytes) -> None:
-        # Issues one atomic PutObject call carrying the configured storage class and encryption settings.
-        kwargs: dict[str, Any] = {"Bucket": self._config.bucket, "Key": key, "Body": payload, "StorageClass": self._config.storage_class.value}
-        if self._config.sse is not None:
-            kwargs["ServerSideEncryption"] = self._config.sse
-            if self._config.kms_key_id is not None:
-                kwargs["SSEKMSKeyId"] = self._config.kms_key_id
+    async def _run_write_probe(self) -> None:
+        # Uses an explicit reserved marker only when the caller accepts the delete permission requirement.
+        probe_key = self._object_key(f".vidbyte-preflight-{uuid4().hex}")
+        await self._put_single(probe_key, b"{}\n")
         try:
-            await asyncio.to_thread(self._client.put_object, **kwargs)
+            await asyncio.to_thread(self._client.delete_object, Bucket=self._config.bucket, Key=probe_key)
         except Exception as exc:
             raise self._translate_error(exc) from exc
 
+    async def _put_record(self, key: str, payload: bytes) -> SinkWriteReceipt:
+        # Uses multipart only after the configured threshold and when the profile advertises support.
+        capabilities = S3CompatibleProfiles.get(self._config.provider)
+        # @intent conditional-write-is-atomic
+        # CreateMultipartUpload has no portable If-None-Match guarantee across
+        # S3-compatible implementations, so create-only writes stay on the
+        # atomic PutObject path even when the payload crosses the multipart
+        # threshold.
+        if self._config.overwrite_mode is not SinkOverwriteMode.CREATE_ONLY and len(payload) >= self._config.multipart_threshold_bytes and capabilities.supports_multipart:
+            return await self._put_multipart(key, payload)
+        return await self._put_single(key, payload)
+
+    async def _put_single(self, key: str, payload: bytes) -> SinkWriteReceipt:
+        # @intent s3-single-put-is-atomic
+        # PutObject preserves conditional-write and object-lock headers as one
+        # provider operation.
+        try:
+            response = await asyncio.to_thread(self._client.put_object, **self._request_kwargs(key, payload))
+        except Exception as exc:
+            raise self._translate_error(exc) from exc
+        return make_receipt(self._config.provider.value, key, payload, response)
+
+    def _request_kwargs(self, key: str, payload: bytes) -> dict[str, Any]:
+        # @intent request-options-are-capability-validated
+        # Config validation rejects unsupported profile features before these
+        # fields can reach a vendor endpoint.
+        kwargs: dict[str, Any] = {
+            "Bucket": self._config.bucket,
+            "Key": key,
+            "Body": payload,
+            "ContentType": self._config.content_type,
+            "StorageClass": self._config.storage_class.value,
+        }
+        metadata = pair_mapping(self._config.metadata)
+        if metadata:
+            kwargs["Metadata"] = metadata
+        tagging = s3_tagging(self._config.tags)
+        if tagging:
+            kwargs["Tagging"] = tagging
+        if self._config.checksum_algorithm is not None:
+            kwargs["ChecksumAlgorithm"] = self._config.checksum_algorithm.value
+        if self._config.overwrite_mode is SinkOverwriteMode.CREATE_ONLY:
+            kwargs["IfNoneMatch"] = "*"
+        kwargs.update(self._encryption_kwargs())
+        kwargs.update(self._object_lock_kwargs())
+        return kwargs
+
+    def _encryption_kwargs(self) -> dict[str, Any]:
+        """Build the selected S3 server-side encryption headers."""
+        if self._config.sse in ("AES256", "aws:kms"):
+            kwargs: dict[str, Any] = {"ServerSideEncryption": self._config.sse}
+            if self._config.kms_key_id is not None:
+                kwargs["SSEKMSKeyId"] = self._config.kms_key_id
+            return kwargs
+        if self._config.sse == "AES256-C":
+            credentials = self._credentials
+            if credentials is None or credentials.customer_encryption_key is None:
+                raise ConfigurationError("S3 SSE-C requires credentials.customer_encryption_key.")
+            return {"SSECustomerAlgorithm": "AES256", "SSECustomerKey": credentials.customer_encryption_key.reveal()}
+        return {}
+
+    def _object_lock_kwargs(self) -> dict[str, Any]:
+        """Build the optional AWS object-lock headers."""
+        kwargs: dict[str, Any] = {}
+        if self._config.object_lock_mode is not None:
+            kwargs["ObjectLockMode"] = self._config.object_lock_mode
+        if self._config.object_lock_retain_until is not None:
+            kwargs["ObjectLockRetainUntilDate"] = self._config.object_lock_retain_until
+        if self._config.legal_hold is not None:
+            kwargs["ObjectLockLegalHoldStatus"] = self._config.legal_hold
+        return kwargs
+
+    async def _put_multipart(self, key: str, payload: bytes) -> SinkWriteReceipt:
+        # @intent s3-multipart-aborts-on-failure
+        # The upload ID is retained until completion so every failed transfer
+        # can attempt best-effort cleanup.
+        upload_id = ""
+        try:
+            create_kwargs = self._request_kwargs(key, b"")
+            create_kwargs.pop("Body", None)
+            create_kwargs.pop("IfNoneMatch", None)
+            response = await asyncio.to_thread(self._client.create_multipart_upload, **create_kwargs)
+            upload_id = response["UploadId"]
+            parts = await self._upload_parts(key, payload, upload_id)
+            completed = await asyncio.to_thread(self._client.complete_multipart_upload, Bucket=self._config.bucket, Key=key, UploadId=upload_id, MultipartUpload={"Parts": parts})
+            return make_receipt(self._config.provider.value, key, payload, completed)
+        except Exception as exc:
+            if upload_id:
+                await self._abort_multipart(key, upload_id)
+            if isinstance(exc, HarnessSinkError):
+                raise
+            raise self._translate_error(exc) from exc
+
+    async def _upload_parts(self, key: str, payload: bytes, upload_id: str) -> list[dict[str, Any]]:
+        part_size = self._config.multipart_part_size_bytes
+        chunks = [(number, payload[start : start + part_size]) for number, start in enumerate(range(0, len(payload), part_size), start=1)]
+        parts: list[dict[str, Any]] = []
+        for start in range(0, len(chunks), self._config.multipart_max_concurrency):
+            batch = chunks[start : start + self._config.multipart_max_concurrency]
+            responses = await asyncio.gather(*(self._upload_part(key, upload_id, number, chunk) for number, chunk in batch))
+            parts.extend(responses)
+        return parts
+
+    async def _upload_part(self, key: str, upload_id: str, part_number: int, chunk: bytes) -> dict[str, Any]:
+        response = await asyncio.to_thread(self._client.upload_part, Bucket=self._config.bucket, Key=key, UploadId=upload_id, PartNumber=part_number, Body=chunk)
+        return {"ETag": response.get("ETag", ""), "PartNumber": part_number}
+
+    async def _abort_multipart(self, key: str, upload_id: str) -> None:
+        try:
+            await asyncio.to_thread(self._client.abort_multipart_upload, Bucket=self._config.bucket, Key=key, UploadId=upload_id)
+        except Exception:
+            return
+
+    # @intent typed-errors-hide-provider-exceptions
+    # Every SDK exception becomes a stable sink error before it crosses the
+    # adapter boundary, while details remain limited to safe identifiers.
     def _translate_error(self, exc: Exception, *, during_role_assumption: bool = False) -> HarnessSinkError:
         # Maps a boto3/botocore exception to the specific HarnessSinkError subclass a caller can act on.
         if during_role_assumption:
@@ -185,29 +313,32 @@ class S3TrajectorySink:
                 details={"role_arn": self._config.role_arn, "error_type": type(exc).__name__},
             )
         if isinstance(exc, self._driver.NoCredentialsError):
-            return HarnessSinkAuthenticationError("No AWS credentials could be resolved (no static keys and the default credential chain is empty).", details={"error_type": type(exc).__name__})
+            return HarnessSinkAuthenticationError("No AWS credentials could be resolved (no static keys and the default credential chain is empty).", details={"provider": self._config.provider.value, "error_type": type(exc).__name__})
         if isinstance(exc, (self._driver.EndpointConnectionError, self._driver.ConnectTimeoutError)):
-            return HarnessSinkUnavailableError("Could not reach the configured S3 endpoint.", details={"endpoint_url": self._config.endpoint_url, "error_type": type(exc).__name__})
+            return HarnessSinkUnavailableError("Could not reach the configured S3 endpoint.", details={"provider": self._config.provider.value, "error_type": type(exc).__name__})
         if isinstance(exc, self._driver.ClientError):
             return self._translate_client_error(exc)
         return HarnessSinkError("S3 request failed for an unrecognized reason.", details={"error_type": type(exc).__name__})
 
+    # @intent status-code-drives-actionable-error
+    # S3-compatible providers expose botocore-shaped response codes, so this
+    # helper retains only the category needed for caller remediation.
     def _translate_client_error(self, exc: Any) -> HarnessSinkError:
         # Maps a botocore ClientError's response Code/HTTPStatusCode to the matching subclass.
         code = str(exc.response.get("Error", {}).get("Code", ""))
         status_code = exc.response.get("ResponseMetadata", {}).get("HTTPStatusCode")
         if code in _SETUP_CODES:
-            return HarnessSinkSetupError(f"S3 reported the bucket could not be resolved ({code}).", details={"bucket": self._config.bucket, "region": self._config.region, "code": code})
+            return HarnessSinkSetupError(f"S3 reported the bucket could not be resolved ({code}).", details={"provider": self._config.provider.value, "bucket": self._config.bucket, "region": self._config.region, "code": code})
         if code in _AUTHENTICATION_CODES:
-            return HarnessSinkAuthenticationError(f"S3 rejected the supplied credentials ({code}).", details={"code": code})
+            return HarnessSinkAuthenticationError(f"S3 rejected the supplied credentials ({code}).", details={"provider": self._config.provider.value, "code": code})
         if code == "AccessDenied":
             return HarnessSinkAuthorizationError(
                 "S3 denied this write. If this bucket requires server-side encryption, confirm sse/kms_key_id is set — a missing encryption header surfaces as AccessDenied too.",
-                details={"bucket": self._config.bucket, "code": code},
+                details={"provider": self._config.provider.value, "bucket": self._config.bucket, "code": code},
             )
         if code in _RETRYABLE_CODES or (status_code is not None and status_code >= _HTTP_SERVER_ERROR_THRESHOLD):
-            return HarnessSinkUnavailableError(f"S3 was unavailable after boto3's own retries were exhausted ({code or status_code}).", details={"code": code, "status_code": status_code})
-        return HarnessSinkError(f"S3 rejected the request ({code}).", details={"code": code, "status_code": status_code})
+            return HarnessSinkUnavailableError(f"S3 was unavailable after boto3's own retries were exhausted ({code or status_code}).", details={"provider": self._config.provider.value, "code": code, "status_code": status_code})
+        return HarnessSinkError(f"S3 rejected the request ({code}).", details={"provider": self._config.provider.value, "code": code, "status_code": status_code})
 
     @staticmethod
     def _import_driver() -> Any:

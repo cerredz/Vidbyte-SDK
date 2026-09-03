@@ -1,10 +1,33 @@
-"""Tests for the cloud TrajectorySink backends (S3, GCS, Azure Blob) and the
-on_sink_error observability hook added in docs/design/cloud-trajectory-sinks.md.
+"""FILE: tests/test_cloud_trajectory_sinks.py
 
-No real AWS/GCP/Azure account, network access, or installed vendor SDK is
-required: every sink test monkeypatches `_import_driver` to return a fake
-driver namespace holding stub exception types and a stub client double, so
-these tests exercise the sink's own translation/encoding/shape logic only.
+PURPOSE:
+    Contract tests for the original S3, GCS, and Azure Blob trajectory sinks,
+    including the Harness on_sink_error observability hook.
+
+ROLE IN CODEBASE:
+    Protects the PR #393 cloud sink compatibility surface while the expanded
+    provider feature pack adds shared lifecycle behavior.
+
+ARCHITECTURE NOTE:
+    No real cloud account, network, or optional SDK is required. Each sink
+    receives a monkeypatched driver namespace and provider-shaped fake client,
+    so tests exercise encoding, request shape, translation, and fail-open
+    behavior at the adapter boundary.
+
+COMMON MODIFICATION PATTERNS:
+    Extend fakes when a provider request gains a documented option, then add
+    a behavior assertion rather than asserting private call order.
+
+KNOWN EDGE CASES:
+    Oversized records must make zero provider calls; concurrent first writes
+    share one preflight; access denial must remain distinct from authentication.
+
+RELATED DOCS:
+    docs/design/cloud-trajectory-sinks.md
+    docs/design/cloud-trajectory-provider-expansion.md
+
+TESTS:
+    This file is the compatibility suite for the three PR #393 providers.
 """
 
 from __future__ import annotations
@@ -362,10 +385,15 @@ class FakeGcsBlob:
         self._upload_error = upload_error
         self.uploaded_payload: bytes | None = None
 
-    def upload_from_string(self, payload: bytes, content_type: str) -> None:
+    def upload_from_string(self, payload: bytes, content_type: str, **_: Any) -> None:
         if self._upload_error is not None:
             raise self._upload_error
         self.uploaded_payload = payload
+
+    def upload_from_file(self, stream: Any, **_: Any) -> None:
+        if self._upload_error is not None:
+            raise self._upload_error
+        self.uploaded_payload = stream.read()
 
 
 class FakeGcsBucket:
@@ -385,7 +413,7 @@ class FakeGcsClient:
         self.upload_error: Exception | None = None
         self.bucket_instance: FakeGcsBucket | None = None
 
-    def get_bucket(self, name: str) -> None:
+    def get_bucket(self, name: str, **_: Any) -> None:
         if self.get_bucket_error is not None:
             raise self.get_bucket_error
 

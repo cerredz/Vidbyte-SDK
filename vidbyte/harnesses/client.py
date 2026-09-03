@@ -18,7 +18,8 @@ ARCHITECTURE NOTE:
 
 PUBLIC API INVENTORY:
     HarnessClient.register(), load(), memory_store(), file_store(), memory_sink(),
-    file_sink(), s3_sink(), gcs_sink(), azure_blob_sink(), and the sessions
+    file_sink(), s3_sink(), gcs_sink(), azure_blob_sink(), the named S3-compatible
+    profile factories, oci_sink(), oss_sink(), and the sessions
     attribute retained for backward compatibility.
 
 WHAT NOT TO DO IN THIS FILE:
@@ -51,14 +52,15 @@ TESTS:
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
 from vidbyte.harnesses.config import HarnessConfigLoader
 from vidbyte.harnesses.execution import Harness, wrap_implementation
 from vidbyte.harnesses.registry import HarnessFactory, HarnessRegistry
-from vidbyte.harnesses.stores import AzureBlobTrajectorySink, FileTrajectorySink, GcsTrajectorySink, InMemoryTrajectorySink, S3TrajectorySink, TrajectorySink
-from vidbyte.lib.dataclasses.cloud_sinks import AzureBlobCredentials, AzureBlobSinkConfig, GcsCredentials, GcsSinkConfig, S3Credentials, S3SinkConfig
+from vidbyte.harnesses.stores import AzureBlobTrajectorySink, FileTrajectorySink, GcsTrajectorySink, InMemoryTrajectorySink, OciTrajectorySink, OssTrajectorySink, S3TrajectorySink, TrajectorySink
+from vidbyte.lib.dataclasses.cloud_sinks import AzureBlobCredentials, AzureBlobSinkConfig, GcsCredentials, GcsSinkConfig, OciCredentials, OciSinkConfig, OssCredentials, OssSinkConfig, S3CompatibleProvider, S3Credentials, S3SinkConfig
 from vidbyte.sessions.client import SessionClient
 from vidbyte.sessions.store import SessionStore
 from vidbyte.sessions.stores.file import FileSessionStore
@@ -118,6 +120,57 @@ class HarnessClient:
     def azure_blob_sink(self, config: AzureBlobSinkConfig, *, credentials: AzureBlobCredentials) -> AzureBlobTrajectorySink:
         # Creates a trajectory sink that writes one JSONL object per run into a customer-owned Azure Blob Storage container.
         return AzureBlobTrajectorySink(config, credentials=credentials)
+
+    def cloudflare_r2_sink(self, config: S3SinkConfig, *, credentials: S3Credentials | None = None) -> S3TrajectorySink:
+        """Create a Cloudflare R2 sink using its S3-compatible endpoint."""
+        return self._s3_profile_sink(config, S3CompatibleProvider.CLOUDFLARE_R2, credentials=credentials)
+
+    def r2_sink(self, config: S3SinkConfig, *, credentials: S3Credentials | None = None) -> S3TrajectorySink:
+        """Short alias for cloudflare_r2_sink()."""
+        return self.cloudflare_r2_sink(config, credentials=credentials)
+
+    def backblaze_b2_sink(self, config: S3SinkConfig, *, credentials: S3Credentials | None = None) -> S3TrajectorySink:
+        """Create a Backblaze B2 S3-compatible sink."""
+        return self._s3_profile_sink(config, S3CompatibleProvider.BACKBLAZE_B2, credentials=credentials)
+
+    def b2_sink(self, config: S3SinkConfig, *, credentials: S3Credentials | None = None) -> S3TrajectorySink:
+        """Short alias for backblaze_b2_sink()."""
+        return self.backblaze_b2_sink(config, credentials=credentials)
+
+    def digitalocean_spaces_sink(self, config: S3SinkConfig, *, credentials: S3Credentials | None = None) -> S3TrajectorySink:
+        """Create a DigitalOcean Spaces S3-compatible sink."""
+        return self._s3_profile_sink(config, S3CompatibleProvider.DIGITALOCEAN_SPACES, credentials=credentials)
+
+    def spaces_sink(self, config: S3SinkConfig, *, credentials: S3Credentials | None = None) -> S3TrajectorySink:
+        """Short alias for digitalocean_spaces_sink()."""
+        return self.digitalocean_spaces_sink(config, credentials=credentials)
+
+    def ibm_cos_sink(self, config: S3SinkConfig, *, credentials: S3Credentials | None = None) -> S3TrajectorySink:
+        """Create an IBM Cloud Object Storage S3-compatible sink."""
+        return self._s3_profile_sink(config, S3CompatibleProvider.IBM_COS, credentials=credentials)
+
+    def wasabi_sink(self, config: S3SinkConfig, *, credentials: S3Credentials | None = None) -> S3TrajectorySink:
+        """Create a Wasabi S3-compatible sink."""
+        return self._s3_profile_sink(config, S3CompatibleProvider.WASABI, credentials=credentials)
+
+    def minio_sink(self, config: S3SinkConfig, *, credentials: S3Credentials | None = None) -> S3TrajectorySink:
+        """Create a MinIO S3-compatible sink."""
+        return self._s3_profile_sink(config, S3CompatibleProvider.MINIO, credentials=credentials)
+
+    # @intent named-profile-keeps-one-s3-adapter
+    # Named S3-compatible factories only select validated capability metadata;
+    # request execution stays in the single S3 implementation.
+    def _s3_profile_sink(self, config: S3SinkConfig, provider: S3CompatibleProvider, *, credentials: S3Credentials | None = None) -> S3TrajectorySink:
+        """Apply a named profile before delegating to the single S3 adapter."""
+        return S3TrajectorySink(replace(config, provider=provider), credentials=credentials)
+
+    def oci_sink(self, config: OciSinkConfig, *, credentials: OciCredentials | None = None) -> OciTrajectorySink:
+        """Create an OCI Object Storage trajectory sink."""
+        return OciTrajectorySink(config, credentials=credentials)
+
+    def oss_sink(self, config: OssSinkConfig, *, credentials: OssCredentials | None = None) -> OssTrajectorySink:
+        """Create an Alibaba Cloud OSS trajectory sink."""
+        return OssTrajectorySink(config, credentials=credentials)
 
 
 __all__ = ["HarnessClient"]

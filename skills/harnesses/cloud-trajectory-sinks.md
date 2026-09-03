@@ -133,7 +133,18 @@ If adding a new run-lifecycle observer, follow this exact shape — a
 
 ## Verification
 
+The expansion adds named S3-compatible profiles for R2, B2, Spaces, IBM COS,
+Wasabi, and MinIO plus native OCI and Alibaba OSS sinks. Every provider keeps
+the PR #393 contract while adding metadata/tags, content type, timeouts,
+provider-owned retries, checksums/encryption, conditional creation,
+metadata-only or explicit write/delete preflight, safe receipts, and native
+multipart/resumable transfer settings. OCI adds API-key, config-file,
+session-token, instance-principal, resource-principal, and OKE workload
+identity modes. OSS adds default/static/STS modes, SSE-KMS, CRC64, object WORM
+fields, and optional checkpointed uploads. Control-plane lifecycle,
+versioning, replication, and bucket policy remain deployment responsibilities.
+
 ```bash
-python -c "from vidbyte.harnesses import S3TrajectorySink, GcsTrajectorySink, AzureBlobTrajectorySink, S3SinkConfig, GcsSinkConfig, AzureBlobSinkConfig, HarnessSinkSetupError, HarnessSinkAuthenticationError, HarnessSinkAuthorizationError, HarnessSinkUnavailableError, HarnessSinkPayloadError, SinkFailureEvent; print('ok')"
-PYTHONPATH=$(pwd) python scripts/test-cloud-trajectory-sinks.py
+python -c "from vidbyte.harnesses import OciTrajectorySink, OssTrajectorySink, S3CompatibleProvider, SinkWriteReceipt; print('ok')"
+PYTHONPATH=$(pwd) python scripts/test-cloud-trajectory-provider-expansion.py
 ```
