@@ -212,6 +212,115 @@ class UnsupportedProviderError(VidbyteSdkError):
     """Raised when a provider does not support a requested capability."""
 
 
+class HarnessSinkError(VidbyteSdkError):
+    """Base error for trajectory sink failures with a complete safe diagnostic packet."""
+
+    DIAGNOSTIC_FIELDS = (
+        "error_kind",
+        "expected",
+        "actual",
+        "safe_runtime_details",
+        "likely_causes",
+        "repair_approaches",
+        "related_docs",
+        "relevant_tests",
+    )
+    description: str = "A trajectory sink could not publish one redacted trajectory record."
+    expected_vs_actual: str = "Expected: the record is encoded and published to the configured destination. Actual: the sink rejected or could not complete that operation."
+    blast_radius: tuple[str, ...] = ("vidbyte/harnesses/stores",)
+    possible_causes: tuple[str, ...] = ("The destination or provider rejected the request.", "The record or sink configuration violated a provider contract.")
+    fix_approaches: tuple[str, ...] = ("Inspect the safe details and the provider-specific configuration.", "Retry only when the error packet identifies a transient provider failure.")
+    doc_links: tuple[str, ...] = ("https://github.com/cerredz/Vidbyte-SDK/blob/main/docs/design/cloud-trajectory-sinks.md",)
+    test_files: tuple[str, ...] = ("tests/test_cloud_trajectory_sinks.py",)
+
+    def __init__(self, message: str, *, details: Mapping[str, Any] | None = None) -> None:
+        self.error_kind = "harness_sink"
+        self.expected = self.expected_vs_actual
+        self.actual = message
+        self.safe_runtime_details = dict(details or {})
+        self.likely_causes = tuple(self.possible_causes)
+        self.repair_approaches = tuple(self.fix_approaches)
+        self.related_docs = tuple(self.doc_links)
+        self.relevant_tests = tuple(self.test_files)
+        super().__init__(
+            message,
+            details=details,
+        )
+
+    def to_context_packet(self) -> dict[str, Any]:
+        """Return all caller-actionable fields without raw exception or credential material."""
+        return {
+            "error_type": type(self).__name__,
+            "message": self.message,
+            "details": dict(self.details),
+            "error_kind": self.error_kind,
+            "expected": self.expected,
+            "actual": self.actual,
+            "safe_runtime_details": dict(self.safe_runtime_details),
+            "likely_causes": tuple(self.likely_causes),
+            "repair_approaches": tuple(self.repair_approaches),
+            "related_docs": tuple(self.related_docs),
+            "relevant_tests": tuple(self.relevant_tests),
+            "description": self.description,
+            "expected_vs_actual": self.expected_vs_actual,
+            "blast_radius": tuple(self.blast_radius),
+            "possible_causes": tuple(self.possible_causes),
+            "fix_approaches": tuple(self.fix_approaches),
+            "doc_links": tuple(self.doc_links),
+            "test_files": tuple(self.test_files),
+        }
+
+
+class HarnessSinkSetupError(HarnessSinkError):
+    """Raised when a bucket or container cannot be resolved or reached."""
+
+    description = "The configured cloud destination could not be resolved before the object write."
+    expected_vs_actual = "Expected: the bucket/container exists and is reachable at the configured account, region, and endpoint. Actual: the provider could not resolve that destination."
+    blast_radius: tuple[str, ...] = ("vidbyte/harnesses/stores/s3.py", "vidbyte/harnesses/stores/gcs.py", "vidbyte/harnesses/stores/azure_blob.py")
+    possible_causes: tuple[str, ...] = ("The bucket/container does not exist.", "The configured region, endpoint, or account is wrong.", "The identity can authenticate but cannot discover the destination.")
+    fix_approaches: tuple[str, ...] = ("Verify the destination exists in the account and region used by the credentials.", "For S3-compatible services, confirm endpoint_url and region match the vendor.", "Call sink.verify() before a long harness run.")
+
+
+class HarnessSinkAuthenticationError(HarnessSinkError):
+    """Raised when a provider identity cannot be established."""
+
+    description = "The sink could not establish a usable provider identity."
+    expected_vs_actual = "Expected: static credentials, a default credential chain, managed identity, or an assumed role resolves to an identity. Actual: authentication failed before a permission decision."
+    blast_radius: tuple[str, ...] = ("vidbyte/harnesses/stores/s3.py", "vidbyte/harnesses/stores/gcs.py", "vidbyte/harnesses/stores/azure_blob.py")
+    possible_causes: tuple[str, ...] = ("No default or explicit credential source is available.", "A static key, token, SAS, or service-account file is invalid or expired.", "S3 role assumption failed because the trust policy or external ID is wrong.")
+    fix_approaches: tuple[str, ...] = ("Supply a valid credential or enable the provider's default identity chain.", "Check role trust and external_id for cross-account S3.", "Distinguish this from authorization: here the identity itself was not established.")
+
+
+class HarnessSinkAuthorizationError(HarnessSinkError):
+    """Raised when an established identity is denied a sink operation."""
+
+    description = "The provider recognized the identity but rejected the destination or object operation by policy."
+    expected_vs_actual = "Expected: the identity can write this object, including its encryption, tag, ACL, retention, and condition headers. Actual: the provider denied the requested operation."
+    blast_radius: tuple[str, ...] = ("vidbyte/harnesses/stores/s3.py", "vidbyte/harnesses/stores/gcs.py", "vidbyte/harnesses/stores/azure_blob.py")
+    possible_causes: tuple[str, ...] = ("The identity lacks write permission on the bucket/container or prefix.", "A required KMS/CMEK, customer-key, ACL, tag, or retention permission is missing.", "A precondition or object policy rejected the request.")
+    fix_approaches: tuple[str, ...] = ("Grant the exact object-write permission for the configured prefix.", "Grant the required KMS/CMEK key usage or object-governance permission.", "If this is a condition failure, refresh the expected ETag/generation before retrying.")
+
+
+class HarnessSinkUnavailableError(HarnessSinkError):
+    """Raised after provider retry/backoff is exhausted for a transient failure."""
+
+    description = "The provider endpoint remained unavailable after its configured retry policy was exhausted."
+    expected_vs_actual = "Expected: the provider responds within the retry budget. Actual: transport, throttling, or server failures persisted across the provider's retries."
+    blast_radius: tuple[str, ...] = ("vidbyte/harnesses/stores/s3.py", "vidbyte/harnesses/stores/gcs.py", "vidbyte/harnesses/stores/azure_blob.py")
+    possible_causes: tuple[str, ...] = ("Network egress or endpoint connectivity is blocked.", "The provider is throttling the identity or destination.", "A provider-side 5xx outage persisted through retries.")
+    fix_approaches: tuple[str, ...] = ("Confirm network access from the harness runtime.", "Adjust max_retries only when the failure is expected to be transient.", "Do not add a second retry loop around this error.")
+
+
+class HarnessSinkPayloadError(HarnessSinkError):
+    """Raised when a record cannot be encoded or exceeds the single-PUT size guard."""
+
+    description = "The redacted trajectory record could not be encoded safely or exceeded the configured single-upload size guard."
+    expected_vs_actual = "Expected: JSON encoding succeeds and the payload is at most MAX_TRAJECTORY_RECORD_BYTES. Actual: encoding failed or the payload exceeded that bound before provider I/O."
+    blast_radius: tuple[str, ...] = ("vidbyte/harnesses/stores/_sink_support.py", "vidbyte/harnesses/stores/file.py", "vidbyte/harnesses/stores/s3.py", "vidbyte/harnesses/stores/gcs.py", "vidbyte/harnesses/stores/azure_blob.py")
+    possible_causes: tuple[str, ...] = ("A redacted value is not JSON serializable.", "A captured tool output made the record larger than the single-PUT guard.", "Compression was requested but the compressed representation still exceeded the guard.")
+    fix_approaches: tuple[str, ...] = ("Fix the redaction/serialization boundary for non-JSON values.", "Trim the unusually large captured output or raise the guard only after confirming every provider's single-PUT ceiling.", "Multipart upload is intentionally not implemented for this KB-to-low-MB trajectory shape.")
+
+
 class ProviderSelectionError(VidbyteSdkError):
     """Raised when no SDK provider adapter matches a requested capability."""
 

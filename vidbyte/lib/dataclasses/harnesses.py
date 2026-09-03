@@ -128,11 +128,30 @@ class HarnessExecutionResult:
     run: HarnessRun
 
 
+@dataclass(frozen=True, slots=True)
+class SinkFailureEvent:
+    """Credential-free record of one swallowed collection/sink failure.
+
+    Built by Harness._report_sink_failure() and handed to the optional
+    on_sink_error callback. `error` is the complete safe diagnostic packet
+    authored by the shared error class; it contains no raw exception, payload,
+    or credential material.
+    """
+
+    run_id: str
+    sink_type: str
+    error_type: str
+    message: str
+    occurred_at: str
+    error: Mapping[str, Any] = field(default_factory=dict)
+
+
 __all__ = [
     "HARNESS_SCHEMA_VERSION",
     "HarnessExecutionResult",
     "HarnessRun",
     "HarnessRunStatus",
     "HarnessSpec",
+    "SinkFailureEvent",
     "TrajectoryRecord",
 ]

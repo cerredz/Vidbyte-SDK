@@ -11,7 +11,9 @@ Architecture:
     - Documents file placement, the Harness contract, config schema, identity model,
       persistence surfaces, the sink port, the registry, and verification.
 Relations:
-    Complements skills/sdk/SKILL.md, skills/sessions.md, and vidbyte/harnesses/.
+    Complements skills/sdk/SKILL.md, skills/sessions.md, vidbyte/harnesses/, and
+    skills/harnesses/cloud-trajectory-sinks.md (why the cloud sinks look the
+    way they do).
 -->
 
 # Harness Execution Contract Skill
@@ -32,8 +34,12 @@ loop, topology, retry strategy, or reasoning algorithm.
 - Put the `HarnessImplementation`/`HarnessFactory` protocols and `HarnessRegistry` in
   `vidbyte/harnesses/registry.py`.
 - Put the `TrajectorySink` port in `vidbyte/harnesses/stores/base.py` and each concrete
-  sink in its own file under `vidbyte/harnesses/stores/` (`memory.py`, `file.py`),
-  mirroring `vidbyte/sessions/stores/`. Do not reintroduce a flat `sinks.py`.
+  sink in its own file under `vidbyte/harnesses/stores/` (`memory.py`, `file.py`, plus
+  the cloud sinks `s3.py`/`gcs.py`/`azure_blob.py` — see
+  skills/harnesses/cloud-trajectory-sinks.md for why cloud export belongs here and
+  not on `SessionStore`), mirroring `vidbyte/sessions/stores/`. Do not reintroduce a
+  flat `sinks.py`. Share encoding/size-guard logic across every sink via
+  `vidbyte/harnesses/stores/_sink_support.SinkEncoding` rather than duplicating it.
 - Put the `sdk.harnesses` client (store/sink constructors, foreign-implementation and
   config-only load, the retained `sessions` namespace) in `vidbyte/harnesses/client.py`.
 - Re-export contract dataclasses through `vidbyte/harnesses/contracts.py`; keep their
@@ -98,7 +104,10 @@ Sinks are NOT SessionStores: the SessionStore is typed to the agent checkpoint d
   resolved spec, and applies the single redaction pass. It never mutates checkpoints and
   never infers messages, rewards, or splits.
 - Collection is fail-open: any sink/redaction/scoring error is swallowed inside
-  `execute()` so it can never fail the run.
+  `execute()` so it can never fail the run. `Harness(..., on_sink_error=...)` is the
+  opt-in, `None`-default way to observe a swallowed failure (as a credential-free
+  `SinkFailureEvent`) without weakening fail-open — never make a sink/collection
+  error propagate out of `execute()` to add observability instead.
 
 ## Registry Rules
 
@@ -111,17 +120,29 @@ Sinks are NOT SessionStores: the SessionStore is typed to the agent checkpoint d
 
 ## Errors
 
-Use the typed families in `vidbyte/harnesses/errors.py`: `HarnessConfigurationError`
+Use the typed families in `vidbyte/harnesses/errors.py` and `vidbyte/lib/errors`:
+`HarnessConfigurationError`
 (and `HarnessCredentialConfigError`, `HarnessVersionError`, `HarnessFileReferenceError`)
 before/at load; `HarnessExecutionError`/`HarnessTimeoutError` at run; `HarnessSinkError`
-for sink I/O; `HarnessRegistrationError`/`HarnessDuplicateRegistrationError` for the
-registry. Keep every public error re-exported from the package `__init__`.
+for sink I/O — including its five cloud-specific subclasses
+(`HarnessSinkSetupError`, `HarnessSinkAuthenticationError`,
+`HarnessSinkAuthorizationError`, `HarnessSinkUnavailableError`,
+`HarnessSinkPayloadError`; one subclass per distinct failure mode, each carrying full
+diagnostic fields — see skills/harnesses/cloud-trajectory-sinks.md); a missing vendor
+SDK raises `vidbyte.lib.errors.ConfigurationError`, not a new harness-specific type;
+`HarnessRegistrationError`/`HarnessDuplicateRegistrationError` for the registry. Keep
+every public error re-exported from the package `__init__`. Sink errors are owned
+by `vidbyte.lib.errors` and re-exported by the harness package; attach their full
+safe `to_context_packet()` to `SinkFailureEvent.error` when reporting a swallowed
+collection failure.
 
 ## Verification
 
 Run these checks after harness changes:
 
 ```bash
-python -c "from vidbyte import Harness, HarnessSpec, HarnessExecutionResult, TrajectorySink, InMemoryTrajectorySink, FileTrajectorySink, HARNESS_SCHEMA_VERSION; print('ok', HARNESS_SCHEMA_VERSION)"
+python -c "from vidbyte import Harness, HarnessSpec, HarnessExecutionResult, TrajectorySink, InMemoryTrajectorySink, FileTrajectorySink, S3TrajectorySink, GcsTrajectorySink, AzureBlobTrajectorySink, HARNESS_SCHEMA_VERSION; print('ok', HARNESS_SCHEMA_VERSION)"
 python -m compileall vidbyte/harnesses
 ```
+
+For the cloud sinks specifically, see skills/harnesses/cloud-trajectory-sinks.md.

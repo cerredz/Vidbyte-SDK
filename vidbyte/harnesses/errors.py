@@ -1,44 +1,4 @@
-"""FILE: vidbyte/harnesses/errors.py
-
-PURPOSE:
-    Defines typed, agent-readable failures for harness configuration, registry,
-    file references, trajectory sinks, execution, and timeout boundaries. This
-    file owns diagnostic context, not validation or persistence behavior.
-
-ROLE IN CODEBASE:
-    Raised by every module under vidbyte.harnesses and consumed by SDK callers.
-    It extends vidbyte.lib.errors.VidbyteSdkError and references HarnessRun only
-    for execution failures that must carry their finalized record.
-
-ARCHITECTURE NOTE:
-    Static diagnostic guidance lives on each error class; raise sites pass only
-    safe invocation-specific details. See docs/design/harness-execution-contract.md.
-
-PUBLIC API INVENTORY:
-    HarnessError and specialized configuration, credential, file-reference,
-    version, registration, sink, execution, and timeout subclasses.
-    HarnessError.to_context_packet() returns a self-contained safe diagnostic mapping.
-
-COMMON MODIFICATION PATTERNS:
-    Add one subclass per distinct failure mode, then reference it in the source
-    file header and export it from vidbyte.harnesses when callers should catch it.
-
-WHAT NOT TO DO IN THIS FILE:
-    1. Do not include secrets, raw config payloads, or connection strings.
-    2. Do not perform recovery; the raising boundary owns recovery semantics.
-    3. Do not collapse distinct state failures into an untyped Exception.
-
-KNOWN EDGE CASES:
-    Execution errors carry a HarnessRun; configuration and setup failures occur
-    before a run exists and therefore expose only safe details.
-
-RELATED DOCS:
-    https://github.com/cerredz/Vidbyte-SDK/blob/main/docs/design/harness-execution-contract.md
-
-TESTS:
-    No dedicated test files were added under the approved no-tests workflow;
-    error packets are exercised by the documented inline smoke verification.
-"""
+"""Typed harness errors and compatibility exports for the shared SDK errors."""
 
 from __future__ import annotations
 
@@ -46,7 +6,15 @@ from collections.abc import Mapping
 from typing import Any
 
 from vidbyte.lib.dataclasses.harnesses import HarnessRun
-from vidbyte.lib.errors import VidbyteSdkError
+from vidbyte.lib.errors import (
+    HarnessSinkAuthenticationError,
+    HarnessSinkAuthorizationError,
+    HarnessSinkError,
+    HarnessSinkPayloadError,
+    HarnessSinkSetupError,
+    HarnessSinkUnavailableError,
+    VidbyteSdkError,
+)
 
 _DESIGN_URL = "https://github.com/cerredz/Vidbyte-SDK/blob/main/docs/design/harness-execution-contract.md"
 _NO_TESTS = ("Approved no-tests workflow: run the repository suite and harness smoke verification.",)
@@ -55,20 +23,18 @@ _NO_TESTS = ("Approved no-tests workflow: run the repository suite and harness s
 class HarnessError(VidbyteSdkError):
     """Base class for harness failures with durable diagnostic context."""
 
-    description = "A harness execution-contract boundary rejected unsafe or inconsistent state."
-    expected_vs_actual = "Expected: the documented harness contract remains valid. Actual: a boundary observed state that violates it."
-    blast_radius = ("vidbyte/harnesses",)
-    possible_causes = ("Invalid caller input", "Corrupt or conflicting persisted state")
-    fix_approaches = ("Inspect the safe details and reproduce at the named boundary.", "Correct the caller input or backend record before retrying.")
-    doc_links = (_DESIGN_URL,)
-    test_files = _NO_TESTS
+    description: str = "A harness execution-contract boundary rejected unsafe or inconsistent state."
+    expected_vs_actual: str = "Expected: the documented harness contract remains valid. Actual: a boundary observed state that violates it."
+    blast_radius: tuple[str, ...] = ("vidbyte/harnesses",)
+    possible_causes: tuple[str, ...] = ("Invalid caller input", "Corrupt or conflicting persisted state")
+    fix_approaches: tuple[str, ...] = ("Inspect the safe details and reproduce at the named boundary.", "Correct the caller input or backend record before retrying.")
+    doc_links: tuple[str, ...] = (_DESIGN_URL,)
+    test_files: tuple[str, ...] = _NO_TESTS
 
     def __init__(self, message: str, *, details: Mapping[str, Any] | None = None) -> None:
-        # Stores only caller-supplied safe details alongside static repair guidance.
         super().__init__(message, details=details)
 
     def to_context_packet(self) -> dict[str, Any]:
-        # Returns the typed failure, safe state, blast radius, and repair guidance.
         return {
             "error_type": type(self).__name__,
             "message": self.message,
@@ -87,15 +53,15 @@ class HarnessConfigurationError(HarnessError):
     """Raised when the common harness configuration envelope is invalid."""
 
     description = "Harness configuration could not be validated before implementation construction."
-    expected_vs_actual = "Expected: schema_version, harness, and agents follow the public envelope (metadata/orchestration optional). Actual: a required field, type, or value is invalid."
-    blast_radius = ("vidbyte/harnesses/config.py", "vidbyte/harnesses/execution.py")
+    expected_vs_actual = "Expected: schema_version, harness, and agents follow the public envelope. Actual: a required field, type, or value is invalid."
+    blast_radius: tuple[str, ...] = ("vidbyte/harnesses/config.py", "vidbyte/harnesses/execution.py")
 
 
 class HarnessCredentialConfigError(HarnessConfigurationError):
     """Raised when a persistable behavior config contains a credential-like key."""
 
     description = "A credential-like key was found in configuration that is fingerprinted and persisted."
-    expected_vs_actual = "Expected: credentials arrive through environment or provider construction. Actual: config contains a key that could persist a secret."
+    expected_vs_actual = "Expected: credentials arrive through environment or provider construction. Actual: configuration contains a key that could persist a secret."
     possible_causes = ("API credentials were placed beside behavior parameters", "An authentication option was named like a secret")
     fix_approaches = ("Move credentials to environment or injected provider objects.", "Keep only non-secret provider/model identifiers in the harness config.")
 
@@ -132,15 +98,6 @@ class HarnessDuplicateRegistrationError(HarnessRegistrationError):
     fix_approaches = ("Remove the duplicate registration.", "Use a distinct implementation version for changed behavior.")
 
 
-class HarnessSinkError(HarnessError):
-    """Raised when a trajectory sink cannot durably write a redacted export record."""
-
-    description = "A TrajectorySink could not atomically publish one redacted trajectory record."
-    expected_vs_actual = "Expected: the sink can encode the record and write its destination. Actual: encoding or destination I/O failed."
-    blast_radius = ("vidbyte/harnesses/stores/file.py", "vidbyte/harnesses/stores/memory.py")
-    fix_approaches = ("Confirm the destination path is writable.", "Inspect the safe error type; collection is fail-open inside execute() and never fails the run.")
-
-
 class HarnessExecutionError(HarnessError):
     """Raised after arbitrary implementation failure has been recorded as a run."""
 
@@ -149,12 +106,10 @@ class HarnessExecutionError(HarnessError):
     blast_radius = ("vidbyte/harnesses/execution.py", "caller-provided harness implementation")
 
     def __init__(self, message: str, *, run: HarnessRun) -> None:
-        # Attaches the finalized failed run so callers can inspect or query it directly.
         self.run = run
         super().__init__(message, details={"run_id": run.run_id, "spec_id": run.spec_id, "status": run.status.value})
 
     def to_context_packet(self) -> dict[str, Any]:
-        # Extends the base packet with safe canonical run identity.
         packet = super().to_context_packet()
         packet["run"] = {"run_id": self.run.run_id, "spec_id": self.run.spec_id, "status": self.run.status.value}
         return packet
@@ -176,7 +131,12 @@ __all__ = [
     "HarnessExecutionError",
     "HarnessFileReferenceError",
     "HarnessRegistrationError",
+    "HarnessSinkAuthenticationError",
+    "HarnessSinkAuthorizationError",
     "HarnessSinkError",
+    "HarnessSinkPayloadError",
+    "HarnessSinkSetupError",
+    "HarnessSinkUnavailableError",
     "HarnessTimeoutError",
     "HarnessVersionError",
 ]

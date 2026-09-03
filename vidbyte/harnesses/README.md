@@ -148,8 +148,127 @@ await h.execute({"topic": "..."})
   orchestration) so a buyer consumes one JSONL line with no dependency on our store.
   Override `Harness.score(request, output)` to attach an optional eval `reward`.
 
-A future `WarehouseTrajectorySink` / `S3TrajectorySink` in `providers/` implements
-the same `TrajectorySink` protocol with zero harness changes.
+## Exporting into a customer's own cloud storage
+
+`S3TrajectorySink`, `GcsTrajectorySink`, and `AzureBlobTrajectorySink` implement the
+same `TrajectorySink` protocol as `file_sink`/`memory_sink`, with zero harness
+changes — swap the sink, nothing else in your code changes:
+
+```python
+from vidbyte.harnesses import S3SinkConfig, S3StorageClass
+
+sink = sdk.harnesses.s3_sink(
+    S3SinkConfig(bucket="acme-corp-vidbyte", prefix="research-runs/", storage_class=S3StorageClass.STANDARD_IA),
+)  # credentials=None falls back to boto3's default credential chain — an attached IAM role, not a static key
+
+h = ResearchSwarm(store=store, sink=sink, collect=True)
+h.load("harness.yaml")
+await h.execute({"topic": "..."})
+```
+
+Each finished run lands as exactly one JSONL object keyed by `run_id`
+(`s3://acme-corp-vidbyte/research-runs/hrun_....jsonl`), not one growing shared
+file — S3/GCS/Azure have no cheap append primitive, and `write()` is only ever
+called once per finished run, so one object per run is both the simplest and the
+most concurrency-safe design. A retried write for the same `run_id` overwrites
+the same object rather than erroring, which is intentional: it's the same
+redacted content being retried.
+
+**Credentials never go through `harness.yaml`.** `Config` (bucket, prefix,
+storage tier, encryption) and `Credentials` (secrets, wrapped in `Secret` so they
+never render in a `repr()`/log line) are separate objects, passed directly into
+`s3_sink()`/`gcs_sink()`/`azure_blob_sink()` at runtime — the same rule that
+already rejects credential-like keys from the YAML applies here by construction,
+not by convention. Every provider prefers a keyless credential path when no
+static credentials are supplied: AWS's own default credential chain (or
+cross-account `role_arn` assumption, for the common enterprise case where
+Vidbyte's execution identity isn't the bucket owner's), GCP's Application
+Default Credentials, and Azure's `DefaultAzureCredential`.
+
+Setup and permission problems raise a specific `HarnessSinkError` subclass —
+`HarnessSinkSetupError` (bucket/container doesn't exist or is misconfigured),
+`HarnessSinkAuthenticationError` (no usable identity), `HarnessSinkAuthorizationError`
+(a valid identity without permission — including the case where a bucket
+requires server-side encryption the sink's request didn't include, which a
+cloud provider reports as a plain permission denial), `HarnessSinkUnavailableError`
+(network/throttling after the vendor SDK's own retries), and
+`HarnessSinkPayloadError` (a record too large or too malformed to encode, caught
+before any network call). Call `await sink.verify()` before a long `execute()`
+run to surface a setup/auth problem immediately instead of only after the run's
+own `finally` swallows it.
+
+Because `_maybe_collect()` is fail-open by design, a sink failure — cloud or
+local — never fails the harness run, and by default it also raises silently.
+Pass `on_sink_error` to `Harness(...)` to observe it instead:
+
+```python
+def log_failure(event):  # SinkFailureEvent: run_id, sink_type, error_type, message, occurred_at — credential-free
+    logger.warning("trajectory export failed: %s", event)
+
+h = ResearchSwarm(store=store, sink=sink, collect=True, on_sink_error=log_failure)
+```
+
+`on_sink_error` defaults to `None`, so every existing caller's behavior is
+unchanged; a raising callback is itself swallowed so a broken observer can never
+turn into a broken run. Full design rationale, the error taxonomy, and the
+per-provider implementation notes are in
+[`docs/design/cloud-trajectory-sinks.md`](../../docs/design/cloud-trajectory-sinks.md).
+
+### Provider-native object controls
+
+The configs preserve each cloud API's useful knobs instead of collapsing them
+into a lowest-common-denominator field set. For example:
+
+```python
+from datetime import datetime, timezone
+
+config = S3SinkConfig(
+    bucket="acme-corp-vidbyte",
+    tags={"cost-center": "research", "lineage": "agent-run"},
+    metadata={"source": "trajectory"},
+    content_type="application/x-ndjson",
+    content_encoding="gzip",
+    cache_control="no-store",
+    sse="aws:kms",
+    kms_key_id="arn:aws:kms:us-east-1:123456789012:key/example",
+    bucket_key_enabled=True,
+    kms_encryption_context={"purpose": "audit"},
+    object_lock_mode="GOVERNANCE",
+    object_lock_retain_until_date=datetime(2027, 1, 1, tzinfo=timezone.utc),
+    if_none_match="*",
+    checksum_algorithm="SHA256",
+    request_payer="requester",
+    use_dualstack_endpoint=True,
+)
+```
+
+S3 `metadata` becomes `x-amz-meta-*` and `tags` becomes the URL-encoded
+`Tagging` header. Use `sse_customer_algorithm="AES256"` with
+`S3Credentials(sse_customer_key=Secret(raw_32_byte_key))` for SSE-C; the raw
+key is sent on each request and must be managed securely. `aws:kms:dsse` adds
+dual-layer KMS encryption. `OUTPOSTS` and `EXPRESS_ONEZONE` are available as
+S3 storage classes, and `Expires`/`WebsiteRedirectLocation` are available for
+the uncommon object-routing cases.
+
+GCS uses `metadata`, content properties, `checksum`, generation/metageneration
+preconditions, `retention_mode`/`retain_until_time`, holds, and optional
+`GcsCredentials(customer_supplied_encryption_key=Secret(raw_32_byte_key))`.
+`kms_key_name` selects CMEK and cannot be combined with that customer key.
+`user_project` charges requester-pays operations to the billing project.
+
+Azure uses `metadata`, `tags`, `content_encoding`, `content_md5`, ETag/tag
+conditions, and `immutability_policy_*`/`legal_hold`. Supply a base64-encoded
+32-byte AES key as `AzureBlobCredentials.customer_provided_key` for customer-
+provided encryption. `validate_content=True` asks the SDK to send a wire MD5
+check; it is not a substitute for a stored warehouse checksum.
+
+Versioning, soft delete, and lifecycle/expiration rules are bucket/account
+policies—not per-object PUT fields—so configure them with S3, GCS, or Azure
+management APIs. GCS's optional `bucket_retention_period` is the one explicit
+bucket-policy operation performed during preflight. The sink does not use
+multipart upload: records over the 100 MiB guard fail before preflight/network
+activity, and the bound should only be raised after checking all provider
+single-PUT ceilings.
 
 ## Relationship to adjacent layers
 
@@ -169,8 +288,15 @@ the same `TrajectorySink` protocol with zero harness changes.
 - `execution.py`: the `Harness` base class — load/execute/session lifecycle.
 - `dataset.py`: `TrajectoryCollector` — joins tagged Sessions into one redacted record.
 - `stores/`: `TrajectorySink` port (`base.py`) plus in-memory and atomic-JSONL file
-  sinks (`memory.py`, `file.py`), mirroring the `vidbyte/sessions/stores/` layout.
+  sinks (`memory.py`, `file.py`), mirroring the `vidbyte/sessions/stores/` layout,
+  plus the three cloud sinks (`s3.py`, `gcs.py`, `azure_blob.py`) and the shared
+  encoding/size-guard helper they and `file.py` all use (`_sink_support.py`).
 - `serialization.py`: the single redaction pass and shared secret-key policy.
+
+Cloud sink `Config`/`Credentials`/enum construction types live in
+`vidbyte/lib/dataclasses/cloud_sinks.py` (Stage 1, local/syntactic validation),
+one layer beneath this package; the numeric bounds they validate against live in
+`vidbyte/lib/constants/cloud_sinks.py`.
 
 The full architecture and rejected alternatives are recorded in
 [`docs/design/harness-execution-contract.md`](../../docs/design/harness-execution-contract.md).

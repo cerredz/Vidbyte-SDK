@@ -46,6 +46,19 @@ from vidbyte.lib.dataclasses.agents import (
     AgentStopReason,
 )
 from vidbyte.lib.dataclasses.aggregate_agent_descriptor import AggregateAgentDescriptor
+from vidbyte.lib.dataclasses.cloud_sinks import (
+    AzureBlobCredentials,
+    AzureBlobSinkConfig,
+    AzureBlobTier,
+    CloudSinkConfigValidation,
+    GcsCredentials,
+    GcsSinkConfig,
+    GcsStorageClass,
+    S3Credentials,
+    S3SinkConfig,
+    S3StorageClass,
+    Secret,
+)
 from vidbyte.lib.dataclasses.config import (
     AgentSettings,
     MiddlewareDefinition,
@@ -94,6 +107,7 @@ from vidbyte.lib.dataclasses.harnesses import (
     HarnessRun,
     HarnessRunStatus,
     HarnessSpec,
+    SinkFailureEvent,
     TrajectoryRecord,
 )
 from vidbyte.lib.dataclasses.mcp import McpToolDefinition
@@ -266,7 +280,9 @@ __all__ = [
     "AgentStopReason",
     "AgentUsage",
     "AggregateAgentDescriptor",
-    "AllegationRecord",
+    "AzureBlobCredentials",
+    "AzureBlobSinkConfig",
+    "AzureBlobTier",
     "AllegationSeverity",
     "ArtifactContextItem",
     "ArtifactRef",
@@ -289,6 +305,7 @@ __all__ = [
     "ContextResponse",
     "ContextState",
     "ContextToolCall",
+    "CloudSinkConfigValidation",
     "ContinualTraceAgentDescriptor",
     "DagNode",
     "DebateStageRecord",
@@ -323,7 +340,16 @@ __all__ = [
     "HarnessRun",
     "HarnessRunStatus",
     "HarnessSpec",
+    "GcsCredentials",
+    "GcsSinkConfig",
+    "GcsStorageClass",
     "HumanReviewRecoverySettings",
+    "S3Credentials",
+    "S3SinkConfig",
+    "S3StorageClass",
+    "Secret",
+    "SinkFailureEvent",
+    "TrajectoryRecord",
     "JudgeDecision",
     "JudgeDecisionPayload",
     "JudgeDecisionRecord",

@@ -24,6 +24,16 @@ WHAT NOT TO DO IN THIS FILE:
     2. Do not import optional provider/database dependencies.
     3. Do not hide a public typed error from package callers.
 
+COMMON MODIFICATION PATTERNS:
+    Add a new public error, sink, or contract at its owning module first,
+    then re-export it here and add it to __all__ — never define new behavior
+    in this file directly.
+
+KNOWN EDGE CASES:
+    Re-exporting a cloud sink here does not require its vendor SDK to be
+    installed; only constructing that sink does, since every vendor import is
+    lazy inside the sink's own constructor.
+
 RELATED DOCS:
     https://github.com/cerredz/Vidbyte-SDK/blob/main/docs/design/harness-execution-contract.md
 
@@ -42,6 +52,7 @@ from vidbyte.harnesses.contracts import (
     HarnessRun,
     HarnessRunStatus,
     HarnessSpec,
+    SinkFailureEvent,
     TrajectoryRecord,
 )
 from vidbyte.harnesses.dataset import TrajectoryCollector
@@ -53,18 +64,48 @@ from vidbyte.harnesses.errors import (
     HarnessExecutionError,
     HarnessFileReferenceError,
     HarnessRegistrationError,
+    HarnessSinkAuthenticationError,
+    HarnessSinkAuthorizationError,
     HarnessSinkError,
+    HarnessSinkPayloadError,
+    HarnessSinkSetupError,
+    HarnessSinkUnavailableError,
     HarnessTimeoutError,
     HarnessVersionError,
 )
 from vidbyte.harnesses.execution import Harness, wrap_implementation
 from vidbyte.harnesses.registry import HarnessFactory, HarnessImplementation, HarnessRegistry
 from vidbyte.harnesses.serialization import HarnessRedactor, HarnessSecretPolicy
-from vidbyte.harnesses.stores import FileTrajectorySink, InMemoryTrajectorySink, TrajectorySink
+from vidbyte.harnesses.stores import (
+    AzureBlobCredentials,
+    AzureBlobSinkConfig,
+    AzureBlobTier,
+    AzureBlobTrajectorySink,
+    FileTrajectorySink,
+    GcsCredentials,
+    GcsSinkConfig,
+    GcsStorageClass,
+    GcsTrajectorySink,
+    InMemoryTrajectorySink,
+    S3Credentials,
+    S3SinkConfig,
+    S3StorageClass,
+    S3TrajectorySink,
+    Secret,
+    TrajectorySink,
+)
 
 __all__ = [
     "HARNESS_SCHEMA_VERSION",
+    "AzureBlobCredentials",
+    "AzureBlobSinkConfig",
+    "AzureBlobTier",
+    "AzureBlobTrajectorySink",
     "FileTrajectorySink",
+    "GcsCredentials",
+    "GcsSinkConfig",
+    "GcsStorageClass",
+    "GcsTrajectorySink",
     "Harness",
     "HarnessClient",
     "HarnessConfigLoader",
@@ -83,11 +124,22 @@ __all__ = [
     "HarnessRun",
     "HarnessRunStatus",
     "HarnessSecretPolicy",
+    "HarnessSinkAuthenticationError",
+    "HarnessSinkAuthorizationError",
     "HarnessSinkError",
+    "HarnessSinkPayloadError",
+    "HarnessSinkSetupError",
+    "HarnessSinkUnavailableError",
     "HarnessSpec",
     "HarnessTimeoutError",
     "HarnessVersionError",
     "InMemoryTrajectorySink",
+    "S3Credentials",
+    "S3SinkConfig",
+    "S3StorageClass",
+    "S3TrajectorySink",
+    "Secret",
+    "SinkFailureEvent",
     "TrajectoryCollector",
     "TrajectoryRecord",
     "TrajectorySink",
