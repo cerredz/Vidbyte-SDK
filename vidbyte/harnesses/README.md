@@ -148,8 +148,101 @@ await h.execute({"topic": "..."})
   orchestration) so a buyer consumes one JSONL line with no dependency on our store.
   Override `Harness.score(request, output)` to attach an optional eval `reward`.
 
-A future `WarehouseTrajectorySink` / `S3TrajectorySink` in `providers/` implements
-the same `TrajectorySink` protocol with zero harness changes.
+## Exporting into a customer's own cloud storage
+
+`S3TrajectorySink`, `GcsTrajectorySink`, and `AzureBlobTrajectorySink` implement the
+same `TrajectorySink` protocol as `file_sink`/`memory_sink`, with zero harness
+changes — swap the sink, nothing else in your code changes:
+
+```python
+from vidbyte.harnesses import S3SinkConfig, S3StorageClass
+
+sink = sdk.harnesses.s3_sink(
+    S3SinkConfig(bucket="acme-corp-vidbyte", prefix="research-runs/", storage_class=S3StorageClass.STANDARD_IA),
+)  # credentials=None falls back to boto3's default credential chain — an attached IAM role, not a static key
+
+h = ResearchSwarm(store=store, sink=sink, collect=True)
+h.load("harness.yaml")
+await h.execute({"topic": "..."})
+```
+
+Each finished run lands as exactly one JSONL object keyed by `run_id`
+(`s3://acme-corp-vidbyte/research-runs/hrun_....jsonl`), not one growing shared
+file — S3/GCS/Azure have no cheap append primitive, and `write()` is only ever
+called once per finished run, so one object per run is both the simplest and the
+most concurrency-safe design. A retried write for the same `run_id` overwrites
+the same object rather than erroring, which is intentional: it's the same
+redacted content being retried.
+
+**Credentials never go through `harness.yaml`.** `Config` (bucket, prefix,
+storage tier, encryption) and `Credentials` (secrets, wrapped in `Secret` so they
+never render in a `repr()`/log line) are separate objects, passed directly into
+`s3_sink()`/`gcs_sink()`/`azure_blob_sink()` at runtime — the same rule that
+already rejects credential-like keys from the YAML applies here by construction,
+not by convention. Every provider prefers a keyless credential path when no
+static credentials are supplied: AWS's own default credential chain (or
+cross-account `role_arn` assumption, for the common enterprise case where
+Vidbyte's execution identity isn't the bucket owner's), GCP's Application
+Default Credentials, and Azure's `DefaultAzureCredential`.
+
+Setup and permission problems raise a specific `HarnessSinkError` subclass —
+`HarnessSinkSetupError` (bucket/container doesn't exist or is misconfigured),
+`HarnessSinkAuthenticationError` (no usable identity), `HarnessSinkAuthorizationError`
+(a valid identity without permission — including the case where a bucket
+requires server-side encryption the sink's request didn't include, which a
+cloud provider reports as a plain permission denial), `HarnessSinkUnavailableError`
+(network/throttling after the vendor SDK's own retries), and
+`HarnessSinkPayloadError` (a record too large or too malformed to encode, caught
+before any network call). Call `await sink.verify()` before a long `execute()`
+run to surface a setup/auth problem immediately instead of only after the run's
+own `finally` swallows it.
+
+Because `_maybe_collect()` is fail-open by design, a sink failure — cloud or
+local — never fails the harness run, and by default it also raises silently.
+Pass `on_sink_error` to `Harness(...)` to observe it instead:
+
+```python
+def log_failure(event):  # SinkFailureEvent: run_id, sink_type, error_type, message, occurred_at — credential-free
+    logger.warning("trajectory export failed: %s", event)
+
+h = ResearchSwarm(store=store, sink=sink, collect=True, on_sink_error=log_failure)
+```
+
+`on_sink_error` defaults to `None`, so every existing caller's behavior is
+unchanged; a raising callback is itself swallowed so a broken observer can never
+turn into a broken run. Full design rationale, the error taxonomy, and the
+per-provider implementation notes are in
+[`docs/design/cloud-trajectory-sinks.md`](../../docs/design/cloud-trajectory-sinks.md).
+
+### Expanded provider coverage
+
+The S3 adapter also exposes named profiles for Cloudflare R2, Backblaze B2,
+DigitalOcean Spaces, IBM Cloud Object Storage, Wasabi, and MinIO. Use the
+short factories (`r2_sink`, `b2_sink`, and `spaces_sink`) or their explicit
+names, and pass the matching `S3CompatibleProvider` so unsupported tiers,
+checksums, tags, or encryption modes fail before network I/O.
+
+OCI and Alibaba OSS have native adapters:
+
+```python
+from vidbyte.harnesses import OciSinkConfig, OssSinkConfig
+
+oci_sink = sdk.harnesses.oci_sink(OciSinkConfig(namespace="acme", bucket="runs", prefix="exports"))
+oss_sink = sdk.harnesses.oss_sink(OssSinkConfig(bucket="runs", region="cn-hangzhou", prefix="exports"))
+```
+
+All cloud configs support deterministic per-run keys, JSONL content type,
+sorted metadata, explicit connect/read timeouts, provider-owned retries,
+overwrite or create-only writes, metadata-only or write/delete preflight,
+optional checksums and encryption, and safe `write_with_receipt()` results.
+Native object tags are supported by S3-compatible profiles, Azure, and OSS;
+GCS rejects them so callers use its custom metadata, while OCI represents tags
+as reserved `tag-` metadata. OCI uses config-file/API-key/session-token/principal
+signers and native `UploadManager`; OSS uses default/static/STS credentials and
+its native resumable uploader with bounded parts, concurrency, optional
+checkpoints, SSE-KMS, CRC64, object WORM fields, and cleanup on failure.
+Install only the optional SDK for the provider you use; none is required to
+import the SDK.
 
 ## Relationship to adjacent layers
 
@@ -169,8 +262,15 @@ the same `TrajectorySink` protocol with zero harness changes.
 - `execution.py`: the `Harness` base class — load/execute/session lifecycle.
 - `dataset.py`: `TrajectoryCollector` — joins tagged Sessions into one redacted record.
 - `stores/`: `TrajectorySink` port (`base.py`) plus in-memory and atomic-JSONL file
-  sinks (`memory.py`, `file.py`), mirroring the `vidbyte/sessions/stores/` layout.
+  sinks (`memory.py`, `file.py`), mirroring the `vidbyte/sessions/stores/` layout,
+  plus S3-compatible profiles, native OCI/OSS adapters, and the shared cloud
+  lifecycle/receipt helper (`_cloud_common.py`).
 - `serialization.py`: the single redaction pass and shared secret-key policy.
+
+Cloud sink `Config`/`Credentials`/enum construction types live in
+`vidbyte/lib/dataclasses/cloud_sinks.py` (Stage 1, local/syntactic validation),
+one layer beneath this package; the numeric bounds they validate against live in
+`vidbyte/lib/constants/cloud_sinks.py`.
 
 The full architecture and rejected alternatives are recorded in
 [`docs/design/harness-execution-contract.md`](../../docs/design/harness-execution-contract.md).

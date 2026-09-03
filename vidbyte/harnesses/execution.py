@@ -32,11 +32,21 @@ WHAT NOT TO DO IN THIS FILE:
 KNOWN EDGE CASES:
     Synchronous run() bodies cannot be interrupted by an asyncio timeout while
     blocking. Cancellation and timeout cannot fence side effects already started.
-    session() is only valid during execute(), when a run_id exists.
+    session() is only valid during execute(), when a run_id exists. on_sink_error
+    is None by default, so _maybe_collect's fail-open behavior is byte-identical
+    to before it existed; when set, a swallowed collection/sink failure is
+    reported as a credential-free SinkFailureEvent, and a raising callback is
+    itself swallowed so a broken observer can never break fail-open.
 
 COMMON ERRORS:
     HarnessConfigurationError before load(); HarnessExecutionError for run()
     failures; HarnessTimeoutError for explicit deadlines.
+
+COMMON MODIFICATION PATTERNS:
+    Add a new run-lifecycle observer the same way on_sink_error was added:
+    a None-default constructor parameter, invoked from inside an existing
+    fail-open except clause, itself wrapped so a raising observer can never
+    break fail-open — never add a second bespoke callback shape.
 
 RELATED DOCS:
     https://github.com/cerredz/Vidbyte-SDK/blob/main/docs/design/harness-execution-contract.md
@@ -56,8 +66,10 @@ from pathlib import Path
 from typing import Any, ClassVar
 from uuid import uuid4
 
+from collections.abc import Callable
+
 from vidbyte.harnesses.config import HarnessConfigLoader
-from vidbyte.harnesses.contracts import HARNESS_SCHEMA_VERSION, HarnessExecutionResult, HarnessRun, HarnessRunStatus, HarnessSpec
+from vidbyte.harnesses.contracts import HARNESS_SCHEMA_VERSION, HarnessExecutionResult, HarnessRun, HarnessRunStatus, HarnessSpec, SinkFailureEvent
 from vidbyte.harnesses.dataset import TrajectoryCollector
 from vidbyte.harnesses.errors import HarnessConfigurationError, HarnessExecutionError, HarnessTimeoutError
 from vidbyte.harnesses.serialization import HarnessRedactor
@@ -100,11 +112,12 @@ class Harness:
     type: ClassVar[str] = ""
     version: ClassVar[str] = ""
 
-    def __init__(self, *, store: SessionStore | None = None, sink: TrajectorySink | None = None, collect: bool = False) -> None:
-        # Binds the two persistence surfaces once and the per-run/tenant consent flag.
+    def __init__(self, *, store: SessionStore | None = None, sink: TrajectorySink | None = None, collect: bool = False, on_sink_error: Callable[[SinkFailureEvent], None] | None = None) -> None:
+        # Binds the two persistence surfaces once, the consent flag, and the optional failure observer.
         self._store: SessionStore = store or InMemorySessionStore()   # operational source of truth
         self._sink = sink                                             # LICENSED, redacted, sellable derivative
         self._collect = bool(collect)                                # opt-in consent, default off
+        self._on_sink_error = on_sink_error                           # None-default; existing callers see no behavior change
         self._redactor = HarnessRedactor()
         self._spec: HarnessSpec | None = None
         self._run_id: str | None = None
@@ -233,6 +246,23 @@ class Harness:
                 self._run_id, self._spec, request, output, status.value, reward=reward
             )
             await self._sink.write(record)
+        except Exception as exc:
+            self._report_sink_failure(exc)
+            return
+
+    def _report_sink_failure(self, exc: Exception) -> None:
+        # Notifies an opted-in observer of a swallowed collection/sink failure; never raises itself.
+        if self._on_sink_error is None:
+            return
+        event = SinkFailureEvent(
+            run_id=self._run_id or "",
+            sink_type=type(self._sink).__name__,
+            error_type=type(exc).__name__,
+            message=self._redactor.safe_error_message(exc),
+            occurred_at=_utc_now(),
+        )
+        try:
+            self._on_sink_error(event)
         except Exception:
             return
 
@@ -262,11 +292,14 @@ class Harness:
         return float(value)
 
 
-def wrap_implementation(implementation: object, *, store: SessionStore | None = None, sink: TrajectorySink | None = None, collect: bool = False, harness_type: str | None = None, harness_version: str | None = None) -> Harness:
+def wrap_implementation(implementation: object, *, store: SessionStore | None = None, sink: TrajectorySink | None = None, collect: bool = False, on_sink_error: Callable[[SinkFailureEvent], None] | None = None, harness_type: str | None = None, harness_version: str | None = None) -> Harness:
     # Adapts a foreign object exposing run(request) into the Harness execution envelope.
     foreign_run = getattr(implementation, "run", None)
     if not callable(foreign_run):
         raise HarnessConfigurationError("Harness implementation must expose callable run(request).", details={"actual_type": type(implementation).__name__})
+    # Rebound to a variable whose only assignment is this callable, so the closure below carries a
+    # definitely-non-None type: narrowing from the callable() check above does not cross a closure boundary.
+    run_callable: Callable[[Any], Any] = foreign_run
     resolved_type = str(harness_type if harness_type is not None else getattr(implementation, "type", "") or "")
     resolved_version = str(harness_version if harness_version is not None else getattr(implementation, "version", "") or "")
 
@@ -275,10 +308,10 @@ def wrap_implementation(implementation: object, *, store: SessionStore | None = 
         version = resolved_version
 
         async def run(self, request: Any) -> Any:
-            result = foreign_run(request)
+            result = run_callable(request)
             return await result if inspect.isawaitable(result) else result
 
-    return _ForeignHarness(store=store, sink=sink, collect=collect)
+    return _ForeignHarness(store=store, sink=sink, collect=collect, on_sink_error=on_sink_error)
 
 
 __all__ = ["Harness", "wrap_implementation"]
