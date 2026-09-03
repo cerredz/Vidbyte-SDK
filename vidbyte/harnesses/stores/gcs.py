@@ -213,7 +213,15 @@ class GcsTrajectorySink:
     def _import_driver() -> Any:
         # Lazily imports google-cloud-storage and the exception types this sink translates, raising a helpful error when absent.
         try:
-            from google.api_core.exceptions import DeadlineExceeded, Forbidden, NotFound, PreconditionFailed, ServiceUnavailable, TooManyRequests, Unauthorized
+            from google.api_core.exceptions import (
+                DeadlineExceeded,
+                Forbidden,
+                NotFound,
+                PreconditionFailed,
+                ServiceUnavailable,
+                TooManyRequests,
+                Unauthorized,
+            )
             from google.auth.exceptions import DefaultCredentialsError
             from google.cloud import storage
             from google.oauth2 import service_account

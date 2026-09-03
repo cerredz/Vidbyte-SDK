@@ -66,7 +66,10 @@ from vidbyte.harnesses.errors import (
     HarnessSinkUnavailableError,
 )
 from vidbyte.harnesses.stores._sink_support import SinkEncoding
-from vidbyte.lib.dataclasses.cloud_sinks import AzureBlobCredentials, AzureBlobSinkConfig
+from vidbyte.lib.dataclasses.cloud_sinks import (
+    AzureBlobCredentials,
+    AzureBlobSinkConfig,
+)
 from vidbyte.lib.errors import ConfigurationError
 
 _HTTP_FORBIDDEN = 403
@@ -245,9 +248,18 @@ class AzureBlobTrajectorySink:
     def _import_driver() -> Any:
         # Lazily imports azure-storage-blob and the exception types this sink translates, raising a helpful error when absent.
         try:
-            from azure.core.exceptions import ClientAuthenticationError, HttpResponseError, ResourceNotFoundError, ServiceRequestError
             from azure.core import MatchConditions
-            from azure.storage.blob import ContentSettings, CustomerProvidedEncryptionKey, ImmutabilityPolicy
+            from azure.core.exceptions import (
+                ClientAuthenticationError,
+                HttpResponseError,
+                ResourceNotFoundError,
+                ServiceRequestError,
+            )
+            from azure.storage.blob import (
+                ContentSettings,
+                CustomerProvidedEncryptionKey,
+                ImmutabilityPolicy,
+            )
             from azure.storage.blob.aio import BlobServiceClient
         except ImportError as exc:
             raise ConfigurationError("AzureBlobTrajectorySink requires the 'azure-storage-blob' package. Install it with `pip install azure-storage-blob`.") from exc

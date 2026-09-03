@@ -288,7 +288,12 @@ class S3TrajectorySink:
         try:
             import boto3
             from botocore.config import Config as BotoConfig
-            from botocore.exceptions import ClientError, ConnectTimeoutError, EndpointConnectionError, NoCredentialsError
+            from botocore.exceptions import (
+                ClientError,
+                ConnectTimeoutError,
+                EndpointConnectionError,
+                NoCredentialsError,
+            )
         except ImportError as exc:
             raise ConfigurationError("S3TrajectorySink requires the 'boto3' package. Install it with `pip install boto3`.") from exc
         return SimpleNamespace(
