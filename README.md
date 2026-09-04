@@ -194,6 +194,41 @@ reply = image_agent.run("A clean product mockup on a white desk")
 print(reply.content)
 ```
 
+### Codex Harness Agent
+
+Install the optional Codex integration when Codex should own the inner coding-agent loop while Vidbyte supplies the agent-facing configuration and result contract:
+
+```bash
+python -m pip install "vidbyte-sdk[codex]"
+```
+
+```python
+from pydantic import BaseModel
+from vidbyte import CodexAgentSettings, CodexHarnessAgent, CodexSubagentSettings
+
+
+class ChangeSummary(BaseModel):
+    summary: str
+    files_changed: list[str]
+
+
+agent = CodexHarnessAgent(
+    name="codex-worker",
+    system_prompt="Make scoped changes and report exactly what you verified.",
+    additional_context="Preserve unrelated work in the checkout.",
+    output_schema=ChangeSummary,
+    settings=CodexAgentSettings(
+        sandbox="workspace-write",
+        subagents=CodexSubagentSettings(max_concurrent_threads=3),
+    ),
+)
+
+reply = agent.run("Implement the requested change.")
+print(reply.structured)
+```
+
+`CodexHarnessAgent` currently translates system prompts, turn-boundary additional context, structured output, Codex thread forks, and Codex-owned subagent configuration/activity. It does not claim Vidbyte-owned iteration, middleware, tool, or durable-session semantics.
+
 ## Multi-Agent Orchestration
 
 Use `MultiAgent` when open-ended work needs a manager that owns the overall goal,
