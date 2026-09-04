@@ -462,6 +462,7 @@ class CodexRunResult: ...
 | MODIFY | `vidbyte/__init__.py` | Re-export new public types at package root |
 | MODIFY | `pyproject.toml` | Add bounded optional Codex SDK extra |
 | MODIFY | `README.md` | Document installation and minimal usage |
+| MODIFY | `lint/baseline.json` | Ratchet improved A001 and A002 counts reported by the canonical gate |
 | CREATE | `skills/runtime-primitives/SKILL.md` | Route harness-agent and runtime-primitive development work |
 | CREATE | `skills/runtime-primitives/references/runtime-primitives.md` | Explain the shared local composition model and intended use cases |
 | CREATE | `skills/runtime-primitives/references/codex-sdk.md` | Inventory Codex SDK controls and ownership boundaries |
@@ -469,7 +470,7 @@ class CodexRunResult: ...
 | CREATE | `skills/runtime-primitives/references/control-matrix.md` | Compare exact, policy-based, and unavailable translations |
 | MODIFY | `C:\Users\422mi\knowledge\knowledge\Vidbyte\Codex\Vidbyte SDK.md` | Append complete translation checklist outside the repository |
 
-Repository count: 12 files created, 4 files modified, 0 files deleted. External knowledge count: 0 files created, 1 file modified, 0 files deleted.
+Repository count: 12 files created, 5 files modified, 0 files deleted. External knowledge count: 0 files created, 1 file modified, 0 files deleted.
 
 ---
 
