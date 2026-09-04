@@ -9,7 +9,7 @@
 
 ## 1. Overview
 
-Add a first-class `CodexHarnessAgent` that presents a Vidbyte-shaped agent API while delegating the inner agent loop to the official Codex Python SDK. The first release intentionally translates only five core capabilities: system prompts, additional context, structured output, provider-native thread forking, and Codex-owned subagents. The implementation is split into a small public agent class plus configuration, context, result, and transport collaborators so provider protocol details do not accumulate in one file.
+Add a first-class `CodexHarnessAgent` that presents a Vidbyte-shaped agent API while delegating the inner agent loop to the official Codex Python SDK. The first release intentionally translates only five core capabilities: system prompts, additional context, structured output, provider-native thread forking, and Codex-owned subagents. The implementation is split into a small public agent class plus configuration, context, result, and transport collaborators so provider protocol details do not accumulate in one file. A repository skill package explains when to use harness agents, how runtime primitives compose them, and which control surfaces belong to Vidbyte versus the native host.
 
 ---
 
@@ -26,6 +26,7 @@ Add a first-class `CodexHarnessAgent` that presents a Vidbyte-shaped agent API w
 - Export the new public types through `vidbyte.agents` and the package root.
 - Keep Codex an optional installation extra so importing the base SDK does not install a large pinned CLI binary.
 - Append a complete future-translation checklist to the requested Obsidian knowledge note.
+- Add an agent-readable runtime-primitives skill with Codex, Claude Agent SDK, and cross-provider control references.
 
 ### Non-Goals
 
@@ -65,6 +66,8 @@ The repository already centralizes context rendering in `ContextManager`, schema
 12. Returned collaboration and subagent activity items must be serialized into a bounded, typed metadata list without exposing hidden reasoning.
 13. Public metadata must include Codex thread id, turn id, turn status, duration, usage, subagent activity, and fork lineage when available.
 14. The requested Obsidian note must end with a categorized checklist covering all remaining translation work and marking the five implemented capabilities.
+15. The top-level skill must distinguish a harness agent from a Vidbyte-owned model loop and route readers to focused Codex, Claude, and translation references.
+16. The skill must state which controls can be translated exactly, which need an adapter policy, and which remain provider-owned.
 
 ### Non-Functional Requirements
 
@@ -343,6 +346,40 @@ N/A - Markdown knowledge artifact, not a runtime API.
 - Do not duplicate the section if rerun.
 - Do not write credentials or raw session contents.
 
+### 6.8 Runtime Primitives Skill
+
+**File(s):** `skills/runtime-primitives/SKILL.md`, `skills/runtime-primitives/references/runtime-primitives.md`, `skills/runtime-primitives/references/codex-sdk.md`, `skills/runtime-primitives/references/claude-agent-sdk.md`, `skills/runtime-primitives/references/control-matrix.md`
+**Type:** New files
+
+#### What it does
+
+Gives downstream coding agents a concise entry point for deciding when a native harness agent is appropriate, then routes them to provider-specific control inventories and the translation matrix. The skill documents the architectural rule that Vidbyte owns composition and normalization while Codex or Claude owns its internal tool loop.
+
+#### Interface / API
+
+```text
+skills/runtime-primitives/
+|-- SKILL.md
+`-- references/
+    |-- runtime-primitives.md
+    |-- codex-sdk.md
+    |-- claude-agent-sdk.md
+    `-- control-matrix.md
+```
+
+#### Logic / Algorithm
+
+1. Trigger when a developer designs or extends a native coding-agent harness adapter or local runtime primitive.
+2. Read the shared runtime-primitives model first.
+3. Read only the provider reference needed for the implementation.
+4. Consult the control matrix before promising parity across providers.
+
+#### Edge Cases & Error Handling
+
+- Documentation must not claim that a translated setting transfers control of the provider-owned loop to Vidbyte.
+- Version-sensitive fields must point readers to official SDK documentation instead of being treated as permanent guarantees.
+- The skill must not instruct an agent to expose credentials, hidden reasoning, or raw process environment values.
+
 ---
 
 ## 7. Data Model Changes
@@ -423,9 +460,14 @@ class CodexRunResult: ...
 | MODIFY | `vidbyte/__init__.py` | Re-export new public types at package root |
 | MODIFY | `pyproject.toml` | Add bounded optional Codex SDK extra |
 | MODIFY | `README.md` | Document installation and minimal usage |
+| CREATE | `skills/runtime-primitives/SKILL.md` | Route harness-agent and runtime-primitive development work |
+| CREATE | `skills/runtime-primitives/references/runtime-primitives.md` | Explain the shared local composition model and intended use cases |
+| CREATE | `skills/runtime-primitives/references/codex-sdk.md` | Inventory Codex SDK controls and ownership boundaries |
+| CREATE | `skills/runtime-primitives/references/claude-agent-sdk.md` | Inventory Claude Agent SDK controls and ownership boundaries |
+| CREATE | `skills/runtime-primitives/references/control-matrix.md` | Compare exact, policy-based, and unavailable translations |
 | MODIFY | `C:\Users\422mi\knowledge\knowledge\Vidbyte\Codex\Vidbyte SDK.md` | Append complete translation checklist outside the repository |
 
-Repository count: 7 files created, 4 files modified, 0 files deleted. External knowledge count: 0 files created, 1 file modified, 0 files deleted.
+Repository count: 12 files created, 4 files modified, 0 files deleted. External knowledge count: 0 files created, 1 file modified, 0 files deleted.
 
 ---
 
