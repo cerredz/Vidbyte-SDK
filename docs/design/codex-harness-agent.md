@@ -142,9 +142,11 @@ class CodexForkSettings:
 
 class CodexConfigurationTranslator:
     @classmethod
-    def client_config(cls, settings: CodexAgentSettings) -> Any: ...
+    def thread_start_kwargs(cls, system_prompt: str, settings: CodexAgentSettings) -> dict[str, Any]: ...
     @classmethod
-    def thread_kwargs(cls, system_prompt: str, settings: CodexAgentSettings) -> dict[str, Any]: ...
+    def thread_resume_kwargs(cls, system_prompt: str, settings: CodexAgentSettings) -> dict[str, Any]: ...
+    @classmethod
+    def thread_fork_kwargs(cls, system_prompt: str, settings: CodexAgentSettings, ephemeral: bool | None) -> dict[str, Any]: ...
     @classmethod
     def turn_kwargs(cls, settings: CodexAgentSettings, output_schema: Mapping[str, Any] | None) -> dict[str, Any]: ...
 ```
@@ -518,3 +520,15 @@ Repository count: 12 files created, 4 files modified, 0 files deleted. External 
 
 - What: Implement process startup, initialization, routing, and schema handling inside Vidbyte.
 - Why rejected: The stable official Python SDK already owns those responsibilities and pins a compatible CLI. Direct JSON-RPC becomes appropriate only when a required stable app-server capability remains unavailable through the SDK.
+
+---
+
+## 14. Refinement Checklist
+
+- [x] Core abstractions remain limited to system prompt, additional context, structured output, native fork, and provider-owned subagents.
+- [x] Unsupported run options fail instead of disappearing.
+- [x] Native thread identity is committed only after a successful provider operation.
+- [x] Provider errors are safely classified and preserve cancellation.
+- [x] The optional SDK import does not affect a normal `import vidbyte`.
+- [x] Skill guidance distinguishes provider control from Vidbyte composition and labels non-exact translations.
+- [x] No critical or notable design/code mismatch remains after implementation review.
