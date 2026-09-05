@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from vidbyte.agents.types import AgentMessage
 from vidbyte.lib.constants.codex import (
@@ -24,13 +24,18 @@ from vidbyte.lib.enums.failure import FailureCode
 from vidbyte.lib.errors import CodexAgentError, OutputSchemaViolationError
 from vidbyte.providers.output_schema import OutputSchemaFormatter
 
+if TYPE_CHECKING:
+    from openai_codex import TurnResult
+    from openai_codex.generated.v2_all import ThreadItem, ThreadTokenUsage
+
 
 class CodexResultSerializer:
     """Copies stable SDK result models into bounded Vidbyte dataclasses."""
 
     @classmethod
-    def from_sdk(cls, thread_id: str, result: object) -> CodexRunResult:
-        final_response = getattr(result, "final_response", None)
+    def from_sdk(cls, thread_id: str, result: TurnResult) -> CodexRunResult:
+        # Read the pinned SDK contract directly; malformed objects must not become empty data.
+        final_response = result.final_response
         if not isinstance(final_response, str) or not final_response:
             raise CodexAgentError(
                 "Codex completed without a final response.",
@@ -39,64 +44,39 @@ class CodexResultSerializer:
             )
         return CodexRunResult(
             thread_id=thread_id,
-            turn_id=str(getattr(result, "id", "")),
-            status=str(
-                getattr(
-                    getattr(result, "status", ""),
-                    "value",
-                    getattr(result, "status", ""),
-                )
-            ),
+            turn_id=result.id,
+            status=result.status.value,
             final_response=final_response,
-            duration_ms=int(
-                getattr(result, "duration_ms", CODEX_ZERO_DURATION_MS)
-                or CODEX_ZERO_DURATION_MS
-            ),
-            usage=cls._usage(getattr(result, "usage", None)),
-            items=tuple(cls._item(item) for item in getattr(result, "items", ())),
+            duration_ms=result.duration_ms if result.duration_ms is not None else CODEX_ZERO_DURATION_MS,
+            usage=cls._usage(result.usage),
+            items=tuple(cls._item(item) for item in result.items),
         )
 
     @classmethod
-    def _item(cls, value: object) -> CodexItem:
-        payload = cls._mapping(value)
-        nested = payload.get("root")
-        if isinstance(nested, Mapping):
-            payload = dict(nested)
-        item_type = str(payload.pop("type", "unknown"))
-        item_id = str(payload.pop("id", ""))
-        if item_type == "reasoning":
-            payload.pop("content", None)
-        if item_type not in CODEX_SUPPORTED_ITEM_TYPES:
-            payload = {}
-        return CodexItem(id=item_id, type=item_type, fields=payload)
+    def _item(cls, value: ThreadItem) -> CodexItem:
+        # @intent exclude-private-reasoning-before-serialization
+        # Only reviewed SDK variants may expose payloads. Omit reasoning content
+        # at the serialization boundary instead of copying it and deleting it later.
+        item = value.root
+        excluded = {"id", "type", "content"} if item.type == "reasoning" else {"id", "type"}
+        payload = item.model_dump(mode="json", by_alias=True, exclude=excluded) if item.type in CODEX_SUPPORTED_ITEM_TYPES else {}
+        return CodexItem(id=item.id, type=item.type, fields=payload)
 
     @classmethod
-    def _usage(cls, value: object) -> CodexUsage:
-        payload = cls._mapping(value)
-        total = payload.get("total", {})
-        if not isinstance(total, Mapping):
-            total = {}
-        return CodexUsage(
-            input_tokens=int(total.get("inputTokens", 0) or 0),
-            cached_input_tokens=int(total.get("cachedInputTokens", 0) or 0),
-            cache_write_input_tokens=int(total.get("cacheWriteInputTokens", 0) or 0),
-            output_tokens=int(total.get("outputTokens", 0) or 0),
-            reasoning_output_tokens=int(total.get("reasoningOutputTokens", 0) or 0),
-            total_tokens=int(total.get("totalTokens", 0) or 0),
-            model_context_window=int(payload.get("modelContextWindow", 0) or 0),
-        )
-
-    @staticmethod
-    def _mapping(value: object) -> dict[str, Any]:
+    def _usage(cls, value: ThreadTokenUsage | None) -> CodexUsage:
+        # The provider may omit usage; otherwise preserve its typed cumulative counters.
         if value is None:
-            return {}
-        if isinstance(value, Mapping):
-            return dict(value)
-        model_dump = getattr(value, "model_dump", None)
-        if callable(model_dump):
-            dumped = model_dump(mode="json", by_alias=True)
-            return dict(dumped) if isinstance(dumped, Mapping) else {}
-        return {}
+            return CodexUsage()
+        total = value.total
+        return CodexUsage(
+            input_tokens=total.input_tokens,
+            cached_input_tokens=total.cached_input_tokens,
+            cache_write_input_tokens=total.cache_write_input_tokens or 0,
+            output_tokens=total.output_tokens,
+            reasoning_output_tokens=total.reasoning_output_tokens,
+            total_tokens=total.total_tokens,
+            model_context_window=value.model_context_window or 0,
+        )
 
 
 class CodexResultTranslator:
