@@ -1,9 +1,19 @@
-"""Official Codex Python SDK transport for CodexHarnessAgent."""
+"""FILE: vidbyte/agents/codex/transport.py
+
+PURPOSE: Owns the optional Codex app-server client, native threads, and turns.
+ROLE IN CODEBASE: Agent and fork collaborators call these bounded wire operations.
+ARCHITECTURE NOTE: Translation precedes SDK calls; result normalization follows them.
+COMMON MODIFICATION PATTERNS: Keep errors specific to their lifecycle boundary.
+WHAT NOT TO DO IN THIS FILE: Swallow cancellation or publish raw exception text.
+KNOWN EDGE CASES: SDK run raises on failed turns; client exit may also fail.
+RELATED DOCS: https://github.com/cerredz/Vidbyte-SDK/pull/409
+TESTS: Offline transport checks and python scripts/run_ci.py.
+"""
 
 from __future__ import annotations
 
 import asyncio
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 from vidbyte.agents.codex.config import CodexContentTranslator
 from vidbyte.agents.codex.result import CodexResultSerializer
@@ -17,11 +27,14 @@ from vidbyte.lib.dataclasses.codex import (
 from vidbyte.lib.enums.failure import FailureCode
 from vidbyte.lib.errors import CodexAgentError
 
+if TYPE_CHECKING:
+    from openai_codex import TurnResult
+
 
 class _CodexThread(Protocol):
     id: str
 
-    async def run(self, input: object, **kwargs: object) -> object: ...
+    async def run(self, input: object, **kwargs: object) -> TurnResult: ...
 
 
 class _CodexClient(Protocol):
@@ -49,6 +62,7 @@ class CodexTransport:
                     turn_kwargs = CodexContentTranslator.turn_kwargs(
                         request.settings, request.output_schema, sdk
                     )
+                # SDK input constructors can reject values before a native turn starts.
                 except Exception as exc:
                     raise CodexAgentError(
                         "Codex settings or input could not be translated for the SDK.",
@@ -58,8 +72,10 @@ class CodexTransport:
                     ) from exc
                 try:
                     result = await thread.run(sdk_input, **turn_kwargs)
+                # Caller cancellation must retain asyncio semantics while the client closes.
                 except asyncio.CancelledError:
                     raise
+                # SDK execution raises on failed turns, protocol faults, or lost connections.
                 except Exception as exc:
                     raise CodexAgentError(
                         "Codex failed to execute the requested turn.",
@@ -69,8 +85,10 @@ class CodexTransport:
                     ) from exc
                 try:
                     return CodexResultSerializer.from_sdk(thread.id, result)
+                # The serializer already classified missing/invalid native responses.
                 except CodexAgentError:
                     raise
+                # A mismatched SDK result contract can fail during typed field conversion.
                 except Exception as exc:
                     raise CodexAgentError(
                         "Codex returned a result that could not be normalized.",
@@ -78,10 +96,13 @@ class CodexTransport:
                         operation="normalize_result",
                         error_type=type(exc).__name__,
                     ) from exc
+        # Cancellation during client entry, thread opening, or exit is not a provider error.
         except asyncio.CancelledError:
             raise
+        # Preserve the inner operation's failure code instead of relabeling it as startup.
         except CodexAgentError:
             raise
+        # Client configuration, process startup, and context-manager shutdown can fail here.
         except Exception as exc:
             raise CodexAgentError(
                 "Codex app-server could not be started or configured.",
@@ -107,6 +128,7 @@ class CodexTransport:
                 )
                 thread = await client.thread_fork(request.thread_id, **kwargs)
                 thread_id = str(thread.id).strip()
+                # Without a provider-confirmed id, a child cannot safely resume its fork.
                 if not thread_id:
                     raise CodexAgentError(
                         "Codex fork returned no thread id.",
@@ -114,10 +136,13 @@ class CodexTransport:
                         operation="thread_fork_result",
                     )
                 return CodexThreadIdentity(thread_id=thread_id)
+        # Fork cancellation must unwind the client and remain visible to the caller.
         except asyncio.CancelledError:
             raise
+        # A malformed fork result already has a more precise response failure code.
         except CodexAgentError:
             raise
+        # Native fork/configuration/connection failures belong to the fork operation.
         except Exception as exc:
             raise CodexAgentError(
                 "Codex failed to fork the requested thread.",
@@ -151,8 +176,10 @@ class CodexTransport:
                 request.system_prompt, request.settings, sdk
             )
             return await client.thread_start(**kwargs)
+        # Stopping thread creation/resume must not become a retryable provider failure.
         except asyncio.CancelledError:
             raise
+        # Invalid lifecycle settings or a missing/inaccessible saved thread fail here.
         except Exception as exc:
             raise CodexAgentError(
                 f"Codex failed during {operation}.",
@@ -182,6 +209,7 @@ class CodexTransport:
                 ThreadSource,
                 ThreadStartSource,
             )
+        # The optional extra may be absent, or an incompatible SDK may lack required types.
         except ImportError as exc:
             raise CodexAgentError(
                 "CodexHarnessAgent requires the optional 'vidbyte-sdk[codex]' integration.",
