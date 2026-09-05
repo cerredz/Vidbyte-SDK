@@ -100,6 +100,8 @@ class CodexContextTranslator:
         remaining = ContextManager()
         if source.manager is None:
             return remaining
+        if not source.placements:
+            return source.manager
         moved = {placement.primitive_id for placement in source.placements}
         for primitive_id, item in source.manager.registry_items():
             if primitive_id not in moved:

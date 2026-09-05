@@ -1,8 +1,19 @@
-"""Normalization of Codex turn results into Vidbyte messages."""
+"""FILE: vidbyte/agents/codex/result.py
+
+PURPOSE: Copies typed native results and validates Vidbyte structured output.
+ROLE IN CODEBASE: Separates transport snapshots from the public AgentMessage boundary.
+ARCHITECTURE NOTE: Only SDK types imported for checking; installing Codex is optional.
+COMMON MODIFICATION PATTERNS: Copy explicit SDK fields and preserve absent values.
+WHAT NOT TO DO IN THIS FILE: Reflect arbitrary objects or serialize private reasoning.
+KNOWN EDGE CASES: Interrupted turns may lack text; SDK run raises for failed turns.
+RELATED DOCS: https://github.com/cerredz/Vidbyte-SDK/pull/409
+TESTS: Offline typed-result checks and python scripts/run_ci.py.
+"""
 
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
 from vidbyte.agents.types import AgentMessage
@@ -11,13 +22,13 @@ from vidbyte.lib.constants.codex import (
     CODEX_ROOT_FORK_DEPTH,
     CODEX_SUBAGENT_ITEM_TYPES,
     CODEX_SUPPORTED_ITEM_TYPES,
-    CODEX_ZERO_DURATION_MS,
 )
 from vidbyte.lib.dataclasses.codex import (
     CodexItem,
     CodexMessageData,
     CodexResultTranslationRequest,
     CodexRunResult,
+    CodexTurnError,
     CodexUsage,
 )
 from vidbyte.lib.enums.failure import FailureCode
@@ -26,7 +37,7 @@ from vidbyte.providers.output_schema import OutputSchemaFormatter
 
 if TYPE_CHECKING:
     from openai_codex import TurnResult
-    from openai_codex.generated.v2_all import ThreadItem, ThreadTokenUsage
+    from openai_codex.generated.v2_all import ThreadItem, TokenUsageBreakdown, TurnError
 
 
 class CodexResultSerializer:
@@ -36,7 +47,7 @@ class CodexResultSerializer:
     def from_sdk(cls, thread_id: str, result: TurnResult) -> CodexRunResult:
         # Read the pinned SDK contract directly; malformed objects must not become empty data.
         final_response = result.final_response
-        if not isinstance(final_response, str) or not final_response:
+        if result.status.value == "completed" and not final_response:
             raise CodexAgentError(
                 "Codex completed without a final response.",
                 failure_code=FailureCode.CODEX_RESPONSE_INVALID.value,
@@ -47,9 +58,14 @@ class CodexResultSerializer:
             turn_id=result.id,
             status=result.status.value,
             final_response=final_response,
-            duration_ms=result.duration_ms if result.duration_ms is not None else CODEX_ZERO_DURATION_MS,
-            usage=cls._usage(result.usage),
+            duration_ms=result.duration_ms,
+            usage=cls._usage(result.usage.total, result.usage.model_context_window) if result.usage else CodexUsage(),
             items=tuple(cls._item(item) for item in result.items),
+            started_at=result.started_at,
+            completed_at=result.completed_at,
+            error=cls._error(result.error),
+            last_usage=cls._usage(result.usage.last, result.usage.model_context_window) if result.usage else None,
+            usage_available=result.usage is not None,
         )
 
     @classmethod
@@ -63,19 +79,27 @@ class CodexResultSerializer:
         return CodexItem(id=item.id, type=item.type, fields=payload)
 
     @classmethod
-    def _usage(cls, value: ThreadTokenUsage | None) -> CodexUsage:
-        # The provider may omit usage; otherwise preserve its typed cumulative counters.
-        if value is None:
-            return CodexUsage()
-        total = value.total
+    def _usage(cls, value: TokenUsageBreakdown, context_window: int | None) -> CodexUsage:
+        # Copy the selected provider snapshot without manufacturing per-turn deltas.
         return CodexUsage(
-            input_tokens=total.input_tokens,
-            cached_input_tokens=total.cached_input_tokens,
-            cache_write_input_tokens=total.cache_write_input_tokens or 0,
-            output_tokens=total.output_tokens,
-            reasoning_output_tokens=total.reasoning_output_tokens,
-            total_tokens=total.total_tokens,
-            model_context_window=value.model_context_window or 0,
+            input_tokens=value.input_tokens,
+            cached_input_tokens=value.cached_input_tokens,
+            cache_write_input_tokens=value.cache_write_input_tokens or 0,
+            output_tokens=value.output_tokens,
+            reasoning_output_tokens=value.reasoning_output_tokens,
+            total_tokens=value.total_tokens,
+            model_context_window=context_window or 0,
+        )
+
+    @staticmethod
+    def _error(value: TurnError | None) -> CodexTurnError | None:
+        # Preserve provider diagnostics only when present in the typed result contract.
+        if value is None:
+            return None
+        return CodexTurnError(
+            message=value.message,
+            additional_details=value.additional_details,
+            codex_error_info=value.codex_error_info.model_dump(mode="json", by_alias=True) if value.codex_error_info else None,
         )
 
 
@@ -89,11 +113,8 @@ class CodexResultTranslator:
         # @intent typed-provider-result
         # Validate output and publish deterministic Codex data separately from
         # generic metadata so callers never need to parse provider dictionaries.
-        result = request.result
+        result = self.normalize(request)
         agent = request.agent
-        structured = self._structured_output(
-            result.final_response, agent.output_schema, agent.name, result.status
-        )
         lineage = dict(agent.metadata)
         codex = CodexMessageData(
             thread_id=result.thread_id,
@@ -102,6 +123,13 @@ class CodexResultTranslator:
             duration_ms=result.duration_ms,
             usage=result.usage,
             items=result.items,
+            started_at=result.started_at,
+            completed_at=result.completed_at,
+            error=result.error,
+            last_usage=result.last_usage,
+            usage_available=result.usage_available,
+            final_response=result.final_response,
+            structured=result.structured,
             subagents=tuple(
                 item for item in result.items if item.type in CODEX_SUBAGENT_ITEM_TYPES
             ),
@@ -120,11 +148,22 @@ class CodexResultTranslator:
         return AgentMessage(
             sender=agent.name,
             recipient=request.recipient,
-            content=result.final_response,
+            content=result.final_response or "",
             metadata=metadata,
-            structured=structured,
+            structured=result.structured,
             codex=codex,
         )
+
+    def normalize(self, request: CodexResultTranslationRequest) -> CodexRunResult:
+        # Validate once at the Vidbyte boundary, retaining the complete native snapshot.
+        # Interrupted/failed results are diagnostic outcomes, not schema-compliant answers.
+        result = request.result
+        if result.status != "completed":
+            return replace(result, structured=None)
+        structured = self._structured_output(
+            result.final_response or "", request.agent.output_schema, request.agent.name, result.status
+        )
+        return replace(result, structured=structured)
 
     def _structured_output(
         self,

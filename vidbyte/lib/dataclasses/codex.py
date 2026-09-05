@@ -15,7 +15,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, JsonValue
 
 from vidbyte.lib.constants.codex import (
     CODEX_RESERVED_SUBAGENT_NAMES,
@@ -604,7 +604,7 @@ class CodexForkResult:
 
 @dataclass(frozen=True, slots=True)
 class CodexUsage:
-    """Stable token-usage shape returned by a Codex turn."""
+    """Provider token counters; ``last`` is not assumed to be a whole-turn delta."""
 
     input_tokens: int = 0
     cached_input_tokens: int = 0
@@ -625,31 +625,57 @@ class CodexItem:
 
 
 @dataclass(frozen=True, slots=True)
+class CodexTurnError:
+    """Public native error data, when the SDK returns it instead of raising."""
+
+    message: str
+    additional_details: str | None = None
+    codex_error_info: JsonValue = None
+
+
+@dataclass(frozen=True, slots=True)
 class CodexMessageData:
     """Typed Codex result attached to ``AgentMessage.codex``."""
 
     thread_id: str
     turn_id: str
     status: str
-    duration_ms: int
+    duration_ms: int | None
     usage: CodexUsage
     items: tuple[CodexItem, ...]
     subagents: tuple[CodexItem, ...]
     forked_from_thread_id: str = ""
     fork_depth: int = CODEX_ROOT_FORK_DEPTH
+    started_at: int | None = None
+    completed_at: int | None = None
+    error: CodexTurnError | None = None
+    last_usage: CodexUsage | None = None
+    usage_available: bool = False
+    final_response: str | None = None
+    structured: Any = None
 
 
 @dataclass(frozen=True, slots=True)
 class CodexRunResult:
-    """Transport snapshot of one completed Codex turn."""
+    """Native snapshot; the result translator populates ``structured`` after validation.
+
+    ``usage`` retains cumulative counters for compatibility; ``last_usage`` copies
+    the provider's last snapshot. Missing timing/text is distinct from zero/empty.
+    """
 
     thread_id: str
     turn_id: str
     status: str
-    final_response: str
-    duration_ms: int
+    final_response: str | None
+    duration_ms: int | None
     usage: CodexUsage
     items: tuple[CodexItem, ...]
+    started_at: int | None = None
+    completed_at: int | None = None
+    error: CodexTurnError | None = None
+    last_usage: CodexUsage | None = None
+    usage_available: bool = False
+    structured: Any = None
 
 
 @dataclass(frozen=True, slots=True)
