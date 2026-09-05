@@ -71,6 +71,7 @@ class CodexHarnessAgent:
                     input=request,
                     static_context=self.settings.additional_context,
                     context_manager=self.settings.context_manager,
+                    context_placements=self.settings.context_placements,
                 )
             )
         except Exception as exc:
@@ -83,7 +84,7 @@ class CodexHarnessAgent:
         result = await self._transport.run(
             CodexTransportRunRequest(
                 thread_id=self.thread_id,
-                system_prompt=self.settings.system_prompt,
+                system_prompt="\n\n".join(part for part in (self.settings.system_prompt, translated.developer_context) if part),
                 prompt=translated,
                 settings=self.settings.codex,
                 output_schema=self._translation.output_schema,

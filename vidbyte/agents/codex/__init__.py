@@ -4,6 +4,7 @@ from vidbyte.agents.codex.agent import CodexHarnessAgent
 from vidbyte.lib.dataclasses.codex import (
     CodexAgentSettings,
     CodexClientSettings,
+    CodexContextPlacement,
     CodexForkSettings,
     CodexHarnessAgentSettings,
     CodexImageInput,
@@ -19,6 +20,7 @@ from vidbyte.lib.dataclasses.codex import (
 )
 from vidbyte.lib.enums.codex import (
     CodexApprovalMode,
+    CodexContextAnchor,
     CodexPersonality,
     CodexReasoningEffort,
     CodexReasoningSummary,
@@ -30,7 +32,9 @@ from vidbyte.lib.enums.codex import (
 __all__ = [
     "CodexAgentSettings",
     "CodexApprovalMode",
+    "CodexContextAnchor",
     "CodexClientSettings",
+    "CodexContextPlacement",
     "CodexForkSettings",
     "CodexHarnessAgent",
     "CodexHarnessAgentSettings",

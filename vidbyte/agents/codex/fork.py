@@ -112,9 +112,12 @@ class CodexFork:
             if settings.capabilities is None
             else settings.capabilities,
             metadata=metadata,
+            context_placements=parent.context_placements
+            if settings.context_placements is None
+            else settings.context_placements,
         )
         if settings.clear_context_manager:
-            child_settings = replace(child_settings, context_manager=None)
+            child_settings = replace(child_settings, context_manager=None, context_placements=())
         if settings.clear_output_schema:
             child_settings = replace(child_settings, output_schema=None)
         return CodexVidbyteTranslator().translate_agent(child_settings).settings

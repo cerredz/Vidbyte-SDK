@@ -54,6 +54,7 @@ from vidbyte.lib.dataclasses.config import (
 from vidbyte.lib.dataclasses.codex import (
     CodexAgentSettings,
     CodexClientSettings,
+    CodexContextPlacement,
     CodexForkSettings,
     CodexHarnessAgentSettings,
     CodexImageInput,
@@ -300,6 +301,7 @@ __all__ = [
     "ContextArtifact",
     "CodexAgentSettings",
     "CodexClientSettings",
+    "CodexContextPlacement",
     "CodexForkSettings",
     "CodexHarnessAgentSettings",
     "CodexImageInput",

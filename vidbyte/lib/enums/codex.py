@@ -89,8 +89,18 @@ class CodexInputType(str, Enum):
     MENTION = "mention"
 
 
+class CodexContextAnchor(str, Enum):
+    """Adapter-owned positions around explicit current-turn input, not native history."""
+
+    BEFORE_IMAGES = "before_images"
+    AFTER_IMAGES = "after_images"
+    BEFORE_SKILLS = "before_skills"
+    AFTER_SKILLS = "after_skills"
+
+
 __all__ = [
     "CodexApprovalMode",
+    "CodexContextAnchor",
     "CodexInputType",
     "CodexPersonality",
     "CodexReasoningEffort",

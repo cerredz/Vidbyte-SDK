@@ -23,6 +23,7 @@ from vidbyte.lib.constants.codex import (
 )
 from vidbyte.lib.enums.codex import (
     CodexApprovalMode,
+    CodexContextAnchor,
     CodexInputType,
     CodexPersonality,
     CodexReasoningEffort,
@@ -269,6 +270,24 @@ class CodexAgentSettings:
 
 
 @dataclass(frozen=True, slots=True)
+class CodexContextPlacement:
+    """Move one managed primitive around the first/last matching native input.
+
+    Before anchors precede the first match; after anchors follow the last match.
+    An absent primitive or input anchor is an error, never a silent fallback.
+    """
+
+    primitive_id: str
+    anchor: CodexContextAnchor
+
+    def __post_init__(self) -> None:
+        # Validate placement independently so settings cannot hold ambiguous anchors.
+        _require_text("Codex context placement", "primitive_id", self.primitive_id)
+        if not isinstance(self.anchor, CodexContextAnchor):
+            raise ConfigurationError("Codex context placement anchor must be CodexContextAnchor.")
+
+
+@dataclass(frozen=True, slots=True)
 class CodexHarnessAgentSettings:
     """Validated Vidbyte-facing construction input for one Codex harness agent.
 
@@ -287,8 +306,10 @@ class CodexHarnessAgentSettings:
     capabilities: tuple[str, ...] = ()
     metadata: Mapping[str, Any] = field(default_factory=dict)
     thread_id: str = ""
+    context_placements: tuple[CodexContextPlacement, ...] = ()
 
     def __post_init__(self) -> None:
+        CodexContextSource(self.context_manager, self.context_placements)
         _require_text("Codex harness agent", "name", self.name)
         _require_text("Codex harness agent", "system_prompt", self.system_prompt)
         for field_name in ("additional_context", "description", "thread_id"):
@@ -391,8 +412,10 @@ class CodexRunInput:
     metadata: Mapping[str, Any] = field(default_factory=dict)
     context_items: tuple[ContextItem, ...] = ()
     context_manager: ContextManager | None = None
+    context_placements: tuple[CodexContextPlacement, ...] = ()
 
     def __post_init__(self) -> None:
+        CodexContextSource(self.context_manager, self.context_placements)
         if (
             not isinstance(self.items, tuple)
             or not self.items
@@ -443,6 +466,44 @@ class CodexPrompt:
     user_prompt: str
     recipient: str
     metadata: Mapping[str, Any]
+    developer_context: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class CodexContextSource:
+    """A manager with source-local overrides; registry membership is checked at render time."""
+
+    manager: ContextManager | None
+    placements: tuple[CodexContextPlacement, ...] = ()
+
+    def __post_init__(self) -> None:
+        # One source may override a primitive once; its live registry remains caller-owned.
+        if not isinstance(self.placements, tuple) or any(
+            not isinstance(value, CodexContextPlacement) for value in self.placements
+        ):
+            raise ConfigurationError("Codex context placements must be a tuple of CodexContextPlacement records.")
+        if len({value.primitive_id for value in self.placements}) != len(self.placements):
+            raise ConfigurationError("Codex context placements cannot repeat a primitive_id within one source.")
+        if self.placements and self.manager is None:
+            raise ConfigurationError("Codex context placements require a context_manager.")
+
+
+@dataclass(frozen=True, slots=True)
+class CodexContextInsertion:
+    """Rendered primitive at a boundary in the original input tuple."""
+
+    index: int
+    item: CodexTextInput
+
+
+@dataclass(frozen=True, slots=True)
+class CodexRenderedContext:
+    """Rendering snapshot without references to mutable registry internals."""
+
+    developer_context: str = ""
+    before_input: tuple[CodexTextInput, ...] = ()
+    after_input: tuple[CodexTextInput, ...] = ()
+    insertions: tuple[CodexContextInsertion, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -452,6 +513,7 @@ class CodexContextTranslationRequest:
     input: CodexRunInput
     static_context: str
     context_manager: ContextManager | None
+    context_placements: tuple[CodexContextPlacement, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -477,8 +539,15 @@ class CodexForkSettings:
     clear_context_manager: bool = False
     clear_output_schema: bool = False
     metadata: Mapping[str, Any] = field(default_factory=dict)
+    context_placements: tuple[CodexContextPlacement, ...] | None = None
 
     def __post_init__(self) -> None:
+        # A fork may inherit its manager; the resolved pair is validated before native creation.
+        if self.context_placements is not None:
+            if not isinstance(self.context_placements, tuple) or any(
+                not isinstance(value, CodexContextPlacement) for value in self.context_placements
+            ):
+                raise ConfigurationError("Codex fork context_placements must contain CodexContextPlacement records.")
         for field_name in ("name", "system_prompt"):
             _optional_text("Codex fork", field_name, getattr(self, field_name))
         if self.additional_context is not None:
