@@ -204,7 +204,16 @@ python -m pip install "vidbyte-sdk[codex]"
 
 ```python
 from pydantic import BaseModel
-from vidbyte import CodexAgentSettings, CodexHarnessAgent, CodexSubagentSettings
+from vidbyte import (
+    CodexAgentSettings,
+    CodexHarnessAgent,
+    CodexHarnessAgentSettings,
+    CodexReasoningEffort,
+    CodexRunInput,
+    CodexSandbox,
+    CodexSubagentSettings,
+    CodexThreadSettings,
+)
 
 
 class ChangeSummary(BaseModel):
@@ -213,18 +222,24 @@ class ChangeSummary(BaseModel):
 
 
 agent = CodexHarnessAgent(
-    name="codex-worker",
-    system_prompt="Make scoped changes and report exactly what you verified.",
-    additional_context="Preserve unrelated work in the checkout.",
-    output_schema=ChangeSummary,
-    settings=CodexAgentSettings(
-        sandbox="workspace-write",
-        subagents=CodexSubagentSettings(max_concurrent_threads=3),
-    ),
+    CodexHarnessAgentSettings(
+        name="codex-worker",
+        system_prompt="Make scoped changes and report exactly what you verified.",
+        additional_context="Preserve unrelated work in the checkout.",
+        output_schema=ChangeSummary,
+        codex=CodexAgentSettings(
+            thread=CodexThreadSettings(sandbox=CodexSandbox.WORKSPACE_WRITE),
+            subagents=CodexSubagentSettings(
+                max_concurrent_threads=3,
+                default_reasoning_effort=CodexReasoningEffort.HIGH,
+            ),
+        ),
+    )
 )
 
-reply = agent.run("Implement the requested change.")
+reply = agent.run(CodexRunInput.text("Implement the requested change."))
 print(reply.structured)
+print(reply.codex.thread_id, reply.codex.usage.total_tokens)
 ```
 
 `CodexHarnessAgent` currently translates system prompts, turn-boundary additional context, structured output, Codex thread forks, and Codex-owned subagent configuration/activity. It does not claim Vidbyte-owned iteration, middleware, tool, or durable-session semantics.

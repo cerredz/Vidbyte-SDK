@@ -7,6 +7,21 @@ description: Guides development of Vidbyte runtime primitives and native Codex o
 
 Use native harness agents when Vidbyte needs to compose an orchestration algorithm around an existing coding-agent loop. Do not model Codex or Claude as a single model call: each provider owns a full loop with tools, context management, permissions, sessions, and provider-specific events.
 
+A **runtime primitive** is a reusable Vidbyte algorithm for arranging work, not a model or a provider. Examples include “send one task to three independent coding agents and select the best result,” “have a reviewer challenge an implementation,” and “fork a proven session before trying two fixes.” The primitive owns the graph—roles, inputs, branches, acceptance rules, aggregation, and normalized output. A harness agent owns the translation into one installed provider SDK and lets that native harness keep control of its internal model/tool loop.
+
+Developers receive primitives as typed SDK objects with declared capability requirements. An application chooses a primitive, supplies one or more configured harness agents, and runs the primitive through Vidbyte. Before launch, the primitive asks each harness agent whether it can provide the required controls. Exact native controls are passed through; policy mappings are named and documented; boundary emulations are visible; unsupported requirements fail before the provider process starts.
+
+```text
+application configuration
+  -> Vidbyte runtime primitive (topology and acceptance contract)
+  -> HarnessAgent capability check and typed request
+  -> provider translator (Vidbyte concepts -> provider settings/input)
+  -> native Codex or Claude SDK loop
+  -> typed provider result -> normalized Vidbyte result
+```
+
+Build primitives in three layers: a provider-neutral contract, an orchestration implementation that depends only on that contract, and provider adapters that publish capabilities. Offer them first as Python SDK objects, then as registered/YAML-addressable primitives once their configuration is stable. Never hide a fallback: if Codex cannot enforce a turn bound that Claude can, the primitive must reject Codex or select an explicitly documented alternative policy.
+
 ## Required reading
 
 1. Read [references/runtime-primitives.md](references/runtime-primitives.md) for ownership and intended use.

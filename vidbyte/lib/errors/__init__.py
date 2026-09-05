@@ -23,6 +23,7 @@ from __future__ import annotations
 
 from vidbyte.lib.errors.base import (
     AgentExecutionError,
+    CodexAgentError,
     AgentSpeedError,
     AgentSpeedValidationError,
     AllModelsFailedError,
@@ -68,6 +69,7 @@ from vidbyte.lib.errors.base import (
 
 __all__ = [
     "AgentExecutionError",
+    "CodexAgentError",
     "AgentSpeedError",
     "AgentSpeedValidationError",
     "AllModelsFailedError",
