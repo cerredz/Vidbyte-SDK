@@ -25,7 +25,11 @@ from typing import TYPE_CHECKING, Any, Mapping, Sequence
 from vidbyte.lib.errors import AgentForkConfigurationError
 
 if TYPE_CHECKING:
-    from vidbyte.agents.runtimes.configs import ActorRuntime, LinearRuntime, MctsSearchRuntime
+    from vidbyte.agents.runtimes.configs import (
+        ActorRuntime,
+        LinearRuntime,
+        MctsSearchRuntime,
+    )
     from vidbyte.agents.settings import AgentLoopSettings
     from vidbyte.agents.settings.fallback import AgentFallbackSettings
     from vidbyte.agents.settings.tool import ToolSettings
@@ -33,6 +37,7 @@ if TYPE_CHECKING:
     from vidbyte.context.manager import ContextManager
     from vidbyte.context.primitives import ContextItem
     from vidbyte.context.window import ContextWindowAlgorithm
+    from vidbyte.lib.dataclasses.codex import CodexMessageData
     from vidbyte.lib.dataclasses.runner import RunnerHandle
     from vidbyte.lib.dataclasses.trace import TraceOption
     from vidbyte.lib.enums import AgentRuntimeType, ModelProvider
@@ -214,6 +219,8 @@ class AgentMessage:
     metadata: Mapping[str, Any] = field(default_factory=dict)
     # The validated instance when the sending agent declared an output_schema, else None.
     structured: Any = None
+    # Provider-specific deterministic result data; absent for non-Codex agents.
+    codex: CodexMessageData | None = None
 
 
 @dataclass(frozen=True, slots=True)

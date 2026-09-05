@@ -32,6 +32,14 @@ class FailureCode(str, Enum):
     CONFIGURATION_INVALID_MIDDLEWARE = "configuration.invalid_middleware"
     CONFIGURATION_INVALID_RUNTIME = "configuration.invalid_runtime"
     CONFIGURATION_INVALID_ARGUMENT = "configuration.invalid_argument"
+    CODEX_SDK_UNAVAILABLE = "codex.sdk_unavailable"
+    CODEX_VIDBYTE_TRANSLATION_FAILED = "codex.vidbyte_translation_failed"
+    CODEX_CONTENT_TRANSLATION_FAILED = "codex.content_translation_failed"
+    CODEX_THREAD_START_FAILED = "codex.thread_start_failed"
+    CODEX_THREAD_RESUME_FAILED = "codex.thread_resume_failed"
+    CODEX_TURN_FAILED = "codex.turn_failed"
+    CODEX_FORK_FAILED = "codex.fork_failed"
+    CODEX_RESPONSE_INVALID = "codex.response_invalid"
     INPUT_EMPTY = "input.empty"
     INPUT_INVALID = "input.invalid"
     INPUT_TYPE_INVALID = "input.type_invalid"
@@ -146,6 +154,12 @@ class FailureCode(str, Enum):
     @classmethod
     def from_exception(cls, exc: BaseException) -> FailureCode:
         """Map a known SDK exception family to one deterministic code."""
+        declared = getattr(exc, "failure_code", None)
+        if declared is not None:
+            try:
+                return cls(str(getattr(declared, "value", declared)))
+            except ValueError:
+                pass
         name = type(exc).__name__.lower()
         module = type(exc).__module__.lower()
         status_code = getattr(exc, "status_code", None)

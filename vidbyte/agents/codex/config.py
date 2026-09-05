@@ -1,203 +1,264 @@
-"""Typed configuration and config translation for Codex-backed agents."""
+"""Vidbyte-to-Codex and Codex-to-SDK translation boundaries."""
 
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass, field, replace
+from dataclasses import replace
 from typing import Any
 
-from vidbyte.context.manager import ContextManager
+from vidbyte.lib.dataclasses.codex import (
+    CodexAgentSettings,
+    CodexAgentTranslation,
+    CodexForkSettings,
+    CodexHarnessAgentSettings,
+    CodexImageInput,
+    CodexLocalImageInput,
+    CodexMentionInput,
+    CodexPrompt,
+    CodexSdkTypes,
+    CodexSkillInput,
+    CodexSubagentSettings,
+    CodexTextInput,
+)
 from vidbyte.lib.errors import ConfigurationError
-
-_APPROVAL_MODES = frozenset({"auto_review", "deny_all"})
-_PERSONALITIES = frozenset({"none", "friendly", "pragmatic"})
-_REASONING_EFFORTS = frozenset({"none", "minimal", "low", "medium", "high", "xhigh"})
-_REASONING_SUMMARIES = frozenset({"none", "auto", "concise", "detailed"})
-_SANDBOXES = frozenset({"read-only", "workspace-write", "full-access"})
+from vidbyte.providers.output_schema import OutputSchemaFormatter
 
 
 class CodexSettingsValidator:
-    """Validates provider settings before a Codex process is started."""
+    """Validates provider compatibility that spans settings records."""
 
     @staticmethod
-    def optional_text(field_name: str, value: str | None) -> None:
-        # Rejects blank values while allowing the provider default through None.
-        if value is not None and not value.strip():
-            raise ConfigurationError(
-                f"Codex {field_name} cannot be empty when provided."
-            )
-
-    @staticmethod
-    def choice(field_name: str, value: str | None, choices: frozenset[str]) -> None:
-        # Rejects values outside the stable SDK enum surface.
-        CodexSettingsValidator.optional_text(field_name, value)
-        if value is not None and value not in choices:
-            allowed = ", ".join(sorted(choices))
-            raise ConfigurationError(f"Codex {field_name} must be one of: {allowed}.")
-
-
-@dataclass(frozen=True, slots=True)
-class CodexSubagentSettings:
-    """Configuration for Codex-owned subagent orchestration."""
-
-    enabled: bool = True
-    max_concurrent_threads: int | None = None
-    default_model: str | None = None
-    default_reasoning_effort: str | None = None
-    interrupt_message: bool = True
-
-    def __post_init__(self) -> None:
-        # Ensures every subagent setting can be translated without coercion.
-        if self.max_concurrent_threads is not None and self.max_concurrent_threads <= 0:
-            raise ConfigurationError(
-                "Codex subagent max_concurrent_threads must be greater than zero."
-            )
-        CodexSettingsValidator.optional_text(
-            "subagent default_model", self.default_model
-        )
-        CodexSettingsValidator.choice(
-            "subagent default_reasoning_effort",
-            self.default_reasoning_effort,
-            _REASONING_EFFORTS,
-        )
-
-
-@dataclass(frozen=True, slots=True)
-class CodexAgentSettings:
-    """Stable Codex thread and turn settings exposed by the Vidbyte agent."""
-
-    model: str | None = None
-    cwd: str | None = None
-    sandbox: str | None = None
-    approval_mode: str | None = None
-    reasoning_effort: str | None = None
-    personality: str | None = None
-    summary: str | None = None
-    service_tier: str | None = None
-    ephemeral: bool = False
-    subagents: CodexSubagentSettings = field(default_factory=CodexSubagentSettings)
-
-    def __post_init__(self) -> None:
-        # Validates text fields and values represented by Codex SDK enums.
-        for field_name in ("model", "cwd", "service_tier"):
-            CodexSettingsValidator.optional_text(field_name, getattr(self, field_name))
-        CodexSettingsValidator.choice("sandbox", self.sandbox, _SANDBOXES)
-        CodexSettingsValidator.choice(
-            "approval_mode", self.approval_mode, _APPROVAL_MODES
-        )
-        CodexSettingsValidator.choice(
-            "reasoning_effort", self.reasoning_effort, _REASONING_EFFORTS
-        )
-        CodexSettingsValidator.choice("personality", self.personality, _PERSONALITIES)
-        CodexSettingsValidator.choice("summary", self.summary, _REASONING_SUMMARIES)
-
-
-@dataclass(frozen=True, slots=True)
-class CodexForkSettings:
-    """Overrides applied to one provider-native Codex thread fork."""
-
-    name: str | None = None
-    system_prompt: str | None = None
-    model: str | None = None
-    additional_context: str | None = None
-    context_manager: ContextManager | None = None
-    output_schema: type | Mapping[str, Any] | None = None
-    ephemeral: bool | None = None
-    metadata: Mapping[str, Any] = field(default_factory=dict)
-
-    def __post_init__(self) -> None:
-        # Rejects blank fork overrides before contacting the provider.
-        for field_name in ("name", "system_prompt", "model", "additional_context"):
-            CodexSettingsValidator.optional_text(
-                f"fork {field_name}", getattr(self, field_name)
-            )
-
-
-class CodexConfigurationTranslator:
-    """Builds wire-neutral SDK arguments from validated Codex settings."""
-
-    @classmethod
-    def thread_start_kwargs(cls, system_prompt: str, settings: CodexAgentSettings) -> dict[str, Any]:
-        # Builds arguments accepted when starting a new Codex thread.
-        kwargs = cls._thread_common_kwargs(system_prompt, settings)
-        kwargs["ephemeral"] = settings.ephemeral
-        if settings.personality is not None:
-            kwargs["personality"] = settings.personality
-        return kwargs
-
-    @classmethod
-    def thread_resume_kwargs(cls, system_prompt: str, settings: CodexAgentSettings) -> dict[str, Any]:
-        # Builds arguments accepted when resuming an existing Codex thread.
-        kwargs = cls._thread_common_kwargs(system_prompt, settings)
-        if settings.personality is not None:
-            kwargs["personality"] = settings.personality
-        return kwargs
-
-    @classmethod
-    def thread_fork_kwargs(cls, system_prompt: str, settings: CodexAgentSettings, ephemeral: bool | None) -> dict[str, Any]:
-        # Builds arguments accepted by the provider-native thread fork operation.
-        kwargs = cls._thread_common_kwargs(system_prompt, settings)
-        kwargs["ephemeral"] = settings.ephemeral if ephemeral is None else ephemeral
-        return kwargs
-
-    @classmethod
-    def turn_kwargs(cls, settings: CodexAgentSettings, output_schema: Mapping[str, Any] | None) -> dict[str, Any]:
-        # Builds per-turn overrides while omitting values delegated to Codex defaults.
-        values: dict[str, Any] = {
-            "effort": settings.reasoning_effort,
-            "model": settings.model,
-            "output_schema": dict(output_schema) if output_schema is not None else None,
-            "personality": settings.personality,
-            "sandbox": settings.sandbox,
-            "service_tier": settings.service_tier,
-            "summary": settings.summary,
+    def validate(settings: CodexAgentSettings) -> None:
+        # @intent reject-conflicting-cwd-sources
+        # Different cwd values at client/thread/turn layers are legal in Codex,
+        # but make a reusable adapter's repository boundary ambiguous.
+        values = {
+            value
+            for value in (settings.client.cwd, settings.thread.cwd, settings.turn.cwd)
+            if value
         }
-        return cls._without_none(values)
+        if len(values) > 1:
+            raise ConfigurationError(
+                "Codex client, thread, and turn cwd settings must agree when combined."
+            )
 
-    @classmethod
-    def with_fork_model(cls, settings: CodexAgentSettings, model: str | None, ephemeral: bool | None) -> CodexAgentSettings:
-        # Produces immutable child settings from the parent and fork overrides.
-        return replace(
+
+class CodexVidbyteTranslator:
+    """Translates Vidbyte abstractions before any Codex process starts."""
+
+    def __init__(self) -> None:
+        self._schemas = OutputSchemaFormatter()
+
+    def translate_agent(
+        self, settings: CodexHarnessAgentSettings
+    ) -> CodexAgentTranslation:
+        # @intent validate-shared-abstractions-at-construction
+        # Resolve shared schemas once so invalid Vidbyte configuration cannot
+        # launch Codex and every later turn uses one deterministic wire shape.
+        CodexSettingsValidator.validate(settings.codex)
+        translated = replace(
             settings,
-            model=settings.model if model is None else model,
-            ephemeral=settings.ephemeral if ephemeral is None else ephemeral,
+            name=settings.name.strip(),
+            system_prompt=self.system_prompt(settings.system_prompt),
+            additional_context=self.additional_context(settings.additional_context),
+            description=settings.description.strip(),
+            capabilities=tuple(value.strip() for value in settings.capabilities),
+            metadata=dict(settings.metadata),
+            thread_id=settings.thread_id.strip(),
+        )
+        return CodexAgentTranslation(
+            settings=translated,
+            output_schema=self.output_schema(settings.output_schema),
+        )
+
+    def output_schema(
+        self, schema: type | Mapping[str, Any] | None
+    ) -> Mapping[str, Any]:
+        if schema is None:
+            return {}
+        return self._schemas.annotate(self._schemas.resolve_schema(schema))
+
+    @staticmethod
+    def system_prompt(value: str) -> str:
+        return value.strip()
+
+    @staticmethod
+    def additional_context(value: str) -> str:
+        return value.strip()
+
+
+class CodexContentTranslator:
+    """Converts validated Codex records into openai-codex SDK arguments."""
+
+    @classmethod
+    def client_kwargs(cls, settings: CodexAgentSettings) -> dict[str, Any]:
+        # @intent preserve-sdk-process-controls
+        # Retain every CodexConfig control while omitting adapter sentinels.
+        client = settings.client
+        return cls._without_empty(
+            {
+                "codex_bin": client.codex_bin,
+                "launch_args_override": client.launch_args_override or None,
+                "config_overrides": client.config_overrides,
+                "cwd": client.cwd,
+                "env": dict(client.env) if client.env else None,
+                "client_name": client.client_name,
+                "client_title": client.client_title,
+                "client_version": client.client_version,
+                "experimental_api": client.experimental_api,
+            }
         )
 
     @classmethod
-    def _thread_common_kwargs(cls, system_prompt: str, settings: CodexAgentSettings) -> dict[str, Any]:
-        # Builds fields shared by start, resume, and fork calls.
-        values: dict[str, Any] = {
-            "approval_mode": settings.approval_mode,
-            "config": {"agents": cls._subagent_config(settings.subagents)},
-            "cwd": settings.cwd,
-            "developer_instructions": system_prompt,
-            "model": settings.model,
-            "sandbox": settings.sandbox,
-            "service_tier": settings.service_tier,
-        }
-        return cls._without_none(values)
+    def thread_start_kwargs(
+        cls, system_prompt: str, settings: CodexAgentSettings, sdk: CodexSdkTypes
+    ) -> dict[str, Any]:
+        values = cls._thread_common(system_prompt, settings, sdk)
+        thread = settings.thread
+        values.update(
+            cls._without_empty(
+                {
+                    "ephemeral": thread.ephemeral,
+                    "personality": cls._enum(thread.personality, sdk.personality),
+                    "service_name": thread.service_name,
+                    "session_start_source": cls._enum(
+                        thread.session_start_source, sdk.thread_start_source
+                    ),
+                }
+            )
+        )
+        return values
+
+    @classmethod
+    def thread_resume_kwargs(
+        cls, system_prompt: str, settings: CodexAgentSettings, sdk: CodexSdkTypes
+    ) -> dict[str, Any]:
+        values = cls._thread_common(system_prompt, settings, sdk)
+        values.pop("thread_source", None)
+        values.update(
+            cls._without_empty(
+                {"personality": cls._enum(settings.thread.personality, sdk.personality)}
+            )
+        )
+        return values
+
+    @classmethod
+    def thread_fork_kwargs(
+        cls, system_prompt: str, settings: CodexAgentSettings, sdk: CodexSdkTypes
+    ) -> dict[str, Any]:
+        values = cls._thread_common(system_prompt, settings, sdk)
+        values["ephemeral"] = settings.thread.ephemeral
+        return values
+
+    @classmethod
+    def turn_kwargs(
+        cls,
+        settings: CodexAgentSettings,
+        output_schema: Mapping[str, Any],
+        sdk: CodexSdkTypes,
+    ) -> dict[str, Any]:
+        turn = settings.turn
+        return cls._without_empty(
+            {
+                "approval_mode": cls._enum(turn.approval_mode, sdk.approval_mode),
+                "cwd": turn.cwd,
+                "effort": cls._enum(turn.effort, sdk.reasoning_effort),
+                "model": turn.model,
+                "output_schema": dict(output_schema) if output_schema else None,
+                "personality": cls._enum(turn.personality, sdk.personality),
+                "sandbox": cls._enum(turn.sandbox, sdk.sandbox),
+                "service_tier": turn.service_tier,
+                "summary": sdk.reasoning_summary.model_validate(turn.summary.value)
+                if turn.summary.value
+                else None,
+            }
+        )
+
+    @classmethod
+    def run_input(cls, prompt: CodexPrompt, sdk: CodexSdkTypes) -> object:
+        # @intent retain-native-codex-input-modalities
+        # Map each local input record to the matching SDK RunInput dataclass;
+        # context may add text without flattening image, skill, or mention input.
+        translated: list[object] = []
+        for item in prompt.items:
+            if isinstance(item, CodexTextInput):
+                translated.append(sdk.text_input(item.text))
+            elif isinstance(item, CodexImageInput):
+                translated.append(sdk.image_input(item.url))
+            elif isinstance(item, CodexLocalImageInput):
+                translated.append(sdk.local_image_input(item.path))
+            elif isinstance(item, CodexSkillInput):
+                translated.append(sdk.skill_input(item.name, item.path))
+            elif isinstance(item, CodexMentionInput):
+                translated.append(sdk.mention_input(item.name, item.path))
+        return translated[0] if len(translated) == 1 else translated
+
+    @classmethod
+    def _thread_common(
+        cls, system_prompt: str, settings: CodexAgentSettings, sdk: CodexSdkTypes
+    ) -> dict[str, Any]:
+        # @intent lifecycle-specific-sdk-fields
+        # Build only shared thread fields so unsupported operation-specific keys
+        # cannot leak into resume or fork requests.
+        thread = settings.thread
+        config = dict(thread.config)
+        config["agents"] = cls._subagent_config(settings.subagents)
+        return cls._without_empty(
+            {
+                "approval_mode": cls._enum(thread.approval_mode, sdk.approval_mode),
+                "base_instructions": thread.base_instructions,
+                "config": config,
+                "cwd": thread.cwd,
+                "developer_instructions": system_prompt,
+                "model": thread.model,
+                "model_provider": thread.model_provider,
+                "sandbox": cls._enum(thread.sandbox, sdk.sandbox),
+                "service_tier": thread.service_tier,
+                "thread_source": cls._enum(thread.thread_source, sdk.thread_source),
+            }
+        )
 
     @staticmethod
     def _subagent_config(settings: CodexSubagentSettings) -> dict[str, Any]:
-        # Maps Vidbyte settings to Codex's documented agents configuration keys.
         values: dict[str, Any] = {
             "enabled": settings.enabled,
-            "max_concurrent_threads_per_session": settings.max_concurrent_threads,
-            "default_subagent_model": settings.default_model,
-            "default_subagent_reasoning_effort": settings.default_reasoning_effort,
             "interrupt_message": settings.interrupt_message,
         }
-        return CodexConfigurationTranslator._without_none(values)
+        if settings.max_concurrent_threads:
+            values["max_concurrent_threads_per_session"] = (
+                settings.max_concurrent_threads
+            )
+        if settings.default_model:
+            values["default_subagent_model"] = settings.default_model
+        if settings.default_reasoning_effort.value:
+            values["default_subagent_reasoning_effort"] = (
+                settings.default_reasoning_effort.value
+            )
+        values.update({name: dict(role) for name, role in settings.roles.items()})
+        return values
 
     @staticmethod
-    def _without_none(values: Mapping[str, Any]) -> dict[str, Any]:
-        # Preserves explicit false values while removing provider-default nulls.
-        return {key: value for key, value in values.items() if value is not None}
+    def _enum(value: object, sdk_type: type) -> object | None:
+        raw = getattr(value, "value", value)
+        return sdk_type(raw) if raw else None
 
+    @staticmethod
+    def _without_empty(values: Mapping[str, Any]) -> dict[str, Any]:
+        return {
+            key: value
+            for key, value in values.items()
+            if value is not None and value != ""
+        }
+
+
+CodexConfigurationTranslator = CodexContentTranslator
 
 __all__ = [
     "CodexAgentSettings",
     "CodexConfigurationTranslator",
+    "CodexContentTranslator",
     "CodexForkSettings",
+    "CodexSettingsValidator",
     "CodexSubagentSettings",
+    "CodexVidbyteTranslator",
 ]

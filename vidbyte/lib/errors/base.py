@@ -126,6 +126,34 @@ class AgentExecutionError(VidbyteSdkError):
     """Raised when an agent cannot generate a reply."""
 
 
+class CodexAgentError(AgentExecutionError):
+    """Carries one safe, vocabulary-backed Codex adapter failure."""
+
+    DIAGNOSTIC_FIELDS = (
+        "error_kind",
+        "expected",
+        "actual",
+        "safe_runtime_details",
+        "likely_causes",
+        "repair_approaches",
+        "related_docs",
+        "relevant_tests",
+    )
+
+    def __init__(self, message: str, *, failure_code: str, operation: str, error_type: str = "") -> None:
+        self.failure_code = failure_code
+        self.operation = operation
+        self.error_kind = failure_code
+        self.expected = f"Codex adapter operation {operation!r} completing successfully"
+        self.actual = message
+        self.safe_runtime_details = {"operation": operation, "error_type": error_type}
+        self.likely_causes = ("The Codex SDK rejected input, failed a lifecycle operation, or returned an invalid result.",)
+        self.repair_approaches = ("Inspect the operation and chained exception, then correct the matching Codex settings or runtime state.",)
+        self.related_docs = ("https://developers.openai.com/codex/sdk", "https://developers.openai.com/codex/app-server")
+        self.relevant_tests = ("python scripts/run_ci.py",)
+        super().__init__(message, details={"error_kind": self.error_kind, "expected": self.expected, "actual": self.actual, "safe_runtime_details": self.safe_runtime_details, "likely_causes": self.likely_causes, "repair_approaches": self.repair_approaches, "related_docs": self.related_docs, "relevant_tests": self.relevant_tests})
+
+
 class AllModelsFailedError(AgentExecutionError):
     """Raised when every model in an agent's fallback chain has failed."""
 
