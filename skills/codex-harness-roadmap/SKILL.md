@@ -26,6 +26,7 @@ If newer implementation exists, reconcile it with the checklist before presentin
 For each selected task, explain the user-visible outcome, the Codex surface, the existing Vidbyte abstraction, proposed implementation seam, dependencies, and completion evidence. Use the smallest useful subset for a scoped question; return the complete grouped checklist when asked for the whole roadmap.
 
 Distinguish:
+
 - a public Python SDK method;
 - a lower-level app-server operation;
 - native config reachable through existing passthrough;
@@ -41,4 +42,3 @@ A native event is observable evidence, not necessarily an enforcement hook. A na
 Use the checklist's documented restrictions for hook failures, plugin readiness, permission precedence, ephemeral sessions, and host execution. Flag an unsupported requirement clearly instead of silently approximating it.
 
 If asked to implement a subset, first refresh its evidence and define its scope using the repository's normal development workflow. Mark tasks complete only after the behavior and relevant verification exist.
-

@@ -1,6 +1,6 @@
 # Design Doc: Codex Harness Roadmap Skill
 
-**Status:** Draft
+**Status:** Implemented (documentation)
 **Author:** Codex
 **Created:** 2026-09-05
 **Last Updated:** 2026-09-05
@@ -233,3 +233,9 @@ Push and open a draft PR targeting main. Wait for Python 3.11/3.12 source, stati
 - What: Add streaming, tools, and sessions together with the checklist.
 - Why rejected: The authorized change is a roadmap skill; runtime implementation needs its own scoped design.
 
+## Refinement Checklist
+
+- [x] [Notable] Distinguish existing AgentInput fields from a future media bridge. The audit confirmed that current AgentInput carries prompt/context/metadata only; V01 and the translation map now state this explicitly.
+- [x] [Minor] Use the complete repository-relative sandbox dataclass path and separate the skill's introductory text from its list with a blank line.
+
+Reconciled all nine functional requirements and all five manifest entries with the completed files. The result contains 100 unique pending task IDs, 20 reviewed official source pages, 25 abstraction mappings, surface/maturity labels, domain completion criteria, and delivery dependencies. No unresolved Critical or Notable gaps and no scope deviations remain.
