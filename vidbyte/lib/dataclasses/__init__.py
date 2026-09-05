@@ -67,6 +67,7 @@ from vidbyte.lib.dataclasses.codex import (
     CodexTextInput,
     CodexThreadSettings,
     CodexTurnSettings,
+    CodexTurnError,
 )
 from vidbyte.lib.dataclasses.context import (
     BaseAgentContext,
@@ -314,6 +315,7 @@ __all__ = [
     "CodexTextInput",
     "CodexThreadSettings",
     "CodexTurnSettings",
+    "CodexTurnError",
     "ContextBudget",
     "ContextItem",
     "ContextMessage",

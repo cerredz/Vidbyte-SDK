@@ -46,6 +46,7 @@ from vidbyte.agents.codex import (
     CodexThreadSource,
     CodexThreadStartSource,
     CodexTurnSettings,
+    CodexTurnError,
 )
 from vidbyte.agents.fallback import AgentFallback, FallbackTransform
 from vidbyte.agents.continual_trace import ContinualTraceAgent
@@ -210,6 +211,7 @@ __all__ = [
     "CodexThreadSource",
     "CodexThreadStartSource",
     "CodexTurnSettings",
+    "CodexTurnError",
     "ContinualTraceAgent",
     "HandoffAgent",
     "MagenticOneOrchestrator",

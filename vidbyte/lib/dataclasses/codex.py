@@ -284,7 +284,9 @@ class CodexContextPlacement:
         # Validate placement independently so settings cannot hold ambiguous anchors.
         _require_text("Codex context placement", "primitive_id", self.primitive_id)
         if not isinstance(self.anchor, CodexContextAnchor):
-            raise ConfigurationError("Codex context placement anchor must be CodexContextAnchor.")
+            raise ConfigurationError(
+                "Codex context placement anchor must be CodexContextAnchor."
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -481,11 +483,19 @@ class CodexContextSource:
         if not isinstance(self.placements, tuple) or any(
             not isinstance(value, CodexContextPlacement) for value in self.placements
         ):
-            raise ConfigurationError("Codex context placements must be a tuple of CodexContextPlacement records.")
-        if len({value.primitive_id for value in self.placements}) != len(self.placements):
-            raise ConfigurationError("Codex context placements cannot repeat a primitive_id within one source.")
+            raise ConfigurationError(
+                "Codex context placements must be a tuple of CodexContextPlacement records."
+            )
+        if len({value.primitive_id for value in self.placements}) != len(
+            self.placements
+        ):
+            raise ConfigurationError(
+                "Codex context placements cannot repeat a primitive_id within one source."
+            )
         if self.placements and self.manager is None:
-            raise ConfigurationError("Codex context placements require a context_manager.")
+            raise ConfigurationError(
+                "Codex context placements require a context_manager."
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -543,11 +553,7 @@ class CodexForkSettings:
 
     def __post_init__(self) -> None:
         # A fork may inherit its manager; the resolved pair is validated before native creation.
-        if self.context_placements is not None:
-            if not isinstance(self.context_placements, tuple) or any(
-                not isinstance(value, CodexContextPlacement) for value in self.context_placements
-            ):
-                raise ConfigurationError("Codex fork context_placements must contain CodexContextPlacement records.")
+        self._validate_context_placements()
         for field_name in ("name", "system_prompt"):
             _optional_text("Codex fork", field_name, getattr(self, field_name))
         if self.additional_context is not None:
@@ -583,6 +589,18 @@ class CodexForkSettings:
         ):
             raise ConfigurationError(
                 "Codex fork context_manager must be a ContextManager."
+            )
+
+    def _validate_context_placements(self) -> None:
+        # None means inherit; validate concrete overrides before creating any native fork.
+        if self.context_placements is None:
+            return
+        if not isinstance(self.context_placements, tuple) or any(
+            not isinstance(value, CodexContextPlacement)
+            for value in self.context_placements
+        ):
+            raise ConfigurationError(
+                "Codex fork context_placements must contain CodexContextPlacement records."
             )
 
 

@@ -16,6 +16,7 @@ from vidbyte.lib.dataclasses.codex import (
     CodexSubagentSettings,
     CodexTextInput,
     CodexThreadSettings,
+    CodexTurnError,
     CodexTurnSettings,
 )
 from vidbyte.lib.enums.codex import (
@@ -54,4 +55,5 @@ __all__ = [
     "CodexThreadSource",
     "CodexThreadStartSource",
     "CodexTurnSettings",
+    "CodexTurnError",
 ]

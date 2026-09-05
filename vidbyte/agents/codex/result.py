@@ -59,12 +59,16 @@ class CodexResultSerializer:
             status=result.status.value,
             final_response=final_response,
             duration_ms=result.duration_ms,
-            usage=cls._usage(result.usage.total, result.usage.model_context_window) if result.usage else CodexUsage(),
+            usage=cls._usage(result.usage.total, result.usage.model_context_window)
+            if result.usage
+            else CodexUsage(),
             items=tuple(cls._item(item) for item in result.items),
             started_at=result.started_at,
             completed_at=result.completed_at,
             error=cls._error(result.error),
-            last_usage=cls._usage(result.usage.last, result.usage.model_context_window) if result.usage else None,
+            last_usage=cls._usage(result.usage.last, result.usage.model_context_window)
+            if result.usage
+            else None,
             usage_available=result.usage is not None,
         )
 
@@ -74,12 +78,20 @@ class CodexResultSerializer:
         # Only reviewed SDK variants may expose payloads. Omit reasoning content
         # at the serialization boundary instead of copying it and deleting it later.
         item = value.root
-        excluded = {"id", "type", "content"} if item.type == "reasoning" else {"id", "type"}
-        payload = item.model_dump(mode="json", by_alias=True, exclude=excluded) if item.type in CODEX_SUPPORTED_ITEM_TYPES else {}
+        excluded = (
+            {"id", "type", "content"} if item.type == "reasoning" else {"id", "type"}
+        )
+        payload = (
+            item.model_dump(mode="json", by_alias=True, exclude=excluded)
+            if item.type in CODEX_SUPPORTED_ITEM_TYPES
+            else {}
+        )
         return CodexItem(id=item.id, type=item.type, fields=payload)
 
     @classmethod
-    def _usage(cls, value: TokenUsageBreakdown, context_window: int | None) -> CodexUsage:
+    def _usage(
+        cls, value: TokenUsageBreakdown, context_window: int | None
+    ) -> CodexUsage:
         # Copy the selected provider snapshot without manufacturing per-turn deltas.
         return CodexUsage(
             input_tokens=value.input_tokens,
@@ -99,7 +111,11 @@ class CodexResultSerializer:
         return CodexTurnError(
             message=value.message,
             additional_details=value.additional_details,
-            codex_error_info=value.codex_error_info.model_dump(mode="json", by_alias=True) if value.codex_error_info else None,
+            codex_error_info=value.codex_error_info.model_dump(
+                mode="json", by_alias=True
+            )
+            if value.codex_error_info
+            else None,
         )
 
 
@@ -155,13 +171,17 @@ class CodexResultTranslator:
         )
 
     def normalize(self, request: CodexResultTranslationRequest) -> CodexRunResult:
+        # @intent validate-only-completed-answers
         # Validate once at the Vidbyte boundary, retaining the complete native snapshot.
         # Interrupted/failed results are diagnostic outcomes, not schema-compliant answers.
         result = request.result
         if result.status != "completed":
             return replace(result, structured=None)
         structured = self._structured_output(
-            result.final_response or "", request.agent.output_schema, request.agent.name, result.status
+            result.final_response or "",
+            request.agent.output_schema,
+            request.agent.name,
+            result.status,
         )
         return replace(result, structured=structured)
 

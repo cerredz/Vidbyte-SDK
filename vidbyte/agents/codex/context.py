@@ -49,47 +49,84 @@ class CodexContextTranslator:
         # Render the live managers each turn so edits/removals are reflected locally.
         # Do not deduplicate equal text: recitations and distinct records are intentional.
         request = translation.input
-        rendered = tuple(cls._render_manager(source, request.items) for source in cls._sources(translation))
+        rendered = tuple(
+            cls._render_manager(source, request.items)
+            for source in cls._sources(translation)
+        )
         prefix = cls._text_items((translation.static_context,))
         prefix += tuple(item for source in rendered for item in source.before_input)
-        prefix += cls._text_items(tuple(item.to_context_text() for item in request.context_items))
-        body = cls._insert_context(request.items, tuple(item for source in rendered for item in source.insertions))
+        prefix += cls._text_items(
+            tuple(item.to_context_text() for item in request.context_items)
+        )
+        body = cls._insert_context(
+            request.items,
+            tuple(item for source in rendered for item in source.insertions),
+        )
         suffix = tuple(item for source in rendered for item in source.after_input)
         return CodexPrompt(
             items=(*prefix, *body, *suffix),
-            user_prompt="\n\n".join(item.text for item in request.items if isinstance(item, CodexTextInput)),
+            user_prompt="\n\n".join(
+                item.text for item in request.items if isinstance(item, CodexTextInput)
+            ),
             recipient=request.recipient,
             metadata=dict(request.metadata),
-            developer_context="\n\n".join(source.developer_context for source in rendered if source.developer_context),
+            developer_context="\n\n".join(
+                source.developer_context
+                for source in rendered
+                if source.developer_context
+            ),
         )
 
     @staticmethod
-    def _sources(translation: CodexContextTranslationRequest) -> tuple[CodexContextSource, ...]:
+    def _sources(
+        translation: CodexContextTranslationRequest,
+    ) -> tuple[CodexContextSource, ...]:
+        # @intent source-identity-not-text-deduplication
         # A manager supplied at both scopes is one source; request overrides win by id.
         request = translation.input
+        CodexContextSource(translation.context_manager, translation.context_placements)
         if translation.context_manager is request.context_manager:
-            placements = {value.primitive_id: value for value in translation.context_placements}
-            placements.update({value.primitive_id: value for value in request.context_placements})
-            return (CodexContextSource(request.context_manager, tuple(placements.values())),)
+            placements = {
+                value.primitive_id: value for value in translation.context_placements
+            }
+            placements.update(
+                {value.primitive_id: value for value in request.context_placements}
+            )
+            return (
+                CodexContextSource(request.context_manager, tuple(placements.values())),
+            )
         return (
-            CodexContextSource(translation.context_manager, translation.context_placements),
+            CodexContextSource(
+                translation.context_manager, translation.context_placements
+            ),
             CodexContextSource(request.context_manager, request.context_placements),
         )
 
     @classmethod
-    def _render_manager(cls, source: CodexContextSource, items: tuple[CodexInputItem, ...]) -> CodexRenderedContext:
+    def _render_manager(
+        cls, source: CodexContextSource, items: tuple[CodexInputItem, ...]
+    ) -> CodexRenderedContext:
         # The manager owns full zone rendering; only explicitly anchored records leave it.
         manager = source.manager
         if manager is None:
             return CodexRenderedContext()
-        insertions = tuple(cls._render_insertion(manager, placement, items) for placement in source.placements)
+        insertions = tuple(
+            cls._render_insertion(manager, placement, items)
+            for placement in source.placements
+        )
         remaining = cls._remaining_manager(source)
-        top = remaining.render_conversation_messages(ContextWindowPlacement.TOP_OF_CONVERSATION)
-        end = remaining.render_conversation_messages(ContextWindowPlacement.END_OF_CONVERSATION)
+        top = remaining.render_conversation_messages(
+            ContextWindowPlacement.TOP_OF_CONVERSATION
+        )
+        end = remaining.render_conversation_messages(
+            ContextWindowPlacement.END_OF_CONVERSATION
+        )
         return CodexRenderedContext(
             developer_context=remaining.render_primitives_zone(),
             before_input=cls._text_items(tuple(message["content"] for message in top))
-            + cls._text_items(tuple(item.to_context_text() for item in manager.items())),
+            + cls._text_items(
+                tuple(item.to_context_text() for item in manager.items())
+            ),
             after_input=cls._text_items(tuple(message["content"] for message in end)),
             insertions=insertions,
         )
@@ -105,35 +142,61 @@ class CodexContextTranslator:
         moved = {placement.primitive_id for placement in source.placements}
         for primitive_id, item in source.manager.registry_items():
             if primitive_id not in moved:
-                placement = source.manager.placement_for(primitive_id) or ContextWindowPlacement.END_OF_CONTEXT
+                placement = (
+                    source.manager.placement_for(primitive_id)
+                    or ContextWindowPlacement.END_OF_CONTEXT
+                )
                 remaining.upsert(item, placement=placement)
         return remaining
 
     @classmethod
-    def _render_insertion(cls, manager: ContextManager, placement: CodexContextPlacement, items: tuple[CodexInputItem, ...]) -> CodexContextInsertion:
+    def _render_insertion(
+        cls,
+        manager: ContextManager,
+        placement: CodexContextPlacement,
+        items: tuple[CodexInputItem, ...],
+    ) -> CodexContextInsertion:
         # Reject unresolved intent instead of silently moving a primitive to a fallback zone.
         primitive = manager.get_by_id(placement.primitive_id)
         if primitive is None:
-            raise ConfigurationError(f"Codex context placement references missing primitive {placement.primitive_id!r}.")
+            raise ConfigurationError(
+                f"Codex context placement references missing primitive {placement.primitive_id!r}."
+            )
         return CodexContextInsertion(
             index=cls._anchor_index(placement.anchor, items),
             item=CodexTextInput(primitive.to_context_text()),
         )
 
     @staticmethod
-    def _anchor_index(anchor: CodexContextAnchor, items: tuple[CodexInputItem, ...]) -> int:
+    def _anchor_index(
+        anchor: CodexContextAnchor, items: tuple[CodexInputItem, ...]
+    ) -> int:
         # Before uses the first matching item; after uses the last, including local images.
-        image_anchors = (CodexContextAnchor.BEFORE_IMAGES, CodexContextAnchor.AFTER_IMAGES)
-        kinds = (CodexImageInput, CodexLocalImageInput) if anchor in image_anchors else (CodexSkillInput,)
+        image_anchors = (
+            CodexContextAnchor.BEFORE_IMAGES,
+            CodexContextAnchor.AFTER_IMAGES,
+        )
+        kinds = (
+            (CodexImageInput, CodexLocalImageInput)
+            if anchor in image_anchors
+            else (CodexSkillInput,)
+        )
         matches = [index for index, item in enumerate(items) if isinstance(item, kinds)]
         if not matches:
-            raise ConfigurationError(f"Codex context anchor {anchor.value!r} has no matching input item.")
-        if anchor in (CodexContextAnchor.BEFORE_IMAGES, CodexContextAnchor.BEFORE_SKILLS):
+            raise ConfigurationError(
+                f"Codex context anchor {anchor.value!r} has no matching input item."
+            )
+        if anchor in (
+            CodexContextAnchor.BEFORE_IMAGES,
+            CodexContextAnchor.BEFORE_SKILLS,
+        ):
             return matches[0]
         return matches[-1] + 1
 
     @staticmethod
-    def _insert_context(items: tuple[CodexInputItem, ...], insertions: tuple[CodexContextInsertion, ...]) -> tuple[CodexInputItem, ...]:
+    def _insert_context(
+        items: tuple[CodexInputItem, ...], insertions: tuple[CodexContextInsertion, ...]
+    ) -> tuple[CodexInputItem, ...]:
         # Original input positions remain stable when several sources share an anchor.
         boundaries: dict[int, list[CodexTextInput]] = {}
         for insertion in insertions:

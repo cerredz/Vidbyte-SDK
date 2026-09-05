@@ -11,7 +11,7 @@ TESTS: python scripts/run_ci.py.
 
 from __future__ import annotations
 
-from enum import Enum
+from enum import Enum, StrEnum
 
 
 class CodexApprovalMode(str, Enum):
@@ -89,7 +89,7 @@ class CodexInputType(str, Enum):
     MENTION = "mention"
 
 
-class CodexContextAnchor(str, Enum):
+class CodexContextAnchor(StrEnum):
     """Adapter-owned positions around explicit current-turn input, not native history."""
 
     BEFORE_IMAGES = "before_images"

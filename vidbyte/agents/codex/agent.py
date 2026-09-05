@@ -84,7 +84,14 @@ class CodexHarnessAgent:
         result = await self._transport.run(
             CodexTransportRunRequest(
                 thread_id=self.thread_id,
-                system_prompt="\n\n".join(part for part in (self.settings.system_prompt, translated.developer_context) if part),
+                system_prompt="\n\n".join(
+                    part
+                    for part in (
+                        self.settings.system_prompt,
+                        translated.developer_context,
+                    )
+                    if part
+                ),
                 prompt=translated,
                 settings=self.settings.codex,
                 output_schema=self._translation.output_schema,
