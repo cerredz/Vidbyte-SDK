@@ -194,6 +194,116 @@ reply = image_agent.run("A clean product mockup on a white desk")
 print(reply.content)
 ```
 
+### Codex Harness Agent
+
+Install the optional Codex integration when Codex should own the inner coding-agent loop while Vidbyte supplies the agent-facing configuration and result contract:
+
+```bash
+python -m pip install "vidbyte-sdk[codex]"
+```
+
+```python
+from pydantic import BaseModel
+from vidbyte import (
+    CodexAgentSettings,
+    CodexHarnessAgent,
+    CodexHarnessAgentSettings,
+    CodexReasoningEffort,
+    CodexRunInput,
+    CodexSandbox,
+    CodexSubagentSettings,
+    CodexThreadSettings,
+)
+
+
+class ChangeSummary(BaseModel):
+    summary: str
+    files_changed: list[str]
+
+
+agent = CodexHarnessAgent(
+    CodexHarnessAgentSettings(
+        name="codex-worker",
+        system_prompt="Make scoped changes and report exactly what you verified.",
+        additional_context="Preserve unrelated work in the checkout.",
+        output_schema=ChangeSummary,
+        codex=CodexAgentSettings(
+            thread=CodexThreadSettings(sandbox=CodexSandbox.WORKSPACE_WRITE),
+            subagents=CodexSubagentSettings(
+                max_concurrent_threads=3,
+                default_reasoning_effort=CodexReasoningEffort.HIGH,
+            ),
+        ),
+    )
+)
+
+reply = agent.run(CodexRunInput.text("Implement the requested change."))
+print(reply.structured)
+print(reply.codex.thread_id, reply.codex.usage.total_tokens)
+```
+
+`CodexHarnessAgent` currently translates system prompts, turn-boundary additional context, structured output, Codex thread forks, and Codex-owned subagent configuration/activity. It does not claim Vidbyte-owned iteration, middleware, tool, or durable-session semantics.
+
+Context is rendered from the live `ContextManager` on every `run`/`arun`, using
+each primitive's complete renderer without an extra adapter wrapper or truncation.
+Registry IDs, titles, ordering, recitations, and edits/removals are respected;
+the adapter does not mutate or unfreeze the manager. Primitive-specific rendering
+limits still apply. Supplying the same manager at agent and request scope renders
+it once; different managers with identical text remain distinct sources.
+
+| Vidbyte placement | Codex translation |
+| --- | --- |
+| `TOP_OF_CONTEXT`, `END_OF_CONTEXT` | Manager-rendered context zone appended after the facade's developer instructions, retaining zone order |
+| `TOP_OF_CONVERSATION` | Text before the current turn's input |
+| `END_OF_CONVERSATION`, `recite()` | Text after the current turn's input |
+| Additional context, unmanaged items, request `context_items` | Complete text blocks before the current input |
+
+These are turn-boundary translations, not access to Codex's hidden prompt or saved
+history. Conversation placements are input text, not injected assistant messages.
+`place_after_tools()` retains end-of-context ordering but cannot position text
+after Codex's native tool definitions. Removing a primitive changes future input;
+it does not erase old thread history. Context-window algorithms, middleware, and
+primitive mutation tools are not installed inside Codex's inner loop.
+
+For explicit native input anchors, give an agent or run request a manager plus
+`context_placements`. Before anchors precede the first matching item; after anchors
+follow the last. Image anchors include both URL and local images. Skill anchors
+refer to explicit `CodexSkillInput` items, not automatic skill expansion.
+
+```python
+from vidbyte import CodexContextAnchor, CodexContextPlacement
+
+placements = (
+    CodexContextPlacement("image-notes", CodexContextAnchor.AFTER_IMAGES),
+    CodexContextPlacement("skill-notes", CodexContextAnchor.AFTER_SKILLS),
+)
+# Pass context_manager=manager, context_placements=placements to settings or input.
+# Both primitive IDs and matching image/skill inputs must exist or the run fails.
+# BEFORE_IMAGES and BEFORE_SKILLS are also supported.
+```
+
+An anchor moves that primitive out of its ordinary zone for this rendering only.
+Request placements override agent placements by ID when both use the same manager.
+Forks inherit placements; override with `context_placements=()` to clear them.
+`clear_context_manager=True` also clears its inherited placements.
+
+Results expose `reply.codex.started_at`, `completed_at`, nullable `duration_ms`,
+`final_response`, native error data when returned, item details, subagent activity,
+and fork lineage. `usage` is cumulative provider usage, `last_usage` is the native
+last snapshot (not a computed whole-turn delta), and `usage_available` distinguishes
+missing usage from reported zero. Timing values retain the SDK's native units.
+Unknown item payloads and private reasoning content remain excluded.
+
+Structured output is decoded/validated at the Vidbyte result boundary and is
+available as both `reply.structured` and `reply.codex.structured`. Low-level users
+can call `CodexResultTranslator.normalize(request)` to obtain a `CodexRunResult`
+with its `structured` field populated; the raw transport snapshot is unvalidated.
+Pydantic schemas receive local model validation; mapping schemas are sent to Codex
+and locally JSON-decoded by the shared formatter, not independently JSON-Schema
+validated. Interrupted results preserve status and missing text without requiring
+a schema answer. The pinned SDK raises for failed turns; these remain classified
+`CodexAgentError` exceptions. Missing final text on a completed turn is still an error.
+
 ## Multi-Agent Orchestration
 
 Use `MultiAgent` when open-ended work needs a manager that owns the overall goal,
