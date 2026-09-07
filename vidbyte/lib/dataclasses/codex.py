@@ -35,6 +35,7 @@ from vidbyte.lib.enums.codex import (
 from vidbyte.lib.errors import ConfigurationError
 
 if TYPE_CHECKING:
+    from vidbyte.agents.pricing.records import UsageRollup
     from vidbyte.context.manager import ContextManager
     from vidbyte.context.primitives import ContextItem
 
@@ -697,13 +698,71 @@ class CodexRunResult:
 
 
 @dataclass(frozen=True, slots=True)
+class CodexUsageResponse:
+    """Presents one Codex turn to UsageTracker in the shape it duck-types.
+
+    ``model`` may be empty: Codex resolves the model itself when neither the
+    turn nor the thread names one, and inventing a name would misprice the run.
+    """
+
+    provider: str
+    model: str
+    usage: Mapping[str, Any]
+
+    def __post_init__(self) -> None:
+        # @intent validate-before-the-tracker-duck-types-it
+        # UsageTracker reads these three attributes without checking them, so a
+        # malformed shim would reach the pricing parser as silently wrong data.
+        _require_text("Codex usage response", "provider", self.provider)
+        _optional_text("Codex usage response", "model", self.model)
+        if not isinstance(self.usage, Mapping) or any(
+            not isinstance(key, str) or not key for key in self.usage
+        ):
+            raise ConfigurationError(
+                "Codex usage response usage must map non-empty string names to values."
+            )
+
+
+@dataclass(frozen=True, slots=True)
+class CodexUsageTranslationRequest:
+    """One completed turn offered to Vidbyte's shared usage accounting.
+
+    ``tracker`` stays loosely typed because ``vidbyte.lib`` may not import the
+    orchestration-tier ``UsageTracker``; only its ``record_call`` is exercised.
+    """
+
+    result: CodexRunResult
+    settings: CodexAgentSettings
+    tracker: object
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.result, CodexRunResult):
+            raise ConfigurationError(
+                "Codex usage translation result must be CodexRunResult."
+            )
+        if not isinstance(self.settings, CodexAgentSettings):
+            raise ConfigurationError(
+                "Codex usage translation settings must be CodexAgentSettings."
+            )
+        if not callable(getattr(self.tracker, "record_call", None)):
+            raise ConfigurationError(
+                "Codex usage translation tracker must expose record_call()."
+            )
+
+
+@dataclass(frozen=True, slots=True)
 class CodexResultTranslationRequest:
-    """Complete input required to build one Vidbyte AgentMessage."""
+    """Complete input required to build one Vidbyte AgentMessage.
+
+    ``usage_rollup`` is absent when no accounting ran, which is deliberately
+    distinct from a rollup that recorded zero calls.
+    """
 
     result: CodexRunResult
     agent: CodexHarnessAgentSettings
     input_metadata: Mapping[str, Any]
     recipient: str
+    usage_rollup: UsageRollup | None = None
 
 
 @dataclass(frozen=True, slots=True)
