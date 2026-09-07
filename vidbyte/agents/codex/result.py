@@ -22,6 +22,7 @@ from vidbyte.lib.constants.codex import (
     CODEX_ROOT_FORK_DEPTH,
     CODEX_SUBAGENT_ITEM_TYPES,
     CODEX_SUPPORTED_ITEM_TYPES,
+    CODEX_USAGE_ROLLUP_KEY,
 )
 from vidbyte.lib.dataclasses.codex import (
     CodexItem,
@@ -155,12 +156,16 @@ class CodexResultTranslator:
                 or CODEX_ROOT_FORK_DEPTH
             ),
         )
-        metadata = {
+        metadata: dict[str, Any] = {
             **lineage,
             **dict(request.input_metadata),
             "provider": CODEX_PROVIDER_NAME,
             "provider_item_count": len(result.items),
         }
+        # An absent rollup means no accounting ran, which is not the same fact as a
+        # rollup that recorded zero calls; omit the key rather than publishing None.
+        if request.usage_rollup is not None:
+            metadata[CODEX_USAGE_ROLLUP_KEY] = request.usage_rollup
         return AgentMessage(
             sender=agent.name,
             recipient=request.recipient,

@@ -74,8 +74,8 @@ The roadmap tracks this as **O02** ("Normalize usage accurately") and **O03** ("
 8. `cached_input_tokens` maps to `input_tokens_details.cached_tokens` and `reasoning_output_tokens` maps to `output_tokens_details.reasoning_tokens`, matching what `OpenAIUsage.from_usage_payload` reads.
 9. `cache_write_input_tokens` is preserved in the payload handed to the parser, so it survives on `OpenAIUsage.raw` despite having no typed field.
 10. `CodexHarnessAgent.get_usage()` returns the tracker's `UsageRollup`; `get_cost_usd()` returns that rollup's `cost_usd`, which is `None` when nothing was priced.
-11. `AgentMessage.metadata["usage_rollup"]` carries the same rollup object the agent API returns, with no second recording pass.
-12. Recording never fails a turn. A malformed usage snapshot marks the tracker's recording integrity as corrupted and returns the reply, rather than raising after Codex has already done the work.
+11. `AgentMessage.metadata["usage_rollup"]` and `get_usage()` report identical values, because both fold the same single ledger. `UsageTracker.rollup()` builds a fresh `UsageRollup` per call, so they are equal rather than identical objects; what must hold is that no second recording pass exists between them.
+12. Recording never fails a turn. `OpenAIUsage.from_usage_payload` reads every field through the total `coerce_int`/`nested_int` helpers, so an unparseable snapshot yields no `UsageRecord` and leaves `recording_integrity` `INTACT` rather than raising after Codex has already done the work.
 
 ### Non-Functional Requirements
 
@@ -180,7 +180,7 @@ class CodexMetricsTranslator:
     def record_usage(cls, request: CodexUsageTranslationRequest) -> UsageRecord | None: ...
 
     @staticmethod
-    def _is_recordable(request: CodexUsageTranslationRequest) -> bool: ...
+    def _recordable_usage(request: CodexUsageTranslationRequest) -> CodexUsage | None: ...
 
     @staticmethod
     def _model_name(settings: CodexAgentSettings) -> str: ...
@@ -193,7 +193,7 @@ class CodexMetricsTranslator:
 
 #### Logic / Algorithm
 
-1. Return `None` immediately unless `_is_recordable` passes: the result must have `usage_available` true, a non-`None` `last_usage`, and an empty `settings.thread.model_provider`.
+1. Ask `_recordable_usage` for the turn delta, and return `None` when it declines. It returns the usage only when `settings.thread.model_provider` is empty, `usage_available` is true, and `last_usage` is present. It returns the snapshot rather than a boolean so the caller needs no second `None` narrowing.
 2. Resolve the model as `settings.turn.model or settings.thread.model`.
 3. Build the payload from `result.last_usage`, nesting cached and reasoning counts where `OpenAIUsage.from_usage_payload` reads them and keeping `cache_write_input_tokens` as a top-level key so it survives on `OpenAIUsage.raw`.
 4. Construct `CodexUsageResponse` and call `tracker.record_call(response)`, returning whatever the tracker returns.
@@ -202,7 +202,7 @@ class CodexMetricsTranslator:
 
 - **Interrupted or failed turn.** `usage_available` is false in that case, so nothing is recorded and the rollup reports no calls. An interrupted turn that *did* report usage still records, because the tokens were genuinely spent.
 - **All-zero usage.** Recorded. Zero reported tokens is a fact, distinct from usage being absent; requirement 5 covers the absent case separately.
-- **Malformed payload.** `UsageTracker.record_call` already catches parse failures, calls `mark_recording_corrupted()`, and returns `None`. The translator does not add a second guard, because duplicating that policy would let the two copies drift.
+- **Malformed payload.** `UsageTracker.record_call` returns `None` when the parser finds no usable token field, and `ProviderUsage.coerce_int`/`nested_int` are total functions that cannot raise, so no record is written and metering integrity stays `INTACT`. The translator adds no second guard, because duplicating that policy would let the two copies drift.
 - **Custom `model_provider`.** No record at all. Recording tokens under `ModelProvider.OPENAI` for an unknown backend would let the pricing table produce a dollar figure for a model the account is not billed for.
 
 ### 6.3 CodexHarnessAgent usage surface
@@ -225,7 +225,7 @@ class CodexHarnessAgent:
 #### Logic / Algorithm
 
 1. `__init__` creates `self._usage = UsageTracker()`.
-2. `arun` calls `self._usage.reset()` after input translation and before the transport call, mirroring `BaseAgent.generate_reply`'s reset at `vidbyte/agents/base.py:602`.
+2. `arun` calls `self._usage.reset()` immediately before the transport call and after context translation, mirroring `BaseAgent.generate_reply`'s reset at `vidbyte/agents/base.py:602`. Resetting last, rather than at the top of the method, means a turn rejected during translation leaves the previous turn's rollup readable.
 3. After `self._transport.run(...)` returns, `arun` calls `CodexMetricsTranslator.record_usage(...)` with the result, the settings, and the tracker.
 4. The rollup is read once and passed into `CodexResultTranslationRequest`, so the metadata and the accessor return the same object.
 5. `get_usage()` returns `self._usage.rollup()`; `get_cost_usd()` returns `self.get_usage().cost_usd`.
@@ -234,7 +234,7 @@ class CodexHarnessAgent:
 
 - **Transport failure.** The recording call is never reached, and the tracker keeps the reset state — an empty rollup, not a stale one from the previous turn. This is why the reset happens before the transport call rather than after it.
 - **Fork.** A forked child constructs its own agent and therefore its own tracker. Usage is not inherited, which is correct: the child has not spent anything yet.
-- **Reset timing.** The reset is placed after input translation so a rejected input leaves the previous turn's rollup readable, matching the facade-state guarantee the input bridge established.
+- **Reset timing.** Because the reset is the last step before the transport call, any translation failure leaves the previous turn's rollup intact rather than clearing it for a turn that never ran. This ordering also stays correct once PR 1's input bridge adds an earlier translation step ahead of it.
 
 ### 6.4 Result metadata
 
@@ -275,6 +275,7 @@ N/A - no HTTP endpoints in this package. The public Python surface gains two met
 | CREATE | `docs/design/codex-usage-tracking.md` | This design document |
 | CREATE | `vidbyte/agents/codex/metrics.py` | `CodexMetricsTranslator` |
 | MODIFY | `vidbyte/lib/dataclasses/codex.py` | `CodexUsageResponse`, `CodexUsageTranslationRequest`, `CodexResultTranslationRequest.usage_rollup` |
+| MODIFY | `vidbyte/lib/constants/codex.py` | `CODEX_USAGE_PROVIDER` and `CODEX_USAGE_ROLLUP_KEY`, so neither string is inline (A007) |
 | MODIFY | `vidbyte/agents/codex/agent.py` | Own the tracker, drive its lifecycle, add `get_usage`/`get_cost_usd` |
 | MODIFY | `vidbyte/agents/codex/result.py` | Publish `metadata["usage_rollup"]` |
 | MODIFY | `vidbyte/agents/codex/__init__.py` | Export the new dataclasses |
@@ -283,7 +284,7 @@ N/A - no HTTP endpoints in this package. The public Python surface gains two met
 | CREATE | `tests/test_codex_usage_tracking.py` | Feature tests for the Testing Plan below |
 | CREATE | `scripts/test-codex-usage-tracking.py` | Phase 5 verification script |
 
-Totals: 4 create, 6 modify, 0 delete.
+Totals: 4 create, 7 modify, 0 delete.
 
 ---
 
@@ -302,7 +303,7 @@ All tests run offline against a fake transport; no Codex process and no `openai-
 - `CodexMetricsTranslator` -> `maps cached tokens into input_tokens_details` — [Silent Failure] — a mis-nested key parses as `None`, which understates nothing but silently loses the cache discount in the cost.
 - `CodexMetricsTranslator` -> `maps reasoning tokens into output_tokens_details` — [Silent Failure]
 - `CodexMetricsTranslator` -> `preserves cache_write_input_tokens on the parsed raw payload` — [Silent Failure] — the field has no typed counterpart and would vanish without an explicit assertion.
-- `CodexMetricsTranslator` -> `returns None and marks integrity corrupted for a malformed usage payload` — [Hidden Failure] — proves the fail-open path is the tracker's, not a swallowed exception in the translator.
+- `CodexMetricsTranslator` -> `records nothing for a usage payload whose counts are non-numeric` — [Hidden Failure] — proves the fail-open path is the tracker's parser returning None, not a swallowed exception in the translator, and that integrity is not falsely reported as corrupted.
 - `CodexUsageResponse` -> `rejects a non-mapping usage payload` — [Hidden Assumption]
 - `CodexUsageResponse` -> `accepts an empty model name` — [Edge Case]
 
