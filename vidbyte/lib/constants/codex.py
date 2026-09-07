@@ -15,6 +15,13 @@ CODEX_ROOT_FORK_DEPTH = 0
 CODEX_NEXT_FORK_DEPTH = 1
 CODEX_ZERO_DURATION_MS = 0
 CODEX_PROVIDER_NAME = "codex"
+# Identifies a checkpoint's provider state so Session's restore path can dispatch
+# to this adapter without vidbyte.sessions importing vidbyte.agents (A006).
+CODEX_PROVIDER_STATE_KIND = "codex"
+CODEX_RUNTIME_TYPE = "codex_harness"
+CODEX_STATE_KIND_KEY = "kind"
+CODEX_STATE_THREAD_ID_KEY = "thread_id"
+CODEX_STATE_SETTINGS_KEY = "codex"
 CODEX_SDK_EXTRA = "vidbyte-sdk[codex]"
 CODEX_RESERVED_SUBAGENT_NAMES = frozenset(
     {
@@ -53,6 +60,11 @@ CODEX_SUPPORTED_ITEM_TYPES = frozenset(
 __all__ = [
     "CODEX_NEXT_FORK_DEPTH",
     "CODEX_PROVIDER_NAME",
+    "CODEX_PROVIDER_STATE_KIND",
+    "CODEX_RUNTIME_TYPE",
+    "CODEX_STATE_KIND_KEY",
+    "CODEX_STATE_SETTINGS_KEY",
+    "CODEX_STATE_THREAD_ID_KEY",
     "CODEX_RESERVED_SUBAGENT_NAMES",
     "CODEX_ROOT_FORK_DEPTH",
     "CODEX_SDK_EXTRA",

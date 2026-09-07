@@ -23,6 +23,8 @@ from typing import TYPE_CHECKING, Any, ClassVar
 from uuid import uuid4
 
 from vidbyte.agents.types import AgentInput, AgentMessage
+from vidbyte.lib.errors import AgentExecutionError
+from vidbyte.lib.registries.session_restore import SessionRestoreRegistry
 from vidbyte.sessions.contracts import (
     Checkpoint,
     CheckpointPolicy,
@@ -30,7 +32,6 @@ from vidbyte.sessions.contracts import (
     SessionStatus,
     TraceCapture,
 )
-from vidbyte.lib.errors import AgentExecutionError
 from vidbyte.sessions.errors import SessionError
 from vidbyte.sessions.failure import Failure, FailurePhase, FailureRouter
 from vidbyte.sessions.portable import SessionBundleExporter
@@ -425,7 +426,13 @@ class Session:
 
     @staticmethod
     def _restore_agent(source: Checkpoint, *, tools: Sequence[object], middleware: Sequence[object], tracer: object | None, output_schema: object | None) -> "BaseAgent":
-        # Rebuild a BaseAgent from a checkpoint's RunState via the rehydration contract.
+        # Rebuild an agent from a checkpoint's RunState via the rehydration contract,
+        # dispatching on provider state so a provider-backed agent is not rebuilt as
+        # a BaseAgent. The registry lives in vidbyte.lib because A006 forbids this
+        # module from importing vidbyte.agents.codex directly.
+        factory = SessionRestoreRegistry.resolve(str(source.run_state.provider_state.get("kind", "")))
+        if factory is not None:
+            return factory(source.run_state, tools=tools, middleware=middleware, tracer=tracer, output_schema=output_schema)
         from vidbyte.agents.base import BaseAgent
         return BaseAgent.restore(source.run_state, tools=tools, middleware=middleware, tracer=tracer, output_schema=output_schema)
 

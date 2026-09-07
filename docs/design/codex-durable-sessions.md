@@ -73,7 +73,7 @@ The roadmap tracks this as **D01** ("Implement export and restore"), **D02** ("A
 5. `export_state()` records `provider="codex"` and `runtime_type="codex_harness"`, so a reader can tell what produced the checkpoint without inspecting `provider_state`.
 6. `export_state()` serializes `self.history` through `SessionSerializer.message_to_dict`, matching `BaseAgent.export_state`.
 7. `export_state()` contains no live objects and no secrets: the `ContextManager`, `output_schema` type, and middleware are all omitted rather than partially serialized.
-8. `CodexHarnessAgent.restore(state, *, output_schema=None, context_manager=None, middleware=())` rebuilds an agent whose `thread_id` equals the exported one, and whose history is rehydrated.
+8. `CodexHarnessAgent.restore(state, *, output_schema=None, context_manager=None)` rebuilds an agent whose `thread_id` equals the exported one, and whose history is rehydrated. Recorded `context_placements` are restored only when a `context_manager` is re-supplied, because a placement addresses a primitive inside one and `CodexHarnessAgentSettings` rejects placements without a manager.
 9. `restore()` raises `SessionError` when `provider_state` has no thread id, because a checkpoint without one cannot resume a conversation and would silently start a fresh thread.
 10. `restore()` raises `SessionError` when the exported thread was `ephemeral`, because an in-memory thread dies with the process that created it and can never be resumed.
 11. `SessionRestoreRegistry` maps a `provider_state` kind to a restore callable; `Session._restore_agent` consults it and falls back to `BaseAgent.restore` when no kind is present or registered.
@@ -226,12 +226,11 @@ class CodexHarnessAgent:
         *,
         output_schema: object | None = None,
         context_manager: object | None = None,
-        middleware: Sequence[object] = (),
         **_ignored: object,
     ) -> CodexHarnessAgent: ...
 ```
 
-`restore` accepts and discards the extra keyword arguments `Session._restore_agent` passes to `BaseAgent.restore` (`tools`, `tracer`), because a Codex agent has neither. Swallowing them in a named `**_ignored` is deliberate and documented: the registry's callable signature must accept the shared call shape.
+`restore` accepts and discards the extra keyword arguments `Session._restore_agent` passes to `BaseAgent.restore` — `tools`, `tracer`, and `middleware` — because this agent runs no Vidbyte tool loop, holds no tracer, and (on `main`) has no `middleware` settings field. Swallowing them in a named `**_ignored` is deliberate and documented: the registry's callable signature must accept the shared call shape. Once PR 4 adds `CodexHarnessAgentSettings.middleware`, `restore` should take `middleware` explicitly and pass it through; until then, accepting and ignoring it is what keeps the shared call shape working.
 
 #### Logic / Algorithm
 
@@ -241,7 +240,7 @@ class CodexHarnessAgent:
 
 `restore`:
 1. Call `require_resumable`, which raises before anything is built.
-2. Rebuild `CodexHarnessAgentSettings` from the `RunState` scalars plus the re-supplied live objects.
+2. Rebuild `CodexHarnessAgentSettings` from the `RunState` scalars plus the re-supplied live objects (`output_schema`, `context_manager`).
 3. Construct the agent, which re-runs the full construction-time translation — so a checkpoint carrying settings this SDK version rejects fails at restore rather than at the first turn.
 4. Rehydrate `history` through `SessionSerializer.message_from_dict`.
 
@@ -320,7 +319,7 @@ N/A - no HTTP endpoints. The public Python surface gains `RunState.provider_stat
 | MODIFY | `vidbyte/lib/constants/codex.py` | Provider-state kind, runtime-type, and key names (A007) |
 | MODIFY | `vidbyte/lib/dataclasses/codex.py` | `CodexSessionExportRequest` |
 | MODIFY | `vidbyte/agents/codex/agent.py` | `export_state`, `restore`, flag, self-registration |
-| MODIFY | `vidbyte/agents/codex/__init__.py` | Export the new dataclass |
+| MODIFY | `vidbyte/agents/codex/__init__.py` | Export `CodexSessionExportRequest` |
 | MODIFY | `vidbyte/agents/__init__.py` | Re-export on the agents facade |
 | MODIFY | `vidbyte/__init__.py` | Re-export for public-export integrity (S015) |
 | CREATE | `tests/test_codex_durable_sessions.py` | Feature tests for the Testing Plan below |
@@ -348,6 +347,8 @@ All tests run offline against an `InMemorySessionStore` and a fake transport.
 - `CodexHarnessAgent.export_state` -> `serializes history` — [Silent Failure]
 - `CodexHarnessAgent.restore` -> `rebuilds the same thread id and settings` — [Silent Failure]
 - `CodexHarnessAgent.restore` -> `tolerates the tools and tracer keyword arguments Session passes` — [Hidden Assumption] — the registry's callable must accept the shared call shape or resume raises `TypeError`.
+- `CodexHarnessAgent.restore` -> `restores context placements when a manager is re-supplied` — [Silent Failure] — a dropped placement silently moves a primitive back to the default context zone on the next turn.
+- `CodexHarnessAgent.restore` -> `drops placements when no manager is re-supplied` — [Edge Case] — carrying them without a manager would make `CodexHarnessAgentSettings` reject the restore outright, turning a recoverable checkpoint into a failure.
 - `SessionRestoreRegistry` -> `resolves a registered kind` — [Edge Case]
 - `SessionRestoreRegistry` -> `returns None for an unknown kind` — [Edge Case]
 - `RunState` -> `defaults provider_state to an empty mapping` — [Edge Case]

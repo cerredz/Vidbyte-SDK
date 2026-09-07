@@ -75,6 +75,9 @@ class RunState:
     context_summary: Mapping[str, Any] = field(default_factory=dict)
     trace_option: Mapping[str, Any] = field(default_factory=dict)
     output_schema: Mapping[str, Any] | None = None
+    # State owned by a provider rather than by Vidbyte (e.g. a Codex thread id).
+    # Optional with a default so payloads written before it rehydrate unchanged.
+    provider_state: Mapping[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)

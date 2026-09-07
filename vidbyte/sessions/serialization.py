@@ -147,6 +147,7 @@ class SessionSerializer:
             "context_summary": self._safe(state.context_summary),
             "trace_option": self._safe(state.trace_option),
             "output_schema": self._safe(state.output_schema),
+            "provider_state": self._safe(state.provider_state),
         }
 
     def _run_state_from_dict(self, data: Mapping[str, Any]) -> RunState:
@@ -173,6 +174,7 @@ class SessionSerializer:
             context_summary=dict(data.get("context_summary", {}) or {}),
             trace_option=dict(data.get("trace_option", {}) or {}),
             output_schema=data.get("output_schema"),
+            provider_state=dict(data.get("provider_state", {}) or {}),
         )
 
     def _scrub_metadata(self, metadata: Mapping[str, Any] | None) -> dict[str, Any]:
