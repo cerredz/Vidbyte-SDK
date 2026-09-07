@@ -1437,9 +1437,18 @@ branch.session_id                   # "" until its first successful run
 
 ## 9. File Change Manifest
 
+Complete list of every file created, modified, or carried. `CARRIED` marks files
+that already existed untracked in the working tree and were committed as the
+branch's first commit rather than authored by this change, which is why
+`skills/claude-agent-sdk-translation/SKILL.md` appears in git as an addition even
+though this change only edits it.
+
 | Action | File Path | Reason |
 |--------|-----------|--------|
 | CREATE | `docs/design/claude-harness-agent.md` | This design doc |
+| CARRIED | `skills/claude-agent-sdk-translation/SKILL.md` | Uncommitted prior work on main; carried so this doc's references to the authorizing skill resolve |
+| CARRIED | `skills/claude-agent-sdk-translation/references/feature-matrix.md` | The authorizing skill's feature inventory, carried for the same reason |
+| CARRIED | `docs/design/claude-agent-sdk-translation-skill.md` | That skill's own design doc, carried for the same reason |
 | CREATE | `vidbyte/agents/claude/__init__.py` | Adapter public exports |
 | CREATE | `vidbyte/agents/claude/agent.py` | `ClaudeHarnessAgent` facade |
 | CREATE | `vidbyte/agents/claude/config.py` | Vidbyte and SDK translation |
@@ -1464,6 +1473,8 @@ branch.session_id                   # "" until its first successful run
 | MODIFY | `vidbyte/__init__.py` | Export Claude adapter names at package root |
 | MODIFY | `pyproject.toml` | Add the `claude` optional dependency |
 | MODIFY | `skills/claude-agent-sdk-translation/SKILL.md` | Record the shipped baseline; link the roadmap |
+| MODIFY | `skills/runtime-primitives/references/claude-agent-sdk.md` | Replace the "future adapter" framing; link the roadmap |
+| MODIFY | `vidbyte/lib/errors/__init__.py` | Re-export `ClaudeAgentError` |
 
 ---
 
@@ -1555,7 +1566,9 @@ test requires `claude-agent-sdk`, an API key, or a CLI binary.
 - `ClaudeHarnessAgent` -> `passes the adopted session id as resume on the second run` — [Silent Failure]
 - `ClaudeHarnessAgent` -> `appends the developer context to the system prompt with a blank line` — [Edge Case]
 - `ClaudeHarnessAgent.run` -> `raises the sync guard inside a running event loop` — [Hidden Failure]
-- `ClaudeHarnessAgent` -> `imports successfully when claude-agent-sdk is not installed` — [Hidden Assumption]
+- `vidbyte.agents.claude` -> `cold-imports with claude-agent-sdk absent and triggers no lazy SDK import` — [Hidden Assumption]
+- `ClaudeHarnessAgent` -> `a run without the SDK installed fails as claude.sdk_unavailable` — [Hidden Assumption]
+- `ClaudeHarnessAgent.arun` -> `propagates CancelledError unwrapped through the facade` — [Hidden Failure]
 
 **Errors and exports**
 - `ClaudeAgentError` -> `exposes all eight DIAGNOSTIC_FIELDS as attributes and in details` — [Hidden Assumption]

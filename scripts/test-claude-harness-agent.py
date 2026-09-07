@@ -1004,12 +1004,24 @@ def check_agent_history_grows() -> None:
 
 
 def check_package_imports_without_sdk() -> None:
+    # Purges the adapter modules so this exercises a genuine cold import, not a cache hit.
     uninstall_fake_sdk()
+    purged = [name for name in sys.modules if name.startswith("vidbyte.agents.claude")]
+    saved = {name: sys.modules.pop(name) for name in purged}
     try:
         import importlib
 
         module = importlib.import_module("vidbyte.agents.claude")
-        assert module.ClaudeHarnessAgent is ClaudeHarnessAgent
+        assert module.ClaudeHarnessAgent.__name__ == "ClaudeHarnessAgent"
+        assert "claude_agent_sdk" not in sys.modules, "the SDK import is not lazy"
+    finally:
+        sys.modules.update(saved)
+        install_fake_sdk()
+
+
+def check_missing_sdk_fails_at_run() -> None:
+    uninstall_fake_sdk()
+    try:
         live = agent()
         expect_failure_code(
             lambda: live.run(ClaudeRunInput.text("go")),
@@ -1017,6 +1029,19 @@ def check_package_imports_without_sdk() -> None:
         )
     finally:
         install_fake_sdk()
+
+
+def check_agent_propagates_cancellation() -> None:
+    reset_fake()
+    SCRIPTED_TURNS.append({"messages": (), "raise": asyncio.CancelledError()})
+    live = agent()
+    try:
+        asyncio.run(live.arun(ClaudeRunInput.text("go")))
+    except asyncio.CancelledError:
+        return
+    except ClaudeAgentError as exc:
+        raise AssertionError(f"cancellation became {exc.failure_code}") from exc
+    raise AssertionError("expected CancelledError from arun")
 
 
 # ---------------------------------------------------------------------------
@@ -1179,7 +1204,9 @@ SUITE = [
     ("agent appends developer context to the system prompt [Edge Case]", check_agent_appends_developer_context),
     ("agent run guards a nested event loop [Hidden Failure]", check_agent_sync_guard_inside_loop),
     ("agent records history and last reply [Edge Case]", check_agent_history_grows),
-    ("package imports and fails cleanly without the SDK [Hidden Assumption]", check_package_imports_without_sdk),
+    ("package cold-imports with no lazy SDK import [Hidden Assumption]", check_package_imports_without_sdk),
+    ("a run without the SDK fails as sdk_unavailable [Hidden Assumption]", check_missing_sdk_fails_at_run),
+    ("agent arun propagates CancelledError unwrapped [Hidden Failure]", check_agent_propagates_cancellation),
     ("error carries the full diagnostic packet [Hidden Assumption]", check_error_carries_diagnostic_packet),
     ("failure vocabulary has ten unique claude codes [Edge Case]", check_failure_codes_present_and_unique),
     ("root package exports every adapter name [Silent Failure]", check_root_exports_complete),
