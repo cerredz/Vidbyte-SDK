@@ -11,6 +11,7 @@ from vidbyte.agents.codex.result import CodexResultTranslator
 from vidbyte.agents.codex.transport import CodexTransport
 from vidbyte.agents.types import AgentMessage
 from vidbyte.lib.dataclasses.codex import (
+    CodexAgentInput,
     CodexContextTranslationRequest,
     CodexForkRequest,
     CodexForkSettings,
@@ -61,14 +62,15 @@ class CodexHarnessAgent:
     def system_prompt(self) -> str:
         return self.settings.system_prompt
 
-    async def arun(self, request: CodexRunInput) -> AgentMessage:
+    async def arun(self, request: CodexAgentInput) -> AgentMessage:
         # @intent typed-native-turn-boundary
         # Execute Codex only after Vidbyte input is translated; bypassing this
         # boundary would silently drop context or native input modalities.
+        run_input = self._translate_input(request)
         try:
             translated = CodexContextTranslator.translate(
                 CodexContextTranslationRequest(
-                    input=request,
+                    input=run_input,
                     static_context=self.settings.additional_context,
                     context_manager=self.settings.context_manager,
                     context_placements=self.settings.context_placements,
@@ -111,7 +113,7 @@ class CodexHarnessAgent:
         self.last_reply = reply
         return reply
 
-    def run(self, request: CodexRunInput) -> AgentMessage:
+    def run(self, request: CodexAgentInput) -> AgentMessage:
         # @intent no-nested-event-loop
         # Guard the synchronous boundary because nesting asyncio.run would fail
         # after partially preparing mutable agent state.
@@ -124,6 +126,21 @@ class CodexHarnessAgent:
             failure_code=FailureCode.CODEX_TURN_FAILED.value,
             operation="run_sync_guard",
         )
+
+    def _translate_input(self, request: CodexAgentInput) -> CodexRunInput:
+        # @intent reject-input-before-any-native-work
+        # Convert a generic Vidbyte call shape into one native request before any
+        # facade state is read, so a rejected input cannot start a Codex thread
+        # or leave this agent holding half-updated turn state.
+        try:
+            return self._vidbyte.translate_input(request)
+        except Exception as exc:
+            raise CodexAgentError(
+                "Vidbyte agent input could not be translated for Codex.",
+                failure_code=FailureCode.CODEX_VIDBYTE_TRANSLATION_FAILED.value,
+                operation="translate_input",
+                error_type=type(exc).__name__,
+            ) from exc
 
     async def afork(
         self, settings: CodexForkSettings = _DEFAULT_FORK_SETTINGS
