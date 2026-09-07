@@ -128,11 +128,30 @@ class HarnessExecutionResult:
     run: HarnessRun
 
 
+@dataclass(frozen=True, slots=True)
+class SinkFailureEvent:
+    """Credential-free record of one swallowed collection/sink failure.
+
+    Built by Harness._report_sink_failure() and handed to the optional
+    on_sink_error callback. `message` has already passed through
+    HarnessRedactor.safe_error_message(); `sink_type`/`error_type` are class
+    names only, never instance state, so nothing sink-instance-specific
+    (bucket name, endpoint, credentials) can leak through this event.
+    """
+
+    run_id: str
+    sink_type: str
+    error_type: str
+    message: str
+    occurred_at: str
+
+
 __all__ = [
     "HARNESS_SCHEMA_VERSION",
     "HarnessExecutionResult",
     "HarnessRun",
     "HarnessRunStatus",
     "HarnessSpec",
+    "SinkFailureEvent",
     "TrajectoryRecord",
 ]
