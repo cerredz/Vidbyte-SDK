@@ -10,9 +10,12 @@ from typing import Any
 from vidbyte.agents.codex.config import CodexVidbyteTranslator
 from vidbyte.agents.codex.context import CodexContextTranslator
 from vidbyte.agents.codex.fork import CodexFork
+from vidbyte.agents.codex.metrics import CodexMetricsTranslator
 from vidbyte.agents.codex.middleware import CodexMiddlewareRunner
 from vidbyte.agents.codex.result import CodexResultTranslator
 from vidbyte.agents.codex.transport import CodexTransport
+from vidbyte.agents.pricing.records import UsageRollup
+from vidbyte.agents.pricing.tracker import UsageTracker
 from vidbyte.agents.types import AgentMessage
 from vidbyte.lib.constants.codex import CODEX_MIDDLEWARE_METADATA_KEY
 from vidbyte.lib.dataclasses.codex import (
@@ -24,6 +27,7 @@ from vidbyte.lib.dataclasses.codex import (
     CodexResultTranslationRequest,
     CodexRunInput,
     CodexTransportRunRequest,
+    CodexUsageTranslationRequest,
 )
 from vidbyte.lib.enums.failure import FailureCode
 from vidbyte.lib.errors import CodexAgentError
@@ -57,6 +61,7 @@ class CodexHarnessAgent:
         self.last_reply: AgentMessage | None = None
         self._transport = CodexTransport()
         self._results = CodexResultTranslator()
+        self._usage = UsageTracker()
         self._forks = CodexFork(self._transport)
         self._middleware = CodexMiddlewareRunner(self.settings.middleware)
 
@@ -88,6 +93,7 @@ class CodexHarnessAgent:
                 operation="translate_context",
                 error_type=type(exc).__name__,
             ) from exc
+        self._usage.reset()
         boundary = CodexMiddlewareRequest(
             agent_name=self.settings.name, prompt=translated.user_prompt
         )
@@ -121,12 +127,20 @@ class CodexHarnessAgent:
             )
             raise
         self.thread_id = result.thread_id
+        CodexMetricsTranslator.record_usage(
+            CodexUsageTranslationRequest(
+                result=result,
+                settings=self.settings.codex,
+                tracker=self._usage,
+            )
+        )
         reply = self._results.translate(
             CodexResultTranslationRequest(
                 result=result,
                 agent=self.settings,
                 input_metadata=translated.metadata,
                 recipient=translated.recipient,
+                usage_rollup=self._usage.rollup(),
             )
         )
         after_metadata = await self._middleware.after_run(boundary)
@@ -169,6 +183,17 @@ class CodexHarnessAgent:
         if pipeline_metadata:
             metadata[CODEX_MIDDLEWARE_METADATA_KEY] = pipeline_metadata
         return replace(reply, metadata=metadata)
+
+    def get_usage(self) -> UsageRollup:
+        """Return the token-usage rollup for the current or most recent turn."""
+        return self._usage.rollup()
+
+    def get_cost_usd(self) -> float | None:
+        """Return the estimated USD cost of the most recent turn, or None when unpriced."""
+        # @intent estimate-not-invoice
+        # Codex may bill against subscription credits, so this is a local pricing-table
+        # estimate; UsageRollup.cost_complete says whether every call was priced.
+        return self.get_usage().cost_usd
 
     async def afork(
         self, settings: CodexForkSettings = _DEFAULT_FORK_SETTINGS

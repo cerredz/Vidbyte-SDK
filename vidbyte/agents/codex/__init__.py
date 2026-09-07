@@ -19,6 +19,7 @@ from vidbyte.lib.dataclasses.codex import (
     CodexThreadSettings,
     CodexTurnError,
     CodexTurnSettings,
+    CodexUsageResponse,
 )
 from vidbyte.lib.enums.codex import (
     CodexApprovalMode,
@@ -58,4 +59,5 @@ __all__ = [
     "CodexThreadStartSource",
     "CodexTurnSettings",
     "CodexTurnError",
+    "CodexUsageResponse",
 ]

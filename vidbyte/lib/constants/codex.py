@@ -31,6 +31,11 @@ CODEX_UNSUPPORTED_MIDDLEWARE_HOOKS = frozenset(
 # MiddlewarePipeline.metadata() already nests events and event_count under this
 # one key, so no separate events key is needed.
 CODEX_MIDDLEWARE_METADATA_KEY = "middleware"
+# Codex executes OpenAI models, so its token usage parses and prices through the
+# OpenAI registry. A dedicated member would duplicate that rate table verbatim.
+CODEX_USAGE_PROVIDER = "openai"
+# Matches the key the direct runtime publishes, so one caller reads both agent kinds.
+CODEX_USAGE_ROLLUP_KEY = "usage_rollup"
 CODEX_SDK_EXTRA = "vidbyte-sdk[codex]"
 CODEX_RESERVED_SUBAGENT_NAMES = frozenset(
     {
@@ -76,5 +81,7 @@ __all__ = [
     "CODEX_SDK_EXTRA",
     "CODEX_SUBAGENT_ITEM_TYPES",
     "CODEX_SUPPORTED_ITEM_TYPES",
+    "CODEX_USAGE_PROVIDER",
+    "CODEX_USAGE_ROLLUP_KEY",
     "CODEX_ZERO_DURATION_MS",
 ]
