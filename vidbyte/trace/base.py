@@ -1,4 +1,13 @@
-"""Public Trace facade for SDK tracing presets."""
+"""FILE: vidbyte/trace/base.py
+
+PURPOSE: Public Trace facade exposing built-in, provider-backed, and profiled tracing presets.
+ROLE IN CODEBASE: The single discoverable entry point users call instead of the lower-level TracerBase/TraceController/translator types directly.
+ARCHITECTURE NOTE: Every preset returns a TracerBase-compatible object; _TraceFactory resolves provider= strings into concrete ProviderTraceTranslator instances.
+COMMON MODIFICATION PATTERNS: Add a new provider by adding a raw Trace.<name>() constructor, a profiled Trace.<name>_default()-style helper, and a resolve_translator() string branch together.
+KNOWN EDGE CASES: Construction errors from provider adapters (missing package, missing credentials/endpoint) propagate unchanged; this facade never swallows them.
+RELATED DOCS: docs/design/trace-facade.md, docs/design/otel-genai-and-openinference-trace-shapes.md
+TESTS: tests/test_trace_facade.py, tests/test_otel_genai_trace_shape.py, tests/test_openinference_trace_shape.py
+"""
 
 from __future__ import annotations
 
@@ -11,7 +20,13 @@ from vidbyte.trace.controller import TraceController
 from vidbyte.trace.continual import ContinualTracer
 from vidbyte.trace.debug import DebugTracer
 from vidbyte.trace.profiles import TraceProfile
-from vidbyte.trace.providers import GenericProviderTranslator, LangSmithProviderTranslator, ProviderTraceTranslator
+from vidbyte.trace.providers import (
+    GenericProviderTranslator,
+    LangSmithProviderTranslator,
+    OpenInferenceProviderTranslator,
+    OTelGenAIProviderTranslator,
+    ProviderTraceTranslator,
+)
 from vidbyte.trace.session import SessionTraceController, SessionTracer
 
 
@@ -120,6 +135,69 @@ class Trace:
         from vidbyte.providers.tracing import PhoenixTracer
         return PhoenixTracer(endpoint=endpoint)
 
+    @staticmethod
+    def phoenix_default(endpoint: str | None = None, profile: TraceProfile | None = None) -> TraceController:
+        # Builds a Phoenix tracer wrapped in the OpenInference semantic profile.
+        return Trace.profile(Trace.phoenix(endpoint=endpoint), profile=profile or TraceProfile.default(), provider="openinference")
+
+    @staticmethod
+    def otel(endpoint: str | None = None, headers: Mapping[str, str] | None = None, service_name: str | None = None) -> TracerBase:
+        # Builds the destination-agnostic OTel tracer with the forwarded transport settings.
+        from vidbyte.providers.tracing import OTelTracer
+        return OTelTracer(endpoint=endpoint, headers=headers, service_name=service_name)
+
+    @staticmethod
+    def otel_genai(
+        endpoint: str | None = None,
+        headers: Mapping[str, str] | None = None,
+        service_name: str | None = None,
+        profile: TraceProfile | None = None,
+    ) -> TraceController:
+        # Builds an OTel tracer wrapped in the OTel GenAI semantic-conventions profile.
+        return Trace.profile(
+            Trace.otel(endpoint=endpoint, headers=headers, service_name=service_name),
+            profile=profile or TraceProfile.default(),
+            provider="otel-genai",
+        )
+
+    @staticmethod
+    def otel_genai_session(
+        endpoint: str | None = None,
+        headers: Mapping[str, str] | None = None,
+        service_name: str | None = None,
+        name: str | None = None,
+        profile: TraceProfile | None = None,
+    ) -> SessionTraceController | SessionTracer:
+        # Builds an OTel tracer wrapped in a session-capable OTel GenAI trace root.
+        inner = Trace.otel(endpoint=endpoint, headers=headers, service_name=service_name)
+        return Trace.session(inner, name=name, profile=profile or TraceProfile.default(), provider="otel-genai")
+
+    @staticmethod
+    def openinference(
+        endpoint: str | None = None,
+        headers: Mapping[str, str] | None = None,
+        service_name: str | None = None,
+        profile: TraceProfile | None = None,
+    ) -> TraceController:
+        # Builds an OTel tracer wrapped in the OpenInference semantic-conventions profile.
+        return Trace.profile(
+            Trace.otel(endpoint=endpoint, headers=headers, service_name=service_name),
+            profile=profile or TraceProfile.default(),
+            provider="openinference",
+        )
+
+    @staticmethod
+    def openinference_session(
+        endpoint: str | None = None,
+        headers: Mapping[str, str] | None = None,
+        service_name: str | None = None,
+        name: str | None = None,
+        profile: TraceProfile | None = None,
+    ) -> SessionTraceController | SessionTracer:
+        # Builds an OTel tracer wrapped in a session-capable OpenInference trace root.
+        inner = Trace.otel(endpoint=endpoint, headers=headers, service_name=service_name)
+        return Trace.session(inner, name=name, profile=profile or TraceProfile.default(), provider="openinference")
+
 
 class _TraceFactory:
     """Validation helpers for the public Trace tracer client."""
@@ -141,6 +219,10 @@ class _TraceFactory:
             return GenericProviderTranslator()
         if provider == "langsmith":
             return LangSmithProviderTranslator()
+        if provider == "otel-genai":
+            return OTelGenAIProviderTranslator()
+        if provider == "openinference":
+            return OpenInferenceProviderTranslator()
         if hasattr(provider, "translate_start"):
             return provider
         raise ConfigurationError(f"Unknown trace provider translator: {provider}.")
