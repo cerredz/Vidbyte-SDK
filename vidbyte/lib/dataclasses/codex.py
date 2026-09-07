@@ -37,6 +37,7 @@ from vidbyte.lib.errors import ConfigurationError
 if TYPE_CHECKING:
     from vidbyte.context.manager import ContextManager
     from vidbyte.context.primitives import ContextItem
+    from vidbyte.middleware.base import AgentMiddleware
 
 
 def _require_text(owner: str, field_name: str, value: str) -> None:
@@ -309,6 +310,7 @@ class CodexHarnessAgentSettings:
     metadata: Mapping[str, Any] = field(default_factory=dict)
     thread_id: str = ""
     context_placements: tuple[CodexContextPlacement, ...] = ()
+    middleware: tuple[AgentMiddleware, ...] = ()
 
     def __post_init__(self) -> None:
         CodexContextSource(self.context_manager, self.context_placements)
@@ -334,6 +336,16 @@ class CodexHarnessAgentSettings:
         ):
             raise ConfigurationError(
                 "Codex harness agent context_manager must be a ContextManager."
+            )
+        # Duck-typed because vidbyte.lib may not import the orchestration-tier
+        # AgentMiddleware; the hook-support check runs in the Codex translator.
+        if not isinstance(self.middleware, tuple) or any(
+            not callable(getattr(value, "before_run", None))
+            or not isinstance(getattr(value, "middleware_name", None), str)
+            for value in self.middleware
+        ):
+            raise ConfigurationError(
+                "Codex harness agent middleware must be a tuple of AgentMiddleware."
             )
 
 
@@ -694,6 +706,37 @@ class CodexRunResult:
     last_usage: CodexUsage | None = None
     usage_available: bool = False
     structured: Any = None
+
+
+@dataclass(frozen=True, slots=True)
+class CodexMiddlewareRequest:
+    """One turn-boundary observation offered to Vidbyte middleware.
+
+    Fields describing an inner loop are deliberately absent: Codex owns its
+    model/tool iterations, so this record carries only what is observable.
+    """
+
+    agent_name: str
+    prompt: str
+    elapsed_seconds: float = 0.0
+    error: BaseException | None = None
+
+    def __post_init__(self) -> None:
+        _require_text("Codex middleware request", "agent_name", self.agent_name)
+        if not isinstance(self.prompt, str):
+            raise ConfigurationError(
+                "Codex middleware request prompt must be a string."
+            )
+        if isinstance(self.elapsed_seconds, bool) or not isinstance(
+            self.elapsed_seconds, (int, float)
+        ):
+            raise ConfigurationError(
+                "Codex middleware request elapsed_seconds must be a number."
+            )
+        if self.elapsed_seconds < 0:
+            raise ConfigurationError(
+                "Codex middleware request elapsed_seconds must not be negative."
+            )
 
 
 @dataclass(frozen=True, slots=True)

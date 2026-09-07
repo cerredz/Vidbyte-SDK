@@ -15,6 +15,22 @@ CODEX_ROOT_FORK_DEPTH = 0
 CODEX_NEXT_FORK_DEPTH = 1
 CODEX_ZERO_DURATION_MS = 0
 CODEX_PROVIDER_NAME = "codex"
+# Codex owns its model/tool loop, so these hooks have no point at which Vidbyte
+# could refuse an action. Declaring one must fail at construction rather than
+# load successfully and never run.
+CODEX_UNSUPPORTED_MIDDLEWARE_HOOKS = frozenset(
+    {
+        "before_iteration",
+        "before_model_call",
+        "after_model_response",
+        "before_tool_call",
+        "after_tool_call",
+        "after_iteration",
+    }
+)
+# MiddlewarePipeline.metadata() already nests events and event_count under this
+# one key, so no separate events key is needed.
+CODEX_MIDDLEWARE_METADATA_KEY = "middleware"
 CODEX_SDK_EXTRA = "vidbyte-sdk[codex]"
 CODEX_RESERVED_SUBAGENT_NAMES = frozenset(
     {
@@ -52,7 +68,9 @@ CODEX_SUPPORTED_ITEM_TYPES = frozenset(
 
 __all__ = [
     "CODEX_NEXT_FORK_DEPTH",
+    "CODEX_MIDDLEWARE_METADATA_KEY",
     "CODEX_PROVIDER_NAME",
+    "CODEX_UNSUPPORTED_MIDDLEWARE_HOOKS",
     "CODEX_RESERVED_SUBAGENT_NAMES",
     "CODEX_ROOT_FORK_DEPTH",
     "CODEX_SDK_EXTRA",

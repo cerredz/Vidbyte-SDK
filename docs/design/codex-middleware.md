@@ -61,7 +61,7 @@ The roadmap's H-series covers the native-hook route, and its completion criteria
 10. A `DENY_TOOL` or `RETRY` decision raises `CodexAgentError` with `CODEX_MIDDLEWARE_UNSUPPORTED`, because no tool boundary and no retry loop exists here and silently ignoring the request would misrepresent the policy as satisfied.
 11. A `CONTINUE` decision whose transform sets `system`, `provider_messages`, or `model_visible_tool_result` raises `CODEX_MIDDLEWARE_UNSUPPORTED`, naming the field. Transform `metadata` is applied.
 12. `MiddlewareContext.hook`, `agent_name`, `message`, and `elapsed_seconds` are populated; fields describing an inner loop (`iteration_count`, `tool_call`, `model_response`) stay at their defaults, which honestly signals "not observable here."
-13. The reply's metadata carries the pipeline's merged middleware metadata and its recorded events.
+13. The reply's metadata carries the pipeline's middleware metadata under one `middleware` key. `MiddlewarePipeline.metadata()` already nests `events` and `event_count` there, so no second key is introduced.
 14. `on_model_error` never replaces the original exception. Its own decisions are recorded, but the transport's exception is what propagates.
 
 ### Non-Functional Requirements
@@ -189,13 +189,13 @@ class CodexMiddlewareRunner:
 `before_run` / `after_run`:
 1. Build a `MiddlewareContext` with the hook, agent name, message, and elapsed seconds.
 2. Await the matching `MiddlewarePipeline` method.
-3. Interpret the decision through one shared `_apply` helper and return the transform's metadata.
+3. Interpret the decision through one shared `_apply` helper, and return its decision metadata with the transform's metadata layered on top. Both are needed: `MiddlewareDecision.continue_(metadata=...)` is the ordinary way a middleware reports something, while a transform's metadata is the rarer explicit form, and `MiddlewarePipeline` already merges decision metadata across middleware in declaration order.
 
 `on_model_error`:
 1. Build a context carrying the raised exception in `MiddlewareContext.error`.
 2. Await `pipeline.on_model_error` and discard its decision beyond recording, because the original exception must propagate unchanged.
 
-`_apply` dispatches on `decision.action` through a mapping rather than an if/else ladder, so the unsupported set is visible in one place and a future `MiddlewareAction` member fails loudly instead of falling through a final `else`.
+`_apply` checks `ABORT_RUN` first, then looks the action up in a module-level `_UNREPRESENTABLE_ACTIONS` mapping that pairs each unsupported action with the reason it cannot be carried out, then rejects anything still not `CONTINUE`. Keeping the unsupported set as data rather than branches means a future `MiddlewareAction` member fails loudly through the final check instead of falling through an `else`.
 
 #### Edge Cases & Error Handling
 
@@ -250,7 +250,7 @@ N/A - no HTTP endpoints. The public Python surface gains one settings field and 
 | CREATE | `docs/design/codex-middleware.md` | This design document |
 | CREATE | `vidbyte/agents/codex/middleware.py` | `CodexMiddlewareValidator`, `CodexMiddlewareRunner` |
 | MODIFY | `vidbyte/lib/dataclasses/codex.py` | `middleware` field, `CodexMiddlewareRequest` |
-| MODIFY | `vidbyte/lib/constants/codex.py` | `CODEX_UNSUPPORTED_MIDDLEWARE_HOOKS` (A007) |
+| MODIFY | `vidbyte/lib/constants/codex.py` | `CODEX_UNSUPPORTED_MIDDLEWARE_HOOKS`, `CODEX_MIDDLEWARE_METADATA_KEY` (A007) |
 | MODIFY | `vidbyte/lib/enums/failure.py` | Two new `CODEX_MIDDLEWARE_*` codes |
 | MODIFY | `vidbyte/agents/codex/config.py` | Validate middleware in `translate_agent` |
 | MODIFY | `vidbyte/agents/codex/agent.py` | Own the runner; run the three hooks; merge metadata |
