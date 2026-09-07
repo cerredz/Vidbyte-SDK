@@ -37,6 +37,7 @@ if TYPE_CHECKING:
     from vidbyte.context.manager import ContextManager
     from vidbyte.context.primitives import ContextItem
     from vidbyte.context.window import ContextWindowAlgorithm
+    from vidbyte.lib.dataclasses.claude import ClaudeMessageData
     from vidbyte.lib.dataclasses.codex import CodexMessageData
     from vidbyte.lib.dataclasses.runner import RunnerHandle
     from vidbyte.lib.dataclasses.trace import TraceOption
@@ -221,6 +222,8 @@ class AgentMessage:
     structured: Any = None
     # Provider-specific deterministic result data; absent for non-Codex agents.
     codex: CodexMessageData | None = None
+    # Provider-specific deterministic result data; absent for non-Claude agents.
+    claude: ClaudeMessageData | None = None
 
 
 @dataclass(frozen=True, slots=True)

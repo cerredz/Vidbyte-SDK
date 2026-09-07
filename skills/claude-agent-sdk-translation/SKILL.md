@@ -13,6 +13,23 @@ provider-owned agent loop. It is not a second Claude Code product, a replacement
 `BaseAgent`, or permission to implement a runtime when the request only asks for a
 design or inventory.
 
+## Current implementation status
+
+A first adapter now exists at `vidbyte/agents/claude/`, authorized by
+`docs/design/claude-harness-agent.md` and pinned to `claude-agent-sdk` 0.2.152 as the
+optional `vidbyte-sdk[claude]` extra. It ships the declarative half of the SDK:
+one-shot `query()` per turn, session resume, lazy `fork_session` branching, context
+rendering, structured output, typed results with `total_cost_usd`, and ten
+`claude.`-prefixed failure codes.
+
+This skill still owns the disposition model and the full feature matrix. What remains
+unbuilt relative to that adapter — the persistent `ClaudeSDKClient`, hooks, the
+`can_use_tool` callback, in-process MCP tools, streaming, file checkpointing, session
+stores, and the accounting wiring — is tracked as stable task IDs in
+[`skills/claude-harness-roadmap/`](../claude-harness-roadmap/SKILL.md). Read that
+skill's checklist before proposing work, so shipped behavior is not re-proposed as
+new.
+
 ## Scope and naming
 
 - Target the open-source Python Claude Agent SDK first. Keep TypeScript parity in
@@ -114,9 +131,13 @@ Those are either outer compositions or unsupported controls.
 
 ## Candidate future module decomposition
 
-This is a planning seam, not an implementation manifest. A future design may place
-the provider-owned integration under `vidbyte/agents/claude/` (or justify another
-placement) with responsibilities separated roughly as follows:
+This is a planning seam, not an implementation manifest, and it describes the
+decomposition for the **complete** feature set. The shipped adapter deliberately
+uses the narrower `vidbyte/agents/codex/` shape instead — facade, transport, config,
+context, result, fork — because with hooks, permission callbacks, in-process MCP
+tools, streaming, and checkpointing all deferred, the modules below would be empty.
+`docs/design/claude-harness-agent.md` section 14 records that justification. Grow
+toward this decomposition as those features land:
 
 - `config.py` / `capabilities.py` - strict Claude-only options and negotiated
   capability report;
@@ -133,19 +154,26 @@ placement) with responsibilities separated roughly as follows:
   and typed error mapping.
 
 Use `vidbyte/lib/dataclasses/` for stable request/result contracts and keep any
-provider wire serialization behind class-bound helpers. Do not create these files
-until an implementation request and a new design document authorize them.
+provider wire serialization behind class-bound helpers. Do not create a new module
+here until an implementation request and a design document authorize it; the
+existing adapter's modules are already authorized.
 
 ## Implementation order for a future request
 
-Implement in this order only after the user explicitly requests implementation:
+Implement in this order only after the user explicitly requests implementation.
+Steps 1 and 2 are done, and step 3's one-shot half is done; the roadmap skill's
+delivery waves carry the current sequencing:
 
-1. Pin and record the Claude Agent SDK version and bundled runtime version; add an
-   optional dependency rather than making the base Vidbyte install depend on it.
+1. ~~Pin and record the Claude Agent SDK version and bundled runtime version; add an
+   optional dependency rather than making the base Vidbyte install depend on it.~~
+   Done: `claude-agent-sdk>=0.2.152,<0.3.0` under the `claude` extra.
 2. Add typed capability and error contracts, then validate provider configuration,
    API-key handling, working directory, and unsupported settings at construction.
+   Partly done: error contracts and settings validation exist; the capability
+   contract and unsupported-control rejection remain (roadmap group C).
 3. Build the one-shot `query()` path and the persistent `ClaudeSDKClient` path as
    two explicit modes. Normalize both into Vidbyte message/result records.
+   Partly done: the one-shot path ships; the persistent mode is roadmap group L.
 4. Translate prompts, models, budgets, thinking/effort, tools, permissions, MCP,
    structured output, and environment settings.
 5. Add streaming input/output, interrupts, queued prompts, and cancellation with
