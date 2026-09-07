@@ -14,15 +14,30 @@ Similar Files:
 
 from __future__ import annotations
 
+from vidbyte.lib.registries.actors import ActorRegistry, actor_registry
 from vidbyte.lib.registries.agents import AgentRegistry
 from vidbyte.lib.registries.components import ComponentRegistry
 from vidbyte.lib.registries.models import ProviderModelRegistry
-from vidbyte.lib.registries.pricing import OPENAI_GPT56_TIER_RATES, ModelPricing, ModelPricingRegistry, PRICING_AS_OF, PRICING_SOURCE_URL, PROVIDER_PRICING
+from vidbyte.lib.registries.pricing import (
+    OPENAI_GPT56_TIER_RATES,
+    PRICING_AS_OF,
+    PRICING_SOURCE_URL,
+    PROVIDER_PRICING,
+    ModelPricing,
+    ModelPricingRegistry,
+)
 from vidbyte.lib.registries.prompts import PromptRecord, Prompts
 from vidbyte.lib.registries.runtimes import RuntimeRegistry
-from vidbyte.lib.registries.structured_output import MODEL_SUPPORT, PROVIDER_SUPPORT, STRUCTURED_OUTPUT_AS_OF, STRUCTURED_OUTPUT_DESCRIPTIONS, StructuredOutputDescription, StructuredOutputRegistry
+from vidbyte.lib.registries.session_restore import SessionRestoreRegistry
+from vidbyte.lib.registries.structured_output import (
+    MODEL_SUPPORT,
+    PROVIDER_SUPPORT,
+    STRUCTURED_OUTPUT_AS_OF,
+    STRUCTURED_OUTPUT_DESCRIPTIONS,
+    StructuredOutputDescription,
+    StructuredOutputRegistry,
+)
 from vidbyte.lib.registries.tools import ToolRegistry
-from vidbyte.lib.registries.actors import ActorRegistry, actor_registry
 
 __all__ = [
     "AgentRegistry",
@@ -37,6 +52,7 @@ __all__ = [
     "PromptRecord",
     "Prompts",
     "RuntimeRegistry",
+    "SessionRestoreRegistry",
     "StructuredOutputRegistry",
     "StructuredOutputDescription",
     "PROVIDER_SUPPORT",

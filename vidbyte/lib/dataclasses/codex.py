@@ -697,6 +697,21 @@ class CodexRunResult:
 
 
 @dataclass(frozen=True, slots=True)
+class CodexSessionExportRequest:
+    """One agent's durable state offered to a Vidbyte checkpoint."""
+
+    settings: CodexHarnessAgentSettings
+    thread_id: str
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.settings, CodexHarnessAgentSettings):
+            raise ConfigurationError(
+                "Codex session export settings must be CodexHarnessAgentSettings."
+            )
+        _optional_text("Codex session export", "thread_id", self.thread_id)
+
+
+@dataclass(frozen=True, slots=True)
 class CodexResultTranslationRequest:
     """Complete input required to build one Vidbyte AgentMessage."""
 
