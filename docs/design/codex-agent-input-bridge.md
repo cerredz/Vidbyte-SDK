@@ -123,7 +123,7 @@ class CodexVidbyteTranslator:
     def _from_agent_input(value: AgentInput) -> CodexRunInput: ...
 ```
 
-`CodexAgentInput` is a module-level type alias declared in `vidbyte/lib/dataclasses/codex.py` next to the existing `CodexInputItem` alias:
+`CodexAgentInput` is a module-level type alias declared in `vidbyte/lib/dataclasses/codex.py`, immediately after `CodexRunInput` because it references that class:
 
 ```python
 CodexAgentInput = str | AgentInput | CodexRunInput
@@ -199,10 +199,12 @@ N/A - no HTTP endpoints in this package. The public Python surface change is two
 | MODIFY | `vidbyte/agents/codex/config.py` | Add `CodexVidbyteTranslator.translate_input()` and its `_from_agent_input` helper |
 | MODIFY | `vidbyte/agents/codex/agent.py` | Widen `arun`/`run` annotations; translate input before context translation |
 | MODIFY | `vidbyte/agents/codex/__init__.py` | Export `CodexAgentInput` |
+| MODIFY | `vidbyte/agents/__init__.py` | Re-export `CodexAgentInput` on the agents facade |
 | MODIFY | `vidbyte/__init__.py` | Re-export `CodexAgentInput` for public-export integrity (S015) |
+| CREATE | `tests/test_codex_agent_input_bridge.py` | Feature tests for the Testing Plan below |
 | CREATE | `scripts/test-codex-agent-input-bridge.py` | Phase 5 verification script |
 
-Totals: 2 create, 5 modify, 0 delete.
+Totals: 3 create, 6 modify, 0 delete.
 
 ---
 
