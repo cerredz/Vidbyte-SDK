@@ -8,7 +8,9 @@ from vidbyte.agents.codex.config import CodexVidbyteTranslator
 from vidbyte.agents.codex.context import CodexContextTranslator
 from vidbyte.agents.codex.fork import CodexFork
 from vidbyte.agents.codex.result import CodexResultTranslator
+from vidbyte.agents.codex.speed import CodexSpeedTranslator
 from vidbyte.agents.codex.transport import CodexTransport
+from vidbyte.agents.speed.tracker import AgentSpeedTracker
 from vidbyte.agents.types import AgentMessage
 from vidbyte.lib.dataclasses.codex import (
     CodexContextTranslationRequest,
@@ -17,8 +19,11 @@ from vidbyte.lib.dataclasses.codex import (
     CodexHarnessAgentSettings,
     CodexResultTranslationRequest,
     CodexRunInput,
+    CodexRunResult,
+    CodexSpeedTranslationRequest,
     CodexTransportRunRequest,
 )
+from vidbyte.lib.dataclasses.speed import AgentSpeedHistory, AgentSpeedRollup
 from vidbyte.lib.enums.failure import FailureCode
 from vidbyte.lib.errors import CodexAgentError
 
@@ -51,6 +56,7 @@ class CodexHarnessAgent:
         self.last_reply: AgentMessage | None = None
         self._transport = CodexTransport()
         self._results = CodexResultTranslator()
+        self._speed = AgentSpeedTracker()
         self._forks = CodexFork(self._transport)
 
     @property
@@ -81,7 +87,7 @@ class CodexHarnessAgent:
                 operation="translate_context",
                 error_type=type(exc).__name__,
             ) from exc
-        result = await self._transport.run(
+        result = await self._measured_turn(
             CodexTransportRunRequest(
                 thread_id=self.thread_id,
                 system_prompt="\n\n".join(
@@ -124,6 +130,58 @@ class CodexHarnessAgent:
             failure_code=FailureCode.CODEX_TURN_FAILED.value,
             operation="run_sync_guard",
         )
+
+    async def _measured_turn(
+        self, request: CodexTransportRunRequest
+    ) -> CodexRunResult:
+        # @intent close-the-run-on-every-exit-path
+        # Cancellation arrives as BaseException, so an Exception-only handler would
+        # leave the run open forever and corrupt every rollup that follows it.
+        self._speed.reset()
+        self._speed.record_run_start()
+        dispatched_at = self._speed.now()
+        try:
+            result = await self._transport.run(request)
+        except BaseException as exc:
+            self._record_speed(dispatched_at, error=exc)
+            self._speed.record_run_end()
+            raise
+        self._record_speed(dispatched_at, result=result)
+        self._speed.record_run_end()
+        return result
+
+    def _record_speed(
+        self,
+        dispatched_at: float,
+        *,
+        result: CodexRunResult | None = None,
+        error: BaseException | None = None,
+    ) -> None:
+        # @intent metering-never-replaces-the-turn-outcome
+        # A raising translator would discard a completed turn's result, or replace the
+        # caller's real exception with a measurement bug. Catch Exception only, so
+        # cancellation still propagates, and report the loss through the tracker.
+        try:
+            CodexSpeedTranslator.record_turn(
+                CodexSpeedTranslationRequest(
+                    settings=self.settings.codex,
+                    tracker=self._speed,
+                    dispatched_at=dispatched_at,
+                    result=result,
+                    error=error,
+                )
+            )
+        except Exception:
+            self._speed.mark_recording_corrupted()
+
+    def get_speed_stats(self) -> AgentSpeedRollup:
+        """Return the speed rollup for the current or most recent turn."""
+        return self._speed.rollup()
+
+    def get_speed_history(self) -> AgentSpeedHistory:
+        """Return bounded speed summaries for completed turns of this agent."""
+        # History deliberately survives the per-turn reset that clears the ledger.
+        return self._speed.history()
 
     async def afork(
         self, settings: CodexForkSettings = _DEFAULT_FORK_SETTINGS
