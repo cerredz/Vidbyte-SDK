@@ -3,21 +3,27 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Mapping
+from dataclasses import replace
+from typing import Any
 
 from vidbyte.agents.codex.config import CodexVidbyteTranslator
 from vidbyte.agents.codex.context import CodexContextTranslator
 from vidbyte.agents.codex.fork import CodexFork
 from vidbyte.agents.codex.metrics import CodexMetricsTranslator
+from vidbyte.agents.codex.middleware import CodexMiddlewareRunner
 from vidbyte.agents.codex.result import CodexResultTranslator
 from vidbyte.agents.codex.transport import CodexTransport
 from vidbyte.agents.pricing.records import UsageRollup
 from vidbyte.agents.pricing.tracker import UsageTracker
 from vidbyte.agents.types import AgentMessage
+from vidbyte.lib.constants.codex import CODEX_MIDDLEWARE_METADATA_KEY
 from vidbyte.lib.dataclasses.codex import (
     CodexContextTranslationRequest,
     CodexForkRequest,
     CodexForkSettings,
     CodexHarnessAgentSettings,
+    CodexMiddlewareRequest,
     CodexResultTranslationRequest,
     CodexRunInput,
     CodexTransportRunRequest,
@@ -57,6 +63,7 @@ class CodexHarnessAgent:
         self._results = CodexResultTranslator()
         self._usage = UsageTracker()
         self._forks = CodexFork(self._transport)
+        self._middleware = CodexMiddlewareRunner(self.settings.middleware)
 
     @property
     def name(self) -> str:
@@ -87,22 +94,38 @@ class CodexHarnessAgent:
                 error_type=type(exc).__name__,
             ) from exc
         self._usage.reset()
-        result = await self._transport.run(
-            CodexTransportRunRequest(
-                thread_id=self.thread_id,
-                system_prompt="\n\n".join(
-                    part
-                    for part in (
-                        self.settings.system_prompt,
-                        translated.developer_context,
-                    )
-                    if part
-                ),
-                prompt=translated,
-                settings=self.settings.codex,
-                output_schema=self._translation.output_schema,
-            )
+        boundary = CodexMiddlewareRequest(
+            agent_name=self.settings.name, prompt=translated.user_prompt
         )
+        before_metadata = await self._middleware.before_run(boundary)
+        try:
+            result = await self._transport.run(
+                CodexTransportRunRequest(
+                    thread_id=self.thread_id,
+                    system_prompt="\n\n".join(
+                        part
+                        for part in (
+                            self.settings.system_prompt,
+                            translated.developer_context,
+                        )
+                        if part
+                    ),
+                    prompt=translated,
+                    settings=self.settings.codex,
+                    output_schema=self._translation.output_schema,
+                )
+            )
+        # Cancellation is not a model error, so it propagates without running
+        # caller code during unwinding; only Exception reaches on_model_error.
+        except Exception as exc:
+            await self._middleware.on_model_error(
+                CodexMiddlewareRequest(
+                    agent_name=self.settings.name,
+                    prompt=translated.user_prompt,
+                    error=exc,
+                )
+            )
+            raise
         self.thread_id = result.thread_id
         CodexMetricsTranslator.record_usage(
             CodexUsageTranslationRequest(
@@ -120,6 +143,8 @@ class CodexHarnessAgent:
                 usage_rollup=self._usage.rollup(),
             )
         )
+        after_metadata = await self._middleware.after_run(boundary)
+        reply = self._with_middleware_metadata(reply, before_metadata, after_metadata)
         self.history.append(reply)
         self.last_prompt = translated.user_prompt
         self.last_reply = reply
@@ -138,6 +163,26 @@ class CodexHarnessAgent:
             failure_code=FailureCode.CODEX_TURN_FAILED.value,
             operation="run_sync_guard",
         )
+
+    def _with_middleware_metadata(
+        self,
+        reply: AgentMessage,
+        before_metadata: Mapping[str, Any],
+        after_metadata: Mapping[str, Any],
+    ) -> AgentMessage:
+        # AgentMessage is frozen, so publish middleware output as a replacement
+        # rather than mutating the message the result translator already validated.
+        if not self._middleware.enabled:
+            return reply
+        metadata = {
+            **dict(reply.metadata),
+            **dict(before_metadata),
+            **dict(after_metadata),
+        }
+        pipeline_metadata = self._middleware.metadata()
+        if pipeline_metadata:
+            metadata[CODEX_MIDDLEWARE_METADATA_KEY] = pipeline_metadata
+        return replace(reply, metadata=metadata)
 
     def get_usage(self) -> UsageRollup:
         """Return the token-usage rollup for the current or most recent turn."""
