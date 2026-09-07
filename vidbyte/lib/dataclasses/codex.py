@@ -697,6 +697,70 @@ class CodexRunResult:
 
 
 @dataclass(frozen=True, slots=True)
+class CodexSpeedResponse:
+    """Presents one Codex turn to AgentSpeedTracker in the shape it duck-types.
+
+    Both fields are required non-empty because ``CallSpeedRecord`` rejects an
+    empty provider or model; failing here names the adapter, not the ledger.
+    """
+
+    provider: str
+    model: str
+
+    def __post_init__(self) -> None:
+        # @intent fail-at-the-adapter-not-the-ledger
+        # CallSpeedRecord rejects an empty provider or model a moment later, so
+        # naming the adapter here keeps the diagnostic pointed at the real caller.
+        _require_text("Codex speed response", "provider", self.provider)
+        _require_text("Codex speed response", "model", self.model)
+
+
+@dataclass(frozen=True, slots=True)
+class CodexSpeedTranslationRequest:
+    """One turn outcome offered to Vidbyte's shared speed ledger.
+
+    Exactly one of ``result`` or ``error`` is present: a turn either completed
+    or failed, and recording both would file two entries for one turn.
+    ``tracker`` stays loosely typed because ``vidbyte.lib`` may not import the
+    orchestration-tier ``AgentSpeedTracker``.
+    """
+
+    settings: CodexAgentSettings
+    tracker: object
+    dispatched_at: float
+    result: CodexRunResult | None = None
+    error: BaseException | None = None
+
+    def __post_init__(self) -> None:
+        # @intent one-turn-one-outcome
+        # Reject an ambiguous outcome here, because the tracker would otherwise
+        # accept two contradictory records for a single native turn.
+        if not isinstance(self.settings, CodexAgentSettings):
+            raise ConfigurationError(
+                "Codex speed translation settings must be CodexAgentSettings."
+            )
+        for method in ("record_call", "record_call_failure"):
+            if not callable(getattr(self.tracker, method, None)):
+                raise ConfigurationError(
+                    f"Codex speed translation tracker must expose {method}()."
+                )
+        if isinstance(self.dispatched_at, bool) or not isinstance(
+            self.dispatched_at, (int, float)
+        ):
+            raise ConfigurationError(
+                "Codex speed translation dispatched_at must be a number."
+            )
+        if self.dispatched_at < 0:
+            raise ConfigurationError(
+                "Codex speed translation dispatched_at must not be negative."
+            )
+        if (self.result is None) == (self.error is None):
+            raise ConfigurationError(
+                "Codex speed translation requires exactly one of result or error."
+            )
+
+
+@dataclass(frozen=True, slots=True)
 class CodexResultTranslationRequest:
     """Complete input required to build one Vidbyte AgentMessage."""
 

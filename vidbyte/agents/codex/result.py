@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, Any
 
 from vidbyte.agents.types import AgentMessage
 from vidbyte.lib.constants.codex import (
+    CODEX_PROVIDER_DURATION_KEY,
     CODEX_PROVIDER_NAME,
     CODEX_ROOT_FORK_DEPTH,
     CODEX_SUBAGENT_ITEM_TYPES,
@@ -155,12 +156,16 @@ class CodexResultTranslator:
                 or CODEX_ROOT_FORK_DEPTH
             ),
         )
-        metadata = {
+        metadata: dict[str, Any] = {
             **lineage,
             **dict(request.input_metadata),
             "provider": CODEX_PROVIDER_NAME,
             "provider_item_count": len(result.items),
         }
+        # The provider's own turn duration is a separate fact from the end-to-end
+        # interval the speed rollup measures; absent stays distinct from zero.
+        if result.duration_ms is not None:
+            metadata[CODEX_PROVIDER_DURATION_KEY] = result.duration_ms
         return AgentMessage(
             sender=agent.name,
             recipient=request.recipient,

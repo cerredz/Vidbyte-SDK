@@ -62,7 +62,7 @@ The roadmap tracks this as **O04** ("Measure runtime performance"), whose stated
 10. The record carries `input_tokens` and `output_tokens` from the turn's per-turn usage delta when the provider reported usage, so the rollup's throughput denominators are real rather than absent.
 11. The provider's own `duration_ms` is published on the message metadata as a separate, clearly named fact, never substituted for the measured interval.
 12. `get_speed_stats()` returns the tracker's `AgentSpeedRollup`; `get_speed_history()` returns its bounded `AgentSpeedHistory`, which survives the per-run reset.
-13. Speed recording never fails a turn. Every recording call is fail-open, matching the tracker's own documented contract.
+13. Speed recording never fails a turn. `_record_speed` catches `Exception` around the translator and calls `mark_recording_corrupted()`, so a measurement bug degrades the rollup instead of discarding a completed turn's result or replacing the caller's real exception. It deliberately does not catch `BaseException`, so cancellation still propagates.
 
 ### Non-Functional Requirements
 
@@ -176,7 +176,7 @@ class CodexSpeedTranslator:
 
 - **Turn with no usage.** Token denominators are `None`, so throughput statistics are absent rather than computed from a fabricated zero.
 - **Empty model at both layers.** Falls back to the `unknown` constant, because `CallSpeedRecord` rejects an empty model and dropping the record entirely would lose the latency measurement over a naming detail.
-- **Recording failure.** `AgentSpeedTracker.record_call` is documented fail-open and returns `None` after marking integrity corrupted, so the translator adds no guard of its own.
+- **Recording failure.** `AgentSpeedTracker.record_call` is documented fail-open and returns `None` after marking integrity corrupted, so the translator adds no guard of its own. The record dataclasses' own `__post_init__` validation *can* raise, however, so the guard against that lives one level up in `CodexHarnessAgent._record_speed` — the only place that knows the turn outcome it would otherwise destroy.
 
 ### 6.3 CodexHarnessAgent speed surface
 
@@ -199,7 +199,7 @@ class CodexHarnessAgent:
 
 1. `__init__` creates `self._speed = AgentSpeedTracker()`.
 2. `arun` resets the tracker and calls `record_run_start()` before the transport call, mirroring `vidbyte/agents/base.py:603-604`.
-3. The transport call is wrapped so all three outcomes are handled: success records the turn and ends the run; `Exception` records the failure, ends the run, and re-raises; `BaseException` — which is how `asyncio.CancelledError` arrives — records a cancelled failure, ends the run, and re-raises unchanged.
+3. The transport call is wrapped in a single `except BaseException` handler, which records the failure, ends the run, and re-raises with a bare `raise`. One handler is enough because `Exception` is a subclass of `BaseException`, and the record's `cancelled` flag — not a separate handler — is what distinguishes a cancellation from an ordinary failure. `BaseAgent` needs two handlers only because it wraps `Exception` in `AgentExecutionError` while re-raising `BaseException` bare; this adapter wraps nothing at this boundary, so the distinction collapses.
 4. `get_speed_stats()` returns `self._speed.rollup()`; `get_speed_history()` returns `self._speed.history()`.
 
 #### Edge Cases & Error Handling
@@ -286,7 +286,9 @@ The flow to prove is: one `arun()` opens and closes exactly one run, on every ou
 
 - One successful `arun()` yields `get_speed_stats().calls` of length 1 with `succeeded=True`, and `run_stats.total_duration_ms` equal to the fake clock's elapsed interval. [Silent Failure] — proves the interval is measured, not copied from `duration_ms`.
 - A failing `arun()` yields one record with `succeeded=False`, and the run is still closed — `run_stats.total_duration_ms` is not `None`. [Hidden Failure] — an unclosed run leaves every subsequent rollup wrong, and this is exactly what a missing `record_run_end` in the exception path produces.
-- A cancelled `arun()` re-raises `asyncio.CancelledError` unchanged and records a record with `cancelled=True`. [Hidden Failure] — proves the `BaseException` handler exists; without it the `Exception` handler never runs for a cancellation and the run stays open forever.
+- A cancelled `arun()` re-raises `asyncio.CancelledError` unchanged and records a record with `cancelled=True`. [Hidden Failure] — proves the `BaseException` handler exists; without it a cancellation escapes uninstrumented and the run stays open forever.
+- A tracker whose `record_call` raises still returns the turn's real `AgentMessage`, and marks integrity corrupted. [Hidden Failure] — the fail-open guarantee. Without the guard in `_record_speed`, a metering bug silently converts a completed turn into an exception.
+- A tracker whose `record_call_failure` raises still propagates the transport's original `TimeoutError`, not the metering error. [Hidden Failure] — the worse half of the same defect: the caller would be told the wrong thing went wrong.
 - Two sequential `arun()` calls leave `get_speed_stats().calls` of length 1 and `get_speed_history()` reporting 2 completed runs. [Silent Failure] — proves the reset clears the ledger but not the history, the distinction `BaseAgent.get_speed_history` documents.
 - The measured `total_duration_ms` differs from `metadata["provider_duration_ms"]` when the fake transport sleeps longer than the reported provider duration. [Silent Failure] — proves the two are genuinely independent facts rather than the same number published twice.
 
