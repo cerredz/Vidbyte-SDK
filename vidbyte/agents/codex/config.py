@@ -89,29 +89,26 @@ class CodexVidbyteTranslator:
     def additional_context(value: str) -> str:
         return value.strip()
 
-    def translate_input(self, value: CodexAgentInput) -> CodexRunInput:
+    @staticmethod
+    def translate_input(value: CodexAgentInput) -> CodexRunInput:
         # @intent one-request-shape-before-transport
         # Every supported caller shape becomes one validated request here, so the
         # context translator and transport never branch on the caller's type.
+        # AgentInput carries each field onto its counterpart; the manager passes by
+        # identity because the context translator collapses shared sources with `is`.
         if isinstance(value, CodexRunInput):
             return value
         if isinstance(value, str):
             return CodexRunInput.text(value)
         if isinstance(value, AgentInput):
-            return self._from_agent_input(value)
+            return CodexRunInput(
+                items=(CodexTextInput(value.prompt),),
+                metadata=dict(value.metadata),
+                context_items=value.context_items,
+                context_manager=value.context_manager,
+            )
         raise ConfigurationError(
             f"Codex run input must be str, AgentInput, or CodexRunInput, not {type(value).__name__}."
-        )
-
-    @staticmethod
-    def _from_agent_input(value: AgentInput) -> CodexRunInput:
-        # Carries every AgentInput field onto its counterpart; the manager passes by
-        # identity because the context translator collapses shared sources with `is`.
-        return CodexRunInput(
-            items=(CodexTextInput(value.prompt),),
-            metadata=dict(value.metadata),
-            context_items=value.context_items,
-            context_manager=value.context_manager,
         )
 
 

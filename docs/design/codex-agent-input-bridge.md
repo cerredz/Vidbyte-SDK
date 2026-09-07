@@ -117,11 +117,11 @@ Converts any supported Vidbyte agent input into the single typed request the res
 class CodexVidbyteTranslator:
     """Translates Vidbyte abstractions before any Codex process starts."""
 
-    def translate_input(self, value: CodexAgentInput) -> CodexRunInput: ...
-
     @staticmethod
-    def _from_agent_input(value: AgentInput) -> CodexRunInput: ...
+    def translate_input(value: CodexAgentInput) -> CodexRunInput: ...
 ```
+
+One flat function, per PR #412 review comment [r3952586662](https://github.com/cerredz/Vidbyte-SDK/pull/412#discussion_r3952586662). The three branches are short enough that a private `_from_agent_input` helper only split the dispatch across two call sites. It is a `@staticmethod` because no branch reads instance state, matching `system_prompt` and `additional_context` on the same class.
 
 `CodexAgentInput` is a module-level type alias declared in `vidbyte/lib/dataclasses/codex.py`, immediately after `CodexRunInput` because it references that class:
 
@@ -133,7 +133,7 @@ CodexAgentInput = str | AgentInput | CodexRunInput
 
 1. If `value` is a `CodexRunInput`, return it unchanged. Identity passthrough, not a copy — a caller that built native image, skill, or mention items keeps them.
 2. If `value` is a `str`, return `CodexRunInput.text(value)`, reusing the existing convenience constructor so the recipient default lives in exactly one place.
-3. If `value` is an `AgentInput`, delegate to `_from_agent_input`, which constructs `CodexRunInput` with a single `CodexTextInput(value.prompt)` and copies `metadata`, `context_items`, and `context_manager` across.
+3. If `value` is an `AgentInput`, construct `CodexRunInput` inline with a single `CodexTextInput(value.prompt)`, copying `metadata`, `context_items`, and `context_manager` across.
 4. Otherwise raise `ConfigurationError` naming the received type, which the agent's caller converts into a classified `CodexAgentError`.
 
 The dispatch is an ordered `isinstance` chain rather than a dict lookup because the branches are three, the types are unrelated classes, and `CodexRunInput` must be checked before any structural test.
@@ -145,6 +145,79 @@ The dispatch is an ordered `isinstance` chain rather than a dict lookup because 
 - **`metadata` that is not a mapping.** `CodexRunInput.__post_init__` already rejects it; the bridge does not duplicate the check.
 - **`context_items` containing an object without `to_context_text`.** Same — `CodexRunInput.__post_init__` owns it.
 - **`context_manager` present.** Passed by identity so `CodexContextTranslator._sources` can correctly collapse an agent-level and request-level manager into one source when they are the same object.
+
+### 6.1a CodexContextTranslator ContextManager translation
+
+**File(s):** `vidbyte/agents/codex/context.py`, `vidbyte/lib/dataclasses/codex.py`
+**Type:** Modified
+
+#### What it does
+
+Translates every `ContextManager` surface that a Codex turn can carry, with one function per translated surface. Added in response to PR #412 review comment [r3952591325](https://github.com/cerredz/Vidbyte-SDK/pull/412#discussion_r3952591325), which asked whether more of `ContextManager` could be translated and for the translations to be modular.
+
+#### Audit of the ContextManager surface
+
+| Surface | Status before this change |
+| --- | --- |
+| Registry primitives in the context zone (`render_primitives_zone()`) | Translated to `developer_context` |
+| Conversation-placed primitives (`render_conversation_messages()`, both placements) | Translated to `before_input` / `after_input` |
+| Unmanaged items (`items()`) | Translated to prefix text |
+| Anchored primitives (`get_by_id`, `placement_for`, `registry_items`) | Translated to `insertions` |
+| **`metadata`** | **Dropped** |
+| `by_kind()`, `recite()`, `set_frozen()`, mutators | Not translations — queries, mutators, or already covered by the rendered result |
+| `to_context()` | Adds no information for Codex beyond `items()` text, because Codex has no `BaseContext` slot for `file_paths`, `artifacts`, `responses`, `tool_calls`, `memory`, `budget`, or `permissions` — except its `metadata` merge, which is the gap above |
+
+`ContextManager.metadata` was the one piece of manager state no Codex turn ever saw. On the generic agent path it reaches provider metadata through `ContextManager.to_context()`. Codex builds no `BaseContext`, so a caller who set `ContextManager(metadata=...)` silently lost it for the whole turn.
+
+#### Interface / API
+
+```python
+class CodexContextTranslator:
+    @classmethod
+    def _render_conversation(
+        cls, manager: ContextManager, placement: ContextWindowPlacement
+    ) -> tuple[CodexTextInput, ...]: ...
+
+    @classmethod
+    def _render_unmanaged_items(cls, manager: ContextManager) -> tuple[CodexTextInput, ...]: ...
+
+    @classmethod
+    def _render_insertions(
+        cls,
+        manager: ContextManager,
+        placements: tuple[CodexContextPlacement, ...],
+        items: tuple[CodexInputItem, ...],
+    ) -> tuple[CodexContextInsertion, ...]: ...
+
+    @staticmethod
+    def _render_metadata(manager: ContextManager) -> Mapping[str, Any]: ...
+
+    @staticmethod
+    def _merge_metadata(
+        rendered: tuple[CodexRenderedContext, ...], request_metadata: Mapping[str, Any]
+    ) -> dict[str, Any]: ...
+```
+
+`CodexRenderedContext` gains one field so a rendered source carries its own metadata alongside its text:
+
+```python
+metadata: Mapping[str, Any] = field(default_factory=dict)
+```
+
+#### Logic / Algorithm
+
+1. `_render_manager` reads each translated surface through its own function instead of inline expressions, so translating a further surface adds one function rather than another inline branch.
+2. Placement-scoped surfaces (`developer_context`, conversation placements) read the *remaining* view from `_remaining_manager`, which excludes anchored primitives. Whole-manager surfaces (unmanaged items, metadata) read the caller's manager, because the remaining view is a fresh `ContextManager` that carries neither.
+3. `_render_metadata` returns a plain `dict` copy, so a rendered snapshot never aliases the caller's mapping.
+4. `_merge_metadata` merges sources in render order, then applies `CodexRunInput.metadata` last. `_sources` orders the agent-scoped manager before the request-scoped one, so a request-scoped manager overrides the agent-scoped one, and per-turn input metadata — the most specific signal — wins outright. This mirrors `to_context()` (manager over base) and `AgentRuntime` (input metadata last).
+
+#### Edge Cases & Error Handling
+
+- **Shared manager at both scopes.** `_sources` already collapses it to one source by object identity, so its metadata is contributed once, not merged with itself.
+- **No manager.** `_render_manager` returns a default `CodexRenderedContext`, whose `metadata` defaults to an empty dict, so `_merge_metadata` is a no-op for that source.
+- **Manager with empty metadata.** Turn metadata is unchanged, which keeps every existing `CodexRunInput` call path byte-for-byte identical.
+- **Caller mutation.** `_render_metadata` copies, so mutating the resulting turn metadata cannot reach back into the caller's manager.
+- **Evaluation order.** `_render_insertions` now runs after zone rendering rather than before it. Rendering raises nothing for valid primitives, so a missing-primitive or missing-anchor `ConfigurationError` still surfaces from the same turn, before transport.
 
 ### 6.2 CodexHarnessAgent entry points
 
@@ -195,16 +268,17 @@ N/A - no HTTP endpoints in this package. The public Python surface change is two
 | Action | File Path | Reason |
 |--------|-----------|--------|
 | CREATE | `docs/design/codex-agent-input-bridge.md` | This design document |
-| MODIFY | `vidbyte/lib/dataclasses/codex.py` | Add the `CodexAgentInput` union alias next to `CodexInputItem` |
-| MODIFY | `vidbyte/agents/codex/config.py` | Add `CodexVidbyteTranslator.translate_input()` and its `_from_agent_input` helper |
+| MODIFY | `vidbyte/lib/dataclasses/codex.py` | Add the `CodexAgentInput` union alias next to `CodexInputItem`; add `CodexRenderedContext.metadata` |
+| MODIFY | `vidbyte/agents/codex/config.py` | Add `CodexVidbyteTranslator.translate_input()` as one flat static method |
 | MODIFY | `vidbyte/agents/codex/agent.py` | Widen `arun`/`run` annotations; translate input before context translation |
+| MODIFY | `vidbyte/agents/codex/context.py` | One `_render_*` function per translated `ContextManager` surface; translate manager metadata onto the turn |
 | MODIFY | `vidbyte/agents/codex/__init__.py` | Export `CodexAgentInput` |
 | MODIFY | `vidbyte/agents/__init__.py` | Re-export `CodexAgentInput` on the agents facade |
 | MODIFY | `vidbyte/__init__.py` | Re-export `CodexAgentInput` for public-export integrity (S015) |
 | CREATE | `tests/test_codex_agent_input_bridge.py` | Feature tests for the Testing Plan below |
 | CREATE | `scripts/test-codex-agent-input-bridge.py` | Phase 5 verification script |
 
-Totals: 3 create, 6 modify, 0 delete.
+Totals: 3 create, 7 modify, 0 delete.
 
 ---
 
@@ -231,6 +305,12 @@ All tests run offline. `CodexVidbyteTranslator` performs no provider I/O, so the
 - `arun` -> `leaves history, last_prompt, last_reply, and thread_id unchanged after a failed translation` — [Silent Failure] — partial mutation would make the next turn resume from a corrupted facade state.
 - `run` -> `accepts a plain string through the synchronous path` — [Edge Case]
 - `run` -> `still raises CodexAgentError inside an active event loop` — [Hidden Assumption] — confirms the widened annotation did not disturb the existing `run_sync_guard`.
+- `CodexContextTranslator.translate` -> `manager metadata reaches the translated turn` — [Silent Failure] — this was the dropped surface; a turn ran normally while losing every key the caller set on the manager.
+- `CodexContextTranslator.translate` -> `absent manager metadata leaves turn metadata empty` — [Edge Case] — guards the requirement that existing `CodexRunInput` paths stay byte-for-byte unchanged.
+- `CodexContextTranslator.translate` -> `per-turn input metadata overrides manager metadata` — [Hidden Assumption] — the merge order must match `AgentRuntime`, where input metadata is applied last.
+- `CodexContextTranslator.translate` -> `request-scoped manager overrides the agent-scoped manager` — [Hidden Assumption] — depends on `_sources` render order; a reversed merge would let stale agent-level metadata win.
+- `CodexContextTranslator.translate` -> `a shared manager contributes its metadata once` — [Silent Failure] — the identity-collapse path must not merge a manager with itself.
+- `CodexContextTranslator.translate` -> `translating metadata does not mutate the caller manager` — [Silent Failure] — returning the caller's mapping by reference would let one turn's merge leak into the next.
 
 ### Integration Tests
 
@@ -239,6 +319,8 @@ The end-to-end flow to prove is: generic input at `arun` produces the same `Agen
 - `arun("prompt")` and `arun(CodexRunInput.text("prompt"))` produce byte-identical `AgentMessage` content, metadata, and `codex` payloads.
 - `arun(AgentInput(prompt=..., context_manager=manager))` renders the manager's primitives exactly once when the same manager is also on the agent's settings — the identity-collapse path in `CodexContextTranslator._sources`. This is the silent failure unit tests cannot catch, because it only appears when both scopes hold the manager.
 - `arun(AgentInput(prompt=..., context_items=(item,)))` places the item's rendered text in the prompt prefix, proving `context_items` survives both translations rather than only the first.
+- `arun("p")` on an agent whose settings carry `ContextManager(metadata=...)` puts those keys on the reply metadata, proving manager metadata survives the context translator, the result translator, and the metadata merge in `CodexResultTranslator`.
+- `arun(AgentInput(prompt=..., context_manager=manager))` does the same for a request-scoped manager, and a per-turn `AgentInput.metadata` key still wins over the manager's.
 
 The hidden assumption the integration surfaces: the bridge assumes `CodexContextTranslator` treats a bridged request exactly like a hand-built one. Only running both through the real translator proves it.
 

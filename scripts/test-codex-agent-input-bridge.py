@@ -66,6 +66,8 @@ from tests.test_codex_agent_input_bridge import (  # noqa: E402
     CodexHarnessAgentInputBoundaryTests,
     CodexHarnessAgentInputIntegrationTests,
     CodexHarnessAgentSynchronousRunTests,
+    ContextManagerMetadataAgentTests,
+    ContextManagerMetadataTranslationTests,
     TranslateInputTests,
 )
 
@@ -74,6 +76,8 @@ TEST_CLASSES = (
     CodexHarnessAgentInputBoundaryTests,
     CodexHarnessAgentSynchronousRunTests,
     CodexHarnessAgentInputIntegrationTests,
+    ContextManagerMetadataTranslationTests,
+    ContextManagerMetadataAgentTests,
 )
 
 

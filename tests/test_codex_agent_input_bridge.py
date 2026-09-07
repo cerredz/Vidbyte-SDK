@@ -3,15 +3,18 @@
 PURPOSE:
     Feature tests for the Codex agent input bridge: CodexVidbyteTranslator's
     translate_input() conversion of str/AgentInput/CodexRunInput, and
-    CodexHarnessAgent's widened arun()/run() entry points. Locks the behavior
-    docs/design/codex-agent-input-bridge.md specifies: lossless field mapping,
-    identity passthrough for native requests, context-manager identity
-    preservation, classified translation failures, and zero transport calls
-    plus zero facade mutation when an input is rejected.
+    CodexHarnessAgent's widened arun()/run() entry points, plus
+    CodexContextTranslator's translation of ContextManager.metadata onto the
+    turn. Locks the behavior docs/design/codex-agent-input-bridge.md specifies:
+    lossless field mapping, identity passthrough for native requests,
+    context-manager identity preservation, manager metadata reaching the turn
+    under per-turn overrides, classified translation failures, and zero
+    transport calls plus zero facade mutation when an input is rejected.
 
 ROLE IN CODEBASE:
     Exercises vidbyte/agents/codex/config.py (CodexVidbyteTranslator),
-    vidbyte/agents/codex/agent.py (CodexHarnessAgent), and the
+    vidbyte/agents/codex/agent.py (CodexHarnessAgent),
+    vidbyte/agents/codex/context.py (CodexContextTranslator), and the
     CodexAgentInput alias in vidbyte/lib/dataclasses/codex.py. These are the
     first committed tests for the Codex adapter package.
 
@@ -30,7 +33,9 @@ FUNCTION INVENTORY:
 COMMON MODIFICATION PATTERNS:
     Add a branch to translate_input(), then add its conversion test to
     TranslateInputTests and its failure test to
-    CodexHarnessAgentInputBoundaryTests.
+    CodexHarnessAgentInputBoundaryTests. Translate a further ContextManager
+    surface and add its test to ContextManagerMetadataTranslationTests, or to a
+    sibling class named for that surface.
 
 WHAT NOT TO DO IN THIS FILE:
     Do not import openai_codex, do not construct a real CodexTransport, and
@@ -51,12 +56,15 @@ import unittest
 
 from vidbyte.agents.codex.agent import CodexHarnessAgent
 from vidbyte.agents.codex.config import CodexVidbyteTranslator
+from vidbyte.agents.codex.context import CodexContextTranslator
 from vidbyte.context.manager import ContextManager
 from vidbyte.context.primitives import TextContextItem
 from vidbyte.lib.dataclasses.agents import AgentInput
 from vidbyte.lib.dataclasses.codex import (
+    CodexContextTranslationRequest,
     CodexHarnessAgentSettings,
     CodexImageInput,
+    CodexPrompt,
     CodexRunInput,
     CodexRunResult,
     CodexTextInput,
@@ -303,6 +311,113 @@ class CodexHarnessAgentSynchronousRunTests(unittest.TestCase):
 
         self.assertEqual(reply.content, FINAL_RESPONSE)
         self.assertEqual(len(transport.requests), 1)
+
+
+class ContextManagerMetadataTranslationTests(unittest.TestCase):
+    """Covers CodexContextTranslator's translation of ContextManager.metadata."""
+
+    @staticmethod
+    def _translate(
+        *,
+        agent_manager: ContextManager | None = None,
+        request: CodexRunInput | None = None,
+    ) -> CodexPrompt:
+        # Runs the real context translator with no agent and no transport involved.
+        return CodexContextTranslator.translate(
+            CodexContextTranslationRequest(
+                input=request if request is not None else CodexRunInput.text("p"),
+                static_context="",
+                context_manager=agent_manager,
+                context_placements=(),
+            )
+        )
+
+    def test_manager_metadata_reaches_the_translated_turn(self) -> None:
+        manager = ContextManager(metadata={"tenant": "acme"})
+
+        prompt = self._translate(agent_manager=manager)
+
+        self.assertEqual(dict(prompt.metadata), {"tenant": "acme"})
+
+    def test_absent_manager_metadata_leaves_the_turn_metadata_empty(self) -> None:
+        prompt = self._translate(agent_manager=ContextManager())
+
+        self.assertEqual(dict(prompt.metadata), {})
+
+    def test_per_turn_input_metadata_overrides_manager_metadata(self) -> None:
+        manager = ContextManager(metadata={"tenant": "acme", "run": "manager"})
+        request = CodexRunInput(
+            items=(CodexTextInput("p"),), metadata={"run": "per-turn"}
+        )
+
+        prompt = self._translate(agent_manager=manager, request=request)
+
+        self.assertEqual(
+            dict(prompt.metadata), {"tenant": "acme", "run": "per-turn"}
+        )
+
+    def test_request_scoped_manager_overrides_the_agent_scoped_manager(self) -> None:
+        agent_manager = ContextManager(metadata={"scope": "agent", "tenant": "acme"})
+        request_manager = ContextManager(metadata={"scope": "request"})
+        request = CodexRunInput(
+            items=(CodexTextInput("p"),), context_manager=request_manager
+        )
+
+        prompt = self._translate(agent_manager=agent_manager, request=request)
+
+        self.assertEqual(
+            dict(prompt.metadata), {"tenant": "acme", "scope": "request"}
+        )
+
+    def test_a_shared_manager_contributes_its_metadata_once(self) -> None:
+        manager = ContextManager(metadata={"tenant": "acme"})
+        request = CodexRunInput(items=(CodexTextInput("p"),), context_manager=manager)
+
+        prompt = self._translate(agent_manager=manager, request=request)
+
+        self.assertEqual(dict(prompt.metadata), {"tenant": "acme"})
+
+    def test_translating_metadata_does_not_mutate_the_caller_manager(self) -> None:
+        manager = ContextManager(metadata={"tenant": "acme"})
+
+        prompt = self._translate(agent_manager=manager)
+        dict(prompt.metadata)["tenant"] = "mutated"
+
+        self.assertEqual(dict(manager.metadata), {"tenant": "acme"})
+
+
+class ContextManagerMetadataAgentTests(unittest.IsolatedAsyncioTestCase):
+    """Covers manager metadata surviving a full bridged turn through the agent."""
+
+    async def test_agent_manager_metadata_reaches_the_reply_metadata(self) -> None:
+        manager = ContextManager(metadata={"tenant": "acme"})
+        agent, _ = _build_agent(context_manager=manager)
+
+        reply = await agent.arun("p")
+
+        self.assertEqual(reply.metadata["tenant"], "acme")
+
+    async def test_agent_input_manager_metadata_reaches_the_reply_metadata(
+        self,
+    ) -> None:
+        agent, _ = _build_agent()
+        manager = ContextManager(metadata={"tenant": "acme"})
+
+        reply = await agent.arun(AgentInput(prompt="p", context_manager=manager))
+
+        self.assertEqual(reply.metadata["tenant"], "acme")
+
+    async def test_agent_input_metadata_still_overrides_manager_metadata(self) -> None:
+        agent, _ = _build_agent()
+        manager = ContextManager(metadata={"run": "manager"})
+
+        reply = await agent.arun(
+            AgentInput(
+                prompt="p", metadata={"run": "per-turn"}, context_manager=manager
+            )
+        )
+
+        self.assertEqual(reply.metadata["run"], "per-turn")
 
 
 if __name__ == "__main__":

@@ -522,6 +522,7 @@ class CodexRenderedContext:
     before_input: tuple[CodexTextInput, ...] = ()
     after_input: tuple[CodexTextInput, ...] = ()
     insertions: tuple[CodexContextInsertion, ...] = ()
+    metadata: Mapping[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
