@@ -4,7 +4,22 @@
 
 The Claude Agent SDK exposes the Claude Code agent loop as Python and TypeScript libraries. One-shot `query()` manages a session per query by default; `ClaudeSDKClient` supports continuous exchanges, streaming input, interrupts, and explicit connection control. This is distinct from the direct Anthropic Client SDK and hosted Managed Agents.
 
-## Controls available to a future adapter
+## Implementation status
+
+`vidbyte/agents/claude/` now implements the declarative half of this surface as
+`ClaudeHarnessAgent`, pinned to `claude-agent-sdk` 0.2.152 behind the optional
+`vidbyte-sdk[claude]` extra and authorized by `docs/design/claude-harness-agent.md`.
+It covers one-shot `query()` per turn, session resume, lazy `fork_session`
+branching, context rendering, structured output, and typed results with
+`total_cost_usd`.
+
+The callback surfaces (`hooks`, `can_use_tool`), the persistent `ClaudeSDKClient`,
+streaming, in-process MCP tools, file checkpointing, and session stores are not
+built. They are tracked as stable task IDs in `skills/claude-harness-roadmap/`.
+Read that checklist before proposing Claude adapter work, and do not build a
+second adapter.
+
+## Controls available to an adapter
 
 - Invocation: prompt or streaming input, one-shot query versus connected client, custom transport, environment and executable options documented by the SDK.
 - Instructions/config: system prompt or Claude Code preset, append-system-prompt behavior, setting sources, project/user/local configuration loading, working directory, and additional directories.
@@ -28,6 +43,6 @@ The Claude Agent SDK exposes the Claude Code agent loop as Python and TypeScript
 
 ## Translation guidance
 
-Prefer `ClaudeSDKClient` for a stateful HarnessAgent and `query()` for explicitly stateless primitives. Declare setting sources rather than assuming filesystem configuration is loaded. Use native resume/fork fields for lineage. Treat permission callbacks as a provider boundary that may enforce a stricter Vidbyte policy, never a way to bypass user restrictions.
+The shipped adapter uses `query()` per turn with an explicit `resume`, which keeps the provider lifetime bounded per turn at the cost of one subprocess spawn each time; `ClaudeSDKClient` is the pending alternative for a genuinely stateful primitive and is the only route to `interrupt()`. Declare setting sources rather than assuming filesystem configuration is loaded. Use native resume/fork fields for lineage. Treat permission callbacks as a provider boundary that may enforce a stricter Vidbyte policy, never a way to bypass user restrictions.
 
 Official starting points: [Agent SDK overview](https://platform.claude.com/docs/en/agent-sdk/overview), [Python reference](https://platform.claude.com/docs/en/agent-sdk/python), [sessions](https://platform.claude.com/docs/en/agent-sdk/sessions), and [permissions](https://platform.claude.com/docs/en/agent-sdk/permissions).
