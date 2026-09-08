@@ -94,6 +94,7 @@ class CodexFork:
             name=settings.name or parent.name,
             system_prompt=child_system_prompt,
             codex=child_codex,
+            observation=parent.observation if settings.observation is None else settings.observation,
             additional_context=parent.additional_context
             if settings.additional_context is None
             else settings.additional_context,
