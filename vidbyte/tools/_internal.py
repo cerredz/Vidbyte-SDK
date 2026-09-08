@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from vidbyte.tools.base import BaseTool
 from vidbyte.tools.catalog import Tools
-from vidbyte.tools.types import ToolCall, ToolParameter, ToolPermission, ToolResult, ToolSpec
+from vidbyte.tools.types import ToolActivity, ToolCall, ToolParameter, ToolPermission, ToolResult, ToolSpec
 
 
 IS_DONE_TOOL_NAME = "isDone"
@@ -33,9 +33,12 @@ class IsDoneTool(BaseTool):
         return ToolResult.success(IS_DONE_TOOL_NAME, output, metadata={"done": True})
 
 
-def with_internal_agent_tools(tools: Tools) -> Tools:
+def with_internal_agent_tools(tools: Tools, *, is_done_activity: ToolActivity | None = None) -> Tools:
     """Return a runtime-only catalog with internal loop-control tools included."""
-    return tools.add(IsDoneTool(), replace=True)
+    done_tool: BaseTool = IsDoneTool()
+    if is_done_activity is not None:
+        done_tool = done_tool.with_activity(is_done_activity)
+    return tools.add(done_tool, replace=True)
 
 
 __all__ = [

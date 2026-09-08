@@ -73,6 +73,12 @@ class SearchActivity(BaseModel):
     purpose: str = Field(min_length=1, max_length=60)
 
 
+class CompletionActivity(BaseModel):
+    """Bounded completion annotation rendered on the internal isDone tool."""
+
+    handoff: str = Field(min_length=1, max_length=60)
+
+
 class CountingSearchTool(PricedOperationTool):
     """Priced search tool that records the business arguments it executed against."""
 
@@ -778,6 +784,76 @@ class ToolActivityRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(tool.executed_arguments, [])
         self.assertEqual(runtime.usage_tracker.operations, ())
         self.assertEqual(result.metadata["tool_call_states"], ("failed", "succeeded"))
+
+
+class IsDoneActivityRuntimeTests(unittest.IsolatedAsyncioTestCase):
+    """Verifies completion annotations use the normal activity path without changing stop semantics."""
+
+    @staticmethod
+    def _done_response(arguments: str) -> FakeResponse:
+        """Script one internal completion call with caller-supplied arguments."""
+        return FakeResponse("", {"output": [{"type": "function_call", "name": "isDone", "arguments": arguments}]})
+
+    @staticmethod
+    def _activity() -> ToolActivity:
+        """Return a required completion activity declaration."""
+        return ToolActivity(schema=CompletionActivity, description="Describe the next handoff.")
+
+    async def test_is_done_activity_is_visible_and_captured_while_stopping(self) -> None:
+        """A valid completion annotation is nested in the schema and retained in call context."""
+        activity = self._activity()
+        runtime = AgentRuntime(
+            agent_name="worker",
+            system_prompt="Work.",
+            tools=Tools(),
+            permission_policy=PermissionPolicy(),
+            is_done_activity=activity,
+        )
+        spec = runtime.tools._get("isDone").spec()
+
+        self.assertIs(spec.activity, activity)
+        result = await runtime.arun(
+            "task",
+            handle=RunnerHandle(
+                runner=FakeRunner([self._done_response('{"final_answer": "done", "activity": {"handoff": "review"}}')]),
+                provider="openai",
+                invoke=invoke_runner,
+                extract_text=runner_output_text,
+                extract_metadata=runner_output_metadata,
+            ),
+            context=runtime.build_context("task", base_context=None, history=(), agent_history=(), agent_metadata={}, existing_tool_calls=()),
+        )
+
+        self.assertEqual(result.output, "done")
+        self.assertEqual(result.metadata["stop_reason"], "is_done")
+        context = result.metadata["tool_calls"][0]
+        self.assertEqual(dict(context.activity.payload), {"handoff": "review"})
+        self.assertEqual(dict(context.arguments), {"final_answer": "done"})
+
+    async def test_missing_required_is_done_activity_returns_a_validation_failure(self) -> None:
+        """A missing completion annotation cannot execute the internal tool."""
+        runtime = AgentRuntime(
+            agent_name="worker",
+            system_prompt="Work.",
+            tools=Tools(),
+            permission_policy=PermissionPolicy(),
+            is_done_activity=self._activity(),
+        )
+        result = await runtime.arun(
+            "task",
+            handle=RunnerHandle(
+                runner=FakeRunner([self._done_response('{"final_answer": "not yet"}')]),
+                provider="openai",
+                invoke=invoke_runner,
+                extract_text=runner_output_text,
+                extract_metadata=runner_output_metadata,
+            ),
+            context=runtime.build_context("task", base_context=None, history=(), agent_history=(), agent_metadata={}, existing_tool_calls=()),
+        )
+
+        self.assertIn("Missing required parameters: activity", result.output)
+        self.assertEqual(result.metadata["stop_reason"], "is_done")
+        self.assertEqual(result.metadata["tool_call_states"], ("failed",))
 
 
 class _ProviderTaggedResponse(FakeResponse):
