@@ -18,12 +18,15 @@ from typing import TYPE_CHECKING, Any
 from pydantic import BaseModel, JsonValue
 
 from vidbyte.lib.constants.codex import (
+    CODEX_FIRST_ATTEMPT,
+    CODEX_PRIMARY_CHAIN_INDEX,
     CODEX_RESERVED_SUBAGENT_NAMES,
     CODEX_ROOT_FORK_DEPTH,
 )
 from vidbyte.lib.enums.codex import (
     CodexApprovalMode,
     CodexContextAnchor,
+    CodexFailureClass,
     CodexInputType,
     CodexPersonality,
     CodexReasoningEffort,
@@ -36,8 +39,10 @@ from vidbyte.lib.errors import ConfigurationError
 
 if TYPE_CHECKING:
     from vidbyte.agents.pricing.records import UsageRollup
+    from vidbyte.agents.settings.fallback import AgentFallbackSettings
     from vidbyte.context.manager import ContextManager
     from vidbyte.context.primitives import ContextItem
+    from vidbyte.lib.dataclasses.failure import Failure
 
 
 def _require_text(owner: str, field_name: str, value: str) -> None:
@@ -51,6 +56,13 @@ def _optional_text(owner: str, field_name: str, value: str) -> None:
     if value and not value.strip():
         raise ConfigurationError(
             f"{owner} {field_name} cannot contain only whitespace."
+        )
+
+
+def _require_non_negative_int(owner: str, field_name: str, value: object) -> None:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ConfigurationError(
+            f"{owner} {field_name} must be a non-negative integer."
         )
 
 
@@ -310,8 +322,12 @@ class CodexHarnessAgentSettings:
     metadata: Mapping[str, Any] = field(default_factory=dict)
     thread_id: str = ""
     context_placements: tuple[CodexContextPlacement, ...] = ()
+    fallback: AgentFallbackSettings | None = None
 
     def __post_init__(self) -> None:
+        # @intent validate-every-declared-capability-at-construction
+        # A fallback chain that cannot be resolved must fail when it is declared,
+        # not at the first failure it was configured to survive.
         CodexContextSource(self.context_manager, self.context_placements)
         _require_text("Codex harness agent", "name", self.name)
         _require_text("Codex harness agent", "system_prompt", self.system_prompt)
@@ -335,6 +351,14 @@ class CodexHarnessAgentSettings:
         ):
             raise ConfigurationError(
                 "Codex harness agent context_manager must be a ContextManager."
+            )
+        # Duck-typed because vidbyte.lib may not import the orchestration-tier
+        # AgentFallbackSettings; the chain itself is resolved by the coordinator.
+        if self.fallback is not None and not callable(
+            getattr(self.fallback, "to_fallback", None)
+        ):
+            raise ConfigurationError(
+                "Codex harness agent fallback must be AgentFallbackSettings."
             )
 
 
@@ -751,6 +775,108 @@ class CodexUsageTranslationRequest:
 
 
 @dataclass(frozen=True, slots=True)
+class CodexFailureRecord:
+    """One canonical failure plus the retry class that decides what may follow it."""
+
+    failure: Failure
+    failure_class: CodexFailureClass
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.failure_class, CodexFailureClass):
+            raise ConfigurationError(
+                "Codex failure record failure_class must be CodexFailureClass."
+            )
+        if not hasattr(self.failure, "code") or not hasattr(self.failure, "phase"):
+            raise ConfigurationError("Codex failure record failure must be a Failure.")
+
+
+@dataclass(frozen=True, slots=True)
+class CodexFailureTranslationRequest:
+    """One classified adapter error offered to the shared failure vocabulary."""
+
+    error: Any
+    attempt: int = CODEX_FIRST_ATTEMPT
+    chain_index: int = CODEX_PRIMARY_CHAIN_INDEX
+
+    def __post_init__(self) -> None:
+        # @intent only-classify-what-carries-a-code
+        # A non-CodexAgentError has no failure_code, and inventing a classification
+        # for an arbitrary exception is exactly what this vocabulary must not do.
+        if not isinstance(getattr(self.error, "failure_code", None), str):
+            raise ConfigurationError(
+                "Codex failure translation requires a CodexAgentError with a failure_code."
+            )
+        for name in ("attempt", "chain_index"):
+            _require_non_negative_int(
+                "Codex failure translation", name, getattr(self, name)
+            )
+
+
+@dataclass(frozen=True, slots=True)
+class CodexFallbackAttempt:
+    """One credential-free record of a model this turn actually tried."""
+
+    index: int
+    provider: str
+    model: str
+    failure_code: str = ""
+
+    def __post_init__(self) -> None:
+        _require_non_negative_int("Codex fallback attempt", "index", self.index)
+        _require_text("Codex fallback attempt", "provider", self.provider)
+        _require_text("Codex fallback attempt", "model", self.model)
+        _optional_text("Codex fallback attempt", "failure_code", self.failure_code)
+
+
+@dataclass(frozen=True, slots=True)
+class CodexFallbackDecision:
+    """The state one fallback decision reads: the classified failure and where we are."""
+
+    record: CodexFailureRecord
+    error: Any
+    index: int
+
+    def __post_init__(self) -> None:
+        # @intent no-decision-without-a-classification
+        # A decision built from an unclassified record would let the coordinator
+        # advance the chain on a failure nothing has judged retryable.
+        if not isinstance(self.record, CodexFailureRecord):
+            raise ConfigurationError(
+                "Codex fallback decision record must be CodexFailureRecord."
+            )
+        if not isinstance(self.error, BaseException):
+            raise ConfigurationError(
+                "Codex fallback decision error must be an exception instance."
+            )
+        _require_non_negative_int("Codex fallback decision", "index", self.index)
+
+
+@dataclass(frozen=True, slots=True)
+class CodexTurnOutcome:
+    """One completed turn plus which models were tried to get it."""
+
+    result: CodexRunResult
+    attempts: tuple[CodexFallbackAttempt, ...] = ()
+    answering_model: str = ""
+
+    def __post_init__(self) -> None:
+        # @intent one-outcome-carries-its-whole-attempt-history
+        # The attempts tuple is what lets a caller tell a first-attempt answer from
+        # a recovered one, so it is validated here rather than trusted downstream.
+        if not isinstance(self.result, CodexRunResult):
+            raise ConfigurationError(
+                "Codex turn outcome result must be CodexRunResult."
+            )
+        if not isinstance(self.attempts, tuple) or any(
+            not isinstance(value, CodexFallbackAttempt) for value in self.attempts
+        ):
+            raise ConfigurationError(
+                "Codex turn outcome attempts must contain CodexFallbackAttempt values."
+            )
+        _optional_text("Codex turn outcome", "answering_model", self.answering_model)
+
+
+@dataclass(frozen=True, slots=True)
 class CodexResultTranslationRequest:
     """Complete input required to build one Vidbyte AgentMessage.
 
@@ -762,6 +888,9 @@ class CodexResultTranslationRequest:
     agent: CodexHarnessAgentSettings
     input_metadata: Mapping[str, Any]
     recipient: str
+    failures: tuple[Failure, ...] = ()
+    fallback_attempts: tuple[CodexFallbackAttempt, ...] = ()
+    answering_model: str = ""
     usage_rollup: UsageRollup | None = None
 
 

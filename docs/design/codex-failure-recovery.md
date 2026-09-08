@@ -71,7 +71,7 @@ The roadmap tracks this as **B03** ("Expand failure classification") and **B05**
 4. `codex.turn_failed` and `codex.thread_start_failed` classify as `MODEL_RETRYABLE` with `FailurePhase.MODEL`, because a different model or a fresh thread can survive them.
 5. `codex.thread_resume_failed`, `codex.fork_failed`, and `codex.response_invalid` classify as `TRANSIENT` with their own phases: retrying the same operation may work, but switching model will not.
 6. `Failure.details` is built through `FailureSafety.sanitize_mapping`, so no credential-shaped key can reach a failure record.
-7. An unrecognized `codex.*` code — one added later without a table entry — classifies as `TERMINAL` with `FailureSeverity.CRITICAL` and a detail naming the missing entry, rather than defaulting to retryable.
+7. A `codex.*` code that is a `FailureCode` member but has **no classification row** resolves to `TERMINAL` / `FailurePhase.UNKNOWN` / `FailureSeverity.CRITICAL` with a `classified: False` detail, rather than defaulting to retryable. `Failure.__post_init__` is the outer gate: a code outside the shared enum entirely raises `ValueError` there and never reaches this table, so the unclassified path exists for the realistic case of an enum member added without a row.
 8. `CodexHarnessAgent` exposes `failures` returning the immutable tuple of `Failure` records observed during the current or most recent turn.
 9. The failure ledger is reset at the start of each turn, matching the `UsageTracker` lifecycle already merged in PR #413.
 10. `CodexHarnessAgentSettings` accepts `fallback: AgentFallbackSettings | None`, defaulting to `None`.
@@ -157,11 +157,13 @@ class CodexFailureClass(str, Enum):
 ```
 
 ```python
-CODEX_FAILURE_CLASSIFICATION: Mapping[str, CodexFailureRule] = {...}
+CODEX_FAILURE_CLASSIFICATION: Mapping[str, tuple[str, str, str, str]] = {...}
 CODEX_FAILURE_SOURCE = "codex_harness_agent"
+CODEX_PRIMARY_CHAIN_INDEX = 0
+CODEX_FIRST_ATTEMPT = 1
 ```
 
-`CodexFailureRule` is a frozen slots dataclass holding `failure_class`, `phase`, `severity`, and `disposition`.
+The table's values are plain `(failure_class, phase, severity, disposition)` tuples rather than a dataclass, because `vidbyte/lib/dataclasses/codex.py` already imports from `vidbyte/lib/constants/codex.py`; a dataclass-valued table would make the constants module import the dataclasses module and close an import cycle. `ClassificationCoverageTests` supplies the safety a typed row would have: it iterates every `codex.*` `FailureCode` member and fails when one has no row, and fails again when a row names a code the enum does not have.
 
 #### Logic / Algorithm
 
@@ -175,7 +177,7 @@ CODEX_FAILURE_SOURCE = "codex_harness_agent"
 
 #### Edge Cases & Error Handling
 
-- **A code with no row.** Requirement 7: the translator returns TERMINAL / RUNTIME / CRITICAL and a detail naming the code. Defaulting to retryable would make an unclassified failure spend the whole chain.
+- **A code with no row.** Requirement 7: `_rule` returns TERMINAL / UNKNOWN / CRITICAL and `_details` reports `classified: False`. Defaulting to retryable would make an unclassified failure spend the whole chain. `ClassificationCoverageTests` is the mechanical guard: it iterates every `FailureCode` member whose value starts with `codex.` and fails if any lacks a row, so the unclassified path is a safety net rather than an expected outcome.
 
 ### 6.2 CodexFailureTranslator
 
@@ -199,7 +201,7 @@ class CodexFailureTranslator:
     def _rule(code: str) -> CodexFailureRule: ...
 
     @staticmethod
-    def _details(error: CodexAgentError, attempt: int) -> Mapping[str, Any]: ...
+    def _details(request: CodexFailureTranslationRequest) -> dict[str, Any]: ...
 
 
 class CodexFailureLedger:
@@ -249,9 +251,10 @@ class CodexFallbackCoordinator:
     @property
     def enabled(self) -> bool: ...
 
-    def next_index(self, request: CodexFallbackDecision) -> int | None: ...
+    def next_index(self, decision: CodexFallbackDecision) -> int | None: ...
+    def model_name(self, index: int) -> str: ...
     def settings_for(self, codex: CodexAgentSettings, index: int) -> CodexAgentSettings: ...
-    def attempt(self, index: int, error: BaseException | None) -> CodexFallbackAttempt: ...
+    def attempt(self, index: int, failure_code: str = "") -> CodexFallbackAttempt: ...
 
     @staticmethod
     def primary_model(codex: CodexAgentSettings) -> FallbackModel: ...
@@ -324,7 +327,29 @@ N/A - no HTTP endpoints. The public Python surface gains one settings field, one
 
 ---
 
-## 9. Abstraction Surface Audit
+## 9. File Change Manifest
+
+| Action | File Path | Reason |
+|--------|-----------|--------|
+| CREATE | `docs/design/codex-failure-recovery.md` | This design document |
+| CREATE | `vidbyte/agents/codex/failures.py` | `CodexFailureTranslator`, `CodexFailureLedger` |
+| CREATE | `vidbyte/agents/codex/fallback.py` | `CodexFallbackCoordinator` |
+| MODIFY | `vidbyte/lib/enums/codex.py` | `CodexFailureClass` |
+| MODIFY | `vidbyte/lib/constants/codex.py` | Classification table, source name, metadata keys, attempt/index constants (A007) |
+| MODIFY | `vidbyte/lib/dataclasses/codex.py` | Five records, the `fallback` settings field, and the three result-reporting fields |
+| MODIFY | `vidbyte/agents/codex/agent.py` | Own the ledger and coordinator; run the attempt loop; expose `failures` |
+| MODIFY | `vidbyte/agents/codex/result.py` | Publish the three new metadata keys |
+| MODIFY | `vidbyte/agents/codex/__init__.py` | Export `CodexFailureRecord`, `CodexFallbackAttempt`, `CodexFailureClass` |
+| MODIFY | `vidbyte/agents/__init__.py` | Re-export on the agents facade |
+| MODIFY | `vidbyte/__init__.py` | Re-export for public-export integrity (S015) |
+| CREATE | `tests/test_codex_failure_recovery.py` | Feature tests for the Testing Plan below |
+| CREATE | `scripts/test-codex-failure-recovery.py` | Phase 5 verification script |
+
+Totals: 5 create, 8 modify, 0 delete.
+
+---
+
+## 9a. Abstraction Surface Audit
 
 Required by the field guide's *audit every surface* entry. `AgentFallbackSettings` has three constructor fields and two public methods:
 
@@ -349,7 +374,9 @@ All tests run offline against a fake transport. `openai-codex` is never imported
 ### Unit Tests
 
 - `CodexFailureTranslator` -> `classifies every codex code in the enum` — [Hidden Assumption] — iterates the `FailureCode` members whose value starts with `codex.` and asserts each has a table row, so adding a ninth code without a row fails this test rather than silently classifying as terminal at runtime.
-- `CodexFailureTranslator` -> `classifies an unknown codex code as terminal and critical` — [Hidden Failure] — the inverse guard: an unrecognized code must not default to retryable, or one omission spends the whole chain on every failure.
+- `CodexFailureTranslator._rule` -> `an unclassified code resolves to terminal and critical` — [Hidden Failure] — the inverse guard: a code without a row must not default to retryable, or one omission spends the whole chain on every failure.
+- `CodexFailureTranslator` -> `a code outside the shared enum is rejected by Failure` — [Hidden Assumption] — documents that `Failure.__post_init__` is the outer gate, so the unclassified path only ever sees real enum members.
+- `CodexFailureTranslator` -> `marks a classified code as classified` — [Silent Failure] — without the positive case, a broken `classified` flag would read as "everything is unclassified" and never fail a test.
 - `CodexFailureTranslator` -> `sets the phase from the table, not the Failure default` — [Silent Failure] — a translator that built `Failure` without a phase would report `RUNTIME` for a configuration error and look plausible.
 - `CodexFailureTranslator` -> `redacts a credential-shaped detail key` — [Hidden Assumption] — asserts a detail named `api_key_hint` does not survive; `FailureSafety` owns the rule but nothing proves the translator routes through it.
 - `CodexFailureTranslator` -> `carries the operation and error_type into details` — [Silent Failure]
