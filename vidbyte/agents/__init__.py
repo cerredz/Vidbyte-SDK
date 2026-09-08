@@ -26,6 +26,7 @@ from vidbyte.agents.aggregation import (
 from vidbyte.agents.base import BaseAgent
 from vidbyte.agents.client import AgentClient
 from vidbyte.agents.codex import (
+    CodexAgentInput,
     CodexAgentSettings,
     CodexApprovalMode,
     CodexClientSettings,
@@ -206,6 +207,7 @@ __all__ = [
     "AgentSpec",
     "AgentStopReason",
     "BaseAgent",
+    "CodexAgentInput",
     "CodexAgentSettings",
     "CodexApprovalMode",
     "CodexContextAnchor",

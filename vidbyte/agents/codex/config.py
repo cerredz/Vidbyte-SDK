@@ -6,7 +6,9 @@ from collections.abc import Mapping
 from dataclasses import replace
 from typing import Any
 
+from vidbyte.lib.dataclasses.agents import AgentInput
 from vidbyte.lib.dataclasses.codex import (
+    CodexAgentInput,
     CodexAgentSettings,
     CodexAgentTranslation,
     CodexForkSettings,
@@ -15,6 +17,7 @@ from vidbyte.lib.dataclasses.codex import (
     CodexLocalImageInput,
     CodexMentionInput,
     CodexPrompt,
+    CodexRunInput,
     CodexSdkTypes,
     CodexSkillInput,
     CodexSubagentSettings,
@@ -85,6 +88,33 @@ class CodexVidbyteTranslator:
     @staticmethod
     def additional_context(value: str) -> str:
         return value.strip()
+
+    def translate_input(self, value: CodexAgentInput) -> CodexRunInput:
+        # @intent one-request-shape-before-transport
+        # Every supported caller shape becomes one validated request here, so the
+        # context translator and transport never branch on the caller's type. The
+        # three branches stay in one ordered dispatch: it is one decision about one
+        # value, and only _from_agent_input actually transforms anything.
+        if isinstance(value, CodexRunInput):
+            return value
+        if isinstance(value, str):
+            return CodexRunInput.text(value)
+        if isinstance(value, AgentInput):
+            return self._from_agent_input(value)
+        raise ConfigurationError(
+            f"Codex run input must be str, AgentInput, or CodexRunInput, not {type(value).__name__}."
+        )
+
+    @staticmethod
+    def _from_agent_input(value: AgentInput) -> CodexRunInput:
+        # Carries every AgentInput field onto its counterpart; the manager passes by
+        # identity because the context translator collapses shared sources with `is`.
+        return CodexRunInput(
+            items=(CodexTextInput(value.prompt),),
+            metadata=dict(value.metadata),
+            context_items=value.context_items,
+            context_manager=value.context_manager,
+        )
 
 
 class CodexContentTranslator:

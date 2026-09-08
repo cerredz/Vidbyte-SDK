@@ -55,7 +55,14 @@ CODEX_SUPPORTED_ITEM_TYPES = frozenset(
     }
 )
 
+# One turn at a time per agent instance. A Codex thread is a single conversation,
+# so simultaneous turns against it are not a performance opportunity the provider
+# offers — and the facade's thread_id, history, and usage ledger would race.
+CODEX_MAX_CONCURRENT_TURNS = 1
+
+
 __all__ = [
+    "CODEX_MAX_CONCURRENT_TURNS",
     "CODEX_NEXT_FORK_DEPTH",
     "CODEX_PROVIDER_NAME",
     "CODEX_RESERVED_SUBAGENT_NAMES",

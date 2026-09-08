@@ -21,7 +21,7 @@ The SDK's four pipeline topologies — sequential, parallel fan-out, map-reduce 
 - Widen `PipelineNode` to that protocol so `_invoke`'s dispatch is type-checked rather than duck-typed against a method name.
 - Add `CodexHarnessAgent.generate_reply(message, **options)` accepting `str | AgentInput | CodexRunInput`.
 - Reject any `**options` the adapter cannot honor, naming each, rather than silently accepting a knob that does nothing.
-- Serialize turns per agent instance with an `asyncio.Lock`, so a fan-out over distinct agents stays concurrent while the same agent used twice runs its turns in sequence.
+- Serialize turns per agent instance, so a fan-out over distinct agents stays concurrent while the same agent used twice runs its turns in sequence.
 - Make all four topologies work with a Codex stage, including a Codex agent as the reduce stage of a map-reduce.
 
 ### Non-Goals
@@ -67,14 +67,14 @@ PR #412 (`feat/codex-agent-input-bridge`) is open and adds `CodexVidbyteTranslat
 ### Functional Requirements
 
 1. A new `VidbyteAgent` protocol declares `name: str`, `generate_reply(message, **options) -> AgentMessage`, and `arun(message, **options) -> AgentMessage`.
-2. The protocol is `@runtime_checkable`, so `_invoke` can narrow with `isinstance` where a static check is unavailable.
+2. The protocol is `@runtime_checkable`, so a caller or test can narrow with `isinstance` where a static check is unavailable. `_invoke` itself does not narrow — it checks `BasePipeline` and calls the method — so the protocol's value there is the static type, not a runtime check.
 3. `PipelineNode` is `Union["VidbyteAgent", "BasePipeline"]`.
 4. `BaseAgent` satisfies the protocol with no change to `BaseAgent`.
 5. `CodexVidbyteTranslator.translate_input(value)` converts `str`, `AgentInput`, and `CodexRunInput` into one `CodexRunInput`, passing an existing request through by identity.
 6. `CodexHarnessAgent.arun` and `.run` accept `str | AgentInput | CodexRunInput`.
 7. `CodexHarnessAgent.generate_reply(message, **options)` returns the same `AgentMessage` `arun` returns.
 8. `generate_reply` raises `CodexAgentError` with `CODEX_RUN_OPTION_UNSUPPORTED` naming every unrecognized keyword, because a pipeline passing `**options` a Codex agent silently drops would make the caller believe a setting applied.
-9. Every turn holds a per-agent `asyncio.Lock`, so two concurrent `arun` calls on one agent run in sequence.
+9. Every turn holds a per-agent `asyncio.Semaphore(CODEX_MAX_CONCURRENT_TURNS)`, so two concurrent `arun` calls on one agent run in sequence. `lint/ruff.toml` bans `asyncio.Lock` outright, and the repo already uses `asyncio.Semaphore` for concurrency bounds in `vidbyte/agents/aggregation.py` and `vidbyte/evals/runner.py`; a semaphore of one is the same mutex and names its bound.
 10. Two different Codex agents in one `ParallelPipeline` still run concurrently; the lock is per instance, never shared.
 11. A serialized second turn observes the first turn's `thread_id`, so the conversation continues rather than forking.
 12. `history` after two concurrent calls on one agent holds exactly two replies.
@@ -211,25 +211,25 @@ class CodexHarnessAgent:
 
 #### Logic / Algorithm
 
-1. `__init__` creates `self._turn_lock = asyncio.Lock()`.
-2. `arun` wraps its entire body in `async with self._turn_lock`, covering translation, transport, result translation, and every field mutation.
+1. `__init__` creates `self._turns = asyncio.Semaphore(CODEX_MAX_CONCURRENT_TURNS)`.
+2. `arun` wraps its entire body in `async with self._turns`, covering translation, transport, result translation, and every field mutation.
 3. The lock is per instance, so distinct agents never contend.
 
 #### Edge Cases & Error Handling
 
 - **Cancellation.** `async with` releases on `CancelledError` like any other exception, so a cancelled turn cannot leave the lock held and deadlock every later turn.
 - **`run()` from sync code.** Each `asyncio.run` call has its own loop; the guard in `run` still rejects an active loop, so no cross-loop lock reuse occurs.
-- **Reentrancy.** `asyncio.Lock` is not reentrant. Nothing in `arun` calls `arun`, and `afork` constructs a new agent with its own lock rather than reentering.
+- **Reentrancy.** An `asyncio.Semaphore` of one is not reentrant. Nothing in `arun` calls `arun`, and `afork` constructs a new agent with its own lock rather than reentering.
 
 ### 6.5 PipelineNode widening
 
-**File(s):** `vidbyte/pipelines/types.py`, `vidbyte/pipelines/base.py`
+**File(s):** `vidbyte/pipelines/types.py`
 **Type:** Modified
 
 #### Logic / Algorithm
 
 1. `PipelineNode` becomes `Union["VidbyteAgent", "BasePipeline"]`.
-2. `_invoke` is unchanged in behavior; its `stage` parameter is now the protocol, so the `generate_reply` call is checked rather than assumed.
+2. `vidbyte/pipelines/base.py` needs no edit: `_invoke` already annotates its `stage` as `PipelineNode`, so widening the alias is what makes the `generate_reply` call checked rather than assumed.
 
 #### Edge Cases & Error Handling
 
@@ -258,6 +258,7 @@ N/A - no HTTP endpoints. The public surface gains one protocol, one input alias,
 | MODIFY | `vidbyte/lib/agents/__init__.py` | Export the protocol |
 | MODIFY | `vidbyte/lib/dataclasses/codex.py` | `CodexAgentInput` alias |
 | MODIFY | `vidbyte/lib/enums/failure.py` | `CODEX_RUN_OPTION_UNSUPPORTED` |
+| MODIFY | `vidbyte/lib/constants/codex.py` | `CODEX_MAX_CONCURRENT_TURNS` (A007) |
 | MODIFY | `vidbyte/agents/codex/config.py` | `translate_input` and `_from_agent_input` |
 | MODIFY | `vidbyte/agents/codex/agent.py` | Widened entry points, `generate_reply`, the turn lock |
 | MODIFY | `vidbyte/pipelines/types.py` | `PipelineNode` accepts the protocol |
@@ -267,7 +268,7 @@ N/A - no HTTP endpoints. The public surface gains one protocol, one input alias,
 | CREATE | `tests/test_codex_pipelines.py` | Feature tests for the Testing Plan below |
 | CREATE | `scripts/test-codex-pipelines.py` | Phase 5 verification script |
 
-Totals: 4 create, 9 modify, 0 delete.
+Totals: 4 create, 10 modify, 0 delete.
 
 ---
 
@@ -311,6 +312,7 @@ All tests run offline against fake transports. Concurrency tests use an event-ga
 - `generate_reply` -> `rejects an unsupported option, naming it` — [Hidden Failure] — a pipeline forwarding `context=` that the adapter drops would produce an answer computed without it.
 - `generate_reply` -> `names every unsupported option at once` — [Silent Failure]
 - `generate_reply` -> `accepts no options` — [Edge Case]
+- serialized turns -> `the usage rollup describes the last completed turn` — [Silent Failure] — requirement 13; the per-turn reset means a fan-out over one agent must not leave a rollup summing both turns.
 
 ### Integration Tests
 

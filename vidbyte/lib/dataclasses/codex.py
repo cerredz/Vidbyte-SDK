@@ -21,6 +21,7 @@ from vidbyte.lib.constants.codex import (
     CODEX_RESERVED_SUBAGENT_NAMES,
     CODEX_ROOT_FORK_DEPTH,
 )
+from vidbyte.lib.dataclasses.agents import AgentInput
 from vidbyte.lib.enums.codex import (
     CodexApprovalMode,
     CodexContextAnchor,
@@ -459,6 +460,12 @@ class CodexRunInput:
     @classmethod
     def text(cls, prompt: str, *, recipient: str = "user") -> CodexRunInput:
         return cls(items=(CodexTextInput(prompt),), recipient=recipient)
+
+
+# One agent turn accepted from any Vidbyte caller. The union is structurally
+# required: a pipeline stage holds a str, a workflow holds an AgentInput, and a
+# native caller holds a CodexRunInput carrying image, skill, or mention items.
+CodexAgentInput = str | AgentInput | CodexRunInput
 
 
 @dataclass(frozen=True, slots=True)
