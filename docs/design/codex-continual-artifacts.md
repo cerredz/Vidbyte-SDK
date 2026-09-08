@@ -36,7 +36,7 @@ The existing ContinualTraceAgent requires a BaseAgent runner. Codex owns a diffe
 5. Fail-open updater diagnostics are exposed; cancellation propagates. Keep trace outside main context and publish metadata[trace], metadata[trace_metadata], and agent.last_trace.
 6. Forks inherit or explicitly replace/disable continual settings.
 ### Non-Functional Requirements
-Bound memory and updater duration; never leak raw errors into diagnostic metadata; retain actual SDK schema behavior and lazy optional imports.
+Bound the observation window and updater duration; duplicate IDs remain linear in unique completed items; never leak raw errors into diagnostic metadata; retain actual SDK schema behavior and lazy optional imports.
 
 ---
 
@@ -153,3 +153,7 @@ No blocker. Default observation window is bounded and may lose early detail; art
 Rejected as default because it would require separate provider credentials rather than existing Codex authentication.
 ### Alternative 2: Ask main model to update traces
 Rejected because the model may skip it; deterministic observer scheduling is the intended contract.
+
+## Refinement Checklist
+
+No unresolved critical or notable gaps in this slice. Timeout validation reuses strict Pydantic positive-number validation with a finite check. Evidence-window truncation is explicit; exact duplicate detection retains one ID per completed item. Native updater tests assert read-only thread/turn settings, disabled subagents, and no observation recursion. The filesystem sandbox is not described as protection from externally configured tool side effects.

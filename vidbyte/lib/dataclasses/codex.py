@@ -11,16 +11,22 @@ TESTS: python scripts/run_ci.py.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from pydantic import BaseModel, JsonValue
+from pydantic import BaseModel, JsonValue, PositiveFloat, TypeAdapter, ValidationError
 
 from vidbyte.lib.constants.codex import (
     CODEX_RESERVED_SUBAGENT_NAMES,
     CODEX_ROOT_FORK_DEPTH,
+    CODEX_TRACE_ATTEMPTS,
+    CODEX_TRACE_INTERVAL,
+    CODEX_TRACE_TIMEOUT_SECONDS,
+    CODEX_TRACE_WINDOW,
 )
+from vidbyte.lib.dataclasses.trace import TraceSchema
 from vidbyte.lib.enums.codex import (
     CodexApprovalMode,
     CodexContextAnchor,
@@ -293,6 +299,44 @@ class CodexContextPlacement:
 
 
 @dataclass(frozen=True, slots=True)
+class CodexContinualTraceSettings:
+    """Native trace generation scheduled by completed items, not model iterations."""
+
+    schema: TraceSchema
+    every_n_completed_items: int = CODEX_TRACE_INTERVAL
+    max_update_attempts: int = CODEX_TRACE_ATTEMPTS
+    max_observations: int = CODEX_TRACE_WINDOW
+    timeout_seconds: float = CODEX_TRACE_TIMEOUT_SECONDS
+
+    def __post_init__(self) -> None:
+        # Validate exact cadence and bounded update work before launching Codex.
+        if not isinstance(self.schema, TraceSchema):
+            raise ConfigurationError("Codex continual schema must be TraceSchema; use TraceSchema.coerce for models.")
+        for name in ("every_n_completed_items", "max_update_attempts", "max_observations"):
+            value = getattr(self, name)
+            if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+                raise ConfigurationError(f"Codex continual {name} must be a positive integer.")
+        if self.max_update_attempts > CODEX_TRACE_ATTEMPTS:
+            raise ConfigurationError("Codex continual max_update_attempts exceeds the supported retry bound.")
+        try:
+            duration = TypeAdapter(PositiveFloat).validate_python(self.timeout_seconds, strict=True)
+        except ValidationError as exc:
+            raise ConfigurationError("Codex continual timeout_seconds must be finite and positive.") from exc
+        if not math.isfinite(duration):
+            raise ConfigurationError("Codex continual timeout_seconds must be finite and positive.")
+
+
+@dataclass(frozen=True, slots=True)
+class CodexTraceUpdateRequest:
+    """Snapshot input for one independent native trace update."""
+
+    settings: CodexAgentSettings
+    schema: TraceSchema
+    artifact: Mapping[str, Any]
+    observations: tuple[CodexObservation, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class CodexObservationSettings:
     """Awaited observers fail closed; optional tracing remains fail open."""
 
@@ -345,11 +389,14 @@ class CodexHarnessAgentSettings:
     context_placements: tuple[CodexContextPlacement, ...] = ()
     middleware: tuple[AgentMiddleware, ...] = ()
     observation: CodexObservationSettings = field(default_factory=CodexObservationSettings)
+    continual_trace: CodexContinualTraceSettings | None = None
 
     def __post_init__(self) -> None:
         # Validate observation collaborators before context or native execution.
         if not isinstance(self.observation, CodexObservationSettings):
             raise ConfigurationError("Codex observation must be CodexObservationSettings.")
+        if self.continual_trace is not None and not isinstance(self.continual_trace, CodexContinualTraceSettings):
+            raise ConfigurationError("Codex continual_trace must be CodexContinualTraceSettings.")
         CodexContextSource(self.context_manager, self.context_placements)
         _require_text("Codex harness agent", "name", self.name)
         _require_text("Codex harness agent", "system_prompt", self.system_prompt)
@@ -589,6 +636,8 @@ class CodexForkSettings:
 
     name: str = ""
     observation: CodexObservationSettings | None = None
+    continual_trace: CodexContinualTraceSettings | None = None
+    clear_continual_trace: bool = False
     system_prompt: str = ""
     codex: CodexAgentSettings | None = None
     additional_context: str | None = None
@@ -603,6 +652,7 @@ class CodexForkSettings:
 
     def __post_init__(self) -> None:
         # A fork may inherit its manager; the resolved pair is validated before native creation.
+        self._validate_continual_trace()
         self._validate_context_placements()
         for field_name in ("name", "system_prompt"):
             _optional_text("Codex fork", field_name, getattr(self, field_name))
@@ -640,6 +690,14 @@ class CodexForkSettings:
             raise ConfigurationError(
                 "Codex fork context_manager must be a ContextManager."
             )
+
+    def _validate_continual_trace(self) -> None:
+        # Reject conflicting fork policy before creating a native child.
+        _require_bool("Codex fork", "clear_continual_trace", self.clear_continual_trace)
+        if self.clear_continual_trace and self.continual_trace is not None:
+            raise ConfigurationError("Codex fork cannot clear and replace continual_trace together.")
+        if self.continual_trace is not None and not isinstance(self.continual_trace, CodexContinualTraceSettings):
+            raise ConfigurationError("Codex fork continual_trace must be CodexContinualTraceSettings.")
 
     def _validate_context_placements(self) -> None:
         # None means inherit; validate concrete overrides before creating any native fork.

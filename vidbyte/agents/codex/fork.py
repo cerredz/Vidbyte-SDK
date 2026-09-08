@@ -95,6 +95,7 @@ class CodexFork:
             system_prompt=child_system_prompt,
             codex=child_codex,
             observation=parent.observation if settings.observation is None else settings.observation,
+            continual_trace=parent.continual_trace if settings.continual_trace is None else settings.continual_trace,
             additional_context=parent.additional_context
             if settings.additional_context is None
             else settings.additional_context,
@@ -119,6 +120,8 @@ class CodexFork:
         )
         if settings.clear_context_manager:
             child_settings = replace(child_settings, context_manager=None, context_placements=())
+        if settings.clear_continual_trace:
+            child_settings = replace(child_settings, continual_trace=None)
         if settings.clear_output_schema:
             child_settings = replace(child_settings, output_schema=None)
         return CodexVidbyteTranslator().translate_agent(child_settings).settings

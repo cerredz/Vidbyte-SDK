@@ -25,6 +25,7 @@ settings override disables them.
 
 - `agent.py`: Public facade and middleware/metrics orchestration.
 - `config.py`: Shared settings resolution and native argument serialization.
+- `continual.py`: Native trace updates and deterministic completed-item scheduling.
 - `context.py`: Context zone and native input placement translation.
 - `fork.py`: Validated child construction and native lineage.
 - `metrics.py`: Usage snapshot and local cost accounting.
@@ -44,3 +45,9 @@ adapter does not replace native context management or expose private reasoning.
 ## Logs
 
 - 2026-09-08 - Added optional native streaming - awaited event callbacks do not establish a native execution barrier.
+
+## Continual artifacts
+
+Pass `continual_trace=CodexContinualTraceSettings(schema=TraceSchema.coerce(MyModel), every_n_completed_items=5)` on harness settings. A separate native Codex turn generates each trace patch using the same model/client configuration. `continual.py` owns the updater and scheduler. Updates cost additional Codex calls; the configured timeout and attempt cap bound each update attempt.
+
+Read artifacts from `reply.metadata["trace"]` or `agent.last_trace`, and inspect `reply.metadata["trace_metadata"]` for failures and window truncation. The default is fail-open. This cadence counts completed native items, not model iterations. The artifact stays out of the main context. Evidence windows are bounded; exact deduplication retains one ID per completed item. Native updater threads use read-only filesystem sandboxing and deny approvals, but those settings do not guarantee that every externally configured tool is side-effect-free. The update prompt instructs the model to use only the supplied snapshot.

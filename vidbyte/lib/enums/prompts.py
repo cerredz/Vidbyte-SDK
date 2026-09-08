@@ -73,6 +73,7 @@ class Prompt(str, Enum):
     INDEPENDENT_CRITIC_REVIEWER_SYSTEM_PROMPT = "independent_critic.reviewer_system_prompt"
     INDEPENDENT_CRITIC_REVIEW_PROMPT = "independent_critic.review_prompt"
     CONTINUAL_TRACE_SYSTEM_PROMPT = "continual_trace.system_prompt"
+    CODEX_CONTINUAL_TRACE_SYSTEM_PROMPT = "continual_trace.codex_system"
     CONTEXT_ENGINEERING_GUIDELINE_PROMPT = "context_engineering.guideline_prompt"
     EXPERT_PROMPTING_EXPERT_PROMPT = "expert_prompting.expert_prompt"
     FAILURE_PATTERN_REPAIR_RULEBOOK_FEEDBACK_LOOP = "failure_pattern_repair.rulebook_feedback_loop"

@@ -9,6 +9,7 @@ from typing import Any
 
 from vidbyte.agents.codex.config import CodexVidbyteTranslator
 from vidbyte.agents.codex.context import CodexContextTranslator
+from vidbyte.agents.codex.continual import CodexContinualTraceBridge
 from vidbyte.agents.codex.fork import CodexFork
 from vidbyte.agents.codex.metrics import CodexMetricsTranslator
 from vidbyte.agents.codex.middleware import CodexMiddlewareRunner
@@ -59,6 +60,7 @@ class CodexHarnessAgent:
         self.history: list[AgentMessage] = []
         self.last_prompt = ""
         self.last_reply: AgentMessage | None = None
+        self.last_trace: dict[str, Any] | None = None
         self._transport = CodexTransport()
         self._results = CodexResultTranslator()
         self._usage = UsageTracker()
@@ -98,6 +100,11 @@ class CodexHarnessAgent:
             agent_name=self.settings.name, prompt=translated.user_prompt
         )
         before_metadata = await self._middleware.before_run(boundary)
+        self.last_trace = None
+        continual = self._continual_bridge()
+        observation = self.settings.observation
+        if continual is not None:
+            observation = replace(observation, observers=(*observation.observers, continual.observe))
         try:
             result = await self._transport.run(
                 CodexTransportRunRequest(
@@ -113,7 +120,7 @@ class CodexHarnessAgent:
                     prompt=translated,
                     settings=self.settings.codex,
                     output_schema=self._translation.output_schema,
-                    observation=self.settings.observation,
+                    observation=observation,
                 )
             )
         # Cancellation is not a model error, so it propagates without running
@@ -146,10 +153,20 @@ class CodexHarnessAgent:
         )
         after_metadata = await self._middleware.after_run(boundary)
         reply = self._with_middleware_metadata(reply, before_metadata, after_metadata)
+        if continual is not None:
+            await continual.finalize()
+            self.last_trace = continual.artifact()
+            reply = replace(reply, metadata={**dict(reply.metadata), "trace": continual.artifact(), "trace_metadata": continual.metadata()})
         self.history.append(reply)
         self.last_prompt = translated.user_prompt
         self.last_reply = reply
         return reply
+
+    def _continual_bridge(self) -> CodexContinualTraceBridge | None:
+        # Create isolated trace state for this run without sharing artifacts across forks.
+        if self.settings.continual_trace is None:
+            return None
+        return CodexContinualTraceBridge(self.settings.continual_trace, self.settings.codex)
 
     def run(self, request: CodexRunInput) -> AgentMessage:
         # @intent no-nested-event-loop
