@@ -99,6 +99,7 @@ class CodexContextAnchor(StrEnum):
 
 
 __all__ = [
+    "CodexEventMethod",
     "CodexApprovalMode",
     "CodexContextAnchor",
     "CodexInputType",
@@ -109,3 +110,12 @@ __all__ = [
     "CodexThreadSource",
     "CodexThreadStartSource",
 ]
+
+
+class CodexEventMethod(str, Enum):
+    """Native notification methods reviewed by observation consumers."""
+
+    ITEM_STARTED = "item/started"
+    ITEM_COMPLETED = "item/completed"
+    TURN_COMPLETED = "turn/completed"
+    USAGE_UPDATED = "thread/tokenUsage/updated"

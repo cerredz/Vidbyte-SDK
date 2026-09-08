@@ -11,7 +11,7 @@ TESTS: python scripts/run_ci.py.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -33,6 +33,7 @@ from vidbyte.lib.enums.codex import (
     CodexThreadStartSource,
 )
 from vidbyte.lib.errors import ConfigurationError
+from vidbyte.lib.tracing import NullTracer, TracerBase
 
 if TYPE_CHECKING:
     from vidbyte.agents.pricing.records import UsageRollup
@@ -292,6 +293,37 @@ class CodexContextPlacement:
 
 
 @dataclass(frozen=True, slots=True)
+class CodexObservationSettings:
+    """Awaited observers fail closed; optional tracing remains fail open."""
+
+    tracer: TracerBase = field(default_factory=NullTracer)
+    observers: tuple[Callable[[CodexObservation], Awaitable[None]], ...] = ()
+
+    def __post_init__(self) -> None:
+        # Reject invalid collaborators before a native process can start.
+        if not isinstance(self.tracer, TracerBase):
+            raise ConfigurationError("Codex observation tracer must implement TracerBase.")
+        if not isinstance(self.observers, tuple) or any(not callable(value) for value in self.observers):
+            raise ConfigurationError("Codex observation observers must be a tuple of async callbacks.")
+
+    @property
+    def enabled(self) -> bool:
+        # Preserve the original path when no observations are requested.
+        return bool(self.observers) or not isinstance(self.tracer, NullTracer)
+
+
+@dataclass(frozen=True, slots=True)
+class CodexObservation:
+    """Reviewed native event; unknown notifications carry identity only."""
+
+    sequence: int
+    method: str
+    thread_id: str
+    turn_id: str
+    item: CodexItem | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class CodexHarnessAgentSettings:
     """Validated Vidbyte-facing construction input for one Codex harness agent.
 
@@ -312,8 +344,12 @@ class CodexHarnessAgentSettings:
     thread_id: str = ""
     context_placements: tuple[CodexContextPlacement, ...] = ()
     middleware: tuple[AgentMiddleware, ...] = ()
+    observation: CodexObservationSettings = field(default_factory=CodexObservationSettings)
 
     def __post_init__(self) -> None:
+        # Validate observation collaborators before context or native execution.
+        if not isinstance(self.observation, CodexObservationSettings):
+            raise ConfigurationError("Codex observation must be CodexObservationSettings.")
         CodexContextSource(self.context_manager, self.context_placements)
         _require_text("Codex harness agent", "name", self.name)
         _require_text("Codex harness agent", "system_prompt", self.system_prompt)
@@ -552,6 +588,7 @@ class CodexForkSettings:
     """Validated overrides for one provider-native Codex fork."""
 
     name: str = ""
+    observation: CodexObservationSettings | None = None
     system_prompt: str = ""
     codex: CodexAgentSettings | None = None
     additional_context: str | None = None
@@ -817,6 +854,7 @@ class CodexTransportRunRequest:
     prompt: CodexPrompt
     settings: CodexAgentSettings
     output_schema: Mapping[str, Any]
+    observation: CodexObservationSettings = field(default_factory=CodexObservationSettings)
 
 
 @dataclass(frozen=True, slots=True)

@@ -36,6 +36,7 @@ Similar files:
 
 from __future__ import annotations
 
+
 __version__ = "0.1.0"
 
 from vidbyte.agents import (
@@ -559,7 +560,11 @@ from vidbyte.workflows import (
     WorkflowValidationError,
 )
 
+from vidbyte.lib.dataclasses.codex import CodexObservation, CodexObservationSettings
+
 __all__ = [
+    "CodexObservation",
+    "CodexObservationSettings",
     "HARNESS_SCHEMA_VERSION",
     "AdversarialAgentDescriptor",
     "AggregateAgentDescriptor",

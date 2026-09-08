@@ -103,6 +103,7 @@ Python APIs described in Section 6. N/A - no HTTP endpoints.
 | CREATE | tests/codex_observation/test_observation.py | Acceptance and failures |
 | CREATE | scripts/test-codex-live-observation.py | Named verification runner |
 | MODIFY | vidbyte/lib/dataclasses/codex.py | Validated contracts |
+| MODIFY | vidbyte/lib/constants/codex.py | Shared sequence increment |
 | MODIFY | vidbyte/lib/enums/codex.py | Event vocabulary |
 | MODIFY | vidbyte/agents/codex/agent.py | Configuration forwarding |
 | MODIFY | vidbyte/agents/codex/transport.py | Native streaming path |
@@ -121,7 +122,8 @@ Python APIs described in Section 6. N/A - no HTTP endpoints.
 ### Integration Tests
 - [Edge Case] Empty stream fails, interrupted text remains absent, zero usage stays available.
 - [Hidden Failure] Observer error and cancellation close the stream and trace.
-- [Silent Failure] Awaited callbacks receive ordered identities and completed item fields.
+- [Silent Failure] Awaited callbacks receive ordered identities and completed item fields; one callback cannot mutate another callback or the native result.
+- [Hidden Failure] Semantic profiles preserve explicit parentage for native tool spans.
 - [Hidden Assumption] Wrong thread/turn, failed terminal event, and synchronous observer fail explicitly.
 - [Hidden Assumption] Actual pinned SDK model instances prove event/result contracts; transport wiring invokes native turn only when enabled.
 ### Manual / QA Test Cases
@@ -147,3 +149,7 @@ No unresolved question blocks this slice. Native event observation is not intern
 - Rejected because private functions can change independently of public result contracts.
 ### Alternative 2: Poll final thread history
 - Rejected because it loses live scheduling and permits missing intermediate observations.
+
+## Refinement Checklist
+
+No unresolved gaps in this slice. The review added callback mutation isolation and semantic-parentage tests. Native streaming is opt-in, shares existing output normalization, and does not claim a native execution barrier. The manifest adds one shared-constant file modification for the sequence increment. Observer schemas carry reviewed items only; full native payload export remains outside this contract.

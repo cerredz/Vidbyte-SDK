@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Protocol
 
 from vidbyte.agents.codex.config import CodexContentTranslator
 from vidbyte.agents.codex.result import CodexResultSerializer
+from vidbyte.agents.codex.stream import CodexStreamRunner
 from vidbyte.lib.dataclasses.codex import (
     CodexRunResult,
     CodexSdkTypes,
@@ -28,13 +29,14 @@ from vidbyte.lib.enums.failure import FailureCode
 from vidbyte.lib.errors import CodexAgentError
 
 if TYPE_CHECKING:
-    from openai_codex import TurnResult
+    from openai_codex import AsyncTurnHandle, TurnResult
 
 
 class _CodexThread(Protocol):
     id: str
 
     async def run(self, input: object, **kwargs: object) -> TurnResult: ...
+    async def turn(self, input: object, **kwargs: object) -> AsyncTurnHandle: ...
 
 
 class _CodexClient(Protocol):
@@ -71,7 +73,9 @@ class CodexTransport:
                         error_type=type(exc).__name__,
                     ) from exc
                 try:
-                    result = await thread.run(sdk_input, **turn_kwargs)
+                    return await self._execute_turn(thread, request, sdk_input=sdk_input, turn_kwargs=turn_kwargs)
+                except CodexAgentError:
+                    raise
                 # Caller cancellation must retain asyncio semantics while the client closes.
                 except asyncio.CancelledError:
                     raise
@@ -81,19 +85,6 @@ class CodexTransport:
                         "Codex failed to execute the requested turn.",
                         failure_code=FailureCode.CODEX_TURN_FAILED.value,
                         operation="turn_run",
-                        error_type=type(exc).__name__,
-                    ) from exc
-                try:
-                    return CodexResultSerializer.from_sdk(thread.id, result)
-                # The serializer already classified missing/invalid native responses.
-                except CodexAgentError:
-                    raise
-                # A mismatched SDK result contract can fail during typed field conversion.
-                except Exception as exc:
-                    raise CodexAgentError(
-                        "Codex returned a result that could not be normalized.",
-                        failure_code=FailureCode.CODEX_RESPONSE_INVALID.value,
-                        operation="normalize_result",
                         error_type=type(exc).__name__,
                     ) from exc
         # Cancellation during client entry, thread opening, or exit is not a provider error.
@@ -110,6 +101,19 @@ class CodexTransport:
                 operation="client_start",
                 error_type=type(exc).__name__,
             ) from exc
+
+    async def _execute_turn(self, thread: _CodexThread, request: CodexTransportRunRequest, *, sdk_input: object, turn_kwargs: dict[str, object]) -> CodexRunResult:
+        # @intent preserve-native-run-contract
+        # Select exactly one consumer; unobserved callers retain native run behavior.
+        if request.observation.enabled:
+            return await CodexStreamRunner(request).run(thread, sdk_input, kwargs=turn_kwargs)
+        result = await thread.run(sdk_input, **turn_kwargs)
+        try:
+            return CodexResultSerializer.from_sdk(thread.id, result)
+        except CodexAgentError:
+            raise
+        except Exception as exc:
+            raise CodexAgentError("Codex returned a result that could not be normalized.", failure_code=FailureCode.CODEX_RESPONSE_INVALID.value, operation="normalize_result", error_type=type(exc).__name__) from exc
 
     async def fork_thread(
         self, request: CodexTransportForkRequest

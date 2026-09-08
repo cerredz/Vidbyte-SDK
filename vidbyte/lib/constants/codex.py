@@ -11,6 +11,7 @@ TESTS: python scripts/run_ci.py.
 
 from __future__ import annotations
 
+CODEX_EVENT_SEQUENCE_STEP = 1
 CODEX_ROOT_FORK_DEPTH = 0
 CODEX_NEXT_FORK_DEPTH = 1
 CODEX_ZERO_DURATION_MS = 0
@@ -72,6 +73,7 @@ CODEX_SUPPORTED_ITEM_TYPES = frozenset(
 )
 
 __all__ = [
+    "CODEX_EVENT_SEQUENCE_STEP",
     "CODEX_NEXT_FORK_DEPTH",
     "CODEX_MIDDLEWARE_METADATA_KEY",
     "CODEX_PROVIDER_NAME",
