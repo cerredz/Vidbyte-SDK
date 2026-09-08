@@ -6,6 +6,7 @@ from collections.abc import Mapping
 from dataclasses import replace
 from typing import Any
 
+from vidbyte.agents.codex.contracts import CodexContractValidator
 from vidbyte.lib.dataclasses.codex import (
     CodexAgentSettings,
     CodexAgentTranslation,
@@ -56,6 +57,7 @@ class CodexVidbyteTranslator:
         # Resolve shared schemas once so invalid Vidbyte configuration cannot
         # launch Codex and every later turn uses one deterministic wire shape.
         CodexSettingsValidator.validate(settings.codex)
+        CodexContractValidator.validate(settings.loop)
         translated = replace(
             settings,
             name=settings.name.strip(),

@@ -91,7 +91,7 @@ Two field-guide constraints bind the work. *Class-Bound Helpers → "Audit every
 13. `compaction_count` counts `contextCompaction` items.
 14. `iteration_count` and `model_call_count` are present in the mapping with value `0`, because a contract rejected at construction can never read them and an absent key would break any caller iterating the shape.
 15. Every configured contract is evaluated after result translation; the outcome records the contract name, whether it was satisfied, its observed value, and its minimum.
-16. An unmet contract raises `CodexAgentError` with `CODEX_CONTRACT_UNMET`, whose message is the first unmet contract's own `error(counters)` text, and whose details name every unmet contract.
+16. An unmet contract raises `CodexAgentError` with `CODEX_CONTRACT_UNMET`, whose message carries the first unmet contract's own `error(counters)` text, and whose details name every unmet contract. Each `CodexContractResult` carries that text too, so a caller reading the published outcome sees the same corrective detail — `MinToolCallsById` names the specific tool it wanted, which a generic observed-vs-required message would lose.
 17. `AgentMessage.metadata` carries the contract evaluation under one key when contracts are configured, and omits the key entirely otherwise.
 18. An agent with `loop=None` behaves exactly as before this change.
 
@@ -246,6 +246,7 @@ class CodexContractResult:
     satisfied: bool
     observed: Any
     minimum: float
+    error: str = ""   # the contract's own corrective text, empty when satisfied
 
 
 @dataclass(frozen=True, slots=True)
@@ -354,11 +355,13 @@ All tests run offline against a fake transport, with `CodexItem` payloads shaped
 - `counters` -> `produces exactly the keys the direct runtime produces` — [Hidden Failure] — asserts the key set against `AgentRuntime._contract_counters`'s literal keys, so the two shapes cannot drift and make one contract mean two things.
 - `CodexContractValidator` -> `accepts loop=None` — [Edge Case]
 - `CodexContractValidator` -> `accepts a loop carrying only output_contracts` — [Edge Case]
-- `CodexContractValidator` -> `rejects each unsupported field, naming it` (parameterized) — [Hidden Failure]
+- `CodexContractValidator` -> `rejects every field CODEX_UNSUPPORTED_LOOP_FIELDS lists, naming it` — [Hidden Failure] — the test asserts its own case set equals the constant, so a field added to the constant without a probe fails the test rather than going untested.
 - `CodexContractValidator` -> `names every unsupported field at once` — [Silent Failure] — fixing one and re-running should not reveal a second.
 - `CodexContractValidator` -> `rejects MinIterations, naming the contract` — [Hidden Failure] — a contract on a counter Codex cannot observe would evaluate against `0` and always fail, which reads as a broken agent rather than a rejected configuration.
 - `CodexContractValidator` -> `accepts a field left at its default` — [Hidden Assumption] — one `AgentLoopSettings` reused across agents must not fail on defaults it never set.
 - `evaluate` -> `reports satisfied and observed per contract` — [Edge Case]
+- `evaluate` -> `carries each unmet contract's own corrective text` — [Silent Failure] — a generic message loses the tool name `MinToolCallsById` computes, which is the only actionable part.
+- `evaluate` -> `leaves a satisfied contract's error empty` — [Edge Case]
 - `evaluate` -> `reports unmet contracts in declaration order` — [Silent Failure]
 
 ### Integration Tests

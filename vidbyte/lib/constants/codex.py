@@ -55,7 +55,46 @@ CODEX_SUPPORTED_ITEM_TYPES = frozenset(
     }
 )
 
+# The three item types that represent a tool actually running. webSearch, fileChange,
+# and imageView are native capabilities rather than tool calls; counting them would
+# inflate every effort floor by an amount that varies with the prompt.
+CODEX_TOOL_ITEM_TYPES = frozenset({"commandExecution", "mcpToolCall", "dynamicToolCall"})
+CODEX_COMPACTION_ITEM_TYPE = "contextCompaction"
+CODEX_ITEM_COMPLETED_STATUS = "completed"
+CODEX_COMMAND_SUCCESS_EXIT_CODE = 0
+CODEX_MILLISECONDS_PER_SECOND = 1000
+# Counters describing a Vidbyte-owned loop. Codex owns its iterations and reports
+# neither, so a contract reading one would evaluate against zero and always fail.
+CODEX_UNOBSERVABLE_COUNTER_KEYS = frozenset({"iteration_count", "model_call_count"})
+# AgentLoopSettings fields describing an inner loop, a local tool executor, or a
+# Vidbyte-managed context window. Accepting one silently would let a caller believe
+# a bound exists that nothing enforces.
+CODEX_UNSUPPORTED_LOOP_FIELDS = (
+    "max_iterations",
+    "max_tokens",
+    "max_tool_calls",
+    "max_parallel_tool_calls",
+    "max_retries",
+    "timeout_seconds",
+    "context_window_budget",
+    "compaction_trigger_tokens",
+    "compaction_target_tokens",
+    "allowed_tools",
+    "tool_error_policy",
+    "tool_settings",
+)
+CODEX_CONTRACTS_KEY = "output_contracts"
+
+
 __all__ = [
+    "CODEX_UNSUPPORTED_LOOP_FIELDS",
+    "CODEX_UNOBSERVABLE_COUNTER_KEYS",
+    "CODEX_TOOL_ITEM_TYPES",
+    "CODEX_MILLISECONDS_PER_SECOND",
+    "CODEX_ITEM_COMPLETED_STATUS",
+    "CODEX_CONTRACTS_KEY",
+    "CODEX_COMPACTION_ITEM_TYPE",
+    "CODEX_COMMAND_SUCCESS_EXIT_CODE",
     "CODEX_NEXT_FORK_DEPTH",
     "CODEX_PROVIDER_NAME",
     "CODEX_RESERVED_SUBAGENT_NAMES",

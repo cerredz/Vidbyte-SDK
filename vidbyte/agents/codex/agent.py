@@ -6,6 +6,7 @@ import asyncio
 
 from vidbyte.agents.codex.config import CodexVidbyteTranslator
 from vidbyte.agents.codex.context import CodexContextTranslator
+from vidbyte.agents.codex.contracts import CodexContractTranslator
 from vidbyte.agents.codex.fork import CodexFork
 from vidbyte.agents.codex.metrics import CodexMetricsTranslator
 from vidbyte.agents.codex.result import CodexResultTranslator
@@ -15,11 +16,14 @@ from vidbyte.agents.pricing.tracker import UsageTracker
 from vidbyte.agents.types import AgentMessage
 from vidbyte.lib.dataclasses.codex import (
     CodexContextTranslationRequest,
+    CodexContractOutcome,
+    CodexContractRequest,
     CodexForkRequest,
     CodexForkSettings,
     CodexHarnessAgentSettings,
     CodexResultTranslationRequest,
     CodexRunInput,
+    CodexRunResult,
     CodexTransportRunRequest,
     CodexUsageTranslationRequest,
 )
@@ -118,6 +122,7 @@ class CodexHarnessAgent:
                 input_metadata=translated.metadata,
                 recipient=translated.recipient,
                 usage_rollup=self._usage.rollup(),
+                contracts=self._evaluate_contracts(result),
             )
         )
         self.history.append(reply)
@@ -149,6 +154,43 @@ class CodexHarnessAgent:
         # Codex may bill against subscription credits, so this is a local pricing-table
         # estimate; UsageRollup.cost_complete says whether every call was priced.
         return self.get_usage().cost_usd
+
+    def _evaluate_contracts(
+        self, result: CodexRunResult
+    ) -> CodexContractOutcome | None:
+        """Judge this turn against the caller's output contracts, or None when unset."""
+        # @intent a-reply-must-not-silently-fail-its-own-requirement
+        # The turn already ran and its file edits are real, so this reports rather
+        # than rolls back; but returning a reply that failed a declared contract
+        # would tell the caller the requirement held when it did not.
+        loop = self.settings.loop
+        contracts = getattr(loop, "output_contracts", ()) if loop is not None else ()
+        if not contracts:
+            return None
+        outcome = CodexContractTranslator.evaluate(
+            contracts,
+            CodexContractTranslator.counters(
+                CodexContractRequest(
+                    result=result, cost_usd=self._usage.rollup().cost_usd
+                )
+            ),
+        )
+        self._require_contracts_met(outcome)
+        return outcome
+
+    @staticmethod
+    def _require_contracts_met(outcome: CodexContractOutcome) -> None:
+        """Raise when any contract went unmet, carrying its own corrective text."""
+        unmet = outcome.unmet
+        if not unmet:
+            return
+        raise CodexAgentError(
+            f"Codex turn did not satisfy output contract {unmet[0].name}. "
+            f"{unmet[0].error}",
+            failure_code=FailureCode.CODEX_CONTRACT_UNMET.value,
+            operation="evaluate_contracts",
+            error_type=",".join(result.name for result in unmet),
+        )
 
     async def afork(
         self, settings: CodexForkSettings = _DEFAULT_FORK_SETTINGS

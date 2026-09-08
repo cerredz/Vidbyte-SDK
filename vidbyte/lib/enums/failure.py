@@ -40,6 +40,7 @@ class FailureCode(str, Enum):
     CODEX_TURN_FAILED = "codex.turn_failed"
     CODEX_FORK_FAILED = "codex.fork_failed"
     CODEX_RESPONSE_INVALID = "codex.response_invalid"
+    CODEX_CONTRACT_UNMET = "codex.contract_unmet"
     INPUT_EMPTY = "input.empty"
     INPUT_INVALID = "input.invalid"
     INPUT_TYPE_INVALID = "input.type_invalid"

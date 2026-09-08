@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, Any
 
 from vidbyte.agents.types import AgentMessage
 from vidbyte.lib.constants.codex import (
+    CODEX_CONTRACTS_KEY,
     CODEX_PROVIDER_NAME,
     CODEX_ROOT_FORK_DEPTH,
     CODEX_SUBAGENT_ITEM_TYPES,
@@ -166,6 +167,10 @@ class CodexResultTranslator:
         # rollup that recorded zero calls; omit the key rather than publishing None.
         if request.usage_rollup is not None:
             metadata[CODEX_USAGE_ROLLUP_KEY] = request.usage_rollup
+        # Omitted when no contracts are configured, so absent stays distinct from
+        # "configured and all satisfied", which publishes an empty results tuple.
+        if request.contracts is not None:
+            metadata[CODEX_CONTRACTS_KEY] = request.contracts
         return AgentMessage(
             sender=agent.name,
             recipient=request.recipient,
