@@ -6,9 +6,12 @@ ROLE IN CODEBASE: agent.py calls this translator; ContextManager owns rendering,
 ARCHITECTURE NOTE: Context-zone primitives follow the facade's developer prompt;
     conversation placements surround current-turn input as text, not native history.
 FUNCTION INVENTORY: translate(request) -> CodexPrompt preserves primitive renderings,
-    live source changes, native input identity, and explicit image/skill anchors.
+    live source changes, native input identity, and explicit image/skill anchors. One
+    _render_* function per translated ContextManager surface: conversation placements,
+    unmanaged items, anchored insertions, and manager metadata.
 COMMON MODIFICATION PATTERNS: Add provider input anchors to the shared enum and
     resolve their boundary here without changing the shared ContextManager contract.
+    Translating a further ContextManager surface adds one _render_* function.
 WHAT NOT TO DO IN THIS FILE: Do not mutate caller managers, rewrite primitive bodies,
     run inner-loop algorithms, or claim insertion into Codex-owned historical messages.
 KNOWN EDGE CASES: Missing anchors fail before transport; equal text is not duplicate
@@ -19,7 +22,8 @@ TESTS: Context manager suites and offline adapter regression checks; full run_ci
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
+from typing import Any
 
 from vidbyte.context.manager import ContextManager
 from vidbyte.context.runtime import ContextWindowPlacement
@@ -69,7 +73,7 @@ class CodexContextTranslator:
                 item.text for item in request.items if isinstance(item, CodexTextInput)
             ),
             recipient=request.recipient,
-            metadata=dict(request.metadata),
+            metadata=cls._merge_metadata(rendered, request.metadata),
             developer_context="\n\n".join(
                 source.developer_context
                 for source in rendered
@@ -106,30 +110,82 @@ class CodexContextTranslator:
     def _render_manager(
         cls, source: CodexContextSource, items: tuple[CodexInputItem, ...]
     ) -> CodexRenderedContext:
+        # @intent one-function-per-translated-manager-surface
         # The manager owns full zone rendering; only explicitly anchored records leave it.
+        # Each translated ContextManager surface has its own function below, so covering
+        # a newly translated surface adds one function instead of another inline branch.
+        # Placement-scoped surfaces read the remaining view; whole-manager surfaces read
+        # the caller's manager, because the remaining view carries no unmanaged items or
+        # metadata of its own.
         manager = source.manager
         if manager is None:
             return CodexRenderedContext()
-        insertions = tuple(
-            cls._render_insertion(manager, placement, items)
-            for placement in source.placements
-        )
         remaining = cls._remaining_manager(source)
-        top = remaining.render_conversation_messages(
-            ContextWindowPlacement.TOP_OF_CONVERSATION
-        )
-        end = remaining.render_conversation_messages(
-            ContextWindowPlacement.END_OF_CONVERSATION
-        )
         return CodexRenderedContext(
             developer_context=remaining.render_primitives_zone(),
-            before_input=cls._text_items(tuple(message["content"] for message in top))
-            + cls._text_items(
-                tuple(item.to_context_text() for item in manager.items())
+            before_input=cls._render_conversation(
+                remaining, ContextWindowPlacement.TOP_OF_CONVERSATION
+            )
+            + cls._render_unmanaged_items(manager),
+            after_input=cls._render_conversation(
+                remaining, ContextWindowPlacement.END_OF_CONVERSATION
             ),
-            after_input=cls._text_items(tuple(message["content"] for message in end)),
-            insertions=insertions,
+            insertions=cls._render_insertions(manager, source.placements, items),
+            metadata=cls._render_metadata(manager),
         )
+
+    @classmethod
+    def _render_conversation(
+        cls, manager: ContextManager, placement: ContextWindowPlacement
+    ) -> tuple[CodexTextInput, ...]:
+        # Conversation-placed primitives surround turn input as text, not native history.
+        messages = manager.render_conversation_messages(placement)
+        return cls._text_items(tuple(message["content"] for message in messages))
+
+    @classmethod
+    def _render_unmanaged_items(
+        cls, manager: ContextManager
+    ) -> tuple[CodexTextInput, ...]:
+        # Unmanaged items hold no placement, so they render ahead of current-turn input.
+        return cls._text_items(
+            tuple(item.to_context_text() for item in manager.items())
+        )
+
+    @classmethod
+    def _render_insertions(
+        cls,
+        manager: ContextManager,
+        placements: tuple[CodexContextPlacement, ...],
+        items: tuple[CodexInputItem, ...],
+    ) -> tuple[CodexContextInsertion, ...]:
+        # Anchored primitives are the only registry records that leave the zone.
+        return tuple(
+            cls._render_insertion(manager, placement, items) for placement in placements
+        )
+
+    @staticmethod
+    def _render_metadata(manager: ContextManager) -> Mapping[str, Any]:
+        # @intent do-not-drop-manager-metadata
+        # ContextManager.metadata reaches provider metadata through to_context() on the
+        # generic agent path. Codex builds no BaseContext, so without this translation a
+        # caller who set metadata on the manager silently loses it for the whole turn.
+        return dict(manager.metadata)
+
+    @staticmethod
+    def _merge_metadata(
+        rendered: tuple[CodexRenderedContext, ...], request_metadata: Mapping[str, Any]
+    ) -> dict[str, Any]:
+        # @intent most-specific-metadata-wins-last
+        # Merge order is the contract: sources in render order, then per-turn input
+        # metadata. _sources emits the agent-scoped manager before the request-scoped
+        # one, so the request scope overrides the agent scope and explicit turn input
+        # overrides both. Reordering these updates would let a stale agent-level key
+        # silently outrank the value a caller set for this turn.
+        metadata: dict[str, Any] = {}
+        for source in rendered:
+            metadata.update(source.metadata)
+        metadata.update(request_metadata)
+        return metadata
 
     @staticmethod
     def _remaining_manager(source: CodexContextSource) -> ContextManager:

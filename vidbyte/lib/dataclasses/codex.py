@@ -21,6 +21,7 @@ from vidbyte.lib.constants.codex import (
     CODEX_RESERVED_SUBAGENT_NAMES,
     CODEX_ROOT_FORK_DEPTH,
 )
+from vidbyte.lib.dataclasses.agents import AgentInput
 from vidbyte.lib.enums.codex import (
     CodexApprovalMode,
     CodexContextAnchor,
@@ -473,6 +474,12 @@ class CodexRunInput:
         return cls(items=(CodexTextInput(prompt),), recipient=recipient)
 
 
+# One agent turn accepted from any Vidbyte caller. The union is structurally
+# required: a composition surface holds a str or AgentInput, while a native
+# caller holds a CodexRunInput carrying image, skill, or mention items.
+CodexAgentInput = str | AgentInput | CodexRunInput
+
+
 @dataclass(frozen=True, slots=True)
 class CodexPrompt:
     """Translated SDK input plus safe Vidbyte message context."""
@@ -527,6 +534,7 @@ class CodexRenderedContext:
     before_input: tuple[CodexTextInput, ...] = ()
     after_input: tuple[CodexTextInput, ...] = ()
     insertions: tuple[CodexContextInsertion, ...] = ()
+    metadata: Mapping[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
