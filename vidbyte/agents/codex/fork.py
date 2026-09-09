@@ -98,6 +98,7 @@ class CodexFork:
             codex=child_codex,
             observation=parent.observation if settings.observation is None else settings.observation,
             acceptance=parent.acceptance if settings.acceptance is None else settings.acceptance,
+            control=parent.control if settings.control is None else settings.control,
             continual_trace=parent.continual_trace if settings.continual_trace is None else settings.continual_trace,
             additional_context=parent.additional_context
             if settings.additional_context is None

@@ -25,6 +25,7 @@ settings override disables them.
 
 - `agent.py`: Public facade and middleware/metrics orchestration.
 - `acceptance.py`: Required final artifacts and application checks before success.
+- `control.py`: Native live steering/interruption with per-turn handle lifetime.
 - `config.py`: Shared settings resolution and native argument serialization.
 - `continual.py`: Native trace updates and deterministic completed-item scheduling.
 - `context.py`: Context zone and native input placement translation.
@@ -91,3 +92,19 @@ candidate with `codex.acceptance_failed`. Successful replies include an
 thread identity and usage remain available. This gate cannot undo native effects
 and never automatically retries them. Forks inherit the settings; an explicit
 `CodexAcceptanceSettings(require_completed=False)` override disables requirements.
+
+## Live control
+
+Set `control=CodexControlSettings(on_ready=async_callback)` to receive a
+`CodexRunControl` when the native turn starts. Retain the handle and return from
+the callback; then use `await handle.steer("New feedback")` or
+`await handle.interrupt()` while `handle.active` is true. The readiness callback
+can also issue immediate commands, but must not wait for the turn to finish.
+
+Both operations call the native SDK. Steering adds text to the current turn and
+checks its acknowledgment; it does not replace native context or guarantee which
+action happens next. Interrupt acknowledgment does not undo effects. Commands and
+readiness callbacks have a configurable timeout (default 60 seconds). Completion,
+failure, or cancellation deactivates the handle, including before terminal event
+observers run. Closed handles and late acknowledgments fail with
+`codex.control_failed`. Forks inherit settings and create their own run handles.

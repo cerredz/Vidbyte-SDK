@@ -18,6 +18,7 @@ import copy
 from collections.abc import AsyncGenerator
 from typing import TYPE_CHECKING, Any, Protocol, cast
 
+from vidbyte.agents.codex.control import CodexNativeControl, CodexRunControl
 from vidbyte.agents.codex.observation import CodexEventTranslator, CodexTraceBridge
 from vidbyte.agents.codex.result import CodexResultSerializer
 from vidbyte.lib.constants.codex import CODEX_EVENT_SEQUENCE_STEP
@@ -49,6 +50,7 @@ class CodexStreamRunner:
         # Observers and traces belong to one invocation, never shared run state.
         self.settings = request.observation
         self.trace = CodexTraceBridge(self.settings)
+        self.control_settings = request.control
 
     async def run(self, thread: _CodexThread, native_input: Any, *, kwargs: dict[str, Any]) -> CodexRunResult:
         # @intent single-native-stream
@@ -66,6 +68,20 @@ class CodexStreamRunner:
             self.trace.finish(error)
 
     async def collect(self, turn: CodexTurnStream | AsyncTurnHandle, identity: CodexObservation) -> TurnResult:
+        # @intent control-follows-native-turn-lifetime
+        # Deactivate the handle on readiness failure, stream failure, and cancellation.
+        control = None
+        if self.control_settings is not None:
+            control = CodexRunControl(identity.thread_id, identity.turn_id, cast("CodexNativeControl", turn), self.control_settings.timeout_seconds)
+        try:
+            if control is not None and self.control_settings is not None:
+                await control.ready(self.control_settings)
+            return await self.collect_events(turn, identity, control)
+        finally:
+            if control is not None:
+                control.close()
+
+    async def collect_events(self, turn: CodexTurnStream | AsyncTurnHandle, identity: CodexObservation, control: CodexRunControl | None) -> TurnResult:
         # @intent preserve-native-result-semantics
         # Match public result fields while treating absent terminal data as failure.
         from openai_codex import TurnResult
@@ -83,6 +99,8 @@ class CodexStreamRunner:
         try:
             async for event in stream:
                 sequence += CODEX_EVENT_SEQUENCE_STEP
+                if event.method == "turn/completed" and control is not None:
+                    control.close()
                 await self.deliver(event, CodexObservation(sequence, "", identity.thread_id, identity.turn_id))
                 payload = event.payload
                 if isinstance(payload, ItemCompletedNotification):

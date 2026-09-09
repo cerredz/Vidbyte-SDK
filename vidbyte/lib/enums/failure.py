@@ -41,6 +41,7 @@ class FailureCode(str, Enum):
     CODEX_FORK_FAILED = "codex.fork_failed"
     CODEX_RESPONSE_INVALID = "codex.response_invalid"
     CODEX_ACCEPTANCE_FAILED = "codex.acceptance_failed"
+    CODEX_CONTROL_FAILED = "codex.control_failed"
     CODEX_MIDDLEWARE_ABORTED = "codex.middleware_aborted"
     CODEX_MIDDLEWARE_UNSUPPORTED = "codex.middleware_unsupported"
     INPUT_EMPTY = "input.empty"

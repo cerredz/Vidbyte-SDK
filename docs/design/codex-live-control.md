@@ -1,4 +1,4 @@
-﻿# Design Doc: Codex Live Control
+# Design Doc: Codex Live Control
 
 **Status:** Draft
 **Author:** Codex
@@ -58,7 +58,7 @@ Owns one native turn's command and lifecycle boundary.
 `CodexRunControl(thread_id, turn_id, native, timeout_seconds)`
 `async steer(text: str) -> None`; `async interrupt() -> None`; `close() -> None`; `active: bool`.
 #### Logic / Algorithm
-Validate text, acquire an asyncio lock, check active state, await the corresponding native method with a timeout, and verify steering response turn_id equals the expected ID. Recheck active after acknowledgment so a late response cannot look like live-turn success. close invalidates new and late command results.
+Validate text, acquire the SDK AsyncCapacityLimiter, check active state, await the corresponding native method with a timeout, and verify steering response turn_id equals the expected ID. Recheck active after acknowledgment so a late response cannot look like live-turn success. close invalidates new and late command results.
 #### Edge Cases & Error Handling
 Raise CODEX_CONTROL_FAILED with operation/error_type only. Cancellation propagates. Pending commands are bounded; close does not cancel unrelated application tasks that issued them. Native completion can race a command and is reported as a control error rather than silently retargeting another turn.
 
@@ -73,6 +73,18 @@ Collector accepts a native handle supporting stream, steer, and interrupt when c
 Before collecting, invoke on_ready once with bounded wait. On terminal event invalidate before observers run. Finally invalidate again and close the stream, including readiness failure. Low-level native transport delegates this same collector path.
 #### Edge Cases & Error Handling
 Readiness callbacks must not wait for collector completion. A stale handle never controls a resumed/forked turn. Terminal interruption remains subject to final acceptance settings.
+
+### 6.4 Shared capacity boundary
+**Files:** lib/util/concurrency.py, lib/util/__init__.py, lib/util/README.md
+**Type:** New and modified
+#### What it does
+Owns SDK asynchronous concurrency admission without the prohibited asyncio.Lock API.
+#### Interface / API
+`AsyncCapacityLimiter(capacity: int = 1)` is an async context manager backed by asyncio.BoundedSemaphore.
+#### Logic / Algorithm
+Validate positive nonboolean integer capacity; await admission on entry and return one permit on exit. Codex uses capacity one to serialize commands.
+#### Edge Cases & Error Handling
+Cancelled waiters must not release a permit they never acquired. Exceptions inside an admitted operation release its permit. Tests cover both.
 
 ## 7. Data Model Changes
 ### 7.1 Control settings
@@ -89,6 +101,9 @@ on_ready receives the handle; steer adds feedback to the active native turn, int
 |---|---|---|
 | CREATE | docs/design/codex-live-control.md | Design |
 | CREATE | vidbyte/agents/codex/control.py | Live native control |
+| CREATE | vidbyte/lib/util/concurrency.py | Shared SDK async capacity boundary |
+| CREATE | vidbyte/lib/util/README.md | Shared helper File Index |
+| MODIFY | vidbyte/lib/util/__init__.py | Export shared capacity limiter |
 | CREATE | tests/codex_control/FEATURE.md | Feature contract |
 | CREATE | tests/codex_control/test_control.py | Acceptance cases |
 | CREATE | scripts/test-codex-live-control.py | Verification script |
@@ -111,6 +126,7 @@ on_ready receives the handle; steer adds feedback to the active native turn, int
 - [Hidden Failure] Wrong turn acknowledgment, SDK exceptions, timeout, and cancellation cannot report success.
 - [Hidden Assumption] Closed handles and commands completing after close cannot operate successfully.
 - [Hidden Failure] Concurrent controls execute serially without retargeting.
+- [Hidden Failure] SDK capacity limiter retains exact capacity after waiting-task cancellation and an admitted operation exception.
 ### Integration Tests
 - [Silent Failure] Control-only configuration chooses streaming and on_ready can issue native steering/interruption.
 - [Hidden Failure] Readiness exception or timeout closes the handle and stream.
@@ -124,7 +140,7 @@ Run every case through the feature script, then lint/source/full package gates. 
 | Dependency | Version / Endpoint | Purpose | Risk |
 |---|---|---|---|
 | openai-codex | >=0.147.0,<0.148.0 | Native steer/interrupt | Native timing is asynchronous |
-| asyncio | Standard library | Locks and bounded waits | Cooperative callbacks |
+| asyncio | Standard library | Capacity limiting and bounded waits | Cooperative callbacks |
 
 ## 12. Rollout & Deployment
 Opt-in control settings; merge after #426. Removing the setting restores prior path. Existing native output and final acceptance rules remain authoritative.
@@ -134,3 +150,13 @@ No unresolved implementation decisions. Exact next-action timing and native cont
 
 ## 14. Alternatives Considered
 Observer-only feedback stays outside the model. Editing local ContextManager state does not replace Codex-owned context. The actual steer request provides the supported supplemental-input behavior, with explicit acknowledgment and lifecycle limits.
+
+## Refinement Checklist
+
+- [x] [Notable] **SDK concurrency ownership**
+  Expected: concurrency belongs to the SDK shared boundary. The repository bans asyncio.Lock but this checkout had no replacement helper. Added AsyncCapacityLimiter under lib/util, using bounded permit admission with cancellation/exception tests, and used capacity one for native commands. The policy and baseline remain unchanged.
+- [x] [Notable] **Readiness failure before stream opening**
+  Expected: no leaked capability or native resource when on_ready fails. Readiness runs before the stream opens, so the outer transport closes the native client and its registered queues. An integration case now verifies client exit in addition to handle deactivation; no unopened generator is represented as having run cleanup.
+
+Feature verification passed 12/12; repository lint passed; source CI passed 1775 tests with one existing optional skip. The updated manifest includes the shared utility owner and folder index.
+Full local CI also passed, including wheel/sdist validation and isolated installed-package smoke checks.

@@ -51,6 +51,7 @@ from vidbyte.lib.errors import ConfigurationError
 from vidbyte.lib.tracing import NullTracer, TracerBase
 
 if TYPE_CHECKING:
+    from vidbyte.agents.codex.control import CodexRunControl
     from vidbyte.agents.pricing.records import UsageRollup
     from vidbyte.agents.types import AgentMessage
     from vidbyte.context.manager import ContextManager
@@ -379,6 +380,25 @@ class CodexObservation:
 
 
 @dataclass(frozen=True, slots=True)
+class CodexControlSettings:
+    """Callback receiving an ephemeral native-turn control handle."""
+
+    on_ready: Callable[[CodexRunControl], Awaitable[None]]
+    timeout_seconds: float = CODEX_TRACE_TIMEOUT_SECONDS
+
+    def __post_init__(self) -> None:
+        # Reject invalid readiness callbacks and unbounded command waits.
+        if not callable(self.on_ready):
+            raise ConfigurationError("Codex control on_ready must be an async callback.")
+        try:
+            timeout = TypeAdapter(PositiveFloat).validate_python(self.timeout_seconds, strict=True)
+        except ValidationError as exc:
+            raise ConfigurationError("Codex control timeout must be positive and finite.") from exc
+        if not math.isfinite(timeout):
+            raise ConfigurationError("Codex control timeout must be finite.")
+
+
+@dataclass(frozen=True, slots=True)
 class CodexAcceptanceSettings:
     """Requirements that must pass before a native candidate becomes a successful reply."""
 
@@ -470,6 +490,7 @@ class CodexHarnessAgentSettings:
     continual_trace: CodexContinualTraceSettings | None = None
     tool_bridge: CodexToolBridgeSettings | None = None
     acceptance: CodexAcceptanceSettings | None = None
+    control: CodexControlSettings | None = None
 
     def __post_init__(self) -> None:
         # Validate observation collaborators before context or native execution.
@@ -717,6 +738,7 @@ class CodexForkSettings:
     name: str = ""
     observation: CodexObservationSettings | None = None
     acceptance: CodexAcceptanceSettings | None = None
+    control: CodexControlSettings | None = None
     continual_trace: CodexContinualTraceSettings | None = None
     clear_continual_trace: bool = False
     system_prompt: str = ""
@@ -995,6 +1017,7 @@ class CodexTransportRunRequest:
     output_schema: Mapping[str, Any]
     observation: CodexObservationSettings = field(default_factory=CodexObservationSettings)
     tool_bridge: CodexToolBridgeSettings | None = None
+    control: CodexControlSettings | None = None
 
 
 @dataclass(frozen=True, slots=True)

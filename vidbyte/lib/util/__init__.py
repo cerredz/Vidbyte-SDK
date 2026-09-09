@@ -6,7 +6,7 @@ PURPOSE:
     SDK feature (agents, sessions, harnesses, or otherwise).
 
 ROLE IN CODEBASE:
-    Re-exports MathHelper from vidbyte/lib/util/math.py. Imported by
+    Re-exports MathHelper and AsyncCapacityLimiter. Imported by
     vidbyte/agents/speed/tracker.py and any future SDK code that needs the
     same general-purpose statistics.
 
@@ -15,8 +15,7 @@ ARCHITECTURE NOTE:
     vidbyte/lib/dataclasses/__init__.py re-export their sibling modules.
 
 FUNCTION INVENTORY:
-    No functions of its own; re-exports MathHelper. See
-    vidbyte/lib/util/math.py for MathHelper's own inventory.
+    No functions of its own; re-exports shared statistics and concurrency helpers.
 
 COMMON MODIFICATION PATTERNS:
     Add a new general-purpose helper class as its own module in this folder,
@@ -35,11 +34,12 @@ RELATED DOCS:
     https://github.com/cerredz/Vidbyte-SDK/blob/main/docs/design/agent-speed-tracking.md
 
 TESTS:
-    tests/test_agent_speed.py (MathHelperTests) covers the sole current export.
+    tests/test_agent_speed.py covers MathHelper; tests/codex_control covers capacity admission.
 """
 
 from __future__ import annotations
 
+from vidbyte.lib.util.concurrency import AsyncCapacityLimiter
 from vidbyte.lib.util.math import MathHelper
 
-__all__ = ["MathHelper"]
+__all__ = ["AsyncCapacityLimiter", "MathHelper"]

@@ -109,7 +109,7 @@ class CodexTransport:
     async def _execute_turn(self, thread: _CodexThread, request: CodexTransportRunRequest, *, sdk_input: object, turn_kwargs: dict[str, object]) -> CodexRunResult:
         # @intent preserve-native-run-contract
         # Select exactly one consumer; unobserved callers retain native run behavior.
-        if request.observation.enabled:
+        if request.observation.enabled or request.control is not None:
             return await CodexStreamRunner(request).run(thread, sdk_input, kwargs=turn_kwargs)
         result = await thread.run(sdk_input, **turn_kwargs)
         try:

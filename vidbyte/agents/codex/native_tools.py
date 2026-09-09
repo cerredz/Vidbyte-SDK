@@ -31,16 +31,28 @@ from vidbyte.lib.errors import CodexAgentError, ConfigurationError
 
 if TYPE_CHECKING:
     from openai_codex.client import CodexClient
+    from openai_codex.generated.v2_all import TurnInterruptResponse, TurnSteerResponse
     from openai_codex.models import Notification
 
 
 class CodexNativeTurnStream:
     """One routed native notification queue with deterministic cleanup."""
 
-    def __init__(self, client: CodexClient, turn_id: str) -> None:
+    def __init__(self, client: CodexClient, turn_id: str, thread_id: str) -> None:
         # Retain only public client operations and the native routing identity.
         self.client = client
         self.id = turn_id
+        self.thread_id = thread_id
+
+    async def steer(self, input: str) -> TurnSteerResponse:
+        # @intent native-low-level-steering
+        # Send the expected turn ID so Codex cannot retarget feedback to a later turn.
+        return await asyncio.to_thread(self.client.turn_steer, self.thread_id, self.id, input)
+
+    async def interrupt(self) -> TurnInterruptResponse:
+        # @intent native-low-level-interruption
+        # Request actual native interruption without synthesizing a terminal event.
+        return await asyncio.to_thread(self.client.turn_interrupt, self.thread_id, self.id)
 
     async def stream(self) -> AsyncGenerator[Notification, None]:
         # @intent single-native-notification-consumer
@@ -98,7 +110,7 @@ class CodexNativeToolTransport:
         runner.trace.start(identity)
         error: BaseException | None = None
         try:
-            result = await runner.collect(CodexNativeTurnStream(client, started.turn.id), identity)
+            result = await runner.collect(CodexNativeTurnStream(client, started.turn.id, opened.thread.id), identity)
             return CodexResultSerializer.from_sdk(opened.thread.id, result)
         except BaseException as exc:
             error = exc

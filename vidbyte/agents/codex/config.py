@@ -10,6 +10,7 @@ from vidbyte.agents.codex.middleware import CodexMiddlewareValidator
 from vidbyte.lib.dataclasses.codex import (
     CodexAgentSettings,
     CodexAgentTranslation,
+    CodexControlSettings,
     CodexForkSettings,
     CodexHarnessAgentSettings,
     CodexImageInput,
@@ -60,6 +61,8 @@ class CodexVidbyteTranslator:
         CodexMiddlewareValidator.validate(settings.middleware)
         self.validate_tools(settings)
         self.validate_acceptance(settings)
+        if settings.control is not None and not isinstance(settings.control, CodexControlSettings):
+            raise ConfigurationError("Codex control must be CodexControlSettings.")
         translated = replace(
             settings,
             name=settings.name.strip(),

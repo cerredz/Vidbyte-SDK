@@ -124,6 +124,7 @@ class CodexHarnessAgent:
                     output_schema=self._translation.output_schema,
                     observation=observation,
                     tool_bridge=self.settings.tool_bridge,
+                    control=self.settings.control,
                 )
             )
         # Cancellation is not a model error, so it propagates without running
