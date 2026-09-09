@@ -1,4 +1,4 @@
-﻿# Design Doc: Codex Native Tools
+# Design Doc: Codex Native Tools
 
 **Status:** Draft
 **Author:** Codex
@@ -141,3 +141,14 @@ Resume/fork cannot re-register dynamicTools in this pinned schema. Persistent re
 
 ## 14. Alternatives Considered
 Prompt-only function instructions do not enforce calls. Mutating private AsyncCodex client fields is brittle. Reimplementing JSON-RPC/process management duplicates the public SDK. A public low-level SDK adapter provides the real request boundary without either compromise.
+
+## Refinement Checklist
+
+- [x] [Critical] **Timed-out duplicate calls**
+  Expected: repeated delivery must not repeat tool effects. Review found that raised timeout errors bypassed the response cache. Failed execution responses now enter the same cache as success, and the timeout test repeats the call and verifies exactly one execution.
+- [x] [Notable] **Experimental registration evidence**
+  Expected: actual Codex registration, not merely a translator-shaped mock. The installed 0.147 binary accepted a real ephemeral thread/start containing dynamicTools; no model turn was started. Offline acceptance additionally exercises the full public-client callback with real ToolExecutor and native models.
+
+Fresh-thread-only registration is the explicit scope of this PR, not a claim of complete tool continuity. Source CI passed 1749 tests with one existing optional skip; native feature verification passed 15/15. The manifest matches all changed files.
+
+Full local CI also passed, including wheel/sdist validation and isolated installed-package smoke checks.

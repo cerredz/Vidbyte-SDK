@@ -16,7 +16,15 @@ from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from pydantic import BaseModel, JsonValue, PositiveFloat, TypeAdapter, ValidationError
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    JsonValue,
+    PositiveFloat,
+    TypeAdapter,
+    ValidationError,
+)
 
 from vidbyte.lib.constants.codex import (
     CODEX_RESERVED_SUBAGENT_NAMES,
@@ -26,6 +34,7 @@ from vidbyte.lib.constants.codex import (
     CODEX_TRACE_TIMEOUT_SECONDS,
     CODEX_TRACE_WINDOW,
 )
+from vidbyte.lib.dataclasses.security import PermissionPolicy
 from vidbyte.lib.dataclasses.trace import TraceSchema
 from vidbyte.lib.enums.codex import (
     CodexApprovalMode,
@@ -46,6 +55,7 @@ if TYPE_CHECKING:
     from vidbyte.context.manager import ContextManager
     from vidbyte.context.primitives import ContextItem
     from vidbyte.middleware.base import AgentMiddleware
+    from vidbyte.tools.catalog import Tools
 
 
 def _require_text(owner: str, field_name: str, value: str) -> None:
@@ -368,6 +378,39 @@ class CodexObservation:
 
 
 @dataclass(frozen=True, slots=True)
+class CodexToolBridgeSettings:
+    """Native function registration backed by existing bound Vidbyte tools."""
+
+    tools: Tools
+    permission_policy: PermissionPolicy = field(default_factory=PermissionPolicy)
+    timeout_seconds: float = CODEX_TRACE_TIMEOUT_SECONDS
+
+    def __post_init__(self) -> None:
+        # @intent bounded-permission-execution
+        # Reject invalid wait bounds before scheduling any tool work.
+        try:
+            timeout = TypeAdapter(PositiveFloat).validate_python(self.timeout_seconds, strict=True)
+        except ValidationError as exc:
+            raise ConfigurationError("Codex tool timeout must be a positive finite number.") from exc
+        if not math.isfinite(timeout):
+            raise ConfigurationError("Codex tool timeout must be finite.")
+        if not isinstance(self.permission_policy, PermissionPolicy):
+            raise ConfigurationError("Codex tools require PermissionPolicy.")
+
+
+class CodexDynamicToolCall(BaseModel):
+    """Reviewed experimental item/tool/call wire fields."""
+
+    model_config = ConfigDict(strict=True, populate_by_name=True, extra="forbid")
+    arguments: dict[str, JsonValue]
+    call_id: str = Field(alias="callId", min_length=1)
+    thread_id: str = Field(alias="threadId", min_length=1)
+    turn_id: str = Field(alias="turnId", min_length=1)
+    tool: str = Field(min_length=1)
+    namespace: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class CodexHarnessAgentSettings:
     """Validated Vidbyte-facing construction input for one Codex harness agent.
 
@@ -390,6 +433,7 @@ class CodexHarnessAgentSettings:
     middleware: tuple[AgentMiddleware, ...] = ()
     observation: CodexObservationSettings = field(default_factory=CodexObservationSettings)
     continual_trace: CodexContinualTraceSettings | None = None
+    tool_bridge: CodexToolBridgeSettings | None = None
 
     def __post_init__(self) -> None:
         # Validate observation collaborators before context or native execution.
@@ -913,6 +957,7 @@ class CodexTransportRunRequest:
     settings: CodexAgentSettings
     output_schema: Mapping[str, Any]
     observation: CodexObservationSettings = field(default_factory=CodexObservationSettings)
+    tool_bridge: CodexToolBridgeSettings | None = None
 
 
 @dataclass(frozen=True, slots=True)

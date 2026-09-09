@@ -77,6 +77,8 @@ class CodexFork:
         # Copy mutable context and resolve schemas before making an external
         # thread so an invalid override cannot leave behind an unusable branch.
         parent = request.parent
+        if parent.tool_bridge is not None:
+            raise CodexAgentError("Codex dynamic tool registration cannot be verified on a fork; create a fresh tool-enabled agent.", failure_code=FailureCode.CODEX_FORK_FAILED.value, operation="fork_tool_registration")
         settings = request.overrides
         child_codex = settings.codex if settings.codex is not None else parent.codex
         child_system_prompt = settings.system_prompt or parent.system_prompt

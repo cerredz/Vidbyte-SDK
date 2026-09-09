@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import copy
 from collections.abc import AsyncGenerator
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, Protocol, cast
 
 from vidbyte.agents.codex.observation import CodexEventTranslator, CodexTraceBridge
 from vidbyte.agents.codex.result import CodexResultSerializer
@@ -33,6 +33,12 @@ if TYPE_CHECKING:
     from openai_codex.models import Notification
 
     from vidbyte.agents.codex.transport import _CodexThread
+
+
+class CodexTurnStream(Protocol):
+    """Public stream contract shared by high-level and low-level SDK handles."""
+
+    def stream(self) -> AsyncGenerator[Notification, None]: ...
 
 
 class CodexStreamRunner:
@@ -59,7 +65,7 @@ class CodexStreamRunner:
         finally:
             self.trace.finish(error)
 
-    async def collect(self, turn: AsyncTurnHandle, identity: CodexObservation) -> TurnResult:
+    async def collect(self, turn: CodexTurnStream | AsyncTurnHandle, identity: CodexObservation) -> TurnResult:
         # @intent preserve-native-result-semantics
         # Match public result fields while treating absent terminal data as failure.
         from openai_codex import TurnResult

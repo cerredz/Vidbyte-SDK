@@ -34,6 +34,9 @@ settings override disables them.
 - `stream.py`: One-consumer native streaming and result collection.
 - `result.py`: Native snapshot serialization and output validation.
 - `transport.py`: Native client lifecycle, lazy imports, and error boundaries.
+- `native_tools.py`: Public low-level SDK lifecycle for registered Vidbyte functions.
+- `tool_dispatch.py`: Native callback authorization, validation, and execution.
+- `tool_wire.py`: Generated native parameters and experimental tool declarations.
 - `__init__.py`: Public facade exports.
 
 ## Non-Goals
@@ -51,3 +54,23 @@ adapter does not replace native context management or expose private reasoning.
 Pass `continual_trace=CodexContinualTraceSettings(schema=TraceSchema.coerce(MyModel), every_n_completed_items=5)` on harness settings. A separate native Codex turn generates each trace patch using the same model/client configuration. `continual.py` owns the updater and scheduler. Updates cost additional Codex calls; the configured timeout and attempt cap bound each update attempt.
 
 Read artifacts from `reply.metadata["trace"]` or `agent.last_trace`, and inspect `reply.metadata["trace_metadata"]` for failures and window truncation. The default is fail-open. This cadence counts completed native items, not model iterations. The artifact stays out of the main context. Evidence windows are bounded; exact deduplication retains one ID per completed item. Native updater threads use read-only filesystem sandboxing and deny approvals, but those settings do not guarantee that every externally configured tool is side-effect-free. The update prompt instructs the model to use only the supplied snapshot.
+
+## Native Vidbyte tools
+
+Set `tool_bridge=CodexToolBridgeSettings(tools=Tools([...]), permission_policy=policy)`
+on harness settings and enable `codex.client.experimental_api`. The native
+`item/tool/call` request waits for Vidbyte's existing ToolExecutor, including its
+permission policy and tool validation. Existing bound reasoning tools retain their
+context references. Tool arguments and successful outputs enter Codex's context.
+
+This option currently requires a fresh thread. Resumed threads and forks reject
+before native execution because the pinned protocol cannot register replacement
+dynamic tools there. Create a fresh agent for another tool-enabled run. Codex's
+built-in shell, file, hosted, and MCP tools do not pass through this dispatcher.
+Native approval requests reaching this client are declined; configure the native
+sandbox and approval mode separately. Registration does not force model tool use.
+
+The callback waits up to `timeout_seconds` (default 60). Timeout or cancellation
+cancels cooperative async tool execution but cannot undo completed effects. Tools
+must not synchronously block their event loop or issue native requests on the same
+Codex connection, whose reader is waiting for their result.

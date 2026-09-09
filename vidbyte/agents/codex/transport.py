@@ -53,6 +53,10 @@ class CodexTransport:
         # Own the complete client/thread/turn lifetime so every success, failure,
         # and cancellation closes the native app-server connection.
         sdk = self._load_sdk()
+        if request.tool_bridge is not None:
+            from vidbyte.agents.codex.native_tools import CodexNativeToolTransport
+
+            return await CodexNativeToolTransport().run(request, sdk)
         try:
             config = sdk.codex_config(
                 **CodexContentTranslator.client_kwargs(request.settings)

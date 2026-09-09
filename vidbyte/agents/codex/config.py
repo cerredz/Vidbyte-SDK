@@ -58,6 +58,7 @@ class CodexVidbyteTranslator:
         # launch Codex and every later turn uses one deterministic wire shape.
         CodexSettingsValidator.validate(settings.codex)
         CodexMiddlewareValidator.validate(settings.middleware)
+        self.validate_tools(settings)
         translated = replace(
             settings,
             name=settings.name.strip(),
@@ -72,6 +73,23 @@ class CodexVidbyteTranslator:
             settings=translated,
             output_schema=self.output_schema(settings.output_schema),
         )
+
+    @staticmethod
+    def validate_tools(settings: CodexHarnessAgentSettings) -> None:
+        # @intent reject-unverifiable-native-registration
+        # Experimental registration is supported only at fresh thread creation.
+        from vidbyte.lib.dataclasses.codex import CodexToolBridgeSettings
+        from vidbyte.tools.catalog import Tools
+
+        bridge = settings.tool_bridge
+        if bridge is None:
+            return
+        if not isinstance(bridge, CodexToolBridgeSettings) or not isinstance(bridge.tools, Tools):
+            raise ConfigurationError("Codex tool_bridge requires CodexToolBridgeSettings with a Tools catalog.")
+        if not bridge.tools.all():
+            raise ConfigurationError("Codex tool_bridge requires at least one tool.")
+        if settings.thread_id or not settings.codex.client.experimental_api:
+            raise ConfigurationError("Codex dynamic tools require a fresh thread and experimental_api=True.")
 
     def output_schema(
         self, schema: type | Mapping[str, Any] | None
