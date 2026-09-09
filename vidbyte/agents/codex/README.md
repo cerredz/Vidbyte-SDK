@@ -24,6 +24,7 @@ settings override disables them.
 ## File Index
 
 - `agent.py`: Public facade and middleware/metrics orchestration.
+- `acceptance.py`: Required final artifacts and application checks before success.
 - `config.py`: Shared settings resolution and native argument serialization.
 - `continual.py`: Native trace updates and deterministic completed-item scheduling.
 - `context.py`: Context zone and native input placement translation.
@@ -74,3 +75,19 @@ The callback waits up to `timeout_seconds` (default 60). Timeout or cancellation
 cancels cooperative async tool execution but cannot undo completed effects. Tools
 must not synchronously block their event loop or issue native requests on the same
 Codex connection, whose reader is waiting for their result.
+
+## Final acceptance
+
+Set `acceptance=CodexAcceptanceSettings(require_trace=True, trace_schema=FinalTrace)`
+alongside continual tracing to require a successful final-boundary update and a
+valid final artifact. `trace_schema` uses the shared output-schema validator. With
+acceptance enabled, native status must be `completed` by default.
+
+Use `checks=(async_check,)` for application requirements such as verifying saved
+artifacts. Each check receives its own `CodexAcceptanceRequest` snapshot and must
+return exactly `True`; false/missing returns, exceptions, or timeout reject the
+candidate with `codex.acceptance_failed`. Successful replies include an
+`acceptance` receipt. Rejected replies are not appended to history, while native
+thread identity and usage remain available. This gate cannot undo native effects
+and never automatically retries them. Forks inherit the settings; an explicit
+`CodexAcceptanceSettings(require_completed=False)` override disables requirements.

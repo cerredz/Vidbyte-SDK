@@ -52,6 +52,7 @@ from vidbyte.lib.tracing import NullTracer, TracerBase
 
 if TYPE_CHECKING:
     from vidbyte.agents.pricing.records import UsageRollup
+    from vidbyte.agents.types import AgentMessage
     from vidbyte.context.manager import ContextManager
     from vidbyte.context.primitives import ContextItem
     from vidbyte.middleware.base import AgentMiddleware
@@ -378,6 +379,40 @@ class CodexObservation:
 
 
 @dataclass(frozen=True, slots=True)
+class CodexAcceptanceSettings:
+    """Requirements that must pass before a native candidate becomes a successful reply."""
+
+    require_completed: bool = True
+    require_trace: bool = False
+    trace_schema: type | Mapping[str, Any] | None = None
+    checks: tuple[Callable[[CodexAcceptanceRequest], Awaitable[bool]], ...] = ()
+    timeout_seconds: float = CODEX_TRACE_TIMEOUT_SECONDS
+
+    def __post_init__(self) -> None:
+        # @intent explicit-final-acceptance-policy
+        # Invalid requirements cannot silently weaken successful-return conditions.
+        _require_bool("Codex acceptance", "require_completed", self.require_completed)
+        _require_bool("Codex acceptance", "require_trace", self.require_trace)
+        if not isinstance(self.checks, tuple) or any(not callable(check) for check in self.checks):
+            raise ConfigurationError("Codex acceptance checks must be a tuple of async callbacks.")
+        try:
+            timeout = TypeAdapter(PositiveFloat).validate_python(self.timeout_seconds, strict=True)
+        except ValidationError as exc:
+            raise ConfigurationError("Codex acceptance timeout must be positive and finite.") from exc
+        if not math.isfinite(timeout):
+            raise ConfigurationError("Codex acceptance timeout must be finite.")
+
+
+@dataclass(frozen=True, slots=True)
+class CodexAcceptanceRequest:
+    """Candidate reply and trusted artifact snapshots offered to application checks."""
+
+    reply: AgentMessage
+    trace: Mapping[str, Any] | None = None
+    trace_metadata: Mapping[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
 class CodexToolBridgeSettings:
     """Native function registration backed by existing bound Vidbyte tools."""
 
@@ -434,6 +469,7 @@ class CodexHarnessAgentSettings:
     observation: CodexObservationSettings = field(default_factory=CodexObservationSettings)
     continual_trace: CodexContinualTraceSettings | None = None
     tool_bridge: CodexToolBridgeSettings | None = None
+    acceptance: CodexAcceptanceSettings | None = None
 
     def __post_init__(self) -> None:
         # Validate observation collaborators before context or native execution.
@@ -680,6 +716,7 @@ class CodexForkSettings:
 
     name: str = ""
     observation: CodexObservationSettings | None = None
+    acceptance: CodexAcceptanceSettings | None = None
     continual_trace: CodexContinualTraceSettings | None = None
     clear_continual_trace: bool = False
     system_prompt: str = ""

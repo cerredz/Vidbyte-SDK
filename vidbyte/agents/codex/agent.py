@@ -7,6 +7,7 @@ from collections.abc import Mapping
 from dataclasses import replace
 from typing import Any
 
+from vidbyte.agents.codex.acceptance import CodexAcceptanceGate
 from vidbyte.agents.codex.config import CodexVidbyteTranslator
 from vidbyte.agents.codex.context import CodexContextTranslator
 from vidbyte.agents.codex.continual import CodexContinualTraceBridge
@@ -20,6 +21,7 @@ from vidbyte.agents.pricing.tracker import UsageTracker
 from vidbyte.agents.types import AgentMessage
 from vidbyte.lib.constants.codex import CODEX_MIDDLEWARE_METADATA_KEY
 from vidbyte.lib.dataclasses.codex import (
+    CodexAcceptanceRequest,
     CodexContextTranslationRequest,
     CodexForkRequest,
     CodexForkSettings,
@@ -158,10 +160,19 @@ class CodexHarnessAgent:
             await continual.finalize()
             self.last_trace = continual.artifact()
             reply = replace(reply, metadata={**dict(reply.metadata), "trace": continual.artifact(), "trace_metadata": continual.metadata()})
+        reply = await self._accept_candidate(reply, continual)
         self.history.append(reply)
         self.last_prompt = translated.user_prompt
         self.last_reply = reply
         return reply
+
+    async def _accept_candidate(self, reply: AgentMessage, continual: CodexContinualTraceBridge | None) -> AgentMessage:
+        # @intent commit-only-accepted-replies
+        # Use actual producer evidence; caller metadata cannot forge trace readiness.
+        if self.settings.acceptance is None:
+            return reply
+        request = CodexAcceptanceRequest(reply, continual.artifact() if continual else None, continual.metadata() if continual else {})
+        return await CodexAcceptanceGate(self.settings.acceptance).accept(request)
 
     def _continual_bridge(self) -> CodexContinualTraceBridge | None:
         # Create isolated trace state for this run without sharing artifacts across forks.

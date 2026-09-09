@@ -97,6 +97,7 @@ class CodexFork:
             system_prompt=child_system_prompt,
             codex=child_codex,
             observation=parent.observation if settings.observation is None else settings.observation,
+            acceptance=parent.acceptance if settings.acceptance is None else settings.acceptance,
             continual_trace=parent.continual_trace if settings.continual_trace is None else settings.continual_trace,
             additional_context=parent.additional_context
             if settings.additional_context is None

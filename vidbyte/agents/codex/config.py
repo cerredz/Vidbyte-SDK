@@ -59,6 +59,7 @@ class CodexVidbyteTranslator:
         CodexSettingsValidator.validate(settings.codex)
         CodexMiddlewareValidator.validate(settings.middleware)
         self.validate_tools(settings)
+        self.validate_acceptance(settings)
         translated = replace(
             settings,
             name=settings.name.strip(),
@@ -90,6 +91,21 @@ class CodexVidbyteTranslator:
             raise ConfigurationError("Codex tool_bridge requires at least one tool.")
         if settings.thread_id or not settings.codex.client.experimental_api:
             raise ConfigurationError("Codex dynamic tools require a fresh thread and experimental_api=True.")
+
+    def validate_acceptance(self, settings: CodexHarnessAgentSettings) -> None:
+        # @intent reject-missing-artifact-producer
+        # Required final artifacts need a configured producer before native work begins.
+        from vidbyte.lib.dataclasses.codex import CodexAcceptanceSettings
+
+        acceptance = settings.acceptance
+        if acceptance is None:
+            return
+        if not isinstance(acceptance, CodexAcceptanceSettings):
+            raise ConfigurationError("Codex acceptance must be CodexAcceptanceSettings.")
+        if (acceptance.require_trace or acceptance.trace_schema is not None) and settings.continual_trace is None:
+            raise ConfigurationError("Codex trace acceptance requires continual_trace configuration.")
+        if acceptance.trace_schema is not None:
+            self.output_schema(acceptance.trace_schema)
 
     def output_schema(
         self, schema: type | Mapping[str, Any] | None

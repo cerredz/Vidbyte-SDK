@@ -128,7 +128,7 @@ class CodexContinualTraceBridge:
 
     def metadata(self) -> dict[str, Any]:
         # Report actual cadence and truncation without publishing native error contents.
-        return {"mode": "continual", "schema": self.config.schema.name, "boundary": "completed_items", "completed_item_count": len(self.seen), "update_count": self.update_count, "error_count": self.error_count, "last_error": self.last_error, "truncated_observation_count": self.truncated_count}
+        return {"mode": "continual", "schema": self.config.schema.name, "boundary": "completed_items", "completed_item_count": len(self.seen), "update_count": self.update_count, "error_count": self.error_count, "last_error": self.last_error, "truncated_observation_count": self.truncated_count, "final_update_complete": self.finalized and self.last_updated_count == len(self.seen)}
 
 
 __all__ = ["CodexContinualTraceBridge", "CodexTraceUpdater"]

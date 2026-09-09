@@ -560,10 +560,12 @@ from vidbyte.workflows import (
     WorkflowValidationError,
 )
 
-from vidbyte.lib.dataclasses.codex import CodexContinualTraceSettings, CodexObservation, CodexObservationSettings, CodexToolBridgeSettings
+from vidbyte.lib.dataclasses.codex import CodexAcceptanceRequest, CodexAcceptanceSettings, CodexContinualTraceSettings, CodexObservation, CodexObservationSettings, CodexToolBridgeSettings
 
 __all__ = [
     "CodexContinualTraceSettings",
+    "CodexAcceptanceRequest",
+    "CodexAcceptanceSettings",
     "CodexToolBridgeSettings",
     "CodexObservation",
     "CodexObservationSettings",

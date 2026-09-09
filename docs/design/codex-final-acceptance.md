@@ -1,4 +1,4 @@
-﻿# Design Doc: Codex Final Acceptance
+# Design Doc: Codex Final Acceptance
 
 **Status:** Draft
 **Author:** Codex
@@ -121,3 +121,10 @@ Native effects cannot be rolled back after acceptance rejection. Hooks and durab
 
 ## 14. Alternatives Considered
 Prompt-only requirements and Stop-hook continuation cannot establish successful artifact publication. Automatically rerunning Codex could repeat effects. A deterministic application gate provides an explicit failure boundary with no hidden retry.
+
+## Refinement Checklist
+
+No gaps found after checking each requirement against the gate, facade publication order, actual producer receipt, fork validation, and failure cases. The gate intentionally does not retry native actions, infer full model traces, or treat hook configuration as enforcement.
+
+Validation: feature script 14/14; repository lint passed; source CI 1763 passed with one existing optional skip.
+Full local CI also passed, including wheel/sdist validation and isolated installed-package smoke checks.
