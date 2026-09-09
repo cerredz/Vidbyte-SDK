@@ -11,6 +11,7 @@ TESTS: python scripts/run_ci.py.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
@@ -292,6 +293,52 @@ class CodexContextPlacement:
 
 
 @dataclass(frozen=True, slots=True)
+class CodexToolDefinition:
+    """One model-facing custom tool translated for Codex consumption.
+
+    Data only; execution lives in vidbyte.agents.codex.tools so this module
+    never imports the tools domain layer.
+    """
+
+    name: str
+    description: str
+    input_schema: Mapping[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        _validate_tool_name("Codex tool", self.name)
+        _validate_tool_description("Codex tool", self.description)
+        _validate_tool_schema("Codex tool", self.input_schema)
+
+
+def _validate_tool_name(owner: str, value: object) -> None:
+    if (
+        not isinstance(value, str)
+        or re.fullmatch(r"[A-Za-z0-9_-]{1,64}", value) is None
+    ):
+        raise ConfigurationError(f"{owner} name must match [A-Za-z0-9_-]{{1,64}}.")
+
+
+def _validate_tool_description(owner: str, value: object) -> None:
+    if not isinstance(value, str) or not value.strip():
+        raise ConfigurationError(f"{owner} description must be a non-empty string.")
+    sentences = len(re.findall(r"[.!?](?:\s|$)", value.strip()))
+    words = len(value.split())
+    if sentences < 4 or words < 20:
+        raise ConfigurationError(
+            f"{owner} description needs 4+ sentences and 20+ words."
+        )
+
+
+def _validate_tool_schema(owner: str, value: object) -> None:
+    if not isinstance(value, Mapping):
+        raise ConfigurationError(f"{owner} input_schema must be a mapping.")
+    if value.get("type") != "object":
+        raise ConfigurationError(f"{owner} input_schema must declare type object.")
+    if not _is_json_value(value):
+        raise ConfigurationError(f"{owner} input_schema must be JSON-compatible.")
+
+
+@dataclass(frozen=True, slots=True)
 class CodexHarnessAgentSettings:
     """Validated Vidbyte-facing construction input for one Codex harness agent.
 
@@ -312,6 +359,7 @@ class CodexHarnessAgentSettings:
     thread_id: str = ""
     context_placements: tuple[CodexContextPlacement, ...] = ()
     middleware: tuple[AgentMiddleware, ...] = ()
+    tools: tuple[CodexToolDefinition, ...] = ()
 
     def __post_init__(self) -> None:
         CodexContextSource(self.context_manager, self.context_placements)
@@ -332,6 +380,7 @@ class CodexHarnessAgentSettings:
             )
         if not isinstance(self.metadata, Mapping):
             raise ConfigurationError("Codex harness agent metadata must be a mapping.")
+        self._validate_tools()
         if self.context_manager is not None and not callable(
             getattr(self.context_manager, "render_primitives_zone", None)
         ):
@@ -348,6 +397,18 @@ class CodexHarnessAgentSettings:
             raise ConfigurationError(
                 "Codex harness agent middleware must be a tuple of AgentMiddleware."
             )
+
+    def _validate_tools(self) -> None:
+        # Settings hold translated data, never live tool objects (A006 boundary).
+        if not isinstance(self.tools, tuple) or any(
+            not isinstance(value, CodexToolDefinition) for value in self.tools
+        ):
+            raise ConfigurationError(
+                "Codex harness agent tools must be CodexToolDefinition records."
+            )
+        names = [value.name for value in self.tools]
+        if len(set(names)) != len(names):
+            raise ConfigurationError("Codex harness agent tools cannot repeat a name.")
 
 
 @dataclass(frozen=True, slots=True)
@@ -561,6 +622,8 @@ class CodexForkSettings:
     capabilities: tuple[str, ...] | None = None
     clear_context_manager: bool = False
     clear_output_schema: bool = False
+    tools: tuple[CodexToolDefinition, ...] | None = None
+    clear_tools: bool = False
     metadata: Mapping[str, Any] = field(default_factory=dict)
     context_placements: tuple[CodexContextPlacement, ...] | None = None
 
@@ -585,6 +648,7 @@ class CodexForkSettings:
             )
         _require_bool("Codex fork", "clear_context_manager", self.clear_context_manager)
         _require_bool("Codex fork", "clear_output_schema", self.clear_output_schema)
+        _require_bool("Codex fork", "clear_tools", self.clear_tools)
         if self.clear_context_manager and self.context_manager is not None:
             raise ConfigurationError(
                 "Codex fork cannot clear and replace context_manager together."
@@ -593,6 +657,7 @@ class CodexForkSettings:
             raise ConfigurationError(
                 "Codex fork cannot clear and replace output_schema together."
             )
+        self._validate_tools()
         if self.codex is not None and not isinstance(self.codex, CodexAgentSettings):
             raise ConfigurationError("Codex fork codex must be CodexAgentSettings.")
         if not isinstance(self.metadata, Mapping):
@@ -614,6 +679,20 @@ class CodexForkSettings:
         ):
             raise ConfigurationError(
                 "Codex fork context_placements must contain CodexContextPlacement records."
+            )
+
+    def _validate_tools(self) -> None:
+        # A fork may inherit its tools; the resolved pair is validated before native creation.
+        if self.tools is not None and (
+            not isinstance(self.tools, tuple)
+            or any(not isinstance(value, CodexToolDefinition) for value in self.tools)
+        ):
+            raise ConfigurationError(
+                "Codex fork tools must contain CodexToolDefinition records."
+            )
+        if self.clear_tools and self.tools is not None:
+            raise ConfigurationError(
+                "Codex fork cannot clear and replace tools together."
             )
 
 

@@ -1,6 +1,7 @@
 """Codex-owned harness integration for Vidbyte agents."""
 
 from vidbyte.agents.codex.agent import CodexHarnessAgent
+from vidbyte.agents.codex.tools import CodexToolExecutor, CodexToolTranslator
 from vidbyte.lib.dataclasses.codex import (
     CodexAgentSettings,
     CodexClientSettings,
@@ -17,6 +18,7 @@ from vidbyte.lib.dataclasses.codex import (
     CodexSubagentSettings,
     CodexTextInput,
     CodexThreadSettings,
+    CodexToolDefinition,
     CodexTurnError,
     CodexTurnSettings,
     CodexUsageResponse,
@@ -57,6 +59,9 @@ __all__ = [
     "CodexThreadSettings",
     "CodexThreadSource",
     "CodexThreadStartSource",
+    "CodexToolDefinition",
+    "CodexToolExecutor",
+    "CodexToolTranslator",
     "CodexTurnSettings",
     "CodexTurnError",
     "CodexUsageResponse",

@@ -115,11 +115,16 @@ class CodexFork:
             context_placements=parent.context_placements
             if settings.context_placements is None
             else settings.context_placements,
+            tools=parent.tools if settings.tools is None else settings.tools,
         )
         if settings.clear_context_manager:
-            child_settings = replace(child_settings, context_manager=None, context_placements=())
+            child_settings = replace(
+                child_settings, context_manager=None, context_placements=()
+            )
         if settings.clear_output_schema:
             child_settings = replace(child_settings, output_schema=None)
+        if settings.clear_tools:
+            child_settings = replace(child_settings, tools=())
         return CodexVidbyteTranslator().translate_agent(child_settings).settings
 
     def fork(self, request: CodexForkRequest) -> CodexForkResult:

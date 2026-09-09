@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from typing import Any
 
@@ -13,6 +13,7 @@ from vidbyte.agents.codex.fork import CodexFork
 from vidbyte.agents.codex.metrics import CodexMetricsTranslator
 from vidbyte.agents.codex.middleware import CodexMiddlewareRunner
 from vidbyte.agents.codex.result import CodexResultTranslator
+from vidbyte.agents.codex.tools import CodexToolExecutor, CodexToolTranslator
 from vidbyte.agents.codex.transport import CodexTransport
 from vidbyte.agents.pricing.records import UsageRollup
 from vidbyte.agents.pricing.tracker import UsageTracker
@@ -26,6 +27,7 @@ from vidbyte.lib.dataclasses.codex import (
     CodexMiddlewareRequest,
     CodexResultTranslationRequest,
     CodexRunInput,
+    CodexToolDefinition,
     CodexTransportRunRequest,
     CodexUsageTranslationRequest,
 )
@@ -40,7 +42,9 @@ class CodexHarnessAgent:
 
     session_persistence_supported = False
 
-    def __init__(self, settings: CodexHarnessAgentSettings) -> None:
+    def __init__(
+        self, settings: CodexHarnessAgentSettings, tools: Sequence[object] = ()
+    ) -> None:
         # @intent translate-vidbyte-settings-once
         # Construction resolves every shared Vidbyte abstraction before a run;
         # provider dictionaries are still created only at their SDK boundary.
@@ -59,6 +63,8 @@ class CodexHarnessAgent:
         self.history: list[AgentMessage] = []
         self.last_prompt = ""
         self.last_reply: AgentMessage | None = None
+        self.tool_definitions = self._resolve_definitions(settings, tools)
+        self._tool_executor = CodexToolExecutor(tools if tools else ())
         self._transport = CodexTransport()
         self._results = CodexResultTranslator()
         self._usage = UsageTracker()
@@ -72,6 +78,44 @@ class CodexHarnessAgent:
     @property
     def system_prompt(self) -> str:
         return self.settings.system_prompt
+
+    def describe_tools(self) -> str:
+        # Render tool definitions as developer-context text for prompt-described tools.
+        return CodexToolTranslator().to_prompt_block(self.tool_definitions)
+
+    def build_mcp_config(self, command: str) -> Mapping[str, Any]:
+        # @intent sidecar-config-boundary
+        # The MCP block crosses into Codex-owned configuration, so build it in
+        # one place; hand-editing the shape per call site would let the server
+        # name or tool list drift from the translated definitions silently.
+        # Build the thread-config block that exposes tools through an MCP sidecar.
+        return CodexToolTranslator().to_mcp_config(self.tool_definitions, command)
+
+    def has_tool(self, tool_name: str) -> bool:
+        # Membership check against the in-process executable subset.
+        return self._tool_executor.has_tool(tool_name)
+
+    async def execute_tool_call(
+        self, tool_name: str, arguments: Mapping[str, Any]
+    ) -> Any:
+        # Validate and run one tool call through the owning tool's contract.
+        return await self._tool_executor.execute_tool_call(tool_name, arguments)
+
+    def _resolve_definitions(
+        self, settings: CodexHarnessAgentSettings, tools: Sequence[object]
+    ) -> tuple[CodexToolDefinition, ...]:
+        # Explicit constructor tools win; otherwise inherit translated settings tools.
+        if tools:
+            try:
+                return CodexToolTranslator().from_sdk_tools(tools)
+            except Exception as exc:
+                raise CodexAgentError(
+                    "Vidbyte tools could not be translated for Codex.",
+                    failure_code=FailureCode.CODEX_VIDBYTE_TRANSLATION_FAILED.value,
+                    operation="translate_tools",
+                    error_type=type(exc).__name__,
+                ) from exc
+        return settings.tools
 
     async def arun(self, request: CodexRunInput) -> AgentMessage:
         # @intent typed-native-turn-boundary
@@ -206,7 +250,7 @@ class CodexHarnessAgent:
                 overrides=settings,
             )
         )
-        return CodexHarnessAgent(result.settings)
+        return self._child_with_tools(result.settings, settings)
 
     def fork(
         self, settings: CodexForkSettings = _DEFAULT_FORK_SETTINGS
@@ -219,7 +263,17 @@ class CodexHarnessAgent:
                 overrides=settings,
             )
         )
-        return CodexHarnessAgent(result.settings)
+        return self._child_with_tools(result.settings, settings)
+
+    def _child_with_tools(
+        self, settings: CodexHarnessAgentSettings, overrides: CodexForkSettings
+    ) -> CodexHarnessAgent:
+        # Children inherit live parent tools unless the fork replaces or clears them.
+        child = CodexHarnessAgent(settings)
+        if overrides.clear_tools or overrides.tools is not None:
+            return child
+        child._tool_executor = self._tool_executor
+        return child
 
 
 __all__ = ["CodexHarnessAgent"]
