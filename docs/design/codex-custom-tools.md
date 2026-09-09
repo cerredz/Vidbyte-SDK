@@ -37,7 +37,7 @@ This change adds the Vidbyte-side seam without pretending the upstream seam exis
 - R1: `CodexToolDefinition` is frozen, slots, validated: non-empty name matching `[A-Za-z0-9_-]{1,64}`, description 4+ sentences, `input_schema` a JSON-compatible mapping with `type: object`.
 - R2: `CodexHarnessAgent(settings, tools=())` accepts `BaseTool`/`ToolLike`/existing definitions; construction translates once and stores `self.tool_definitions: tuple[CodexToolDefinition, ...]` plus a private catalog for execution.
 - R3: `describe_tools()` returns deterministic text (`Tool: <name>\nDescription: ...\nArguments: {...}` joined by blank lines) for developer-context injection; empty tools return `""`.
-- R4: `build_mcp_config(command, *, server_name="vidbyte-tools")` returns `{"mcp_servers": {server_name: {"command": command, "tools": [names]}}}` for thread-config passthrough.
+- R4: `build_mcp_config(command)` returns `{"mcp_servers": {"vidbyte-tools": {"command": command, "tools": [names]}}}` for thread-config passthrough.
 - R5: `execute_tool_call(name, arguments)` validates against the catalog (`validate_call`), executes `BaseTool.execute` with a constructed `ToolCall`, and returns `ToolResult`; unknown tools raise `ConfigurationError`.
 - R6: Fork inherits parent tool definitions by default; `CodexForkSettings` gains `tools: tuple[...] | None` plus `clear_tools: bool` with cannot-clear-and-replace validation.
 - R7: All new validation failures raise `ConfigurationError` (typed-boundary rule), never raw `ValueError`.
