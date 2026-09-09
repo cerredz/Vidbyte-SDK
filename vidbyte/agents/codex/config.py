@@ -61,6 +61,7 @@ class CodexVidbyteTranslator:
         CodexMiddlewareValidator.validate(settings.middleware)
         self.validate_tools(settings)
         self.validate_acceptance(settings)
+        self.validate_capture(settings)
         if settings.control is not None and not isinstance(settings.control, CodexControlSettings):
             raise ConfigurationError("Codex control must be CodexControlSettings.")
         translated = replace(
@@ -109,6 +110,17 @@ class CodexVidbyteTranslator:
             raise ConfigurationError("Codex trace acceptance requires continual_trace configuration.")
         if acceptance.trace_schema is not None:
             self.output_schema(acceptance.trace_schema)
+
+    @staticmethod
+    def validate_capture(settings: CodexHarnessAgentSettings) -> None:
+        # @intent validate-consented-export-destination
+        # Export requires the existing trajectory sink port rather than arbitrary objects.
+        from vidbyte.harnesses.stores.base import TrajectorySink
+        from vidbyte.lib.dataclasses.codex import CodexCaptureSettings
+
+        capture = settings.capture
+        if capture is not None and (not isinstance(capture, CodexCaptureSettings) or not isinstance(capture.sink, TrajectorySink)):
+            raise ConfigurationError("Codex capture requires CodexCaptureSettings with a TrajectorySink.")
 
     def output_schema(
         self, schema: type | Mapping[str, Any] | None

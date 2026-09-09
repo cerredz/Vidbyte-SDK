@@ -22,6 +22,7 @@ from pydantic import (
     Field,
     JsonValue,
     PositiveFloat,
+    PositiveInt,
     TypeAdapter,
     ValidationError,
 )
@@ -56,6 +57,7 @@ if TYPE_CHECKING:
     from vidbyte.agents.types import AgentMessage
     from vidbyte.context.manager import ContextManager
     from vidbyte.context.primitives import ContextItem
+    from vidbyte.harnesses.stores.base import TrajectorySink
     from vidbyte.middleware.base import AgentMiddleware
     from vidbyte.tools.catalog import Tools
 
@@ -380,6 +382,46 @@ class CodexObservation:
 
 
 @dataclass(frozen=True, slots=True)
+class CodexCaptureSettings:
+    """Explicit opt-in export through the existing Vidbyte trajectory sink contract."""
+
+    sink: TrajectorySink
+    required: bool = True
+    max_observations: int = CODEX_TRACE_WINDOW
+    timeout_seconds: float = CODEX_TRACE_TIMEOUT_SECONDS
+    redactor: Callable[[Any], Any] | None = None
+
+    def __post_init__(self) -> None:
+        # @intent explicit-bounded-export-policy
+        # Reject invalid export policy before task content can leave the process.
+        _require_bool("Codex capture", "required", self.required)
+        try:
+            TypeAdapter(PositiveInt).validate_python(self.max_observations, strict=True)
+            timeout = TypeAdapter(PositiveFloat).validate_python(self.timeout_seconds, strict=True)
+        except ValidationError as exc:
+            raise ConfigurationError("Codex capture bounds must be positive finite numbers; max_observations must be an integer.") from exc
+        if not math.isfinite(timeout):
+            raise ConfigurationError("Codex capture timeout must be finite.")
+        if self.redactor is not None and not callable(self.redactor):
+            raise ConfigurationError("Codex capture redactor must be callable.")
+
+
+@dataclass(frozen=True, slots=True)
+class CodexTrajectorySnapshot:
+    """Reviewed evidence for one shared trajectory export record."""
+
+    run_id: str
+    task: CodexRunInput | CodexPrompt
+    reply: AgentMessage | None
+    observations: tuple[CodexObservation, ...]
+    status: str
+    observed_event_count: int
+    dropped_event_count: int
+    error_type: str = ""
+    native_result: CodexRunResult | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class CodexControlSettings:
     """Callback receiving an ephemeral native-turn control handle."""
 
@@ -491,6 +533,7 @@ class CodexHarnessAgentSettings:
     tool_bridge: CodexToolBridgeSettings | None = None
     acceptance: CodexAcceptanceSettings | None = None
     control: CodexControlSettings | None = None
+    capture: CodexCaptureSettings | None = None
 
     def __post_init__(self) -> None:
         # Validate observation collaborators before context or native execution.
@@ -739,6 +782,7 @@ class CodexForkSettings:
     observation: CodexObservationSettings | None = None
     acceptance: CodexAcceptanceSettings | None = None
     control: CodexControlSettings | None = None
+    capture: CodexCaptureSettings | None = None
     continual_trace: CodexContinualTraceSettings | None = None
     clear_continual_trace: bool = False
     system_prompt: str = ""

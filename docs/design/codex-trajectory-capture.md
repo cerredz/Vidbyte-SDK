@@ -1,4 +1,4 @@
-﻿# Design Doc: Codex Trajectory Capture
+# Design Doc: Codex Trajectory Capture
 
 **Status:** Draft
 **Author:** Codex
@@ -30,13 +30,13 @@ Existing harness distillation joins Session checkpoints into TrajectoryRecord an
 4. Export one TrajectoryRecord per invocation, including a unique run ID, actual translated prompt when available, reviewed native events, candidate output, final trace, selected nonsecret behavior settings, and status. reward is None; label scope as observed native events, not full internal model context.
 5. Exclude native process env/config/credentials from the specification. Apply mandatory baseline key redaction and free-text assignment scrubbing to every exported section. Apply optional tenant redaction before the baseline.
 6. Await sink.write with a bounded timeout. Required export failure raises CODEX_CAPTURE_FAILED and does not append history or publish last_reply; optional failure returns an explicit failed capture receipt.
-7. Failure/cancellation recording is best effort and cannot replace the primary exception. Never perform a second write when a success-record write fails ambiguously; consumers deduplicate by run ID if retrying storage outside this adapter.
+7. Failure/cancellation recording is best effort; ordinary recording errors cannot replace the primary exception, while a fresh cancellation during recording must propagate. Never perform a second write when a success-record write fails ambiguously; consumers deduplicate by run ID if retrying storage outside this adapter.
 8. Forks inherit or explicitly replace capture settings; each invocation gets separate IDs/windows. Omission preserves existing behavior.
 ### Non-Functional Requirements
 No native private data or invented model-step records. The native provider remains execution authority. Cooperative sink cancellation does not guarantee a timed-out physical write was undone; receipt accurately reports lack of acknowledgment. Dataset completeness is bounded and explicit.
 
 ## 5. High-Level Design
-The facade arun wrapper creates a per-invocation CodexTrajectoryCapture, invokes the existing candidate pipeline, awaits final export, then commits history/last_reply. The candidate pipeline adds the capture observer alongside tracing, provides translated prompt and final candidate evidence, and retains existing acceptance logic. Capture formats a shared TrajectoryRecord and writes through the caller's existing TrajectorySink. A separate translator owns specification projection and recursive redaction.
+The facade arun wrapper creates a per-invocation CodexTrajectoryCapture, invokes the existing candidate pipeline, awaits final export, then commits history/last_reply. The candidate pipeline adds the capture observer before application observers and alongside tracing, provides translated prompt and final candidate evidence, and retains existing acceptance logic. Capture formats a shared TrajectoryRecord and writes through the caller's existing TrajectorySink. A separate translator owns specification projection and recursive redaction.
 
 ## 6. Detailed Design
 ### 6.1 Settings and facade lifetime
@@ -48,9 +48,9 @@ Defines capture settings, validates collaborators, forwards actual prompt/candid
 `CodexCaptureSettings(sink: TrajectorySink, required: bool = True, max_observations: int = 100, timeout_seconds: float = 60.0, redactor: Callable[[Any], Any] | None = None)`
 Harness/fork `capture: CodexCaptureSettings | None`; fork None inherits.
 #### Logic / Algorithm
-Create capture per arun. A candidate helper returns reply and translated prompt text; capture receives prompt after context translation and candidate before acceptance. Await final sink receipt, then update history/last_reply/last_prompt. Catch failures around candidate work only so ambiguous sink failure never triggers a duplicate failure write.
+Create capture per arun. A candidate helper returns reply and translated prompt text; capture receives prompt after context translation and reviewed native result before output validation and candidate before acceptance. Await final sink receipt, then update history/last_reply/last_prompt. Catch failures around candidate work only so ambiguous sink failure never triggers a duplicate failure write.
 #### Edge Cases & Error Handling
-Pre-native failures can produce diagnostic records with no native identity. Rejected acceptance candidates are labeled failed. Caller cancellation is re-raised after best-effort bounded recording. Existing native identity and usage accounting remain available after capture rejection.
+Pre-native failures can produce diagnostic records with no native identity. Rejected acceptance candidates are labeled failed. Caller cancellation is re-raised after best-effort bounded recording; a fresh cancellation during recording also propagates. Existing native identity and usage accounting remain available after capture rejection.
 
 ### 6.2 Capture and shared sink
 **Files:** agents/codex/capture.py, lib/enums/failure.py
@@ -79,12 +79,12 @@ Unsupported objects use the shared dropped markers. Invalid tenant redaction/sin
 ## 7. Data Model Changes
 ### 7.1 Capture settings
 **Change type:** New
-Frozen capture settings and harness/fork options. Export reuses TrajectoryRecord unchanged, labeling agents as native observed turns rather than stored Session checkpoints. No new database or Session schema.
+Frozen capture settings, CodexTrajectorySnapshot evidence record, and harness/fork options. Export reuses TrajectoryRecord unchanged, labeling agents as native observed turns rather than stored Session checkpoints. No new database or Session schema.
 
 ## 8. API Changes
 ### 8.1 Harness capture receipt
 **Change type:** New, opt-in
-Successful reply metadata.capture reports saved and run_id. Required sink failure raises codex.capture_failed before successful publication. Original failure/cancellation remains the primary exception if diagnostic export also fails.
+Successful reply metadata.capture and agent.last_capture report saved and run_id; last_capture also preserves diagnostic receipts when a run raises. Required sink failure raises codex.capture_failed before successful publication. Original failure/cancellation remains the primary exception if diagnostic export also fails.
 
 ## 9. File Change Manifest
 | Action | File Path | Reason |
@@ -112,10 +112,12 @@ Successful reply metadata.capture reports saved and run_id. Required sink failur
 - [Hidden Assumption] Nested caller mutations cannot alter previously captured observations.
 - [Hidden Failure] Process env/config never enters export; secret keys and common text assignments are scrubbed, including custom redactor output.
 - [Hidden Failure] Sink exception/timeout required versus optional behavior produces accurate receipts without duplicate writes.
+- [Hidden Failure] A fresh cancellation during diagnostic export propagates.
 ### Integration Tests
 - [Silent Failure] Real FileTrajectorySink writes readable JSONL using existing TrajectoryRecord.
 - [Hidden Failure] Required capture finishes before history publication; failure preserves prior accepted reply.
 - [Hidden Assumption] Native failure, acceptance rejection, and cancellation retain their original error if diagnostic capture also fails.
+- [Hidden Failure] A failed downstream observer cannot erase its triggering event from capture.
 - [Silent Failure] Capture-only configuration enables streaming via its observer; no capture setting means no sink calls.
 - [Hidden Assumption] Forks inherit/replace configuration but each run gets isolated IDs and windows.
 ### Manual / QA Test Cases
@@ -135,3 +137,6 @@ Hidden native model inputs/context cannot be reconstructed from public events. N
 
 ## 14. Alternatives Considered
 Fabricating a resumable RunState would misrepresent native context ownership. A new dataset/sink format would fragment existing tooling. Reusing the existing record and sink with explicit native observation scope supports downstream distillation without either error.
+
+## Refinement Review
+All 13 manifest entries are implemented. Review moved capture before caller observers, preserved native output before schema rejection, retained whitespace-only values during redaction, and preserved fresh cancellation during diagnostic export. No resumable native state is fabricated. The feature runner passed 15/15 cases; lint passed; source and full package CI passed with 1,790 tests passed and one skipped. Required sink failure cannot publish history or trigger a duplicate write. Timeout receipts intentionally do not promise that a sink's background I/O was rolled back.

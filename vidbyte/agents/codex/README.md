@@ -26,6 +26,8 @@ settings override disables them.
 - `agent.py`: Public facade and middleware/metrics orchestration.
 - `acceptance.py`: Required final artifacts and application checks before success.
 - `control.py`: Native live steering/interruption with per-turn handle lifetime.
+- `capture.py`: Bounded native observations and required trajectory-sink acknowledgment.
+- `capture_format.py`: Shared TrajectoryRecord projection and mandatory export redaction.
 - `config.py`: Shared settings resolution and native argument serialization.
 - `continual.py`: Native trace updates and deterministic completed-item scheduling.
 - `context.py`: Context zone and native input placement translation.
@@ -108,3 +110,26 @@ readiness callbacks have a configurable timeout (default 60 seconds). Completion
 failure, or cancellation deactivates the handle, including before terminal event
 observers run. Closed handles and late acknowledgments fail with
 `codex.control_failed`. Forks inherit settings and create their own run handles.
+
+## Trajectory capture for distillation
+
+Opt in with `capture=CodexCaptureSettings(sink=FileTrajectorySink("dataset.jsonl"))`.
+This uses the existing `vidbyte.harnesses.stores` sink contract and TrajectoryRecord
+format. Required export (the default) must be acknowledged before the reply enters
+history; set `required=False` for fail-open export with an explicit failed receipt.
+Read `reply.metadata["capture"]` or `agent.last_capture` for the run ID, storage
+acknowledgment, and discarded-event count. Sinks determine physical durability;
+timeout does not prove a write was rolled back, so no automatic retry occurs.
+
+Records contain reviewed native events, actual translated input, candidate output,
+trace artifact, and selected behavior settings. Hidden reasoning, internal model
+prompts, full native context, and unreported deltas are explicitly unavailable.
+This remains an observed trajectory, not a resumable Vidbyte Session. Failed and
+cancelled runs receive best-effort diagnostic export without replacing their error.
+
+The event window defaults to 100 snapshots; configure `max_observations` as needed.
+Client environment and arbitrary process config are excluded. Existing credential
+key and common text-assignment redaction always runs, after any custom `redactor`.
+This does not guarantee exhaustive secret or PII detection. No rewards are invented
+and no training job is started. Configuring capture explicitly authorizes export
+to the selected sink; omitting it performs no export.

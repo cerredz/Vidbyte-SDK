@@ -8,6 +8,7 @@ from dataclasses import replace
 from typing import Any
 
 from vidbyte.agents.codex.acceptance import CodexAcceptanceGate
+from vidbyte.agents.codex.capture import CodexTrajectoryCapture
 from vidbyte.agents.codex.config import CodexVidbyteTranslator
 from vidbyte.agents.codex.context import CodexContextTranslator
 from vidbyte.agents.codex.continual import CodexContinualTraceBridge
@@ -63,6 +64,7 @@ class CodexHarnessAgent:
         self.last_prompt = ""
         self.last_reply: AgentMessage | None = None
         self.last_trace: dict[str, Any] | None = None
+        self.last_capture: dict[str, Any] | None = None
         self._transport = CodexTransport()
         self._results = CodexResultTranslator()
         self._usage = UsageTracker()
@@ -78,6 +80,28 @@ class CodexHarnessAgent:
         return self.settings.system_prompt
 
     async def arun(self, request: CodexRunInput) -> AgentMessage:
+        # @intent export-before-success-publication
+        # Required capture must finish before history commits, without retrying native effects.
+        capture = CodexTrajectoryCapture(self.settings.capture, self.settings, request) if self.settings.capture else None
+        self.last_capture = None
+        try:
+            try:
+                reply, prompt = await self._run_candidate(request, capture)
+            except BaseException as exc:
+                if capture is not None:
+                    await capture.failed(exc)
+                raise
+            if capture is not None:
+                reply = await capture.finish(reply)
+            self.history.append(reply)
+            self.last_prompt = prompt
+            self.last_reply = reply
+            return reply
+        finally:
+            if capture is not None:
+                self.last_capture = capture.receipt()
+
+    async def _run_candidate(self, request: CodexRunInput, capture: CodexTrajectoryCapture | None) -> tuple[AgentMessage, str]:
         # @intent typed-native-turn-boundary
         # Execute Codex only after Vidbyte input is translated; bypassing this
         # boundary would silently drop context or native input modalities.
@@ -98,6 +122,8 @@ class CodexHarnessAgent:
                 error_type=type(exc).__name__,
             ) from exc
         self._usage.reset()
+        if capture is not None:
+            capture.set_prompt(translated)
         boundary = CodexMiddlewareRequest(
             agent_name=self.settings.name, prompt=translated.user_prompt
         )
@@ -107,6 +133,8 @@ class CodexHarnessAgent:
         observation = self.settings.observation
         if continual is not None:
             observation = replace(observation, observers=(*observation.observers, continual.observe))
+        if capture is not None:
+            observation = replace(observation, observers=(capture.observe, *observation.observers))
         try:
             result = await self._transport.run(
                 CodexTransportRunRequest(
@@ -139,6 +167,8 @@ class CodexHarnessAgent:
             )
             raise
         self.thread_id = result.thread_id
+        if capture is not None:
+            capture.set_result(result)
         CodexMetricsTranslator.record_usage(
             CodexUsageTranslationRequest(
                 result=result,
@@ -161,11 +191,10 @@ class CodexHarnessAgent:
             await continual.finalize()
             self.last_trace = continual.artifact()
             reply = replace(reply, metadata={**dict(reply.metadata), "trace": continual.artifact(), "trace_metadata": continual.metadata()})
+        if capture is not None:
+            capture.set_candidate(reply)
         reply = await self._accept_candidate(reply, continual)
-        self.history.append(reply)
-        self.last_prompt = translated.user_prompt
-        self.last_reply = reply
-        return reply
+        return reply, translated.user_prompt
 
     async def _accept_candidate(self, reply: AgentMessage, continual: CodexContinualTraceBridge | None) -> AgentMessage:
         # @intent commit-only-accepted-replies
