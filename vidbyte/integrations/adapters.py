@@ -28,6 +28,8 @@ class ProviderAdapter(Protocol):
     @property
     def provider(self) -> str:
         """Return the stable provider name selections address this adapter by."""
+        # @intent external boundaries
+        # Names the remote system this adapter reaches; selections address it by this value.
         ...
 
     def capabilities(self) -> frozenset[ProviderOperation]:
@@ -54,7 +56,7 @@ class AdapterRegistry:
         # Starts empty; no provider ships with the access layer itself.
         self._adapters: dict[str, ProviderAdapter] = {}
 
-    def register(self, adapter: ProviderAdapter) -> "AdapterRegistry":
+    def register(self, adapter: ProviderAdapter) -> AdapterRegistry:
         """Register one adapter under its own provider name and return this registry."""
         # @intent provider
         # Registration is refused rather than overwritten so two libraries cannot
@@ -67,6 +69,9 @@ class AdapterRegistry:
 
     def get(self, provider: str) -> ProviderAdapter:
         """Return the adapter for a provider, raising a typed error when none is registered."""
+        # @intent external boundaries
+        # A missing adapter means the named remote system has no implementation, which
+        # must surface as one typed error rather than an unexplained empty result.
         adapter = self._adapters.get(provider)
         if adapter is None:
             raise SourceAccessError(
@@ -79,6 +84,8 @@ class AdapterRegistry:
 
     def has(self, provider: str) -> bool:
         """Return whether a provider name resolves to a registered adapter."""
+        # @intent external boundaries
+        # A membership question about remote-system coverage, never a failure.
         return provider in self._adapters
 
     def providers(self) -> tuple[str, ...]:
@@ -92,6 +99,9 @@ class AdapterRegistry:
     @staticmethod
     def _require_provider_name(adapter: ProviderAdapter) -> str:
         """Return the adapter's provider name, rejecting a blank or missing one."""
+        # @intent external boundaries
+        # An unnamed adapter could never be addressed by a selection, so it is refused
+        # at registration rather than becoming an unreachable entry in the registry.
         name = str(getattr(adapter, "provider", "") or "").strip()
         if not name:
             raise ConfigurationError("A ProviderAdapter must expose a non-empty provider name.")

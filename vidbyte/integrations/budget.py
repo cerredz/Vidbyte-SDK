@@ -19,6 +19,7 @@ from vidbyte.context.primitives.documents import DocumentContextItem
 from vidbyte.lib.config.sources import UNTRUSTED_CONTENT_END
 from vidbyte.lib.constants.integrations import (
     INTEGRATIONS_CHARS_PER_TOKEN,
+    INTEGRATIONS_MIN_CHARGED_BYTES,
     INTEGRATIONS_MIN_TRUNCATION_CHARS,
     INTEGRATIONS_TRUNCATION_MARKER,
 )
@@ -72,7 +73,7 @@ class ContextAdmissionBudget:
             return LoadOutcome.TRUNCATED
         return LoadOutcome.LOADED
 
-    def _admit_one(self, item: DocumentContextItem) -> "_AdmittedItem | None":
+    def _admit_one(self, item: DocumentContextItem) -> _AdmittedItem | None:
         """Admit one item whole, truncated to the remaining budget, or not at all."""
         cost = self.estimate_tokens(item.content)
         if cost <= self._remaining:
@@ -136,7 +137,7 @@ class ToolBudget:
         if self._exhausted:
             return False
         self._calls_used += 1
-        self._bytes_used += max(byte_count, 0)
+        self._bytes_used += max(byte_count, INTEGRATIONS_MIN_CHARGED_BYTES)
         if self._calls_used > self._max_calls or self._bytes_used > self._max_bytes:
             self._exhausted = True
             return False

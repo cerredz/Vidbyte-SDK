@@ -11,8 +11,16 @@ TESTS: tests/test_sources_access_layer.py and scripts/test_sources_access_layer.
 
 from __future__ import annotations
 
-from vidbyte.integrations.adapters import DEFAULT_ADAPTERS, AdapterRegistry, ProviderAdapter
-from vidbyte.integrations.budget import BudgetAdmission, ContextAdmissionBudget, ToolBudget
+from vidbyte.integrations.adapters import (
+    DEFAULT_ADAPTERS,
+    AdapterRegistry,
+    ProviderAdapter,
+)
+from vidbyte.integrations.budget import (
+    BudgetAdmission,
+    ContextAdmissionBudget,
+    ToolBudget,
+)
 from vidbyte.integrations.connections import (
     ConnectionBroker,
     ConnectionRegistry,

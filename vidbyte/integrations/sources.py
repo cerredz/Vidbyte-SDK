@@ -16,7 +16,11 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 
 from vidbyte.context.primitives.documents import DocumentContextItem
-from vidbyte.integrations.adapters import DEFAULT_ADAPTERS, AdapterRegistry, ProviderAdapter
+from vidbyte.integrations.adapters import (
+    DEFAULT_ADAPTERS,
+    AdapterRegistry,
+    ProviderAdapter,
+)
 from vidbyte.integrations.budget import ContextAdmissionBudget, ToolBudget
 from vidbyte.integrations.connections import (
     ConnectionBroker,
@@ -175,6 +179,9 @@ class SourcesResolver:
 
     async def _load_content(self, granted: tuple[tuple[ResourceSelection, AuthorizationResult], ...]) -> tuple[DocumentContextItem, ...]:
         """Fetch every loading selection concurrently and admit the results against the token budget."""
+        # @intent external boundaries
+        # Every provider fetch for the run is gathered here with return_exceptions, so
+        # one unreachable remote system degrades to a report entry, not a cancelled run.
         loading = tuple((selection, result) for selection, result in granted if selection.loads)
         if not loading:
             return ()
@@ -236,6 +243,9 @@ class SourcesResolver:
 
     def _enforce_failure_policy(self, report: SourcesReport) -> None:
         """Raise a typed access error when require_all is set and any selection failed."""
+        # @intent permissions
+        # require_all is the caller's statement that partial provider coverage is not
+        # acceptable, so an incomplete resolution must raise instead of returning.
         if self._on_failure is not FailurePolicy.REQUIRE_ALL:
             return
         failures = report.failed
@@ -246,10 +256,15 @@ class SourcesResolver:
 
     def _require_adapter(self, selection: ResourceSelection) -> ProviderAdapter:
         """Return the registered adapter for a selection's provider, raising when absent."""
+        # @intent external boundaries
+        # The single lookup point from a selection to the remote system that serves it.
         return self._adapters.get(selection.provider)
 
     def _scope_for(self, selection: ResourceSelection, result: AuthorizationResult) -> ResourceScope:
         """Build the immutable resource boundary a selection's tools are bound to."""
+        # @intent permissions
+        # This scope is the authorization boundary every tool built for the selection
+        # is closed over, so it is derived from the granted connection, never the call.
         return ResourceScope(provider=selection.provider, resource_id=selection.resource_id, connection_id=result.require_connection().connection_id)
 
     def _record_failure(self, selection: ResourceSelection, state: AccessState, detail: str) -> None:

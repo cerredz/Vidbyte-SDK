@@ -484,7 +484,9 @@ class SourceAccessError(SourceError):
     )
 
     def __init__(self, provider: str, resource_id: str, state: str, detail: str = "") -> None:
-        # Carries only SDK-authored access metadata; no credential or provider response body is included.
+        # @intent redaction
+        # Carries only SDK-authored access metadata. No credential, token, or provider
+        # response body is copied into the message or the diagnostic details packet.
         self.provider = provider
         self.resource_id = resource_id
         self.state = state

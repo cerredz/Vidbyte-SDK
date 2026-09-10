@@ -1,23 +1,12 @@
-"""Context Protocol Header
+"""FILE: tests/test_sources_access_layer.py
 
-Description:
-    Tests the Sources access layer: construction, budgets, authorization, scoping, and reporting.
-Purpose:
-    Proves both access paths behave correctly at their boundaries and that a scoped
-    tool cannot reach a resource the run was not granted.
-Architecture:
-    - FakeAdapter: Configurable ProviderAdapter test double; no provider ships with the SDK.
-    - SourcesConstructionTests: Positional/keyword contract, duplicates, and bounds.
-    - ContextAdmissionBudgetTests: Admission, truncation, fencing, and skipping.
-    - ToolBudgetTests: Call and byte ceilings and sticky exhaustion.
-    - ConnectionBrokerTests: Every authorization state and credential non-disclosure.
-    - ResourceScopePolicyTests: Scoped denial and unscoped passthrough.
-    - ProviderToolsetTests: Parameter rejection, naming, provenance, and failure mapping.
-    - SourcesResolverTests: Load, tools, hybrid, concurrency, and failure policy.
-    - SourcesReportTests: Completeness and redaction.
-    - SourcesIntegrationTests: Real Agent, Tools, and ContextManager seams.
-Relations:
-    Related to vidbyte.integrations, vidbyte.lib.dataclasses.integrations, and vidbyte.lib.dataclasses.security.
+PURPOSE: Verifies the Sources access layer end to end: construction contract, budgets, authorization states, resource scoping, and coverage reporting.
+ROLE IN CODEBASE: The quality gate for vidbyte/integrations/ and for ResourceScopePolicy, including the assertion that a scoped tool cannot reach an ungranted resource.
+ARCHITECTURE NOTE: A FakeAdapter double stands in for every provider, because no concrete provider ships with the access layer; Agent, Tools, and ContextManager are real.
+COMMON MODIFICATION PATTERNS: Add a test class here and register it in scripts/test-sources-access-layer.py in the same change so both runners stay in sync.
+KNOWN EDGE CASES: The concurrency test asserts a wall-clock bound and is the one case a heavily loaded machine can make flaky.
+RELATED DOCS: docs/design/sources-access-layer.md
+TESTS: Run with python -m pytest tests/test_sources_access_layer.py or python scripts/test-sources-access-layer.py.
 """
 
 from __future__ import annotations
@@ -25,11 +14,12 @@ from __future__ import annotations
 import asyncio
 import unittest
 from collections.abc import Mapping
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 from typing import Any
 
 from vidbyte.agents import Agent
 from vidbyte.context import ContextManager
+from vidbyte.context.primitives.documents import DocumentContextItem
 from vidbyte.integrations import (
     AccessState,
     AdapterRegistry,
@@ -54,7 +44,6 @@ from vidbyte.integrations import (
     SourcesReport,
     ToolBudget,
 )
-from vidbyte.context.primitives.documents import DocumentContextItem
 from vidbyte.lib.config.sources import UNTRUSTED_CONTENT_BEGIN, UNTRUSTED_CONTENT_END
 from vidbyte.lib.constants.integrations import INTEGRATIONS_MAX_SELECTIONS
 from vidbyte.lib.errors import ConfigurationError, SourceAccessError
@@ -309,7 +298,7 @@ class ConnectionBrokerTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_expired_credentials_require_reauth(self) -> None:
         """[Edge Case] An expired token is a distinct state from a missing one."""
-        past = datetime.now(timezone.utc) - timedelta(hours=1)
+        past = datetime.now(UTC) - timedelta(hours=1)
         _, connections, resolver = _wire(FakeAdapter(), expires_at=past)
         result = await self._broker(connections=connections, resolver=resolver).authorize(_selection())
         self.assertIs(result.state, AccessState.REAUTH_REQUIRED)

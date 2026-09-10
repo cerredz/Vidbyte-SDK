@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from types import MappingProxyType
 from typing import Any
 
@@ -21,6 +21,7 @@ from vidbyte.lib.constants.integrations import (
     INTEGRATIONS_MAX_TOKENS_CEILING,
     INTEGRATIONS_MAX_TOOL_BYTES_CEILING,
     INTEGRATIONS_MAX_TOOL_CALLS_CEILING,
+    INTEGRATIONS_MIN_SELECTION_LIMIT,
 )
 from vidbyte.lib.enums.integrations import AccessState, LoadMode, LoadOutcome
 from vidbyte.lib.errors import ConfigurationError
@@ -68,7 +69,7 @@ class Credentials:
         """Return True only when an expiry is set and has already passed."""
         if self.expires_at is None:
             return False
-        return self.expires_at <= (now or datetime.now(timezone.utc))
+        return self.expires_at <= (now or datetime.now(UTC))
 
     def covers(self, required: tuple[str, ...]) -> bool:
         """Return True when every required scope was granted to this credential."""
@@ -89,13 +90,16 @@ class ResourceSelection:
 
     def __post_init__(self) -> None:
         """Reject an unaddressable selection and freeze its filter mapping."""
+        # @intent external boundaries
+        # A selection names a remote resource, so an unaddressable one is refused here
+        # rather than failing later as a confusing provider error.
         if not self.provider.strip():
             raise ConfigurationError("ResourceSelection.provider cannot be empty.")
         if not self.resource_id.strip():
             raise ConfigurationError("ResourceSelection.resource_id cannot be empty.")
         if not self.connection.strip():
             raise ConfigurationError("ResourceSelection.connection cannot be empty.")
-        if self.limit is not None and self.limit <= 0:
+        if self.limit is not None and self.limit < INTEGRATIONS_MIN_SELECTION_LIMIT:
             raise ConfigurationError("ResourceSelection.limit must be a positive integer when set.")
         object.__setattr__(self, "filters", MappingProxyType(dict(self.filters)))
 
@@ -111,6 +115,9 @@ class ResourceSelection:
 
     def identity(self) -> tuple[str, str, str]:
         """Return the tuple that makes two selections duplicates of one another."""
+        # @intent external boundaries
+        # Identity is provider-scoped: the same resource id under two providers is two
+        # distinct remote resources, never a duplicate.
         return (self.provider, self.resource_id, self.mode.value)
 
 
@@ -124,6 +131,8 @@ class ResourceScope:
 
     def __post_init__(self) -> None:
         """Reject a scope that cannot identify the resource it is meant to bound."""
+        # @intent permissions
+        # An incomplete scope could not bound anything, so it is refused at construction.
         if not self.provider.strip():
             raise ConfigurationError("ResourceScope.provider cannot be empty.")
         if not self.resource_id.strip():
@@ -133,6 +142,9 @@ class ResourceScope:
 
     def qualified_id(self) -> str:
         """Return the single string a scope policy compares against its granted set."""
+        # @intent permissions
+        # This is the exact value ResourceScopePolicy authorizes against, so its shape
+        # is part of the security contract rather than a display detail.
         return f"{self.provider}:{self.resource_id}"
 
 
@@ -196,6 +208,9 @@ class SelectionReportEntry:
 
     def describe(self) -> str:
         """Render one human-readable report line for this selection."""
+        # @intent redaction
+        # Report lines are developer-facing output, so only provider, resource, outcome
+        # and state are rendered; no credential or provider response body appears here.
         suffix = f" ({self.detail})" if self.detail else ""
         return f"{self.selection.provider}:{self.selection.resource_id} -> {self.outcome.value}/{self.state.value}{suffix}"
 

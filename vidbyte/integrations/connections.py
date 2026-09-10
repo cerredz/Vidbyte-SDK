@@ -39,7 +39,7 @@ class ConnectionRegistry:
         # Names are developer-chosen labels; the connection carries the stable identifier.
         self._connections: dict[str, Connection] = {}
 
-    def register(self, name: str, connection: Connection) -> "ConnectionRegistry":
+    def register(self, name: str, connection: Connection) -> ConnectionRegistry:
         """Register one named connection and return this registry for chaining."""
         if not name.strip():
             raise ConfigurationError("A connection name cannot be empty.")
@@ -64,7 +64,7 @@ class InMemoryCredentialResolver:
         # to disk, logged, or copied into a report entry by this layer.
         self._credentials: dict[str, Credentials] = {}
 
-    def add(self, connection_id: str, credentials: Credentials) -> "InMemoryCredentialResolver":
+    def add(self, connection_id: str, credentials: Credentials) -> InMemoryCredentialResolver:
         """Store credentials under a connection id and return this resolver for chaining."""
         self._credentials[connection_id] = credentials
         return self

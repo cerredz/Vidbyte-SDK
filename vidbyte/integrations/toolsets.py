@@ -71,6 +71,9 @@ class ScopedProviderTool(BaseTool):
 
     def _provenance(self) -> dict[str, str]:
         """Return the source identity stamped onto every result this tool returns."""
+        # @intent external boundaries
+        # Provenance travels with every remote result so a reader can trace any claim
+        # back to the provider, resource, and connection that produced it.
         return {
             "provider": self._scope.provider,
             "resource_id": self._scope.resource_id,
@@ -121,6 +124,9 @@ class ProviderToolset:
     @staticmethod
     def _reject_resource_parameters(spec: ToolSpec, scope: ResourceScope) -> None:
         """Raise when an adapter spec lets the model address the resource itself."""
+        # @intent permissions
+        # A third-party adapter is untrusted input here: accepting a resource-addressing
+        # parameter would make an out-of-scope provider call expressible by the model.
         offenders = tuple(parameter.name for parameter in spec.parameters if parameter.name in INTEGRATIONS_RESERVED_TOOL_PARAMETERS)
         if offenders:
             raise ConfigurationError(
@@ -131,6 +137,9 @@ class ProviderToolset:
     @staticmethod
     def tool_name(scope: ResourceScope, operation: ProviderOperation) -> str:
         """Build a deterministic tool name unique to one provider, resource, and operation."""
+        # @intent external boundaries
+        # Two selections on one provider must not collide, because a duplicate name
+        # would let one remote resource shadow another inside the tool catalog.
         return f"{ProviderToolset._sanitize(scope.provider)}_{operation.value}_{ProviderToolset._resource_slug(scope)}"
 
     @staticmethod
