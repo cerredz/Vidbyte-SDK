@@ -6,7 +6,7 @@ ARCHITECTURE NOTE: The resource lives in a construction-time closure and in spec
 COMMON MODIFICATION PATTERNS: Add an operation to ProviderOperation and let the adapter describe it; the toolset needs no change to expose it.
 KNOWN EDGE CASES: Two selections on one provider must not collide on tool name, an adapter spec declaring a resource parameter is rejected, and budget exhaustion fails the call rather than raising.
 RELATED DOCS: docs/design/sources-access-layer.md
-TESTS: tests/test_sources_access_layer.py and scripts/test_sources_access_layer.py.
+TESTS: tests/test_sources_access_layer.py and scripts/test-sources-access-layer.py.
 """
 
 from __future__ import annotations
@@ -53,14 +53,15 @@ class ScopedProviderTool(BaseTool):
         return self._spec
 
     async def execute(self, call: ToolCall) -> ToolResult:
-        """Charge the budget, invoke the adapter against the bound scope, and stamp provenance."""
-        if not self._budget.charge(len(str(call.arguments))):
+        """Reserve a call, invoke the adapter, bound the payload, and stamp provenance."""
+        if not self._budget.reserve():
             return ToolResult.failure(self._spec.name, "The exploration budget for this run is exhausted.", metadata={"error": "budget_exhausted", **self._provenance()})
         try:
             output = await self._invoke(call)
         except Exception as exc:
             return ToolResult.failure(self._spec.name, f"The provider request failed with {type(exc).__name__}.", metadata={"error": "provider_failed", "error_type": type(exc).__name__, **self._provenance()})
-        return ToolResult.success(self._spec.name, output, metadata=self._provenance())
+        admission = self._budget.admit_output(output)
+        return ToolResult.success(self._spec.name, admission.text, metadata={**self._provenance(), "truncated": admission.truncated})
 
     async def _invoke(self, call: ToolCall) -> str:
         """Run the adapter operation for this call against the closed-over resource scope."""

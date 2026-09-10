@@ -6,7 +6,7 @@ ARCHITECTURE NOTE: The report is a frozen projection over per-selection entries;
 COMMON MODIFICATION PATTERNS: Add a grouping as a derived property over entries; never store a redundant counter that can drift from the entries.
 KNOWN EDGE CASES: An empty report is complete and still summarizes to readable text, and a summary never renders a credential.
 RELATED DOCS: docs/design/sources-access-layer.md
-TESTS: tests/test_sources_access_layer.py and scripts/test_sources_access_layer.py.
+TESTS: tests/test_sources_access_layer.py and scripts/test-sources-access-layer.py.
 """
 
 from __future__ import annotations

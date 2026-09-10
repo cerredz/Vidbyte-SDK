@@ -6,7 +6,7 @@ ARCHITECTURE NOTE: This module intentionally ships no concrete adapter; the regi
 COMMON MODIFICATION PATTERNS: Add a capability by extending ProviderOperation and describe_operation together; never widen the protocol without a registry test.
 KNOWN EDGE CASES: An unknown provider raises at resolve time rather than run time, and a duplicate registration is rejected instead of silently replacing.
 RELATED DOCS: docs/design/sources-access-layer.md
-TESTS: tests/test_sources_access_layer.py and scripts/test_sources_access_layer.py.
+TESTS: tests/test_sources_access_layer.py and scripts/test-sources-access-layer.py.
 """
 
 from __future__ import annotations

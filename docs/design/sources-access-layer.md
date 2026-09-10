@@ -159,6 +159,7 @@ class LoadOutcome(str, Enum):
     TRUNCATED = "truncated"
     SKIPPED = "skipped"
     FAILED = "failed"
+    TOOLS_ONLY = "tools_only"
 
 class FailurePolicy(str, Enum):
     REPORT = "report"
@@ -431,7 +432,7 @@ class ToolBudget:
 3. If it does not fit but the remaining budget is at least `INTEGRATIONS_MIN_TRUNCATION_CHARS`, truncate the content at that character count, append a truncation marker, stamp `metadata["truncated"] = True`, and record `TRUNCATED`.
 4. If less than the minimum remains, stop and record every remaining item as `SKIPPED`.
 
-`ToolBudget.charge` decrements the call counter first, then adds bytes; it returns `False` once either ceiling is crossed and stays `False` thereafter.
+`ToolBudget` splits its two ceilings across the tool call. `reserve()` claims one call before the provider is contacted and returns `False` once the call ceiling is reached. `admit_output()` runs after the provider responds and charges the returned payload — measured in UTF-8 bytes, because that is what actually consumes the agent's context — clipping and marking anything that overruns the remaining budget. Both ceilings are sticky: once either is crossed the budget stays closed for the rest of the run.
 
 #### Edge Cases & Error Handling
 - `max_tokens=0` admits nothing and reports every item skipped — it does not raise.
@@ -666,7 +667,7 @@ N/A — the SDK exposes no HTTP endpoints. The public Python API additions are s
 | MODIFY | `vidbyte/__init__.py` | Export `Sources` and supporting public types |
 | MODIFY | `README.md` | Add `vidbyte/integrations/` to the Layer Guide |
 | CREATE | `tests/test_sources_access_layer.py` | Full unit and integration suite from Section 10 |
-| CREATE | `scripts/test_sources_access_layer.py` | Phase-5 verification script |
+| CREATE | `scripts/test-sources-access-layer.py` | Phase-5 verification script |
 
 **Totals:** 15 created, 6 modified, 0 deleted.
 
@@ -816,3 +817,41 @@ No new third-party dependency is introduced. No external service is contacted by
 - **Why rejected:** The user scoped this PR to the access layer explicitly. A `FakeAdapter` in the test suite exercises every path a real provider would, and keeps the diff reviewable as one architectural change.
 
 ---
+
+---
+
+## 15. Implementation Deviations
+
+Recorded during the Phase 5.5 self-critique; each is a deliberate departure from the
+text above, not drift.
+
+### 15.1 `ContextBudget` renamed to `ContextAdmissionBudget`
+
+`vidbyte/lib/dataclasses/context.py` already defines a `ContextBudget` that is
+exported from the root `vidbyte` namespace. Shipping a second class under that
+name would have shadowed an existing public symbol — a silent breaking change for
+any caller doing `from vidbyte import ContextBudget`. The admission budget is
+therefore `ContextAdmissionBudget`, which also states what it does more precisely.
+
+### 15.2 `LoadOutcome.TOOLS_ONLY` added
+
+Section 6.1 listed four outcomes. A `TOOLS` selection contributes capability rather
+than content, so recording it as `LOADED` with zero items would have been
+misleading, and recording it as `SKIPPED` would have wrongly marked the report
+incomplete. A fifth member keeps `SourcesReport.complete` honest.
+
+### 15.3 `ToolBudget.charge()` split into `reserve()` and `admit_output()`
+
+The first implementation charged `len(str(call.arguments))` — the *request*, not the
+*response*. That left `max_tool_bytes` inert: an agent could return unbounded bytes
+across its allowed call count, which is the exact context-flooding case the ceiling
+exists to prevent. The budget now claims the call before the provider is contacted
+and charges the returned payload afterwards, clipping and marking an overrun. This
+also supplies the truncation marker Requirement 16 asks for on every scoped result.
+
+### 15.4 `ResourceScopePolicy.check` calls its base explicitly
+
+`@dataclass(slots=True)` rebuilds the class object, so a zero-argument `super()`
+resolves its implicit `__class__` cell to the discarded pre-slots class and raises
+`TypeError` on every call. The base method is invoked as
+`PermissionPolicy.check(self, spec, call)` instead.

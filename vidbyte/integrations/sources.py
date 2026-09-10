@@ -6,7 +6,7 @@ ARCHITECTURE NOTE: Sources.__init__ is a thin adapter that coerces loose argumen
 COMMON MODIFICATION PATTERNS: Add a resolution concern as one more named step composed inside resolve(); keep __init__ free of any logic beyond coercion and registry defaults.
 KNOWN EDGE CASES: An empty selection list resolves cleanly, a hybrid failure is reported exactly once, and one failing adapter never cancels its siblings.
 RELATED DOCS: docs/design/sources-access-layer.md
-TESTS: tests/test_sources_access_layer.py and scripts/test_sources_access_layer.py.
+TESTS: tests/test_sources_access_layer.py and scripts/test-sources-access-layer.py.
 """
 
 from __future__ import annotations

@@ -6,7 +6,7 @@ ARCHITECTURE NOTE: CredentialResolver is a protocol so a CLI keyring or a hosted
 COMMON MODIFICATION PATTERNS: Add an authorization check as one more ordered step in ConnectionBroker.authorize, returning a typed AccessState rather than raising.
 KNOWN EDGE CASES: A resolver that raises degrades to TRANSPORT_FAILED, and a denied result is structurally unable to carry credentials.
 RELATED DOCS: docs/design/sources-access-layer.md
-TESTS: tests/test_sources_access_layer.py and scripts/test_sources_access_layer.py.
+TESTS: tests/test_sources_access_layer.py and scripts/test-sources-access-layer.py.
 """
 
 from __future__ import annotations

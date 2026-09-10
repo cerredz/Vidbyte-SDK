@@ -6,7 +6,7 @@ ARCHITECTURE NOTE: All vocabularies subclass IntegrationEnum so parser choices d
 COMMON MODIFICATION PATTERNS: Add a member with a semantically distinct meaning; never add a member that restates an existing one.
 KNOWN EDGE CASES: Raw strings are coerced to members in Sources.__init__, never inside a frozen dataclass field.
 RELATED DOCS: docs/design/sources-access-layer.md
-TESTS: tests/test_sources_access_layer.py and scripts/test_sources_access_layer.py.
+TESTS: tests/test_sources_access_layer.py and scripts/test-sources-access-layer.py.
 """
 
 from __future__ import annotations

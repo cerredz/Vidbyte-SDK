@@ -6,7 +6,7 @@ ARCHITECTURE NOTE: Bounds are referenced by dataclass __post_init__ validation r
 COMMON MODIFICATION PATTERNS: Widen a ceiling here and rerun the budget tests; never inline a replacement literal in a validator.
 KNOWN EDGE CASES: The character-per-token ratio is a deliberate estimate, not a tokenizer, so budgets stay conservative.
 RELATED DOCS: docs/design/sources-access-layer.md
-TESTS: tests/test_sources_access_layer.py and scripts/test_sources_access_layer.py.
+TESTS: tests/test_sources_access_layer.py and scripts/test-sources-access-layer.py.
 """
 
 from __future__ import annotations

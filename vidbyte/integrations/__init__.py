@@ -6,7 +6,7 @@ ARCHITECTURE NOTE: This package composes vidbyte.context, vidbyte.tools, and vid
 COMMON MODIFICATION PATTERNS: Export a new public type here and add it to the root vidbyte namespace in the same change.
 KNOWN EDGE CASES: No concrete provider adapter ships here; the adapter registry starts empty by design.
 RELATED DOCS: docs/design/sources-access-layer.md
-TESTS: tests/test_sources_access_layer.py and scripts/test_sources_access_layer.py.
+TESTS: tests/test_sources_access_layer.py and scripts/test-sources-access-layer.py.
 """
 
 from __future__ import annotations

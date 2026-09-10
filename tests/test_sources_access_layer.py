@@ -258,21 +258,48 @@ class ToolBudgetTests(unittest.TestCase):
     def test_denies_after_call_ceiling(self) -> None:
         """[Edge Case] The call ceiling denies the call immediately after it is reached."""
         budget = ToolBudget(max_calls=2, max_bytes=10_000)
-        self.assertTrue(budget.charge(1))
-        self.assertTrue(budget.charge(1))
-        self.assertFalse(budget.charge(1))
+        self.assertTrue(budget.reserve())
+        self.assertTrue(budget.reserve())
+        self.assertFalse(budget.reserve())
 
-    def test_denies_once_byte_ceiling_crossed(self) -> None:
-        """[Edge Case] The byte ceiling is independent of the call ceiling."""
+    def test_charges_the_returned_payload_not_the_request(self) -> None:
+        """[Silent Failure] Billing request arguments would leave the byte ceiling inert."""
         budget = ToolBudget(max_calls=100, max_bytes=10)
-        self.assertFalse(budget.charge(11))
+        budget.reserve()
+        self.assertEqual(budget.remaining_bytes(), 10)
+        budget.admit_output("abcde")
+        self.assertEqual(budget.remaining_bytes(), 5)
+
+    def test_clips_payload_that_overruns_the_byte_ceiling(self) -> None:
+        """[Silent Failure] An oversized payload must be clipped and marked, never admitted whole."""
+        budget = ToolBudget(max_calls=100, max_bytes=10)
+        budget.reserve()
+        admission = budget.admit_output("z" * 500)
+        self.assertTrue(admission.truncated)
+        self.assertLess(len(admission.text), 500)
+        self.assertTrue(budget.would_exceed())
+
+    def test_byte_ceiling_accumulates_across_calls(self) -> None:
+        """[Hidden Failure] A per-call ceiling would let N calls each spend the full budget."""
+        budget = ToolBudget(max_calls=100, max_bytes=10)
+        budget.reserve()
+        budget.admit_output("abcde")
+        budget.reserve()
+        admission = budget.admit_output("abcdefghij")
+        self.assertTrue(admission.truncated)
+
+    def test_multibyte_payload_is_measured_in_bytes(self) -> None:
+        """[Hidden Assumption] A byte ceiling must count bytes, not characters."""
+        budget = ToolBudget(max_calls=100, max_bytes=4)
+        budget.reserve()
+        self.assertTrue(budget.admit_output("ééé").truncated)
 
     def test_stays_denied_after_first_denial(self) -> None:
         """[Hidden Failure] A resetting budget would allow unbounded exploration after one refusal."""
         budget = ToolBudget(max_calls=1, max_bytes=10)
-        budget.charge(1)
-        self.assertFalse(budget.charge(1))
-        self.assertFalse(budget.charge(0))
+        budget.reserve()
+        self.assertFalse(budget.reserve())
+        self.assertFalse(budget.reserve())
         self.assertTrue(budget.would_exceed())
 
 
@@ -443,6 +470,20 @@ class ProviderToolsetTests(unittest.IsolatedAsyncioTestCase):
         self.assertIs(result.status, ToolStatus.ERROR)
         self.assertNotIn("abc123", result.output)
         self.assertEqual(result.metadata["error_type"], "RuntimeError")
+
+    async def test_clips_and_marks_an_oversized_provider_payload(self) -> None:
+        """[Silent Failure] A clipped provider result must be marked so a reader can tell."""
+        tool = self._build(FakeAdapter(output="q" * 5_000), budget=ToolBudget(max_calls=10, max_bytes=100))[0]
+        result = await tool.execute(ToolCall(tool_name=tool.spec().name))
+        self.assertIs(result.status, ToolStatus.SUCCESS)
+        self.assertTrue(result.metadata["truncated"])
+        self.assertLess(len(result.output), 5_000)
+
+    async def test_marks_an_in_budget_payload_as_untruncated(self) -> None:
+        """[Silent Failure] A complete result must be distinguishable from a clipped one."""
+        tool = self._build(FakeAdapter(output="short"))[0]
+        result = await tool.execute(ToolCall(tool_name=tool.spec().name))
+        self.assertFalse(result.metadata["truncated"])
 
     async def test_stamps_provenance_on_success(self) -> None:
         """[Silent Failure] A result with no provenance cannot be traced back to its source."""

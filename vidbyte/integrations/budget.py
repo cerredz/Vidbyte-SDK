@@ -6,7 +6,7 @@ ARCHITECTURE NOTE: Admission returns a typed record per item, which the report r
 COMMON MODIFICATION PATTERNS: Replace the character-ratio estimator with an injected tokenizer by widening ContextAdmissionBudget's constructor, leaving admit() unchanged.
 KNOWN EDGE CASES: A zero budget admits nothing without raising, an empty document costs nothing, and truncation preserves the untrusted-content fence.
 RELATED DOCS: docs/design/sources-access-layer.md
-TESTS: tests/test_sources_access_layer.py and scripts/test_sources_access_layer.py.
+TESTS: tests/test_sources_access_layer.py and scripts/test-sources-access-layer.py.
 """
 
 from __future__ import annotations
@@ -110,6 +110,14 @@ class ContextAdmissionBudget:
 
 
 @dataclass(frozen=True, slots=True)
+class OutputAdmission:
+    """One provider payload after the byte ceiling decided how much of it may be returned."""
+
+    text: str
+    truncated: bool
+
+
+@dataclass(frozen=True, slots=True)
 class _AdmittedItem:
     """One item that cleared the budget, and whether it had to be cut to fit."""
 
@@ -128,8 +136,8 @@ class ToolBudget:
         self._bytes_used = 0
         self._exhausted = False
 
-    def charge(self, byte_count: int) -> bool:
-        """Record one tool call and its payload, returning False once a ceiling is crossed."""
+    def reserve(self) -> bool:
+        """Claim one tool call, returning False once the call ceiling is reached."""
         # @intent permissions
         # Exhaustion is sticky: once either ceiling is crossed the budget stays
         # closed for the rest of the run, so a refused agent cannot retry its way
@@ -137,11 +145,27 @@ class ToolBudget:
         if self._exhausted:
             return False
         self._calls_used += 1
-        self._bytes_used += max(byte_count, INTEGRATIONS_MIN_CHARGED_BYTES)
-        if self._calls_used > self._max_calls or self._bytes_used > self._max_bytes:
+        if self._calls_used > self._max_calls:
             self._exhausted = True
             return False
         return True
+
+    def admit_output(self, output: str) -> OutputAdmission:
+        """Charge a provider payload against the byte ceiling, clipping what does not fit."""
+        # @intent permissions
+        # The returned payload is what actually consumes the agent's context, so the
+        # byte ceiling is charged here rather than against the request arguments. A
+        # payload that overruns the remaining budget is clipped and marked instead of
+        # being admitted whole, and the budget closes for the rest of the run.
+        remaining = max(self._max_bytes - self._bytes_used, INTEGRATIONS_MIN_CHARGED_BYTES)
+        payload = output.encode("utf-8")
+        if len(payload) <= remaining:
+            self._bytes_used += len(payload)
+            return OutputAdmission(text=output, truncated=False)
+        self._bytes_used = self._max_bytes
+        self._exhausted = True
+        clipped = payload[:remaining].decode("utf-8", errors="ignore")
+        return OutputAdmission(text=clipped + INTEGRATIONS_TRUNCATION_MARKER, truncated=True)
 
     def would_exceed(self) -> bool:
         """Return whether this budget has already refused a call."""
@@ -151,9 +175,14 @@ class ToolBudget:
         """Return how many tool calls remain before the call ceiling is reached."""
         return max(self._max_calls - self._calls_used, 0)
 
+    def remaining_bytes(self) -> int:
+        """Return how many payload bytes remain before the byte ceiling is reached."""
+        return max(self._max_bytes - self._bytes_used, INTEGRATIONS_MIN_CHARGED_BYTES)
+
 
 __all__ = [
     "BudgetAdmission",
     "ContextAdmissionBudget",
+    "OutputAdmission",
     "ToolBudget",
 ]

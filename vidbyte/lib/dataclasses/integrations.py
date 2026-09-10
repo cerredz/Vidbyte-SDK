@@ -6,7 +6,7 @@ ARCHITECTURE NOTE: Each dataclass is frozen and slotted and owns its own rules i
 COMMON MODIFICATION PATTERNS: Add a field with its validation in the same __post_init__; coerce loose caller types before construction, never inside the dataclass.
 KNOWN EDGE CASES: A credential with no expiry is not expired, an empty required-scope tuple is always covered, and filters are frozen into an immutable mapping.
 RELATED DOCS: docs/design/sources-access-layer.md
-TESTS: tests/test_sources_access_layer.py and scripts/test_sources_access_layer.py.
+TESTS: tests/test_sources_access_layer.py and scripts/test-sources-access-layer.py.
 """
 
 from __future__ import annotations
