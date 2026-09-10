@@ -82,6 +82,7 @@ from vidbyte.lib.enums.reasoning_strategies import (
 from vidbyte.lib.enums.skills import ContextMinimalFanoutSkill, Skill
 from vidbyte.lib.enums.skills import Skills as SkillEnums
 from vidbyte.lib.enums.sources import PinPolicy
+from vidbyte.lib.enums.integrations import SourceKind, SourceProvider
 from vidbyte.lib.enums.speed import AgentSpeedRecordingIntegrity
 from vidbyte.lib.enums.structured_output import StructuredOutputSupport
 
@@ -143,6 +144,8 @@ __all__ = [
     "RuleErrorMode",
     "Skill",
     "SkillEnums",
+    "SourceKind",
+    "SourceProvider",
     "StrawmanCriticism",
     "StructuredOutputSupport",
     "TaskStatus",

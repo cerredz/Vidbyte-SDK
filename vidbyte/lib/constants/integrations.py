@@ -1,0 +1,64 @@
+"""FILE: vidbyte/lib/constants/integrations.py
+
+PURPOSE: Centralizes every numeric bound and default for the integrations layer in one importable module.
+ROLE IN CODEBASE: SourceConfig validation, ContextAdmission budgeting, GitHub pagination, and tool output clipping all read these names.
+ARCHITECTURE NOTE: Bounds live here rather than inline so policy is discoverable and widenable without touching call sites.
+COMMON MODIFICATION PATTERNS: Widen a bound here and update the design doc; never duplicate a literal at a call site.
+KNOWN EDGE CASES: Zero budgets must admit nothing; truncation markers always count toward the budget they clip for.
+RELATED DOCS: docs/design/source-context-tools.md
+TESTS: tests/test_source_context_tools.py and scripts/test-source-context-tools.py.
+"""
+
+from __future__ import annotations
+
+SOURCES_KNOWN_FIELDS = frozenset({"provider", "api_key", "resource"})
+SOURCES_DEFAULT_MAX_TOKENS = 20000
+SOURCES_DEFAULT_MAX_OUTPUT_BYTES = 50000
+SOURCES_CHARS_PER_TOKEN = 4
+SOURCES_TRUNCATION_MARKER = "...[truncated]"
+SOURCES_MAX_PATH_CHARS = 512
+SOURCES_MAX_QUERY_CHARS = 256
+SOURCES_MAX_REF_CHARS = 64
+SOURCES_MAX_PAGES = 10
+SOURCES_PER_PAGE = 100
+SOURCES_MAX_DIRECTORY_ENTRIES = 200
+SOURCES_MAX_SEARCH_ITEMS = 20
+SOURCES_DIFF_MAX_BYTES = 1000000
+SOURCES_PULL_MAX_BYTES = 262144
+SOURCES_PAGE_MAX_BYTES = 413696
+SOURCES_LISTING_BYTES_PER_ENTRY = 512
+SOURCES_LISTING_OVERHEAD_BYTES = 4096
+SOURCES_SEARCH_BYTES_PER_ITEM = 1024
+SOURCES_SEARCH_OVERHEAD_BYTES = 4096
+SOURCES_CONTENTS_SLACK_NUMERATOR = 2
+SOURCES_CONTENTS_SLACK_DENOMINATOR = 2
+SOURCES_CONTENTS_OVERHEAD_BYTES = 1024
+SOURCES_HTTP_TIMEOUT_SECONDS = 30.0
+SOURCES_MIN_TOKENS = 0
+
+__all__ = [
+    "SOURCES_CHARS_PER_TOKEN",
+    "SOURCES_CONTENTS_OVERHEAD_BYTES",
+    "SOURCES_CONTENTS_SLACK_DENOMINATOR",
+    "SOURCES_CONTENTS_SLACK_NUMERATOR",
+    "SOURCES_DEFAULT_MAX_OUTPUT_BYTES",
+    "SOURCES_DEFAULT_MAX_TOKENS",
+    "SOURCES_DIFF_MAX_BYTES",
+    "SOURCES_HTTP_TIMEOUT_SECONDS",
+    "SOURCES_KNOWN_FIELDS",
+    "SOURCES_LISTING_BYTES_PER_ENTRY",
+    "SOURCES_LISTING_OVERHEAD_BYTES",
+    "SOURCES_MAX_DIRECTORY_ENTRIES",
+    "SOURCES_MAX_PAGES",
+    "SOURCES_MAX_PATH_CHARS",
+    "SOURCES_MAX_QUERY_CHARS",
+    "SOURCES_MAX_REF_CHARS",
+    "SOURCES_MAX_SEARCH_ITEMS",
+    "SOURCES_MIN_TOKENS",
+    "SOURCES_PAGE_MAX_BYTES",
+    "SOURCES_PER_PAGE",
+    "SOURCES_PULL_MAX_BYTES",
+    "SOURCES_SEARCH_BYTES_PER_ITEM",
+    "SOURCES_SEARCH_OVERHEAD_BYTES",
+    "SOURCES_TRUNCATION_MARKER",
+]

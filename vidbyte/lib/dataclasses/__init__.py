@@ -217,6 +217,7 @@ from vidbyte.lib.dataclasses.sources import (
     SourceResult,
     SourceSnapshot,
 )
+from vidbyte.lib.dataclasses.integrations import SourceConfig
 from vidbyte.lib.dataclasses.speed import (
     AgentSpeedHistory,
     AgentSpeedRollup,
@@ -427,6 +428,7 @@ __all__ = [
     "Selection",
     "SessionMeta",
     "SessionStatus",
+    "SourceConfig",
     "SourceResult",
     "SourceSnapshot",
     "StopRecoverySettings",
