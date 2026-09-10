@@ -39,6 +39,7 @@ access remain outside this package.
 | [`vidbyte.context`](vidbyte/context/README.md) | Structured context items, context windows, compaction, algorithms, and handoff models |
 | [`vidbyte.evals`](vidbyte/evals/README.md) | Local eval cases, suites, runners, graders, registries, and result summaries |
 | [`vidbyte.harnesses`](vidbyte/harnesses/README.md) | The `Harness` base class: config-as-source-of-truth identity, Session-backed capture, and consented, redacted trajectory export |
+| [`vidbyte.integrations`](vidbyte/integrations/README.md) | `SourceContext` and `SourceTool`: external provider resources loaded into agent context items and repo-scoped tools |
 | [`vidbyte.lib`](vidbyte/lib/README.md) | Shared dataclasses, enums, registries, errors, runners, config, and tracing contracts |
 | [`vidbyte.mcp_server`](vidbyte/mcp_server/README.md) | Stdio MCP Studio server for exposing agents, tools, prompts, and pipelines |
 | [`vidbyte.middleware`](vidbyte/middleware/README.md) | Deterministic runtime hooks and built-in policy, safety, retry, budget, and compaction middleware |
