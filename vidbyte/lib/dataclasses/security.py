@@ -60,7 +60,11 @@ class ResourceScopePolicy(PermissionPolicy):
         # model-supplied call arguments, so a forged argument cannot influence
         # the decision. A spec with no resource marker is an ordinary tool and
         # is left entirely to the inherited permission-level check.
-        if super().check(spec, call) is PermissionDecision.DENY:
+        #
+        # The base method is called explicitly rather than through a zero-arg
+        # super(): dataclass(slots=True) rebuilds the class object, so the
+        # implicit __class__ cell would point at the discarded pre-slots class.
+        if PermissionPolicy.check(self, spec, call) is PermissionDecision.DENY:
             return PermissionDecision.DENY
         requested = spec.metadata.get("resource_id")
         if requested is None:
