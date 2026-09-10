@@ -81,12 +81,21 @@ from vidbyte.lib.enums.reasoning_strategies import (
 )
 from vidbyte.lib.enums.skills import ContextMinimalFanoutSkill, Skill
 from vidbyte.lib.enums.skills import Skills as SkillEnums
+from vidbyte.lib.enums.integrations import (
+    AccessState,
+    FailurePolicy,
+    IntegrationEnum,
+    LoadMode,
+    LoadOutcome,
+    ProviderOperation,
+)
 from vidbyte.lib.enums.sources import PinPolicy
 from vidbyte.lib.enums.speed import AgentSpeedRecordingIntegrity
 from vidbyte.lib.enums.structured_output import StructuredOutputSupport
 
 __all__ = [
     "AbsenceEvidenceSignificance",
+    "AccessState",
     "AgentRuntimeStateKey",
     "AgentRuntimeType",
     "AgentSpeedRecordingIntegrity",
@@ -96,9 +105,6 @@ __all__ = [
     "BudgetPreset",
     "BurdenOfProofVerdict",
     "CircularityVerdict",
-    "CompositionDivisionValidity",
-    "ConsistencyStatus",
-    "ContextMinimalFanoutSkill",
     "CodexApprovalMode",
     "CodexContextAnchor",
     "CodexInputType",
@@ -108,6 +114,9 @@ __all__ = [
     "CodexSandbox",
     "CodexThreadSource",
     "CodexThreadStartSource",
+    "CompositionDivisionValidity",
+    "ConsistencyStatus",
+    "ContextMinimalFanoutSkill",
     "CotEventEnum",
     "DefeasibleRuleApplies",
     "DocumentType",
@@ -115,11 +124,15 @@ __all__ = [
     "FailureCode",
     "FailureDisposition",
     "FailurePhase",
+    "FailurePolicy",
     "FailureSeverity",
     "FailureStatus",
     "HypothesisStatus",
     "IdentityVerdict",
     "ImpactLevel",
+    "IntegrationEnum",
+    "LoadMode",
+    "LoadOutcome",
     "ModalStatus",
     "ModelModality",
     "ModelNameModality",
@@ -134,6 +147,7 @@ __all__ = [
     "PredictMatch",
     "ProgressState",
     "Prompt",
+    "ProviderOperation",
     "QuantifierKind",
     "QuantifierVerdict",
     "ReasoningStrategyEnum",

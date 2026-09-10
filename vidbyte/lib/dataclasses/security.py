@@ -45,3 +45,26 @@ class PermissionPolicy:
     def allow_all(cls) -> "PermissionPolicy":
         """Return a policy that allows every declared tool permission."""
         return cls(allowed=frozenset(ToolPermission))
+
+
+@dataclass(frozen=True, slots=True)
+class ResourceScopePolicy(PermissionPolicy):
+    """Permission policy that additionally confines scoped tools to a granted resource set."""
+
+    granted_resources: frozenset[str] = frozenset()
+
+    def check(self, spec: ToolSpec, call: ToolCall) -> PermissionDecision:
+        """Deny a scoped provider tool whose bound resource was not granted to this run."""
+        # @intent permissions
+        # The resource is read from the tool's own spec metadata, never from the
+        # model-supplied call arguments, so a forged argument cannot influence
+        # the decision. A spec with no resource marker is an ordinary tool and
+        # is left entirely to the inherited permission-level check.
+        if super().check(spec, call) is PermissionDecision.DENY:
+            return PermissionDecision.DENY
+        requested = spec.metadata.get("resource_id")
+        if requested is None:
+            return PermissionDecision.ALLOW
+        if requested in self.granted_resources:
+            return PermissionDecision.ALLOW
+        return PermissionDecision.DENY

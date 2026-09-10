@@ -102,7 +102,7 @@ SourcesResolver
    ├─ LOAD / HYBRID path                      TOOLS / HYBRID path
    |    adapter.load(request)                   adapter.capabilities()
    |      -> DocumentContextItem[]                -> ProviderToolset.build()
-   |    ContextBudget.admit()                        -> ScopedProviderTool per op
+   |    ContextAdmissionBudget.admit()                        -> ScopedProviderTool per op
    |      -> kept / truncated / skipped          ResourceScopePolicy(granted ids)
    v                                                 v
 ResolvedSources(context_items=..., tools=..., permission_policy=..., report=...)
@@ -404,11 +404,11 @@ class ConnectionBroker:
 **Type:** New file
 
 #### What it does
-`ContextBudget` decides which loaded items are admitted, and how. `ToolBudget` bounds exploration at run time.
+`ContextAdmissionBudget` decides which loaded items are admitted, and how. `ToolBudget` bounds exploration at run time.
 
 #### Interface / API
 ```python
-class ContextBudget:
+class ContextAdmissionBudget:
     def __init__(self, *, max_tokens: int) -> None: ...
     def admit(self, items: tuple[DocumentContextItem, ...]) -> BudgetAdmission: ...
     @staticmethod
@@ -425,7 +425,7 @@ class ToolBudget:
 `BudgetAdmission` is a frozen dataclass of `items`, `tokens_admitted`, `tokens_original`, and `outcome`.
 
 #### Logic / Algorithm
-`ContextBudget.admit` walks items in order:
+`ContextAdmissionBudget.admit` walks items in order:
 1. Estimate the item's tokens as `ceil(len(content) / INTEGRATIONS_CHARS_PER_TOKEN)`.
 2. If it fits in the remaining budget, admit it whole.
 3. If it does not fit but the remaining budget is at least `INTEGRATIONS_MIN_TRUNCATION_CHARS`, truncate the content at that character count, append a truncation marker, stamp `metadata["truncated"] = True`, and record `TRUNCATED`.
@@ -556,7 +556,7 @@ class ResolvedSources:
 
 `SourcesResolver.resolve()` composes four named steps:
 1. `_authorize_all()` — awaits `ConnectionBroker.authorize` for every selection concurrently, returning granted pairs and failure entries.
-2. `_load_content()` — awaits `adapter.load` for every granted `LOAD`/`HYBRID` selection concurrently, then admits results through `ContextBudget`.
+2. `_load_content()` — awaits `adapter.load` for every granted `LOAD`/`HYBRID` selection concurrently, then admits results through `ContextAdmissionBudget`.
 3. `_build_tools()` — builds scoped tools for every granted `TOOLS`/`HYBRID` selection and collects granted resource ids.
 4. `_assemble()` — constructs `ResourceScopePolicy`, the `SourcesReport`, and the `ResolvedSources`; raises `SourceAccessError` first when the policy is `REQUIRE_ALL` and any entry failed.
 
@@ -655,7 +655,7 @@ N/A — the SDK exposes no HTTP endpoints. The public Python API additions are s
 | CREATE | `vidbyte/integrations/README.md` | Folder documentation with File Index (rule `S020`) |
 | CREATE | `vidbyte/integrations/adapters.py` | `ProviderAdapter` protocol and `AdapterRegistry` |
 | CREATE | `vidbyte/integrations/connections.py` | `ConnectionRegistry`, `CredentialResolver`, `InMemoryCredentialResolver`, `ConnectionBroker` |
-| CREATE | `vidbyte/integrations/budget.py` | `ContextBudget`, `ToolBudget` |
+| CREATE | `vidbyte/integrations/budget.py` | `ContextAdmissionBudget`, `ToolBudget` |
 | CREATE | `vidbyte/integrations/toolsets.py` | `ScopedProviderTool`, `ProviderToolset` |
 | CREATE | `vidbyte/integrations/report.py` | `SourcesReport` |
 | CREATE | `vidbyte/integrations/sources.py` | `Sources`, `SourcesResolver`, `ResolvedSources` |
@@ -687,7 +687,7 @@ A `FakeAdapter` test double implements `ProviderAdapter` in the test module. It 
 - `it('coerces a string on_failure into FailurePolicy')` — [Hidden Assumption]
 - `it('rejects max_tokens above the ceiling and below zero')` — [Edge Case]
 
-**`ContextBudget`**
+**`ContextAdmissionBudget`**
 - `it('admits one item that fits exactly at the budget boundary')` — [Edge Case] — off-by-one at `tokens == max_tokens` is the classic failure here.
 - `it('truncates an item that exceeds the remaining budget')` — [Silent Failure] — the danger is admitting a truncated item while reporting it as fully loaded.
 - `it('marks truncated content with metadata and a visible marker')` — [Silent Failure]

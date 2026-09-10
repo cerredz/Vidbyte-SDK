@@ -467,3 +467,53 @@ class SourceParseError(SourceError):
 
 class SourceSecurityError(SourceError):
     """Raised when a URL is disallowed or a response violates a size/scheme guard."""
+
+
+class SourceAccessError(SourceError):
+    """Raised when a requested source cannot be accessed under the run's access policy."""
+
+    DIAGNOSTIC_FIELDS = (
+        "error_kind",
+        "expected",
+        "actual",
+        "safe_runtime_details",
+        "likely_causes",
+        "repair_approaches",
+        "related_docs",
+        "relevant_tests",
+    )
+
+    def __init__(self, provider: str, resource_id: str, state: str, detail: str = "") -> None:
+        # Carries only SDK-authored access metadata; no credential or provider response body is included.
+        self.provider = provider
+        self.resource_id = resource_id
+        self.state = state
+        self.error_kind = "source_access"
+        self.expected = "an authorized connection granting the selected resource"
+        self.actual = state
+        self.safe_runtime_details = {"provider": provider, "resource_id": resource_id, "state": state}
+        self.likely_causes = (
+            "The named connection was never registered for this provider.",
+            "The resolved credential expired or lacks the scopes the selection requires.",
+            "No adapter is registered for the selection's provider.",
+        )
+        self.repair_approaches = (
+            "Register the connection and its credentials before calling Sources.resolve().",
+            "Register a ProviderAdapter for the provider named by the selection.",
+            "Resolve with on_failure='report' to inspect every failing selection at once.",
+        )
+        self.related_docs = ("docs/design/sources-access-layer.md",)
+        self.relevant_tests = ("tests/test_sources_access_layer.py",)
+        super().__init__(
+            f"Cannot access {provider} resource '{resource_id}': {state}." + (f" {detail}" if detail else ""),
+            details={
+                "error_kind": self.error_kind,
+                "expected": self.expected,
+                "actual": self.actual,
+                "safe_runtime_details": self.safe_runtime_details,
+                "likely_causes": self.likely_causes,
+                "repair_approaches": self.repair_approaches,
+                "related_docs": self.related_docs,
+                "relevant_tests": self.relevant_tests,
+            },
+        )
