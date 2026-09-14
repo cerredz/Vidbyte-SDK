@@ -46,11 +46,6 @@ from vidbyte.lib.dataclasses.agents import (
     AgentStopReason,
 )
 from vidbyte.lib.dataclasses.aggregate_agent_descriptor import AggregateAgentDescriptor
-from vidbyte.lib.dataclasses.config import (
-    AgentSettings,
-    MiddlewareDefinition,
-    ToolDefinition,
-)
 from vidbyte.lib.dataclasses.codex import (
     CodexAgentSettings,
     CodexClientSettings,
@@ -66,8 +61,13 @@ from vidbyte.lib.dataclasses.codex import (
     CodexSubagentSettings,
     CodexTextInput,
     CodexThreadSettings,
-    CodexTurnSettings,
     CodexTurnError,
+    CodexTurnSettings,
+)
+from vidbyte.lib.dataclasses.config import (
+    AgentSettings,
+    MiddlewareDefinition,
+    ToolDefinition,
 )
 from vidbyte.lib.dataclasses.context import (
     BaseAgentContext,
@@ -114,6 +114,7 @@ from vidbyte.lib.dataclasses.harnesses import (
     HarnessSpec,
     TrajectoryRecord,
 )
+from vidbyte.lib.dataclasses.integrations import LoadedSection, SourceConfig
 from vidbyte.lib.dataclasses.mcp import McpToolDefinition
 from vidbyte.lib.dataclasses.middleware import (
     MiddlewareAction,
@@ -217,7 +218,6 @@ from vidbyte.lib.dataclasses.sources import (
     SourceResult,
     SourceSnapshot,
 )
-from vidbyte.lib.dataclasses.integrations import SourceConfig
 from vidbyte.lib.dataclasses.speed import (
     AgentSpeedHistory,
     AgentSpeedRollup,
@@ -369,6 +369,7 @@ __all__ = [
     "LlmsTxtDocument",
     "LlmsTxtLink",
     "LlmsTxtSection",
+    "LoadedSection",
     "ManagerAgentCloser",
     "ManagerAgentFactory",
     "MarkdownDocument",

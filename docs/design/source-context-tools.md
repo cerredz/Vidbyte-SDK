@@ -211,11 +211,11 @@ provider factory:
   max_output_bytes)` in construction closure, and exposes a `ToolSpec`
   whose parameters are only the model-fillable fields (`path` with default
   `""` for list, required `path` for read, required `query` for search;
-  optional `ref` branch pinned at build from resource URL fragment or
-  default branch resolved once at build time — no, keep simpler: `ref`
-  defaults to the repository default branch resolved lazily per call via
-  `GET /repos/{o}/{r}` cached on the tool for the process; model may pass an
-  explicit `ref` limited to `[A-Za-z0-9._/-]{1,64}`).
+  optional `ref` branch omitted from the request URL entirely, in which case
+  the GitHub API serves the repository default branch; model-supplied `ref`
+  values are limited to `[A-Za-z0-9._/-]{1,64}`). No eager default-branch
+  resolution happens at build time, keeping `build()` synchronous and
+  side-effect free.
 - `execute(call)`: validate path (`posix` normalize, reject absolute,
   `..` escapes above root, empty for read, URLs), validate query (nonempty,
   ≤256 chars, reject `repo:` qualifier which would widen scope), call the
@@ -226,15 +226,15 @@ provider factory:
 - No `ResourceScopePolicy` is returned. Tool descriptions are 4–5 sentences,
   example-free, per the model-facing tool contract guide.
 
-### 6.6 Errors (`vidbyte/lib/errors/base.py`, add `SourceError` + `SourceAccessError`)
+### 6.6 Errors (reuse `SourceError` / `SourceFetchError`)
 
-- `SourceError(VidbyteSdkError)` thin base; `SourceAccessError(SourceError)`
-  with the full A003 `DIAGNOSTIC_FIELDS` packet following
-  `ReasoningTraceArgumentError`'s shape, carrying only `(provider,
-  resource, state)` — no key material. Constructor signature
-  `(provider: str, resource: str, state: str, detail: str = "")`.
-- Input-shape problems raise the existing `ConfigurationError`; transport
-  problems the client cannot classify stay `ProviderRequestError`.
+No new exception class is added, per the repo's shallow-hierarchy
+discipline (reuse an existing type with a clear message). Access failures
+raise the existing `SourceFetchError(SourceError)` with structured
+`details={"provider", "resource", "state"}` carrying only SDK-authored
+metadata — no key material, token, or response body. Constructor shape
+problems raise the existing `ConfigurationError`; unclassifiable transport
+problems stay `ProviderRequestError`.
 
 ### 6.7 Constants and enums
 
@@ -291,17 +291,19 @@ Create (12):
 - `tests/test_source_context_tools.py` — Section 10 suite.
 - `scripts/test-source-context-tools.py` — verification script.
 
-Modify (3):
+Modify (6):
 
-- `vidbyte/lib/errors/base.py` — add `SourceError`, `SourceAccessError`
-  with full diagnostic packets.
 - `vidbyte/__init__.py` — export the two classes.
 - `README.md` — one Layer Guide table row for `vidbyte.integrations`.
+- `vidbyte/lib/constants/__init__.py`, `vidbyte/lib/enums/__init__.py`,
+  `vidbyte/lib/dataclasses/__init__.py` — re-export the new substrate names.
+- `lint/baseline.json` — tighten the S051 ratchet after ruff-canonical import
+  ordering (improvement only, no allowance raised).
 
 Delete (0): `vidbyte/integrations/` does not exist on `main`; PR #429 branch
 files are abandoned by closing the PR, not deleted.
 
-Totals: 12 create, 3 modify, 0 delete.
+Totals: 12 create, 6 modify, 0 delete.
 
 ## 10. Testing Plan
 

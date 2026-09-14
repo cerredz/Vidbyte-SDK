@@ -17,9 +17,21 @@ from typing import Any
 
 from vidbyte.integrations.github import clip_text
 from vidbyte.integrations.providers import SourceProviderClient, create_client
-from vidbyte.lib.constants.integrations import SOURCES_DEFAULT_MAX_OUTPUT_BYTES, SOURCES_MAX_DIRECTORY_ENTRIES, SOURCES_MAX_PATH_CHARS, SOURCES_MAX_QUERY_CHARS, SOURCES_MAX_SEARCH_ITEMS
+from vidbyte.lib.constants.integrations import (
+    SOURCES_DEFAULT_MAX_OUTPUT_BYTES,
+    SOURCES_MAX_DIRECTORY_ENTRIES,
+    SOURCES_MAX_PATH_CHARS,
+    SOURCES_MAX_QUERY_CHARS,
+    SOURCES_MAX_SEARCH_ITEMS,
+)
 from vidbyte.lib.dataclasses.integrations import SourceConfig, validate_ref
-from vidbyte.lib.dataclasses.tools import ToolCall, ToolParameter, ToolPermission, ToolResult, ToolSpec
+from vidbyte.lib.dataclasses.tools import (
+    ToolCall,
+    ToolParameter,
+    ToolPermission,
+    ToolResult,
+    ToolSpec,
+)
 from vidbyte.lib.enums.integrations import SourceKind
 from vidbyte.lib.errors import ConfigurationError
 from vidbyte.tools.base import BaseTool
@@ -42,6 +54,10 @@ _SEARCH_DESCRIPTION = (
     "Queries cannot name another repository, and results are bounded in count with their source attached. "
     "Use it to locate relevant files before reading them."
 )
+_LIST_PATH_DESCRIPTION = "Repo-relative directory to list within the bound repository. Empty string selects the repository root for top-level discovery. Nested paths use forward slashes from the root downward. Only names directly inside the chosen directory are returned."
+_READ_PATH_DESCRIPTION = "Repo-relative file to read within the bound repository. The value must name a file, never a directory or an external address. Forward slashes separate nested levels from the root downward. Paths escaping the repository are rejected before any request."
+_SEARCH_QUERY_DESCRIPTION = "Code text to find within the bound repository. Matching is confined to the repository fixed at build time. Repository qualifiers are rejected so the scope cannot widen. Results return bounded matching paths with their source attached."
+_REF_DESCRIPTION = "Branch or commit to read within the bound repository. Omit it to use the repository default branch for stable reads. Values are limited to safe branch characters only. Unrecognized refs fail validation before any request."
 
 
 class SourceTool:
@@ -117,12 +133,14 @@ class _ScopedGitHubTool(BaseTool):
 
     def _provenance(self) -> dict[str, str]:
         """Stamp every result with the provider, resource, and operation identity."""
+        # @intent external boundaries
+        # Provenance comes from construction scope only, so model input can never forge result identity.
         return {"provider": self._config.provider.value, "resource": f"{self._config.owner}/{self._config.repo}", "operation": self.operation}
 
     def _succeed(self, name: str, text: str) -> ToolResult:
         """Clip one payload to the byte ceiling and return it as a stamped success."""
         clipped = clip_text(text, self._max_output_bytes)
-        metadata = dict(self._provenance())
+        metadata: dict[str, Any] = dict(self._provenance())
         metadata["truncated"] = clipped != text
         return ToolResult.success(name, clipped, metadata=metadata)
 
@@ -160,7 +178,7 @@ class GitHubListFilesTool(_ScopedGitHubTool):
 
     def spec(self) -> ToolSpec:
         """Declare the directory listing contract with its optional path and branch."""
-        return ToolSpec(name="github_list_files", description=_LIST_DESCRIPTION, parameters=(ToolParameter(name="path", type="string", description="Repo-relative directory to list; empty string lists the repository root for discovery.", required=False, default=""), ToolParameter(name="ref", type="string", description="Branch or commit to read; omit to use the repository default branch for stable reads.", required=False, default=None)), permission=ToolPermission.SAFE, metadata={"source": "integrations", "provider": "github", "operation": self.operation})
+        return ToolSpec(name="github_list_files", description=_LIST_DESCRIPTION, parameters=(ToolParameter(name="path", type="string", description=_LIST_PATH_DESCRIPTION, required=False, default=""), ToolParameter(name="ref", type="string", description=_REF_DESCRIPTION, required=False, default=None)), permission=ToolPermission.SAFE, metadata={"source": "integrations", "provider": "github", "operation": self.operation})
 
     async def execute(self, call: ToolCall) -> ToolResult:
         """List one validated directory through the bound repository scope."""
@@ -201,7 +219,7 @@ class GitHubReadFileTool(_ScopedGitHubTool):
 
     def spec(self) -> ToolSpec:
         """Declare the file read contract with its required path and optional branch."""
-        return ToolSpec(name="github_read_file", description=_READ_DESCRIPTION, parameters=(ToolParameter(name="path", type="string", description="Repo-relative file to read; must name a file inside the repository for inspection.", required=True), ToolParameter(name="ref", type="string", description="Branch or commit to read; omit to use the repository default branch for stable reads.", required=False, default=None)), permission=ToolPermission.SAFE, metadata={"source": "integrations", "provider": "github", "operation": self.operation})
+        return ToolSpec(name="github_read_file", description=_READ_DESCRIPTION, parameters=(ToolParameter(name="path", type="string", description=_READ_PATH_DESCRIPTION, required=True), ToolParameter(name="ref", type="string", description=_REF_DESCRIPTION, required=False, default=None)), permission=ToolPermission.SAFE, metadata={"source": "integrations", "provider": "github", "operation": self.operation})
 
     async def execute(self, call: ToolCall) -> ToolResult:
         """Read one validated file through the bound repository scope."""
@@ -235,7 +253,7 @@ class GitHubSearchCodeTool(_ScopedGitHubTool):
 
     def spec(self) -> ToolSpec:
         """Declare the code search contract with its required query and optional branch."""
-        return ToolSpec(name="github_search_code", description=_SEARCH_DESCRIPTION, parameters=(ToolParameter(name="query", type="string", description="Code text to find; confined to the bound repository with no cross-repo qualifiers.", required=True), ToolParameter(name="ref", type="string", description="Branch or commit to search; omit to use the repository default branch for stable reads.", required=False, default=None)), permission=ToolPermission.SAFE, metadata={"source": "integrations", "provider": "github", "operation": self.operation})
+        return ToolSpec(name="github_search_code", description=_SEARCH_DESCRIPTION, parameters=(ToolParameter(name="query", type="string", description=_SEARCH_QUERY_DESCRIPTION, required=True), ToolParameter(name="ref", type="string", description=_REF_DESCRIPTION, required=False, default=None)), permission=ToolPermission.SAFE, metadata={"source": "integrations", "provider": "github", "operation": self.operation})
 
     async def execute(self, call: ToolCall) -> ToolResult:
         """Search one validated query confined to the bound repository scope."""
