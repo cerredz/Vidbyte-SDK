@@ -16,9 +16,12 @@ from typing import Any
 
 from vidbyte.context.primitives.documents import DocumentContextItem
 from vidbyte.integrations.budget import ContextAdmission
-from vidbyte.integrations.providers import LoadedSection, create_client
-from vidbyte.lib.constants.integrations import SOURCES_DEFAULT_MAX_TOKENS, SOURCES_MIN_TOKENS
-from vidbyte.lib.dataclasses.integrations import SourceConfig
+from vidbyte.integrations.providers import create_client
+from vidbyte.lib.constants.integrations import (
+    SOURCES_DEFAULT_MAX_TOKENS,
+    SOURCES_MIN_TOKENS,
+)
+from vidbyte.lib.dataclasses.integrations import LoadedSection, SourceConfig
 from vidbyte.lib.enums.integrations import SourceKind
 from vidbyte.lib.errors import ConfigurationError
 
@@ -43,12 +46,16 @@ class SourceContext:
 
     async def load(self) -> list[DocumentContextItem]:
         """Fetch the resource, convert sections to items, and fit them to the budget."""
+        # @intent external boundaries
+        # Fetch, convert, and budget run as one pipeline so partial fetches never return as complete context.
         self._require_pull_request()
         sections = await create_client(self._config).load_context(self._config)
         return self._fit_items(sections)
 
     def _require_pull_request(self) -> None:
         """Reject repository resources before any network use."""
+        # @intent external boundaries
+        # Kind is checked before the first request so a wrong-kind config never touches the network.
         if self._config.kind != SourceKind.PULL_REQUEST:
             raise ConfigurationError("SourceContext requires a pull-request resource.")
 
@@ -59,10 +66,14 @@ class SourceContext:
 
     def _to_item(self, section: LoadedSection) -> DocumentContextItem:
         """Convert one fetched section into a provenance-carrying context item."""
+        # @intent external boundaries
+        # Every item stamps its source URL and revision so fetched claims stay attributable downstream.
         return DocumentContextItem(source=section.source_url, content=section.body, title=section.title, document_id=self._document_id(), metadata={"provider": self._config.provider.value, "resource": self._config.resource, "revision": section.revision, "truncated": False})
 
     def _document_id(self) -> str | None:
         """Derive a stable external identifier for the bound resource."""
+        # @intent external boundaries
+        # Identifiers derive from validated scope only, so untrusted input never shapes an external id.
         if self._config.kind == SourceKind.PULL_REQUEST:
             return f"github-pr-{self._config.owner}-{self._config.repo}-{self._config.number}"
         return None

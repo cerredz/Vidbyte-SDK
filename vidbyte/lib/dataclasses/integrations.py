@@ -16,7 +16,10 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from vidbyte.lib.constants.integrations import SOURCES_KNOWN_FIELDS
+from vidbyte.lib.constants.integrations import (
+    SOURCES_KNOWN_FIELDS,
+    SOURCES_MAX_CONTROL_CODE,
+)
 from vidbyte.lib.enums.integrations import SourceKind, SourceProvider
 from vidbyte.lib.errors import ConfigurationError
 
@@ -24,6 +27,16 @@ _PR_URL_PATTERN = re.compile(r"^https://github\.com/(?P<owner>[^/\s]+)/(?P<repo>
 _REPO_URL_PATTERN = re.compile(r"^https://github\.com/(?P<owner>[^/\s]+)/(?P<repo>[^/\s]+?)(?:\.git)?/?$")
 _SHORTHAND_PATTERN = re.compile(r"^(?P<owner>[^/\s]+)/(?P<repo>[^/\s]+)$")
 _REF_PATTERN = re.compile(r"^[A-Za-z0-9._/-]{1,64}$")
+
+
+@dataclass(frozen=True, slots=True)
+class LoadedSection:
+    """One fetched content section with its provenance attached."""
+
+    title: str
+    source_url: str
+    body: str
+    revision: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,13 +53,15 @@ class SourceConfig:
 
     def __post_init__(self) -> None:
         """Enforce every invariant a constructed config guarantees downstream."""
+        # @intent external boundaries
+        # Validation owns the whole public shape here so no downstream consumer re-checks provider scope.
         if not isinstance(self.provider, SourceProvider):
             raise ConfigurationError("SourceConfig.provider must be a SourceProvider.")
         if not isinstance(self.api_key, str) or not self.api_key.strip():
             raise ConfigurationError("Source 'api_key' must be a nonempty string.")
         if not isinstance(self.resource, str) or not self.resource.strip():
             raise ConfigurationError("Source 'resource' must be a nonempty string.")
-        if any(ord(char) < 32 for char in self.resource):
+        if any(ord(char) <= SOURCES_MAX_CONTROL_CODE for char in self.resource):
             raise ConfigurationError("Source 'resource' must not contain control characters.")
         if not isinstance(self.kind, SourceKind):
             raise ConfigurationError("SourceConfig.kind must be a SourceKind.")
@@ -60,6 +75,8 @@ class SourceConfig:
     @classmethod
     def from_mapping(cls, source: Mapping[str, Any]) -> "SourceConfig":
         """Coerce a public source dictionary into a validated SourceConfig."""
+        # @intent external boundaries
+        # Unknown fields fail here so a typo can never slip a forged option past validation.
         if not isinstance(source, Mapping):
             raise ConfigurationError("A source must be a mapping with provider, api_key, and resource.")
         unknown = sorted(set(source) - SOURCES_KNOWN_FIELDS)
@@ -78,6 +95,8 @@ class SourceConfig:
     @staticmethod
     def _coerce_provider(raw: Any) -> SourceProvider:
         """Convert a public provider string into its internal enum member."""
+        # @intent external boundaries
+        # Only the closed enum vocabulary survives coercion; anything else names its accepted values.
         if isinstance(raw, SourceProvider):
             return raw
         if isinstance(raw, str) and raw.strip().lower() in SourceProvider.values():
@@ -87,6 +106,8 @@ class SourceConfig:
     @staticmethod
     def _parse_resource(resource: str) -> tuple[SourceKind, str, str, int | None]:
         """Split a resource address into its kind, owner, repo, and optional pull number."""
+        # @intent external boundaries
+        # Resource syntax decides kind and scope, and unrecognized shapes fail before any client exists.
         pr_match = _PR_URL_PATTERN.match(resource.strip())
         if pr_match is not None:
             return (SourceKind.PULL_REQUEST, pr_match.group("owner"), pr_match.group("repo"), int(pr_match.group("number")))
@@ -104,6 +125,7 @@ def validate_ref(raw: Any) -> str:
 
 
 __all__ = [
+    "LoadedSection",
     "SourceConfig",
     "validate_ref",
 ]

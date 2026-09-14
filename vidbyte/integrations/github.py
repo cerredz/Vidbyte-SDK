@@ -16,11 +16,34 @@ import json
 from typing import Any
 from urllib.parse import quote
 
-from vidbyte.integrations.providers import LoadedSection
-from vidbyte.lib.constants.integrations import SOURCES_CONTENTS_OVERHEAD_BYTES, SOURCES_CONTENTS_SLACK_DENOMINATOR, SOURCES_CONTENTS_SLACK_NUMERATOR, SOURCES_DIFF_MAX_BYTES, SOURCES_HTTP_TIMEOUT_SECONDS, SOURCES_LISTING_BYTES_PER_ENTRY, SOURCES_LISTING_OVERHEAD_BYTES, SOURCES_MAX_PAGES, SOURCES_PAGE_MAX_BYTES, SOURCES_PER_PAGE, SOURCES_PULL_MAX_BYTES, SOURCES_SEARCH_BYTES_PER_ITEM, SOURCES_SEARCH_OVERHEAD_BYTES
-from vidbyte.lib.dataclasses.integrations import SourceConfig
+from vidbyte.lib.constants.integrations import (
+    SOURCES_CONTENTS_OVERHEAD_BYTES,
+    SOURCES_CONTENTS_SLACK_DENOMINATOR,
+    SOURCES_CONTENTS_SLACK_NUMERATOR,
+    SOURCES_DIFF_MAX_BYTES,
+    SOURCES_HTTP_FORBIDDEN,
+    SOURCES_HTTP_NOT_FOUND,
+    SOURCES_HTTP_OK_MAX,
+    SOURCES_HTTP_OK_MIN,
+    SOURCES_HTTP_RATE_LIMITED,
+    SOURCES_HTTP_TIMEOUT_SECONDS,
+    SOURCES_HTTP_UNAUTHORIZED,
+    SOURCES_LISTING_BYTES_PER_ENTRY,
+    SOURCES_LISTING_OVERHEAD_BYTES,
+    SOURCES_MAX_PAGES,
+    SOURCES_PAGE_MAX_BYTES,
+    SOURCES_PER_PAGE,
+    SOURCES_PULL_MAX_BYTES,
+    SOURCES_SEARCH_BYTES_PER_ITEM,
+    SOURCES_SEARCH_OVERHEAD_BYTES,
+)
+from vidbyte.lib.dataclasses.integrations import LoadedSection, SourceConfig
 from vidbyte.lib.enums.integrations import SourceKind
-from vidbyte.lib.errors import ConfigurationError, ProviderRequestError, SourceFetchError
+from vidbyte.lib.errors import (
+    ConfigurationError,
+    ProviderRequestError,
+    SourceFetchError,
+)
 from vidbyte.lib.http.transport import HttpResponse, HttpTransport
 
 _API_ROOT = "https://api.github.com"
@@ -31,12 +54,16 @@ class GitHubClient:
 
     def __init__(self, api_key: str, *, transport: HttpTransport | None = None, timeout_seconds: float = SOURCES_HTTP_TIMEOUT_SECONDS) -> None:
         """Hold the provider key in memory beside an injectable HTTP transport."""
+        # @intent external boundaries
+        # The key lives only on this client for header use; no persistence or logging path may read it.
         self._api_key = api_key
         self._transport = transport if transport is not None else HttpTransport()
         self._timeout_seconds = timeout_seconds
 
     async def load_context(self, config: SourceConfig) -> tuple[LoadedSection, ...]:
         """Fetch a pull request's description, diff, reviews, and discussion as sections."""
+        # @intent external boundaries
+        # Sections stay explicit even when empty so a missing part reads as empty, never as skipped.
         self._require_pull_request(config)
         pull = await self._fetch_pull(config)
         diff = await self._fetch_diff(config)
@@ -69,6 +96,8 @@ class GitHubClient:
 
     async def _get_json(self, config: SourceConfig, url: str, *, max_bytes: int | None = None) -> Any:
         """GET one URL and return its decoded JSON body or raise a typed access error."""
+        # @intent external boundaries
+        # Malformed bodies become typed access errors so untrusted bytes never flow downstream as data.
         response = await self._send(config, url, accept="application/vnd.github+json", max_bytes=max_bytes)
         try:
             return json.loads(response.body)
@@ -77,6 +106,8 @@ class GitHubClient:
 
     async def _send(self, config: SourceConfig, url: str, *, accept: str, max_bytes: int | None) -> HttpResponse:
         """Send one bounded GET and map HTTP failures to typed access states."""
+        # @intent external boundaries
+        # Transport failures map to TRANSPORT_FAILED here so no raw HTTP error escapes the provider seam.
         try:
             response = await self._transport.request(method="GET", url=url, headers=self._headers(accept=accept), timeout_seconds=self._timeout_seconds, max_response_bytes=max_bytes)
         except ProviderRequestError as exc:
@@ -86,7 +117,9 @@ class GitHubClient:
 
     def _raise_for_status(self, config: SourceConfig, response: HttpResponse) -> None:
         """Translate non-2xx GitHub statuses into named access states without key material."""
-        if 200 <= response.status_code < 300:
+        # @intent external boundaries
+        # Non-2xx responses become named states so callers branch on meaning, never on raw codes.
+        if SOURCES_HTTP_OK_MIN <= response.status_code < SOURCES_HTTP_OK_MAX:
             return
         state = self._classify_status(response)
         raise SourceFetchError(f"Cannot access github resource '{config.resource}': {state}.", details={"provider": "github", "resource": config.resource, "state": state})
@@ -94,20 +127,24 @@ class GitHubClient:
     @staticmethod
     def _classify_status(response: HttpResponse) -> str:
         """Name the access state one HTTP status and body imply."""
-        if response.status_code == 401:
+        # @intent external boundaries
+        # Status codes map to retry-or-escalate states here so transport noise never leaks as raw numbers.
+        if response.status_code == SOURCES_HTTP_UNAUTHORIZED:
             return "AUTH_REQUIRED"
-        if response.status_code == 429:
+        if response.status_code == SOURCES_HTTP_RATE_LIMITED:
             return "RATE_LIMITED"
-        if response.status_code == 404:
+        if response.status_code == SOURCES_HTTP_NOT_FOUND:
             return "RESOURCE_UNAVAILABLE"
-        if response.status_code == 403 and "rate limit" in response.body.lower():
+        if response.status_code == SOURCES_HTTP_FORBIDDEN and "rate limit" in response.body.lower():
             return "RATE_LIMITED"
-        if response.status_code == 403:
+        if response.status_code == SOURCES_HTTP_FORBIDDEN:
             return "INSUFFICIENT_SCOPE"
         return "TRANSPORT_FAILED"
 
     async def _fetch_pull(self, config: SourceConfig) -> dict[str, Any]:
         """Fetch one pull request's metadata record as decoded JSON."""
+        # @intent external boundaries
+        # A non-object payload is a transport failure, not an empty pull, so shape drift cannot read as content.
         payload = await self._get_json(config, f"{_API_ROOT}/repos/{config.owner}/{config.repo}/pulls/{config.number}", max_bytes=SOURCES_PULL_MAX_BYTES)
         if not isinstance(payload, dict):
             raise SourceFetchError(f"Cannot access github resource '{config.resource}': invalid response.", details={"provider": "github", "resource": config.resource, "state": "TRANSPORT_FAILED"})
@@ -115,11 +152,15 @@ class GitHubClient:
 
     async def _fetch_diff(self, config: SourceConfig) -> str:
         """Fetch one pull request's unified diff text within a byte ceiling."""
+        # @intent external boundaries
+        # Diffs stream under a hard byte ceiling so one huge pull cannot exhaust memory before clipping.
         response = await self._send(config, f"{_API_ROOT}/repos/{config.owner}/{config.repo}/pulls/{config.number}", accept="application/vnd.github.diff", max_bytes=SOURCES_DIFF_MAX_BYTES)
         return response.body
 
     async def _fetch_paged(self, config: SourceConfig, path: str) -> list[dict[str, Any]]:
         """Collect bounded pages of a list endpoint into one flat record list."""
+        # @intent external boundaries
+        # Pagination stops at a fixed page cap so a hostile list endpoint cannot page forever.
         records: list[dict[str, Any]] = []
         for page in range(1, SOURCES_MAX_PAGES + 1):
             payload = await self._get_json(config, f"{_API_ROOT}{path}?per_page={SOURCES_PER_PAGE}&page={page}", max_bytes=SOURCES_PAGE_MAX_BYTES)
@@ -187,6 +228,8 @@ class GitHubClient:
     @staticmethod
     def _require_pull_request(config: SourceConfig) -> None:
         """Reject non-pull-request configs before any network use."""
+        # @intent external boundaries
+        # Kind is checked before the first request so a wrong-kind config never touches the network.
         if config.kind != SourceKind.PULL_REQUEST:
             raise ConfigurationError("Loading pull context requires a pull-request resource.")
 

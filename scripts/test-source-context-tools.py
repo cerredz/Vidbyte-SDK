@@ -62,7 +62,10 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
-from tests.test_source_context_tools import SourceContextTests, SourceToolTests  # noqa: E402
+from tests.test_source_context_tools import (  # noqa: E402
+    SourceContextTests,
+    SourceToolTests,
+)
 
 TEST_CLASSES = (
     SourceContextTests,

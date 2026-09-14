@@ -11,22 +11,11 @@ TESTS: tests/test_source_context_tools.py and scripts/test-source-context-tools.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Protocol
 
-from vidbyte.lib.dataclasses.integrations import SourceConfig
+from vidbyte.lib.dataclasses.integrations import LoadedSection, SourceConfig
 from vidbyte.lib.enums.integrations import SourceProvider
 from vidbyte.lib.errors import ConfigurationError
-
-
-@dataclass(frozen=True, slots=True)
-class LoadedSection:
-    """One fetched content section with its provenance attached."""
-
-    title: str
-    source_url: str
-    body: str
-    revision: str | None = None
 
 
 class SourceProviderClient(Protocol):
@@ -51,6 +40,8 @@ class SourceProviderClient(Protocol):
 
 def create_client(config: SourceConfig) -> SourceProviderClient:
     """Resolve the built-in provider client for one validated config."""
+    # @intent external boundaries
+    # Resolution is a closed factory over validated configs, so no caller string ever selects a module.
     if config.provider == SourceProvider.GITHUB:
         from vidbyte.integrations.github import GitHubClient
 
@@ -59,7 +50,6 @@ def create_client(config: SourceConfig) -> SourceProviderClient:
 
 
 __all__ = [
-    "LoadedSection",
     "SourceProviderClient",
     "create_client",
 ]

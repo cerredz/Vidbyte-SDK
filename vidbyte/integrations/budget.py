@@ -14,7 +14,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from vidbyte.context.primitives.documents import DocumentContextItem
-from vidbyte.lib.constants.integrations import SOURCES_CHARS_PER_TOKEN, SOURCES_TRUNCATION_MARKER
+from vidbyte.lib.constants.integrations import (
+    SOURCES_CHARS_PER_TOKEN,
+    SOURCES_MIN_TOKEN_COST,
+    SOURCES_MIN_TOKENS,
+    SOURCES_TRUNCATION_MARKER,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,7 +38,7 @@ class ContextAdmission:
 
     def __init__(self, *, max_tokens: int) -> None:
         """Track the remaining approximate tokens for one load operation."""
-        self._remaining = max(0, max_tokens)
+        self._remaining = max(SOURCES_MIN_TOKENS, max_tokens)
 
     @property
     def remaining_tokens(self) -> int:
@@ -60,7 +65,7 @@ class ContextAdmission:
         if cost <= self._remaining:
             self._remaining -= cost
             return item
-        if self._remaining <= 0:
+        if self._remaining <= SOURCES_MIN_TOKENS:
             return None
         clipped = clip_to_tokens(item.content, self._remaining)
         self._remaining -= estimate_tokens(clipped)
@@ -72,15 +77,15 @@ class ContextAdmission:
 def estimate_tokens(content: str) -> int:
     """Approximate one text's token cost with the shared character ratio."""
     if not content:
-        return 0
-    return max(1, len(content) // SOURCES_CHARS_PER_TOKEN)
+        return SOURCES_MIN_TOKENS
+    return max(SOURCES_MIN_TOKEN_COST, len(content) // SOURCES_CHARS_PER_TOKEN)
 
 
 def clip_to_tokens(content: str, budget: int) -> str:
     """Clip text to an approximate token budget with the marker counted inside."""
     room_chars = budget * SOURCES_CHARS_PER_TOKEN - len(SOURCES_TRUNCATION_MARKER)
-    if room_chars <= 0:
-        return SOURCES_TRUNCATION_MARKER[: max(0, budget * SOURCES_CHARS_PER_TOKEN)]
+    if room_chars <= SOURCES_MIN_TOKENS:
+        return SOURCES_TRUNCATION_MARKER[: max(SOURCES_MIN_TOKENS, budget * SOURCES_CHARS_PER_TOKEN)]
     return f"{content[:room_chars]}{SOURCES_TRUNCATION_MARKER}"
 
 

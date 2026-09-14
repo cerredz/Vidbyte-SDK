@@ -20,7 +20,6 @@ from unittest import mock
 
 from vidbyte import Agent, SourceContext, SourceTool
 from vidbyte.integrations import source_context as source_context_module
-from vidbyte.integrations import source_tool as source_tool_module
 from vidbyte.integrations.github import GitHubClient, clip_text
 from vidbyte.integrations.providers import create_client
 from vidbyte.lib.dataclasses.integrations import SourceConfig
@@ -91,8 +90,8 @@ class SourceContextTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_single_char_over_budget_truncates_boundary_item(self) -> None:
         """[Edge Case] Content one char over budget clips with a counted marker."""
-        from vidbyte.integrations.budget import ContextAdmission
         from vidbyte.context.primitives.documents import DocumentContextItem
+        from vidbyte.integrations.budget import ContextAdmission
 
         admission = ContextAdmission(max_tokens=4)
         item = DocumentContextItem(source="s", content="x" * 21, title="t")
@@ -133,8 +132,8 @@ class SourceContextTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_truncation_marker_counted_in_budget(self) -> None:
         """[Silent Failure] Admitted token totals including markers never exceed the ceiling."""
-        from vidbyte.integrations.budget import ContextAdmission, estimate_tokens
         from vidbyte.context.primitives.documents import DocumentContextItem
+        from vidbyte.integrations.budget import ContextAdmission, estimate_tokens
 
         admission = ContextAdmission(max_tokens=8)
         items = (DocumentContextItem(source="s", content="y" * 100, title="a"), DocumentContextItem(source="s", content="z" * 100, title="b"))
