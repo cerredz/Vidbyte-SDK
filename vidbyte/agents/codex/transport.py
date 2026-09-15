@@ -196,7 +196,7 @@ class CodexTransport:
 
     @staticmethod
     @asynccontextmanager
-    async def _attached_tools(client: object, tools: CodexToolBridge | None) -> AsyncIterator[None]:
+    async def _attached_tools(client: _CodexClient, tools: CodexToolBridge | None) -> AsyncIterator[None]:
         # @intent tools-live-only-for-one-connection
         # Attach before the thread opens so thread/start registers the tools, and
         # cancel unfinished tool calls before the app-server connection closes.

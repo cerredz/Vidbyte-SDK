@@ -388,8 +388,10 @@ class CodexHarnessAgentSettings:
         self._validate_tools()
 
     def _validate_tools(self) -> None:
+        # @intent reject-non-tool-declarations-at-construction
         # Duck-typed because vidbyte.lib may not import BaseTool; names and
-        # duplicates are resolved by the Codex tool translator.
+        # duplicates are resolved by the Codex tool translator, and the
+        # permission policy must be the same allow-list the direct runtime uses.
         if not isinstance(self.tools, tuple) or any(
             not callable(value) and not _is_tool_shaped(value) for value in self.tools
         ):
