@@ -24,6 +24,7 @@ from vidbyte.lib.constants.codex import (
     CODEX_ROOT_FORK_DEPTH,
 )
 from vidbyte.lib.dataclasses.agents import AgentInput
+from vidbyte.lib.dataclasses.security import PermissionPolicy
 from vidbyte.lib.enums.codex import (
     CodexApprovalMode,
     CodexContextAnchor,
@@ -39,12 +40,14 @@ from vidbyte.lib.enums.codex import (
 from vidbyte.lib.errors import ConfigurationError
 
 if TYPE_CHECKING:
+    from vidbyte.agents.codex.tools import CodexToolBridge
     from vidbyte.agents.pricing.records import UsageRollup
     from vidbyte.agents.settings.fallback import AgentFallbackSettings
     from vidbyte.context.manager import ContextManager
     from vidbyte.context.primitives import ContextItem
     from vidbyte.lib.dataclasses.failure import Failure
     from vidbyte.middleware.base import AgentMiddleware
+    from vidbyte.tools.adapters import ToolInput
 
 
 def _require_text(owner: str, field_name: str, value: str) -> None:
@@ -71,6 +74,13 @@ def _require_non_negative_int(owner: str, field_name: str, value: object) -> Non
 def _require_bool(owner: str, field_name: str, value: object) -> None:
     if not isinstance(value, bool):
         raise ConfigurationError(f"{owner} {field_name} must be a boolean.")
+
+
+def _is_tool_shaped(value: object) -> bool:
+    # A BaseTool exposes a spec() declaration and an execute() coroutine.
+    return callable(getattr(value, "spec", None)) and callable(
+        getattr(value, "execute", None)
+    )
 
 
 def _is_json_value(value: object) -> bool:
@@ -326,6 +336,8 @@ class CodexHarnessAgentSettings:
     context_placements: tuple[CodexContextPlacement, ...] = ()
     middleware: tuple[AgentMiddleware, ...] = ()
     fallback: AgentFallbackSettings | None = None
+    tools: tuple[ToolInput, ...] = ()
+    tool_permission_policy: PermissionPolicy = field(default_factory=PermissionPolicy)
 
     def __post_init__(self) -> None:
         # @intent validate-every-declared-capability-at-construction
@@ -372,6 +384,21 @@ class CodexHarnessAgentSettings:
         ):
             raise ConfigurationError(
                 "Codex harness agent fallback must be AgentFallbackSettings."
+            )
+        self._validate_tools()
+
+    def _validate_tools(self) -> None:
+        # Duck-typed because vidbyte.lib may not import BaseTool; names and
+        # duplicates are resolved by the Codex tool translator.
+        if not isinstance(self.tools, tuple) or any(
+            not callable(value) and not _is_tool_shaped(value) for value in self.tools
+        ):
+            raise ConfigurationError(
+                "Codex harness agent tools must be a tuple of BaseTool instances or @tool functions."
+            )
+        if not isinstance(self.tool_permission_policy, PermissionPolicy):
+            raise ConfigurationError(
+                "Codex harness agent tool_permission_policy must be a PermissionPolicy."
             )
 
 
@@ -573,10 +600,15 @@ class CodexContextTranslationRequest:
 
 @dataclass(frozen=True, slots=True)
 class CodexAgentTranslation:
-    """Constructor-time translation of Vidbyte agent settings."""
+    """Constructor-time translation of Vidbyte agent settings.
+
+    ``tools`` is None when the agent declares no tools; the bridge is an
+    orchestration-tier object this module cannot construct as an empty default.
+    """
 
     settings: CodexHarnessAgentSettings
     output_schema: Mapping[str, Any]
+    tools: CodexToolBridge | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -947,13 +979,18 @@ class CodexResultTranslationRequest:
 
 @dataclass(frozen=True, slots=True)
 class CodexTransportRunRequest:
-    """Complete input to one transport run operation."""
+    """Complete input to one transport run operation.
+
+    ``tools`` is None when the agent declares no tools, which leaves the SDK
+    connection's request path and server-request handler untouched.
+    """
 
     thread_id: str
     system_prompt: str
     prompt: CodexPrompt
     settings: CodexAgentSettings
     output_schema: Mapping[str, Any]
+    tools: CodexToolBridge | None = None
 
 
 @dataclass(frozen=True, slots=True)
