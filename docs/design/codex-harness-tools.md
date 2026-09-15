@@ -352,6 +352,7 @@ N/A - no HTTP endpoints. The public Python API gains `CodexHarnessAgentSettings.
 | MODIFY | `vidbyte/agents/codex/agent.py` | Pass the bridge to the transport |
 | MODIFY | `vidbyte/agents/codex/fork.py` | Children inherit tools |
 | MODIFY | `skills/codex-harness-roadmap/references/checklist.md` | Mark U02/U03 delivered |
+| MODIFY | `README.md` | Document custom tools; drop the "does not claim tool semantics" statement |
 | CREATE | `tests/test_codex_tools.py` | Feature tests |
 | CREATE | `scripts/test-codex-tools.py` | Phase-5 verification runner |
 
