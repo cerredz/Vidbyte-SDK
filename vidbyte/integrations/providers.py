@@ -1,55 +1,41 @@
 """FILE: vidbyte/integrations/providers.py
 
-PURPOSE: Defines the provider seam between validated source configs and concrete external APIs.
-ROLE IN CODEBASE: SourceContext and SourceTool resolve their client here so adding a provider never touches either class.
-ARCHITECTURE NOTE: A small built-in factory replaces a public registry until a second provider proves one earns its keep.
-COMMON MODIFICATION PATTERNS: Add a client module plus one factory branch and one SourceProvider member together.
-KNOWN EDGE CASES: Unknown provider names fail at construction with the accepted list, never with an import error.
+PURPOSE: Resolves a validated source configuration to its concrete provider client.
+ROLE IN CODEBASE: Keeps provider selection in one explicit class-bound switch.
+ARCHITECTURE NOTE: There is no shared provider protocol because future providers may expose different context shapes.
+COMMON MODIFICATION PATTERNS: Add one enum member, client config, and match branch together when a provider is real.
+KNOWN EDGE CASES: Unknown providers fail before a client or network boundary is created.
 RELATED DOCS: docs/design/source-context-tools.md
-TESTS: tests/test_source_context_tools.py and scripts/test-source-context-tools.py.
+TESTS: tests/test_source_context_tools.py
 """
 
 from __future__ import annotations
 
-from typing import Protocol
+from typing import TYPE_CHECKING
 
-from vidbyte.lib.dataclasses.integrations import LoadedSection, SourceConfig
+from vidbyte.lib.dataclasses.integrations import GitHubClientConfig, SourceConfig
 from vidbyte.lib.enums.integrations import SourceProvider
 from vidbyte.lib.errors import ConfigurationError
 
-
-class SourceProviderClient(Protocol):
-    """Contract every external source provider implements."""
-
-    async def load_context(self, config: SourceConfig) -> tuple[LoadedSection, ...]:
-        """Fetch every section one resource contributes to agent context."""
-        ...
-
-    async def read_repo_file(self, config: SourceConfig, path: str, ref: str | None, *, max_bytes: int) -> str:
-        """Return one repo-relative file's decoded text bounded by max_bytes."""
-        ...
-
-    async def list_repo_files(self, config: SourceConfig, path: str, ref: str | None, *, max_entries: int) -> str:
-        """Return a newline listing of one repo-relative directory bounded by max_entries."""
-        ...
-
-    async def search_repo_code(self, config: SourceConfig, query: str, ref: str | None, *, max_items: int) -> str:
-        """Return code matches for a query confined to the bound repository."""
-        ...
+if TYPE_CHECKING:
+    from vidbyte.integrations.github import GitHubClient
 
 
-def create_client(config: SourceConfig) -> SourceProviderClient:
-    """Resolve the built-in provider client for one validated config."""
-    # @intent external boundaries
-    # Resolution is a closed factory over validated configs, so no caller string ever selects a module.
-    if config.provider == SourceProvider.GITHUB:
-        from vidbyte.integrations.github import GitHubClient
+class SourceProviderFactory:
+    """Constructs the concrete client for one validated provider selection."""
 
-        return GitHubClient(api_key=config.api_key)
-    raise ConfigurationError(f"Unknown source provider {config.provider.value!r}.")
+    @staticmethod
+    def create(config: SourceConfig, *, client_config: GitHubClientConfig | None = None) -> GitHubClient:
+        """Select a provider with an explicit switch and return its configured client."""
+        # @intent external boundaries
+        # Provider selection is closed over validated enum values, so raw caller strings cannot import arbitrary code.
+        match config.provider:
+            case SourceProvider.GITHUB:
+                from vidbyte.integrations.github import GitHubClient
+
+                return GitHubClient(client_config or GitHubClientConfig(api_key=config.api_key))
+            case _:
+                raise ConfigurationError(f"Unknown source provider {config.provider.value!r}.")
 
 
-__all__ = [
-    "SourceProviderClient",
-    "create_client",
-]
+__all__ = ["SourceProviderFactory"]

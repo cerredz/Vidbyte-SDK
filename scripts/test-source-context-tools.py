@@ -10,9 +10,10 @@ PURPOSE:
 
 ROLE IN CODEBASE:
     Loads and runs tests/test_source_context_tools.py's test classes, which
-    in turn exercise vidbyte/integrations/source_context.py,
-    vidbyte/integrations/source_tool.py, vidbyte/integrations/github.py,
-    vidbyte/integrations/budget.py, and vidbyte/lib/dataclasses/integrations.py.
+    in turn exercise vidbyte/integrations/source_context/,
+    vidbyte/integrations/source_tool/, vidbyte/integrations/github.py,
+    vidbyte/lib/cli.py, vidbyte/lib/integrations_budget.py, and
+    vidbyte/lib/dataclasses/integrations.py.
     Not imported by any production code.
 
 ARCHITECTURE NOTE:
@@ -62,12 +63,14 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
-from tests.test_source_context_tools import (  # noqa: E402
+from tests.test_source_context_tools import (
+    CliRunnerTests,
     SourceContextTests,
     SourceToolTests,
 )
 
 TEST_CLASSES = (
+    CliRunnerTests,
     SourceContextTests,
     SourceToolTests,
 )
@@ -101,8 +104,7 @@ def _all_run_tests(result: unittest.TestResult) -> list:
     # from failures/errors plus every test the loader queued, in declaration order.
     seen = []
     for cls in TEST_CLASSES:
-        for test in unittest.TestLoader().loadTestsFromTestCase(cls):
-            seen.append(test)
+        seen.extend(unittest.TestLoader().loadTestsFromTestCase(cls))
     return seen
 
 

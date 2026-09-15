@@ -114,7 +114,11 @@ from vidbyte.lib.dataclasses.harnesses import (
     HarnessSpec,
     TrajectoryRecord,
 )
-from vidbyte.lib.dataclasses.integrations import LoadedSection, SourceConfig
+from vidbyte.lib.dataclasses.integrations import (
+    GitHubClientConfig,
+    LoadedSection,
+    SourceConfig,
+)
 from vidbyte.lib.dataclasses.mcp import McpToolDefinition
 from vidbyte.lib.dataclasses.middleware import (
     MiddlewareAction,
@@ -369,6 +373,7 @@ __all__ = [
     "LlmsTxtDocument",
     "LlmsTxtLink",
     "LlmsTxtSection",
+    "GitHubClientConfig",
     "LoadedSection",
     "ManagerAgentCloser",
     "ManagerAgentFactory",

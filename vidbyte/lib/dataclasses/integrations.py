@@ -13,20 +13,24 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
+from vidbyte.lib.cli import CliRequest, CliRunner
 from vidbyte.lib.constants.integrations import (
+    SOURCES_GITHUB_TOKEN_PREFIXES,
+    SOURCES_HTTP_TIMEOUT_SECONDS,
     SOURCES_KNOWN_FIELDS,
     SOURCES_MAX_CONTROL_CODE,
 )
 from vidbyte.lib.enums.integrations import SourceKind, SourceProvider
 from vidbyte.lib.errors import ConfigurationError
+from vidbyte.lib.http.transport import HttpTransport
 
-_PR_URL_PATTERN = re.compile(r"^https://github\.com/(?P<owner>[^/\s]+)/(?P<repo>[^/\s]+)/pull/(?P<number>\d+)/?$")
-_REPO_URL_PATTERN = re.compile(r"^https://github\.com/(?P<owner>[^/\s]+)/(?P<repo>[^/\s]+?)(?:\.git)?/?$")
-_SHORTHAND_PATTERN = re.compile(r"^(?P<owner>[^/\s]+)/(?P<repo>[^/\s]+)$")
-_REF_PATTERN = re.compile(r"^[A-Za-z0-9._/-]{1,64}$")
+_GITHUB_NAME = r"[A-Za-z0-9_.-]+"
+_PR_URL_PATTERN = re.compile(rf"^https://github\.com/(?P<owner>{_GITHUB_NAME})/(?P<repo>{_GITHUB_NAME})/pull/(?P<number>[1-9]\d*)/?$")
+_REPO_URL_PATTERN = re.compile(rf"^https://github\.com/(?P<owner>{_GITHUB_NAME})/(?P<repo>{_GITHUB_NAME})(?:\.git)?/?$")
+_SHORTHAND_PATTERN = re.compile(rf"^(?P<owner>{_GITHUB_NAME})/(?P<repo>{_GITHUB_NAME})$")
 
 
 @dataclass(frozen=True, slots=True)
@@ -37,6 +41,33 @@ class LoadedSection:
     source_url: str
     body: str
     revision: str | None = None
+    transport: str = "rest"
+
+
+@dataclass(frozen=True, slots=True)
+class GitHubClientConfig:
+    """Strict runtime configuration for one GitHub client and its transports."""
+
+    api_key: str
+    transport: HttpTransport = field(default_factory=HttpTransport)
+    runner: CliRunner = field(default_factory=CliRunner)
+    timeout_seconds: float = SOURCES_HTTP_TIMEOUT_SECONDS
+
+    # @intent external-boundary-validation
+    def __post_init__(self) -> None:
+        """Validate the credential shape, transport types, and timeout bounds."""
+        if not isinstance(self.api_key, str) or not self.api_key.strip():
+            raise ConfigurationError("GitHubClientConfig.api_key must be a nonempty string.")
+        if not self.api_key.startswith(SOURCES_GITHUB_TOKEN_PREFIXES):
+            raise ConfigurationError("GitHubClientConfig.api_key must use a recognized GitHub token prefix.")
+        if not isinstance(self.transport, HttpTransport):
+            raise ConfigurationError("GitHubClientConfig.transport must be an HttpTransport.")
+        if not isinstance(self.runner, CliRunner):
+            raise ConfigurationError("GitHubClientConfig.runner must be a CliRunner.")
+        try:
+            CliRequest.validate_timeout(self.timeout_seconds)
+        except ValueError as exc:
+            raise ConfigurationError("GitHubClientConfig.timeout_seconds is outside the approved range.") from exc
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,7 +96,7 @@ class SourceConfig:
             raise ConfigurationError("Source 'resource' must not contain control characters.")
         if not isinstance(self.kind, SourceKind):
             raise ConfigurationError("SourceConfig.kind must be a SourceKind.")
-        if not self.owner or not self.repo:
+        if not re.fullmatch(_GITHUB_NAME, self.owner) or not re.fullmatch(_GITHUB_NAME, self.repo):
             raise ConfigurationError("SourceConfig must carry a resolved owner and repo.")
         if self.kind == SourceKind.PULL_REQUEST and self.number is None:
             raise ConfigurationError("A pull-request source must carry its pull number.")
@@ -73,7 +104,7 @@ class SourceConfig:
             raise ConfigurationError("A repository source must not carry a pull number.")
 
     @classmethod
-    def from_mapping(cls, source: Mapping[str, Any]) -> "SourceConfig":
+    def from_mapping(cls, source: Mapping[str, Any]) -> SourceConfig:
         """Coerce a public source dictionary into a validated SourceConfig."""
         # @intent external boundaries
         # Unknown fields fail here so a typo can never slip a forged option past validation.
@@ -117,15 +148,8 @@ class SourceConfig:
         raise ConfigurationError(f"Unrecognized github resource {resource!r}; use a pull URL or owner/repo.")
 
 
-def validate_ref(raw: Any) -> str:
-    """Accept one branch or commit ref the model may supply, rejecting scope-widening values."""
-    if not isinstance(raw, str) or not _REF_PATTERN.match(raw):
-        raise ConfigurationError("Tool 'ref' must be 1-64 chars of letters, digits, dot, underscore, slash, or hyphen.")
-    return raw
-
-
 __all__ = [
+    "GitHubClientConfig",
     "LoadedSection",
     "SourceConfig",
-    "validate_ref",
 ]
