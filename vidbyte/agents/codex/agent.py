@@ -128,6 +128,7 @@ class CodexHarnessAgent:
                 prompt=translated,
                 settings=self.settings.codex,
                 output_schema=self._translation.output_schema,
+                tools=self._translation.tools,
             ),
             boundary,
         )
