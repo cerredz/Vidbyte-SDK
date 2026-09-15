@@ -11,6 +11,7 @@ TESTS: python scripts/run_ci.py.
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
@@ -24,6 +25,7 @@ from vidbyte.lib.constants.codex import (
     CODEX_ROOT_FORK_DEPTH,
 )
 from vidbyte.lib.dataclasses.agents import AgentInput
+from vidbyte.lib.dataclasses.security import PermissionPolicy
 from vidbyte.lib.enums.codex import (
     CodexApprovalMode,
     CodexContextAnchor,
@@ -39,12 +41,14 @@ from vidbyte.lib.enums.codex import (
 from vidbyte.lib.errors import ConfigurationError
 
 if TYPE_CHECKING:
+    from vidbyte.agents.codex.tools import CodexToolBridge
     from vidbyte.agents.pricing.records import UsageRollup
     from vidbyte.agents.settings.fallback import AgentFallbackSettings
     from vidbyte.context.manager import ContextManager
     from vidbyte.context.primitives import ContextItem
     from vidbyte.lib.dataclasses.failure import Failure
     from vidbyte.middleware.base import AgentMiddleware
+    from vidbyte.tools.adapters import ToolInput
 
 
 def _require_text(owner: str, field_name: str, value: str) -> None:
@@ -71,6 +75,13 @@ def _require_non_negative_int(owner: str, field_name: str, value: object) -> Non
 def _require_bool(owner: str, field_name: str, value: object) -> None:
     if not isinstance(value, bool):
         raise ConfigurationError(f"{owner} {field_name} must be a boolean.")
+
+
+def _is_tool_shaped(value: object) -> bool:
+    # A BaseTool exposes a spec() declaration and an execute() coroutine.
+    return callable(getattr(value, "spec", None)) and callable(
+        getattr(value, "execute", None)
+    )
 
 
 def _is_json_value(value: object) -> bool:
@@ -326,6 +337,8 @@ class CodexHarnessAgentSettings:
     context_placements: tuple[CodexContextPlacement, ...] = ()
     middleware: tuple[AgentMiddleware, ...] = ()
     fallback: AgentFallbackSettings | None = None
+    tools: tuple[ToolInput, ...] = ()
+    tool_permission_policy: PermissionPolicy = field(default_factory=PermissionPolicy)
 
     def __post_init__(self) -> None:
         # @intent validate-every-declared-capability-at-construction
@@ -372,6 +385,23 @@ class CodexHarnessAgentSettings:
         ):
             raise ConfigurationError(
                 "Codex harness agent fallback must be AgentFallbackSettings."
+            )
+        self._validate_tools()
+
+    def _validate_tools(self) -> None:
+        # @intent reject-non-tool-declarations-at-construction
+        # Duck-typed because vidbyte.lib may not import BaseTool; names and
+        # duplicates are resolved by the Codex tool translator, and the
+        # permission policy must be the same allow-list the direct runtime uses.
+        if not isinstance(self.tools, tuple) or any(
+            not callable(value) and not _is_tool_shaped(value) for value in self.tools
+        ):
+            raise ConfigurationError(
+                "Codex harness agent tools must be a tuple of BaseTool instances or @tool functions."
+            )
+        if not isinstance(self.tool_permission_policy, PermissionPolicy):
+            raise ConfigurationError(
+                "Codex harness agent tool_permission_policy must be a PermissionPolicy."
             )
 
 
@@ -573,10 +603,15 @@ class CodexContextTranslationRequest:
 
 @dataclass(frozen=True, slots=True)
 class CodexAgentTranslation:
-    """Constructor-time translation of Vidbyte agent settings."""
+    """Constructor-time translation of Vidbyte agent settings.
+
+    ``tools`` is None when the agent declares no tools; the bridge is an
+    orchestration-tier object this module cannot construct as an empty default.
+    """
 
     settings: CodexHarnessAgentSettings
     output_schema: Mapping[str, Any]
+    tools: CodexToolBridge | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -947,13 +982,106 @@ class CodexResultTranslationRequest:
 
 @dataclass(frozen=True, slots=True)
 class CodexTransportRunRequest:
-    """Complete input to one transport run operation."""
+    """Complete input to one transport run operation.
+
+    ``tools`` is None when the agent declares no tools, which leaves the SDK
+    connection's request path and server-request handler untouched.
+    """
 
     thread_id: str
     system_prompt: str
     prompt: CodexPrompt
     settings: CodexAgentSettings
     output_schema: Mapping[str, Any]
+    tools: CodexToolBridge | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class CodexToolAttachRequest:
+    """One live Codex connection a tool bridge attaches to for a single run.
+
+    ``client`` stays loosely typed because ``vidbyte.lib`` may not import the
+    optional openai-codex extra; the bridge resolves its private sync client
+    and raises ``codex.sdk_unavailable`` when the pinned shape has moved.
+    """
+
+    client: object
+    loop: asyncio.AbstractEventLoop
+
+    def __post_init__(self) -> None:
+        # @intent attach-only-to-a-live-loop
+        # Every tool coroutine of the run is scheduled onto this loop from the SDK
+        # reader thread, so a closed loop would fail each call instead of the attach.
+        if self.client is None:
+            raise ConfigurationError(
+                "Codex tool attach request client must be an open AsyncCodex connection."
+            )
+        if not isinstance(self.loop, asyncio.AbstractEventLoop) or self.loop.is_closed():
+            raise ConfigurationError(
+                "Codex tool attach request loop must be an open asyncio event loop."
+            )
+
+
+@dataclass(frozen=True, slots=True)
+class CodexToolCallRequest:
+    """One ``item/tool/call`` server request, field for field as Codex sends it.
+
+    Mirrors the app-server's ``DynamicToolCallParams``. ``namespace`` keeps its
+    None because the protocol field is nullable; Vidbyte registers only
+    un-namespaced function tools, so Codex leaves it unset in practice.
+    """
+
+    thread_id: str
+    turn_id: str
+    call_id: str
+    tool: str
+    arguments: Mapping[str, Any]
+    namespace: str | None = None
+
+    def __post_init__(self) -> None:
+        # @intent reject-malformed-tool-calls-before-execution
+        # A call missing a protocol field or carrying non-object arguments is
+        # answered as a failed call rather than guessed into a tool invocation.
+        for field_name in ("thread_id", "turn_id", "call_id", "tool"):
+            _require_text("Codex tool call", field_name, getattr(self, field_name))
+        if not isinstance(self.arguments, Mapping) or any(
+            not isinstance(key, str) for key in self.arguments
+        ):
+            raise ConfigurationError("Codex tool call arguments must be a JSON object.")
+        if self.namespace is not None:
+            _require_text("Codex tool call", "namespace", self.namespace)
+
+    @classmethod
+    def from_params(cls, params: Mapping[str, Any] | None) -> CodexToolCallRequest:
+        """Read one request from the app-server's camelCase wire params."""
+        wire = params or {}
+        arguments = wire.get("arguments")
+        return cls(
+            thread_id=wire.get("threadId", ""),
+            turn_id=wire.get("turnId", ""),
+            call_id=wire.get("callId", ""),
+            tool=wire.get("tool", ""),
+            # A tool that declares no parameters may be called with null arguments.
+            arguments={} if arguments is None else arguments,
+            namespace=wire.get("namespace"),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class CodexToolCallResponse:
+    """One ``item/tool/call`` answer: the fields of the app-server's ``DynamicToolCallResponse``.
+
+    ``text`` becomes the response's single ``inputText`` content item; the Codex
+    tool handler owns the camelCase wire encoding.
+    """
+
+    success: bool
+    text: str
+
+    def __post_init__(self) -> None:
+        _require_bool("Codex tool call response", "success", self.success)
+        if not isinstance(self.text, str):
+            raise ConfigurationError("Codex tool call response text must be a string.")
 
 
 @dataclass(frozen=True, slots=True)

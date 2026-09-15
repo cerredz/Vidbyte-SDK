@@ -242,7 +242,38 @@ print(reply.structured)
 print(reply.codex.thread_id, reply.codex.usage.total_tokens)
 ```
 
-`CodexHarnessAgent` currently translates system prompts, turn-boundary additional context, structured output, Codex thread forks, and Codex-owned subagent configuration/activity. It does not claim Vidbyte-owned iteration, middleware, tool, or durable-session semantics.
+`CodexHarnessAgent` currently translates system prompts, turn-boundary additional context, structured output, custom tools, Codex thread forks, and Codex-owned subagent configuration/activity. It does not claim Vidbyte-owned iteration, per-tool middleware, or durable-session semantics.
+
+#### Custom tools
+
+Pass `BaseTool` instances, `@tool` functions, or plain callables, in any mix, as a tuple. Codex registers them as dynamic tools when the thread starts. Each call the model makes runs your Python in the agent's own process, through the same `ToolExecutor` and `PermissionPolicy` the direct runtime uses.
+
+```python
+from vidbyte import CodexHarnessAgent, CodexHarnessAgentSettings, tool
+from vidbyte.tools.security import PermissionPolicy
+
+
+@tool
+def lookup_order(order_id: str) -> str:
+    """Return the shipping status for one order."""
+    return orders.status(order_id)
+
+
+agent = CodexHarnessAgent(
+    CodexHarnessAgentSettings(
+        name="support",
+        system_prompt="Answer order questions with the available tools.",
+        tools=(lookup_order, RefundTool()),  # RefundTool is any BaseTool subclass
+        tool_permission_policy=PermissionPolicy.allow_all(),
+    )
+)
+```
+
+- Tool names must match `^[A-Za-z0-9_-]+$`, be at most 128 characters, and not be `mcp` or start with `mcp__`. Names are checked when the agent is constructed.
+- The default policy runs only SAFE and READ tools. A denied call goes back to the model as a failed result.
+- Codex fixes a thread's tool definitions when the thread starts, so resuming a saved `thread_id` or forking keeps that thread's original tools.
+- Tool calls within one run execute one at a time. A call still running after 300 seconds is cancelled and reported to the model as failed.
+- Tools require `codex.client.experimental_api=True`, which is the default, because dynamic tools are an experimental Codex app-server field.
 
 Context is rendered from the live `ContextManager` on every `run`/`arun`, using
 each primitive's complete renderer without an extra adapter wrapper or truncation.

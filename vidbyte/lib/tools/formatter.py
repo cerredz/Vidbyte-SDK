@@ -118,6 +118,16 @@ class ToolsFormatter:
         }
 
     @staticmethod
+    def to_codex_tool(spec: ToolSpec) -> dict[str, Any]:
+        """Convert a ToolSpec into a Codex app-server dynamic function tool."""
+        return {
+            "type": "function",
+            "name": spec.name,
+            "description": spec.description,
+            "inputSchema": ToolsFormatter._schema_for_spec(spec),
+        }
+
+    @staticmethod
     def to_grok_tool(spec: ToolSpec) -> dict[str, Any]:
         """Convert a ToolSpec into a Grok/xAI OpenAI-compatible tool."""
         return ToolsFormatter.to_openai_tool(spec)

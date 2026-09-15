@@ -7,6 +7,7 @@ from dataclasses import replace
 from typing import Any
 
 from vidbyte.agents.codex.middleware import CodexMiddlewareValidator
+from vidbyte.agents.codex.tools import CodexToolTranslator
 from vidbyte.lib.dataclasses.agents import AgentInput
 from vidbyte.lib.dataclasses.codex import (
     CodexAgentInput,
@@ -74,6 +75,7 @@ class CodexVidbyteTranslator:
         return CodexAgentTranslation(
             settings=translated,
             output_schema=self.output_schema(settings.output_schema),
+            tools=CodexToolTranslator.translate(settings),
         )
 
     def output_schema(

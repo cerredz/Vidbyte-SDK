@@ -160,6 +160,20 @@ CODEX_FAILURE_CLASSIFICATION: Mapping[str, tuple[str, str, str, str]] = {
 CODEX_FAILURES_KEY = "failures"
 CODEX_FALLBACK_ATTEMPTS_KEY = "fallback_attempts"
 CODEX_ANSWERING_MODEL_KEY = "answering_model"
+# Codex validates dynamic function-tool names against the Responses API identifier
+# rules at thread/start; checking them here turns a thread-start failure into a
+# construction error that names the offending tool.
+CODEX_DYNAMIC_TOOL_NAME_PATTERN = r"^[A-Za-z0-9_-]+$"
+CODEX_DYNAMIC_TOOL_NAME_MAX_LENGTH = 128
+CODEX_RESERVED_DYNAMIC_TOOL_NAME = "mcp"
+CODEX_RESERVED_DYNAMIC_TOOL_PREFIX = "mcp__"
+# App-server wire names for registering dynamic tools and answering their calls.
+CODEX_DYNAMIC_TOOLS_PARAM = "dynamicTools"
+CODEX_THREAD_START_METHOD = "thread/start"
+CODEX_TOOL_CALL_METHOD = "item/tool/call"
+# The SDK answers server requests on its only reader thread, so one hung tool
+# would stall the whole turn; a bounded wait returns a failed call instead.
+CODEX_TOOL_CALL_TIMEOUT_SECONDS = 300.0
 
 
 __all__ = [
@@ -183,4 +197,12 @@ __all__ = [
     "CODEX_USAGE_PROVIDER",
     "CODEX_USAGE_ROLLUP_KEY",
     "CODEX_ZERO_DURATION_MS",
+    "CODEX_DYNAMIC_TOOL_NAME_MAX_LENGTH",
+    "CODEX_DYNAMIC_TOOL_NAME_PATTERN",
+    "CODEX_DYNAMIC_TOOLS_PARAM",
+    "CODEX_RESERVED_DYNAMIC_TOOL_NAME",
+    "CODEX_RESERVED_DYNAMIC_TOOL_PREFIX",
+    "CODEX_THREAD_START_METHOD",
+    "CODEX_TOOL_CALL_METHOD",
+    "CODEX_TOOL_CALL_TIMEOUT_SECONDS",
 ]
