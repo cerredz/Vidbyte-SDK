@@ -3,7 +3,7 @@
 PURPOSE: Attaches Vidbyte tools to a Codex harness agent as app-server dynamic tools.
 ROLE IN CODEBASE: The Codex translator builds one bridge at construction; the transport attaches it to each run's connection.
 ARCHITECTURE NOTE: Tool code runs in-process through ToolExecutor on the agent's event loop, never on the SDK reader thread.
-COMMON MODIFICATION PATTERNS: Keep every private openai-codex attribute access inside CodexToolBridge._sync_client.
+COMMON MODIFICATION PATTERNS: Keep every private openai-codex attribute access inside CodexToolBridge._sync_client; add Codex wire fields to the request/response records in vidbyte/lib/dataclasses/codex.py.
 WHAT NOT TO DO IN THIS FILE: Raise from CodexToolCallHandler.handle; an exception there stops the SDK reader loop.
 KNOWN EDGE CASES: Codex accepts dynamicTools only on thread/start, so resumed and forked threads keep their original definitions.
 RELATED DOCS: docs/design/codex-harness-tools.md
@@ -15,7 +15,7 @@ from __future__ import annotations
 import asyncio
 import concurrent.futures
 import re
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Coroutine, Mapping
 from typing import Any
 
 from vidbyte.lib.constants.codex import (
@@ -28,7 +28,12 @@ from vidbyte.lib.constants.codex import (
     CODEX_TOOL_CALL_METHOD,
     CODEX_TOOL_CALL_TIMEOUT_SECONDS,
 )
-from vidbyte.lib.dataclasses.codex import CodexAgentSettings, CodexHarnessAgentSettings
+from vidbyte.lib.dataclasses.codex import (
+    CodexHarnessAgentSettings,
+    CodexToolAttachRequest,
+    CodexToolCallRequest,
+    CodexToolCallResponse,
+)
 from vidbyte.lib.dataclasses.security import PermissionPolicy
 from vidbyte.lib.dataclasses.tools import ToolCall, ToolResult, ToolStatus
 from vidbyte.lib.enums.failure import FailureCode
@@ -44,37 +49,28 @@ _TOOL_NAME = re.compile(CODEX_DYNAMIC_TOOL_NAME_PATTERN)
 class CodexToolTranslator:
     """Resolves declared Vidbyte tools into one Codex dynamic-tool bridge at construction."""
 
-    @classmethod
-    def translate(cls, settings: CodexHarnessAgentSettings) -> CodexToolBridge | None:
+    @staticmethod
+    def translate(settings: CodexHarnessAgentSettings) -> CodexToolBridge | None:
         # @intent reject-unregistrable-tools-before-launch
-        # Codex rejects the whole thread/start for one bad declaration, so every
-        # tool is normalized and checked before any app-server process exists.
+        # Codex rejects the whole thread/start for one bad declaration, so the
+        # experimental-API opt-in and every tool name are checked against the
+        # app-server's rules before any app-server process exists.
         if not settings.tools:
             return None
-        cls._require_experimental_api(settings.codex)
-        catalog = Tools(settings.tools)
-        for name in catalog.names():
-            cls._validate_name(name)
-        return CodexToolBridge(catalog, settings.tool_permission_policy)
-
-    @staticmethod
-    def _require_experimental_api(settings: CodexAgentSettings) -> None:
-        # dynamicTools is an experimental thread/start field the app-server refuses without the opt-in.
-        if not settings.client.experimental_api:
+        if not settings.codex.client.experimental_api:
             raise ConfigurationError(
                 "Codex harness agent tools require codex.client.experimental_api=True."
             )
-
-    @staticmethod
-    def _validate_name(name: str) -> None:
-        # Mirrors the app-server's dynamic function-name rules so a bad name fails at construction.
-        if len(name) > CODEX_DYNAMIC_TOOL_NAME_MAX_LENGTH or not _TOOL_NAME.fullmatch(name):
-            raise ConfigurationError(
-                f"Codex tool name {name!r} must be 1-{CODEX_DYNAMIC_TOOL_NAME_MAX_LENGTH} "
-                "characters of letters, digits, '_' or '-'."
-            )
-        if name == CODEX_RESERVED_DYNAMIC_TOOL_NAME or name.startswith(CODEX_RESERVED_DYNAMIC_TOOL_PREFIX):
-            raise ConfigurationError(f"Codex tool name {name!r} is reserved for MCP tools.")
+        catalog = Tools(settings.tools)
+        for name in catalog.names():
+            if len(name) > CODEX_DYNAMIC_TOOL_NAME_MAX_LENGTH or not _TOOL_NAME.fullmatch(name):
+                raise ConfigurationError(
+                    f"Codex tool name {name!r} must be 1-{CODEX_DYNAMIC_TOOL_NAME_MAX_LENGTH} "
+                    "characters of letters, digits, '_' or '-'."
+                )
+            if name == CODEX_RESERVED_DYNAMIC_TOOL_NAME or name.startswith(CODEX_RESERVED_DYNAMIC_TOOL_PREFIX):
+                raise ConfigurationError(f"Codex tool name {name!r} is reserved for MCP tools.")
+        return CodexToolBridge(catalog, settings.tool_permission_policy)
 
 
 class CodexToolBridge:
@@ -86,20 +82,20 @@ class CodexToolBridge:
         self.dynamic_tools = tuple(ToolsFormatter.to_codex_tool(spec) for spec in tools.specs())
         self._executor = ToolExecutor(tools, permission_policy=permission_policy)
 
-    def attach(self, codex: object, loop: asyncio.AbstractEventLoop) -> CodexToolCallHandler:
+    def attach(self, request: CodexToolAttachRequest) -> CodexToolCallHandler:
         # @intent install-tools-on-one-connection
         # AsyncCodex exposes neither dynamicTools nor a server-request handler, so
         # both are installed on its sync client before the thread is opened.
-        client = self._sync_client(codex)
-        handler = CodexToolCallHandler(self._executor, loop, client._approval_handler)
+        client = self._sync_client(request)
+        handler = CodexToolCallHandler(self._executor, request.loop, client._approval_handler)
         client._approval_handler = handler.handle
         client.request = self._with_dynamic_tools(client.request)
         return handler
 
     @staticmethod
-    def _sync_client(codex: object) -> Any:
+    def _sync_client(request: CodexToolAttachRequest) -> Any:
         # Resolves the pinned SDK's private sync client, failing loudly if its shape has moved.
-        client = getattr(getattr(codex, "_client", None), "_sync", None)
+        client = getattr(getattr(request.client, "_client", None), "_sync", None)
         if not callable(getattr(client, "_approval_handler", None)) or not callable(getattr(client, "request", None)):
             raise CodexAgentError(
                 "Installed openai-codex does not expose the client hooks Codex tools require.",
@@ -139,57 +135,46 @@ class CodexToolCallHandler:
         # attaching tools cannot change command or file-change approval behavior.
         if method != CODEX_TOOL_CALL_METHOD:
             return self._fallback(method, params)
-        return self._response(self._execute(params or {}))
+        coroutine: Coroutine[Any, Any, ToolResult] | None = None
+        future: concurrent.futures.Future[ToolResult] | None = None
+        # @intent answer-every-tool-call
+        # One try spans reading the call, scheduling it, and waiting for it,
+        # because any raise here would stop the SDK reader thread for the run.
+        try:
+            call = CodexToolCallRequest.from_params(params)
+            coroutine = self._executor.execute_call(
+                ToolCall(tool_name=call.tool, arguments=dict(call.arguments), call_id=call.call_id)
+            )
+            future = asyncio.run_coroutine_threadsafe(coroutine, self._loop)
+            self._pending.add(future)
+            result = future.result(timeout=CODEX_TOOL_CALL_TIMEOUT_SECONDS)
+            response = CodexToolCallResponse(success=result.status == ToolStatus.SUCCESS, text=result.output)
+        except ConfigurationError as exc:
+            response = CodexToolCallResponse(success=False, text=exc.message)
+        except concurrent.futures.TimeoutError:
+            response = CodexToolCallResponse(
+                success=False, text=f"Tool call timed out after {CODEX_TOOL_CALL_TIMEOUT_SECONDS:g} seconds."
+            )
+        # Cancellation by close(), a stopped loop, or a bridge failure must still answer Codex.
+        except Exception:
+            response = CodexToolCallResponse(
+                success=False,
+                text="The agent event loop stopped before the tool could run."
+                if self._loop.is_closed()
+                else "Tool call was cancelled or failed before returning a result.",
+            )
+        finally:
+            if future is not None:
+                future.cancel()
+                self._pending.discard(future)
+            elif coroutine is not None:
+                coroutine.close()
+        return {"success": response.success, "contentItems": [{"type": "inputText", "text": response.text}]}
 
     def close(self) -> None:
         # Cancels tool coroutines still running when the connection closes.
         for future in tuple(self._pending):
             future.cancel()
-
-    def _execute(self, params: Mapping[str, Any]) -> ToolResult:
-        # Runs one call on the agent loop; every failure becomes a result because a raise would stop the reader thread.
-        call = self._parse_call(params)
-        if isinstance(call, ToolResult):
-            return call
-        coroutine = self._executor.execute_call(call)
-        try:
-            future = asyncio.run_coroutine_threadsafe(coroutine, self._loop)
-        except RuntimeError:
-            coroutine.close()
-            return ToolResult.error(call.tool_name, "The agent event loop stopped before the tool could run.", metadata={"error": "loop_closed"})
-        self._pending.add(future)
-        try:
-            return future.result(timeout=CODEX_TOOL_CALL_TIMEOUT_SECONDS)
-        except concurrent.futures.TimeoutError:
-            future.cancel()
-            return ToolResult.error(call.tool_name, f"Tool call timed out after {CODEX_TOOL_CALL_TIMEOUT_SECONDS:g} seconds.", metadata={"error": "timeout"})
-        # Cancellation by close() or an unexpected bridge failure must still answer Codex.
-        except Exception as exc:
-            return ToolResult.error(call.tool_name, "Tool call was cancelled or failed before returning a result.", metadata={"error": "execution_error", "error_type": type(exc).__name__})
-        finally:
-            self._pending.discard(future)
-
-    @staticmethod
-    def _parse_call(params: Mapping[str, Any]) -> ToolCall | ToolResult:
-        # Builds the Vidbyte call from a Codex request, or the error result for a malformed one.
-        name = params.get("tool")
-        arguments = params.get("arguments")
-        if not isinstance(name, str) or not name.strip():
-            return ToolResult.error("unknown", "Codex tool call did not name a tool.", metadata={"error": "invalid_call"})
-        if arguments is None:
-            arguments = {}
-        if not isinstance(arguments, Mapping):
-            return ToolResult.error(name, "Tool arguments must be a JSON object.", metadata={"error": "validation_error"})
-        call_id = params.get("callId")
-        return ToolCall(tool_name=name, arguments=dict(arguments), call_id=call_id if isinstance(call_id, str) else None)
-
-    @staticmethod
-    def _response(result: ToolResult) -> dict[str, Any]:
-        # Encodes a ToolResult as the app-server's dynamic tool call response.
-        return {
-            "success": result.status == ToolStatus.SUCCESS,
-            "contentItems": [{"type": "inputText", "text": result.output}],
-        }
 
 
 __all__ = ["CodexToolBridge", "CodexToolCallHandler", "CodexToolTranslator"]

@@ -23,7 +23,9 @@ ARCHITECTURE NOTE:
 
 FUNCTION INVENTORY:
     No production functions. _settings() builds agent settings; _bridge()
-    builds a bridge over test tools; _call() answers one tool call through a
+    builds a bridge over test tools; _wire() builds one item/tool/call params
+    object; _attach() attaches a bridge through CodexToolAttachRequest;
+    _call() answers one tool call through a
     handler from a worker thread; _run_transport() runs CodexTransport against
     the fake SDK.
 
@@ -75,6 +77,9 @@ from vidbyte.lib.dataclasses.codex import (
     CodexRunResult,
     CodexSdkTypes,
     CodexTextInput,
+    CodexToolAttachRequest,
+    CodexToolCallRequest,
+    CodexToolCallResponse,
     CodexTransportRunRequest,
     CodexUsage,
 )
@@ -176,6 +181,16 @@ def _bridge(*tools: Any, policy: PermissionPolicy | None = None) -> CodexToolBri
 def _fallback(method: str, params: Mapping[str, Any] | None) -> dict[str, Any]:
     # Mirrors the SDK default: accept approvals, answer anything else with an empty object.
     return {"decision": "accept"} if method.endswith("requestApproval") else {}
+
+
+def _wire(tool_name: str, arguments: object, call_id: str = "call_1") -> dict[str, Any]:
+    # Builds one item/tool/call params object in the app-server's full wire shape.
+    return {"threadId": "th_1", "turnId": "tu_1", "callId": call_id, "tool": tool_name, "arguments": arguments}
+
+
+def _attach(bridge: CodexToolBridge, codex: object, loop: asyncio.AbstractEventLoop) -> CodexToolCallHandler:
+    # Attaches a bridge to one client connection through the validated attach request.
+    return bridge.attach(CodexToolAttachRequest(client=codex, loop=loop))
 
 
 async def _call(handler: CodexToolCallHandler, params: Mapping[str, Any] | None, method: str = TOOL_CALL) -> dict[str, Any]:
@@ -380,40 +395,83 @@ class CodexToolFormatterTests(unittest.TestCase):
         self.assertEqual(codex["inputSchema"], ToolsFormatter.to_openai_tool(spec)["function"]["parameters"])
 
 
+class CodexToolCallRecordTests(unittest.TestCase):
+    """Strict validation on the lib records the tool bridge reads and writes."""
+
+    def test_request_reads_every_wire_field(self) -> None:
+        call = CodexToolCallRequest.from_params({**_wire("add", {"a": 1}, call_id="c7"), "namespace": None})
+        self.assertEqual(
+            (call.thread_id, call.turn_id, call.call_id, call.tool, dict(call.arguments), call.namespace),
+            ("th_1", "tu_1", "c7", "add", {"a": 1}, None),
+        )
+
+    def test_request_null_arguments_become_empty_object(self) -> None:
+        self.assertEqual(dict(CodexToolCallRequest.from_params(_wire("add", None)).arguments), {})
+
+    def test_request_rejects_malformed_fields(self) -> None:
+        cases = {
+            "tool": {**_wire("add", {}), "tool": " "},
+            "call_id": {**_wire("add", {}), "callId": 7},
+            "JSON object": _wire("add", ["a", 1]),
+            "namespace": {**_wire("add", {}), "namespace": ""},
+        }
+        for message, params in cases.items():
+            with self.subTest(message=message), self.assertRaisesRegex(ConfigurationError, message):
+                CodexToolCallRequest.from_params(params)
+
+    def test_response_rejects_non_bool_success_and_non_text(self) -> None:
+        with self.assertRaisesRegex(ConfigurationError, "success must be a boolean"):
+            CodexToolCallResponse(success=1, text="ok")  # type: ignore[arg-type]
+        with self.assertRaisesRegex(ConfigurationError, "text must be a string"):
+            CodexToolCallResponse(success=True, text=None)  # type: ignore[arg-type]
+
+    def test_attach_request_requires_a_client_and_an_open_loop(self) -> None:
+        loop = asyncio.new_event_loop()
+        try:
+            with self.assertRaisesRegex(ConfigurationError, "client"):
+                CodexToolAttachRequest(client=None, loop=loop)
+            with self.assertRaisesRegex(ConfigurationError, "open asyncio event loop"):
+                CodexToolAttachRequest(client=_FakeAsyncCodex(), loop="loop")  # type: ignore[arg-type]
+        finally:
+            loop.close()
+        with self.assertRaisesRegex(ConfigurationError, "open asyncio event loop"):
+            CodexToolAttachRequest(client=_FakeAsyncCodex(), loop=loop)
+
+
 class CodexToolCallHandlerTests(unittest.IsolatedAsyncioTestCase):
     """Server-request handling on the SDK reader thread."""
 
     def _handler(self, *tools: Any, policy: PermissionPolicy | None = None) -> CodexToolCallHandler:
         # Attaches a bridge to a fake client and returns the installed handler.
         codex = _FakeAsyncCodex()
-        return _bridge(*tools, policy=policy).attach(codex, asyncio.get_running_loop())
+        return _attach(_bridge(*tools, policy=policy), codex, asyncio.get_running_loop())
 
     async def test_decorated_tool_succeeds(self) -> None:
-        answer = await _call(self._handler(add), {"tool": "add", "arguments": {"a": 2, "b": 3}, "callId": "c1"})
+        answer = await _call(self._handler(add), _wire("add", {"a": 2, "b": 3}, call_id="c1"))
         self.assertEqual(answer, {"success": True, "contentItems": [{"type": "inputText", "text": "5"}]})
 
     async def test_plain_callable_succeeds(self) -> None:
-        answer = await _call(self._handler(shout), {"tool": "shout", "arguments": {"text": "hi"}})
+        answer = await _call(self._handler(shout), _wire("shout", {"text": "hi"}))
         self.assertTrue(answer["success"])
         self.assertEqual(answer["contentItems"][0]["text"], "HI")
 
     async def test_async_tool_runs_on_the_agent_loop_with_call_id(self) -> None:
         probe = _ProbeTool()
-        answer = await _call(self._handler(probe), {"tool": "probe", "arguments": {"note": "x"}, "callId": "c9"})
+        answer = await _call(self._handler(probe), _wire("probe", {"note": "x"}, call_id="c9"))
         self.assertTrue(answer["success"])
         self.assertEqual(probe.thread_ids, [threading.get_ident()])
         self.assertEqual(probe.calls[0].call_id, "c9")
 
     async def test_unknown_tool_fails_without_raising(self) -> None:
-        answer = await _call(self._handler(add), {"tool": "missing", "arguments": {}})
+        answer = await _call(self._handler(add), _wire("missing", {}))
         self.assertFalse(answer["success"])
 
     async def test_raising_tool_fails_without_raising(self) -> None:
-        answer = await _call(self._handler(_RaisingTool()), {"tool": "boom", "arguments": {}})
+        answer = await _call(self._handler(_RaisingTool()), _wire("boom", {}))
         self.assertFalse(answer["success"])
 
     async def test_write_tool_is_denied_by_default_and_allowed_by_policy(self) -> None:
-        params = {"tool": "writer", "arguments": {}}
+        params = _wire("writer", {})
         denied = await _call(self._handler(_ProbeTool("writer", ToolPermission.WRITE)), params)
         self.assertFalse(denied["success"])
         self.assertIn("Permission denied", denied["contentItems"][0]["text"])
@@ -421,24 +479,35 @@ class CodexToolCallHandlerTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(allowed["success"])
 
     async def test_null_arguments_become_empty_object(self) -> None:
-        answer = await _call(self._handler(_ProbeTool()), {"tool": "probe", "arguments": None})
+        answer = await _call(self._handler(_ProbeTool()), _wire("probe", None))
         self.assertEqual(answer["contentItems"][0]["text"], "ran:")
 
     async def test_non_object_arguments_fail(self) -> None:
-        answer = await _call(self._handler(_ProbeTool()), {"tool": "probe", "arguments": "note=x"})
+        answer = await _call(self._handler(_ProbeTool()), _wire("probe", "note=x"))
         self.assertFalse(answer["success"])
         self.assertIn("JSON object", answer["contentItems"][0]["text"])
 
     async def test_missing_tool_name_fails(self) -> None:
-        for params in ({"arguments": {}}, None):
+        for params in ({"threadId": "th_1", "turnId": "tu_1", "callId": "call_1", "arguments": {}}, None):
             with self.subTest(params=params):
                 answer = await _call(self._handler(add), params)
                 self.assertFalse(answer["success"])
 
+    async def test_missing_protocol_fields_fail_before_the_tool_runs(self) -> None:
+        probe = _ProbeTool()
+        handler = self._handler(probe)
+        for field_name in ("threadId", "turnId", "callId"):
+            params = {key: value for key, value in _wire("probe", {}).items() if key != field_name}
+            with self.subTest(missing=field_name):
+                answer = await _call(handler, params)
+                self.assertFalse(answer["success"])
+                self.assertIn("must be a non-empty string", answer["contentItems"][0]["text"])
+        self.assertEqual(probe.calls, [])
+
     async def test_timeout_cancels_the_tool(self) -> None:
         slow = _SlowTool()
         with mock.patch("vidbyte.agents.codex.tools.CODEX_TOOL_CALL_TIMEOUT_SECONDS", 0.05):
-            answer = await _call(self._handler(slow), {"tool": "slow", "arguments": {}})
+            answer = await _call(self._handler(slow), _wire("slow", {}))
         self.assertFalse(answer["success"])
         self.assertIn("timed out", answer["contentItems"][0]["text"])
         await asyncio.sleep(0.01)
@@ -447,7 +516,7 @@ class CodexToolCallHandlerTests(unittest.IsolatedAsyncioTestCase):
     async def test_close_cancels_an_in_flight_call(self) -> None:
         slow = _SlowTool()
         handler = self._handler(slow)
-        pending = asyncio.ensure_future(_call(handler, {"tool": "slow", "arguments": {}}))
+        pending = asyncio.ensure_future(_call(handler, _wire("slow", {})))
         await asyncio.to_thread(slow.started.wait, 5)
         handler.close()
         answer = await pending
@@ -458,7 +527,7 @@ class CodexToolCallHandlerTests(unittest.IsolatedAsyncioTestCase):
     async def test_raw_exception_text_is_not_disclosed_by_the_bridge(self) -> None:
         slow = _SlowTool()
         handler = self._handler(slow)
-        pending = asyncio.ensure_future(_call(handler, {"tool": "slow", "arguments": {}}))
+        pending = asyncio.ensure_future(_call(handler, _wire("slow", {})))
         await asyncio.to_thread(slow.started.wait, 5)
         handler.close()
         answer = await pending
@@ -475,9 +544,9 @@ class CodexToolCallHandlerClosedLoopTests(unittest.TestCase):
 
     def test_closed_loop_fails_without_raising(self) -> None:
         loop = asyncio.new_event_loop()
+        handler = _attach(_bridge(add), _FakeAsyncCodex(), loop)
         loop.close()
-        handler = _bridge(add).attach(_FakeAsyncCodex(), loop)
-        answer = handler.handle(TOOL_CALL, {"tool": "add", "arguments": {"a": 1, "b": 1}})
+        answer = handler.handle(TOOL_CALL, _wire("add", {"a": 1, "b": 1}))
         self.assertFalse(answer["success"])
         self.assertIn("event loop stopped", answer["contentItems"][0]["text"])
 
@@ -488,7 +557,7 @@ class CodexToolBridgeAttachTests(unittest.IsolatedAsyncioTestCase):
     async def test_only_thread_start_gains_dynamic_tools(self) -> None:
         codex = _FakeAsyncCodex()
         bridge = _bridge(add)
-        bridge.attach(codex, asyncio.get_running_loop())
+        _attach(bridge, codex, asyncio.get_running_loop())
         original = {"model": "gpt"}
         sync = codex._client._sync
         sync.request("thread/start", original)
@@ -500,7 +569,7 @@ class CodexToolBridgeAttachTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_missing_sdk_hooks_raise_typed_error(self) -> None:
         with self.assertRaises(CodexAgentError) as caught:
-            _bridge(add).attach(SimpleNamespace(_client=SimpleNamespace()), asyncio.get_running_loop())
+            _attach(_bridge(add), SimpleNamespace(_client=SimpleNamespace()), asyncio.get_running_loop())
         self.assertEqual(caught.exception.failure_code, FailureCode.CODEX_SDK_UNAVAILABLE.value)
 
 
@@ -508,7 +577,7 @@ class CodexTransportToolIntegrationTests(unittest.IsolatedAsyncioTestCase):
     """CodexTransport attaches tools per connection against the fake SDK."""
 
     async def test_new_thread_registers_and_executes_tools(self) -> None:
-        _reset_fake([(TOOL_CALL, {"tool": "add", "arguments": {"a": 4, "b": 5}, "callId": "c1"})])
+        _reset_fake([(TOOL_CALL, _wire("add", {"a": 4, "b": 5}, call_id="c1"))])
         bridge = _bridge(add)
         result = await _run_transport(bridge)
         method, params = _FakeAsyncCodex.instances[0]._client._sync.requests[0]
@@ -518,7 +587,7 @@ class CodexTransportToolIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.thread_id, "th_new")
 
     async def test_resume_keeps_handler_without_reregistering(self) -> None:
-        _reset_fake([(TOOL_CALL, {"tool": "add", "arguments": {"a": 1, "b": 2}})])
+        _reset_fake([(TOOL_CALL, _wire("add", {"a": 1, "b": 2}))])
         await _run_transport(_bridge(add), thread_id="th_saved")
         method, params = _FakeAsyncCodex.instances[0]._client._sync.requests[0]
         self.assertEqual(method, "thread/resume")
@@ -545,7 +614,7 @@ class CodexTransportToolIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(caught.exception.failure_code, FailureCode.CODEX_SDK_UNAVAILABLE.value)
 
     async def test_agent_passes_its_tools_to_the_transport(self) -> None:
-        _reset_fake([(TOOL_CALL, {"tool": "shout", "arguments": {"text": "ok"}})])
+        _reset_fake([(TOOL_CALL, _wire("shout", {"text": "ok"}))])
         agent = CodexHarnessAgent(_settings(tools=(shout,)))
         with mock.patch.object(CodexTransport, "_load_sdk", return_value=_fake_sdk()), mock.patch(
             "vidbyte.agents.codex.transport.CodexResultSerializer.from_sdk",

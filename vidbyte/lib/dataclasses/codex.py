@@ -11,6 +11,7 @@ TESTS: python scripts/run_ci.py.
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
@@ -993,6 +994,94 @@ class CodexTransportRunRequest:
     settings: CodexAgentSettings
     output_schema: Mapping[str, Any]
     tools: CodexToolBridge | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class CodexToolAttachRequest:
+    """One live Codex connection a tool bridge attaches to for a single run.
+
+    ``client`` stays loosely typed because ``vidbyte.lib`` may not import the
+    optional openai-codex extra; the bridge resolves its private sync client
+    and raises ``codex.sdk_unavailable`` when the pinned shape has moved.
+    """
+
+    client: object
+    loop: asyncio.AbstractEventLoop
+
+    def __post_init__(self) -> None:
+        # @intent attach-only-to-a-live-loop
+        # Every tool coroutine of the run is scheduled onto this loop from the SDK
+        # reader thread, so a closed loop would fail each call instead of the attach.
+        if self.client is None:
+            raise ConfigurationError(
+                "Codex tool attach request client must be an open AsyncCodex connection."
+            )
+        if not isinstance(self.loop, asyncio.AbstractEventLoop) or self.loop.is_closed():
+            raise ConfigurationError(
+                "Codex tool attach request loop must be an open asyncio event loop."
+            )
+
+
+@dataclass(frozen=True, slots=True)
+class CodexToolCallRequest:
+    """One ``item/tool/call`` server request, field for field as Codex sends it.
+
+    Mirrors the app-server's ``DynamicToolCallParams``. ``namespace`` keeps its
+    None because the protocol field is nullable; Vidbyte registers only
+    un-namespaced function tools, so Codex leaves it unset in practice.
+    """
+
+    thread_id: str
+    turn_id: str
+    call_id: str
+    tool: str
+    arguments: Mapping[str, Any]
+    namespace: str | None = None
+
+    def __post_init__(self) -> None:
+        # @intent reject-malformed-tool-calls-before-execution
+        # A call missing a protocol field or carrying non-object arguments is
+        # answered as a failed call rather than guessed into a tool invocation.
+        for field_name in ("thread_id", "turn_id", "call_id", "tool"):
+            _require_text("Codex tool call", field_name, getattr(self, field_name))
+        if not isinstance(self.arguments, Mapping) or any(
+            not isinstance(key, str) for key in self.arguments
+        ):
+            raise ConfigurationError("Codex tool call arguments must be a JSON object.")
+        if self.namespace is not None:
+            _require_text("Codex tool call", "namespace", self.namespace)
+
+    @classmethod
+    def from_params(cls, params: Mapping[str, Any] | None) -> CodexToolCallRequest:
+        """Read one request from the app-server's camelCase wire params."""
+        wire = params or {}
+        arguments = wire.get("arguments")
+        return cls(
+            thread_id=wire.get("threadId", ""),
+            turn_id=wire.get("turnId", ""),
+            call_id=wire.get("callId", ""),
+            tool=wire.get("tool", ""),
+            # A tool that declares no parameters may be called with null arguments.
+            arguments={} if arguments is None else arguments,
+            namespace=wire.get("namespace"),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class CodexToolCallResponse:
+    """One ``item/tool/call`` answer: the fields of the app-server's ``DynamicToolCallResponse``.
+
+    ``text`` becomes the response's single ``inputText`` content item; the Codex
+    tool handler owns the camelCase wire encoding.
+    """
+
+    success: bool
+    text: str
+
+    def __post_init__(self) -> None:
+        _require_bool("Codex tool call response", "success", self.success)
+        if not isinstance(self.text, str):
+            raise ConfigurationError("Codex tool call response text must be a string.")
 
 
 @dataclass(frozen=True, slots=True)

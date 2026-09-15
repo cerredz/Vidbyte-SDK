@@ -23,6 +23,7 @@ from vidbyte.lib.dataclasses.codex import (
     CodexRunResult,
     CodexSdkTypes,
     CodexThreadIdentity,
+    CodexToolAttachRequest,
     CodexTransportForkRequest,
     CodexTransportRunRequest,
 )
@@ -203,7 +204,9 @@ class CodexTransport:
         if tools is None:
             yield
             return
-        handler = tools.attach(client, asyncio.get_running_loop())
+        handler = tools.attach(
+            CodexToolAttachRequest(client=client, loop=asyncio.get_running_loop())
+        )
         try:
             yield
         finally:
