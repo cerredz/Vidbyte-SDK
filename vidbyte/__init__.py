@@ -274,6 +274,7 @@ from vidbyte.harnesses import (
     TrajectoryRecord,
     TrajectorySink,
 )
+from vidbyte.integrations import SourceContext, SourceTool
 from vidbyte.lib.dataclasses.adversarial_agent_descriptor import (
     AdversarialAgentDescriptor,
 )
@@ -896,6 +897,8 @@ __all__ = [
     "SummaryCompactionMiddleware",
     "SequentialPipeline",
     "SchemaValidator",
+    "SourceContext",
+    "SourceTool",
     "Stage",
     "StageContext",
     "StageExecution",

@@ -46,11 +46,6 @@ from vidbyte.lib.dataclasses.agents import (
     AgentStopReason,
 )
 from vidbyte.lib.dataclasses.aggregate_agent_descriptor import AggregateAgentDescriptor
-from vidbyte.lib.dataclasses.config import (
-    AgentSettings,
-    MiddlewareDefinition,
-    ToolDefinition,
-)
 from vidbyte.lib.dataclasses.codex import (
     CodexAgentSettings,
     CodexClientSettings,
@@ -66,8 +61,13 @@ from vidbyte.lib.dataclasses.codex import (
     CodexSubagentSettings,
     CodexTextInput,
     CodexThreadSettings,
-    CodexTurnSettings,
     CodexTurnError,
+    CodexTurnSettings,
+)
+from vidbyte.lib.dataclasses.config import (
+    AgentSettings,
+    MiddlewareDefinition,
+    ToolDefinition,
 )
 from vidbyte.lib.dataclasses.context import (
     BaseAgentContext,
@@ -113,6 +113,11 @@ from vidbyte.lib.dataclasses.harnesses import (
     HarnessRunStatus,
     HarnessSpec,
     TrajectoryRecord,
+)
+from vidbyte.lib.dataclasses.integrations import (
+    GitHubClientConfig,
+    LoadedSection,
+    SourceConfig,
 )
 from vidbyte.lib.dataclasses.mcp import McpToolDefinition
 from vidbyte.lib.dataclasses.middleware import (
@@ -368,6 +373,8 @@ __all__ = [
     "LlmsTxtDocument",
     "LlmsTxtLink",
     "LlmsTxtSection",
+    "GitHubClientConfig",
+    "LoadedSection",
     "ManagerAgentCloser",
     "ManagerAgentFactory",
     "MarkdownDocument",
@@ -427,6 +434,7 @@ __all__ = [
     "Selection",
     "SessionMeta",
     "SessionStatus",
+    "SourceConfig",
     "SourceResult",
     "SourceSnapshot",
     "StopRecoverySettings",
