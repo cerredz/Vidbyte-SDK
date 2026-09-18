@@ -242,6 +242,8 @@ print(reply.structured)
 print(reply.codex.thread_id, reply.codex.usage.total_tokens)
 ```
 
+For a use-case cookbook covering input shapes, settings, structured output, tools, middleware, context, threads, forks, subagents, fallback, usage, errors, and composition, see [`vidbyte/agents/codex/README.md`](vidbyte/agents/codex/README.md).
+
 `CodexHarnessAgent` currently translates system prompts, turn-boundary additional context, structured output, custom tools, Codex thread forks, and Codex-owned subagent configuration/activity. It does not claim Vidbyte-owned iteration, per-tool middleware, or durable-session semantics.
 
 #### Custom tools
