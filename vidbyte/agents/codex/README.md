@@ -637,6 +637,32 @@ agent.run(
 )
 ```
 
+### Preview the translated turn without starting Codex
+
+The translators are plain classes, so you can see exactly what Codex would receive. This helps with debugging placements, or with snapshot-testing your prompt assembly offline:
+
+```python
+from vidbyte.agents.codex.config import CodexVidbyteTranslator
+from vidbyte.agents.codex.context import CodexContextTranslator
+from vidbyte.lib.dataclasses.codex import CodexContextTranslationRequest
+
+settings = agent.settings                                   # the already-translated agent settings
+run_input = CodexVidbyteTranslator.translate_input("Continue.")
+prompt = CodexContextTranslator.translate(
+    CodexContextTranslationRequest(
+        input=run_input,
+        static_context=settings.additional_context,
+        context_manager=settings.context_manager,
+        context_placements=settings.context_placements,
+    )
+)
+
+print(settings.system_prompt + "\n\n" + prompt.developer_context)   # Codex developer instructions
+for item in prompt.items:                                            # turn input, in order
+    print(type(item).__name__, getattr(item, "text", "")[:80])
+print(prompt.metadata)                                               # merged into reply.metadata
+```
+
 - A request-scoped `context_manager` renders **alongside** the agent's manager. If you pass the *same* manager object at both scopes, it renders once, and request placements override agent placements by primitive id.
 - A placement that names a missing primitive, or an anchor with no matching image or skill item, fails before Codex starts. It never falls back to another position silently.
 - Removing a primitive changes *future* turns only. Text Codex already saw stays in the thread.
