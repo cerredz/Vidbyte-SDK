@@ -152,6 +152,12 @@ PROVIDER_PRICING: dict[ModelProvider, dict[str, ModelPricing]] = {
     ModelProvider.META: {
         "muse-spark-1.1": ModelPricing(input_per_million=1.25, output_per_million=4.25, cache_read_per_million=0.15),
     },
+    # TypeSafe Jev (System One decision model): $0.042 per million input tokens and
+    # free output tokens, per the TypeSafe launch post checked 2026-09-21
+    # (https://typesafe.ai/blog/introducing-system-one-models-and-jev).
+    ModelProvider.TYPESAFE: {
+        "jev-latest": ModelPricing(input_per_million=0.042, output_per_million=0.0),
+    },
 }
 
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from vidbyte.lib.runners.types import (
     AudioModelResponse,
+    DecisionModelResponse,
     EmbeddingResponse,
     GeneratedImage,
     ImageModelResponse,
@@ -15,6 +16,7 @@ from vidbyte.lib.agents import ModalityDetector
 __all__ = [
     "AudioModelResponse",
     "AudioModelRunner",
+    "DecisionModelResponse",
     "EmbeddingModelRunner",
     "EmbeddingModelRunnerProvider",
     "EmbeddingResponse",

@@ -8,6 +8,7 @@ Architecture:
     - TextModelConfig: dataclass for text/chat completions.
     - ImageModelConfig: dataclass for image generation.
     - VideoModelConfig: dataclass for video generation tasks.
+    - DecisionModelConfig: dataclass for calibrated decision models (TypeSafe Jev).
 Key Functions:
     - resolved_api_key: Resolves provider key by delegating to ProviderModelRegistry.
     - resolved_endpoint: Resolves provider endpoint by delegating to ProviderModelRegistry.
@@ -23,6 +24,7 @@ import os
 from dataclasses import dataclass
 from typing import Any, Mapping
 
+from vidbyte.lib.constants.jev import JEV_DEFAULT_MODEL, JEV_DEFAULT_RETRY_COUNT, JEV_DEFAULT_TIMEOUT_SECONDS, JEV_NO_RETRIES, JEV_TIMEOUT_FLOOR_SECONDS
 from vidbyte.lib.enums import ModelProvider
 from vidbyte.lib.errors import ConfigurationError, UnsupportedProviderError
 from vidbyte.lib.registries.models import ProviderModelRegistry
@@ -319,8 +321,73 @@ class EmbeddingModelConfig:
             raise ConfigurationError(f"{field_name} must be greater than zero.")
 
 
+DECISION_SUPPORTED_PROVIDERS: frozenset[ModelProvider] = frozenset({
+    ModelProvider.TYPESAFE,
+})
+
+
+@dataclass(frozen=True, slots=True)
+class DecisionModelConfig:
+    """Configuration for one calibrated decision model; the API key resolves lazily at validate()."""
+
+    provider: ModelProvider | str = ModelProvider.TYPESAFE
+    model: str = JEV_DEFAULT_MODEL
+    api_key: str | None = None
+    endpoint: str | None = None
+    timeout_seconds: float = JEV_DEFAULT_TIMEOUT_SECONDS
+    retry_count: int = JEV_DEFAULT_RETRY_COUNT
+
+    def __post_init__(self) -> None:
+        # Rejects shape errors at construction so a bad config never waits for its first call.
+        # @intent decision-config-shape-fails-at-construction
+        # The API key is deliberately not resolved here: a decision tool must be constructable
+        # without a key and fail open at call time, while a wrong timeout or retry count is a
+        # programming error that should surface immediately rather than as a silent skip.
+        provider = self.normalized_provider()
+        if provider not in DECISION_SUPPORTED_PROVIDERS:
+            raise UnsupportedProviderError(
+                f"DecisionModelRunner supports: {', '.join(p.value for p in DECISION_SUPPORTED_PROVIDERS)}.",
+                details={"provider": provider.value},
+            )
+        if not isinstance(self.model, str) or not self.model.strip():
+            raise ConfigurationError("model must be non-empty.")
+        if not isinstance(self.timeout_seconds, (int, float)) or self.timeout_seconds <= JEV_TIMEOUT_FLOOR_SECONDS:
+            raise ConfigurationError("timeout_seconds must be greater than zero.")
+        if isinstance(self.retry_count, bool) or not isinstance(self.retry_count, int) or self.retry_count < JEV_NO_RETRIES:
+            raise ConfigurationError("retry_count must be a non-negative integer.")
+
+    def normalized_provider(self) -> ModelProvider:
+        # Convert strings to the canonical provider enum at the SDK boundary.
+        # @intent decision-provider-coerced-once
+        # Callers may pass the provider as a string; coercing here keeps every later lookup
+        # (support check, key, endpoint) keyed on the enum's frozen set of providers.
+        try:
+            return self.provider if isinstance(self.provider, ModelProvider) else ModelProvider(self.provider)
+        except ValueError as exc:
+            raise ConfigurationError(f"Unsupported model provider: {self.provider!r}") from exc
+
+    def validate(self) -> None:
+        # Resolves the API key; shape checks already ran when the config was constructed.
+        self.resolved_api_key()
+
+    def resolved_api_key(self) -> str:
+        # Resolve explicit keys before provider-specific environment variables.
+        # @intent explicit-key-wins-over-environment
+        # An explicit key lets tests and multi-tenant callers override TYPESAFE_API_KEY; a
+        # missing key raises ConfigurationError, which decision tools treat as "disabled".
+        return ProviderModelRegistry.resolve_api_key(self.normalized_provider(), self.api_key)
+
+    def resolved_endpoint(self) -> str:
+        # Prefer caller-provided endpoints for tests, proxies, and compatible APIs.
+        # @intent explicit-endpoint-wins-over-default
+        # Proxies and test servers replace the public TypeSafe endpoint without code changes.
+        return ProviderModelRegistry.resolve_endpoint(self.normalized_provider(), self.endpoint)
+
+
 __all__ = [
     "AUDIO_SUPPORTED_PROVIDERS",
+    "DECISION_SUPPORTED_PROVIDERS",
+    "DecisionModelConfig",
     "EMBEDDING_SUPPORTED_PROVIDERS",
     "AudioModelConfig",
     "EmbeddingModelConfig",
