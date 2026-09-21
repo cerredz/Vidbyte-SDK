@@ -148,6 +148,7 @@ from vidbyte.tools.activity import ActivityToolFormatter
 from vidbyte.tools.base import BaseTool
 from vidbyte.tools.builtins.operations.base import PricedOperationTool
 from vidbyte.tools.catalog import Tools
+from vidbyte.tools.model_backed import ModelBackedTool
 from vidbyte.tools.security import PermissionDecision, PermissionPolicy
 from vidbyte.tools.types import ToolCall, ToolCallContext, ToolCallState, ToolResult
 
@@ -1077,6 +1078,7 @@ class AgentRuntime:
                         metadata={"error": "output_schema_violation", "detail": error},
                     )
             self._record_operation_usage(tool, call, result)
+            self._record_tool_model_usage(tool, result)
             succeeded = result.status.value == "success"
             if not succeeded:
                 error_type = str(dict(result.metadata).get("error_type") or dict(result.metadata).get("error") or "ToolExecutionError")
@@ -1162,6 +1164,23 @@ class AgentRuntime:
         except Exception:
             self.usage_tracker.mark_recording_corrupted()
             return
+
+    def _record_tool_model_usage(self, tool: object, result: ToolResult) -> None:
+        # Records every model call a ModelBackedTool reports on its result into the agent's
+        # token ledger, so a tool's own model spend appears in get_usage() and get_cost_usd().
+        # @intent meter-tool-model-calls-once
+        # The runtime stays the only writer to the usage ledger: tools report calls in result
+        # metadata and each reported response is recorded exactly once here, for success and
+        # error results alike, because a provider bills a call whose answer we later rejected.
+        # Any recording error marks the ledger corrupted instead of failing the tool call.
+        tool = ActivityToolFormatter.unwrap(tool) if isinstance(tool, BaseTool) else tool
+        if not isinstance(tool, ModelBackedTool):
+            return
+        try:
+            for model_call in tool.model_calls(result):
+                self.usage_tracker.record_call(model_call)
+        except Exception:
+            self.usage_tracker.mark_recording_corrupted()
 
     def _billable_attempts(self, tool: PricedOperationTool, call: ToolCall, result: ToolResult) -> int:
         # Returns how many attempts to price, or zero when the call never reached the provider.
