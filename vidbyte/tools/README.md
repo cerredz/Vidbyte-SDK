@@ -88,6 +88,8 @@ print(catalog.provider_schemas("openai"))
 - `mcp/`: MCP clients, transports, presets, and bridged tools.
 - `builtins/`: code search, context, context primitives, editing, memory, MCP, handoff, pause, reasoning traces, and utility tools.
 - `builtins/operations/`: priced search and fetch tools plus the executing provider clients.
+- `model_backed.py`: `ModelBackedTool`, the base for tools that call a model and report that usage for the agent's `UsageTracker`.
+- `classifier/`: `JevDecideTool` (`jev_decide`), a quick calibrated judgment from TypeSafe's Jev decision model.
 
 ## Cooperative Pause
 
@@ -127,6 +129,16 @@ Billing is attempt-accurate. A tool declares `units` and `attempts` in
 attempt — so three retries of a flat-rate search bill three times, and a call
 that exhausts its retries and fails is still billed for the attempts it spent. A
 call that never reached the provider declares `units=0` and bills nothing.
+
+## Model-Backed Tools
+
+A tool that calls a model on the agent's behalf subclasses `ModelBackedTool`
+and attaches one `ToolModelCall` (provider, model, raw usage) per call to its
+result's `metadata["model_usage"]`. The runtime records each reported call in
+the agent's `UsageTracker`, so it appears in `get_usage()` and `get_cost_usd()`
+beside the agent's own model calls. This includes error results, because a
+provider bills a call even when its answer is rejected afterward.
+`JevDecideTool` is the first such tool; see [`classifier/README.md`](classifier/README.md).
 
 ## Related Layers
 

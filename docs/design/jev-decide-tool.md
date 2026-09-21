@@ -3,7 +3,7 @@
 **Status:** Draft
 **Author:** Claude
 **Created:** 2026-09-21
-**Last Updated:** 2026-09-21
+**Last Updated:** 2026-09-21 (reconciled with implementation)
 
 ---
 
@@ -51,7 +51,7 @@ This change adds Jev, TypeSafe's calibrated "System One" decision model, to the 
 ### Functional Requirements
 1. `ModelProvider.TYPESAFE == "typesafe"` exists. `ProviderModelRegistry` maps it to the default model `jev-latest`, the key variable `TYPESAFE_API_KEY`, and the endpoint `https://api.typesafe.ai/v1`.
 2. The runner catalogs map `typesafe/jev-latest` and `jev-latest` to a new `RUNNER_TYPE_DECISION`. `Runner.build()` for that runner type raises `ConfigurationError`, explaining that decision models cannot drive an agent loop.
-3. `DecisionModelConfig.validate()` rejects a provider other than TypeSafe, a blank model, a non-positive timeout, and a negative retry count, and it resolves the API key.
+3. `DecisionModelConfig` rejects a provider other than TypeSafe, a blank model, a non-positive timeout, and a negative or non-int retry count *at construction*. `validate()` resolves the API key, so a config builds without credentials.
 4. `JevQuestion` validates each question type:
    - `noul` takes exactly the options `true` and `false`.
    - `choice` takes 2–255 unique, non-blank option names.
@@ -175,10 +175,12 @@ class DecisionModelConfig:
     def resolved_api_key(self) -> str: ...
     def resolved_endpoint(self) -> str: ...
 ```
-`validate()` checks: the provider is in `DECISION_SUPPORTED_PROVIDERS`, the model is not blank, `timeout_seconds > 0`, `retry_count` is an int ≥ 0 (not a bool), and the API key resolves.
+`__post_init__` checks the shape: the provider is in `DECISION_SUPPORTED_PROVIDERS`, the model is not blank, `timeout_seconds > 0`, and `retry_count` is an int ≥ 0 (not a bool). `validate()` only resolves the API key. This lets a tool build without a key and fail open at call time, while a bad timeout fails immediately.
 
 ### 6.6 Jev records
-**File(s):** `vidbyte/lib/dataclasses/jev.py` (new)
+**File(s):** `vidbyte/lib/dataclasses/jev.py` (new), `vidbyte/lib/dataclasses/jev_settings.py` (new, holds `JevDecideSettings` only)
+
+`JevDecideSettings` has its own module because it depends on `model_configs`. Importing that from `jev.py` closes an import cycle through `ModalityDetector` and `lib.runners.types` (lint A006).
 ```python
 @dataclass(frozen=True, slots=True)
 class JevOption:            # name + optional criterion text
@@ -222,18 +224,14 @@ class JevDecisionRecord:
     latency_ms: float
 
 @dataclass(frozen=True, slots=True)
-class JevDecideSettings:
-    model: str = "jev-latest"
-    api_key: str | None = None
-    endpoint: str | None = None
-    timeout_seconds: float = 10.0
-    retry_count: int = 0
+class JevDecideSettings:          # in jev_settings.py
+    decision: DecisionModelConfig = field(default_factory=DecisionModelConfig)
     min_confidence: float | None = None
 ```
-Every `__post_init__` validates its record, following section 4 FR 4–5. `JevAnswer` also checks that its probabilities are within [0, 1]. `JevDecideSettings` checks that `min_confidence`, when set, lies in [0, 1], and that the timeout and retry count are valid. `JevDecideSettings.decision_config()` returns a `DecisionModelConfig`.
+Every `__post_init__` validates its record, following section 4 FR 4–5. `JevAnswer` also checks that its probabilities are within [0, 1]. `JevDecideSettings` checks that `min_confidence`, when set, lies in [0, 1], and that the timeout and retry count are valid. `JevDecideSettings` holds a validated `decision: DecisionModelConfig` field (default factory) rather than copying its fields, so the timeout and retry rules live in one place (lint C002).
 
 ### 6.7 DecisionModelResponse
-**File(s):** `vidbyte/lib/runners/types.py`, `vidbyte/lib/runners/__init__.py`
+**File(s):** `vidbyte/lib/runners/types.py`, `vidbyte/lib/runners/__init__.py` (exports the response. `DecisionModelRunner` is imported from `vidbyte.lib.runners.decision` directly)
 ```python
 @dataclass(frozen=True, slots=True)
 class DecisionModelResponse:
@@ -390,11 +388,12 @@ New public Python surface:
 | MODIFY | `vidbyte/lib/registries/pricing.py` | `jev-latest` rate |
 | MODIFY | `vidbyte/lib/dataclasses/model_configs.py` | `DecisionModelConfig` |
 | MODIFY | `vidbyte/lib/config/__init__.py`, `vidbyte/lib/config/models.py` | Export `DecisionModelConfig` |
-| CREATE | `vidbyte/lib/dataclasses/jev.py` | Jev request/answer/record/settings records |
+| CREATE | `vidbyte/lib/dataclasses/jev.py` | Jev option/question/request/answer/record records |
+| CREATE | `vidbyte/lib/dataclasses/jev_settings.py` | `JevDecideSettings` (split out to avoid an import cycle) |
 | CREATE | `vidbyte/lib/dataclasses/tool_model_usage.py` | `ToolModelCall` |
 | MODIFY | `vidbyte/lib/runners/types.py` | `DecisionModelResponse` |
 | CREATE | `vidbyte/lib/runners/decision.py` | `DecisionModelRunner` |
-| MODIFY | `vidbyte/lib/runners/__init__.py` | Export runner + response |
+| MODIFY | `vidbyte/lib/runners/__init__.py` | Export `DecisionModelResponse` |
 | MODIFY | `vidbyte/lib/runners/utility.py` | Refuse decision runner type clearly |
 | CREATE | `vidbyte/providers/typesafe.py` | `TypeSafeProvider` |
 | MODIFY | `vidbyte/providers/__init__.py` | `ModelProviders.decision` + export |
@@ -405,7 +404,8 @@ New public Python surface:
 | CREATE | `vidbyte/tools/classifier/__init__.py` | Package exports |
 | CREATE | `vidbyte/tools/classifier/jev_decide.py` | `JevDecideTool` |
 | CREATE | `vidbyte/tools/classifier/README.md` | Folder map + data-egress note |
-| MODIFY | `vidbyte/tools/__init__.py` | Export `JevDecideTool`, `ModelBackedTool` |
+| MODIFY | `vidbyte/tools/README.md` | Document `ModelBackedTool` and `classifier/` |
+| MODIFY | `vidbyte/tools/__init__.py` | Export `ModelBackedTool`; lazy `_LAZY_EXPORTS` entry for `JevDecideTool` |
 | CREATE | `tests/test_jev_decide_tool.py` | Unit + integration tests |
 | CREATE | `scripts/test_jev_decide_tool.py` | Phase-5 verification script |
 
