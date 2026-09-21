@@ -32,6 +32,7 @@ from vidbyte.tools.executor import ToolExecutor
 from vidbyte.tools.function_tool import FunctionTool
 from vidbyte.lib.tools import ToolsFormatter
 from vidbyte.tools.mixins import ToolMixin
+from vidbyte.tools.model_backed import ModelBackedTool
 from vidbyte.tools.types import (
     ToolActivity,
     ToolCall,
@@ -49,6 +50,8 @@ __all__ = [
     "AgentTool",
     "BaseTool",
     "FunctionTool",
+    "JevDecideTool",
+    "ModelBackedTool",
     "ToolActivity",
     "ToolCall",
     "ToolCallActivity",
@@ -74,7 +77,19 @@ __all__ = [
 ]
 
 
+def _load_jev_decide_tool() -> Any:
+    # Imports the classifier lazily: it pulls in the provider stack, which plain tool imports skip.
+    from vidbyte.tools.classifier import JevDecideTool
+
+    return JevDecideTool
+
+
+_LAZY_EXPORTS: dict[str, Any] = {"JevDecideTool": _load_jev_decide_tool}
+
+
 def __getattr__(name: str) -> Any:
+    if name in _LAZY_EXPORTS:
+        return _LAZY_EXPORTS[name]()
     if name == "ToolRegistry":
         from vidbyte.lib.registries.tools import ToolRegistry
 
