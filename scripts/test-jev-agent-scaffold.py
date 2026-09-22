@@ -1,4 +1,13 @@
-"""Run every Jev agent scaffold test with explicit per-case output."""
+"""FILE: scripts/test-jev-agent-scaffold.py
+
+PURPOSE: Runs every focused Jev agent scaffold test and reports each case plus an aggregate result.
+ROLE IN CODEBASE: Provides the executable verification entry point required by docs/design/jev-agent-scaffold.md.
+ARCHITECTURE NOTE: The script loads the unittest module directly and never supplies credentials or contacts a live provider.
+COMMON MODIFICATION PATTERNS: Keep module loading exhaustive as new cases are added; customize reporting without filtering tests.
+KNOWN EDGE CASES: Assertion failures and unexpected errors both produce a non-zero process exit; skipped tests do not count as passes.
+RELATED DOCS: docs/design/jev-agent-scaffold.md and skills/jev-agent/SKILL.md.
+TESTS: This script executes tests/test_jev_agent.py and is itself exercised by the source CI script stage.
+"""
 
 from __future__ import annotations
 

@@ -39,6 +39,8 @@ class JevAgentSettings:
 
     def __post_init__(self) -> None:
         # Normalizes immutable inputs and rejects invalid agent configuration before runtime construction.
+        # @intent opinionated-settings-fail-before-runtime
+        # A frozen, validated settings object prevents later capability code from inheriting ambiguous policy inputs.
         self._validate_text(self.name, "name")
         self._validate_text(self.system_prompt, "system_prompt")
         self._validate_text(self.model_name, "model_name")
@@ -69,6 +71,8 @@ class JevAgentSettings:
 
     def _normalized_provider(self) -> ModelProvider:
         # Converts the public string form into the SDK provider enum exactly once.
+        # @intent generative-and-decision-providers-stay-distinct
+        # Canonicalizing here lets construction reject TypeSafe before a decision model is mistaken for a text runner.
         try:
             return self.provider if isinstance(self.provider, ModelProvider) else ModelProvider(self.provider)
         except (TypeError, ValueError) as exc:

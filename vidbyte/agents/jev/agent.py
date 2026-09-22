@@ -25,6 +25,8 @@ class JevAgent(BaseAgent):
 
     def __init__(self, settings: JevAgentSettings) -> None:
         # Maps the sole public settings object into BaseAgent while fixing linear execution semantics.
+        # @intent closed-jev-construction-surface
+        # Rejecting arbitrary objects keeps runtime selection and future decision policy owned by this package.
         if not isinstance(settings, JevAgentSettings):
             raise ConfigurationError("JevAgent requires a JevAgentSettings instance.")
         self.settings = settings
