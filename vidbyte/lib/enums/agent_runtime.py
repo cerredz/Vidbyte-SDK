@@ -47,6 +47,7 @@ class AgentRuntimeType(str, Enum):
     ACTOR_MODEL = "actor_model"
     ACTOR_MODEL_P2P = "actor_model_p2p"
     ACTOR_MODEL_BROADCAST = "actor_model_broadcast"
+    JEV = "jev"
 
 
 __all__ = ["AgentRuntimeStateKey", "AgentRuntimeType"]
