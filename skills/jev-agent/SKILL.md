@@ -28,7 +28,7 @@ Each capability owns its fixed internal Jev questions, state projection, thresho
 - `vidbyte/lib/runners/decision.py` owns semantic decision execution (`arun`) and model listing (`alist_models`).
 - `vidbyte/providers/typesafe.py` alone owns TypeSafe wire serialization, normalization, and failure mapping.
 
-The scaffold performs no Jev call. A missing TypeSafe API key must not prevent `JevAgentSettings` or `JevAgent` construction until an enabled capability actually needs Jev.
+The security preflight is opt-in through `preflight=(Preset.Security(on_detected=SecurityAction.BLOCK),)`. It asks 20 fixed same-polarity questions in one decision request and returns per-category flags plus `any_sensitive`. `BLOCK` and `PAUSE` stop before the ordinary generative loop; `REPORT` records the result and continues. `BLOCK` and `PAUSE` also stop if classification is unavailable, while `REPORT` records unknown flags and continues. Construction remains credential-free; the TypeSafe key is required only when the enabled preflight runs.
 
 ## Change workflow
 
@@ -47,6 +47,9 @@ The scaffold performs no Jev call. A missing TypeSafe API key must not prevent `
 - TypeSafe/Jev cannot be selected as the reply-generating provider.
 - API keys never appear in object representations, errors, logs, traces, or serialized state.
 - The public API names capabilities, not internal questions or decisions.
+- Security preflight response metadata contains category flags, never a copy of the supplied input.
+- Security preflight only classifies the request text sent to Jev; attachments, context, tool data, and outputs remain outside its coverage.
+- The decision provider receives the supplied request text, so it must be an approved destination for that input.
 - Runtime state is run-local; reusable configuration is frozen and validated before execution.
 - Existing `BaseAgent` behavior remains unchanged when Jev is not involved; `AgentRuntimeType.JEV` gets the same linear-loop wiring as `LINEAR`.
 - Provider payload dictionaries do not move into `vidbyte/lib` records.
@@ -55,13 +58,14 @@ The scaffold performs no Jev call. A missing TypeSafe API key must not prevent `
 ## Example construction
 
 ```python
-from vidbyte import JevAgent, JevAgentSettings
+from vidbyte import JevAgent, JevAgentSettings, Preset, SecurityAction
 
 settings = JevAgentSettings(
     name="researcher",
     system_prompt="Research carefully and report evidence.",
     provider="openai",
     model_name="gpt-4.1",
+    preflight=(Preset.Security(on_detected=SecurityAction.BLOCK),),
 )
 agent = JevAgent(settings)
 ```

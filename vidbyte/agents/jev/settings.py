@@ -14,6 +14,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, field
 
+from vidbyte.agents.jev.presets import SecurityPreset
 from vidbyte.agents.settings import AgentLoopSettings
 from vidbyte.lib.dataclasses.model_configs import DecisionModelConfig
 from vidbyte.lib.enums import ModelProvider
@@ -36,6 +37,7 @@ class JevAgentSettings:
     permission_policy: PermissionPolicy = field(default_factory=PermissionPolicy)
     loop: AgentLoopSettings = field(default_factory=AgentLoopSettings)
     decision: DecisionModelConfig = field(default_factory=DecisionModelConfig, repr=False)
+    preflight: tuple[SecurityPreset, ...] = ()
 
     def __post_init__(self) -> None:
         # Normalizes immutable inputs and rejects invalid agent configuration before runtime construction.
@@ -62,6 +64,21 @@ class JevAgentSettings:
             raise ConfigurationError("JevAgentSettings.loop must be an AgentLoopSettings instance.")
         if not isinstance(self.decision, DecisionModelConfig):
             raise ConfigurationError("JevAgentSettings.decision must be a DecisionModelConfig instance.")
+        self._normalize_preflight()
+
+    def _normalize_preflight(self) -> None:
+        # Freezes the opt-in preset list and rejects objects outside the supported named surface.
+        if isinstance(self.preflight, (str, bytes, SecurityPreset)):
+            raise ConfigurationError("JevAgentSettings.preflight must be an iterable of Preset.Security objects.")
+        try:
+            normalized = tuple(self.preflight)
+        except TypeError as exc:
+            raise ConfigurationError("JevAgentSettings.preflight must be an iterable of Preset.Security objects.") from exc
+        if not all(isinstance(item, SecurityPreset) for item in normalized):
+            raise ConfigurationError("JevAgentSettings.preflight only supports Preset.Security objects.")
+        if len(normalized) > 1:
+            raise ConfigurationError("JevAgentSettings.preflight cannot contain duplicate security presets.")
+        object.__setattr__(self, "preflight", normalized)
 
     @staticmethod
     def _validate_text(value: object, field_name: str) -> None:
