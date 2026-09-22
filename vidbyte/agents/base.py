@@ -1002,10 +1002,9 @@ class BaseAgent(McpAttachableMixin):
         )
 
     def _runtime(self) -> Any:
-        from vidbyte.lib.registries.runtimes import RuntimeRegistry
-        runtime_cls = RuntimeRegistry.resolve(self.runtime_type)
+        runtime_cls = self._runtime_class()
 
-        kwargs: dict[str, Any] = {}
+        kwargs = self._runtime_extension_kwargs()
         if self.runtime_type in (
             AgentRuntimeType.ACTOR_MODEL,
             AgentRuntimeType.ACTOR_MODEL_P2P,
@@ -1048,6 +1047,16 @@ class BaseAgent(McpAttachableMixin):
             output_schema=self.output_schema,
             **kwargs,
         )
+
+    def _runtime_class(self) -> type:
+        # Resolves the runtime implementation; specialized agents may replace the class without copying factory wiring.
+        from vidbyte.lib.registries.runtimes import RuntimeRegistry
+
+        return RuntimeRegistry.resolve(self.runtime_type)
+
+    def _runtime_extension_kwargs(self) -> dict[str, Any]:
+        # Supplies feature-specific runtime constructor options while standard agents keep the established empty extension.
+        return {}
 
     def _runtime_middleware(self) -> tuple[AgentMiddleware, ...]:
         # Appends settings-driven and tracing middleware to the user middleware.
