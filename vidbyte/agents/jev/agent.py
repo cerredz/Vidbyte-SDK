@@ -1,7 +1,7 @@
 """FILE: vidbyte/agents/jev/agent.py
 
 PURPOSE: Exposes the narrow JevAgent facade backed by JevRuntime and JevAgentSettings.
-ROLE IN CODEBASE: Maps one immutable settings object into established BaseAgent state and fixes the runtime specialization internally.
+ROLE IN CODEBASE: Maps one immutable settings object into established BaseAgent state and fixes the runtime to AgentRuntimeType.JEV, which RuntimeRegistry resolves to JevRuntime.
 ARCHITECTURE NOTE: JevAgent is opinionated by design; callers cannot replace its runtime or pass arbitrary BaseAgent customization kwargs.
 COMMON MODIFICATION PATTERNS: Evolve JevAgentSettings and JevRuntime together, leaving this mapping intentionally small.
 KNOWN EDGE CASES: Jev's TypeSafe model is not the reply-generating model; settings validation prevents that provider mix-up.
@@ -14,7 +14,6 @@ from __future__ import annotations
 from typing import Any
 
 from vidbyte.agents.base import BaseAgent
-from vidbyte.agents.jev.runtime import JevRuntime
 from vidbyte.agents.jev.settings import JevAgentSettings
 from vidbyte.lib.enums import AgentRuntimeType
 from vidbyte.lib.errors import ConfigurationError
@@ -24,7 +23,7 @@ class JevAgent(BaseAgent):
     """Opinionated agent whose future decision policies are owned by JevRuntime."""
 
     def __init__(self, settings: JevAgentSettings) -> None:
-        # Maps the sole public settings object into BaseAgent while fixing linear execution semantics.
+        # Maps the sole public settings object into BaseAgent while fixing the jev runtime.
         # @intent closed-jev-construction-surface
         # Rejecting arbitrary objects keeps runtime selection and future decision policy owned by this package.
         if not isinstance(settings, JevAgentSettings):
@@ -33,7 +32,7 @@ class JevAgent(BaseAgent):
         super().__init__(
             name=settings.name,
             system_prompt=settings.system_prompt,
-            runtime=AgentRuntimeType.LINEAR,
+            runtime=AgentRuntimeType.JEV,
             tools=settings.tools,
             permission_policy=settings.permission_policy,
             agent_loop_settings=settings.loop,
@@ -43,10 +42,6 @@ class JevAgent(BaseAgent):
             temperature=settings.temperature,
             timeout_seconds=settings.timeout_seconds,
         )
-
-    def _runtime_class(self) -> type[JevRuntime]:
-        # Selects the dedicated runtime without exposing runtime choice in the public constructor.
-        return JevRuntime
 
     def _runtime_extension_kwargs(self) -> dict[str, Any]:
         # Passes the exact immutable settings object to each run-local JevRuntime instance.

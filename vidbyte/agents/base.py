@@ -11,7 +11,7 @@ Architecture:
       exposing shared async execution and pause behavior.
     - Owns one UsageTracker (cost) and one AgentSpeedTracker (latency) for its
       lifetime, both reset at the top of every generate_reply() and threaded
-      into the AgentRuntime it constructs for AgentRuntimeType.LINEAR.
+      into the AgentRuntime it constructs for the linear-loop runtimes (LINEAR and JEV).
 Relations:
     Inherits from McpAttachableMixin. Used by registries, harnesses, and
     multi-agent orchestration. Agent-bound built-ins are wired in
@@ -57,6 +57,10 @@ if TYPE_CHECKING:
     from vidbyte.agents.settings import AgentFallbackSettings
     from vidbyte.sessions.session import Session
     from vidbyte.sessions.store import SessionStore
+
+# Runtimes that execute the direct model/tool loop and so accept its usage, speed, output-contract,
+# fallback, and session-failure wiring. JEV is the opinionated JevAgent's linear-loop subclass.
+_LINEAR_LOOP_RUNTIMES = frozenset({AgentRuntimeType.LINEAR, AgentRuntimeType.JEV})
 
 
 class BaseAgent(McpAttachableMixin):
@@ -197,7 +201,7 @@ class BaseAgent(McpAttachableMixin):
                 f"Agent {name} uses non-linear runtime {self.runtime_type.value}, "
                 "which does not support tool_settings."
             )
-        if self.agent_loop_settings.output_contract.active() and self.runtime_type is not AgentRuntimeType.LINEAR:
+        if self.agent_loop_settings.output_contract.active() and self.runtime_type not in _LINEAR_LOOP_RUNTIMES:
             raise ConfigurationError(
                 f"Agent {name} uses non-linear runtime {self.runtime_type.value}, "
                 "which does not support output contracts."
@@ -1002,7 +1006,8 @@ class BaseAgent(McpAttachableMixin):
         )
 
     def _runtime(self) -> Any:
-        runtime_cls = self._runtime_class()
+        from vidbyte.lib.registries.runtimes import RuntimeRegistry
+        runtime_cls = RuntimeRegistry.resolve(self.runtime_type)
 
         kwargs = self._runtime_extension_kwargs()
         if self.runtime_type in (
@@ -1027,7 +1032,7 @@ class BaseAgent(McpAttachableMixin):
                     "include_actors": None,
                 }
 
-        if self.runtime_type is AgentRuntimeType.LINEAR:
+        if self.runtime_type in _LINEAR_LOOP_RUNTIMES:
             kwargs["output_contract"] = self._output_contract_with_schema()
             kwargs["usage_tracker"] = self._usage_tracker
             kwargs["speed_tracker"] = self._speed_tracker
@@ -1048,14 +1053,8 @@ class BaseAgent(McpAttachableMixin):
             **kwargs,
         )
 
-    def _runtime_class(self) -> type:
-        # Resolves the runtime implementation; specialized agents may replace the class without copying factory wiring.
-        from vidbyte.lib.registries.runtimes import RuntimeRegistry
-
-        return RuntimeRegistry.resolve(self.runtime_type)
-
     def _runtime_extension_kwargs(self) -> dict[str, Any]:
-        # Supplies feature-specific runtime constructor options while standard agents keep the established empty extension.
+        # Supplies runtime-specific constructor options (JevAgent passes its settings); standard agents add none.
         return {}
 
     def _runtime_middleware(self) -> tuple[AgentMiddleware, ...]:
@@ -1063,7 +1062,7 @@ class BaseAgent(McpAttachableMixin):
         middleware = self.middleware
         active_session = getattr(self, "_active_session", None)
         session_failures = getattr(active_session, "failures", None)
-        if self.runtime_type is AgentRuntimeType.LINEAR and session_failures is not None and getattr(session_failures, "has_rules", False):
+        if self.runtime_type in _LINEAR_LOOP_RUNTIMES and session_failures is not None and getattr(session_failures, "has_rules", False):
             from vidbyte.middleware.builtins import FailureMiddleware
             middleware = (*middleware, FailureMiddleware(session_failures))
         if self.agent_loop_settings.tool_error_policy is not None:

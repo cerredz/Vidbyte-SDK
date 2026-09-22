@@ -152,11 +152,16 @@ PROVIDER_PRICING: dict[ModelProvider, dict[str, ModelPricing]] = {
     ModelProvider.META: {
         "muse-spark-1.1": ModelPricing(input_per_million=1.25, output_per_million=4.25, cache_read_per_million=0.15),
     },
-    # TypeSafe Jev (System One decision model): $0.042 per million input tokens and
-    # free output tokens, per the TypeSafe launch post checked 2026-09-21
-    # (https://typesafe.ai/blog/introducing-system-one-models-and-jev).
+    # TypeSafe Jev 1.13 (System One decision model), checked 2026-09-21 against
+    # https://docs.typesafe.ai/models.md: "$42 / $0.042" per Btok / per Mtok, "Charged per
+    # input token. Output tokens are free." The API reports only input_tokens and
+    # output_tokens (https://docs.typesafe.ai/api.md#response-body) and publishes no cached-
+    # token rate, so no cache_read rate applies. Responses name the versioned model that
+    # answered (jev-1.13.0), which the "jev-1.13" prefix prices; both aliases point to it.
     ModelProvider.TYPESAFE: {
+        "jev-1.13": ModelPricing(input_per_million=0.042, output_per_million=0.0),
         "jev-latest": ModelPricing(input_per_million=0.042, output_per_million=0.0),
+        "jev-preview": ModelPricing(input_per_million=0.042, output_per_million=0.0),
     },
 }
 

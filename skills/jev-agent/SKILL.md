@@ -22,11 +22,11 @@ Each capability owns its fixed internal Jev questions, state projection, thresho
 ## Current scaffold
 
 - `settings.py` owns the complete public configuration surface.
-- `agent.py` maps settings into `BaseAgent` and fixes linear execution.
-- `runtime.py` is the seam for Jev policy and currently inherits the ordinary linear loop unchanged.
-- `vidbyte/lib/dataclasses/jev.py` owns immutable decision records.
-- `vidbyte/lib/runners/decision.py` owns semantic decision execution.
-- `vidbyte/providers/typesafe.py` alone owns TypeSafe wire serialization and normalization.
+- `agent.py` maps settings into `BaseAgent` and fixes the runtime to `AgentRuntimeType.JEV`; it supplies its settings through the single `_runtime_extension_kwargs()` hook.
+- `runtime.py` is the seam for Jev policy. `RuntimeRegistry` resolves `AgentRuntimeType.JEV` to `JevRuntime`, which currently inherits the ordinary linear loop unchanged and refuses to build without `JevAgentSettings`.
+- `vidbyte/lib/dataclasses/jev.py` owns immutable decision records and the `TypeSafeWireRequest`/`TypeSafeWireQuestion` wire records. They mirror https://docs.typesafe.ai/api.md exactly: state, instructions, and criteria may be strings or JSON structure; noul criteria are optional; Score answers carry a weighted `score`; noul answers carry no confidence.
+- `vidbyte/lib/runners/decision.py` owns semantic decision execution (`arun`) and model listing (`alist_models`).
+- `vidbyte/providers/typesafe.py` alone owns TypeSafe wire serialization, normalization, and failure mapping.
 
 The scaffold performs no Jev call. A missing TypeSafe API key must not prevent `JevAgentSettings` or `JevAgent` construction until an enabled capability actually needs Jev.
 
@@ -48,7 +48,7 @@ The scaffold performs no Jev call. A missing TypeSafe API key must not prevent `
 - API keys never appear in object representations, errors, logs, traces, or serialized state.
 - The public API names capabilities, not internal questions or decisions.
 - Runtime state is run-local; reusable configuration is frozen and validated before execution.
-- Existing `BaseAgent` behavior remains unchanged when Jev is not involved.
+- Existing `BaseAgent` behavior remains unchanged when Jev is not involved; `AgentRuntimeType.JEV` gets the same linear-loop wiring as `LINEAR`.
 - Provider payload dictionaries do not move into `vidbyte/lib` records.
 - No live provider call is required by deterministic tests.
 
