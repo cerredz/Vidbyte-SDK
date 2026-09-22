@@ -19,16 +19,18 @@ Expose user intent through named, validated capabilities. Examples include:
 
 Each capability owns its fixed internal Jev questions, state projection, thresholds, actions, fallback policy, and observability. Those internal mechanics are implementation details, not public decision-building blocks.
 
-## Current scaffold
+## Current implementation
 
 - `settings.py` owns the complete public configuration surface.
 - `agent.py` maps settings into `BaseAgent` and fixes linear execution.
-- `runtime.py` is the seam for Jev policy and currently inherits the ordinary linear loop unchanged.
+- `presets.py` owns the closed registry of fixed Jev preflight policies.
+- `response.py` owns the run-local `JevResponse` and typed preset results.
+- `runtime.py` evaluates every enabled preflight preset in one Jev request before the ordinary linear loop.
 - `vidbyte/lib/dataclasses/jev.py` owns immutable decision records.
 - `vidbyte/lib/runners/decision.py` owns semantic decision execution.
 - `vidbyte/providers/typesafe.py` alone owns TypeSafe wire serialization and normalization.
 
-The scaffold performs no Jev call. A missing TypeSafe API key must not prevent `JevAgentSettings` or `JevAgent` construction until an enabled capability actually needs Jev.
+The clarity preflight is opt-in through `preflight=(JevPreflightPreset.CLARITY,)`. It asks 18 same-polarity Noul questions in one request, uses their mean `true` probability, and asks the clarification associated with the lowest-scoring dimension when the mean is below the fixed threshold. A missing TypeSafe API key or provider failure is represented as an unavailable preset result and fails open into the ordinary agent loop.
 
 ## Change workflow
 
@@ -55,13 +57,14 @@ The scaffold performs no Jev call. A missing TypeSafe API key must not prevent `
 ## Example construction
 
 ```python
-from vidbyte import JevAgent, JevAgentSettings
+from vidbyte import JevAgent, JevAgentSettings, JevPreflightPreset
 
 settings = JevAgentSettings(
     name="researcher",
     system_prompt="Research carefully and report evidence.",
     provider="openai",
     model_name="gpt-4.1",
+    preflight=(JevPreflightPreset.CLARITY,),
 )
 agent = JevAgent(settings)
 ```
@@ -78,6 +81,7 @@ Run the focused script first:
 
 ```text
 python scripts/test-jev-agent-scaffold.py
+python scripts/test-jev-preflight.py
 ```
 
 Then run repository gates:
