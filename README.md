@@ -194,6 +194,35 @@ reply = image_agent.run("A clean product mockup on a white desk")
 print(reply.content)
 ```
 
+### Jev Security Preflight
+
+Use `Preset.Security` to classify sensitive categories in the supplied request
+before JevAgent enters its ordinary model and tool loop. The fixed preflight
+checks for credentials, personal records, and confidential business material;
+it returns one flag per category and an `any_sensitive` aggregate.
+
+```python
+from vidbyte import JevAgent, JevAgentSettings, Preset, SecurityAction
+
+agent = JevAgent(JevAgentSettings(
+    name="assistant",
+    system_prompt="Help the user carefully.",
+    provider="openai",
+    model_name="gpt-4.1-mini",
+    preflight=(Preset.Security(on_detected=SecurityAction.BLOCK),),
+))
+
+reply = agent.run("Review this request.")
+security = reply.metadata["jev_response"].results["security"]
+print(security.any_sensitive, security.flags["api_service_secrets"])
+```
+
+`BLOCK` stops the run and names detected categories without echoing their
+contents. `PAUSE` returns a review-required result for the caller to handle.
+`REPORT` attaches the flags and continues into the model loop. Classification
+uses TypeSafe and sends it the request text; only request text is checked in
+this version, and attachments, context, outputs, and tool data are not covered.
+
 ### Codex Harness Agent
 
 Install the optional Codex integration when Codex should own the inner coding-agent loop while Vidbyte supplies the agent-facing configuration and result contract:
