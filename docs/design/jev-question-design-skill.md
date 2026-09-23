@@ -12,11 +12,12 @@ This change adds a contributor skill, `skills/asking-jev-questions/SKILL.md`, th
 
 The skill is one Markdown file with YAML frontmatter, in the same format as `skills/jev-agent/SKILL.md`. It contains:
 
-1. **The core idea.** Phrasing does not delete reasoning. It moves it to the question author (definitions), to code (arithmetic, combination, actions), or to the main model (planning, generation). Jev keeps only the matching step.
-2. **Fifteen pillars.** Each pillar has a rule, a reason tied to how Jev behaves, and a short bad/good contrast. The pillars are grounded in TypeSafe's published guidance, especially the `jev-1.13` jaggedness page (literal reading, math, dates, indirection, large state, contradictory criteria, structural invariants, generation).
-3. **A two-second test** for checking any question before it ships.
-4. **Few-shot examples** as full request bodies in the wire shape `TypeSafeProvider` sends (`state`, `questions` with `type`, `instructions`, `criteria`), each followed by the code-side action for every answer. The examples cover the three capabilities discussed for `JevAgent`: scope fit, effort budget (as feature questions combined in code), decomposition gating, plus a mid-run progress check that replaces the forecast example.
-5. **A pre-ship checklist.**
+1. **What we are trying to accomplish.** Several paragraphs on the goal: rewrite questions that seem to need reasoning so the reasoning is already done when Jev reads them. Definitions and boundaries go into the question text, facts and combination go into code, and generation goes to a generative model. Jev keeps one recognition step. The section uses an expert-versus-checklist picture and states the limits (information not in the state, generation, reasoning that cannot be written down in advance).
+2. **A method.** Write the naive question, list the hidden steps, tag each (definition, fact, lookup, combination, forecast, generation, recognition), and move every step except recognition to its owner. Includes one worked pass.
+3. **The two-second test** for checking a finished question.
+4. **Twenty-five strategies in six groups:** move the meaning into the question, split the reasoning, do non-judgment work in code, shape the state, time the question, shape the answer. Each strategy says what it means, why it works, and how to apply it, most with a before/after. The strategies are grounded in TypeSafe's published guidance, especially the `jev-1.13` jaggedness page (literal reading, math, dates, indirection, large state, contradictory criteria, structural invariants, generation) and its structure and batching docs.
+5. **A checklist** keyed to strategy numbers, and a short note on how the rules apply inside `JevAgent` (definitions from named settings, fallback to the linear loop).
+6. **Fifteen general before/after examples** from domains unrelated to the runtime (support urgency, phishing, resumes, reviews, contracts, meeting notes, invoices, bug severity, moderation, diets, record matching, retrieval, churn, schema changes, team routing). Each names the hidden steps, gives the rewritten question as a four-to-five-sentence `instructions` text with its options, and says what code does with the answer.
 
 `skills/jev-agent/SKILL.md` changes in two places: step 3 of the change workflow points to the new skill, and the capability design example swaps the forecast question for an observation.
 
@@ -38,6 +39,6 @@ No Python, tests, or package data change. `pyproject.toml` already includes `ski
 
 ## Verification
 
-- Every example request uses only fields that `JevQuestion` and `TypeSafeWireQuestion` accept (`noul` criteria keys limited to `true`/`false`; `choice` has at least 2 options; `score` has 2–10 levels). Check this by building each example as a `JevDecisionRequest` in a throwaway script.
+- Every rewritten example question is four or five sentences long, and every example uses a question type and option count that `JevQuestion` accepts (`noul` criteria keys limited to `true`/`false`; `choice` has at least 2 options; `score` has 2–10 levels).
 - `python lint/run.py`, `python scripts/run_ci.py --stage source`, and `python scripts/run_ci.py` pass.
 - The draft PR's required checks are green.
