@@ -14,6 +14,7 @@ from __future__ import annotations
 from typing import Any
 
 from vidbyte.agents.base import BaseAgent
+from vidbyte.agents.jev.alignment import JevAgentAlignment
 from vidbyte.agents.jev.settings import JevAgentSettings
 from vidbyte.lib.enums import AgentRuntimeType
 from vidbyte.lib.errors import ConfigurationError
@@ -29,6 +30,8 @@ class JevAgent(BaseAgent):
         if not isinstance(settings, JevAgentSettings):
             raise ConfigurationError("JevAgent requires a JevAgentSettings instance.")
         self.settings = settings
+        # One editor per agent; it aligns only this agent's run-local prompt and is absent unless self_align is on.
+        self.alignment = JevAgentAlignment(settings) if settings.self_align else None
         super().__init__(
             name=settings.name,
             system_prompt=settings.system_prompt,
@@ -44,8 +47,8 @@ class JevAgent(BaseAgent):
         )
 
     def _runtime_extension_kwargs(self) -> dict[str, Any]:
-        # Passes the exact immutable settings object to each run-local JevRuntime instance.
-        return {"jev_settings": self.settings}
+        # Passes the exact immutable settings object and the optional alignment editor to each run-local JevRuntime.
+        return {"jev_settings": self.settings, "alignment": self.alignment}
 
 
 __all__ = ["JevAgent"]

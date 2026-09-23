@@ -28,7 +28,9 @@ Each capability owns its fixed internal Jev questions, state projection, thresho
 - `vidbyte/lib/runners/decision.py` owns semantic decision execution (`arun`) and model listing (`alist_models`).
 - `vidbyte/providers/typesafe.py` alone owns TypeSafe wire serialization, normalization, and failure mapping.
 
-The scaffold performs no Jev call. A missing TypeSafe API key must not prevent `JevAgentSettings` or `JevAgent` construction until an enabled capability actually needs Jev.
+- `alignment/` owns the self-alignment capability (`JevAgentSettings(self_align=True)`). `JevAgentAlignment` is a `BaseAgent` subclass: it asks the fixed questions in `alignment/questions.py`, routes each "no" to an editable section or to `owner_actions`, runs its own loop with the single `edit_system_prompt_section` tool against a run-local `JevPromptDraft`, and keeps only the edits a second Jev call confirms. `JevRuntime.arun` swaps the result into this run's context and run-local runtime and attaches it as `metadata["jev_alignment"]`.
+
+Without `self_align`, the scaffold performs no Jev call. A missing TypeSafe API key must not prevent `JevAgentSettings` or `JevAgent` construction until an enabled capability actually needs Jev.
 
 ## Change workflow
 
@@ -51,6 +53,9 @@ The scaffold performs no Jev call. A missing TypeSafe API key must not prevent `
 - Existing `BaseAgent` behavior remains unchanged when Jev is not involved; `AgentRuntimeType.JEV` gets the same linear-loop wiring as `LINEAR`.
 - Provider payload dictionaries do not move into `vidbyte/lib` records.
 - No live provider call is required by deterministic tests.
+- Self-alignment edits only the main agent's current run: never `JevAgentSettings`, `JevAgent.system_prompt`, the editor's own prompt, or later runs.
+- Alignment edits are additive and limited to operational sections (tools, method, output, exceptions, priorities, glossary). Role, scope, boundaries, audience, knowledge, and permissions are reported to the owner, and a failed fit gate never produces an edit.
+- Alignment fails open for the run (original prompt) and closed for edits (an unverified edit never runs).
 
 ## Example construction
 

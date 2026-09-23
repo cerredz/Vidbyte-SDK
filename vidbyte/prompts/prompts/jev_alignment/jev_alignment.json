@@ -1,0 +1,11 @@
+{
+  "name": "Jev Agent Alignment",
+  "description": "The system prompt for JevAgentAlignment, the small editor agent that closes gaps Jev found in a JevAgent's system prompt before a run. It explains the section model, the owner-only sections the editor must never touch, and the rules that keep each addition general, minimal, and free of invented facts, so the main agent runs with a prompt that covers the request without widening its job.",
+  "key": "jev_alignment",
+  "prompts": {
+    "editor_system_prompt": {
+      "path": "editor_system_prompt.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_alignment/editor_system_prompt.md"
+    }
+  }
+}
