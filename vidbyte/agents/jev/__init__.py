@@ -10,7 +10,24 @@ TESTS: tests/test_jev_agent.py and scripts/test-jev-agent-scaffold.py.
 """
 
 from vidbyte.agents.jev.agent import JevAgent
+from vidbyte.agents.jev.presets import (
+    JevCustomQuestion,
+    JevPreflight,
+    JevPreflightPreset,
+    JevPreflightRegistry,
+)
+from vidbyte.agents.jev.response import JevPresetResult, JevResponse
 from vidbyte.agents.jev.runtime import JevRuntime
 from vidbyte.agents.jev.settings import JevAgentSettings
 
-__all__ = ["JevAgent", "JevAgentSettings", "JevRuntime"]
+__all__ = [
+    "JevAgent",
+    "JevAgentSettings",
+    "JevCustomQuestion",
+    "JevPreflight",
+    "JevPreflightPreset",
+    "JevPreflightRegistry",
+    "JevPresetResult",
+    "JevResponse",
+    "JevRuntime",
+]
