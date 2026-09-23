@@ -14,6 +14,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, field
 
+from vidbyte.agents.jev.presets import JevPreflight
 from vidbyte.agents.settings import AgentLoopSettings
 from vidbyte.lib.dataclasses.model_configs import DecisionModelConfig
 from vidbyte.lib.enums import ModelProvider
@@ -36,6 +37,7 @@ class JevAgentSettings:
     permission_policy: PermissionPolicy = field(default_factory=PermissionPolicy)
     loop: AgentLoopSettings = field(default_factory=AgentLoopSettings)
     decision: DecisionModelConfig = field(default_factory=DecisionModelConfig, repr=False)
+    preflight: JevPreflight = field(default_factory=JevPreflight)
 
     def __post_init__(self) -> None:
         # Normalizes immutable inputs and rejects invalid agent configuration before runtime construction.
@@ -62,6 +64,8 @@ class JevAgentSettings:
             raise ConfigurationError("JevAgentSettings.loop must be an AgentLoopSettings instance.")
         if not isinstance(self.decision, DecisionModelConfig):
             raise ConfigurationError("JevAgentSettings.decision must be a DecisionModelConfig instance.")
+        if not isinstance(self.preflight, JevPreflight):
+            raise ConfigurationError("JevAgentSettings.preflight must be a JevPreflight instance.")
 
     @staticmethod
     def _validate_text(value: object, field_name: str) -> None:
