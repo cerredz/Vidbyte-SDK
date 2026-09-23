@@ -30,6 +30,28 @@ Each capability owns its fixed internal Jev questions, state projection, thresho
 
 The scaffold performs no Jev call. A missing TypeSafe API key must not prevent `JevAgentSettings` or `JevAgent` construction until an enabled capability actually needs Jev.
 
+## Proposed state architecture for runtime decisions
+
+Use this guidance when designing a capability that asks Jev about an active or completed run. It is a design direction, not a claim that the current scaffold implements state tracking.
+
+Maintain three related representations:
+
+1. **Recoverable source evidence:** user instructions, model outputs, tool inputs and outcomes, and relevant artifact versions. Retain the material needed to revisit a detail after context compaction or result truncation. An evidence reference supports retrieval and audit; Jev needs the relevant content in its view.
+2. **Run-local structured state:** incrementally update objectives, constraints and exceptions, active tasks, declared plans, findings, execution outcomes, and unresolved issues. Keep what the runtime observed separate from what the agent interpreted, intended, or claimed to have verified. Record scope, provenance, dependencies, and versions for consequential facts. Changes invalidate dependent claims; a passed check on an old artifact version does not verify the current one.
+3. **Decision-specific Jev view:** assemble the facts and evidence needed by a named capability. Treat roughly 5–10k tokens as an upper budget for a broad view, not a required size for every call. Keep instructions, exceptions, qualifications, and contradictions that could change the answer.
+
+Update deterministic execution facts directly from runtime events. Have the generative agent provide small structured changes to its interpretations and plans during ordinary responses. Use targeted retrieval or a generative interpretation call when a new question needs old detail or when an instruction is ambiguous. Validate updates at runtime boundaries; a missing or malformed update leaves dependent semantic state unresolved. Periodic reconciliation can detect drift, but summaries of summaries cannot establish completeness.
+
+At a decision boundary, specify an **evidence contract**: the classification criteria, required evidence and scope, freshness and version requirements, preparation steps, input budget, and behavior when evidence is insufficient. Check for known gaps, stale claims, conflicts, and budget overflow before using Jev's answer. Retrieve or interpret missing material, defer, or use a suitable fallback according to the capability's policy. Do not silently trim required evidence to fit the budget or treat an unresolved absence as proof that nothing relevant exists.
+
+Timing affects what the state can truthfully say. After a tool result, the runtime knows the observed outcome while the generative agent's interpretation may still be pending. Preserve that distinction. A prior conditional intention may become inapplicable when its condition fails. Before tool execution, use the agent's latest proposed action and interpretation; at run completion, compare final claims with current execution and verification evidence.
+
+Keep deterministic counting, ordering, permission checks, version checks, and answer combination in code. Give ambiguous instructions, reference resolution, planning, and complex synthesis to a generative model. Ask Jev narrow recognition questions over prepared evidence using `skills/asking-jev-questions/SKILL.md`. A yes/no form does not make a question simple if answering it requires multi-step reasoning.
+
+No fixed-size state can preserve all information needed for every possible future question about an unbounded run. No state schema guarantees faithful access to the generative model's private reasoning. Aim for an accurate operational record of observed facts, declared beliefs and intentions, and verified outcomes, with recoverable evidence and explicit uncertainty. Extraction and retrieval can miss decisive facts. Provenance, an event ID, or a `complete` flag can show where a claim came from but cannot prove the evidence establishes the claim or that every relevant detail was found.
+
+Before letting a state-backed decision control consequential runtime behavior, evaluate three levels separately: Jev on a reviewed reference view, Jev on the automatically prepared view, and the resulting full-run outcome. Include paired cases differing by one decisive exception, correction, version, failed check, or dependency. Measure missed evidence, stale-state errors, incorrect decisions, fallback rate, added tokens, latency, and total cost. Start with action relevance, progress assessment, and final-output support to test whether the design generalizes beyond one capability.
+
 ## Change workflow
 
 1. Read `AGENTS.md`, `docs/design/jev-agent-scaffold.md`, and every existing file under `vidbyte/agents/jev/`.
