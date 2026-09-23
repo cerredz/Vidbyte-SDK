@@ -34,7 +34,7 @@ The scaffold performs no Jev call. A missing TypeSafe API key must not prevent `
 
 1. Read `AGENTS.md`, `docs/design/jev-agent-scaffold.md`, and every existing file under `vidbyte/agents/jev/`.
 2. Describe the user-facing capability in product terms and add a dedicated immutable settings type. Prefer one boolean or nested settings object over low-level knobs.
-3. Define exactly when the runtime asks Jev, the state Jev sees, the fixed questions asked, and the action for every answer.
+3. Define exactly when the runtime asks Jev, the state Jev sees, the fixed questions asked, and the action for every answer. Write every question with `skills/asking-jev-questions/SKILL.md`: Jev matches state against definitions you supply; it does not reason, count, forecast, or generate.
 4. Define fail-open or fail-closed behavior for missing credentials, timeouts, malformed answers, and unsupported configurations. Never let an exception silently choose policy.
 5. Implement orchestration in `JevRuntime`; keep provider wire shapes in `vidbyte/providers/typesafe.py` and reusable validated records in `vidbyte/lib/`.
 6. Keep generative usage/speed tracking agent-owned. Make decision usage visible without mixing token fields or double counting.
@@ -70,7 +70,7 @@ The equivalent namespace constructor is `sdk.agents.jev(settings)`.
 
 ## Capability design example
 
-For a future `dynamic_compute` setting, expose the user-level choice and useful bounds. Keep questions such as “Is another iteration likely to materially improve the answer?” inside the runtime. Translate Jev's calibrated answer into a fixed compute policy, record the decision and usage, and test both continued and stopped execution. Do not expose that question as a caller-supplied rule.
+For a future `dynamic_compute` setting, expose the user-level choice and useful bounds. Keep questions such as “How much did `last_turn` add beyond `earlier_findings`?” inside the runtime. Ask about what the last turn observably did, not whether another turn will help: Jev answers observations reliably and forecasts poorly. Translate Jev's calibrated answer into a fixed compute policy, record the decision and usage, and test both continued and stopped execution. Do not expose that question as a caller-supplied rule.
 
 ## Verification
 
