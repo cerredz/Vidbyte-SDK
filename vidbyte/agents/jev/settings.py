@@ -4,9 +4,9 @@ PURPOSE: Defines the single, opinionated public configuration object for JevAgen
 ROLE IN CODEBASE: JevAgentSettings is the only constructor input accepted by JevAgent and carries the future decision-model seam into JevRuntime.
 ARCHITECTURE NOTE: The surface is intentionally closed; named Jev capabilities belong here as explicit settings instead of a generic decisions collection.
 COMMON MODIFICATION PATTERNS: Add a validated named capability object, then implement its fixed policy in JevRuntime without exposing runtime replacement hooks.
-KNOWN EDGE CASES: The generative provider cannot be TypeSafe because Jev is a decision model; neither generative nor decision API keys appear in repr output.
-RELATED DOCS: docs/design/jev-agent-scaffold.md and skills/jev-agent/SKILL.md.
-TESTS: tests/test_jev_agent.py and scripts/test-jev-agent-scaffold.py.
+KNOWN EDGE CASES: The generative provider cannot be TypeSafe because Jev is a decision model; neither generative nor decision API keys appear in repr output. `documentation` is one value on purpose: it turns the lookup on and picks the search provider, and every other part of the lookup is fixed.
+RELATED DOCS: docs/design/jev-agent-scaffold.md, docs/design/jev-documentation.md, and skills/jev-agent/SKILL.md.
+TESTS: tests/test_jev_agent.py, tests/test_jev_documentation.py, and scripts/test-jev-agent-scaffold.py.
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 
 from vidbyte.agents.settings import AgentLoopSettings
 from vidbyte.lib.dataclasses.model_configs import DecisionModelConfig
-from vidbyte.lib.enums import ModelProvider
+from vidbyte.lib.enums import JevDocumentationProvider, ModelProvider
 from vidbyte.lib.errors import ConfigurationError
 from vidbyte.tools.security import PermissionPolicy
 
@@ -36,6 +36,7 @@ class JevAgentSettings:
     permission_policy: PermissionPolicy = field(default_factory=PermissionPolicy)
     loop: AgentLoopSettings = field(default_factory=AgentLoopSettings)
     decision: DecisionModelConfig = field(default_factory=DecisionModelConfig, repr=False)
+    documentation: JevDocumentationProvider | str | None = None
 
     def __post_init__(self) -> None:
         # Normalizes immutable inputs and rejects invalid agent configuration before runtime construction.
@@ -62,6 +63,7 @@ class JevAgentSettings:
             raise ConfigurationError("JevAgentSettings.loop must be an AgentLoopSettings instance.")
         if not isinstance(self.decision, DecisionModelConfig):
             raise ConfigurationError("JevAgentSettings.decision must be a DecisionModelConfig instance.")
+        object.__setattr__(self, "documentation", self._normalized_documentation())
 
     @staticmethod
     def _validate_text(value: object, field_name: str) -> None:
@@ -77,6 +79,22 @@ class JevAgentSettings:
             return self.provider if isinstance(self.provider, ModelProvider) else ModelProvider(self.provider)
         except (TypeError, ValueError) as exc:
             raise ConfigurationError(f"Unsupported model provider: {self.provider!r}") from exc
+
+    def _normalized_documentation(self) -> JevDocumentationProvider | None:
+        # Converts the documentation search provider to its enum, keeping None as "off".
+        # @intent documentation-is-one-value
+        # The owner wants a single value that both enables the lookup and names the search provider,
+        # so a bare True is rejected rather than silently picking a provider the caller never chose.
+        value = self.documentation
+        if value is None or isinstance(value, JevDocumentationProvider):
+            return value
+        supported = ", ".join(provider.value for provider in JevDocumentationProvider)
+        if not isinstance(value, str):
+            raise ConfigurationError(f"JevAgentSettings.documentation must be None or a search provider name: {supported}.")
+        try:
+            return JevDocumentationProvider(value)
+        except ValueError as exc:
+            raise ConfigurationError(f"Unsupported documentation search provider {value!r}; use one of: {supported}.") from exc
 
     def _validate_temperature(self) -> None:
         # Applies the shared generative-model temperature range without accepting booleans or non-finite numbers.

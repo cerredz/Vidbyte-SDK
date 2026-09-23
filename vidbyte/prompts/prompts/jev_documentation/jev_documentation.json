@@ -1,0 +1,11 @@
+{
+  "name": "Jev Documentation",
+  "description": "The system prompt for JevDocumentation, the small search agent a JevAgent runs when Jev decides a request depends on outside libraries, APIs, or platforms. It tells the agent to search for the official documentation pages the request needs and to return only links its searches returned, one per line, so the main agent can prefer current documentation over stale training knowledge.",
+  "key": "jev_documentation",
+  "prompts": {
+    "searcher_system_prompt": {
+      "path": "searcher_system_prompt.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_documentation/searcher_system_prompt.md"
+    }
+  }
+}

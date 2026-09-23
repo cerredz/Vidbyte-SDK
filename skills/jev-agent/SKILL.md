@@ -28,7 +28,9 @@ Each capability owns its fixed internal Jev questions, state projection, thresho
 - `vidbyte/lib/runners/decision.py` owns semantic decision execution (`arun`) and model listing (`alist_models`).
 - `vidbyte/providers/typesafe.py` alone owns TypeSafe wire serialization, normalization, and failure mapping.
 
-The scaffold performs no Jev call. A missing TypeSafe API key must not prevent `JevAgentSettings` or `JevAgent` construction until an enabled capability actually needs Jev.
+- `documentation/` owns the documentation lookup (`JevAgentSettings(documentation="exa")`, one value that turns it on and names the search provider). `JevDocumentation` is a `BaseAgent` subclass: it asks the ten fixed questions in `documentation/questions.py` in one Jev call, takes the highest P(true) against a fixed threshold, and only then runs its own loop with the provider's priced search tool. A middleware records every URL search returns, only those links are kept, and `JevRuntime.arun` appends them to this run's context and attaches the result as `metadata["jev_documentation"]`.
+
+Without `documentation`, the scaffold performs no Jev call. A missing TypeSafe API key must not prevent `JevAgentSettings` or `JevAgent` construction until an enabled capability actually needs Jev, and a missing search API key must not either.
 
 ## Change workflow
 
@@ -51,6 +53,7 @@ The scaffold performs no Jev call. A missing TypeSafe API key must not prevent `
 - Existing `BaseAgent` behavior remains unchanged when Jev is not involved; `AgentRuntimeType.JEV` gets the same linear-loop wiring as `LINEAR`.
 - Provider payload dictionaries do not move into `vidbyte/lib` records.
 - No live provider call is required by deterministic tests.
+- The documentation lookup fails open for the run: a Jev, key, or search failure leaves the prompt unchanged. Only URLs that a search result returned may reach the main agent, and they reach only the current run.
 
 ## Example construction
 

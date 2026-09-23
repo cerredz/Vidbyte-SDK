@@ -1,12 +1,12 @@
 """FILE: vidbyte/lib/enums/jev.py
 
-PURPOSE: Defines the closed set of TypeSafe Jev question types the SDK can send to the System One endpoint.
+PURPOSE: Defines the closed set of TypeSafe Jev question types the SDK can send to the System One endpoint, and the web search providers JevAgent's documentation lookup can use.
 ROLE IN CODEBASE: `vidbyte/lib/dataclasses/jev.py` validates questions against these members and `vidbyte/providers/typesafe.py` serializes their values onto the wire.
 ARCHITECTURE NOTE: The vocabulary lives in `vidbyte.lib` because the provider layer, the record layer, and the tool layer all read it, and the lower two may not import the tool layer.
 COMMON MODIFICATION PATTERNS: Add a member only when TypeSafe documents a new question type, then extend JevQuestion validation and TypeSafeProvider answer normalization in the same change.
 KNOWN EDGE CASES: `noul` is TypeSafe's own spelling for a yes/no question; keep the serialized value exactly as the API expects it.
 RELATED DOCS: docs/design/jev-agent-scaffold.md and https://docs.typesafe.ai/api.md.
-TESTS: tests/test_jev_agent.py and scripts/test-jev-agent-scaffold.py.
+TESTS: tests/test_jev_agent.py, tests/test_jev_documentation.py, and scripts/test-jev-agent-scaffold.py.
 """
 
 from __future__ import annotations
@@ -27,4 +27,13 @@ class JevQuestionType(str, Enum):
         return tuple(member.value for member in cls)
 
 
-__all__ = ["JevQuestionType"]
+class JevDocumentationProvider(str, Enum):
+    """Web search providers JevAgent's documentation lookup can search with; each value matches its priced search tool's provider."""
+
+    EXA = "exa"
+    TAVILY = "tavily"
+    BRAVE = "brave"
+    PARALLEL = "parallel"
+
+
+__all__ = ["JevDocumentationProvider", "JevQuestionType"]
