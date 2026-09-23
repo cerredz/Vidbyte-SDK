@@ -131,9 +131,12 @@ Add `agents: Sequence[JevSpecialist] = ()` and `specialist_match_threshold: floa
 | MODIFY | `vidbyte/agents/jev/settings.py` | Add and validate catalog and threshold |
 | MODIFY | `vidbyte/agents/jev/runtime.py` | Perform one pre-run decision and specialist dispatch |
 | MODIFY | `vidbyte/agents/jev/__init__.py` | Export the public specialist descriptor |
+| MODIFY | `vidbyte/agents/jev/README.md` | Document matching and fallback behavior |
+| MODIFY | `tests/test_jev_agent.py` | Verify strict catalog validation and routing outcomes without network calls |
 | MODIFY | `vidbyte/agents/__init__.py` | Re-export the descriptor |
 | MODIFY | `vidbyte/__init__.py` | Re-export the descriptor at the package root |
 | MODIFY | `skills/jev-agent/SKILL.md` | Document the supported named capability and invariants |
+| MODIFY | `lint/baseline.json` | Ratchet the verified intent-comment improvement |
 
 ## Dependencies & External Services
 

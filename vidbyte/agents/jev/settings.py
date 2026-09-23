@@ -1,7 +1,7 @@
 """FILE: vidbyte/agents/jev/settings.py
 
-PURPOSE: Defines the single, opinionated public configuration object for JevAgent.
-ROLE IN CODEBASE: JevAgentSettings is the only constructor input accepted by JevAgent and carries the future decision-model seam into JevRuntime.
+PURPOSE: Defines the validated public configuration object for JevAgent.
+ROLE IN CODEBASE: JevAgentSettings is the only constructor input accepted by JevAgent and carries the fixed specialist-routing capability into JevRuntime.
 ARCHITECTURE NOTE: The surface is intentionally closed; named Jev capabilities belong here as explicit settings instead of a generic decisions collection.
 COMMON MODIFICATION PATTERNS: Add a validated named capability object, then implement its fixed policy in JevRuntime without exposing runtime replacement hooks.
 KNOWN EDGE CASES: The generative provider cannot be TypeSafe because Jev is a decision model; neither generative nor decision API keys appear in repr output.
@@ -12,8 +12,14 @@ TESTS: tests/test_jev_agent.py and scripts/test-jev-agent-scaffold.py.
 from __future__ import annotations
 
 import math
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 
+from vidbyte.agents.jev.specialists import (
+    JEV_SPECIALIST_DEFAULT_MATCH_THRESHOLD,
+    JevSpecialist,
+    JevSpecialistCatalog,
+)
 from vidbyte.agents.settings import AgentLoopSettings
 from vidbyte.lib.dataclasses.model_configs import DecisionModelConfig
 from vidbyte.lib.enums import ModelProvider
@@ -36,6 +42,8 @@ class JevAgentSettings:
     permission_policy: PermissionPolicy = field(default_factory=PermissionPolicy)
     loop: AgentLoopSettings = field(default_factory=AgentLoopSettings)
     decision: DecisionModelConfig = field(default_factory=DecisionModelConfig, repr=False)
+    agents: Sequence[JevSpecialist] = ()
+    specialist_match_threshold: float = JEV_SPECIALIST_DEFAULT_MATCH_THRESHOLD
 
     def __post_init__(self) -> None:
         # Normalizes immutable inputs and rejects invalid agent configuration before runtime construction.
@@ -62,6 +70,18 @@ class JevAgentSettings:
             raise ConfigurationError("JevAgentSettings.loop must be an AgentLoopSettings instance.")
         if not isinstance(self.decision, DecisionModelConfig):
             raise ConfigurationError("JevAgentSettings.decision must be a DecisionModelConfig instance.")
+        self._normalize_specialists()
+
+    def _normalize_specialists(self) -> None:
+        # Freezes the catalog and validates every entry before the first runtime can be built.
+        if isinstance(self.agents, (str, bytes)) or not isinstance(self.agents, Sequence):
+            raise ConfigurationError("JevAgentSettings.agents must be a sequence of JevSpecialist values.")
+        specialists = tuple(self.agents)
+        if not all(isinstance(specialist, JevSpecialist) for specialist in specialists):
+            raise ConfigurationError("JevAgentSettings.agents must contain only JevSpecialist values.")
+        normalized_threshold = JevSpecialistCatalog.validate(specialists, self.specialist_match_threshold)
+        object.__setattr__(self, "agents", specialists)
+        object.__setattr__(self, "specialist_match_threshold", normalized_threshold)
 
     @staticmethod
     def _validate_text(value: object, field_name: str) -> None:

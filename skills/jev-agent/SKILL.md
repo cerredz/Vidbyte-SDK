@@ -23,18 +23,18 @@ Each capability owns its fixed internal Jev questions, state projection, thresho
 
 - `settings.py` owns the complete public configuration surface.
 - `agent.py` maps settings into `BaseAgent` and fixes the runtime to `AgentRuntimeType.JEV`; it supplies its settings through the single `_runtime_extension_kwargs()` hook.
-- `runtime.py` is the seam for Jev policy. `RuntimeRegistry` resolves `AgentRuntimeType.JEV` to `JevRuntime`, which currently inherits the ordinary linear loop unchanged and refuses to build without `JevAgentSettings`.
+- `runtime.py` owns Jev policy. `RuntimeRegistry` resolves `AgentRuntimeType.JEV` to `JevRuntime`, which requires `JevAgentSettings` and can make one pre-run specialist choice before using the ordinary linear loop or a specialist agent.
 - `vidbyte/lib/dataclasses/jev.py` owns immutable decision records and the `TypeSafeWireRequest`/`TypeSafeWireQuestion` wire records. They mirror https://docs.typesafe.ai/api.md exactly: state, instructions, and criteria may be strings or JSON structure; noul criteria are optional; Score answers carry a weighted `score`; noul answers carry no confidence.
 - `vidbyte/lib/runners/decision.py` owns semantic decision execution (`arun`) and model listing (`alist_models`).
 - `vidbyte/providers/typesafe.py` alone owns TypeSafe wire serialization, normalization, and failure mapping.
 
-The scaffold performs no Jev call. A missing TypeSafe API key must not prevent `JevAgentSettings` or `JevAgent` construction until an enabled capability actually needs Jev.
+A missing TypeSafe API key must not prevent `JevAgentSettings` or `JevAgent` construction. An empty specialist catalog makes no Jev call. With specialists configured, a missing key or failed decision falls back to the general model loop.
 
 ## Change workflow
 
 1. Read `AGENTS.md`, `docs/design/jev-agent-scaffold.md`, and every existing file under `vidbyte/agents/jev/`.
-2. Describe the user-facing capability in product terms and add a dedicated immutable settings type. Prefer one boolean or nested settings object over low-level knobs.
-3. Define exactly when the runtime asks Jev, the state Jev sees, the fixed questions asked, and the action for every answer.
+2. Describe the user-facing capability in product terms and add a dedicated immutable settings type or catalog record. Prefer one boolean or nested settings object over low-level knobs.
+3. Define exactly when the runtime asks Jev, the state Jev sees, the fixed questions asked, and the action for every answer. Specialist routing runs once at the start, using only the current prompt and specialist descriptions.
 4. Define fail-open or fail-closed behavior for missing credentials, timeouts, malformed answers, and unsupported configurations. Never let an exception silently choose policy.
 5. Implement orchestration in `JevRuntime`; keep provider wire shapes in `vidbyte/providers/typesafe.py` and reusable validated records in `vidbyte/lib/`.
 6. Keep generative usage/speed tracking agent-owned. Make decision usage visible without mixing token fields or double counting.
@@ -48,6 +48,8 @@ The scaffold performs no Jev call. A missing TypeSafe API key must not prevent `
 - API keys never appear in object representations, errors, logs, traces, or serialized state.
 - The public API names capabilities, not internal questions or decisions.
 - Runtime state is run-local; reusable configuration is frozen and validated before execution.
+- Specialist IDs are unique; `no_suitable_agent` is reserved; Choice option and catalog size limits are validated before execution.
+- Specialist templates are forked per routed run. A weak match or decision failure falls back to general; a specialist execution failure does not replay the task.
 - Existing `BaseAgent` behavior remains unchanged when Jev is not involved; `AgentRuntimeType.JEV` gets the same linear-loop wiring as `LINEAR`.
 - Provider payload dictionaries do not move into `vidbyte/lib` records.
 - No live provider call is required by deterministic tests.
