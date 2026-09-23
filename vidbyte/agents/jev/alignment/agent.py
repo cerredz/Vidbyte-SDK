@@ -62,6 +62,9 @@ class JevAgentAlignment(BaseAgent):
 
     def __init__(self, settings: JevAgentSettings) -> None:
         # Reuses the main agent's generative model and decision config; its own prompt and tool are fixed.
+        # @intent editor-shares-model-not-prompt
+        # The editor must call the same provider and key the owner configured, but its system prompt and single
+        # tool are fixed here so no caller can turn it into a general agent that edits anything else.
         if not isinstance(settings, JevAgentSettings):
             raise ConfigurationError("JevAgentAlignment requires the JevAgentSettings of the agent it aligns.")
         self.agent_settings = settings
@@ -107,6 +110,9 @@ class JevAgentAlignment(BaseAgent):
 
     async def _edit_and_verify(self, request: str, tools: tuple[str, ...], report: JevAlignmentResult, draft: JevPromptDraft) -> JevAlignmentResult:
         # Runs the editor, then keeps only the sections Jev confirms closed a gap without adding a conflict.
+        # @intent fail-open-run-fail-closed-edit
+        # An editor failure returns the original prompt so the main run still happens; a verification failure
+        # drops every edit, because an unverified addition must never reach the main model.
         try:
             await self._edit(request, draft)
         except VidbyteSdkError:
@@ -127,6 +133,9 @@ class JevAgentAlignment(BaseAgent):
 
     async def _assess(self, request: str, system_prompt: str, tools: tuple[str, ...]) -> tuple[dict[str, float], JevUsage | None]:
         # Asks the dynamic questions every run and the static ones only on a cache miss, concurrently.
+        # @intent static-questions-never-see-the-request
+        # Static answers are cached per prompt and tool list, so their state must exclude the request; otherwise
+        # one user's message would shape the cached answers every later request reuses.
         has_tools = bool(tools)
         static_state: dict[str, object] = {"system_prompt": system_prompt, "tools": list(tools)}
         cache_key = _state_key(static_state)
@@ -149,6 +158,9 @@ class JevAgentAlignment(BaseAgent):
 
     async def _edit(self, request: str, draft: JevPromptDraft) -> None:
         # Clears history so each pass starts clean; like any BaseAgent, one instance runs one conversation at a time.
+        # @intent edits-land-only-in-this-draft
+        # The tool writes through the context variable bound here, so an edit can only reach this pass's draft,
+        # never the main agent, its settings, or this editor's own prompt.
         self.history.clear()
         with bind_prompt_draft(draft):
             await self.arun(_editor_message(request, draft))
@@ -157,6 +169,9 @@ class JevAgentAlignment(BaseAgent):
         self, request: str, tools: tuple[str, ...], draft: JevPromptDraft, before: Mapping[str, float]
     ) -> tuple[frozenset[JevPromptSection], dict[str, float], JevUsage | None]:
         # Re-asks each cited gap plus the consistency question against the fully edited prompt.
+        # @intent keep-only-confirmed-sections
+        # A section survives only when Jev now answers yes to a gap it cited, and a newly introduced conflict
+        # reverts everything, because the conflict cannot be traced to a single section.
         cited = dict.fromkeys(name for edit in draft.edits for name in edit.fixes)
         questions = tuple(_QUESTIONS_BY_NAME[name] for name in cited if name != CONSISTENCY_QUESTION.name) + (CONSISTENCY_QUESTION,)
         state = {"system_prompt": draft.render(), "request": request, "tools": list(tools)}
@@ -198,6 +213,9 @@ def _asked(questions: Sequence[JevAlignmentQuestion], has_tools: bool) -> tuple[
 
 def _request(state: Mapping[str, object], questions: Sequence[JevAlignmentQuestion]) -> JevDecisionRequest:
     # Builds one Jev request whose questions all share this state.
+    # @intent one-state-per-request
+    # Jev answers each question independently against the same state, so batching questions that share a
+    # state keeps every question small without adding calls.
     return JevDecisionRequest(state=dict(state), questions=tuple(question.to_jev_question() for question in questions))
 
 
@@ -240,6 +258,8 @@ def _sum_usage(*usages: JevUsage | None) -> JevUsage | None:
 
 def _editor_message(request: str, draft: JevPromptDraft) -> str:
     # Frames the prompt and request as data and lists each open gap with its section and fix.
+    # @intent request-is-data-for-the-editor
+    # The user request is fenced and labeled as an example so text inside it cannot instruct the editor.
     gaps = "\n".join(f"- {gap.question} (section: {gap.section.value}): {gap.fix}" for gap in draft.gaps.values())
     return (
         f"SYSTEM PROMPT TO EDIT:\n<<<\n{draft.base}\n>>>\n\n"
