@@ -1,11 +1,11 @@
 """FILE: tests/test_jev_preflight.py
 
-PURPOSE: Verifies JevAgent's clarity preflight and caller-written custom questions deterministically without live model calls.
+PURPOSE: Verifies JevAgent's clarity and recurring preflight presets and caller-written custom questions deterministically without live model calls.
 ROLE IN CODEBASE: Covers the preset definition, JevPreflight validation, single-call classification of presets plus custom questions, runtime actions, response state, and fail-open policy.
 ARCHITECTURE NOTE: Scripted decision and generative runners replace only external boundaries while production settings and runtime wiring remain active.
 COMMON MODIFICATION PATTERNS: Add a case for every new preset outcome, threshold boundary, and availability policy.
 KNOWN EDGE CASES: Environment credentials are cleared explicitly and no test may contact TypeSafe or a generative provider.
-RELATED DOCS: docs/design/jev-preflight-clarity.md, docs/design/jev-preflight-custom-questions.md, and skills/jev-agent/SKILL.md.
+RELATED DOCS: docs/design/jev-preflight-clarity.md, docs/design/jev-preflight-custom-questions.md, docs/design/jev-preflight-recurring.md, and skills/jev-agent/SKILL.md.
 TESTS: python -m unittest tests.test_jev_preflight and python scripts/test-jev-preflight.py.
 """
 
@@ -24,11 +24,12 @@ from vidbyte import (
     JevAgentSettings,
     JevCustomQuestion,
     JevPreflight,
+    JevPreflightAction,
     JevPreflightPreset,
     JevPreflightRegistry,
     JevResponse,
 )
-from vidbyte.agents.jev.presets import CLARITY_QUESTIONS
+from vidbyte.agents.jev.presets import CLARITY_QUESTIONS, RECURRING_QUESTIONS
 from vidbyte.lib.config import DecisionModelConfig
 from vidbyte.lib.constants.jev import JEV_MAX_QUESTIONS
 from vidbyte.lib.dataclasses.jev import JevAnswer, JevDecisionRequest
@@ -111,7 +112,7 @@ class JevPreflightDefinitionTests(unittest.TestCase):
 
     def test_preflight_normalizes_and_validates_presets(self) -> None:
         self.assertEqual(JevPreflight(preset=("clarity",)).preset, (JevPreflightPreset.CLARITY,))
-        self.assertEqual(JevPreflightRegistry.presets(), (JevPreflightPreset.CLARITY,))
+        self.assertEqual(JevPreflightRegistry.presets(), (JevPreflightPreset.CLARITY, JevPreflightPreset.RECURRING))
         for invalid in (("clarity", "clarity"), ("unknown",), ("custom",), "clarity"):
             with self.subTest(preset=invalid), self.assertRaises(ConfigurationError):
                 JevPreflight(preset=invalid)
@@ -132,11 +133,11 @@ class JevPreflightDefinitionTests(unittest.TestCase):
         with self.assertRaises(ConfigurationError):
             JevPreflight(custom=("Is this a question?",))
 
-    def test_custom_questions_become_one_zero_threshold_definition(self) -> None:
+    def test_custom_questions_become_one_record_only_definition(self) -> None:
         definitions = JevPreflight(preset=(JevPreflightPreset.CLARITY,), custom=(_PII, _DESTRUCTIVE)).definitions()
         self.assertEqual([definition.preset for definition in definitions], [JevPreflightPreset.CLARITY, JevPreflightPreset.CUSTOM])
         custom = definitions[1]
-        self.assertEqual(custom.threshold, 0.0)
+        self.assertIs(custom.action, JevPreflightAction.RECORD)
         self.assertEqual([question.name for question in custom.questions], ["custom.touches_pii", "custom.is_destructive"])
         self.assertTrue(all(question.question_type is JevQuestionType.NOUL for question in custom.questions))
 
@@ -173,8 +174,8 @@ class JevPreflightRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(decision_runner.requests), 1)
         request = decision_runner.requests[0]
         self.assertEqual(len(request.questions), 18)
-        self.assertTrue(request.state.endswith("USER REQUEST:\nBuild it"))
-        self.assertEqual(request.state.count(". "), 3)
+        self.assertEqual(dict(request.state), {"request": "Build it"})
+        self.assertTrue(all(question.instructions.startswith("You are evaluating whether `request` is clear enough") for question in request.questions))
         response = reply.metadata["jev_response"]
         self.assertTrue(response.needs_clarification)
         self.assertAlmostEqual(response.results["clarity"].score, 0.5 - (0.4 / 18))
@@ -282,6 +283,86 @@ class JevPreflightRuntimeTests(unittest.IsolatedAsyncioTestCase):
         results = reply.metadata["jev_response"].results
         self.assertFalse(results["clarity"].available)
         self.assertFalse(results["custom"].available)
+
+
+class JevRecurringPresetTests(unittest.IsolatedAsyncioTestCase):
+    """Pin the recurring question shape, one-line selection, appending, and record-only policy."""
+
+    def test_recurring_preset_has_twenty_structured_noul_questions(self) -> None:
+        names = [question.name for question in RECURRING_QUESTIONS]
+        self.assertEqual(len(names), 20)
+        self.assertEqual(len(set(names)), 20)
+        self.assertFalse(set(names) & {question.name for question in CLARITY_QUESTIONS})
+        for question in RECURRING_QUESTIONS:
+            with self.subTest(question=question.name):
+                self.assertTrue(question.name.startswith("recurring."))
+                self.assertIs(question.question_type, JevQuestionType.NOUL)
+                self.assertEqual(question.option_names(), ("true", "false"))
+                self.assertIn("`request`", question.instructions)
+                self.assertTrue(question.instructions.endswith("?"))
+                self.assertGreaterEqual(question.instructions.count(". "), 4)
+                for option in question.options:
+                    self.assertEqual(set(option.description), {"what", "examples"})
+                    self.assertEqual(len(option.description["examples"]), 2)
+
+    def test_one_preset_line_enables_recurring_as_record_only(self) -> None:
+        for preset in (("recurring",), (JevPreflightPreset.RECURRING,)):
+            with self.subTest(preset=preset):
+                (definition,) = JevPreflight(preset=preset).definitions()
+                self.assertIs(definition.preset, JevPreflightPreset.RECURRING)
+                self.assertIs(definition.action, JevPreflightAction.RECORD)
+                self.assertEqual(definition.questions, RECURRING_QUESTIONS)
+        settings = _settings(preflight=JevPreflight(preset=("recurring",)))
+        self.assertEqual(settings.preflight.preset, (JevPreflightPreset.RECURRING,))
+
+    async def test_selected_presets_and_custom_questions_are_appended_into_one_request(self) -> None:
+        decision_runner = ScriptedDecisionRunner({})
+        generative_runner = ScriptedGenerativeRunner("ordinary answer")
+        settings = _settings(
+            preflight=JevPreflight(preset=("recurring", "clarity"), custom=(_PII, _DESTRUCTIVE)),
+            decision=DecisionModelConfig(api_key="test-key"),
+        )
+        agent = bind_test_runner(JevAgent(settings), generative_runner)
+
+        with patch("vidbyte.agents.jev.runtime.DecisionModelRunner", return_value=decision_runner):
+            reply = await agent.arun("Write this week's metrics report.")
+
+        self.assertEqual(len(decision_runner.requests), 1)
+        request = decision_runner.requests[0]
+        self.assertEqual(dict(request.state), {"request": "Write this week's metrics report."})
+        self.assertEqual(request.questions[:38], (*RECURRING_QUESTIONS, *CLARITY_QUESTIONS))
+        self.assertEqual([question.name for question in request.questions[38:]], ["custom.touches_pii", "custom.is_destructive"])
+        self.assertEqual(set(reply.metadata["jev_response"].results), {"recurring", "clarity", "custom"})
+
+    async def test_low_recurring_score_never_short_circuits(self) -> None:
+        decision_runner = ScriptedDecisionRunner({question.name: 0.0 for question in RECURRING_QUESTIONS})
+        generative_runner = ScriptedGenerativeRunner("ran anyway")
+        settings = _settings(
+            preflight=JevPreflight(preset=(JevPreflightPreset.CLARITY, JevPreflightPreset.RECURRING)),
+            decision=DecisionModelConfig(api_key="test-key"),
+        )
+        agent = bind_test_runner(JevAgent(settings), generative_runner)
+
+        with patch("vidbyte.agents.jev.runtime.DecisionModelRunner", return_value=decision_runner):
+            reply = await agent.arun("Explain how TCP handshakes work.")
+
+        self.assertEqual(reply.content, "ran anyway")
+        self.assertEqual(len(generative_runner.calls), 1)
+        response = reply.metadata["jev_response"]
+        self.assertFalse(response.needs_clarification)
+        self.assertEqual(response.results["recurring"].score, 0.0)
+        self.assertEqual(len(response.results["recurring"].answers), 20)
+        self.assertAlmostEqual(response.results["clarity"].score, 0.9)
+
+    async def test_unavailable_jev_marks_recurring_result_unavailable(self) -> None:
+        generative_runner = ScriptedGenerativeRunner("available answer")
+        agent = bind_test_runner(JevAgent(_settings(preflight=JevPreflight(preset=("recurring",)))), generative_runner)
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("TYPESAFE_API_KEY", None)
+            reply = await agent.arun("Write this week's metrics report.")
+
+        self.assertEqual(reply.content, "available answer")
+        self.assertFalse(reply.metadata["jev_response"].results["recurring"].available)
 
 
 if __name__ == "__main__":

@@ -1,21 +1,22 @@
 """FILE: vidbyte/agents/jev/presets.py
 
 PURPOSE: Defines JevAgent's preflight configuration: the closed registry of opinionated presets, caller-written custom questions, and the JevPreflight container that combines them.
-ROLE IN CODEBASE: JevAgentSettings holds one JevPreflight; JevRuntime evaluates the definitions it returns in a single Jev request.
-ARCHITECTURE NOTE: Presets keep their question wording, thresholds, and clarification prompts internal. Custom questions become one extra definition with a zero threshold, so the runtime records their answers without acting on them.
-COMMON MODIFICATION PATTERNS: Add one enum value and one registered definition per preset, keeping question names globally unique across presets.
-KNOWN EDGE CASES: All clarity questions use positive polarity so their true probabilities can be averaged without per-question inversion. CUSTOM is a result key, never a registered preset.
-RELATED DOCS: docs/design/jev-preflight-clarity.md, docs/design/jev-preflight-custom-questions.md, and skills/jev-agent/SKILL.md.
+ROLE IN CODEBASE: JevAgentSettings holds one JevPreflight; JevRuntime appends the questions of every definition it returns into a single Jev request.
+ARCHITECTURE NOTE: Presets keep their question wording, thresholds, and clarification prompts internal. Each definition names its JevPreflightAction: CLARIFY may short-circuit the run, RECORD only records answers (recurring and custom questions).
+COMMON MODIFICATION PATTERNS: Add one enum value and one registered definition per preset, keeping question names globally unique across presets and any framing inside each question's own instructions.
+KNOWN EDGE CASES: Every preset's questions share one state, {"request": ...}, so preset-specific framing must never be placed in the state. All questions within a preset use positive polarity so their true probabilities can be averaged without per-question inversion. CUSTOM is a result key, never a registered preset.
+RELATED DOCS: docs/design/jev-preflight-clarity.md, docs/design/jev-preflight-custom-questions.md, docs/design/jev-preflight-recurring.md, and skills/jev-agent/SKILL.md.
 TESTS: tests/test_jev_preflight.py and scripts/test-jev-preflight.py.
 """
 
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 from types import MappingProxyType
 
+from vidbyte.agents.jev.recurring import RECURRING_QUESTIONS
 from vidbyte.lib.constants.jev import JEV_MAX_QUESTIONS, JEV_NOUL_FALSE, JEV_NOUL_TRUE
 from vidbyte.lib.dataclasses.jev import JevOption, JevQuestion
 from vidbyte.lib.enums.jev import JevQuestionType
@@ -26,7 +27,15 @@ class JevPreflightPreset(StrEnum):
     """Named Jev preflight policies supported by JevAgent."""
 
     CLARITY = "clarity"
+    RECURRING = "recurring"
     CUSTOM = "custom"  # results key for caller-written questions; never registered, so it cannot be selected
+
+
+class JevPreflightAction(StrEnum):
+    """What the runtime does with a preflight definition's score."""
+
+    CLARIFY = "clarify"  # a score below the threshold returns a clarifying question instead of running the agent
+    RECORD = "record"  # answers and the mean score are recorded; the run is never changed
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,8 +44,9 @@ class JevPreflightDefinition:
 
     preset: JevPreflightPreset
     questions: tuple[JevQuestion, ...]
-    clarifications: Mapping[str, str]
-    threshold: float
+    action: JevPreflightAction
+    clarifications: Mapping[str, str] = field(default_factory=lambda: MappingProxyType({}))
+    threshold: float = 0.0
 
 
 _NOUL_OPTIONS = (
@@ -45,11 +55,21 @@ _NOUL_OPTIONS = (
 )
 
 
+# @intent clarity-framing-lives-in-its-own-questions
+# The request state is shared by every selected preset, so this framing travels with each clarity
+# question; placed in the state it would also frame recurring and custom questions.
+_CLARITY_CONTEXT = (
+    "You are evaluating whether `request` is clear enough for an autonomous agent to begin substantive work without first asking a clarifying question. "
+    "Only count missing or ambiguous information when it could materially change what the agent should do or produce; minor details that can be safely inferred should not reduce clarity. "
+    "Treat a dimension that is irrelevant to the request as satisfied, and judge only `request`."
+)
+
+
 def _clarity_question(name: str, instructions: str) -> JevQuestion:
     return JevQuestion(
         name=f"clarity.{name}",
         question_type=JevQuestionType.NOUL,
-        instructions=instructions,
+        instructions=f"{_CLARITY_CONTEXT} {instructions}",
         options=_NOUL_OPTIONS,
     )
 
@@ -108,9 +128,15 @@ class JevPreflightRegistry:
             JevPreflightPreset.CLARITY: JevPreflightDefinition(
                 preset=JevPreflightPreset.CLARITY,
                 questions=CLARITY_QUESTIONS,
+                action=JevPreflightAction.CLARIFY,
                 clarifications=_CLARIFICATIONS,
                 threshold=0.75,
-            )
+            ),
+            JevPreflightPreset.RECURRING: JevPreflightDefinition(
+                preset=JevPreflightPreset.RECURRING,
+                questions=RECURRING_QUESTIONS,
+                action=JevPreflightAction.RECORD,
+            ),
         }
     )
 
@@ -154,7 +180,11 @@ class JevCustomQuestion:
 
 @dataclass(frozen=True, slots=True)
 class JevPreflight:
-    """Everything JevAgent asks Jev before its main loop: registered presets plus caller-written questions."""
+    """Everything JevAgent asks Jev before its main loop: registered presets plus caller-written questions.
+
+    Selecting several presets appends their questions, in the order given, into one Jev request:
+    ``JevPreflight(preset=("clarity", "recurring"))``.
+    """
 
     preset: tuple[JevPreflightPreset, ...] = ()
     custom: tuple[JevCustomQuestion, ...] = ()
@@ -166,19 +196,18 @@ class JevPreflight:
         self._require_question_budget()
 
     def definitions(self) -> tuple[JevPreflightDefinition, ...]:
-        """Return every definition the runtime evaluates in its single Jev request, presets first."""
+        """Return every definition the runtime appends into its single Jev request: presets in selection order, then custom."""
         registered = tuple(JevPreflightRegistry.resolve(preset) for preset in self.preset)
         if not self.custom:
             return registered
         return (*registered, self._custom_definition())
 
     def _custom_definition(self) -> JevPreflightDefinition:
-        # A zero threshold means custom answers are recorded but can never trigger clarification.
+        # RECORD means custom answers are recorded but can never trigger clarification.
         return JevPreflightDefinition(
             preset=JevPreflightPreset.CUSTOM,
             questions=tuple(question.to_jev_question() for question in self.custom),
-            clarifications=MappingProxyType({}),
-            threshold=0.0,
+            action=JevPreflightAction.RECORD,
         )
 
     def _validated_presets(self) -> tuple[JevPreflightPreset, ...]:
@@ -219,8 +248,10 @@ class JevPreflight:
 
 __all__ = [
     "CLARITY_QUESTIONS",
+    "RECURRING_QUESTIONS",
     "JevCustomQuestion",
     "JevPreflight",
+    "JevPreflightAction",
     "JevPreflightPreset",
     "JevPreflightRegistry",
 ]

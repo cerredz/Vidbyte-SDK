@@ -23,7 +23,8 @@ Each capability owns its fixed internal Jev questions, state projection, thresho
 
 - `settings.py` owns the complete public configuration surface.
 - `agent.py` maps settings into `BaseAgent` and fixes the runtime to `AgentRuntimeType.JEV`; it supplies its settings through the single `_runtime_extension_kwargs()` hook.
-- `presets.py` owns the closed registry of fixed Jev preflight policies, the caller-written `JevCustomQuestion`, and the `JevPreflight` container that turns both into definitions.
+- `presets.py` owns the closed registry of fixed Jev preflight policies, `JevPreflightAction`, the caller-written `JevCustomQuestion`, and the `JevPreflight` container that turns both into definitions.
+- `recurring.py` owns the fixed questions of the recurring preset.
 - `response.py` owns the run-local `JevResponse` and typed preset results.
 - `runtime.py` is the seam for Jev policy. `RuntimeRegistry` resolves `AgentRuntimeType.JEV` to `JevRuntime`, which evaluates every preflight definition in one Jev request before the ordinary linear loop and refuses to build without `JevAgentSettings`.
 - `vidbyte/lib/dataclasses/jev.py` owns immutable decision records and the `TypeSafeWireRequest`/`TypeSafeWireQuestion` wire records. They mirror https://docs.typesafe.ai/api.md exactly: state, instructions, and criteria may be strings or JSON structure; noul criteria are optional; Score answers carry a weighted `score`; noul answers carry no confidence.
@@ -32,7 +33,11 @@ Each capability owns its fixed internal Jev questions, state projection, thresho
 
 The clarity preflight is opt-in through `preflight=JevPreflight(preset=(JevPreflightPreset.CLARITY,))`. It asks 18 same-polarity Noul questions in one request, uses their mean `true` probability, and asks the clarification associated with the lowest-scoring dimension when the mean is below the fixed threshold. A missing TypeSafe API key or provider failure is represented as an unavailable preset result and fails open into the ordinary agent loop.
 
-`JevPreflight.custom` is the one deliberate exception to capability-only configuration. Callers may add yes/no `JevCustomQuestion` values, which Jev answers in the same request as the preset questions. Their answers are recorded under `results["custom"]` and never drive runtime policy: the custom definition's threshold is `0.0`, so it cannot trigger clarification.
+The recurring preflight is opt-in through `preflight=JevPreflight(preset=(JevPreflightPreset.RECURRING,))`. It asks 20 Noul questions from `vidbyte/agents/jev/recurring.py` about general properties that suggest the work is of a reusable kind. Examples: the subject changes over time, the result has variants, the method works on other inputs, and the work is tied to a repeating cycle. Each question's instructions join five fixed parts: definition, markers from several domains, boundary, focus, and question. Each `true`/`false` criterion carries `what` and `examples`. `true` always supports reuse. The preset is record-only: its answers and mean score land in `results["recurring"]`, and nothing acts on them yet.
+
+Every definition names a `JevPreflightAction`. Only `CLARIFY` (clarity) can short-circuit a run. `RECORD` (recurring and custom) records answers only. Selecting several presets, for example `preset=("clarity", "recurring")`, appends their questions in selection order, then the custom questions, into one Jev request. That request uses the shared state `{"request": message}`. The state must hold only the request, because every selected preset reads it. Any preset-specific framing belongs in that preset's own question instructions, as the clarity preamble does.
+
+`JevPreflight.custom` is the one deliberate exception to capability-only configuration. Callers may add yes/no `JevCustomQuestion` values, which Jev answers in the same request as the preset questions. Their answers are recorded under `results["custom"]` and never drive runtime policy, because the custom definition's action is `RECORD`.
 
 ## Change workflow
 
@@ -67,7 +72,7 @@ settings = JevAgentSettings(
     provider="openai",
     model_name="gpt-4.1",
     preflight=JevPreflight(
-        preset=(JevPreflightPreset.CLARITY,),
+        preset=(JevPreflightPreset.CLARITY, JevPreflightPreset.RECURRING),
         custom=(JevCustomQuestion(name="cites_sources", question="Does the request ask for cited sources?"),),
     ),
 )

@@ -13,6 +13,7 @@ from vidbyte.agents.jev.agent import JevAgent
 from vidbyte.agents.jev.presets import (
     JevCustomQuestion,
     JevPreflight,
+    JevPreflightAction,
     JevPreflightPreset,
     JevPreflightRegistry,
 )
@@ -25,6 +26,7 @@ __all__ = [
     "JevAgentSettings",
     "JevCustomQuestion",
     "JevPreflight",
+    "JevPreflightAction",
     "JevPreflightPreset",
     "JevPreflightRegistry",
     "JevPresetResult",

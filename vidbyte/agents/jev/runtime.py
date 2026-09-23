@@ -2,10 +2,10 @@
 
 PURPOSE: Executes JevAgent's preflight definitions before its inherited generative agent loop.
 ROLE IN CODEBASE: RuntimeRegistry maps AgentRuntimeType.JEV to JevRuntime; it owns preflight request assembly, scoring, clarification short-circuiting, and response metadata.
-ARCHITECTURE NOTE: Every preset and custom question shares one Jev request, while BaseAgent continues to own generative runners, tools, tracing, and usage.
+ARCHITECTURE NOTE: The questions of every selected preset, then the custom questions, are appended into one Jev request over the neutral state {"request": message}; only CLARIFY definitions can short-circuit. BaseAgent continues to own generative runners, tools, tracing, and usage.
 COMMON MODIFICATION PATTERNS: Add new preflight policy as JevPreflightDefinition values in presets.py; this runtime evaluates whatever definitions JevPreflight returns.
 KNOWN EDGE CASES: Disabled and unavailable preflights continue normally; unclear requests must not invoke the generative runner. A plain BaseAgent(runtime="jev") has no JevAgentSettings and is refused here.
-RELATED DOCS: docs/design/jev-preflight-clarity.md, docs/design/jev-preflight-custom-questions.md, and skills/jev-agent/SKILL.md.
+RELATED DOCS: docs/design/jev-preflight-clarity.md, docs/design/jev-preflight-custom-questions.md, docs/design/jev-preflight-recurring.md, and skills/jev-agent/SKILL.md.
 TESTS: tests/test_jev_preflight.py, tests/test_jev_agent.py, and scripts/test-jev-preflight.py.
 """
 
@@ -14,7 +14,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from vidbyte.agents.jev.presets import JevPreflightDefinition
+from vidbyte.agents.jev.presets import JevPreflightAction, JevPreflightDefinition
 from vidbyte.agents.jev.response import JevPresetResult, JevResponse
 from vidbyte.agents.jev.settings import JevAgentSettings
 from vidbyte.agents.pricing import JevUsage
@@ -28,12 +28,7 @@ from vidbyte.lib.errors import ConfigurationError, VidbyteSdkError
 from vidbyte.lib.runners.decision import DecisionModelRunner
 from vidbyte.lib.tracing import SpanContext
 
-_PREFLIGHT_CONTEXT = (
-    "You are evaluating whether a user request is clear enough for an autonomous agent to begin substantive work without first asking a clarifying question. "
-    "Only count missing or ambiguous information when it could materially change what the agent should do or produce; minor details that can be safely inferred should not reduce clarity. "
-    "Treat a dimension that is irrelevant to the request as satisfied. "
-    "Evaluate every question independently using only the request below."
-)
+PREFLIGHT_STATE_FIELD = "request"
 
 
 class JevRuntime(AgentRuntime):
@@ -60,8 +55,11 @@ class JevRuntime(AgentRuntime):
             return response
 
         try:
+            # @intent shared-state-carries-content-only
+            # Every selected preset reads this one state, so it holds the request alone; each
+            # preset's framing lives in its own question instructions.
             request = JevDecisionRequest(
-                state=f"{_PREFLIGHT_CONTEXT}\n\nUSER REQUEST:\n{message}",
+                state={PREFLIGHT_STATE_FIELD: message},
                 questions=tuple(question for definition in definitions for question in definition.questions),
             )
             runner = DecisionModelRunner(self.jev_settings.decision)
@@ -100,7 +98,7 @@ class JevRuntime(AgentRuntime):
                 true_probabilities.append(probability)
             score = sum(true_probabilities) / len(true_probabilities)
             response.results[definition.preset.value] = JevPresetResult(score=score, answers=preset_answers)
-            if score < definition.threshold:
+            if definition.action is JevPreflightAction.CLARIFY and score < definition.threshold:
                 response.needs_clarification = True
                 preset_lowest = min(
                     (answer.probabilities[JEV_NOUL_TRUE], question_name)
