@@ -42,9 +42,9 @@ Code validates unique IDs, the quote substrings, and the caps (8 scenarios, 3 mo
 
 ### 2. Finish-attempt seam
 
-`AgentRuntime._continue_finish_attempt(result, state, messages) -> bool` is called on both finish paths: the plain final response and `isDone`. The default returns `False`, so behavior is unchanged. `JevRuntime` overrides it.
+`AgentRuntime._finish_attempt_feedback(result, state) -> str | None` is called on both finish paths: the plain final response and `isDone`. The default returns `None`, so behavior is unchanged. `JevRuntime` overrides it and returns feedback text to continue the same loop.
 
-- On a plain final response that continues, the assistant message is appended before the feedback.
+- On a plain final response that continues, the loop appends the assistant message, then the feedback as a user message.
 - On `isDone`, the feedback becomes the tool result.
 
 ### 3. Evidence ledger (code)
@@ -111,7 +111,7 @@ Code writes the feedback from the state fields. At most 2 continuations are allo
 
 ### 8. Failure policy
 
-- A missing TypeSafe key raises `ConfigurationError` at the start of the run, because the capability was explicitly enabled.
+- A missing TypeSafe key raises `ConfigurationError` when `JevAgent` is constructed with a preset, because the capability was explicitly enabled. Without a preset, construction stays credential-free.
 - Provider errors and builder schema violations fail open: the attempt is accepted and `done_criteria.status` records the reason. Infrastructure failures never change the run's outcome.
 
 The metadata lands at `result.metadata["done_criteria"]`.
@@ -126,7 +126,9 @@ The metadata lands at `result.metadata["done_criteria"]`.
 - `tests/test_jev_motivating_case.py`
 
 **Modified:**
-- `vidbyte/agents/runtime.py` (the seam)
+- `tests/test_jev_agent.py` (constructor signature)
+- `vidbyte/agents/client.py` (`sdk.agents.jev(settings, done_criteria=...)`)
+- `vidbyte/agents/runtime.py`. This adds the seam. It also fixes a bug already on `main`: `_contract_counters` never set the `final_output` key that `SchemaConformance` reads, so every `output_schema` agent was rejected until its retries ran out. Both builders depend on structured output, so the fix is in scope.
 - `vidbyte/agents/jev/agent.py`, `runtime.py`, `__init__.py`, `README.md`
 - `vidbyte/agents/__init__.py`, `vidbyte/__init__.py` (export `JevPresets`)
 - `vidbyte/lib/enums/jev.py`, `vidbyte/lib/enums/__init__.py`
@@ -144,5 +146,5 @@ The metadata lands at `result.metadata["done_criteria"]`.
 
 ## Verification
 
-- `tests/test_jev_motivating_case.py` uses scripted generative runners and a scripted TypeSafe transport. It covers the empty state, the recall-guard rebuild, the near-miss rejection, stale runs, fake quotes, literal recovery, blocked plus disclosure, the continuation cap, `isDone` continuation, fail-open, the missing key, and the default seam being inert.
+- `tests/test_jev_motivating_case.py` uses scripted generative runners and a scripted TypeSafe transport. It covers the empty state, the recall-guard rebuild, the near-miss rejection, stale runs, fake quotes, literal recovery, blocked plus disclosure, the continuation cap, `isDone` continuation, fail-open, the missing key, and the default seam being inert. `tests/test_jev_agent.py` gets its constructor-signature test updated.
 - Then run `python scripts/run_ci.py --stage source`, the semgrep policy, and the PR CI.
