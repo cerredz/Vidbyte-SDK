@@ -62,7 +62,7 @@ class JevRuntime(AgentRuntime):
         self.jev_settings = jev_settings
         super().__init__(**kwargs)
         self._sections: tuple[JevRunSection, ...] = self._enabled_sections(jev_settings)
-        self._runner: object | None = None
+        self._handle: RunnerHandle | None = None
         self._run_state: JevRunState | None = None
         self._finish_reviews: list[JevFinishReviewRecord] = []
         self._review_feedback: list[tuple[int, str]] = []
@@ -89,8 +89,8 @@ class JevRuntime(AgentRuntime):
         """Build the run state, run the inherited loop under finish review, and attach the run report."""
         if not self._sections:
             return await super().arun(message, handle=handle, context=context, metadata=metadata, options=options, trace_context=trace_context)
-        self._runner = handle.runner
-        self._run_state = await self._abuild_run_state(message)
+        self._handle = handle
+        self._run_state = await self._abuild_run_state(message, handle)
         active = self._active_sections()
         if active:
             instructions = "\n\n".join(section.agent_instructions(self._run_state.sections[section.key]) for section in active)
@@ -133,9 +133,9 @@ class JevRuntime(AgentRuntime):
         self._review_feedback.append((iteration, feedback))
         return FinishReview.continue_with(feedback)
 
-    async def _abuild_run_state(self, message: str) -> JevRunState:
+    async def _abuild_run_state(self, message: str, handle: RunnerHandle) -> JevRunState:
         # One generative call before the loop; a failed build leaves the run ungated and says why.
-        builder = JevRunStateAgent(settings=self.jev_settings, runner=self._runner, sections=self._sections)
+        builder = JevRunStateAgent(settings=self.jev_settings, handle=handle, sections=self._sections)
         try:
             return await builder.abuild(message)
         except VidbyteSdkError as exc:
@@ -145,11 +145,14 @@ class JevRuntime(AgentRuntime):
 
     async def _abuild_handoff(self, candidate_output: str, event_log: JevRunEventLog, active: tuple[JevRunSection, ...]) -> tuple[JevRunHandoff | None, str]:
         # Builds the handoff, rebuilding with the validation error when the first answer is invalid.
-        assert self._run_state is not None
+        # @intent one-corrected-rebuild
+        # The validation error is fed back once so a fixable handoff (unknown event ID, missing stage) is
+        # repaired; more attempts would multiply generative cost on every finish attempt.
+        assert self._run_state is not None and self._handle is not None
         correction = ""
         failure = ""
         for _attempt in range(JEV_HANDOFF_BUILD_ATTEMPTS):
-            builder = JevRunHandoffAgent(settings=self.jev_settings, runner=self._runner, run_state=self._run_state, sections=active)
+            builder = JevRunHandoffAgent(settings=self.jev_settings, handle=self._handle, run_state=self._run_state, sections=active)
             try:
                 return await builder.abuild(proposed_answer=candidate_output, event_log=event_log, correction=correction), ""
             except VidbyteSdkError as exc:

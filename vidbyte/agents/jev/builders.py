@@ -27,6 +27,7 @@ from vidbyte.agents.jev.run_state import (
 from vidbyte.agents.jev.settings import JevAgentSettings
 from vidbyte.agents.pricing.records import UsageRollup
 from vidbyte.agents.settings import AgentLoopSettings
+from vidbyte.lib.dataclasses.runner import RunnerHandle
 from vidbyte.lib.constants.jev import JEV_BUILDER_MAX_ITERATIONS
 from vidbyte.lib.constants.runners import RUNNER_TYPE_TEXT
 from vidbyte.lib.enums.prompts import Prompt
@@ -37,7 +38,7 @@ from vidbyte.prompts.catalog import Prompts
 class JevStructuredBuilderAgent(BaseAgent):
     """Tool-free agent that returns exactly one JSON object validated against its output schema."""
 
-    def __init__(self, *, name: str, system_prompt: str, output_schema: JsonSchema, settings: JevAgentSettings, runner: object) -> None:
+    def __init__(self, *, name: str, system_prompt: str, output_schema: JsonSchema, settings: JevAgentSettings, handle: RunnerHandle) -> None:
         # Mirrors the main agent's model identity and binds its already-selected runner.
         # @intent builders-share-the-main-runner
         # Reusing the exact runner keeps one execution boundary per JevAgent run (and lets tests script
@@ -53,7 +54,7 @@ class JevStructuredBuilderAgent(BaseAgent):
             temperature=settings.temperature,
             timeout_seconds=settings.timeout_seconds,
         )
-        self._runner_cache[RUNNER_TYPE_TEXT] = runner
+        self._runner_cache[RUNNER_TYPE_TEXT] = handle.runner
 
     async def abuild_payload(self, prompt: str) -> JsonPayload:
         """Run once and return the schema-validated JSON object."""
@@ -79,7 +80,7 @@ class JevStructuredBuilderAgent(BaseAgent):
 class JevRunStateAgent(JevStructuredBuilderAgent):
     """Builds the JevRunState for one request before the main loop starts."""
 
-    def __init__(self, *, settings: JevAgentSettings, runner: object, sections: Sequence[JevRunSection]) -> None:
+    def __init__(self, *, settings: JevAgentSettings, handle: RunnerHandle, sections: Sequence[JevRunSection]) -> None:
         # Assembles the prompt and schema from the base state plus every enabled section.
         self.sections = tuple(sections)
         super().__init__(
@@ -87,11 +88,14 @@ class JevRunStateAgent(JevStructuredBuilderAgent):
             system_prompt=self.compose_prompt(Prompt.JEV_RUN_STATE_STATE_BUILDER, [section.state_instructions() for section in self.sections]),
             output_schema=JevRunState.schema({section.key: section.state_schema() for section in self.sections}),
             settings=settings,
-            runner=runner,
+            handle=handle,
         )
 
     async def abuild(self, request: str) -> JevRunState:
         """Return the validated run state; raises when the answer does not fit the schema or the request."""
+        # @intent run-state-comes-only-from-the-request
+        # The builder sees the user's request and nothing else, so every section is traceable to the
+        # user's words; feeding it the agent's plan or history would let invented requirements gate runs.
         payload = await self.abuild_payload(f"# User request\n{request}")
         return JevRunState.from_payload(payload, request=request, sections=self.sections)
 
@@ -99,7 +103,7 @@ class JevRunStateAgent(JevStructuredBuilderAgent):
 class JevRunHandoffAgent(JevStructuredBuilderAgent):
     """Builds the JevRunHandoff for one finish attempt, shaped by the run state's active sections."""
 
-    def __init__(self, *, settings: JevAgentSettings, runner: object, run_state: JevRunState, sections: Sequence[JevRunSection]) -> None:
+    def __init__(self, *, settings: JevAgentSettings, handle: RunnerHandle, run_state: JevRunState, sections: Sequence[JevRunSection]) -> None:
         # The handoff schema depends on the state (for example the stage IDs), so it is built per run.
         self.run_state = run_state
         self.sections = tuple(sections)
@@ -108,7 +112,7 @@ class JevRunHandoffAgent(JevStructuredBuilderAgent):
             system_prompt=self.compose_prompt(Prompt.JEV_RUN_STATE_HANDOFF_BUILDER, [section.handoff_instructions() for section in self.sections]),
             output_schema=JevRunHandoff.schema({section.key: section.handoff_schema(run_state.sections[section.key]) for section in self.sections}),
             settings=settings,
-            runner=runner,
+            handle=handle,
         )
 
     async def abuild(self, *, proposed_answer: str, event_log: JevRunEventLog, correction: str = "") -> JevRunHandoff:
@@ -124,9 +128,12 @@ class JevRunHandoffAgent(JevStructuredBuilderAgent):
 
     def render_input(self, *, proposed_answer: str, event_log: JevRunEventLog, correction: str) -> str:
         """Render the request, run state, proposed answer, event log, and optional correction."""
+        # @intent handoff-sees-the-whole-log
+        # The full numbered log is passed, never a summary: a stage the agent skipped is only visible as an
+        # absence, and a pre-summarized log would repeat the main agent's own omissions.
         parts: list[tuple[str, Any]] = [
             ("Original request", self.run_state.request),
-            ("Run state", json.dumps(self.run_state.to_payload(), indent=2)),
+            ("Run state", json.dumps(self.run_state.to_payload())),
             ("Proposed final answer", proposed_answer or "(empty)"),
             ("Event log", event_log.render()),
         ]

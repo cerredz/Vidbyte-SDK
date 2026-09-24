@@ -229,6 +229,9 @@ class JevRunState:
     @classmethod
     def from_payload(cls, payload: JsonPayload, *, request: str, sections: Sequence[JevRunSection]) -> JevRunState:
         """Validate the builder's answer and let each enabled section parse its own part."""
+        # @intent strict-builder-payloads
+        # Any shape mismatch raises instead of defaulting, so a malformed answer can never become an empty
+        # section that silently disables a done check; the runtime records the failure instead.
         section_payloads = JevPayload.mapping(payload, "sections", where="run_state")
         return cls(
             request=request,
@@ -247,6 +250,9 @@ class JevRunState:
     @classmethod
     def unavailable(cls, request: str, sections: Sequence[JevRunSection], reason: str) -> JevRunState:
         """Return a state whose sections are all UNAVAILABLE, used when the builder itself fails."""
+        # @intent builder-failure-is-recorded-not-hidden
+        # A failed build leaves the run ungated, but every section keeps a reason in the report so the
+        # missing check is visible to callers instead of looking like a request with no requirements.
         return cls(request=request, sections={section.key: JevSectionState(JevSectionStatus.UNAVAILABLE, reason) for section in sections})
 
     def active_section_keys(self) -> tuple[JevRunSectionKey, ...]:
