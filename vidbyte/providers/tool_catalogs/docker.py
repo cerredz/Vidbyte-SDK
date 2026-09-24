@@ -55,6 +55,8 @@ class DockerMcpCatalog(IndexedToolCatalogProvider):
 
     def __init__(self, *, credentials: ToolCatalogCredentials | None = None, transport: HttpTransport | None = None) -> None:
         # Adds a map from entry id to its tools JSON URL, filled while the index is parsed.
+        # @intent tools-urls-come-from-the-index
+        # describe() fetches only URLs the catalog itself published, never one built from an entry id.
         super().__init__(credentials=credentials, transport=transport)
         self._tools_urls: dict[str, str] = {}
 
@@ -120,6 +122,8 @@ def _entry(catalog: ToolCatalogName, key: str, raw: Mapping[str, object]) -> Too
 
 def _server_install(raw: Mapping[str, object]) -> ToolInstall | None:
     # Converts a server image into `docker run -i --rm` with its fixed env values and secret env names.
+    # @intent secret-env-passes-by-name
+    # Secrets appear in the command only as `-e NAME`; their values reach the container through the process env.
     image = text(raw.get("image"))
     if not image or _needs_toolkit(raw):
         return None
@@ -163,6 +167,8 @@ def _needs_toolkit(raw: Mapping[str, object]) -> bool:
 
 def _env_secret(secret: Mapping[str, object]) -> ToolSecretRequirement:
     # Declares one secret the container reads from its environment.
+    # @intent docker-secrets-are-env-only
+    # Docker catalog secrets are always environment variables, never headers or arguments.
     env = text(secret.get("env"))
     return ToolSecretRequirement(name=env, location=ToolSecretLocation.ENV, target=env, description=text(secret.get("description")))
 

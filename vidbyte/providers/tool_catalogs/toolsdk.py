@@ -52,6 +52,8 @@ class ToolSdkCatalog(IndexedToolCatalogProvider):
 
     def __init__(self, *, credentials: ToolCatalogCredentials | None = None, transport: HttpTransport | None = None) -> None:
         # Adds a map from package name to its package-file path, filled while the index is parsed.
+        # @intent package-paths-come-from-the-index
+        # describe() reads only package files the index points to, never a path built from a package name.
         super().__init__(credentials=credentials, transport=transport)
         self._paths: dict[str, str] = {}
 
@@ -101,6 +103,8 @@ class ToolSdkCatalog(IndexedToolCatalogProvider):
 
 def _remote_install(raw: object, secrets: tuple[ToolSecretRequirement, ...]) -> ToolInstall | None:
     # A remote is attachable only when it needs no environment values, since the file never says which header carries them.
+    # @intent no-guessed-secret-headers
+    # Guessing which header carries an env value could send a secret to the wrong place, so such remotes are skipped.
     remote = mapping(raw)
     url = text(remote.get("url"))
     if text(remote.get("type")) != _STREAMABLE_HTTP or not url or any(secret.required for secret in secrets):

@@ -68,6 +68,8 @@ class McpRegistryCatalog(ToolCatalogProvider):
 
     async def _search_once(self, query: str, limit: int) -> tuple[ToolCatalogEntry, ...]:
         # Asks the registry for the latest version of each server whose name contains the query.
+        # @intent latest-version-only
+        # version=latest keeps older releases of the same server from crowding out distinct servers.
         payload = await self.get_json(f"{self.base_url}{MCP_REGISTRY_SERVERS_PATH}", params={"search": query, "limit": limit, "version": "latest"})
         return tuple(parse_server_list(self.name, payload))
 
@@ -157,6 +159,8 @@ def _remote_install(raw: object) -> ToolInstall | None:
 
 def _header_requirement(header_name: str, header: Mapping[str, object]) -> ToolSecretRequirement | None:
     # Returns the requirement a header needs, or None for a fixed header value that needs nothing from the owner.
+    # @intent header-templates-become-secrets
+    # A header whose value is a template or marked secret is never sent as published; the owner supplies its value.
     value = text(header.get("value"))
     variables = _TEMPLATE_VARIABLE.findall(value)
     secret = header.get("isSecret") is True
@@ -176,6 +180,9 @@ def _header_requirement(header_name: str, header: Mapping[str, object]) -> ToolS
 
 def _package_install(raw: object) -> ToolInstall | None:
     # Converts one stdio package into a PACKAGE (npm, PyPI) or CONTAINER (OCI) install with its environment secrets.
+    # @intent commands-use-published-identifiers
+    # The command is built from the identifier and version the registry publishes, never from a display name,
+    # and an unversioned package is marked unpinned so it cannot run unless the owner allows it.
     package = mapping(raw)
     identifier = text(package.get("identifier"))
     registry_type = text(package.get("registryType"))

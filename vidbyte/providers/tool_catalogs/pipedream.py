@@ -37,6 +37,7 @@ from vidbyte.providers.tool_catalogs.base import (
 
 PIPEDREAM_TOKEN_REFRESH_MARGIN_SECONDS = 60.0
 PIPEDREAM_DEFAULT_TOKEN_SECONDS = 3_600.0
+PIPEDREAM_TOKEN_UNSET = 0.0
 
 
 class PipedreamCatalog(ToolCatalogProvider):
@@ -47,9 +48,11 @@ class PipedreamCatalog(ToolCatalogProvider):
 
     def __init__(self, *, credentials: ToolCatalogCredentials | None = None, transport: HttpTransport | None = None) -> None:
         # Starts with no cached access token.
+        # @intent token-starts-expired
+        # The first request always exchanges the OAuth client for a fresh token.
         super().__init__(credentials=credentials, transport=transport)
         self._token: str | None = None
-        self._token_expires_at = 0.0
+        self._token_expires_at = PIPEDREAM_TOKEN_UNSET
 
     async def search(self, query: str, *, limit: int) -> tuple[ToolCatalogEntry, ...]:
         """Search apps that have actions; each app becomes one MANAGED entry without a tool list."""
@@ -104,7 +107,7 @@ class PipedreamCatalog(ToolCatalogProvider):
             expires_in = payload.get("expires_in")
             lifetime = float(expires_in) if isinstance(expires_in, (int, float)) else PIPEDREAM_DEFAULT_TOKEN_SECONDS
             self._token = token
-            self._token_expires_at = time.monotonic() + max(0.0, lifetime - PIPEDREAM_TOKEN_REFRESH_MARGIN_SECONDS)
+            self._token_expires_at = time.monotonic() + max(PIPEDREAM_TOKEN_UNSET, lifetime - PIPEDREAM_TOKEN_REFRESH_MARGIN_SECONDS)
         return {"Authorization": f"Bearer {self._token}"}
 
 
