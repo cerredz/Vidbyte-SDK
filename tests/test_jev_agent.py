@@ -1,11 +1,11 @@
 """FILE: tests/test_jev_agent.py
 
-PURPOSE: Verifies the TypeSafe decision substrate and the first opinionated JevAgent scaffold without network access.
-ROLE IN CODEBASE: Covers docs/design/jev-agent-scaffold.md section 10, including settings, runtime wiring, provider normalization, public exports, and ordinary loop behavior.
+PURPOSE: Verifies the TypeSafe decision substrate and opinionated JevAgent capabilities without network access.
+ROLE IN CODEBASE: Covers Jev settings, runtime wiring, multipart state/handoff policy, continuation, provider normalization, and public exports.
 ARCHITECTURE NOTE: Scripted transports and runners replace only external model boundaries; production constructors and runtime factories remain under test.
 COMMON MODIFICATION PATTERNS: Add cases here whenever a named Jev capability changes settings, runtime policy, fallback behavior, or observability.
 KNOWN EDGE CASES: TYPESAFE_API_KEY is cleared where credential timing is tested, and no test may send a live provider request.
-RELATED DOCS: docs/design/jev-agent-scaffold.md and skills/jev-agent/SKILL.md.
+RELATED DOCS: docs/design/jev-agent-scaffold.md, docs/design/jev-multipart-done-criteria.md, and skills/jev-agent/SKILL.md.
 TESTS: python -m pytest tests/test_jev_agent.py and python scripts/test-jev-agent-scaffold.py.
 """
 
@@ -21,11 +21,13 @@ from unittest.mock import patch
 
 from tests.agent_test_support import bind_test_runner
 from vidbyte import JevAgent as RootJevAgent
+from vidbyte import JevPresets as RootJevPresets
 from vidbyte import JevAgentSettings as RootJevAgentSettings
 from vidbyte import JevRuntime as RootJevRuntime
 from vidbyte import VidbyteSDK, tool
 from vidbyte.agents import BaseAgent
-from vidbyte.agents.jev import JevAgent, JevAgentSettings, JevRuntime
+from vidbyte.agents.jev import JevAgent, JevAgentSettings, JevPresets, JevRuntime
+from vidbyte.agents.jev.run_state import JevDeliverableHandoff, JevEvidenceReference, JevRunHandoff, JevRunSnapshot, JevRunState
 from vidbyte.agents.pricing import JevUsage
 from vidbyte.agents.runtime import AgentRuntime
 from vidbyte.agents.settings import AgentLoopSettings
@@ -33,7 +35,7 @@ from vidbyte.lib.config import DecisionModelConfig
 from vidbyte.lib.constants.jev import JEV_DEFAULT_RETRY_COUNT, JEV_DEFAULT_TIMEOUT_SECONDS, JEV_MAX_CHOICE_OPTIONS, JEV_MAX_SCORE_LEVELS
 from vidbyte.lib.dataclasses.jev import JevAnswer, JevDecisionRequest, JevOption, JevQuestion
 from vidbyte.lib.enums import AgentRuntimeType, JevQuestionType, ModelProvider
-from vidbyte.lib.errors import ConfigurationError, ProviderRequestError, ProviderResponseError
+from vidbyte.lib.errors import AgentExecutionError, ConfigurationError, OutputSchemaViolationError, ProviderRequestError, ProviderResponseError
 from vidbyte.lib.http import HttpResponse
 from vidbyte.lib.registries.pricing import ModelPricingRegistry
 from vidbyte.lib.registries.runtimes import RuntimeRegistry
@@ -455,6 +457,7 @@ class JevPublicApiTests(unittest.TestCase):
     def test_root_and_package_exports_are_identical(self) -> None:
         # [Silent Failure] public import paths resolve the same classes rather than compatibility copies.
         self.assertIs(RootJevAgent, JevAgent)
+        self.assertIs(RootJevPresets, JevPresets)
         self.assertIs(RootJevAgentSettings, JevAgentSettings)
         self.assertIs(RootJevRuntime, JevRuntime)
 
@@ -465,12 +468,321 @@ class JevPublicApiTests(unittest.TestCase):
         self.assertIsInstance(agent, JevAgent)
         self.assertIs(agent.settings, settings)
 
-    def test_constructor_exposes_only_settings(self) -> None:
-        # [Hidden Assumption] runtime machinery and generic decisions are not user customization points.
+    def test_constructor_exposes_only_settings_and_named_done_criteria(self) -> None:
+        # [Hidden Assumption] runtime machinery is closed while named done criteria remain configurable.
         parameters = tuple(inspect.signature(JevAgent.__init__).parameters)
-        self.assertEqual(parameters, ("self", "settings"))
-        for forbidden in ("runtime", "middleware", "algorithm", "fallback", "decisions"):
+        self.assertEqual(parameters, ("self", "settings", "done_criteria"))
+        self.assertEqual(inspect.signature(JevAgent.__init__).parameters["done_criteria"].kind, inspect.Parameter.KEYWORD_ONLY)
+        for forbidden in ("runtime", "middleware", "algorithm", "fallback", "decisions", "questions"):
             self.assertNotIn(forbidden, parameters)
+
+    def test_done_criteria_rejects_raw_string(self) -> None:
+        # [Hidden Assumption] a string-backed enum must still be passed as its named enum member.
+        with self.assertRaisesRegex(ConfigurationError, "JevPresets"):
+            JevAgent(_settings(), done_criteria="multi_part")
+
+    def test_sdk_namespace_accepts_named_done_criteria(self) -> None:
+        # [Silent Failure] the SDK namespace forwards the same preset as the direct constructor.
+        agent = VidbyteSDK().agents.jev(_settings(), done_criteria=JevPresets.MultiPart)
+        self.assertIs(agent.done_criteria, JevPresets.MultiPart)
+
+
+def _multipart_state(*deliverables: tuple[str, str, str]) -> JevRunState:
+    # Returns a stable generated-state fixture for runtime policy tests.
+    return JevRunState.from_payload({
+        "goal": "Complete the requested change.",
+        "objective": "Deliver each distinct requested output.",
+        "mission": "Work through the request and report the result.",
+        "what_not_to_do": ["Do not claim unobserved work."],
+        "sections": {"constraints": "Respect the original scope."},
+        "multi_part": {"deliverables": [
+            {"id": item_id, "description": description, "completion_signal": signal}
+            for item_id, description, signal in deliverables
+        ]},
+    })
+
+
+def _multipart_handoff(*items: tuple[str, str, str, str]) -> JevRunHandoff:
+    # Builds one run-handoff fixture with each evidence string tied to a fixture source.
+    return JevRunHandoff(tuple(JevDeliverableHandoff(item[0], item[1], (JevEvidenceReference("final_answer", item[2]),), item[3]) for item in items))
+
+
+class ScriptedMultipartDecisionRunner:
+    """Captures one-item Jev requests and returns scripted true probabilities."""
+
+    def __init__(self, *probabilities: float | BaseException) -> None:
+        # Retains deterministic outcomes and the exact classification requests.
+        self.probabilities = list(probabilities)
+        self.requests: list[JevDecisionRequest] = []
+
+    async def arun(self, request: JevDecisionRequest) -> object:
+        # Returns a Jev-shaped response or raises the next scripted provider error.
+        from types import SimpleNamespace
+
+        self.requests.append(request)
+        probability = self.probabilities.pop(0)
+        if isinstance(probability, BaseException):
+            raise probability
+        answer = JevAnswer(
+            question_name=request.questions[0].name,
+            question_type=JevQuestionType.NOUL,
+            choice="true" if probability >= 0.5 else "false",
+            probabilities={"true": probability, "false": 1.0 - probability},
+            noul=probability,
+        )
+        return SimpleNamespace(answer=lambda name: answer if name == answer.question_name else None)
+
+
+class JevMultipartDoneCriteriaTests(unittest.IsolatedAsyncioTestCase):
+    """Tests structured state, per-deliverable classification, and same-loop continuation."""
+
+    async def test_state_is_built_once_and_low_evidence_continues_same_loop(self) -> None:
+        # [Hidden Failure] an incomplete first finish gets concrete feedback; the same loop checks again.
+        first = _multipart_handoff(("implementation", "incomplete", "Feature code exists.", "Documentation is not written."))
+        second = _multipart_handoff(("implementation", "complete", "Feature and documentation are present.", "none"))
+        runner = ScriptedRunner(
+            TextModelResponse(provider=ModelProvider.OPENAI, model="fake", text="Implemented the code.", raw={}),
+            TextModelResponse(provider=ModelProvider.OPENAI, model="fake", text="Implementation and docs are complete.", raw={}),
+        )
+        state = _multipart_state(("implementation", "Implement the feature.", "The feature behavior is implemented."))
+        agent = bind_test_runner(JevAgent(_settings(), done_criteria=JevPresets.MultiPart), runner)
+        from unittest.mock import AsyncMock
+        from vidbyte.agents.jev import runtime as jev_runtime
+
+        state_builder = AsyncMock(return_value=state)
+        handoff_builder = AsyncMock(side_effect=(first, second))
+        decisions = ScriptedMultipartDecisionRunner(0.2, 0.95)
+        with patch.object(jev_runtime.MultiPartStateBuilderAgent, "build_state", state_builder), patch.object(jev_runtime.MultiPartHandoffBuilderAgent, "build_handoff", handoff_builder), patch.object(jev_runtime, "DecisionModelRunner", return_value=decisions):
+            reply = await agent.arun("Implement the feature and document it.")
+        self.assertEqual(reply.content, "Implementation and docs are complete.")
+        self.assertEqual(len(runner.calls), 2)
+        self.assertEqual(state_builder.await_count, 1)
+        self.assertEqual(handoff_builder.await_count, 2)
+        self.assertTrue(reply.metadata["done_criteria"]["complete"])
+        self.assertEqual(reply.metadata["done_criteria"]["attempts"], 2)
+
+    async def test_each_jev_request_contains_only_one_deliverable(self) -> None:
+        # [Hidden Assumption] code routes two targets into separate Jev states with no unrelated evidence.
+        handoff = _multipart_handoff(
+            ("implementation", "complete", "Implementation is present.", "none"),
+            ("documentation", "complete", "Documentation is present.", "none"),
+        )
+        state = _multipart_state(
+            ("implementation", "Implement the feature.", "The feature is implemented."),
+            ("documentation", "Write documentation.", "The requested documentation is written."),
+        )
+        runner = ScriptedRunner(TextModelResponse(provider=ModelProvider.OPENAI, model="fake", text="Done.", raw={}))
+        agent = bind_test_runner(JevAgent(_settings(), done_criteria=JevPresets.MultiPart), runner)
+        from unittest.mock import AsyncMock
+        from vidbyte.agents.jev import runtime as jev_runtime
+
+        decisions = ScriptedMultipartDecisionRunner(0.91, 0.93)
+        with patch.object(jev_runtime.MultiPartStateBuilderAgent, "build_state", AsyncMock(return_value=state)), patch.object(jev_runtime.MultiPartHandoffBuilderAgent, "build_handoff", AsyncMock(return_value=handoff)), patch.object(jev_runtime, "DecisionModelRunner", return_value=decisions):
+            await agent.arun("Implement and document the feature.")
+        self.assertEqual(len(decisions.requests), 2)
+        ids = []
+        expected_evidence = {"implementation": "Implementation is present.", "documentation": "Documentation is present."}
+        for request in decisions.requests:
+            payload = json.loads(request.state)
+            ids.append(payload["requested_deliverable_id"])
+            self.assertEqual(len(payload["initial_state"]["multi_part"]["deliverables"]), 1)
+            self.assertEqual(payload["handoff_entry"]["id"], payload["requested_deliverable_id"])
+            self.assertEqual(payload["handoff_entry"]["evidence"][0]["excerpt"], expected_evidence[payload["requested_deliverable_id"]])
+        self.assertEqual(ids, ["implementation", "documentation"])
+
+    async def test_completion_threshold_is_inclusive_and_below_threshold_retries(self) -> None:
+        # [Edge Case] P(true) exactly at 0.8 passes; a slightly lower value does not pass silently.
+        from unittest.mock import AsyncMock
+        from vidbyte.agents.jev import runtime as jev_runtime
+
+        state = _multipart_state(("code", "Implement the feature.", "The feature behavior is present."))
+        handoff = _multipart_handoff(("code", "complete", "The feature behavior is implemented.", "none"))
+        agent = bind_test_runner(JevAgent(_settings(), done_criteria=JevPresets.MultiPart), ScriptedRunner(TextModelResponse(provider=ModelProvider.OPENAI, model="fake", text="Done.", raw={})))
+        decisions = ScriptedMultipartDecisionRunner(0.8)
+        with patch.object(jev_runtime.MultiPartStateBuilderAgent, "build_state", AsyncMock(return_value=state)), patch.object(jev_runtime.MultiPartHandoffBuilderAgent, "build_handoff", AsyncMock(return_value=handoff)), patch.object(jev_runtime, "DecisionModelRunner", return_value=decisions):
+            reply = await agent.arun("Implement the feature.")
+        self.assertTrue(reply.metadata["done_criteria"]["complete"])
+
+    async def test_probability_below_threshold_requests_another_iteration(self) -> None:
+        # [Silent Failure] a plausible but sub-threshold P(true) cannot be rounded up into completion.
+        from unittest.mock import AsyncMock
+        from vidbyte.agents.jev import runtime as jev_runtime
+
+        state = _multipart_state(("code", "Implement the feature.", "The feature behavior is present."))
+        handoff = _multipart_handoff(("code", "complete", "The feature behavior is implemented.", "none"))
+        runner = ScriptedRunner(
+            TextModelResponse(provider=ModelProvider.OPENAI, model="fake", text="First attempt.", raw={}),
+            TextModelResponse(provider=ModelProvider.OPENAI, model="fake", text="Evidence strengthened.", raw={}),
+        )
+        agent = bind_test_runner(JevAgent(_settings(), done_criteria=JevPresets.MultiPart), runner)
+        decisions = ScriptedMultipartDecisionRunner(0.799, 0.95)
+        with patch.object(jev_runtime.MultiPartStateBuilderAgent, "build_state", AsyncMock(return_value=state)), patch.object(jev_runtime.MultiPartHandoffBuilderAgent, "build_handoff", AsyncMock(side_effect=(handoff, handoff))), patch.object(jev_runtime, "DecisionModelRunner", return_value=decisions):
+            reply = await agent.arun("Implement the feature.")
+        self.assertEqual(len(runner.calls), 2)
+        self.assertEqual(reply.metadata["done_criteria"]["attempts"], 2)
+
+    async def test_continuation_handoff_keeps_prior_tool_observations(self) -> None:
+        # [Silent Failure] both finish snapshots retain earlier successful tool evidence after continuation.
+        from unittest.mock import AsyncMock
+        from vidbyte.agents.jev import runtime as jev_runtime
+
+        @tool
+        def lookup(topic: str) -> str:
+            """Return a deterministic result for the requested topic."""
+            return f"found:{topic}"
+
+        state = _multipart_state(("code", "Implement the feature.", "The feature behavior is present."))
+        handoffs = (
+            _multipart_handoff(("code", "incomplete", "The lookup result was found.", "Implementation is missing.")),
+            _multipart_handoff(("code", "complete", "The feature implementation is present.", "none")),
+        )
+        runner = ScriptedRunner(
+            RawResponse({"output": [{"type": "function_call", "name": "lookup", "arguments": '{"topic": "runtime"}', "call_id": "lookup-1"}]}),
+            TextModelResponse(provider=ModelProvider.OPENAI, model="fake", text="Only looked up the runtime.", raw={}),
+            TextModelResponse(provider=ModelProvider.OPENAI, model="fake", text="Implemented the runtime feature.", raw={}),
+        )
+        agent = bind_test_runner(JevAgent(_settings(tools=(lookup,)), done_criteria=JevPresets.MultiPart), runner)
+        snapshots = []
+
+        async def build_handoff(snapshot: object) -> JevRunHandoff:
+            # Retains each snapshot to verify that earlier tool evidence survives continuation.
+            snapshots.append(snapshot)
+            return handoffs[len(snapshots) - 1]
+
+        decisions = ScriptedMultipartDecisionRunner(0.2, 0.95)
+        with patch.object(jev_runtime.MultiPartStateBuilderAgent, "build_state", AsyncMock(return_value=state)), patch.object(jev_runtime.MultiPartHandoffBuilderAgent, "build_handoff", AsyncMock(side_effect=build_handoff)), patch.object(jev_runtime, "DecisionModelRunner", return_value=decisions):
+            reply = await agent.arun("Implement the feature.")
+        self.assertEqual(reply.content, "Implemented the runtime feature.")
+        self.assertEqual(len(snapshots), 2)
+        self.assertEqual([call["name"] for call in snapshots[0].tool_calls], ["lookup"])
+        self.assertEqual(snapshots[0].tool_calls, snapshots[1].tool_calls)
+
+    async def test_real_builders_use_strict_structured_output(self) -> None:
+        # [Hidden Failure] production builder subclasses consume the strict state and handoff schemas end to end.
+        state_payload = {
+            "goal": "Deliver the feature.", "objective": "Implement and document it.", "mission": "Complete both outputs.",
+            "what_not_to_do": [], "sections": {"constraints": "Keep the change focused."},
+            "multi_part": {"deliverables": [{"id": "code", "description": "Implement the feature.", "completion_signal": "The feature behavior is implemented."}]},
+        }
+        handoff_payload = {"deliverables": [{"id": "code", "status": "complete", "evidence": [{"source_id": "final_answer", "excerpt": "Implemented and documented."}], "remaining": "none"}]}
+        runner = ScriptedRunner(
+            TextModelResponse(provider=ModelProvider.OPENAI, model="gpt-4.1-mini", text=json.dumps(state_payload), raw={}, usage={"input_tokens": 10, "output_tokens": 2, "total_tokens": 12}),
+            TextModelResponse(provider=ModelProvider.OPENAI, model="gpt-4.1-mini", text="Implemented and documented.", raw={}, usage={"input_tokens": 10, "output_tokens": 2, "total_tokens": 12}),
+            TextModelResponse(provider=ModelProvider.OPENAI, model="gpt-4.1-mini", text=json.dumps(handoff_payload), raw={}, usage={"input_tokens": 10, "output_tokens": 2, "total_tokens": 12}),
+        )
+        agent = bind_test_runner(JevAgent(_settings(), done_criteria=JevPresets.MultiPart), runner)
+        decisions = ScriptedMultipartDecisionRunner(0.92)
+        from vidbyte.agents.jev import runtime as jev_runtime
+
+        with patch.object(jev_runtime, "DecisionModelRunner", return_value=decisions):
+            reply = await agent.arun("Implement and document the feature.")
+        self.assertEqual(reply.content, "Implemented and documented.")
+        self.assertEqual(len(runner.calls), 3)
+        self.assertTrue(reply.metadata["done_criteria"]["complete"])
+        self.assertEqual(agent.get_usage().model_call_count, 3)
+        self.assertEqual(agent.get_usage().total_tokens, 36)
+
+    async def test_empty_deliverables_skip_handoff_and_type_safe_setup(self) -> None:
+        # [Edge Case] an empty multipart section completes without building a handoff or resolving Jev credentials.
+        from unittest.mock import AsyncMock
+        from vidbyte.agents.jev import runtime as jev_runtime
+
+        state = _multipart_state()
+        agent = bind_test_runner(JevAgent(_settings(), done_criteria=JevPresets.MultiPart), ScriptedRunner(TextModelResponse(provider=ModelProvider.OPENAI, model="fake", text="Done.", raw={})))
+        with patch.object(jev_runtime.MultiPartStateBuilderAgent, "build_state", AsyncMock(return_value=state)), patch.object(jev_runtime.MultiPartHandoffBuilderAgent, "build_handoff", new_callable=AsyncMock) as handoff, patch.object(jev_runtime, "DecisionModelRunner") as decision_runner:
+            reply = await agent.arun("A single simple request.")
+        handoff.assert_not_awaited()
+        decision_runner.assert_not_called()
+        self.assertTrue(reply.metadata["done_criteria"]["complete"])
+
+    async def test_is_done_tool_uses_the_same_multipart_gate(self) -> None:
+        # [Hidden Failure] the internal isDone path cannot bypass enabled done criteria.
+        from unittest.mock import AsyncMock
+        from vidbyte.agents.jev import runtime as jev_runtime
+
+        state = _multipart_state(("answer", "Answer the question.", "The final answer addresses the request."))
+        handoff = _multipart_handoff(("answer", "complete", "The final answer addresses the request.", "none"))
+        runner = ScriptedRunner(RawResponse({"output": [{"type": "function_call", "name": "isDone", "arguments": '{"final_answer": "done"}', "call_id": "c1"}]}))
+        agent = bind_test_runner(JevAgent(_settings(), done_criteria=JevPresets.MultiPart), runner)
+        decisions = ScriptedMultipartDecisionRunner(0.9)
+        with patch.object(jev_runtime.MultiPartStateBuilderAgent, "build_state", AsyncMock(return_value=state)), patch.object(jev_runtime.MultiPartHandoffBuilderAgent, "build_handoff", AsyncMock(return_value=handoff)), patch.object(jev_runtime, "DecisionModelRunner", return_value=decisions):
+            reply = await agent.arun("Answer the question.")
+        self.assertEqual(reply.content, "done")
+        self.assertEqual(len(decisions.requests), 1)
+
+    async def test_incomplete_handoff_schema_fails_before_classification(self) -> None:
+        # [Hidden Failure] missing, duplicate, and unknown IDs fail closed before any Jev request.
+        state = _multipart_state(("code", "Implement.", "Code is implemented."))
+        for rows in (
+            (),
+            (("code", "complete", "evidence", "none"), ("code", "complete", "evidence", "none")),
+            (("unknown", "complete", "evidence", "none"),),
+        ):
+            with self.subTest(rows=rows), self.assertRaises(OutputSchemaViolationError):
+                JevRunHandoff.from_payload({"deliverables": [dict(zip(("id", "status", "evidence", "remaining"), (row[0], row[1], [{"source_id": "final_answer", "excerpt": row[2]}], row[3]))) for row in rows]}, state, JevRunSnapshot("request", state, (), (), "evidence"))
+
+    async def test_handoff_order_is_matched_by_identifier(self) -> None:
+        # [Silent Failure] reordered generated handoff rows still align with state IDs, not array position.
+        state = _multipart_state(("code", "Implement.", "Code exists."), ("docs", "Document.", "Docs exist."))
+        handoff = JevRunHandoff.from_payload({"deliverables": [
+            {"id": "docs", "status": "complete", "evidence": [{"source_id": "final_answer", "excerpt": "Docs exist."}], "remaining": "none"},
+            {"id": "code", "status": "complete", "evidence": [{"source_id": "final_answer", "excerpt": "Code exists."}], "remaining": "none"},
+        ]}, state, JevRunSnapshot("request", state, (), (), "Code exists. Docs exist."))
+        self.assertEqual([item.id for item in handoff.deliverables], ["code", "docs"])
+
+    async def test_handoff_rejects_unknown_sources_and_invented_excerpts(self) -> None:
+        # [Silent Failure] a fluent fabricated sentence cannot enter Jev state as evidence.
+        state = _multipart_state(("code", "Implement.", "Code exists."))
+        snapshot = JevRunSnapshot("request", state, (), (), "The code exists in this answer.")
+        bad_rows = (
+            {"id": "code", "status": "complete", "evidence": [{"source_id": "missing_source", "excerpt": "The code exists"}], "remaining": "none"},
+            {"id": "code", "status": "complete", "evidence": [{"source_id": "final_answer", "excerpt": "This fabricated evidence is not in the answer."}], "remaining": "none"},
+        )
+        for row in bad_rows:
+            with self.subTest(row=row), self.assertRaises(OutputSchemaViolationError):
+                JevRunHandoff.from_payload({"deliverables": [row]}, state, snapshot)
+
+    async def test_provider_failure_does_not_return_agent_success(self) -> None:
+        # [Hidden Failure] an unavailable Jev decision service propagates instead of selecting a success policy.
+        from unittest.mock import AsyncMock
+        from vidbyte.agents.jev import runtime as jev_runtime
+
+        state = _multipart_state(("code", "Implement.", "Code exists."))
+        handoff = _multipart_handoff(("code", "complete", "Code exists.", "none"))
+        agent = bind_test_runner(JevAgent(_settings(), done_criteria=JevPresets.MultiPart), ScriptedRunner(TextModelResponse(provider=ModelProvider.OPENAI, model="fake", text="Done.", raw={})))
+        decisions = ScriptedMultipartDecisionRunner(ProviderResponseError("unavailable", provider="typesafe"))
+        with patch.object(jev_runtime.MultiPartStateBuilderAgent, "build_state", AsyncMock(return_value=state)), patch.object(jev_runtime.MultiPartHandoffBuilderAgent, "build_handoff", AsyncMock(return_value=handoff)), patch.object(jev_runtime, "DecisionModelRunner", return_value=decisions):
+            with self.assertRaises(AgentExecutionError) as raised:
+                await agent.arun("Implement the feature.")
+        self.assertEqual(raised.exception.details["error_type"], "ProviderResponseError")
+
+    async def test_state_output_rejects_duplicates_and_missing_fields(self) -> None:
+        # [Hidden Failure] model output that looks like JSON but omits state fields or repeats IDs is rejected.
+        valid = {
+            "goal": "Goal", "objective": "Objective", "mission": "Mission", "what_not_to_do": [], "sections": {},
+            "multi_part": {"deliverables": [{"id": "code", "description": "Code", "completion_signal": "Code exists."}]},
+        }
+        with self.assertRaises(OutputSchemaViolationError):
+            JevRunState.from_payload({"goal": "only one field"})
+        duplicate = {**valid, "multi_part": {"deliverables": [*valid["multi_part"]["deliverables"], valid["multi_part"]["deliverables"][0]]}}
+        with self.assertRaises(OutputSchemaViolationError):
+            JevRunState.from_payload(duplicate)
+
+    async def test_metadata_maps_each_deliverable_to_its_probability(self) -> None:
+        # [Silent Failure] final metadata preserves the exact identifier/probability association.
+        state = _multipart_state(("code", "Implement.", "Code exists."), ("docs", "Document.", "Docs exist."))
+        handoff = _multipart_handoff(("code", "complete", "Code exists.", "none"), ("docs", "complete", "Docs exist.", "none"))
+        runner = ScriptedRunner(TextModelResponse(provider=ModelProvider.OPENAI, model="fake", text="Done.", raw={}))
+        agent = bind_test_runner(JevAgent(_settings(), done_criteria=JevPresets.MultiPart), runner)
+        from unittest.mock import AsyncMock
+        from vidbyte.agents.jev import runtime as jev_runtime
+
+        decisions = ScriptedMultipartDecisionRunner(0.91, 0.84)
+        with patch.object(jev_runtime.MultiPartStateBuilderAgent, "build_state", AsyncMock(return_value=state)), patch.object(jev_runtime.MultiPartHandoffBuilderAgent, "build_handoff", AsyncMock(return_value=handoff)), patch.object(jev_runtime, "DecisionModelRunner", return_value=decisions):
+            reply = await agent.arun("Implement and document.")
+        rows = reply.metadata["done_criteria"]["deliverables"]
+        self.assertEqual(rows["code"]["probability"], 0.91)
+        self.assertEqual(rows["docs"]["probability"], 0.84)
 
 
 if __name__ == "__main__":

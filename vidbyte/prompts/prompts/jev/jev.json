@@ -1,0 +1,15 @@
+{
+  "name": "Jev",
+  "description": "Prompt assets for generating Jev run state and structured multipart completion handoffs.",
+  "key": "jev",
+  "prompts": {
+    "state_builder": {
+      "path": "state_builder.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev/state_builder.md"
+    },
+    "handoff_builder": {
+      "path": "handoff_builder.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev/handoff_builder.md"
+    }
+  }
+}

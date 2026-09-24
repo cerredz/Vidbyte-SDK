@@ -36,7 +36,7 @@ from vidbyte.agents.pricing.records import (
     UsageRollup,
 )
 from vidbyte.lib.enums import ModelProvider
-from vidbyte.lib.registries.operation_pricing import OperationPricingRegistry
+from vidbyte.lib.registries.operation_pricing import OperationPricing, OperationPricingRegistry
 from vidbyte.lib.registries.pricing import ModelPricingRegistry
 
 if TYPE_CHECKING:
@@ -105,6 +105,38 @@ class UsageTracker:
         self._operations.append(record)
         return record
 
+    def merge(self, rollup: UsageRollup) -> None:
+        # Adds a nested agent's already-priced model and operation records to this run's owner ledger.
+        # @intent merge-nested-run-usage
+        # Reindex nested builders without repricing their recorded calls, preserving one owner ledger per run.
+        if not isinstance(rollup, UsageRollup):
+            raise TypeError("UsageTracker.merge() requires a UsageRollup.")
+        first_call_index = len(self._records) + 1
+        first_operation_index = len(self._operations) + 1
+        self._records.extend(
+            UsageRecord(
+                call_index=first_call_index + offset - 1,
+                provider=record.provider,
+                model=record.model,
+                usage=record.usage,
+                cost_usd=record.cost_usd,
+            )
+            for offset, record in enumerate(rollup.calls, start=1)
+        )
+        self._operations.extend(
+            OperationUsageRecord(
+                call_index=first_operation_index + offset - 1,
+                operation=record.operation,
+                provider=record.provider,
+                mode=record.mode,
+                units=record.units,
+                cost_usd=record.cost_usd,
+            )
+            for offset, record in enumerate(rollup.operations, start=1)
+        )
+        if rollup.recording_integrity is UsageRecordingIntegrity.CORRUPTED:
+            self.mark_recording_corrupted()
+
     def rollup(self) -> UsageRollup:
         # Folds both ledgers into an immutable None-aware rollup whose cost spans
         # the token and operation axes and whose cost_complete requires every
@@ -116,9 +148,9 @@ class UsageTracker:
         return UsageRollup(
             calls=records,
             model_call_count=len(records),
-            input_tokens=_sum_or_none(record.usage.input_tokens for record in records),
-            output_tokens=_sum_or_none(record.usage.output_tokens for record in records),
-            total_tokens=_sum_or_none(record.usage.total_tokens for record in records),
+            input_tokens=_sum_int_or_none(record.usage.input_tokens for record in records),
+            output_tokens=_sum_int_or_none(record.usage.output_tokens for record in records),
+            total_tokens=_sum_int_or_none(record.usage.total_tokens for record in records),
             cached_input_tokens=_sum_int_or_none(record.usage.cached_input_tokens for record in records),
             cache_hit_rate=_cache_hit_rate(records),
             cost_usd=_sum_or_none(token_costs + operation_costs),
@@ -175,7 +207,7 @@ def _is_billable_key(operation: str, provider: str) -> bool:
     return isinstance(operation, str) and bool(operation.strip()) and isinstance(provider, str) and bool(provider.strip())
 
 
-def _reported_or_table_cost(reported_cost_usd: float | None, pricing: object, units: int) -> float | None:
+def _reported_or_table_cost(reported_cost_usd: float | None, pricing: OperationPricing | None, units: int) -> float | None:
     # Prefers a valid non-negative provider-reported cost, else falls back to the
     # tariff's own math; returns None when neither can price the operation.
     if isinstance(reported_cost_usd, (int, float)) and not isinstance(reported_cost_usd, bool) and reported_cost_usd >= 0:

@@ -511,12 +511,17 @@ class AgentRuntime:
                         tokens_used=state.tokens_used,
                         contexts=state.call_contexts,
                     )
+                elif await self._continue_finish_attempt(final, state, messages):
+                    if state.inner_context_window_algorithm is None:
+                        messages.append(self._assistant_message(last_assistant_output))
+                    continue
                 return await self._finish_result(final, state)
 
             assistant_tool_msg = ToolsFormatter.format_assistant_tool_calls(raw_result, state.provider)
             if assistant_tool_msg is not None:
                 messages.append(dict(assistant_tool_msg))
             contract_rejected = False
+            finish_attempt_continued = False
             for call in tool_calls:
                 processed = await self._process_tool_call(call, messages, state, trace_context=active_trace_context)
                 if isinstance(processed, AgentResult):
@@ -554,8 +559,13 @@ class AgentRuntime:
                         tokens_used=state.tokens_used,
                         stop_reason=AgentStopReason.IS_DONE,
                     )
+                    if await self._continue_finish_attempt(final, state, messages):
+                        finish_attempt_continued = True
+                        break
                     return await self._finish_result(final, state)
 
+            if finish_attempt_continued:
+                continue
             if contract_rejected:
                 continue
 
@@ -744,6 +754,11 @@ class AgentRuntime:
         published = run_state.get(AgentRuntimeStateKey.RESULT_METADATA.value)
         base = dict(published) if isinstance(published, Mapping) else {}
         run_state[AgentRuntimeStateKey.RESULT_METADATA.value] = {**base, "fallback": dict(record)}
+
+    async def _continue_finish_attempt(self, result: AgentResult, state: BaseAgentRuntimeLoopState, messages: list[dict[str, Any]]) -> bool:
+        """Let specialized linear runtimes continue a normal finish attempt with explicit feedback."""
+        # Default runtimes accept the attempt unchanged; specialized runtimes append feedback before returning True.
+        return False
 
     async def _finish_result(self, result: AgentResult, state: BaseAgentRuntimeLoopState) -> AgentResult:
         """Run after_run middleware and attach final middleware metadata."""
@@ -1776,6 +1791,7 @@ class AgentRuntime:
             "tool_calls_by_name": self._tool_calls_by_name(non_internal),
             "tokens_used": tokens_used or 0,
             "elapsed_seconds": self.middleware.clock() - started_at,
+            "final_output": final_text,
             "final_output_chars": len(final_text),
             "final_output_tokens": self._approx_output_tokens(final_text),
             "cost_spent_usd": self._cost_spent_usd(tokens_used),
