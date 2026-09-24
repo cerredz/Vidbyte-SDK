@@ -16,8 +16,8 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
+from vidbyte.tools.mcp.transport import McpNotifyingTransport, McpTransport
 from vidbyte.tools.mcp.types import McpToolDefinition
-from vidbyte.tools.mcp.transport import McpTransport
 from vidbyte.tools.types import ToolResult
 
 
@@ -42,6 +42,10 @@ class McpClient:
                 "clientInfo": {"name": "vidbyte-sdk", "version": "0.1.0"},
             },
         )
+        # Streamable HTTP servers may refuse requests until the client confirms initialization; stdio servers do not
+        # need it, and McpStdioTransport has no notification channel.
+        if isinstance(self.transport, McpNotifyingTransport):
+            await self.transport.notify("notifications/initialized")
         self.initialized = True
 
     async def list_tools(self) -> tuple[McpToolDefinition, ...]:
@@ -60,6 +64,7 @@ class McpClient:
                     name=str(item.get("name", "")),
                     description=str(item.get("description", "")) or "MCP bridged tool.",
                     input_schema=self._schema(item),
+                    annotations=self._annotations(item),
                 )
             )
         return tuple(tool for tool in tools if tool.name)
@@ -87,6 +92,13 @@ class McpClient:
         schema = item.get("inputSchema") or item.get("input_schema") or {}
         if isinstance(schema, Mapping):
             return schema
+        return {}
+
+    def _annotations(self, item: Mapping[str, Any]) -> Mapping[str, Any]:
+        """Extract the MCP annotations object (readOnlyHint, destructiveHint, ...) from a remote tool definition."""
+        annotations = item.get("annotations") or {}
+        if isinstance(annotations, Mapping):
+            return annotations
         return {}
 
     def _content_to_text(self, result: Mapping[str, Any]) -> str:

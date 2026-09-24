@@ -10,7 +10,7 @@ attach.py    -- attaches an MCP server's tools to an agent
 presets.py   -- named server configurations
 client.py    -- MCP session: initialize, list tools, call tools
 bridge.py    -- wraps a discovered MCP tool as a Vidbyte ToolSpec
-transport.py -- McpTransport protocol + hardened stdio JSON-RPC implementation
+transport.py -- McpTransport protocol, hardened stdio JSON-RPC, and Streamable HTTP transports
 types.py     -- shared payload dataclasses
 ```
 
@@ -22,6 +22,15 @@ types.py     -- shared payload dataclasses
 The design reasoning lives in `docs/design/harden-mcp-stdio-transport.md`. This README covers the
 *protocol* those mechanics implement.
 
+`McpStreamableHttpTransport` connects remote servers. `McpServerConfig(url=..., headers=...)` selects it,
+and `McpServerConfig(command=...)` selects stdio; a config must name exactly one of the two. Each JSON-RPC
+message is one POST. The reply is JSON or `text/event-stream`, and either is read under a byte ceiling. The
+`Mcp-Session-Id` the server assigns is echoed on later requests, `MCP-Protocol-Version` is sent after
+`initialize`, `notifications/initialized` follows the handshake, and `close()` sends a best-effort `DELETE`.
+`tool_allowlist` bridges only the named tools (an empty tuple bridges none), and `tool_prefix` renames them for
+the model while the server is still called by its own name. Tool `annotations` (`readOnlyHint`,
+`destructiveHint`) are kept on `McpToolDefinition`. Design: `docs/design/jev-tool-alignment.md`.
+
 ---
 
 # External Contract
@@ -31,7 +40,7 @@ The design reasoning lives in `docs/design/harden-mcp-stdio-transport.md`. This 
 > **retrieved:** 2026-08-29
 > **verified_by:** `vidbyte/tools/mcp/transport.py`, `vidbyte/tools/mcp/client.py`,
 > `vidbyte/tools/mcp/bridge.py`
-> **scope:** Client-side `tools` capability and the stdio transport. Excludes resources, prompts,
+> **scope:** Client-side `tools` capability, the stdio transport, and the Streamable HTTP transport. Excludes resources, prompts,
 > sampling, and elicitation.
 >
 > Written in our own words: `vidbyte-sdk` is MIT-licensed and published to PyPI, and the

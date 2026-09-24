@@ -14,8 +14,22 @@ from vidbyte.agents.jev.alignment import (
     JevAgentAlignment,
     JevAlignmentResult,
     JevAlignmentStatus,
+    JevAttachedTool,
+    JevToolAlignmentResult,
+    JevToolAlignmentStatus,
 )
 from vidbyte.agents.jev.runtime import JevRuntime
-from vidbyte.agents.jev.settings import JevAgentSettings
+from vidbyte.agents.jev.settings import JevAgentSettings, JevToolAlignmentSettings
 
-__all__ = ["JevAgent", "JevAgentAlignment", "JevAgentSettings", "JevAlignmentResult", "JevAlignmentStatus", "JevRuntime"]
+__all__ = [
+    "JevAgent",
+    "JevAgentAlignment",
+    "JevAgentSettings",
+    "JevAlignmentResult",
+    "JevAlignmentStatus",
+    "JevAttachedTool",
+    "JevRuntime",
+    "JevToolAlignmentResult",
+    "JevToolAlignmentSettings",
+    "JevToolAlignmentStatus",
+]

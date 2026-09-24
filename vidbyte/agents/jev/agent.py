@@ -30,8 +30,9 @@ class JevAgent(BaseAgent):
         if not isinstance(settings, JevAgentSettings):
             raise ConfigurationError("JevAgent requires a JevAgentSettings instance.")
         self.settings = settings
-        # One editor per agent; it aligns only this agent's run-local prompt and is absent unless self_align is on.
-        self.alignment = JevAgentAlignment(settings) if settings.self_align else None
+        # One alignment agent per agent; it aligns only this agent's run-local prompt and tools, and is absent unless
+        # self_align is on or tool_align is set.
+        self.alignment = JevAgentAlignment(settings) if settings.self_align or settings.tool_align is not None else None
         super().__init__(
             name=settings.name,
             system_prompt=settings.system_prompt,

@@ -1,6 +1,6 @@
 """FILE: vidbyte/agents/jev/alignment/draft.py
 
-PURPOSE: Holds one run's additive edits to the main agent's system prompt and renders the edited prompt.
+PURPOSE: Holds one run's additive edits to the main agent's system prompt and renders the edited prompt; and JevToolScoutPass, the run-local state a tool-alignment pass shares with the scout's tools.
 ROLE IN CODEBASE: JevAgentAlignment creates one JevPromptDraft per alignment pass; the edit tool writes to it and verification chooses which sections to keep.
 ARCHITECTURE NOTE: Edits only add text under a named section heading, creating the heading when missing. The original prompt text is never replaced or deleted, so owner-written instructions survive every edit.
 COMMON MODIFICATION PATTERNS: Change validation here, not in the tool, so every caller of add() gets the same rules.
@@ -13,9 +13,19 @@ from __future__ import annotations
 
 import re
 from collections.abc import Collection, Mapping
+from dataclasses import dataclass, field
+from enum import StrEnum
 
 from vidbyte.agents.jev.alignment.questions import EDITABLE_SECTIONS, JevPromptSection
-from vidbyte.agents.jev.alignment.result import JevAlignmentGap, JevPromptEdit
+from vidbyte.agents.jev.alignment.result import (
+    JevAlignmentGap,
+    JevPromptEdit,
+    JevToolCandidate,
+    JevToolNeed,
+)
+from vidbyte.agents.pricing import JevUsage
+from vidbyte.lib.dataclasses.tool_catalogs import ToolCatalogEntry
+from vidbyte.tools.mcp.types import McpServerHandle
 
 MAX_EDIT_CHARS = 1_500
 MAX_ADDED_CHARS = 6_000
@@ -119,4 +129,45 @@ def _section_end(lines: list[str], start: int) -> int:
     return len(lines)
 
 
-__all__ = ["MAX_ADDED_CHARS", "MAX_EDIT_CHARS", "JevPromptDraft"]
+class JevToolScoutPhase(StrEnum):
+    """Which part of a tool-alignment pass the scout is in; each phase allows only its own tools."""
+
+    NEEDS = "needs"  # write_tool_needs only
+    SEARCH = "search"  # search_tool_catalogs, describe_catalog_entry, propose_tool_candidates
+
+
+@dataclass(frozen=True, slots=True)
+class JevToolProposal:
+    """One entry and tool shortlist the scout proposed for one need."""
+
+    need_id: str
+    entry_key: str
+    tool_names: tuple[str, ...]
+
+
+@dataclass(slots=True)
+class JevToolScoutPass:
+    """Run-local state one tool-alignment pass shares with the scout's tools; JevAgentAlignment owns every rule."""
+
+    request: str
+    phase: JevToolScoutPhase = JevToolScoutPhase.NEEDS
+    needs: list[JevToolNeed] = field(default_factory=list)
+    # Every entry a search or describe returned this pass, keyed by ToolCatalogEntry.key; proposals may cite only these.
+    entries: dict[str, ToolCatalogEntry] = field(default_factory=dict)
+    described: set[str] = field(default_factory=set)
+    proposals: list[JevToolProposal] = field(default_factory=list)
+    searches: int = 0
+    provider_errors: dict[str, str] = field(default_factory=dict)
+    # Evidence and resources the pass accumulates; JevAgentAlignment turns them into the result and closes the sessions.
+    probabilities: dict[str, float] = field(default_factory=dict)
+    usages: list[JevUsage] = field(default_factory=list)
+    rejected: list[JevToolCandidate] = field(default_factory=list)
+    owner_actions: list[str] = field(default_factory=list)
+    handles: list[McpServerHandle] = field(default_factory=list)
+
+    def uncovered_ids(self) -> frozenset[str]:
+        """Return the ids of needs no existing tool performs; only these may receive proposals."""
+        return frozenset(need.need_id for need in self.needs if not need.covered)
+
+
+__all__ = ["MAX_ADDED_CHARS", "MAX_EDIT_CHARS", "JevPromptDraft", "JevToolProposal", "JevToolScoutPass", "JevToolScoutPhase"]
