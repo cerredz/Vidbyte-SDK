@@ -99,6 +99,8 @@ class GlamaCatalog(ToolCatalogProvider):
 
 def _connector_install(connection: Mapping[str, object], secret_name: str) -> ToolInstall | None:
     # Converts a connection into a REMOTE_HTTP install; OAuth and basic auth cannot be attached yet.
+    # @intent unsupported-auth-is-not-attachable
+    # An OAuth or basic-auth connector would fail at connect time, so it gets no install instead of a broken one.
     url = text(connection.get("url"))
     auth_type = text(connection.get("authType"))
     if text(connection.get("transport")) != _STREAMABLE_HTTP or not url or auth_type not in (_AUTH_NONE, _AUTH_API_KEY):

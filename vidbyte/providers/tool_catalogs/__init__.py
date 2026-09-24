@@ -52,6 +52,8 @@ _ADAPTERS: Mapping[ToolCatalogName, type[ToolCatalogProvider]] = {
     ToolCatalogName.APIS_GURU: ApisGuruCatalog,
 }
 
+_NO_ENTRIES = 0
+
 
 class ToolCatalogs:
     """Factory and fan-out search over the public tool-catalog adapters."""
@@ -95,8 +97,8 @@ def _interleave_unique(results: Sequence[Sequence[ToolCatalogEntry]], limit: int
     # Takes the first entry from each catalog, then the second, and so on, skipping entries already seen elsewhere.
     merged: list[ToolCatalogEntry] = []
     seen: set[str] = set()
-    depth = max((len(entries) for entries in results), default=0)
-    for index in range(depth):
+    rounds = max((len(entries) for entries in results), default=_NO_ENTRIES)
+    for index in range(rounds):
         for entries in results:
             if index >= len(entries) or len(merged) >= limit:
                 continue

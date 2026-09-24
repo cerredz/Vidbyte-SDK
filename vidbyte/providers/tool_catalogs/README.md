@@ -21,26 +21,12 @@ found = await ToolCatalogs.search_all(catalogs, "linear", limit_per_catalog=8, m
 - Adapters never derive a command from a catalog name. A package or container install uses the identifier and version the catalog publishes, and an install without a version is marked unpinned.
 - Owner credentials go only to the catalog they belong to. The Smithery key, for example, is sent only to `registry.smithery.ai` and never to a server's deployment URL.
 
-## File Index
-
-- `__init__.py`: the `ToolCatalogs` factory, the `search_all()` fan-out, and the interleave-and-dedupe merge.
-- `base.py`: the `ToolCatalogProvider` contract, the bounded HTTP helpers, `IndexedToolCatalogProvider`, and local ranking.
-- `mcp_registry.py`: the official MCP Registry and GitHub's MCP Registry (`server.json`).
-- `smithery.py`: the Smithery registry.
-- `glama.py`: Glama connectors.
-- `docker.py`: Docker's MCP Catalog (`catalog.yaml`).
-- `toolsdk.py`: ToolSDK's package index.
-- `composio.py`: Composio tools and tool-router sessions.
-- `pipedream.py`: Pipedream Connect apps and remote MCP.
-- `arcade.py`: Arcade tools and direct execution.
-- `apis_guru.py`: the APIs.guru OpenAPI directory (discovery only).
-
 ---
 
 # External Contract
 
 > **retrieved:** 2026-09-23
-> **verified_by:** every module in this folder, and `tests/test_tool_catalogs.py`
+> **verified_by:** every module in this folder, and the tool-catalog test module under tests/
 > **scope:** endpoints, authentication, and the response fields each adapter reads. Rate limits and fields no adapter reads are out of scope.
 >
 > This section is written in our own words. `vidbyte-sdk` is MIT-licensed, and the catalogs' documentation is not.
@@ -57,3 +43,17 @@ found = await ToolCatalogs.search_all(catalogs, "linear", limit_per_catalog=8, m
 | [Pipedream Connect](https://pipedream.com/docs/connect/mcp/developers) | `GET api.pipedream.com/v1/connect/apps?q=&has_actions=true` | `https://remote.mcp.pipedream.net/v3` with `x-pd-project-id`, `x-pd-environment`, `x-pd-external-user-id`, and `x-pd-app-slug` | `POST /v1/oauth/token` client-credentials grant, then `Authorization: Bearer` | managed: the remote MCP server scoped by those headers |
 | [Arcade](https://docs.arcade.dev/en/references/api) ([OpenAPI](https://api.arcade.dev/v1/swagger)) | `GET api.arcade.dev/v1/tools?search=&limit=` (literal substring; every word must match) | `POST /v1/tools/execute` with `tool_name`, `input`, and `user_id` | `Authorization: Bearer <key>` | managed, direct execute (`executes_directly=True`) |
 | [APIs.guru](https://apis.guru/api-doc/) | `api.apis.guru/v2/list.json` (~9 MB), ranked locally | none | none | OpenAPI (`swaggerUrl`); reported to the owner, never attached |
+
+## File Index
+
+- `__init__.py`: the `ToolCatalogs` factory, the `search_all()` fan-out, and the interleave-and-dedupe merge.
+- `base.py`: the `ToolCatalogProvider` contract, the bounded HTTP helpers, `IndexedToolCatalogProvider`, and local ranking.
+- `mcp_registry.py`: the official MCP Registry and GitHub's MCP Registry.
+- `smithery.py`: the Smithery registry.
+- `glama.py`: Glama connectors.
+- `docker.py`: Docker's MCP Catalog.
+- `toolsdk.py`: ToolSDK's package index.
+- `composio.py`: Composio tools and tool-router sessions.
+- `pipedream.py`: Pipedream Connect apps and remote MCP.
+- `arcade.py`: Arcade tools and direct execution.
+- `apis_guru.py`: the APIs.guru OpenAPI directory (discovery only).

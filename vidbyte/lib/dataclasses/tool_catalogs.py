@@ -95,6 +95,8 @@ class ToolInstall:
     @property
     def required_secrets(self) -> tuple[ToolSecretRequirement, ...]:
         """Return the secrets the install cannot run without."""
+        # @intent optional-secrets-never-block
+        # Only required secrets block an install; optional ones are sent when the owner configured them.
         return tuple(secret for secret in self.secrets if secret.required)
 
 

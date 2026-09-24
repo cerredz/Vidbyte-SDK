@@ -52,6 +52,8 @@ _WORD = re.compile(r"[a-z0-9]+")
 _MIN_TERM_CHARS = 2
 _NAME_WEIGHT = 3
 _TEXT_WEIGHT = 1
+_NO_RETRIES = 0
+_NO_RESULTS = 0
 
 
 class ToolCatalogProvider(ABC):
@@ -63,6 +65,8 @@ class ToolCatalogProvider(ABC):
 
     def __init__(self, *, credentials: ToolCatalogCredentials | None = None, transport: HttpTransport | None = None) -> None:
         # Retains the owner's credentials for this catalog and the shared HTTP transport.
+        # @intent one-transport-per-adapter
+        # All catalog HTTP goes through the injected HttpTransport so bounds, retries, and test fakes apply everywhere.
         self.credentials = credentials or ToolCatalogCredentials()
         self.transport = transport or HttpTransport()
 
@@ -118,7 +122,7 @@ class ToolCatalogProvider(ABC):
             headers=request_headers,
             json_body=body,
             timeout_seconds=TOOL_CATALOG_INDEX_TIMEOUT_SECONDS if index else TOOL_CATALOG_TIMEOUT_SECONDS,
-            retry_count=TOOL_CATALOG_RETRY_COUNT if method.upper() == "GET" else 0,
+            retry_count=TOOL_CATALOG_RETRY_COUNT if method.upper() == "GET" else _NO_RETRIES,
             max_response_bytes=TOOL_CATALOG_INDEX_MAX_RESPONSE_BYTES if index else TOOL_CATALOG_MAX_RESPONSE_BYTES,
             follow_redirects=True,
         )
@@ -141,6 +145,8 @@ class IndexedToolCatalogProvider(ToolCatalogProvider):
 
     def __init__(self, *, credentials: ToolCatalogCredentials | None = None, transport: HttpTransport | None = None) -> None:
         # Starts with an empty cache; the first search downloads the index.
+        # @intent index-downloads-are-cached
+        # Whole-file indexes are megabytes, so one download serves every search until the TTL passes.
         super().__init__(credentials=credentials, transport=transport)
         self._entries: tuple[ToolCatalogEntry, ...] = ()
         self._loaded_at: float | None = None
@@ -188,7 +194,7 @@ def rank_entries(entries: Iterable[ToolCatalogEntry], query: str, *, limit: int)
         if score:
             scored.append((score, -position, entry))
     scored.sort(key=lambda item: (item[0], item[1]), reverse=True)
-    return tuple(entry for _, _, entry in scored[: max(0, limit)])
+    return tuple(entry for _, _, entry in scored[: max(_NO_RESULTS, limit)])
 
 
 def query_terms(query: str) -> frozenset[str]:
