@@ -1,8 +1,8 @@
 # Design Doc: Jev Done Criteria
 
-**Status:** Approved; implementation clarification  
-**Author:** OpenCode  
-**Created:** 2026-09-23  
+**Status:** Approved; implementation clarification
+**Author:** OpenCode
+**Created:** 2026-09-23
 **Last Updated:** 2026-09-24
 
 ---
@@ -89,7 +89,7 @@ JevAgentSettings(done_criteria=(JevPreset.MinimumTime(hours=5),))
 
 ### 6.1 Jev criterion package
 
-**File(s):** `vidbyte/agents/jev/done_criteria/__init__.py`, `vidbyte/agents/jev/done_criteria/base.py`, `vidbyte/agents/jev/done_criteria/criteria.py`, `vidbyte/agents/jev/done_criteria/presets.py`  
+**File(s):** `vidbyte/agents/jev/done_criteria/__init__.py`, `vidbyte/agents/jev/done_criteria/base.py`, `vidbyte/agents/jev/done_criteria/criteria.py`, `vidbyte/agents/jev/done_criteria/presets.py`
 **Type:** New files
 
 #### What it does
@@ -166,7 +166,7 @@ JevAgentSettings(..., done_criteria=(JevPreset.MinimumTime(hours=5),))
 
 ### 6.3 Shared runtime finish-attempt hook
 
-**File(s):** `vidbyte/agents/runtime.py`  
+**File(s):** `vidbyte/agents/runtime.py`
 **Type:** Modified file
 
 #### What it does
@@ -196,7 +196,7 @@ async def _continue_finish_attempt(self, result: AgentResult, state: BaseAgentRu
 
 ### 6.4 Tests and verification script
 
-**File(s):** `tests/test_jev_done_criteria.py`, `scripts/test-jev-done-criteria.py`  
+**File(s):** `tests/test_jev_done_criteria.py`, `scripts/test-jev-done-criteria.py`
 **Type:** New files
 
 #### What it does
