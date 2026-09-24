@@ -1,0 +1,27 @@
+{
+  "name": "Jev Run State",
+  "description": "Prompts for JevAgent's done checks: the builder that turns a user request into a structured run state before the agent starts, the builder that writes a matching structured handoff of the agent's work at each finish attempt, and the per-section instructions (starting with required_sequence) that each builder and the main agent receive when a setting enables that section.",
+  "key": "jev_run_state",
+  "prompts": {
+    "state_builder": {
+      "path": "state_builder.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_run_state/state_builder.md"
+    },
+    "handoff_builder": {
+      "path": "handoff_builder.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_run_state/handoff_builder.md"
+    },
+    "required_sequence_state": {
+      "path": "required_sequence_state.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_run_state/required_sequence_state.md"
+    },
+    "required_sequence_handoff": {
+      "path": "required_sequence_handoff.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_run_state/required_sequence_handoff.md"
+    },
+    "required_sequence_agent": {
+      "path": "required_sequence_agent.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_run_state/required_sequence_agent.md"
+    }
+  }
+}

@@ -12,6 +12,7 @@ Architecture:
     - AgentCard: Local agent description, capabilities, and tools.
     - AgentMessage: Actor-to-actor message payload.
     - AgentSpec: Construction-friendly agent settings block.
+    - FinishReview: Accept, continue, or stop decision for one runtime finish attempt.
 Relations:
     Used by vidbyte.agents.base, vidbyte.agents.registry, and orchestration strategies.
 """
@@ -64,7 +65,39 @@ class AgentStopReason(str, Enum):
     TOOL_SETTINGS_DENIED = "tool_settings_denied"
     TOOL_LOOP_LIMIT = "tool_loop_limit"
     CONTRACT_UNSATISFIED = "contract_unsatisfied"
+    FINISH_REVIEW_REJECTED = "finish_review_rejected"
     ERROR = "error"
+
+
+class FinishReviewAction(str, Enum):
+    """What a runtime does with a finish attempt after reviewing it."""
+
+    ACCEPT = "accept"
+    CONTINUE = "continue"
+    STOP = "stop"
+
+
+@dataclass(frozen=True, slots=True)
+class FinishReview:
+    """Outcome of AgentRuntime.review_finish_attempt for one proposed final answer."""
+
+    action: FinishReviewAction = FinishReviewAction.ACCEPT
+    feedback: str = ""
+
+    @classmethod
+    def accept(cls) -> "FinishReview":
+        """Let the run finish with the proposed answer."""
+        return cls()
+
+    @classmethod
+    def continue_with(cls, feedback: str) -> "FinishReview":
+        """Reject the finish attempt and send feedback back into the same loop."""
+        return cls(action=FinishReviewAction.CONTINUE, feedback=feedback)
+
+    @classmethod
+    def stop(cls, feedback: str) -> "FinishReview":
+        """Reject the finish attempt and end the run with FINISH_REVIEW_REJECTED."""
+        return cls(action=FinishReviewAction.STOP, feedback=feedback)
 
 
 @dataclass(frozen=True, slots=True)
