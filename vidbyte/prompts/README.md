@@ -64,6 +64,7 @@ prompt text.
 | Failure Pattern Repair | `failure_pattern_repair` | rulebook_feedback_loop, dependency_shape_triage, stage_gate_controller, evaluator_red_team, selective_regeneration_loop | [failure_pattern_repair/](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/failure_pattern_repair) |
 | Goal Behavior | `goals` | goal_prompt | [goals/goal_prompt.md](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/goals/goal_prompt.md) |
 | Handoff | `handoff` | system_prompt | [handoff/handoff.md](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/handoff/handoff.md) |
+| Jev Run State | `jev_run_state` | state_builder, handoff_builder, required_sequence_state, required_sequence_handoff, required_sequence_agent | [jev_run_state/](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_run_state) |
 | Mimic Behavior | `mimic_behavior` | mimic_prompt | [mimic_behavior/mimic_prompt.md](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/mimic_behavior/mimic_prompt.md) |
 | Multi-Provider Agentic Grader | `multi_provider_agentic_grader` | agent_system_prompt, grader_system_prompt, grader_prompt | [multi_provider_agentic_grader/](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/multi_provider_agentic_grader) |
 | Multi-Provider Aggregator | `multi_provider_aggregator` | synthesis_system_prompt, synthesis_prompt | [multi_provider_aggregator/](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/multi_provider_aggregator) |
@@ -214,6 +215,22 @@ structured, reusable handoff document another agent or human can use to continue
 the work cold.
 
 Link: <https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/handoff/handoff.md>
+
+#### Jev Run State — `jev_run_state`
+
+Prompts for JevAgent's done checks. The state builder turns a user request into
+a structured run state before the agent starts; the handoff builder writes a
+matching structured account of the agent's work at each finish attempt. Each
+section enabled by a JevAgent setting adds its own instructions to both builders
+and to the main agent, starting with `required_sequence`.
+
+- [state_builder](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_run_state/state_builder.md)
+- [handoff_builder](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_run_state/handoff_builder.md)
+- [required_sequence_state](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_run_state/required_sequence_state.md)
+- [required_sequence_handoff](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_run_state/required_sequence_handoff.md)
+- [required_sequence_agent](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_run_state/required_sequence_agent.md)
+
+Link: <https://github.com/cerredz/Vidbyte-SDK/tree/main/vidbyte/prompts/prompts/jev_run_state>
 
 #### Mimic Behavior — `mimic_behavior`
 

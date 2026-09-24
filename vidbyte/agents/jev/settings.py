@@ -4,7 +4,7 @@ PURPOSE: Defines the single, opinionated public configuration object for JevAgen
 ROLE IN CODEBASE: JevAgentSettings is the only constructor input accepted by JevAgent and carries the future decision-model seam into JevRuntime.
 ARCHITECTURE NOTE: The surface is intentionally closed; named Jev capabilities belong here as explicit settings instead of a generic decisions collection.
 COMMON MODIFICATION PATTERNS: Add a validated named capability object, then implement its fixed policy in JevRuntime without exposing runtime replacement hooks.
-KNOWN EDGE CASES: The generative provider cannot be TypeSafe because Jev is a decision model; neither generative nor decision API keys appear in repr output.
+KNOWN EDGE CASES: The generative provider cannot be TypeSafe because Jev is a decision model; neither generative nor decision API keys appear in repr output. required_sequence=True gates completion on the stages derived from each request (docs/design/jev-required-sequence.md).
 RELATED DOCS: docs/design/jev-agent-scaffold.md and skills/jev-agent/SKILL.md.
 TESTS: tests/test_jev_agent.py and scripts/test-jev-agent-scaffold.py.
 """
@@ -36,6 +36,7 @@ class JevAgentSettings:
     permission_policy: PermissionPolicy = field(default_factory=PermissionPolicy)
     loop: AgentLoopSettings = field(default_factory=AgentLoopSettings)
     decision: DecisionModelConfig = field(default_factory=DecisionModelConfig, repr=False)
+    required_sequence: bool = False
 
     def __post_init__(self) -> None:
         # Normalizes immutable inputs and rejects invalid agent configuration before runtime construction.
@@ -62,6 +63,8 @@ class JevAgentSettings:
             raise ConfigurationError("JevAgentSettings.loop must be an AgentLoopSettings instance.")
         if not isinstance(self.decision, DecisionModelConfig):
             raise ConfigurationError("JevAgentSettings.decision must be a DecisionModelConfig instance.")
+        if type(self.required_sequence) is not bool:
+            raise ConfigurationError("JevAgentSettings.required_sequence must be True or False.")
 
     @staticmethod
     def _validate_text(value: object, field_name: str) -> None:

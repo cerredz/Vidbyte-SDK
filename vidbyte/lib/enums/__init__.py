@@ -50,6 +50,7 @@ from vidbyte.lib.enums.cot_events import (
     Reversibility,
 )
 from vidbyte.lib.enums.jev import JevQuestionType
+from vidbyte.lib.enums.jev_run_state import JevRunEventKind, JevRunSectionKey, JevSectionStatus, JevStageFailure
 from vidbyte.lib.enums.model_modality import ModelModality, ModelNameModality
 from vidbyte.lib.enums.model_provider import ModelProvider
 from vidbyte.lib.enums.multi_agent import (
@@ -88,6 +89,10 @@ from vidbyte.lib.enums.structured_output import StructuredOutputSupport
 
 __all__ = [
     "JevQuestionType",
+    "JevRunEventKind",
+    "JevRunSectionKey",
+    "JevSectionStatus",
+    "JevStageFailure",
     "AbsenceEvidenceSignificance",
     "AgentRuntimeStateKey",
     "AgentRuntimeType",

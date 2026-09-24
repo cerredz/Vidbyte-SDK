@@ -57,11 +57,33 @@ JEV_NOUL_FALSE: str = "false"
 JEV_NOUL_OPTIONS: tuple[str, ...] = (JEV_NOUL_TRUE, JEV_NOUL_FALSE)
 JEV_NOUL_YES_THRESHOLD: float = 0.5
 
+# JevAgent run state and the required-sequence done check (docs/design/jev-required-sequence.md).
+# A sequence of one stage is just a task, and past twelve the stage list is almost certainly a plan
+# rather than an order the user asked for; either bound makes the section inactive for the run.
+JEV_REQUIRED_SEQUENCE_MIN_STAGES: int = 2
+JEV_REQUIRED_SEQUENCE_MAX_STAGES: int = 12
+# Rejected finish attempts sent back to the agent before the next rejection stops the run.
+JEV_MAX_FINISH_REVIEW_CONTINUATIONS: int = 3
+# One build plus one rebuild carrying the validation error of the first handoff.
+JEV_HANDOFF_BUILD_ATTEMPTS: int = 2
+# Builders answer in one JSON response; the headroom covers schema-repair turns only.
+JEV_BUILDER_MAX_ITERATIONS: int = 4
+# Longest single event body shown to the handoff builder before an explicit truncation marker.
+JEV_EVENT_LOG_MAX_EVENT_CHARS: int = 4_000
+JEV_EVENT_ID_PREFIX: str = "E"
+JEV_STAGE_ID_PREFIX: str = "stage_"
+JEV_RUN_REPORT_METADATA_KEY: str = "jev_run_report"
+
 __all__ = [
+    "JEV_BUILDER_MAX_ITERATIONS",
     "JEV_DEFAULT_MODEL",
     "JEV_DEFAULT_RETRY_COUNT",
     "JEV_DEFAULT_TIMEOUT_SECONDS",
+    "JEV_EVENT_ID_PREFIX",
+    "JEV_EVENT_LOG_MAX_EVENT_CHARS",
+    "JEV_HANDOFF_BUILD_ATTEMPTS",
     "JEV_MAX_CHOICE_OPTIONS",
+    "JEV_MAX_FINISH_REVIEW_CONTINUATIONS",
     "JEV_MAX_OPTION_NAME_CHARS",
     "JEV_MAX_QUESTIONS",
     "JEV_MAX_RESPONSE_BYTES",
@@ -77,8 +99,12 @@ __all__ = [
     "JEV_NO_RETRIES",
     "JEV_PREVIEW_MODEL",
     "JEV_PROBABILITY_SUM_TOLERANCE",
+    "JEV_REQUIRED_SEQUENCE_MAX_STAGES",
+    "JEV_REQUIRED_SEQUENCE_MIN_STAGES",
     "JEV_RETRY_BACKOFF_SECONDS",
     "JEV_RETRY_STATUS_CODES",
+    "JEV_RUN_REPORT_METADATA_KEY",
+    "JEV_STAGE_ID_PREFIX",
     "JEV_STATUS_OVERLOADED",
     "JEV_STATUS_RATE_LIMITED",
     "JEV_STATUS_REQUEST_TIMEOUT",

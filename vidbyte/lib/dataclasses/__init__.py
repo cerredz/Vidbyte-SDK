@@ -44,6 +44,8 @@ from vidbyte.lib.dataclasses.agents import (
     AgentRuntimeStats,
     AgentSpec,
     AgentStopReason,
+    FinishReview,
+    FinishReviewAction,
 )
 from vidbyte.lib.dataclasses.aggregate_agent_descriptor import AggregateAgentDescriptor
 from vidbyte.lib.dataclasses.config import (
@@ -349,6 +351,8 @@ __all__ = [
     "FileSystemToolConfig",
     "FinalizationContext",
     "FinalizationRenderer",
+    "FinishReview",
+    "FinishReviewAction",
     "ForkRecoverySettings",
     "GitDiffContextItem",
     "HandoffAgentDescriptor",

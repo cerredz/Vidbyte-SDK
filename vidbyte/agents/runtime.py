@@ -104,6 +104,8 @@ from vidbyte.lib.dataclasses.agents import (
     AgentIterationSnapshot,
     AgentRuntimeConfig,
     AgentStopReason,
+    FinishReview,
+    FinishReviewAction,
 )
 from vidbyte.lib.dataclasses.context import BaseAgentContext, BaseContext
 from vidbyte.lib.dataclasses.middleware import (
@@ -491,6 +493,13 @@ class AgentRuntime:
                         rejections += 1
                         messages.append({"role": "user", "content": self.output_contract.feedback(unmet, counters)})
                         continue
+                review = await self.review_finish_attempt(last_assistant_output or "", state)
+                if review.action is FinishReviewAction.STOP:
+                    return await self._finish_result(self._finish_review_stop_result(last_assistant_output or "", state), state)
+                if review.action is FinishReviewAction.CONTINUE:
+                    messages.append(self._assistant_message(last_assistant_output or ""))
+                    messages.append({"role": "user", "content": review.feedback})
+                    continue
                 final = self._final_result(
                     output=last_assistant_output,
                     runner_metadata=runner_metadata,
@@ -516,7 +525,7 @@ class AgentRuntime:
             assistant_tool_msg = ToolsFormatter.format_assistant_tool_calls(raw_result, state.provider)
             if assistant_tool_msg is not None:
                 messages.append(dict(assistant_tool_msg))
-            contract_rejected = False
+            finish_rejected = False
             for call in tool_calls:
                 processed = await self._process_tool_call(call, messages, state, trace_context=active_trace_context)
                 if isinstance(processed, AgentResult):
@@ -544,8 +553,15 @@ class AgentRuntime:
                         if unmet:
                             rejections += 1
                             self._append_tool_result_message(messages, call, ToolResult.error(call.tool_name, self.output_contract.feedback(unmet, counters)), state.provider, MiddlewareDecision.continue_())
-                            contract_rejected = True
+                            finish_rejected = True
                             break
+                    review = await self.review_finish_attempt(result.output or "", state)
+                    if review.action is FinishReviewAction.STOP:
+                        return await self._finish_result(self._finish_review_stop_result(result.output or "", state), state)
+                    if review.action is FinishReviewAction.CONTINUE:
+                        self._append_tool_result_message(messages, call, ToolResult.error(call.tool_name, review.feedback), state.provider, MiddlewareDecision.continue_())
+                        finish_rejected = True
+                        break
                     final = self._final_result(
                         output=result.output,
                         runner_metadata=runner_metadata,
@@ -556,7 +572,7 @@ class AgentRuntime:
                     )
                     return await self._finish_result(final, state)
 
-            if contract_rejected:
+            if finish_rejected:
                 continue
 
             decision = await self.middleware.after_iteration(self._middleware_context(MiddlewareHook.AFTER_ITERATION, state))
@@ -568,6 +584,19 @@ class AgentRuntime:
                     contexts=state.call_contexts,
                 )
                 return await self._finish_result(result, state)
+
+    async def review_finish_attempt(self, candidate_output: str, state: BaseAgentRuntimeLoopState) -> FinishReview:
+        """Review a proposed final answer before the loop accepts it; the default always accepts."""
+        # Called on both finish paths (a plain final response and isDone), after the output contract.
+        # @intent finish-review-is-a-subclass-seam
+        # Runtimes that gate completion (JevRuntime's done checks) override this instead of copying
+        # _arun_once, so the loop, budgets, and middleware stay implemented in one place.
+        del candidate_output, state
+        return FinishReview.accept()
+
+    def _finish_review_stop_result(self, output: str, state: BaseAgentRuntimeLoopState) -> AgentResult:
+        # Ends the run with the candidate answer when a finish review refuses to continue any further.
+        return self._stopped_result(output, stop_reason=AgentStopReason.FINISH_REVIEW_REJECTED, iteration_count=state.iteration_count, tokens_used=state.tokens_used, contexts=state.call_contexts)
 
     async def _invoke_with_middleware(self, handle: RunnerHandle, message: str, call_options: Mapping[str, Any], *, context: BaseAgentContext, iteration_count: int, model_call_count: int, call_contexts: Sequence[ToolCallContext], tokens_used: int | None, started_at: float, metadata: Mapping[str, Any], run_state: dict[type, Any] | None = None, trace_context: SpanContext | None = None, compaction_count: int = 0) -> tuple[object | AgentResult, int, int]:
         """Invoke the runner, allowing middleware to retry model errors while tracking compaction events."""
@@ -1776,6 +1805,7 @@ class AgentRuntime:
             "tool_calls_by_name": self._tool_calls_by_name(non_internal),
             "tokens_used": tokens_used or 0,
             "elapsed_seconds": self.middleware.clock() - started_at,
+            "final_output": final_text,
             "final_output_chars": len(final_text),
             "final_output_tokens": self._approx_output_tokens(final_text),
             "cost_spent_usd": self._cost_spent_usd(tokens_used),
