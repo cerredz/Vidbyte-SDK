@@ -1,12 +1,14 @@
 """FILE: vidbyte/agents/jev/settings.py
 
-PURPOSE: Defines the single, opinionated public configuration object for JevAgent.
-ROLE IN CODEBASE: JevAgentSettings is the only constructor input accepted by JevAgent and carries the future decision-model seam into JevRuntime.
-ARCHITECTURE NOTE: The surface is intentionally closed; named Jev capabilities belong here as explicit settings instead of a generic decisions collection.
-COMMON MODIFICATION PATTERNS: Add a validated named capability object, then implement its fixed policy in JevRuntime without exposing runtime replacement hooks.
-KNOWN EDGE CASES: The generative provider cannot be TypeSafe because Jev is a decision model; neither generative nor decision API keys appear in repr output.
+PURPOSE: Defines the validated, immutable public settings accepted by JevAgent, including its optional typed completion criteria.
+ROLE IN CODEBASE: JevAgent passes this object to JevRuntime; done_criteria values come from vidbyte/agents/jev/done_criteria and are evaluated only at model finish attempts.
+ARCHITECTURE NOTE: Named Jev capabilities remain explicit settings rather than a generic decisions map; the settings object is the sole public constructor input.
+FUNCTION INVENTORY: __post_init__ validates and normalizes settings; _validate_done_criteria snapshots completion policy; helper methods validate provider and model fields.
+COMMON MODIFICATION PATTERNS: Add new Jev capabilities as validated typed settings, then implement their fixed policy in JevRuntime or a Jev-owned package.
+WHAT NOT TO DO: Do not construct a provider runner or evaluate per-run criteria in settings; runtime construction and run-local policy belong to JevRuntime.
+KNOWN EDGE CASES: The generative provider cannot be TypeSafe; secrets remain excluded from repr; strings and invalid objects are rejected as done criteria.
 RELATED DOCS: docs/design/jev-agent-scaffold.md and skills/jev-agent/SKILL.md.
-TESTS: tests/test_jev_agent.py and scripts/test-jev-agent-scaffold.py.
+TESTS: tests/test_jev_agent.py, tests/test_jev_done_criteria.py, and scripts/test-jev-done-criteria.py.
 """
 
 from __future__ import annotations
@@ -14,6 +16,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, field
 
+from vidbyte.agents.jev.done_criteria import JevDoneCriterion
 from vidbyte.agents.settings import AgentLoopSettings
 from vidbyte.lib.dataclasses.model_configs import DecisionModelConfig
 from vidbyte.lib.enums import ModelProvider
@@ -36,6 +39,7 @@ class JevAgentSettings:
     permission_policy: PermissionPolicy = field(default_factory=PermissionPolicy)
     loop: AgentLoopSettings = field(default_factory=AgentLoopSettings)
     decision: DecisionModelConfig = field(default_factory=DecisionModelConfig, repr=False)
+    done_criteria: tuple[JevDoneCriterion, ...] = ()
 
     def __post_init__(self) -> None:
         # Normalizes immutable inputs and rejects invalid agent configuration before runtime construction.
@@ -62,6 +66,19 @@ class JevAgentSettings:
             raise ConfigurationError("JevAgentSettings.loop must be an AgentLoopSettings instance.")
         if not isinstance(self.decision, DecisionModelConfig):
             raise ConfigurationError("JevAgentSettings.decision must be a DecisionModelConfig instance.")
+        self._validate_done_criteria()
+
+    def _validate_done_criteria(self) -> None:
+        # Snapshots criteria so callers cannot mutate Jev completion policy after settings construction.
+        if isinstance(self.done_criteria, (str, bytes)):
+            raise ConfigurationError("JevAgentSettings.done_criteria must contain JevDoneCriterion instances, not a string.")
+        try:
+            criteria = tuple(self.done_criteria)
+        except TypeError as exc:
+            raise ConfigurationError("JevAgentSettings.done_criteria must be an iterable of JevDoneCriterion instances.") from exc
+        if any(not isinstance(criterion, JevDoneCriterion) for criterion in criteria):
+            raise ConfigurationError("JevAgentSettings.done_criteria must contain only JevDoneCriterion instances.")
+        object.__setattr__(self, "done_criteria", criteria)
 
     @staticmethod
     def _validate_text(value: object, field_name: str) -> None:
