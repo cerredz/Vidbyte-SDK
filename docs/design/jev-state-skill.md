@@ -8,7 +8,7 @@ Future Jev capabilities will classify the agent's progress and actions during an
 
 Extend `skills/jev-agent/SKILL.md` with guidance for a proposed state architecture and its limits. Keep it distinguishable from the currently implemented scaffold and preflight behavior. No runtime API or behavior changes in this PR.
 
-The proposed architecture keeps recoverable source evidence, incrementally updated structured state, and a decision-specific Jev view. Each capability specifies the evidence it needs, freshness rules, a budget, and fallback behavior. Code records execution facts and deterministic comparisons; the generative model interprets ambiguous meaning and changes to plans; Jev classifies prepared evidence. Evaluation must isolate errors in view construction from errors in Jev classification and measure end-to-end benefit.
+The proposed architecture builds a general structured task state once from the original request. Named settings add capability-specific sections; the first is a multi-part completion section. At a finish attempt, a second generative builder creates a matching handoff from the observed run. Jev receives the original request, initial state, and handoff and classifies each requested part. Runtime code validates matching sections and controls acceptance or continuation. Retained source evidence supports handoff review across context compaction; insufficient or oversized evidence remains explicit. Evaluation isolates errors in initial extraction, handoff reconstruction, Jev classification, and the resulting run behavior.
 
 ## Files
 
@@ -17,7 +17,7 @@ The proposed architecture keeps recoverable source evidence, incrementally updat
 
 ## Risks and open questions
 
-A finite view cannot answer arbitrary future questions about an unbounded run. Extraction, retrieval, and dependency tracking can miss a decisive detail even when a view appears complete. The eventual storage interface, update channel, and decision contracts require implementation and empirical validation before controlling consequential behavior.
+A finite view cannot answer arbitrary future questions about an unbounded run. Initial extraction and final reconstruction can omit decisive details, especially when the full run exceeds the handoff model's context. The strict finish-attempt seam, source capture, and fallback behavior require implementation and empirical validation before controlling consequential behavior.
 
 ## Verification
 
