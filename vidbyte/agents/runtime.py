@@ -19,7 +19,8 @@ ROLE IN CODEBASE:
 
 ARCHITECTURE NOTE:
     This is the imperative boundary between reusable agent contracts and model
-    or tool execution. ``_middleware_context`` snapshots state for deterministic
+    or tool execution. A protected finish-attempt hook lets specialized runtimes
+    gate normal completion paths without copying this loop. ``_middleware_context`` snapshots state for deterministic
     middleware hooks; ``BaseAgentRuntimeLoopState`` keeps model response,
     counters, call records, context-window state, and iteration outputs local to
     one attempt. Runtime handoff keys come from ``vidbyte.lib.enums``.
@@ -29,6 +30,8 @@ FUNCTION INVENTORY:
     provider-facing context window from agent history and managed items.
     ``AgentRuntime.arun`` -> ``AgentResult``: dispatches configured algorithms or
     the direct model/tool loop.
+    ``AgentRuntime._continue_finish_attempt`` -> ``bool``: optionally resumes
+    after a model-originated final response or internal completion-tool attempt.
     ``AgentRuntime.execute_tool_call`` -> ``(ToolCallContext, ToolResult)``:
     resolves, authorizes, validates, executes, and records one tool call.
     ``BaseAgentRuntimeLoopState.tool_call_count`` -> ``int``: derives the number
@@ -40,7 +43,8 @@ COMMON MODIFICATION PATTERNS:
     route all middleware snapshots through that field. Add new run-state keys to
     ``vidbyte/lib/enums/agent_runtime.py`` and use ``.value`` at dict boundaries.
     Preserve ``_invoke_with_middleware``'s keyword signature because external
-    runtime algorithms call it directly.
+    runtime algorithms call it directly. Override ``_continue_finish_attempt``
+    for subclass policies and append feedback before requesting continuation.
 
 WHAT NOT TO DO IN THIS FILE:
     1. Do not construct provider runners; use ``vidbyte/agents/base.py`` and
@@ -55,7 +59,9 @@ KNOWN EDGE CASES:
     all later snapshots must read the updated state. ``AgentResult`` returned
     directly by a runner is finalized before replacing ``model_response``.
     Context-window algorithms write public metadata into their dedicated state
-    dict, while private keys remain excluded from final result metadata.
+    dict, while private keys remain excluded from final result metadata. Ordinary
+    completion can arrive as plain text or through ``isDone``; both paths consult
+    the subclass hook after generic output-contract evaluation.
 
 RELATED DOCS:
     https://github.com/cerredz/Vidbyte-SDK/blob/main/docs/design/agent-runtime-loop-state.md
@@ -64,7 +70,8 @@ RELATED DOCS:
 
 TEST FILES:
     ``tests/test_agent_runtime.py``, ``tests/test_agent_tool_loop.py``,
-    ``tests/test_tracing.py``, and the context algorithm integration tests.
+    ``tests/test_tracing.py``, ``tests/test_jev_done_criteria.py``, and context
+    algorithm integration tests.
 
 CONCURRENCY MODEL:
     Runtime attempts are run-local and reentrant. Never store loop counters or
@@ -502,8 +509,6 @@ class AgentRuntime:
                 if state.inner_context_window_algorithm is not None:
                     messages.append(self._assistant_message(last_assistant_output))
                 decision = await self.middleware.after_iteration(self._middleware_context(MiddlewareHook.AFTER_ITERATION, state))
-                if state.inner_context_window_algorithm is not None and decision.action is MiddlewareAction.CONTINUE:
-                    continue
                 if decision.action is not MiddlewareAction.CONTINUE:
                     final = self._middleware_abort_result(
                         decision,
@@ -511,12 +516,19 @@ class AgentRuntime:
                         tokens_used=state.tokens_used,
                         contexts=state.call_contexts,
                     )
+                elif state.inner_context_window_algorithm is not None:
+                    continue
+                else:
+                    messages.append(self._assistant_message(last_assistant_output))
+                    if await self._continue_finish_attempt(final, state, messages):
+                        continue
                 return await self._finish_result(final, state)
 
             assistant_tool_msg = ToolsFormatter.format_assistant_tool_calls(raw_result, state.provider)
             if assistant_tool_msg is not None:
                 messages.append(dict(assistant_tool_msg))
             contract_rejected = False
+            finish_attempt_rejected = False
             for call in tool_calls:
                 processed = await self._process_tool_call(call, messages, state, trace_context=active_trace_context)
                 if isinstance(processed, AgentResult):
@@ -554,9 +566,12 @@ class AgentRuntime:
                         tokens_used=state.tokens_used,
                         stop_reason=AgentStopReason.IS_DONE,
                     )
+                    if await self._continue_finish_attempt(final, state, messages):
+                        finish_attempt_rejected = True
+                        break
                     return await self._finish_result(final, state)
 
-            if contract_rejected:
+            if contract_rejected or finish_attempt_rejected:
                 continue
 
             decision = await self.middleware.after_iteration(self._middleware_context(MiddlewareHook.AFTER_ITERATION, state))
@@ -568,6 +583,10 @@ class AgentRuntime:
                     contexts=state.call_contexts,
                 )
                 return await self._finish_result(result, state)
+
+    async def _continue_finish_attempt(self, result: AgentResult, state: BaseAgentRuntimeLoopState, messages: list[dict[str, Any]]) -> bool:
+        # Lets specialized runtimes reject a normal finish attempt without replacing this shared loop.
+        return False
 
     async def _invoke_with_middleware(self, handle: RunnerHandle, message: str, call_options: Mapping[str, Any], *, context: BaseAgentContext, iteration_count: int, model_call_count: int, call_contexts: Sequence[ToolCallContext], tokens_used: int | None, started_at: float, metadata: Mapping[str, Any], run_state: dict[type, Any] | None = None, trace_context: SpanContext | None = None, compaction_count: int = 0) -> tuple[object | AgentResult, int, int]:
         """Invoke the runner, allowing middleware to retry model errors while tracking compaction events."""

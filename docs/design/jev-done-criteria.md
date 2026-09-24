@@ -134,7 +134,7 @@ The composite uses AND semantics and combines feedback from unmet criteria. Empt
 
 ### 6.2 Settings and Jev runtime
 
-**File(s):** `vidbyte/agents/jev/settings.py`, `vidbyte/agents/jev/agent.py`, `vidbyte/agents/jev/runtime.py`, `vidbyte/agents/jev/__init__.py`, `vidbyte/agents/__init__.py`, `vidbyte/__init__.py`  
+**File(s):** `vidbyte/agents/jev/settings.py`, `vidbyte/agents/jev/runtime.py`, `vidbyte/agents/jev/__init__.py`, `vidbyte/agents/__init__.py`, `vidbyte/__init__.py`
 **Type:** Modified files
 
 #### What it does
@@ -265,9 +265,9 @@ Configured runs return `minimum_duration_met: bool`; absent criterion omits the 
 | CREATE | `vidbyte/agents/jev/done_criteria/criteria.py` | Minimum-time criterion. |
 | CREATE | `vidbyte/agents/jev/done_criteria/presets.py` | `JevPreset.MinimumTime(...)` factory. |
 | MODIFY | `vidbyte/agents/jev/settings.py` | Validated criteria setting. |
-| MODIFY | `vidbyte/agents/jev/agent.py` | Pass criteria through existing runtime seam if needed by settings design. |
 | MODIFY | `vidbyte/agents/jev/runtime.py` | Jev completion policy and metadata. |
 | MODIFY | `vidbyte/agents/runtime.py` | Default completion hook at both terminal boundaries. |
+| MODIFY | `lint/baseline.json` | Ratchet the S051 allowance after formatting improves its count by one. |
 | MODIFY | `vidbyte/agents/jev/__init__.py` | Jev public exports. |
 | MODIFY | `vidbyte/agents/__init__.py` | Agent namespace exports. |
 | MODIFY | `vidbyte/__init__.py` | Root namespace exports. |
