@@ -9,13 +9,14 @@ Use this skill for work under `vidbyte/agents/jev/` or when adding a Jev-backed 
 
 ## Product contract
 
-`JevAgent` is an opinionated agent, not a framework for users to assemble arbitrary decisions. Its public constructor accepts one `JevAgentSettings` object. Do not add generic `decisions`, question lists, hooks, action callbacks, runtime selectors, middleware injection, or arbitrary passthrough kwargs.
+`JevAgent` is an opinionated agent, not a framework for users to assemble arbitrary decisions. Its public constructor accepts one `JevAgentSettings` object and named keyword-only capabilities such as `done_criteria=JevPresets.MultiPart`. Do not add generic `decisions`, question lists, hooks, action callbacks, runtime selectors, middleware injection, or arbitrary passthrough kwargs.
 
 Expose user intent through named, validated capabilities. Examples include:
 
 - pre-allocated questions answered before a model run;
 - dynamic compute allocation;
 - multi-agent coordination with explicit agent descriptions and metadata.
+- multipart done criteria, which builds one request-shaped state before execution and checks a structured run handoff at each normal finish attempt.
 
 Each capability owns its fixed internal Jev questions, state projection, thresholds, actions, fallback policy, and observability. Those internal mechanics are implementation details, not public decision-building blocks.
 
@@ -32,7 +33,7 @@ The scaffold performs no Jev call. A missing TypeSafe API key must not prevent `
 
 ## Change workflow
 
-1. Read `AGENTS.md`, `docs/design/jev-agent-scaffold.md`, and every existing file under `vidbyte/agents/jev/`.
+1. Read `AGENTS.md`, the relevant Jev design docs, and every existing file under `vidbyte/agents/jev/`.
 2. Describe the user-facing capability in product terms and add a dedicated immutable settings type. Prefer one boolean or nested settings object over low-level knobs.
 3. Define exactly when the runtime asks Jev, the state Jev sees, the fixed questions asked, and the action for every answer. Write every question with `skills/asking-jev-questions/SKILL.md`: Jev matches state against definitions you supply; it does not reason, count, forecast, or generate.
 4. Define fail-open or fail-closed behavior for missing credentials, timeouts, malformed answers, and unsupported configurations. Never let an exception silently choose policy.
@@ -44,10 +45,14 @@ The scaffold performs no Jev call. A missing TypeSafe API key must not prevent `
 ## Invariants
 
 - `JevAgent.__init__` accepts only `JevAgentSettings`.
+- Named capability choices are keyword-only enum values; multipart completion is enabled with `JevAgent(settings, done_criteria=JevPresets.MultiPart)`.
 - TypeSafe/Jev cannot be selected as the reply-generating provider.
 - API keys never appear in object representations, errors, logs, traces, or serialized state.
 - The public API names capabilities, not internal questions or decisions.
 - Runtime state is run-local; reusable configuration is frozen and validated before execution.
+- Multipart completion creates the structured state once per run; the handoff is regenerated at normal finish attempts and must match every state deliverable ID exactly.
+- Jev sees one deliverable and its matching handoff evidence per question. Deterministic code joins answers and feeds incomplete items back into the same runtime loop.
+- State/handoff schema errors and Jev failures never count as successful completion; the main agent cannot silently finish while the capability is enabled and verification failed.
 - Existing `BaseAgent` behavior remains unchanged when Jev is not involved; `AgentRuntimeType.JEV` gets the same linear-loop wiring as `LINEAR`.
 - Provider payload dictionaries do not move into `vidbyte/lib` records.
 - No live provider call is required by deterministic tests.
@@ -67,6 +72,26 @@ agent = JevAgent(settings)
 ```
 
 The equivalent namespace constructor is `sdk.agents.jev(settings)`.
+
+## Multipart completion capability
+
+```python
+from vidbyte import JevAgent, JevAgentSettings, JevPresets
+
+agent = JevAgent(
+    JevAgentSettings(
+        name="developer",
+        system_prompt="Implement the requested change and report what you did.",
+        provider="openai",
+        model_name="gpt-4.1",
+    ),
+    done_criteria=JevPresets.MultiPart,
+)
+```
+
+The runtime uses `MultiPartStateBuilderAgent` once to capture goal, objective, mission, exclusions, useful sections, and the specifically named multipart deliverable section. It uses `MultiPartHandoffBuilderAgent` at each ordinary finish attempt to map direct run observations to those deliverables. The strict handoff is checked by ID before `DecisionModelRunner` asks one `NOUL` recognition question per item. Jev judges only whether that item's handoff evidence shows its explicit completion signal; runtime code evaluates status, remaining work, and probability. Any gap is appended to the live loop so the same agent can continue.
+
+The generated deliverable list is capability-specific; it is not a universal obligations model. A large original request or handoff may exceed TypeSafe's state limit, and the provider error is surfaced instead of truncating the information silently. The initial 0.8 `P(true)` threshold is an internal policy constant and should be calibrated against representative runs before being treated as a product guarantee.
 
 ## Capability design example
 

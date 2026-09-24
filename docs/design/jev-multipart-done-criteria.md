@@ -54,8 +54,8 @@ The ordinary runtime has two normal completion boundaries: an unstructured final
 1. `JevAgent` accepts `done_criteria: JevPresets | None` as a named keyword-only capability; `None` leaves current execution unchanged.
 2. With `JevPresets.MultiPart`, the runtime invokes a dedicated state-builder subclass exactly once before the main generative loop, using the original request and a strict schema.
 3. The generated state has stable top-level `goal`, `objective`, `mission`, `what_not_to_do`, and `sections` fields. The multipart section contains zero or more uniquely identified deliverables with a plain description and an observable completion signal.
-4. At each normal finish attempt, a dedicated handoff-builder subclass receives the original request, generated state, accumulated iteration outputs, recorded tool-call contexts, and candidate final output; it returns one structured entry for every deliverable.
-5. Runtime validation rejects missing, duplicate, or unknown handoff IDs and malformed/empty required content; prose fallback does not satisfy the handoff contract.
+4. At each normal finish attempt, a dedicated handoff-builder subclass receives the original request, generated state, accumulated iteration outputs, recorded tool-call contexts, candidate final output, and stable evidence-source IDs; it returns one structured entry for every deliverable.
+5. Each handoff evidence excerpt cites a source ID and copies an exact substring from that source. Runtime validation rejects missing, duplicate, or unknown handoff IDs, unknown evidence sources, invented excerpts, and malformed required content; prose fallback does not satisfy the handoff contract.
 6. The done-criteria policy sends exactly one `NOUL` question per deliverable, with only that deliverable's description, completion signal, and handoff entry in the Jev state. The question defines completion in observable terms and asks whether the handoff explicitly shows that condition.
 7. Each deliverable passes only when `P(true)` is at least the named fixed multipart threshold. A missing/low-confidence item yields concrete continuation feedback naming that item and the evidence gap.
 8. Incomplete attempts continue inside the same `AgentRuntime` loop, preserving existing counters, tool history, middleware lifecycle, context handling, and run-local state.
@@ -66,9 +66,11 @@ The ordinary runtime has two normal completion boundaries: an unstructured final
 ### Non-Functional Requirements
 
 - Extra generative calls are bounded to one state build per enabled run and one handoff build per finish attempt; no state regeneration occurs during continuation.
-- Each Jev request is bounded to one deliverable and its corresponding evidence to avoid requiring Jev to search or combine a large run transcript.
+- Each Jev request contains one deliverable and its corresponding source-linked evidence to avoid requiring Jev to search or combine a large run transcript.
+- The handoff builder receives the complete captured run snapshot. Oversized input fails through the configured generative provider; runtime does not silently truncate observations or accept a partial handoff.
 - Reuse the source agent's runner cache/configuration for internal generative subclasses; keep main-agent usage and speed tracking semantics intact.
-- Avoid credentials in prompt text, generated state, handoff, logs, and result metadata.
+- Merge internal generative builder usage records into the source JevAgent's run-owned usage rollup exactly once.
+- Do not pass Jev provider configuration or API keys into generated state, handoff, logs, or result metadata. User request and tool output text remain model supplied content.
 - Runtime and intermediate records are scoped to one `arun` invocation to prevent cross-run contamination.
 - Provider failures propagate with their existing typed error behavior; no implicit fail-open completion.
 
@@ -78,7 +80,7 @@ The ordinary runtime has two normal completion boundaries: an unstructured final
 
 `JevPresets` is a closed public enum with `MultiPart`; `JevAgent` accepts it as a keyword-only `done_criteria` choice and passes it with its validated settings through the existing runtime-extension seam. When absent, `JevRuntime` delegates directly to the existing runtime. When selected, the runtime creates `MultiPartStateBuilderAgent`, a `BaseAgent` subclass that uses the source agent's runner cache and strict output schema to produce the structured state once from the original request.
 
-At each normal finish attempt, `MultiPartHandoffBuilderAgent` receives a bounded, explicit run snapshot and emits a handoff keyed to the generated deliverable IDs. The policy validates that contract, constructs one `JevDecisionRequest` per deliverable, and uses `DecisionModelRunner` to classify the associated evidence. A low or missing probability adds precise gap feedback to the current messages and tells the parent loop to continue; complete answers return through normal result finalization. The direct runtime gains a protected default no-op hook invoked only at its two normal completion boundaries.
+At each normal finish attempt, `MultiPartHandoffBuilderAgent` receives the complete captured run snapshot and emits a handoff keyed to the generated deliverable IDs. Its evidence entries cite stable IDs for iteration output, tool-call records, or the candidate final answer. The runtime verifies each cited excerpt occurs exactly in that run snapshot before Jev sees it. The policy then constructs one `JevDecisionRequest` per deliverable and classifies only its associated evidence. A low or missing probability adds precise gap feedback to the current messages and tells the parent loop to continue; complete answers return through normal result finalization. The direct runtime gains a protected default no-op hook invoked only at its two normal completion boundaries.
 
 ```text
 JevAgent(settings, done_criteria=MultiPart)
@@ -154,13 +156,13 @@ class JevRunHandoff: ...
 
 1. Parse structured state output and validate required top-level fields and string content.
 2. Validate multipart deliverable IDs as non-empty, unique identifiers; allow an empty tuple when the original request has no distinct deliverables.
-3. Build a handoff JSON schema with required properties for the known IDs.
-4. Validate the returned handoff's ID set exactly matches state IDs and that all evidence/status fields are non-empty strings.
+3. Build a handoff JSON schema with required properties for the known IDs and source-reference fields.
+4. Validate the returned handoff's ID set exactly matches state IDs and every evidence excerpt matches a registered snapshot source verbatim.
 
 #### Edge Cases & Error Handling
 
 - Empty multipart requests pass vacuously without making Jev requests.
-- Duplicate/missing/extra IDs raise `OutputSchemaViolationError` (or the repo's closest structured-output error) before classification.
+- Duplicate/missing/extra IDs or invented source citations raise `OutputSchemaViolationError` before classification.
 - Model output that has the right outer JSON but blank content is rejected.
 
 ### 6.3 Role-specific generative builder subclasses
@@ -176,13 +178,11 @@ Defines `MultiPartStateBuilderAgent(BaseAgent)` and `MultiPartHandoffBuilderAgen
 
 ```python
 class MultiPartStateBuilderAgent(BaseAgent):
-    @classmethod
-    def from_source_agent(cls, source_agent: BaseAgent) -> "MultiPartStateBuilderAgent": ...
+    def __init__(self, *, source_agent: BaseAgent, settings: JevAgentSettings) -> None: ...
     async def build_state(self, request: str) -> JevRunState: ...
 
 class MultiPartHandoffBuilderAgent(BaseAgent):
-    @classmethod
-    def from_source_agent(cls, source_agent: BaseAgent, state: JevRunState) -> "MultiPartHandoffBuilderAgent": ...
+    def __init__(self, *, source_agent: BaseAgent, settings: JevAgentSettings, state: JevRunState) -> None: ...
     async def build_handoff(self, snapshot: JevRunSnapshot) -> JevRunHandoff: ...
 ```
 
@@ -190,14 +190,14 @@ class MultiPartHandoffBuilderAgent(BaseAgent):
 
 1. The state builder receives the original request, names the overall goal/objective/mission, what not to do, useful sections, and (when requested) a multipart deliverables section with observable criteria.
 2. State-builder instructions forbid hidden chain-of-thought and require preserving distinct requested outputs rather than collapsing them into one headline.
-3. The handoff builder receives the original request, the frozen state object, bounded iteration outputs, tool call names/arguments/results/states, and candidate final answer.
-4. Its instructions require one entry per state deliverable, describe progress and directly available evidence, and identify what is still missing; it may not invent or silently omit deliverables.
+3. The handoff builder receives the original request, the frozen state object, all captured iteration outputs, tool call names/arguments/results/states, candidate final answer, and deterministic evidence-source IDs.
+4. Its instructions require one entry per state deliverable, exact source-linked excerpts for evidence, and a clear remaining-work field; it may not invent evidence or silently omit deliverables.
 5. Structured output and record validation are mandatory; unlike `HandoffAgent`, no prose fallback is allowed.
 
 #### Edge Cases & Error Handling
 
 - Zero deliverables skips handoff generation and Jev classification.
-- Schema violation propagates; no partial handoff is accepted.
+- Schema violation, unknown source ID, or excerpt absent from the cited source propagates; no partial handoff is accepted.
 - The internal builder agent has no tools and cannot recursively create its own Jev state.
 
 ### 6.4 Runtime loop finish-attempt extension
@@ -251,9 +251,9 @@ class JevRuntime(AgentRuntime):
 
 1. With no preset, delegate directly to `AgentRuntime.arun`.
 2. With `MultiPart`, build state once from `message` using the source model runner.
-3. At a finish attempt, render a bounded run snapshot from original message, immutable state, `iteration_outputs`, recorded tool contexts, and candidate result.
+3. At a finish attempt, render the complete run snapshot from original message, immutable state, `iteration_outputs`, recorded tool contexts, and candidate result.
 4. Generate and strictly validate the handoff; for each deliverable, create one `JevDecisionRequest` containing only that deliverable's state and handoff record.
-5. Construct `DecisionModelRunner` from `JevAgentSettings.decision`, classify, and compare `answer.noul` to `JEV_MULTIPART_DONE_THRESHOLD = 0.8`.
+5. Construct `DecisionModelRunner` from `JevAgentSettings.decision`, classify, and compare `answer.noul` to `JEV_MULTIPART_DONE_THRESHOLD = 0.8`. Missing source-linked evidence cannot pass even when Jev's probability is high.
 6. Save per-deliverable probabilities and attempt count to the runtime's result-metadata channel.
 7. If any item is below threshold, append the candidate answer where necessary and user feedback naming each incomplete deliverable and its reported gap, then return `True` to continue.
 8. If all items meet threshold, return `False` and allow ordinary finalization.
@@ -264,6 +264,34 @@ class JevRuntime(AgentRuntime):
 - A decision answer missing its named `noul` value is a malformed provider response and cannot pass.
 - A TypeSafe configuration/key/network failure propagates; it does not count as a complete result.
 - Fallback/middleware/iteration budgets remain owned by existing runtime behavior; if a budget ends before a passing finish attempt, the ordinary stop result is returned with the latest evaluation metadata where available.
+
+### 6.6 Nested generative usage accounting
+
+**File(s):** `vidbyte/agents/pricing/tracker.py`
+**Type:** [Modified]
+
+#### What it does
+
+Adds an explicit rollup merge operation so the source JevAgent remains the owner of all generative usage from its state and handoff builder subclasses.
+
+#### Interface / API
+
+```python
+def merge(self, rollup: UsageRollup) -> None: ...
+```
+
+#### Logic / Algorithm
+
+1. Validate the nested value is a `UsageRollup`.
+2. Append its priced model and operation records with new sequential indices.
+3. Preserve provider-reported usage and cost values without re-parsing or charging the same response twice.
+4. Propagate a corrupted nested recording-integrity state.
+
+#### Edge Cases & Error Handling
+
+- Empty rollups leave the owner unchanged.
+- An object of another type is rejected immediately.
+- Nested call indices are rebased after any prior calls in the owner.
 
 ---
 
@@ -297,7 +325,7 @@ No database migration applies. Records are immutable and live only during one `a
 ```python
 {
     "deliverables": [
-        {"id": "documentation", "status": "...", "evidence": "...", "remaining": "..."}
+    {"id": "documentation", "status": "...", "evidence": [{"source_id": "final_answer", "excerpt": "..."}], "remaining": "..."}
     ]
 }
 ```
@@ -350,12 +378,14 @@ agent = JevAgent(settings, done_criteria=JevPresets.MultiPart)
 | CREATE | `vidbyte/agents/jev/builders.py` | Role-specific generative `BaseAgent` subclasses |
 | MODIFY | `vidbyte/agents/jev/agent.py` | Add validated keyword-only preset and runtime wiring |
 | MODIFY | `vidbyte/agents/jev/runtime.py` | Build once, classify finish attempts, continue with gaps |
+| MODIFY | `vidbyte/agents/jev/settings.py` | Clarify settings versus named runtime capabilities |
 | MODIFY | `vidbyte/agents/jev/__init__.py` | Export the supported preset |
 | MODIFY | `vidbyte/agents/client.py` | Expose the preset through `sdk.agents.jev` |
 | MODIFY | `vidbyte/agents/__init__.py` | Export preset at agent package level |
 | MODIFY | `vidbyte/__init__.py` | Export preset at root SDK level |
 | MODIFY | `vidbyte/agents/runtime.py` | Add default no-op finish-attempt hook at two ordinary terminal boundaries |
 | MODIFY | `vidbyte/lib/constants/jev.py` | Name and export fixed multipart threshold |
+| MODIFY | `vidbyte/agents/pricing/tracker.py` | Merge nested builder usage into the main run-owned usage ledger |
 | MODIFY | `vidbyte/lib/enums/prompts.py` | Add builder prompt IDs |
 | CREATE | `vidbyte/prompts/prompts/jev/jev.json` | Register the prompt family |
 | CREATE | `vidbyte/prompts/prompts/jev/state_builder.md` | State-builder instructions |
@@ -363,6 +393,7 @@ agent = JevAgent(settings, done_criteria=JevPresets.MultiPart)
 | MODIFY | `vidbyte/prompts/README.md` | Document prompt family and counts |
 | MODIFY | `skills/jev-agent/SKILL.md` | Document named capability API and lifecycle invariants |
 | MODIFY | `tests/test_jev_agent.py` | Unit and integration coverage for state, handoff, classification, continuation, and disabled behavior |
+| MODIFY | `tests/test_agent_pricing.py` | Verify nested usage rollup merge and sequential call indexing |
 | CREATE | `scripts/test-jev-multipart-done-criteria.py` | Executable feature verification script |
 
 ---
@@ -379,11 +410,13 @@ Every test case is labeled by the failure category it targets.
 - `[Hidden Failure]` State output missing a required field, duplicate deliverable ID, or wrong structured-output shape fails before main runtime execution.
 - `[Silent Failure]` Handoff entries are matched by ID rather than list position when model returns a different order.
 - `[Hidden Failure]` Missing, duplicate, or unknown handoff IDs fail closed before any Jev calls.
+- `[Silent Failure]` An unknown evidence source ID or excerpt absent from the cited source fails before Jev sees the handoff.
 - `[Edge Case]` A single deliverable creates exactly one `NOUL` question and accepts probability exactly at the threshold.
 - `[Silent Failure]` A high `P(false)` or a `P(true)` just below threshold cannot be mistaken for completion.
 - `[Hidden Assumption]` Every question state contains only its matching deliverable and handoff entry, not another deliverable's evidence.
 - `[Hidden Failure]` Builder, TypeSafe credential, network, and malformed answer errors do not return success metadata.
 - `[Silent Failure]` Final metadata reports the final finish attempt and the correct ID-to-probability mapping.
+- `[Hidden Assumption]` `UsageTracker.merge` accepts only `UsageRollup` and rebases nested model-call indices after existing calls.
 
 ### Integration Tests
 
@@ -391,6 +424,8 @@ Every test case is labeled by the failure category it targets.
 - `[Hidden Failure]` `isDone` completion uses the same Jev check and finalization path.
 - `[Hidden Failure]` A low-probability deliverable appends actionable feedback and the same runtime consumes the next scripted model response; state is not rebuilt.
 - `[Silent Failure]` Runtime continuation preserves prior tool-call contexts and iteration outputs for the second handoff.
+- `[Silent Failure]` A second handoff can cite an earlier tool result after the main loop continues.
+- `[Silent Failure]` State and handoff builder usage appears once in the JevAgent-owned usage rollup alongside main-loop calls.
 - `[Hidden Assumption]` Ordinary `BaseAgent` and `JevAgent` without the preset resolve/run without invoking any new subclass or Jev endpoint.
 - `[Edge Case]` Empty multipart deliverables skip decision API setup, including TypeSafe key resolution.
 - `[Hidden Failure]` Repeated incomplete result follows existing runtime iteration budgets instead of spinning outside the loop.
@@ -432,6 +467,7 @@ Every test case is labeled by the failure category it targets.
 
 - [ ] Is `0.8` the appropriate initial P(true) completion threshold? It will be a named internal constant and can be calibrated without changing the public API.
 - [ ] The model-generated state can only preserve requested parts it recognizes. Evaluation on a representative set of user prompts remains a product-quality follow-up, not a deterministic runtime guarantee.
+- [ ] Handoff-builder input grows with the captured run. A future bounded evidence-selection strategy may be needed for unusually long runs; it must preserve source IDs and fail closed when it cannot represent relevant observations.
 
 ---
 
