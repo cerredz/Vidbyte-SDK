@@ -4,7 +4,7 @@ FILE:
     vidbyte/lib/enums/prompts.py
 
 PURPOSE:
-    Defines the stable typed identifiers for all 67 static prompt assets across 24
+    Defines the stable typed identifiers for all 74 static prompt assets across 24
     JSON/Markdown-backed families. This file owns identifiers only; prompt text and
     family metadata belong under ``vidbyte/prompts/prompts/``.
 
@@ -72,6 +72,13 @@ class Prompt(str, Enum):
     HANDOFF_SYSTEM_PROMPT = "handoff.system_prompt"
     JEV_STATE_BUILDER = "jev.state_builder"
     JEV_HANDOFF_BUILDER = "jev.handoff_builder"
+    JEV_STATE_BUILDER_MULTI_PART = "jev.state_builder_multi_part"
+    JEV_STATE_BUILDER_SCOPE_COVERAGE = "jev.state_builder_scope_coverage"
+    JEV_HANDOFF_BUILDER_MULTI_PART = "jev.handoff_builder_multi_part"
+    JEV_HANDOFF_BUILDER_SCOPE_COVERAGE = "jev.handoff_builder_scope_coverage"
+    JEV_SCOPE_BREADTH = "jev.scope_breadth"
+    JEV_SCOPE_UNIT_COVERAGE = "jev.scope_unit_coverage"
+    JEV_SCOPE_COVERAGE_STATEMENT = "jev.scope_coverage_statement"
     INDEPENDENT_CRITIC_REVIEWER_SYSTEM_PROMPT = "independent_critic.reviewer_system_prompt"
     INDEPENDENT_CRITIC_REVIEW_PROMPT = "independent_critic.review_prompt"
     CONTINUAL_TRACE_SYSTEM_PROMPT = "continual_trace.system_prompt"

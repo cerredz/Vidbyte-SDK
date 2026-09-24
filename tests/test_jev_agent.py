@@ -21,21 +21,51 @@ from unittest.mock import patch
 
 from tests.agent_test_support import bind_test_runner
 from vidbyte import JevAgent as RootJevAgent
-from vidbyte import JevPresets as RootJevPresets
 from vidbyte import JevAgentSettings as RootJevAgentSettings
+from vidbyte import JevPresets as RootJevPresets
 from vidbyte import JevRuntime as RootJevRuntime
 from vidbyte import VidbyteSDK, tool
 from vidbyte.agents import BaseAgent
 from vidbyte.agents.jev import JevAgent, JevAgentSettings, JevPresets, JevRuntime
-from vidbyte.agents.jev.run_state import JevDeliverableHandoff, JevEvidenceReference, JevRunHandoff, JevRunSnapshot, JevRunState
+from vidbyte.agents.jev.run_state import (
+    JevDeliverableHandoff,
+    JevEvidenceReference,
+    JevRunHandoff,
+    JevRunSnapshot,
+    JevRunState,
+)
+from vidbyte.agents.jev.scope_coverage import (
+    JevScopeBreadth,
+    JevScopeDimensionHandoff,
+    JevScopeHandoff,
+    JevScopeUnitRecord,
+    JevScopeUnitSource,
+)
+from vidbyte.agents.jev.scope_coverage.questions import ScopeCoverageQuestions
 from vidbyte.agents.pricing import JevUsage
 from vidbyte.agents.runtime import AgentRuntime
 from vidbyte.agents.settings import AgentLoopSettings
 from vidbyte.lib.config import DecisionModelConfig
-from vidbyte.lib.constants.jev import JEV_DEFAULT_RETRY_COUNT, JEV_DEFAULT_TIMEOUT_SECONDS, JEV_MAX_CHOICE_OPTIONS, JEV_MAX_SCORE_LEVELS
-from vidbyte.lib.dataclasses.jev import JevAnswer, JevDecisionRequest, JevOption, JevQuestion
+from vidbyte.lib.constants.jev import (
+    JEV_DEFAULT_RETRY_COUNT,
+    JEV_DEFAULT_TIMEOUT_SECONDS,
+    JEV_MAX_CHOICE_OPTIONS,
+    JEV_MAX_SCORE_LEVELS,
+)
+from vidbyte.lib.dataclasses.jev import (
+    JevAnswer,
+    JevDecisionRequest,
+    JevOption,
+    JevQuestion,
+)
 from vidbyte.lib.enums import AgentRuntimeType, JevQuestionType, ModelProvider
-from vidbyte.lib.errors import AgentExecutionError, ConfigurationError, OutputSchemaViolationError, ProviderRequestError, ProviderResponseError
+from vidbyte.lib.errors import (
+    AgentExecutionError,
+    ConfigurationError,
+    OutputSchemaViolationError,
+    ProviderRequestError,
+    ProviderResponseError,
+)
 from vidbyte.lib.http import HttpResponse
 from vidbyte.lib.registries.pricing import ModelPricingRegistry
 from vidbyte.lib.registries.runtimes import RuntimeRegistry
@@ -547,12 +577,13 @@ class JevMultipartDoneCriteriaTests(unittest.IsolatedAsyncioTestCase):
         state = _multipart_state(("implementation", "Implement the feature.", "The feature behavior is implemented."))
         agent = bind_test_runner(JevAgent(_settings(), done_criteria=JevPresets.MultiPart), runner)
         from unittest.mock import AsyncMock
+
         from vidbyte.agents.jev import runtime as jev_runtime
 
         state_builder = AsyncMock(return_value=state)
         handoff_builder = AsyncMock(side_effect=(first, second))
         decisions = ScriptedMultipartDecisionRunner(0.2, 0.95)
-        with patch.object(jev_runtime.MultiPartStateBuilderAgent, "build_state", state_builder), patch.object(jev_runtime.MultiPartHandoffBuilderAgent, "build_handoff", handoff_builder), patch.object(jev_runtime, "DecisionModelRunner", return_value=decisions):
+        with patch.object(jev_runtime.JevRunStateBuilderAgent, "build_state", state_builder), patch.object(jev_runtime.JevRunHandoffBuilderAgent, "build_handoff", handoff_builder), patch.object(jev_runtime, "DecisionModelRunner", return_value=decisions):
             reply = await agent.arun("Implement the feature and document it.")
         self.assertEqual(reply.content, "Implementation and docs are complete.")
         self.assertEqual(len(runner.calls), 2)
@@ -574,10 +605,11 @@ class JevMultipartDoneCriteriaTests(unittest.IsolatedAsyncioTestCase):
         runner = ScriptedRunner(TextModelResponse(provider=ModelProvider.OPENAI, model="fake", text="Done.", raw={}))
         agent = bind_test_runner(JevAgent(_settings(), done_criteria=JevPresets.MultiPart), runner)
         from unittest.mock import AsyncMock
+
         from vidbyte.agents.jev import runtime as jev_runtime
 
         decisions = ScriptedMultipartDecisionRunner(0.91, 0.93)
-        with patch.object(jev_runtime.MultiPartStateBuilderAgent, "build_state", AsyncMock(return_value=state)), patch.object(jev_runtime.MultiPartHandoffBuilderAgent, "build_handoff", AsyncMock(return_value=handoff)), patch.object(jev_runtime, "DecisionModelRunner", return_value=decisions):
+        with patch.object(jev_runtime.JevRunStateBuilderAgent, "build_state", AsyncMock(return_value=state)), patch.object(jev_runtime.JevRunHandoffBuilderAgent, "build_handoff", AsyncMock(return_value=handoff)), patch.object(jev_runtime, "DecisionModelRunner", return_value=decisions):
             await agent.arun("Implement and document the feature.")
         self.assertEqual(len(decisions.requests), 2)
         ids = []
@@ -593,19 +625,21 @@ class JevMultipartDoneCriteriaTests(unittest.IsolatedAsyncioTestCase):
     async def test_completion_threshold_is_inclusive_and_below_threshold_retries(self) -> None:
         # [Edge Case] P(true) exactly at 0.8 passes; a slightly lower value does not pass silently.
         from unittest.mock import AsyncMock
+
         from vidbyte.agents.jev import runtime as jev_runtime
 
         state = _multipart_state(("code", "Implement the feature.", "The feature behavior is present."))
         handoff = _multipart_handoff(("code", "complete", "The feature behavior is implemented.", "none"))
         agent = bind_test_runner(JevAgent(_settings(), done_criteria=JevPresets.MultiPart), ScriptedRunner(TextModelResponse(provider=ModelProvider.OPENAI, model="fake", text="Done.", raw={})))
         decisions = ScriptedMultipartDecisionRunner(0.8)
-        with patch.object(jev_runtime.MultiPartStateBuilderAgent, "build_state", AsyncMock(return_value=state)), patch.object(jev_runtime.MultiPartHandoffBuilderAgent, "build_handoff", AsyncMock(return_value=handoff)), patch.object(jev_runtime, "DecisionModelRunner", return_value=decisions):
+        with patch.object(jev_runtime.JevRunStateBuilderAgent, "build_state", AsyncMock(return_value=state)), patch.object(jev_runtime.JevRunHandoffBuilderAgent, "build_handoff", AsyncMock(return_value=handoff)), patch.object(jev_runtime, "DecisionModelRunner", return_value=decisions):
             reply = await agent.arun("Implement the feature.")
         self.assertTrue(reply.metadata["done_criteria"]["complete"])
 
     async def test_probability_below_threshold_requests_another_iteration(self) -> None:
         # [Silent Failure] a plausible but sub-threshold P(true) cannot be rounded up into completion.
         from unittest.mock import AsyncMock
+
         from vidbyte.agents.jev import runtime as jev_runtime
 
         state = _multipart_state(("code", "Implement the feature.", "The feature behavior is present."))
@@ -616,7 +650,7 @@ class JevMultipartDoneCriteriaTests(unittest.IsolatedAsyncioTestCase):
         )
         agent = bind_test_runner(JevAgent(_settings(), done_criteria=JevPresets.MultiPart), runner)
         decisions = ScriptedMultipartDecisionRunner(0.799, 0.95)
-        with patch.object(jev_runtime.MultiPartStateBuilderAgent, "build_state", AsyncMock(return_value=state)), patch.object(jev_runtime.MultiPartHandoffBuilderAgent, "build_handoff", AsyncMock(side_effect=(handoff, handoff))), patch.object(jev_runtime, "DecisionModelRunner", return_value=decisions):
+        with patch.object(jev_runtime.JevRunStateBuilderAgent, "build_state", AsyncMock(return_value=state)), patch.object(jev_runtime.JevRunHandoffBuilderAgent, "build_handoff", AsyncMock(side_effect=(handoff, handoff))), patch.object(jev_runtime, "DecisionModelRunner", return_value=decisions):
             reply = await agent.arun("Implement the feature.")
         self.assertEqual(len(runner.calls), 2)
         self.assertEqual(reply.metadata["done_criteria"]["attempts"], 2)
@@ -624,6 +658,7 @@ class JevMultipartDoneCriteriaTests(unittest.IsolatedAsyncioTestCase):
     async def test_continuation_handoff_keeps_prior_tool_observations(self) -> None:
         # [Silent Failure] both finish snapshots retain earlier successful tool evidence after continuation.
         from unittest.mock import AsyncMock
+
         from vidbyte.agents.jev import runtime as jev_runtime
 
         @tool
@@ -650,7 +685,7 @@ class JevMultipartDoneCriteriaTests(unittest.IsolatedAsyncioTestCase):
             return handoffs[len(snapshots) - 1]
 
         decisions = ScriptedMultipartDecisionRunner(0.2, 0.95)
-        with patch.object(jev_runtime.MultiPartStateBuilderAgent, "build_state", AsyncMock(return_value=state)), patch.object(jev_runtime.MultiPartHandoffBuilderAgent, "build_handoff", AsyncMock(side_effect=build_handoff)), patch.object(jev_runtime, "DecisionModelRunner", return_value=decisions):
+        with patch.object(jev_runtime.JevRunStateBuilderAgent, "build_state", AsyncMock(return_value=state)), patch.object(jev_runtime.JevRunHandoffBuilderAgent, "build_handoff", AsyncMock(side_effect=build_handoff)), patch.object(jev_runtime, "DecisionModelRunner", return_value=decisions):
             reply = await agent.arun("Implement the feature.")
         self.assertEqual(reply.content, "Implemented the runtime feature.")
         self.assertEqual(len(snapshots), 2)
@@ -685,11 +720,12 @@ class JevMultipartDoneCriteriaTests(unittest.IsolatedAsyncioTestCase):
     async def test_empty_deliverables_skip_handoff_and_type_safe_setup(self) -> None:
         # [Edge Case] an empty multipart section completes without building a handoff or resolving Jev credentials.
         from unittest.mock import AsyncMock
+
         from vidbyte.agents.jev import runtime as jev_runtime
 
         state = _multipart_state()
         agent = bind_test_runner(JevAgent(_settings(), done_criteria=JevPresets.MultiPart), ScriptedRunner(TextModelResponse(provider=ModelProvider.OPENAI, model="fake", text="Done.", raw={})))
-        with patch.object(jev_runtime.MultiPartStateBuilderAgent, "build_state", AsyncMock(return_value=state)), patch.object(jev_runtime.MultiPartHandoffBuilderAgent, "build_handoff", new_callable=AsyncMock) as handoff, patch.object(jev_runtime, "DecisionModelRunner") as decision_runner:
+        with patch.object(jev_runtime.JevRunStateBuilderAgent, "build_state", AsyncMock(return_value=state)), patch.object(jev_runtime.JevRunHandoffBuilderAgent, "build_handoff", new_callable=AsyncMock) as handoff, patch.object(jev_runtime, "DecisionModelRunner") as decision_runner:
             reply = await agent.arun("A single simple request.")
         handoff.assert_not_awaited()
         decision_runner.assert_not_called()
@@ -698,6 +734,7 @@ class JevMultipartDoneCriteriaTests(unittest.IsolatedAsyncioTestCase):
     async def test_is_done_tool_uses_the_same_multipart_gate(self) -> None:
         # [Hidden Failure] the internal isDone path cannot bypass enabled done criteria.
         from unittest.mock import AsyncMock
+
         from vidbyte.agents.jev import runtime as jev_runtime
 
         state = _multipart_state(("answer", "Answer the question.", "The final answer addresses the request."))
@@ -705,7 +742,7 @@ class JevMultipartDoneCriteriaTests(unittest.IsolatedAsyncioTestCase):
         runner = ScriptedRunner(RawResponse({"output": [{"type": "function_call", "name": "isDone", "arguments": '{"final_answer": "done"}', "call_id": "c1"}]}))
         agent = bind_test_runner(JevAgent(_settings(), done_criteria=JevPresets.MultiPart), runner)
         decisions = ScriptedMultipartDecisionRunner(0.9)
-        with patch.object(jev_runtime.MultiPartStateBuilderAgent, "build_state", AsyncMock(return_value=state)), patch.object(jev_runtime.MultiPartHandoffBuilderAgent, "build_handoff", AsyncMock(return_value=handoff)), patch.object(jev_runtime, "DecisionModelRunner", return_value=decisions):
+        with patch.object(jev_runtime.JevRunStateBuilderAgent, "build_state", AsyncMock(return_value=state)), patch.object(jev_runtime.JevRunHandoffBuilderAgent, "build_handoff", AsyncMock(return_value=handoff)), patch.object(jev_runtime, "DecisionModelRunner", return_value=decisions):
             reply = await agent.arun("Answer the question.")
         self.assertEqual(reply.content, "done")
         self.assertEqual(len(decisions.requests), 1)
@@ -745,13 +782,14 @@ class JevMultipartDoneCriteriaTests(unittest.IsolatedAsyncioTestCase):
     async def test_provider_failure_does_not_return_agent_success(self) -> None:
         # [Hidden Failure] an unavailable Jev decision service propagates instead of selecting a success policy.
         from unittest.mock import AsyncMock
+
         from vidbyte.agents.jev import runtime as jev_runtime
 
         state = _multipart_state(("code", "Implement.", "Code exists."))
         handoff = _multipart_handoff(("code", "complete", "Code exists.", "none"))
         agent = bind_test_runner(JevAgent(_settings(), done_criteria=JevPresets.MultiPart), ScriptedRunner(TextModelResponse(provider=ModelProvider.OPENAI, model="fake", text="Done.", raw={})))
         decisions = ScriptedMultipartDecisionRunner(ProviderResponseError("unavailable", provider="typesafe"))
-        with patch.object(jev_runtime.MultiPartStateBuilderAgent, "build_state", AsyncMock(return_value=state)), patch.object(jev_runtime.MultiPartHandoffBuilderAgent, "build_handoff", AsyncMock(return_value=handoff)), patch.object(jev_runtime, "DecisionModelRunner", return_value=decisions):
+        with patch.object(jev_runtime.JevRunStateBuilderAgent, "build_state", AsyncMock(return_value=state)), patch.object(jev_runtime.JevRunHandoffBuilderAgent, "build_handoff", AsyncMock(return_value=handoff)), patch.object(jev_runtime, "DecisionModelRunner", return_value=decisions):
             with self.assertRaises(AgentExecutionError) as raised:
                 await agent.arun("Implement the feature.")
         self.assertEqual(raised.exception.details["error_type"], "ProviderResponseError")
@@ -775,14 +813,394 @@ class JevMultipartDoneCriteriaTests(unittest.IsolatedAsyncioTestCase):
         runner = ScriptedRunner(TextModelResponse(provider=ModelProvider.OPENAI, model="fake", text="Done.", raw={}))
         agent = bind_test_runner(JevAgent(_settings(), done_criteria=JevPresets.MultiPart), runner)
         from unittest.mock import AsyncMock
+
         from vidbyte.agents.jev import runtime as jev_runtime
 
         decisions = ScriptedMultipartDecisionRunner(0.91, 0.84)
-        with patch.object(jev_runtime.MultiPartStateBuilderAgent, "build_state", AsyncMock(return_value=state)), patch.object(jev_runtime.MultiPartHandoffBuilderAgent, "build_handoff", AsyncMock(return_value=handoff)), patch.object(jev_runtime, "DecisionModelRunner", return_value=decisions):
+        with patch.object(jev_runtime.JevRunStateBuilderAgent, "build_state", AsyncMock(return_value=state)), patch.object(jev_runtime.JevRunHandoffBuilderAgent, "build_handoff", AsyncMock(return_value=handoff)), patch.object(jev_runtime, "DecisionModelRunner", return_value=decisions):
             reply = await agent.arun("Implement and document.")
-        rows = reply.metadata["done_criteria"]["deliverables"]
+        rows = reply.metadata["done_criteria"]["multi_part"]["deliverables"]
         self.assertEqual(rows["code"]["probability"], 0.91)
         self.assertEqual(rows["docs"]["probability"], 0.84)
+
+
+WEB_CLI_API = "Add CSV export to the web, CLI, and API clients."
+ALL_PROVIDERS = "Add CSV export to all our model providers."
+
+
+def _scope_dimension(**overrides: Any) -> dict[str, Any]:
+    # Builds one valid named-list dimension payload over WEB_CLI_API, letting a test replace fields.
+    values: dict[str, Any] = {
+        "id": "clients",
+        "request_quote": "Add CSV export to the web, CLI, and API clients",
+        "requested_change": "Add CSV export",
+        "unit_noun": "client",
+        "membership_rule": "a client named in the request",
+        "breadth": "named_list",
+        "universe": "named_in_request",
+        "named_units": ["web", "CLI", "API"],
+        "excluded_units": [],
+        "partial_allowed_quote": "",
+        "deliverable_id": "",
+    }
+    values.update(overrides)
+    return values
+
+
+def _scope_state(request: str, *dimensions: dict[str, Any], presets: tuple[JevPresets, ...] = (JevPresets.ScopeCoverage,), deliverables: tuple[dict[str, str], ...] = ()) -> JevRunState:
+    # Builds a request-grounded generated state through the production validator.
+    payload: dict[str, Any] = {
+        "goal": "Complete the requested change.",
+        "objective": "Reach every requested member.",
+        "mission": "Work through the request and report the result.",
+        "what_not_to_do": [],
+        "sections": {},
+        "scope": {"dimensions": list(dimensions)},
+    }
+    if JevPresets.MultiPart in presets:
+        payload["multi_part"] = {"deliverables": list(deliverables)}
+    return JevRunState.from_payload(payload, presets=presets, original_request=request)
+
+
+def _unit(name: str, *work: str, source: JevScopeUnitSource = JevScopeUnitSource.NAMED_IN_REQUEST) -> JevScopeUnitRecord:
+    # Builds one unit record whose work excerpts cite the first iteration.
+    return JevScopeUnitRecord(name, source, tuple(JevEvidenceReference("iteration_1", item) for item in work))
+
+
+def _scope_handoff(*units: JevScopeUnitRecord, dimension_id: str = "clients", enumeration: tuple[str, ...] = (), deliverables: tuple[JevDeliverableHandoff, ...] = ()) -> JevRunHandoff:
+    # Builds a run handoff whose scope section accounts for one dimension.
+    account = JevScopeDimensionHandoff(dimension_id, tuple(JevEvidenceReference("tool_call_1", item) for item in enumeration), units, (), ())
+    return JevRunHandoff(deliverables, JevScopeHandoff((account,)))
+
+
+def _distribution(winner: str, probability: float, options: tuple[str, ...]) -> dict[str, float]:
+    # Spreads the remaining probability evenly so the distribution sums to one.
+    rest = (1.0 - probability) / (len(options) - 1)
+    return {option: (probability if option == winner else rest) for option in options}
+
+
+UNIT_OPTIONS = ("applied", "attempted", "examined_only", "none")
+STATEMENT_OPTIONS = ("claims_all", "reports_partial", "silent")
+BREADTH_OPTIONS = ("every_member", "named_list", "one_example", "single_target")
+
+
+class ScriptedChoiceDecisionRunner:
+    """Answers Jev requests from a per-question script and records every request."""
+
+    def __init__(self, **scripts: list[dict[str, float] | float]) -> None:
+        # Retains one queue of distributions (choice) or P(true) values (noul) per question name.
+        self.scripts = {name: list(values) for name, values in scripts.items()}
+        self.requests: list[JevDecisionRequest] = []
+
+    def names(self) -> list[str]:
+        # Returns the question name of every recorded request in order.
+        return [request.questions[0].name for request in self.requests]
+
+    async def arun(self, request: JevDecisionRequest) -> object:
+        # Returns a Jev-shaped response for the next scripted value of this question.
+        from types import SimpleNamespace
+
+        self.requests.append(request)
+        question = request.questions[0]
+        value = self.scripts[question.name].pop(0)
+        if question.question_type is JevQuestionType.NOUL:
+            answer = JevAnswer(question.name, JevQuestionType.NOUL, "true" if value >= 0.5 else "false", {"true": value, "false": 1.0 - value}, noul=value)
+        else:
+            answer = JevAnswer(question.name, JevQuestionType.CHOICE, max(value, key=value.get), value, confidence=max(value.values()))
+        return SimpleNamespace(answer=lambda name: answer if name == answer.question_name else None)
+
+
+def _text(text: str) -> TextModelResponse:
+    # Builds one scripted final text response.
+    return TextModelResponse(provider=ModelProvider.OPENAI, model="fake", text=text, raw={})
+
+
+class JevScopeCoverageDoneCriteriaTests(unittest.IsolatedAsyncioTestCase):
+    """Tests scope state grounding, per-unit classification, continuation, and disclosure."""
+
+    async def _run(self, request: str, state: JevRunState, handoffs: tuple[JevRunHandoff, ...], decisions: ScriptedChoiceDecisionRunner, *texts: str, done_criteria: Any = JevPresets.ScopeCoverage) -> tuple[Any, ScriptedRunner, Any, Any]:
+        # Runs one JevAgent with scripted builders, model replies, and Jev answers.
+        from unittest.mock import AsyncMock
+
+        from vidbyte.agents.jev import runtime as jev_runtime
+
+        runner = ScriptedRunner(*(_text(item) for item in texts))
+        agent = bind_test_runner(JevAgent(_settings(), done_criteria=done_criteria), runner)
+        state_builder = AsyncMock(return_value=state)
+        handoff_builder = AsyncMock(side_effect=handoffs)
+        with patch.object(jev_runtime.JevRunStateBuilderAgent, "build_state", state_builder), patch.object(jev_runtime.JevRunHandoffBuilderAgent, "build_handoff", handoff_builder), patch.object(jev_runtime, "DecisionModelRunner", return_value=decisions):
+            reply = await agent.arun(request)
+        return reply, runner, state_builder, handoff_builder
+
+    async def test_named_list_partial_continues_until_every_member_is_covered(self) -> None:
+        # [Hidden Failure] web alone cannot finish a web/CLI/API request; the same loop continues with the missing members.
+        state = _scope_state(WEB_CLI_API, _scope_dimension())
+        first = _scope_handoff(_unit("web", "Added export to web."), _unit("CLI"), _unit("API"))
+        second = _scope_handoff(_unit("web", "Added export to web."), _unit("CLI", "Added export to CLI."), _unit("API", "Added export to API."))
+        decisions = ScriptedChoiceDecisionRunner(
+            unit_coverage=[_distribution("applied", 0.9, UNIT_OPTIONS)] * 4,
+            coverage_statement=[_distribution("silent", 0.8, STATEMENT_OPTIONS)],
+        )
+        reply, runner, state_builder, handoff_builder = await self._run(WEB_CLI_API, state, (first, second), decisions, "Added export to web.", "All three clients export CSV.")
+        self.assertEqual(reply.content, "All three clients export CSV.")
+        self.assertEqual(len(runner.calls), 2)
+        self.assertEqual(state_builder.await_count, 1)
+        self.assertEqual(handoff_builder.await_count, 2)
+        self.assertEqual(decisions.names(), ["unit_coverage", "coverage_statement", "unit_coverage", "unit_coverage", "unit_coverage"])
+        feedback = json.dumps(runner.calls[1])
+        self.assertIn("CLI, API", feedback)
+        report = reply.metadata["done_criteria"]
+        self.assertTrue(report["complete"])
+        self.assertEqual(report["attempts"], 2)
+        self.assertEqual(report["scope_coverage"]["outcome"], "complete")
+        self.assertEqual(report["scope_coverage"]["dimensions"]["clients"]["covered_units"], ["web", "CLI", "API"])
+
+    async def test_overclaiming_final_answer_is_named_in_feedback(self) -> None:
+        # [Silent Failure] "all clients done" with one client worked gets feedback that names the overclaim.
+        state = _scope_state(WEB_CLI_API, _scope_dimension())
+        first = _scope_handoff(_unit("web", "Added export to web."), _unit("CLI"), _unit("API"))
+        second = _scope_handoff(_unit("web", "Added export to web."), _unit("CLI", "Added export to CLI."), _unit("API", "Added export to API."))
+        decisions = ScriptedChoiceDecisionRunner(
+            unit_coverage=[_distribution("applied", 0.9, UNIT_OPTIONS)] * 4,
+            coverage_statement=[_distribution("claims_all", 0.9, STATEMENT_OPTIONS)],
+        )
+        _, runner, _, _ = await self._run(WEB_CLI_API, state, (first, second), decisions, "Every client exports CSV.", "Every client exports CSV.")
+        self.assertIn("says the change reached every client", json.dumps(runner.calls[1]))
+
+    async def test_units_below_threshold_and_examined_only_units_are_uncovered(self) -> None:
+        # [Edge Case] P(applied) at exactly 0.8 covers; 0.79 does not, and neither does an examined-only unit.
+        state = _scope_state(WEB_CLI_API, _scope_dimension())
+        handoff = _scope_handoff(_unit("web", "a"), _unit("CLI", "b"), _unit("API", "c"))
+        decisions = ScriptedChoiceDecisionRunner(
+            unit_coverage=[_distribution("applied", 0.8, UNIT_OPTIONS), _distribution("applied", 0.79, UNIT_OPTIONS), _distribution("examined_only", 0.9, UNIT_OPTIONS)] + [_distribution("applied", 0.9, UNIT_OPTIONS)] * 3,
+            coverage_statement=[_distribution("silent", 0.9, STATEMENT_OPTIONS)],
+        )
+        _, runner, _, _ = await self._run(WEB_CLI_API, state, (handoff, handoff), decisions, "a b c", "a b c")
+        feedback = json.dumps(runner.calls[1])
+        self.assertIn("finished for: CLI, API.", feedback)
+
+    async def test_one_example_request_is_not_checked(self) -> None:
+        # [Edge Case] "show one example" never triggers a continuation or a handoff.
+        request = "Show an example provider that supports CSV export."
+        state = _scope_state(request, _scope_dimension(request_quote="Show an example provider", breadth="one_example", universe="found_in_workspace", named_units=[], unit_noun="provider"))
+        decisions = ScriptedChoiceDecisionRunner(scope_breadth=[_distribution("one_example", 0.9, BREADTH_OPTIONS)])
+        reply, runner, _, handoff_builder = await self._run(request, state, (), decisions, "Here is the OpenAI example.")
+        self.assertEqual(len(runner.calls), 1)
+        handoff_builder.assert_not_awaited()
+        self.assertEqual(decisions.names(), ["scope_breadth"])
+        report = reply.metadata["done_criteria"]["scope_coverage"]
+        self.assertEqual(report["outcome"], "not_checked")
+        self.assertFalse(report["dimensions"]["clients"]["checked"])
+
+    async def test_breadth_review_widens_a_mislabeled_group_and_requires_a_listing(self) -> None:
+        # [Hidden Failure] a builder that labels "all our providers" as one example is corrected, then the unlisted universe continues the run.
+        state = _scope_state(ALL_PROVIDERS, _scope_dimension(id="providers", request_quote="all our model providers", breadth="one_example", universe="found_in_workspace", named_units=[], unit_noun="model provider"))
+        seen_states: list[JevRunState] = []
+        handoffs = (
+            _scope_handoff(dimension_id="providers"),
+            _scope_handoff(_unit("openai", "Added export to openai.", source=JevScopeUnitSource.FOUND_BY_RUN), dimension_id="providers", enumeration=("openai.py",)),
+        )
+        decisions = ScriptedChoiceDecisionRunner(
+            scope_breadth=[_distribution("every_member", 0.7, BREADTH_OPTIONS)],
+            unit_coverage=[_distribution("applied", 0.9, UNIT_OPTIONS)],
+            coverage_statement=[_distribution("silent", 0.9, STATEMENT_OPTIONS)],
+        )
+        from unittest.mock import AsyncMock
+
+        from vidbyte.agents.jev import runtime as jev_runtime
+
+        original_init = jev_runtime.JevRunHandoffBuilderAgent.__init__
+
+        def capture_init(builder: Any, *, source_agent: Any, settings: Any, state: JevRunState) -> None:
+            # Records the reviewed state the runtime hands to the handoff builder.
+            seen_states.append(state)
+            original_init(builder, source_agent=source_agent, settings=settings, state=state)
+
+        runner = ScriptedRunner(_text("Added export to openai."), _text("Listed and updated every provider."))
+        agent = bind_test_runner(JevAgent(_settings(), done_criteria=JevPresets.ScopeCoverage), runner)
+        with patch.object(jev_runtime.JevRunStateBuilderAgent, "build_state", AsyncMock(return_value=state)), patch.object(jev_runtime.JevRunHandoffBuilderAgent, "__init__", capture_init), patch.object(jev_runtime.JevRunHandoffBuilderAgent, "build_handoff", AsyncMock(side_effect=handoffs)), patch.object(jev_runtime, "DecisionModelRunner", return_value=decisions):
+            reply = await agent.arun(ALL_PROVIDERS)
+        dimension = seen_states[0].scope.dimensions[0]
+        self.assertIs(dimension.breadth, JevScopeBreadth.EVERY_MEMBER)
+        self.assertTrue(dimension.breadth_upgraded)
+        self.assertIn("never listed every model provider", json.dumps(runner.calls[1]))
+        self.assertTrue(reply.metadata["done_criteria"]["complete"])
+        self.assertTrue(reply.metadata["done_criteria"]["scope_coverage"]["dimensions"]["providers"]["breadth_upgraded"])
+
+    async def test_request_that_allows_partial_coverage_is_not_checked(self) -> None:
+        # [Edge Case] "just the web one for now" is permission; no Jev call and no continuation follow.
+        request = "Add CSV export to the web, CLI, and API clients, but just the web one for now."
+        state = _scope_state(request, _scope_dimension(partial_allowed_quote="just the web one for now"))
+        decisions = ScriptedChoiceDecisionRunner()
+        reply, runner, _, handoff_builder = await self._run(request, state, (), decisions, "Web exports CSV.")
+        self.assertEqual(len(runner.calls), 1)
+        handoff_builder.assert_not_awaited()
+        self.assertEqual(decisions.requests, [])
+        self.assertEqual(reply.metadata["done_criteria"]["scope_coverage"]["outcome"], "not_checked")
+
+    async def test_disclosed_gap_is_accepted_after_the_coverage_attempts(self) -> None:
+        # [Edge Case] after two coverage continuations, an answer that reports the gap may end the run as a partial result.
+        state = _scope_state(WEB_CLI_API, _scope_dimension(named_units=["web", "CLI"], request_quote="the web, CLI"))
+        handoff = _scope_handoff(_unit("web", "Added export to web."), _unit("CLI"))
+        decisions = ScriptedChoiceDecisionRunner(
+            unit_coverage=[_distribution("applied", 0.9, UNIT_OPTIONS)] * 3,
+            coverage_statement=[_distribution("silent", 0.9, STATEMENT_OPTIONS), _distribution("silent", 0.9, STATEMENT_OPTIONS), _distribution("reports_partial", 0.9, STATEMENT_OPTIONS)],
+        )
+        reply, runner, _, _ = await self._run(WEB_CLI_API, state, (handoff,) * 3, decisions, "web", "web", "Web is done; the CLI is not done.")
+        self.assertEqual(len(runner.calls), 3)
+        report = reply.metadata["done_criteria"]
+        self.assertFalse(report["complete"])
+        self.assertEqual(report["scope_coverage"]["outcome"], "partial_disclosed")
+        self.assertEqual(report["scope_coverage"]["dimensions"]["clients"]["uncovered_units"], ["CLI"])
+
+    async def test_silent_gap_gets_one_disclosure_request_then_is_accepted_as_undisclosed(self) -> None:
+        # [Silent Failure] a silent partial answer is asked once to report the gap; the runtime never rewrites the output.
+        state = _scope_state(WEB_CLI_API, _scope_dimension(named_units=["web", "CLI"], request_quote="the web, CLI"))
+        handoff = _scope_handoff(_unit("web", "Added export to web."), _unit("CLI"))
+        decisions = ScriptedChoiceDecisionRunner(
+            unit_coverage=[_distribution("applied", 0.9, UNIT_OPTIONS)] * 4,
+            coverage_statement=[_distribution("silent", 0.9, STATEMENT_OPTIONS)] * 4,
+        )
+        reply, runner, _, _ = await self._run(WEB_CLI_API, state, (handoff,) * 4, decisions, "web", "web", "web", "Web export works.")
+        self.assertEqual(len(runner.calls), 4)
+        self.assertIn("state plainly in your final answer", json.dumps(runner.calls[3]))
+        self.assertEqual(reply.content, "Web export works.")
+        self.assertEqual(reply.metadata["done_criteria"]["scope_coverage"]["outcome"], "partial_undisclosed")
+
+    async def test_combined_presets_share_one_state_and_one_handoff_per_attempt(self) -> None:
+        # [Hidden Assumption] two presets cost one state call and one handoff call; each reports its own subsection.
+        presets = (JevPresets.MultiPart, JevPresets.ScopeCoverage)
+        state = _scope_state(WEB_CLI_API, _scope_dimension(deliverable_id="export"), presets=presets, deliverables=({"id": "export", "description": "Add CSV export.", "completion_signal": "CSV export exists."},))
+        deliverable = JevDeliverableHandoff("export", "complete", (JevEvidenceReference("final_answer", "CSV export exists."),), "none")
+        handoff = _scope_handoff(_unit("web", "a"), _unit("CLI", "b"), _unit("API", "c"), deliverables=(deliverable,))
+        decisions = ScriptedChoiceDecisionRunner(evidence_matches_completion_signal=[0.95], unit_coverage=[_distribution("applied", 0.9, UNIT_OPTIONS)] * 3)
+        reply, runner, state_builder, handoff_builder = await self._run(WEB_CLI_API, state, (handoff,), decisions, "CSV export exists.", done_criteria=(JevPresets.ScopeCoverage, JevPresets.MultiPart))
+        self.assertEqual(len(runner.calls), 1)
+        self.assertEqual(state_builder.await_count, 1)
+        self.assertEqual(handoff_builder.await_count, 1)
+        report = reply.metadata["done_criteria"]
+        self.assertEqual(report["presets"], ["multi_part", "scope_coverage"])
+        self.assertTrue(report["multi_part"]["complete"])
+        self.assertTrue(report["scope_coverage"]["complete"])
+
+    async def test_real_builders_ground_scope_in_the_request_end_to_end(self) -> None:
+        # [Hidden Failure] production builders compose the scope schema, and handoff citations resolve against real tool outputs.
+        @tool
+        def edit(target: str) -> str:
+            """Apply the requested change to one target."""
+            return f"edited:{target}"
+
+        request = "Add CSV export to the web and CLI clients."
+        state_payload = {
+            "goal": "CSV export.", "objective": "Both clients export CSV.", "mission": "Change both clients.", "what_not_to_do": [], "sections": {},
+            "scope": {"dimensions": [_scope_dimension(request_quote="the web and CLI clients", named_units=["web", "CLI"])]},
+        }
+        handoff_payload = {"scope": {"dimensions": [{
+            "dimension_id": "clients",
+            "enumeration": [],
+            "units": [
+                {"unit": "web", "source": "named_in_request", "work": [{"source_id": "tool_call_1", "excerpt": "edited:web"}]},
+                {"unit": "CLI", "source": "named_in_request", "work": [{"source_id": "tool_call_2", "excerpt": "edited:CLI"}]},
+            ],
+            "narrowing": [],
+            "coverage_claims": [{"source_id": "final_answer", "excerpt": "web and CLI"}],
+        }]}}
+        runner = ScriptedRunner(
+            _text(json.dumps(state_payload)),
+            RawResponse({"output": [{"type": "function_call", "name": "edit", "arguments": '{"target": "web"}', "call_id": "e1"}]}),
+            RawResponse({"output": [{"type": "function_call", "name": "edit", "arguments": '{"target": "CLI"}', "call_id": "e2"}]}),
+            _text("Added CSV export to web and CLI."),
+            _text(json.dumps(handoff_payload)),
+        )
+        agent = bind_test_runner(JevAgent(_settings(tools=(edit,)), done_criteria=JevPresets.ScopeCoverage), runner)
+        decisions = ScriptedChoiceDecisionRunner(unit_coverage=[_distribution("applied", 0.9, UNIT_OPTIONS)] * 2)
+        from vidbyte.agents.jev import runtime as jev_runtime
+
+        with patch.object(jev_runtime, "DecisionModelRunner", return_value=decisions):
+            reply = await agent.arun(request)
+        self.assertEqual(reply.content, "Added CSV export to web and CLI.")
+        self.assertEqual(len(runner.calls), 5)
+        self.assertIn("## `scope`", json.dumps(runner.calls[0]))
+        self.assertTrue(reply.metadata["done_criteria"]["complete"])
+
+
+class JevScopeCoverageContractTests(unittest.TestCase):
+    """Tests request grounding, handoff validation, and the done_criteria surface without running an agent."""
+
+    def test_state_rejects_scope_text_not_quoted_from_the_request(self) -> None:
+        # [Hidden Failure] an invented quote, an invented unit, or an impossible named list fails closed.
+        for overrides in (
+            {"request_quote": "every client in the company"},
+            {"named_units": ["web", "desktop"]},
+            {"named_units": ["web"], "request_quote": "the web"},
+            {"deliverable_id": "missing"},
+        ):
+            with self.subTest(overrides=overrides), self.assertRaises(OutputSchemaViolationError):
+                _scope_state(WEB_CLI_API, _scope_dimension(**overrides))
+
+    def test_state_quote_check_ignores_case_and_whitespace_only(self) -> None:
+        # [Edge Case] formatting differences are tolerated; the words themselves must match.
+        state = _scope_state(WEB_CLI_API, _scope_dimension(request_quote="add csv export to   the WEB, cli, and api clients"))
+        self.assertEqual(state.scope.dimensions[0].named_units, ("web", "CLI", "API"))
+
+    def test_handoff_rejects_a_missing_named_unit_and_miscited_sources(self) -> None:
+        # [Silent Failure] a handoff that drops a named member or cites the final answer as work never reaches Jev.
+        state = _scope_state(WEB_CLI_API, _scope_dimension())
+        snapshot = JevRunSnapshot(WEB_CLI_API, state, ("Added export to web.",), (), "All clients are done.")
+
+        def payload(units: list[dict[str, Any]]) -> dict[str, Any]:
+            # Wraps unit rows in one otherwise valid scope handoff.
+            return {"scope": {"dimensions": [{"dimension_id": "clients", "enumeration": [], "units": units, "narrowing": [], "coverage_claims": []}]}}
+
+        named = [{"unit": name, "source": "named_in_request", "work": []} for name in ("web", "CLI", "API")]
+        JevRunHandoff.from_payload(payload(named), state, snapshot)
+        with self.assertRaises(OutputSchemaViolationError):
+            JevRunHandoff.from_payload(payload(named[:2]), state, snapshot)
+        final_as_work = [{**named[0], "work": [{"source_id": "final_answer", "excerpt": "All clients are done."}]}, *named[1:]]
+        with self.assertRaises(OutputSchemaViolationError):
+            JevRunHandoff.from_payload(payload(final_as_work), state, snapshot)
+
+    def test_unit_sources_are_recomputed_and_exclusions_are_not_required(self) -> None:
+        # [Hidden Assumption] a "found" unit absent from the listing is demoted, and an excluded unit is never required.
+        request = "Add retries to every provider adapter except Cohere."
+        state = _scope_state(request, _scope_dimension(id="providers", request_quote="every provider adapter", breadth="every_member", universe="found_in_workspace", named_units=[], excluded_units=["Cohere"], unit_noun="provider adapter"))
+        listing = {"name": "ls", "arguments": {}, "state": "succeeded", "output": "openai.py anthropic.py cohere.py"}
+        snapshot = JevRunSnapshot(request, state, (), (listing,), "Done.")
+        handoff = JevRunHandoff.from_payload({"scope": {"dimensions": [{
+            "dimension_id": "providers",
+            "enumeration": [{"source_id": "tool_call_1", "excerpt": "openai.py anthropic.py cohere.py"}],
+            "units": [
+                {"unit": "openai", "source": "found_by_run", "work": []},
+                {"unit": "anthropic", "source": "found_by_run", "work": []},
+                {"unit": "cohere", "source": "found_by_run", "work": []},
+                {"unit": "gemini", "source": "found_by_run", "work": []},
+            ],
+            "narrowing": [],
+            "coverage_claims": [],
+        }]}}, state, snapshot)
+        account = handoff.scope.dimensions[0]
+        self.assertIs(account.units[3].source, JevScopeUnitSource.MENTIONED_BY_AGENT)
+        self.assertEqual([item.unit for item in account.required_units(state.scope.dimensions[0])], ["openai", "anthropic"])
+
+    def test_unit_question_state_holds_only_its_own_unit_and_work(self) -> None:
+        # [Hidden Assumption] Jev judges one unit at a time and never sees the request, other units, or the run.
+        from vidbyte.lib.dataclasses.jev import JevJson
+
+        state = _scope_state(WEB_CLI_API, _scope_dimension())
+        request = ScopeCoverageQuestions.unit_request(state.scope.dimensions[0], _unit("CLI", "Read the CLI module."))
+        payload = JevJson.thaw(request.state)
+        self.assertEqual(sorted(payload), ["requested_change", "unit", "unit_noun", "work_record"])
+        self.assertEqual(payload["unit"], "CLI")
+        self.assertEqual(payload["work_record"], [{"source_id": "iteration_1", "excerpt": "Read the CLI module."}])
+        self.assertEqual([option.name for option in request.questions[0].options], list(UNIT_OPTIONS))
+
+    def test_done_criteria_accepts_distinct_preset_tuples_only(self) -> None:
+        # [Edge Case] tuples are normalized to declaration order; empty, duplicate, and raw-string tuples are rejected.
+        agent = JevAgent(_settings(), done_criteria=(JevPresets.ScopeCoverage, JevPresets.MultiPart))
+        self.assertEqual(agent.done_presets, (JevPresets.MultiPart, JevPresets.ScopeCoverage))
+        for bad in ((), (JevPresets.MultiPart, JevPresets.MultiPart), ("scope_coverage",), [JevPresets.MultiPart]):
+            with self.subTest(bad=bad), self.assertRaises(ConfigurationError):
+                JevAgent(_settings(), done_criteria=bad)
 
 
 if __name__ == "__main__":

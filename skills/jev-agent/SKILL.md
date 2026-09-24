@@ -45,12 +45,13 @@ The scaffold performs no Jev call. A missing TypeSafe API key must not prevent `
 ## Invariants
 
 - `JevAgent.__init__` accepts only `JevAgentSettings`.
-- Named capability choices are keyword-only enum values; multipart completion is enabled with `JevAgent(settings, done_criteria=JevPresets.MultiPart)`.
+- Named capability choices are keyword-only enum values; done criteria are enabled with one preset or a tuple of distinct presets, such as `JevAgent(settings, done_criteria=(JevPresets.MultiPart, JevPresets.ScopeCoverage))`.
 - TypeSafe/Jev cannot be selected as the reply-generating provider.
 - API keys never appear in object representations, errors, logs, traces, or serialized state.
 - The public API names capabilities, not internal questions or decisions.
 - Runtime state is run-local; reusable configuration is frozen and validated before execution.
-- Multipart completion creates the structured state once per run; the handoff is regenerated at normal finish attempts and must match every state deliverable ID exactly.
+- Done criteria create the structured state once per run and at most one handoff per normal finish attempt, whatever the number of enabled presets. Each preset adds its own state section and handoff section, and the handoff must match every state ID exactly.
+- Each preset is a `JevDoneCheck` subclass (`done_checks.py`) that owns its questions, thresholds, feedback, and metadata. The runtime only builds the shared inputs, runs the checks, and merges their results.
 - Jev sees one deliverable and its matching handoff evidence per question. Deterministic code joins answers and feeds incomplete items back into the same runtime loop.
 - State/handoff schema errors and Jev failures never count as successful completion; the main agent cannot silently finish while the capability is enabled and verification failed.
 - Existing `BaseAgent` behavior remains unchanged when Jev is not involved; `AgentRuntimeType.JEV` gets the same linear-loop wiring as `LINEAR`.
@@ -89,9 +90,21 @@ agent = JevAgent(
 )
 ```
 
-The runtime uses `MultiPartStateBuilderAgent` once to capture goal, objective, mission, exclusions, useful sections, and the specifically named multipart deliverable section. It uses `MultiPartHandoffBuilderAgent` at each ordinary finish attempt to map direct run observations to those deliverables. The strict handoff is checked by ID before `DecisionModelRunner` asks one `NOUL` recognition question per item. Jev judges only whether that item's handoff evidence shows its explicit completion signal; runtime code evaluates status, remaining work, and probability. Any gap is appended to the live loop so the same agent can continue.
+The runtime uses `JevRunStateBuilderAgent` once to capture goal, objective, mission, exclusions, useful sections, and the specifically named multipart deliverable section. It uses `JevRunHandoffBuilderAgent` at each ordinary finish attempt to map direct run observations to those deliverables. The strict handoff is checked by ID before `DecisionModelRunner` asks one `NOUL` recognition question per item. Jev judges only whether that item's handoff evidence shows its explicit completion signal; runtime code evaluates status, remaining work, and probability. Any gap is appended to the live loop so the same agent can continue.
 
 The generated deliverable list is capability-specific; it is not a universal obligations model. A large original request or handoff may exceed TypeSafe's state limit, and the provider error is surfaced instead of truncating the information silently. The initial 0.8 `P(true)` threshold is an internal policy constant and should be calibrated against representative runs before being treated as a product guarantee.
+
+## Scope coverage capability
+
+`done_criteria=JevPresets.ScopeCoverage` catches silent scope narrowing: the user asks for a change across a group ("all our model providers", "the web, CLI, and API") and the agent does one member and finishes. The code lives in `vidbyte/agents/jev/scope_coverage/`, one role per module.
+
+- The state section holds one `JevScopeDimension` per group: a verbatim `request_quote`, the `requested_change`, the `unit_noun`, a `breadth` (`every_member`, `named_list`, `one_example`, `single_target`), a `universe` (`named_in_request`, `found_in_workspace`, `open_ended`), and verbatim `named_units`, `excluded_units`, and `partial_allowed_quote`. Code rejects any quoted field that does not appear in the request.
+- Only `every_member` and `named_list` dimensions without a partial-coverage quote are checked. A dimension the builder labeled narrow gets one Jev `choice` breadth review before the loop, which may widen it.
+- The handoff section lists every named or listed unit with cited `work` excerpts, plus the listing excerpts, narrowing statements, and final-answer coverage claims. It has no verdict fields; code recomputes each unit's source.
+- Code computes the required units and the units with no work. Jev answers one `choice` per worked unit (`applied` / `attempted` / `examined_only` / `none`) and, for an incomplete dimension, one `choice` on the final answer (`claims_all` / `reports_partial` / `silent`).
+- The run continues with named gaps for two finish attempts. After that, a disclosed gap is accepted as `partial_disclosed`; a silent one gets one disclosure request and is then accepted as `partial_undisclosed`. The runtime never rewrites the agent's output.
+
+Thresholds (0.8 applied, 0.7 disclosed, 0.5 breadth widening) are starting points in `vidbyte/lib/constants/jev.py` and must be tuned on labeled runs. Open-ended groups can only be checked for named units, overclaiming, and disclosure.
 
 ## Capability design example
 
@@ -103,6 +116,8 @@ Run the focused script first:
 
 ```text
 python scripts/test-jev-agent-scaffold.py
+python scripts/test-jev-multipart-done-criteria.py
+python scripts/test-jev-scope-coverage-done-criteria.py
 ```
 
 Then run repository gates:

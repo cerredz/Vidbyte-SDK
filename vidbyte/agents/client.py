@@ -31,8 +31,8 @@ class AgentClient:
         # Construct a handoff agent for a given handoff spec, defaulting to MinimalHandoff.
         return HandoffAgent(handoff, **kwargs)
 
-    def jev(self, settings: JevAgentSettings, *, done_criteria: JevPresets | None = None) -> JevAgent:
-        # Construct the opinionated Jev agent with an optional named done-criteria capability.
+    def jev(self, settings: JevAgentSettings, *, done_criteria: JevPresets | tuple[JevPresets, ...] | None = None) -> JevAgent:
+        # Construct the opinionated Jev agent with optional named done-criteria capabilities.
         return JevAgent(settings, done_criteria=done_criteria)
 
     def continual_trace(self, schema: Any, **kwargs: Any) -> Any:

@@ -1,6 +1,6 @@
 {
   "name": "Jev",
-  "description": "Prompt assets for generating Jev run state and structured multipart completion handoffs.",
+  "description": "Prompt assets for generating Jev run state, structured completion handoffs, and the fixed Jev done-check questions.",
   "key": "jev",
   "prompts": {
     "state_builder": {
@@ -10,6 +10,34 @@
     "handoff_builder": {
       "path": "handoff_builder.md",
       "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev/handoff_builder.md"
+    },
+    "state_builder_multi_part": {
+      "path": "state_builder_multi_part.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev/state_builder_multi_part.md"
+    },
+    "state_builder_scope_coverage": {
+      "path": "state_builder_scope_coverage.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev/state_builder_scope_coverage.md"
+    },
+    "handoff_builder_multi_part": {
+      "path": "handoff_builder_multi_part.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev/handoff_builder_multi_part.md"
+    },
+    "handoff_builder_scope_coverage": {
+      "path": "handoff_builder_scope_coverage.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev/handoff_builder_scope_coverage.md"
+    },
+    "scope_breadth": {
+      "path": "scope_breadth.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev/scope_breadth.md"
+    },
+    "scope_unit_coverage": {
+      "path": "scope_unit_coverage.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev/scope_unit_coverage.md"
+    },
+    "scope_coverage_statement": {
+      "path": "scope_coverage_statement.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev/scope_coverage_statement.md"
     }
   }
 }
