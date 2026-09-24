@@ -43,7 +43,7 @@ The scaffold performs no Jev call. A missing TypeSafe API key must not prevent `
 
 ## Invariants
 
-- `JevAgent.__init__` accepts only `JevAgentSettings`.
+- `JevAgent.__init__` accepts only `JevAgentSettings` plus one optional named `done_criteria` preset from the closed `JevPresets` enum.
 - TypeSafe/Jev cannot be selected as the reply-generating provider.
 - API keys never appear in object representations, errors, logs, traces, or serialized state.
 - The public API names capabilities, not internal questions or decisions.
@@ -67,6 +67,25 @@ agent = JevAgent(settings)
 ```
 
 The equivalent namespace constructor is `sdk.agents.jev(settings)`.
+
+## Done-criteria presets
+
+A done-criteria preset reviews each attempt to finish before the loop returns it. Enable one with `JevAgent(settings, done_criteria=JevPresets.MotivatingCase)`. This needs a TypeSafe key at construction. Every preset follows one pattern:
+
+1. A generative state builder runs once, before the loop, and turns the request into a validated, request-shaped state.
+2. At each finish attempt (`AgentRuntime._finish_attempt_feedback`), a generative handoff builder writes a handoff shaped like that state. It holds refs and verbatim quotes only, never verdicts.
+3. Code verifies every ref and quote against the run's recorded tool calls, then works out the exact facts (order, success, staleness).
+4. Jev answers one recognition question per item, batched by shared state.
+5. Code combines the answers. It either accepts the attempt or returns feedback that continues the same loop. Continuations are capped, infrastructure failures fail open, and the latest report lands in `result.metadata["done_criteria"]`.
+
+`JevPresets.MotivatingCase` (done-check #9) lives in `motivating_case/`. It confirms that the boundary condition which motivated the request (empty input, retry, conflicting state, and so on) was built and run, or inspected where allowed. A nearby easier case (`near_miss`) or the ordinary flow does not count. Each module has one role:
+- `state.py`
+- `evidence.py` (ledger)
+- `handoff.py`
+- `checks.py` (code facts)
+- `questions.py` (Jev wording)
+- `policy.py` (thresholds and combination)
+- `builders.py` (generative sub-agents)
 
 ## Capability design example
 

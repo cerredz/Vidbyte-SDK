@@ -465,10 +465,10 @@ class JevPublicApiTests(unittest.TestCase):
         self.assertIsInstance(agent, JevAgent)
         self.assertIs(agent.settings, settings)
 
-    def test_constructor_exposes_only_settings(self) -> None:
+    def test_constructor_exposes_only_settings_and_named_presets(self) -> None:
         # [Hidden Assumption] runtime machinery and generic decisions are not user customization points.
         parameters = tuple(inspect.signature(JevAgent.__init__).parameters)
-        self.assertEqual(parameters, ("self", "settings"))
+        self.assertEqual(parameters, ("self", "settings", "done_criteria"))
         for forbidden in ("runtime", "middleware", "algorithm", "fallback", "decisions"):
             self.assertNotIn(forbidden, parameters)
 
