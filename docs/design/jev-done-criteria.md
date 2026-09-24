@@ -1,6 +1,6 @@
 # Design Doc: Jev Done Criteria
 
-**Status:** Approved  
+**Status:** Approved; implementation clarification  
 **Author:** OpenCode  
 **Created:** 2026-09-23  
 **Last Updated:** 2026-09-24
@@ -259,6 +259,7 @@ Configured runs return `minimum_duration_met: bool`; absent criterion omits the 
 | Action | File Path | Reason |
 |--------|-----------|--------|
 | CREATE | `docs/design/jev-done-criteria.md` | Approved source of truth. |
+| CREATE | `vidbyte/agents/jev/done_criteria/README.md` | Explain subsystem intent, boundaries, and file routing. |
 | CREATE | `vidbyte/agents/jev/done_criteria/__init__.py` | Public exports for criteria package. |
 | CREATE | `vidbyte/agents/jev/done_criteria/base.py` | Criterion and composite contracts. |
 | CREATE | `vidbyte/agents/jev/done_criteria/criteria.py` | Minimum-time criterion. |
@@ -270,6 +271,7 @@ Configured runs return `minimum_duration_met: bool`; absent criterion omits the 
 | MODIFY | `vidbyte/agents/jev/__init__.py` | Jev public exports. |
 | MODIFY | `vidbyte/agents/__init__.py` | Agent namespace exports. |
 | MODIFY | `vidbyte/__init__.py` | Root namespace exports. |
+| CREATE | `tests/features/jev_minimum_duration/FEATURE.md` | Feature contract and failure inventory for future test authors. |
 | CREATE | `tests/test_jev_done_criteria.py` | Unit and integration coverage. |
 | CREATE | `scripts/test-jev-done-criteria.py` | Executable verification runner. |
 
