@@ -10,7 +10,8 @@ TESTS: tests/test_jev_agent.py and scripts/test-jev-agent-scaffold.py.
 """
 
 from vidbyte.agents.jev.agent import JevAgent
+from vidbyte.agents.jev.presets import JevPresets
 from vidbyte.agents.jev.runtime import JevRuntime
 from vidbyte.agents.jev.settings import JevAgentSettings
 
-__all__ = ["JevAgent", "JevAgentSettings", "JevRuntime"]
+__all__ = ["JevAgent", "JevAgentSettings", "JevPresets", "JevRuntime"]

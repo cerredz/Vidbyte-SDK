@@ -14,21 +14,24 @@ from __future__ import annotations
 from typing import Any
 
 from vidbyte.agents.base import BaseAgent
+from vidbyte.agents.jev.presets import JevPresets, normalize_done_criteria
 from vidbyte.agents.jev.settings import JevAgentSettings
 from vidbyte.lib.enums import AgentRuntimeType
 from vidbyte.lib.errors import ConfigurationError
 
 
 class JevAgent(BaseAgent):
-    """Opinionated agent whose future decision policies are owned by JevRuntime."""
+    """Opinionated agent whose named Jev capability policies are owned by JevRuntime."""
 
-    def __init__(self, settings: JevAgentSettings) -> None:
-        # Maps the sole public settings object into BaseAgent while fixing the jev runtime.
+    def __init__(self, settings: JevAgentSettings, *, done_criteria: JevPresets | tuple[JevPresets, ...] | None = None) -> None:
+        # Maps validated settings and named completion capabilities into the fixed Jev runtime.
         # @intent closed-jev-construction-surface
         # Rejecting arbitrary objects keeps runtime selection and future decision policy owned by this package.
         if not isinstance(settings, JevAgentSettings):
             raise ConfigurationError("JevAgent requires a JevAgentSettings instance.")
         self.settings = settings
+        self.done_criteria = done_criteria
+        self.done_presets = normalize_done_criteria(done_criteria)
         super().__init__(
             name=settings.name,
             system_prompt=settings.system_prompt,
@@ -44,8 +47,8 @@ class JevAgent(BaseAgent):
         )
 
     def _runtime_extension_kwargs(self) -> dict[str, Any]:
-        # Passes the exact immutable settings object to each run-local JevRuntime instance.
-        return {"jev_settings": self.settings}
+        # Passes run configuration and its source agent to each isolated JevRuntime instance.
+        return {"jev_settings": self.settings, "done_criteria": self.done_presets or None, "source_agent": self}
 
 
 __all__ = ["JevAgent"]

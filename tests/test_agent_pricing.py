@@ -21,6 +21,7 @@ Similar Files:
 from __future__ import annotations
 
 import unittest
+from types import SimpleNamespace
 
 from vidbyte.agents.pricing import (
     ChatCompletionUsage,
@@ -29,6 +30,7 @@ from vidbyte.agents.pricing import (
     MiniMaxUsage,
     OpenAIUsage,
     OpenRouterUsage,
+    UsageTracker,
     XAIUsage,
 )
 from vidbyte.lib.enums import ModelProvider
@@ -87,6 +89,24 @@ class PricingBaseTests(unittest.TestCase):
 
     def test_no_token_fields_parses_to_none(self) -> None:
         self.assertIsNone(OpenAIUsage.from_usage_payload({"input_tokens_details": {"cached_tokens": 5}}))
+
+    def test_usage_tracker_merge_rebases_nested_call_indices(self) -> None:
+        # [Silent Failure] nested builder usage is included exactly once with sequential owner indices.
+        owner = UsageTracker()
+        nested = UsageTracker()
+        response = SimpleNamespace(
+            provider=ModelProvider.OPENAI,
+            model="gpt-4.1-mini",
+            usage={"input_tokens": 10, "output_tokens": 2, "total_tokens": 12},
+        )
+        owner.record_call(response)
+        nested.record_call(response)
+        nested.record_call(response)
+        owner.merge(nested.rollup())
+        rollup = owner.rollup()
+        self.assertEqual([record.call_index for record in rollup.calls], [1, 2, 3])
+        self.assertEqual(rollup.model_call_count, 3)
+        self.assertEqual(rollup.total_tokens, 36)
 
 
 class CompatibleProviderTests(unittest.TestCase):
