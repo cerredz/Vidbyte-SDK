@@ -39,23 +39,29 @@ class McpAttachableMixin:
 
     async def attach_mcp_server(
         self,
-        command: Sequence[str],
+        command: Sequence[str] = (),
         *,
         name: str | None = None,
         permission: McpToolPermission = McpToolPermission.EXECUTE,
         env: Mapping[str, str] | None = None,
         timeout: float = 30.0,
+        url: str | None = None,
+        headers: Mapping[str, str] | None = None,
     ) -> McpAttachableMixin:
-        """Start one MCP server subprocess, bridge its discovered tools, and attach them.
+        """Connect one MCP server (a stdio `command` or a Streamable HTTP `url`), bridge its tools, and attach them.
 
         Returns self to support builder pattern.
         """
+        # @intent one-attach-api-two-transports
+        # McpServerConfig refuses a config with both or neither of command and url, so this method never guesses.
         config = McpServerConfig(
             command=tuple(command),
             name=name,
             permission=permission,
             env=env,
             timeout=timeout,
+            url=url,
+            headers=headers,
         )
         handle = await attach_mcp_server(config)
         self._mcp_handles.append(handle)

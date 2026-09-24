@@ -24,17 +24,18 @@ from vidbyte.lib.errors import (
     McpInitializeError,
     McpToolDiscoveryError,
 )
+from vidbyte.lib.registries.tools import ToolRegistry
 from vidbyte.tools.mcp.bridge import McpToolBridge
 from vidbyte.tools.mcp.client import McpClient
-from vidbyte.tools.mcp.transport import McpStdioTransport
+from vidbyte.tools.mcp.transport import McpStdioTransport, McpStreamableHttpTransport
 from vidbyte.tools.mcp.types import McpServerConfig, McpServerHandle, McpToolPermission
-from vidbyte.lib.registries.tools import ToolRegistry
 from vidbyte.tools.types import ToolPermission
 
 
 async def attach_mcp_server(config: McpServerConfig) -> McpServerHandle:
-    """Starts the MCP subprocess, runs the initialize handshake, discovers tools,
-    wraps them as McpBridgedTool instances, and returns a live McpServerHandle.
+    """Connects to the MCP server (a stdio subprocess or a Streamable HTTP url), runs the
+    initialize handshake, discovers tools, wraps the allowlisted ones as McpBridgedTool
+    instances under the configured prefix, and returns a live McpServerHandle.
 
     Raises:
         McpConnectionError: If the subprocess fails to start.
@@ -42,14 +43,10 @@ async def attach_mcp_server(config: McpServerConfig) -> McpServerHandle:
         McpToolDiscoveryError: If tools/list returns an unexpected response.
     """
     try:
-        transport = McpStdioTransport(
-            list(config.command),
-            env=config.env,
-            request_timeout=config.timeout,
-        )
+        transport = _build_transport(config)
     except Exception as e:
         raise McpConnectionError(
-            f"Failed to start MCP server subprocess for command {config.command}: {e}"
+            f"Failed to start MCP server transport for {config.target}: {e}"
         ) from e
 
     try:
@@ -73,7 +70,12 @@ async def attach_mcp_server(config: McpServerConfig) -> McpServerHandle:
 
         registry = ToolRegistry()
         try:
-            bridged_tools = await McpToolBridge(registry, client, permission=perm).bridge()
+            definitions = await client.list_tools()
+            bridged_tools = McpToolBridge(registry, client, permission=perm).bridge_definitions(
+                definitions,
+                allowlist=config.tool_allowlist,
+                prefix=config.tool_prefix,
+            )
         except Exception as e:
             raise McpToolDiscoveryError(
                 f"Failed to discover remote tools from MCP server: {e}"
@@ -88,4 +90,14 @@ async def attach_mcp_server(config: McpServerConfig) -> McpServerHandle:
         client=client,
         transport=transport,
         bridged_tools=tuple(bridged_tools),
+        definitions=tuple(definitions),
     )
+
+
+def _build_transport(config: McpServerConfig) -> McpStdioTransport | McpStreamableHttpTransport:
+    """Return the transport the config names: Streamable HTTP for a url, stdio for a command."""
+    # @intent one-config-one-transport
+    # McpServerConfig guarantees exactly one of url or command, so the choice here is never ambiguous.
+    if config.url:
+        return McpStreamableHttpTransport(config.url, headers=config.headers, request_timeout=config.timeout)
+    return McpStdioTransport(list(config.command), env=config.env, request_timeout=config.timeout)

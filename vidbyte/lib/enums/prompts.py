@@ -81,6 +81,8 @@ class Prompt(str, Enum):
     FAILURE_PATTERN_REPAIR_EVALUATOR_RED_TEAM = "failure_pattern_repair.evaluator_red_team"
     FAILURE_PATTERN_REPAIR_SELECTIVE_REGENERATION_LOOP = "failure_pattern_repair.selective_regeneration_loop"
     GOALS_GOAL_PROMPT = "goals.goal_prompt"
+    JEV_ALIGNMENT_EDITOR_SYSTEM_PROMPT = "jev_alignment.editor_system_prompt"
+    JEV_ALIGNMENT_TOOL_SCOUT_SYSTEM_PROMPT = "jev_alignment.tool_scout_system_prompt"
     MIMIC_BEHAVIOR_MIMIC_PROMPT = "mimic_behavior.mimic_prompt"
     REFLEXION_AGENT_SYSTEM_PROMPT = "reflexion.agent_system_prompt"
     REFLEXION_REFLECT_SYSTEM_PROMPT = "reflexion.reflect_system_prompt"

@@ -44,6 +44,7 @@ schema = tool_spec_to_provider_schema(lookup_metric.spec(), "openai")
 - `base.py`: provider schema translation helpers.
 - `openai.py`, `anthropic.py`, `gemini.py`, `xai.py`, `openrouter.py`, `compatible.py` (DeepSeek, GLM, MiniMax, Kimi, Mistral): provider adapters.
 - `tracing/`: provider-backed trace adapters.
+- `tool_catalogs/`: public tool-catalog adapters (MCP registries, Docker, Smithery, Glama, ToolSDK, Composio, Pipedream, Arcade, APIs.guru) used by JevAgent tool alignment; see its README for its External Contract.
 
 ## Related Layers
 

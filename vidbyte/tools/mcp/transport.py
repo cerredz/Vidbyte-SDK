@@ -1,7 +1,8 @@
 """Context Protocol Header
 
 Description:
-    Defines MCP transport interfaces and a hardened stdio JSON-RPC implementation.
+    Defines MCP transport interfaces, a hardened stdio JSON-RPC implementation, and a
+    Streamable HTTP implementation for remote MCP servers.
 Purpose:
     Keeps process communication isolated from MCP tool discovery and native tool
     wrapping logic while making concurrent requests, timeouts, stderr drainage,
@@ -11,6 +12,11 @@ Architecture:
     - McpStdioTransport: Newline-delimited JSON-RPC over subprocess stdio with
       ID demultiplexing, background stdout/stderr readers, per-request deadlines,
       restricted child environment, and idempotent bounded close.
+    - McpNotifyingTransport: Optional protocol for transports that can send
+      JSON-RPC notifications (used for notifications/initialized).
+    - McpStreamableHttpTransport: JSON-RPC over HTTP POST per the MCP Streamable
+      HTTP transport: JSON or SSE replies, Mcp-Session-Id and MCP-Protocol-Version
+      headers, byte-bounded bodies, and a best-effort session DELETE on close.
 Relations:
     Related to vidbyte.tools.mcp.client, vidbyte.tools.mcp.bridge, and
     vidbyte.tools.mcp.attach.
@@ -24,9 +30,14 @@ import json
 import os
 import sys
 from collections.abc import Mapping, Sequence
-from typing import Any, Protocol
+from typing import Any, Protocol, runtime_checkable
 
-from vidbyte.lib.errors import McpProtocolError
+from vidbyte.lib.errors import (
+    ConfigurationError,
+    McpProtocolError,
+    ProviderRequestError,
+)
+from vidbyte.lib.http.transport import HttpResponse, HttpTransport
 
 # Process-necessary variables only. Caller credentials arrive via ``env=``.
 # PYTHONPATH is intentionally excluded so parent import paths do not leak.
@@ -63,6 +74,15 @@ _WINDOWS_ENV_KEYS: tuple[str, ...] = (
 _DEFAULT_STDERR_MAX_BYTES = 64 * 1024
 _DEFAULT_REQUEST_TIMEOUT = 30.0
 _DEFAULT_SHUTDOWN_TIMEOUT = 5.0
+_DEFAULT_HTTP_MAX_RESPONSE_BYTES = 4 * 1024 * 1024
+_HTTP_STATUS_OK_FLOOR = 200
+_HTTP_STATUS_OK_CEILING = 300
+_HTTP_STATUS_NOT_FOUND = 404
+_JSONRPC_VERSION = "2.0"
+_SESSION_HEADER = "mcp-session-id"
+_PROTOCOL_HEADER = "MCP-Protocol-Version"
+_EVENT_STREAM = "text/event-stream"
+_MIN_POSITIVE = 0
 
 
 def _inherited_env_keys() -> tuple[str, ...]:
@@ -93,6 +113,17 @@ class McpTransport(Protocol):
         params: Mapping[str, Any] | None = None,
     ) -> Mapping[str, Any]:
         """Send one JSON-RPC request and return the result object."""
+
+    async def close(self) -> None:
+        """Release the connection: end the subprocess or the remote session."""
+
+
+@runtime_checkable
+class McpNotifyingTransport(Protocol):
+    """Protocol implemented by MCP transports that can send JSON-RPC notifications."""
+
+    async def notify(self, method: str, params: Mapping[str, Any] | None = None) -> None:
+        """Send one JSON-RPC notification, which has no id and expects no result."""
 
 
 class McpStdioTransport:
@@ -433,3 +464,212 @@ class McpStdioTransport:
         overflow = len(self._stderr_buf) - self.stderr_max_bytes
         if overflow > 0:
             del self._stderr_buf[:overflow]
+
+
+class McpStreamableHttpTransport:
+    """JSON-RPC over the MCP Streamable HTTP transport for one remote server.
+
+    Every message is one HTTP POST to the server's MCP endpoint. A reply is
+    either a JSON body or a text/event-stream body whose events carry the
+    JSON-RPC response; both are read under a byte ceiling. The server's
+    Mcp-Session-Id is echoed on later requests, the negotiated protocol version
+    is sent as MCP-Protocol-Version after initialize, and close() sends a
+    best-effort DELETE to end the session.
+    """
+
+    def __init__(
+        self,
+        url: str,
+        *,
+        headers: Mapping[str, str] | None = None,
+        request_timeout: float = _DEFAULT_REQUEST_TIMEOUT,
+        max_response_bytes: int = _DEFAULT_HTTP_MAX_RESPONSE_BYTES,
+        http: HttpTransport | None = None,
+    ) -> None:
+        """Store the endpoint, the fixed headers (usually carrying a credential), and the transport bounds."""
+        # @intent http-transport-validates-bounds-up-front
+        # A zero timeout or byte ceiling would disable the protection against untrusted servers, so both are refused here.
+        if not url:
+            raise ConfigurationError("MCP HTTP url cannot be empty.")
+        if request_timeout <= _MIN_POSITIVE:
+            raise ConfigurationError("request_timeout must be greater than zero.")
+        if max_response_bytes <= _MIN_POSITIVE:
+            raise ConfigurationError("max_response_bytes must be greater than zero.")
+        self.url = url
+        self._headers = dict(headers or {})
+        self.request_timeout = request_timeout
+        self.max_response_bytes = max_response_bytes
+        self._http = http or HttpTransport()
+        self._next_id = 1
+        self._session_id: str | None = None
+        self._protocol_version: str | None = None
+        self._closed = False
+
+    @property
+    def closed(self) -> bool:
+        """True after close() has run."""
+        return self._closed
+
+    async def request(self, method: str, params: Mapping[str, Any] | None = None) -> Mapping[str, Any]:
+        """Send one JSON-RPC request and return its result object."""
+        # @intent mcp-http-request-is-bounded-and-typed
+        # Remote servers are untrusted: every reply is read under a byte ceiling, and every failure surfaces as
+        # McpProtocolError so callers see one error type whether the server is local (stdio) or remote.
+        self._require_open(method)
+        request_id = self._next_id
+        self._next_id += 1
+        payload = {"jsonrpc": _JSONRPC_VERSION, "id": request_id, "method": method, "params": dict(params or {})}
+        response = await self._post(method, payload)
+        self._remember_session(response)
+        result = self._result(method, request_id, response)
+        if method == "initialize":
+            version = result.get("protocolVersion")
+            self._protocol_version = version if isinstance(version, str) and version else None
+        return result
+
+    async def notify(self, method: str, params: Mapping[str, Any] | None = None) -> None:
+        """Send one JSON-RPC notification; the server answers 202 Accepted with no body."""
+        self._require_open(method)
+        payload: dict[str, Any] = {"jsonrpc": _JSONRPC_VERSION, "method": method}
+        if params:
+            payload["params"] = dict(params)
+        response = await self._post(method, payload)
+        self._remember_session(response)
+        self._require_success(method, response)
+
+    async def close(self) -> None:
+        """Mark the transport closed and ask the server to end the session, ignoring servers that refuse."""
+        # @intent session-delete-is-best-effort
+        # Closing must always succeed locally; a server that rejects DELETE only keeps its own session until expiry.
+        if self._closed:
+            return
+        self._closed = True
+        if self._session_id is None:
+            return
+        try:
+            await self._http.request(
+                method="DELETE",
+                url=self.url,
+                headers=self._request_headers(),
+                timeout_seconds=self.request_timeout,
+                max_response_bytes=self.max_response_bytes,
+            )
+        except ProviderRequestError:
+            # Ending a session is a courtesy; the server expires abandoned sessions on its own.
+            return
+
+    async def _post(self, method: str, payload: Mapping[str, Any]) -> HttpResponse:
+        # Sends one JSON-RPC message and translates transport failures into McpProtocolError.
+        # @intent every-post-is-bounded
+        # The response ceiling and timeout apply to every POST, and POSTs are never retried, since a retried
+        # tools/call could repeat a side effect.
+        try:
+            return await self._http.request(
+                method="POST",
+                url=self.url,
+                headers=self._request_headers(),
+                json_body=payload,
+                timeout_seconds=self.request_timeout,
+                max_response_bytes=self.max_response_bytes,
+            )
+        except ProviderRequestError as exc:
+            raise McpProtocolError(
+                "MCP HTTP request failed",
+                details={"method": method, "reason": "http_error", "cause": exc.message},
+            ) from exc
+
+    def _request_headers(self) -> dict[str, str]:
+        # Combines the fixed headers with the negotiated session and protocol version.
+        # @intent session-and-version-headers-follow-negotiation
+        # The session id and protocol version are echoed only after the server assigns them, as the transport spec requires.
+        # Lowercase names match the header HttpTransport adds for JSON bodies; a mixed-case duplicate would be sent
+        # as a second Content-Type value, which servers reject with 415.
+        headers = {
+            "content-type": "application/json",
+            "accept": f"application/json, {_EVENT_STREAM}",
+            **self._headers,
+        }
+        if self._session_id is not None:
+            headers["Mcp-Session-Id"] = self._session_id
+        if self._protocol_version is not None:
+            headers[_PROTOCOL_HEADER] = self._protocol_version
+        return headers
+
+    def _remember_session(self, response: HttpResponse) -> None:
+        # Keeps the session id the server assigns on initialize; header names are compared case-insensitively.
+        session = _header(response.headers, _SESSION_HEADER)
+        if session:
+            self._session_id = session
+
+    def _require_open(self, method: str) -> None:
+        # Refuses to send after close().
+        if self._closed:
+            raise McpProtocolError("MCP transport is closed", details={"reason": "closed", "method": method})
+
+    def _require_success(self, method: str, response: HttpResponse) -> None:
+        # Maps non-2xx statuses to a protocol error, naming an expired session separately.
+        if _HTTP_STATUS_OK_FLOOR <= response.status_code < _HTTP_STATUS_OK_CEILING:
+            return
+        reason = "session_expired" if response.status_code == _HTTP_STATUS_NOT_FOUND and self._session_id else "http_status"
+        raise McpProtocolError(
+            "MCP HTTP server returned an error status",
+            details={"method": method, "reason": reason, "status_code": response.status_code},
+        )
+
+    def _result(self, method: str, request_id: int, response: HttpResponse) -> Mapping[str, Any]:
+        # Finds the JSON-RPC response for this request id in a JSON or SSE body and returns its result.
+        # @intent match-response-by-request-id
+        # Server notifications and requests can share a reply stream, so only the message with this request's id counts.
+        self._require_success(method, response)
+        content_type = _header(response.headers, "content-type") or ""
+        messages = _sse_messages(response.body) if _EVENT_STREAM in content_type else _json_messages(response.body)
+        for message in messages:
+            if message.get("id") != request_id:
+                continue
+            error = message.get("error")
+            if isinstance(error, Mapping):
+                raise McpProtocolError(
+                    "MCP server returned a JSON-RPC error",
+                    details={"method": method, "reason": "rpc_error", "code": error.get("code"), "message": str(error.get("message", ""))[:500]},
+                )
+            result = message.get("result")
+            return result if isinstance(result, Mapping) else {}
+        raise McpProtocolError(
+            "MCP HTTP reply did not contain a response for the request",
+            details={"method": method, "reason": "missing_response", "request_id": request_id},
+        )
+
+
+def _header(headers: Mapping[str, str], name: str) -> str | None:
+    """Return one response header by case-insensitive name."""
+    wanted = name.lower()
+    for key, value in headers.items():
+        if key.lower() == wanted:
+            return value
+    return None
+
+
+def _json_messages(body: str) -> list[Mapping[str, Any]]:
+    """Decode a JSON reply, which is one JSON-RPC message or a batch array of them."""
+    try:
+        decoded = json.loads(body) if body.strip() else []
+    except json.JSONDecodeError as exc:
+        raise McpProtocolError("MCP HTTP reply is not JSON", details={"reason": "invalid_json"}) from exc
+    candidates = decoded if isinstance(decoded, list) else [decoded]
+    return [message for message in candidates if isinstance(message, Mapping)]
+
+
+def _sse_messages(body: str) -> list[Mapping[str, Any]]:
+    """Decode every event's data lines from a text/event-stream reply, skipping events that are not JSON."""
+    messages: list[Mapping[str, Any]] = []
+    for event in body.replace("\r\n", "\n").split("\n\n"):
+        data = "\n".join(line[len("data:"):].lstrip() for line in event.split("\n") if line.startswith("data:"))
+        if not data:
+            continue
+        try:
+            decoded = json.loads(data)
+        except json.JSONDecodeError:
+            continue
+        candidates = decoded if isinstance(decoded, list) else [decoded]
+        messages.extend(message for message in candidates if isinstance(message, Mapping))
+    return messages

@@ -1,12 +1,12 @@
-"""FILE: scripts/test-jev-agent-scaffold.py
+"""FILE: scripts/test-jev-tool-alignment.py
 
-PURPOSE: Runs every focused Jev agent scaffold test and reports each case plus an aggregate result.
-ROLE IN CODEBASE: Provides the executable verification entry point required by docs/design/jev-agent-scaffold.md.
+PURPOSE: Runs every focused Jev tool-alignment test (catalog adapters, the MCP HTTP transport, and the alignment pass) and reports each case plus an aggregate result.
+ROLE IN CODEBASE: Provides the executable verification entry point required by docs/design/jev-tool-alignment.md.
 ARCHITECTURE NOTE: The script loads the unittest module directly and never supplies credentials or contacts a live provider.
 COMMON MODIFICATION PATTERNS: Keep module loading exhaustive as new cases are added; customize reporting without filtering tests.
 KNOWN EDGE CASES: Assertion failures and unexpected errors both produce a non-zero process exit; skipped tests do not count as passes.
-RELATED DOCS: docs/design/jev-agent-scaffold.md and skills/jev-agent/SKILL.md.
-TESTS: This script executes tests/test_jev_agent.py, tests/test_jev_alignment.py, and tests/test_jev_tool_alignment.py and is itself exercised by the source CI script stage.
+RELATED DOCS: docs/design/jev-tool-alignment.md and skills/jev-agent/SKILL.md.
+TESTS: This script executes tests/test_tool_catalogs.py, tests/test_mcp_http_transport.py, tests/test_mcp_discovery_tools.py, and tests/test_jev_tool_alignment.py and is itself exercised by the source CI script stage.
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 if str(REPOSITORY_ROOT) not in sys.path:
     sys.path.insert(0, str(REPOSITORY_ROOT))
 
-from tests import test_jev_agent, test_jev_alignment, test_jev_tool_alignment
+from tests import test_jev_tool_alignment, test_mcp_discovery_tools, test_mcp_http_transport, test_tool_catalogs
 
 
 class ReportingResult(unittest.TextTestResult):
@@ -44,11 +44,11 @@ class ReportingResult(unittest.TextTestResult):
 def main() -> int:
     # Loads the focused module, runs every case, and returns a shell-friendly status.
     loader = unittest.defaultTestLoader
-    suite = unittest.TestSuite(loader.loadTestsFromModule(module) for module in (test_jev_agent, test_jev_alignment, test_jev_tool_alignment))
+    suite = unittest.TestSuite(loader.loadTestsFromModule(module) for module in (test_tool_catalogs, test_mcp_http_transport, test_mcp_discovery_tools, test_jev_tool_alignment))
     runner = unittest.TextTestRunner(verbosity=0, resultclass=ReportingResult)
     result = runner.run(suite)
     passed = result.testsRun - len(result.failures) - len(result.errors) - len(result.skipped)
-    print(f"{passed}/{result.testsRun} Jev scaffold tests passed")
+    print(f"{passed}/{result.testsRun} Jev tool-alignment tests passed")
     return 0 if result.wasSuccessful() else 1
 
 
