@@ -672,13 +672,18 @@ class BaseAgent(McpAttachableMixin):
         }
         if result.structured is not None:
             metadata["structured"] = result.structured
-        reply = AgentMessage(
-            sender=self.name,
-            recipient=recipient,
-            content=result.output,
-            metadata=metadata,
-            structured=result.structured,
-        )
+        # Lets an opinionated AgentResult retain its typed public message subclass; ordinary results use AgentMessage.
+        result_to_message = getattr(result, "to_message", None)
+        if callable(result_to_message):
+            reply = result_to_message(sender=self.name, recipient=recipient, metadata=metadata)
+        else:
+            reply = AgentMessage(
+                sender=self.name,
+                recipient=recipient,
+                content=result.output,
+                metadata=metadata,
+                structured=result.structured,
+            )
         self.history.append(reply)
         self.last_prompt = prompt
         self.last_reply = reply
