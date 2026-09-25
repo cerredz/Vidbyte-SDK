@@ -1,12 +1,12 @@
 """FILE: vidbyte/agents/jev/preflight.py
 
-PURPOSE: Defines the Jev preflight contract and the tool-selection implementation.
+PURPOSE: Defines the Jev preflight contract, the tool-selection implementation, and the sensitive-data security policy.
 ROLE IN CODEBASE: JevRuntime applies enabled preflights before the ordinary model/tool loop.
-ARCHITECTURE NOTE: Tool questions and selection policy stay internal; callers choose the named TOOL_SELECTOR capability.
-COMMON MODIFICATION PATTERNS: Implement a JevPreflight subclass and keep request shaping, filtering, and catalog building as separate methods.
-KNOWN EDGE CASES: Missing credentials, provider failures, and incomplete answers keep the full original tool catalog.
-RELATED DOCS: docs/design/jev-tool-selector.md and skills/jev-agent/SKILL.md.
-TESTS: tests/test_jev_tool_selector.py and scripts/test-jev-tool-selector.py.
+ARCHITECTURE NOTE: Tool questions and selection policy stay internal; security questions live in `vidbyte/lib/jev/preflight/` and this module only maps their answers to flags and an action.
+COMMON MODIFICATION PATTERNS: Implement a JevPreflight subclass for catalog-shaping preflights; add a policy class like JevPreflightSecurity for preflights that gate the run.
+KNOWN EDGE CASES: Missing credentials, provider failures, and incomplete answers keep the full original tool catalog; the same failures make the security result unavailable, which stops BLOCK and PAUSE runs and contains CONTAIN runs.
+RELATED DOCS: docs/design/jev-tool-selector.md, docs/design/jev-preflight-sensitive-data.md, and skills/jev-agent/SKILL.md.
+TESTS: tests/test_jev_tool_selector.py, tests/test_jev_sensitive_preflight.py, and scripts/test-jev-tool-selector.py.
 """
 
 from __future__ import annotations
@@ -16,10 +16,22 @@ from collections.abc import Mapping, Sequence
 
 from vidbyte.agents.pricing import JevUsage
 from vidbyte.lib.config import DecisionModelConfig
-from vidbyte.lib.constants.jev import JEV_NOUL_TRUE
-from vidbyte.lib.dataclasses.jev import JevAnswer, JevDecisionRequest, JevQuestion
-from vidbyte.lib.enums.jev import JevQuestionType
+from vidbyte.lib.constants.jev import (
+    JEV_NOUL_TRUE,
+    JEV_SECURITY_DETECTION_THRESHOLD,
+    JEV_SECURITY_STOP_BLOCKED,
+    JEV_SECURITY_STOP_REVIEW,
+)
+from vidbyte.lib.dataclasses.jev import (
+    JevAnswer,
+    JevDecisionRequest,
+    JevPreflightQuestion,
+    JevQuestion,
+    JevSecurityResult,
+)
+from vidbyte.lib.enums.jev import JevPreflightPreset, JevQuestionType, JevSecurityAction
 from vidbyte.lib.errors import ConfigurationError, VidbyteSdkError
+from vidbyte.lib.jev.preflight import JevPreflightRegistry
 from vidbyte.lib.runners.decision import DecisionModelRunner
 from vidbyte.tools.catalog import Tools
 
@@ -97,4 +109,83 @@ class JevPreflightTools(JevPreflight):
         return tools.subset(selected_names)
 
 
-__all__ = ["JevPreflight", "JevPreflightTools"]
+class JevPreflightSecurity:
+    """Classifies one request's sensitive-data categories and decides whether and how JevAgent may start."""
+
+    def __init__(self, decision: DecisionModelConfig, action: JevSecurityAction) -> None:
+        # Retains the validated decision config and the caller's action for detected sensitive data.
+        self._decision = decision
+        self.action = action
+        self.usage: JevUsage | None = None
+
+    async def run(self, message: str) -> JevSecurityResult:
+        """Ask every security question in one Jev request and return per-category flags, never the text."""
+        questions = JevPreflightRegistry.questions(JevPreflightPreset.SECURITY)
+        try:
+            response = await JevPreflightRegistry.run(JevPreflightPreset.SECURITY, message, self._decision)
+        except VidbyteSdkError:
+            # @intent security-outage-is-unknown-not-clean
+            # A missing key or provider failure must not read as "no sensitive data"; every flag stays
+            # unknown so BLOCK and PAUSE fail closed and CONTAIN restricts the run.
+            return self.build_result({question.key: None for question in questions})
+        self.usage = JevUsage.from_usage_payload(response.usage or {})
+        return self.build_result(self.flags(questions, response.answers))
+
+    @staticmethod
+    def flags(questions: Sequence[JevPreflightQuestion], answers: Mapping[str, JevAnswer]) -> dict[str, bool | None]:
+        """Map each answer's P(true) to a flag; a missing answer or probability becomes None."""
+        flags: dict[str, bool | None] = {}
+        for question in questions:
+            answer = answers.get(JevPreflightRegistry.wire_name(JevPreflightPreset.SECURITY, question.key))
+            probability = None if answer is None else answer.probabilities.get(JEV_NOUL_TRUE)
+            flags[question.key] = None if probability is None else probability >= JEV_SECURITY_DETECTION_THRESHOLD
+        return flags
+
+    def build_result(self, flags: Mapping[str, bool | None]) -> JevSecurityResult:
+        """Build the frozen result, where a known positive wins over missing answers."""
+        values = tuple(flags.values())
+        if any(value is True for value in values):
+            any_sensitive: bool | None = True
+        elif any(value is None for value in values):
+            any_sensitive = None
+        else:
+            any_sensitive = False
+        return JevSecurityResult(
+            action=self.action,
+            available=all(value is not None for value in values),
+            flags=flags,
+            any_sensitive=any_sensitive,
+            input_tokens=None if self.usage is None else self.usage.input_tokens,
+            output_tokens=None if self.usage is None else self.usage.output_tokens,
+        )
+
+    @staticmethod
+    def needs_protection(result: JevSecurityResult) -> bool:
+        """Return True when data was detected or the check could not finish."""
+        return result.any_sensitive is True or not result.available
+
+    def must_stop(self, result: JevSecurityResult) -> bool:
+        """Return True when BLOCK or PAUSE must end the run before the generative loop."""
+        return self.action in (JevSecurityAction.BLOCK, JevSecurityAction.PAUSE) and self.needs_protection(result)
+
+    def must_contain(self, result: JevSecurityResult) -> bool:
+        """Return True when CONTAIN must run the generative loop with restricted tools and tracing."""
+        return self.action is JevSecurityAction.CONTAIN and self.needs_protection(result)
+
+    def stop_reason(self) -> str:
+        """Return the stable metadata stop reason for a stopped run."""
+        return JEV_SECURITY_STOP_BLOCKED if self.action is JevSecurityAction.BLOCK else JEV_SECURITY_STOP_REVIEW
+
+    def stop_message(self, result: JevSecurityResult) -> str:
+        """Name the detected categories without echoing any value from the request."""
+        detected = ", ".join(name.replace("_", " ") for name in result.detected())
+        if detected and self.action is JevSecurityAction.BLOCK:
+            return f"This request appears to contain sensitive data in these categories: {detected}. The request was blocked before the agent started."
+        if detected:
+            return f"This request appears to contain sensitive data in these categories: {detected}. Review is required before the agent can continue."
+        if self.action is JevSecurityAction.BLOCK:
+            return "The request could not be checked for sensitive data, so it was blocked before the agent started."
+        return "The request could not be checked for sensitive data. Review it before starting the agent."
+
+
+__all__ = ["JevPreflight", "JevPreflightSecurity", "JevPreflightTools"]

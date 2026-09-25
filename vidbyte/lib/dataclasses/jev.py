@@ -1,12 +1,12 @@
 """FILE: vidbyte/lib/dataclasses/jev.py
 
-PURPOSE: Defines the validated, immutable records for TypeSafe Jev decisions: JSON content, options, questions, requests, normalized answers, wire bodies, model cards, and decision-log records.
+PURPOSE: Defines the validated, immutable records for TypeSafe Jev decisions: JSON content, options, questions, requests, normalized answers, wire bodies, model cards, decision-log records, fixed preflight questions, and security preflight results.
 ROLE IN CODEBASE: `vidbyte/providers/typesafe.py` builds TypeSafeWireRequest from JevDecisionRequest and JevAnswer values from responses, while `vidbyte/lib/runners/decision.py` passes the typed records through.
 ARCHITECTURE NOTE: This module must not import model_configs because that would close an import cycle through ModalityDetector. Records own every shape rule in __post_init__; the provider, not these records, turns a wire record into the JSON body (lint S060 bars dict[str, Any] encoders here).
 COMMON MODIFICATION PATTERNS: Mirror https://docs.typesafe.ai/api.md exactly: add a field together with its validation, its wire record, and its provider serialization; keep bounds in vidbyte/lib/constants/jev.py.
 KNOWN EDGE CASES: State, instructions, and criteria may be a string or JSON structure; noul criteria are optional; score answers carry a probability-weighted `score` that can land between levels; noul answers carry no confidence.
-RELATED DOCS: docs/design/jev-agent-scaffold.md, https://docs.typesafe.ai/api.md, and https://docs.typesafe.ai/primitives/advanced.md.
-TESTS: tests/test_jev_agent.py and scripts/test-jev-agent-scaffold.py.
+RELATED DOCS: docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-sensitive-data.md, https://docs.typesafe.ai/api.md, and https://docs.typesafe.ai/primitives/advanced.md.
+TESTS: tests/test_jev_agent.py, tests/test_jev_sensitive_preflight.py, and scripts/test-jev-agent-scaffold.py.
 """
 
 from __future__ import annotations
@@ -29,7 +29,7 @@ from vidbyte.lib.constants.jev import (
     JEV_NOUL_OPTIONS,
     JEV_PROBABILITY_SUM_TOLERANCE,
 )
-from vidbyte.lib.enums.jev import JevQuestionType
+from vidbyte.lib.enums.jev import JevQuestionType, JevSecurityAction
 from vidbyte.lib.errors import ConfigurationError
 
 # A frozen JSON value as TypeSafe accepts it: a string, or a read-only mapping / tuple of JSON values.
@@ -380,6 +380,60 @@ class JevDecisionRecord:
                 object.__setattr__(self, field_name, JevProbability.require(value, field_name=f"{field_name} of record {self.question!r}"))
 
 
+@dataclass(frozen=True, slots=True)
+class JevPreflightQuestion:
+    """One fixed noul question a JevAgent preflight asks, with structured meanings for true and false.
+
+    Every concrete question is its own frozen subclass under `vidbyte/lib/jev/preflight/` that fixes
+    each field by default. `key` is the response flag name; like a JevQuestion name it is never
+    shown to the model, so all meaning lives in `instructions` and the true/false criteria.
+    """
+
+    key: str
+    instructions: str
+    true_what: str
+    true_examples: tuple[str, ...]
+    false_what: str
+    false_examples: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        # Rejects blank text and loose example containers so every registered question is sendable as written.
+        for field_name in ("key", "instructions", "true_what", "false_what"):
+            value = getattr(self, field_name)
+            if not isinstance(value, str) or not value.strip():
+                raise JevValidation.error(f"preflight question {field_name}", "a non-blank string", value)
+        for field_name in ("true_examples", "false_examples"):
+            value = getattr(self, field_name)
+            if not isinstance(value, tuple) or not value or not all(isinstance(item, str) and item.strip() for item in value):
+                raise JevValidation.error(f"preflight question {field_name} of {self.key!r}", "a non-empty tuple of non-blank strings", value)
+
+
+@dataclass(frozen=True, slots=True)
+class JevSecurityResult:
+    """Sensitive-data flags for one request, keyed by JevSecurityCategory value, without the request text.
+
+    A flag is None when Jev did not answer that question. `any_sensitive` is True when any flag is
+    True, False when every flag is False, and None otherwise. Token counts come from TypeSafe usage.
+    """
+
+    action: JevSecurityAction
+    available: bool
+    flags: Mapping[str, bool | None]
+    any_sensitive: bool | None
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+
+    def __post_init__(self) -> None:
+        # Freezes the flags so callers cannot edit the evidence after the response is returned.
+        if not isinstance(self.action, JevSecurityAction):
+            raise JevValidation.error("security result action", "a JevSecurityAction member", self.action)
+        object.__setattr__(self, "flags", MappingProxyType(dict(self.flags)))
+
+    def detected(self) -> tuple[str, ...]:
+        # Returns the categories Jev flagged as present, in question order.
+        return tuple(name for name, value in self.flags.items() if value is True)
+
+
 __all__ = [
     "JevAnswer",
     "JevContent",
@@ -388,8 +442,10 @@ __all__ = [
     "JevJson",
     "JevModelCard",
     "JevOption",
+    "JevPreflightQuestion",
     "JevProbability",
     "JevQuestion",
+    "JevSecurityResult",
     "JevValidation",
     "TypeSafeWireQuestion",
     "TypeSafeWireRequest",
