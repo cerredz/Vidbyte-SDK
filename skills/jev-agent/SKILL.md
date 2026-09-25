@@ -30,6 +30,11 @@ Each capability owns its fixed internal Jev questions, state projection, thresho
 - `presets.py` exposes the named `JevPreflightPreset` values; `preflight.py` owns the internal `JevPreflight` contract and `JevPreflightTools` implementation.
 
 The default settings perform no Jev call. `JevPreflightPreset.TOOL_SELECTOR` enables one batched tool-usefulness request before the generative loop. `tool_selector_threshold` is a finite probability from 0 through 1 inclusive; a missing TypeSafe API key must not prevent settings or agent construction.
+- `alignment/` owns the self-alignment capability (`JevAgentSettings(self_align=True)`). `JevAgentAlignment` is a `BaseAgent` subclass: it accepts `JevAlignmentInput` with the user's task, system prompt, and SDK tool objects; reads dataclass questions from a fixed key registry; routes each "no" to an editable section or to `owner_actions`; runs its own loop with the tool in `vidbyte/tools/edit_system_prompt_section.py`; and keeps only the edits a second Jev call confirms. Its run-local `JevPromptDraft` uses `ContextManager` to replace edits by section. `JevRuntime.arun` returns a `JevResponse` whose `response.alignment` contains the typed result and whose `aligned_prompt` is the prompt this run used.
+
+Without `self_align`, the scaffold performs no Jev call. A missing TypeSafe API key must not prevent `JevAgentSettings` or `JevAgent` construction until an enabled capability actually needs Jev.
+
+The default settings perform no Jev call unless an explicit preflight or self-alignment capability is enabled. `JevResponse.response` is the typed home for feature outcomes such as alignment and tool selection; keep these values out of generic metadata.
 
 ## Change workflow
 
@@ -52,6 +57,9 @@ The default settings perform no Jev call. `JevPreflightPreset.TOOL_SELECTOR` ena
 - Existing `BaseAgent` behavior remains unchanged when Jev is not involved; `AgentRuntimeType.JEV` gets the same linear-loop wiring as `LINEAR`.
 - Provider payload dictionaries do not move into `vidbyte/lib` records.
 - No live provider call is required by deterministic tests.
+- Self-alignment edits only the main agent's current run: never `JevAgentSettings`, `JevAgent.system_prompt`, the editor's own prompt, or later runs.
+- Alignment edits are additive and limited to operational sections (tools, method, output, exceptions, priorities, glossary). Role, scope, boundaries, audience, knowledge, and permissions are reported to the owner, and a failed fit gate never produces an edit.
+- Alignment fails open for the run (original prompt) and closed for edits (an unverified edit never runs).
 
 ## Example construction
 

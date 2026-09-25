@@ -44,6 +44,7 @@ class JevAgentSettings:
     decision: DecisionModelConfig = field(default_factory=DecisionModelConfig, repr=False)
     preflight: tuple[JevPreflightPreset | str, ...] = ()
     tool_selector_threshold: float = JEV_TOOL_SELECTOR_DEFAULT_THRESHOLD
+    self_align: bool = False
 
     def __post_init__(self) -> None:
         # Normalizes immutable inputs and rejects invalid agent configuration before runtime construction.
@@ -72,6 +73,8 @@ class JevAgentSettings:
             raise ConfigurationError("JevAgentSettings.decision must be a DecisionModelConfig instance.")
         self._normalize_preflight()
         self._validate_tool_selector_threshold()
+        if not isinstance(self.self_align, bool):
+            raise ConfigurationError("JevAgentSettings.self_align must be True or False.")
 
     def _normalize_preflight(self) -> None:
         # Converts supported string names into the closed preflight enum and rejects duplicate policies.
