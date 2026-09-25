@@ -57,6 +57,11 @@ JEV_NOUL_FALSE: str = "false"
 JEV_NOUL_OPTIONS: tuple[str, ...] = (JEV_NOUL_TRUE, JEV_NOUL_FALSE)
 JEV_NOUL_YES_THRESHOLD: float = 0.5
 
+# Tool-selector policy bounds and default: caller settings use probabilities on the closed unit interval.
+JEV_TOOL_SELECTOR_DEFAULT_THRESHOLD: float = 0.20
+JEV_TOOL_SELECTOR_MAX_THRESHOLD: float = 1.0
+JEV_TOOL_SELECTOR_MIN_THRESHOLD: float = 0.0
+
 __all__ = [
     "JEV_DEFAULT_MODEL",
     "JEV_DEFAULT_RETRY_COUNT",
@@ -88,4 +93,7 @@ __all__ = [
     "JEV_STATUS_UNPROCESSABLE",
     "JEV_SYSTEMONE_PATH",
     "JEV_TIMEOUT_FLOOR_SECONDS",
+    "JEV_TOOL_SELECTOR_DEFAULT_THRESHOLD",
+    "JEV_TOOL_SELECTOR_MAX_THRESHOLD",
+    "JEV_TOOL_SELECTOR_MIN_THRESHOLD",
 ]
