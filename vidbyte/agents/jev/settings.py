@@ -1,12 +1,12 @@
 """FILE: vidbyte/agents/jev/settings.py
 
 PURPOSE: Defines the single, opinionated public configuration object for JevAgent.
-ROLE IN CODEBASE: JevAgentSettings is the only constructor input accepted by JevAgent and carries the future decision-model seam into JevRuntime.
+ROLE IN CODEBASE: JevAgentSettings is the only constructor input accepted by JevAgent and carries the decision-model config and enabled preflight presets into JevRuntime.
 ARCHITECTURE NOTE: The surface is intentionally closed; named Jev capabilities belong here as explicit settings instead of a generic decisions collection.
 COMMON MODIFICATION PATTERNS: Add a validated named capability object, then implement its fixed policy in JevRuntime without exposing runtime replacement hooks.
-KNOWN EDGE CASES: The generative provider cannot be TypeSafe because Jev is a decision model; neither generative nor decision API keys appear in repr output.
-RELATED DOCS: docs/design/jev-agent-scaffold.md and skills/jev-agent/SKILL.md.
-TESTS: tests/test_jev_agent.py and scripts/test-jev-agent-scaffold.py.
+KNOWN EDGE CASES: The generative provider cannot be TypeSafe because Jev is a decision model; neither generative nor decision API keys appear in repr output. Preflight presets are validated by JevPreflight at construction, so no TypeSafe key is needed until a run asks Jev.
+RELATED DOCS: docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, and skills/jev-agent/SKILL.md.
+TESTS: tests/test_jev_agent.py, tests/test_jev_preflight.py, and scripts/test-jev-agent-scaffold.py.
 """
 
 from __future__ import annotations
@@ -16,8 +16,9 @@ from dataclasses import dataclass, field
 
 from vidbyte.agents.settings import AgentLoopSettings
 from vidbyte.lib.dataclasses.model_configs import DecisionModelConfig
-from vidbyte.lib.enums import ModelProvider
+from vidbyte.lib.enums import JevPreflightPreset, ModelProvider
 from vidbyte.lib.errors import ConfigurationError
+from vidbyte.lib.jev import JevPreflight
 from vidbyte.tools.security import PermissionPolicy
 
 
@@ -36,6 +37,7 @@ class JevAgentSettings:
     permission_policy: PermissionPolicy = field(default_factory=PermissionPolicy)
     loop: AgentLoopSettings = field(default_factory=AgentLoopSettings)
     decision: DecisionModelConfig = field(default_factory=DecisionModelConfig, repr=False)
+    preflight: tuple[JevPreflightPreset | str, ...] = ()
 
     def __post_init__(self) -> None:
         # Normalizes immutable inputs and rejects invalid agent configuration before runtime construction.
@@ -62,6 +64,7 @@ class JevAgentSettings:
             raise ConfigurationError("JevAgentSettings.loop must be an AgentLoopSettings instance.")
         if not isinstance(self.decision, DecisionModelConfig):
             raise ConfigurationError("JevAgentSettings.decision must be a DecisionModelConfig instance.")
+        object.__setattr__(self, "preflight", JevPreflight.validate(self.preflight))
 
     @staticmethod
     def _validate_text(value: object, field_name: str) -> None:

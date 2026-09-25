@@ -1,12 +1,12 @@
 """FILE: vidbyte/lib/dataclasses/jev.py
 
-PURPOSE: Defines the validated, immutable records for TypeSafe Jev decisions: JSON content, options, questions, requests, normalized answers, wire bodies, model cards, and decision-log records.
+PURPOSE: Defines the validated records for TypeSafe Jev decisions (JSON content, options, questions, requests, normalized answers, wire bodies, model cards, and decision-log records) and for JevAgent preflight (the question base, preset definitions, preset results, and the run-local response).
 ROLE IN CODEBASE: `vidbyte/providers/typesafe.py` builds TypeSafeWireRequest from JevDecisionRequest and JevAnswer values from responses, while `vidbyte/lib/runners/decision.py` passes the typed records through.
 ARCHITECTURE NOTE: This module must not import model_configs because that would close an import cycle through ModalityDetector. Records own every shape rule in __post_init__; the provider, not these records, turns a wire record into the JSON body (lint S060 bars dict[str, Any] encoders here).
 COMMON MODIFICATION PATTERNS: Mirror https://docs.typesafe.ai/api.md exactly: add a field together with its validation, its wire record, and its provider serialization; keep bounds in vidbyte/lib/constants/jev.py.
-KNOWN EDGE CASES: State, instructions, and criteria may be a string or JSON structure; noul criteria are optional; score answers carry a probability-weighted `score` that can land between levels; noul answers carry no confidence.
-RELATED DOCS: docs/design/jev-agent-scaffold.md, https://docs.typesafe.ai/api.md, and https://docs.typesafe.ai/primitives/advanced.md.
-TESTS: tests/test_jev_agent.py and scripts/test-jev-agent-scaffold.py.
+KNOWN EDGE CASES: State, instructions, and criteria may be a string or JSON structure; noul criteria are optional; score answers carry a probability-weighted `score` that can land between levels; noul answers carry no confidence. JevPreflightQuestion is deliberately not slotted because every concrete question subclass redeclares its fields with defaults.
+RELATED DOCS: docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, https://docs.typesafe.ai/api.md, and https://docs.typesafe.ai/primitives/advanced.md.
+TESTS: tests/test_jev_agent.py, tests/test_jev_preflight.py, and scripts/test-jev-agent-scaffold.py.
 """
 
 from __future__ import annotations
@@ -14,9 +14,9 @@ from __future__ import annotations
 import json
 import math
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from types import MappingProxyType
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 from vidbyte.lib.constants.jev import (
     JEV_MAX_CHOICE_OPTIONS,
@@ -26,11 +26,20 @@ from vidbyte.lib.constants.jev import (
     JEV_MAX_STATE_CHARS,
     JEV_MIN_CHOICE_OPTIONS,
     JEV_MIN_SCORE_LEVELS,
+    JEV_NOUL_FALSE,
     JEV_NOUL_OPTIONS,
+    JEV_NOUL_TRUE,
     JEV_PROBABILITY_SUM_TOLERANCE,
 )
-from vidbyte.lib.enums.jev import JevQuestionType
+from vidbyte.lib.enums.jev import (
+    JevPreflightPreset,
+    JevPreflightQuestionKey,
+    JevQuestionType,
+)
 from vidbyte.lib.errors import ConfigurationError
+
+if TYPE_CHECKING:
+    from vidbyte.agents.pricing import ProviderUsage
 
 # A frozen JSON value as TypeSafe accepts it: a string, or a read-only mapping / tuple of JSON values.
 JevContent = str | Mapping[str, object] | tuple[object, ...]
@@ -380,6 +389,95 @@ class JevDecisionRecord:
                 object.__setattr__(self, field_name, JevProbability.require(value, field_name=f"{field_name} of record {self.question!r}"))
 
 
+@dataclass(frozen=True)
+class JevPreflightQuestion:
+    """One fixed preflight yes/no question: what Jev reads, what each answer means, and what to ask the user when it fails.
+
+    Every concrete question in `vidbyte/lib/jev/preflight/` subclasses this with a default for every
+    field, so each question is its own dataclass constructed with no arguments. `instructions` is the
+    whole brief Jev reads (definition, boundary, focus, then the question); `when_true` and
+    `when_false` are the noul criteria; `clarification` is what the agent asks the user when this is
+    the weakest answer of a failing preset.
+    """
+
+    key: JevPreflightQuestionKey
+    instructions: str
+    when_true: str
+    when_false: str
+    clarification: str
+
+    def __post_init__(self) -> None:
+        # Requires a registered key and non-blank text for every part of the question.
+        if not isinstance(self.key, JevPreflightQuestionKey):
+            raise JevValidation.error("preflight question key", "a JevPreflightQuestionKey member", self.key)
+        for field_name in ("instructions", "when_true", "when_false", "clarification"):
+            value = getattr(self, field_name)
+            if not isinstance(value, str) or not value.strip():
+                raise JevValidation.error(f"{field_name} of preflight question {self.key.value!r}", "a non-blank string", value)
+
+    def to_question(self) -> JevQuestion:
+        # Builds the noul JevQuestion sent to Jev, named by the key so its answer comes back under it.
+        return JevQuestion(
+            name=self.key.value,
+            question_type=JevQuestionType.NOUL,
+            instructions=self.instructions,
+            options=(JevOption(name=JEV_NOUL_TRUE, description=self.when_true), JevOption(name=JEV_NOUL_FALSE, description=self.when_false)),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class JevPresetDefinition:
+    """The fixed policy one preflight flag turns on: which questions it asks and the score it must reach."""
+
+    preset: JevPreflightPreset
+    question_keys: tuple[JevPreflightQuestionKey, ...]
+    threshold: float
+
+    def __post_init__(self) -> None:
+        # Requires a registered preset, a non-empty tuple of unique keys, and a probability threshold.
+        if not isinstance(self.preset, JevPreflightPreset):
+            raise JevValidation.error("preset definition preset", "a JevPreflightPreset member", self.preset)
+        keys = self.question_keys
+        if not isinstance(keys, tuple) or not keys or not all(isinstance(key, JevPreflightQuestionKey) for key in keys):
+            raise JevValidation.error(f"question_keys of preset {self.preset.value!r}", "a non-empty tuple of JevPreflightQuestionKey members", keys)
+        if len(set(keys)) != len(keys):
+            raise JevValidation.error(f"question_keys of preset {self.preset.value!r}", "unique question keys", keys)
+        object.__setattr__(self, "threshold", JevProbability.require(self.threshold, field_name=f"threshold of preset {self.preset.value!r}"))
+
+
+@dataclass(frozen=True, slots=True)
+class JevPresetResult:
+    """The score and answer evidence one enabled preflight preset produced.
+
+    `score` is the mean P(yes) of the preset's questions, or None with `available=False` when Jev
+    could not be asked and the run failed open.
+    """
+
+    score: float | None
+    answers: Mapping[JevPreflightQuestionKey, JevAnswer] = field(default_factory=dict)
+    available: bool = True
+
+    def __post_init__(self) -> None:
+        # Validates the score and freezes the answer evidence so a recorded result cannot be edited.
+        if self.score is not None:
+            object.__setattr__(self, "score", JevProbability.require(self.score, field_name="preset result score"))
+        object.__setattr__(self, "answers", MappingProxyType(dict(self.answers)))
+
+
+@dataclass(slots=True)
+class JevResponse:
+    """Run-local Jev state for one JevAgent run, returned under the agent result's `jev_response` metadata key.
+
+    `results` holds one entry per enabled preset, and `usage` is the one preflight Jev call's usage.
+    """
+
+    input: str
+    output: str | None = None
+    results: dict[JevPreflightPreset, JevPresetResult] = field(default_factory=dict)
+    needs_clarification: bool = False
+    usage: ProviderUsage | None = None
+
+
 __all__ = [
     "JevAnswer",
     "JevContent",
@@ -388,8 +486,12 @@ __all__ = [
     "JevJson",
     "JevModelCard",
     "JevOption",
+    "JevPreflightQuestion",
+    "JevPresetDefinition",
+    "JevPresetResult",
     "JevProbability",
     "JevQuestion",
+    "JevResponse",
     "JevValidation",
     "TypeSafeWireQuestion",
     "TypeSafeWireRequest",

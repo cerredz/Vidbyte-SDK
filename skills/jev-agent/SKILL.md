@@ -23,12 +23,21 @@ Each capability owns its fixed internal Jev questions, state projection, thresho
 
 - `settings.py` owns the complete public configuration surface.
 - `agent.py` maps settings into `BaseAgent` and fixes the runtime to `AgentRuntimeType.JEV`; it supplies its settings through the single `_runtime_extension_kwargs()` hook.
-- `runtime.py` is the seam for Jev policy. `RuntimeRegistry` resolves `AgentRuntimeType.JEV` to `JevRuntime`, which currently inherits the ordinary linear loop unchanged and refuses to build without `JevAgentSettings`.
+- `runtime.py` is the seam for Jev policy. `RuntimeRegistry` resolves `AgentRuntimeType.JEV` to `JevRuntime`, which refuses to build without `JevAgentSettings`, calls `JevPreflight.run` before the inherited linear loop, and returns the clarifying question instead of running the loop when a preset fails.
+- `vidbyte/lib/jev/presets.py` (`JevPresets`) owns the preflight flags a user enables through `JevAgentSettings.preflight` and the fixed question keys and threshold each flag turns on.
+- `vidbyte/lib/jev/preflight/` is the canonical home of every preflight question, one dataclass per question (`clarity.py`), and of `JevPreflight`, the registry that owns `get`, `validate`, `combine`, and `run`. The flag and question-key enums live in `vidbyte/lib/enums/jev.py`; the preflight records live in `vidbyte/lib/dataclasses/jev.py`.
 - `vidbyte/lib/dataclasses/jev.py` owns immutable decision records and the `TypeSafeWireRequest`/`TypeSafeWireQuestion` wire records. They mirror https://docs.typesafe.ai/api.md exactly: state, instructions, and criteria may be strings or JSON structure; noul criteria are optional; Score answers carry a weighted `score`; noul answers carry no confidence.
 - `vidbyte/lib/runners/decision.py` owns semantic decision execution (`arun`) and model listing (`alist_models`).
 - `vidbyte/providers/typesafe.py` alone owns TypeSafe wire serialization, normalization, and failure mapping.
 
-The scaffold performs no Jev call. A missing TypeSafe API key must not prevent `JevAgentSettings` or `JevAgent` construction until an enabled capability actually needs Jev.
+With no preflight preset enabled, a run performs no Jev call. A missing TypeSafe API key must not prevent `JevAgentSettings` or `JevAgent` construction, and when an enabled preset cannot reach Jev the run fails open: every preset is marked unavailable and the ordinary loop runs.
+
+## Adding a preflight preset
+
+1. Add a `JevPreflightPreset` member and one `JevPreflightQuestionKey` per question in `vidbyte/lib/enums/jev.py`, prefixing each key with the preset name.
+2. Write each question as its own `JevPreflightQuestion` subclass under `vidbyte/lib/jev/preflight/`, with a default for every field and instructions written to `skills/asking-jev-questions/SKILL.md`: 4-5 sentences, a definition, a boundary, a focus, then one positive yes/no question about the `request` state field.
+3. Add the preset's `JevPresetDefinition` (question keys and a named threshold constant) to `JevPresets` and register its questions in `JevPreflight._questions`.
+4. Extend `tests/test_jev_preflight.py`.
 
 ## Change workflow
 

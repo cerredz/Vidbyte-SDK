@@ -1,12 +1,12 @@
 """FILE: vidbyte/lib/constants/jev.py
 
-PURPOSE: Declares the TypeSafe Jev limits, defaults, and wire literals shared by the decision records and provider adapter.
-ROLE IN CODEBASE: `vidbyte/lib/dataclasses/jev.py` validates against these bounds and `vidbyte/providers/typesafe.py` builds requests from the same values.
+PURPOSE: Declares the TypeSafe Jev limits, defaults, and wire literals shared by the decision records and provider adapter, plus the JevAgent preflight policy values.
+ROLE IN CODEBASE: `vidbyte/lib/dataclasses/jev.py` validates against these bounds, `vidbyte/providers/typesafe.py` builds requests from the same values, and `vidbyte/lib/jev/` reads the preflight policy values.
 ARCHITECTURE NOTE: Values live in `vidbyte.lib` so both lower-layer modules and the tool layer can import them without a layering inversion.
 COMMON MODIFICATION PATTERNS: Change a vendor limit only after TypeSafe documents it; local sanity caps stay generous because the API enforces the real (token) limits itself.
 KNOWN EDGE CASES: Vendor limits are the 255 Choice options and the 2-10 Score levels; question count, state size, and option-name length are local caps only.
-RELATED DOCS: docs/design/jev-agent-scaffold.md, https://docs.typesafe.ai/api.md, https://docs.typesafe.ai/models.md, https://docs.typesafe.ai/sdk/python/api/retries.md.
-TESTS: tests/test_jev_agent.py and scripts/test-jev-agent-scaffold.py.
+RELATED DOCS: docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, https://docs.typesafe.ai/api.md, https://docs.typesafe.ai/models.md, https://docs.typesafe.ai/sdk/python/api/retries.md.
+TESTS: tests/test_jev_agent.py, tests/test_jev_preflight.py, and scripts/test-jev-agent-scaffold.py.
 """
 
 from __future__ import annotations
@@ -57,7 +57,17 @@ JEV_NOUL_FALSE: str = "false"
 JEV_NOUL_OPTIONS: tuple[str, ...] = (JEV_NOUL_TRUE, JEV_NOUL_FALSE)
 JEV_NOUL_YES_THRESHOLD: float = 0.5
 
+# Preflight policy. The request is the only state field preflight questions read, and a preset's
+# score is the mean P(yes) of its questions; below the threshold the agent asks instead of working.
+# 0.75 is a starting point, not a value tuned on a labeled set.
+JEV_PREFLIGHT_REQUEST_FIELD: str = "request"
+JEV_CLARITY_THRESHOLD: float = 0.75
+# A short-circuited run reports this strategy name and carries its JevResponse under this metadata key.
+JEV_PREFLIGHT_STRATEGY_NAME: str = "jev_preflight"
+JEV_RESPONSE_METADATA_KEY: str = "jev_response"
+
 __all__ = [
+    "JEV_CLARITY_THRESHOLD",
     "JEV_DEFAULT_MODEL",
     "JEV_DEFAULT_RETRY_COUNT",
     "JEV_DEFAULT_TIMEOUT_SECONDS",
@@ -76,7 +86,10 @@ __all__ = [
     "JEV_NOUL_YES_THRESHOLD",
     "JEV_NO_RETRIES",
     "JEV_PREVIEW_MODEL",
+    "JEV_PREFLIGHT_REQUEST_FIELD",
+    "JEV_PREFLIGHT_STRATEGY_NAME",
     "JEV_PROBABILITY_SUM_TOLERANCE",
+    "JEV_RESPONSE_METADATA_KEY",
     "JEV_RETRY_BACKOFF_SECONDS",
     "JEV_RETRY_STATUS_CODES",
     "JEV_STATUS_OVERLOADED",
