@@ -230,8 +230,8 @@ class JevToolSelectorRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(reply.content, "done")
         self.assertEqual(reply.metadata["tool_call_states"], ("failed", "succeeded"))
         self.assertEqual(hidden_calls, [])
-        self.assertEqual(reply.metadata["jev_tool_selector"]["candidate_tool_count"], 2)
-        self.assertEqual(reply.metadata["jev_tool_selector"]["selected_tool_count"], 1)
+        self.assertEqual(reply.response.tool_selector.candidate_tool_count, 2)
+        self.assertEqual(reply.response.tool_selector.selected_tool_count, 1)
 
     async def test_disabled_selector_makes_no_decision_call(self) -> None:
         # [Edge Case] existing JevAgent settings retain ordinary loop behavior by default.
@@ -243,7 +243,7 @@ class JevToolSelectorRuntimeTests(unittest.IsolatedAsyncioTestCase):
 
         decision_runner.assert_not_called()
         self.assertEqual(reply.content, "done")
-        self.assertNotIn("jev_tool_selector", reply.metadata)
+        self.assertIsNone(reply.response.tool_selector)
 
 
 if __name__ == "__main__":

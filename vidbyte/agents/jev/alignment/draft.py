@@ -15,10 +15,17 @@ import re
 from collections.abc import Collection, Mapping
 
 from vidbyte.agents.jev.alignment.questions import EDITABLE_SECTIONS, JevPromptSection
-from vidbyte.agents.jev.alignment.result import JevAlignmentGap, JevPromptEdit
+from vidbyte.context.manager import ContextManager
+from vidbyte.lib.dataclasses.jev_alignment import (
+    JEV_ALIGNMENT_MAX_ADDED_CHARS,
+    JEV_ALIGNMENT_MAX_EDIT_CHARS,
+    JevAlignmentGap,
+    JevPromptEdit,
+    JevPromptEditContextItem,
+)
 
-MAX_EDIT_CHARS = 1_500
-MAX_ADDED_CHARS = 6_000
+MAX_EDIT_CHARS = JEV_ALIGNMENT_MAX_EDIT_CHARS
+MAX_ADDED_CHARS = JEV_ALIGNMENT_MAX_ADDED_CHARS
 _HEADING = re.compile(r"^(#{1,6})\s+(.+?)\s*#*\s*$")
 
 
@@ -29,12 +36,14 @@ class JevPromptDraft:
         # Retains the original prompt and the open editor gaps each edit must cite.
         self.base = base
         self.gaps: Mapping[str, JevAlignmentGap] = {gap.question: gap for gap in gaps}
-        self._edits: dict[JevPromptSection, JevPromptEdit] = {}
+        self.context = ContextManager()
 
     @property
     def edits(self) -> tuple[JevPromptEdit, ...]:
         """Return the current edits in section declaration order."""
-        return tuple(self._edits[section] for section in JevPromptSection if section in self._edits)
+        edits = (item.edit for _, item in self.context.registry_items() if isinstance(item, JevPromptEditContextItem))
+        by_section = {edit.section: edit for edit in edits}
+        return tuple(by_section[section] for section in JevPromptSection if section in by_section)
 
     def add(self, section: str, content: str, fixes: Collection[str]) -> JevPromptEdit:
         """Validate and record one additive edit, raising ValueError with a repair hint when it is refused."""
@@ -45,11 +54,11 @@ class JevPromptDraft:
         if len(text) > MAX_EDIT_CHARS:
             raise ValueError(f"content is {len(text)} characters; keep one section's addition under {MAX_EDIT_CHARS}.")
         cited = self._cited_gaps(target, fixes)
-        others = sum(len(edit.content) for key, edit in self._edits.items() if key is not target)
+        others = sum(len(edit.content) for edit in self.edits if edit.section is not target)
         if others + len(text) > MAX_ADDED_CHARS:
             raise ValueError(f"all additions together must stay under {MAX_ADDED_CHARS} characters; shorten this or an earlier edit.")
         edit = JevPromptEdit(section=target, content=text, fixes=cited)
-        self._edits[target] = edit
+        self.context.upsert(JevPromptEditContextItem(edit))
         return edit
 
     def render(self, sections: Collection[JevPromptSection] | None = None) -> str:

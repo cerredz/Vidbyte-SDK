@@ -1,9 +1,9 @@
 """FILE: vidbyte/agents/jev/alignment/__init__.py
 
 PURPOSE: Exposes JevAgent's self-alignment capability: the editor agent, its result records, and the fixed question set.
-ROLE IN CODEBASE: vidbyte.agents.jev imports JevAgentAlignment for JevAgent and JevRuntime; applications read JevAlignmentResult from run metadata.
+ROLE IN CODEBASE: vidbyte.agents.jev imports JevAgentAlignment for JevAgent and JevRuntime; applications read JevAlignmentResult from JevResponse.response.alignment.
 ARCHITECTURE NOTE: Questions, draft rules, and the edit tool are internal policy; callers turn the capability on with JevAgentSettings(self_align=True).
-COMMON MODIFICATION PATTERNS: Export a record here only when applications need to read it from run metadata.
+COMMON MODIFICATION PATTERNS: Export a record here only when applications need to read it from the typed JevResponse.
 KNOWN EDGE CASES: Importing this package performs no Jev call and needs no credentials.
 RELATED DOCS: docs/design/jev-agent-alignment.md and skills/jev-agent/SKILL.md.
 TESTS: tests/test_jev_alignment.py.
@@ -21,14 +21,17 @@ from vidbyte.agents.jev.alignment.result import (
     JevAlignmentStatus,
     JevPromptEdit,
 )
+from vidbyte.lib.dataclasses.jev_alignment import JevAlignmentInput, JevResponse
 
 __all__ = [
     "ALIGNMENT_QUESTIONS",
     "JevAgentAlignment",
     "JevAlignmentGap",
+    "JevAlignmentInput",
     "JevAlignmentResult",
     "JevAlignmentRole",
     "JevAlignmentStatus",
     "JevPromptEdit",
     "JevPromptSection",
+    "JevResponse",
 ]

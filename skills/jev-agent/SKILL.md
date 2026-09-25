@@ -30,11 +30,11 @@ Each capability owns its fixed internal Jev questions, state projection, thresho
 - `presets.py` exposes the named `JevPreflightPreset` values; `preflight.py` owns the internal `JevPreflight` contract and `JevPreflightTools` implementation.
 
 The default settings perform no Jev call. `JevPreflightPreset.TOOL_SELECTOR` enables one batched tool-usefulness request before the generative loop. `tool_selector_threshold` is a finite probability from 0 through 1 inclusive; a missing TypeSafe API key must not prevent settings or agent construction.
-- `alignment/` owns the self-alignment capability (`JevAgentSettings(self_align=True)`). `JevAgentAlignment` is a `BaseAgent` subclass: it asks the fixed questions in `alignment/questions.py`, routes each "no" to an editable section or to `owner_actions`, runs its own loop with the single `edit_system_prompt_section` tool against a run-local `JevPromptDraft`, and keeps only the edits a second Jev call confirms. `JevRuntime.arun` swaps the result into this run's context and run-local runtime and attaches it as `metadata["jev_alignment"]`.
+- `alignment/` owns the self-alignment capability (`JevAgentSettings(self_align=True)`). `JevAgentAlignment` is a `BaseAgent` subclass: it accepts `JevAlignmentInput` with the user's task, system prompt, and SDK tool objects; reads dataclass questions from a fixed key registry; routes each "no" to an editable section or to `owner_actions`; runs its own loop with the tool in `vidbyte/tools/edit_system_prompt_section.py`; and keeps only the edits a second Jev call confirms. Its run-local `JevPromptDraft` uses `ContextManager` to replace edits by section. `JevRuntime.arun` returns a `JevResponse` whose `response.alignment` contains the typed result and whose `aligned_prompt` is the prompt this run used.
 
 Without `self_align`, the scaffold performs no Jev call. A missing TypeSafe API key must not prevent `JevAgentSettings` or `JevAgent` construction until an enabled capability actually needs Jev.
 
-The default settings perform no Jev call unless an explicit preflight or self-alignment capability is enabled.
+The default settings perform no Jev call unless an explicit preflight or self-alignment capability is enabled. `JevResponse.response` is the typed home for feature outcomes such as alignment and tool selection; keep these values out of generic metadata.
 
 ## Change workflow
 

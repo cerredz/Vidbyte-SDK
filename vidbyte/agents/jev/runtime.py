@@ -15,23 +15,27 @@ from collections.abc import Mapping
 from dataclasses import replace
 from typing import Any
 
-from vidbyte.agents.jev.preflight import JevPreflightTools
-from vidbyte.agents.jev.presets import JevPreflightPreset
 from vidbyte.agents.jev.alignment import (
     JevAgentAlignment,
     JevAlignmentResult,
     JevAlignmentStatus,
 )
+from vidbyte.agents.jev.preflight import JevPreflightTools
+from vidbyte.agents.jev.presets import JevPreflightPreset
 from vidbyte.agents.jev.settings import JevAgentSettings
 from vidbyte.agents.runtime import AgentRuntime
 from vidbyte.lib.dataclasses.context import BaseAgentContext
+from vidbyte.lib.dataclasses.jev_alignment import (
+    JevAgentResponseState,
+    JevAgentResult,
+    JevAlignmentInput,
+    JevToolSelectorResponse,
+)
 from vidbyte.lib.dataclasses.runner import RunnerHandle
 from vidbyte.lib.dataclasses.strategies import AgentResult
 from vidbyte.lib.errors import ConfigurationError
 from vidbyte.lib.tracing import SpanContext
 from vidbyte.tools._internal import with_internal_agent_tools
-
-ALIGNMENT_METADATA_KEY = "jev_alignment"
 
 
 class JevRuntime(AgentRuntime):
@@ -64,7 +68,7 @@ class JevRuntime(AgentRuntime):
         trace_context: SpanContext | None = None,
     ) -> AgentResult:
         """Apply enabled Jev preflights, align this run's prompt, then enter the inherited loop."""
-        selector_metadata: dict[str, Any] | None = None
+        selector_response: JevToolSelectorResponse | None = None
         if JevPreflightPreset.TOOL_SELECTOR in self.jev_settings.preflight:
             candidate_tool_count = len(self.user_tools)
             selector = JevPreflightTools(self.jev_settings.decision, self.jev_settings.tool_selector_threshold)
@@ -73,28 +77,30 @@ class JevRuntime(AgentRuntime):
             self.tools = with_internal_agent_tools(selected_tools)
             context = replace(context, tools=self.tools.specs())
             options = {key: value for key, value in (options or {}).items() if key != "tools"}
-            selector_metadata = {
-                "available": selector.available,
-                "candidate_tool_count": candidate_tool_count,
-                "selected_tool_count": len(selected_tools),
-            }
-            if selector.usage is not None:
-                selector_metadata["usage"] = {
-                    "input_tokens": selector.usage.input_tokens,
-                    "output_tokens": selector.usage.output_tokens,
-                }
+            selector_response = JevToolSelectorResponse(
+                available=selector.available,
+                candidate_tool_count=candidate_tool_count,
+                selected_tool_count=len(selected_tools),
+                usage=selector.usage,
+            )
 
         alignment = self.alignment
         alignment_result: JevAlignmentResult | None = None
         if alignment is not None:
             alignment_result, context = await self._align(alignment, message, context)
         result = await super().arun(message, handle=handle, context=context, metadata=metadata, options=options, trace_context=trace_context)
-        result_metadata = dict(result.metadata)
-        if selector_metadata is not None:
-            result_metadata["jev_tool_selector"] = selector_metadata
-        if alignment_result is not None:
-            result_metadata[ALIGNMENT_METADATA_KEY] = alignment_result
-        return replace(result, metadata=result_metadata)
+        return JevAgentResult(
+            output=result.output,
+            strategy_name=result.strategy_name,
+            calls=result.calls,
+            metadata=result.metadata,
+            structured=result.structured,
+            response=JevAgentResponseState(
+                alignment=alignment_result,
+                tool_selector=selector_response,
+                aligned_prompt=context.system_prompt or self.system_prompt,
+            ),
+        )
 
     async def _align(self, alignment: JevAgentAlignment, message: str, context: BaseAgentContext) -> tuple[JevAlignmentResult, BaseAgentContext]:
         # Aligns the prompt at the head of this run's context and swaps in the edited prompt for this run only.
@@ -104,8 +110,8 @@ class JevRuntime(AgentRuntime):
         if not current.startswith(prefix):
             # A caller-supplied context prompt is not the agent's prompt, so there is nothing of ours to align.
             return JevAlignmentResult(JevAlignmentStatus.SKIPPED, original, detail="The run context carries a caller-supplied system prompt."), context
-        tools = tuple(f"{spec.name}: {spec.description}" for spec in self.user_tools.specs())
-        aligned = await alignment.align(message, original, tools=tools)
+        alignment_input = JevAlignmentInput(user_prompt=message, system_prompt=original, tools=tuple(self.user_tools))
+        aligned = await alignment.run(alignment_input)
         if aligned.system_prompt == original:
             return aligned, context
         # @intent align-only-this-runs-prompt
@@ -114,4 +120,4 @@ class JevRuntime(AgentRuntime):
         return aligned, replace(context, system_prompt=aligned.system_prompt.strip() + current[len(prefix):])
 
 
-__all__ = ["ALIGNMENT_METADATA_KEY", "JevRuntime"]
+__all__ = ["JevRuntime"]

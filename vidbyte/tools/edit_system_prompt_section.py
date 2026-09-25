@@ -1,4 +1,4 @@
-"""FILE: vidbyte/agents/jev/alignment/tool.py
+"""FILE: vidbyte/tools/edit_system_prompt_section.py
 
 PURPOSE: Implements edit_system_prompt_section, the single tool the alignment editor uses to add text to the main agent's system prompt.
 ROLE IN CODEBASE: JevAgentAlignment registers one instance and binds it to the current pass's JevPromptDraft through a context variable before running its loop.
@@ -11,19 +11,29 @@ TESTS: tests/test_jev_alignment.py.
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Collection, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
-from typing import Any
+from typing import Any, Protocol
 
-from vidbyte.agents.jev.alignment.draft import MAX_EDIT_CHARS, JevPromptDraft
-from vidbyte.agents.jev.alignment.questions import EDITABLE_SECTIONS
+from vidbyte.lib.dataclasses.jev_alignment import (
+    JEV_ALIGNMENT_EDITABLE_SECTIONS,
+    JEV_ALIGNMENT_MAX_EDIT_CHARS,
+    JevPromptEdit,
+)
 from vidbyte.tools.base import BaseTool
 from vidbyte.tools.types import ToolCall, ToolPermission, ToolResult, ToolSpec
 
 EDIT_TOOL_NAME = "edit_system_prompt_section"
 
-_ACTIVE_DRAFT: ContextVar[JevPromptDraft | None] = ContextVar("jev_alignment_active_draft", default=None)
+
+class _PromptDraft(Protocol):
+    """Edit surface required by the alignment tool, independent of the agent implementation."""
+
+    def add(self, section: str, content: str, fixes: Collection[str]) -> JevPromptEdit:
+        """Validate and record a section edit in the active draft."""
+
+_ACTIVE_DRAFT: ContextVar[_PromptDraft | None] = ContextVar("jev_alignment_active_draft", default=None)
 
 _DESCRIPTION = (
     "Add text to one section of the main agent's system prompt so that it closes one or more listed gaps. "
@@ -35,7 +45,7 @@ _DESCRIPTION = (
 
 
 @contextmanager
-def bind_prompt_draft(draft: JevPromptDraft) -> Iterator[None]:
+def bind_prompt_draft(draft: _PromptDraft) -> Iterator[None]:
     """Bind the draft the edit tool writes to for the duration of one editor run."""
     token = _ACTIVE_DRAFT.set(draft)
     try:
@@ -84,12 +94,12 @@ class EditSystemPromptSectionTool(BaseTool):
             "properties": {
                 "section": {
                     "type": "string",
-                    "enum": sorted(section.value for section in EDITABLE_SECTIONS),
+                    "enum": sorted(section.value for section in JEV_ALIGNMENT_EDITABLE_SECTIONS),
                     "description": "The prompt section to add to. Pick the section named on the gap you are closing.",
                 },
                 "content": {
                     "type": "string",
-                    "description": f"The text to add under the section heading, without the heading itself, at most {MAX_EDIT_CHARS} characters. Write general rules for this kind of request, not rules about this one message.",
+                    "description": f"The text to add under the section heading, without the heading itself, at most {JEV_ALIGNMENT_MAX_EDIT_CHARS} characters. Write general rules for this kind of request, not rules about this one message.",
                 },
                 "fixes": {
                     "type": "array",
