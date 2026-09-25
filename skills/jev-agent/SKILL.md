@@ -27,9 +27,13 @@ Each capability owns its fixed internal Jev questions, state projection, thresho
 - `vidbyte/lib/dataclasses/jev.py` owns immutable decision records and the `TypeSafeWireRequest`/`TypeSafeWireQuestion` wire records. They mirror https://docs.typesafe.ai/api.md exactly: state, instructions, and criteria may be strings or JSON structure; noul criteria are optional; Score answers carry a weighted `score`; noul answers carry no confidence.
 - `vidbyte/lib/runners/decision.py` owns semantic decision execution (`arun`) and model listing (`alist_models`).
 - `vidbyte/providers/typesafe.py` alone owns TypeSafe wire serialization, normalization, and failure mapping.
-- `presets.py` exposes the named `JevPreflightPreset` values; `preflight.py` owns the internal `JevPreflight` contract and `JevPreflightTools` implementation.
+- `vidbyte/lib/enums/jev.py` owns `JevPreflightPreset`, `JevSecurityAction`, and `JevSecurityCategory`; `vidbyte/lib/jev/presets.py` (`JevPresets`) validates the presets and preset settings callers enable.
+- `vidbyte/lib/jev/preflight/` is the canonical home of fixed preflight questions: one module per preset, one frozen `JevPreflightQuestion` subclass per question, and `JevPreflightRegistry` (`questions`, `get`, `validate`, `combine`, `run`) over all of them.
+- `preflight.py` owns the internal `JevPreflight` contract, `JevPreflightTools`, and `JevPreflightSecurity`, which turns security answers into a `JevSecurityResult` and an action.
 
 The default settings perform no Jev call. `JevPreflightPreset.TOOL_SELECTOR` enables one batched tool-usefulness request before the generative loop. `tool_selector_threshold` is a finite probability from 0 through 1 inclusive; a missing TypeSafe API key must not prevent settings or agent construction.
+
+`JevPreflightPreset.SECURITY` asks 20 fixed questions about `{"request": message}` in one request and returns `metadata["jev_security"]`. `security_action` chooses what happens when a category is detected or the check is unavailable: `BLOCK` and `PAUSE` stop before the generative loop, `CONTAIN` runs it with `SAFE`/`READ` tools only, a no-repeat prompt addendum, and no runtime spans (all restored afterwards), and `REPORT` continues. The security gate runs before the tool selector.
 
 ## Change workflow
 
@@ -48,6 +52,9 @@ The default settings perform no Jev call. `JevPreflightPreset.TOOL_SELECTOR` ena
 - TypeSafe/Jev cannot be selected as the reply-generating provider.
 - API keys never appear in object representations, errors, logs, traces, or serialized state.
 - The public API names capabilities, not internal questions or decisions.
+- Security results contain category flags and token counts, never a copy of the supplied input or a detected value.
+- The decision provider receives the supplied request text, so it must be an approved destination for that input.
+- Fixed preflight questions live in `vidbyte/lib/jev/preflight/` and pass `JevPreflightRegistry.validate()`; new question text is never written inline in the agents layer.
 - Runtime state is run-local; reusable configuration is frozen and validated before execution.
 - Existing `BaseAgent` behavior remains unchanged when Jev is not involved; `AgentRuntimeType.JEV` gets the same linear-loop wiring as `LINEAR`.
 - Provider payload dictionaries do not move into `vidbyte/lib` records.

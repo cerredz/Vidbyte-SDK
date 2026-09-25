@@ -62,6 +62,23 @@ JEV_TOOL_SELECTOR_DEFAULT_THRESHOLD: float = 0.20
 JEV_TOOL_SELECTOR_MAX_THRESHOLD: float = 1.0
 JEV_TOOL_SELECTOR_MIN_THRESHOLD: float = 0.0
 
+# Fixed preflight question shape: each question carries a definition, a boundary, a focus, and the
+# question itself, which takes four to five sentences (skills/asking-jev-questions/SKILL.md).
+JEV_PREFLIGHT_MIN_SENTENCES: int = 4
+JEV_PREFLIGHT_MAX_SENTENCES: int = 5
+JEV_PREFLIGHT_STATE_REQUEST_FIELD: str = "request"
+
+# Security preflight policy. A missed secret costs more than a false alarm, so a category counts as
+# present once P(true) reaches an even split rather than a high-confidence bar.
+JEV_SECURITY_DETECTION_THRESHOLD: float = 0.5
+JEV_SECURITY_STOP_BLOCKED: str = "sensitive_data_blocked"
+JEV_SECURITY_STOP_REVIEW: str = "sensitive_data_review_required"
+JEV_SECURITY_CONTAIN_PROMPT: str = (
+    "The current request contains sensitive data. Use it only to complete this request. "
+    "Do not repeat secret values, personal identifiers, or confidential text back in full; refer to them by description instead. "
+    "Do not store, forward, publish, or send any of it anywhere, and remind the user to rotate any credential it exposed."
+)
+
 __all__ = [
     "JEV_DEFAULT_MODEL",
     "JEV_DEFAULT_RETRY_COUNT",
@@ -80,10 +97,17 @@ __all__ = [
     "JEV_NOUL_TRUE",
     "JEV_NOUL_YES_THRESHOLD",
     "JEV_NO_RETRIES",
+    "JEV_PREFLIGHT_MAX_SENTENCES",
+    "JEV_PREFLIGHT_MIN_SENTENCES",
+    "JEV_PREFLIGHT_STATE_REQUEST_FIELD",
     "JEV_PREVIEW_MODEL",
     "JEV_PROBABILITY_SUM_TOLERANCE",
     "JEV_RETRY_BACKOFF_SECONDS",
     "JEV_RETRY_STATUS_CODES",
+    "JEV_SECURITY_CONTAIN_PROMPT",
+    "JEV_SECURITY_DETECTION_THRESHOLD",
+    "JEV_SECURITY_STOP_BLOCKED",
+    "JEV_SECURITY_STOP_REVIEW",
     "JEV_STATUS_OVERLOADED",
     "JEV_STATUS_RATE_LIMITED",
     "JEV_STATUS_REQUEST_TIMEOUT",

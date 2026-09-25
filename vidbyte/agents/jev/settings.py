@@ -4,9 +4,9 @@ PURPOSE: Defines the single, opinionated public configuration object for JevAgen
 ROLE IN CODEBASE: JevAgentSettings is the only constructor input accepted by JevAgent and carries decision configuration plus named preflight settings into JevRuntime.
 ARCHITECTURE NOTE: The surface is intentionally closed; named Jev capabilities belong here as explicit settings instead of a generic decisions collection.
 COMMON MODIFICATION PATTERNS: Add a validated named capability object, then implement its fixed policy in JevRuntime without exposing runtime replacement hooks.
-KNOWN EDGE CASES: The generative provider cannot be TypeSafe because Jev is a decision model; selector thresholds reject booleans, non-finite values, and out-of-range probabilities.
-RELATED DOCS: docs/design/jev-agent-scaffold.md, docs/design/jev-tool-selector.md, and skills/jev-agent/SKILL.md.
-TESTS: tests/test_jev_agent.py, tests/test_jev_tool_selector.py, and scripts/test-jev-tool-selector.py.
+KNOWN EDGE CASES: The generative provider cannot be TypeSafe because Jev is a decision model; selector thresholds reject booleans, non-finite values, and out-of-range probabilities; security_action is validated even when the security preset is off.
+RELATED DOCS: docs/design/jev-agent-scaffold.md, docs/design/jev-tool-selector.md, docs/design/jev-preflight-sensitive-data.md, and skills/jev-agent/SKILL.md.
+TESTS: tests/test_jev_agent.py, tests/test_jev_tool_selector.py, tests/test_jev_sensitive_preflight.py, and scripts/test-jev-tool-selector.py.
 """
 
 from __future__ import annotations
@@ -14,7 +14,6 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, field
 
-from vidbyte.agents.jev.presets import JevPreflightPreset
 from vidbyte.agents.settings import AgentLoopSettings
 from vidbyte.lib.constants.jev import (
     JEV_TOOL_SELECTOR_DEFAULT_THRESHOLD,
@@ -23,7 +22,9 @@ from vidbyte.lib.constants.jev import (
 )
 from vidbyte.lib.dataclasses.model_configs import DecisionModelConfig
 from vidbyte.lib.enums import ModelProvider
+from vidbyte.lib.enums.jev import JevPreflightPreset, JevSecurityAction
 from vidbyte.lib.errors import ConfigurationError
+from vidbyte.lib.jev.presets import JevPresets
 from vidbyte.tools.security import PermissionPolicy
 
 
@@ -44,6 +45,7 @@ class JevAgentSettings:
     decision: DecisionModelConfig = field(default_factory=DecisionModelConfig, repr=False)
     preflight: tuple[JevPreflightPreset | str, ...] = ()
     tool_selector_threshold: float = JEV_TOOL_SELECTOR_DEFAULT_THRESHOLD
+    security_action: JevSecurityAction | str = JevSecurityAction.BLOCK
 
     def __post_init__(self) -> None:
         # Normalizes immutable inputs and rejects invalid agent configuration before runtime construction.
@@ -74,19 +76,9 @@ class JevAgentSettings:
         self._validate_tool_selector_threshold()
 
     def _normalize_preflight(self) -> None:
-        # Converts supported string names into the closed preflight enum and rejects duplicate policies.
-        if isinstance(self.preflight, (str, bytes)):
-            raise ConfigurationError("JevAgentSettings.preflight must be an iterable of JevPreflightPreset values, not a string.")
-        try:
-            normalized = tuple(
-                value if isinstance(value, JevPreflightPreset) else JevPreflightPreset(value)
-                for value in self.preflight
-            )
-        except (TypeError, ValueError) as exc:
-            raise ConfigurationError("JevAgentSettings.preflight contains an unsupported preset.") from exc
-        if len(set(normalized)) != len(normalized):
-            raise ConfigurationError("JevAgentSettings.preflight cannot contain duplicate presets.")
-        object.__setattr__(self, "preflight", normalized)
+        # Delegates preset and preset-setting validation to JevPresets, which owns the enable-able surface.
+        object.__setattr__(self, "preflight", JevPresets.normalize(self.preflight))
+        object.__setattr__(self, "security_action", JevPresets.normalize_security_action(self.security_action))
 
     def _validate_tool_selector_threshold(self) -> None:
         # Accepts calibrated probabilities on the closed unit interval, but excludes bool and non-finite values.
