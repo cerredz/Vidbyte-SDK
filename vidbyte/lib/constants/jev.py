@@ -1,12 +1,12 @@
 """FILE: vidbyte/lib/constants/jev.py
 
-PURPOSE: Declares the TypeSafe Jev limits, defaults, and wire literals shared by the decision records and provider adapter.
-ROLE IN CODEBASE: `vidbyte/lib/dataclasses/jev.py` validates against these bounds and `vidbyte/providers/typesafe.py` builds requests from the same values.
+PURPOSE: Declares the TypeSafe Jev limits, defaults, and wire literals shared by the decision records and provider adapter, plus the JevAgent preflight policy values.
+ROLE IN CODEBASE: `vidbyte/lib/dataclasses/jev.py` validates against these bounds, `vidbyte/providers/typesafe.py` builds requests from the same values, `vidbyte/lib/jev/` reads the preflight policy values, and `vidbyte/agents/jev/` reads the tool-selector and clarification values.
 ARCHITECTURE NOTE: Values live in `vidbyte.lib` so both lower-layer modules and the tool layer can import them without a layering inversion.
 COMMON MODIFICATION PATTERNS: Change a vendor limit only after TypeSafe documents it; local sanity caps stay generous because the API enforces the real (token) limits itself.
 KNOWN EDGE CASES: Vendor limits are the 255 Choice options and the 2-10 Score levels; question count, state size, and option-name length are local caps only.
-RELATED DOCS: docs/design/jev-agent-scaffold.md, https://docs.typesafe.ai/api.md, https://docs.typesafe.ai/models.md, https://docs.typesafe.ai/sdk/python/api/retries.md.
-TESTS: tests/test_jev_agent.py and scripts/test-jev-agent-scaffold.py.
+RELATED DOCS: docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, docs/design/jev-tool-selector.md, https://docs.typesafe.ai/api.md, https://docs.typesafe.ai/models.md, https://docs.typesafe.ai/sdk/python/api/retries.md.
+TESTS: tests/test_jev_agent.py, tests/test_jev_preflight.py, tests/test_jev_tool_selector.py, and scripts/test-jev-agent-scaffold.py.
 """
 
 from __future__ import annotations
@@ -57,12 +57,26 @@ JEV_NOUL_FALSE: str = "false"
 JEV_NOUL_OPTIONS: tuple[str, ...] = (JEV_NOUL_TRUE, JEV_NOUL_FALSE)
 JEV_NOUL_YES_THRESHOLD: float = 0.5
 
+# Preflight policy. The request is the only state field preflight questions read, and a fixed-question
+# preset's score is the mean P(yes) of its questions; below the threshold the preset fails.
+# 0.75 is a starting point, not a value tuned on a labeled set.
+JEV_PREFLIGHT_REQUEST_FIELD: str = "request"
+JEV_CLARITY_THRESHOLD: float = 0.75
+# A run the preflight gate stops reports this strategy name.
+JEV_PREFLIGHT_STRATEGY_NAME: str = "jev_preflight"
+# The clarification agent writes its questions in one reply; the cap only covers an isDone round trip.
+JEV_CLARIFICATION_MAX_ITERATIONS: int = 3
+
 # Tool-selector policy bounds and default: caller settings use probabilities on the closed unit interval.
+# Each tool question is named with this prefix and the tool's position in the catalog.
 JEV_TOOL_SELECTOR_DEFAULT_THRESHOLD: float = 0.20
 JEV_TOOL_SELECTOR_MAX_THRESHOLD: float = 1.0
 JEV_TOOL_SELECTOR_MIN_THRESHOLD: float = 0.0
+JEV_TOOL_SELECTOR_QUESTION_PREFIX: str = "tool_selector."
 
 __all__ = [
+    "JEV_CLARIFICATION_MAX_ITERATIONS",
+    "JEV_CLARITY_THRESHOLD",
     "JEV_DEFAULT_MODEL",
     "JEV_DEFAULT_RETRY_COUNT",
     "JEV_DEFAULT_TIMEOUT_SECONDS",
@@ -81,6 +95,8 @@ __all__ = [
     "JEV_NOUL_YES_THRESHOLD",
     "JEV_NO_RETRIES",
     "JEV_PREVIEW_MODEL",
+    "JEV_PREFLIGHT_REQUEST_FIELD",
+    "JEV_PREFLIGHT_STRATEGY_NAME",
     "JEV_PROBABILITY_SUM_TOLERANCE",
     "JEV_RETRY_BACKOFF_SECONDS",
     "JEV_RETRY_STATUS_CODES",
@@ -96,4 +112,5 @@ __all__ = [
     "JEV_TOOL_SELECTOR_DEFAULT_THRESHOLD",
     "JEV_TOOL_SELECTOR_MAX_THRESHOLD",
     "JEV_TOOL_SELECTOR_MIN_THRESHOLD",
+    "JEV_TOOL_SELECTOR_QUESTION_PREFIX",
 ]
