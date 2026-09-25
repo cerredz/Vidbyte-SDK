@@ -356,6 +356,9 @@ class AgentRuntime:
                 )
                 return await self._finish_result(result, state)
 
+            # A runtime that owns history policy rewrites the canonical list here, once, before the next model call.
+            await self.prepare_iteration_history(state, messages)
+
             iteration_span = self._start_semantic_span(
                 "runtime.iteration",
                 parent=trace_context,
@@ -568,6 +571,13 @@ class AgentRuntime:
                     contexts=state.call_contexts,
                 )
                 return await self._finish_result(result, state)
+
+    async def prepare_iteration_history(self, state: BaseAgentRuntimeLoopState, messages: list[dict[str, Any]]) -> None:
+        """Seam for runtimes that rewrite the canonical message history between iterations; the default does nothing."""
+        # @intent history-rewrites-need-the-canonical-list
+        # A before_model_call transform only changes one call's options, so the loop's own list keeps growing and a
+        # summary would be rebuilt on every call; a runtime that compacts must edit this list in place, once.
+        del state, messages
 
     async def _invoke_with_middleware(self, handle: RunnerHandle, message: str, call_options: Mapping[str, Any], *, context: BaseAgentContext, iteration_count: int, model_call_count: int, call_contexts: Sequence[ToolCallContext], tokens_used: int | None, started_at: float, metadata: Mapping[str, Any], run_state: dict[type, Any] | None = None, trace_context: SpanContext | None = None, compaction_count: int = 0) -> tuple[object | AgentResult, int, int]:
         """Invoke the runner, allowing middleware to retry model errors while tracking compaction events."""

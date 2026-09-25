@@ -1,0 +1,19 @@
+{
+  "name": "Jev Compaction",
+  "description": "Prompt assets for JevAgent dynamic compaction. When Jev finds that the agent finished a unit of work, the record writer turns that unit's steps into a short factual record, and the record header wraps the record in the message that replaces the unit in the agent's context window.",
+  "key": "jev_compaction",
+  "prompts": {
+    "record_writer_system_prompt": {
+      "path": "record_writer_system_prompt.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_compaction/record_writer_system_prompt.md"
+    },
+    "record_writer_prompt": {
+      "path": "record_writer_prompt.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_compaction/record_writer_prompt.md"
+    },
+    "record_header": {
+      "path": "record_header.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_compaction/record_header.md"
+    }
+  }
+}

@@ -30,6 +30,19 @@ Each capability owns its fixed internal Jev questions, state projection, thresho
 
 The scaffold performs no Jev call. A missing TypeSafe API key must not prevent `JevAgentSettings` or `JevAgent` construction until an enabled capability actually needs Jev.
 
+## Dynamic compaction
+
+`JevAgentSettings(dynamic_compaction=JevDynamicCompactionSettings(unit_of_work=True))` turns on dynamic compaction. `vidbyte/agents/jev/compaction/` owns it; see its README.
+
+- Each enabled flag is one trigger. A trigger only recognizes that the latest step began a new unit of work.
+- All triggers share:
+  - one Jev request per step;
+  - one `JevUnitLedger` that maps messages to iterations and units;
+  - one policy: compact eligible closed units in a single rewrite once they reclaim `min_reclaim_tokens`, and keep the newest closed unit raw;
+  - one writer: `JevDynamicCompaction`, a tool-free `BaseAgent` on the main model with a deterministic fallback.
+- The rewrite happens in `JevRuntime.prepare_iteration_history`, which edits the canonical message list in place. Middleware cannot do this, because its message transforms are not persisted.
+- To add a trigger, subclass `JevCompactionTrigger`, then add a `JevCompactionTriggerKey` member, a settings flag, and a `JEV_COMPACTION_TRIGGERS` entry.
+
 ## Change workflow
 
 1. Read `AGENTS.md`, `docs/design/jev-agent-scaffold.md`, and every existing file under `vidbyte/agents/jev/`.
