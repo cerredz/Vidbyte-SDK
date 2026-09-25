@@ -1,8 +1,8 @@
 """FILE: vidbyte/lib/jev/preflight/__init__.py
 
-PURPOSE: Exposes JevPreflight and every fixed preflight question dataclass from the canonical preflight folder.
-ROLE IN CODEBASE: JevAgentSettings and JevRuntime import JevPreflight from here; tests import the question dataclasses to pin their contract.
-ARCHITECTURE NOTE: This folder is the one home for preflight questions and the logic that asks them; flags live in vidbyte/lib/jev/presets.py and records in vidbyte/lib/dataclasses/jev.py.
+PURPOSE: Exposes JevPreflightRegistry and every fixed preflight question dataclass from the canonical preflight question folder.
+ROLE IN CODEBASE: JevAgentSettings and JevPreflight (vidbyte/agents/jev/preflight/) import JevPreflightRegistry from here; tests import the question dataclasses to pin their contract.
+ARCHITECTURE NOTE: This folder is the one home for fixed preflight questions and their registry; flags live in vidbyte/lib/jev/presets.py, records in vidbyte/lib/dataclasses/jev.py, and the logic that asks and acts on the questions in vidbyte/agents/jev/preflight/.
 COMMON MODIFICATION PATTERNS: Export each new preset's question module here alongside the existing clarity questions.
 KNOWN EDGE CASES: Importing this package builds the question registry but never resolves credentials or constructs a decision runner.
 RELATED DOCS: docs/design/jev-preflight-clarity.md and skills/jev-agent/SKILL.md.
@@ -24,7 +24,7 @@ from vidbyte.lib.jev.preflight.clarity import (
     ClarityTargetQuestion,
     ClarityTimeContextQuestion,
 )
-from vidbyte.lib.jev.preflight.preflight import JevPreflight
+from vidbyte.lib.jev.preflight.preflight import JevPreflightRegistry
 
 __all__ = [
     "CLARITY_QUESTIONS",
@@ -40,5 +40,5 @@ __all__ = [
     "ClaritySingleReadingQuestion",
     "ClarityTargetQuestion",
     "ClarityTimeContextQuestion",
-    "JevPreflight",
+    "JevPreflightRegistry",
 ]

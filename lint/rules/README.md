@@ -80,6 +80,7 @@ cached external findings; semantic rules inspect the shared source catalogue.
 - `s059_explicit_serialization_mode.py` -- explicit model_dump() wire/Python mode.
 - `s060_typed_public_seam_mappings.py` -- named mapping shapes at public seams.
 - `s061_bounded_safe_path.py` -- resolved, contained file/archive I/O paths.
+- `s062_no_implicit_string_concatenation.py` -- one literal per string, never adjacent literals.
 - `a001_agent_readable_file_headers.py` -- structured SDK source headers.
 - `a002_intent_comments.py` -- intent markers for load-bearing policy functions.
 - `a003_context_rich_error_packets.py` -- stable diagnostic fields on errors.
@@ -98,3 +99,4 @@ cached external findings; semantic rules inspect the shared source catalogue.
 - 2026-08-28: Added catalog-expansion S051-S061 policies (renumbered from an initial S025-S035
   draft after S025-S050 landed on main concurrently; S052/S054 dropped the Ruff codes S045-S050
   already own).
+- 2026-09-25: Added S062 no-implicit-string-concatenation from PR #456 review comment 4108971007.
