@@ -1,12 +1,12 @@
 """FILE: vidbyte/lib/dataclasses/jev.py
 
-PURPOSE: Defines the validated, immutable records for TypeSafe Jev decisions: JSON content, options, questions, requests, normalized answers, wire bodies, model cards, decision-log records, and the JevAgent specialist catalog.
+PURPOSE: Defines the validated records for TypeSafe Jev decisions (JSON content, options, questions, requests, normalized answers, wire bodies, model cards, and decision-log records), for JevAgent preflight (the noul score, the question brief and criteria, the question base, preset definitions, preset results, the clarification agent's structured reply and the clarification built from it), for JevAgent specialist routing (the specialist, the catalog, and the routing outcome), and the JevAgentResponse the user reads after a run.
 ROLE IN CODEBASE: `vidbyte/providers/typesafe.py` builds TypeSafeWireRequest from JevDecisionRequest and JevAnswer values from responses, while `vidbyte/lib/runners/decision.py` passes the typed records through.
 ARCHITECTURE NOTE: This module must not import model_configs because that would close an import cycle through ModalityDetector. Records own every shape rule in __post_init__; the provider, not these records, turns a wire record into the JSON body (lint S060 bars dict[str, Any] encoders here).
 COMMON MODIFICATION PATTERNS: Mirror https://docs.typesafe.ai/api.md exactly: add a field together with its validation, its wire record, and its provider serialization; keep bounds in vidbyte/lib/constants/jev.py.
-KNOWN EDGE CASES: State, instructions, and criteria may be a string or JSON structure; noul criteria are optional; score answers carry a probability-weighted `score` that can land between levels; noul answers carry no confidence.
-RELATED DOCS: docs/design/jev-agent-scaffold.md, https://docs.typesafe.ai/api.md, and https://docs.typesafe.ai/primitives/advanced.md.
-TESTS: tests/test_jev_agent.py and scripts/test-jev-agent-scaffold.py.
+KNOWN EDGE CASES: State, instructions, and criteria may be a string or JSON structure; noul criteria are optional; score answers carry a probability-weighted `score` that can land between levels; noul answers carry no confidence. JevPreflightQuestion is deliberately not slotted because every concrete question subclass redeclares its fields with defaults. The two clarification payloads are pydantic models because they are the output_schema JevClarificationAgent is held to.
+RELATED DOCS: docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, https://docs.typesafe.ai/api.md, and https://docs.typesafe.ai/primitives/advanced.md.
+TESTS: tests/test_jev_agent.py, tests/test_jev_preflight.py, and scripts/test-jev-agent-scaffold.py.
 """
 
 from __future__ import annotations
@@ -14,11 +14,16 @@ from __future__ import annotations
 import json
 import math
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import TYPE_CHECKING, cast
 
+from pydantic import BaseModel, ConfigDict, Field
+
 from vidbyte.lib.constants.jev import (
+    JEV_CLARIFICATION_MAX_QUESTIONS,
+    JEV_CLARIFICATION_MAX_RECOMMENDATIONS,
+    JEV_CLARIFICATION_MIN_RECOMMENDATIONS,
     JEV_MAX_CHOICE_OPTIONS,
     JEV_MAX_OPTION_NAME_CHARS,
     JEV_MAX_QUESTIONS,
@@ -26,7 +31,9 @@ from vidbyte.lib.constants.jev import (
     JEV_MAX_STATE_CHARS,
     JEV_MIN_CHOICE_OPTIONS,
     JEV_MIN_SCORE_LEVELS,
+    JEV_NOUL_FALSE,
     JEV_NOUL_OPTIONS,
+    JEV_NOUL_TRUE,
     JEV_PROBABILITY_SUM_TOLERANCE,
     JEV_SPECIALIST_MAX_COUNT,
     JEV_SPECIALIST_MAX_DESCRIPTION_CHARS,
@@ -34,11 +41,17 @@ from vidbyte.lib.constants.jev import (
     JEV_SPECIALIST_NO_MATCH_ID,
 )
 from vidbyte.lib.enums.agent_runtime import AgentRuntimeType
-from vidbyte.lib.enums.jev import JevQuestionType
+from vidbyte.lib.enums.jev import (
+    JevPreflightPreset,
+    JevPreflightQuestionKey,
+    JevQuestionType,
+    JevSpecialistFallback,
+)
 from vidbyte.lib.errors import ConfigurationError
 
 if TYPE_CHECKING:
     from vidbyte.agents.base import BaseAgent
+    from vidbyte.agents.pricing import ProviderUsage, UsageRollup
 
 # A frozen JSON value as TypeSafe accepts it: a string, or a read-only mapping / tuple of JSON values.
 JevContent = str | Mapping[str, object] | tuple[object, ...]
@@ -459,18 +472,328 @@ class JevSpecialistCatalog:
         return next((specialist for specialist in self.specialists if specialist.id == specialist_id), None)
 
 
+@dataclass(frozen=True, slots=True)
+class JevSpecialistRouting:
+    """Which agent JevSpecialistRouter ran for the most recent task, and why, read as `JevAgent.response.routing`.
+
+    `specialist` is the ID of the registered specialist that ran, or None when the general agent ran;
+    `fallback` then says why. `choice` and `probability` are Jev's answer when it gave one (a weak match
+    keeps the choice it did not take), `threshold` is the catalog's match threshold, `error_type` names
+    the exception class of an unavailable decision, and `usage` is the specialist's own model usage.
+    """
+
+    threshold: float
+    specialist: str | None = None
+    fallback: JevSpecialistFallback | None = None
+    choice: str | None = None
+    probability: float | None = None
+    error_type: str | None = None
+    usage: UsageRollup | None = None
+
+    def __post_init__(self) -> None:
+        # Requires exactly one of a specialist or a fallback reason, and valid probabilities.
+        # @intent routing-names-exactly-one-handler
+        # A caller reads this record to learn which agent answered, so a record naming both or neither handler is refused.
+        if (self.specialist is None) == (self.fallback is None):
+            raise JevValidation.error("specialist routing", "exactly one of specialist or fallback", (self.specialist, self.fallback))
+        object.__setattr__(self, "threshold", JevProbability.require(self.threshold, field_name="specialist routing threshold"))
+        if self.probability is not None:
+            object.__setattr__(self, "probability", JevProbability.require(self.probability, field_name="specialist routing probability"))
+
+    @property
+    def routed(self) -> bool:
+        """Return True when a registered specialist, not the general agent, handled the task."""
+        return self.specialist is not None
+
+
+@dataclass(frozen=True, slots=True)
+class JevNoulScore:
+    """How a set of noul answers scored against one threshold: their mean P(yes), the verdict, and the answers used.
+
+    DecisionModelRunner.score_noul builds this; `passed` is True when `score` is at or above the threshold.
+    """
+
+    score: float
+    passed: bool
+    answers: Mapping[str, JevAnswer] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        # Validates the score and freezes the answers so a recorded verdict cannot be edited.
+        object.__setattr__(self, "score", JevProbability.require(self.score, field_name="noul score"))
+        object.__setattr__(self, "answers", MappingProxyType(dict(self.answers)))
+
+
+class JevText:
+    """Shared validation for the prose parts of a fixed Jev question."""
+
+    @staticmethod
+    def require(value: object, *, field_name: str) -> str:
+        # Returns a non-blank string, raising a detailed ConfigurationError for anything else.
+        if not isinstance(value, str) or not value.strip():
+            raise JevValidation.error(field_name, "a non-blank string", value)
+        return value
+
+    @staticmethod
+    def require_all(values: object, *, field_name: str) -> tuple[str, ...]:
+        # Returns a non-empty tuple of non-blank strings, raising for any other shape.
+        if not isinstance(values, tuple) or not values:
+            raise JevValidation.error(field_name, "a non-empty tuple of strings", values)
+        return tuple(JevText.require(value, field_name=f"{field_name}[{index}]") for index, value in enumerate(values))
+
+
+@dataclass(frozen=True, slots=True)
+class JevBrief:
+    """The instructions of one fixed Jev question, one field per section, in the order Jev reads them.
+
+    `introduction` says in general terms what the question answers; `state` says what each state
+    field is and where it comes from; `definitions` define every term a rule uses, parts before the
+    whole and without examples; `rules` hold every rule that decides the answer, including the focus;
+    `question` is the one positively phrased yes/no question about a named state field.
+    """
+
+    introduction: str
+    state: str
+    definitions: tuple[str, ...]
+    rules: tuple[str, ...]
+    question: str
+
+    def __post_init__(self) -> None:
+        # Requires non-blank text in every section and at least one definition and one rule.
+        for field_name in ("introduction", "state", "question"):
+            JevText.require(getattr(self, field_name), field_name=f"brief {field_name}")
+        JevText.require_all(self.definitions, field_name="brief definitions")
+        JevText.require_all(self.rules, field_name="brief rules")
+
+    def render(self) -> str:
+        """Return the brief as the one instructions string Jev reads, sections separated by blank lines."""
+        definitions = "\n".join(f"- {definition}" for definition in self.definitions)
+        rules = "\n".join(f"- {rule}" for rule in self.rules)
+        return f"{self.introduction}\n\n{self.state}\n\nDefinitions:\n{definitions}\n\nRules:\n{rules}\n\n{self.question}"
+
+
+@dataclass(frozen=True, slots=True)
+class JevCriterion:
+    """One side of a noul question, in the structure of strategy 3: what it covers, what it is not for, and labeled examples.
+
+    `what` opens with the verdict in the question's own defined term ("Choose true when `request`
+    states an action.") and then lists the signs Jev can see. `not_for` names the cases that belong
+    to the other side. `easy` examples are obvious cases and `boundary` examples sit next to the
+    line; each example differs from its partner on the other side only in the tested property.
+    """
+
+    what: str
+    not_for: str
+    easy: tuple[str, ...]
+    boundary: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        # Requires non-blank text and at least one easy and one boundary example.
+        JevText.require(self.what, field_name="criterion what")
+        JevText.require(self.not_for, field_name="criterion not_for")
+        JevText.require_all(self.easy, field_name="criterion easy examples")
+        JevText.require_all(self.boundary, field_name="criterion boundary examples")
+
+    def to_content(self) -> Mapping[str, object]:
+        """Return the structured criterion description TypeSafe accepts as an option description."""
+        return {"what": self.what, "not_for": self.not_for, "examples": {"easy": list(self.easy), "boundary": list(self.boundary)}}
+
+
+@dataclass(frozen=True)
+class JevPreflightQuestion:
+    """One fixed preflight yes/no question: what Jev reads, what each answer looks like, and the gap a no answer names.
+
+    Every concrete question in `vidbyte/lib/jev/preflight/` subclasses this with a default for every
+    field, so each question is its own dataclass constructed with no arguments. `instructions` holds
+    every rule; `when_true` and `when_false` only describe what each side looks like and add no rule;
+    `gap` is the self-contained sentence JevClarificationAgent reads when this question fails.
+    """
+
+    key: JevPreflightQuestionKey
+    instructions: JevBrief
+    when_true: JevCriterion
+    when_false: JevCriterion
+    gap: str
+
+    def __post_init__(self) -> None:
+        # Requires a registered key, a brief, two criteria, and non-blank gap text.
+        if not isinstance(self.key, JevPreflightQuestionKey):
+            raise JevValidation.error("preflight question key", "a JevPreflightQuestionKey member", self.key)
+        if not isinstance(self.instructions, JevBrief):
+            raise JevValidation.error(f"instructions of preflight question {self.key.value!r}", "a JevBrief", self.instructions)
+        for field_name in ("when_true", "when_false"):
+            if not isinstance(getattr(self, field_name), JevCriterion):
+                raise JevValidation.error(f"{field_name} of preflight question {self.key.value!r}", "a JevCriterion", getattr(self, field_name))
+        JevText.require(self.gap, field_name=f"gap of preflight question {self.key.value!r}")
+
+    def to_question(self) -> JevQuestion:
+        # Builds the noul JevQuestion sent to Jev, named by the key so its answer comes back under it.
+        return JevQuestion(
+            name=self.key.value,
+            question_type=JevQuestionType.NOUL,
+            instructions=self.instructions.render(),
+            options=(JevOption(name=JEV_NOUL_TRUE, description=self.when_true.to_content()), JevOption(name=JEV_NOUL_FALSE, description=self.when_false.to_content())),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class JevPresetDefinition:
+    """The fixed policy one fixed-question preflight flag turns on: which questions it asks and the score it must reach."""
+
+    preset: JevPreflightPreset
+    question_keys: tuple[JevPreflightQuestionKey, ...]
+    threshold: float
+
+    def __post_init__(self) -> None:
+        # Requires a registered preset, a non-empty tuple of unique keys, and a probability threshold.
+        if not isinstance(self.preset, JevPreflightPreset):
+            raise JevValidation.error("preset definition preset", "a JevPreflightPreset member", self.preset)
+        keys = self.question_keys
+        if not isinstance(keys, tuple) or not keys or not all(isinstance(key, JevPreflightQuestionKey) for key in keys):
+            raise JevValidation.error(f"question_keys of preset {self.preset.value!r}", "a non-empty tuple of JevPreflightQuestionKey members", keys)
+        if len(set(keys)) != len(keys):
+            raise JevValidation.error(f"question_keys of preset {self.preset.value!r}", "unique question keys", keys)
+        object.__setattr__(self, "threshold", JevProbability.require(self.threshold, field_name=f"threshold of preset {self.preset.value!r}"))
+
+
+@dataclass(frozen=True, slots=True)
+class JevPresetResult:
+    """The score and answer evidence one enabled fixed-question preset produced.
+
+    `score` is the mean P(yes) of the preset's questions, and `passed` is False only when Jev answered
+    and the score fell below the preset's threshold. With `available=False` Jev could not answer,
+    `score` is None, and the preset fails open (`passed` stays True).
+    """
+
+    preset: JevPreflightPreset
+    score: float | None
+    passed: bool = True
+    answers: Mapping[JevPreflightQuestionKey, JevAnswer] = field(default_factory=dict)
+    available: bool = True
+
+    def __post_init__(self) -> None:
+        # Validates the score and freezes the answer evidence so a recorded result cannot be edited.
+        if self.score is not None:
+            object.__setattr__(self, "score", JevProbability.require(self.score, field_name="preset result score"))
+        object.__setattr__(self, "answers", MappingProxyType(dict(self.answers)))
+
+    def yes(self) -> dict[JevPreflightQuestionKey, float]:
+        """Return each question's P(yes), in the order the preset asked them."""
+        return {key: answer.probabilities[JEV_NOUL_TRUE] for key, answer in self.answers.items()}
+
+
+class JevClarifyingQuestionPayload(BaseModel):
+    """One clarifying question as JevClarificationAgent must return it: the question and a few answers to pick from."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    question: str = Field(min_length=1, description="One short question for the user about one missing detail of their request.")
+    recommendations: list[str] = Field(
+        min_length=JEV_CLARIFICATION_MIN_RECOMMENDATIONS,
+        max_length=JEV_CLARIFICATION_MAX_RECOMMENDATIONS,
+        description="Likely answers the user can pick from, each a complete answer to the question in the user's own terms.",
+    )
+
+
+class JevClarificationPayload(BaseModel):
+    """The structured reply JevClarificationAgent must return: its clarifying questions, most important first."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    questions: list[JevClarifyingQuestionPayload] = Field(
+        min_length=1,
+        max_length=JEV_CLARIFICATION_MAX_QUESTIONS,
+        description="The clarifying questions for the user, most important missing detail first.",
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class JevClarifyingQuestion:
+    """One clarifying question returned to the user, with the recommended answers the user can pick from."""
+
+    question: str
+    recommendations: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        # Requires a question and at least one recommended answer, all non-blank.
+        JevText.require(self.question, field_name="clarifying question")
+        JevText.require_all(self.recommendations, field_name="clarifying question recommendations")
+
+
+@dataclass(frozen=True, slots=True)
+class JevClarification:
+    """The questions JevClarificationAgent wrote for an unclear request, and the clarity checks behind them.
+
+    `questions` holds each clarifying question with its recommended answers, `gaps` names the failed
+    clarity checks weakest first, and `usage` is the clarification agent's own model usage.
+    """
+
+    questions: tuple[JevClarifyingQuestion, ...]
+    gaps: tuple[JevPreflightQuestionKey, ...]
+    usage: UsageRollup | None = None
+
+    @classmethod
+    def from_payload(cls, payload: JevClarificationPayload, gaps: tuple[JevPreflightQuestionKey, ...], usage: UsageRollup | None = None) -> JevClarification:
+        """Build the frozen record from the agent's validated structured reply."""
+        questions = tuple(JevClarifyingQuestion(question=item.question.strip(), recommendations=tuple(text.strip() for text in item.recommendations)) for item in payload.questions)
+        return cls(questions=questions, gaps=gaps, usage=usage)
+
+    def render(self) -> str:
+        """Return the questions as the plain text the user reads: numbered questions, each followed by its recommendations."""
+        blocks = []
+        for number, item in enumerate(self.questions, start=1):
+            options = "\n".join(f"   - {recommendation}" for recommendation in item.recommendations)
+            blocks.append(f"{number}. {item.question}\n{options}")
+        return "\n".join(blocks)
+
+
+@dataclass(slots=True)
+class JevAgentResponse:
+    """Everything JevAgent's opinionated features produced for its most recent run, read as `JevAgent.response`.
+
+    JevResponse is the only writer: it resets this record at the start of each run and fills it as the
+    preflight gate acts. `results` holds one entry per enabled fixed-question preset, `usage` is the one
+    preflight Jev call's usage, `clarification` is set only when the gate stopped the run to ask the user, and
+    `routing` is set only when a specialist catalog is configured and the gate let the run through.
+    """
+
+    input: str = ""
+    output: str | None = None
+    results: dict[JevPreflightPreset, JevPresetResult] = field(default_factory=dict)
+    clarification: JevClarification | None = None
+    usage: ProviderUsage | None = None
+    routing: JevSpecialistRouting | None = None
+
+    @property
+    def needs_clarification(self) -> bool:
+        """Return True when the gate stopped the run to ask the user clarifying questions."""
+        return self.clarification is not None
+
+
 __all__ = [
+    "JevAgentResponse",
     "JevAnswer",
+    "JevBrief",
+    "JevClarification",
+    "JevClarificationPayload",
+    "JevClarifyingQuestion",
+    "JevClarifyingQuestionPayload",
     "JevContent",
+    "JevCriterion",
     "JevDecisionRecord",
     "JevDecisionRequest",
     "JevJson",
     "JevModelCard",
+    "JevNoulScore",
     "JevOption",
+    "JevPreflightQuestion",
+    "JevPresetDefinition",
+    "JevPresetResult",
     "JevProbability",
     "JevQuestion",
     "JevSpecialist",
     "JevSpecialistCatalog",
+    "JevSpecialistRouting",
+    "JevText",
     "JevValidation",
     "TypeSafeWireQuestion",
     "TypeSafeWireRequest",

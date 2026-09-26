@@ -57,6 +57,41 @@ Before you ship a question, ask: *could a careful person with no special experti
 
 If they would need scratch paper, have to count something, have to look something up elsewhere, have to imagine how things will turn out, or have to guess what you meant, the question still contains a hidden step. Find it and move it.
 
+## Writing a full question
+
+The strategies below say what to move out of a question. This section says how to lay out what remains, so that every question reads the same way and any two questions can be compared line by line. Feedback on one question applies to every question: when this layout changes, change every question and this section in the same change.
+
+Ship the text a question needs, not the shortest text that fits. A brief that explains its terms and rules in full helps Jev far more than a clipped one, as long as every sentence is a definition, a rule, or a sign Jev can match.
+
+### The brief (`instructions`)
+
+Write the brief as five sections, in this order.
+
+1. **Introduction (2 to 3 sentences).** Say in general terms what the question is going to answer, and what it leaves to other questions. Do not define anything yet.
+2. **State.** One or two sentences that say what each state field is and where it comes from, for example "`request` is the message a user sent to an AI agent to start a task, before the agent has done any work." Jev knows nothing about a field until you describe it.
+3. **Definitions.** Define every term a rule will use, in dependency order: parts before the whole, and each term before any definition that uses it. If a definition says "an action together with the thing it acts on", then "action" and "the thing it acts on" are defined first. Write general descriptions, a few sentences each, with no specific examples; the examples go into the criteria.
+4. **Rules.** Every rule that decides the answer lives here, once. That includes the special cases, the zero, one, and many cases (no item, one item, and several items where only some qualify), the focus ("judge only ...; X is a separate check"), and the guard against the state arguing for its own answer. Rules may give their reasons, because reasoning written once by the author is exactly what helps Jev match the definitions.
+5. **Question.** One positive yes/no question about a named state field, using the defined term and the verb chosen for it.
+
+In code, give the brief a structure so the order cannot drift. In JevAgent this is `JevBrief(introduction, state, definitions, rules, question)`.
+
+### The criteria (`true` and `false`)
+
+Give each side the structure of strategy 3, `{what, not_for, examples}`, never a prose paragraph with examples mixed in. In JevAgent this is `JevCriterion(what, not_for, easy, boundary)`.
+
+- **Start with the verdict in the defined term.** Write "Choose true when `request` states an action.", not a new wording of the definition.
+- **Use one verb everywhere.** If the question asks whether `request` *states* something, the rules, the question, and both sides all say "states", never "names" or "appears".
+- **Add no rules.** A criterion only describes what its side looks like. A case that appears only in a criterion, such as "a question counts as an action", is a rule the brief never set up, so move it into the rules.
+- **Write no reasoning sentences.** Drop "because ..." and "so ..." from criteria. They are arguments, not signs Jev can see, and they ask Jev to follow a chain of logic, which is what this skill exists to remove.
+- **Make the two sides exact opposites that cover every case.** Put the sides next to each other and look for a case that fits both or neither. Every case named on one side needs its mirror in the other side's `not_for`, and the zero, one, and many cases from the rules show up on both sides.
+- **Use minimal pairs.** The strongest boundary example differs from an example on the other side only in the property being tested: "Build the login page." (true) against "The login page." (false). Change one thing per example, so an example never also tests another question's property, such as a relative time or a generic noun.
+- **Label the examples.** Mark which example is the easy case and which sits near the line, by structure (`easy` and `boundary`), not by wording such as "for example" and "is also true".
+- **Use the same template on both sides.** Verdict, then signs, then `not_for`, then the easy example, then the boundary example, so that both sides, and every question in a file, can be compared line by line.
+
+### The gap text and compound questions
+
+When code hands a no answer to another reader, such as a generative agent that writes questions for the user, write that text for the reader who actually reads it. That reader never sees the brief, so the text carries its own short definition and uses the same defined terms. The text must never say more than a no answer supports. If a no can mean "A is missing, or B is missing, or both", the question combines two judgments (strategy 9): split it into two questions and let code combine the answers, so each gap names exactly what is missing.
+
 ## Strategies
 
 The strategies are grouped by the kind of work they move. Most real questions use four or five of them together.
@@ -69,7 +104,7 @@ The strategies are grouped by the kind of work they move. Most real questions us
 
 **Why it works.** Without a definition, Jev has to infer your meaning first and then judge the input. That is two steps, and the first one is reasoning. With a definition, Jev only compares the input against it.
 
-**How to apply.** Find every judgment word in your draft. For each one, write one or two sentences that say what it includes, in terms someone could check by reading. Put the definition before the question itself, so the question reads as the last line of a short brief.
+**How to apply.** Find every judgment word in your draft. For each one, write one or two sentences that say what it includes, in terms someone could check by reading. Define the parts of a term before the term itself, and every term before a rule uses it. Keep definitions general; put examples in the criteria, not in the definition. Put the definitions before the question itself, so the question reads as the last line of a short brief (see "Writing a full question").
 
 - Before: "Is this ticket urgent?"
 - After: "Urgent means the customer cannot use a part of the product they pay for right now, or is losing money right now. Does `message` describe that?"
@@ -91,7 +126,7 @@ The strategies are grouped by the kind of work they move. Most real questions us
 
 **Why it works.** Most mistakes happen at the boundary between two neighboring options. A label such as `billing` is not a definition. The `not_for` line tells Jev exactly where one option stops and the next begins.
 
-**How to apply.** For each option, write the `what`. Then look at its nearest neighbor and write the `not_for` that separates them. Add an example of an easy case and, where you know one, an example of a tricky boundary case.
+**How to apply.** For each option, write the `what`, starting with the verdict in the question's own defined term. Then look at its nearest neighbor and write the `not_for` that separates them. Add an example of an easy case and an example of a boundary case, labeled as such, and make each boundary example a minimal pair with an example of the neighbor. Rules stay in the instructions; an option only describes what its side looks like.
 
 ```json
 "billing": {
@@ -145,7 +180,7 @@ The strategies are grouped by the kind of work they move. Most real questions us
 
 **Why it works.** Negation adds a logical step. A `true` criterion that describes the "no" case, or a rubric that pulls against the question, makes Jev resolve a contradiction. TypeSafe reports lower accuracy in both cases.
 
-**How to apply.** Rewrite "Is it not X?" as "Is it Y?", where Y is the positive description of what you want. If you need "X unless Y", ask two questions and combine them in code. Read the question and the criteria together; they should read as one continuous thought.
+**How to apply.** Rewrite "Is it not X?" as "Is it Y?", where Y is the positive description of what you want. If you need "X unless Y", ask two questions and combine them in code. Pick one verb for the property and use it in the rules, the question, and both options. Read the question and the criteria together; they should read as one continuous thought.
 
 - Before: "Is this request not outside the listed topics?"
 - After: "Does `request` ask for help with one of the topics in `scope`?"
@@ -158,7 +193,7 @@ The strategies are grouped by the kind of work they move. Most real questions us
 
 **Why it works.** A question with "and" or "or" inside it asks Jev to make several judgments and combine them silently. Split, each judgment is easy, and when one goes wrong you can see which.
 
-**How to apply.** Look for "and", "or", "but", "while", and adjective stacks ("complex, multi-step, research-heavy"). Give each property its own question, then write the combination as a short function.
+**How to apply.** Look for "and", "or", "but", "while", and adjective stacks ("complex, multi-step, research-heavy"). Give each property its own question, then write the combination as a short function. A definition that joins two parts ("an action together with its object") is a combination too, and so is any question whose no answer could mean that either of two different things is missing.
 
 - Before: "Is this a complex task that needs outside research?"
 - After: two `noul` questions, `has_multiple_deliverables` and `needs_outside_information`, joined in code.
@@ -302,12 +337,13 @@ The strategies are grouped by the kind of work they move. Most real questions us
 ## Checklist before you ship a question
 
 - [ ] It passes the two-second test.
+- [ ] The brief follows "Writing a full question": introduction, state, definitions in dependency order with no examples, every rule, then the question.
 - [ ] Every judgment word is defined in the question (1), with the exact condition spelled out (2).
-- [ ] Every option, level, or side has `what`; neighbors have `not_for` and examples (3, 4).
+- [ ] Every option, level, or side has a `what` that starts with the verdict, a mirrored `not_for`, and labeled easy and boundary examples that form minimal pairs; no option adds a rule or a "because" (3, 4).
 - [ ] It says what to focus on and what to ignore (5).
 - [ ] It asks what the input says, not what is true in the world (6).
-- [ ] It uses the input's own words, with no negation, and `true` means yes (7, 8).
-- [ ] It holds exactly one judgment; conditions, lists, and comparisons are split in code (9 to 13).
+- [ ] It uses the input's own words, with no negation, one verb for the property throughout, and `true` means yes (7, 8).
+- [ ] It holds exactly one judgment; conditions, lists, and comparisons are split in code, and any text handed on after a no names exactly what is missing (9 to 13).
 - [ ] No counting, arithmetic, dates, or unresolved references are left for Jev (14, 15).
 - [ ] Jev picks among candidates; it never produces them (16).
 - [ ] The state holds only the named fields the question needs, and user text cannot rewrite the rules (17 to 19).
@@ -319,13 +355,15 @@ The strategies are grouped by the kind of work they move. Most real questions us
 
 `JevAgent` capabilities follow the same rules. A few points apply specifically:
 
+- Load this skill before writing, changing, or reviewing any JevAgent question. Fixed preflight questions live in `vidbyte/lib/jev/preflight/`, and each one is a `JevBrief` plus two `JevCriterion` values laid out as "Writing a full question" describes.
+
 - Definitions such as a scope description come from a named, validated setting on the capability, not from `system_prompt`. A system prompt was written to instruct a generative model; it is not a definition.
 - The fallback for any Jev failure is the ordinary linear loop, unless the capability's design doc says otherwise.
 - Code, not Jev, maps answers to budgets, routes, and turn limits.
 
 ## Before and after examples
 
-Each example starts from a question that needs reasoning, names the hidden steps, and shows the rewritten question with its options and the code around it. The rewritten question is the full `instructions` text. Every one is four to five sentences long, because that is roughly how much text it takes to carry a definition, a boundary, a focus, and the question itself.
+Each example starts from a question that needs reasoning, names the hidden steps, and shows the core of the rewritten question with its options and the code around it. The core shown here is the definition, the boundary, the focus, and the question, in four to five sentences, so the rewrite itself is easy to see. A shipped question expands that core into the full layout in "Writing a full question": an introduction, the state description, definitions, rules, and the question, with structured, labeled criteria on both sides.
 
 ### 1. Support ticket urgency
 

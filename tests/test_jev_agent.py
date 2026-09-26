@@ -42,7 +42,7 @@ from vidbyte.lib.constants.jev import (
     JEV_SPECIALIST_NO_MATCH_ID,
 )
 from vidbyte.lib.dataclasses.jev import JevAnswer, JevDecisionRequest, JevOption, JevQuestion
-from vidbyte.lib.enums import AgentRuntimeType, JevQuestionType, ModelProvider
+from vidbyte.lib.enums import AgentRuntimeType, JevQuestionType, JevSpecialistFallback, ModelProvider
 from vidbyte.lib.errors import ConfigurationError, ProviderRequestError, ProviderResponseError
 from vidbyte.lib.http import HttpResponse
 from vidbyte.lib.registries.pricing import ModelPricingRegistry
@@ -464,13 +464,13 @@ class JevSettingsTests(unittest.TestCase):
 class JevAgentRuntimeTests(unittest.IsolatedAsyncioTestCase):
     """Pins runtime specialization while proving the standard loop stays intact."""
 
-    def test_jev_runtime_retains_settings_and_agent_trackers(self) -> None:
-        # [Silent Failure] specialized construction keeps settings, usage, and speed identity.
-        settings = _settings()
-        agent = JevAgent(settings)
+    def test_jev_runtime_receives_the_agents_gate_and_trackers(self) -> None:
+        # [Silent Failure] each run-local runtime gets the gate and response JevAgent built once, plus its trackers.
+        agent = JevAgent(_settings())
         runtime = agent._runtime()
         self.assertIsInstance(runtime, JevRuntime)
-        self.assertIs(runtime.jev_settings, settings)
+        self.assertIs(runtime.preflight, agent.preflight)
+        self.assertIs(runtime.response.state, agent.response)
         self.assertIs(runtime.usage_tracker, agent._usage_tracker)
         self.assertIs(runtime.speed_tracker, agent._speed_tracker)
 
@@ -486,7 +486,7 @@ class JevAgentRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertIs(RuntimeRegistry.resolve(AgentRuntimeType.JEV), JevRuntime)
 
     def test_plain_base_agent_cannot_build_the_jev_runtime(self) -> None:
-        # [Hidden Failure] the jev runtime without JevAgentSettings fails with a message naming JevAgent.
+        # [Hidden Failure] the jev runtime without JevAgent's preflight gate fails with a message naming JevAgent.
         agent = BaseAgent(name="base", system_prompt="Work.", provider="openai", model_name="gpt-4.1-mini", runtime="jev")
         with self.assertRaisesRegex(ConfigurationError, "JevAgent"):
             agent._runtime()
@@ -530,12 +530,17 @@ class JevAgentRuntimeTests(unittest.IsolatedAsyncioTestCase):
 
         request = decision_runner.arun.await_args.args[0]
         question = request.questions[0]
-        self.assertEqual(request.state, "Find research on this SDK.")
-        self.assertIn("Which registered specialist best fits this task?", question.instructions)
+        self.assertEqual(dict(request.state), {"request": "Find research on this SDK."})
+        self.assertTrue(question.instructions.endswith("Which specialist does `request` fit?"))
         self.assertEqual(tuple(option.name for option in question.options), ("research", "no_suitable_agent"))
         self.assertEqual(question.options[0].description, "Research source-backed questions.")
         self.assertEqual(reply.content, "research result")
-        self.assertEqual(reply.metadata["jev_specialist_routing"]["selected_id"], "research")
+        routing = agent.response.routing
+        assert routing is not None
+        self.assertEqual((routing.specialist, routing.fallback, routing.probability, routing.threshold), ("research", None, 0.9, 0.6))
+        self.assertTrue(routing.routed)
+        self.assertNotIn("jev_specialist_routing", reply.metadata)
+        self.assertEqual(agent.response.output, "research result")
         self.assertEqual(len(specialist_runner.calls), 1)
         self.assertEqual(general_runner.calls, [])
 
@@ -543,8 +548,8 @@ class JevAgentRuntimeTests(unittest.IsolatedAsyncioTestCase):
         # [Edge Case] explicit no-match and below-threshold choices both retain the established general loop.
         specialist = JevSpecialist(id="research", description="Research source-backed questions.", agent=_specialist_template())
         for choice, probabilities, reason in (
-            ("no_suitable_agent", {"research": 0.1, "no_suitable_agent": 0.9}, "no_suitable_agent"),
-            ("research", {"research": 0.59, "no_suitable_agent": 0.41}, "below_probability_threshold"),
+            ("no_suitable_agent", {"research": 0.1, "no_suitable_agent": 0.9}, JevSpecialistFallback.NO_MATCH),
+            ("research", {"research": 0.59, "no_suitable_agent": 0.41}, JevSpecialistFallback.WEAK_MATCH),
         ):
             with self.subTest(reason=reason):
                 general_runner = ScriptedRunner(TextModelResponse(provider=ModelProvider.OPENAI, model="fake-general", text="general result", raw={}))
@@ -554,7 +559,10 @@ class JevAgentRuntimeTests(unittest.IsolatedAsyncioTestCase):
                 with patch("vidbyte.agents.jev.specialists.DecisionModelRunner", return_value=decision_runner):
                     reply = await agent.arun("Do this task.")
                 self.assertEqual(reply.content, "general result")
-                self.assertEqual(reply.metadata["jev_specialist_routing"]["reason"], reason)
+                routing = agent.response.routing
+                assert routing is not None
+                self.assertEqual((routing.specialist, routing.fallback), (None, reason))
+                self.assertFalse(routing.routed)
                 self.assertEqual(len(general_runner.calls), 1)
 
     async def test_decision_failure_falls_back_to_general_agent(self) -> None:
@@ -567,8 +575,34 @@ class JevAgentRuntimeTests(unittest.IsolatedAsyncioTestCase):
         with patch("vidbyte.agents.jev.specialists.DecisionModelRunner", return_value=decision_runner):
             reply = await agent.arun("Do this task.")
         self.assertEqual(reply.content, "general result")
-        self.assertEqual(reply.metadata["jev_specialist_routing"]["reason"], "decision_unavailable")
-        self.assertEqual(reply.metadata["jev_specialist_routing"]["error_type"], "RuntimeError")
+        routing = agent.response.routing
+        assert routing is not None
+        self.assertEqual((routing.fallback, routing.error_type), (JevSpecialistFallback.DECISION_UNAVAILABLE, "RuntimeError"))
+
+    async def test_closed_gate_never_reaches_the_router(self) -> None:
+        # [Hidden Assumption] routing runs after JevPreflightGate, so a stopped run spends no routing call and no specialist tokens.
+        specialist_runner = ScriptedRunner(TextModelResponse(provider=ModelProvider.OPENAI, model="fake-specialist", text="research result", raw={}))
+        specialist = JevSpecialist(id="research", description="Research source-backed questions.", agent=_specialist_template(runner=specialist_runner))
+        general_runner = ScriptedRunner()
+        agent = bind_test_runner(JevAgent(_settings(agents=(specialist,))), general_runner)
+        decision_runner = AsyncMock()
+        with patch.object(agent.preflight, "pass_", AsyncMock(return_value=False)), patch("vidbyte.agents.jev.specialists.DecisionModelRunner", return_value=decision_runner):
+            await agent.arun("Find research on this SDK.")
+        decision_runner.arun.assert_not_awaited()
+        self.assertIsNone(agent.response.routing)
+        self.assertEqual(specialist_runner.calls, [])
+        self.assertEqual(general_runner.calls, [])
+
+    async def test_empty_catalog_records_no_routing(self) -> None:
+        # [Edge Case] without specialists the router is disabled: no Jev call, and response.routing stays None.
+        general_runner = ScriptedRunner(TextModelResponse(provider=ModelProvider.OPENAI, model="fake-general", text="general result", raw={}))
+        agent = bind_test_runner(JevAgent(_settings()), general_runner)
+        self.assertFalse(agent.specialists.enabled)
+        with patch("vidbyte.agents.jev.specialists.DecisionModelRunner") as decision_runner:
+            reply = await agent.arun("Do this task.")
+        decision_runner.assert_not_called()
+        self.assertEqual(reply.content, "general result")
+        self.assertIsNone(agent.response.routing)
 
 
 class JevPromptRegistryTests(unittest.TestCase):

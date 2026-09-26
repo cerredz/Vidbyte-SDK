@@ -1,1 +1,1 @@
-No registered specialist clearly fits this request; use the general agent.
+Choose `no_suitable_agent` when `request` fits no specialist. The signs are work outside every specialist's scope, or several pieces of work where only some are inside one specialist's scope. A request whose work is all inside one specialist's scope belongs to that specialist.

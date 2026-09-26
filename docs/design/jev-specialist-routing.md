@@ -34,20 +34,21 @@ Allow `JevAgentSettings` to hold a validated catalog of specialist agent templat
 
 1. `JevAgentSettings(agents=())` preserves current behavior and does not call Jev.
 2. Each `JevSpecialist` has a unique stable ID, a non-blank description, and a `BaseAgent` template. The template is forked for the selected run.
-3. Jev receives the current prompt as decision state and one fixed question: “Which registered specialist best fits this task?” Options contain each specialist ID and a reserved `no_suitable_agent`; option descriptions state the specialist's scope. Instructions direct Jev to choose the strongest direct fit and choose no-match if none clearly applies.
+3. Jev receives the current prompt as the `request` state field and one fixed question, “Which specialist does `request` fit?”, written in the five-section layout of `skills/asking-jev-questions/SKILL.md` ("Writing a full question"). Options contain each specialist ID and a reserved `no_suitable_agent`; option descriptions state the specialist's scope. The rules direct Jev to choose the specialist whose scope holds every piece of the requested work, and to choose no-match when none does.
 4. A selected specialist runs only when its normalized option probability meets the configured minimum. No-match, a weak selection, or decision unavailability uses the general agent.
 5. Once specialist execution starts, its error propagates. The system does not replay the task through the general agent.
-6. Routing metadata records the selected specialist or fallback reason without including raw prompt text or secrets.
+6. `JevAgent.response.routing` (`JevSpecialistRouting`) records the selected specialist or the fallback reason without including raw prompt text or secrets.
+7. Routing runs only after `JevPreflightGate` passes, so a request the gate stops never reaches a specialist.
 
 ### Non-Functional Requirements
 
 - Validate against TypeSafe limits: at most 255 Choice options (including no-match), unique labels, non-blank bounded labels and descriptions, and the existing state character limit. The token limit remains ultimately enforced by TypeSafe because the SDK has no tokenizer for the decision model.
 - Preserve per-run isolation by forking the selected template and closing its MCP resources after execution.
-- Record TypeSafe decision usage once in the parent JevAgent tracker; expose specialist usage separately in the run metadata.
+- Record TypeSafe decision usage once in the parent JevAgent tracker; expose specialist usage separately on `JevAgent.response.routing.usage`.
 
 ## High-Level Design
 
-Add immutable `JevSpecialist` metadata and an `agents` catalog plus a probability threshold to `JevAgentSettings`. `JevRuntime` skips matching when the catalog is empty. Otherwise it builds one typed `JevDecisionRequest` from the normalized prompt and fixed Choice question, invokes `DecisionModelRunner`, and checks the returned choice and its probability against the threshold.
+Add immutable `JevSpecialist` metadata and an `agents` catalog plus a probability threshold to `JevAgentSettings`. `JevAgent` builds one `JevSpecialistRouter` from the settings at construction and passes it to `JevRuntime`, which calls it after the preflight gate passes. The router is disabled when the catalog is empty. Otherwise it builds one typed `JevDecisionRequest` from the normalized prompt and fixed Choice question, invokes `DecisionModelRunner`, and checks the returned choice and its probability against the threshold.
 
 For a qualified specialist selection, the runtime forks the specialist template, calls its ordinary `generate_reply()` with the original prompt, input context, and conversation history, then returns that output as the parent runtime's `AgentResult`. The parent's ordinary `BaseAgent` flow therefore still owns the returned message, history, and session boundary. No catalog agent is mutated across calls.
 
@@ -82,7 +83,7 @@ Invalid configuration raises `ConfigurationError` at construction. An empty cata
 
 ### 6.2 Pre-run routing and execution
 
-**File(s):** `vidbyte/agents/jev/runtime.py`, `vidbyte/agents/jev/__init__.py`, `vidbyte/agents/__init__.py`, `vidbyte/__init__.py`
+**File(s):** `vidbyte/agents/jev/specialists.py`, `vidbyte/agents/jev/agent.py`, `vidbyte/agents/jev/runtime.py`, `vidbyte/agents/jev/response.py`, `vidbyte/agents/jev/__init__.py`, `vidbyte/agents/__init__.py`, `vidbyte/__init__.py`
 **Type:** Modified files
 
 #### What it does
@@ -95,12 +96,12 @@ The routing question, its name, the no-match option, and the question wording ar
 
 #### Logic / Algorithm
 
-1. If there are no specialists, invoke the inherited linear runtime directly.
-2. Build a `JevDecisionRequest` with current prompt state and one Choice question. Each specialist option description contains the supplied specialist description; `no_suitable_agent` has a fixed explanation.
-3. On a Jev decision failure or missing answer, record a safe fallback reason and invoke the inherited runtime.
-4. If Jev chooses no-match or a specialist probability below threshold, record the reason and invoke the inherited runtime.
+1. If the preflight gate closes, return its response; routing never runs. If there are no specialists, invoke the general loop directly.
+2. Build a `JevDecisionRequest` with the state `{request: prompt}` and one Choice question. Each specialist option description contains the supplied specialist description; `no_suitable_agent` has a fixed explanation.
+3. On a Jev decision failure or missing answer, record a `JevSpecialistFallback` reason through `JevResponse.routed` and invoke the general loop.
+4. If Jev chooses no-match or a specialist probability below threshold, record the reason the same way and invoke the general loop.
 5. Fork the selected template, call its `generate_reply()` with the prompt and user-visible context/history, and always close the fork's MCP resources.
-6. Return an `AgentResult` containing the specialist output and bounded routing metadata. Preserve the specialist's structured result where available.
+6. Record the specialist, its probability, and its usage through `JevResponse.routed`, and return an `AgentResult` containing the specialist output. Preserve the specialist's structured result where available.
 
 #### Edge Cases & Error Handling
 

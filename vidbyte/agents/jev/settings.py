@@ -1,12 +1,12 @@
 """FILE: vidbyte/agents/jev/settings.py
 
 PURPOSE: Defines the single, opinionated public configuration object for JevAgent.
-ROLE IN CODEBASE: JevAgentSettings is the only constructor input accepted by JevAgent and carries decision configuration, the specialist catalog, and named preflight settings into JevRuntime.
+ROLE IN CODEBASE: JevAgentSettings is the only constructor input accepted by JevAgent; JevAgent builds its preflight gate and its JevSpecialistRouter from these settings, so JevRuntime reads them only for the tool selector.
 ARCHITECTURE NOTE: The surface is intentionally closed; named Jev capabilities belong here as explicit settings instead of a generic decisions collection.
-COMMON MODIFICATION PATTERNS: Add a validated named capability object, then implement its fixed policy in JevRuntime without exposing runtime replacement hooks.
-KNOWN EDGE CASES: The generative provider cannot be TypeSafe because Jev is a decision model; selector and specialist thresholds reject booleans, non-finite values, and out-of-range probabilities.
-RELATED DOCS: docs/design/jev-agent-scaffold.md, docs/design/jev-tool-selector.md, and skills/jev-agent/SKILL.md.
-TESTS: tests/test_jev_agent.py, tests/test_jev_tool_selector.py, and scripts/test-jev-tool-selector.py.
+COMMON MODIFICATION PATTERNS: Add a validated named capability setting, then implement its fixed policy in its own class under vidbyte/agents/jev/ (the gate, the specialist router) without exposing runtime replacement hooks.
+KNOWN EDGE CASES: The generative provider cannot be TypeSafe because Jev is a decision model; neither generative nor decision API keys appear in repr output. Preflight presets are validated by JevPreflightRegistry and the specialist catalog by JevSpecialistCatalog at construction, so no TypeSafe key is needed until a run asks Jev; the tool-selector and specialist thresholds reject booleans, non-finite values, and out-of-range probabilities.
+RELATED DOCS: docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, docs/design/jev-tool-selector.md, docs/design/jev-specialist-routing.md, and skills/jev-agent/SKILL.md.
+TESTS: tests/test_jev_agent.py, tests/test_jev_preflight.py, tests/test_jev_tool_selector.py, and scripts/test-jev-agent-scaffold.py.
 """
 
 from __future__ import annotations
@@ -15,7 +15,6 @@ import math
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 
-from vidbyte.agents.jev.presets import JevPreflightPreset
 from vidbyte.agents.settings import AgentLoopSettings
 from vidbyte.lib.constants.jev import (
     JEV_SPECIALIST_DEFAULT_MATCH_THRESHOLD,
@@ -25,8 +24,9 @@ from vidbyte.lib.constants.jev import (
 )
 from vidbyte.lib.dataclasses.jev import JevSpecialist, JevSpecialistCatalog
 from vidbyte.lib.dataclasses.model_configs import DecisionModelConfig
-from vidbyte.lib.enums import ModelProvider
+from vidbyte.lib.enums import JevPreflightPreset, ModelProvider
 from vidbyte.lib.errors import ConfigurationError
+from vidbyte.lib.jev import JevPreflightRegistry
 from vidbyte.tools.security import PermissionPolicy
 
 
@@ -75,24 +75,9 @@ class JevAgentSettings:
             raise ConfigurationError("JevAgentSettings.loop must be an AgentLoopSettings instance.")
         if not isinstance(self.decision, DecisionModelConfig):
             raise ConfigurationError("JevAgentSettings.decision must be a DecisionModelConfig instance.")
-        self._normalize_preflight()
+        object.__setattr__(self, "preflight", JevPreflightRegistry.validate(self.preflight))
         self._validate_tool_selector_threshold()
         self._normalize_specialists()
-
-    def _normalize_preflight(self) -> None:
-        # Converts supported string names into the closed preflight enum and rejects duplicate policies.
-        if isinstance(self.preflight, (str, bytes)):
-            raise ConfigurationError("JevAgentSettings.preflight must be an iterable of JevPreflightPreset values, not a string.")
-        try:
-            normalized = tuple(
-                value if isinstance(value, JevPreflightPreset) else JevPreflightPreset(value)
-                for value in self.preflight
-            )
-        except (TypeError, ValueError) as exc:
-            raise ConfigurationError("JevAgentSettings.preflight contains an unsupported preset.") from exc
-        if len(set(normalized)) != len(normalized):
-            raise ConfigurationError("JevAgentSettings.preflight cannot contain duplicate presets.")
-        object.__setattr__(self, "preflight", normalized)
 
     def _validate_tool_selector_threshold(self) -> None:
         # Accepts calibrated probabilities on the closed unit interval, but excludes bool and non-finite values.
@@ -116,7 +101,7 @@ class JevAgentSettings:
 
     @property
     def specialists(self) -> JevSpecialistCatalog:
-        """Return the validated specialist catalog JevRuntime routes with."""
+        """Return the validated specialist catalog JevAgent builds its JevSpecialistRouter from."""
         return JevSpecialistCatalog(specialists=tuple(self.agents), match_threshold=self.specialist_match_threshold)
 
     @staticmethod
