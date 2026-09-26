@@ -1,11 +1,11 @@
 """FILE: vidbyte/lib/enums/jev.py
 
-PURPOSE: Defines the closed Jev vocabularies: the TypeSafe question types, the preflight presets a JevAgent user can enable, and the key of every preflight question.
-ROLE IN CODEBASE: `vidbyte/lib/dataclasses/jev.py` validates questions against these members, `vidbyte/providers/typesafe.py` serializes question types onto the wire, `vidbyte/lib/jev/presets.py` maps each fixed-question preset to its question keys, `vidbyte/lib/jev/preflight/` registers one question per key, and `vidbyte/agents/jev/gate/` matches on the presets when it acts on Jev's answers.
+PURPOSE: Defines the closed Jev vocabularies: the TypeSafe question types, the preflight presets a JevAgent user can enable, the key of every preflight question, and why specialist routing fell back to the general agent.
+ROLE IN CODEBASE: `vidbyte/lib/dataclasses/jev.py` validates questions against these members, `vidbyte/providers/typesafe.py` serializes question types onto the wire, `vidbyte/lib/jev/presets.py` maps each fixed-question preset to its question keys, `vidbyte/lib/jev/preflight/` registers one question per key, `vidbyte/agents/jev/gate/` matches on the presets when it acts on Jev's answers, and `vidbyte/agents/jev/specialists.py` records a JevSpecialistFallback on each general-agent run.
 ARCHITECTURE NOTE: The vocabulary lives in `vidbyte.lib` because the provider layer, the record layer, and the tool layer all read it, and the lower two may not import the tool layer.
 COMMON MODIFICATION PATTERNS: Add a question type only when TypeSafe documents one, then extend JevQuestion validation and TypeSafeProvider answer normalization in the same change. Add a preflight question key together with its question dataclass in `vidbyte/lib/jev/preflight/` and its preset's key list in `vidbyte/lib/jev/presets.py`.
 KNOWN EDGE CASES: `noul` is TypeSafe's own spelling for a yes/no question; keep the serialized value exactly as the API expects it. A question key's value is the answer name Jev returns, so it must stay unique across every preset. TOOL_SELECTOR has no question keys because it asks one question per configured tool, built at run time.
-RELATED DOCS: docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, and https://docs.typesafe.ai/api.md.
+RELATED DOCS: docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, docs/design/jev-specialist-routing.md, and https://docs.typesafe.ai/api.md.
 TESTS: tests/test_jev_agent.py, tests/test_jev_preflight.py, scripts/test-jev-agent-scaffold.py, and scripts/test-jev-preflight.py.
 """
 
@@ -56,4 +56,13 @@ class JevPreflightQuestionKey(str, Enum):
     CLARITY_SINGLE_READING = "clarity.single_reading"
 
 
-__all__ = ["JevPreflightPreset", "JevPreflightQuestionKey", "JevQuestionType"]
+class JevSpecialistFallback(str, Enum):
+    """Why JevSpecialistRouter ran the general agent instead of a registered specialist."""
+
+    NO_MATCH = "no_suitable_agent"
+    WEAK_MATCH = "below_probability_threshold"
+    DECISION_UNAVAILABLE = "decision_unavailable"
+    INPUT_TOO_LARGE = "routing_input_too_large"
+
+
+__all__ = ["JevPreflightPreset", "JevPreflightQuestionKey", "JevQuestionType", "JevSpecialistFallback"]

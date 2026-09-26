@@ -49,7 +49,7 @@ from vidbyte.lib.enums.cot_events import (
     ReturnableOption,
     Reversibility,
 )
-from vidbyte.lib.enums.jev import JevPreflightPreset, JevPreflightQuestionKey, JevQuestionType
+from vidbyte.lib.enums.jev import JevPreflightPreset, JevPreflightQuestionKey, JevQuestionType, JevSpecialistFallback
 from vidbyte.lib.enums.model_modality import ModelModality, ModelNameModality
 from vidbyte.lib.enums.model_provider import ModelProvider
 from vidbyte.lib.enums.multi_agent import (
@@ -90,6 +90,7 @@ __all__ = [
     "JevPreflightPreset",
     "JevPreflightQuestionKey",
     "JevQuestionType",
+    "JevSpecialistFallback",
     "AbsenceEvidenceSignificance",
     "AgentRuntimeStateKey",
     "AgentRuntimeType",

@@ -1,7 +1,7 @@
 """FILE: vidbyte/lib/constants/jev.py
 
-PURPOSE: Declares the TypeSafe Jev limits, defaults, and wire literals shared by the decision records and provider adapter, plus the JevAgent preflight policy values.
-ROLE IN CODEBASE: `vidbyte/lib/dataclasses/jev.py` validates against these bounds, `vidbyte/providers/typesafe.py` builds requests from the same values, `vidbyte/lib/jev/` reads the preflight policy values, and `vidbyte/agents/jev/` reads the tool-selector and clarification values.
+PURPOSE: Declares the TypeSafe Jev limits, defaults, and wire literals shared by the decision records and provider adapter, plus the JevAgent preflight and specialist-routing policy values.
+ROLE IN CODEBASE: `vidbyte/lib/dataclasses/jev.py` validates against these bounds, `vidbyte/providers/typesafe.py` builds requests from the same values, `vidbyte/lib/jev/` reads the preflight policy values, and `vidbyte/agents/jev/` reads the tool-selector, clarification, and specialist-routing values.
 ARCHITECTURE NOTE: Values live in `vidbyte.lib` so both lower-layer modules and the tool layer can import them without a layering inversion.
 COMMON MODIFICATION PATTERNS: Change a vendor limit only after TypeSafe documents it; local sanity caps stay generous because the API enforces the real (token) limits itself.
 KNOWN EDGE CASES: Vendor limits are the 255 Choice options and the 2-10 Score levels; question count, state size, and option-name length are local caps only.
@@ -80,6 +80,16 @@ JEV_TOOL_SELECTOR_DEFAULT_THRESHOLD: float = 0.20
 JEV_TOOL_SELECTOR_MAX_THRESHOLD: float = 1.0
 JEV_TOOL_SELECTOR_MIN_THRESHOLD: float = 0.0
 
+# Specialist-routing catalog. One Choice option is reserved for the no-match answer, so the catalog
+# holds one fewer entry than TypeSafe's option limit. The character caps are local sanity bounds set
+# well above realistic catalogs: TypeSafe enforces the real token limits, and an oversized routing
+# input falls back to the general agent rather than failing the run.
+JEV_SPECIALIST_NO_MATCH_ID: str = "no_suitable_agent"
+JEV_SPECIALIST_MAX_COUNT: int = JEV_MAX_CHOICE_OPTIONS - 1
+JEV_SPECIALIST_MAX_DESCRIPTION_CHARS: int = 32_000
+JEV_SPECIALIST_MAX_ROUTING_CHARS: int = JEV_MAX_STATE_CHARS
+JEV_SPECIALIST_DEFAULT_MATCH_THRESHOLD: float = 0.6
+
 __all__ = [
     "JEV_CLARIFICATION_MAX_ITERATIONS",
     "JEV_CLARIFICATION_MAX_QUESTIONS",
@@ -111,6 +121,11 @@ __all__ = [
     "JEV_PROBABILITY_SUM_TOLERANCE",
     "JEV_RETRY_BACKOFF_SECONDS",
     "JEV_RETRY_STATUS_CODES",
+    "JEV_SPECIALIST_DEFAULT_MATCH_THRESHOLD",
+    "JEV_SPECIALIST_MAX_COUNT",
+    "JEV_SPECIALIST_MAX_DESCRIPTION_CHARS",
+    "JEV_SPECIALIST_MAX_ROUTING_CHARS",
+    "JEV_SPECIALIST_NO_MATCH_ID",
     "JEV_STATUS_OVERLOADED",
     "JEV_STATUS_RATE_LIMITED",
     "JEV_STATUS_REQUEST_TIMEOUT",

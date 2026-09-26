@@ -1,6 +1,6 @@
 """FILE: vidbyte/lib/dataclasses/jev.py
 
-PURPOSE: Defines the validated records for TypeSafe Jev decisions (JSON content, options, questions, requests, normalized answers, wire bodies, model cards, and decision-log records) and for JevAgent preflight (the noul score, the question brief and criteria, the question base, preset definitions, preset results, the clarification agent's structured reply and the clarification built from it, and the JevAgentResponse the user reads after a run).
+PURPOSE: Defines the validated records for TypeSafe Jev decisions (JSON content, options, questions, requests, normalized answers, wire bodies, model cards, and decision-log records), for JevAgent preflight (the noul score, the question brief and criteria, the question base, preset definitions, preset results, the clarification agent's structured reply and the clarification built from it), for JevAgent specialist routing (the specialist, the catalog, and the routing outcome), and the JevAgentResponse the user reads after a run.
 ROLE IN CODEBASE: `vidbyte/providers/typesafe.py` builds TypeSafeWireRequest from JevDecisionRequest and JevAnswer values from responses, while `vidbyte/lib/runners/decision.py` passes the typed records through.
 ARCHITECTURE NOTE: This module must not import model_configs because that would close an import cycle through ModalityDetector. Records own every shape rule in __post_init__; the provider, not these records, turns a wire record into the JSON body (lint S060 bars dict[str, Any] encoders here).
 COMMON MODIFICATION PATTERNS: Mirror https://docs.typesafe.ai/api.md exactly: add a field together with its validation, its wire record, and its provider serialization; keep bounds in vidbyte/lib/constants/jev.py.
@@ -35,15 +35,22 @@ from vidbyte.lib.constants.jev import (
     JEV_NOUL_OPTIONS,
     JEV_NOUL_TRUE,
     JEV_PROBABILITY_SUM_TOLERANCE,
+    JEV_SPECIALIST_MAX_COUNT,
+    JEV_SPECIALIST_MAX_DESCRIPTION_CHARS,
+    JEV_SPECIALIST_MAX_ROUTING_CHARS,
+    JEV_SPECIALIST_NO_MATCH_ID,
 )
+from vidbyte.lib.enums.agent_runtime import AgentRuntimeType
 from vidbyte.lib.enums.jev import (
     JevPreflightPreset,
     JevPreflightQuestionKey,
     JevQuestionType,
+    JevSpecialistFallback,
 )
 from vidbyte.lib.errors import ConfigurationError
 
 if TYPE_CHECKING:
+    from vidbyte.agents.base import BaseAgent
     from vidbyte.agents.pricing import ProviderUsage, UsageRollup
 
 # A frozen JSON value as TypeSafe accepts it: a string, or a read-only mapping / tuple of JSON values.
@@ -395,6 +402,111 @@ class JevDecisionRecord:
 
 
 @dataclass(frozen=True, slots=True)
+class JevSpecialist:
+    """One registered specialist's stable choice ID, matching description, and configured agent template."""
+
+    id: str
+    description: str
+    agent: BaseAgent
+
+    def __post_init__(self) -> None:
+        # Rejects ambiguous metadata and configurations that cannot be routed or executed safely.
+        self._validate_identity()
+        self._validate_description()
+        self._validate_agent()
+
+    def _validate_identity(self) -> None:
+        # Enforces the TypeSafe option label bound and keeps the no-match label reserved.
+        if not isinstance(self.id, str) or not self.id.strip():
+            raise ConfigurationError("JevSpecialist.id must be a non-blank string.")
+        if self.id != self.id.strip() or len(self.id) > JEV_MAX_OPTION_NAME_CHARS:
+            raise ConfigurationError(f"JevSpecialist.id must be trimmed and at most {JEV_MAX_OPTION_NAME_CHARS} characters.")
+        if self.id == JEV_SPECIALIST_NO_MATCH_ID:
+            raise ConfigurationError(f"JevSpecialist.id {JEV_SPECIALIST_NO_MATCH_ID!r} is reserved for the no-match option.")
+
+    def _validate_description(self) -> None:
+        # Requires a bounded description because it is sent to the decision model on every routed run.
+        if not isinstance(self.description, str) or not self.description.strip() or self.description != self.description.strip():
+            raise ConfigurationError("JevSpecialist.description must be a trimmed, non-blank string.")
+        if len(self.description) > JEV_SPECIALIST_MAX_DESCRIPTION_CHARS:
+            raise ConfigurationError(f"JevSpecialist.description must be at most {JEV_SPECIALIST_MAX_DESCRIPTION_CHARS} characters.")
+
+    def _validate_agent(self) -> None:
+        # Requires a configured agent template and disallows recursively nested Jev routing.
+        # @intent lib-record-checks-agent-shape-without-upward-import
+        # vidbyte.lib may not import vidbyte.agents at run time, so the record checks the BaseAgent surface the
+        # router uses (a resolved runtime type, fork, and generate_reply) instead of an isinstance check.
+        runtime_type = getattr(self.agent, "runtime_type", None)
+        if not isinstance(runtime_type, AgentRuntimeType) or not all(callable(getattr(self.agent, name, None)) for name in ("fork", "generate_reply")):
+            raise ConfigurationError("JevSpecialist.agent must be a configured BaseAgent instance.")
+        if runtime_type is AgentRuntimeType.JEV:
+            raise ConfigurationError("JevSpecialist.agent cannot use the jev runtime.")
+
+
+@dataclass(frozen=True, slots=True)
+class JevSpecialistCatalog:
+    """The validated specialist collection and probability threshold one JevAgent routes with."""
+
+    specialists: tuple[JevSpecialist, ...]
+    match_threshold: float
+
+    def __post_init__(self) -> None:
+        # Enforces collection invariants that no single JevSpecialist entry can check on its own.
+        if not isinstance(self.specialists, tuple) or not all(isinstance(specialist, JevSpecialist) for specialist in self.specialists):
+            raise ConfigurationError("JevAgentSettings.agents must contain only JevSpecialist values.")
+        if len(self.specialists) > JEV_SPECIALIST_MAX_COUNT:
+            raise ConfigurationError(f"JevAgentSettings.agents supports at most {JEV_SPECIALIST_MAX_COUNT} specialists.")
+        identifiers = tuple(specialist.id for specialist in self.specialists)
+        if len(set(identifiers)) != len(identifiers):
+            raise ConfigurationError("JevAgentSettings.agents must have unique specialist IDs.")
+        if self.metadata_chars() > JEV_SPECIALIST_MAX_ROUTING_CHARS:
+            raise ConfigurationError(f"JevAgentSettings.agents metadata must fit within {JEV_SPECIALIST_MAX_ROUTING_CHARS} characters in total.")
+        object.__setattr__(self, "match_threshold", JevProbability.require(self.match_threshold, field_name="JevAgentSettings.specialist_match_threshold"))
+
+    def metadata_chars(self) -> int:
+        """Return the combined ID and description length sent to Jev on every routed run."""
+        return sum(len(specialist.id) + len(specialist.description) for specialist in self.specialists)
+
+    def get(self, specialist_id: str) -> JevSpecialist | None:
+        """Return the registered specialist for one Choice answer, or None for an unknown ID."""
+        return next((specialist for specialist in self.specialists if specialist.id == specialist_id), None)
+
+
+@dataclass(frozen=True, slots=True)
+class JevSpecialistRouting:
+    """Which agent JevSpecialistRouter ran for the most recent task, and why, read as `JevAgent.response.routing`.
+
+    `specialist` is the ID of the registered specialist that ran, or None when the general agent ran;
+    `fallback` then says why. `choice` and `probability` are Jev's answer when it gave one (a weak match
+    keeps the choice it did not take), `threshold` is the catalog's match threshold, `error_type` names
+    the exception class of an unavailable decision, and `usage` is the specialist's own model usage.
+    """
+
+    threshold: float
+    specialist: str | None = None
+    fallback: JevSpecialistFallback | None = None
+    choice: str | None = None
+    probability: float | None = None
+    error_type: str | None = None
+    usage: UsageRollup | None = None
+
+    def __post_init__(self) -> None:
+        # Requires exactly one of a specialist or a fallback reason, and valid probabilities.
+        # @intent routing-names-exactly-one-handler
+        # A caller reads this record to learn which agent answered, so a record naming both or neither handler is refused.
+        if (self.specialist is None) == (self.fallback is None):
+            raise JevValidation.error("specialist routing", "exactly one of specialist or fallback", (self.specialist, self.fallback))
+        object.__setattr__(self, "threshold", JevProbability.require(self.threshold, field_name="specialist routing threshold"))
+        if self.probability is not None:
+            object.__setattr__(self, "probability", JevProbability.require(self.probability, field_name="specialist routing probability"))
+
+    @property
+    def routed(self) -> bool:
+        """Return True when a registered specialist, not the general agent, handled the task."""
+        return self.specialist is not None
+
+
+@dataclass(frozen=True, slots=True)
 class JevNoulScore:
     """How a set of noul answers scored against one threshold: their mean P(yes), the verdict, and the answers used.
 
@@ -652,7 +764,8 @@ class JevAgentResponse:
 
     JevResponse is the only writer: it resets this record at the start of each run and fills it as the
     preflight gate acts. `results` holds one entry per enabled fixed-question preset, `usage` is the one
-    preflight Jev call's usage, and `clarification` is set only when the gate stopped the run to ask the user.
+    preflight Jev call's usage, `clarification` is set only when the gate stopped the run to ask the user, and
+    `routing` is set only when a specialist catalog is configured and the gate let the run through.
     """
 
     input: str = ""
@@ -660,6 +773,7 @@ class JevAgentResponse:
     results: dict[JevPreflightPreset, JevPresetResult] = field(default_factory=dict)
     clarification: JevClarification | None = None
     usage: ProviderUsage | None = None
+    routing: JevSpecialistRouting | None = None
 
     @property
     def needs_clarification(self) -> bool:
@@ -688,6 +802,9 @@ __all__ = [
     "JevPresetResult",
     "JevProbability",
     "JevQuestion",
+    "JevSpecialist",
+    "JevSpecialistCatalog",
+    "JevSpecialistRouting",
     "JevText",
     "JevValidation",
     "TypeSafeWireQuestion",
