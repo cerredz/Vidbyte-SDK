@@ -62,6 +62,9 @@ JEV_NOUL_YES_THRESHOLD: float = 0.5
 # 0.75 is a starting point, not a value tuned on a labeled set.
 JEV_PREFLIGHT_REQUEST_FIELD: str = "request"
 JEV_CLARITY_THRESHOLD: float = 0.75
+# One clarity question with P(yes) below this fails the preset on its own, so a mean pulled up by many
+# easy yes answers cannot hide one clear no. Also a starting point, not a tuned value.
+JEV_CLARITY_VETO_THRESHOLD: float = 0.2
 # A run the preflight gate stops reports this strategy name.
 JEV_PREFLIGHT_STRATEGY_NAME: str = "jev_preflight"
 # JevClarificationAgent limits: its loop and token budget, and the size of the structured reply it must
@@ -84,6 +87,7 @@ __all__ = [
     "JEV_CLARIFICATION_MAX_TOKENS",
     "JEV_CLARIFICATION_MIN_RECOMMENDATIONS",
     "JEV_CLARITY_THRESHOLD",
+    "JEV_CLARITY_VETO_THRESHOLD",
     "JEV_DEFAULT_MODEL",
     "JEV_DEFAULT_RETRY_COUNT",
     "JEV_DEFAULT_TIMEOUT_SECONDS",

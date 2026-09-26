@@ -398,7 +398,8 @@ class JevDecisionRecord:
 class JevNoulScore:
     """How a set of noul answers scored against one threshold: their mean P(yes), the verdict, and the answers used.
 
-    DecisionModelRunner.score_noul builds this; `passed` is True when `score` is at or above the threshold.
+    DecisionModelRunner.score_noul builds this; `passed` is True when `score` is at or above the threshold
+    and, when a veto is given, no single answer's P(yes) falls below the veto.
     """
 
     score: float
@@ -525,14 +526,21 @@ class JevPreflightQuestion:
 
 @dataclass(frozen=True, slots=True)
 class JevPresetDefinition:
-    """The fixed policy one fixed-question preflight flag turns on: which questions it asks and the score it must reach."""
+    """The fixed policy one fixed-question preflight flag turns on: which questions it asks and the score it must reach.
+
+    `threshold` is the mean P(yes) the questions must reach. `veto`, when set, fails the preset on its own
+    whenever any one question's P(yes) falls below it. `gate`, when set, names the question every other
+    question depends on; when it fails, only its gap is reported.
+    """
 
     preset: JevPreflightPreset
     question_keys: tuple[JevPreflightQuestionKey, ...]
     threshold: float
+    veto: float | None = None
+    gate: JevPreflightQuestionKey | None = None
 
     def __post_init__(self) -> None:
-        # Requires a registered preset, a non-empty tuple of unique keys, and a probability threshold.
+        # Requires a registered preset, a non-empty tuple of unique keys, probability thresholds, and a gate among the keys.
         if not isinstance(self.preset, JevPreflightPreset):
             raise JevValidation.error("preset definition preset", "a JevPreflightPreset member", self.preset)
         keys = self.question_keys
@@ -541,6 +549,10 @@ class JevPresetDefinition:
         if len(set(keys)) != len(keys):
             raise JevValidation.error(f"question_keys of preset {self.preset.value!r}", "unique question keys", keys)
         object.__setattr__(self, "threshold", JevProbability.require(self.threshold, field_name=f"threshold of preset {self.preset.value!r}"))
+        if self.veto is not None:
+            object.__setattr__(self, "veto", JevProbability.require(self.veto, field_name=f"veto of preset {self.preset.value!r}"))
+        if self.gate is not None and self.gate not in keys:
+            raise JevValidation.error(f"gate of preset {self.preset.value!r}", "one of the preset's question keys", self.gate)
 
 
 @dataclass(frozen=True, slots=True)

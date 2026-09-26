@@ -1,13 +1,13 @@
 ---
 name: asking-jev-questions
-description: Turn questions that seem to need reasoning into questions TypeSafe Jev can answer by recognition alone, by writing the reasoning into the question, the state, and the surrounding code. Use when designing, reviewing, or debugging any Jev question (noul, choice, score), its criteria, its state, or the code that acts on its answer.
+description: Turn questions that seem to need reasoning into questions TypeSafe Jev can answer by recognition alone, by writing the reasoning into the question, the state, and the surrounding code, backed by 25 research-measured tips and the published Jev papers. Use when designing, reviewing, or debugging any Jev question (noul, choice, score), its criteria, its state, or the code that acts on its answer.
 ---
 
 # Asking Jev Questions
 
 Use this skill whenever you write or change a question that is sent to Jev. For work on `JevAgent` itself, read `skills/jev-agent/SKILL.md` first for the package boundary. This skill covers how to write the question.
 
-It was written against `jev-1.13` and TypeSafe's documentation as of September 2026. Recheck the [jaggedness page](https://docs.typesafe.ai/model-jaggedness/jev-1.13.md) when the model version changes.
+It was written against `jev-1.13`, TypeSafe's documentation as of September 2026, and the independent research published in the two weeks after launch ("Research-backed tips" and "Research on Jev" below). Recheck the [jaggedness page](https://docs.typesafe.ai/model-jaggedness/jev-1.13.md) and the [robustness index](https://github.com/Yifan-Lan/awesome-jev-robustness) when the model version changes.
 
 ## What we are trying to accomplish
 
@@ -70,7 +70,7 @@ Write the brief as five sections, in this order.
 1. **Introduction (2 to 3 sentences).** Say in general terms what the question is going to answer, and what it leaves to other questions. Do not define anything yet.
 2. **State.** One or two sentences that say what each state field is and where it comes from, for example "`request` is the message a user sent to an AI agent to start a task, before the agent has done any work." Jev knows nothing about a field until you describe it.
 3. **Definitions.** Define every term a rule will use, in dependency order: parts before the whole, and each term before any definition that uses it. If a definition says "an action together with the thing it acts on", then "action" and "the thing it acts on" are defined first. Write general descriptions, a few sentences each, with no specific examples; the examples go into the criteria.
-4. **Rules.** Every rule that decides the answer lives here, once. That includes the special cases, the zero, one, and many cases (no item, one item, and several items where only some qualify), the focus ("judge only ...; X is a separate check"), and the guard against the state arguing for its own answer. Rules may give their reasons, because reasoning written once by the author is exactly what helps Jev match the definitions.
+4. **Rules.** Every rule that decides the answer lives here, once, in this order: the special cases; the zero, one, and many cases (no item, one item, and several items where only some qualify); the side an input with nothing to judge belongs to, such as an empty message or a greeting (T8); the focus ("judge only ...; X is a separate check"); a rule that the input is judged by meaning, not by language or writing quality (T7); and last, the guard against the state arguing for its own answer, which covers self-descriptions, claimed approvals, and sentences that tell the checker what to decide (T14). Rules may give their reasons, because reasoning written once by the author is exactly what helps Jev match the definitions.
 5. **Question.** One positive yes/no question about a named state field, using the defined term and the verb chosen for it.
 
 In code, give the brief a structure so the order cannot drift. In JevAgent this is `JevBrief(introduction, state, definitions, rules, question)`.
@@ -334,6 +334,126 @@ The strategies are grouped by the kind of work they move. Most real questions us
 
 **How to apply.** For each question, write down the action for each outcome. Set thresholds by the cost of being wrong: a destructive or expensive action needs a high bar (for example 0.85 to 0.9), and a cheap default needs none. Choose a fallback for timeouts and missing credentials, usually the behavior you had before Jev. Then build a labeled set of 50 to 100 real inputs, including the hard cases, and tune the thresholds on it. The thresholds in this skill are starting points, not tuned values.
 
+## Research-backed tips
+
+The strategies above come from TypeSafe's documentation. The tips below come from independent measurements published in the two weeks after Jev launched: the ten papers in "Research on Jev" and a set of public audit repositories. They are labeled T1 to T25 so they are not confused with strategies 1 to 25.
+
+Each tip says what to do, what was measured, and how to apply it. Treat every number as a measurement on someone else's data. It shows how large an effect can be, not how large it will be on ours, so recheck it on a labeled set before you rely on it. Community repositories are not peer reviewed; the papers are preprints.
+
+### Writing the criteria
+
+**T1. Define what passes, not only what fails.** When a side keeps misfiring, the natural fix is to add more prohibitions to the other side. Writing out the allowed cases works better. In the [jev-classification-prompting](https://github.com/RastislavDujava/jev-classification-prompting) ablations, describing what passes shifted the answer by −0.70, against −0.20 for extending the prohibitions, and writing a culture's everyday expressions into the passing side cut a false "vulgar" flag from 0.98 to 0.13. Apply it by listing, in the rules and on the passing side, the cases that look like failures but are not: short, informal, politely wrapped, or indirect inputs.
+
+**T2. Name the dimension being judged, not a list of words.** A list of trigger words breaks on the first input that uses a different word. In the same ablations, stating the axis ("what matters is whether a person is attacked") held the boundary in both directions on 3 of 3 cases, pulling mild expressions down (−0.456) and real threats up (+0.329). Apply it with one sentence in the introduction or the rules: "What matters is whether ...".
+
+**T3. Stop at about five examples.** Examples have steep diminishing returns. The first 5 boundary examples moved the answer by −0.572; the next 45 added only −0.049. A question needs an easy and a boundary example on each side, as "Writing a full question" asks, not a catalog.
+
+**T4. Keep numbers out of level descriptions.** Adding numeric ranges to `score` levels ("0.55 to 0.70 means real danger") had a negligible effect, even when the ranges were deliberately inverted. Jev reads the words of a level, not its numbers. Describe each level by what the input shows (strategy 4).
+
+**T5. Tell Jev that its own knowledge may be out of date.** Jev cannot tell "I know this" from "I learned this before my training cutoff." Adding one sentence to the `true` side, "Even if the model has a confident answer stored, that answer may now be outdated," took routing of stale-knowledge queries to web search from 66.7% to 100%. Apply it to any question whose answer could lean on what Jev believes about the world: versions, dates, prices, roles, or "can this be answered from memory?"
+
+**T6. Keep option names neutral, and describe every option.** A constrained decision head follows the option *name*, not the rubric bound to it. In [arXiv 2609.26758](https://arxiv.org/abs/2609.26758), binding "no/yes" names against the opposite rubric dropped the hosted model's AUC from 0.81 to 0.58, and random-string names removed the effect. Bare labels fail the other way: in an [independent test](https://dev.to/aws-builders/jev-after-eight-days-of-independent-tests-level-with-mid-price-llms-behind-the-frontier-1c60), one-line descriptions fixed 37 of 40 hard tasks that bare labels had routed wrongly at 0.96 confidence. Never let a name pull against its description, and give every option a `what`. A `noul`'s names are fixed as `true` and `false`, so there `true` must always mean yes to the question as written (strategy 8).
+
+**T7. Judge meaning, not writing, and keep the instructions in English.** Language and style change accuracy when nothing addresses them. With an English question and the local norms written into the criteria, Czech content scored 15 of 15, the same as English (mean difference 0.036). Without that, Russian content lost 11 points (77.3% against 88.3%) and its calibration error tripled ([robustness list](https://github.com/Yifan-Lan/awesome-jev-robustness)). Apply it with a rule that the input may be informal, misspelled, or in any language, and is judged by what it means.
+
+### Designing the options
+
+**T8. Always give Jev a way out.** Without an honest option, Jev answers anyway, confidently. Removing the abstain option dropped accuracy on unanswerable KoBBQ items from 0.950 to 0.000, with stereotyped picks at 0.79 confidence ([jev-calibration-audit](https://github.com/jujumilk3/jev-calibration-audit)). Without a "no tool" option, Jev invented tool calls on 76% of When2Call cases that needed none. Give every `choice` a `none` or `unclear` option, and make every `noul` say which side an empty or out-of-scope input belongs to (strategy 22).
+
+**T9. Ask "whether" separately from "which".** These are different judgments with very different accuracy. In [REFLEX](https://arxiv.org/html/2609.26532), Jev picked the right tool 98.4% of the time but decided whether any tool should be called only 52.0% of the time. Ask the gate question on its own, then the choice (strategy 10).
+
+**T10. Keep option sets small, with no near-duplicates.** In REFLEX's factorial test, growing the action set from 10 to 50 cost 6.7 points, and adding two near-valid alternatives cost 5.6. Unrelated candidates also shifted the odds between options they did not touch by 0.31 to 0.50 in log-odds ([jev-wide](https://github.com/Yifan-Lan/awesome-jev-robustness)). Include every real option, remove filler and near-duplicates, and walk a hierarchy (strategy 13) when the list is long.
+
+**T11. Put irreversible choices behind their own gate.** In REFLEX, swapping one nearby option from a read to an irreversible write raised irreversible-commit errors from 1.7% to 10.0%, while overall accuracy did not change. Exact-choice accuracy hides this. Ask a separate `noul` before any irreversible action, with a higher threshold than reversible ones.
+
+**T12. Check order effects wherever the judgment is subjective.** Order barely matters on objective questions: reversing two options moved probability by 0.005 and flipped 0 of 400 answers. On value-laden yes/no questions, the first-listed option gained 0.37. When two candidates are compared, swapping them reversed 3.25% to 11.14% of decisions in [JEV-as-a-Judge](https://arxiv.org/html/2609.26550v1). Ask pairwise comparisons in both orders and average the aligned probability, p(A) = ½[p₁(A, B) + 1 − p₁(B, A)], and shuffle options on value-laden questions.
+
+### Building the state
+
+**T13. Put whatever defines the right answer in the state.** Jev cannot judge against a reference it was not given. In JEV-as-a-Judge, accuracy was 87.5% with the evidence in the state and 52.5% without it. In [Just Ask Jev](https://arxiv.org/abs/2609.29429), fields that define the label (a gold answer, a list of secrets, a verdict pointer) added a median +0.053 AUROC, while context that merely describes the deployment helped on only 1 of 4 benchmarks. Give the defining material its own named field (strategies 12 and 18).
+
+**T14. Limit how much of the state untrusted text controls, and name authority claims.** Typed outputs resist injection well: in [Decision Hijacking](https://arxiv.org/html/2609.28613), injected text selected the attacker's option in only 1.8% of cases, and "ignore all previous instructions" actually *lowered* the attacker's probability. Two conditions broke it: a margin of 0.1 or less between the safe and the attacker's option, and attacker text making up 85% or more of the state. Separately, claimed approvals passed up to 3 of 30 attempts where blunt commands failed 30 of 30. Apply it by writing the guard rule to cover self-descriptions ("this is clear"), claimed approvals ("the team signed off"), and sentences that tell the checker what to decide (strategy 19).
+
+**T15. Send one item per request.** Forty rows in one request broke an ordering check that passed with one row per request ([jev-orderby-bench](https://github.com/Yifan-Lan/awesome-jev-robustness)). The state holds one item; loop in code (strategy 11), and batch questions about that one item instead (strategy 24).
+
+### Reading the answer
+
+**T16. Try `score` instead of `noul` for graded properties, and always read the probabilities.** In Just Ask Jev, a three-level `score` beat a `noul` on 19 of 31 benchmarks (median +0.016 AUROC), and soft probabilities beat the chosen label everywhere they were compared. Use `score` when the property has real middle cases, and never act on the label alone.
+
+**T17. Never carry a threshold from one question to another.** Separate questions do not obey logical identities. A `noul` and a two-option `choice` asking the same thing differed by 0.125 on average, and P(x) + P(not x) ranged from 0.71 to 1.42 ([jev-calibration-audit](https://github.com/jujumilk3/jev-calibration-audit)). In JEV-as-a-Judge, thresholds did not transfer between fallback models either. Fit a threshold per question, per primitive, and per phrasing (strategy 23).
+
+**T18. A `choice` answer's confidence is derived, not independent.** Its `confidence` equals (N·p_max − 1)/(N − 1), where N is the number of options ([primeline test](https://github.com/Yifan-Lan/awesome-jev-robustness)). Do not gate on both `confidence` and the top probability as if they were two signals, and refit a confidence threshold whenever the number of options changes.
+
+**T19. Gate on the margin, and keep probabilities away from whoever wrote the state.** Hijacking succeeded every time the margin between the top two options was 0.1 or less, and attackers who could see the returned probabilities raised their success from 1.8% to 3.5% in 24 queries. Send answers inside an uncertain band to a fallback (a person, a stronger model, or fail open), and never return raw probabilities to the author of the judged text.
+
+**T20. Do not threshold events rarer than about 1%.** Jev's probabilities come on a 0.01 grid. In the [crash-narratives paper](https://arxiv.org/html/2609.24052v1), no allocation of grid values could be calibrated for variables with base rates under 1%, and an independent test found 70.4% of `choice` probabilities were exactly 0.00. For rare events, rank inputs by probability and review the top instead of cutting at a threshold.
+
+### Calibrating and combining answers
+
+**T21. Recalibrate each question on its own labels.** Jev is calibrated overall but not on every task. A two-parameter refit on 50 to 300 labels took calibration error from 0.16–0.21 to under 0.025 in one test, isotonic regression took it from 0.117 to 0.008 in another, and the crash-narratives paper cut it 3.3×. One temperature for everything made two of three workloads worse in JEV-as-a-Judge, and in [the social-science study](https://arxiv.org/html/2609.24574v1) Jev reported 78% confidence at 38.3% accuracy on empathy. Fit calibration per question and per model version, never globally.
+
+**T22. Ten labels are enough to fit a threshold.** In Just Ask Jev, a threshold fitted on 10 labeled items raised F1 from 0.706 to 0.793, and keeping only the more confident half of answers raised accuracy to 0.933. There is no reason to ship an untuned threshold.
+
+**T23. Combine split signals with a fitted model, and let one clear failure count.** Decomposition only pays off if the pieces are combined well. Phishing asked as one question scored 62.6%; five narrow signals combined by a logistic regression fitted on 1,000 labeled emails scored 95.0% ([writeup](https://www.beri.net/article/typesafe-jev-typed-decision-model-calibration-decomposition-shadow-eval)). A plain average does the opposite of an OR-gate: many easy yes answers hide one clear no. Until labels exist, add a veto that fails the decision when any single safety or completeness question is a clear no. Once labels exist, fit the combination.
+
+**T24. Ask a gate and its detail questions together, then hide the details in code.** In the crash-narratives paper, detail answers still asserted things behind a closed gate 0.03% to 3.99% of the time, so the gate must be applied in code, not trusted to Jev. The same paper pre-bucketed numbers into the options (weeks against months) instead of asking Jev to compute them (strategy 14). When a gate fails, report only the gate's gap to whoever reads it next.
+
+**T25. Treat wording as your largest source of variance.** In the preregistered [jev-reliability](https://github.com/vcjdeboer/jev-reliability) study, rewording caused 1.7× more variance than changes that kept the meaning, and criteria rewrites moved accuracy from 70% to 96% in the classification ablations. Try three paraphrases of each question on a fixed probe set and keep the one with the lowest flip rate. Pin the model version instead of `jev-latest`, rerun the probe set when the version changes, and after adding an exclusion to one question, diff every other question's answers on the same fixed sample, as the crash-narratives paper did (at least 0.9975 agreement).
+
+## Research on Jev
+
+Every paper below is an arXiv preprint from September 2026 that tests TypeSafe's hosted Jev. Three further papers ([Visual Jev](https://arxiv.org/html/2609.25845v1), [PixelJev](https://arxiv.org/html/2609.29283v1), and [CallScreenBench](https://arxiv.org/html/2609.23959v1)) study open "Jev-style" copies instead, so they are left out.
+
+### 1. Jev-Mem: System-One-Controlled Agentic Memory ([2609.23986](https://arxiv.org/html/2609.23986v1))
+
+Jiang, Li, and Li (UT Dallas). **Strategy:** many narrow nouls control an agent's long-term memory: four nouls type each observation, direction-specific nouls decide causal and semantic links (kept at P ≥ 0.60), six nouls route retrieval, and four nouls decide when evidence is sufficient to stop (sufficiency ≥ 0.95, missing and contradiction < 0.15). Each instruction names the state fields it compares. **Found:** on LoCoMo, 0.777 overall against 0.700 for the best baseline (+11%), 0.962 against 0.742 on adversarial questions (+29.6%), memory built 6.6× faster, and query latency 36.7% lower. **Take:** split a fuzzy decision ("are these related?") into specific, directional nouls with explicit thresholds (T9, strategy 9).
+
+### 2. REFLEX with Jev ([2609.26532](https://arxiv.org/html/2609.26532))
+
+Wu and Lim (NTU). **Strategy:** Jev makes bounded control choices (which tool, whether to stop) and a strong LLM handles generation and low-confidence cases, with a factorial test of action-set size and near-valid alternatives. **Found:** 95% task success against 88% for the strong model alone, 72.7% fewer strong-model calls, and 250 of 251 autonomous decisions valid. Jev picked the right tool 98.4% of the time but decided whether to call one only 52.0%. Growing the action set from 10 to 50 cost 6.7 points, two near-valid alternatives cost 5.6, and an irreversible nearby option raised irreversible errors from 1.7% to 10.0%. **Take:** T9, T10, T11.
+
+### 3. Just Ask Jev ([2609.29429](https://arxiv.org/abs/2609.29429))
+
+Guo and colleagues (Griffith, NTU, UNSW, and others). **Strategy:** detect ten alignment failures (sycophancy, jailbreaks, deception, injection, and more) across 44 benchmarks, comparing one generic question against targeted wording, `noul` against `score`, and different state contents. **Found:** a single generic question reached median AUROC 0.886 zero-shot. Targeted wording added only +0.006, a three-level `score` beat `noul` on 19 of 31 benchmarks, label-defining state fields added +0.053, and combining answers through rubric thresholds hurt 9 of 10 benchmarks. A threshold fitted on 10 labels raised F1 from 0.706 to 0.793, and the whole detector cost 63× less than LLM judges. **Take:** T13, T16, T22. Once a question is well formed, more elaborate wording buys little; the state and the readout matter more.
+
+### 4. JEV-as-a-Judge ([2609.26550](https://arxiv.org/html/2609.26550v1))
+
+Li, Miao, Krishnan, and Padman (CMU). **Strategy:** use Jev as an evaluation judge that accepts confident verdicts and escalates the rest to a generative judge, judging pairs in both orders and comparing evidence-grounded with reference-free rubrics. **Found:** a cascade escalating below 0.9 kept 91.3% accuracy (against 91.7% for GPT-6 alone) at 47% of the cost. Swapping candidate order reversed 3.25% to 11.14% of decisions. Accuracy was 87.5% with evidence and 52.5% without, and paraphrasing a rubric changed 4 of 48 decisions. Jev fell to 74.8% (against 94.6%) when correct answers were written more plainly than wrong ones, and no single temperature calibrated every workload. **Take:** T12, T13, T17, T21. Also test on style-adversarial inputs before trusting a judge.
+
+### 5. Calibrated Decisions at Scale ([2609.24052](https://arxiv.org/html/2609.24052v1))
+
+Rafe and Das (Texas State). **Strategy:** code 499,500 police crash narratives with a gated 27-question schema built on seven rules: narrow single judgments, presence before detail, an explicit no-match option, closed option sets, pre-bucketed numbers, no double negatives or cross-question references, and exclusions written into the criteria. **Found:** F1 0.908 against human labels, at $0.154 per 1,000 narratives. An exclusion for police pursuits cut false positives from 4 to 1 while every other question stayed at 0.9975 agreement or better. Recalibration cut calibration error 3.3×, detail answers leaked through closed gates 0.03% to 3.99% of the time, and base rates under 1% could not be calibrated on the 0.01 grid. **Take:** T20, T21, T24, T25.
+
+### 6. Type-Safe Is Not Error-Free ([2609.26758](https://arxiv.org/abs/2609.26758))
+
+Sun, Xu, Shi, and Yang. **Strategy:** bind option names against the rubrics attached to them and measure whether Jev follows the name or the rubric. **Found:** renaming 0/1 to no/yes moved an open model's AUC from 0.94 to 0.23, and the hosted Jev from 0.8146 to 0.5806, with 24× more answer flips than its test-retest floor. Neutral names removed the bias without costing accuracy, and the type-error rate stayed at 0% throughout. **Take:** T6. A valid type is not a correct decision.
+
+### 7. Evaluating Decision Models for Text Annotation ([2609.24574](https://arxiv.org/html/2609.24574v1))
+
+Ibrahim and Zaki (NYU Abu Dhabi). **Strategy:** compare Jev with 19 LLMs on 18 social-science annotation tasks, including confidence routing and Jev-first cascades. **Found:** Jev trailed the best LLM by a median 11.6 macro-F1 points but was better calibrated than 16 of the 19. Cascades matched frontier accuracy at 25% to 50% of the cost. At a 0.9 confidence cutoff, Jev covered 37.6% of items at 0.815 accuracy, and on empathy it reported 78% confidence at 38.3% accuracy. **Take:** T21. Validating confidence on one task says little about the next.
+
+### 8. Decision Hijacking ([2609.28613](https://arxiv.org/html/2609.28613))
+
+Wu and Lim (NTU). **Strategy:** attack Jev's typed decisions with prompt injection, including adaptive attacks that use the returned probabilities as feedback. **Found:** attacks selected the attacker's option in 1.8% of cases, override prefixes did worse (0%), and adaptive optimization reached 3.5% after 24 queries. Attacks succeeded every time the safe option's margin was 0.1 or less, and when attacker text made up 85% or more of the state. **Take:** T14, T19.
+
+### 9. Calibrated Decision Models for Penetration-Testing Harnesses ([2609.28940](https://arxiv.org/abs/2609.28940))
+
+Dos Santos (independent). **Strategy:** place Jev at four bottlenecks of an autonomous pentest agent (finding adjudication, severity recalibration, agent pruning, confirmation loops), batch independent nouls, and score demonstrated rather than claimed impact on an ordered ladder. **Found:** 15 nouls in one call took 276 ms, against 22 to 45 seconds as sequential LLM calls. Severity recalibration demoted findings graded Critical by class alone (4 Critical became 2 Critical and 8 High), and a single run finished about 5 minutes faster. Evidence is from single runs, so causal claims are limited. **Take:** batch independent questions (strategy 24), and score what the evidence shows, not what its label implies.
+
+### 10. Jev in the Wild ([2609.30216](https://arxiv.org/html/2609.30216v1))
+
+Ling, Xue, and Ye. **Strategy:** annotate 2,170 public GitHub repositories that use Jev. **Found:** `choice` appears in 81% of projects, `noul` in 72.2%, and `score` in 45.4%, and attribute judgment is the most common purpose (77%). Option-name sensitivity and uneven calibration show up as recurring failures in real projects. **Take:** descriptive only, but it confirms that T6 and T21 matter in practice.
+
+### Community audits
+
+These are public, mostly preregistered tests with raw data, not peer-reviewed papers.
+
+- [awesome-jev-robustness](https://github.com/Yifan-Lan/awesome-jev-robustness): the index of audits for paraphrase sensitivity, negation pairs, option order, abstention, injection, and calibration. Start here for new results.
+- [jev-classification-prompting](https://github.com/RastislavDujava/jev-classification-prompting): nine criteria-wording ablations behind T1 to T5, about 1,300 calls with a measured noise floor of 0.05.
+- [jev-calibration-audit](https://github.com/jujumilk3/jev-calibration-audit): abstain removal, negation pairs, `noul` against `choice`, and option order, behind T8, T12, and T17.
+- [jev-reliability](https://github.com/vcjdeboer/jev-reliability): a preregistered study of repeatability, framing sensitivity, resolution, and answerability, behind T25.
+- [jev-prompt-optimization](https://github.com/j341nono/jev-prompt-optimization): evolutionary search (EvoPrompt, GEPA) over `instructions` and criteria descriptions against labeled data, scored by normalized Brier score.
+
 ## Checklist before you ship a question
 
 - [ ] It passes the two-second test.
@@ -350,6 +470,12 @@ The strategies are grouped by the kind of work they move. Most real questions us
 - [ ] It asks about the present, with evidence that already exists (20, 21).
 - [ ] The options are exclusive and complete, and the primitive fits the judgment (22, 23).
 - [ ] Code has an action for every outcome, and thresholds were checked on a labeled set (25).
+- [ ] The passing side lists the cases that look like failures but are not, the rules name the dimension being judged, and each side has about two examples (T1 to T3).
+- [ ] Every input with nothing to judge, such as an empty message or a greeting, has an explicit side or option (T8).
+- [ ] Option names are neutral or descriptive and never pull against their descriptions (T6).
+- [ ] Whatever defines the right answer is in the state, and untrusted text cannot claim authority or instruct the checker (T13, T14).
+- [ ] Code reads probabilities, not labels, handles the uncertain band, vetoes a clear failure instead of averaging it away, and fits thresholds and calibration per question (T16 to T24).
+- [ ] Three paraphrases were tried on a fixed probe set, the model version is pinned, and other questions were diffed after any exclusion edit (T25).
 
 ## Using this in JevAgent
 
@@ -360,6 +486,7 @@ The strategies are grouped by the kind of work they move. Most real questions us
 - Definitions such as a scope description come from a named, validated setting on the capability, not from `system_prompt`. A system prompt was written to instruct a generative model; it is not a definition.
 - The fallback for any Jev failure is the ordinary linear loop, unless the capability's design doc says otherwise.
 - Code, not Jev, maps answers to budgets, routes, and turn limits.
+- A fixed-question preset's `JevPresetDefinition` can carry a `veto` and a `gate` besides its `threshold` (T23, T24). `DecisionModelRunner.score_noul` fails the preset when any single answer's P(yes) falls below the veto, even when the mean passes. When the gate question fails, `JevClarificationAgent` is told only the gate's gap. The clarity preset vetoes at `JEV_CLARITY_VETO_THRESHOLD` and gates on `clarity.action`.
 
 ## Before and after examples
 
@@ -598,3 +725,4 @@ Each example starts from a question that needs reasoning, names the hidden steps
 - Confidence and risk-scaled thresholds: https://docs.typesafe.ai/confidence.md
 - State: https://docs.typesafe.ai/concepts/state.md
 - Batching questions: https://docs.typesafe.ai/patterns/fan-out.md
+- The ten Jev papers and the community audits: see "Research on Jev" above; the running index is https://github.com/Yifan-Lan/awesome-jev-robustness

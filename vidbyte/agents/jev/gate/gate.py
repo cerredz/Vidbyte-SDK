@@ -89,11 +89,11 @@ class JevPreflightGate:
 
     @staticmethod
     def _score(preset: JevPreflightPreset, answers: Mapping[str, JevAnswer] | None) -> JevPresetResult:
-        # Scores one fixed-question preset through DecisionModelRunner.score_noul against the preset's threshold.
+        # Scores one fixed-question preset through DecisionModelRunner.score_noul against the preset's threshold and veto.
         # @intent a-missing-answer-fails-open
         # Any missing or non-noul answer makes only this preset unavailable, and an unavailable preset never fails.
         definition = JevPresets.definition(preset)
-        verdict = DecisionModelRunner.score_noul(answers, tuple(key.value for key in definition.question_keys), definition.threshold)
+        verdict = DecisionModelRunner.score_noul(answers, tuple(key.value for key in definition.question_keys), definition.threshold, definition.veto)
         if verdict is None:
             return JevPresetResult(preset=preset, score=None, available=False)
         evidence = {JevPreflightQuestionKey(name): answer for name, answer in verdict.answers.items()}

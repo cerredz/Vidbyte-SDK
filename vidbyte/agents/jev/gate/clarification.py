@@ -3,7 +3,7 @@
 PURPOSE: Implements JevClarificationAgent, the generative agent the preflight gate routes an unclear request to, which returns structured clarifying questions, each with a few recommended answers, for the user to answer before the main agent runs.
 ROLE IN CODEBASE: JevPreflightGate builds one instance when the CLARITY preset is enabled, and its clarity case calls clarify(); JevResponse returns the questions to the user and stops the run.
 ARCHITECTURE NOTE: Jev only recognizes which clarity checks failed; writing questions is generation, so it belongs to a generative model (skills/asking-jev-questions/SKILL.md, strategy 16). The agent reuses the JevAgent's generative model, but its prompt is fixed, it has no tools, its reply is held to JevClarificationPayload, and it sees only the request (the run message) and the failed checks (a context item built through vidbyte.context).
-COMMON MODIFICATION PATTERNS: Change what the agent writes in vidbyte/prompts/prompts/jev_clarification/system_prompt.md; change the reply shape in JevClarificationPayload; change which checks it is told about in gaps().
+COMMON MODIFICATION PATTERNS: Change what the agent writes in vidbyte/prompts/prompts/jev_clarification/system_prompt.md; change the reply shape in JevClarificationPayload; change which checks it is told about in gaps(), which reports only the preset's gate check when that check failed.
 KNOWN EDGE CASES: A generative failure or a reply that never matches the schema returns None, so the gate fails open and the main agent runs. History is cleared before every call, so one user's earlier request never reaches a later clarification.
 RELATED DOCS: docs/design/jev-preflight-clarity.md, skills/jev-agent/SKILL.md, and skills/asking-jev-questions/SKILL.md.
 TESTS: tests/test_jev_preflight.py and scripts/test-jev-preflight.py.
@@ -30,7 +30,7 @@ from vidbyte.lib.dataclasses.jev import (
 from vidbyte.lib.enums.jev import JevPreflightQuestionKey
 from vidbyte.lib.enums.prompts import Prompt
 from vidbyte.lib.errors import ConfigurationError, VidbyteSdkError
-from vidbyte.lib.jev import JevPreflightRegistry
+from vidbyte.lib.jev import JevPreflightRegistry, JevPresets
 from vidbyte.prompts.catalog import Prompts
 
 # The title and source of the context item that lists the failed checks, named in the system prompt.
@@ -81,10 +81,16 @@ class JevClarificationAgent(BaseAgent):
 
     @staticmethod
     def gaps(result: JevPresetResult) -> tuple[JevPreflightQuestionKey, ...]:
-        """Return the clarity checks Jev answered no, weakest first, or the single weakest check when none fell below one half."""
+        """Return the clarity checks Jev answered no, weakest first, the gate check alone when it failed, or the single weakest check when none fell below one half."""
         yes = result.yes()
         ranked = sorted(yes, key=yes.__getitem__)
         failed = tuple(key for key in ranked if yes[key] < JEV_NOUL_YES_THRESHOLD)
+        # @intent a-failed-gate-hides-the-checks-that-depend-on-it
+        # Every other clarity check assumes the request asks for some work; when the gate check says it does
+        # not (a greeting, a bare topic), their gaps are noise, so the clarifier is told only the gate's gap.
+        gate = JevPresets.definition(result.preset).gate
+        if gate is not None and gate in failed:
+            return (gate,)
         return failed or tuple(ranked[:1])
 
 
