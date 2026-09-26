@@ -90,6 +90,7 @@ RULE_MODULES = (
     "lint.rules.s059_explicit_serialization_mode",
     "lint.rules.s060_typed_public_seam_mappings",
     "lint.rules.s061_bounded_safe_path",
+    "lint.rules.s062_no_implicit_string_concatenation",
 )
 
 

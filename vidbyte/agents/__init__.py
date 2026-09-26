@@ -77,7 +77,16 @@ from vidbyte.agents.contracts import (
 )
 from vidbyte.agents.fallback import AgentFallback, FallbackTransform
 from vidbyte.agents.handoff import HandoffAgent
-from vidbyte.agents.jev import JevAgent, JevAgentSettings, JevPreflightPreset, JevRuntime
+from vidbyte.agents.jev import (
+    JevAgent,
+    JevAgentResponse,
+    JevAgentSettings,
+    JevClarification,
+    JevClarifyingQuestion,
+    JevPreflightPreset,
+    JevPresetResult,
+    JevRuntime,
+)
 from vidbyte.agents.multi import (
     AgentBinding,
     AgentDispatch,
@@ -246,8 +255,12 @@ __all__ = [
     "ContinualTraceAgent",
     "HandoffAgent",
     "JevAgent",
+    "JevAgentResponse",
     "JevAgentSettings",
+    "JevClarification",
+    "JevClarifyingQuestion",
     "JevPreflightPreset",
+    "JevPresetResult",
     "JevRuntime",
     "MagenticOneOrchestrator",
     "MultiAgent",
