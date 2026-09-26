@@ -41,6 +41,7 @@ from vidbyte.lib.constants.jev import (
     JEV_CLARIFICATION_MAX_ITERATIONS,
     JEV_CLARIFICATION_MAX_TOKENS,
     JEV_CLARITY_THRESHOLD,
+    JEV_CLARITY_VETO_THRESHOLD,
     JEV_PREFLIGHT_REQUEST_FIELD,
     JEV_PREFLIGHT_STRATEGY_NAME,
 )
@@ -51,12 +52,13 @@ from vidbyte.lib.dataclasses.jev import (
     JevCriterion,
     JevDecisionRequest,
     JevPreflightQuestion,
+    JevPresetDefinition,
 )
 from vidbyte.lib.enums import JevPreflightQuestionKey, JevQuestionType, ModelProvider
 from vidbyte.lib.errors import ConfigurationError, ProviderRequestError
 from vidbyte.lib.jev import JevPreflightRegistry, JevPresets
 from vidbyte.lib.jev.preflight import CLARITY_QUESTIONS
-from vidbyte.lib.jev.preflight.clarity import IGNORE_CLAIMS, REQUEST_STATE
+from vidbyte.lib.jev.preflight.clarity import IGNORE_CLAIMS, JUDGE_MEANING, REQUEST_STATE
 from vidbyte.lib.runners import TextModelResponse
 from vidbyte.lib.runners.decision import DecisionModelRunner
 from vidbyte.lib.runners.types import DecisionModelResponse
@@ -168,6 +170,19 @@ class JevPreflightQuestionTests(unittest.TestCase):
                 self.assertIn(f"`{JEV_PREFLIGHT_REQUEST_FIELD}`", brief.question)
                 self.assertIn(IGNORE_CLAIMS, brief.rules)
 
+    def test_every_brief_carries_the_shared_rules_and_a_way_out_for_a_request_with_no_task(self) -> None:
+        # Research tips T7, T8, T14, T15 in skills/asking-jev-questions: meaning over wording, an explicit place for a greeting, claims and approvals ignored, one message.
+        self.assertIn("exactly one message", REQUEST_STATE)
+        self.assertIn("approved", IGNORE_CLAIMS)
+        for question in CLARITY_QUESTIONS:
+            rules = question.instructions.rules
+            with self.subTest(key=question.key.value):
+                self.assertEqual(rules[-2:], (JUDGE_MEANING, IGNORE_CLAIMS))
+                self.assertEqual(sum("no task at all" in rule for rule in rules), 1)
+                self.assertTrue(rules[-3].startswith("Judge only"))
+                sides = [criterion.what for criterion in (question.when_true, question.when_false) if "no task at all" in criterion.what]
+                self.assertEqual(len(sides), 1)
+
     def test_definitions_are_general_and_carry_no_quoted_examples(self) -> None:
         # [Review 4110265114] definitions describe terms in general; examples move into the criteria.
         for question in CLARITY_QUESTIONS:
@@ -242,6 +257,16 @@ class JevPresetsTests(unittest.TestCase):
         definition = JevPresets.definition(JevPreflightPreset.CLARITY)
         self.assertEqual(definition.question_keys, _CLARITY_KEYS)
         self.assertEqual(definition.threshold, JEV_CLARITY_THRESHOLD)
+        self.assertEqual(definition.veto, JEV_CLARITY_VETO_THRESHOLD)
+        self.assertIs(definition.gate, JevPreflightQuestionKey.CLARITY_ACTION)
+
+    def test_definition_rejects_a_bad_veto_or_a_gate_outside_its_questions(self) -> None:
+        keys = (JevPreflightQuestionKey.CLARITY_ACTION, JevPreflightQuestionKey.CLARITY_OBJECT)
+        self.assertIsNone(JevPresetDefinition(preset=JevPreflightPreset.CLARITY, question_keys=keys, threshold=0.5).gate)
+        with self.assertRaises(ConfigurationError):
+            JevPresetDefinition(preset=JevPreflightPreset.CLARITY, question_keys=keys, threshold=0.5, veto=1.5)
+        with self.assertRaises(ConfigurationError):
+            JevPresetDefinition(preset=JevPreflightPreset.CLARITY, question_keys=keys, threshold=0.5, gate=JevPreflightQuestionKey.CLARITY_TARGET)
 
     def test_tool_selector_is_a_flag_without_fixed_questions(self) -> None:
         self.assertFalse(JevPresets.has_fixed_questions(JevPreflightPreset.TOOL_SELECTOR))
@@ -289,6 +314,18 @@ class DecisionModelRunnerScoreTests(unittest.TestCase):
         failing = DecisionModelRunner.score_noul(answers, ("a", "b"), 0.76)
         assert failing is not None
         self.assertFalse(failing.passed)
+
+    def test_one_answer_below_the_veto_fails_a_passing_mean(self) -> None:
+        # Research tip T23: a mean lifted by easy yes answers must not hide one clear no.
+        answers = {"a": _answer("a", 0.99), "b": _answer("b", 0.99), "c": _answer("c", 0.15)}
+        without = DecisionModelRunner.score_noul(answers, ("a", "b", "c"), 0.7)
+        vetoed = DecisionModelRunner.score_noul(answers, ("a", "b", "c"), 0.7, 0.2)
+        at_veto = DecisionModelRunner.score_noul(answers, ("a", "b", "c"), 0.7, 0.15)
+        assert without is not None and vetoed is not None and at_veto is not None
+        self.assertTrue(without.passed)
+        self.assertFalse(vetoed.passed)
+        self.assertAlmostEqual(vetoed.score, without.score)
+        self.assertTrue(at_veto.passed)
 
     def test_missing_or_non_noul_answers_make_no_verdict(self) -> None:
         choice = JevAnswer(question_name="b", question_type=JevQuestionType.CHOICE, choice="x", probabilities={"x": 1.0}, confidence=1.0)
@@ -415,6 +452,32 @@ class JevPreflightRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn(JevPreflightRegistry.get("clarity.scope_size").gap, clarifier.systems[0])
         self.assertNotIn(JevPreflightRegistry.get("clarity.scope_parts").gap, clarifier.systems[0])
         self.assertEqual(agent.response.clarification.gaps, (JevPreflightQuestionKey.CLARITY_SCOPE_SIZE,))
+
+    async def test_one_clear_no_stops_a_request_whose_mean_passes(self) -> None:
+        decision = ScriptedDecisionRunner({**{key.value: 0.95 for key in _CLARITY_KEYS}, "clarity.target": 0.05})
+        generative = ScriptedGenerativeRunner()
+        clarifier = ScriptedGenerativeRunner(json.dumps(_PAYLOAD))
+        agent = self._agent(generative, clarifier)
+        with patch(_RUNNER_PATH, new=_runner_class(decision)):
+            await agent.arun("Fix the bug in the file.")
+
+        result = agent.response.results[JevPreflightPreset.CLARITY]
+        self.assertGreater(result.score, JEV_CLARITY_THRESHOLD)
+        self.assertFalse(result.passed)
+        self.assertEqual(generative.calls, [])
+        self.assertEqual(agent.response.clarification.gaps, (JevPreflightQuestionKey.CLARITY_TARGET,))
+
+    async def test_failed_gate_check_is_the_only_gap_sent(self) -> None:
+        failing = ("clarity.action", "clarity.object", "clarity.deliverable", "clarity.target")
+        decision = ScriptedDecisionRunner({**{key.value: 0.9 for key in _CLARITY_KEYS}, **{name: 0.1 for name in failing}})
+        clarifier = ScriptedGenerativeRunner(json.dumps(_PAYLOAD))
+        agent = self._agent(ScriptedGenerativeRunner(), clarifier)
+        with patch(_RUNNER_PATH, new=_runner_class(decision)):
+            await agent.arun("Hi!")
+
+        self.assertEqual(agent.response.clarification.gaps, (JevPreflightQuestionKey.CLARITY_ACTION,))
+        self.assertIn(JevPreflightRegistry.get("clarity.action").gap, clarifier.systems[0])
+        self.assertNotIn(JevPreflightRegistry.get("clarity.target").gap, clarifier.systems[0])
 
     async def test_threshold_score_continues_into_main_loop(self) -> None:
         decision = ScriptedDecisionRunner({key.value: JEV_CLARITY_THRESHOLD for key in _CLARITY_KEYS})
