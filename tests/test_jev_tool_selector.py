@@ -1,7 +1,7 @@
 """FILE: tests/test_jev_tool_selector.py
 
 PURPOSE: Verifies Jev tool selection, threshold validation, and runtime tool hiding without network calls.
-ROLE IN CODEBASE: Covers the TOOL_SELECTOR setting, the JevPreflightTools step, and the gate's tool-selector case before the ordinary Jev agent loop.
+ROLE IN CODEBASE: Covers the TOOL_SELECTOR setting and its integration before the ordinary Jev agent loop.
 ARCHITECTURE NOTE: Scripted decision and generative runners replace external boundaries while production catalog filtering stays active.
 COMMON MODIFICATION PATTERNS: Cover settings bounds, each availability outcome, model-visible schemas, and execution lookup together.
 KNOWN EDGE CASES: The selector is disabled by default and provider or incomplete-answer failures preserve the full catalog.
@@ -17,13 +17,7 @@ from typing import Any
 from unittest.mock import patch
 
 from tests.agent_test_support import bind_test_runner
-from vidbyte import (
-    JevAgent,
-    JevAgentSettings,
-    JevPreflightPreset,
-    JevToolSelection,
-    tool,
-)
+from vidbyte import JevAgent, JevAgentSettings, JevPreflightPreset, tool
 from vidbyte.agents.jev.preflight import JevPreflightTools
 from vidbyte.lib.config import DecisionModelConfig
 from vidbyte.lib.dataclasses.jev import JevAnswer, JevDecisionRequest
@@ -130,10 +124,11 @@ class JevToolSelectorSettingsTests(unittest.TestCase):
                 _settings(preflight=presets)
 
 
-class JevPreflightToolsTests(unittest.TestCase):
-    """Checks question generation, probability filtering, and fail-open selection."""
+class JevPreflightToolsTests(unittest.IsolatedAsyncioTestCase):
+    """Checks batched question generation, probability filtering, and fail-open behavior."""
 
-    def _catalog(self) -> Tools:
+    async def test_builds_one_question_per_tool_and_keeps_threshold_boundary(self) -> None:
+        # [Edge Case] a probability equal to the configured cutoff remains selectable.
         @tool
         def search(query: str) -> str:
             """Search documents for a query."""
@@ -144,36 +139,55 @@ class JevPreflightToolsTests(unittest.TestCase):
             """Read events for a day."""
             return day
 
-        return Tools((search, calendar))
+        catalog = Tools((search, calendar))
+        decision_runner = ScriptedDecisionRunner({"tool_selector.0": 0.4, "tool_selector.1": 0.399})
+        selector = JevPreflightTools(DecisionModelConfig(api_key="test-key"), 0.4)
 
-    def test_builds_one_question_per_tool_about_the_request_field(self) -> None:
-        # [Edge Case] every tool question reads the shared `request` state and names its tool's spec.
-        questions = JevPreflightTools(0.2).questions(self._catalog())
-        self.assertEqual(tuple(question.name for question in questions), ("tool_selector.0", "tool_selector.1"))
-        for question in questions:
-            self.assertIn("`request`", question.instructions)
-            self.assertEqual(question.option_names(), ("true", "false"))
-        self.assertIn("Tool: calendar", questions[1].instructions)
+        with patch("vidbyte.agents.jev.preflight.DecisionModelRunner", return_value=decision_runner):
+            selected = await selector.run("Find the architecture notes.", catalog)
 
-    def test_keeps_threshold_boundary(self) -> None:
-        # [Edge Case] a probability equal to the configured cutoff remains selectable.
-        catalog = self._catalog()
-        selector = JevPreflightTools(0.4)
-        selection = selector.select(catalog, {"tool_selector.0": _answer("tool_selector.0", 0.4), "tool_selector.1": _answer("tool_selector.1", 0.399)})
-
-        self.assertTrue(selection.available)
-        self.assertEqual(selection.selected, ("search",))
-        self.assertEqual(selector.narrow(catalog, selection).names(), ("search",))
         self.assertEqual(catalog.names(), ("search", "calendar"))
+        self.assertEqual(selected.names(), ("search",))
+        self.assertEqual(len(decision_runner.requests), 1)
+        self.assertEqual(len(decision_runner.requests[0].questions), 2)
+        self.assertEqual(selector.usage.input_tokens, 15)
+        self.assertTrue(selector.available)
 
-    def test_incomplete_or_missing_answers_keep_all_tools(self) -> None:
-        # [Silent Failure] a missing answer or a Jev outage cannot silently remove a configured tool.
-        catalog = self._catalog()
-        for answers in ({"tool_selector.0": _answer("tool_selector.0", 0.9)}, None):
-            with self.subTest(answers=answers):
-                selection = JevPreflightTools(0.2).select(catalog, answers)
-                self.assertFalse(selection.available)
-                self.assertEqual(selection.selected, catalog.names())
+    async def test_incomplete_answers_keep_all_tools(self) -> None:
+        # [Silent Failure] a missing answer cannot silently remove the tool whose answer was absent.
+        @tool
+        def lookup(query: str) -> str:
+            """Look up one record."""
+            return query
+
+        catalog = Tools((lookup,))
+        decision_runner = ScriptedDecisionRunner(omit_answer="tool_selector.0")
+        selector = JevPreflightTools(DecisionModelConfig(api_key="test-key"), 0.2)
+
+        with patch("vidbyte.agents.jev.preflight.DecisionModelRunner", return_value=decision_runner):
+            selected = await selector.run("Look up the record.", catalog)
+
+        self.assertEqual(selected.names(), catalog.names())
+        self.assertFalse(selector.available)
+
+    async def test_provider_failure_keeps_all_tools(self) -> None:
+        # [Hidden Failure] missing Jev credentials or a provider outage must not disable agent tools.
+        @tool
+        def lookup(query: str) -> str:
+            """Look up one record."""
+            return query
+
+        catalog = Tools((lookup,))
+        selector = JevPreflightTools(DecisionModelConfig(api_key="test-key"), 0.2)
+
+        with patch(
+            "vidbyte.agents.jev.preflight.DecisionModelRunner",
+            side_effect=ProviderRequestError("provider unavailable", provider="typesafe"),
+        ):
+            selected = await selector.run("Look up the record.", catalog)
+
+        self.assertEqual(selected.names(), catalog.names())
+        self.assertFalse(selector.available)
 
 
 class JevToolSelectorRuntimeTests(unittest.IsolatedAsyncioTestCase):
@@ -206,7 +220,7 @@ class JevToolSelectorRuntimeTests(unittest.IsolatedAsyncioTestCase):
         )
         agent = bind_test_runner(JevAgent(settings), generative_runner)
 
-        with patch("vidbyte.agents.jev.preflight.preflight.DecisionModelRunner", return_value=decision_runner):
+        with patch("vidbyte.agents.jev.preflight.DecisionModelRunner", return_value=decision_runner):
             reply = await agent.arun("Search the relevant records.")
 
         for model_call in generative_runner.calls:
@@ -216,45 +230,20 @@ class JevToolSelectorRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(reply.content, "done")
         self.assertEqual(reply.metadata["tool_call_states"], ("failed", "succeeded"))
         self.assertEqual(hidden_calls, [])
-        selection = agent.response.results[JevPreflightPreset.TOOL_SELECTOR]
-        self.assertIsInstance(selection, JevToolSelection)
-        self.assertEqual(selection.candidates, ("keep", "hide"))
-        self.assertEqual(selection.selected, ("keep",))
-        self.assertEqual(agent.response.usage.input_tokens, 15)
+        self.assertEqual(reply.metadata["jev_tool_selector"]["candidate_tool_count"], 2)
+        self.assertEqual(reply.metadata["jev_tool_selector"]["selected_tool_count"], 1)
 
     async def test_disabled_selector_makes_no_decision_call(self) -> None:
         # [Edge Case] existing JevAgent settings retain ordinary loop behavior by default.
         generative_runner = ScriptedGenerativeRunner()
         agent = bind_test_runner(JevAgent(_settings()), generative_runner)
 
-        with patch("vidbyte.agents.jev.preflight.preflight.DecisionModelRunner") as decision_runner:
+        with patch("vidbyte.agents.jev.preflight.DecisionModelRunner") as decision_runner:
             reply = await agent.arun("Answer normally.")
 
         decision_runner.assert_not_called()
         self.assertEqual(reply.content, "done")
-        self.assertEqual(agent.response.results, {})
-
-
-    async def test_provider_failure_keeps_all_tools(self) -> None:
-        # [Hidden Failure] missing Jev credentials or a provider outage must not disable agent tools.
-        @tool
-        def lookup(query: str) -> str:
-            """Look up one record."""
-            return query
-
-        generative_runner = ScriptedGenerativeRunner()
-        settings = _settings(tools=(lookup,), preflight=(JevPreflightPreset.TOOL_SELECTOR,), decision=DecisionModelConfig(api_key="test-key"))
-        agent = bind_test_runner(JevAgent(settings), generative_runner)
-
-        with patch(
-            "vidbyte.agents.jev.preflight.preflight.DecisionModelRunner",
-            side_effect=ProviderRequestError("provider unavailable", provider="typesafe"),
-        ):
-            await agent.arun("Look up the record.")
-
-        model_tools = generative_runner.calls[0]["kwargs"]["tools"]
-        self.assertEqual(tuple(schema["function"]["name"] for schema in model_tools), ("lookup", "isDone"))
-        self.assertFalse(agent.response.results[JevPreflightPreset.TOOL_SELECTOR].available)
+        self.assertNotIn("jev_tool_selector", reply.metadata)
 
 
 if __name__ == "__main__":

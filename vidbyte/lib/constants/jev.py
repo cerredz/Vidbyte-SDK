@@ -64,18 +64,25 @@ JEV_PREFLIGHT_REQUEST_FIELD: str = "request"
 JEV_CLARITY_THRESHOLD: float = 0.75
 # A run the preflight gate stops reports this strategy name.
 JEV_PREFLIGHT_STRATEGY_NAME: str = "jev_preflight"
-# The clarification agent writes its questions in one reply; the cap only covers an isDone round trip.
-JEV_CLARIFICATION_MAX_ITERATIONS: int = 3
+# JevClarificationAgent limits: its loop and token budget, and the size of the structured reply it must
+# return (a few clarifying questions, each with a few recommended answers the user can pick from).
+JEV_CLARIFICATION_MAX_ITERATIONS: int = 25
+JEV_CLARIFICATION_MAX_TOKENS: int = 100_000
+JEV_CLARIFICATION_MAX_QUESTIONS: int = 6
+JEV_CLARIFICATION_MIN_RECOMMENDATIONS: int = 2
+JEV_CLARIFICATION_MAX_RECOMMENDATIONS: int = 4
 
 # Tool-selector policy bounds and default: caller settings use probabilities on the closed unit interval.
-# Each tool question is named with this prefix and the tool's position in the catalog.
 JEV_TOOL_SELECTOR_DEFAULT_THRESHOLD: float = 0.20
 JEV_TOOL_SELECTOR_MAX_THRESHOLD: float = 1.0
 JEV_TOOL_SELECTOR_MIN_THRESHOLD: float = 0.0
-JEV_TOOL_SELECTOR_QUESTION_PREFIX: str = "tool_selector."
 
 __all__ = [
     "JEV_CLARIFICATION_MAX_ITERATIONS",
+    "JEV_CLARIFICATION_MAX_QUESTIONS",
+    "JEV_CLARIFICATION_MAX_RECOMMENDATIONS",
+    "JEV_CLARIFICATION_MAX_TOKENS",
+    "JEV_CLARIFICATION_MIN_RECOMMENDATIONS",
     "JEV_CLARITY_THRESHOLD",
     "JEV_DEFAULT_MODEL",
     "JEV_DEFAULT_RETRY_COUNT",
@@ -112,5 +119,4 @@ __all__ = [
     "JEV_TOOL_SELECTOR_DEFAULT_THRESHOLD",
     "JEV_TOOL_SELECTOR_MAX_THRESHOLD",
     "JEV_TOOL_SELECTOR_MIN_THRESHOLD",
-    "JEV_TOOL_SELECTOR_QUESTION_PREFIX",
 ]

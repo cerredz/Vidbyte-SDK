@@ -1,9 +1,9 @@
 """FILE: vidbyte/lib/jev/preflight/preflight.py
 
 PURPOSE: Defines JevPreflightRegistry, the registry over every fixed preflight question dataclass, plus validation that every flag a user enables can be asked.
-ROLE IN CODEBASE: JevAgentSettings calls JevPreflightRegistry.validate at construction, and JevPreflight (vidbyte/agents/jev/preflight/preflight.py) reads questions from here when it combines one Jev request; the preflight logic itself lives in the agent layer.
+ROLE IN CODEBASE: JevAgentSettings calls JevPreflightRegistry.validate at construction, and JevPreflightGate (vidbyte/agents/jev/gate/gate.py) reads questions from here when it combines one Jev request; the preflight logic itself lives in the agent layer.
 ARCHITECTURE NOTE: Questions are dataclasses in this folder, flags and their policy live in vidbyte/lib/jev/presets.py, and records live in vidbyte/lib/dataclasses/jev.py; this lib module never imports the agents layer and never calls Jev.
-COMMON MODIFICATION PATTERNS: Register a new preset's questions by adding its question tuple to _questions; keep scoring and the actions taken on answers in JevPreflight, not here.
+COMMON MODIFICATION PATTERNS: Register a new preset's questions by adding its question tuple to _questions; keep scoring in DecisionModelRunner.score_noul and the actions taken on answers in JevPreflightGate, not here.
 KNOWN EDGE CASES: A preset without fixed questions (TOOL_SELECTOR) contributes nothing here; its questions are built per run from the tool catalog.
 RELATED DOCS: docs/design/jev-preflight-clarity.md, skills/jev-agent/SKILL.md, and skills/asking-jev-questions/SKILL.md.
 TESTS: tests/test_jev_preflight.py and scripts/test-jev-preflight.py.

@@ -82,10 +82,10 @@ from vidbyte.agents.jev import (
     JevAgentResponse,
     JevAgentSettings,
     JevClarification,
+    JevClarifyingQuestion,
     JevPreflightPreset,
     JevPresetResult,
     JevRuntime,
-    JevToolSelection,
 )
 from vidbyte.agents.multi import (
     AgentBinding,
@@ -258,10 +258,10 @@ __all__ = [
     "JevAgentResponse",
     "JevAgentSettings",
     "JevClarification",
+    "JevClarifyingQuestion",
     "JevPreflightPreset",
     "JevPresetResult",
     "JevRuntime",
-    "JevToolSelection",
     "MagenticOneOrchestrator",
     "MultiAgent",
     "MultiAgentOrchestrator",
