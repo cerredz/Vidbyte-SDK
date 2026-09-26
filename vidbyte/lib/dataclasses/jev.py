@@ -1,6 +1,6 @@
 """FILE: vidbyte/lib/dataclasses/jev.py
 
-PURPOSE: Defines the validated, immutable records for TypeSafe Jev decisions: JSON content, options, questions, requests, normalized answers, wire bodies, model cards, and decision-log records.
+PURPOSE: Defines the validated, immutable records for TypeSafe Jev decisions: JSON content, options, questions, requests, normalized answers, wire bodies, model cards, decision-log records, and the JevAgent specialist catalog.
 ROLE IN CODEBASE: `vidbyte/providers/typesafe.py` builds TypeSafeWireRequest from JevDecisionRequest and JevAnswer values from responses, while `vidbyte/lib/runners/decision.py` passes the typed records through.
 ARCHITECTURE NOTE: This module must not import model_configs because that would close an import cycle through ModalityDetector. Records own every shape rule in __post_init__; the provider, not these records, turns a wire record into the JSON body (lint S060 bars dict[str, Any] encoders here).
 COMMON MODIFICATION PATTERNS: Mirror https://docs.typesafe.ai/api.md exactly: add a field together with its validation, its wire record, and its provider serialization; keep bounds in vidbyte/lib/constants/jev.py.
@@ -16,7 +16,7 @@ import math
 from collections.abc import Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 from vidbyte.lib.constants.jev import (
     JEV_MAX_CHOICE_OPTIONS,
@@ -28,9 +28,17 @@ from vidbyte.lib.constants.jev import (
     JEV_MIN_SCORE_LEVELS,
     JEV_NOUL_OPTIONS,
     JEV_PROBABILITY_SUM_TOLERANCE,
+    JEV_SPECIALIST_MAX_COUNT,
+    JEV_SPECIALIST_MAX_DESCRIPTION_CHARS,
+    JEV_SPECIALIST_MAX_ROUTING_CHARS,
+    JEV_SPECIALIST_NO_MATCH_ID,
 )
+from vidbyte.lib.enums.agent_runtime import AgentRuntimeType
 from vidbyte.lib.enums.jev import JevQuestionType
 from vidbyte.lib.errors import ConfigurationError
+
+if TYPE_CHECKING:
+    from vidbyte.agents.base import BaseAgent
 
 # A frozen JSON value as TypeSafe accepts it: a string, or a read-only mapping / tuple of JSON values.
 JevContent = str | Mapping[str, object] | tuple[object, ...]
@@ -380,6 +388,77 @@ class JevDecisionRecord:
                 object.__setattr__(self, field_name, JevProbability.require(value, field_name=f"{field_name} of record {self.question!r}"))
 
 
+@dataclass(frozen=True, slots=True)
+class JevSpecialist:
+    """One registered specialist's stable choice ID, matching description, and configured agent template."""
+
+    id: str
+    description: str
+    agent: BaseAgent
+
+    def __post_init__(self) -> None:
+        # Rejects ambiguous metadata and configurations that cannot be routed or executed safely.
+        self._validate_identity()
+        self._validate_description()
+        self._validate_agent()
+
+    def _validate_identity(self) -> None:
+        # Enforces the TypeSafe option label bound and keeps the no-match label reserved.
+        if not isinstance(self.id, str) or not self.id.strip():
+            raise ConfigurationError("JevSpecialist.id must be a non-blank string.")
+        if self.id != self.id.strip() or len(self.id) > JEV_MAX_OPTION_NAME_CHARS:
+            raise ConfigurationError(f"JevSpecialist.id must be trimmed and at most {JEV_MAX_OPTION_NAME_CHARS} characters.")
+        if self.id == JEV_SPECIALIST_NO_MATCH_ID:
+            raise ConfigurationError(f"JevSpecialist.id {JEV_SPECIALIST_NO_MATCH_ID!r} is reserved for the no-match option.")
+
+    def _validate_description(self) -> None:
+        # Requires a bounded description because it is sent to the decision model on every routed run.
+        if not isinstance(self.description, str) or not self.description.strip() or self.description != self.description.strip():
+            raise ConfigurationError("JevSpecialist.description must be a trimmed, non-blank string.")
+        if len(self.description) > JEV_SPECIALIST_MAX_DESCRIPTION_CHARS:
+            raise ConfigurationError(f"JevSpecialist.description must be at most {JEV_SPECIALIST_MAX_DESCRIPTION_CHARS} characters.")
+
+    def _validate_agent(self) -> None:
+        # Requires a configured agent template and disallows recursively nested Jev routing.
+        # @intent lib-record-checks-agent-shape-without-upward-import
+        # vidbyte.lib may not import vidbyte.agents at run time, so the record checks the BaseAgent surface the
+        # router uses (a resolved runtime type, fork, and generate_reply) instead of an isinstance check.
+        runtime_type = getattr(self.agent, "runtime_type", None)
+        if not isinstance(runtime_type, AgentRuntimeType) or not all(callable(getattr(self.agent, name, None)) for name in ("fork", "generate_reply")):
+            raise ConfigurationError("JevSpecialist.agent must be a configured BaseAgent instance.")
+        if runtime_type is AgentRuntimeType.JEV:
+            raise ConfigurationError("JevSpecialist.agent cannot use the jev runtime.")
+
+
+@dataclass(frozen=True, slots=True)
+class JevSpecialistCatalog:
+    """The validated specialist collection and probability threshold one JevAgent routes with."""
+
+    specialists: tuple[JevSpecialist, ...]
+    match_threshold: float
+
+    def __post_init__(self) -> None:
+        # Enforces collection invariants that no single JevSpecialist entry can check on its own.
+        if not isinstance(self.specialists, tuple) or not all(isinstance(specialist, JevSpecialist) for specialist in self.specialists):
+            raise ConfigurationError("JevAgentSettings.agents must contain only JevSpecialist values.")
+        if len(self.specialists) > JEV_SPECIALIST_MAX_COUNT:
+            raise ConfigurationError(f"JevAgentSettings.agents supports at most {JEV_SPECIALIST_MAX_COUNT} specialists.")
+        identifiers = tuple(specialist.id for specialist in self.specialists)
+        if len(set(identifiers)) != len(identifiers):
+            raise ConfigurationError("JevAgentSettings.agents must have unique specialist IDs.")
+        if self.metadata_chars() > JEV_SPECIALIST_MAX_ROUTING_CHARS:
+            raise ConfigurationError(f"JevAgentSettings.agents metadata must fit within {JEV_SPECIALIST_MAX_ROUTING_CHARS} characters in total.")
+        object.__setattr__(self, "match_threshold", JevProbability.require(self.match_threshold, field_name="JevAgentSettings.specialist_match_threshold"))
+
+    def metadata_chars(self) -> int:
+        """Return the combined ID and description length sent to Jev on every routed run."""
+        return sum(len(specialist.id) + len(specialist.description) for specialist in self.specialists)
+
+    def get(self, specialist_id: str) -> JevSpecialist | None:
+        """Return the registered specialist for one Choice answer, or None for an unknown ID."""
+        return next((specialist for specialist in self.specialists if specialist.id == specialist_id), None)
+
+
 __all__ = [
     "JevAnswer",
     "JevContent",
@@ -390,6 +469,8 @@ __all__ = [
     "JevOption",
     "JevProbability",
     "JevQuestion",
+    "JevSpecialist",
+    "JevSpecialistCatalog",
     "JevValidation",
     "TypeSafeWireQuestion",
     "TypeSafeWireRequest",

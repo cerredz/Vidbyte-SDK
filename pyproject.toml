@@ -66,6 +66,7 @@ vidbyte-sdk = "vidbyte.cli:main"
 vidbyte-mcp-server = "vidbyte.mcp_server.__main__:main"
 
 [tool.setuptools.package-data]
+"vidbyte.prompts" = ["jev/*.md"]
 "vidbyte.prompts.prompts" = ["*.json", "*.md", "*/*.json", "*/*.md"]
 "vidbyte.paradigms.context_minimal_fanout" = [
   "*.md",

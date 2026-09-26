@@ -1,10 +1,10 @@
 """FILE: vidbyte/agents/jev/settings.py
 
 PURPOSE: Defines the single, opinionated public configuration object for JevAgent.
-ROLE IN CODEBASE: JevAgentSettings is the only constructor input accepted by JevAgent and carries decision configuration plus named preflight settings into JevRuntime.
+ROLE IN CODEBASE: JevAgentSettings is the only constructor input accepted by JevAgent and carries decision configuration, the specialist catalog, and named preflight settings into JevRuntime.
 ARCHITECTURE NOTE: The surface is intentionally closed; named Jev capabilities belong here as explicit settings instead of a generic decisions collection.
 COMMON MODIFICATION PATTERNS: Add a validated named capability object, then implement its fixed policy in JevRuntime without exposing runtime replacement hooks.
-KNOWN EDGE CASES: The generative provider cannot be TypeSafe because Jev is a decision model; selector thresholds reject booleans, non-finite values, and out-of-range probabilities.
+KNOWN EDGE CASES: The generative provider cannot be TypeSafe because Jev is a decision model; selector and specialist thresholds reject booleans, non-finite values, and out-of-range probabilities.
 RELATED DOCS: docs/design/jev-agent-scaffold.md, docs/design/jev-tool-selector.md, and skills/jev-agent/SKILL.md.
 TESTS: tests/test_jev_agent.py, tests/test_jev_tool_selector.py, and scripts/test-jev-tool-selector.py.
 """
@@ -12,15 +12,18 @@ TESTS: tests/test_jev_agent.py, tests/test_jev_tool_selector.py, and scripts/tes
 from __future__ import annotations
 
 import math
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 
 from vidbyte.agents.jev.presets import JevPreflightPreset
 from vidbyte.agents.settings import AgentLoopSettings
 from vidbyte.lib.constants.jev import (
+    JEV_SPECIALIST_DEFAULT_MATCH_THRESHOLD,
     JEV_TOOL_SELECTOR_DEFAULT_THRESHOLD,
     JEV_TOOL_SELECTOR_MAX_THRESHOLD,
     JEV_TOOL_SELECTOR_MIN_THRESHOLD,
 )
+from vidbyte.lib.dataclasses.jev import JevSpecialist, JevSpecialistCatalog
 from vidbyte.lib.dataclasses.model_configs import DecisionModelConfig
 from vidbyte.lib.enums import ModelProvider
 from vidbyte.lib.errors import ConfigurationError
@@ -44,6 +47,8 @@ class JevAgentSettings:
     decision: DecisionModelConfig = field(default_factory=DecisionModelConfig, repr=False)
     preflight: tuple[JevPreflightPreset | str, ...] = ()
     tool_selector_threshold: float = JEV_TOOL_SELECTOR_DEFAULT_THRESHOLD
+    agents: Sequence[JevSpecialist] = ()
+    specialist_match_threshold: float = JEV_SPECIALIST_DEFAULT_MATCH_THRESHOLD
 
     def __post_init__(self) -> None:
         # Normalizes immutable inputs and rejects invalid agent configuration before runtime construction.
@@ -72,6 +77,7 @@ class JevAgentSettings:
             raise ConfigurationError("JevAgentSettings.decision must be a DecisionModelConfig instance.")
         self._normalize_preflight()
         self._validate_tool_selector_threshold()
+        self._normalize_specialists()
 
     def _normalize_preflight(self) -> None:
         # Converts supported string names into the closed preflight enum and rejects duplicate policies.
@@ -99,6 +105,19 @@ class JevAgentSettings:
         ):
             raise ConfigurationError("JevAgentSettings.tool_selector_threshold must be a finite probability between 0 and 1 inclusive.")
         object.__setattr__(self, "tool_selector_threshold", float(value))
+
+    def _normalize_specialists(self) -> None:
+        # Freezes the catalog and validates it through JevSpecialistCatalog before the first runtime can be built.
+        if isinstance(self.agents, (str, bytes)) or not isinstance(self.agents, Sequence):
+            raise ConfigurationError("JevAgentSettings.agents must be a sequence of JevSpecialist values.")
+        catalog = JevSpecialistCatalog(specialists=tuple(self.agents), match_threshold=self.specialist_match_threshold)
+        object.__setattr__(self, "agents", catalog.specialists)
+        object.__setattr__(self, "specialist_match_threshold", catalog.match_threshold)
+
+    @property
+    def specialists(self) -> JevSpecialistCatalog:
+        """Return the validated specialist catalog JevRuntime routes with."""
+        return JevSpecialistCatalog(specialists=tuple(self.agents), match_threshold=self.specialist_match_threshold)
 
     @staticmethod
     def _validate_text(value: object, field_name: str) -> None:

@@ -1,11 +1,11 @@
 """FILE: tests/test_jev_agent.py
 
-PURPOSE: Verifies the TypeSafe decision substrate and the first opinionated JevAgent scaffold without network access.
-ROLE IN CODEBASE: Covers docs/design/jev-agent-scaffold.md section 10, including settings, runtime wiring, provider normalization, public exports, and ordinary loop behavior.
+PURPOSE: Verifies the TypeSafe decision substrate, JevAgent scaffold, and one-time specialist routing without network access.
+ROLE IN CODEBASE: Covers docs/design/jev-agent-scaffold.md and docs/design/jev-specialist-routing.md, including settings, runtime wiring, provider normalization, public exports, and routing behavior.
 ARCHITECTURE NOTE: Scripted transports and runners replace only external model boundaries; production constructors and runtime factories remain under test.
 COMMON MODIFICATION PATTERNS: Add cases here whenever a named Jev capability changes settings, runtime policy, fallback behavior, or observability.
 KNOWN EDGE CASES: TYPESAFE_API_KEY is cleared where credential timing is tested, and no test may send a live provider request.
-RELATED DOCS: docs/design/jev-agent-scaffold.md and skills/jev-agent/SKILL.md.
+RELATED DOCS: docs/design/jev-agent-scaffold.md, docs/design/jev-specialist-routing.md, and skills/jev-agent/SKILL.md.
 TESTS: python -m pytest tests/test_jev_agent.py and python scripts/test-jev-agent-scaffold.py.
 """
 
@@ -17,20 +17,30 @@ import json
 import os
 import unittest
 from typing import Any
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
-from tests.agent_test_support import bind_test_runner
+from tests.agent_test_support import OfflineTestAgent, bind_test_runner
 from vidbyte import JevAgent as RootJevAgent
 from vidbyte import JevAgentSettings as RootJevAgentSettings
 from vidbyte import JevRuntime as RootJevRuntime
+from vidbyte import JevSpecialist as RootJevSpecialist
 from vidbyte import VidbyteSDK, tool
 from vidbyte.agents import BaseAgent
-from vidbyte.agents.jev import JevAgent, JevAgentSettings, JevRuntime
+from vidbyte.agents.jev import JevAgent, JevAgentSettings, JevRuntime, JevSpecialist
+from vidbyte.agents.jev.prompts import JevPrompt, JevPrompts
 from vidbyte.agents.pricing import JevUsage
 from vidbyte.agents.runtime import AgentRuntime
 from vidbyte.agents.settings import AgentLoopSettings
 from vidbyte.lib.config import DecisionModelConfig
-from vidbyte.lib.constants.jev import JEV_DEFAULT_RETRY_COUNT, JEV_DEFAULT_TIMEOUT_SECONDS, JEV_MAX_CHOICE_OPTIONS, JEV_MAX_SCORE_LEVELS
+from vidbyte.lib.constants.jev import (
+    JEV_DEFAULT_RETRY_COUNT,
+    JEV_DEFAULT_TIMEOUT_SECONDS,
+    JEV_MAX_CHOICE_OPTIONS,
+    JEV_MAX_SCORE_LEVELS,
+    JEV_SPECIALIST_MAX_COUNT,
+    JEV_SPECIALIST_MAX_DESCRIPTION_CHARS,
+    JEV_SPECIALIST_NO_MATCH_ID,
+)
 from vidbyte.lib.dataclasses.jev import JevAnswer, JevDecisionRequest, JevOption, JevQuestion
 from vidbyte.lib.enums import AgentRuntimeType, JevQuestionType, ModelProvider
 from vidbyte.lib.errors import ConfigurationError, ProviderRequestError, ProviderResponseError
@@ -38,6 +48,7 @@ from vidbyte.lib.http import HttpResponse
 from vidbyte.lib.registries.pricing import ModelPricingRegistry
 from vidbyte.lib.registries.runtimes import RuntimeRegistry
 from vidbyte.lib.runners import DecisionModelRunner, TextModelResponse
+from vidbyte.lib.runners.types import DecisionModelResponse
 from vidbyte.tools.security import PermissionPolicy
 
 API_KEY = "typesafe-test-key"
@@ -136,6 +147,18 @@ def _runner(*responses: HttpResponse | BaseException, **config: Any) -> tuple[De
     # Builds a keyed decision runner over a scripted transport.
     transport = ScriptedTransport(*responses)
     return DecisionModelRunner(DecisionModelConfig(api_key=API_KEY, **config), transport=transport), transport
+
+
+def _specialist_response(choice: str, probabilities: dict[str, float]) -> DecisionModelResponse:
+    # Builds one normalized Choice response for the fixed specialist question.
+    answer = JevAnswer(question_name="specialist", question_type=JevQuestionType.CHOICE, choice=choice, probabilities=probabilities, confidence=max(probabilities.values()))
+    return DecisionModelResponse(provider=ModelProvider.TYPESAFE, model="jev-latest", answers={"specialist": answer}, raw={})
+
+
+def _specialist_template(name: str = "research", runner: object | None = None) -> BaseAgent:
+    # Creates one valid specialist template and optionally binds an offline runner retained across forks.
+    agent = OfflineTestAgent(name=name, system_prompt=f"Handle {name} tasks.", provider="openai", model_name="gpt-4.1-mini")
+    return bind_test_runner(agent, runner) if runner is not None else agent
 
 
 class DecisionFoundationTests(unittest.IsolatedAsyncioTestCase):
@@ -392,6 +415,51 @@ class JevSettingsTests(unittest.TestCase):
         self.assertIs(settings.permission_policy, policy)
         self.assertIs(settings.loop, loop)
 
+    def test_freezes_valid_specialist_catalog(self) -> None:
+        # [Hidden Assumption] list input becomes an immutable, validated tuple while the template stays configured.
+        specialist = JevSpecialist(id="research", description="Researches source-backed questions.", agent=_specialist_template())
+        settings = _settings(agents=[specialist])
+        self.assertEqual(settings.agents, (specialist,))
+        self.assertEqual(settings.specialist_match_threshold, 0.6)
+
+    def test_rejects_invalid_specialist_catalog_entries(self) -> None:
+        # [Edge Case] invalid types, duplicate IDs, reserved IDs, and overlong descriptions fail at construction.
+        first = JevSpecialist(id="research", description="Researches questions.", agent=_specialist_template())
+        duplicate = JevSpecialist(id="research", description="Writes code.", agent=_specialist_template("coder"))
+        invalid = (object(), "research")
+        for agents in ((first, duplicate), invalid):
+            with self.subTest(agents=type(agents).__name__), self.assertRaises(ConfigurationError):
+                _settings(agents=agents)
+        with self.assertRaises(ConfigurationError):
+            JevSpecialist(id="no_suitable_agent", description="Reserved.", agent=_specialist_template())
+        with self.assertRaises(ConfigurationError):
+            JevSpecialist(id="large", description="x" * (JEV_SPECIALIST_MAX_DESCRIPTION_CHARS + 1), agent=_specialist_template())
+        with self.assertRaises(ConfigurationError):
+            _settings(agents="research")
+
+    def test_rejects_non_agent_and_jev_runtime_specialist_templates(self) -> None:
+        # [Hidden Failure] the lib record cannot import BaseAgent, so its shape check must still refuse non-agents and nested Jev routing.
+        with self.assertRaisesRegex(ConfigurationError, "configured BaseAgent"):
+            JevSpecialist(id="research", description="Researches questions.", agent=object())  # type: ignore[arg-type]
+        with self.assertRaisesRegex(ConfigurationError, "jev runtime"):
+            JevSpecialist(id="nested", description="Routes again.", agent=JevAgent(_settings()))
+
+    def test_specialist_limits_are_generous_and_shared(self) -> None:
+        # [Hidden Assumption] a long, realistic description fits; only TypeSafe's option limit (minus no-match) caps the count.
+        description = "Handles source-backed research. " * 500
+        specialist = JevSpecialist(id="research", description=description.strip(), agent=_specialist_template())
+        self.assertLessEqual(len(specialist.description), JEV_SPECIALIST_MAX_DESCRIPTION_CHARS)
+        self.assertEqual(JEV_SPECIALIST_MAX_COUNT, JEV_MAX_CHOICE_OPTIONS - 1)
+
+    def test_rejects_catalog_limit_and_bad_probability_thresholds(self) -> None:
+        # [Hidden Failure] TypeSafe's 255-option limit includes the reserved no-match option.
+        specialist = JevSpecialist(id="research", description="Researches questions.", agent=_specialist_template())
+        with self.assertRaisesRegex(ConfigurationError, str(JEV_SPECIALIST_MAX_COUNT)):
+            _settings(agents=(specialist,) * (JEV_SPECIALIST_MAX_COUNT + 1))
+        for threshold in (True, float("nan"), -0.01, 1.01):
+            with self.subTest(threshold=threshold), self.assertRaises(ConfigurationError):
+                _settings(specialist_match_threshold=threshold)
+
 
 class JevAgentRuntimeTests(unittest.IsolatedAsyncioTestCase):
     """Pins runtime specialization while proving the standard loop stays intact."""
@@ -448,6 +516,81 @@ class JevAgentRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(reply.metadata["tool_call_states"], ("succeeded", "succeeded"))
         self.assertEqual(len(runner.calls), 2)
 
+    async def test_routes_to_selected_specialist_once_with_prompt_and_descriptions(self) -> None:
+        # [Hidden Assumption] routing sees only the current task and catalog descriptions, then runs the selected template.
+        specialist_runner = ScriptedRunner(TextModelResponse(provider=ModelProvider.OPENAI, model="fake-specialist", text="research result", raw={}))
+        specialist = JevSpecialist(id="research", description="Research source-backed questions.", agent=_specialist_template(runner=specialist_runner))
+        general_runner = ScriptedRunner(TextModelResponse(provider=ModelProvider.OPENAI, model="fake-general", text="general result", raw={}))
+        agent = bind_test_runner(JevAgent(_settings(agents=(specialist,))), general_runner)
+        decision_runner = AsyncMock()
+        decision_runner.arun.return_value = _specialist_response("research", {"research": 0.9, "no_suitable_agent": 0.1})
+
+        with patch("vidbyte.agents.jev.specialists.DecisionModelRunner", return_value=decision_runner):
+            reply = await agent.arun("Find research on this SDK.")
+
+        request = decision_runner.arun.await_args.args[0]
+        question = request.questions[0]
+        self.assertEqual(request.state, "Find research on this SDK.")
+        self.assertIn("Which registered specialist best fits this task?", question.instructions)
+        self.assertEqual(tuple(option.name for option in question.options), ("research", "no_suitable_agent"))
+        self.assertEqual(question.options[0].description, "Research source-backed questions.")
+        self.assertEqual(reply.content, "research result")
+        self.assertEqual(reply.metadata["jev_specialist_routing"]["selected_id"], "research")
+        self.assertEqual(len(specialist_runner.calls), 1)
+        self.assertEqual(general_runner.calls, [])
+
+    async def test_no_match_or_weak_probability_uses_general_agent(self) -> None:
+        # [Edge Case] explicit no-match and below-threshold choices both retain the established general loop.
+        specialist = JevSpecialist(id="research", description="Research source-backed questions.", agent=_specialist_template())
+        for choice, probabilities, reason in (
+            ("no_suitable_agent", {"research": 0.1, "no_suitable_agent": 0.9}, "no_suitable_agent"),
+            ("research", {"research": 0.59, "no_suitable_agent": 0.41}, "below_probability_threshold"),
+        ):
+            with self.subTest(reason=reason):
+                general_runner = ScriptedRunner(TextModelResponse(provider=ModelProvider.OPENAI, model="fake-general", text="general result", raw={}))
+                agent = bind_test_runner(JevAgent(_settings(agents=(specialist,))), general_runner)
+                decision_runner = AsyncMock()
+                decision_runner.arun.return_value = _specialist_response(choice, probabilities)
+                with patch("vidbyte.agents.jev.specialists.DecisionModelRunner", return_value=decision_runner):
+                    reply = await agent.arun("Do this task.")
+                self.assertEqual(reply.content, "general result")
+                self.assertEqual(reply.metadata["jev_specialist_routing"]["reason"], reason)
+                self.assertEqual(len(general_runner.calls), 1)
+
+    async def test_decision_failure_falls_back_to_general_agent(self) -> None:
+        # [Hidden Failure] an unavailable decision service must not prevent the general agent from handling the task.
+        specialist = JevSpecialist(id="research", description="Research source-backed questions.", agent=_specialist_template())
+        general_runner = ScriptedRunner(TextModelResponse(provider=ModelProvider.OPENAI, model="fake-general", text="general result", raw={}))
+        agent = bind_test_runner(JevAgent(_settings(agents=(specialist,))), general_runner)
+        decision_runner = AsyncMock()
+        decision_runner.arun.side_effect = RuntimeError("decision unavailable")
+        with patch("vidbyte.agents.jev.specialists.DecisionModelRunner", return_value=decision_runner):
+            reply = await agent.arun("Do this task.")
+        self.assertEqual(reply.content, "general result")
+        self.assertEqual(reply.metadata["jev_specialist_routing"]["reason"], "decision_unavailable")
+        self.assertEqual(reply.metadata["jev_specialist_routing"]["error_type"], "RuntimeError")
+
+
+class JevPromptRegistryTests(unittest.TestCase):
+    """Pins that every fixed Jev prompt is a Markdown asset reached through the registry."""
+
+    def test_every_registered_prompt_has_markdown_text(self) -> None:
+        # [Silent Failure] a registry member without an asset would only fail on the first routed or selected run.
+        for prompt in JevPrompt:
+            with self.subTest(prompt=prompt.name):
+                text = JevPrompts.get(prompt)
+                self.assertTrue(text)
+                self.assertEqual(text, text.strip())
+
+    def test_specialist_question_names_the_reserved_no_match_option(self) -> None:
+        # [Hidden Assumption] the Markdown wording must keep naming the reserved option ID the router adds.
+        self.assertIn(JEV_SPECIALIST_NO_MATCH_ID, JevPrompts.get(JevPrompt.SPECIALIST_QUESTION))
+
+    def test_rejects_non_member_lookup(self) -> None:
+        # [Edge Case] raw strings are not prompt names; callers must use the closed enum.
+        with self.assertRaises(ConfigurationError):
+            JevPrompts.get("specialist_question")  # type: ignore[arg-type]
+
 
 class JevPublicApiTests(unittest.TestCase):
     """Pins imports, namespace construction, and the closed constructor."""
@@ -457,6 +600,7 @@ class JevPublicApiTests(unittest.TestCase):
         self.assertIs(RootJevAgent, JevAgent)
         self.assertIs(RootJevAgentSettings, JevAgentSettings)
         self.assertIs(RootJevRuntime, JevRuntime)
+        self.assertIs(RootJevSpecialist, JevSpecialist)
 
     def test_sdk_namespace_constructs_jev_agent(self) -> None:
         # [Silent Failure] the root namespace client exposes the opinionated constructor.

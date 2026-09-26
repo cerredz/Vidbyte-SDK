@@ -2,7 +2,7 @@
 
 PURPOSE: Defines the Jev preflight contract and the tool-selection implementation.
 ROLE IN CODEBASE: JevRuntime applies enabled preflights before the ordinary model/tool loop.
-ARCHITECTURE NOTE: Tool questions and selection policy stay internal; callers choose the named TOOL_SELECTOR capability.
+ARCHITECTURE NOTE: Tool questions and selection policy stay internal; callers choose the named TOOL_SELECTOR capability. The question text is the JevPrompt.TOOL_SELECTOR_QUESTION asset in vidbyte/prompts/jev/.
 COMMON MODIFICATION PATTERNS: Implement a JevPreflight subclass and keep request shaping, filtering, and catalog building as separate methods.
 KNOWN EDGE CASES: Missing credentials, provider failures, and incomplete answers keep the full original tool catalog.
 RELATED DOCS: docs/design/jev-tool-selector.md and skills/jev-agent/SKILL.md.
@@ -14,6 +14,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from collections.abc import Mapping, Sequence
 
+from vidbyte.agents.jev.prompts import JevPrompt, JevPrompts
 from vidbyte.agents.pricing import JevUsage
 from vidbyte.lib.config import DecisionModelConfig
 from vidbyte.lib.constants.jev import JEV_NOUL_TRUE
@@ -70,11 +71,7 @@ class JevPreflightTools(JevPreflight):
                 JevQuestion(
                     name=f"tool_selector.{index}",
                     question_type=JevQuestionType.NOUL,
-                    instructions=(
-                        "Could this tool be useful at any point in completing the user's request? "
-                        "Answer true if it could materially help, even if it is not the first tool needed.\n\n"
-                        f"{tool.spec().to_prompt_str()}"
-                    ),
+                    instructions=f"{JevPrompts.get(JevPrompt.TOOL_SELECTOR_QUESTION)}\n\n{tool.spec().to_prompt_str()}",
                 )
             )
         return tuple(questions)

@@ -23,21 +23,23 @@ Each capability owns its fixed internal Jev questions, state projection, thresho
 
 - `settings.py` owns the complete public configuration surface.
 - `agent.py` maps settings into `BaseAgent` and fixes the runtime to `AgentRuntimeType.JEV`; it supplies its settings through the single `_runtime_extension_kwargs()` hook.
-- `runtime.py` is the seam for Jev policy. `RuntimeRegistry` resolves `AgentRuntimeType.JEV` to `JevRuntime`, which currently inherits the ordinary linear loop unchanged and refuses to build without `JevAgentSettings`.
+- `runtime.py` is the thin seam for Jev policy. `RuntimeRegistry` resolves `AgentRuntimeType.JEV` to `JevRuntime`, which requires `JevAgentSettings`, hands the run to `JevSpecialistRouter` when specialists are configured, and applies enabled preflights before the ordinary linear loop.
 - `vidbyte/lib/dataclasses/jev.py` owns immutable decision records and the `TypeSafeWireRequest`/`TypeSafeWireQuestion` wire records. They mirror https://docs.typesafe.ai/api.md exactly: state, instructions, and criteria may be strings or JSON structure; noul criteria are optional; Score answers carry a weighted `score`; noul answers carry no confidence.
 - `vidbyte/lib/runners/decision.py` owns semantic decision execution (`arun`) and model listing (`alist_models`).
 - `vidbyte/providers/typesafe.py` alone owns TypeSafe wire serialization, normalization, and failure mapping.
 - `presets.py` exposes the named `JevPreflightPreset` values; `preflight.py` owns the internal `JevPreflight` contract and `JevPreflightTools` implementation.
+- `specialists.py` owns `JevSpecialistRouter`, the specialist-routing logic; the `JevSpecialist` record lives in `vidbyte/lib/dataclasses/jev.py` and its limits in `vidbyte/lib/constants/jev.py`.
+- `prompts.py` is the registry (`JevPrompt`, `JevPrompts`) for every fixed Jev question text; the text itself lives in Markdown files under `vidbyte/prompts/jev/`. Never inline question text in Python.
 
-The default settings perform no Jev call. `JevPreflightPreset.TOOL_SELECTOR` enables one batched tool-usefulness request before the generative loop. `tool_selector_threshold` is a finite probability from 0 through 1 inclusive; a missing TypeSafe API key must not prevent settings or agent construction.
+The default settings perform no Jev call, and a missing TypeSafe API key must not prevent settings or agent construction. `JevPreflightPreset.TOOL_SELECTOR` enables one batched tool-usefulness request before the generative loop. `tool_selector_threshold` is a finite probability from 0 through 1 inclusive. An empty specialist catalog makes no routing call; with specialists configured, a missing key or failed decision falls back to the general model loop.
 
 ## Change workflow
 
 1. Read `AGENTS.md`, `docs/design/jev-agent-scaffold.md`, and every existing file under `vidbyte/agents/jev/`.
-2. Describe the user-facing capability in product terms and add a named setting or preset. Keep caller configuration to the minimum product-level controls, such as a validated threshold.
-3. Define exactly when the runtime asks Jev, the state Jev sees, the fixed questions asked, and the action for every answer. Write every question with `skills/asking-jev-questions/SKILL.md`: Jev matches state against definitions you supply; it does not reason, count, forecast, or generate.
+2. Describe the user-facing capability in product terms and add a named setting, preset, or catalog record. Keep caller configuration to the minimum product-level controls, such as a validated threshold.
+3. Define exactly when the runtime asks Jev, the state Jev sees, the fixed questions asked, and the action for every answer. Write every question with `skills/asking-jev-questions/SKILL.md`: Jev matches state against definitions you supply; it does not reason, count, forecast, or generate. Specialist routing runs once at the start, using only the current prompt and specialist descriptions.
 4. Define fail-open or fail-closed behavior for missing credentials, timeouts, malformed answers, and unsupported configurations. Never let an exception silently choose policy.
-5. Implement orchestration in `JevRuntime`; keep provider wire shapes in `vidbyte/providers/typesafe.py` and reusable validated records in `vidbyte/lib/`.
+5. Implement each capability's logic in its own class under `vidbyte/agents/jev/` and keep `JevRuntime` to the call that delegates to it; keep provider wire shapes in `vidbyte/providers/typesafe.py` and reusable validated records in `vidbyte/lib/`.
 6. Keep generative usage/speed tracking agent-owned. Make decision usage visible without mixing token fields or double counting.
 7. Add tests for the disabled path, each enabled outcome, boundary thresholds, provider failure, the ordinary model/tool loop, and any context/schema/tool-catalog changes.
 8. Update this skill and the design documentation when the public philosophy or package boundary changes.
@@ -49,6 +51,8 @@ The default settings perform no Jev call. `JevPreflightPreset.TOOL_SELECTOR` ena
 - API keys never appear in object representations, errors, logs, traces, or serialized state.
 - The public API names capabilities, not internal questions or decisions.
 - Runtime state is run-local; reusable configuration is frozen and validated before execution.
+- Specialist IDs are unique; `no_suitable_agent` is reserved; Choice option and catalog size limits are validated before execution.
+- Specialist templates are forked per routed run. A weak match or decision failure falls back to general; a specialist execution failure does not replay the task.
 - Existing `BaseAgent` behavior remains unchanged when Jev is not involved; `AgentRuntimeType.JEV` gets the same linear-loop wiring as `LINEAR`.
 - Provider payload dictionaries do not move into `vidbyte/lib` records.
 - No live provider call is required by deterministic tests.
