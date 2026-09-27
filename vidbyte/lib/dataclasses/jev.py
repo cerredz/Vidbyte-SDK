@@ -1,6 +1,6 @@
 """FILE: vidbyte/lib/dataclasses/jev.py
 
-PURPOSE: Defines validated records for TypeSafe Jev decisions, Jev preflight questions/results, JevAgent candidate profiles and probability rankings, and the JevAgentResponse the caller reads after a run.
+PURPOSE: Defines validated records for TypeSafe Jev decisions, preflight outcomes, selected profile probabilities, and the JevAgentResponse the caller reads after a run.
 ROLE IN CODEBASE: `vidbyte/providers/typesafe.py` builds TypeSafeWireRequest from JevDecisionRequest and JevAnswer values from responses, while `vidbyte/lib/runners/decision.py` passes the typed records through.
 ARCHITECTURE NOTE: This module must not import model_configs because that would close an import cycle through ModalityDetector. Records own every shape rule in __post_init__; the provider, not these records, turns a wire record into the JSON body (lint S060 bars dict[str, Any] encoders here).
 COMMON MODIFICATION PATTERNS: Mirror https://docs.typesafe.ai/api.md exactly: add a field together with its validation, its wire record, and its provider serialization; keep bounds in vidbyte/lib/constants/jev.py.
@@ -21,9 +21,6 @@ from typing import TYPE_CHECKING, cast
 from pydantic import BaseModel, ConfigDict, Field
 
 from vidbyte.lib.constants.jev import (
-    JEV_AGENT_MAX_COUNT,
-    JEV_AGENT_MAX_DESCRIPTION_CHARS,
-    JEV_AGENT_MAX_ROUTING_CHARS,
     JEV_CLARIFICATION_MAX_QUESTIONS,
     JEV_CLARIFICATION_MAX_RECOMMENDATIONS,
     JEV_CLARIFICATION_MIN_RECOMMENDATIONS,
@@ -39,7 +36,6 @@ from vidbyte.lib.constants.jev import (
     JEV_NOUL_TRUE,
     JEV_PROBABILITY_SUM_TOLERANCE,
 )
-from vidbyte.lib.enums.agent_runtime import AgentRuntimeType
 from vidbyte.lib.enums.jev import (
     JevPreflightPreset,
     JevPreflightQuestionKey,
@@ -48,7 +44,6 @@ from vidbyte.lib.enums.jev import (
 from vidbyte.lib.errors import ConfigurationError
 
 if TYPE_CHECKING:
-    from vidbyte.agents.base import BaseAgent
     from vidbyte.agents.pricing import ProviderUsage, UsageRollup
 
 # A frozen JSON value as TypeSafe accepts it: a string, or a read-only mapping / tuple of JSON values.
@@ -400,88 +395,6 @@ class JevDecisionRecord:
 
 
 @dataclass(frozen=True, slots=True)
-class JevAgent:
-    """A named routing profile paired with the configured BaseAgent settings that run it."""
-
-    title: str
-    description: str
-    metadata: Mapping[str, object]
-    agent: BaseAgent
-
-    def __post_init__(self) -> None:
-        # Freezes the profile data Jev sees and validates the reusable linear agent template.
-        self._validate_title()
-        self._validate_description()
-        self._validate_metadata()
-        self._validate_agent()
-
-    def _validate_title(self) -> None:
-        # Requires a unique, TypeSafe-safe label; catalog uniqueness is checked separately.
-        if not isinstance(self.title, str) or not self.title.strip() or self.title != self.title.strip():
-            raise JevValidation.error("JevAgent.title", "a trimmed, non-blank string", self.title)
-        if len(self.title) > JEV_MAX_OPTION_NAME_CHARS:
-            raise JevValidation.error("JevAgent.title", f"at most {JEV_MAX_OPTION_NAME_CHARS} characters", len(self.title))
-
-    def _validate_description(self) -> None:
-        # Requires a bounded scope description because it is included in each routing request.
-        if not isinstance(self.description, str) or not self.description.strip() or self.description != self.description.strip():
-            raise JevValidation.error("JevAgent.description", "a trimmed, non-blank string", self.description)
-        if len(self.description) > JEV_AGENT_MAX_DESCRIPTION_CHARS:
-            raise JevValidation.error("JevAgent.description", f"at most {JEV_AGENT_MAX_DESCRIPTION_CHARS} characters", len(self.description))
-
-    def _validate_metadata(self) -> None:
-        # Freezes JSON-compatible metadata; it is sent to TypeSafe and must never carry secrets.
-        if not isinstance(self.metadata, Mapping):
-            raise JevValidation.error("JevAgent.metadata", "a JSON object", self.metadata)
-        frozen = JevJson.freeze(self.metadata, field_name="JevAgent.metadata")
-        if not isinstance(frozen, Mapping):
-            raise JevValidation.error("JevAgent.metadata", "a JSON object", self.metadata)
-        object.__setattr__(self, "metadata", frozen)
-
-    def _validate_agent(self) -> None:
-        # lib cannot import BaseAgent at runtime, so validate its required surface and linear runtime.
-        # @intent profile-settings-are-loaded-into-linear-main-agent
-        # The coordinator owns the Jev runtime; profile runtime families cannot be swapped onto it without
-        # silently losing actor/search semantics, and nested Jev would recurse before every request.
-        runtime_type = getattr(self.agent, "runtime_type", None)
-        runner_config = getattr(self.agent, "runner_config", None)
-        provider = getattr(runner_config, "provider", None)
-        model_name = getattr(runner_config, "model_name", None)
-        required = ("fork", "generate_reply", "_runner_for_model")
-        if not isinstance(runtime_type, AgentRuntimeType) or not all(callable(getattr(self.agent, name, None)) for name in required):
-            raise JevValidation.error("JevAgent.agent", "a configured BaseAgent template", type(self.agent).__name__)
-        if runtime_type is not AgentRuntimeType.LINEAR:
-            raise ConfigurationError("JevAgent.agent must use the linear runtime; Jev owns the selected run's runtime.")
-        if not isinstance(provider, str) or not isinstance(model_name, str):
-            raise JevValidation.error("JevAgent.agent.runner_config", "a configured provider and model identity", runner_config)
-        if not provider.strip() or not model_name.strip():
-            raise JevValidation.error("JevAgent.agent.runner_config", "a non-blank provider and model identity", runner_config)
-
-
-@dataclass(frozen=True, slots=True)
-class JevAgentCatalog:
-    """An immutable, bounded collection of profile candidates for one Jev coordinator."""
-
-    agents: tuple[JevAgent, ...]
-
-    def __post_init__(self) -> None:
-        # Enforces the catalog-wide uniqueness, non-empty, provider count, and serialized-size rules.
-        if not isinstance(self.agents, tuple) or not self.agents or not all(isinstance(agent, JevAgent) for agent in self.agents):
-            raise JevValidation.error("JevAgentSettings.agents", "a non-empty tuple of JevAgent profiles", self.agents)
-        if len(self.agents) > JEV_AGENT_MAX_COUNT:
-            raise JevValidation.error("JevAgentSettings.agents", f"at most {JEV_AGENT_MAX_COUNT} profiles", len(self.agents))
-        titles = tuple(agent.title for agent in self.agents)
-        if len(set(titles)) != len(titles):
-            raise JevValidation.error("JevAgentSettings.agents", "profiles with unique titles", titles)
-        if self.metadata_chars() > JEV_AGENT_MAX_ROUTING_CHARS:
-            raise JevValidation.error("JevAgentSettings.agents", f"profile data within {JEV_AGENT_MAX_ROUTING_CHARS} characters", self.metadata_chars())
-
-    def metadata_chars(self) -> int:
-        """Return the serialized title, description, and metadata size for the configured profiles."""
-        return sum(len(agent.title) + len(agent.description) + JevJson.char_length(agent.metadata) for agent in self.agents)
-
-
-@dataclass(frozen=True, slots=True)
 class JevAgentProbability:
     """The probability TypeSafe assigned to one candidate profile."""
 
@@ -798,8 +711,6 @@ class JevAgentResponse:
 
 __all__ = [
     "JevAgentResponse",
-    "JevAgent",
-    "JevAgentCatalog",
     "JevAgentProbability",
     "JevAgentSelection",
     "JevAnswer",

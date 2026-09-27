@@ -62,6 +62,7 @@ from vidbyte.lib.enums.failure import (
 from vidbyte.lib.enums.jev import (
     JevPreflightPreset,
     JevPreflightQuestionKey,
+    JevPrompt,
     JevQuestionType,
 )
 from vidbyte.lib.enums.model_modality import ModelModality, ModelNameModality
@@ -101,6 +102,7 @@ from vidbyte.lib.enums.speed import AgentSpeedRecordingIntegrity
 from vidbyte.lib.enums.structured_output import StructuredOutputSupport
 
 __all__ = [
+    "JevPrompt",
     "JevPreflightPreset",
     "JevPreflightQuestionKey",
     "JevQuestionType",

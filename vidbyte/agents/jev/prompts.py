@@ -13,23 +13,16 @@ TESTS: tests/test_jev_agent.py.
 
 from __future__ import annotations
 
-from enum import StrEnum
 from functools import cache
 from importlib import resources
 from typing import cast
 
 from vidbyte.lib.dataclasses.jev import JevBrief, JevCriterion
+from vidbyte.lib.enums.jev import JevPrompt
 from vidbyte.lib.errors import ConfigurationError
 
 _JEV_PROMPT_PACKAGE = "vidbyte.prompts"
 _JEV_PROMPT_FOLDER = "jev"
-
-
-class JevPrompt(StrEnum):
-    """Names of the fixed Jev prompts; each value is its Markdown file stem."""
-
-    AGENT_SELECTION_QUESTION = "specialist_question"
-    TOOL_SELECTOR_QUESTION = "tool_selector_question"
 
 
 class JevPrompts:

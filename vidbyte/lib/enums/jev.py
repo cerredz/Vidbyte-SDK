@@ -11,7 +11,14 @@ TESTS: tests/test_jev_agent.py, tests/test_jev_preflight.py, scripts/test-jev-ag
 
 from __future__ import annotations
 
-from enum import Enum
+from enum import Enum, StrEnum
+
+
+class JevPrompt(StrEnum):
+    """Names of fixed Jev prompts, matching their packaged Markdown asset stems."""
+
+    AGENT_SELECTION_QUESTION = "specialist_question"
+    TOOL_SELECTOR_QUESTION = "tool_selector_question"
 
 
 class JevQuestionType(str, Enum):
@@ -56,4 +63,4 @@ class JevPreflightQuestionKey(str, Enum):
     CLARITY_SINGLE_READING = "clarity.single_reading"
 
 
-__all__ = ["JevPreflightPreset", "JevPreflightQuestionKey", "JevQuestionType"]
+__all__ = ["JevPreflightPreset", "JevPreflightQuestionKey", "JevPrompt", "JevQuestionType"]

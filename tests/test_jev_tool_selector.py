@@ -16,10 +16,9 @@ from collections.abc import Mapping
 from typing import Any
 from unittest.mock import patch
 
-from tests.agent_test_support import OfflineTestAgent, bind_test_runner
+from tests.agent_test_support import bind_test_runner
 from vidbyte import (
     Jev,
-    JevAgent,
     JevAgentSettings,
     JevPreflightPreset,
     JevRuntimeSettings,
@@ -105,10 +104,8 @@ def _settings(**overrides: Any) -> JevRuntimeSettings:
 
 
 def _agent_settings(generative: object, tools: tuple[object, ...] = ()) -> JevAgentSettings:
-    """Builds one profile whose configured runner stays offline through a template fork."""
-    source = OfflineTestAgent(name="selector", system_prompt="Work carefully.", provider="openai", model_name="gpt-4.1-mini", tools=tools)
-    bind_test_runner(source, generative)
-    return JevAgentSettings(agents=(JevAgent(title="Selector", description="Handles the user's requested work.", metadata={}, agent=source),))
+    """Builds the linear generator configuration used by selector runtime tests."""
+    return JevAgentSettings(name="selector", system_prompt="Work carefully.", provider="openai", model_name="gpt-4.1-mini", tools=tools)
 
 
 class JevToolSelectorSettingsTests(unittest.TestCase):
@@ -223,6 +220,7 @@ class JevToolSelectorRuntimeTests(unittest.IsolatedAsyncioTestCase):
         )
         settings = _settings(preflight=(JevPreflightPreset.TOOL_SELECTOR,), tool_selector_threshold=0.2)
         agent = Jev(_agent_settings(generative_runner, tools=(keep, hide)), runtime_settings=settings)
+        bind_test_runner(agent, generative_runner)
 
         with patch("vidbyte.agents.jev.preflight.DecisionModelRunner", return_value=decision_runner):
             reply = await agent.arun("Search the relevant records.")
@@ -241,6 +239,7 @@ class JevToolSelectorRuntimeTests(unittest.IsolatedAsyncioTestCase):
         # [Edge Case] the selector remains disabled when its runtime preset is absent.
         generative_runner = ScriptedGenerativeRunner()
         agent = Jev(_agent_settings(generative_runner), runtime_settings=_settings())
+        bind_test_runner(agent, generative_runner)
 
         with patch("vidbyte.agents.jev.preflight.DecisionModelRunner") as decision_runner:
             reply = await agent.arun("Answer normally.")

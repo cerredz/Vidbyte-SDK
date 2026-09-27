@@ -9,11 +9,11 @@ RELATED DOCS: docs/design/jev-agent-scaffold.md and skills/jev-agent/SKILL.md.
 TESTS: tests/test_jev_agent.py and scripts/test-jev-agent-scaffold.py.
 """
 
-from vidbyte.agents.jev.agent import Jev
+from vidbyte.agents.jev.agent import Jev, JevAgent
 from vidbyte.agents.jev.runtime import JevRuntime
 from vidbyte.agents.jev.settings import JevAgentSettings, JevRuntimeSettings
+from vidbyte.agents.jev.specialists import JevSpecialist
 from vidbyte.lib.dataclasses.jev import (
-    JevAgent,
     JevAgentProbability,
     JevAgentResponse,
     JevAgentSelection,
@@ -21,7 +21,7 @@ from vidbyte.lib.dataclasses.jev import (
     JevClarifyingQuestion,
     JevPresetResult,
 )
-from vidbyte.lib.enums.jev import JevPreflightPreset
+from vidbyte.lib.enums.jev import JevPreflightPreset, JevPrompt
 
 __all__ = [
     "Jev",
@@ -33,7 +33,9 @@ __all__ = [
     "JevClarification",
     "JevClarifyingQuestion",
     "JevPreflightPreset",
+    "JevPrompt",
     "JevPresetResult",
     "JevRuntime",
     "JevRuntimeSettings",
+    "JevSpecialist",
 ]

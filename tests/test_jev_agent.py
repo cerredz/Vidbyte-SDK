@@ -22,15 +22,14 @@ from unittest.mock import AsyncMock, patch
 
 from tests.agent_test_support import OfflineTestAgent, bind_test_runner
 from vidbyte import Jev as RootJev
-from vidbyte import JevAgent as RootJevProfile
+from vidbyte import JevSpecialist as RootJevProfile
 from vidbyte import JevAgentSettings as RootJevAgentSettings
 from vidbyte import JevRuntime as RootJevRuntime
 from vidbyte import VidbyteSDK, tool
 from vidbyte.agents import BaseAgent
 from vidbyte.agents.jev import Jev, JevAgentSettings, JevRuntime, JevRuntimeSettings
-from vidbyte.agents.jev import JevAgent as JevProfile
+from vidbyte.agents.jev.specialists import JevSpecialist as JevProfile
 from vidbyte.agents.jev.prompts import JevPrompt, JevPrompts
-from vidbyte.agents.jev.specialists import JevAgentRoute
 from vidbyte.agents.pricing import JevUsage
 from vidbyte.agents.runtime import AgentRuntime
 from vidbyte.lib.config import DecisionModelConfig
@@ -110,14 +109,13 @@ class RawResponse:
 
 
 def _profile(title: str = "general", description: str = "Handles general requests.", runner: object | None = None, tools: tuple[object, ...] = ()) -> JevProfile:
-    # Builds a candidate with a configured offline model template.
-    agent = _specialist_template(name=title.lower(), runner=runner, tools=tools)
-    return JevProfile(title=title, description=description, metadata={"team": title.lower()}, agent=agent)
+    # Builds a decision-only profile; generation always uses JevAgentSettings.
+    return JevProfile(title=title, description=description, metadata={"team": title.lower()})
 
 
 def _settings(agents: tuple[JevProfile, ...] | list[JevProfile] | None = None) -> JevAgentSettings:
-    # Provides one valid profile by default while keeping empty-catalog tests explicit.
-    return JevAgentSettings(agents=(_profile(),) if agents is None else agents)
+    # Provides one linear generation configuration while keeping optional routing metadata explicit.
+    return JevAgentSettings(name="general", system_prompt="Handle general requests.", provider="openai", model_name="gpt-4.1-mini", agents=() if agents is None else agents)
 
 
 def _question() -> JevQuestion:
@@ -389,56 +387,54 @@ class TypeSafeProviderContractTests(unittest.IsolatedAsyncioTestCase):
 
 
 class JevSettingsTests(unittest.TestCase):
-    """Pins the profile-only catalog and the separate runtime policy surface."""
+    """Pins main-agent configuration, descriptive profile metadata, and separate runtime policy."""
 
     def test_settings_only_accept_the_agent_catalog(self) -> None:
-        # [Hidden Assumption] the requested settings surface contains no model or capability knobs.
-        self.assertEqual(tuple(item.name for item in fields(JevAgentSettings)), ("agents",))
+        # [Hidden Assumption] the settings keep main linear execution separate from TypeSafe policy.
+        self.assertIn("name", {item.name for item in fields(JevAgentSettings)})
+        self.assertIn("agents", {item.name for item in fields(JevAgentSettings)})
 
     def test_freezes_one_or_many_profiles_and_rejects_empty_catalog(self) -> None:
-        # [Edge Case] one profile is a no-routing configuration, while an empty catalog cannot initialize Jev.
+        # [Edge Case] one profile skips routing, and no profile catalog keeps ordinary Jev generation available.
         profile = _profile()
-        settings = JevAgentSettings(agents=[profile])
+        settings = JevAgentSettings(name="general", system_prompt="Work.", provider="openai", model_name="gpt-4.1-mini", agents=[profile])
         self.assertEqual(settings.agents, (profile,))
-        with self.assertRaises(ConfigurationError):
-            JevAgentSettings(agents=[])
+        self.assertEqual(JevAgentSettings(name="general", system_prompt="Work.", provider="openai", model_name="gpt-4.1-mini").agents, ())
 
     def test_profile_fields_are_trimmed_unique_and_json_frozen(self) -> None:
         # [Edge Case] profile identity, scope, and nested metadata remain stable after caller mutation.
         metadata = {"scope": ["research"]}
-        profile = JevProfile(title="Research", description="Find and summarize sources.", metadata=metadata, agent=_specialist_template())
+        profile = JevProfile(title="Research", description="Find and summarize sources.", metadata=metadata)
         metadata["scope"].append("mutated")
         self.assertEqual(profile.metadata["scope"], ("research",))
         with self.assertRaises(ConfigurationError):
-            JevProfile(title=" ", description="Research.", metadata={}, agent=_specialist_template())
+            JevProfile(title=" ", description="Research.", metadata={})
         with self.assertRaises(ConfigurationError):
-            JevProfile(title="Research", description=" ", metadata={}, agent=_specialist_template())
+            JevProfile(title="Research", description=" ", metadata={})
         duplicate = _profile("Research", "Writes code.")
         with self.assertRaises(ConfigurationError):
-            JevAgentSettings(agents=(profile, duplicate))
+            JevAgentSettings(name="general", system_prompt="Work.", provider="openai", model_name="gpt-4.1-mini", agents=(profile, duplicate))
 
     def test_profile_and_catalog_limits_match_provider_bounds(self) -> None:
         # [Edge Case] the catalog uses every Choice option and rejects one beyond the provider limit.
         template = _specialist_template()
         self.assertEqual(JEV_AGENT_MAX_COUNT, JEV_MAX_CHOICE_OPTIONS)
-        exact_limit = tuple(JevProfile(title=f"agent-{index}", description="Researches questions.", metadata={}, agent=template) for index in range(JEV_AGENT_MAX_COUNT))
-        JevAgentSettings(agents=exact_limit)
+        exact_limit = tuple(JevProfile(title=f"agent-{index}", description="Researches questions.", metadata={}) for index in range(JEV_AGENT_MAX_COUNT))
+        JevAgentSettings(name="general", system_prompt="Work.", provider="openai", model_name="gpt-4.1-mini", agents=exact_limit)
         with self.assertRaises(ConfigurationError):
-            over_limit = (*exact_limit, JevProfile(title="agent-over", description="Researches questions.", metadata={}, agent=template))
-            JevAgentSettings(agents=over_limit)
+            over_limit = (*exact_limit, JevProfile(title="agent-over", description="Researches questions.", metadata={}))
+            JevAgentSettings(name="general", system_prompt="Work.", provider="openai", model_name="gpt-4.1-mini", agents=over_limit)
         with self.assertRaises(ConfigurationError):
-            JevProfile(title="Large", description="x" * (JEV_AGENT_MAX_DESCRIPTION_CHARS + 1), metadata={}, agent=_specialist_template())
+            large = JevProfile(title="Large", description="x" * (JEV_AGENT_MAX_DESCRIPTION_CHARS + 1), metadata={})
+            JevAgentSettings(name="general", system_prompt="Work.", provider="openai", model_name="gpt-4.1-mini", agents=(large,))
+        oversized = tuple(JevProfile(title=f"scope-{index}", description="x" * JEV_AGENT_MAX_DESCRIPTION_CHARS) for index in range(32))
+        with self.assertRaisesRegex(ConfigurationError, "metadata must fit"):
+            JevAgentSettings(name="general", system_prompt="Work.", provider="openai", model_name="gpt-4.1-mini", agents=oversized)
 
-    def test_profile_agent_must_be_a_non_jev_linear_agent(self) -> None:
-        # [Hidden Failure] invalid candidates fail during configuration instead of losing runtime behavior later.
-        with self.assertRaises(ConfigurationError):
-            JevProfile(title="Invalid", description="Research.", metadata={}, agent=object())  # type: ignore[arg-type]
-        unconfigured = BaseAgent(name="unconfigured", system_prompt="No model settings.")
-        with self.assertRaisesRegex(ConfigurationError, "provider and model"):
-            JevProfile(title="Unconfigured", description="Research.", metadata={}, agent=unconfigured)
-        nested = Jev(_settings())
-        with self.assertRaisesRegex(ConfigurationError, "linear runtime"):
-            JevProfile(title="Nested", description="Routes recursively.", metadata={}, agent=nested)
+    def test_profile_records_contain_only_decision_metadata(self) -> None:
+        profile = _profile()
+        self.assertEqual((profile.title, profile.description), ("general", "Handles general requests."))
+        self.assertFalse(hasattr(profile, "agent"))
 
     def test_runtime_controls_remain_separate_and_validate_thresholds(self) -> None:
         # [Edge Case] runtime-wide controls retain their original defaults and validate finite thresholds.
@@ -458,7 +454,7 @@ class JevAgentRuntimeTests(unittest.IsolatedAsyncioTestCase):
         agent = Jev(_settings())
         runtime = agent._runtime()
         self.assertIsInstance(runtime, JevRuntime)
-        self.assertFalse(runtime.preflight_passed)
+        self.assertIs(runtime.preflight, agent.preflight)
         self.assertIs(runtime.runtime_settings, agent.runtime_settings)
         self.assertIs(runtime.response.state, agent.response)
         self.assertIs(runtime.usage_tracker, agent._usage_tracker)
@@ -484,7 +480,8 @@ class JevAgentRuntimeTests(unittest.IsolatedAsyncioTestCase):
     async def test_no_tool_response_uses_ordinary_final_path(self) -> None:
         # [Edge Case] a plain generative response completes without invoking Jev.
         runner = ScriptedRunner(TextModelResponse(provider=ModelProvider.OPENAI, model="fake", text="ordinary answer", raw={}))
-        agent = Jev(_settings(agents=(_profile(runner=runner),)))
+        agent = Jev(_settings())
+        bind_test_runner(agent, runner)
         reply = await agent.arun("question")
         self.assertEqual(reply.content, "ordinary answer")
         self.assertEqual(len(runner.calls), 1)
@@ -500,47 +497,35 @@ class JevAgentRuntimeTests(unittest.IsolatedAsyncioTestCase):
             RawResponse({"output": [{"type": "function_call", "name": "lookup", "arguments": '{"topic": "sdk"}', "call_id": "c1"}]}),
             RawResponse({"output": [{"type": "function_call", "name": "isDone", "arguments": '{"final_answer": "done"}', "call_id": "c2"}]}),
         )
-        agent = Jev(_settings(agents=(_profile(runner=runner, tools=(lookup,)),)))
+        agent = Jev(JevAgentSettings(name="main", system_prompt="Work.", provider="openai", model_name="gpt-4.1-mini", tools=(lookup,)))
+        bind_test_runner(agent, runner)
         reply = await agent.arun("question")
         self.assertEqual(reply.content, "done")
         self.assertEqual(reply.metadata["tool_call_states"], ("succeeded", "succeeded"))
         self.assertEqual(len(runner.calls), 2)
 
-    async def test_routes_to_highest_probability_profile_and_applies_its_settings(self) -> None:
-        # [Silent Failure] the selected profile, not the first profile, supplies the main run's prompt and model.
-        coding_runner = ScriptedRunner(TextModelResponse(provider=ModelProvider.OPENAI, model="fake-coding", text="coding response", raw={}))
-        research_runner = ScriptedRunner(TextModelResponse(provider=ModelProvider.OPENAI, model="fake-research", text="research response", raw={}))
-        coding = _profile("Coding", "Implements and debugs software changes.", runner=coding_runner)
-        research = _profile("Research", "Researches source-backed questions.", runner=research_runner)
-        agent = Jev(_settings((coding, research)))
-        initial = (agent.name, agent.system_prompt, agent.runner_config, agent.tools, dict(agent.metadata))
+    async def test_preflight_selects_profile_metadata_but_keeps_the_linear_generator(self) -> None:
+        # Profile routing chooses a semantic label; it never forks or swaps the main model configuration.
+        coding = _profile("Coding", "Implements and debugs software changes.")
+        research = _profile("Research", "Researches source-backed questions.")
+        settings = _settings((coding, research))
+        agent = Jev(settings, runtime_settings=JevRuntimeSettings(decision=DecisionModelConfig(api_key=API_KEY)))
+        runner = ScriptedRunner(TextModelResponse(provider=ModelProvider.OPENAI, model="main", text="linear answer", raw={}))
+        bind_test_runner(agent, runner)
+        before = (agent.name, agent.system_prompt, agent.runner_config)
         decision_runner = AsyncMock()
-        decision_runner.arun.return_value = _specialist_response("Coding", {"Coding": 0.1, "Research": 0.9})
+        decision_runner.arun.return_value = _specialist_response("Research", {"Coding": 0.1, "Research": 0.9})
 
-        with patch("vidbyte.agents.jev.specialists.DecisionModelRunner", return_value=decision_runner):
+        with patch("vidbyte.agents.jev.gate.gate.DecisionModelRunner", return_value=decision_runner):
             reply = await agent.arun("Find research on this SDK.")
 
         request = decision_runner.arun.await_args.args[0]
-        question = request.questions[0]
-        state = dict(request.state)
-        self.assertEqual(state["request"], "Find research on this SDK.")
-        self.assertEqual(tuple(dict(profile)["title"] for profile in state["agents"]), ("Coding", "Research"))
-        self.assertNotIn("typesafe-test-key", repr(state))
-        self.assertTrue(question.instructions.endswith("Which configured profile is the best fit for the main outcome in `request`?"))
-        self.assertEqual(tuple(option.name for option in question.options), ("Coding", "Research"))
-        self.assertEqual(dict(question.options[1].description)["metadata"], {"team": "research"})
-        self.assertEqual(reply.content, "research response")
-        selection = agent.response.selection
-        assert selection is not None
-        self.assertEqual((selection.title, selection.probability), ("Research", 0.9))
-        self.assertEqual(tuple(score.title for score in selection.ranked_agents), ("Research", "Coding"))
-        self.assertEqual((selection.usage.input_tokens, selection.usage.output_tokens), (12, 3))
-        self.assertEqual(agent.get_usage().model_call_count, 1)
-        self.assertNotIn("jev_agent_selection", reply.metadata)
-        self.assertEqual((agent.name, agent.system_prompt, agent.runner_config, agent.tools, agent.metadata), initial)
-        self.assertEqual(research.agent.history, [])
-        self.assertEqual(len(research_runner.calls), 1)
-        self.assertEqual(coding_runner.calls, [])
+        self.assertEqual(request.questions[-1].name, "agent_profile")
+        self.assertEqual(tuple(option.name for option in request.questions[-1].options), ("Coding", "Research"))
+        self.assertEqual(reply.content, "linear answer")
+        self.assertEqual(agent.response.selection.title, "Research")
+        self.assertEqual((agent.name, agent.system_prompt, agent.runner_config), before)
+        self.assertEqual(len(runner.calls), 1)
 
     async def test_inconsistent_choice_uses_maximum_and_exact_ties_keep_catalog_order(self) -> None:
         # [Silent Failure] code trusts option probabilities rather than a mismatched declared choice.
@@ -548,30 +533,30 @@ class JevAgentRuntimeTests(unittest.IsolatedAsyncioTestCase):
         agent = Jev(_settings(profiles))
         decision_runner = AsyncMock()
         decision_runner.arun.return_value = _specialist_response("Agent 3", {f"Agent {index}": 0.25 for index in range(4)})
-        with patch("vidbyte.agents.jev.specialists.DecisionModelRunner", return_value=decision_runner):
+        with patch("vidbyte.agents.jev.gate.gate.DecisionModelRunner", return_value=decision_runner):
             with patch.object(agent, "_runner_for_model", return_value=(ScriptedRunner(TextModelResponse(provider=ModelProvider.OPENAI, model="fake", text="answer", raw={})), "text")):
                 await agent.arun("Do the task.")
         self.assertEqual(agent.response.selection.title, "Agent 0")
         self.assertEqual(agent.response.selection.probability, 0.25)
 
-    async def test_incomplete_probability_distribution_is_rejected(self) -> None:
-        # [Hidden Failure] a partial response cannot make the missing profile look like a low-confidence loser.
-        runner = ScriptedRunner()
-        profiles = (_profile("First", "Handles first work.", runner=runner), _profile("Second", "Handles second work."))
-        agent = Jev(_settings(profiles))
+    async def test_incomplete_profile_distribution_does_not_record_a_selection(self) -> None:
+        runner = ScriptedRunner(TextModelResponse(provider=ModelProvider.OPENAI, model="main", text="answer", raw={}))
+        agent = Jev(_settings((_profile("First", "Handles first work."), _profile("Second", "Handles second work."))))
+        bind_test_runner(agent, runner)
         incomplete = _specialist_response("First", {"First": 1.0})
         decision_runner = AsyncMock()
         decision_runner.arun.return_value = incomplete
-        with patch("vidbyte.agents.jev.specialists.DecisionModelRunner", return_value=decision_runner):
-            with self.assertRaisesRegex(ConfigurationError, "invalid Jev profile selection distribution"):
-                await agent.arun("Do this task.")
-        self.assertEqual(runner.calls, [])
+        with patch("vidbyte.agents.jev.gate.gate.DecisionModelRunner", return_value=decision_runner):
+            await agent.arun("Do this task.")
+        self.assertIsNone(agent.response.selection)
+        self.assertEqual(len(runner.calls), 1)
 
     async def test_one_profile_skips_routing_and_uses_its_configured_runner(self) -> None:
         # [Hidden Assumption] a single-profile request does not require TypeSafe credentials or selection.
         runner = ScriptedRunner(TextModelResponse(provider=ModelProvider.OPENAI, model="fake", text="single profile", raw={}))
-        agent = Jev(_settings((_profile("Solo", "Handles all tasks.", runner=runner),)))
-        with patch("vidbyte.agents.jev.specialists.DecisionModelRunner") as decision_runner:
+        agent = Jev(_settings((_profile("Solo", "Handles all tasks."),)))
+        bind_test_runner(agent, runner)
+        with patch("vidbyte.agents.jev.gate.gate.DecisionModelRunner") as decision_runner:
             reply = await agent.arun("Do this.")
         decision_runner.assert_not_called()
         self.assertEqual(reply.content, "single profile")
@@ -580,69 +565,47 @@ class JevAgentRuntimeTests(unittest.IsolatedAsyncioTestCase):
     async def test_decision_failure_is_surfaced_without_running_a_candidate(self) -> None:
         # [Hidden Failure] a failed choice must never silently run an arbitrary profile.
         runner = ScriptedRunner()
-        profiles = (_profile("First", "Handles first work.", runner=runner), _profile("Second", "Handles second work."))
-        agent = Jev(_settings(profiles))
+        agent = Jev(_settings((_profile("First", "Handles first work."), _profile("Second", "Handles second work."))))
+        bind_test_runner(agent, runner)
         decision_runner = AsyncMock()
         decision_runner.arun.side_effect = RuntimeError("decision unavailable")
-        with patch("vidbyte.agents.jev.specialists.DecisionModelRunner", return_value=decision_runner):
-            with self.assertRaisesRegex(RuntimeError, "decision unavailable"):
+        with patch("vidbyte.agents.jev.gate.gate.DecisionModelRunner", return_value=decision_runner):
+            with self.assertRaisesRegex(AgentExecutionError, "failed to generate") as caught:
                 await agent.arun("Do this task.")
+        self.assertIsInstance(caught.exception.__cause__, RuntimeError)
         self.assertEqual(runner.calls, [])
         self.assertIsNone(agent.response.selection)
 
     async def test_closed_gate_never_reaches_profile_router(self) -> None:
         # [Hidden Assumption] an unclear request spends neither routing nor candidate-model tokens.
         runner = ScriptedRunner()
-        profiles = (_profile("First", "Handles first work.", runner=runner), _profile("Second", "Handles second work."))
+        profiles = (_profile("First", "Handles first work."), _profile("Second", "Handles second work."))
         agent = Jev(_settings(profiles))
+        bind_test_runner(agent, runner)
         decision_runner = AsyncMock()
-        with patch.object(agent.preflight, "pass_", AsyncMock(return_value=False)), patch("vidbyte.agents.jev.specialists.DecisionModelRunner", return_value=decision_runner):
+        with patch.object(agent.preflight, "pass_", AsyncMock(return_value=False)), patch("vidbyte.agents.jev.gate.gate.DecisionModelRunner", return_value=decision_runner):
             await agent.arun("Do this task.")
         decision_runner.arun.assert_not_awaited()
         self.assertIsNone(agent.response.selection)
         self.assertEqual(runner.calls, [])
 
-    async def test_selected_profile_configuration_is_restored_after_model_failure(self) -> None:
-        # [Hidden Failure] a failed selected run cannot leave its prompt, provider, or tools on later runs.
-        first_runner = ScriptedRunner(TextModelResponse(provider=ModelProvider.OPENAI, model="fake-first", text="unused", raw={}))
-        second_runner = ScriptedRunner(RuntimeError("model failed"))
-        first = _profile("First", "Handles first work.", runner=first_runner)
-        second = _profile("Second", "Handles second work.", runner=second_runner)
-        agent = Jev(_settings((first, second)))
+    async def test_profile_selection_never_overlays_main_configuration_on_failure(self) -> None:
+        runner = ScriptedRunner(RuntimeError("model failed"))
+        agent = Jev(_settings((_profile("First", "Handles first work."), _profile("Second", "Handles second work."))), runtime_settings=JevRuntimeSettings(decision=DecisionModelConfig(api_key=API_KEY)))
+        bind_test_runner(agent, runner)
         initial = (agent.name, agent.system_prompt, agent.runner_config, agent.tools, agent.metadata)
         decision_runner = AsyncMock()
         decision_runner.arun.return_value = _specialist_response("Second", {"First": 0.1, "Second": 0.9})
-        with patch("vidbyte.agents.jev.specialists.DecisionModelRunner", return_value=decision_runner):
+        with patch("vidbyte.agents.jev.gate.gate.DecisionModelRunner", return_value=decision_runner):
             with self.assertRaises(AgentExecutionError):
                 await agent.arun("Do second work.")
         self.assertEqual((agent.name, agent.system_prompt, agent.runner_config, agent.tools, agent.metadata), initial)
 
-    async def test_concurrent_requests_keep_profile_settings_isolated(self) -> None:
-        # [Hidden Failure] one Jev instance cannot let overlapping requests replace each other's main-agent config.
-        first_runner = ScriptedRunner(TextModelResponse(provider=ModelProvider.OPENAI, model="first", text="first reply", raw={}))
-        second_runner = ScriptedRunner(TextModelResponse(provider=ModelProvider.OPENAI, model="second", text="second reply", raw={}))
-        first = _profile("First", "Handles first work.", runner=first_runner)
-        second = _profile("Second", "Handles second work.", runner=second_runner)
-        agent = Jev(_settings((first, second)))
+    def test_profile_routing_does_not_add_mutable_runtime_coordination(self) -> None:
+        agent = Jev(_settings((_profile("First", "Handles first work."), _profile("Second", "Handles second work."))))
+        self.assertFalse(hasattr(agent, "_profile_semaphore"))
 
-        async def choose(request: str) -> JevAgentRoute:
-            # Gives concurrent callers distinct winners so a missing lock crosses their model settings.
-            await asyncio.sleep(0.01)
-            title = "First" if request == "first task" else "Second"
-            probability = 0.9
-            other = "Second" if title == "First" else "First"
-            ranked = (JevAgentProbability(title, probability), JevAgentProbability(other, 0.1))
-            selection = JevAgentSelection(title=title, probability=probability, ranked_agents=ranked)
-            return JevAgentRoute(selection=selection, decision_response=_specialist_response(title, {title: probability, other: 0.1}))
-
-        with patch.object(agent.router, "select", side_effect=choose):
-            first_reply, second_reply = await asyncio.gather(agent.arun("first task"), agent.arun("second task"))
-
-        self.assertEqual((first_reply.content, second_reply.content), ("first reply", "second reply"))
-        self.assertEqual((agent.name, agent.system_prompt), ("First", first.agent.system_prompt))
-
-    async def test_cancellation_restores_the_main_profile_configuration(self) -> None:
-        # [Hidden Failure] cancellation during model execution still restores the coordinator's saved settings.
+    async def test_cancellation_leaves_main_configuration_unchanged(self) -> None:
         class WaitingRunner:
             def __init__(self) -> None:
                 # Signals when model execution begins and remains blocked until the test cancels it.
@@ -655,14 +618,13 @@ class JevAgentRuntimeTests(unittest.IsolatedAsyncioTestCase):
                 await self.release.wait()
                 return TextModelResponse(provider=ModelProvider.OPENAI, model="waiting", text="finished", raw={})
 
-        first = _profile("First", "Handles first work.")
         waiting = WaitingRunner()
-        second = _profile("Second", "Handles second work.", runner=waiting)
-        agent = Jev(_settings((first, second)))
+        agent = Jev(_settings((_profile("First", "Handles first work."), _profile("Second", "Handles second work."))))
+        bind_test_runner(agent, waiting)
         original = (agent.name, agent.system_prompt, agent.runner_config)
-        selected = JevAgentSelection("Second", 0.9, (JevAgentProbability("Second", 0.9), JevAgentProbability("First", 0.1)))
-        route = JevAgentRoute(selected, _specialist_response("Second", {"Second": 0.9, "First": 0.1}))
-        with patch.object(agent.router, "select", AsyncMock(return_value=route)):
+        decision_runner = AsyncMock()
+        decision_runner.arun.return_value = _specialist_response("Second", {"Second": 0.9, "First": 0.1})
+        with patch("vidbyte.agents.jev.gate.gate.DecisionModelRunner", return_value=decision_runner):
             task = asyncio.create_task(agent.arun("second task"))
             await waiting.started.wait()
             task.cancel()
@@ -681,6 +643,11 @@ class JevPromptRegistryTests(unittest.TestCase):
                 text = JevPrompts.get(prompt)
                 self.assertTrue(text)
                 self.assertEqual(text, text.strip())
+
+    def test_prompt_enum_is_owned_by_the_shared_jev_enum_module(self) -> None:
+        from vidbyte.lib.enums.jev import JevPrompt as CanonicalJevPrompt
+
+        self.assertIs(JevPrompt, CanonicalJevPrompt)
 
     def test_profile_question_has_a_complete_brief_and_structured_criteria(self) -> None:
         # [Hidden Assumption] the dynamic profile question keeps the named state and criteria sections intact.

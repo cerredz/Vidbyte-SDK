@@ -38,6 +38,7 @@ from vidbyte import (
     tool,
 )
 from vidbyte.agents.jev.gate import JevClarificationAgent, JevPreflightGate
+from vidbyte.agents.jev.specialists import JevSpecialist
 from vidbyte.agents.jev.settings import JevRuntimeSettings
 from vidbyte.lib.config import DecisionModelConfig
 from vidbyte.lib.constants.jev import (
@@ -109,7 +110,16 @@ class ScriptedDecisionRunner:
 
     async def arun(self, request: JevDecisionRequest) -> DecisionModelResponse:
         self.requests.append(request)
-        answers = {question.name: _answer(question.name, self.probabilities.get(question.name, 0.9)) for question in request.questions if question.name != self.omit}
+        answers = {}
+        for question in request.questions:
+            if question.name == self.omit:
+                continue
+            if question.question_type is JevQuestionType.CHOICE:
+                names = question.option_names()
+                distribution = {name: (0.8 if index == 0 else 0.2 / (len(names) - 1)) for index, name in enumerate(names)}
+                answers[question.name] = JevAnswer(question_name=question.name, question_type=JevQuestionType.CHOICE, choice=names[0], probabilities=distribution, confidence=0.8)
+            else:
+                answers[question.name] = _answer(question.name, self.probabilities.get(question.name, 0.9))
         return DecisionModelResponse(provider=ModelProvider.TYPESAFE, model="jev-1.13.0", answers=answers, raw={}, usage={"input_tokens": 120, "output_tokens": 18})
 
 
@@ -129,9 +139,8 @@ def _answer(name: str, yes: float) -> JevAnswer:
 
 
 def _settings() -> JevAgentSettings:
-    # Builds the one profile required to construct a Jev coordinator.
-    source = BaseAgent(name="preflight", system_prompt="Work carefully.", provider="openai", model_name="gpt-4.1-mini")
-    return JevAgentSettings(agents=(JevAgent(title="General", description="Handles the user's requested work.", metadata={}, agent=source),))
+    # Builds the linear generative agent and a single profile that needs no routing request.
+    return JevAgentSettings(name="preflight", system_prompt="Work carefully.", provider="openai", model_name="gpt-4.1-mini", agents=(JevSpecialist(title="General", description="Handles the user's requested work."),))
 
 
 def _runtime_settings(**overrides: Any) -> JevRuntimeSettings:
@@ -366,11 +375,19 @@ class JevPreflightGateTests(unittest.TestCase):
     def test_combine_puts_every_enabled_preset_into_one_request(self) -> None:
         request = Jev(_settings(), _runtime_settings()).preflight.combine("Find the notes.")
         assert request is not None
-        self.assertEqual(dict(request.state), {JEV_PREFLIGHT_REQUEST_FIELD: "Find the notes."})
+        self.assertEqual(request.state[JEV_PREFLIGHT_REQUEST_FIELD], "Find the notes.")
         self.assertEqual(tuple(question.name for question in request.questions), tuple(key.value for key in _CLARITY_KEYS))
 
     def test_combine_asks_nothing_when_no_preset_is_enabled(self) -> None:
         self.assertIsNone(Jev(_settings(), _runtime_settings(preflight=())).preflight.combine("Hello."))
+
+    def test_profile_choice_is_appended_to_the_preflight_request(self) -> None:
+        settings = JevAgentSettings(name="main", system_prompt="Work.", provider="openai", model_name="gpt-4.1-mini", agents=(JevSpecialist("Research", "Researches evidence."), JevSpecialist("Coding", "Implements software.")))
+        request = Jev(settings, _runtime_settings(preflight=())).preflight.combine("Build a feature.")
+        assert request is not None
+        self.assertEqual(tuple(question.name for question in request.questions), ("agent_profile",))
+        self.assertEqual(tuple(option.name for option in request.questions[0].options), ("Research", "Coding"))
+        self.assertEqual(tuple(profile["title"] for profile in request.state["agents"]), ("Research", "Coding"))
 
 
 class JevClarificationAgentTests(unittest.TestCase):
@@ -412,10 +429,9 @@ class JevPreflightRuntimeTests(unittest.IsolatedAsyncioTestCase):
         decision = overrides.pop("decision", DecisionModelConfig(api_key="test-key"))
         preflight = overrides.pop("preflight", (JevPreflightPreset.CLARITY,))
         tools = tuple(overrides.pop("tools", ()))
-        source = OfflineTestAgent(name="preflight", system_prompt="Work carefully.", provider="openai", model_name="gpt-4.1-mini", tools=tools)
-        bind_test_runner(source, generative)
-        profiles = JevAgentSettings(agents=(JevAgent(title="General", description="Handles the user's requested work.", metadata={}, agent=source),))
+        profiles = JevAgentSettings(name="preflight", system_prompt="Work carefully.", provider="openai", model_name="gpt-4.1-mini", tools=tools)
         agent = Jev(profiles, JevRuntimeSettings(decision=decision, preflight=preflight))
+        bind_test_runner(agent, generative)
         if agent.preflight.clarification is not None:
             bind_test_runner(agent.preflight.clarification, clarifier or ScriptedGenerativeRunner(json.dumps(_PAYLOAD)))
         return agent

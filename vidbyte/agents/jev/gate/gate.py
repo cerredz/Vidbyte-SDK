@@ -1,9 +1,9 @@
 """FILE: vidbyte/agents/jev/gate/gate.py
 
-PURPOSE: Implements JevPreflightGate, the gate before profile selection: it combines every enabled fixed-question preset into one Jev request and decides whether the coordinator may continue.
-ROLE IN CODEBASE: `Jev` builds the gate from `JevRuntimeSettings` and the first profile's generative model; `Jev.generate_reply()` calls `pass_()` before profile routing and the inherited linear loop.
-ARCHITECTURE NOTE: Question text and flags stay in vidbyte/lib/jev/ (JevPreflightRegistry, JevPresets), and DecisionModelRunner.score_noul turns answers into a pass or fail; this class owns asking, failing open, and the action each preset triggers (JevClarificationAgent), and it reports every outcome through JevResponse. The tool selector is not a gate case: it keeps its own path in vidbyte/agents/jev/preflight.py.
-COMMON MODIFICATION PATTERNS: Add a fixed-question preset by adding its definition to JevPresets and one commented case to the match in pass_(); never add preset checks to JevRuntime or move the gate after profile selection.
+PURPOSE: Implements JevPreflightGate, which combines enabled fixed-question presets and optional specialist choice into one Jev request before deciding whether generation may continue.
+ROLE IN CODEBASE: `JevAgent` builds the gate from its settings and response writer; `JevRuntime.arun()` calls `pass_()` before the inherited linear loop.
+ARCHITECTURE NOTE: Question text and flags stay in vidbyte/lib/jev/ (JevPreflightRegistry, JevPresets); DecisionModelRunner.score_noul turns preset answers into pass or fail. This class owns decision requests, fail-open behavior, clarification, and specialist selection records. Specialist records are metadata; generation remains on the configured JevAgent. The tool selector retains its own path in preflight.py.
+COMMON MODIFICATION PATTERNS: Add fixed-question presets through JevPresets and a commented case in pass_(); add descriptive profile-choice context here, without executing candidate agents or adding selection logic to JevRuntime.
 KNOWN EDGE CASES: No enabled fixed-question preset makes no Jev call; a missing credential, a provider failure, or a local request-validation error marks every preset unavailable; a missing answer marks only its own preset unavailable. Every unavailable preset fails open, so the run continues as the owner configured it.
 RELATED DOCS: `docs/design/jev-agent-profile-routing.md`, `skills/jev-agent/SKILL.md`, and `skills/asking-jev-questions/SKILL.md`.
 TESTS: tests/test_jev_preflight.py and scripts/test-jev-preflight.py.
@@ -15,46 +15,60 @@ from collections.abc import Mapping
 
 from vidbyte.agents.base import BaseAgent
 from vidbyte.agents.jev.gate.clarification import JevClarificationAgent
+from vidbyte.agents.jev.prompts import JevPrompt, JevPrompts
 from vidbyte.agents.jev.response import JevResponse
-from vidbyte.agents.jev.settings import JevRuntimeSettings
+from vidbyte.agents.jev.settings import JevAgentSettings, JevRuntimeSettings
 from vidbyte.agents.pricing import JevUsage
 from vidbyte.lib.constants.jev import JEV_PREFLIGHT_REQUEST_FIELD
 from vidbyte.lib.dataclasses.jev import (
+    JevAgentProbability,
+    JevAgentSelection,
     JevAnswer,
     JevDecisionRequest,
+    JevOption,
     JevPresetResult,
     JevQuestion,
 )
-from vidbyte.lib.enums.jev import JevPreflightPreset, JevPreflightQuestionKey
+from vidbyte.lib.enums.jev import (
+    JevPreflightPreset,
+    JevPreflightQuestionKey,
+    JevQuestionType,
+)
 from vidbyte.lib.errors import VidbyteSdkError
 from vidbyte.lib.jev import JevPreflightRegistry, JevPresets
 from vidbyte.lib.runners.decision import DecisionModelRunner
 
 
 class JevPreflightGate:
-    """Gate in front of JevAgent's generative agent: one Jev request for every enabled fixed-question preset, then one match over the outcomes."""
+    """Gate that sends enabled preflight checks and profile choice in one request before JevAgent generation."""
 
-    def __init__(self, settings: JevRuntimeSettings, response: JevResponse, clarification_source: BaseAgent) -> None:
-        # Fixes preflight policy and its clarification model when Jev is built; nothing is resolved from profiles mid-gate.
-        # @intent clarity-precedes-profile-selection
-        # The owner needs an unclear request to stop before TypeSafe compares profiles or a generative agent runs.
-        # The first profile supplies the clarification model because the gate runs before a winning profile exists.
-        self.presets: tuple[JevPreflightPreset, ...] = tuple(preset for preset in JevPreflightRegistry.validate(settings.preflight) if JevPresets.has_fixed_questions(preset))
-        self.decision = settings.decision
+    def __init__(self, settings: JevAgentSettings, runtime_settings: JevRuntimeSettings, response: JevResponse, clarification_source: BaseAgent) -> None:
+        # Fixes preflight policy and the clarification model when JevAgent is built; profile entries remain decision metadata.
+        # @intent preflight-decides-before-linear-generation
+        # Clarity checks and optional profile choice share one decision call. A failed clarity check stops the
+        # generative loop even if TypeSafe also produced a profile label; do not record that label as selected unless
+        # the gate passes. This keeps advisory routing from overriding the user's need to clarify their request.
+        self.presets: tuple[JevPreflightPreset, ...] = tuple(preset for preset in JevPreflightRegistry.validate(runtime_settings.preflight) if JevPresets.has_fixed_questions(preset))
+        self.settings = settings
+        self.decision = runtime_settings.decision
         self.response = response
         self.clarification = JevClarificationAgent(clarification_source) if JevPreflightPreset.CLARITY in self.presets else None
 
     def combine(self, message: str) -> JevDecisionRequest | None:
         """Return one Jev request holding every enabled preset's questions, or None when no preset has a question to ask."""
         # @intent preflight-only-current-request
-        # Clarity is checked against the user's current message before profile selection. Do not include
-        # prior conversation or selected-profile settings: an unclear message must stop before any profile runs.
+        # All checks use only the current message and descriptive profile metadata. Do not include prior
+        # conversation or execution settings; neither the classifier nor the profile picker should infer them.
         questions: list[JevQuestion] = []
         for preset in self.presets:
             questions.extend(JevPreflightRegistry.questions(preset))
+        questions.extend(self._profile_questions())
         if not questions:
             return None
-        return JevDecisionRequest(state={JEV_PREFLIGHT_REQUEST_FIELD: message}, questions=tuple(questions))
+        state: dict[str, object] = {JEV_PREFLIGHT_REQUEST_FIELD: message}
+        if self.settings.agents:
+            state["agents"] = tuple({"title": agent.title, "description": agent.description, "metadata": dict(agent.metadata)} for agent in self.settings.agents)
+        return JevDecisionRequest(state=state, questions=tuple(questions))
 
     async def pass_(self, message: str) -> bool:
         """Act on every enabled preset's answers and return True when JevAgent's generative agent should run."""
@@ -74,7 +88,32 @@ class JevPreflightGate:
                 case _:
                     # A preset that passed needs no action.
                     continue
+        self._record_profile_selection(answers)
         return True
+
+    def _profile_questions(self) -> tuple[JevQuestion, ...]:
+        # Profile descriptions are decision context only; they never replace the configured generative agent.
+        agents = tuple(self.settings.agents)
+        if len(agents) < 2:
+            return ()
+        criteria = JevPrompts.selection_criteria()
+        options = tuple(JevOption(agent.title, {**criteria, "title": agent.title, "description": agent.description, "metadata": dict(agent.metadata)}) for agent in agents)
+        return (JevQuestion(name="agent_profile", question_type=JevQuestionType.CHOICE, instructions=JevPrompts.brief(JevPrompt.AGENT_SELECTION_QUESTION).render(), options=options),)
+
+    def _record_profile_selection(self, answers: Mapping[str, JevAnswer] | None) -> None:
+        # Records a valid highest-probability label without changing the main agent's linear execution configuration.
+        agents = tuple(self.settings.agents)
+        if len(agents) < 2 or answers is None or "agent_profile" not in answers:
+            return
+        answer = answers["agent_profile"]
+        if answer.question_type is not JevQuestionType.CHOICE:
+            return
+        probabilities = answer.probabilities
+        titles = tuple(agent.title for agent in agents)
+        if set(probabilities) != set(titles):
+            return
+        ranked = tuple(sorted((JevAgentProbability(agent.title, probabilities[agent.title]) for agent in agents), key=lambda score: -score.probability))
+        self.response.selected(JevAgentSelection(title=ranked[0].title, probability=ranked[0].probability, ranked_agents=ranked, usage=self.response.state.usage))
 
     async def _ask(self, message: str) -> Mapping[str, JevAnswer] | None:
         # Sends the one combined request and returns Jev's answers, {} when there was nothing to ask, or None on failure.
