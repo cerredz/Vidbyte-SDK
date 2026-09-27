@@ -7,7 +7,7 @@
 
 ## 1. Overview
 
-Update the `asking-jev-questions` skill with a minimum-length criterion for a complete fixed Jev question: the combined text Jev receives in the instructions and both answer criteria must contain at least 2,000 tokens. Explain that the floor applies to the meaningful, rendered prompt content rather than Python syntax, and add one complete `JevPreflightQuestion` example whose string fields each use one standalone literal.
+Update the `asking-jev-questions` skill with a minimum-length criterion for a complete fixed Jev question: the combined text in the rendered instructions, both answer criteria, and the question's gap must contain at least 2,000 tokens. Explain that the floor applies to the meaningful string content rather than Python syntax, and add one complete `JevPreflightQuestion` example whose string fields each use one standalone literal.
 
 ## 2. Goals & Non-Goals
 
@@ -29,8 +29,8 @@ The repository-level `skills/asking-jev-questions/SKILL.md` is the authoring gui
 ## 4. Requirements
 
 ### Functional Requirements
-1. The skill must state that a complete question's combined instructions, true criterion, and false criterion content is at least 2,000 tokens.
-2. The skill must clarify that counting applies to the text sent to Jev after rendering, not code identifiers, punctuation, whitespace, or dataclass source syntax; count with the tokenizer for the configured Jev model when available, otherwise use a consistent tokenizer estimate and exceed the floor rather than target it exactly.
+1. The skill must state that a complete question's combined rendered instructions, true criterion, false criterion, and gap content is at least 2,000 tokens.
+2. The skill must clarify that counting applies to the full dataclass's meaningful string content, not code identifiers, punctuation, whitespace, or dataclass source syntax; count with the tokenizer for the configured Jev model when available, otherwise use a consistent tokenizer estimate and exceed the floor rather than target it exactly.
 3. The rule must not imply that each field individually needs 2,000 tokens, or that filler/repetition satisfies the criterion; the content must remain relevant, complete, and useful for recognition.
 4. Add a paragraph at the end that explains the minimum's purpose and how to apply it.
 5. Add one complete example of a `JevPreflightQuestion` subclass. It must include the structured brief, both structured answer criteria, the gap, and a key.
@@ -47,7 +47,7 @@ The repository-level `skills/asking-jev-questions/SKILL.md` is the authoring gui
 
 Modify only the Jev question-authoring skill and append a final explanatory paragraph plus a complete illustrative fixed-question dataclass. Place the length criterion in the existing “Writing a full question” guidance and add it to the checklist so authors encounter it as both a rule and a ship check. The example will show all `JevPreflightQuestion` fields, with sufficient relevant definition/rule/criterion content to demonstrate the minimum, and each field value will be one string literal.
 
-No runtime path changes: source authors write and render the structured brief, and Jev receives the existing rendered instructions and answer option descriptions. The new guidance defines the combined count across that actual prompt content, rather than counting the serialized Python object or asking for 2,000 tokens per field.
+No runtime path changes: source authors write and render the structured brief and criteria, and the gap remains a separate text field for its downstream reader. The new guidance defines the combined count across the full question dataclass's meaningful string fields, including the gap, rather than counting Python source syntax or asking for 2,000 tokens per field.
 
 ## 6. Detailed Design
 
@@ -57,19 +57,19 @@ No runtime path changes: source authors write and render the structured brief, a
 **Type:** Modified
 
 #### What it does
-Specifies that the combined rendered instructions and both answer-side criteria for one fixed Jev question must be at least 2,000 tokens. The text must be substantive; the target is completeness, not padding.
+Specifies that the combined rendered instructions, both answer-side criteria, and the gap for one fixed Jev question must be at least 2,000 tokens. The text must be substantive; the target is completeness, not padding.
 
 #### Interface / API
 N/A - this is authoring guidance only; no SDK interface changes.
 
 #### Logic / Algorithm
 1. Render the brief using the existing `JevBrief.render()` shape.
-2. Include the text in both `JevCriterion` values, including `what`, `not_for`, and labeled examples.
-3. Count the combined model-facing text with the configured Jev model tokenizer where available.
+2. Include the text in both `JevCriterion` values, including `what`, `not_for`, and labeled examples, plus the standalone `gap` string.
+3. Count the combined text with the configured Jev model tokenizer where available.
 4. Revise concise or incomplete content with relevant definitions, decision rules, boundaries, and examples until it reaches at least 2,000 tokens; do not duplicate wording or add irrelevant material to reach the number.
 
 #### Edge Cases & Error Handling
-- Do not count Python identifiers, field names, formatting syntax, or code fences as prompt content.
+- Do not count Python identifiers, field names, formatting syntax, or code fences as question content.
 - If the exact tokenizer is unavailable during authoring, use a consistent tokenizer estimate and provide margin above 2,000 tokens.
 - The requirement is one combined minimum, not a per-field minimum; each component must still satisfy its own layout and quality requirements.
 
@@ -88,7 +88,7 @@ Use the existing `JevPreflightQuestion`, `JevBrief`, `JevCriterion`, and questio
 1. Choose a single observable question and keep it to one judgment.
 2. Define the state and all terms before using them in rules.
 3. Include all decision rules in the brief and mirrored evidence in the two criteria.
-4. Make the total model-facing content at least 2,000 tokens.
+4. Make the full dataclass's meaningful string content at least 2,000 tokens.
 5. Keep each string as one literal; tuples may contain multiple independent one-literal examples.
 
 #### Edge Cases & Error Handling
