@@ -1,12 +1,14 @@
 """FILE: vidbyte/agents/jev/runtime.py
 
-PURPOSE: Provides the dedicated execution seam for the opinionated Jev agent: it runs the JevPreflightGate, then either returns the gate's response, hands the run to the JevSpecialistRouter, or applies the tool selector and runs the inherited linear loop.
-ROLE IN CODEBASE: RuntimeRegistry maps AgentRuntimeType.JEV to JevRuntime; JevAgent builds the gate, the specialist router, and the JevResponse writer at construction and passes them in, and the runtime keeps run-local tool selection ahead of the inherited agent loop.
-ARCHITECTURE NOTE: JevRuntime retains the standard runner, usage, speed, tracing, and session wiring; each capability's logic lives in its own class (the gate, the router, the tool selector) and this runtime only calls it in order.
-COMMON MODIFICATION PATTERNS: Add fixed preflight, compute, or coordination phases around inherited execution while keeping their policy internal.
-KNOWN EDGE CASES: A gate with no fixed-question preset performs no Jev call, and a closed gate never reaches the router or the generative runner. An empty specialist catalog and a disabled selector perform no Jev call; an unavailable selector keeps the original tool catalog. A plain BaseAgent(runtime="jev") has no JevAgentSettings, gate, router, or response writer and is refused here.
-RELATED DOCS: docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, docs/design/jev-tool-selector.md, docs/design/jev-specialist-routing.md, and skills/jev-agent/SKILL.md.
-TESTS: tests/test_jev_agent.py, tests/test_jev_preflight.py, tests/test_jev_tool_selector.py, and scripts/test-jev-tool-selector.py.
+PURPOSE: Provides the linear-runtime seam for Jev; it honors the precomputed gate result, applies the optional tool selector, and runs the inherited model loop.
+ROLE IN CODEBASE: `RuntimeRegistry` resolves `AgentRuntimeType.JEV` here; `Jev` supplies validated runtime settings, the response writer, and the per-run preflight result.
+ARCHITECTURE NOTE: Profile selection happens before BaseAgent runner construction in `Jev`; this class has no profile-routing policy and retains usage, speed, tracing, and normal agent-loop behavior.
+FUNCTION INVENTORY: `JevRuntime.__init__` refuses generic BaseAgent construction without Jev-owned runtime inputs; `arun(...)` stops on a closed gate or delegates to `_run_general(...)`; `_run_general(...)` preserves existing tool-selector behavior.
+COMMON MODIFICATION PATTERNS: Keep new global Jev policy in a capability class built by `Jev`; update `JevRuntimeSettings` and the focused runtime tests when its existing loop settings change.
+WHAT NOT TO DO IN THIS FILE: 1. Do not select profiles; `vidbyte/agents/jev/specialists.py` owns that decision. 2. Do not re-run preflight; `Jev.generate_reply()` runs it before profile selection.
+KNOWN EDGE CASES: A closed preflight result returns the structured clarification without a generative model call; an unavailable tool selector keeps the selected profile's full tool catalog.
+RELATED DOCS: `docs/design/jev-agent-profile-routing.md`, `skills/jev-agent/SKILL.md`, and `field-guide/vidbyte-sdk/runtime-boundaries.md`.
+TESTS: `tests/test_jev_agent.py`, `tests/test_jev_preflight.py`, and `tests/test_jev_tool_selector.py`.
 """
 
 from __future__ import annotations
@@ -15,11 +17,9 @@ from collections.abc import Mapping
 from dataclasses import replace
 from typing import Any
 
-from vidbyte.agents.jev.gate import JevPreflightGate
 from vidbyte.agents.jev.preflight import JevPreflightTools
 from vidbyte.agents.jev.response import JevResponse
-from vidbyte.agents.jev.settings import JevAgentSettings
-from vidbyte.agents.jev.specialists import JevSpecialistRouter
+from vidbyte.agents.jev.settings import JevRuntimeSettings
 from vidbyte.agents.runtime import AgentRuntime
 from vidbyte.lib.dataclasses.context import BaseAgentContext
 from vidbyte.lib.dataclasses.runner import RunnerHandle
@@ -31,123 +31,49 @@ from vidbyte.tools._internal import with_internal_agent_tools
 
 
 class JevRuntime(AgentRuntime):
-    """Linear runtime seam reserved for opinionated Jev capabilities."""
+    """Linear runtime seam reserved for Jev's already prepared runs."""
 
-    def __init__(
-        self,
-        *,
-        jev_settings: JevAgentSettings | None = None,
-        preflight: JevPreflightGate | None = None,
-        specialists: JevSpecialistRouter | None = None,
-        response: JevResponse | None = None,
-        **kwargs: Any,
-    ) -> None:
-        # Retains the validated settings, the gate, the router, and the response writer JevAgent built, and delegates the loop to AgentRuntime.
-        # @intent jev-runtime-needs-jev-agent
-        # AgentRuntimeType.JEV is selectable by string, so a generic BaseAgent can reach this class
-        # without them; refusing here names JevAgent instead of failing later on a None field.
-        if (
-            not isinstance(jev_settings, JevAgentSettings)
-            or not isinstance(preflight, JevPreflightGate)
-            or not isinstance(specialists, JevSpecialistRouter)
-            or not isinstance(response, JevResponse)
-        ):
-            raise ConfigurationError(
-                "The 'jev' runtime is only available through JevAgent; construct JevAgent(JevAgentSettings(...)) instead of BaseAgent(runtime='jev').",
-                details={
-                    "received_jev_settings": type(jev_settings).__name__,
-                    "received_preflight": type(preflight).__name__,
-                    "received_specialists": type(specialists).__name__,
-                    "received_response": type(response).__name__,
-                },
-            )
-        self.jev_settings = jev_settings
-        self.preflight = preflight
-        self.specialists = specialists
+    def __init__(self, *, runtime_settings: JevRuntimeSettings | None = None, response: JevResponse | None = None, preflight_passed: bool | None = None, **kwargs: Any) -> None:
+        # Refuses direct BaseAgent runtime selection because only Jev can prepare the gate result and profile configuration.
+        if not isinstance(runtime_settings, JevRuntimeSettings) or not isinstance(response, JevResponse) or not isinstance(preflight_passed, bool):
+            raise ConfigurationError("The 'jev' runtime is only available through Jev; construct Jev(JevAgentSettings(...)) instead of BaseAgent(runtime='jev').")
+        self.runtime_settings = runtime_settings
         self.response = response
+        self.preflight_passed = preflight_passed
         super().__init__(**kwargs)
 
-    async def arun(
-        self,
-        message: str,
-        *,
-        handle: RunnerHandle,
-        context: BaseAgentContext,
-        metadata: Mapping[str, Any] | None = None,
-        options: Mapping[str, Any] | None = None,
-        trace_context: SpanContext | None = None,
-    ) -> AgentResult:
-        """Run the preflight gate, then route to a registered specialist or run the general loop with enabled run-local preflights."""
-        # @intent closed-gate-never-reaches-the-model
-        # A closed gate returns without invoking the router or the generative runner, so an unclear request is
-        # answered with questions before any generative tokens are spent.
-        self.response.start(message)
-        if not await self.preflight.pass_(message):
+    async def arun(self, message: str, *, handle: RunnerHandle, context: BaseAgentContext, metadata: Mapping[str, Any] | None = None, options: Mapping[str, Any] | None = None, trace_context: SpanContext | None = None) -> AgentResult:
+        # Returns a clarification for a closed gate; otherwise uses the standard selected-profile loop.
+        if not self.preflight_passed:
             return self.response.stopped()
+        result = await self._run_general(message, handle=handle, context=context, metadata=metadata, options=options, trace_context=trace_context)
+        return self.response.finished(result)
 
-        async def general() -> AgentResult:
-            return await self._run_general(message, handle=handle, context=context, metadata=metadata, options=options, trace_context=trace_context)
+    async def _run_general(self, message: str, *, handle: RunnerHandle, context: BaseAgentContext, metadata: Mapping[str, Any] | None, options: Mapping[str, Any] | None, trace_context: SpanContext | None) -> AgentResult:
+        # Applies tool selection only after Jev has loaded the chosen profile into BaseAgent.
+        if JevPreflightPreset.TOOL_SELECTOR not in self.runtime_settings.preflight:
+            return await super().arun(message, handle=handle, context=context, metadata=metadata, options=options, trace_context=trace_context)
+        return await self._run_with_tool_selection(message, handle=handle, context=context, metadata=metadata, options=options, trace_context=trace_context)
 
-        if self.specialists.enabled:
-            return self.response.finished(await self.specialists.run(message, usage_tracker=self.usage_tracker, context=context, metadata=metadata, options=options, general=general))
-        return self.response.finished(await general())
-
-    async def _run_general(
-        self,
-        message: str,
-        *,
-        handle: RunnerHandle,
-        context: BaseAgentContext,
-        metadata: Mapping[str, Any] | None,
-        options: Mapping[str, Any] | None,
-        trace_context: SpanContext | None,
-    ) -> AgentResult:
-        # Applies the tool selector when enabled, then enters the inherited agent loop.
-        if JevPreflightPreset.TOOL_SELECTOR not in self.jev_settings.preflight:
-            return await super().arun(
-                message,
-                handle=handle,
-                context=context,
-                metadata=metadata,
-                options=options,
-                trace_context=trace_context,
-            )
-
+    async def _run_with_tool_selection(self, message: str, *, handle: RunnerHandle, context: BaseAgentContext, metadata: Mapping[str, Any] | None, options: Mapping[str, Any] | None, trace_context: SpanContext | None) -> AgentResult:
+        # Keeps the selector's existing fail-open catalog behavior and run metadata.
         candidate_tool_count = len(self.user_tools)
-        selector = JevPreflightTools(
-            self.jev_settings.decision,
-            self.jev_settings.tool_selector_threshold,
-        )
+        selector = JevPreflightTools(self.runtime_settings.decision, self.runtime_settings.tool_selector_threshold)
         self.user_tools = await selector.run(message, self.user_tools)
+        selected_tool_count = len(self.user_tools)
         self.tools = with_internal_agent_tools(self.user_tools)
-        context = replace(context, tools=self.tools.specs())
+        selected_context = replace(context, tools=self.tools.specs())
         run_options = dict(options or {})
         run_options.pop("tools", None)
-        result = await super().arun(
-            message,
-            handle=handle,
-            context=context,
-            metadata=metadata,
-            options=run_options,
-            trace_context=trace_context,
-        )
+        result = await super().arun(message, handle=handle, context=selected_context, metadata=metadata, options=run_options, trace_context=trace_context)
         selector_metadata: dict[str, Any] = {
             "available": selector.available,
             "candidate_tool_count": candidate_tool_count,
-            "selected_tool_count": len(self.user_tools),
+            "selected_tool_count": selected_tool_count,
         }
         if selector.usage is not None:
-            selector_metadata["usage"] = {
-                "input_tokens": selector.usage.input_tokens,
-                "output_tokens": selector.usage.output_tokens,
-            }
-        return replace(
-            result,
-            metadata={
-                **dict(result.metadata),
-                "jev_tool_selector": selector_metadata,
-            },
-        )
+            selector_metadata["usage"] = {"input_tokens": selector.usage.input_tokens, "output_tokens": selector.usage.output_tokens}
+        return replace(result, metadata={**dict(result.metadata), "jev_tool_selector": selector_metadata})
 
 
 __all__ = ["JevRuntime"]

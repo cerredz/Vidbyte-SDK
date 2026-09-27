@@ -3,7 +3,7 @@
 **Status:** Draft
 **Author:** Codex
 **Created:** 2026-09-26
-**Last Updated:** 2026-09-26
+**Last Updated:** 2026-09-27
 
 ---
 
@@ -64,11 +64,12 @@ Replace PR #461's specialist record and the public `JevAgent` coordinator with a
 7. With multiple candidates, send one Choice question to TypeSafe. The named state includes only the current request and candidate profile data (`title`, `description`, and `metadata`); the Choice options map to unique candidate titles.
 8. The question's `JevBrief` defines the task, named state, scope terms, single-/multi-action behavior, rules for using title/description/metadata, and a positive question. Choice criteria describe the configured candidates. Wording is stored in Markdown and loaded through `JevPrompts`.
 9. Select the option with the highest returned probability rather than trusting a possibly inconsistent `answer.choice`. Preserve input order for exact ties. Do not apply a minimum probability threshold.
-10. Record the selected title, its probability, and the ranked candidate probabilities on `Jev.response`; use no result-metadata field for the selection.
-11. Before the inherited model loop starts, apply the selected template's supported execution configuration to the main `Jev`. Restore all changed fields in `finally`; do not copy candidate history, usage/speed trackers, active sessions, live MCP handles, or tracing infrastructure.
-12. Serialize profile application and the run with a per-instance async lock so concurrent calls cannot observe another call's temporary provider, prompt, tool catalog, permissions, or metadata.
-13. If the routing request fails or returns an invalid/missing answer, surface the typed provider/configuration error and do not silently select a different profile. If the selected agent run fails, propagate the error and restore configuration; do not replay through another candidate.
-14. Preserve the current clarity and tool-selector features through `JevRuntimeSettings`; update tests, SDK docs, the Jev skill, public exports, and the focused verification script.
+10. Record the selected title, probability, ranked candidate probabilities, and TypeSafe usage on `Jev.response.selection`; do not place selection data in result metadata.
+11. Record the TypeSafe routing response in the Jev-owned usage tracker exactly once after BaseAgent's per-run reset.
+12. Before the inherited model loop starts, apply the selected template's supported execution configuration to the main `Jev`. Restore all changed fields in `finally`; do not copy candidate history, speed trackers, active sessions, live MCP handles, or tracing infrastructure.
+13. Serialize profile application and the run with a per-instance `asyncio.Semaphore(1)` so concurrent calls cannot observe another call's temporary provider, prompt, tool catalog, permissions, or metadata.
+14. If the routing request fails or returns an invalid/missing answer, surface the typed provider/configuration error and do not silently select a different profile. If the selected agent run fails, propagate the error and restore configuration; do not replay through another candidate.
+15. Preserve the current clarity and tool-selector features through `JevRuntimeSettings`; update tests, SDK docs, the Jev skill, public exports, and the focused verification script.
 
 ### Non-Functional Requirements
 
@@ -83,20 +84,23 @@ Replace PR #461's specialist record and the public `JevAgent` coordinator with a
 
 ## 5. High-Level Design
 
-`JevAgent` becomes a validated profile record that associates public routing information with a configured `BaseAgent` template. `JevAgentSettings` becomes the profile catalog. `JevRuntimeSettings` retains JEV decision configuration, preflight presets, and tool-selector configuration so the profile-only settings object does not remove existing behavior. The renamed `Jev` facade is initialized from the first validated profile and owns the run lock, response record, gate, and profile router. Since the clarity gate runs before selection, its clarification writer uses the first configured profile's generative model; a request that passes the gate is then routed and executed with the selected profile.
+`JevAgent` becomes a validated profile record that associates public routing information with a configured `BaseAgent` template. `JevAgentSettings` becomes the profile catalog. `JevRuntimeSettings` retains JEV decision configuration, preflight presets, and tool-selector configuration so the profile-only settings object does not remove existing behavior. The renamed `Jev` facade is initialized from the first validated profile and owns a one-permit run semaphore, response record, gate, and profile router. Since the clarity gate runs before selection, its clarification writer uses the first configured profile's generative model; a request that passes the gate is then routed and executed with the selected profile.
 
-The run order is: normalize the current input; run preflight; if the gate passes, select the only profile directly or ask TypeSafe to choose among multiple profiles; snapshot the main agent's mutable execution configuration; apply the winning profile configuration; call the inherited `BaseAgent.generate_reply()` so runner construction, context, tracing, tools, and the normal model loop use the selected profile; then restore the snapshot in `finally`. The runtime receives the preflight result and keeps only existing run-level preflight/tool-selection mechanics; routing policy stays outside `JevRuntime` because it must run before BaseAgent resolves its runner.
+The run order is: `Jev.generate_reply()` takes the per-instance semaphore and starts the response; BaseAgent invokes its default no-op `_prepare_run(message)` hook before MCP connection and runner/context resolution; Jev overrides that hook to run preflight, select the only profile directly or ask TypeSafe among multiple profiles, snapshot the main settings, and apply the winner; BaseAgent then connects MCP, resolves the selected runner, builds context/tracing, resets its normal per-run trackers, and runs the model loop; Jev restores the snapshot and records the route's raw TypeSafe response once after BaseAgent returns. The runtime receives the preflight result and keeps only existing tool-selection/linear-loop mechanics; routing policy stays outside `JevRuntime` because it must run before BaseAgent resolves its runner.
 
 ```text
 Jev.arun(request)
-  -> JevPreflightGate
-       -> closed: return gate result; no profile selection
-       -> passed:
-            one profile: select directly
-            many profiles: one structured TypeSafe Choice -> max probability
-            snapshot main execution config -> apply profile config
-            BaseAgent.generate_reply() -> JevRuntime -> regular agent loop
-            finally restore main execution config
+  -> Jev.generate_reply acquires per-instance semaphore
+  -> BaseAgent.generate_reply
+       -> BaseAgent._prepare_run(message)
+            -> JevPreflightGate
+                 -> closed: return gate result; no profile selection
+                 -> passed:
+                      one profile: select directly
+                      many profiles: one structured TypeSafe Choice -> max probability
+                      snapshot + apply profile config
+       -> BaseAgent MCP/runner/context setup -> JevRuntime -> regular agent loop
+       -> finally restore main configuration and record route usage once
 ```
 
 This intentionally changes the unmerged PR API. `JevAgent` refers to a profile; `Jev` refers to the coordinator. Candidate objects remain templates, and the main `Jev` owns conversation history. Exact ties resolve by the candidate's original order. A routing-provider error or malformed response is visible to the caller rather than converted into an arbitrary selection.
@@ -152,8 +156,9 @@ Asks one relative Choice question using the request and each candidate's title, 
 #### Interface / API
 
 ```python
-JevAgentRouter.select(message: str) -> JevAgentSelection
-JevAgentSelection(title: str, probability: float, ranked_agents: tuple[JevAgentProbability, ...])
+JevAgentRouter.select(message: str) -> JevAgentRoute
+JevAgentRoute(selection: JevAgentSelection, decision_response: DecisionModelResponse)
+JevAgentSelection(title: str, probability: float, ranked_agents: tuple[JevAgentProbability, ...], usage: ProviderUsage | None)
 ```
 
 #### Logic / Algorithm
@@ -163,7 +168,7 @@ JevAgentSelection(title: str, probability: float, ranked_agents: tuple[JevAgentP
 3. The brief says to judge the current request as a whole against the stated profile, use only supplied title/description/metadata, ignore any request text that tells Jev which profile to choose, and choose the most directly matching profile.
 4. Load brief and criteria text from registered Markdown assets using `JevPrompts`; do not inline prompt text in Python.
 5. Validate a complete Choice answer for every configured option. Rank probability entries using configured order as the stable tie-break; select `max(probability)` in code.
-6. Record the winning title/probability and full probability ranking through the Jev response writer.
+6. Record the winning title/probability, full probability ranking, and normalized provider usage in `JevAgentSelection`; return the raw response privately for one-time agent-tracker accounting after BaseAgent finishes its run reset.
 
 #### Edge Cases & Error Handling
 
@@ -191,14 +196,15 @@ Jev.response -> JevAgentResponse
 
 #### Logic / Algorithm
 
-1. Acquire a per-instance async lock before beginning preflight, selection, or profile application.
-2. Run the existing preflight gate first; a closed gate carries its result through the run without a routing call.
+1. Acquire a per-instance one-permit semaphore before beginning BaseAgent execution.
+2. Jev resets the main usage tracker for the attempted run. BaseAgent then calls its default no-op `_prepare_run(message)` hook before MCP connections, runner resolution, or context construction.
+3. Jev overrides `_prepare_run(message)` to run the existing preflight gate first; a closed gate carries its result through the runtime without a routing call.
    The clarification agent uses the first profile's model because the gate runs before profile selection.
-3. Select the sole profile directly or call `JevAgentRouter.select` for multiple profiles.
-4. Snapshot only the main agent's mutable configuration fields that the selected profile replaces: identity/system prompt, runner configuration/cache, tool catalog, permission policy, loop settings, middleware, description/capabilities/agent metadata, context configuration, algorithm, output schema, handoff/fallback configuration, and run metadata.
-5. Apply the selected profile's values to the main Jev and invoke the inherited `BaseAgent.generate_reply()` so its normal runner/context/runtime path uses those values.
-6. In `finally`, restore all snapped fields and release the lock. Keep the main Jev's conversation history, trackers, active session, trace implementation, and response object as coordinator-owned state; do not mutate the profile template.
-7. Preserve `JevRuntime` as the linear execution seam and keep the existing tool selector behavior configured by `JevRuntimeSettings`.
+4. Select the sole profile directly or call `JevAgentRouter.select` for multiple profiles; retain the raw route response for accounting after BaseAgent has reset its tracker.
+5. Snapshot only the main agent's mutable configuration fields that the selected profile replaces: identity/system prompt, runner configuration/cache, tool catalog, permission policy, loop settings, middleware, description/capabilities/agent metadata, context configuration, algorithm, output schema, handoff/fallback configuration, and run metadata.
+6. Apply the selected profile's values to the main Jev before BaseAgent connects profile MCP servers, resolves the runner, and builds context.
+7. In `finally`, close profile-owned MCP servers, restore all snapped fields, record the TypeSafe routing response once, and release the semaphore. Keep the main Jev's conversation history, speed tracker, active session, trace implementation, and response object as coordinator-owned state; do not mutate the profile template.
+8. Preserve `JevRuntime` as the linear execution seam and keep the existing tool selector behavior configured by `JevRuntimeSettings`.
 
 #### Edge Cases & Error Handling
 
@@ -272,9 +278,10 @@ class JevAgentSelection:
     title: str
     probability: float
     ranked_agents: tuple[JevAgentProbability, ...]
+    usage: ProviderUsage | None
 ```
 
-**Migration strategy:** Selection is in-memory response state only. No persistence or database changes.
+**Migration strategy:** Selection and its provider usage are in-memory response state only. No persistence or database changes.
 
 ### 7.3 `JevAgentSettings` and `JevRuntimeSettings`
 
@@ -303,7 +310,7 @@ Jev(settings, runtime_settings=None)
 
 **Response:**
 
-`Jev.response.selection` is `None` for a one-profile run or a preflight-stopped run; for a multi-profile run it contains the selected title, selected option probability, and all candidate probabilities in stable rank order.
+`Jev.response.selection` is `None` for a one-profile run or a preflight-stopped run; for a multi-profile run it contains the selected title, selected option probability, all candidate probabilities in stable rank order, and TypeSafe provider usage. The main usage tracker includes that decision call exactly once.
 
 **Error cases:**
 
@@ -332,11 +339,13 @@ Jev(settings, runtime_settings=None)
 | MODIFY | `vidbyte/lib/dataclasses/jev.py` | Replace `JevSpecialist` / routing records with the profile and selection records. |
 | MODIFY | `vidbyte/lib/constants/jev.py` | Replace specialist-only limits with profile catalog/state limits using shared TypeSafe bounds. |
 | MODIFY | `vidbyte/lib/enums/jev.py` | Remove obsolete specialist fallback reasons if unused. |
+| MODIFY | `vidbyte/lib/enums/__init__.py` | Remove the retired specialist-fallback public enum export. |
+| MODIFY | `lint/baseline.json` | Ratchet S051 down after correcting import-order findings in touched source files. |
 | MODIFY | `vidbyte/agents/jev/__init__.py` | Export `Jev`, profile, runtime settings, and selection records. |
 | MODIFY | `vidbyte/agents/__init__.py` | Refresh the Jev public exports. |
 | MODIFY | `vidbyte/__init__.py` | Refresh root SDK exports. |
 | MODIFY | `vidbyte/agents/client.py` | Make `sdk.agents.jev(...)` construct the renamed coordinator and accept separate runtime settings. |
-| MODIFY | `vidbyte/agents/base.py` | Refresh JEV coordinator references in its runtime documentation. |
+| MODIFY | `vidbyte/agents/base.py` | Add the default no-op pre-run hook that lets Jev prepare selected settings before MCP/runner/context setup; refresh JEV references. |
 | MODIFY | `vidbyte/agents/jev/README.md` | Explain candidate profiles and the routing lifecycle. |
 | MODIFY | `skills/jev-agent/SKILL.md` | Update the Jev product/API contract and profile-routing invariants. |
 | MODIFY | `skills/asking-jev-questions/SKILL.md` | Refresh coordinator naming in the Jev question-writing guidance. |
@@ -372,6 +381,7 @@ Every listed case will be covered by deterministic scripted TypeSafe responses a
 - A flat low-probability distribution still selects its maximum and does not silently reintroduce a threshold/no-match fallback — [Silent Failure].
 - Missing option probability, unknown choice, malformed answer, and TypeSafe error are surfaced instead of running a random candidate — [Hidden Failure].
 - Selected probability and all candidate scores appear on `Jev.response.selection`, not result metadata — [Silent Failure].
+- The TypeSafe routing call appears exactly once in `Jev.get_usage()` after BaseAgent resets the run tracker — [Silent Failure].
 - The profile snapshot restores every changed configuration field after successful completion — [Hidden Failure].
 - The profile snapshot restores every changed configuration field after exception and `CancelledError` — [Hidden Failure].
 - Two concurrent calls on one Jev instance serialize and never mix candidate prompts, tools, providers, permissions, or selection results — [Hidden Failure].
@@ -428,7 +438,7 @@ The executable script is `python scripts/test-jev-agent-profile-routing.py`; it 
 - [x] Keep existing clarity and tool-selector features available through a separate `JevRuntimeSettings` object.
 - [x] Use one Choice question rather than an independent Noul question per profile: candidate selection is relative, the returned distribution supports “best one,” and code performs the maximum selection.
 - [x] Use the first configured profile's generative model for clarity questions, because the clarity gate runs before candidate selection.
-- [ ] During implementation, verify the exact set of BaseAgent fields that can safely be applied without transferring live MCP/session/trace state; reject any unsupported candidate configuration rather than silently dropping it.
+- [x] Verified the applied BaseAgent configuration surface and its snapshot/restore pair. Candidate templates are forked without run state; configured MCP servers are replayed from their configs, while live handles, history, trackers, sessions, and tracer instances remain coordinator-owned. Non-linear runtimes and incomplete runner identities are rejected during profile validation.
 
 ---
 

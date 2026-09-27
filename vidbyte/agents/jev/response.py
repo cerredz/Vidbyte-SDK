@@ -1,10 +1,10 @@
 """FILE: vidbyte/agents/jev/response.py
 
-PURPOSE: Implements JevResponse, the one writer of a JevAgent's JevAgentResponse: every opinionated feature reports what it decided through a method here instead of through result metadata.
-ROLE IN CODEBASE: JevAgent builds one instance and exposes its record as `JevAgent.response`; JevPreflightGate writes preset outcomes and clarifications through it, JevSpecialistRouter writes which agent handled the task, and JevRuntime asks it for the result to return.
+PURPOSE: Implements JevResponse, the only writer of a Jev coordinator's JevAgentResponse; every opinionated feature reports decisions here instead of through result metadata.
+ROLE IN CODEBASE: `Jev` builds one instance and exposes `Jev.response`; `JevPreflightGate` writes preset outcomes and clarifications, `JevAgentRouter` writes the selected profile, and `JevRuntime` reads it when a gate closes or an agent completes.
 ARCHITECTURE NOTE: The record type lives in vidbyte/lib/dataclasses/jev.py; this class only owns how the record changes during a run, so a new feature adds one method here and one field there.
 COMMON MODIFICATION PATTERNS: Add a method named for the event a feature reports (for example needs_clarification), write the matching JevAgentResponse field, and call it from the feature.
-KNOWN EDGE CASES: start() replaces the record, so a caller holding the previous run's record keeps it unchanged; like the JevAgent that owns it, one instance serves one run at a time.
+KNOWN EDGE CASES: start() replaces the record, so a caller holding the previous run's record keeps it unchanged; the coordinator serializes its own runs because the response describes only the latest run.
 RELATED DOCS: docs/design/jev-preflight-clarity.md, docs/design/jev-specialist-routing.md, and skills/jev-agent/SKILL.md.
 TESTS: tests/test_jev_preflight.py, tests/test_jev_agent.py, and scripts/test-jev-preflight.py.
 """
@@ -15,18 +15,18 @@ from vidbyte.agents.pricing import JevUsage
 from vidbyte.lib.constants.jev import JEV_PREFLIGHT_STRATEGY_NAME
 from vidbyte.lib.dataclasses.jev import (
     JevAgentResponse,
+    JevAgentSelection,
     JevClarification,
     JevPresetResult,
-    JevSpecialistRouting,
 )
 from vidbyte.lib.dataclasses.strategies import AgentResult
 
 
 class JevResponse:
-    """Writes what JevAgent's opinionated features decide into the JevAgentResponse the user reads after a run."""
+    """Writes what Jev's opinionated features decide into the response record read after a run."""
 
     def __init__(self) -> None:
-        # Starts with an empty record so JevAgent.response is readable before the first run.
+        # Starts with an empty record so Jev.response is readable before the first run.
         self.state = JevAgentResponse()
 
     def start(self, message: str) -> None:
@@ -46,9 +46,9 @@ class JevResponse:
         self.state.clarification = clarification
         self.state.output = clarification.render()
 
-    def routed(self, routing: JevSpecialistRouting) -> None:
-        """Record which agent JevSpecialistRouter ran for the task: a registered specialist, or the general agent and why."""
-        self.state.routing = routing
+    def selected(self, selection: JevAgentSelection) -> None:
+        # Records the selected profile and its probability ranking on the public response surface.
+        self.state.selection = selection
 
     def stopped(self) -> AgentResult:
         """Return the result of a run the preflight gate stopped, carrying the clarification as its structured value."""

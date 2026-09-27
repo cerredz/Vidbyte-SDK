@@ -1,12 +1,14 @@
 """FILE: vidbyte/agents/jev/settings.py
 
-PURPOSE: Defines the single, opinionated public configuration object for JevAgent.
-ROLE IN CODEBASE: JevAgentSettings is the only constructor input accepted by JevAgent; JevAgent builds its preflight gate and its JevSpecialistRouter from these settings, so JevRuntime reads them only for the tool selector.
-ARCHITECTURE NOTE: The surface is intentionally closed; named Jev capabilities belong here as explicit settings instead of a generic decisions collection.
-COMMON MODIFICATION PATTERNS: Add a validated named capability setting, then implement its fixed policy in its own class under vidbyte/agents/jev/ (the gate, the specialist router) without exposing runtime replacement hooks.
-KNOWN EDGE CASES: The generative provider cannot be TypeSafe because Jev is a decision model; neither generative nor decision API keys appear in repr output. Preflight presets are validated by JevPreflightRegistry and the specialist catalog by JevSpecialistCatalog at construction, so no TypeSafe key is needed until a run asks Jev; the tool-selector and specialist thresholds reject booleans, non-finite values, and out-of-range probabilities.
-RELATED DOCS: docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, docs/design/jev-tool-selector.md, docs/design/jev-specialist-routing.md, and skills/jev-agent/SKILL.md.
-TESTS: tests/test_jev_agent.py, tests/test_jev_preflight.py, tests/test_jev_tool_selector.py, and scripts/test-jev-agent-scaffold.py.
+PURPOSE: Validates the agent-profile catalog separately from Jev's runtime-wide decision and preflight controls.
+ROLE IN CODEBASE: `Jev` consumes `JevAgentSettings` to choose a configured profile and `JevRuntimeSettings` to build the gate and tool selector; profile record validation lives in `vidbyte/lib/dataclasses/jev.py`.
+ARCHITECTURE NOTE: The profile catalog is the only content in JevAgentSettings; named runtime controls stay in a separate typed object so developer-defined agent configuration is not mixed with Jev policy.
+FUNCTION INVENTORY: `JevAgentSettings.__post_init__` freezes and validates candidate profiles; `JevRuntimeSettings.__post_init__` validates decision, preflight, and tool-selector configuration. Both raise `ConfigurationError` for invalid public input.
+COMMON MODIFICATION PATTERNS: Add profile identity or catalog bounds to the `JevAgent`/`JevAgentCatalog` records; add a global policy control to `JevRuntimeSettings` and pass it to its owning capability.
+WHAT NOT TO DO IN THIS FILE: 1. Do not put agent execution policy in `JevRuntime`; `Jev` and its capability classes own it. 2. Do not add provider request JSON; `vidbyte/providers/typesafe.py` owns wire serialization.
+KNOWN EDGE CASES: Empty profiles are rejected because a coordinator needs a profile to initialize from; the TypeSafe decision key is resolved only when a run actually requests a decision.
+RELATED DOCS: `docs/design/jev-agent-profile-routing.md`, `skills/jev-agent/SKILL.md`, and `skills/asking-jev-questions/SKILL.md`.
+TESTS: `tests/test_jev_agent.py`, `tests/test_jev_preflight.py`, and `tests/test_jev_tool_selector.py`.
 """
 
 from __future__ import annotations
@@ -15,125 +17,53 @@ import math
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 
-from vidbyte.agents.settings import AgentLoopSettings
 from vidbyte.lib.constants.jev import (
-    JEV_SPECIALIST_DEFAULT_MATCH_THRESHOLD,
     JEV_TOOL_SELECTOR_DEFAULT_THRESHOLD,
     JEV_TOOL_SELECTOR_MAX_THRESHOLD,
     JEV_TOOL_SELECTOR_MIN_THRESHOLD,
 )
-from vidbyte.lib.dataclasses.jev import JevSpecialist, JevSpecialistCatalog
+from vidbyte.lib.dataclasses.jev import JevAgent, JevAgentCatalog
 from vidbyte.lib.dataclasses.model_configs import DecisionModelConfig
-from vidbyte.lib.enums import JevPreflightPreset, ModelProvider
+from vidbyte.lib.enums.jev import JevPreflightPreset
 from vidbyte.lib.errors import ConfigurationError
 from vidbyte.lib.jev import JevPreflightRegistry
-from vidbyte.tools.security import PermissionPolicy
 
 
 @dataclass(frozen=True, slots=True)
 class JevAgentSettings:
-    """Validated construction settings for the opinionated Jev agent."""
+    """Validated catalog of candidate agents available to one Jev coordinator."""
 
-    name: str
-    system_prompt: str
-    provider: ModelProvider | str
-    model_name: str
-    api_key: str | None = field(default=None, repr=False)
-    temperature: float | None = None
-    timeout_seconds: float | None = None
-    tools: tuple[object, ...] = ()
-    permission_policy: PermissionPolicy = field(default_factory=PermissionPolicy)
-    loop: AgentLoopSettings = field(default_factory=AgentLoopSettings)
-    decision: DecisionModelConfig = field(default_factory=DecisionModelConfig, repr=False)
-    preflight: tuple[JevPreflightPreset | str, ...] = ()
-    tool_selector_threshold: float = JEV_TOOL_SELECTOR_DEFAULT_THRESHOLD
-    agents: Sequence[JevSpecialist] = ()
-    specialist_match_threshold: float = JEV_SPECIALIST_DEFAULT_MATCH_THRESHOLD
+    agents: Sequence[JevAgent]
 
     def __post_init__(self) -> None:
-        # Normalizes immutable inputs and rejects invalid agent configuration before runtime construction.
-        # @intent opinionated-settings-fail-before-runtime
-        # A frozen, validated settings object prevents later capability code from inheriting ambiguous policy inputs.
-        self._validate_text(self.name, "name")
-        self._validate_text(self.system_prompt, "system_prompt")
-        self._validate_text(self.model_name, "model_name")
-        provider = self._normalized_provider()
-        if provider is ModelProvider.TYPESAFE:
-            raise ConfigurationError("JevAgentSettings.provider must be a generative model provider, not TypeSafe.")
-        object.__setattr__(self, "provider", provider)
-        if isinstance(self.tools, (str, bytes)):
-            raise ConfigurationError("JevAgentSettings.tools must be an iterable of tool objects, not a string.")
-        try:
-            object.__setattr__(self, "tools", tuple(self.tools))
-        except TypeError as exc:
-            raise ConfigurationError("JevAgentSettings.tools must be an iterable of tool objects.") from exc
-        self._validate_temperature()
-        self._validate_timeout()
-        if not isinstance(self.permission_policy, PermissionPolicy):
-            raise ConfigurationError("JevAgentSettings.permission_policy must be a PermissionPolicy instance.")
-        if not isinstance(self.loop, AgentLoopSettings):
-            raise ConfigurationError("JevAgentSettings.loop must be an AgentLoopSettings instance.")
+        # Freezes sequence input once so profile order remains the deterministic tie-break.
+        if isinstance(self.agents, (str, bytes)) or not isinstance(self.agents, Sequence):
+            raise ConfigurationError("JevAgentSettings.agents must be a sequence of JevAgent profiles.")
+        catalog = JevAgentCatalog(agents=tuple(self.agents))
+        object.__setattr__(self, "agents", catalog.agents)
+
+
+@dataclass(frozen=True, slots=True)
+class JevRuntimeSettings:
+    """Validated runtime-wide decision and preflight policy, separate from agent profiles."""
+
+    decision: DecisionModelConfig = field(default_factory=DecisionModelConfig, repr=False)
+    preflight: Sequence[JevPreflightPreset | str] = ()
+    tool_selector_threshold: float = JEV_TOOL_SELECTOR_DEFAULT_THRESHOLD
+
+    def __post_init__(self) -> None:
+        # Normalizes the existing preflight surface and validates the tool selector probability.
         if not isinstance(self.decision, DecisionModelConfig):
-            raise ConfigurationError("JevAgentSettings.decision must be a DecisionModelConfig instance.")
+            raise ConfigurationError("JevRuntimeSettings.decision must be a DecisionModelConfig instance.")
         object.__setattr__(self, "preflight", JevPreflightRegistry.validate(self.preflight))
         self._validate_tool_selector_threshold()
-        self._normalize_specialists()
 
     def _validate_tool_selector_threshold(self) -> None:
-        # Accepts calibrated probabilities on the closed unit interval, but excludes bool and non-finite values.
+        # Keeps existing tool selection semantics on a finite, inclusive probability range.
         value = self.tool_selector_threshold
-        if (
-            isinstance(value, bool)
-            or not isinstance(value, (int, float))
-            or not math.isfinite(value)
-            or not JEV_TOOL_SELECTOR_MIN_THRESHOLD <= value <= JEV_TOOL_SELECTOR_MAX_THRESHOLD
-        ):
-            raise ConfigurationError("JevAgentSettings.tool_selector_threshold must be a finite probability between 0 and 1 inclusive.")
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or not JEV_TOOL_SELECTOR_MIN_THRESHOLD <= value <= JEV_TOOL_SELECTOR_MAX_THRESHOLD:
+            raise ConfigurationError("JevRuntimeSettings.tool_selector_threshold must be a finite probability between 0 and 1 inclusive.")
         object.__setattr__(self, "tool_selector_threshold", float(value))
 
-    def _normalize_specialists(self) -> None:
-        # Freezes the catalog and validates it through JevSpecialistCatalog before the first runtime can be built.
-        if isinstance(self.agents, (str, bytes)) or not isinstance(self.agents, Sequence):
-            raise ConfigurationError("JevAgentSettings.agents must be a sequence of JevSpecialist values.")
-        catalog = JevSpecialistCatalog(specialists=tuple(self.agents), match_threshold=self.specialist_match_threshold)
-        object.__setattr__(self, "agents", catalog.specialists)
-        object.__setattr__(self, "specialist_match_threshold", catalog.match_threshold)
 
-    @property
-    def specialists(self) -> JevSpecialistCatalog:
-        """Return the validated specialist catalog JevAgent builds its JevSpecialistRouter from."""
-        return JevSpecialistCatalog(specialists=tuple(self.agents), match_threshold=self.specialist_match_threshold)
-
-    @staticmethod
-    def _validate_text(value: object, field_name: str) -> None:
-        # Requires identity and prompt fields to be non-blank strings.
-        if not isinstance(value, str) or not value.strip():
-            raise ConfigurationError(f"JevAgentSettings.{field_name} must be a non-blank string.")
-
-    def _normalized_provider(self) -> ModelProvider:
-        # Converts the public string form into the SDK provider enum exactly once.
-        # @intent generative-and-decision-providers-stay-distinct
-        # Canonicalizing here lets construction reject TypeSafe before a decision model is mistaken for a text runner.
-        try:
-            return self.provider if isinstance(self.provider, ModelProvider) else ModelProvider(self.provider)
-        except (TypeError, ValueError) as exc:
-            raise ConfigurationError(f"Unsupported model provider: {self.provider!r}") from exc
-
-    def _validate_temperature(self) -> None:
-        # Applies the shared generative-model temperature range without accepting booleans or non-finite numbers.
-        value = self.temperature
-        if value is None:
-            return
-        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or not 0.0 <= value <= 2.0:
-            raise ConfigurationError("JevAgentSettings.temperature must be a finite number between 0 and 2.")
-
-    def _validate_timeout(self) -> None:
-        # Requires a finite positive generative-model timeout when one is supplied.
-        value = self.timeout_seconds
-        if value is None:
-            return
-        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0.0:
-            raise ConfigurationError("JevAgentSettings.timeout_seconds must be a finite number greater than zero.")
-
-
-__all__ = ["JevAgentSettings"]
+__all__ = ["JevAgentSettings", "JevRuntimeSettings"]

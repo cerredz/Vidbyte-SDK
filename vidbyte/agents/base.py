@@ -12,6 +12,8 @@ Architecture:
     - Owns one UsageTracker (cost) and one AgentSpeedTracker (latency) for its
       lifetime, both reset at the top of every generate_reply() and threaded
       into the AgentRuntime it constructs for the linear-loop runtimes (LINEAR and JEV).
+    - _prepare_run: No-op extension invoked before MCP connection and runner/context
+      resolution; Jev uses it to gate and load one profile before the selected tools connect.
 Relations:
     Inherits from McpAttachableMixin. Used by registries, harnesses, and
     multi-agent orchestration. Agent-bound built-ins are wired in
@@ -28,24 +30,36 @@ from typing import TYPE_CHECKING, Any
 
 from vidbyte.agents.mixins import McpAttachableMixin
 from vidbyte.agents.pricing import UsageRollup, UsageTracker
-from vidbyte.agents.speed import AgentSpeedHistory, AgentSpeedRollup, AgentSpeedTracker
 from vidbyte.agents.settings import AgentLoopSettings
+from vidbyte.agents.speed import AgentSpeedHistory, AgentSpeedRollup, AgentSpeedTracker
 from vidbyte.agents.types import AgentCard, AgentInput, AgentMessage
-from vidbyte.context.manager import ContextManager
-from vidbyte.context.window import ContextWindow, ContextWindowAlgorithm
-from vidbyte.context.primitives import ContextItem
 from vidbyte.context.handoff import Handoff, MinimalHandoff
-from vidbyte.lib.dataclasses.agents import AgentForkSettings, AgentMetadata, AgentRunnerConfig, AgentRuntimeConfig, FallbackModel, PauseDuration
+from vidbyte.context.manager import ContextManager
+from vidbyte.context.primitives import ContextItem
+from vidbyte.context.window import ContextWindow, ContextWindowAlgorithm
+from vidbyte.lib.constants import RUNNER_TYPE_TEXT
+from vidbyte.lib.dataclasses.agents import (
+    AgentForkSettings,
+    AgentMetadata,
+    AgentRunnerConfig,
+    AgentRuntimeConfig,
+    FallbackModel,
+    PauseDuration,
+)
 from vidbyte.lib.dataclasses.runner import RunnerHandle
 from vidbyte.lib.dataclasses.sessions import SESSION_SCHEMA_VERSION, RunState
 from vidbyte.lib.dataclasses.speed import RecordStreamInput
 from vidbyte.lib.dataclasses.strategies import AgentResult
 from vidbyte.lib.dataclasses.trace import TraceOption
-from vidbyte.lib.constants import RUNNER_TYPE_TEXT
 from vidbyte.lib.enums import AgentRuntimeType, ModelProvider
-from vidbyte.lib.errors import AgentExecutionError, ConfigurationError, OutputSchemaViolationError
+from vidbyte.lib.errors import (
+    AgentExecutionError,
+    ConfigurationError,
+    OutputSchemaViolationError,
+)
 from vidbyte.lib.runners import Runner
 from vidbyte.lib.tracing import NullTracer, TracerBase
+# Keep this import after provider contracts: eager runtime loading otherwise cycles through providers.
 from vidbyte.agents.runtimes.configs import ActorRuntime, LinearRuntime, MctsSearchRuntime
 from vidbyte.middleware import AgentMiddleware
 from vidbyte.tools.catalog import Tools
@@ -59,7 +73,7 @@ if TYPE_CHECKING:
     from vidbyte.sessions.store import SessionStore
 
 # Runtimes that execute the direct model/tool loop and so accept its usage, speed, output-contract,
-# fallback, and session-failure wiring. JEV is the opinionated JevAgent's linear-loop subclass.
+# fallback, and session-failure wiring. JEV is the Jev coordinator's linear-loop subclass.
 _LINEAR_LOOP_RUNTIMES = frozenset({AgentRuntimeType.LINEAR, AgentRuntimeType.JEV})
 
 
@@ -357,7 +371,9 @@ class BaseAgent(McpAttachableMixin):
         from vidbyte.tools.builtins.handoff import CreateHandoffTool
         from vidbyte.tools.builtins.mcp import AttachMcpServerTool
         from vidbyte.tools.builtins.pause import PauseAgentTool
-        from vidbyte.tools.builtins.run_prompts_sequentially import RunPromptsSequentiallyTool
+        from vidbyte.tools.builtins.run_prompts_sequentially import (
+            RunPromptsSequentiallyTool,
+        )
 
         if isinstance(tool, AgentTool):
             tool.bind_context_getter(lambda: (self._active_prompt, list(self.history)))
@@ -596,6 +612,7 @@ class BaseAgent(McpAttachableMixin):
         recipient: str = "orchestrator",
         **options: Any,
     ) -> AgentMessage:
+        await self._prepare_run(message)
         await self._ensure_mcp_connected()
         trace_ctx = None
         try:
@@ -1054,8 +1071,12 @@ class BaseAgent(McpAttachableMixin):
         )
 
     def _runtime_extension_kwargs(self) -> dict[str, Any]:
-        # Supplies runtime-specific constructor options (JevAgent passes its settings); standard agents add none.
+        # Supplies runtime-specific constructor options (Jev passes its settings); standard agents add none.
         return {}
+
+    async def _prepare_run(self, message: str | AgentInput) -> None:
+        # Gives specialized BaseAgent facades a pre-run seam before runner and context resolution; ordinary agents need no preparation.
+        return None
 
     def _runtime_middleware(self) -> tuple[AgentMiddleware, ...]:
         # Appends settings-driven and tracing middleware to the user middleware.

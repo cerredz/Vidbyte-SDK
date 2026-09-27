@@ -1,6 +1,6 @@
 # Jev preflight questions
 
-This folder holds every fixed question JevAgent sends to Jev before its generative agent runs, one dataclass per question, and `JevPreflightRegistry`, the registry over them.
+This folder holds every fixed question the `Jev` coordinator sends to Jev before its selected generative profile runs, one dataclass per question, and `JevPreflightRegistry`, the registry over them.
 
 ## Load the asking-jev-questions skill first
 

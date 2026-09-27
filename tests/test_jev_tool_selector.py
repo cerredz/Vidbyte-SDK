@@ -1,11 +1,11 @@
 """FILE: tests/test_jev_tool_selector.py
 
-PURPOSE: Verifies Jev tool selection, threshold validation, and runtime tool hiding without network calls.
-ROLE IN CODEBASE: Covers the TOOL_SELECTOR setting and its integration before the ordinary Jev agent loop.
+PURPOSE: Verifies Jev tool selection, separate runtime-settings validation, and runtime tool hiding without network calls.
+ROLE IN CODEBASE: Covers the `JevRuntimeSettings.TOOL_SELECTOR` behavior and its integration before the ordinary selected-profile loop.
 ARCHITECTURE NOTE: Scripted decision and generative runners replace external boundaries while production catalog filtering stays active.
 COMMON MODIFICATION PATTERNS: Cover settings bounds, each availability outcome, model-visible schemas, and execution lookup together.
 KNOWN EDGE CASES: The selector is disabled by default and provider or incomplete-answer failures preserve the full catalog.
-RELATED DOCS: docs/design/jev-tool-selector.md and skills/jev-agent/SKILL.md.
+RELATED DOCS: `docs/design/jev-agent-profile-routing.md` and `skills/jev-agent/SKILL.md`.
 TESTS: python -m pytest tests/test_jev_tool_selector.py and python scripts/test-jev-tool-selector.py.
 """
 
@@ -16,8 +16,15 @@ from collections.abc import Mapping
 from typing import Any
 from unittest.mock import patch
 
-from tests.agent_test_support import bind_test_runner
-from vidbyte import JevAgent, JevAgentSettings, JevPreflightPreset, tool
+from tests.agent_test_support import OfflineTestAgent, bind_test_runner
+from vidbyte import (
+    Jev,
+    JevAgent,
+    JevAgentSettings,
+    JevPreflightPreset,
+    JevRuntimeSettings,
+    tool,
+)
 from vidbyte.agents.jev.preflight import JevPreflightTools
 from vidbyte.lib.config import DecisionModelConfig
 from vidbyte.lib.dataclasses.jev import JevAnswer, JevDecisionRequest
@@ -90,16 +97,18 @@ def _answer(name: str, probability: float) -> JevAnswer:
     )
 
 
-def _settings(**overrides: Any) -> JevAgentSettings:
-    """Builds a valid Jev settings object with caller-provided overrides."""
-    values: dict[str, Any] = {
-        "name": "selector",
-        "system_prompt": "Work carefully.",
-        "provider": "openai",
-        "model_name": "gpt-4.1-mini",
-    }
+def _settings(**overrides: Any) -> JevRuntimeSettings:
+    """Builds runtime-wide policy settings with caller-provided overrides."""
+    values: dict[str, Any] = {"decision": DecisionModelConfig(api_key="test-key")}
     values.update(overrides)
-    return JevAgentSettings(**values)
+    return JevRuntimeSettings(**values)
+
+
+def _agent_settings(generative: object, tools: tuple[object, ...] = ()) -> JevAgentSettings:
+    """Builds one profile whose configured runner stays offline through a template fork."""
+    source = OfflineTestAgent(name="selector", system_prompt="Work carefully.", provider="openai", model_name="gpt-4.1-mini", tools=tools)
+    bind_test_runner(source, generative)
+    return JevAgentSettings(agents=(JevAgent(title="Selector", description="Handles the user's requested work.", metadata={}, agent=source),))
 
 
 class JevToolSelectorSettingsTests(unittest.TestCase):
@@ -212,13 +221,8 @@ class JevToolSelectorRuntimeTests(unittest.IsolatedAsyncioTestCase):
             RawResponse({"output": [{"type": "function_call", "name": "hide", "arguments": '{"query": "x"}', "call_id": "hidden"}]}),
             RawResponse({"output": [{"type": "function_call", "name": "isDone", "arguments": '{"final_answer": "done"}', "call_id": "complete"}]}),
         )
-        settings = _settings(
-            tools=(keep, hide),
-            preflight=(JevPreflightPreset.TOOL_SELECTOR,),
-            decision=DecisionModelConfig(api_key="test-key"),
-            tool_selector_threshold=0.2,
-        )
-        agent = bind_test_runner(JevAgent(settings), generative_runner)
+        settings = _settings(preflight=(JevPreflightPreset.TOOL_SELECTOR,), tool_selector_threshold=0.2)
+        agent = Jev(_agent_settings(generative_runner, tools=(keep, hide)), runtime_settings=settings)
 
         with patch("vidbyte.agents.jev.preflight.DecisionModelRunner", return_value=decision_runner):
             reply = await agent.arun("Search the relevant records.")
@@ -234,9 +238,9 @@ class JevToolSelectorRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(reply.metadata["jev_tool_selector"]["selected_tool_count"], 1)
 
     async def test_disabled_selector_makes_no_decision_call(self) -> None:
-        # [Edge Case] existing JevAgent settings retain ordinary loop behavior by default.
+        # [Edge Case] the selector remains disabled when its runtime preset is absent.
         generative_runner = ScriptedGenerativeRunner()
-        agent = bind_test_runner(JevAgent(_settings()), generative_runner)
+        agent = Jev(_agent_settings(generative_runner), runtime_settings=_settings())
 
         with patch("vidbyte.agents.jev.preflight.DecisionModelRunner") as decision_runner:
             reply = await agent.arun("Answer normally.")

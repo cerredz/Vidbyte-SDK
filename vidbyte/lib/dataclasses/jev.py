@@ -1,6 +1,6 @@
 """FILE: vidbyte/lib/dataclasses/jev.py
 
-PURPOSE: Defines the validated records for TypeSafe Jev decisions (JSON content, options, questions, requests, normalized answers, wire bodies, model cards, and decision-log records), for JevAgent preflight (the noul score, the question brief and criteria, the question base, preset definitions, preset results, the clarification agent's structured reply and the clarification built from it), for JevAgent specialist routing (the specialist, the catalog, and the routing outcome), and the JevAgentResponse the user reads after a run.
+PURPOSE: Defines validated records for TypeSafe Jev decisions, Jev preflight questions/results, JevAgent candidate profiles and probability rankings, and the JevAgentResponse the caller reads after a run.
 ROLE IN CODEBASE: `vidbyte/providers/typesafe.py` builds TypeSafeWireRequest from JevDecisionRequest and JevAnswer values from responses, while `vidbyte/lib/runners/decision.py` passes the typed records through.
 ARCHITECTURE NOTE: This module must not import model_configs because that would close an import cycle through ModalityDetector. Records own every shape rule in __post_init__; the provider, not these records, turns a wire record into the JSON body (lint S060 bars dict[str, Any] encoders here).
 COMMON MODIFICATION PATTERNS: Mirror https://docs.typesafe.ai/api.md exactly: add a field together with its validation, its wire record, and its provider serialization; keep bounds in vidbyte/lib/constants/jev.py.
@@ -21,6 +21,9 @@ from typing import TYPE_CHECKING, cast
 from pydantic import BaseModel, ConfigDict, Field
 
 from vidbyte.lib.constants.jev import (
+    JEV_AGENT_MAX_COUNT,
+    JEV_AGENT_MAX_DESCRIPTION_CHARS,
+    JEV_AGENT_MAX_ROUTING_CHARS,
     JEV_CLARIFICATION_MAX_QUESTIONS,
     JEV_CLARIFICATION_MAX_RECOMMENDATIONS,
     JEV_CLARIFICATION_MIN_RECOMMENDATIONS,
@@ -35,17 +38,12 @@ from vidbyte.lib.constants.jev import (
     JEV_NOUL_OPTIONS,
     JEV_NOUL_TRUE,
     JEV_PROBABILITY_SUM_TOLERANCE,
-    JEV_SPECIALIST_MAX_COUNT,
-    JEV_SPECIALIST_MAX_DESCRIPTION_CHARS,
-    JEV_SPECIALIST_MAX_ROUTING_CHARS,
-    JEV_SPECIALIST_NO_MATCH_ID,
 )
 from vidbyte.lib.enums.agent_runtime import AgentRuntimeType
 from vidbyte.lib.enums.jev import (
     JevPreflightPreset,
     JevPreflightQuestionKey,
     JevQuestionType,
-    JevSpecialistFallback,
 )
 from vidbyte.lib.errors import ConfigurationError
 
@@ -402,108 +400,125 @@ class JevDecisionRecord:
 
 
 @dataclass(frozen=True, slots=True)
-class JevSpecialist:
-    """One registered specialist's stable choice ID, matching description, and configured agent template."""
+class JevAgent:
+    """A named routing profile paired with the configured BaseAgent settings that run it."""
 
-    id: str
+    title: str
     description: str
+    metadata: Mapping[str, object]
     agent: BaseAgent
 
     def __post_init__(self) -> None:
-        # Rejects ambiguous metadata and configurations that cannot be routed or executed safely.
-        self._validate_identity()
+        # Freezes the profile data Jev sees and validates the reusable linear agent template.
+        self._validate_title()
         self._validate_description()
+        self._validate_metadata()
         self._validate_agent()
 
-    def _validate_identity(self) -> None:
-        # Enforces the TypeSafe option label bound and keeps the no-match label reserved.
-        if not isinstance(self.id, str) or not self.id.strip():
-            raise ConfigurationError("JevSpecialist.id must be a non-blank string.")
-        if self.id != self.id.strip() or len(self.id) > JEV_MAX_OPTION_NAME_CHARS:
-            raise ConfigurationError(f"JevSpecialist.id must be trimmed and at most {JEV_MAX_OPTION_NAME_CHARS} characters.")
-        if self.id == JEV_SPECIALIST_NO_MATCH_ID:
-            raise ConfigurationError(f"JevSpecialist.id {JEV_SPECIALIST_NO_MATCH_ID!r} is reserved for the no-match option.")
+    def _validate_title(self) -> None:
+        # Requires a unique, TypeSafe-safe label; catalog uniqueness is checked separately.
+        if not isinstance(self.title, str) or not self.title.strip() or self.title != self.title.strip():
+            raise JevValidation.error("JevAgent.title", "a trimmed, non-blank string", self.title)
+        if len(self.title) > JEV_MAX_OPTION_NAME_CHARS:
+            raise JevValidation.error("JevAgent.title", f"at most {JEV_MAX_OPTION_NAME_CHARS} characters", len(self.title))
 
     def _validate_description(self) -> None:
-        # Requires a bounded description because it is sent to the decision model on every routed run.
+        # Requires a bounded scope description because it is included in each routing request.
         if not isinstance(self.description, str) or not self.description.strip() or self.description != self.description.strip():
-            raise ConfigurationError("JevSpecialist.description must be a trimmed, non-blank string.")
-        if len(self.description) > JEV_SPECIALIST_MAX_DESCRIPTION_CHARS:
-            raise ConfigurationError(f"JevSpecialist.description must be at most {JEV_SPECIALIST_MAX_DESCRIPTION_CHARS} characters.")
+            raise JevValidation.error("JevAgent.description", "a trimmed, non-blank string", self.description)
+        if len(self.description) > JEV_AGENT_MAX_DESCRIPTION_CHARS:
+            raise JevValidation.error("JevAgent.description", f"at most {JEV_AGENT_MAX_DESCRIPTION_CHARS} characters", len(self.description))
+
+    def _validate_metadata(self) -> None:
+        # Freezes JSON-compatible metadata; it is sent to TypeSafe and must never carry secrets.
+        if not isinstance(self.metadata, Mapping):
+            raise JevValidation.error("JevAgent.metadata", "a JSON object", self.metadata)
+        frozen = JevJson.freeze(self.metadata, field_name="JevAgent.metadata")
+        if not isinstance(frozen, Mapping):
+            raise JevValidation.error("JevAgent.metadata", "a JSON object", self.metadata)
+        object.__setattr__(self, "metadata", frozen)
 
     def _validate_agent(self) -> None:
-        # Requires a configured agent template and disallows recursively nested Jev routing.
-        # @intent lib-record-checks-agent-shape-without-upward-import
-        # vidbyte.lib may not import vidbyte.agents at run time, so the record checks the BaseAgent surface the
-        # router uses (a resolved runtime type, fork, and generate_reply) instead of an isinstance check.
+        # lib cannot import BaseAgent at runtime, so validate its required surface and linear runtime.
+        # @intent profile-settings-are-loaded-into-linear-main-agent
+        # The coordinator owns the Jev runtime; profile runtime families cannot be swapped onto it without
+        # silently losing actor/search semantics, and nested Jev would recurse before every request.
         runtime_type = getattr(self.agent, "runtime_type", None)
-        if not isinstance(runtime_type, AgentRuntimeType) or not all(callable(getattr(self.agent, name, None)) for name in ("fork", "generate_reply")):
-            raise ConfigurationError("JevSpecialist.agent must be a configured BaseAgent instance.")
-        if runtime_type is AgentRuntimeType.JEV:
-            raise ConfigurationError("JevSpecialist.agent cannot use the jev runtime.")
+        runner_config = getattr(self.agent, "runner_config", None)
+        provider = getattr(runner_config, "provider", None)
+        model_name = getattr(runner_config, "model_name", None)
+        required = ("fork", "generate_reply", "_runner_for_model")
+        if not isinstance(runtime_type, AgentRuntimeType) or not all(callable(getattr(self.agent, name, None)) for name in required):
+            raise JevValidation.error("JevAgent.agent", "a configured BaseAgent template", type(self.agent).__name__)
+        if runtime_type is not AgentRuntimeType.LINEAR:
+            raise ConfigurationError("JevAgent.agent must use the linear runtime; Jev owns the selected run's runtime.")
+        if not isinstance(provider, str) or not isinstance(model_name, str):
+            raise JevValidation.error("JevAgent.agent.runner_config", "a configured provider and model identity", runner_config)
+        if not provider.strip() or not model_name.strip():
+            raise JevValidation.error("JevAgent.agent.runner_config", "a non-blank provider and model identity", runner_config)
 
 
 @dataclass(frozen=True, slots=True)
-class JevSpecialistCatalog:
-    """The validated specialist collection and probability threshold one JevAgent routes with."""
+class JevAgentCatalog:
+    """An immutable, bounded collection of profile candidates for one Jev coordinator."""
 
-    specialists: tuple[JevSpecialist, ...]
-    match_threshold: float
+    agents: tuple[JevAgent, ...]
 
     def __post_init__(self) -> None:
-        # Enforces collection invariants that no single JevSpecialist entry can check on its own.
-        if not isinstance(self.specialists, tuple) or not all(isinstance(specialist, JevSpecialist) for specialist in self.specialists):
-            raise ConfigurationError("JevAgentSettings.agents must contain only JevSpecialist values.")
-        if len(self.specialists) > JEV_SPECIALIST_MAX_COUNT:
-            raise ConfigurationError(f"JevAgentSettings.agents supports at most {JEV_SPECIALIST_MAX_COUNT} specialists.")
-        identifiers = tuple(specialist.id for specialist in self.specialists)
-        if len(set(identifiers)) != len(identifiers):
-            raise ConfigurationError("JevAgentSettings.agents must have unique specialist IDs.")
-        if self.metadata_chars() > JEV_SPECIALIST_MAX_ROUTING_CHARS:
-            raise ConfigurationError(f"JevAgentSettings.agents metadata must fit within {JEV_SPECIALIST_MAX_ROUTING_CHARS} characters in total.")
-        object.__setattr__(self, "match_threshold", JevProbability.require(self.match_threshold, field_name="JevAgentSettings.specialist_match_threshold"))
+        # Enforces the catalog-wide uniqueness, non-empty, provider count, and serialized-size rules.
+        if not isinstance(self.agents, tuple) or not self.agents or not all(isinstance(agent, JevAgent) for agent in self.agents):
+            raise JevValidation.error("JevAgentSettings.agents", "a non-empty tuple of JevAgent profiles", self.agents)
+        if len(self.agents) > JEV_AGENT_MAX_COUNT:
+            raise JevValidation.error("JevAgentSettings.agents", f"at most {JEV_AGENT_MAX_COUNT} profiles", len(self.agents))
+        titles = tuple(agent.title for agent in self.agents)
+        if len(set(titles)) != len(titles):
+            raise JevValidation.error("JevAgentSettings.agents", "profiles with unique titles", titles)
+        if self.metadata_chars() > JEV_AGENT_MAX_ROUTING_CHARS:
+            raise JevValidation.error("JevAgentSettings.agents", f"profile data within {JEV_AGENT_MAX_ROUTING_CHARS} characters", self.metadata_chars())
 
     def metadata_chars(self) -> int:
-        """Return the combined ID and description length sent to Jev on every routed run."""
-        return sum(len(specialist.id) + len(specialist.description) for specialist in self.specialists)
-
-    def get(self, specialist_id: str) -> JevSpecialist | None:
-        """Return the registered specialist for one Choice answer, or None for an unknown ID."""
-        return next((specialist for specialist in self.specialists if specialist.id == specialist_id), None)
+        """Return the serialized title, description, and metadata size for the configured profiles."""
+        return sum(len(agent.title) + len(agent.description) + JevJson.char_length(agent.metadata) for agent in self.agents)
 
 
 @dataclass(frozen=True, slots=True)
-class JevSpecialistRouting:
-    """Which agent JevSpecialistRouter ran for the most recent task, and why, read as `JevAgent.response.routing`.
+class JevAgentProbability:
+    """The probability TypeSafe assigned to one candidate profile."""
 
-    `specialist` is the ID of the registered specialist that ran, or None when the general agent ran;
-    `fallback` then says why. `choice` and `probability` are Jev's answer when it gave one (a weak match
-    keeps the choice it did not take), `threshold` is the catalog's match threshold, `error_type` names
-    the exception class of an unavailable decision, and `usage` is the specialist's own model usage.
-    """
-
-    threshold: float
-    specialist: str | None = None
-    fallback: JevSpecialistFallback | None = None
-    choice: str | None = None
-    probability: float | None = None
-    error_type: str | None = None
-    usage: UsageRollup | None = None
+    title: str
+    probability: float
 
     def __post_init__(self) -> None:
-        # Requires exactly one of a specialist or a fallback reason, and valid probabilities.
-        # @intent routing-names-exactly-one-handler
-        # A caller reads this record to learn which agent answered, so a record naming both or neither handler is refused.
-        if (self.specialist is None) == (self.fallback is None):
-            raise JevValidation.error("specialist routing", "exactly one of specialist or fallback", (self.specialist, self.fallback))
-        object.__setattr__(self, "threshold", JevProbability.require(self.threshold, field_name="specialist routing threshold"))
-        if self.probability is not None:
-            object.__setattr__(self, "probability", JevProbability.require(self.probability, field_name="specialist routing probability"))
+        # Ensures each candidate score is a valid probability and has a usable profile label.
+        if not isinstance(self.title, str) or not self.title.strip():
+            raise JevValidation.error("agent probability title", "a non-blank profile title", self.title)
+        object.__setattr__(self, "probability", JevProbability.require(self.probability, field_name=f"probability of {self.title!r}"))
 
-    @property
-    def routed(self) -> bool:
-        """Return True when a registered specialist, not the general agent, handled the task."""
-        return self.specialist is not None
+
+@dataclass(frozen=True, slots=True)
+class JevAgentSelection:
+    """The highest-probability profile, stable ranking, and TypeSafe usage for one route."""
+
+    title: str
+    probability: float
+    ranked_agents: tuple[JevAgentProbability, ...]
+    usage: ProviderUsage | None = field(default=None, repr=False)
+
+    def __post_init__(self) -> None:
+        # Requires a ranking whose first item is the selected maximum, with ties preserved by catalog order.
+        if not isinstance(self.ranked_agents, tuple) or not self.ranked_agents or not all(isinstance(item, JevAgentProbability) for item in self.ranked_agents):
+            raise JevValidation.error("agent selection ranking", "a non-empty tuple of JevAgentProbability values", self.ranked_agents)
+        titles = tuple(item.title for item in self.ranked_agents)
+        if len(set(titles)) != len(titles):
+            raise JevValidation.error("agent selection ranking", "unique profile titles", titles)
+        if any(current.probability < following.probability for current, following in zip(self.ranked_agents, self.ranked_agents[1:], strict=False)):
+            raise JevValidation.error("agent selection ranking", "profiles sorted by descending probability", tuple(item.probability for item in self.ranked_agents))
+        if self.title != self.ranked_agents[0].title:
+            raise JevValidation.error("agent selection title", "the first profile in the probability ranking", self.title)
+        probability = JevProbability.require(self.probability, field_name="selected agent probability")
+        if probability != self.ranked_agents[0].probability:
+            raise JevValidation.error("selected agent probability", "the first ranked profile's probability", probability)
+        object.__setattr__(self, "probability", probability)
 
 
 @dataclass(frozen=True, slots=True)
@@ -748,12 +763,12 @@ class JevClarification:
 
 @dataclass(slots=True)
 class JevAgentResponse:
-    """Everything JevAgent's opinionated features produced for its most recent run, read as `JevAgent.response`.
+    """Everything Jev's opinionated features produced for its most recent run, read as `Jev.response`.
 
     JevResponse is the only writer: it resets this record at the start of each run and fills it as the
     preflight gate acts. `results` holds one entry per enabled fixed-question preset, `usage` is the one
     preflight Jev call's usage, `clarification` is set only when the gate stopped the run to ask the user, and
-    `routing` is set only when a specialist catalog is configured and the gate let the run through.
+    `selection` records the winning profile and probability ranking when a multi-profile route ran.
     """
 
     input: str = ""
@@ -761,7 +776,7 @@ class JevAgentResponse:
     results: dict[JevPreflightPreset, JevPresetResult] = field(default_factory=dict)
     clarification: JevClarification | None = None
     usage: ProviderUsage | None = None
-    routing: JevSpecialistRouting | None = None
+    selection: JevAgentSelection | None = None
 
     @property
     def needs_clarification(self) -> bool:
@@ -771,6 +786,10 @@ class JevAgentResponse:
 
 __all__ = [
     "JevAgentResponse",
+    "JevAgent",
+    "JevAgentCatalog",
+    "JevAgentProbability",
+    "JevAgentSelection",
     "JevAnswer",
     "JevBrief",
     "JevClarification",
@@ -790,9 +809,6 @@ __all__ = [
     "JevPresetResult",
     "JevProbability",
     "JevQuestion",
-    "JevSpecialist",
-    "JevSpecialistCatalog",
-    "JevSpecialistRouting",
     "JevText",
     "JevValidation",
     "TypeSafeWireQuestion",

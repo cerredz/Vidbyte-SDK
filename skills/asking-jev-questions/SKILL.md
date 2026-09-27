@@ -5,7 +5,7 @@ description: Turn questions that seem to need reasoning into questions TypeSafe 
 
 # Asking Jev Questions
 
-Use this skill whenever you write or change a question that is sent to Jev. For work on `JevAgent` itself, read `skills/jev-agent/SKILL.md` first for the package boundary. This skill covers how to write the question.
+Use this skill whenever you write or change a question that is sent to Jev. For work on the `Jev` coordinator or `JevAgent` profiles, read `skills/jev-agent/SKILL.md` first for the package boundary. This skill covers how to write the question.
 
 It was written against `jev-1.13` and TypeSafe's documentation as of September 2026. Recheck the [jaggedness page](https://docs.typesafe.ai/model-jaggedness/jev-1.13.md) when the model version changes.
 
@@ -73,11 +73,11 @@ Write the brief as five sections, in this order.
 4. **Rules.** Every rule that decides the answer lives here, once. That includes the special cases, the zero, one, and many cases (no item, one item, and several items where only some qualify), the focus ("judge only ...; X is a separate check"), and the guard against the state arguing for its own answer. Rules may give their reasons, because reasoning written once by the author is exactly what helps Jev match the definitions.
 5. **Question.** One positive yes/no question about a named state field, using the defined term and the verb chosen for it.
 
-In code, give the brief a structure so the order cannot drift. In JevAgent this is `JevBrief(introduction, state, definitions, rules, question)`.
+In code, give the brief a structure so the order cannot drift. For Jev questions this is `JevBrief(introduction, state, definitions, rules, question)`.
 
 ### The criteria (`true` and `false`)
 
-Give each side the structure of strategy 3, `{what, not_for, examples}`, never a prose paragraph with examples mixed in. In JevAgent this is `JevCriterion(what, not_for, easy, boundary)`.
+Give each side the structure of strategy 3, `{what, not_for, examples}`, never a prose paragraph with examples mixed in. For Noul questions this is `JevCriterion(what, not_for, easy, boundary)`.
 
 - **Start with the verdict in the defined term.** Write "Choose true when `request` states an action.", not a new wording of the definition.
 - **Use one verb everywhere.** If the question asks whether `request` *states* something, the rules, the question, and both sides all say "states", never "names" or "appears".
@@ -351,13 +351,13 @@ The strategies are grouped by the kind of work they move. Most real questions us
 - [ ] The options are exclusive and complete, and the primitive fits the judgment (22, 23).
 - [ ] Code has an action for every outcome, and thresholds were checked on a labeled set (25).
 
-## Using this in JevAgent
+## Using this in Jev
 
-`JevAgent` capabilities follow the same rules. A few points apply specifically:
+`Jev` capabilities follow the same rules. A few points apply specifically:
 
-- Load this skill before writing, changing, or reviewing any JevAgent question. Fixed preflight questions live in `vidbyte/lib/jev/preflight/`, and each one is a `JevBrief` plus two `JevCriterion` values laid out as "Writing a full question" describes.
+- Load this skill before writing, changing, or reviewing any Jev question. Fixed preflight questions live in `vidbyte/lib/jev/preflight/`, and each one is a `JevBrief` plus two `JevCriterion` values laid out as "Writing a full question" describes. The profile-selection brief is a Markdown asset under `vidbyte/prompts/jev/`, loaded by `JevPrompts`.
 
-- Definitions such as a scope description come from a named, validated setting on the capability, not from `system_prompt`. A system prompt was written to instruct a generative model; it is not a definition.
+- Definitions such as a profile scope come from the validated `JevAgent.title`, `JevAgent.description`, and `JevAgent.metadata` fields, not from a selected agent's `system_prompt`. A system prompt instructs the generative model; it is not the routing definition.
 - The fallback for any Jev failure is the ordinary linear loop, unless the capability's design doc says otherwise.
 - Code, not Jev, maps answers to budgets, routes, and turn limits.
 

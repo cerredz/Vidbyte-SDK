@@ -218,8 +218,8 @@ Link: <https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/
 
 #### Jev Clarification — `jev_clarification`
 
-The system prompt for JevClarificationAgent, the small generative agent a JevAgent
-routes an unclear request to when its clarity preflight fails. It receives the
+The system prompt for JevClarificationAgent, the small generative writer the Jev
+coordinator uses when its clarity preflight fails. It receives the
 user's request and the details Jev found missing, and returns a few clarifying
 questions, each with two to four recommended answers, for the user to answer
 before the main agent starts.

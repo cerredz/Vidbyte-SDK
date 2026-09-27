@@ -1,11 +1,11 @@
 """FILE: tests/test_jev_preflight.py
 
-PURPOSE: Verifies JevAgent's preflight gate and clarity preset deterministically without live model calls.
-ROLE IN CODEBASE: Covers the question dataclasses and their brief and criterion layout, the JevPresets flags, the JevPreflightRegistry, DecisionModelRunner.score_noul, the JevPreflightGate (combine and pass_), JevClarificationAgent and its structured reply, the JevResponse record on JevAgent.response, and JevRuntime's stop and fail-open behavior.
+PURPOSE: Verifies Jev's preflight gate and clarity preset deterministically without live model calls.
+ROLE IN CODEBASE: Covers question contracts, JevPresets, JevPreflightRegistry, DecisionModelRunner.score_noul, JevPreflightGate, JevClarificationAgent, `Jev.response`, and the runtime's stop and fail-open behavior.
 ARCHITECTURE NOTE: Scripted decision and generative runners replace only the external boundaries while production settings, registry, gate, and runtime wiring stay active.
 COMMON MODIFICATION PATTERNS: Add a case for every new preset, question, threshold boundary, match case, and availability policy.
 KNOWN EDGE CASES: The TypeSafe credential is cleared explicitly and no test may contact TypeSafe or a generative provider.
-RELATED DOCS: docs/design/jev-preflight-clarity.md, skills/jev-agent/SKILL.md, and skills/asking-jev-questions/SKILL.md.
+RELATED DOCS: `docs/design/jev-agent-profile-routing.md`, `skills/jev-agent/SKILL.md`, and `skills/asking-jev-questions/SKILL.md`.
 TESTS: python -m unittest tests.test_jev_preflight and python scripts/test-jev-preflight.py.
 """
 
@@ -26,8 +26,10 @@ from lint.core.discovery import SourceFile
 from lint.rules.s062_no_implicit_string_concatenation import (
     ImplicitConcatenationScanner,
 )
-from tests.agent_test_support import bind_test_runner
+from tests.agent_test_support import OfflineTestAgent, bind_test_runner
 from vidbyte import (
+    BaseAgent,
+    Jev,
     JevAgent,
     JevAgentResponse,
     JevAgentSettings,
@@ -36,6 +38,7 @@ from vidbyte import (
     tool,
 )
 from vidbyte.agents.jev.gate import JevClarificationAgent, JevPreflightGate
+from vidbyte.agents.jev.settings import JevRuntimeSettings
 from vidbyte.lib.config import DecisionModelConfig
 from vidbyte.lib.constants.jev import (
     JEV_CLARIFICATION_MAX_ITERATIONS,
@@ -123,10 +126,17 @@ def _answer(name: str, yes: float) -> JevAnswer:
     return JevAnswer(question_name=name, question_type=JevQuestionType.NOUL, choice="true" if yes >= 0.5 else "false", probabilities={"true": yes, "false": 1.0 - yes}, noul=yes)
 
 
-def _settings(**overrides: Any) -> JevAgentSettings:
-    values: dict[str, Any] = {"name": "jev", "system_prompt": "Work carefully.", "provider": "openai", "model_name": "gpt-4.1-mini", "preflight": (JevPreflightPreset.CLARITY,)}
+def _settings() -> JevAgentSettings:
+    # Builds the one profile required to construct a Jev coordinator.
+    source = BaseAgent(name="preflight", system_prompt="Work carefully.", provider="openai", model_name="gpt-4.1-mini")
+    return JevAgentSettings(agents=(JevAgent(title="General", description="Handles the user's requested work.", metadata={}, agent=source),))
+
+
+def _runtime_settings(**overrides: Any) -> JevRuntimeSettings:
+    # Keeps preflight decisions and tool selection outside the profile catalog.
+    values: dict[str, Any] = {"decision": DecisionModelConfig(api_key="test-key"), "preflight": (JevPreflightPreset.CLARITY,)}
     values.update(overrides)
-    return JevAgentSettings(**values)
+    return JevRuntimeSettings(**values)
 
 
 def _sentences(text: str) -> int:
@@ -269,9 +279,9 @@ class JevPreflightRegistryTests(unittest.TestCase):
 
     def test_validate_normalizes_flags_for_settings(self) -> None:
         self.assertEqual(JevPreflightRegistry.validate(("clarity",)), (JevPreflightPreset.CLARITY,))
-        self.assertEqual(_settings(preflight=("clarity",)).preflight, (JevPreflightPreset.CLARITY,))
+        self.assertEqual(_runtime_settings(preflight=("clarity",)).preflight, (JevPreflightPreset.CLARITY,))
         with self.assertRaises(ConfigurationError):
-            _settings(preflight=("clarity", JevPreflightPreset.CLARITY))
+            _runtime_settings(preflight=("clarity", JevPreflightPreset.CLARITY))
 
 
 class DecisionModelRunnerScoreTests(unittest.TestCase):
@@ -303,27 +313,27 @@ class JevPreflightGateTests(unittest.TestCase):
 
     def test_gate_is_built_once_in_the_agent_constructor(self) -> None:
         # [Review 4108937660] every preset and preflight input is fixed when JevAgent is built.
-        agent = JevAgent(_settings())
+        agent = Jev(_settings(), _runtime_settings())
         self.assertIsInstance(agent.preflight, JevPreflightGate)
         self.assertEqual(agent.preflight.presets, (JevPreflightPreset.CLARITY,))
         self.assertIsInstance(agent.preflight.clarification, JevClarificationAgent)
-        self.assertIsNone(JevAgent(_settings(preflight=())).preflight.clarification)
+        self.assertIsNone(Jev(_settings(), _runtime_settings(preflight=())).preflight.clarification)
 
     def test_gate_holds_no_tool_selector_logic(self) -> None:
         # [Review 4110242769, 4110245164] the tool selector keeps its own path; the gate only runs fixed-question presets.
-        gate = JevAgent(_settings(preflight=("clarity", "tool_selector"))).preflight
+        gate = Jev(_settings(), _runtime_settings(preflight=("clarity", "tool_selector"))).preflight
         self.assertEqual(gate.presets, (JevPreflightPreset.CLARITY,))
         self.assertFalse(hasattr(gate, "tools"))
-        self.assertIsNone(JevAgent(_settings(preflight=("tool_selector",))).preflight.combine("Hello."))
+        self.assertIsNone(Jev(_settings(), _runtime_settings(preflight=("tool_selector",))).preflight.combine("Hello."))
 
     def test_combine_puts_every_enabled_preset_into_one_request(self) -> None:
-        request = JevAgent(_settings()).preflight.combine("Find the notes.")
+        request = Jev(_settings(), _runtime_settings()).preflight.combine("Find the notes.")
         assert request is not None
         self.assertEqual(dict(request.state), {JEV_PREFLIGHT_REQUEST_FIELD: "Find the notes."})
         self.assertEqual(tuple(question.name for question in request.questions), tuple(key.value for key in _CLARITY_KEYS))
 
     def test_combine_asks_nothing_when_no_preset_is_enabled(self) -> None:
-        self.assertIsNone(JevAgent(_settings(preflight=())).preflight.combine("Hello."))
+        self.assertIsNone(Jev(_settings(), _runtime_settings(preflight=())).preflight.combine("Hello."))
 
 
 class JevClarificationAgentTests(unittest.TestCase):
@@ -331,7 +341,7 @@ class JevClarificationAgentTests(unittest.TestCase):
 
     def test_agent_uses_the_requested_limits_and_structured_output(self) -> None:
         # [Review 4110223154] max tokens 100,000, max iterations 25, and questions with a few recommendations each.
-        agent = JevAgent(_settings()).preflight.clarification
+        agent = Jev(_settings(), _runtime_settings()).preflight.clarification
         assert agent is not None
         self.assertEqual(agent.runtime_config.max_iterations, JEV_CLARIFICATION_MAX_ITERATIONS)
         self.assertEqual(JEV_CLARIFICATION_MAX_ITERATIONS, 25)
@@ -359,11 +369,16 @@ class JevClarificationAgentTests(unittest.TestCase):
 
 
 class JevPreflightRuntimeTests(unittest.IsolatedAsyncioTestCase):
-    """Verify one-call classification, the clarification route, and fail-open behavior through JevAgent."""
+    """Verify one-call classification, clarification, and fail-open behavior through Jev."""
 
-    def _agent(self, generative: ScriptedGenerativeRunner, clarifier: ScriptedGenerativeRunner | None = None, **overrides: Any) -> JevAgent:
-        overrides.setdefault("decision", DecisionModelConfig(api_key="test-key"))
-        agent = bind_test_runner(JevAgent(_settings(**overrides)), generative)
+    def _agent(self, generative: ScriptedGenerativeRunner, clarifier: ScriptedGenerativeRunner | None = None, **overrides: Any) -> Jev:
+        decision = overrides.pop("decision", DecisionModelConfig(api_key="test-key"))
+        preflight = overrides.pop("preflight", (JevPreflightPreset.CLARITY,))
+        tools = tuple(overrides.pop("tools", ()))
+        source = OfflineTestAgent(name="preflight", system_prompt="Work carefully.", provider="openai", model_name="gpt-4.1-mini", tools=tools)
+        bind_test_runner(source, generative)
+        profiles = JevAgentSettings(agents=(JevAgent(title="General", description="Handles the user's requested work.", metadata={}, agent=source),))
+        agent = Jev(profiles, JevRuntimeSettings(decision=decision, preflight=preflight))
         if agent.preflight.clarification is not None:
             bind_test_runner(agent.preflight.clarification, clarifier or ScriptedGenerativeRunner(json.dumps(_PAYLOAD)))
         return agent

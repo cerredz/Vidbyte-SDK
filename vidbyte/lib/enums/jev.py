@@ -1,7 +1,7 @@
 """FILE: vidbyte/lib/enums/jev.py
 
-PURPOSE: Defines the closed Jev vocabularies: the TypeSafe question types, the preflight presets a JevAgent user can enable, the key of every preflight question, and why specialist routing fell back to the general agent.
-ROLE IN CODEBASE: `vidbyte/lib/dataclasses/jev.py` validates questions against these members, `vidbyte/providers/typesafe.py` serializes question types onto the wire, `vidbyte/lib/jev/presets.py` maps each fixed-question preset to its question keys, `vidbyte/lib/jev/preflight/` registers one question per key, `vidbyte/agents/jev/gate/` matches on the presets when it acts on Jev's answers, and `vidbyte/agents/jev/specialists.py` records a JevSpecialistFallback on each general-agent run.
+PURPOSE: Defines closed Jev vocabularies for TypeSafe question types and the fixed preflight presets and question keys the Jev coordinator can enable.
+ROLE IN CODEBASE: `vidbyte/lib/dataclasses/jev.py` validates questions against these members, `vidbyte/providers/typesafe.py` serializes question types, `vidbyte/lib/jev/presets.py` maps preflight presets to question keys, and `vidbyte/lib/jev/preflight/` registers each fixed question.
 ARCHITECTURE NOTE: The vocabulary lives in `vidbyte.lib` because the provider layer, the record layer, and the tool layer all read it, and the lower two may not import the tool layer.
 COMMON MODIFICATION PATTERNS: Add a question type only when TypeSafe documents one, then extend JevQuestion validation and TypeSafeProvider answer normalization in the same change. Add a preflight question key together with its question dataclass in `vidbyte/lib/jev/preflight/` and its preset's key list in `vidbyte/lib/jev/presets.py`.
 KNOWN EDGE CASES: `noul` is TypeSafe's own spelling for a yes/no question; keep the serialized value exactly as the API expects it. A question key's value is the answer name Jev returns, so it must stay unique across every preset. TOOL_SELECTOR has no question keys because it asks one question per configured tool, built at run time.
@@ -56,13 +56,4 @@ class JevPreflightQuestionKey(str, Enum):
     CLARITY_SINGLE_READING = "clarity.single_reading"
 
 
-class JevSpecialistFallback(str, Enum):
-    """Why JevSpecialistRouter ran the general agent instead of a registered specialist."""
-
-    NO_MATCH = "no_suitable_agent"
-    WEAK_MATCH = "below_probability_threshold"
-    DECISION_UNAVAILABLE = "decision_unavailable"
-    INPUT_TOO_LARGE = "routing_input_too_large"
-
-
-__all__ = ["JevPreflightPreset", "JevPreflightQuestionKey", "JevQuestionType", "JevSpecialistFallback"]
+__all__ = ["JevPreflightPreset", "JevPreflightQuestionKey", "JevQuestionType"]

@@ -16,7 +16,7 @@ from typing import Any
 
 from vidbyte.agents.base import BaseAgent
 from vidbyte.agents.handoff import HandoffAgent
-from vidbyte.agents.jev import JevAgent, JevAgentSettings
+from vidbyte.agents.jev import Jev, JevAgentSettings, JevRuntimeSettings
 from vidbyte.context.handoff import Handoff
 
 
@@ -31,9 +31,9 @@ class AgentClient:
         # Construct a handoff agent for a given handoff spec, defaulting to MinimalHandoff.
         return HandoffAgent(handoff, **kwargs)
 
-    def jev(self, settings: JevAgentSettings) -> JevAgent:
-        # Construct the opinionated Jev agent from its sole public settings object.
-        return JevAgent(settings)
+    def jev(self, settings: JevAgentSettings, runtime_settings: JevRuntimeSettings | None = None) -> Jev:
+        # Construct the profile-selecting Jev coordinator with optional separate runtime-wide controls.
+        return Jev(settings, runtime_settings=runtime_settings)
 
     def continual_trace(self, schema: Any, **kwargs: Any) -> Any:
         # Construct a continual trace agent that fills the given trace schema.

@@ -1,24 +1,66 @@
-# Jev agent
+# Jev profile coordinator
 
-This package owns Vidbyte's opinionated Jev agent. Its dedicated runtime can route a task to one registered specialist and run named Jev-backed preflights before the established linear model/tool loop.
+## Folder Description / Intent
 
-- `settings.py` is the complete public configuration surface.
-- `agent.py` maps those settings into `BaseAgent` with the `jev` runtime type (`AgentRuntimeType.JEV`).
-- `gate/` holds the gate for fixed-question presets. `JevPreflightGate` combines every enabled preset's questions into one Jev request, scores each preset with `DecisionModelRunner.score_noul`, and its `pass_` match statement acts on the outcomes and returns whether the generative agent runs. `JevClarificationAgent` returns structured clarifying questions, each with a few recommended answers, when the request is unclear.
-- `specialists.py` owns `JevSpecialistRouter`: the one fixed Choice question, the probability threshold policy, the fail-open decision path, and isolated specialist execution.
-- `preflight.py` holds the tool selector (`JevPreflightTools`), which keeps its own path in the runtime.
-- `prompts.py` is the registry (`JevPrompt`, `JevPrompts`) for the question text of the questions built at run time (specialist routing and the tool selector); the text itself lives in Markdown files under `vidbyte/prompts/jev/`.
-- `response.py` defines `JevResponse`, the only writer of the `JevAgentResponse` record exposed as `JevAgent.response`.
-- `runtime.py` calls the gate before anything else and returns the gate's response when it closes, then hands the run to the router when specialists are configured, then applies the tool selector when it is enabled before the inherited `AgentRuntime` loop; `RuntimeRegistry` resolves the `jev` runtime type to it.
+This package owns the opinionated `Jev` coordinator. Developers give it one or more `JevAgent` profiles; the coordinator runs preflight, selects the best profile when there are multiple candidates, applies that profile's reusable settings for one run, and then restores its own configuration. `Jev` retains the normal BaseAgent conversation, trace, usage, and session lifecycle.
 
-`agent.py` builds the gate, the specialist router, and the response writer at construction and passes them to the runtime. Fixed preflight question text lives in `vidbyte/lib/jev/`: `presets.py` (`JevPresets`) owns the flags a user can enable in `JevAgentSettings.preflight` and the questions each fixed-question flag asks, and `preflight/` holds one dataclass per question plus `JevPreflightRegistry`. The flag and question-key enums are in `vidbyte/lib/enums/jev.py`, and the records are in `vidbyte/lib/dataclasses/jev.py`.
+This folder is for named Jev capabilities and their execution boundary. It is not the TypeSafe wire adapter or a general-purpose arbitrary decision framework; provider serialization belongs in `vidbyte/providers/typesafe.py`, fixed question contracts belong in `vidbyte/lib/jev/`, and ordinary BaseAgent execution belongs in `vidbyte/agents/base.py` and its runtime.
 
-The `JevSpecialist` record (a stable ID, a matching description, and a configured `BaseAgent` template) and its catalog limits live in `vidbyte/lib/dataclasses/jev.py` and `vidbyte/lib/constants/jev.py`. When `agents` is set, the router asks Jev once, after the gate passes, using only the current prompt and the specialist descriptions. A qualified specialist handles the whole task; no match, a weak selection, or an unavailable decision uses the general agent. `agent.response.routing` (`JevSpecialistRouting`) records which agent ran and why. Specialist templates are forked per selected run, and a specialist execution failure is surfaced without retrying through the general agent.
+## Non-Goals
 
-Enable request clarity checks with `JevPreflightPreset.CLARITY`. When the request is unclear, the run stops before the generative agent starts, `agent.response.clarification` holds the questions and their recommended answers, and the reply content is those questions as a numbered list.
+- Do not add caller-defined question lists, arbitrary decision callbacks, or a generic `decisions` collection; keep the profile-matching question fixed and internal.
+- Do not add a no-match option or confidence threshold; the coordinator selects the top-probability profile.
+- Do not execute the selected profile as a child agent; apply its supported execution configuration to the main Jev instance.
+- Do not copy a profile's conversation history, trackers, active session, or live MCP handles onto Jev.
+- Do not silently select another profile after TypeSafe or the selected model fails.
+- Do not put provider request/response JSON in this folder; `vidbyte/providers/typesafe.py` owns the wire contract.
+- Do not put fixed preflight question text here; those typed questions live in `vidbyte/lib/jev/preflight/`.
+- Do not add profile selection to `JevRuntime`; it runs only after Jev selected the profile and BaseAgent resolved its runner.
 
-Enable tool selection with `JevPreflightPreset.TOOL_SELECTOR`. `tool_selector_threshold` defaults to `0.20` and accepts finite probabilities from `0.0` through `1.0` inclusive. If Jev is unavailable or returns incomplete answers, the run keeps the full configured tool catalog, and the reply metadata reports the selection under `jev_tool_selector`. After each run, `agent.response.results` holds one outcome per enabled fixed-question preset.
+## File Index
 
-Do not add a generic `decisions` collection, caller-defined Jev question lists, or a runtime replacement option. Add named, validated settings for product capabilities and keep their internal questions and actions inside this package, with fixed preflight questions in `vidbyte/lib/jev/preflight/` and run-built question text in `vidbyte/prompts/jev/`.
+- `__init__.py` - Exposes the public coordinator, profile, runtime settings, and response records. Open it when changing Jev imports; keep its exports aligned with `vidbyte/agents/__init__.py` and `vidbyte/__init__.py`.
+- `agent.py` - Owns the public `Jev` coordinator, run serialization, preflight-before-selection sequence, and temporary profile configuration scope. Open this first when the profile needs additional BaseAgent settings copied or restored.
+- `settings.py` - Defines `JevAgentSettings` (the profile array only) and `JevRuntimeSettings` (decision, preflight, and tool-selector controls). Open this when changing validated caller configuration.
+- `specialists.py` - Implements `JevAgentRouter`, the TypeSafe Choice request, and stable maximum-probability selection. Open this when revising the profile-fit question or ranking behavior.
+- `prompts.py` - Loads packaged Jev Markdown and validates the structured brief and option criteria. Open this when adding a prompt key or changing prompt asset structure.
+- `response.py` - Is the sole writer of `JevAgentResponse`, including the selected profile and full probability ranking. Open this when adding observable feature output.
+- `runtime.py` - Enforces the precomputed preflight result and preserves the tool-selector/linear-loop behavior. Open this when changing runtime sequencing after profile application.
+- `gate/` - Owns the fixed-question preflight gate and generative clarification writer. Open this when changing clarity or preset behavior.
+- `preflight.py` - Contains `JevPreflightTools`, the per-run tool selector. Open this when changing tool-selection behavior; keep its threshold in `JevRuntimeSettings`.
 
-See `docs/design/jev-agent-scaffold.md`, `docs/design/jev-preflight-clarity.md`, `docs/design/jev-tool-selector.md`, `docs/design/jev-specialist-routing.md`, and `skills/jev-agent/SKILL.md`.
+## Public API
+
+```python
+from vidbyte import BaseAgent, Jev, JevAgent, JevAgentSettings, JevRuntimeSettings
+
+research = JevAgent(
+    title="Research",
+    description="Finds and summarizes source-backed information.",
+    metadata={"team": "research"},
+    agent=BaseAgent(
+        name="research-model",
+        system_prompt="Research carefully and cite sources.",
+        provider="openai",
+        model_name="gpt-4.1",
+    ),
+)
+
+agent = Jev(JevAgentSettings(agents=(research,)))
+reply = await agent.arun("Find sources about the SDK.")
+```
+
+With one profile Jev makes no profile-selection call. With multiple profiles, it sends one Choice question using the current request and each profile's title, description, and metadata, then selects the option with the highest probability. Exact ties preserve input order. The ranking is exposed as `agent.response.selection`; probabilities are relative TypeSafe outputs, not guarantees of correctness. Profile metadata is sent to TypeSafe and must not contain secrets.
+
+```python
+selection = agent.response.selection
+if selection is not None:
+    print(f"Selected {selection.title} with probability {selection.probability:.0%}")
+    print(selection.ranked_agents)
+```
+
+Use `JevRuntimeSettings(preflight=(JevPreflightPreset.CLARITY,))` to enable existing preflight behavior, or `JevRuntimeSettings(preflight=(JevPreflightPreset.TOOL_SELECTOR,), tool_selector_threshold=0.2)` to select tools. The clarity writer uses the first configured profile's generative model because preflight runs before profile selection. An unavailable clarity check keeps existing fail-open behavior; a multi-profile routing error is surfaced rather than choosing arbitrarily.
+
+## Logs
+
+- 2026-09-26 - Replaced specialist forks with profile settings temporarily applied to the coordinator - preserves the requested single-main-agent execution model and restores settings after each run.
