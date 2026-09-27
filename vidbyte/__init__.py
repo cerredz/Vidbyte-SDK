@@ -36,7 +36,7 @@ Similar files:
 
 from __future__ import annotations
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 from vidbyte.agents import (
     Agent,
@@ -98,7 +98,12 @@ from vidbyte.agents import (
     FinalizationContext,
     HandoffAgent,
     JevAgent,
+    JevAgentResponse,
     JevAgentSettings,
+    JevClarification,
+    JevClarifyingQuestion,
+    JevPreflightPreset,
+    JevPresetResult,
     JevRuntime,
     LedgerEvent,
     MagenticOneOrchestrator,
@@ -590,7 +595,12 @@ __all__ = [
     "JudgeReasonCode",
     "JudgeReportPayload",
     "JevAgent",
+    "JevAgentResponse",
     "JevAgentSettings",
+    "JevClarification",
+    "JevClarifyingQuestion",
+    "JevPreflightPreset",
+    "JevPresetResult",
     "JevRuntime",
     "ProsecutorAllegationPayload",
     "ProsecutorDefenderJudgeAlgorithm",

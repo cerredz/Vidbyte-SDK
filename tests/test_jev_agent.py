@@ -396,13 +396,13 @@ class JevSettingsTests(unittest.TestCase):
 class JevAgentRuntimeTests(unittest.IsolatedAsyncioTestCase):
     """Pins runtime specialization while proving the standard loop stays intact."""
 
-    def test_jev_runtime_retains_settings_and_agent_trackers(self) -> None:
-        # [Silent Failure] specialized construction keeps settings, usage, and speed identity.
-        settings = _settings()
-        agent = JevAgent(settings)
+    def test_jev_runtime_receives_the_agents_gate_and_trackers(self) -> None:
+        # [Silent Failure] each run-local runtime gets the gate and response JevAgent built once, plus its trackers.
+        agent = JevAgent(_settings())
         runtime = agent._runtime()
         self.assertIsInstance(runtime, JevRuntime)
-        self.assertIs(runtime.jev_settings, settings)
+        self.assertIs(runtime.preflight, agent.preflight)
+        self.assertIs(runtime.response.state, agent.response)
         self.assertIs(runtime.usage_tracker, agent._usage_tracker)
         self.assertIs(runtime.speed_tracker, agent._speed_tracker)
 
@@ -418,7 +418,7 @@ class JevAgentRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertIs(RuntimeRegistry.resolve(AgentRuntimeType.JEV), JevRuntime)
 
     def test_plain_base_agent_cannot_build_the_jev_runtime(self) -> None:
-        # [Hidden Failure] the jev runtime without JevAgentSettings fails with a message naming JevAgent.
+        # [Hidden Failure] the jev runtime without JevAgent's preflight gate fails with a message naming JevAgent.
         agent = BaseAgent(name="base", system_prompt="Work.", provider="openai", model_name="gpt-4.1-mini", runtime="jev")
         with self.assertRaisesRegex(ConfigurationError, "JevAgent"):
             agent._runtime()
