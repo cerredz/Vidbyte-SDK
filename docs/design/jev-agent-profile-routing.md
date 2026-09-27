@@ -83,7 +83,7 @@ Replace PR #461's specialist record and the public `JevAgent` coordinator with a
 
 ## 5. High-Level Design
 
-`JevAgent` becomes a validated profile record that associates public routing information with a configured `BaseAgent` template. `JevAgentSettings` becomes the profile catalog. `JevRuntimeSettings` retains JEV decision configuration, preflight presets, and tool-selector configuration so the profile-only settings object does not remove existing behavior. The renamed `Jev` facade is initialized from the first validated profile and owns the run lock, response record, gate, and profile router.
+`JevAgent` becomes a validated profile record that associates public routing information with a configured `BaseAgent` template. `JevAgentSettings` becomes the profile catalog. `JevRuntimeSettings` retains JEV decision configuration, preflight presets, and tool-selector configuration so the profile-only settings object does not remove existing behavior. The renamed `Jev` facade is initialized from the first validated profile and owns the run lock, response record, gate, and profile router. Since the clarity gate runs before selection, its clarification writer uses the first configured profile's generative model; a request that passes the gate is then routed and executed with the selected profile.
 
 The run order is: normalize the current input; run preflight; if the gate passes, select the only profile directly or ask TypeSafe to choose among multiple profiles; snapshot the main agent's mutable execution configuration; apply the winning profile configuration; call the inherited `BaseAgent.generate_reply()` so runner construction, context, tracing, tools, and the normal model loop use the selected profile; then restore the snapshot in `finally`. The runtime receives the preflight result and keeps only existing run-level preflight/tool-selection mechanics; routing policy stays outside `JevRuntime` because it must run before BaseAgent resolves its runner.
 
@@ -175,7 +175,7 @@ JevAgentSelection(title: str, probability: float, ranked_agents: tuple[JevAgentP
 
 ### 6.3 Apply selected settings to the main Jev
 
-**File(s):** `vidbyte/agents/jev/agent.py`, `vidbyte/agents/jev/runtime.py`, `vidbyte/agents/jev/response.py`
+**File(s):** `vidbyte/agents/jev/agent.py`, `vidbyte/agents/jev/runtime.py`, `vidbyte/agents/jev/response.py`, `vidbyte/agents/jev/gate/gate.py`, `vidbyte/agents/jev/gate/clarification.py`
 **Type:** Modified
 
 #### What it does
@@ -193,6 +193,7 @@ Jev.response -> JevAgentResponse
 
 1. Acquire a per-instance async lock before beginning preflight, selection, or profile application.
 2. Run the existing preflight gate first; a closed gate carries its result through the run without a routing call.
+   The clarification agent uses the first profile's model because the gate runs before profile selection.
 3. Select the sole profile directly or call `JevAgentRouter.select` for multiple profiles.
 4. Snapshot only the main agent's mutable configuration fields that the selected profile replaces: identity/system prompt, runner configuration/cache, tool catalog, permission policy, loop settings, middleware, description/capabilities/agent metadata, context configuration, algorithm, output schema, handoff/fallback configuration, and run metadata.
 5. Apply the selected profile's values to the main Jev and invoke the inherited `BaseAgent.generate_reply()` so its normal runner/context/runtime path uses those values.
@@ -325,6 +326,8 @@ Jev(settings, runtime_settings=None)
 | MODIFY | `vidbyte/agents/jev/specialists.py` | Replace specialist selection with one full-profile Choice router and code-side maximum probability selection. |
 | MODIFY | `vidbyte/agents/jev/runtime.py` | Consume the preflight result/settings from the renamed coordinator while retaining normal loop and tool selection. |
 | MODIFY | `vidbyte/agents/jev/response.py` | Report selected profile and ranked probabilities on the response. |
+| MODIFY | `vidbyte/agents/jev/gate/gate.py` | Read the new runtime settings while keeping preflight ahead of profile selection. |
+| MODIFY | `vidbyte/agents/jev/gate/clarification.py` | Build the clarification writer from the first configured profile's model. |
 | MODIFY | `vidbyte/agents/jev/prompts.py` | Replace old routing/no-match prompt registry entries while retaining the tool-selector prompt. |
 | MODIFY | `vidbyte/lib/dataclasses/jev.py` | Replace `JevSpecialist` / routing records with the profile and selection records. |
 | MODIFY | `vidbyte/lib/constants/jev.py` | Replace specialist-only limits with profile catalog/state limits using shared TypeSafe bounds. |
@@ -332,8 +335,13 @@ Jev(settings, runtime_settings=None)
 | MODIFY | `vidbyte/agents/jev/__init__.py` | Export `Jev`, profile, runtime settings, and selection records. |
 | MODIFY | `vidbyte/agents/__init__.py` | Refresh the Jev public exports. |
 | MODIFY | `vidbyte/__init__.py` | Refresh root SDK exports. |
+| MODIFY | `vidbyte/agents/client.py` | Make `sdk.agents.jev(...)` construct the renamed coordinator and accept separate runtime settings. |
+| MODIFY | `vidbyte/agents/base.py` | Refresh JEV coordinator references in its runtime documentation. |
 | MODIFY | `vidbyte/agents/jev/README.md` | Explain candidate profiles and the routing lifecycle. |
 | MODIFY | `skills/jev-agent/SKILL.md` | Update the Jev product/API contract and profile-routing invariants. |
+| MODIFY | `skills/asking-jev-questions/SKILL.md` | Refresh coordinator naming in the Jev question-writing guidance. |
+| MODIFY | `vidbyte/lib/jev/preflight/README.md` | Refer to the renamed coordinator without changing preflight ownership. |
+| MODIFY | `vidbyte/prompts/README.md` | Refresh the clarification prompt description for the renamed coordinator. |
 | MODIFY | `vidbyte/prompts/jev/specialist_question.md` | Rewrite as a complete profile-matching Choice brief. |
 | DELETE | `vidbyte/prompts/jev/specialist_no_match.md` | There is no no-match option in the new always-pick-best policy. |
 | MODIFY | `tests/test_jev_agent.py` | Cover new profile API, routing, probability selection, temporary settings, and errors. |
@@ -371,6 +379,7 @@ Every listed case will be covered by deterministic scripted TypeSafe responses a
 - Preflight denial makes zero routing calls and zero generative calls; preflight provider unavailability preserves its existing fail-open behavior — [Silent Failure].
 - Existing tool selector still filters the selected profile's tools and restores the coordinator's original catalog afterward — [Silent Failure].
 - Root and subpackage exports refer to the same renamed `Jev` and profile classes — [Hidden Assumption].
+- The clarity writer uses the first profile's model before selection and does not mutate or accidentally execute another candidate profile — [Hidden Assumption].
 - `tests/features/jev-agent-profile-routing/FEATURE.md` describes the stable behavior contract, historical fork-vs-apply design change, known failure inventory, and links to all maintained test modules — [Hidden Assumption].
 
 ### Integration Tests
