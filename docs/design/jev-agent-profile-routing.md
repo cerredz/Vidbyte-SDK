@@ -319,6 +319,7 @@ Jev(settings, runtime_settings=None)
 | Action | File Path | Reason |
 |--------|-----------|--------|
 | CREATE | `docs/design/jev-agent-profile-routing.md` | Record the approved architecture and test plan. |
+| CREATE | `tests/features/jev-agent-profile-routing/FEATURE.md` | Keep the user-facing routing contract, failure inventory, and test map discoverable independently of implementation modules. |
 | MODIFY | `vidbyte/agents/jev/agent.py` | Rename coordinator to `Jev`; prepare, apply, and restore selected configuration before BaseAgent execution. |
 | MODIFY | `vidbyte/agents/jev/settings.py` | Reduce `JevAgentSettings` to profiles and introduce `JevRuntimeSettings`. |
 | MODIFY | `vidbyte/agents/jev/specialists.py` | Replace specialist selection with one full-profile Choice router and code-side maximum probability selection. |
@@ -370,6 +371,7 @@ Every listed case will be covered by deterministic scripted TypeSafe responses a
 - Preflight denial makes zero routing calls and zero generative calls; preflight provider unavailability preserves its existing fail-open behavior — [Silent Failure].
 - Existing tool selector still filters the selected profile's tools and restores the coordinator's original catalog afterward — [Silent Failure].
 - Root and subpackage exports refer to the same renamed `Jev` and profile classes — [Hidden Assumption].
+- `tests/features/jev-agent-profile-routing/FEATURE.md` describes the stable behavior contract, historical fork-vs-apply design change, known failure inventory, and links to all maintained test modules — [Hidden Assumption].
 
 ### Integration Tests
 
