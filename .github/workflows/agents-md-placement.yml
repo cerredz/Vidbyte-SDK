@@ -5,6 +5,11 @@ name: AGENTS.md placement
 # pushes the fix back to the PR branch. Codex only edits the working tree; this
 # workflow commits and pushes. Instructions live in
 # .github/prompts/agents-md-placement.md.
+#
+# Codex bills the owner's ChatGPT subscription, not an API key: the job runs on
+# a self-hosted runner labelled `codex` whose .env sets CODEX_HOME to a ChatGPT
+# `codex login` made for that runner alone. The runner takes one job at a time,
+# so the auth.json Codex refreshes in place is never shared by concurrent jobs.
 on:
   pull_request:
     types: [opened, synchronize]
@@ -21,10 +26,12 @@ jobs:
     name: AGENTS.md placement
     # Same-repo branches only: fork PRs get no secrets and cannot be pushed to.
     if: github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, codex]
     timeout-minutes: 30
     permissions:
       contents: write
+    env:
+      CODEX_VERSION: 0.157.1
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
@@ -32,12 +39,28 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Require OPENAI_API_KEY
-        env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      # codex-action's drop-sudo protection does not apply outside the action,
+      # so the runner user itself must be unprivileged.
+      - name: Require an unprivileged runner user
         run: |
-          if [[ -z "$OPENAI_API_KEY" ]]; then
-            echo "::error::Add an OPENAI_API_KEY Actions secret to this repository to enable AGENTS.md placement."
+          if sudo -n true 2>/dev/null; then
+            echo "::error::The runner user has passwordless sudo. Run the Codex runner as an unprivileged user."
+            exit 1
+          fi
+
+      - name: Install Codex CLI
+        run: |
+          npm install --prefix "$RUNNER_TEMP/codex-cli" --no-audit --no-fund "@openai/codex@${CODEX_VERSION}"
+          echo "$RUNNER_TEMP/codex-cli/node_modules/.bin" >> "$GITHUB_PATH"
+
+      - name: Require a ChatGPT Codex login
+        run: |
+          if [[ -z "${CODEX_HOME:-}" ]]; then
+            echo "::error::Set CODEX_HOME in this runner's .env to a directory holding its own ChatGPT codex login."
+            exit 1
+          fi
+          if ! codex login status 2>&1 | grep -q "Logged in using ChatGPT"; then
+            echo "::error::No ChatGPT login in $CODEX_HOME. On the runner host, run: CODEX_HOME=$CODEX_HOME codex login --device-auth"
             exit 1
           fi
 
@@ -52,15 +75,16 @@ jobs:
           } > "$RUNNER_TEMP/prompt.md"
 
       - name: Run Codex
-        uses: openai/codex-action@86365089eb2b84e0a8fb0717b304f8bdcb13b20e # v1.12
-        with:
-          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
-          prompt-file: ${{ runner.temp }}/prompt.md
-          output-file: ${{ runner.temp }}/report.md
-          model: gpt-6-luna
-          effort: high
-          permission-profile: ":workspace"
-          safety-strategy: drop-sudo
+        run: |
+          codex exec \
+            --skip-git-repo-check \
+            --ephemeral \
+            --cd "$GITHUB_WORKSPACE" \
+            --model gpt-6-luna \
+            --config 'model_reasoning_effort="high"' \
+            --config 'default_permissions=":workspace"' \
+            --output-last-message "$RUNNER_TEMP/report.md" \
+            - < "$RUNNER_TEMP/prompt.md"
 
       # PLACEMENT_PUSH_TOKEN (a fine-grained PAT with Contents: write) is optional.
       # Without it, the push uses GITHUB_TOKEN, which never triggers other
