@@ -427,6 +427,7 @@ The executable script is `python scripts/test-jev-agent-profile-routing.py`; it 
 - [x] Always select the top-probability candidate with stable input-order ties; do not add a threshold or no-match outcome. Surface decision failures.
 - [x] Keep existing clarity and tool-selector features available through a separate `JevRuntimeSettings` object.
 - [x] Use one Choice question rather than an independent Noul question per profile: candidate selection is relative, the returned distribution supports “best one,” and code performs the maximum selection.
+- [x] Use the first configured profile's generative model for clarity questions, because the clarity gate runs before candidate selection.
 - [ ] During implementation, verify the exact set of BaseAgent fields that can safely be applied without transferring live MCP/session/trace state; reject any unsupported candidate configuration rather than silently dropping it.
 
 ---
