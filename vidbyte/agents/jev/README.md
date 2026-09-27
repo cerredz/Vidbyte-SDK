@@ -4,15 +4,19 @@ This package owns Vidbyte's opinionated Jev agent. Its dedicated runtime can run
 
 - `settings.py` is the complete public configuration surface.
 - `agent.py` maps those settings into `BaseAgent` with the `jev` runtime type (`AgentRuntimeType.JEV`).
-- `preflight.py` owns the internal preflight interface, `JevPreflightTools`, which asks one batched Jev request whether each configured tool may help, and `JevPreflightSecurity`, which maps the security answers to flags and an action.
-- `runtime.py` runs the security gate, the contained run, and tool selection before delegating to `AgentRuntime`; `RuntimeRegistry` resolves the `jev` runtime type to it.
+- `gate/` holds the gate for fixed-question presets. `JevPreflightGate` combines every enabled preset's questions into one Jev request, scores each preset with `DecisionModelRunner.score_noul`, and its `pass_` match statement acts on the outcomes and returns whether the generative agent runs. `JevClarificationAgent` returns structured clarifying questions, each with a few recommended answers, when the request is unclear.
+- `preflight.py` holds the tool selector (`JevPreflightTools`), which keeps its own path in the runtime.
+- `response.py` defines `JevResponse`, the only writer of the `JevAgentResponse` record exposed as `JevAgent.response`.
+- `runtime.py` calls the gate before the inherited `AgentRuntime` loop and returns the gate's response when it closes, then applies the tool selector when it is enabled; `RuntimeRegistry` resolves the `jev` runtime type to it.
 
-Preset names, security actions, and categories live in `vidbyte/lib/enums/jev.py`; preset validation lives in `vidbyte/lib/jev/presets.py`; the fixed security questions and `JevPreflightRegistry` live in `vidbyte/lib/jev/preflight/`.
+`agent.py` builds the gate and the response writer at construction and passes them to the runtime. Question text lives in `vidbyte/lib/jev/`: `presets.py` (`JevPresets`) owns the flags a user can enable in `JevAgentSettings.preflight` and the questions each fixed-question flag asks, and `preflight/` holds one dataclass per question plus `JevPreflightRegistry`. The flag and question-key enums are in `vidbyte/lib/enums/jev.py`, and the records are in `vidbyte/lib/dataclasses/jev.py`.
 
-Enable tool selection with `JevPreflightPreset.TOOL_SELECTOR`. `tool_selector_threshold` defaults to `0.20` and accepts finite probabilities from `0.0` through `1.0` inclusive. If Jev is unavailable or returns incomplete answers, the run keeps the full configured tool catalog.
+Enable request clarity checks with `JevPreflightPreset.CLARITY`. When the request is unclear, the run stops before the generative agent starts, `agent.response.clarification` holds the questions and their recommended answers, and the reply content is those questions as a numbered list.
 
-Enable the sensitive-data check with `JevPreflightPreset.SECURITY` and choose `security_action`: `block` (default), `pause`, `report`, or `contain`. The result is `metadata["jev_security"]`.
+Enable tool selection with `JevPreflightPreset.TOOL_SELECTOR`. `tool_selector_threshold` defaults to `0.20` and accepts finite probabilities from `0.0` through `1.0` inclusive. If Jev is unavailable or returns incomplete answers, the run keeps the full configured tool catalog, and the reply metadata reports the selection under `jev_tool_selector`. After each run, `agent.response.results` holds one outcome per enabled fixed-question preset.
 
-Do not add a generic `decisions` collection or runtime replacement option. Add named, validated settings for product capabilities and keep their internal questions and actions out of the public API.
+Enable sensitive-data checks with `JevPreflightPreset.SECURITY` and choose a `security_action`. `BLOCK` stops before the model loop when data is detected or the check is unavailable; `PAUSE` stops for caller review; `REPORT` continues with flags recorded in `agent.response.security`; and `CONTAIN` continues with only SAFE/READ tools, a prompt not to repeat or send the data, and no runtime model/tool spans. Security and clarity questions share the gate's single preflight request.
 
-See `docs/design/jev-agent-scaffold.md`, `docs/design/jev-preflight-sensitive-data.md`, and `skills/jev-agent/SKILL.md`.
+Do not add a generic `decisions` collection or runtime replacement option. Add named, validated settings for product capabilities and keep their internal questions and actions inside this package.
+
+See `docs/design/jev-agent-scaffold.md`, `docs/design/jev-preflight-clarity.md`, `docs/design/jev-tool-selector.md`, and `skills/jev-agent/SKILL.md`.

@@ -25,11 +25,15 @@ from vidbyte.lib.constants.jev import (
 from vidbyte.lib.dataclasses.jev import (
     JevAnswer,
     JevDecisionRequest,
-    JevPreflightQuestion,
     JevQuestion,
     JevSecurityResult,
 )
-from vidbyte.lib.enums.jev import JevPreflightPreset, JevQuestionType, JevSecurityAction
+from vidbyte.lib.enums.jev import (
+    JevPreflightPreset,
+    JevQuestionType,
+    JevSecurityAction,
+    JevSecurityCategory,
+)
 from vidbyte.lib.errors import ConfigurationError, VidbyteSdkError
 from vidbyte.lib.jev.preflight import JevPreflightRegistry
 from vidbyte.lib.runners.decision import DecisionModelRunner
@@ -120,26 +124,35 @@ class JevPreflightSecurity:
 
     async def run(self, message: str) -> JevSecurityResult:
         """Ask every security question in one Jev request and return per-category flags, never the text."""
-        questions = JevPreflightRegistry.questions(JevPreflightPreset.SECURITY)
         try:
-            response = await JevPreflightRegistry.run(JevPreflightPreset.SECURITY, message, self._decision)
+            response = await DecisionModelRunner(self._decision).arun(
+                JevDecisionRequest(
+                    state={"request": message},
+                    questions=JevPreflightRegistry.questions(JevPreflightPreset.SECURITY),
+                )
+            )
         except VidbyteSdkError:
             # @intent security-outage-is-unknown-not-clean
             # A missing key or provider failure must not read as "no sensitive data"; every flag stays
             # unknown so BLOCK and PAUSE fail closed and CONTAIN restricts the run.
-            return self.build_result({question.key: None for question in questions})
+            return self.build_result({category.value: None for category in JevSecurityCategory})
         self.usage = JevUsage.from_usage_payload(response.usage or {})
-        return self.build_result(self.flags(questions, response.answers))
+        return self.classify(response.answers)
 
     @staticmethod
-    def flags(questions: Sequence[JevPreflightQuestion], answers: Mapping[str, JevAnswer]) -> dict[str, bool | None]:
+    def flags(answers: Mapping[str, JevAnswer]) -> dict[str, bool | None]:
         """Map each answer's P(true) to a flag; a missing answer or probability becomes None."""
         flags: dict[str, bool | None] = {}
-        for question in questions:
-            answer = answers.get(JevPreflightRegistry.wire_name(JevPreflightPreset.SECURITY, question.key))
+        for category in JevSecurityCategory:
+            answer = answers.get(f"security.{category.value}")
             probability = None if answer is None else answer.probabilities.get(JEV_NOUL_TRUE)
-            flags[question.key] = None if probability is None else probability >= JEV_SECURITY_DETECTION_THRESHOLD
+            flags[category.value] = None if probability is None else probability >= JEV_SECURITY_DETECTION_THRESHOLD
         return flags
+
+    def classify(self, answers: Mapping[str, JevAnswer], usage: JevUsage | None = None) -> JevSecurityResult:
+        """Classify answers from a shared preflight request without issuing another Jev call."""
+        self.usage = usage
+        return self.build_result(self.flags(answers))
 
     def build_result(self, flags: Mapping[str, bool | None]) -> JevSecurityResult:
         """Build the frozen result, where a known positive wins over missing answers."""

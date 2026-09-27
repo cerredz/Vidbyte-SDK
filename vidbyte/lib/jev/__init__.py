@@ -1,15 +1,15 @@
 """FILE: vidbyte/lib/jev/__init__.py
 
-PURPOSE: Groups the shared JevAgent policy vocabulary: enable-able presets and the canonical fixed preflight questions.
-ROLE IN CODEBASE: `vidbyte/agents/jev/` imports presets and the preflight registry from here; nothing here imports the agents layer.
-ARCHITECTURE NOTE: Kept in `vidbyte.lib` so settings, runtime, and tests share one definition; wire records stay in `vidbyte/lib/dataclasses/jev.py` and enums in `vidbyte/lib/enums/jev.py`.
-COMMON MODIFICATION PATTERNS: Add preset validation to presets.py and fixed questions under preflight/.
-KNOWN EDGE CASES: Importing this package performs no Jev call.
-RELATED DOCS: docs/design/jev-preflight-sensitive-data.md and skills/jev-agent/SKILL.md.
-TESTS: tests/test_jev_sensitive_preflight.py and tests/test_jev_tool_selector.py.
+PURPOSE: Exposes the JevAgent capability substrate: the preflight flags (JevPresets) and the registry over every fixed preflight question (JevPreflightRegistry).
+ROLE IN CODEBASE: vidbyte/agents/jev imports these to validate settings and to build the one preflight Jev request; the gate that acts on Jev's answers is JevPreflightGate in vidbyte/agents/jev/gate/.
+ARCHITECTURE NOTE: This package sits in vidbyte.lib and imports only lib modules; it holds question text and flag policy but never calls Jev.
+COMMON MODIFICATION PATTERNS: Add a flag in presets.py and its questions under preflight/; export only the classes JevAgent needs.
+KNOWN EDGE CASES: Importing this package performs no Jev call and needs no TypeSafe credential.
+RELATED DOCS: docs/design/jev-preflight-clarity.md and skills/jev-agent/SKILL.md.
+TESTS: tests/test_jev_preflight.py and scripts/test-jev-preflight.py.
 """
 
-from vidbyte.lib.jev.preflight import SECURITY_QUESTIONS, JevPreflightRegistry
+from vidbyte.lib.jev.preflight import JevPreflightRegistry, SECURITY_QUESTIONS
 from vidbyte.lib.jev.presets import JevPresets
 
-__all__ = ["SECURITY_QUESTIONS", "JevPreflightRegistry", "JevPresets"]
+__all__ = ["JevPreflightRegistry", "JevPresets", "SECURITY_QUESTIONS"]

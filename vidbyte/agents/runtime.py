@@ -1776,6 +1776,7 @@ class AgentRuntime:
             "tool_calls_by_name": self._tool_calls_by_name(non_internal),
             "tokens_used": tokens_used or 0,
             "elapsed_seconds": self.middleware.clock() - started_at,
+            "final_output": final_text,
             "final_output_chars": len(final_text),
             "final_output_tokens": self._approx_output_tokens(final_text),
             "cost_spent_usd": self._cost_spent_usd(tokens_used),

@@ -13,12 +13,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from vidbyte.lib.dataclasses.jev import JevPreflightQuestion
+from vidbyte.lib.dataclasses.jev import JevSecurityQuestion
 from vidbyte.lib.enums.jev import JevSecurityCategory
 
 
 @dataclass(frozen=True, slots=True)
-class PasswordsPinsQuestion(JevPreflightQuestion):
+class PasswordsPinsQuestion(JevSecurityQuestion):
     """Detects a password, passphrase, or PIN value."""
 
     key: str = JevSecurityCategory.PASSWORDS_PINS
@@ -36,7 +36,7 @@ class PasswordsPinsQuestion(JevPreflightQuestion):
 
 
 @dataclass(frozen=True, slots=True)
-class ApiServiceSecretsQuestion(JevPreflightQuestion):
+class ApiServiceSecretsQuestion(JevSecurityQuestion):
     """Detects an API key, service secret, or connection string that carries a password."""
 
     key: str = JevSecurityCategory.API_SERVICE_SECRETS
@@ -54,7 +54,7 @@ class ApiServiceSecretsQuestion(JevPreflightQuestion):
 
 
 @dataclass(frozen=True, slots=True)
-class SessionTokensQuestion(JevPreflightQuestion):
+class SessionTokensQuestion(JevSecurityQuestion):
     """Detects a session cookie, access token, signed link, or one-time code value."""
 
     key: str = JevSecurityCategory.SESSION_TOKENS
@@ -72,7 +72,7 @@ class SessionTokensQuestion(JevPreflightQuestion):
 
 
 @dataclass(frozen=True, slots=True)
-class PrivateCryptoMaterialQuestion(JevPreflightQuestion):
+class PrivateCryptoMaterialQuestion(JevSecurityQuestion):
     """Detects a private key, recovery phrase, or other private cryptographic secret."""
 
     key: str = JevSecurityCategory.PRIVATE_CRYPTO_MATERIAL
@@ -90,7 +90,7 @@ class PrivateCryptoMaterialQuestion(JevPreflightQuestion):
 
 
 @dataclass(frozen=True, slots=True)
-class PersonalContactQuestion(JevPreflightQuestion):
+class PersonalContactQuestion(JevSecurityQuestion):
     """Detects a private person's personal email address, phone number, or home address."""
 
     key: str = JevSecurityCategory.PERSONAL_CONTACT
@@ -108,7 +108,7 @@ class PersonalContactQuestion(JevPreflightQuestion):
 
 
 @dataclass(frozen=True, slots=True)
-class GovernmentIdsQuestion(JevPreflightQuestion):
+class GovernmentIdsQuestion(JevSecurityQuestion):
     """Detects a government-issued identity number or identity document text."""
 
     key: str = JevSecurityCategory.GOVERNMENT_IDS
@@ -126,7 +126,7 @@ class GovernmentIdsQuestion(JevPreflightQuestion):
 
 
 @dataclass(frozen=True, slots=True)
-class PaymentBankQuestion(JevPreflightQuestion):
+class PaymentBankQuestion(JevSecurityQuestion):
     """Detects a payment card number, bank account number, or payment account credential."""
 
     key: str = JevSecurityCategory.PAYMENT_BANK
@@ -144,7 +144,7 @@ class PaymentBankQuestion(JevPreflightQuestion):
 
 
 @dataclass(frozen=True, slots=True)
-class PersonalFinancesQuestion(JevPreflightQuestion):
+class PersonalFinancesQuestion(JevSecurityQuestion):
     """Detects nonpublic financial facts about a specific person."""
 
     key: str = JevSecurityCategory.PERSONAL_FINANCES
@@ -162,7 +162,7 @@ class PersonalFinancesQuestion(JevPreflightQuestion):
 
 
 @dataclass(frozen=True, slots=True)
-class HealthQuestion(JevPreflightQuestion):
+class HealthQuestion(JevSecurityQuestion):
     """Detects a fact linking a specific person to a health condition or treatment."""
 
     key: str = JevSecurityCategory.HEALTH
@@ -180,7 +180,7 @@ class HealthQuestion(JevPreflightQuestion):
 
 
 @dataclass(frozen=True, slots=True)
-class BiometricGeneticQuestion(JevPreflightQuestion):
+class BiometricGeneticQuestion(JevSecurityQuestion):
     """Detects a specific person's biometric measurement or genetic information."""
 
     key: str = JevSecurityCategory.BIOMETRIC_GENETIC
@@ -198,7 +198,7 @@ class BiometricGeneticQuestion(JevPreflightQuestion):
 
 
 @dataclass(frozen=True, slots=True)
-class PreciseLocationQuestion(JevPreflightQuestion):
+class PreciseLocationQuestion(JevSecurityQuestion):
     """Detects where a specific person is, has been, or will be."""
 
     key: str = JevSecurityCategory.PRECISE_LOCATION
@@ -216,7 +216,7 @@ class PreciseLocationQuestion(JevPreflightQuestion):
 
 
 @dataclass(frozen=True, slots=True)
-class MinorsStudentsQuestion(JevPreflightQuestion):
+class MinorsStudentsQuestion(JevSecurityQuestion):
     """Detects an identifiable child or a specific student's school records."""
 
     key: str = JevSecurityCategory.MINORS_STUDENTS
@@ -234,7 +234,7 @@ class MinorsStudentsQuestion(JevPreflightQuestion):
 
 
 @dataclass(frozen=True, slots=True)
-class SensitiveTraitsQuestion(JevPreflightQuestion):
+class SensitiveTraitsQuestion(JevSecurityQuestion):
     """Detects a sensitive personal trait of a specific private person."""
 
     key: str = JevSecurityCategory.SENSITIVE_TRAITS
@@ -252,7 +252,7 @@ class SensitiveTraitsQuestion(JevPreflightQuestion):
 
 
 @dataclass(frozen=True, slots=True)
-class EmploymentHrQuestion(JevPreflightQuestion):
+class EmploymentHrQuestion(JevSecurityQuestion):
     """Detects nonpublic employment facts about a specific worker or candidate."""
 
     key: str = JevSecurityCategory.EMPLOYMENT_HR
@@ -270,7 +270,7 @@ class EmploymentHrQuestion(JevPreflightQuestion):
 
 
 @dataclass(frozen=True, slots=True)
-class LegalMattersQuestion(JevPreflightQuestion):
+class LegalMattersQuestion(JevSecurityQuestion):
     """Detects confidential legal advice or nonpublic facts about a specific legal matter."""
 
     key: str = JevSecurityCategory.LEGAL_MATTERS
@@ -288,7 +288,7 @@ class LegalMattersQuestion(JevPreflightQuestion):
 
 
 @dataclass(frozen=True, slots=True)
-class CustomerClientRecordsQuestion(JevPreflightQuestion):
+class CustomerClientRecordsQuestion(JevSecurityQuestion):
     """Detects a nonpublic record about a specific customer, client, or patient."""
 
     key: str = JevSecurityCategory.CUSTOMER_CLIENT_RECORDS
@@ -306,7 +306,7 @@ class CustomerClientRecordsQuestion(JevPreflightQuestion):
 
 
 @dataclass(frozen=True, slots=True)
-class ConfidentialCommunicationsQuestion(JevPreflightQuestion):
+class ConfidentialCommunicationsQuestion(JevSecurityQuestion):
     """Detects the content of a private message, confidential agreement, or negotiation."""
 
     key: str = JevSecurityCategory.CONFIDENTIAL_COMMUNICATIONS
@@ -324,7 +324,7 @@ class ConfidentialCommunicationsQuestion(JevPreflightQuestion):
 
 
 @dataclass(frozen=True, slots=True)
-class ProprietaryWorkQuestion(JevPreflightQuestion):
+class ProprietaryWorkQuestion(JevSecurityQuestion):
     """Detects unreleased proprietary code, designs, research, or other private work product."""
 
     key: str = JevSecurityCategory.PROPRIETARY_WORK
@@ -342,7 +342,7 @@ class ProprietaryWorkQuestion(JevPreflightQuestion):
 
 
 @dataclass(frozen=True, slots=True)
-class InternalBusinessQuestion(JevPreflightQuestion):
+class InternalBusinessQuestion(JevSecurityQuestion):
     """Detects nonpublic commercial information about a specific organization."""
 
     key: str = JevSecurityCategory.INTERNAL_BUSINESS
@@ -360,7 +360,7 @@ class InternalBusinessQuestion(JevPreflightQuestion):
 
 
 @dataclass(frozen=True, slots=True)
-class SecuritySystemDetailsQuestion(JevPreflightQuestion):
+class SecuritySystemDetailsQuestion(JevSecurityQuestion):
     """Detects nonpublic details that could expose a specific system to attack."""
 
     key: str = JevSecurityCategory.SECURITY_SYSTEM_DETAILS
@@ -377,7 +377,7 @@ class SecuritySystemDetailsQuestion(JevPreflightQuestion):
     false_examples: tuple[str, ...] = ("How should I harden an SSH server", "Explain the published advisory for this CVE")
 
 
-SECURITY_QUESTIONS: tuple[JevPreflightQuestion, ...] = (
+SECURITY_QUESTIONS: tuple[JevSecurityQuestion, ...] = (
     PasswordsPinsQuestion(),
     ApiServiceSecretsQuestion(),
     SessionTokensQuestion(),
