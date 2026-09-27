@@ -23,9 +23,11 @@ from tests.agent_test_support import bind_test_runner
 from vidbyte import JevAgent as RootJevAgent
 from vidbyte import JevAgentSettings as RootJevAgentSettings
 from vidbyte import JevRuntime as RootJevRuntime
+from vidbyte import JevRuntimeSettings as RootJevRuntimeSettings
+from vidbyte import JevSpecialist as RootJevSpecialist
 from vidbyte import VidbyteSDK, tool
 from vidbyte.agents import BaseAgent
-from vidbyte.agents.jev import JevAgent, JevAgentSettings, JevRuntime
+from vidbyte.agents.jev import JevAgent, JevAgentSettings, JevRuntime, JevRuntimeSettings, JevSpecialist
 from vidbyte.agents.pricing import JevUsage
 from vidbyte.agents.runtime import AgentRuntime
 from vidbyte.agents.settings import AgentLoopSettings
@@ -364,20 +366,22 @@ class JevSettingsTests(unittest.TestCase):
         # [Hidden Assumption] Jev supplies decisions but never the agent's prose response.
         with self.assertRaisesRegex(ConfigurationError, "generative"):
             _settings(provider=ModelProvider.TYPESAFE)
-        self.assertEqual(_settings().decision.normalized_provider(), ModelProvider.TYPESAFE)
+        self.assertEqual(JevRuntimeSettings().decision.normalized_provider(), ModelProvider.TYPESAFE)
 
     def test_rejects_bad_tools_and_nested_settings(self) -> None:
         # [Hidden Failure] strings and unrelated nested objects cannot leak into runtime construction.
         with self.assertRaises(ConfigurationError):
             _settings(tools="lookup")
-        for field_name in ("permission_policy", "loop", "decision"):
+        for field_name in ("permission_policy", "loop"):
             with self.subTest(field_name=field_name), self.assertRaises(ConfigurationError):
                 _settings(**{field_name: object()})
+        with self.assertRaises(ConfigurationError):
+            JevRuntimeSettings(decision=object())  # type: ignore[arg-type]
 
     def test_normalizes_provider_and_redacts_both_keys(self) -> None:
         # [Silent Failure] canonical provider identity is stored and neither credential appears in repr.
-        settings = _settings(api_key="generative-secret", decision=DecisionModelConfig(api_key="decision-secret"))
-        rendered = repr(settings)
+        settings = _settings(api_key="generative-secret")
+        rendered = repr(settings) + repr(JevRuntimeSettings(decision=DecisionModelConfig(api_key="decision-secret")))
         self.assertIs(settings.provider, ModelProvider.OPENAI)
         self.assertNotIn("generative-secret", rendered)
         self.assertNotIn("decision-secret", rendered)
@@ -392,6 +396,23 @@ class JevSettingsTests(unittest.TestCase):
         self.assertIs(settings.permission_policy, policy)
         self.assertIs(settings.loop, loop)
 
+    def test_specialists_are_validated_and_kept_in_order(self) -> None:
+        # [Hidden Assumption] each specialist is a Choice option, so titles must be unique and the given order is kept.
+        first = JevSpecialist("database", "Changes to the database schema and its migrations.", BaseAgent(name="db", system_prompt="Work.", provider="openai", model_name="gpt-4.1-mini"))
+        second = JevSpecialist("writer", "Prose written for a reader.", BaseAgent(name="w", system_prompt="Work.", provider="openai", model_name="gpt-4.1-mini"))
+        self.assertEqual(_settings(agents=[first, second]).agents, (first, second))
+        self.assertEqual(_settings().agents, ())
+        for agents in ("database", (first, first), (first, object())):
+            with self.subTest(agents=agents), self.assertRaises(ConfigurationError):
+                _settings(agents=agents)
+
+    def test_specialist_rejects_a_non_agent_blank_scope_or_the_reserved_title(self) -> None:
+        # [Hidden Failure] a lib record cannot isinstance-check BaseAgent, so it checks the runnable surface instead.
+        agent = BaseAgent(name="db", system_prompt="Work.", provider="openai", model_name="gpt-4.1-mini")
+        for title, description, candidate in (("database", "Schema work.", object()), ("database", "  ", agent), ("none", "Schema work.", agent), (" database", "Schema work.", agent)):
+            with self.subTest(title=title, description=description), self.assertRaises(ConfigurationError):
+                JevSpecialist(title, description, candidate)  # type: ignore[arg-type]
+
 
 class JevAgentRuntimeTests(unittest.IsolatedAsyncioTestCase):
     """Pins runtime specialization while proving the standard loop stays intact."""
@@ -402,6 +423,7 @@ class JevAgentRuntimeTests(unittest.IsolatedAsyncioTestCase):
         runtime = agent._runtime()
         self.assertIsInstance(runtime, JevRuntime)
         self.assertIs(runtime.preflight, agent.preflight)
+        self.assertIs(runtime.runtime_settings, agent.runtime_settings)
         self.assertIs(runtime.response.state, agent.response)
         self.assertIs(runtime.usage_tracker, agent._usage_tracker)
         self.assertIs(runtime.speed_tracker, agent._speed_tracker)
@@ -457,18 +479,28 @@ class JevPublicApiTests(unittest.TestCase):
         self.assertIs(RootJevAgent, JevAgent)
         self.assertIs(RootJevAgentSettings, JevAgentSettings)
         self.assertIs(RootJevRuntime, JevRuntime)
+        self.assertIs(RootJevRuntimeSettings, JevRuntimeSettings)
+        self.assertIs(RootJevSpecialist, JevSpecialist)
 
     def test_sdk_namespace_constructs_jev_agent(self) -> None:
         # [Silent Failure] the root namespace client exposes the opinionated constructor.
         settings = _settings()
-        agent = VidbyteSDK().agents.jev(settings)
+        runtime_settings = JevRuntimeSettings()
+        agent = VidbyteSDK().agents.jev(settings, runtime_settings)
         self.assertIsInstance(agent, JevAgent)
         self.assertIs(agent.settings, settings)
+        self.assertIs(agent.runtime_settings, runtime_settings)
+
+    def test_runtime_settings_default_and_reject_other_objects(self) -> None:
+        # [Hidden Failure] omitting runtime settings means no Jev policy, and a wrong object fails at construction.
+        self.assertEqual(JevAgent(_settings()).runtime_settings, JevRuntimeSettings())
+        with self.assertRaisesRegex(ConfigurationError, "JevRuntimeSettings"):
+            JevAgent(_settings(), object())  # type: ignore[arg-type]
 
     def test_constructor_exposes_only_settings(self) -> None:
         # [Hidden Assumption] runtime machinery and generic decisions are not user customization points.
         parameters = tuple(inspect.signature(JevAgent.__init__).parameters)
-        self.assertEqual(parameters, ("self", "settings"))
+        self.assertEqual(parameters, ("self", "settings", "runtime_settings"))
         for forbidden in ("runtime", "middleware", "algorithm", "fallback", "decisions"):
             self.assertNotIn(forbidden, parameters)
 

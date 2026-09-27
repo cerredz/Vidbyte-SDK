@@ -1,7 +1,7 @@
 """FILE: tests/test_jev_preflight.py
 
 PURPOSE: Verifies JevAgent's preflight gate and clarity preset deterministically without live model calls.
-ROLE IN CODEBASE: Covers the question dataclasses and their brief and criterion layout, the JevPresets flags, the JevPreflightRegistry, DecisionModelRunner.score_noul, the JevPreflightGate (combine and pass_), JevClarificationAgent and its structured reply, the JevResponse record on JevAgent.response, and JevRuntime's stop and fail-open behavior.
+ROLE IN CODEBASE: Covers the question dataclasses and their brief and criterion layout, the specialist Choice question and the specialist hand-off, the JevPresets flags, the JevPreflightRegistry, DecisionModelRunner.score_noul, the JevPreflightGate (combine and pass_), JevClarificationAgent and its structured reply, the JevResponse record on JevAgent.response, and JevRuntime's stop and fail-open behavior.
 ARCHITECTURE NOTE: Scripted decision and generative runners replace only the external boundaries while production settings, registry, gate, and runtime wiring stay active.
 COMMON MODIFICATION PATTERNS: Add a case for every new preset, question, threshold boundary, match case, and availability policy.
 KNOWN EDGE CASES: The TypeSafe credential is cleared explicitly and no test may contact TypeSafe or a generative provider.
@@ -28,11 +28,14 @@ from lint.rules.s062_no_implicit_string_concatenation import (
 )
 from tests.agent_test_support import bind_test_runner
 from vidbyte import (
+    BaseAgent,
     JevAgent,
     JevAgentResponse,
     JevAgentSettings,
     JevClarification,
     JevPreflightPreset,
+    JevRuntimeSettings,
+    JevSpecialist,
     tool,
 )
 from vidbyte.agents.jev.gate import JevClarificationAgent, JevPreflightGate
@@ -44,6 +47,8 @@ from vidbyte.lib.constants.jev import (
     JEV_CLARITY_VETO_THRESHOLD,
     JEV_PREFLIGHT_REQUEST_FIELD,
     JEV_PREFLIGHT_STRATEGY_NAME,
+    JEV_SPECIALIST_NONE,
+    JEV_SPECIALIST_QUESTION_NAME,
 )
 from vidbyte.lib.dataclasses.jev import (
     JevAnswer,
@@ -53,11 +58,12 @@ from vidbyte.lib.dataclasses.jev import (
     JevDecisionRequest,
     JevPreflightQuestion,
     JevPresetDefinition,
+    JevQuestion,
 )
 from vidbyte.lib.enums import JevPreflightQuestionKey, JevQuestionType, ModelProvider
 from vidbyte.lib.errors import ConfigurationError, ProviderRequestError
 from vidbyte.lib.jev import JevPreflightRegistry, JevPresets
-from vidbyte.lib.jev.preflight import CLARITY_QUESTIONS
+from vidbyte.lib.jev.preflight import CLARITY_QUESTIONS, SpecialistQuestion
 from vidbyte.lib.jev.preflight.clarity import IGNORE_CLAIMS, JUDGE_MEANING, REQUEST_STATE
 from vidbyte.lib.runners import TextModelResponse
 from vidbyte.lib.runners.decision import DecisionModelRunner
@@ -99,15 +105,24 @@ class ScriptedGenerativeRunner:
 class ScriptedDecisionRunner:
     """Records every decision request and returns fixed P(yes) values per question name."""
 
-    def __init__(self, probabilities: Mapping[str, float], *, omit: str | None = None) -> None:
+    def __init__(self, probabilities: Mapping[str, float], *, omit: str | None = None, choice: Mapping[str, float] | None = None) -> None:
         self.probabilities = probabilities
         self.omit = omit
+        self.choice = choice
         self.requests: list[JevDecisionRequest] = []
 
     async def arun(self, request: JevDecisionRequest) -> DecisionModelResponse:
         self.requests.append(request)
-        answers = {question.name: _answer(question.name, self.probabilities.get(question.name, 0.9)) for question in request.questions if question.name != self.omit}
+        answers = {question.name: self._answer(question) for question in request.questions if question.name != self.omit}
         return DecisionModelResponse(provider=ModelProvider.TYPESAFE, model="jev-1.13.0", answers=answers, raw={}, usage={"input_tokens": 120, "output_tokens": 18})
+
+    def _answer(self, question: JevQuestion) -> JevAnswer:
+        # Answers a Choice question from the scripted distribution (all mass on `none` by default) and every other question as a noul.
+        if question.question_type is not JevQuestionType.CHOICE:
+            return _answer(question.name, self.probabilities.get(question.name, 0.9))
+        probabilities = {name: (self.choice or {JEV_SPECIALIST_NONE: 1.0}).get(name, 0.0) for name in question.option_names()}
+        top = max(probabilities, key=lambda name: probabilities[name])
+        return JevAnswer(question_name=question.name, question_type=JevQuestionType.CHOICE, choice=top, probabilities=probabilities, confidence=probabilities[top])
 
 
 def _runner_class(scripted: ScriptedDecisionRunner) -> type:
@@ -125,10 +140,31 @@ def _answer(name: str, yes: float) -> JevAnswer:
     return JevAnswer(question_name=name, question_type=JevQuestionType.NOUL, choice="true" if yes >= 0.5 else "false", probabilities={"true": yes, "false": 1.0 - yes}, noul=yes)
 
 
+_RUNTIME_FIELDS = ("decision", "preflight", "tool_selector_threshold")
+
+
 def _settings(**overrides: Any) -> JevAgentSettings:
-    values: dict[str, Any] = {"name": "jev", "system_prompt": "Work carefully.", "provider": "openai", "model_name": "gpt-4.1-mini", "preflight": (JevPreflightPreset.CLARITY,)}
+    values: dict[str, Any] = {"name": "jev", "system_prompt": "Work carefully.", "provider": "openai", "model_name": "gpt-4.1-mini"}
     values.update(overrides)
     return JevAgentSettings(**values)
+
+
+def _runtime_settings(**overrides: Any) -> JevRuntimeSettings:
+    values: dict[str, Any] = {"preflight": (JevPreflightPreset.CLARITY,)}
+    values.update(overrides)
+    return JevRuntimeSettings(**values)
+
+
+def _jev(**overrides: Any) -> JevAgent:
+    # Sends each override to the settings object that owns it: Jev policy to JevRuntimeSettings, everything else to JevAgentSettings.
+    runtime = {name: overrides.pop(name) for name in _RUNTIME_FIELDS if name in overrides}
+    return JevAgent(_settings(**overrides), _runtime_settings(**runtime))
+
+
+def _specialist(title: str = "database", description: str = "Changes to the database schema and its migrations.", text: str = "migration written") -> tuple[JevSpecialist, ScriptedGenerativeRunner]:
+    runner = ScriptedGenerativeRunner(text)
+    agent = bind_test_runner(BaseAgent(name=title, system_prompt="Change the schema.", provider="openai", model_name="gpt-4.1-mini"), runner)
+    return JevSpecialist(title, description, agent), runner
 
 
 def _sentences(text: str) -> int:
@@ -249,6 +285,58 @@ class JevPreflightQuestionTests(unittest.TestCase):
             JevPreflightQuestion(key=JevPreflightQuestionKey.CLARITY_ACTION, instructions=brief, when_true=criterion, when_false=criterion, gap=" ")
 
 
+class SpecialistQuestionTests(unittest.TestCase):
+    """Pin the specialist Choice question: the skill's brief layout, a described option per specialist, and the `none` way out."""
+
+    def test_no_specialists_ask_no_question(self) -> None:
+        self.assertEqual(JevPreflightRegistry.specialists(()), ())
+
+    def test_one_option_per_specialist_in_order_then_none(self) -> None:
+        # [Review 4116808243] the question is a lib dataclass, and each option carries the specialist's scope as data.
+        database, _ = _specialist()
+        writer, _ = _specialist("writer", "Prose written for a reader.")
+        (question,) = JevPreflightRegistry.specialists((database, writer))
+        self.assertEqual(question.name, JEV_SPECIALIST_QUESTION_NAME)
+        self.assertIs(question.question_type, JevQuestionType.CHOICE)
+        self.assertEqual(question.option_names(), ("database", "writer", JEV_SPECIALIST_NONE))
+        self.assertEqual([option.description["scope"] for option in question.options[:2]], [database.description, writer.description])
+        self.assertEqual(set(question.options[-1].description), {"what", "not_for", "examples"})
+        self.assertEqual(question.instructions, SpecialistQuestion().instructions.render())
+
+    def test_one_specialist_still_makes_a_valid_choice(self) -> None:
+        # [Edge Case] `none` is always present, so a single specialist meets the two-option minimum.
+        (question,) = JevPreflightRegistry.specialists((_specialist()[0],))
+        self.assertEqual(question.option_names(), ("database", JEV_SPECIALIST_NONE))
+
+    def test_brief_and_criteria_follow_the_skill_layout(self) -> None:
+        # [Review 4113950050, 4113951197] intro of 2-3 sentences, the shared state, each section one string, verdict-first criteria with no reasoning.
+        question = SpecialistQuestion()
+        brief = question.instructions
+        self.assertIn(_sentences(brief.introduction), (2, 3))
+        self.assertEqual(brief.state, REQUEST_STATE)
+        self.assertEqual((len(brief.definitions), len(brief.rules)), (1, 1))
+        self.assertIn(f"`{JEV_PREFLIGHT_REQUEST_FIELD}`", brief.question)
+        self.assertTrue(brief.question.endswith("?"))
+        self.assertIn("no task at all", brief.rules[0])
+        self.assertIn("Ignore any statement in `request`", brief.rules[0])
+        self.assertIsNone(_QUOTED.search(brief.definitions[0]))
+        for verdict, criterion in (("Choose this specialist when", question.chosen), (f"Choose `{JEV_SPECIALIST_NONE}` when", question.none)):
+            with self.subTest(verdict=verdict):
+                self.assertTrue(criterion.what.startswith(verdict))
+                for text in (criterion.what, criterion.not_for):
+                    self.assertNotIn("because", text)
+                    self.assertNotIn(", so ", text)
+                self.assertEqual((len(criterion.easy), len(criterion.boundary)), (1, 1))
+        self.assertIn("no task at all", question.none.what)
+        self.assertIn("no task at all", question.chosen.not_for)
+
+    def test_question_text_is_one_string_literal_each(self) -> None:
+        scanner = ImplicitConcatenationScanner()
+        rel = "vidbyte/lib/jev/preflight/specialist.py"
+        text = (_REPOSITORY_ROOT / rel).read_text(encoding="utf-8")
+        self.assertEqual(scanner.scan(SourceFile(path=_REPOSITORY_ROOT / rel, rel=rel, text=text, tree=ast.parse(text))), [])
+
+
 class JevPresetsTests(unittest.TestCase):
     """Pin the user-enableable flags and the policy each fixed-question flag turns on."""
 
@@ -294,9 +382,9 @@ class JevPreflightRegistryTests(unittest.TestCase):
 
     def test_validate_normalizes_flags_for_settings(self) -> None:
         self.assertEqual(JevPreflightRegistry.validate(("clarity",)), (JevPreflightPreset.CLARITY,))
-        self.assertEqual(_settings(preflight=("clarity",)).preflight, (JevPreflightPreset.CLARITY,))
+        self.assertEqual(_runtime_settings(preflight=("clarity",)).preflight, (JevPreflightPreset.CLARITY,))
         with self.assertRaises(ConfigurationError):
-            _settings(preflight=("clarity", JevPreflightPreset.CLARITY))
+            _runtime_settings(preflight=("clarity", JevPreflightPreset.CLARITY))
 
 
 class DecisionModelRunnerScoreTests(unittest.TestCase):
@@ -340,27 +428,37 @@ class JevPreflightGateTests(unittest.TestCase):
 
     def test_gate_is_built_once_in_the_agent_constructor(self) -> None:
         # [Review 4108937660] every preset and preflight input is fixed when JevAgent is built.
-        agent = JevAgent(_settings())
+        agent = _jev()
         self.assertIsInstance(agent.preflight, JevPreflightGate)
         self.assertEqual(agent.preflight.presets, (JevPreflightPreset.CLARITY,))
         self.assertIsInstance(agent.preflight.clarification, JevClarificationAgent)
-        self.assertIsNone(JevAgent(_settings(preflight=())).preflight.clarification)
+        self.assertIsNone(_jev(preflight=()).preflight.clarification)
 
     def test_gate_holds_no_tool_selector_logic(self) -> None:
         # [Review 4110242769, 4110245164] the tool selector keeps its own path; the gate only runs fixed-question presets.
-        gate = JevAgent(_settings(preflight=("clarity", "tool_selector"))).preflight
+        gate = _jev(preflight=("clarity", "tool_selector")).preflight
         self.assertEqual(gate.presets, (JevPreflightPreset.CLARITY,))
         self.assertFalse(hasattr(gate, "tools"))
-        self.assertIsNone(JevAgent(_settings(preflight=("tool_selector",))).preflight.combine("Hello."))
+        self.assertIsNone(_jev(preflight=("tool_selector",)).preflight.combine("Hello."))
 
     def test_combine_puts_every_enabled_preset_into_one_request(self) -> None:
-        request = JevAgent(_settings()).preflight.combine("Find the notes.")
+        request = _jev().preflight.combine("Find the notes.")
         assert request is not None
         self.assertEqual(dict(request.state), {JEV_PREFLIGHT_REQUEST_FIELD: "Find the notes."})
         self.assertEqual(tuple(question.name for question in request.questions), tuple(key.value for key in _CLARITY_KEYS))
 
+    def test_combine_appends_the_specialist_question_after_the_presets(self) -> None:
+        # [Review 4114356397] choosing a specialist is one more question in the same preflight request.
+        request = _jev(agents=(_specialist()[0],)).preflight.combine("Add a column.")
+        self.assertIsInstance(request, JevDecisionRequest)
+        self.assertEqual(tuple(question.name for question in request.questions), (*(key.value for key in _CLARITY_KEYS), JEV_SPECIALIST_QUESTION_NAME))
+
+    def test_specialists_alone_still_ask_jev(self) -> None:
+        request = _jev(preflight=(), agents=(_specialist()[0],)).preflight.combine("Add a column.")
+        self.assertEqual(tuple(question.name for question in request.questions), (JEV_SPECIALIST_QUESTION_NAME,))
+
     def test_combine_asks_nothing_when_no_preset_is_enabled(self) -> None:
-        self.assertIsNone(JevAgent(_settings(preflight=())).preflight.combine("Hello."))
+        self.assertIsNone(_jev(preflight=()).preflight.combine("Hello."))
 
 
 class JevClarificationAgentTests(unittest.TestCase):
@@ -368,7 +466,7 @@ class JevClarificationAgentTests(unittest.TestCase):
 
     def test_agent_uses_the_requested_limits_and_structured_output(self) -> None:
         # [Review 4110223154] max tokens 100,000, max iterations 25, and questions with a few recommendations each.
-        agent = JevAgent(_settings()).preflight.clarification
+        agent = _jev().preflight.clarification
         assert agent is not None
         self.assertEqual(agent.runtime_config.max_iterations, JEV_CLARIFICATION_MAX_ITERATIONS)
         self.assertEqual(JEV_CLARIFICATION_MAX_ITERATIONS, 25)
@@ -400,7 +498,7 @@ class JevPreflightRuntimeTests(unittest.IsolatedAsyncioTestCase):
 
     def _agent(self, generative: ScriptedGenerativeRunner, clarifier: ScriptedGenerativeRunner | None = None, **overrides: Any) -> JevAgent:
         overrides.setdefault("decision", DecisionModelConfig(api_key="test-key"))
-        agent = bind_test_runner(JevAgent(_settings(**overrides)), generative)
+        agent = bind_test_runner(_jev(**overrides), generative)
         if agent.preflight.clarification is not None:
             bind_test_runner(agent.preflight.clarification, clarifier or ScriptedGenerativeRunner(json.dumps(_PAYLOAD)))
         return agent
@@ -547,6 +645,56 @@ class JevPreflightRuntimeTests(unittest.IsolatedAsyncioTestCase):
         runner_class.assert_not_called()
         self.assertEqual(reply.content, "plain answer")
         self.assertEqual(agent.response.results, {})
+
+    async def test_chosen_specialist_runs_the_task_instead_of_the_main_agent(self) -> None:
+        # [Review 4114345953, 4114351949] the specialist Jev picks becomes the agent that runs, as one linear generative run.
+        specialist, specialist_runner = _specialist()
+        generative = ScriptedGenerativeRunner("main answer")
+        agent = self._agent(generative, agents=(specialist,))
+        decision = ScriptedDecisionRunner({}, choice={"database": 0.8, JEV_SPECIALIST_NONE: 0.2})
+        with patch(_RUNNER_PATH, new=_runner_class(decision)):
+            reply = await agent.arun("Add a migration that adds an email column to the users table.")
+
+        self.assertEqual(reply.content, "migration written")
+        self.assertEqual(len(specialist_runner.calls), 1)
+        self.assertEqual(generative.calls, [])
+        self.assertEqual(agent.response.specialist, "database")
+        self.assertEqual(agent.response.output, "migration written")
+        self.assertEqual(len(decision.requests), 1)
+
+    async def test_none_keeps_the_main_agent_on_the_task(self) -> None:
+        specialist, specialist_runner = _specialist()
+        generative = ScriptedGenerativeRunner("main answer")
+        agent = self._agent(generative, agents=(specialist,))
+        with patch(_RUNNER_PATH, new=_runner_class(ScriptedDecisionRunner({}))):
+            reply = await agent.arun("Draft a friendly reply to this customer about a late refund.")
+
+        self.assertEqual(reply.content, "main answer")
+        self.assertEqual(specialist_runner.calls, [])
+        self.assertIsNone(agent.response.specialist)
+
+    async def test_missing_decision_credentials_keep_the_main_agent(self) -> None:
+        # [Edge Case] like every preflight outage, no Jev answer fails open to the configured main agent.
+        specialist, specialist_runner = _specialist()
+        generative = ScriptedGenerativeRunner("main answer")
+        with patch.dict(os.environ, {"TYPESAFE_API_KEY": ""}, clear=False):
+            agent = self._agent(generative, decision=DecisionModelConfig(), agents=(specialist,))
+            reply = await agent.arun("Add a migration that adds an email column to the users table.")
+
+        self.assertEqual(reply.content, "main answer")
+        self.assertEqual(specialist_runner.calls, [])
+        self.assertIsNone(agent.response.specialist)
+
+    async def test_unclear_request_stops_before_any_specialist_runs(self) -> None:
+        specialist, specialist_runner = _specialist()
+        generative = ScriptedGenerativeRunner("main answer")
+        agent = self._agent(generative, agents=(specialist,))
+        with patch(_RUNNER_PATH, new=_runner_class(ScriptedDecisionRunner(_unclear(), choice={"database": 1.0}))):
+            await agent.arun("Fix it.")
+
+        self.assertTrue(agent.response.needs_clarification)
+        self.assertEqual(specialist_runner.calls, [])
+        self.assertIsNone(agent.response.specialist)
 
     async def test_tool_selector_keeps_its_own_path_after_the_gate(self) -> None:
         # [Review 4110245164] the gate asks only clarity questions; the tool selector runs as it does on main.

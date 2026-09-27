@@ -484,7 +484,7 @@ These are public, mostly preregistered tests with raw data, not peer-reviewed pa
 
 `JevAgent` capabilities follow the same rules. A few points apply specifically:
 
-- Load this skill before writing, changing, or reviewing any JevAgent question. Fixed preflight questions live in `vidbyte/lib/jev/preflight/`, and each one is a `JevBrief` plus two `JevCriterion` values laid out as "Writing a full question" describes.
+- Load this skill before writing, changing, or reviewing any JevAgent question. Fixed preflight questions live in `vidbyte/lib/jev/preflight/`, and each one is a `JevBrief` plus two `JevCriterion` values laid out as "Writing a full question" describes. The specialist Choice question (`specialist.py`) uses the same layout, with one `JevCriterion` shared by every specialist option and one for `none`.
 
 - Definitions such as a scope description come from a named, validated setting on the capability, not from `system_prompt`. A system prompt was written to instruct a generative model; it is not a definition.
 - The fallback for any Jev failure is the ordinary linear loop, unless the capability's design doc says otherwise.
