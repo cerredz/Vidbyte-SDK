@@ -126,7 +126,7 @@ N/A - no API, endpoint, or public SDK behavior changes.
 
 ## 12. Open Questions
 
-- [ ] The user requested a 2,000-token floor but did not identify a specific tokenizer. Use the configured Jev model tokenizer when known and otherwise an estimate with margin.
+None. Use the configured Jev model tokenizer when it is available; otherwise estimate consistently and leave margin above the threshold.
 
 ## 13. Alternatives Considered
 
