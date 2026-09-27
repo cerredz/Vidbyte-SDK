@@ -12,7 +12,9 @@ TESTS: tests/test_jev_agent.py, tests/test_jev_preflight.py, tests/test_jev_tool
 from __future__ import annotations
 
 import math
+from collections.abc import Mapping
 from dataclasses import dataclass, field
+from types import MappingProxyType
 
 from vidbyte.agents.settings import AgentLoopSettings
 from vidbyte.lib.constants.jev import (
@@ -28,11 +30,122 @@ from vidbyte.lib.constants.jev import (
 )
 from vidbyte.lib.dataclasses.jev import JevSpecialist
 from vidbyte.lib.dataclasses.model_configs import DecisionModelConfig
+from vidbyte.lib.dataclasses.tool_catalogs import ToolCatalogCredentials
 from vidbyte.lib.enums import JevDoneCheck, JevPreflightPreset, ModelProvider
+from vidbyte.lib.enums.tool_catalogs import ToolCatalogName, ToolInstallKind
 from vidbyte.lib.errors import ConfigurationError
 from vidbyte.lib.jev import JevDoneRegistry, JevPreflightRegistry
 from vidbyte.tools.security import PermissionPolicy
 
+DEFAULT_TOOL_CATALOGS: tuple[ToolCatalogName, ...] = (
+    ToolCatalogName.MCP_REGISTRY,
+    ToolCatalogName.GITHUB_MCP_REGISTRY,
+    ToolCatalogName.DOCKER_MCP_CATALOG,
+    ToolCatalogName.SMITHERY,
+    ToolCatalogName.TOOLSDK,
+)
+DEFAULT_TOOL_INSTALL_KINDS: frozenset[ToolInstallKind] = frozenset({ToolInstallKind.REMOTE_HTTP, ToolInstallKind.MANAGED})
+TOOL_ALIGN_MAX_ATTACHED_CEILING = 20
+TOOL_ALIGN_DEFAULT_MAX_ATTACHED = 6
+TOOL_ALIGN_DEFAULT_TIME_BUDGET_SECONDS = 60.0
+PIPEDREAM_ENVIRONMENTS = frozenset({"development", "production"})
+_REQUIRED_CATALOG_CREDENTIALS: Mapping[ToolCatalogName, tuple[str, ...]] = {
+    ToolCatalogName.GLAMA: ("api_key",),
+    ToolCatalogName.COMPOSIO: ("api_key",),
+    ToolCatalogName.ARCADE: ("api_key",),
+    ToolCatalogName.PIPEDREAM: ("client_id", "client_secret", "project_id", "environment"),
+}
+_END_USER_CATALOGS = frozenset({ToolCatalogName.COMPOSIO, ToolCatalogName.PIPEDREAM, ToolCatalogName.ARCADE})
+
+
+@dataclass(frozen=True, slots=True)
+class JevToolAlignmentSettings:
+    """Validated settings for discovering and attaching approved catalog tools per run."""
+
+    catalogs: tuple[ToolCatalogName | str, ...] = DEFAULT_TOOL_CATALOGS
+    catalog_credentials: Mapping[ToolCatalogName | str, ToolCatalogCredentials] = field(default_factory=dict, repr=False)
+    secrets: Mapping[str, str] = field(default_factory=dict, repr=False)
+    install_kinds: frozenset[ToolInstallKind | str] = DEFAULT_TOOL_INSTALL_KINDS
+    allow_unpinned_packages: bool = False
+    allow_high_impact: bool = False
+    max_attached_tools: int = TOOL_ALIGN_DEFAULT_MAX_ATTACHED
+    time_budget_seconds: float = TOOL_ALIGN_DEFAULT_TIME_BUDGET_SECONDS
+    announce: bool = True
+    user_id: str | None = None
+
+    def __post_init__(self) -> None:
+        catalogs = self._normalized_catalogs()
+        credentials = self._normalized_credentials()
+        secrets = self._normalized_secrets()
+        install_kinds = self._normalized_install_kinds()
+        self._validate_catalog_access(catalogs, credentials)
+        self._validate_tool_alignment_bounds()
+        object.__setattr__(self, "catalogs", catalogs)
+        object.__setattr__(self, "catalog_credentials", MappingProxyType(credentials))
+        object.__setattr__(self, "secrets", MappingProxyType(secrets))
+        object.__setattr__(self, "install_kinds", install_kinds)
+
+    def _normalized_catalogs(self) -> tuple[ToolCatalogName, ...]:
+        if isinstance(self.catalogs, (str, bytes)):
+            raise ConfigurationError("JevToolAlignmentSettings.catalogs must be a tuple of catalog names, not a string.")
+        try:
+            catalogs = tuple(dict.fromkeys(ToolCatalogName(name) for name in self.catalogs))
+        except ValueError as exc:
+            raise ConfigurationError("JevToolAlignmentSettings.catalogs has an unknown catalog.") from exc
+        if not catalogs:
+            raise ConfigurationError("JevToolAlignmentSettings.catalogs must name at least one catalog.")
+        return catalogs
+
+    def _normalized_credentials(self) -> dict[ToolCatalogName, ToolCatalogCredentials]:
+        credentials: dict[ToolCatalogName, ToolCatalogCredentials] = {}
+        for name, credential in dict(self.catalog_credentials).items():
+            if not isinstance(credential, ToolCatalogCredentials):
+                raise ConfigurationError("JevToolAlignmentSettings.catalog_credentials values must be ToolCatalogCredentials.")
+            try:
+                credentials[ToolCatalogName(name)] = credential
+            except ValueError as exc:
+                raise ConfigurationError(f"JevToolAlignmentSettings.catalog_credentials names an unknown catalog {name!r}.") from exc
+        return credentials
+
+    def _normalized_secrets(self) -> dict[str, str]:
+        secrets = dict(self.secrets)
+        if not all(isinstance(key, str) and key.strip() and isinstance(value, str) and value for key, value in secrets.items()):
+            raise ConfigurationError("JevToolAlignmentSettings.secrets must map non-blank names to non-empty string values.")
+        return secrets
+
+    def _normalized_install_kinds(self) -> frozenset[ToolInstallKind]:
+        try:
+            kinds = frozenset(ToolInstallKind(kind) for kind in self.install_kinds)
+        except ValueError as exc:
+            raise ConfigurationError("JevToolAlignmentSettings.install_kinds has an unknown kind.") from exc
+        if not kinds or ToolInstallKind.OPENAPI in kinds:
+            raise ConfigurationError("JevToolAlignmentSettings.install_kinds must allow attachable install kinds, not openapi.")
+        return kinds
+
+    def _validate_catalog_access(self, catalogs: tuple[ToolCatalogName, ...], credentials: Mapping[ToolCatalogName, ToolCatalogCredentials]) -> None:
+        for catalog in catalogs:
+            required = _REQUIRED_CATALOG_CREDENTIALS.get(catalog, ())
+            credential = credentials.get(catalog)
+            if any(not getattr(credential, key, None) for key in required):
+                raise ConfigurationError(f"The {catalog.value} catalog needs catalog_credentials with: {', '.join(required)}.")
+            if catalog is ToolCatalogName.PIPEDREAM and credential is not None and credential.environment not in PIPEDREAM_ENVIRONMENTS:
+                raise ConfigurationError("The pipedream catalog environment must be 'development' or 'production'.")
+            if catalog in _END_USER_CATALOGS and not (isinstance(self.user_id, str) and self.user_id.strip()):
+                raise ConfigurationError(f"The {catalog.value} catalog runs tools for an end user; set JevToolAlignmentSettings.user_id.")
+
+    def _validate_tool_alignment_bounds(self) -> None:
+        for name in ("allow_unpinned_packages", "allow_high_impact", "announce"):
+            if not isinstance(getattr(self, name), bool):
+                raise ConfigurationError(f"JevToolAlignmentSettings.{name} must be True or False.")
+        cap = self.max_attached_tools
+        if isinstance(cap, bool) or not isinstance(cap, int) or not 1 <= cap <= TOOL_ALIGN_MAX_ATTACHED_CEILING:
+            raise ConfigurationError(f"JevToolAlignmentSettings.max_attached_tools must be an integer from 1 to {TOOL_ALIGN_MAX_ATTACHED_CEILING}.")
+        budget = self.time_budget_seconds
+        if isinstance(budget, bool) or not isinstance(budget, (int, float)) or not math.isfinite(budget) or budget <= 0:
+            raise ConfigurationError("JevToolAlignmentSettings.time_budget_seconds must be a finite number greater than zero.")
+
+    def credentials_for(self, catalog: ToolCatalogName) -> ToolCatalogCredentials | None:
+        return self.catalog_credentials.get(catalog)
 
 @dataclass(frozen=True, slots=True)
 class JevAgentSettings:
