@@ -1,7 +1,7 @@
-"""FILE: vidbyte/agents/jev/event_log.py
+"""FILE: vidbyte/agents/jev/done/event_log.py
 
 PURPOSE: Builds the numbered event log the handoff builder reads, directly from the runtime loop state at a finish attempt.
-ROLE IN CODEBASE: JevRuntime.review_finish_attempt calls JevRunEventLog.from_loop_state and passes the rendered log to JevRunHandoffAgent; section parsers check cited event IDs against it.
+ROLE IN CODEBASE: JevDoneGate.review calls JevRunEventLog.from_loop_state and passes the rendered log to JevRunHandoffAgent; section parsers check cited event IDs against it.
 ARCHITECTURE NOTE: No middleware records anything; the loop state already holds the request, each iteration's assistant text, and every tool call tagged with its iteration, and those lists only grow, so IDs stay stable across finish attempts.
 COMMON MODIFICATION PATTERNS: Add a new event source by appending events in iteration order inside from_loop_state; never reorder existing sources, because earlier handoffs cite their IDs.
 KNOWN EDGE CASES: isDone calls are skipped because the proposed answer is passed separately; only the final attempt of a retried tool call exists in call_contexts; long bodies are cut with an explicit marker, never silently.
@@ -15,10 +15,10 @@ import json
 from collections import defaultdict
 from collections.abc import Sequence
 
-from vidbyte.agents.jev.run_state import JevRunEvent
+from vidbyte.agents.jev.done.run_state import JevRunEvent
 from vidbyte.agents.runtime import BaseAgentRuntimeLoopState
 from vidbyte.lib.constants.jev import JEV_EVENT_ID_PREFIX, JEV_EVENT_LOG_MAX_EVENT_CHARS
-from vidbyte.lib.enums.jev_run_state import JevRunEventKind
+from vidbyte.lib.enums.jev import JevRunEventKind
 from vidbyte.tools._internal import IS_DONE_TOOL_NAME
 from vidbyte.tools.types import ToolCallContext
 

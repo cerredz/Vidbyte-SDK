@@ -1,9 +1,9 @@
-"""FILE: vidbyte/agents/jev/run_state.py
+"""FILE: vidbyte/agents/jev/done/run_state.py
 
 PURPOSE: Defines JevAgent's structured run state, the matching finish-attempt handoff, the run report, and the contract every setting-enabled section implements.
-ROLE IN CODEBASE: builders.py fills JevRunState once before the loop and JevRunHandoff at each finish attempt; runtime.py reviews each active JevRunSection and attaches a JevRunReport to the result.
+ROLE IN CODEBASE: builders.py fills JevRunState once before the loop and JevRunHandoff at each finish attempt; JevDoneGate (gate.py) reviews each active JevRunSection and reports the JevRunReport through JevResponse, so callers read it as JevAgent.response.run_report.
 ARCHITECTURE NOTE: The base state (goal, objective, mission, what_not_to_do, constraints, proposed_plan) is shared by every done check; each JevAgentSettings flag contributes one JevRunSection that adds its own state, handoff, and review, so builders never special-case a check.
-COMMON MODIFICATION PATTERNS: Add a done check by subclassing JevRunSection, adding a JevRunSectionKey member, and enabling it from a JevAgentSettings flag in runtime.py.
+COMMON MODIFICATION PATTERNS: Add a done check by subclassing JevRunSection, adding a JevRunSectionKey member, and enabling it from a JevAgentSettings flag in JevDoneGate.sections.
 KNOWN EDGE CASES: Payload parsing raises AgentExecutionError on any shape mismatch so a malformed builder answer can never pass as an empty section; a section whose state is not ACTIVE is never reviewed.
 RELATED DOCS: docs/design/jev-required-sequence.md and skills/jev-agent/SKILL.md.
 TESTS: tests/test_jev_required_sequence.py.
@@ -20,13 +20,13 @@ from vidbyte.agents.pricing import JevUsage
 from vidbyte.agents.pricing.records import UsageRollup
 from vidbyte.lib.constants.jev import JEV_EVENT_ID_PREFIX
 from vidbyte.lib.dataclasses.agents import FinishReviewAction
-from vidbyte.lib.enums.jev_run_state import (
+from vidbyte.lib.dataclasses.model_configs import DecisionModelConfig
+from vidbyte.lib.enums.jev import (
     JevRunEventKind,
     JevRunSectionKey,
     JevSectionStatus,
 )
 from vidbyte.lib.errors import AgentExecutionError
-from vidbyte.lib.runners.decision import DecisionModelRunner
 
 JsonSchema = dict[str, Any]
 JsonPayload = Mapping[str, Any]
@@ -194,7 +194,7 @@ class JevRunSection(ABC):
         """Validate the handoff builder's section payload against the state and the event log."""
 
     @abstractmethod
-    async def areview(self, *, state: JevSectionState, handoff: JevSectionHandoff, decider: DecisionModelRunner | None) -> JevSectionReview:
+    async def areview(self, *, state: JevSectionState, handoff: JevSectionHandoff, decision: DecisionModelConfig) -> JevSectionReview:
         """Decide whether this section passes, asking Jev only the recognition questions code cannot answer."""
 
 
@@ -324,7 +324,7 @@ class JevFinishReviewRecord:
 
 @dataclass(frozen=True, slots=True)
 class JevRunReport:
-    """Run-level record attached to the result metadata whenever a run-state section is enabled."""
+    """Run-level record JevResponse writes to JevAgent.response.run_report whenever a run-state section is enabled."""
 
     run_state: JevRunState
     finish_reviews: tuple[JevFinishReviewRecord, ...] = ()

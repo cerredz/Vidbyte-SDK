@@ -1,7 +1,7 @@
-"""FILE: vidbyte/agents/jev/builders.py
+"""FILE: vidbyte/agents/jev/done/builders.py
 
 PURPOSE: Defines the two generative builders behind JevAgent's done checks: one turns the request into a JevRunState before the loop, the other turns the run into a matching JevRunHandoff at each finish attempt.
-ROLE IN CODEBASE: JevRuntime constructs a fresh builder per build and reads its validated record; both extend JevStructuredBuilderAgent, a tool-free BaseAgent with a strict output schema.
+ROLE IN CODEBASE: JevDoneGate constructs a fresh builder per build and reads its validated record; both extend JevStructuredBuilderAgent, a tool-free BaseAgent with a strict output schema, like JevClarificationAgent in vidbyte/agents/jev/gate/.
 ARCHITECTURE NOTE: Builders reuse the main agent's runner and model settings, and assemble their system prompt and output schema from the enabled JevRunSection objects, so adding a section never changes this file.
 COMMON MODIFICATION PATTERNS: Change builder wording in vidbyte/prompts/prompts/jev_run_state/; change a section's fields in its JevRunSection, not here.
 KNOWN EDGE CASES: Unlike HandoffAgent there is no prose fallback: a schema miss raises OutputSchemaViolationError, because a finish gate must never accept an unparsed handoff.
@@ -16,8 +16,8 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from vidbyte.agents.base import BaseAgent
-from vidbyte.agents.jev.event_log import JevRunEventLog
-from vidbyte.agents.jev.run_state import (
+from vidbyte.agents.jev.done.event_log import JevRunEventLog
+from vidbyte.agents.jev.done.run_state import (
     JevRunHandoff,
     JevRunSection,
     JevRunState,
@@ -27,9 +27,9 @@ from vidbyte.agents.jev.run_state import (
 from vidbyte.agents.jev.settings import JevAgentSettings
 from vidbyte.agents.pricing.records import UsageRollup
 from vidbyte.agents.settings import AgentLoopSettings
-from vidbyte.lib.dataclasses.runner import RunnerHandle
 from vidbyte.lib.constants.jev import JEV_BUILDER_MAX_ITERATIONS
 from vidbyte.lib.constants.runners import RUNNER_TYPE_TEXT
+from vidbyte.lib.dataclasses.runner import RunnerHandle
 from vidbyte.lib.enums.prompts import Prompt
 from vidbyte.lib.errors import AgentExecutionError
 from vidbyte.prompts.catalog import Prompts
@@ -59,7 +59,7 @@ class JevStructuredBuilderAgent(BaseAgent):
     async def abuild_payload(self, prompt: str) -> JsonPayload:
         """Run once and return the schema-validated JSON object."""
         reply = await self.arun(prompt)
-        structured = reply.metadata.get("structured")
+        structured = reply.structured
         if not isinstance(structured, Mapping):
             raise AgentExecutionError(
                 f"Builder '{self.name}' returned no structured object.",
@@ -84,7 +84,7 @@ class JevRunStateAgent(JevStructuredBuilderAgent):
         # Assembles the prompt and schema from the base state plus every enabled section.
         self.sections = tuple(sections)
         super().__init__(
-            name="jev-run-state",
+            name=f"{settings.name}-run-state",
             system_prompt=self.compose_prompt(Prompt.JEV_RUN_STATE_STATE_BUILDER, [section.state_instructions() for section in self.sections]),
             output_schema=JevRunState.schema({section.key: section.state_schema() for section in self.sections}),
             settings=settings,
@@ -108,7 +108,7 @@ class JevRunHandoffAgent(JevStructuredBuilderAgent):
         self.run_state = run_state
         self.sections = tuple(sections)
         super().__init__(
-            name="jev-run-handoff",
+            name=f"{settings.name}-run-handoff",
             system_prompt=self.compose_prompt(Prompt.JEV_RUN_STATE_HANDOFF_BUILDER, [section.handoff_instructions() for section in self.sections]),
             output_schema=JevRunHandoff.schema({section.key: section.handoff_schema(run_state.sections[section.key]) for section in self.sections}),
             settings=settings,

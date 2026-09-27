@@ -1,8 +1,8 @@
-"""FILE: vidbyte/agents/jev/required_sequence.py
+"""FILE: vidbyte/agents/jev/done/required_sequence.py
 
 PURPOSE: Implements done check #15 as a JevRunSection: derive the ordered stages a request requires, and accept a finish attempt only when the recorded run shows every stage done, in order.
-ROLE IN CODEBASE: JevRuntime enables JevRequiredSequence when JevAgentSettings.required_sequence is true; the builders add its state and handoff parts, and its areview decides each finish attempt.
-ARCHITECTURE NOTE: Code owns every fact: stage IDs, the source-text check, cited-event validation, the order rule, and the combination of answers. Jev only answers two recognition questions per stage (work shown, previous output used) over the handoff's descriptions, following skills/asking-jev-questions/SKILL.md.
+ROLE IN CODEBASE: JevDoneGate enables JevRequiredSequence when JevAgentSettings.required_sequence is true; the builders add its state and handoff parts, and its areview decides each finish attempt.
+ARCHITECTURE NOTE: Code owns every fact: stage IDs, the source-text check, cited-event validation, the order rule, and the combination of answers. Jev only answers two recognition questions per stage (work shown, previous output used) over the handoff's descriptions, following skills/asking-jev-questions/SKILL.md; DecisionModelRunner.score_noul turns each answer into a pass or fail, as it does for the preflight gate.
 COMMON MODIFICATION PATTERNS: Change question wording in _work_question or _previous_question and keep the named state fields they point at in _jev_state in sync.
 KNOWN EDGE CASES: A stage with no located work fails in code and is never sent to Jev; the order rule forbids interleaving, so going back to an earlier stage after a later one began is out of order until every later stage is redone.
 RELATED DOCS: docs/design/jev-required-sequence.md and skills/jev-agent/SKILL.md.
@@ -15,7 +15,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from vidbyte.agents.jev.run_state import (
+from vidbyte.agents.jev.done.run_state import (
     JevPayload,
     JevRunEvent,
     JevRunSection,
@@ -28,15 +28,20 @@ from vidbyte.agents.jev.run_state import (
 )
 from vidbyte.agents.pricing import JevUsage
 from vidbyte.lib.constants.jev import (
-    JEV_NOUL_TRUE,
     JEV_NOUL_YES_THRESHOLD,
     JEV_REQUIRED_SEQUENCE_MAX_STAGES,
     JEV_REQUIRED_SEQUENCE_MIN_STAGES,
     JEV_STAGE_ID_PREFIX,
 )
-from vidbyte.lib.dataclasses.jev import JevAnswer, JevDecisionRequest, JevQuestion
-from vidbyte.lib.enums import JevQuestionType
-from vidbyte.lib.enums.jev_run_state import (
+from vidbyte.lib.dataclasses.jev import (
+    JevAnswer,
+    JevDecisionRequest,
+    JevNoulScore,
+    JevQuestion,
+)
+from vidbyte.lib.dataclasses.model_configs import DecisionModelConfig
+from vidbyte.lib.enums.jev import (
+    JevQuestionType,
     JevRunSectionKey,
     JevSectionStatus,
     JevStageFailure,
@@ -238,13 +243,13 @@ class JevRequiredSequence(JevRunSection):
             raise self._handoff_error(f"The handoff has no entry for {missing}; include every stage, even one with no work.", missing=missing)
         return JevRequiredSequenceHandoff(stages=tuple(entries[stage.stage_id] for stage in stages))
 
-    async def areview(self, *, state: JevSectionState, handoff: JevSectionHandoff, decider: DecisionModelRunner | None) -> JevSectionReview:
+    async def areview(self, *, state: JevSectionState, handoff: JevSectionHandoff, decision: DecisionModelConfig) -> JevSectionReview:
         """Apply the code checks, ask Jev about stages with work, and name the first failing stage."""
         if not isinstance(handoff, JevRequiredSequenceHandoff):
             raise AgentExecutionError("The required_sequence review needs a required_sequence handoff.", details={"received": type(handoff).__name__})
         pairs: tuple[_StagePair, ...] = tuple(zip(self._state(state).stages, handoff.stages, strict=True))
         questions = self._questions(pairs)
-        answers, jev_available, usage = await self._aask(decider, pairs, questions)
+        answers, jev_available, usage = await self._aask(decision, pairs, questions)
         verdicts = tuple(self._verdict(index, pairs, answers) for index in range(len(pairs)))
         failing = next((index for index, verdict in enumerate(verdicts) if verdict.failure is not None), None)
         feedback = "" if failing is None else self._feedback(failing, pairs, verdicts[failing])
@@ -340,12 +345,7 @@ class JevRequiredSequence(JevRunSection):
         return JevQuestion(
             name=f"{stage.stage_id}_work_shown",
             question_type=JevQuestionType.NOUL,
-            instructions=(
-                f"`{field}` describes the {stage.name} stage of a task. Its `completion_criterion` defines what finishing this stage looks like. "
-                f"Its `observed_work` lists the work a reviewer found in the agent's recorded actions for this stage. "
-                f"Items in its `failures` did not succeed and do not count as work. Its `missing_or_uncertain` lists what the reviewer could not find. "
-                f"Does `{field}.observed_work` show the work that `{field}.completion_criterion` describes?"
-            ),
+            instructions=f"`{field}` describes the {stage.name} stage of a task. Its `completion_criterion` defines what finishing this stage looks like. Its `observed_work` lists the work a reviewer found in the agent's recorded actions for this stage. Items in its `failures` did not succeed and do not count as work. Its `missing_or_uncertain` lists what the reviewer could not find. Does `{field}.observed_work` show the work that `{field}.completion_criterion` describes?",
         )
 
     @staticmethod
@@ -355,11 +355,7 @@ class JevRequiredSequence(JevRunSection):
         return JevQuestion(
             name=f"{stage.stage_id}_uses_previous_output",
             question_type=JevQuestionType.NOUL,
-            instructions=(
-                f"`{prior}.outputs_produced` lists what the {previous.name} stage produced, and `{prior}.produces` names the output it was meant to produce. "
-                f"`{field}.inputs_used` lists what the {stage.name} stage worked from. "
-                f"Does `{field}.inputs_used` include an output of the {previous.name} stage, as listed in `{prior}.outputs_produced` or named in `{prior}.produces`?"
-            ),
+            instructions=f"`{prior}.outputs_produced` lists what the {previous.name} stage produced, and `{prior}.produces` names the output it was meant to produce. `{field}.inputs_used` lists what the {stage.name} stage worked from. Does `{field}.inputs_used` include an output of the {previous.name} stage, as listed in `{prior}.outputs_produced` or named in `{prior}.produces`?",
         )
 
     @staticmethod
@@ -381,14 +377,15 @@ class JevRequiredSequence(JevRunSection):
             }
         }
 
-    async def _aask(self, decider: DecisionModelRunner | None, pairs: Sequence[_StagePair], questions: tuple[JevQuestion, ...]) -> tuple[Mapping[str, JevAnswer], bool, JevUsage | None]:
-        # One batched Jev request; without a decider or on a provider failure only the code checks decide.
+    async def _aask(self, decision: DecisionModelConfig, pairs: Sequence[_StagePair], questions: tuple[JevQuestion, ...]) -> tuple[Mapping[str, JevAnswer], bool, JevUsage | None]:
+        # One batched Jev request; a missing TypeSafe key or a provider failure leaves only the code checks.
+        # @intent jev-outage-keeps-the-code-checks
+        # Like the preflight gate, a Jev failure is not a verdict: the order and presence checks still gate,
+        # and only the two recognition questions are skipped and reported as jev_available=False.
         if not questions:
             return {}, True, None
-        if decider is None:
-            return {}, False, None
         try:
-            response = await decider.arun(JevDecisionRequest(state=self._jev_state(pairs), questions=questions))
+            response = await DecisionModelRunner(decision).arun(JevDecisionRequest(state=self._jev_state(pairs), questions=questions))
         except VidbyteSdkError:
             return {}, False, None
         return dict(response.answers), True, JevUsage.from_usage_payload(response.usage or {})
@@ -396,30 +393,30 @@ class JevRequiredSequence(JevRunSection):
     def _verdict(self, index: int, pairs: Sequence[_StagePair], answers: Mapping[str, JevAnswer]) -> JevStageVerdict:
         # Combines code facts and Jev answers for one stage; code facts always win.
         stage, entry = pairs[index]
-        work = self._true_probability(answers, f"{stage.stage_id}_work_shown")
-        previous = self._true_probability(answers, f"{stage.stage_id}_uses_previous_output")
-        return JevStageVerdict(stage_id=stage.stage_id, failure=self._first_failure(index, pairs, work, previous), work_shown_probability=work, uses_previous_probability=previous)
+        work = DecisionModelRunner.score_noul(answers, (f"{stage.stage_id}_work_shown",), JEV_NOUL_YES_THRESHOLD)
+        previous = DecisionModelRunner.score_noul(answers, (f"{stage.stage_id}_uses_previous_output",), JEV_NOUL_YES_THRESHOLD)
+        return JevStageVerdict(
+            stage_id=stage.stage_id,
+            failure=self._first_failure(index, pairs, work, previous),
+            work_shown_probability=None if work is None else work.score,
+            uses_previous_probability=None if previous is None else previous.score,
+        )
 
     @staticmethod
-    def _first_failure(index: int, pairs: Sequence[_StagePair], work: float | None, previous: float | None) -> JevStageFailure | None:
+    def _first_failure(index: int, pairs: Sequence[_StagePair], work: JevNoulScore | None, previous: JevNoulScore | None) -> JevStageFailure | None:
         # Order of checks: located work, strict order after the previous stage, then Jev's two recognitions.
+        # A None score means the question was not asked or Jev was unavailable, so it never fails a stage.
         entry = pairs[index][1]
         if not entry.has_work():
             return JevStageFailure.NO_WORK
         prior = pairs[index - 1][1] if index > 0 else None
         if prior is not None and prior.has_work() and JevRunEvent.position(entry.first_event_id) <= JevRunEvent.position(prior.last_work_event_id):
             return JevStageFailure.OUT_OF_ORDER
-        if work is not None and work < JEV_NOUL_YES_THRESHOLD:
+        if work is not None and not work.passed:
             return JevStageFailure.WORK_NOT_SHOWN
-        if previous is not None and previous < JEV_NOUL_YES_THRESHOLD:
+        if previous is not None and not previous.passed:
             return JevStageFailure.PREVIOUS_OUTPUT_NOT_USED
         return None
-
-    @staticmethod
-    def _true_probability(answers: Mapping[str, JevAnswer], name: str) -> float | None:
-        # A missing answer means the question was not asked or Jev was unavailable.
-        answer = answers.get(name)
-        return None if answer is None else answer.probabilities.get(JEV_NOUL_TRUE)
 
     @staticmethod
     def _feedback(index: int, pairs: Sequence[_StagePair], verdict: JevStageVerdict) -> str:
@@ -430,10 +427,7 @@ class JevRequiredSequence(JevRunSection):
         if verdict.failure is JevStageFailure.NO_WORK:
             detail = f"{stage.label()} has no recorded work. Finishing it means: {stage.completion_criterion} Do this stage, {redo_later}"
         elif verdict.failure is JevStageFailure.OUT_OF_ORDER and previous is not None:
-            detail = (
-                f"{stage.label()} began at {entry.first_event_id}, before {previous[0].label()} finished at {previous[1].last_work_event_id}. "
-                f"Finish all {previous[0].name} work first, then redo {stage.label()} and every later stage in order."
-            )
+            detail = f"{stage.label()} began at {entry.first_event_id}, before {previous[0].label()} finished at {previous[1].last_work_event_id}. Finish all {previous[0].name} work first, then redo {stage.label()} and every later stage in order."
         elif verdict.failure is JevStageFailure.PREVIOUS_OUTPUT_NOT_USED and previous is not None:
             output = previous[0].produces or "its output"
             detail = f"{stage.label()} does not show that it worked from {previous[0].label()}'s output ({output}). Redo {stage.label()} using that output, {redo_later}"

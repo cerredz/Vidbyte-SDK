@@ -4,9 +4,9 @@ PURPOSE: Defines the validated records for TypeSafe Jev decisions (JSON content,
 ROLE IN CODEBASE: `vidbyte/providers/typesafe.py` builds TypeSafeWireRequest from JevDecisionRequest and JevAnswer values from responses, while `vidbyte/lib/runners/decision.py` passes the typed records through.
 ARCHITECTURE NOTE: This module must not import model_configs because that would close an import cycle through ModalityDetector. Records own every shape rule in __post_init__; the provider, not these records, turns a wire record into the JSON body (lint S060 bars dict[str, Any] encoders here).
 COMMON MODIFICATION PATTERNS: Mirror https://docs.typesafe.ai/api.md exactly: add a field together with its validation, its wire record, and its provider serialization; keep bounds in vidbyte/lib/constants/jev.py.
-KNOWN EDGE CASES: State, instructions, and criteria may be a string or JSON structure; noul criteria are optional; score answers carry a probability-weighted `score` that can land between levels; noul answers carry no confidence. JevPreflightQuestion is deliberately not slotted because every concrete question subclass redeclares its fields with defaults. The two clarification payloads are pydantic models because they are the output_schema JevClarificationAgent is held to.
+KNOWN EDGE CASES: State, instructions, and criteria may be a string or JSON structure; noul criteria are optional; score answers carry a probability-weighted `score` that can land between levels; noul answers carry no confidence. JevPreflightQuestion is deliberately not slotted because every concrete question subclass redeclares its fields with defaults. The two clarification payloads are pydantic models because they are the output_schema JevClarificationAgent is held to. JevAgentResponse.run_report is typed through a TYPE_CHECKING import because the done-check records live with their builders in vidbyte/agents/jev/done/.
 RELATED DOCS: docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, https://docs.typesafe.ai/api.md, and https://docs.typesafe.ai/primitives/advanced.md.
-TESTS: tests/test_jev_agent.py, tests/test_jev_preflight.py, and scripts/test-jev-agent-scaffold.py.
+TESTS: tests/test_jev_agent.py, tests/test_jev_preflight.py, tests/test_jev_required_sequence.py, and scripts/test-jev-agent-scaffold.py.
 """
 
 from __future__ import annotations
@@ -44,6 +44,7 @@ from vidbyte.lib.enums.jev import (
 from vidbyte.lib.errors import ConfigurationError
 
 if TYPE_CHECKING:
+    from vidbyte.agents.jev.done.run_state import JevRunReport
     from vidbyte.agents.pricing import ProviderUsage, UsageRollup
 
 # A frozen JSON value as TypeSafe accepts it: a string, or a read-only mapping / tuple of JSON values.
@@ -653,6 +654,7 @@ class JevAgentResponse:
     JevResponse is the only writer: it resets this record at the start of each run and fills it as the
     preflight gate acts. `results` holds one entry per enabled fixed-question preset, `usage` is the one
     preflight Jev call's usage, and `clarification` is set only when the gate stopped the run to ask the user.
+    `run_report` is set only when a done check is enabled: the run state, every finish review, and builder usage.
     """
 
     input: str = ""
@@ -660,6 +662,7 @@ class JevAgentResponse:
     results: dict[JevPreflightPreset, JevPresetResult] = field(default_factory=dict)
     clarification: JevClarification | None = None
     usage: ProviderUsage | None = None
+    run_report: JevRunReport | None = None
 
     @property
     def needs_clarification(self) -> bool:

@@ -3,7 +3,7 @@
 PURPOSE: Verifies JevAgent's required-sequence done check end to end without network access.
 ROLE IN CODEBASE: Covers docs/design/jev-required-sequence.md: stage derivation, the event log, handoff validation and rebuild, the code order checks, the Jev questions, and the AgentRuntime finish-attempt seam on both finish paths.
 ARCHITECTURE NOTE: One scripted runner serves the run-state builder, the main loop, and the handoff builder in call order; a scripted decider replaces only the TypeSafe boundary.
-COMMON MODIFICATION PATTERNS: Script a new scenario as [state, main-loop responses..., handoff, ...] and assert on the JevRunReport in the reply metadata.
+COMMON MODIFICATION PATTERNS: Script a new scenario as [state, main-loop responses..., handoff, ...] and assert on the JevRunReport in JevAgent.response.run_report.
 KNOWN EDGE CASES: Event IDs in scripted handoffs must match the log the runtime builds (E1 is the request; empty assistant text adds no event).
 RELATED DOCS: docs/design/jev-required-sequence.md and skills/jev-agent/SKILL.md.
 TESTS: python -m pytest tests/test_jev_required_sequence.py.
@@ -20,16 +20,17 @@ from unittest.mock import patch
 from tests.agent_test_support import bind_test_runner
 from vidbyte import tool
 from vidbyte.agents.jev import JevAgent, JevAgentSettings
-from vidbyte.agents.jev.required_sequence import (
+from vidbyte.agents.jev.done.required_sequence import (
     JevRequiredSequence,
     JevRequiredSequenceReview,
     JevRequiredSequenceState,
 )
-from vidbyte.agents.jev.run_state import JevRunReport
-from vidbyte.lib.constants.jev import JEV_RUN_REPORT_METADATA_KEY
+from vidbyte.agents.jev.done.run_state import JevRunReport
 from vidbyte.lib.dataclasses.agents import FinishReviewAction
 from vidbyte.lib.dataclasses.jev import JevAnswer, JevDecisionRequest
+from vidbyte.lib.dataclasses.model_configs import DecisionModelConfig
 from vidbyte.lib.enums import (
+    JevPreflightPreset,
     JevQuestionType,
     JevRunSectionKey,
     JevSectionStatus,
@@ -38,10 +39,13 @@ from vidbyte.lib.enums import (
 )
 from vidbyte.lib.errors import ConfigurationError
 from vidbyte.lib.runners import TextModelResponse
+from vidbyte.lib.runners.decision import DecisionModelRunner
 from vidbyte.lib.runners.types import DecisionModelResponse
 
 REQUEST = "First research the topic, then write a draft from your research."
 RESEARCH = {"name": "Research", "source_text": "research the topic", "completion_criterion": "Sources on the topic were looked up.", "produces": "research notes", "depends_on_previous": False}
+_RUNNER_PATH = "vidbyte.agents.jev.done.required_sequence.DecisionModelRunner"
+_CONTINUATIONS_PATH = "vidbyte.agents.jev.done.gate.JEV_MAX_FINISH_REVIEW_CONTINUATIONS"
 DRAFT = {"name": "Draft", "source_text": "write a draft from your research", "completion_criterion": "A draft exists.", "produces": "the draft", "depends_on_previous": True}
 
 
@@ -82,6 +86,19 @@ class ScriptedDecider:
         overrides = self.rounds.pop(0) if self.rounds else {}
         answers = {question.name: _noul(question.name, overrides.get(question.name, 0.9)) for question in request.questions}
         return DecisionModelResponse(provider=ModelProvider.TYPESAFE, model="jev-test", answers=answers, raw={}, usage={})
+
+
+def _runner_class(decider: ScriptedDecider | Exception) -> type:
+    # Stands in for DecisionModelRunner: construction returns the scripted decider (or raises), while score_noul stays real.
+    class ScriptedRunnerClass:
+        score_noul = staticmethod(DecisionModelRunner.score_noul)
+
+        def __new__(cls, *args: Any, **kwargs: Any) -> ScriptedDecider:  # type: ignore[misc]
+            if isinstance(decider, Exception):
+                raise decider
+            return decider
+
+    return ScriptedRunnerClass
 
 
 def _noul(name: str, probability: float) -> JevAnswer:
@@ -157,9 +174,9 @@ def _agent(runner: ScriptedRunner, *, required_sequence: bool = True) -> JevAgen
     return bind_test_runner(JevAgent(settings), runner)
 
 
-def _report(reply: Any) -> JevRunReport:
-    # The run report attached to the reply metadata.
-    report = reply.metadata[JEV_RUN_REPORT_METADATA_KEY]
+def _report(agent: JevAgent) -> JevRunReport:
+    # The run report JevResponse wrote for the agent's most recent run.
+    report = agent.response.run_report
     assert isinstance(report, JevRunReport)
     return report
 
@@ -168,29 +185,33 @@ class JevRequiredSequenceTests(unittest.IsolatedAsyncioTestCase):
     """Behavior of the required-sequence done check through the public JevAgent API."""
 
     async def test_disabled_setting_leaves_the_loop_unchanged(self) -> None:
-        # [Silent Failure] without the setting no builder runs and no report is attached.
+        # [Silent Failure] without the setting no builder runs and no report is written.
         runner = ScriptedRunner(_text("plain answer"))
-        reply = await _agent(runner, required_sequence=False).arun(REQUEST)
+        agent = _agent(runner, required_sequence=False)
+        reply = await agent.arun(REQUEST)
         self.assertEqual(reply.content, "plain answer")
         self.assertEqual(len(runner.calls), 1)
-        self.assertNotIn(JEV_RUN_REPORT_METADATA_KEY, reply.metadata)
+        self.assertIsNone(agent.response.run_report)
+        self.assertEqual(agent.response.output, "plain answer")
 
     async def test_request_without_order_is_inactive_and_ungated(self) -> None:
         # [Edge Case] no required order means no stage prompt and no finish review.
         runner = ScriptedRunner(_state(), _text("answer"))
-        reply = await _agent(runner).arun("Add tests and update the docs.")
-        section = _report(reply).run_state.sections[JevRunSectionKey.REQUIRED_SEQUENCE]
+        agent = _agent(runner)
+        reply = await agent.arun("Add tests and update the docs.")
+        section = _report(agent).run_state.sections[JevRunSectionKey.REQUIRED_SEQUENCE]
         self.assertIs(section.status, JevSectionStatus.INACTIVE)
         self.assertEqual(section.reason, "request_has_no_required_order")
         self.assertEqual(len(runner.calls), 2)
-        self.assertEqual(_report(reply).finish_reviews, ())
+        self.assertEqual(_report(agent).finish_reviews, ())
 
     async def test_stage_not_quoted_from_request_is_inactive(self) -> None:
         # [Hidden Assumption] an invented stage turns the gate off instead of blocking a correct run.
         invented = {**DRAFT, "source_text": "publish it"}
         runner = ScriptedRunner(_state(RESEARCH, invented), _text("answer"))
-        reply = await _agent(runner).arun(REQUEST)
-        section = _report(reply).run_state.sections[JevRunSectionKey.REQUIRED_SEQUENCE]
+        agent = _agent(runner)
+        reply = await agent.arun(REQUEST)
+        section = _report(agent).run_state.sections[JevRunSectionKey.REQUIRED_SEQUENCE]
         self.assertIs(section.status, JevSectionStatus.INACTIVE)
         self.assertEqual(section.reason, "stage_source_not_in_request")
 
@@ -204,13 +225,14 @@ class JevRequiredSequenceTests(unittest.IsolatedAsyncioTestCase):
             _handoff(_entry("stage_1", ["E2"], outputs=["research notes"]), _entry("stage_2", ["E3"], inputs=["research notes"])),
         )
         decider = ScriptedDecider()
-        with patch("vidbyte.agents.jev.runtime.DecisionModelRunner", return_value=decider):
-            reply = await _agent(runner).arun(REQUEST)
+        with patch(_RUNNER_PATH, new=_runner_class(decider)):
+            agent = _agent(runner)
+            reply = await agent.arun(REQUEST)
         self.assertEqual(reply.content, "Here is the draft.")
         self.assertIn("Stage 1 (Research): Sources on the topic were looked up.", json.dumps(runner.calls[1]["kwargs"], default=str))
         self.assertEqual([question.name for question in decider.requests[0].questions], ["stage_1_work_shown", "stage_2_work_shown", "stage_2_uses_previous_output"])
         self.assertEqual(set(decider.requests[0].state["stages"]), {"stage_1", "stage_2"})
-        record = _report(reply).finish_reviews[0]
+        record = _report(agent).finish_reviews[0]
         self.assertIs(record.action, FinishReviewAction.ACCEPT)
         review = record.reviews[0]
         self.assertIsInstance(review, JevRequiredSequenceReview)
@@ -229,10 +251,11 @@ class JevRequiredSequenceTests(unittest.IsolatedAsyncioTestCase):
             _handoff(_entry("stage_1", ["E2"], outputs=["notes"]), _entry("stage_2", ["E5"], inputs=["notes"])),
         )
         decider = ScriptedDecider()
-        with patch("vidbyte.agents.jev.runtime.DecisionModelRunner", return_value=decider):
-            reply = await _agent(runner).arun(REQUEST)
+        with patch(_RUNNER_PATH, new=_runner_class(decider)):
+            agent = _agent(runner)
+            reply = await agent.arun(REQUEST)
         self.assertEqual(reply.content, "Draft written.")
-        first, second = _report(reply).finish_reviews
+        first, second = _report(agent).finish_reviews
         self.assertIs(first.action, FinishReviewAction.CONTINUE)
         self.assertIs(first.reviews[0].stages[1].failure, JevStageFailure.NO_WORK)
         self.assertEqual([question.name for question in decider.requests[0].questions], ["stage_1_work_shown"])
@@ -252,12 +275,13 @@ class JevRequiredSequenceTests(unittest.IsolatedAsyncioTestCase):
             _text("Redrafted from the full research."),
             _handoff(_entry("stage_1", ["E2", "E4"]), _entry("stage_2", ["E7"])),
         )
-        with patch("vidbyte.agents.jev.runtime.DecisionModelRunner", return_value=ScriptedDecider()):
-            reply = await _agent(runner).arun(REQUEST)
-        first = _report(reply).finish_reviews[0]
+        with patch(_RUNNER_PATH, new=_runner_class(ScriptedDecider())):
+            agent = _agent(runner)
+            reply = await agent.arun(REQUEST)
+        first = _report(agent).finish_reviews[0]
         self.assertIs(first.reviews[0].stages[1].failure, JevStageFailure.OUT_OF_ORDER)
         self.assertIn("began at E3, before Stage 1 (Research) finished at E4", first.reviews[0].feedback)
-        self.assertIs(_report(reply).finish_reviews[1].action, FinishReviewAction.ACCEPT)
+        self.assertIs(_report(agent).finish_reviews[1].action, FinishReviewAction.ACCEPT)
 
     async def test_jev_rejecting_the_work_sends_the_agent_back(self) -> None:
         # [Hidden Failure] listed work that does not show the criterion is not accepted.
@@ -271,9 +295,10 @@ class JevRequiredSequenceTests(unittest.IsolatedAsyncioTestCase):
             _handoff(_entry("stage_1", ["E2"]), _entry("stage_2", ["E3", "E6"])),
         )
         decider = ScriptedDecider({"stage_2_work_shown": 0.1})
-        with patch("vidbyte.agents.jev.runtime.DecisionModelRunner", return_value=decider):
-            reply = await _agent(runner).arun(REQUEST)
-        first, second = _report(reply).finish_reviews
+        with patch(_RUNNER_PATH, new=_runner_class(decider)):
+            agent = _agent(runner)
+            reply = await agent.arun(REQUEST)
+        first, second = _report(agent).finish_reviews
         verdict = first.reviews[0].stages[1]
         self.assertIs(verdict.failure, JevStageFailure.WORK_NOT_SHOWN)
         self.assertAlmostEqual(verdict.work_shown_probability or 0.0, 0.1)
@@ -288,9 +313,10 @@ class JevRequiredSequenceTests(unittest.IsolatedAsyncioTestCase):
             _text("Done."),
             _handoff(_entry("stage_1", ["E2"]), _entry("stage_2", ["E3"])),
         )
-        with patch("vidbyte.agents.jev.runtime.DecisionModelRunner", return_value=ScriptedDecider({"stage_2_uses_previous_output": 0.2})), patch("vidbyte.agents.jev.runtime.JEV_MAX_FINISH_REVIEW_CONTINUATIONS", 0):
-            reply = await _agent(runner).arun(REQUEST)
-        record = _report(reply).finish_reviews[0]
+        with patch(_RUNNER_PATH, new=_runner_class(ScriptedDecider({"stage_2_uses_previous_output": 0.2}))), patch(_CONTINUATIONS_PATH, 0):
+            agent = _agent(runner)
+            reply = await agent.arun(REQUEST)
+        record = _report(agent).finish_reviews[0]
         self.assertIs(record.reviews[0].stages[1].failure, JevStageFailure.PREVIOUS_OUTPUT_NOT_USED)
         self.assertIn("worked from Stage 1 (Research)'s output (research notes)", record.reviews[0].feedback)
 
@@ -301,10 +327,11 @@ class JevRequiredSequenceTests(unittest.IsolatedAsyncioTestCase):
             _text("Done."),
             _handoff(_entry("stage_1"), _entry("stage_2")),
         )
-        with patch("vidbyte.agents.jev.runtime.DecisionModelRunner", return_value=ScriptedDecider()), patch("vidbyte.agents.jev.runtime.JEV_MAX_FINISH_REVIEW_CONTINUATIONS", 0):
-            reply = await _agent(runner).arun(REQUEST)
+        with patch(_RUNNER_PATH, new=_runner_class(ScriptedDecider())), patch(_CONTINUATIONS_PATH, 0):
+            agent = _agent(runner)
+            reply = await agent.arun(REQUEST)
         self.assertEqual(reply.metadata["stop_reason"], "finish_review_rejected")
-        self.assertIs(_report(reply).finish_reviews[0].action, FinishReviewAction.STOP)
+        self.assertIs(_report(agent).finish_reviews[0].action, FinishReviewAction.STOP)
 
     async def test_missing_jev_key_falls_back_to_code_checks(self) -> None:
         # [Hidden Assumption] no TypeSafe key disables only the Jev questions; order and presence still gate.
@@ -315,9 +342,10 @@ class JevRequiredSequenceTests(unittest.IsolatedAsyncioTestCase):
             _text("Done."),
             _handoff(_entry("stage_1", ["E2"]), _entry("stage_2", ["E3"])),
         )
-        with patch("vidbyte.agents.jev.runtime.DecisionModelRunner", side_effect=ConfigurationError("no key")):
-            reply = await _agent(runner).arun(REQUEST)
-        review = _report(reply).finish_reviews[0].reviews[0]
+        with patch(_RUNNER_PATH, new=_runner_class(ConfigurationError("no key"))):
+            agent = _agent(runner)
+            reply = await agent.arun(REQUEST)
+        review = _report(agent).finish_reviews[0].reviews[0]
         self.assertTrue(review.passed)
         self.assertFalse(review.jev_available)
 
@@ -331,12 +359,13 @@ class JevRequiredSequenceTests(unittest.IsolatedAsyncioTestCase):
             _handoff(_entry("stage_1", ["E2"]), _entry("stage_2", ["E99"])),
             _handoff(_entry("stage_1", ["E2"]), _entry("stage_2", ["E3"])),
         )
-        with patch("vidbyte.agents.jev.runtime.DecisionModelRunner", return_value=ScriptedDecider()):
-            reply = await _agent(runner).arun(REQUEST)
+        with patch(_RUNNER_PATH, new=_runner_class(ScriptedDecider())):
+            agent = _agent(runner)
+            reply = await agent.arun(REQUEST)
         self.assertIn("# Correction", runner.calls[5]["prompt"])
         self.assertIn("E99", runner.calls[5]["prompt"])
-        self.assertIs(_report(reply).finish_reviews[0].action, FinishReviewAction.ACCEPT)
-        self.assertEqual(len(_report(reply).builder_usage), 3)
+        self.assertIs(_report(agent).finish_reviews[0].action, FinishReviewAction.ACCEPT)
+        self.assertEqual(len(_report(agent).builder_usage), 3)
 
     async def test_handoff_invalid_twice_accepts_and_flags(self) -> None:
         # [Edge Case] a builder that cannot describe the run leaves the finish accepted but recorded.
@@ -346,8 +375,9 @@ class JevRequiredSequenceTests(unittest.IsolatedAsyncioTestCase):
             _handoff(_entry("stage_1", ["E9"]), _entry("stage_2")),
             _handoff(_entry("stage_1", ["E9"]), _entry("stage_2")),
         )
-        reply = await _agent(runner).arun(REQUEST)
-        record = _report(reply).finish_reviews[0]
+        agent = _agent(runner)
+        reply = await agent.arun(REQUEST)
+        record = _report(agent).finish_reviews[0]
         self.assertIs(record.action, FinishReviewAction.ACCEPT)
         self.assertIsNone(record.handoff)
         self.assertTrue(record.handoff_failure.startswith("handoff_build_failed"))
@@ -363,11 +393,52 @@ class JevRequiredSequenceTests(unittest.IsolatedAsyncioTestCase):
             _call("isDone", {"final_answer": "complete"}, "c4"),
             _handoff(_entry("stage_1", ["E2"]), _entry("stage_2", ["E4"])),
         )
-        with patch("vidbyte.agents.jev.runtime.DecisionModelRunner", return_value=ScriptedDecider()):
-            reply = await _agent(runner).arun(REQUEST)
+        with patch(_RUNNER_PATH, new=_runner_class(ScriptedDecider())):
+            agent = _agent(runner)
+            reply = await agent.arun(REQUEST)
         self.assertEqual(reply.content, "complete")
-        self.assertEqual([record.action for record in _report(reply).finish_reviews], [FinishReviewAction.CONTINUE, FinishReviewAction.ACCEPT])
+        self.assertEqual([record.action for record in _report(agent).finish_reviews], [FinishReviewAction.CONTINUE, FinishReviewAction.ACCEPT])
         self.assertIn("Stage 2 (Draft) has no recorded work", json.dumps(runner.calls[4]["kwargs"], default=str))
+
+    async def test_next_run_replaces_the_previous_report(self) -> None:
+        # [Hidden Assumption] the done gate lives as long as the agent, so each run starts without the previous run's reviews or continuations.
+        runner = ScriptedRunner(
+            _state(RESEARCH, DRAFT),
+            _text("Done."),
+            _handoff(_entry("stage_1"), _entry("stage_2")),
+            _state(),
+            _text("answer"),
+        )
+        agent = _agent(runner)
+        with patch(_RUNNER_PATH, new=_runner_class(ScriptedDecider())), patch(_CONTINUATIONS_PATH, 0):
+            await agent.arun(REQUEST)
+            self.assertIs(_report(agent).finish_reviews[0].action, FinishReviewAction.STOP)
+            reply = await agent.arun("Add tests and update the docs.")
+        self.assertEqual(reply.content, "answer")
+        self.assertEqual(_report(agent).finish_reviews, ())
+        self.assertIs(_report(agent).run_state.sections[JevRunSectionKey.REQUIRED_SEQUENCE].status, JevSectionStatus.INACTIVE)
+
+    async def test_closed_preflight_gate_never_builds_the_run_state(self) -> None:
+        # [Silent Failure] a request the clarity gate stops spends no run-state build and leaves no run report.
+        runner = ScriptedRunner()
+        settings = JevAgentSettings(
+            name="jev",
+            system_prompt="Work carefully.",
+            provider="openai",
+            model_name="gpt-4.1-mini",
+            decision=DecisionModelConfig(api_key="test-key"),
+            preflight=(JevPreflightPreset.CLARITY,),
+            required_sequence=True,
+        )
+        agent = bind_test_runner(JevAgent(settings), runner)
+        clarifier = ScriptedRunner(_text(json.dumps({"questions": [{"question": "What should I build?", "recommendations": ["A login page", "A signup form"]}]})))
+        assert agent.preflight.clarification is not None
+        bind_test_runner(agent.preflight.clarification, clarifier)
+        with patch("vidbyte.agents.jev.gate.gate.DecisionModelRunner", new=_runner_class(ScriptedDecider({"clarity.object": 0.05}))):
+            await agent.arun("Build it")
+        self.assertTrue(agent.response.needs_clarification)
+        self.assertEqual(runner.calls, [])
+        self.assertIsNone(agent.response.run_report)
 
 
 class JevRequiredSequenceSettingsTests(unittest.TestCase):

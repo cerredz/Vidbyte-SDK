@@ -1,12 +1,12 @@
 """FILE: vidbyte/lib/constants/jev.py
 
-PURPOSE: Declares the TypeSafe Jev limits, defaults, and wire literals shared by the decision records and provider adapter, plus the JevAgent preflight policy values.
-ROLE IN CODEBASE: `vidbyte/lib/dataclasses/jev.py` validates against these bounds, `vidbyte/providers/typesafe.py` builds requests from the same values, `vidbyte/lib/jev/` reads the preflight policy values, and `vidbyte/agents/jev/` reads the tool-selector and clarification values.
+PURPOSE: Declares the TypeSafe Jev limits, defaults, and wire literals shared by the decision records and provider adapter, plus the JevAgent preflight and done-check policy values.
+ROLE IN CODEBASE: `vidbyte/lib/dataclasses/jev.py` validates against these bounds, `vidbyte/providers/typesafe.py` builds requests from the same values, `vidbyte/lib/jev/` reads the preflight policy values, `vidbyte/agents/jev/` reads the tool-selector and clarification values, and `vidbyte/agents/jev/done/` reads the done-check values.
 ARCHITECTURE NOTE: Values live in `vidbyte.lib` so both lower-layer modules and the tool layer can import them without a layering inversion.
 COMMON MODIFICATION PATTERNS: Change a vendor limit only after TypeSafe documents it; local sanity caps stay generous because the API enforces the real (token) limits itself.
 KNOWN EDGE CASES: Vendor limits are the 255 Choice options and the 2-10 Score levels; question count, state size, and option-name length are local caps only.
-RELATED DOCS: docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, docs/design/jev-tool-selector.md, https://docs.typesafe.ai/api.md, https://docs.typesafe.ai/models.md, https://docs.typesafe.ai/sdk/python/api/retries.md.
-TESTS: tests/test_jev_agent.py, tests/test_jev_preflight.py, tests/test_jev_tool_selector.py, and scripts/test-jev-agent-scaffold.py.
+RELATED DOCS: docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, docs/design/jev-tool-selector.md, docs/design/jev-required-sequence.md, https://docs.typesafe.ai/api.md, https://docs.typesafe.ai/models.md, https://docs.typesafe.ai/sdk/python/api/retries.md.
+TESTS: tests/test_jev_agent.py, tests/test_jev_preflight.py, tests/test_jev_tool_selector.py, tests/test_jev_required_sequence.py, and scripts/test-jev-agent-scaffold.py.
 """
 
 from __future__ import annotations
@@ -95,8 +95,6 @@ JEV_BUILDER_MAX_ITERATIONS: int = 4
 JEV_EVENT_LOG_MAX_EVENT_CHARS: int = 4_000
 JEV_EVENT_ID_PREFIX: str = "E"
 JEV_STAGE_ID_PREFIX: str = "stage_"
-JEV_RUN_REPORT_METADATA_KEY: str = "jev_run_report"
-
 
 __all__ = [
     "JEV_BUILDER_MAX_ITERATIONS",
@@ -136,7 +134,6 @@ __all__ = [
     "JEV_REQUIRED_SEQUENCE_MIN_STAGES",
     "JEV_RETRY_BACKOFF_SECONDS",
     "JEV_RETRY_STATUS_CODES",
-    "JEV_RUN_REPORT_METADATA_KEY",
     "JEV_STAGE_ID_PREFIX",
     "JEV_STATUS_OVERLOADED",
     "JEV_STATUS_RATE_LIMITED",

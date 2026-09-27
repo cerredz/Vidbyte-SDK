@@ -13,6 +13,8 @@ It also lays the foundation the "jev done criteria" design settled on, which lat
 3. Code checks what code can check exactly. Jev answers narrow recognition questions about each stage, written with `skills/asking-jev-questions/SKILL.md`.
 4. A new finish-attempt seam on `AgentRuntime` lets `JevRuntime` send the agent back to work with specific feedback.
 
+It is built the way main builds JevAgent features: `JevAgent` constructs a `JevDoneGate` (in `vidbyte/agents/jev/done/`, the finish-time counterpart of the preflight `JevPreflightGate` in `gate/`) from its settings at construction and passes it to `JevRuntime`, which never reads the done-check settings. Every outcome is written through `JevResponse`, so callers read it as `JevAgent.response.run_report`, not from result metadata. A request the preflight gate stops never reaches the done gate.
+
 ## How it works
 
 ### Run state (once, before the run)
@@ -28,7 +30,7 @@ It also lays the foundation the "jev done criteria" design settled on, which lat
 | `produces` | model | what the stage outputs, matched against the next stage's inputs |
 | `depends_on_previous` | model (forced false for stage 1) | whether the "uses previous output" question is asked |
 
-The section is **inactive** for the run (nothing is gated) when the request has no required order, has fewer than 2 or more than 12 stages, has a blank field, or cites words that are not in the request. The reason is recorded in the result metadata.
+The section is **inactive** for the run (nothing is gated) when the request has no required order, has fewer than 2 or more than 12 stages, has a blank field, or cites words that are not in the request. The reason is recorded in `JevAgent.response.run_report`.
 
 When active, the stage list is appended to the main agent's system prompt so the agent knows the order from the start.
 
@@ -74,23 +76,21 @@ If Jev is unavailable (no key, provider error), only the code checks run and the
 
 `AgentRuntime.review_finish_attempt(candidate_output, state) -> FinishReview` is called on both finish paths (plain final response and `isDone`), after the output contract. The default accepts, so every other agent is unchanged. `FinishReview` can accept, continue with feedback, or stop.
 
-### Pre-existing fix: schema conformance never saw the output
-
-`AgentRuntime._contract_counters` never set the `final_output` key that `SchemaConformance` reads. As a result, every `BaseAgent` with an `output_schema` was rejected as "not valid JSON", even when the model returned valid JSON. `HandoffAgent` only worked because it falls back to parsing prose. Both builders need strict structured output, so the counters now include `final_output`.
-
 ## Files
 
 - `vidbyte/lib/dataclasses/agents.py`: `FinishReviewAction`, `FinishReview`, `AgentStopReason.FINISH_REVIEW_REJECTED`.
-- `vidbyte/agents/runtime.py`: the seam on both finish paths, and `final_output` in the contract counters.
+- `vidbyte/agents/runtime.py`: the seam on both finish paths.
 - `vidbyte/agents/jev/settings.py`: `required_sequence: bool`.
-- `vidbyte/agents/jev/run_state.py`: base run state, handoff, event records, section contract.
-- `vidbyte/agents/jev/builders.py`: `JevStructuredBuilderAgent`, `JevRunStateAgent`, `JevRunHandoffAgent`.
-- `vidbyte/agents/jev/event_log.py`: builds the numbered event log from the loop state.
-- `vidbyte/agents/jev/required_sequence.py`: the section, its parsing, Jev questions, and verdict.
-- `vidbyte/agents/jev/runtime.py`: orchestration and the review override.
-- `vidbyte/agents/jev/README.md`, `__init__.py`: package docs and exports.
+- `vidbyte/agents/jev/done/gate.py`: `JevDoneGate`, the orchestration (run-state build, handoff build and rebuild, section reviews, the continue-or-stop decision, and the report).
+- `vidbyte/agents/jev/done/run_state.py`: base run state, handoff, event records, section contract, `JevRunReport`.
+- `vidbyte/agents/jev/done/builders.py`: `JevStructuredBuilderAgent`, `JevRunStateAgent`, `JevRunHandoffAgent`.
+- `vidbyte/agents/jev/done/event_log.py`: builds the numbered event log from the loop state.
+- `vidbyte/agents/jev/done/required_sequence.py`: the section, its parsing, Jev questions, and verdict (scored with `DecisionModelRunner.score_noul`).
+- `vidbyte/agents/jev/agent.py`, `runtime.py`: `JevAgent` builds the done gate; `JevRuntime` starts it after the preflight gate and delegates the review override to it.
+- `vidbyte/agents/jev/response.py`, `vidbyte/lib/dataclasses/jev.py`: `JevResponse.run_report` and `JevAgentResponse.run_report`.
+- `vidbyte/agents/jev/README.md`, `__init__.py`, `done/__init__.py`: package docs and exports.
 - `vidbyte/lib/constants/jev.py`: named caps and thresholds.
-- `vidbyte/lib/enums/jev_run_state.py`, `vidbyte/lib/enums/__init__.py`: section key, section status, event kind, stage failure.
+- `vidbyte/lib/enums/jev.py`, `vidbyte/lib/enums/__init__.py`: section key, section status, event kind, stage failure.
 - `vidbyte/lib/enums/prompts.py`, `vidbyte/prompts/prompts/jev_run_state/`, `vidbyte/prompts/README.md`: builder and stage prompts as assets.
 - `vidbyte/lib/dataclasses/__init__.py`: exports `FinishReview` and `FinishReviewAction`.
 - `tests/test_jev_required_sequence.py`: offline tests.
@@ -100,9 +100,8 @@ If Jev is unavailable (no key, provider error), only the code checks run and the
 
 - The handoff builder can attribute an event to the wrong stage. Code only confirms cited events exist.
 - The strict order rule forbids interleaving (for example more research while drafting). That matches "must happen in order" but is a policy choice.
-- Builder calls are extra generative cost: one at the start, one or two per finish attempt. Their usage is reported in metadata, not folded into the main agent's token budget.
-- Failing open on builder failure keeps a broken builder from blocking runs, at the cost of an ungated run (flagged in metadata).
-- Overlaps with open PRs #443 and #445 on `JevRuntime.arun`; whichever merges second needs a small rebase.
+- Builder calls are extra generative cost: one at the start, one or two per finish attempt. Their usage is reported in `JevAgent.response.run_report`, not folded into the main agent's token budget.
+- Failing open on builder failure keeps a broken builder from blocking runs, at the cost of an ungated run (flagged in the run report).
 
 ## Verification
 
@@ -117,5 +116,7 @@ If Jev is unavailable (no key, provider error), only the code checks run and the
   - the finish-review cap stops the run;
   - Jev unavailable falls back to the code checks;
   - invalid handoff is rebuilt;
-  - the seam works on both finish paths.
+  - the seam works on both finish paths;
+  - a second run starts with a fresh report;
+  - a request the clarity preflight stops never builds a run state.
 - `python lint/run.py`, `python scripts/run_ci.py --stage source`, `python scripts/run_ci.py`, then PR CI.

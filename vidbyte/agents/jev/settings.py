@@ -1,9 +1,9 @@
 """FILE: vidbyte/agents/jev/settings.py
 
 PURPOSE: Defines the single, opinionated public configuration object for JevAgent.
-ROLE IN CODEBASE: JevAgentSettings is the only constructor input accepted by JevAgent; JevAgent builds its preflight gate from these settings, so JevRuntime never reads them.
+ROLE IN CODEBASE: JevAgentSettings is the only constructor input accepted by JevAgent; JevAgent builds its preflight gate and done gate from these settings, so JevRuntime never reads them (except the tool selector, which keeps its own path).
 ARCHITECTURE NOTE: The surface is intentionally closed; named Jev capabilities belong here as explicit settings instead of a generic decisions collection.
-COMMON MODIFICATION PATTERNS: Add a validated named capability setting, then implement its fixed policy in vidbyte/agents/jev/gate/ without exposing runtime replacement hooks.
+COMMON MODIFICATION PATTERNS: Add a validated named capability setting, then implement its fixed policy in vidbyte/agents/jev/gate/ (preflight) or vidbyte/agents/jev/done/ (done checks) without exposing runtime replacement hooks.
 KNOWN EDGE CASES: The generative provider cannot be TypeSafe because Jev is a decision model; neither generative nor decision API keys appear in repr output. required_sequence=True gates completion on the stages derived from each request (docs/design/jev-required-sequence.md). Preflight presets are validated by JevPreflightRegistry at construction, so no TypeSafe key is needed until a run asks Jev; the tool-selector threshold rejects booleans, non-finite values, and out-of-range probabilities.
 RELATED DOCS: docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, docs/design/jev-tool-selector.md, docs/design/jev-required-sequence.md, and skills/jev-agent/SKILL.md.
 TESTS: tests/test_jev_agent.py, tests/test_jev_preflight.py, tests/test_jev_tool_selector.py, tests/test_jev_required_sequence.py, and scripts/test-jev-agent-scaffold.py.
