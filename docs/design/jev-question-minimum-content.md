@@ -1,8 +1,8 @@
 # Design Doc: Minimum Content Length for Jev Questions
 
-**Status:** Draft  
-**Author:** OpenCode  
-**Created:** 2026-09-26  
+**Status:** Draft
+**Author:** OpenCode
+**Created:** 2026-09-26
 **Last Updated:** 2026-09-26
 
 ## 1. Overview
@@ -53,7 +53,7 @@ No runtime path changes: source authors write and render the structured brief an
 
 ### 6.1 Skill length criterion
 
-**File(s):** `skills/asking-jev-questions/SKILL.md`  
+**File(s):** `skills/asking-jev-questions/SKILL.md`
 **Type:** Modified
 
 #### What it does
@@ -75,7 +75,7 @@ N/A - this is authoring guidance only; no SDK interface changes.
 
 ### 6.2 Complete example
 
-**File(s):** `skills/asking-jev-questions/SKILL.md`  
+**File(s):** `skills/asking-jev-questions/SKILL.md`
 **Type:** Modified
 
 #### What it does
