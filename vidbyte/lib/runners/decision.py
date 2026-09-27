@@ -50,8 +50,8 @@ class DecisionModelRunner:
         return await self._provider.list_models(transport=self._transport, config=self._config)
 
     @staticmethod
-    def score_noul(answers: Mapping[str, JevAnswer] | None, names: Sequence[str], threshold: float) -> JevNoulScore | None:
-        """Average P(yes) over the named noul answers and decide yes when the mean reaches `threshold`."""
+    def score_noul(answers: Mapping[str, JevAnswer] | None, names: Sequence[str], threshold: float, veto: float | None = None) -> JevNoulScore | None:
+        """Average P(yes) over the named noul answers and decide yes when the mean reaches `threshold` and no answer falls below `veto`."""
         # @intent every-named-answer-counts
         # Callers phrase every question so yes means satisfied, so the mean needs no inversion. A score
         # built from only some of the answers would look confident while hiding a gap, so any missing
@@ -60,8 +60,13 @@ class DecisionModelRunner:
         noul = {name: answer for name, answer in found.items() if answer is not None and answer.question_type is JevQuestionType.NOUL}
         if not noul or len(noul) != len(found):
             return None
-        score = math.fsum(answer.probabilities[JEV_NOUL_TRUE] for answer in noul.values()) / len(noul)
-        return JevNoulScore(score=score, passed=score >= threshold, answers=noul)
+        yes = [answer.probabilities[JEV_NOUL_TRUE] for answer in noul.values()]
+        score = math.fsum(yes) / len(yes)
+        # @intent one-clear-no-is-not-averaged-away
+        # With many questions, a few confident yes answers can lift the mean over the threshold while one
+        # question clearly says no; the veto lets that single clear no fail the decision on its own.
+        vetoed = veto is not None and min(yes) < veto
+        return JevNoulScore(score=score, passed=score >= threshold and not vetoed, answers=noul)
 
     def model_name(self) -> str:
         # Return the configured model identifier string.

@@ -1,6 +1,6 @@
 """FILE: vidbyte/lib/jev/presets.py
 
-PURPOSE: Owns the preflight flags a JevAgent user can enable and, for each flag with fixed questions, the question keys it asks and the score it must reach.
+PURPOSE: Owns the preflight flags a JevAgent user can enable and, for each flag with fixed questions, the question keys it asks, the score it must reach, the veto any single answer must clear, and its gate question.
 ROLE IN CODEBASE: JevPreflightRegistry.validate normalizes JevAgentSettings.preflight through JevPresets, and JevPreflightGate (vidbyte/agents/jev/gate/) reads each fixed preset's definition from here when it combines questions and scores answers.
 ARCHITECTURE NOTE: The flag vocabulary is JevPreflightPreset in vidbyte/lib/enums/jev.py and the definition record is JevPresetDefinition in vidbyte/lib/dataclasses/jev.py; this module holds only the mapping and the flag logic.
 COMMON MODIFICATION PATTERNS: Add a JevPreflightPreset member; if its questions are fixed, add its question keys and one JevPresetDefinition entry here and register every new question in vidbyte/lib/jev/preflight/.
@@ -14,7 +14,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from types import MappingProxyType
 
-from vidbyte.lib.constants.jev import JEV_CLARITY_THRESHOLD
+from vidbyte.lib.constants.jev import JEV_CLARITY_THRESHOLD, JEV_CLARITY_VETO_THRESHOLD
 from vidbyte.lib.dataclasses.jev import JevPresetDefinition
 from vidbyte.lib.enums.jev import JevPreflightPreset, JevPreflightQuestionKey
 from vidbyte.lib.errors import ConfigurationError
@@ -44,6 +44,9 @@ class JevPresets:
                     JevPreflightQuestionKey.CLARITY_SINGLE_READING,
                 ),
                 threshold=JEV_CLARITY_THRESHOLD,
+                # One clear no fails the request, and a request with no action reports only that gap.
+                veto=JEV_CLARITY_VETO_THRESHOLD,
+                gate=JevPreflightQuestionKey.CLARITY_ACTION,
             ),
         }
     )
