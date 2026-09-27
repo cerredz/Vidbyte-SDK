@@ -65,11 +65,7 @@ class MinimumTime(JevDoneCriterion):
 
     def _continuation_prompt(self, elapsed_seconds: float) -> str:
         # Gives the model the measured and required durations while leaving task completion to the model.
-        return (
-            f"The configured minimum run duration has not elapsed ({elapsed_seconds:.3f} of "
-            f"{self.duration_seconds:.3f} seconds). Continue useful work on the task; do not wait idly. "
-            "You may finish only after the minimum duration has elapsed and the task is complete."
-        )
+        return f"The configured minimum run duration has not elapsed ({elapsed_seconds:.3f} of {self.duration_seconds:.3f} seconds). Continue useful work on the task; do not wait idly. You may finish only after the minimum duration has elapsed and the task is complete."
 
 
 __all__ = ["MinimumTime"]

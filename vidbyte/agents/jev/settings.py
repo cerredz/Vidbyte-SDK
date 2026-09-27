@@ -1,14 +1,14 @@
 """FILE: vidbyte/agents/jev/settings.py
 
-PURPOSE: Defines the validated, immutable public settings accepted by JevAgent, including its optional typed completion criteria.
-ROLE IN CODEBASE: JevAgent passes this object to JevRuntime; done_criteria values come from vidbyte/agents/jev/done_criteria and are evaluated only at model finish attempts.
-ARCHITECTURE NOTE: Named Jev capabilities remain explicit settings rather than a generic decisions map; the settings object is the sole public constructor input.
-FUNCTION INVENTORY: __post_init__ validates and normalizes settings; _validate_done_criteria snapshots completion policy; helper methods validate provider and model fields.
-COMMON MODIFICATION PATTERNS: Add new Jev capabilities as validated typed settings, then implement their fixed policy in JevRuntime or a Jev-owned package.
-WHAT NOT TO DO: Do not construct a provider runner or evaluate per-run criteria in settings; runtime construction and run-local policy belong to JevRuntime.
-KNOWN EDGE CASES: The generative provider cannot be TypeSafe; secrets remain excluded from repr; strings and invalid objects are rejected as done criteria.
-RELATED DOCS: docs/design/jev-agent-scaffold.md and skills/jev-agent/SKILL.md.
-TESTS: tests/test_jev_agent.py, tests/test_jev_done_criteria.py, and scripts/test-jev-done-criteria.py.
+PURPOSE: Defines JevAgent's immutable validated settings, including completion criteria, preflight presets, and tool-selection threshold.
+ROLE IN CODEBASE: JevAgent passes this object to JevRuntime and builds its preflight gate from it; done criteria are consumed by runtime finish attempts.
+ARCHITECTURE NOTE: Named Jev capabilities remain explicit typed settings rather than generic policy maps.
+FUNCTION INVENTORY: __post_init__ validates and normalizes settings; dedicated validators snapshot criteria, check preflight presets and selector threshold, and validate model fields.
+COMMON MODIFICATION PATTERNS: Add a typed setting and validate it before JevAgent constructs runtime or preflight objects.
+WHAT NOT TO DO: Do not construct a provider runner or evaluate run-local criteria in settings; those belong to JevRuntime.
+KNOWN EDGE CASES: The generative provider cannot be TypeSafe; secrets remain excluded from repr; invalid criteria, preflight presets, and selector probabilities fail during settings construction.
+RELATED DOCS: docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, docs/design/jev-tool-selector.md, and skills/jev-agent/SKILL.md.
+TESTS: tests/test_jev_agent.py, tests/test_jev_done_criteria.py, tests/test_jev_preflight.py, tests/test_jev_tool_selector.py, scripts/test-jev-done-criteria.py, and scripts/test-jev-agent-scaffold.py.
 """
 
 from __future__ import annotations
@@ -18,9 +18,15 @@ from dataclasses import dataclass, field
 
 from vidbyte.agents.jev.done_criteria import JevDoneCriterion
 from vidbyte.agents.settings import AgentLoopSettings
+from vidbyte.lib.constants.jev import (
+    JEV_TOOL_SELECTOR_DEFAULT_THRESHOLD,
+    JEV_TOOL_SELECTOR_MAX_THRESHOLD,
+    JEV_TOOL_SELECTOR_MIN_THRESHOLD,
+)
 from vidbyte.lib.dataclasses.model_configs import DecisionModelConfig
-from vidbyte.lib.enums import ModelProvider
+from vidbyte.lib.enums import JevPreflightPreset, ModelProvider
 from vidbyte.lib.errors import ConfigurationError
+from vidbyte.lib.jev import JevPreflightRegistry
 from vidbyte.tools.security import PermissionPolicy
 
 
@@ -40,6 +46,8 @@ class JevAgentSettings:
     loop: AgentLoopSettings = field(default_factory=AgentLoopSettings)
     decision: DecisionModelConfig = field(default_factory=DecisionModelConfig, repr=False)
     done_criteria: tuple[JevDoneCriterion, ...] = ()
+    preflight: tuple[JevPreflightPreset | str, ...] = ()
+    tool_selector_threshold: float = JEV_TOOL_SELECTOR_DEFAULT_THRESHOLD
 
     def __post_init__(self) -> None:
         # Normalizes immutable inputs and rejects invalid agent configuration before runtime construction.
@@ -67,6 +75,8 @@ class JevAgentSettings:
         if not isinstance(self.decision, DecisionModelConfig):
             raise ConfigurationError("JevAgentSettings.decision must be a DecisionModelConfig instance.")
         self._validate_done_criteria()
+        object.__setattr__(self, "preflight", JevPreflightRegistry.validate(self.preflight))
+        self._validate_tool_selector_threshold()
 
     def _validate_done_criteria(self) -> None:
         # Snapshots criteria so callers cannot mutate Jev completion policy after settings construction.
@@ -79,6 +89,17 @@ class JevAgentSettings:
         if any(not isinstance(criterion, JevDoneCriterion) for criterion in criteria):
             raise ConfigurationError("JevAgentSettings.done_criteria must contain only JevDoneCriterion instances.")
         object.__setattr__(self, "done_criteria", criteria)
+    def _validate_tool_selector_threshold(self) -> None:
+        # Accepts calibrated probabilities on the closed unit interval, but excludes bool and non-finite values.
+        value = self.tool_selector_threshold
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(value)
+            or not JEV_TOOL_SELECTOR_MIN_THRESHOLD <= value <= JEV_TOOL_SELECTOR_MAX_THRESHOLD
+        ):
+            raise ConfigurationError("JevAgentSettings.tool_selector_threshold must be a finite probability between 0 and 1 inclusive.")
+        object.__setattr__(self, "tool_selector_threshold", float(value))
 
     @staticmethod
     def _validate_text(value: object, field_name: str) -> None:

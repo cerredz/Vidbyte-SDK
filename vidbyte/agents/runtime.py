@@ -107,6 +107,11 @@ from vidbyte.context.runtime import (
 )
 from vidbyte.context.templates import NullRecorder, RecorderBase
 from vidbyte.context.window import ContextWindow
+from vidbyte.lib.constants.speed import (
+    AGENT_SPEED_FIRST_INDEX,
+    AGENT_SPEED_FIRST_RETRY_INDEX,
+    AGENT_SPEED_ZERO_COUNT,
+)
 from vidbyte.lib.dataclasses.agents import (
     AgentIterationSnapshot,
     AgentRuntimeConfig,
@@ -122,11 +127,6 @@ from vidbyte.lib.dataclasses.middleware import (
     MiddlewareHookInvocation,
 )
 from vidbyte.lib.dataclasses.runner import RunnerHandle
-from vidbyte.lib.constants.speed import (
-    AGENT_SPEED_FIRST_INDEX,
-    AGENT_SPEED_FIRST_RETRY_INDEX,
-    AGENT_SPEED_ZERO_COUNT,
-)
 from vidbyte.lib.dataclasses.speed import (
     RecordModelCallFailureInput,
     RecordModelCallInput,
@@ -584,8 +584,9 @@ class AgentRuntime:
                 )
                 return await self._finish_result(result, state)
 
+    # @intent specialized-finish-policy-preserves-one-shared-loop
     async def _continue_finish_attempt(self, result: AgentResult, state: BaseAgentRuntimeLoopState, messages: list[dict[str, Any]]) -> bool:
-        # Lets specialized runtimes reject a normal finish attempt without replacing this shared loop.
+        # A subclass can append feedback and resume without copying shared lifecycle behavior.
         return False
 
     async def _invoke_with_middleware(self, handle: RunnerHandle, message: str, call_options: Mapping[str, Any], *, context: BaseAgentContext, iteration_count: int, model_call_count: int, call_contexts: Sequence[ToolCallContext], tokens_used: int | None, started_at: float, metadata: Mapping[str, Any], run_state: dict[type, Any] | None = None, trace_context: SpanContext | None = None, compaction_count: int = 0) -> tuple[object | AgentResult, int, int]:
@@ -1795,6 +1796,7 @@ class AgentRuntime:
             "tool_calls_by_name": self._tool_calls_by_name(non_internal),
             "tokens_used": tokens_used or 0,
             "elapsed_seconds": self.middleware.clock() - started_at,
+            "final_output": final_text,
             "final_output_chars": len(final_text),
             "final_output_tokens": self._approx_output_tokens(final_text),
             "cost_spent_usd": self._cost_spent_usd(tokens_used),

@@ -297,14 +297,11 @@ class JevDoneCriteriaRuntimeTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_concurrent_attempts_use_run_local_start_times(self) -> None:
         # [Hidden Failure] concurrent run states calculate elapsed duration from their own start markers.
-        from vidbyte.agents.jev.runtime import JevRuntime
         from vidbyte.agents.runtime import BaseAgentRuntimeLoopState
         from vidbyte.lib.dataclasses.context import BaseAgentContext
-        from vidbyte.tools.catalog import Tools
-        from vidbyte.tools.security import PermissionPolicy
 
         clock = FakeClock(20.0)
-        runtime = JevRuntime(jev_settings=_settings(done_criteria=(JevPreset.MinimumTime(seconds=5),)), agent_name="jev", system_prompt="work", tools=Tools(), permission_policy=PermissionPolicy())
+        runtime = JevAgent(_settings(done_criteria=(JevPreset.MinimumTime(seconds=5),)))._runtime()
         runtime.middleware.clock = clock
         older = BaseAgentRuntimeLoopState(message="a", context=BaseAgentContext(system_prompt="work"), provider="openai", metadata={}, started_at=10.0)
         newer = BaseAgentRuntimeLoopState(message="b", context=BaseAgentContext(system_prompt="work"), provider="openai", metadata={}, started_at=18.0)
