@@ -5,7 +5,7 @@ ROLE IN CODEBASE: JevAgent builds one JevDoneContinuation over its JevRunState w
 ARCHITECTURE NOTE: The message is the vidbyte/prompts asset jev_continuation/continue_prompt.md, filled with the run's own text; what one failed check contributes to it is one commented case in _explain(). The cap on continuations is JevContinualSettings.max_continuations.
 COMMON MODIFICATION PATTERNS: Add a done check's failed questions and focus to _explain(); change the message's instructions in vidbyte/prompts/prompts/jev_continuation/continue_prompt.md.
 KNOWN EDGE CASES: A failed check whose handoff is missing never continues, because there is no evidence to hand back. After max_continuations continuations the latest verdict stays on JevAgent.response, but the main agent's answer stands.
-RELATED DOCS: docs/design/jev-multipart-done-criteria.md and skills/jev-agent/SKILL.md.
+RELATED DOCS: docs/design/jev-multipart-done-criteria.md, docs/design/jev-can-simplify-done-criteria.md, skills/jev-agent/SKILL.md, and skills/jev-continuation/SKILL.md.
 TESTS: tests/test_jev_done.py.
 """
 
@@ -85,6 +85,21 @@ class JevDoneContinuation(JevContinuation):
                     yes = result.answers[identifier].probabilities[JEV_NOUL_TRUE]
                     failed.append(f"- {question.instructions.question.format(item=identifier)} Jev's answer: no (P(yes) = {yes:.2f}). Still missing: {missing[identifier]}")
                     focus.append(f"- {deliverables[identifier].description} Done when: {deliverables[identifier].completion_signal}")
+                return "\n".join(failed), "\n".join(focus)
+            case JevDoneCheck.CAN_SIMPLIFY:
+                # Return the supported alternative and original preservation rules so the main agent can simplify
+                # the implementation in place without broadening scope or sacrificing required behavior.
+                question = JevDoneRegistry.question(JevDoneCheck.CAN_SIMPLIFY)
+                state = None if self.run_state.record is None else self.run_state.record.can_simplify
+                handoff = None if self.run_state.handoff is None else self.run_state.handoff.can_simplify
+                yes = result.answers["implementation"].probabilities[JEV_NOUL_TRUE]
+                failed = [question.gap, f"- {question.instructions.question} Jev's answer: no (P(yes) = {yes:.2f}). Simplification to make: {'' if handoff is None else handoff.missing}"]
+                focus = []
+                if state is not None:
+                    focus.append(f"Implementation scope: {state.scope}")
+                    focus.append(f"Preserve: {state.preserve}")
+                if handoff is not None:
+                    focus.append(f"Apply this smaller approach: {handoff.missing}")
                 return "\n".join(failed), "\n".join(focus)
 
 

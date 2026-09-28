@@ -718,6 +718,28 @@ class JevMultiPartEvidencePayload(JevSectionPayload):
     deliverables: list[JevDeliverableEvidencePayload] = Field(description="The deliverables hold one evidence entry for every deliverable in the run state's multi-part section, with the same ids and in the same order. Each entry gathers the parts of the run that bear on that one deliverable and states what the run does not show for it. An entry never borrows evidence from another deliverable unless the same piece of the run truly concerns both, in which case it is repeated in each. Do not add entries for work the run did that no deliverable asks for. Never leave a deliverable out, even when the run did nothing toward it.")
 
 
+class JevCanSimplifyPayload(JevSectionPayload):
+    """The can-simplify section of the run state: the implementation scope and requirements a simpler implementation must preserve."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    SECTION: ClassVar[str] = "The can-simplify section gives the later checker a fixed reference for reviewing the implementation the agent produces. It records the implementation scope and the requirements that any simpler approach must continue to meet. Write both fields from the user's request alone, before the main agent starts work, and do not infer constraints from an implementation plan. The section narrows simplification to changes that keep the requested behavior, quality, and scope intact."
+
+    scope: str = Field(min_length=1, description="The scope identifies the implementation the request asks the agent to create or change, using the user's names for the relevant behavior, files, and boundaries. It is written before the implementation exists, so it describes the requested work rather than predicting the code structure. Include only implementation work in the request and do not expand the review to unrelated existing code. When the request asks for no implementation change, say that there is no implementation to simplify.")
+    preserve: str = Field(min_length=1, description="The preservation requirements state the behavior, outputs, interfaces, constraints, and quality conditions from the user's request that any simplification must keep. Include explicit constraints and requirements that clearly follow from the request's stated outcome, but do not invent preferences about architecture or style. A simpler approach that drops a required behavior, changes an interface the request says to retain, or moves complexity into another required part does not qualify. When the request sets no special preservation constraint, say that the simplification must still fully meet the requested outcome.")
+
+
+class JevCanSimplifyEvidencePayload(JevSectionPayload):
+    """The can-simplify section of the handoff: evidence about the implementation and any concrete simpler alternative."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    SECTION: ClassVar[str] = "The can-simplify evidence section reviews the implementation in the main agent's run against the scope and preservation requirements written before work began. It gives the checker direct evidence of what the implementation does and identifies any specific alternative that would reduce its complexity while preserving those requirements. A candidate must be concrete enough for the main agent to apply and must identify the part it replaces and the complexity it removes. Report observations and analysis, not a verdict that the implementation is finished or already simple. If no implementation was requested or no concrete safe simplification is found, state that explicitly."
+
+    implementation: str = Field(min_length=1, description="The implementation field reports the changed code or other implementation output relevant to the request, with file names, behavior, and supporting run evidence such as tool results or command output. It identifies at least one concrete simplification candidate when the run supports one, describing the current structure, the smaller alternative, and why the alternative preserves the request's requirements. A candidate must remove a real branch, duplicate path, unnecessary abstraction, repeated operation, or comparable source of complexity rather than merely shorten spelling or move the same complexity elsewhere. If the implementation has no concrete behavior-preserving simplification, say what was reviewed and why the apparent alternatives are not simpler or would violate the request. When there is no implementation in scope, say that the check has nothing to review.")
+    missing: str = Field(min_length=1, description="The missing field gives the main agent an actionable simplification to make when the evidence identifies one, naming the current file or structure, the smaller replacement, and the required behavior it must preserve. Write it as a direct instruction that can be followed in the existing run, without asking the main agent to repeat completed work. Do not suggest a change unless the evidence supports that it is simpler and remains within the request's scope. When no concrete simplification is supported, say that no change is needed for this check.")
+
+
 class JevDeliverableId:
     """Shared validation for the deliverable identifiers JevRunState writes and JevHandoff echoes."""
 
@@ -769,6 +791,18 @@ class JevMultiPart:
 
 
 @dataclass(frozen=True, slots=True)
+class JevCanSimplify:
+    """The implementation scope and preservation requirements written from the request before work starts."""
+
+    scope: str
+    preserve: str
+
+    def __post_init__(self) -> None:
+        JevText.require(self.scope, field_name="can-simplify scope")
+        JevText.require(self.preserve, field_name="can-simplify preservation requirements")
+
+
+@dataclass(frozen=True, slots=True)
 class JevRunStateRecord:
     """The run state JevRunState wrote from the user's request: the central fields and the section of every enabled done check.
 
@@ -780,6 +814,7 @@ class JevRunStateRecord:
     mission: str
     what_not_to_do: tuple[str, ...] = ()
     multi_part: JevMultiPart | None = None
+    can_simplify: JevCanSimplify | None = None
     usage: UsageRollup | None = None
 
     def __post_init__(self) -> None:
@@ -792,6 +827,8 @@ class JevRunStateRecord:
             JevText.require(limit, field_name=f"run state what_not_to_do[{index}]")
         if self.multi_part is not None and not isinstance(self.multi_part, JevMultiPart):
             raise JevValidation.error("run state multi_part", "a JevMultiPart or None", self.multi_part)
+        if self.can_simplify is not None and not isinstance(self.can_simplify, JevCanSimplify):
+            raise JevValidation.error("run state can_simplify", "a JevCanSimplify or None", self.can_simplify)
 
 
 @dataclass(frozen=True, slots=True)
@@ -827,6 +864,18 @@ class JevMultiPartEvidence:
 
 
 @dataclass(frozen=True, slots=True)
+class JevCanSimplifyEvidence:
+    """The evidence about the implementation and the actionable change, if a supported simplification was found."""
+
+    implementation: str
+    missing: str
+
+    def __post_init__(self) -> None:
+        JevText.require(self.implementation, field_name="can-simplify implementation evidence")
+        JevText.require(self.missing, field_name="can-simplify suggested action")
+
+
+@dataclass(frozen=True, slots=True)
 class JevHandoffRecord:
     """The evidence JevHandoff compiled from the main agent's run for every enabled done check.
 
@@ -834,12 +883,15 @@ class JevHandoffRecord:
     """
 
     multi_part: JevMultiPartEvidence | None = None
+    can_simplify: JevCanSimplifyEvidence | None = None
     usage: UsageRollup | None = None
 
     def __post_init__(self) -> None:
         # Requires a typed multi-part evidence section when present.
         if self.multi_part is not None and not isinstance(self.multi_part, JevMultiPartEvidence):
             raise JevValidation.error("handoff multi_part", "a JevMultiPartEvidence or None", self.multi_part)
+        if self.can_simplify is not None and not isinstance(self.can_simplify, JevCanSimplifyEvidence):
+            raise JevValidation.error("handoff can_simplify", "a JevCanSimplifyEvidence or None", self.can_simplify)
 
 
 @dataclass(frozen=True)
@@ -889,8 +941,8 @@ class JevDoneQuestion:
 class JevDoneResult:
     """What one enabled done check decided the last time the main agent tried to finish.
 
-    `answers` holds Jev's answer per deliverable id, `score` is their mean P(yes), and `incomplete` names
-    the deliverables whose P(yes) fell below the check's threshold. With `available=False` the run state,
+    `answers` holds Jev's answer per checked item id, `score` is their mean P(yes), and `incomplete` names
+    the items whose P(yes) fell below the check's threshold. With `available=False` the run state,
     the handoff, or Jev was unavailable, `score` is None, and the check fails open (`passed` stays True).
     `usage` is the usage of the one Jev request that asked every enabled check's questions at that finish attempt.
     """
@@ -911,7 +963,7 @@ class JevDoneResult:
             object.__setattr__(self, "score", JevProbability.require(self.score, field_name="done result score"))
         object.__setattr__(self, "answers", MappingProxyType(dict(self.answers)))
         if not isinstance(self.incomplete, tuple):
-            raise JevValidation.error("done result incomplete", "a tuple of deliverable ids", self.incomplete)
+            raise JevValidation.error("done result incomplete", "a tuple of checked item ids", self.incomplete)
 
 
 @dataclass(frozen=True, slots=True)

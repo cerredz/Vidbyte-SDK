@@ -18,6 +18,8 @@ from vidbyte.agents.jev.settings import (
 )
 from vidbyte.lib.dataclasses.jev import (
     JevAgentResponse,
+    JevCanSimplify,
+    JevCanSimplifyEvidence,
     JevClarification,
     JevClarifyingQuestion,
     JevDeliverable,
@@ -36,6 +38,8 @@ __all__ = [
     "JevAgentSettings",
     "JevClarification",
     "JevClarifyingQuestion",
+    "JevCanSimplify",
+    "JevCanSimplifyEvidence",
     "JevContinualSettings",
     "JevDeliverable",
     "JevDeliverableEvidence",

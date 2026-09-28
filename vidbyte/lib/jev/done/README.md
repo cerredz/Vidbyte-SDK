@@ -9,6 +9,7 @@ Whenever a model or agent writes, rewrites, or reviews a Jev question here, it m
 ## Where things live
 
 - `multi_part.py` holds the multi-part check's question, asked once per deliverable in the one request that holds every enabled done check's questions, over the shared state `{request, deliverables: {id: {deliverable, completion_signal, evidence}}}`; `to_question(id)` names the deliverable's id in the question and in the question's name.
+- `can_simplify.py` holds the implementation-wide simplification question, asked once per finish attempt over the shared state `{request, implementation: {scope, preserve, evidence}}`; its failed-check action comes from the handoff's `missing` field, which is not sent to Jev.
 - `done.py` holds `JevDoneRegistry` (`question`, `threshold`, `resolve`, `validate`).
 - The check vocabulary (`JevDoneCheck`, `JevDoneQuestionKey`) is in `vidbyte/lib/enums/jev.py`; the structured-reply payloads, records, and `JevDoneQuestion` base are in `vidbyte/lib/dataclasses/jev.py`; the thresholds are in `vidbyte/lib/constants/jev.py`.
 - The logic that writes the run state and the handoff, asks Jev, and sends the main agent back to work is `JevRunState` and `JevHandoff` in `vidbyte/agents/jev/done/`.

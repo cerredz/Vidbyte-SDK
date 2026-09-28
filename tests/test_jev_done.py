@@ -5,7 +5,7 @@ ROLE IN CODEBASE: Pins the review of PR #452: records and enums live in vidbyte/
 ARCHITECTURE NOTE: Scripted generative and decision runners replace only the external boundaries while production settings, registry, schemas, runtime hook, and response wiring stay active.
 COMMON MODIFICATION PATTERNS: Add a case for every new done check, section, question, threshold boundary, and availability policy.
 KNOWN EDGE CASES: No test may contact TypeSafe or a generative provider; the token-floor test needs tiktoken and is skipped without it.
-RELATED DOCS: docs/design/jev-multipart-done-criteria.md, skills/jev-agent/SKILL.md, and skills/asking-jev-questions/SKILL.md.
+RELATED DOCS: docs/design/jev-multipart-done-criteria.md, docs/design/jev-can-simplify-done-criteria.md, skills/jev-agent/SKILL.md, skills/jev-continuation/SKILL.md, and skills/asking-jev-questions/SKILL.md.
 TESTS: python -m unittest tests.test_jev_done and python scripts/test-jev-multipart-done-criteria.py.
 """
 
@@ -25,7 +25,9 @@ from unittest.mock import patch
 from pydantic import BaseModel
 
 from lint.core.discovery import SourceFile
-from lint.rules.s062_no_implicit_string_concatenation import ImplicitConcatenationScanner
+from lint.rules.s062_no_implicit_string_concatenation import (
+    ImplicitConcatenationScanner,
+)
 from tests.agent_test_support import bind_test_runner
 from vidbyte import (
     BaseAgent,
@@ -38,20 +40,31 @@ from vidbyte import (
 )
 from vidbyte.agents.jev.continuation import JevContinuation, JevDoneContinuation
 from vidbyte.agents.jev.done import JevHandoff, JevRunState
-from vidbyte.context.primitives import ResponseContextItem, TextContextItem, ToolCallContextItem
+from vidbyte.context.primitives import (
+    ResponseContextItem,
+    TextContextItem,
+    ToolCallContextItem,
+)
 from vidbyte.lib.config import DecisionModelConfig
 from vidbyte.lib.constants.jev import (
+    JEV_CAN_SIMPLIFY_THRESHOLD,
     JEV_DONE_COMPLETION_SIGNAL_FIELD,
     JEV_DONE_DELIVERABLE_FIELD,
     JEV_DONE_DELIVERABLES_FIELD,
     JEV_DONE_EVIDENCE_FIELD,
+    JEV_DONE_IMPLEMENTATION_FIELD,
     JEV_DONE_MAX_CONTINUATIONS,
+    JEV_DONE_PRESERVATION_FIELD,
     JEV_DONE_REQUEST_FIELD,
     JEV_MULTI_PART_THRESHOLD,
 )
 from vidbyte.lib.dataclasses.jev import (
     JevAnswer,
     JevBrief,
+    JevCanSimplify,
+    JevCanSimplifyEvidence,
+    JevCanSimplifyEvidencePayload,
+    JevCanSimplifyPayload,
     JevCriterion,
     JevDecisionRequest,
     JevDeliverable,
@@ -71,7 +84,11 @@ from vidbyte.lib.enums import JevDoneQuestionKey, JevQuestionType, ModelProvider
 from vidbyte.lib.enums.prompts import Prompt
 from vidbyte.lib.errors import ConfigurationError, ProviderRequestError
 from vidbyte.lib.jev import JevDoneRegistry
-from vidbyte.lib.jev.done import DONE_STATE, MultiPartDeliveredQuestion
+from vidbyte.lib.jev.done import (
+    DONE_STATE,
+    CanSimplifyQuestion,
+    MultiPartDeliveredQuestion,
+)
 from vidbyte.lib.runners import TextModelResponse
 from vidbyte.lib.runners.decision import DecisionModelRunner
 from vidbyte.lib.runners.types import DecisionModelResponse
@@ -102,6 +119,10 @@ _HANDOFF = {
         ]
     }
 }
+_CAN_SIMPLIFY_STATE = {"goal": "The deploy command can preview a deployment.", "objective": "Keep the deploy implementation simple and preserve its contract.", "mission": "Retain every deploy flag and the preview behavior.", "what_not_to_do": [], "can_simplify": {"scope": "Change the deploy implementation without changing its command contract.", "preserve": "Keep all existing deploy flags and preview behavior."}}
+_CAN_SIMPLIFY_HANDOFF = {"can_simplify": {"implementation": "The deploy implementation repeats the same validation in two branches. A single shared validation path keeps all flags and preview behavior.", "missing": "Replace the duplicate validation branches in cli/deploy.py with one shared validation path, retaining every existing flag and preview behavior."}}
+_STATE_BOTH = {**_STATE, **_CAN_SIMPLIFY_STATE}
+_HANDOFF_BOTH = {**_HANDOFF, **_CAN_SIMPLIFY_HANDOFF}
 
 
 class ScriptedGenerativeRunner:
@@ -187,7 +208,7 @@ class JevDoneRecordTests(unittest.TestCase):
 
     def test_records_and_enums_live_in_lib(self) -> None:
         # [Review 4116720422] dataclasses and enums belong in vidbyte/lib, per AGENTS.md.
-        for cls in (JevDeliverable, JevMultiPart, JevRunStateRecord, JevDoneResult, JevRunStatePayload, JevMultiPartPayload):
+        for cls in (JevDeliverable, JevMultiPart, JevCanSimplify, JevCanSimplifyEvidence, JevRunStateRecord, JevDoneResult, JevRunStatePayload, JevMultiPartPayload, JevCanSimplifyPayload, JevCanSimplifyEvidencePayload):
             self.assertEqual(cls.__module__, "vidbyte.lib.dataclasses.jev")
         self.assertEqual(JevDoneCheck.__module__, "vidbyte.lib.enums.jev")
         self.assertFalse((_REPOSITORY_ROOT / "vidbyte/agents/jev/run_state.py").exists())
@@ -195,11 +216,11 @@ class JevDoneRecordTests(unittest.TestCase):
 
     def test_every_structured_output_field_has_a_four_to_six_sentence_description(self) -> None:
         # [Review 4116725548] every field carries a pre-defined 4-6 sentence description used in the structured output.
-        for model in (JevRunStatePayload, JevMultiPartPayload, JevDeliverablePayload, JevMultiPartEvidencePayload, JevDeliverableEvidencePayload):
+        for model in (JevRunStatePayload, JevMultiPartPayload, JevDeliverablePayload, JevMultiPartEvidencePayload, JevDeliverableEvidencePayload, JevCanSimplifyPayload, JevCanSimplifyEvidencePayload):
             for name, description in _descriptions(model).items():
                 with self.subTest(model=model.__name__, field=name):
                     self.assertIn(_sentences(description), range(4, 7))
-        for section in (JevMultiPartPayload, JevMultiPartEvidencePayload):
+        for section in (JevMultiPartPayload, JevMultiPartEvidencePayload, JevCanSimplifyPayload, JevCanSimplifyEvidencePayload):
             with self.subTest(section=section.__name__):
                 self.assertIn(_sentences(section.SECTION), range(4, 7))
 
@@ -209,6 +230,7 @@ class JevDoneRecordTests(unittest.TestCase):
         self.assertNotIn("multi_part", JevRunStatePayload.model_fields)
         record = JevRunStateRecord("goal", "objective", "mission", multi_part=JevMultiPart((JevDeliverable("a", "b", "c"),)))
         self.assertIsInstance(record.multi_part, JevMultiPart)
+        self.assertIsInstance(JevRunStateRecord("goal", "objective", "mission", can_simplify=JevCanSimplify("implementation", "preserve behavior")).can_simplify, JevCanSimplify)
 
     def test_records_hold_no_parsing_or_schema_code(self) -> None:
         # [Review 4116752796] from_payload and output_schema do not belong on the record dataclasses.
@@ -235,6 +257,10 @@ class JevDoneSchemaTests(unittest.TestCase):
         schema = JevRunState.schema((JevDoneCheck.MULTI_PART,))
         self.assertTrue(issubclass(schema, JevRunStatePayload))
         self.assertEqual(schema.model_fields["multi_part"].description, JevMultiPartPayload.SECTION)
+        simplify_schema = JevRunState.schema((JevDoneCheck.CAN_SIMPLIFY,))
+        self.assertEqual(simplify_schema.model_fields["can_simplify"].description, JevCanSimplifyPayload.SECTION)
+        both = JevRunState.schema((JevDoneCheck.MULTI_PART, JevDoneCheck.CAN_SIMPLIFY))
+        self.assertEqual(set(both.model_fields), {"goal", "objective", "mission", "what_not_to_do", "multi_part", "can_simplify"})
         self.assertEqual(set(JevRunState._SECTIONS), set(JevDoneCheck))
 
     def test_handoff_schema_is_general_with_a_tailored_section_per_check(self) -> None:
@@ -243,6 +269,9 @@ class JevDoneSchemaTests(unittest.TestCase):
         schema = JevHandoff.schema((JevDoneCheck.MULTI_PART,))
         self.assertTrue(issubclass(schema, JevHandoffPayload))
         self.assertEqual(schema.model_fields["multi_part"].description, JevMultiPartEvidencePayload.SECTION)
+        simplify_schema = JevHandoff.schema((JevDoneCheck.CAN_SIMPLIFY,))
+        self.assertEqual(simplify_schema.model_fields["can_simplify"].description, JevCanSimplifyEvidencePayload.SECTION)
+        self.assertEqual(set(JevHandoff.schema((JevDoneCheck.MULTI_PART, JevDoneCheck.CAN_SIMPLIFY)).model_fields), {"multi_part", "can_simplify"})
         self.assertEqual(set(JevDeliverableEvidencePayload.model_fields), {"id", "evidence", "missing"})
         self.assertEqual(set(JevHandoff._SECTIONS), set(JevDoneCheck))
 
@@ -306,6 +335,19 @@ class JevDoneQuestionTests(unittest.TestCase):
         self.assertEqual((rendered.name, rendered.question_type), (f"{JevDoneQuestionKey.MULTI_PART_DELIVERED.value}.readme_docs", JevQuestionType.NOUL))
         self.assertIn("with id `readme_docs`?", str(rendered.instructions))
 
+    def test_can_simplify_question_is_registered_and_uses_the_shared_state(self) -> None:
+        question = CanSimplifyQuestion()
+        self.assertEqual(JevDoneRegistry.question(JevDoneCheck.CAN_SIMPLIFY), question)
+        self.assertEqual(JevDoneRegistry.threshold(JevDoneCheck.CAN_SIMPLIFY), JEV_CAN_SIMPLIFY_THRESHOLD)
+        self.assertEqual(question.key, JevDoneQuestionKey.CAN_SIMPLIFY_IMPLEMENTATION)
+        self.assertEqual(question.instructions.state, DONE_STATE)
+        rendered = question.to_question("implementation")
+        self.assertEqual(rendered.name, "can_simplify.implementation.implementation")
+        self.assertIn("can remain as-is", str(rendered.instructions))
+        self.assertIn("material complexity", question.when_true.what)
+        self.assertIn("preserving every stated requirement", question.when_false.what)
+        self.assertGreater(len(question.instructions.render()), 2_000)
+
     def test_brief_follows_the_skill_layout_with_one_string_per_section(self) -> None:
         brief = self.question.instructions
         self.assertIsInstance(brief, JevBrief)
@@ -337,16 +379,18 @@ class JevDoneQuestionTests(unittest.TestCase):
     def test_question_carries_at_least_two_thousand_tokens(self) -> None:
         import tiktoken
 
-        parts = [self.question.instructions.render(), self.question.gap]
-        for criterion in (self.question.when_true, self.question.when_false):
-            parts += [criterion.what, criterion.not_for, *criterion.easy, *criterion.boundary]
-        self.assertGreaterEqual(len(tiktoken.get_encoding("cl100k_base").encode("\n".join(parts))), 2_000)
+        for question in (self.question, CanSimplifyQuestion()):
+            parts = [question.instructions.render(), question.gap]
+            for criterion in (question.when_true, question.when_false):
+                parts += [criterion.what, criterion.not_for, *criterion.easy, *criterion.boundary]
+            with self.subTest(question=question.key.value):
+                self.assertGreaterEqual(len(tiktoken.get_encoding("cl100k_base").encode("\n".join(parts))), 2_000)
 
     def test_question_text_is_one_string_literal_each(self) -> None:
         scanner = ImplicitConcatenationScanner()
-        rel = "vidbyte/lib/jev/done/multi_part.py"
-        text = (_REPOSITORY_ROOT / rel).read_text(encoding="utf-8")
-        self.assertEqual(scanner.scan(SourceFile(path=_REPOSITORY_ROOT / rel, rel=rel, text=text, tree=ast.parse(text))), [])
+        for rel in ("vidbyte/lib/jev/done/multi_part.py", "vidbyte/lib/jev/done/can_simplify.py"):
+            text = (_REPOSITORY_ROOT / rel).read_text(encoding="utf-8")
+            self.assertEqual(scanner.scan(SourceFile(path=_REPOSITORY_ROOT / rel, rel=rel, text=text, tree=ast.parse(text))), [])
 
 
 class JevDonePromptTests(unittest.TestCase):
@@ -386,17 +430,17 @@ class JevHandoffWindowTests(unittest.TestCase):
 class JevDoneRuntimeTests(unittest.IsolatedAsyncioTestCase):
     """Verify the finish-attempt check, continuation, cap, and fail-open behavior through JevAgent."""
 
-    def _agent(self, *, state: str = json.dumps(_STATE), handoff: str = json.dumps(_HANDOFF), state_error: Exception | None = None, **settings: Any) -> tuple[JevAgent, ScriptedGenerativeRunner, ScriptedGenerativeRunner, ScriptedGenerativeRunner]:
+    def _agent(self, *, done: tuple[Any, ...] = (JevDoneCheck.MULTI_PART,), state: str = json.dumps(_STATE), handoff: str = json.dumps(_HANDOFF), state_error: Exception | None = None, **settings: Any) -> tuple[JevAgent, ScriptedGenerativeRunner, ScriptedGenerativeRunner, ScriptedGenerativeRunner]:
         main, state_runner, handoff_runner = ScriptedGenerativeRunner("All done."), ScriptedGenerativeRunner(state, error=state_error), ScriptedGenerativeRunner(handoff)
-        agent = bind_test_runner(_jev(**settings), main)
+        agent = bind_test_runner(_jev(done=done, **settings), main)
         assert agent.run_state is not None
         bind_test_runner(agent.run_state, state_runner)
         bind_test_runner(agent.run_state.handoff_writer, handoff_runner)
         return agent, main, state_runner, handoff_runner
 
     @staticmethod
-    def _decision(readme: list[float], flag: float = 0.95, **kwargs: Any) -> ScriptedDecisionRunner:
-        return ScriptedDecisionRunner({"dry_run_flag": [flag], "readme_docs": readme}, **kwargs)
+    def _decision(readme: list[float], flag: float = 0.95, implementation: list[float] | None = None, **kwargs: Any) -> ScriptedDecisionRunner:
+        return ScriptedDecisionRunner({"dry_run_flag": [flag], "readme_docs": readme, "implementation": implementation or [0.95]}, **kwargs)
 
     async def test_complete_run_finishes_after_one_check(self) -> None:
         decision = self._decision([0.9])
@@ -437,6 +481,59 @@ class JevDoneRuntimeTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(entries[entry["id"]][JEV_DONE_EVIDENCE_FIELD], evidence["evidence"])
         prefix = JevDoneQuestionKey.MULTI_PART_DELIVERED.value
         self.assertEqual([question.name for question in request.questions], [f"{prefix}.dry_run_flag", f"{prefix}.readme_docs"])
+
+    async def test_both_done_checks_share_one_request_and_distinct_state_sections(self) -> None:
+        decision = self._decision([0.9], implementation=[0.9])
+        agent, *_ = self._agent(done=(JevDoneCheck.MULTI_PART, JevDoneCheck.CAN_SIMPLIFY), state=json.dumps(_STATE_BOTH), handoff=json.dumps(_HANDOFF_BOTH))
+        with patch(_RUNNER_PATH, new=_runner_class(decision)):
+            await agent.arun(_REQUEST)
+
+        self.assertEqual(len(decision.requests), 1)
+        request = decision.requests[0]
+        self.assertEqual(set(request.state), {JEV_DONE_REQUEST_FIELD, JEV_DONE_DELIVERABLES_FIELD, JEV_DONE_IMPLEMENTATION_FIELD})
+        implementation = request.state[JEV_DONE_IMPLEMENTATION_FIELD]
+        self.assertEqual(implementation["implementation"]["scope"], _CAN_SIMPLIFY_STATE["can_simplify"]["scope"])
+        self.assertEqual(implementation["implementation"][JEV_DONE_PRESERVATION_FIELD], _CAN_SIMPLIFY_STATE["can_simplify"]["preserve"])
+        self.assertEqual(implementation["implementation"][JEV_DONE_EVIDENCE_FIELD], _CAN_SIMPLIFY_HANDOFF["can_simplify"]["implementation"])
+        self.assertEqual(sum(question.name.startswith("can_simplify.") for question in request.questions), 1)
+        self.assertTrue(agent.response.done[JevDoneCheck.CAN_SIMPLIFY].passed)
+
+    async def test_can_simplify_failure_continues_with_candidate_and_requirements(self) -> None:
+        decision = ScriptedDecisionRunner({"implementation": [0.2, 0.95]})
+        agent, main, *_ = self._agent(done=(JevDoneCheck.CAN_SIMPLIFY,), state=json.dumps(_CAN_SIMPLIFY_STATE), handoff=json.dumps(_CAN_SIMPLIFY_HANDOFF))
+        with patch(_RUNNER_PATH, new=_runner_class(decision)):
+            await agent.arun(_REQUEST)
+
+        self.assertEqual((len(main.calls), agent.response.continuations), (2, 1))
+        feedback = main.messages[1][0]["content"]
+        self.assertIn("Replace the duplicate validation branches", feedback)
+        self.assertIn("Keep all existing deploy flags and preview behavior.", feedback)
+        self.assertIn("Apply this smaller approach", feedback)
+        self.assertTrue(agent.response.done[JevDoneCheck.CAN_SIMPLIFY].passed)
+
+    async def test_can_simplify_check_passes_when_handoff_finds_no_supported_candidate(self) -> None:
+        no_candidate = {"can_simplify": {"implementation": "The implementation was reviewed. The apparent alternatives would add branches or change the public contract; no supported material simplification was found.", "missing": "No change is needed for this check."}}
+        agent, main, *_ = self._agent(done=(JevDoneCheck.CAN_SIMPLIFY,), state=json.dumps(_CAN_SIMPLIFY_STATE), handoff=json.dumps(no_candidate))
+        with patch(_RUNNER_PATH, new=_runner_class(ScriptedDecisionRunner({"implementation": [0.95]}))):
+            await agent.arun(_REQUEST)
+
+        self.assertEqual(len(main.calls), 1)
+        self.assertTrue(agent.response.done[JevDoneCheck.CAN_SIMPLIFY].passed)
+
+    async def test_can_simplify_threshold_is_inclusive_and_unavailable_jev_fails_open(self) -> None:
+        agent, main, *_ = self._agent(done=(JevDoneCheck.CAN_SIMPLIFY,), state=json.dumps(_CAN_SIMPLIFY_STATE), handoff=json.dumps(_CAN_SIMPLIFY_HANDOFF))
+        with patch(_RUNNER_PATH, new=_runner_class(ScriptedDecisionRunner({"implementation": [JEV_CAN_SIMPLIFY_THRESHOLD]}))):
+            await agent.arun(_REQUEST)
+        self.assertEqual(len(main.calls), 1)
+        self.assertTrue(agent.response.done[JevDoneCheck.CAN_SIMPLIFY].passed)
+
+        agent, main, *_ = self._agent(done=(JevDoneCheck.CAN_SIMPLIFY,), state=json.dumps(_CAN_SIMPLIFY_STATE), handoff=json.dumps(_CAN_SIMPLIFY_HANDOFF))
+        with patch(_RUNNER_PATH, new=_runner_class(ScriptedDecisionRunner({"implementation": [0.1]}, error=ProviderRequestError("down", provider="typesafe")))):
+            await agent.arun(_REQUEST)
+        result = agent.response.done[JevDoneCheck.CAN_SIMPLIFY]
+        self.assertEqual(len(main.calls), 1)
+        self.assertFalse(result.available)
+        self.assertTrue(result.passed)
 
     async def test_handoff_receives_the_request_state_and_main_agent_window(self) -> None:
         agent, _, _, handoff_runner = self._agent()

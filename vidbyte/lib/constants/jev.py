@@ -81,10 +81,11 @@ JEV_SPECIALIST_NONE: str = "none"
 JEV_SPECIALIST_MAX_COUNT: int = JEV_MAX_CHOICE_OPTIONS - 1
 
 # Done checks. A done check runs each time the main agent tries to finish. Every enabled check's questions
-# go to Jev in one request; the multi-part check asks one question per deliverable, and a run is complete
-# only when every deliverable's P(yes) reaches the threshold (used as both the mean threshold and the veto).
+# go to Jev in one request; the multi-part check asks one question per deliverable, and can-simplify asks
+# whether the implementation can stand as-is. Each check uses its threshold as both the mean threshold and veto.
 # 0.8 is a starting point, not a tuned value.
 JEV_MULTI_PART_THRESHOLD: float = 0.8
+JEV_CAN_SIMPLIFY_THRESHOLD: float = 0.8
 # Default of JevContinualSettings.max_continuations: how many times a failed done check may send the main
 # agent back to work before its answer is accepted.
 JEV_DONE_MAX_CONTINUATIONS: int = 3
@@ -95,6 +96,9 @@ JEV_DONE_DELIVERABLES_FIELD: str = "deliverables"
 JEV_DONE_DELIVERABLE_FIELD: str = "deliverable"
 JEV_DONE_COMPLETION_SIGNAL_FIELD: str = "completion_signal"
 JEV_DONE_EVIDENCE_FIELD: str = "evidence"
+# The can-simplify check evaluates one complete implementation against its request constraints.
+JEV_DONE_IMPLEMENTATION_FIELD: str = "implementation"
+JEV_DONE_PRESERVATION_FIELD: str = "preserve"
 # A deliverable ID is a short lowercase identifier JevRunState writes and JevHandoff must echo exactly.
 JEV_DELIVERABLE_ID_PATTERN: str = r"^[a-z][a-z0-9_]{0,63}$"
 # Defaults of the JevRunState and JevHandoff limits in JevContinualSettings: each writes one structured reply,
@@ -116,6 +120,7 @@ __all__ = [
     "JEV_CLARIFICATION_MAX_TOKENS",
     "JEV_CLARIFICATION_MIN_RECOMMENDATIONS",
     "JEV_CLARITY_THRESHOLD",
+    "JEV_CAN_SIMPLIFY_THRESHOLD",
     "JEV_CLARITY_VETO_THRESHOLD",
     "JEV_DEFAULT_MODEL",
     "JEV_DEFAULT_RETRY_COUNT",
@@ -125,7 +130,9 @@ __all__ = [
     "JEV_DONE_DELIVERABLES_FIELD",
     "JEV_DONE_DELIVERABLE_FIELD",
     "JEV_DONE_EVIDENCE_FIELD",
+    "JEV_DONE_IMPLEMENTATION_FIELD",
     "JEV_DONE_MAX_CONTINUATIONS",
+    "JEV_DONE_PRESERVATION_FIELD",
     "JEV_DONE_REQUEST_FIELD",
     "JEV_HANDOFF_MAX_ITERATIONS",
     "JEV_HANDOFF_MAX_TOKENS",

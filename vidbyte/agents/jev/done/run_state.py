@@ -5,7 +5,7 @@ ROLE IN CODEBASE: JevAgent builds one JevRunState at construction when JevRuntim
 ARCHITECTURE NOTE: The run state is general: its schema is the central JevRunStatePayload plus one field per enabled JevDoneCheck, typed as that check's section payload and described by its SECTION text, so a new check adds one entry to _SECTIONS and one case each to _section() and _judge() instead of a new class; what the main agent reads when a check fails belongs to JevDoneContinuation. Every enabled check's questions go to Jev in one request (combine()), over one shared state. Question text and thresholds stay in vidbyte/lib/jev/done/ (JevDoneRegistry), and DecisionModelRunner.score_noul turns answers into a pass or fail. Writing the state and the evidence is generation, so it belongs to generative agents (this class and JevHandoff, skills/asking-jev-questions/SKILL.md strategy 16); Jev only recognizes whether the evidence shows each item.
 COMMON MODIFICATION PATTERNS: Change what the agent writes in vidbyte/prompts/prompts/jev_run_state/system_prompt.md and each field's description in vidbyte/lib/dataclasses/jev.py; add a done check's section to _SECTIONS, its record conversion to _record(), and its commented case to _section() and _judge().
 KNOWN EDGE CASES: Every failure fails open: no run state means no check, and an unavailable handoff or Jev answer marks the check unavailable and lets the answer stand. A request with no deliverables passes with nothing to ask. Like the JevAgent that owns it, one instance serves one run at a time.
-RELATED DOCS: docs/design/jev-multipart-done-criteria.md, skills/jev-agent/SKILL.md, and skills/asking-jev-questions/SKILL.md.
+RELATED DOCS: docs/design/jev-multipart-done-criteria.md, docs/design/jev-can-simplify-done-criteria.md, skills/jev-agent/SKILL.md, skills/jev-continuation/SKILL.md, and skills/asking-jev-questions/SKILL.md.
 TESTS: tests/test_jev_done.py.
 """
 
@@ -28,11 +28,15 @@ from vidbyte.lib.constants.jev import (
     JEV_DONE_DELIVERABLE_FIELD,
     JEV_DONE_DELIVERABLES_FIELD,
     JEV_DONE_EVIDENCE_FIELD,
+    JEV_DONE_IMPLEMENTATION_FIELD,
+    JEV_DONE_PRESERVATION_FIELD,
     JEV_DONE_REQUEST_FIELD,
     JEV_NOUL_TRUE,
 )
 from vidbyte.lib.dataclasses.agents import AgentInput
 from vidbyte.lib.dataclasses.jev import (
+    JevCanSimplify,
+    JevCanSimplifyPayload,
     JevDecisionRequest,
     JevDeliverable,
     JevDoneResult,
@@ -58,7 +62,7 @@ class JevRunState(BaseAgent):
     """Generative agent that writes the run state the enabled done checks read, and runs those checks at every finish attempt."""
 
     # One run-state section per done check; the field name is the check's value, and the enum is the only option list.
-    _SECTIONS: ClassVar[Mapping[JevDoneCheck, type[JevSectionPayload]]] = MappingProxyType({JevDoneCheck.MULTI_PART: JevMultiPartPayload})
+    _SECTIONS: ClassVar[Mapping[JevDoneCheck, type[JevSectionPayload]]] = MappingProxyType({JevDoneCheck.MULTI_PART: JevMultiPartPayload, JevDoneCheck.CAN_SIMPLIFY: JevCanSimplifyPayload})
 
     def __init__(self, settings: JevAgentSettings, runtime_settings: JevRuntimeSettings, response: JevResponse) -> None:
         # Reuses the JevAgent's generative model and key; the prompt, limits, schema, and empty tool list are fixed here.
@@ -182,6 +186,19 @@ class JevRunState(BaseAgent):
                     for deliverable in state.deliverables
                 }
                 return {JEV_DONE_DELIVERABLES_FIELD: entries}, tuple(question.to_question(identifier) for identifier in state.ids())
+            case JevDoneCheck.CAN_SIMPLIFY:
+                # The fixed implementation item pairs request-only scope and preservation rules with handoff
+                # evidence; the handoff's suggested action is judgment for the main agent, not Jev state.
+                state = None if self.record is None else self.record.can_simplify
+                if state is None or handoff.can_simplify is None:
+                    return {}, ()
+                question = JevDoneRegistry.question(JevDoneCheck.CAN_SIMPLIFY)
+                entry = {
+                    "scope": state.scope,
+                    JEV_DONE_PRESERVATION_FIELD: state.preserve,
+                    JEV_DONE_EVIDENCE_FIELD: handoff.can_simplify.implementation,
+                }
+                return {JEV_DONE_IMPLEMENTATION_FIELD: {"implementation": entry}}, (question.to_question("implementation"),)
 
     def _judge(self, check: JevDoneCheck, handoff: JevHandoffRecord | None, decision: DecisionModelResponse | None) -> JevDoneResult:
         # Scores one enabled done check from the combined request's answers; one commented case per check.
@@ -190,6 +207,28 @@ class JevRunState(BaseAgent):
                 # Every deliverable the request asks for must be shown produced in full: Jev answered one
                 # question per deliverable, and code joins them with a veto so one clear no is never averaged away.
                 return self._multi_part(handoff, decision)
+            case JevDoneCheck.CAN_SIMPLIFY:
+                # A low yes probability means the evidence supports a concrete simplification or leaves one unresolved.
+                return self._can_simplify(handoff, decision)
+
+    def _can_simplify(self, handoff: JevHandoffRecord | None, decision: DecisionModelResponse | None) -> JevDoneResult:
+        # Turns the one implementation-wide answer into a check result; unavailable inputs fail open.
+        state = None if self.record is None else self.record.can_simplify
+        if state is None or handoff is None or handoff.can_simplify is None:
+            return JevDoneResult(check=JevDoneCheck.CAN_SIMPLIFY, score=None, available=False)
+        if decision is None:
+            return JevDoneResult(check=JevDoneCheck.CAN_SIMPLIFY, score=None, available=False)
+        question = JevDoneRegistry.question(JevDoneCheck.CAN_SIMPLIFY)
+        identifier = "implementation"
+        name = question.name(identifier)
+        answers = {identifier: decision.answers[name]} if name in decision.answers else {}
+        threshold = JevDoneRegistry.threshold(JevDoneCheck.CAN_SIMPLIFY)
+        verdict = DecisionModelRunner.score_noul(answers, (identifier,), threshold, threshold)
+        if verdict is None:
+            return JevDoneResult(check=JevDoneCheck.CAN_SIMPLIFY, score=None, available=False)
+        incomplete = () if verdict.passed else (identifier,)
+        usage = JevUsage.from_usage_payload(decision.usage or {})
+        return JevDoneResult(check=JevDoneCheck.CAN_SIMPLIFY, score=verdict.score, passed=verdict.passed, answers=verdict.answers, incomplete=incomplete, usage=usage)
 
     def _multi_part(self, handoff: JevHandoffRecord | None, decision: DecisionModelResponse | None) -> JevDoneResult:
         # Turns Jev's answers about each deliverable into the multi-part result, scored with score_noul.
@@ -227,12 +266,17 @@ class JevRunState(BaseAgent):
         section = getattr(payload, JevDoneCheck.MULTI_PART.value, None)
         if isinstance(section, JevMultiPartPayload):
             multi_part = JevMultiPart(tuple(JevDeliverable(item.id, item.description.strip(), item.completion_signal.strip()) for item in section.deliverables))
+        can_simplify = None
+        section = getattr(payload, JevDoneCheck.CAN_SIMPLIFY.value, None)
+        if isinstance(section, JevCanSimplifyPayload):
+            can_simplify = JevCanSimplify(section.scope.strip(), section.preserve.strip())
         return JevRunStateRecord(
             goal=payload.goal.strip(),
             objective=payload.objective.strip(),
             mission=payload.mission.strip(),
             what_not_to_do=tuple(limit.strip() for limit in payload.what_not_to_do if limit.strip()),
             multi_part=multi_part,
+            can_simplify=can_simplify,
             usage=self.get_usage(),
         )
 

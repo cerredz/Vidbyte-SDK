@@ -9,7 +9,8 @@ RELATED DOCS: docs/design/jev-multipart-done-criteria.md and skills/jev-agent/SK
 TESTS: tests/test_jev_done.py.
 """
 
+from vidbyte.lib.jev.done.can_simplify import CanSimplifyQuestion
 from vidbyte.lib.jev.done.done import JevDoneRegistry
 from vidbyte.lib.jev.done.multi_part import DONE_STATE, MultiPartDeliveredQuestion
 
-__all__ = ["DONE_STATE", "JevDoneRegistry", "MultiPartDeliveredQuestion"]
+__all__ = ["CanSimplifyQuestion", "DONE_STATE", "JevDoneRegistry", "MultiPartDeliveredQuestion"]
