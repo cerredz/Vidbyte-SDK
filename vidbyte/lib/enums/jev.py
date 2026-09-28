@@ -34,6 +34,8 @@ class JevPreflightPreset(str, Enum):
     TOOL_SELECTOR = "tool_selector"
 
 
+# Load skills/jev-continuation/SKILL.md before adding a member here: it is the step-by-step checklist for adding
+# a continuation done check (run-state and handoff sections, the batched Jev question, and the continuation message).
 class JevDoneCheck(str, Enum):
     """The done checks a JevAgent user can enable; each adds its own section to JevRunState's state and JevHandoff's evidence, and asks its own Jev question before a run may finish."""
 

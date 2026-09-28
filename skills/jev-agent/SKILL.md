@@ -47,6 +47,8 @@ With no preflight preset enabled and no specialist configured, a run performs no
 
 ## Adding a done check
 
+Load `skills/jev-continuation/SKILL.md` first; it explains each step below in detail, with the batching, fail-open, and continuation-message rules.
+
 1. Add a `JevDoneCheck` member and its `JevDoneQuestionKey` in `vidbyte/lib/enums/jev.py`.
 2. Add its run-state section and evidence section payloads (subclasses of `JevSectionPayload` with a `SECTION` text and a 4–6 sentence description on every field) and their records to `vidbyte/lib/dataclasses/jev.py`.
 3. Load `skills/asking-jev-questions/SKILL.md` first, then write its question as a `JevDoneQuestion` subclass under `vidbyte/lib/jev/done/` and register it and its threshold constant in `JevDoneRegistry`.
