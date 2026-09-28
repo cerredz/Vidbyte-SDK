@@ -5,7 +5,7 @@ description: Step-by-step guide to adding a continuation done check (a preset co
 
 # Adding a JevAgent continuation done check
 
-Use this skill before you add a new continuation setting to `JevAgent`, or change how an existing one works. In code, a continuation setting is a **done check**. It is a `JevDoneCheck` member that a user enables through `JevRuntimeSettings(continual=JevContinualSettings(checks=(...)))`. The check runs every time the main agent tries to finish. When it fails, the main agent goes back to work in the same loop. `JevDoneCheck.MULTI_PART` is the first done check (PR #470, finished in #471). Every file and method named below exists on `main` and is the model to copy.
+Use this skill before you add a new continuation setting to `JevAgent`, or change how an existing one works. In code, a continuation setting is a **done check**. It is a `JevDoneCheck` member that a user enables through `JevRuntimeSettings(continual=JevContinualSettings(checks=(...)))`. The check runs every time the main agent tries to finish. When it fails, the main agent goes back to work in the same loop. `JevDoneCheck.MULTI_PART` is the first done check (PR #470, finished in #471). `JevDoneCheck.EXPERT_DEPTH` is the second: its items are nested (3–5 weak points, called details, under each deliverable), and it ranks its failed items weakest first and caps how many reach Focus. Every file and method named below exists on `main` and is the model to copy.
 
 Load these first:
 
@@ -62,7 +62,8 @@ Every stage fails open. With no run state there is no check. When the handoff or
 | `vidbyte/lib/enums/jev.py` | `JevDoneCheck`, `JevDoneQuestionKey` | Add one member to each. |
 | `vidbyte/lib/dataclasses/jev.py` | Section payloads (`JevSectionPayload` subclasses), records, `JevRunStateRecord`, `JevHandoffRecord`, `JevDoneQuestion`, `JevDoneResult` | Add the run-state payload, the evidence payload, their frozen records, and one optional field on each of the two top-level records. |
 | `vidbyte/lib/constants/jev.py` | `JEV_<CHECK>_THRESHOLD`, shared-state field names (`JEV_DONE_*_FIELD`), limits | Add the threshold and any new state field names. |
-| `vidbyte/lib/jev/done/<check>.py` | One `JevDoneQuestion` subclass per question | **New file**, one per check (`multi_part.py` is the model). |
+| `vidbyte/lib/jev/done/<check>.py` | One `JevDoneQuestion` subclass per question | **New file**, one per check (`multi_part.py` and `expert_depth.py` are the models). |
+| `vidbyte/lib/jev/done/state.py` | `DONE_STATE`, the one description of the batched state every done brief uses | Describe your top-level state field with the condition under which it is present (step 11). |
 | `vidbyte/lib/jev/done/done.py` | `JevDoneRegistry` (`_questions`, `_thresholds`, `validate`) | Register the question and the threshold. |
 | `vidbyte/lib/jev/done/__init__.py`, `README.md` | Exports and a folder guide | Export the question and list it in the README. |
 | `vidbyte/agents/jev/done/run_state.py` | `JevRunState`: `_SECTIONS`, `schema`, `begin`, `check`, `combine`, `_section`, `_judge`, `_record` | One `_SECTIONS` entry, `_record` conversion, one `case` in `_section`, and one `case` in `_judge`, plus a `_<check>` scorer. |
@@ -72,7 +73,7 @@ Every stage fails open. With no run state there is no check. When the handoff or
 | `vidbyte/agents/jev/settings.py` | `JevContinualSettings` (`checks`, `max_continuations`, limits) | Usually nothing, because `checks` already accepts every registered member. |
 | `vidbyte/agents/jev/runtime.py`, `agent.py` | Wiring | **Nothing.** A check never touches the runtime. |
 | `vidbyte/agents/jev/response.py` | `JevResponse` (`run_state`, `handoff`, `done`, `continued`) | Nothing. `done` is keyed by check. |
-| `vidbyte/prompts/prompts/jev_run_state/`, `jev_handoff/` | General system prompts | **Nothing.** They must stay check-agnostic, and a test enforces this. |
+| `vidbyte/prompts/prompts/jev_run_state/`, `jev_handoff/` | General system prompts | **Nothing.** They must stay check-agnostic, and a test enforces this. The run-state prompt already lets a field description ask for depth inside an output the request asks for (added for expert depth), without naming any check. |
 | `vidbyte/prompts/prompts/jev_continuation/continue_prompt.md` | The continuation message template | Usually nothing. `_explain` fills `{failed}` and `{focus}`. |
 | `vidbyte/__init__.py`, `vidbyte/agents/__init__.py`, `vidbyte/agents/jev/__init__.py` | Public exports | Export new records a user reads on `JevAgent.response`, as `JevDeliverable` is exported. |
 | `tests/test_jev_done.py`, `scripts/test-jev-multipart-done-criteria.py` | Tests and the focused runner | Extend the test classes, and keep the script's loader exhaustive. |
@@ -369,11 +370,11 @@ Rules for your `case`:
 
 ### Step 11: Keep the shared state description true
 
-`DONE_STATE` in `vidbyte/lib/jev/done/multi_part.py` is the `state` section of the multi-part brief. It currently says "The state has two fields" and describes `request` and `deliverables`. Once your check adds a top-level key, a request with both checks enabled carries three fields. The multi-part brief would then misdescribe its own state, and nothing else would catch it.
+`DONE_STATE` in `vidbyte/lib/jev/done/state.py` is the `state` section of every done brief. It describes `request` as always present, and each check's top-level field (`deliverables`, `expert_details`) together with the condition under which it is present. Once your check adds a top-level key, every brief would misdescribe the batched state until you describe that key here, and nothing else would catch it.
 
 Before you ship:
 
-- Keep **one** shared description of the batched state that every done question's brief uses, so any two questions can be compared line by line ("Feedback on one question applies to every question" in `asking-jev-questions`). If you move it to a shared module, it stays in `vidbyte/lib/jev/done/`.
+- Keep **one** shared description of the batched state that every done question's brief uses, so any two questions can be compared line by line ("Feedback on one question applies to every question" in `asking-jev-questions`). It lives in `vidbyte/lib/jev/done/state.py`, so no question module imports another.
 - Describe each field together with the condition under which it is present. For example: "`<items>` is present only when the <check> check is enabled…". Also state that each question judges only the fields and the entry it names. The description must be true for **every combination** of enabled checks.
 - Add a test that enables both checks, asserts the batched state holds both checks' keys, and asserts that every question's name has its check's prefix.
 
@@ -448,6 +449,7 @@ case JevDoneCheck.<CHECK>:
 
 - **Failed checks** tells the agent what was asked, what Jev answered, and what the handoff says is missing, for **incomplete items only**.
 - **Focus** lists the incomplete items in the user's own terms, from the run state, which was written before any work. Items that passed never appear here. `test_incomplete_deliverable_sends_the_main_agent_back_in_the_same_loop` asserts this for multi-part.
+- A check may order `incomplete` in `_judge` and name only the first few under Focus. Expert depth sorts its failed details by ascending P(yes), weakest first, and names only `JEV_EXPERT_DEPTH_FOCUS_LIMIT` of them under Focus, so each round goes deep on a few points instead of shallow on all; Failed checks still lists every one.
 - Only change `continue_prompt.md` when the instructions for **every** check need to change. Its placeholders are fixed: `{request}`, `{run_state}`, `{handoff}`, `{failed}`, `{focus}`.
 
 On the next finish attempt the whole cycle repeats:

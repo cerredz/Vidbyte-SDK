@@ -4,8 +4,8 @@ PURPOSE: Implements JevDoneContinuation, the continuation for JevAgent's done ch
 ROLE IN CODEBASE: JevAgent builds one JevDoneContinuation over its JevRunState when JevRuntimeSettings.continual enables a done check, and JevRuntime calls should_continue() and continue_() from its finish-attempt hook; each continuation is recorded through JevResponse on JevAgent.response.
 ARCHITECTURE NOTE: The message is the vidbyte/prompts asset jev_continuation/continue_prompt.md, filled with the run's own text; what one failed check contributes to it is one commented case in _explain(). The cap on continuations is JevContinualSettings.max_continuations.
 COMMON MODIFICATION PATTERNS: Add a done check's failed questions and focus to _explain(); change the message's instructions in vidbyte/prompts/prompts/jev_continuation/continue_prompt.md.
-KNOWN EDGE CASES: A failed check whose handoff is missing never continues, because there is no evidence to hand back. After max_continuations continuations the latest verdict stays on JevAgent.response, but the main agent's answer stands.
-RELATED DOCS: docs/design/jev-multipart-done-criteria.md and skills/jev-agent/SKILL.md.
+KNOWN EDGE CASES: A failed check whose handoff is missing never continues, because there is no evidence to hand back. Expert depth lists every shallow detail under Failed checks, weakest first, but names only the JEV_EXPERT_DEPTH_FOCUS_LIMIT weakest under Focus. After max_continuations continuations the latest verdict stays on JevAgent.response, but the main agent's answer stands.
+RELATED DOCS: docs/design/jev-multipart-done-criteria.md, docs/design/jev-expert-depth-done-criteria.md, skills/jev-continuation/SKILL.md, and skills/jev-agent/SKILL.md.
 TESTS: tests/test_jev_done.py.
 """
 
@@ -18,7 +18,7 @@ from vidbyte.agents.jev.continuation.base import JevContinuation
 from vidbyte.agents.jev.done import JevRunState
 from vidbyte.agents.jev.response import JevResponse
 from vidbyte.agents.jev.settings import JevContinualSettings
-from vidbyte.lib.constants.jev import JEV_NOUL_TRUE
+from vidbyte.lib.constants.jev import JEV_EXPERT_DEPTH_FOCUS_LIMIT, JEV_NOUL_TRUE
 from vidbyte.lib.dataclasses.jev import JevDoneResult
 from vidbyte.lib.enums.jev import JevDoneCheck
 from vidbyte.lib.enums.prompts import Prompt
@@ -85,6 +85,27 @@ class JevDoneContinuation(JevContinuation):
                     yes = result.answers[identifier].probabilities[JEV_NOUL_TRUE]
                     failed.append(f"- {question.instructions.question.format(item=identifier)} Jev's answer: no (P(yes) = {yes:.2f}). Still missing: {missing[identifier]}")
                     focus.append(f"- {deliverables[identifier].description} Done when: {deliverables[identifier].completion_signal}")
+                return "\n".join(failed), "\n".join(focus)
+            case JevDoneCheck.EXPERT_DEPTH:
+                # Every shallow detail's question, Jev's answer, and the handoff's words for what a deeper handling
+                # still needs, weakest first; then only the weakest few, in the run state's terms, as the points to
+                # go deeper on, each with its quick version to move past, why it matters, and when it is done.
+                # @intent go-deep-on-the-weakest-few
+                # Naming every shallow point under Focus would spread the next round thin, which is the shallow work
+                # this check exists to catch; the next finish attempt re-ranks, so each round takes the weakest now.
+                question = JevDoneRegistry.question(JevDoneCheck.EXPERT_DEPTH)
+                state = None if self.run_state.record is None else self.run_state.record.expert_depth
+                handoff = None if self.run_state.handoff is None else self.run_state.handoff.expert_depth
+                details = {} if state is None else {detail.id: (deliverable, detail) for deliverable, detail in state.entries()}
+                missing = {} if handoff is None else {item.id: item.missing for item in handoff.details}
+                failed = [question.gap]
+                focus = []
+                for rank, identifier in enumerate(result.incomplete):
+                    yes = result.answers[identifier].probabilities[JEV_NOUL_TRUE]
+                    failed.append(f"- {question.instructions.question.format(item=identifier)} Jev's answer: no (P(yes) = {yes:.2f}). Still needed for depth: {missing[identifier]}")
+                    if rank < JEV_EXPERT_DEPTH_FOCUS_LIMIT:
+                        deliverable, detail = details[identifier]
+                        focus.append(f"- Go deeper on: {detail.detail} Deliverable: {deliverable.description} Quick version to move past: {detail.shallow_version} Why it matters: {detail.risk} Done when: {detail.done_when}")
                 return "\n".join(failed), "\n".join(focus)
 
 

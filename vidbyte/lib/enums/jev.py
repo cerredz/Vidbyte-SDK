@@ -40,6 +40,7 @@ class JevDoneCheck(str, Enum):
     """The done checks a JevAgent user can enable; each adds its own section to JevRunState's state and JevHandoff's evidence, and asks its own Jev question before a run may finish."""
 
     MULTI_PART = "multi_part"
+    EXPERT_DEPTH = "expert_depth"
 
 
 class JevDoneQuestionKey(str, Enum):
@@ -49,6 +50,7 @@ class JevDoneQuestionKey(str, Enum):
     """
 
     MULTI_PART_DELIVERED = "multi_part.delivered"
+    EXPERT_DEPTH_HANDLED = "expert_depth.handled"
 
 
 class JevPreflightQuestionKey(str, Enum):

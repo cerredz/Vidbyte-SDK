@@ -5,7 +5,7 @@ ROLE IN CODEBASE: Pins the review of PR #452: records and enums live in vidbyte/
 ARCHITECTURE NOTE: Scripted generative and decision runners replace only the external boundaries while production settings, registry, schemas, runtime hook, and response wiring stay active.
 COMMON MODIFICATION PATTERNS: Add a case for every new done check, section, question, threshold boundary, and availability policy.
 KNOWN EDGE CASES: No test may contact TypeSafe or a generative provider; the token-floor test needs tiktoken and is skipped without it.
-RELATED DOCS: docs/design/jev-multipart-done-criteria.md, skills/jev-agent/SKILL.md, and skills/asking-jev-questions/SKILL.md.
+RELATED DOCS: docs/design/jev-multipart-done-criteria.md, docs/design/jev-expert-depth-done-criteria.md, skills/jev-continuation/SKILL.md, and skills/asking-jev-questions/SKILL.md.
 TESTS: python -m unittest tests.test_jev_done and python scripts/test-jev-multipart-done-criteria.py.
 """
 
@@ -44,9 +44,17 @@ from vidbyte.lib.constants.jev import (
     JEV_DONE_COMPLETION_SIGNAL_FIELD,
     JEV_DONE_DELIVERABLE_FIELD,
     JEV_DONE_DELIVERABLES_FIELD,
+    JEV_DONE_DETAIL_FIELD,
+    JEV_DONE_DONE_WHEN_FIELD,
     JEV_DONE_EVIDENCE_FIELD,
+    JEV_DONE_EXPERT_DETAILS_FIELD,
     JEV_DONE_MAX_CONTINUATIONS,
     JEV_DONE_REQUEST_FIELD,
+    JEV_DONE_SHALLOW_VERSION_FIELD,
+    JEV_EXPERT_DEPTH_FOCUS_LIMIT,
+    JEV_EXPERT_DEPTH_MAX_DETAILS,
+    JEV_EXPERT_DEPTH_MIN_DETAILS,
+    JEV_EXPERT_DEPTH_THRESHOLD,
     JEV_MULTI_PART_THRESHOLD,
 )
 from vidbyte.lib.dataclasses.jev import (
@@ -59,6 +67,16 @@ from vidbyte.lib.dataclasses.jev import (
     JevDeliverablePayload,
     JevDoneQuestion,
     JevDoneResult,
+    JevExpertDepth,
+    JevExpertDepthDeliverable,
+    JevExpertDepthDeliverablePayload,
+    JevExpertDepthEvidence,
+    JevExpertDepthEvidencePayload,
+    JevExpertDepthPayload,
+    JevExpertDetail,
+    JevExpertDetailEvidence,
+    JevExpertDetailEvidencePayload,
+    JevExpertDetailPayload,
     JevHandoffPayload,
     JevMultiPart,
     JevMultiPartEvidencePayload,
@@ -71,7 +89,7 @@ from vidbyte.lib.enums import JevDoneQuestionKey, JevQuestionType, ModelProvider
 from vidbyte.lib.enums.prompts import Prompt
 from vidbyte.lib.errors import ConfigurationError, ProviderRequestError
 from vidbyte.lib.jev import JevDoneRegistry
-from vidbyte.lib.jev.done import DONE_STATE, MultiPartDeliveredQuestion
+from vidbyte.lib.jev.done import DONE_STATE, ExpertDepthHandledQuestion, MultiPartDeliveredQuestion
 from vidbyte.lib.runners import TextModelResponse
 from vidbyte.lib.runners.decision import DecisionModelRunner
 from vidbyte.lib.runners.types import DecisionModelResponse
@@ -187,7 +205,7 @@ class JevDoneRecordTests(unittest.TestCase):
 
     def test_records_and_enums_live_in_lib(self) -> None:
         # [Review 4116720422] dataclasses and enums belong in vidbyte/lib, per AGENTS.md.
-        for cls in (JevDeliverable, JevMultiPart, JevRunStateRecord, JevDoneResult, JevRunStatePayload, JevMultiPartPayload):
+        for cls in (JevDeliverable, JevMultiPart, JevRunStateRecord, JevDoneResult, JevRunStatePayload, JevMultiPartPayload, JevExpertDetail, JevExpertDepthDeliverable, JevExpertDepth, JevExpertDetailEvidence, JevExpertDepthEvidence, JevExpertDepthPayload, JevExpertDepthEvidencePayload):
             self.assertEqual(cls.__module__, "vidbyte.lib.dataclasses.jev")
         self.assertEqual(JevDoneCheck.__module__, "vidbyte.lib.enums.jev")
         self.assertFalse((_REPOSITORY_ROOT / "vidbyte/agents/jev/run_state.py").exists())
@@ -195,11 +213,11 @@ class JevDoneRecordTests(unittest.TestCase):
 
     def test_every_structured_output_field_has_a_four_to_six_sentence_description(self) -> None:
         # [Review 4116725548] every field carries a pre-defined 4-6 sentence description used in the structured output.
-        for model in (JevRunStatePayload, JevMultiPartPayload, JevDeliverablePayload, JevMultiPartEvidencePayload, JevDeliverableEvidencePayload):
+        for model in (JevRunStatePayload, JevMultiPartPayload, JevDeliverablePayload, JevMultiPartEvidencePayload, JevDeliverableEvidencePayload, JevExpertDepthPayload, JevExpertDepthDeliverablePayload, JevExpertDetailPayload, JevExpertDepthEvidencePayload, JevExpertDetailEvidencePayload):
             for name, description in _descriptions(model).items():
                 with self.subTest(model=model.__name__, field=name):
                     self.assertIn(_sentences(description), range(4, 7))
-        for section in (JevMultiPartPayload, JevMultiPartEvidencePayload):
+        for section in (JevMultiPartPayload, JevMultiPartEvidencePayload, JevExpertDepthPayload, JevExpertDepthEvidencePayload):
             with self.subTest(section=section.__name__):
                 self.assertIn(_sentences(section.SECTION), range(4, 7))
 
@@ -212,7 +230,7 @@ class JevDoneRecordTests(unittest.TestCase):
 
     def test_records_hold_no_parsing_or_schema_code(self) -> None:
         # [Review 4116752796] from_payload and output_schema do not belong on the record dataclasses.
-        for cls in (JevDeliverable, JevMultiPart, JevRunStateRecord):
+        for cls in (JevDeliverable, JevMultiPart, JevRunStateRecord, JevExpertDetail, JevExpertDepthDeliverable, JevExpertDepth, JevExpertDetailEvidence, JevExpertDepthEvidence):
             for name in ("from_payload", "output_schema", "to_payload"):
                 self.assertFalse(hasattr(cls, name), f"{cls.__name__}.{name}")
 
@@ -572,6 +590,280 @@ class JevDoneRuntimeTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(reply.content, "migration written")
         self.assertEqual((len(main.calls), len(state_runner.calls)), (0, 0))
+
+
+_DEPTH_REQUEST = "Add retries to the HTTP client in client/http.py."
+_DEPTH_DETAILS = [
+    {"id": "retry_idempotent_only", "detail": "Retries only calls that are safe to repeat.", "shallow_version": "Every failed request is retried, including POST.", "done_when": "The retry wrapper retries only GET, HEAD, PUT, and DELETE, and sends a POST once.", "risk": "A retried POST can charge a customer twice."},
+    {"id": "retry_backoff", "detail": "Exponential backoff between retries.", "shallow_version": "Retries fire immediately, one after another.", "done_when": "The delay before each retry doubles with every attempt.", "risk": "Immediate retries hammer a server that is already struggling."},
+    {"id": "retry_cap", "detail": "A cap on the number of attempts.", "shallow_version": "A failed request is retried until it succeeds.", "done_when": "Retries stop after a fixed maximum number of attempts and the last error is raised.", "risk": "A request that can never succeed retries forever."},
+    {"id": "retry_errors", "detail": "Which errors are retried.", "shallow_version": "Every exception triggers a retry.", "done_when": "Only timeouts and 5xx responses are retried, and a 4xx response fails at once.", "risk": "A bad request is retried for nothing and its real error is hidden."},
+]
+_DEPTH_STATE = {
+    "goal": "Requests from the HTTP client survive brief failures.",
+    "objective": "Retry logic in client/http.py.",
+    "mission": "Change only the HTTP client.",
+    "what_not_to_do": [],
+    "expert_depth": {"deliverables": [{"id": "http_retries", "description": "Retries for failed requests in the HTTP client in client/http.py.", "details": _DEPTH_DETAILS}]},
+}
+_DEPTH_HANDOFF = {
+    "expert_depth": {
+        "details": [
+            {"id": "retry_idempotent_only", "evidence": "Tool call edit_file(path='client/http.py') output: updated; the wrapper retries every failed request.", "missing": "Limit retries to GET, HEAD, PUT, and DELETE."},
+            {"id": "retry_backoff", "evidence": "The same edit retries at once, with no delay.", "missing": "Double the delay before each retry."},
+            {"id": "retry_cap", "evidence": "The same edit stops after 3 attempts.", "missing": "Nothing is missing."},
+            {"id": "retry_errors", "evidence": "The same edit retries on any exception.", "missing": "Retry only timeouts and 5xx responses."},
+        ]
+    }
+}
+_DEPTH_IDS = tuple(detail["id"] for detail in _DEPTH_DETAILS)
+
+
+def _detail(identifier: str) -> JevExpertDetail:
+    return JevExpertDetail(identifier, "detail", "shallow", "done when", "risk")
+
+
+class JevExpertDepthRecordTests(unittest.TestCase):
+    """Pin the expert-depth records, payloads, and schema sections: 3-5 weak points per deliverable, ids unique across the section."""
+
+    def test_each_deliverable_holds_three_to_five_details(self) -> None:
+        for count in (JEV_EXPERT_DEPTH_MIN_DETAILS, JEV_EXPERT_DEPTH_MAX_DETAILS):
+            deliverable = JevExpertDepthDeliverable("retries", "Retries.", tuple(_detail(f"d{index}") for index in range(count)))
+            self.assertEqual(len(deliverable.details), count)
+        for count in (JEV_EXPERT_DEPTH_MIN_DETAILS - 1, JEV_EXPERT_DEPTH_MAX_DETAILS + 1):
+            with self.subTest(count=count), self.assertRaises(ConfigurationError):
+                JevExpertDepthDeliverable("retries", "Retries.", tuple(_detail(f"d{index}") for index in range(count)))
+        schema = JevExpertDepthDeliverablePayload.model_json_schema()["properties"]["details"]
+        self.assertEqual((schema["minItems"], schema["maxItems"]), (JEV_EXPERT_DEPTH_MIN_DETAILS, JEV_EXPERT_DEPTH_MAX_DETAILS))
+
+    def test_detail_ids_are_unique_across_every_deliverable(self) -> None:
+        # Each detail's Jev question is named by its id alone, so a repeated id across deliverables would collide.
+        first = JevExpertDepthDeliverable("uploads", "Uploads.", (_detail("backoff"), _detail("cap"), _detail("errors")))
+        second = JevExpertDepthDeliverable("downloads", "Downloads.", (_detail("backoff"), _detail("resume"), _detail("checksum")))
+        with self.assertRaises(ConfigurationError):
+            JevExpertDepth((first, second))
+        with self.assertRaises(ConfigurationError):
+            JevExpertDepth((first, first))
+        for bad in ("Backoff", "1_backoff", "back off"):
+            with self.subTest(bad=bad), self.assertRaises(ConfigurationError):
+                _detail(bad)
+        with self.assertRaises(ConfigurationError):
+            JevExpertDetail("backoff", "detail", "shallow", "done when", " ")
+
+    def test_entries_pair_each_detail_with_its_deliverable_in_order(self) -> None:
+        uploads = JevExpertDepthDeliverable("uploads", "Uploads.", (_detail("upload_backoff"), _detail("upload_cap"), _detail("upload_errors")))
+        downloads = JevExpertDepthDeliverable("downloads", "Downloads.", (_detail("resume"), _detail("checksum"), _detail("timeout")))
+        depth = JevExpertDepth((uploads, downloads))
+        self.assertEqual(depth.ids(), ("upload_backoff", "upload_cap", "upload_errors", "resume", "checksum", "timeout"))
+        self.assertEqual([deliverable.id for deliverable, _ in depth.entries()], ["uploads"] * 3 + ["downloads"] * 3)
+        self.assertEqual(JevExpertDepthEvidence((JevExpertDetailEvidence("resume", "evidence", "missing"),)).ids(), ("resume",))
+
+    def test_enabling_the_check_adds_a_described_section_to_both_schemas(self) -> None:
+        run_state = JevRunState.schema((JevDoneCheck.EXPERT_DEPTH,))
+        self.assertEqual(run_state.model_fields["expert_depth"].description, JevExpertDepthPayload.SECTION)
+        self.assertNotIn("multi_part", run_state.model_fields)
+        handoff = JevHandoff.schema((JevDoneCheck.EXPERT_DEPTH,))
+        self.assertEqual(handoff.model_fields["expert_depth"].description, JevExpertDepthEvidencePayload.SECTION)
+        self.assertEqual(set(JevExpertDetailPayload.model_fields), {"id", "detail", "shallow_version", "done_when", "risk"})
+        self.assertEqual(set(JevExpertDetailEvidencePayload.model_fields), {"id", "evidence", "missing"})
+        both = JevRunState.schema((JevDoneCheck.MULTI_PART, JevDoneCheck.EXPERT_DEPTH))
+        self.assertTrue({"multi_part", "expert_depth"} <= set(both.model_fields))
+
+    def test_run_state_prompt_allows_depth_but_never_new_outputs(self) -> None:
+        # The general prompt forbids best practices of the writer's own, so the depth section needs this one general exception.
+        text = Prompts().get(Prompt.JEV_RUN_STATE_SYSTEM_PROMPT)
+        self.assertIn("adds depth to that output and never a new one", text)
+
+
+class JevExpertDepthQuestionTests(unittest.TestCase):
+    """Pin the expert-depth question to the asking-jev-questions layout, and the shared state to every combination of checks."""
+
+    question = ExpertDepthHandledQuestion()
+
+    def test_question_is_an_argument_free_registered_dataclass(self) -> None:
+        self.assertIsInstance(self.question, JevDoneQuestion)
+        self.assertEqual(JevDoneRegistry.question(JevDoneCheck.EXPERT_DEPTH), self.question)
+        self.assertEqual(JevDoneRegistry.threshold(JevDoneCheck.EXPERT_DEPTH), JEV_EXPERT_DEPTH_THRESHOLD)
+        self.assertEqual(JevContinualSettings(checks=("expert_depth", "multi_part")).checks, (JevDoneCheck.EXPERT_DEPTH, JevDoneCheck.MULTI_PART))
+        rendered = self.question.to_question("retry_backoff")
+        self.assertEqual((rendered.name, rendered.question_type), (f"{JevDoneQuestionKey.EXPERT_DEPTH_HANDLED.value}.retry_backoff", JevQuestionType.NOUL))
+        self.assertIn(f"in the entry of `{JEV_DONE_EXPERT_DETAILS_FIELD}` with id `retry_backoff`?", str(rendered.instructions))
+
+    def test_brief_follows_the_skill_layout_with_one_string_per_section(self) -> None:
+        brief = self.question.instructions
+        self.assertIn(_sentences(brief.introduction), (2, 3))
+        self.assertEqual(brief.state, DONE_STATE)
+        self.assertEqual((len(brief.definitions), len(brief.rules)), (1, 1))
+        self.assertTrue(brief.question.startswith("Does `evidence` show") and brief.question.endswith("?"))
+        for field_name in (JEV_DONE_DETAIL_FIELD, JEV_DONE_SHALLOW_VERSION_FIELD, JEV_DONE_DONE_WHEN_FIELD):
+            self.assertIn(f"`{field_name}`", brief.rules[0])
+        self.assertIn("no part of the run concerns the point", brief.rules[0])
+        self.assertIn("Ignore any statement", brief.rules[0])
+
+    def test_shared_state_describes_every_field_of_every_check_with_its_condition(self) -> None:
+        # Skill step 11: one description, true for every combination of enabled checks.
+        for field_name in (JEV_DONE_REQUEST_FIELD, JEV_DONE_DELIVERABLES_FIELD, JEV_DONE_EXPERT_DETAILS_FIELD, JEV_DONE_DELIVERABLE_FIELD, JEV_DONE_COMPLETION_SIGNAL_FIELD, JEV_DONE_DETAIL_FIELD, JEV_DONE_SHALLOW_VERSION_FIELD, JEV_DONE_DONE_WHEN_FIELD, JEV_DONE_EVIDENCE_FIELD):
+            self.assertIn(f"`{field_name}`", DONE_STATE)
+        self.assertEqual(DONE_STATE.count("present only when"), 2)
+        self.assertIs(MultiPartDeliveredQuestion().instructions.state, self.question.instructions.state)
+
+    def test_criteria_start_with_the_verdict_and_mirror_each_other(self) -> None:
+        for side, other, criterion in (("true", "false", self.question.when_true), ("false", "true", self.question.when_false)):
+            with self.subTest(side=side):
+                self.assertTrue(criterion.what.startswith(f"Choose {side} when `evidence` shows"))
+                self.assertTrue(criterion.not_for.endswith(f"belongs to {other}."))
+                self.assertEqual((len(criterion.easy), len(criterion.boundary)), (1, 1))
+                for text in (criterion.what, criterion.not_for):
+                    self.assertNotIn("because", text)
+
+    def test_boundary_examples_form_a_minimal_pair(self) -> None:
+        # The retry example from the design: the deep form differs from the shallow form only in which calls retry.
+        true_side, false_side = self.question.when_true.boundary[0], self.question.when_false.boundary[0]
+        self.assertTrue(true_side.startswith(false_side.rstrip(".")))
+        self.assertIn("a POST is sent once", true_side)
+
+    @unittest.skipUnless(importlib.util.find_spec("tiktoken"), "tiktoken is not installed")
+    def test_question_carries_at_least_two_thousand_tokens(self) -> None:
+        import tiktoken
+
+        parts = [self.question.instructions.render(), self.question.gap]
+        for criterion in (self.question.when_true, self.question.when_false):
+            parts += [criterion.what, criterion.not_for, *criterion.easy, *criterion.boundary]
+        self.assertGreaterEqual(len(tiktoken.get_encoding("cl100k_base").encode("\n".join(parts))), 2_000)
+
+    def test_question_text_is_one_string_literal_each(self) -> None:
+        scanner = ImplicitConcatenationScanner()
+        for rel in ("vidbyte/lib/jev/done/expert_depth.py", "vidbyte/lib/jev/done/state.py"):
+            text = (_REPOSITORY_ROOT / rel).read_text(encoding="utf-8")
+            with self.subTest(rel=rel):
+                self.assertEqual(scanner.scan(SourceFile(path=_REPOSITORY_ROOT / rel, rel=rel, text=text, tree=ast.parse(text))), [])
+
+
+class JevExpertDepthRuntimeTests(unittest.IsolatedAsyncioTestCase):
+    """Verify the expert-depth check through JevAgent: the batched state, weakest-first ranking, the capped Focus, and fail-open paths."""
+
+    _agent = JevDoneRuntimeTests._agent
+
+    def _depth(self, *, state: dict[str, Any] = _DEPTH_STATE, handoff: dict[str, Any] = _DEPTH_HANDOFF, **settings: Any) -> tuple[JevAgent, ScriptedGenerativeRunner, ScriptedGenerativeRunner, ScriptedGenerativeRunner]:
+        return self._agent(state=json.dumps(state), handoff=json.dumps(handoff), done=(JevDoneCheck.EXPERT_DEPTH,), **settings)
+
+    @staticmethod
+    def _decision(**yes: list[float]) -> ScriptedDecisionRunner:
+        return ScriptedDecisionRunner({identifier: yes.get(identifier, [0.95]) for identifier in _DEPTH_IDS})
+
+    async def test_deep_work_finishes_and_jev_sees_each_points_minimal_pair(self) -> None:
+        decision = self._decision()
+        agent, main, *_ = self._depth()
+        with patch(_RUNNER_PATH, new=_runner_class(decision)):
+            reply = await agent.arun(_DEPTH_REQUEST)
+
+        self.assertEqual((reply.content, len(main.calls), len(decision.requests)), ("All done.", 1, 1))
+        response = agent.response
+        assert response.run_state is not None and response.run_state.expert_depth is not None
+        self.assertEqual(response.run_state.expert_depth.ids(), _DEPTH_IDS)
+        self.assertIsNone(response.run_state.multi_part)
+        result = response.done[JevDoneCheck.EXPERT_DEPTH]
+        self.assertTrue(result.passed and result.available)
+        request = decision.requests[0]
+        state = request.state
+        assert isinstance(state, Mapping)
+        self.assertEqual(set(state), {JEV_DONE_REQUEST_FIELD, JEV_DONE_EXPERT_DETAILS_FIELD})
+        entry = state[JEV_DONE_EXPERT_DETAILS_FIELD]["retry_idempotent_only"]
+        # The minimal pair and the evidence reach Jev; the risk and the handoff's `missing` are for the main agent only.
+        self.assertEqual(set(entry), {JEV_DONE_DELIVERABLE_FIELD, JEV_DONE_DETAIL_FIELD, JEV_DONE_SHALLOW_VERSION_FIELD, JEV_DONE_DONE_WHEN_FIELD, JEV_DONE_EVIDENCE_FIELD})
+        self.assertEqual(entry[JEV_DONE_SHALLOW_VERSION_FIELD], "Every failed request is retried, including POST.")
+        self.assertNotIn("charge a customer twice", repr(state))
+        self.assertNotIn("Limit retries to GET", repr(state))
+        prefix = JevDoneQuestionKey.EXPERT_DEPTH_HANDLED.value
+        self.assertEqual([question.name for question in request.questions], [f"{prefix}.{identifier}" for identifier in _DEPTH_IDS])
+
+    async def test_shallow_points_send_the_agent_deeper_on_the_weakest_few_first(self) -> None:
+        decision = self._decision(retry_idempotent_only=[0.3, 0.9], retry_backoff=[0.1, 0.9], retry_cap=[0.5, 0.9], retry_errors=[0.6, 0.9])
+        agent, main, *_ = self._depth()
+        with patch(_RUNNER_PATH, new=_runner_class(decision)):
+            await agent.arun(_DEPTH_REQUEST)
+
+        self.assertEqual((len(main.calls), agent.response.continuations), (2, 1))
+        feedback = main.messages[1][0]["content"]
+        failed, focus = feedback.split("# Failed checks", 1)[1].split("# Focus", 1)
+        self.assertIn(ExpertDepthHandledQuestion().gap, failed)
+        # Failed checks names every shallow point, weakest first, with what a deeper handling still needs.
+        order = ["`retry_backoff`", "`retry_idempotent_only`", "`retry_cap`", "`retry_errors`"]
+        self.assertEqual([failed.index(name) for name in order], sorted(failed.index(name) for name in order))
+        self.assertIn("P(yes) = 0.10). Still needed for depth: Double the delay before each retry.", failed)
+        # Focus names only the weakest few, each with its quick version to move past, why it matters, and when it is done.
+        lines = [line for line in focus.strip().splitlines() if line.startswith("- ")]
+        self.assertEqual(len(lines), JEV_EXPERT_DEPTH_FOCUS_LIMIT)
+        self.assertTrue(lines[0].startswith("- Go deeper on: Exponential backoff between retries."))
+        self.assertIn("Quick version to move past: Retries fire immediately, one after another.", lines[0])
+        self.assertIn("Why it matters: Immediate retries hammer a server that is already struggling.", lines[0])
+        self.assertIn("Done when: The delay before each retry doubles with every attempt.", lines[0])
+        self.assertIn("Deliverable: Retries for failed requests in the HTTP client in client/http.py.", lines[0])
+        self.assertNotIn("Which errors are retried.", focus)
+        self.assertTrue(agent.response.done[JevDoneCheck.EXPERT_DEPTH].passed)
+
+    async def test_the_recorded_result_ranks_shallow_points_weakest_first_with_ties_in_state_order(self) -> None:
+        decision = self._decision(retry_idempotent_only=[0.4], retry_backoff=[0.1], retry_cap=[0.4], retry_errors=[0.9])
+        agent, main, *_ = self._depth()
+        with patch(_RUNNER_PATH, new=_runner_class(decision)):
+            await agent.arun(_DEPTH_REQUEST)
+
+        self.assertEqual(len(main.calls), JEV_DONE_MAX_CONTINUATIONS + 1)
+        result = agent.response.done[JevDoneCheck.EXPERT_DEPTH]
+        self.assertFalse(result.passed)
+        self.assertEqual(result.incomplete, ("retry_backoff", "retry_idempotent_only", "retry_cap"))
+
+    async def test_threshold_is_inclusive_and_one_shallow_point_fails_a_deep_mean(self) -> None:
+        agent, main, *_ = self._depth()
+        with patch(_RUNNER_PATH, new=_runner_class(self._decision(**{identifier: [JEV_EXPERT_DEPTH_THRESHOLD] for identifier in _DEPTH_IDS}))):
+            await agent.arun(_DEPTH_REQUEST)
+        self.assertEqual(len(main.calls), 1)
+
+        agent, main, *_ = self._depth()
+        with patch(_RUNNER_PATH, new=_runner_class(self._decision(retry_cap=[JEV_EXPERT_DEPTH_THRESHOLD - 0.01, 0.9], **{identifier: [1.0] for identifier in _DEPTH_IDS if identifier != "retry_cap"}))):
+            await agent.arun(_DEPTH_REQUEST)
+        self.assertEqual(len(main.calls), 2)
+
+    async def test_handoff_that_misses_a_detail_is_unavailable(self) -> None:
+        partial = {"expert_depth": {"details": _DEPTH_HANDOFF["expert_depth"]["details"][:3]}}  # type: ignore[index]
+        decision = self._decision(retry_backoff=[0.1])
+        agent, main, *_ = self._depth(handoff=partial)
+        with patch(_RUNNER_PATH, new=_runner_class(decision)):
+            await agent.arun(_DEPTH_REQUEST)
+
+        self.assertEqual((len(main.calls), len(decision.requests)), (1, 0))
+        result = agent.response.done[JevDoneCheck.EXPERT_DEPTH]
+        self.assertFalse(result.available)
+        self.assertTrue(result.passed)
+
+    async def test_request_with_no_depth_to_miss_passes_without_asking_jev(self) -> None:
+        empty = {**_DEPTH_STATE, "expert_depth": {"deliverables": []}}
+        decision = self._decision(retry_backoff=[0.1])
+        agent, main, *_ = self._depth(state=empty, handoff={"expert_depth": {"details": []}})
+        with patch(_RUNNER_PATH, new=_runner_class(decision)):
+            await agent.arun("Rename the variable x to count.")
+
+        self.assertEqual((len(main.calls), len(decision.requests)), (1, 0))
+        result = agent.response.done[JevDoneCheck.EXPERT_DEPTH]
+        self.assertTrue(result.passed and result.available)
+
+    async def test_both_checks_share_one_request_and_one_state(self) -> None:
+        # Skill step 11: with both checks enabled, one request carries both checks' keys and questions.
+        state = {**_STATE, "expert_depth": _DEPTH_STATE["expert_depth"]}
+        handoff = {**_HANDOFF, **_DEPTH_HANDOFF}
+        decision = ScriptedDecisionRunner({"dry_run_flag": [0.95], "readme_docs": [0.95], **{identifier: [0.95] for identifier in _DEPTH_IDS}})
+        agent, main, *_ = self._agent(state=json.dumps(state), handoff=json.dumps(handoff), done=(JevDoneCheck.MULTI_PART, JevDoneCheck.EXPERT_DEPTH))
+        with patch(_RUNNER_PATH, new=_runner_class(decision)):
+            await agent.arun(_REQUEST)
+
+        self.assertEqual((len(main.calls), len(decision.requests)), (1, 1))
+        request = decision.requests[0]
+        assert isinstance(request.state, Mapping)
+        self.assertEqual(set(request.state), {JEV_DONE_REQUEST_FIELD, JEV_DONE_DELIVERABLES_FIELD, JEV_DONE_EXPERT_DETAILS_FIELD})
+        names = [question.name for question in request.questions]
+        self.assertEqual(sum(name.startswith(f"{JevDoneQuestionKey.MULTI_PART_DELIVERED.value}.") for name in names), 2)
+        self.assertEqual(sum(name.startswith(f"{JevDoneQuestionKey.EXPERT_DEPTH_HANDLED.value}.") for name in names), len(_DEPTH_IDS))
+        self.assertEqual(set(agent.response.done), {JevDoneCheck.MULTI_PART, JevDoneCheck.EXPERT_DEPTH})
 
 
 if __name__ == "__main__":

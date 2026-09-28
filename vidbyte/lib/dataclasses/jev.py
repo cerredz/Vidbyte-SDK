@@ -1,6 +1,6 @@
 """FILE: vidbyte/lib/dataclasses/jev.py
 
-PURPOSE: Defines the validated records for TypeSafe Jev decisions (JSON content, options, questions, requests, normalized answers, wire bodies, model cards, and decision-log records), for JevAgent preflight (the noul score, the question brief and criteria, the question base, preset definitions, preset results, the specialists JevAgent can hand a run to, the clarification agent's structured reply and the clarification built from it), for JevAgent done checks (the run-state and handoff structured replies with a described field per section, the run-state, deliverable, evidence, and handoff records, the done question base, and done results), and the JevAgentResponse the user reads after a run.
+PURPOSE: Defines the validated records for TypeSafe Jev decisions (JSON content, options, questions, requests, normalized answers, wire bodies, model cards, and decision-log records), for JevAgent preflight (the noul score, the question brief and criteria, the question base, preset definitions, preset results, the specialists JevAgent can hand a run to, the clarification agent's structured reply and the clarification built from it), for JevAgent done checks (the run-state and handoff structured replies with a described field per section, the run-state, deliverable, expert-depth detail, evidence, and handoff records, the done question base, and done results), and the JevAgentResponse the user reads after a run.
 ROLE IN CODEBASE: `vidbyte/providers/typesafe.py` builds TypeSafeWireRequest from JevDecisionRequest and JevAnswer values from responses, while `vidbyte/lib/runners/decision.py` passes the typed records through.
 ARCHITECTURE NOTE: This module must not import model_configs because that would close an import cycle through ModalityDetector. Records own every shape rule in __post_init__; the provider, not these records, turns a wire record into the JSON body (lint S060 bars dict[str, Any] encoders here).
 COMMON MODIFICATION PATTERNS: Mirror https://docs.typesafe.ai/api.md exactly: add a field together with its validation, its wire record, and its provider serialization; keep bounds in vidbyte/lib/constants/jev.py.
@@ -26,6 +26,8 @@ from vidbyte.lib.constants.jev import (
     JEV_CLARIFICATION_MAX_RECOMMENDATIONS,
     JEV_CLARIFICATION_MIN_RECOMMENDATIONS,
     JEV_DELIVERABLE_ID_PATTERN,
+    JEV_EXPERT_DEPTH_MAX_DETAILS,
+    JEV_EXPERT_DEPTH_MIN_DETAILS,
     JEV_MAX_CHOICE_OPTIONS,
     JEV_MAX_OPTION_NAME_CHARS,
     JEV_MAX_QUESTIONS,
@@ -688,6 +690,38 @@ class JevMultiPartPayload(JevSectionPayload):
     deliverables: list[JevDeliverablePayload] = Field(description="The deliverables are the separate outputs the request asks the agent to produce, one entry per output, in the order the request asks for them. An output is separate when it could be left out while the other outputs are still produced, such as a code change, a test, a migration, a document, an example, or an explanation the user asked for in its own right. Do not split one output into smaller steps, do not merge two outputs the user asked for separately, and do not add outputs the request does not ask for, such as extra tests or documentation the user never mentioned. Steps the agent takes only to produce an output, such as reading files or running a search, are not deliverables. Return an empty list when the request asks for no output at all, such as a greeting.")
 
 
+class JevExpertDetailPayload(BaseModel):
+    """One weak point of a requested deliverable, as JevRunState writes it in the expert-depth section."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(pattern=JEV_DELIVERABLE_ID_PATTERN, description="The id is a short, stable identifier for this detail, written in lowercase letters, digits, and underscores and starting with a letter. It must be unique across every detail of every deliverable in this section, so start it with the subject of its deliverable whenever two deliverables could share a point, such as retry_backoff and upload_backoff. Later steps refer to the detail only by this id, so it is copied exactly and never changed after it is written. Keep it under sixty-four characters and free of spaces, capital letters, and punctuation other than underscores.")
+    detail: str = Field(min_length=1, description="The detail names, in one sentence, one specific part of this deliverable that a careful version handles and a quick version handles thinly or skips. It is a point of depth inside the deliverable the user asked for, such as which errors a retry covers, a cap on attempts, or the empty-input case of a parser, never a new output, feature, file, or document the request does not ask for. Name it concretely enough that someone reading only the finished work could find the part of that work that concerns this point. Use the user's own names for the things the deliverable touches. Never name a point that conflicts with a limit the request sets, such as a point that makes the work larger when the user asked to keep it minimal.")
+    shallow_version: str = Field(min_length=1, description="The shallow version describes, in one or two sentences, what this detail looks like when a quick version of the deliverable handles it, so that it marks the weak point to look for. Describe the concrete form the quick version takes, such as retrying every request the same way, catching every exception in one place, or testing only the expected input, rather than calling it poor or incomplete. It must be something a quick but otherwise working version would plausibly do, not a broken or missing deliverable, since a missing deliverable is a different failure. Write it from the request alone, before any work, and never from guesses about how this particular agent will work.")
+    done_when: str = Field(min_length=1, description="The done-when condition is the visible sign that this detail was handled in depth, written so that it can be checked by reading the agent's final work and the record of its run. It names what must be present, such as code with a stated behavior, a test that exercises the point, or a passage of the answer that explains the point, and it must go beyond what the shallow version describes. It describes something observable in the work, never the agent's intentions or its claims that the point was considered. Keep it to one or two sentences, and keep it within what the request asks the deliverable to do.")
+    risk: str = Field(min_length=1, description="The risk says, in one or two sentences, what goes wrong for the user when this detail stays in its shallow version. Name the concrete consequence, such as a payment charged twice, a failure hidden from the caller, or a request that retries forever, rather than a general loss of quality. It is written for the agent doing the work, so that the agent understands why the point deserves more depth. It is never shown to the checker that judges the work, so it does not restate the done-when condition.")
+
+
+class JevExpertDepthDeliverablePayload(BaseModel):
+    """One requested deliverable whose quick version could be shallow, with its weakest points, as JevRunState writes it in the expert-depth section."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(pattern=JEV_DELIVERABLE_ID_PATTERN, description="The id is a short, stable identifier for this deliverable, written in lowercase letters, digits, and underscores and starting with a letter. It must be unique among the deliverables of this section, and it names the deliverable by its subject rather than numbering it. When another section of the state also lists the outputs the request asks for, use the same id for the same output there and here. Keep it under sixty-four characters and free of spaces, capital letters, and punctuation other than underscores.")
+    description: str = Field(min_length=1, description="The description says what this one deliverable is, in one or two sentences that follow the user's own wording. It names the thing to be produced or changed and any detail the request gives about it, such as a file, a format, a scope, or an audience. It describes only this deliverable as a whole, while its weak points belong in its details. Do not strengthen, weaken, or widen what the user asked for.")
+    details: list[JevExpertDetailPayload] = Field(min_length=JEV_EXPERT_DEPTH_MIN_DETAILS, max_length=JEV_EXPERT_DEPTH_MAX_DETAILS, description=f"The details are the {JEV_EXPERT_DEPTH_MIN_DETAILS} to {JEV_EXPERT_DEPTH_MAX_DETAILS} weakest points of this deliverable: the specific parts a careful version handles and a quick version handles thinly or skips. Order them from the point a quick version is most likely to get wrong to the point it is least likely to get wrong, since later steps go deeper on the weakest points first. Each detail is checked on its own against the finished work, so each one must be a separate point that can be seen in the work, not a restatement of another. Choose points inside what the user asked for, never extra outputs, and never points that the request's limits rule out. Prefer points whose shallow version would hurt the user over points of style or polish.")
+
+
+class JevExpertDepthPayload(JevSectionPayload):
+    """The expert-depth section of the run state: the weakest points of every requested deliverable whose quick version could be shallow."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    SECTION: ClassVar[str] = "The expert-depth section names, for each deliverable the request asks for, the weakest points of a quick version: the specific parts a careful engineer's version would handle and a quick version would handle thinly or skip. It exists because agents often produce every requested output, but only in its quick form, such as a retry with no backoff, no cap on attempts, and retries on calls that are not safe to repeat. Each point is described so that someone reading only the agent's final work and a record of its run could tell whether that point was handled in depth. The section adds depth inside the outputs the user asked for, never new outputs, and it never contradicts a limit the request sets. Fill it from the user's request alone, before any work has started."
+
+    deliverables: list[JevExpertDepthDeliverablePayload] = Field(description="The deliverables are the outputs the request asks for whose quick version could be shallow, one entry per output, in the order the request asks for them. An output belongs here when a quick version could produce it and still miss points a careful version would handle, such as a code change, a test suite, a migration, or an explanation of a design choice. Leave out outputs with nothing to handle in depth, such as a one-line rename, a greeting, or a plain factual answer, rather than inventing weak points for them. Do not split one output into smaller steps, and do not add outputs the request does not ask for. Return an empty list when no output the request asks for has depth to miss.")
+
+
 class JevHandoffPayload(BaseModel):
     """The evidence handoff JevHandoff writes after the main agent tries to finish.
 
@@ -716,6 +750,26 @@ class JevMultiPartEvidencePayload(JevSectionPayload):
     SECTION: ClassVar[str] = "The multi-part evidence section gathers, for each deliverable the run state lists, the parts of the agent's run that show whether that deliverable was produced. A separate checker reads one entry at a time, next to the user's request and that deliverable's description and completion signal, and decides whether the deliverable is done. That checker sees nothing of the run except the evidence written here, so the evidence must be complete, specific, and faithful to what the run actually shows. The section reports observations and never gives a verdict about whether the work is complete. It is filled after the agent tries to finish, from the agent's context window."
 
     deliverables: list[JevDeliverableEvidencePayload] = Field(description="The deliverables hold one evidence entry for every deliverable in the run state's multi-part section, with the same ids and in the same order. Each entry gathers the parts of the run that bear on that one deliverable and states what the run does not show for it. An entry never borrows evidence from another deliverable unless the same piece of the run truly concerns both, in which case it is repeated in each. Do not add entries for work the run did that no deliverable asks for. Never leave a deliverable out, even when the run did nothing toward it.")
+
+
+class JevExpertDetailEvidencePayload(BaseModel):
+    """The evidence the run holds for one weak point of a deliverable, as JevHandoff writes it in the expert-depth section."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(pattern=JEV_DELIVERABLE_ID_PATTERN, description="The id is the exact identifier of one detail from the run state's expert-depth section, copied character for character. Every detail of every deliverable in the run state gets exactly one evidence entry, even when the run did no work on it, and no entry may use an id that is not in the run state. The id is how the evidence is matched back to the detail it is about, so it is never renamed, merged, or invented. Write the entries in the same order as the details appear in the run state.")
+    evidence: str = Field(min_length=1, description="The evidence is everything in the agent's run that shows how this one detail was handled, compiled so that a checker who sees only this text, the detail, its shallow version, and its done-when condition can judge it. Quote or closely reproduce the exact code, test, command output, or passage of the final answer that concerns this point, since the difference between a shallow and a deep version is usually in a few specific lines. Name where each piece comes from, such as the final answer, a response, or a named tool call, and keep the pieces in the order they happened. Report what the run shows, including failed attempts, and never describe work the run does not show or state that the point was handled well. When the run produced the deliverable but nothing in it concerns this point, say so plainly.")
+    missing: str = Field(min_length=1, description="The missing field says what a deeper handling of this detail still needs, measured against its done-when condition. Name the specific behavior, case, test, or explanation that the run does not show yet, and the file or passage where it belongs. Write it for the agent that did the work, in plain words it can act on, so that it can go deeper on this one point without redoing the rest. Do not repeat the evidence, and do not suggest work beyond this point. When the evidence meets the done-when condition, write that nothing is missing.")
+
+
+class JevExpertDepthEvidencePayload(JevSectionPayload):
+    """The expert-depth section of the handoff: the evidence for every detail the run state lists."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    SECTION: ClassVar[str] = "The expert-depth evidence section gathers, for each detail the run state lists, the parts of the agent's run that show how that one point of a deliverable was handled. A separate checker reads one entry at a time, next to the detail, what its shallow version looks like, and the visible condition that shows it handled in depth, and decides whether the point was handled in depth. That checker sees nothing of the run except the evidence written here, so the evidence must quote the specific lines, tests, or passages that concern the point. The section reports observations and never gives a verdict about whether the work is deep enough. It is filled after the agent tries to finish, from the agent's context window."
+
+    details: list[JevExpertDetailEvidencePayload] = Field(description="The details hold one evidence entry for every detail of every deliverable in the run state's expert-depth section, with the same ids and in the same order. Each entry gathers the parts of the run that bear on that one point and states what a deeper handling still needs. An entry never borrows evidence from another detail unless the same piece of the run truly concerns both, in which case it is repeated in each. Do not add entries for points the run state does not list. Never leave a detail out, even when the run did nothing toward it.")
 
 
 class JevDeliverableId:
@@ -769,10 +823,68 @@ class JevMultiPart:
 
 
 @dataclass(frozen=True, slots=True)
+class JevExpertDetail:
+    """One weak point of a requested deliverable: a stable id, the point, its shallow version, the visible sign of depth, and the risk of leaving it shallow."""
+
+    id: str
+    detail: str
+    shallow_version: str
+    done_when: str
+    risk: str
+
+    def __post_init__(self) -> None:
+        # Requires an identifier later steps can echo exactly, and non-blank text in every other field.
+        JevDeliverableId.require(self.id, field_name="expert detail id")
+        for field_name in ("detail", "shallow_version", "done_when", "risk"):
+            JevText.require(getattr(self, field_name), field_name=f"{field_name} of expert detail {self.id!r}")
+
+
+@dataclass(frozen=True, slots=True)
+class JevExpertDepthDeliverable:
+    """One requested deliverable whose quick version could be shallow, with its weakest points, weakest first."""
+
+    id: str
+    description: str
+    details: tuple[JevExpertDetail, ...]
+
+    def __post_init__(self) -> None:
+        # Requires a deliverable id, non-blank description, and the fixed range of typed details.
+        JevDeliverableId.require(self.id, field_name="expert-depth deliverable id")
+        JevText.require(self.description, field_name=f"description of expert-depth deliverable {self.id!r}")
+        if not isinstance(self.details, tuple) or not all(isinstance(item, JevExpertDetail) for item in self.details):
+            raise JevValidation.error(f"details of expert-depth deliverable {self.id!r}", "a tuple of JevExpertDetail values", self.details)
+        if not JEV_EXPERT_DEPTH_MIN_DETAILS <= len(self.details) <= JEV_EXPERT_DEPTH_MAX_DETAILS:
+            raise JevValidation.error(f"details of expert-depth deliverable {self.id!r}", f"{JEV_EXPERT_DEPTH_MIN_DETAILS} to {JEV_EXPERT_DEPTH_MAX_DETAILS} details", len(self.details))
+
+
+@dataclass(frozen=True, slots=True)
+class JevExpertDepth:
+    """The expert-depth section of a run state: every requested deliverable whose quick version could be shallow, in request order."""
+
+    deliverables: tuple[JevExpertDepthDeliverable, ...] = ()
+
+    def __post_init__(self) -> None:
+        # Requires typed deliverables with unique ids, and detail ids unique across every deliverable, since
+        # each detail's Jev question and answer are named by its id alone.
+        if not isinstance(self.deliverables, tuple) or not all(isinstance(item, JevExpertDepthDeliverable) for item in self.deliverables):
+            raise JevValidation.error("expert-depth deliverables", "a tuple of JevExpertDepthDeliverable values", self.deliverables)
+        JevDeliverableId.require_unique(tuple(item.id for item in self.deliverables), field_name="expert-depth deliverables")
+        JevDeliverableId.require_unique(self.ids(), field_name="expert-depth details")
+
+    def ids(self) -> tuple[str, ...]:
+        """Return every detail id, deliverable by deliverable, each deliverable's weakest point first."""
+        return tuple(detail.id for _, detail in self.entries())
+
+    def entries(self) -> tuple[tuple[JevExpertDepthDeliverable, JevExpertDetail], ...]:
+        """Return every detail paired with the deliverable it belongs to, in the order of ids()."""
+        return tuple((deliverable, detail) for deliverable in self.deliverables for detail in deliverable.details)
+
+
+@dataclass(frozen=True, slots=True)
 class JevRunStateRecord:
     """The run state JevRunState wrote from the user's request: the central fields and the section of every enabled done check.
 
-    `multi_part` is set only when the MULTI_PART done check is enabled, and `usage` is JevRunState's own model usage.
+    `multi_part` and `expert_depth` are set only when their done check is enabled, and `usage` is JevRunState's own model usage.
     """
 
     goal: str
@@ -780,6 +892,7 @@ class JevRunStateRecord:
     mission: str
     what_not_to_do: tuple[str, ...] = ()
     multi_part: JevMultiPart | None = None
+    expert_depth: JevExpertDepth | None = None
     usage: UsageRollup | None = None
 
     def __post_init__(self) -> None:
@@ -792,6 +905,8 @@ class JevRunStateRecord:
             JevText.require(limit, field_name=f"run state what_not_to_do[{index}]")
         if self.multi_part is not None and not isinstance(self.multi_part, JevMultiPart):
             raise JevValidation.error("run state multi_part", "a JevMultiPart or None", self.multi_part)
+        if self.expert_depth is not None and not isinstance(self.expert_depth, JevExpertDepth):
+            raise JevValidation.error("run state expert_depth", "a JevExpertDepth or None", self.expert_depth)
 
 
 @dataclass(frozen=True, slots=True)
@@ -827,19 +942,54 @@ class JevMultiPartEvidence:
 
 
 @dataclass(frozen=True, slots=True)
+class JevExpertDetailEvidence:
+    """What the run shows for one weak point of a deliverable, and what a deeper handling still needs, as JevHandoff compiled it."""
+
+    id: str
+    evidence: str
+    missing: str
+
+    def __post_init__(self) -> None:
+        # Requires the echoed detail id and non-blank evidence and missing text.
+        JevDeliverableId.require(self.id, field_name="expert detail evidence id")
+        JevText.require(self.evidence, field_name=f"evidence of expert detail {self.id!r}")
+        JevText.require(self.missing, field_name=f"missing of expert detail {self.id!r}")
+
+
+@dataclass(frozen=True, slots=True)
+class JevExpertDepthEvidence:
+    """The expert-depth section of a handoff: one evidence entry per detail, in the run state's order."""
+
+    details: tuple[JevExpertDetailEvidence, ...] = ()
+
+    def __post_init__(self) -> None:
+        # Requires a tuple of evidence entries with unique ids.
+        if not isinstance(self.details, tuple) or not all(isinstance(item, JevExpertDetailEvidence) for item in self.details):
+            raise JevValidation.error("expert-depth evidence", "a tuple of JevExpertDetailEvidence values", self.details)
+        JevDeliverableId.require_unique(self.ids(), field_name="expert-depth evidence")
+
+    def ids(self) -> tuple[str, ...]:
+        """Return every evidence entry's detail id in order."""
+        return tuple(item.id for item in self.details)
+
+
+@dataclass(frozen=True, slots=True)
 class JevHandoffRecord:
     """The evidence JevHandoff compiled from the main agent's run for every enabled done check.
 
-    `multi_part` is set only when the MULTI_PART done check is enabled, and `usage` is JevHandoff's own model usage.
+    `multi_part` and `expert_depth` are set only when their done check is enabled, and `usage` is JevHandoff's own model usage.
     """
 
     multi_part: JevMultiPartEvidence | None = None
+    expert_depth: JevExpertDepthEvidence | None = None
     usage: UsageRollup | None = None
 
     def __post_init__(self) -> None:
-        # Requires a typed multi-part evidence section when present.
+        # Requires a typed evidence section for every enabled check that is present.
         if self.multi_part is not None and not isinstance(self.multi_part, JevMultiPartEvidence):
             raise JevValidation.error("handoff multi_part", "a JevMultiPartEvidence or None", self.multi_part)
+        if self.expert_depth is not None and not isinstance(self.expert_depth, JevExpertDepthEvidence):
+            raise JevValidation.error("handoff expert_depth", "a JevExpertDepthEvidence or None", self.expert_depth)
 
 
 @dataclass(frozen=True)
@@ -889,8 +1039,9 @@ class JevDoneQuestion:
 class JevDoneResult:
     """What one enabled done check decided the last time the main agent tried to finish.
 
-    `answers` holds Jev's answer per deliverable id, `score` is their mean P(yes), and `incomplete` names
-    the deliverables whose P(yes) fell below the check's threshold. With `available=False` the run state,
+    `answers` holds Jev's answer per checked item id (a deliverable, or an expert-depth detail), `score` is
+    their mean P(yes), and `incomplete` names the items whose P(yes) fell below the check's threshold, in the
+    order that check's continuation focuses on them. With `available=False` the run state,
     the handoff, or Jev was unavailable, `score` is None, and the check fails open (`passed` stays True).
     `usage` is the usage of the one Jev request that asked every enabled check's questions at that finish attempt.
     """
@@ -911,7 +1062,7 @@ class JevDoneResult:
             object.__setattr__(self, "score", JevProbability.require(self.score, field_name="done result score"))
         object.__setattr__(self, "answers", MappingProxyType(dict(self.answers)))
         if not isinstance(self.incomplete, tuple):
-            raise JevValidation.error("done result incomplete", "a tuple of deliverable ids", self.incomplete)
+            raise JevValidation.error("done result incomplete", "a tuple of item ids", self.incomplete)
 
 
 @dataclass(frozen=True, slots=True)
@@ -1003,6 +1154,16 @@ __all__ = [
     "JevDeliverablePayload",
     "JevDoneQuestion",
     "JevDoneResult",
+    "JevExpertDepth",
+    "JevExpertDepthDeliverable",
+    "JevExpertDepthDeliverablePayload",
+    "JevExpertDepthEvidence",
+    "JevExpertDepthEvidencePayload",
+    "JevExpertDepthPayload",
+    "JevExpertDetail",
+    "JevExpertDetailEvidence",
+    "JevExpertDetailEvidencePayload",
+    "JevExpertDetailPayload",
     "JevHandoffPayload",
     "JevHandoffRecord",
     "JevJson",

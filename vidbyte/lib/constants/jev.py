@@ -85,6 +85,16 @@ JEV_SPECIALIST_MAX_COUNT: int = JEV_MAX_CHOICE_OPTIONS - 1
 # only when every deliverable's P(yes) reaches the threshold (used as both the mean threshold and the veto).
 # 0.8 is a starting point, not a tuned value.
 JEV_MULTI_PART_THRESHOLD: float = 0.8
+# The expert-depth check asks one question per detail (a weak point of a requested deliverable), with the
+# same rule: the threshold is also the veto. It starts lower than multi-part because depth is graded and a
+# false "shallow" costs a whole continuation; 0.7 is a starting point, not a tuned value.
+JEV_EXPERT_DEPTH_THRESHOLD: float = 0.7
+# Every deliverable in the expert-depth section lists this many details, from the weakest point down.
+JEV_EXPERT_DEPTH_MIN_DETAILS: int = 3
+JEV_EXPERT_DEPTH_MAX_DETAILS: int = 5
+# How many of the weakest incomplete details the continuation names under Focus, so the main agent goes
+# deep on a few points at a time instead of shallow on all of them; the next finish attempt re-ranks.
+JEV_EXPERT_DEPTH_FOCUS_LIMIT: int = 3
 # Default of JevContinualSettings.max_continuations: how many times a failed done check may send the main
 # agent back to work before its answer is accepted.
 JEV_DONE_MAX_CONTINUATIONS: int = 3
@@ -95,6 +105,12 @@ JEV_DONE_DELIVERABLES_FIELD: str = "deliverables"
 JEV_DONE_DELIVERABLE_FIELD: str = "deliverable"
 JEV_DONE_COMPLETION_SIGNAL_FIELD: str = "completion_signal"
 JEV_DONE_EVIDENCE_FIELD: str = "evidence"
+# The expert-depth entries, one per detail id: the deliverable (JEV_DONE_DELIVERABLE_FIELD), the detail, what
+# its shallow version looks like, the visible condition that shows it handled in depth, and the evidence.
+JEV_DONE_EXPERT_DETAILS_FIELD: str = "expert_details"
+JEV_DONE_DETAIL_FIELD: str = "detail"
+JEV_DONE_SHALLOW_VERSION_FIELD: str = "shallow_version"
+JEV_DONE_DONE_WHEN_FIELD: str = "done_when"
 # A deliverable ID is a short lowercase identifier JevRunState writes and JevHandoff must echo exactly.
 JEV_DELIVERABLE_ID_PATTERN: str = r"^[a-z][a-z0-9_]{0,63}$"
 # Defaults of the JevRunState and JevHandoff limits in JevContinualSettings: each writes one structured reply,
@@ -124,9 +140,17 @@ __all__ = [
     "JEV_DONE_COMPLETION_SIGNAL_FIELD",
     "JEV_DONE_DELIVERABLES_FIELD",
     "JEV_DONE_DELIVERABLE_FIELD",
+    "JEV_DONE_DETAIL_FIELD",
+    "JEV_DONE_DONE_WHEN_FIELD",
     "JEV_DONE_EVIDENCE_FIELD",
+    "JEV_DONE_EXPERT_DETAILS_FIELD",
     "JEV_DONE_MAX_CONTINUATIONS",
     "JEV_DONE_REQUEST_FIELD",
+    "JEV_DONE_SHALLOW_VERSION_FIELD",
+    "JEV_EXPERT_DEPTH_FOCUS_LIMIT",
+    "JEV_EXPERT_DEPTH_MAX_DETAILS",
+    "JEV_EXPERT_DEPTH_MIN_DETAILS",
+    "JEV_EXPERT_DEPTH_THRESHOLD",
     "JEV_HANDOFF_MAX_ITERATIONS",
     "JEV_HANDOFF_MAX_TOKENS",
     "JEV_MAX_CHOICE_OPTIONS",

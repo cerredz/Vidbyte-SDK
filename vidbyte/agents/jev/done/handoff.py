@@ -4,8 +4,8 @@ PURPOSE: Implements JevHandoff, the generative agent that reads the main agent's
 ROLE IN CODEBASE: JevRunState builds one JevHandoff at construction and calls compile() from its check(); Jev then answers one question per item, all in one request, over the compiled evidence.
 ARCHITECTURE NOTE: The handoff is general: its output schema is JevHandoffPayload plus one field per enabled JevDoneCheck, typed as that check's evidence payload and described by its SECTION text, so a new check adds one entry to _SECTIONS instead of a new class. It reads the user's request as its message and the run state and the main agent's window as a vidbyte.context ContextManager of standard primitives; it reuses the JevAgent's generative model, but its prompt is fixed, it has no tools, and its reply is held to the composed schema.
 COMMON MODIFICATION PATTERNS: Change what the agent writes in vidbyte/prompts/prompts/jev_handoff/system_prompt.md and each field's description in vidbyte/lib/dataclasses/jev.py; add a done check's evidence section to _SECTIONS and its record conversion to _record().
-KNOWN EDGE CASES: A generative failure, a reply that never matches the schema, or evidence whose deliverable ids differ from the run state's returns None, so the done check fails open. History is cleared before every call, so an earlier finish attempt's handoff never leaks into a later one.
-RELATED DOCS: docs/design/jev-multipart-done-criteria.md, skills/jev-agent/SKILL.md, and skills/asking-jev-questions/SKILL.md.
+KNOWN EDGE CASES: A generative failure, a reply that never matches the schema, or evidence whose item ids (deliverable ids, or expert-depth detail ids) differ from the run state's returns None, so the done check fails open. History is cleared before every call, so an earlier finish attempt's handoff never leaks into a later one.
+RELATED DOCS: docs/design/jev-multipart-done-criteria.md, docs/design/jev-expert-depth-done-criteria.md, skills/jev-continuation/SKILL.md, skills/jev-agent/SKILL.md, and skills/asking-jev-questions/SKILL.md.
 TESTS: tests/test_jev_done.py.
 """
 
@@ -30,6 +30,9 @@ from vidbyte.context.primitives import (
 from vidbyte.lib.dataclasses.agents import AgentInput
 from vidbyte.lib.dataclasses.jev import (
     JevDeliverableEvidence,
+    JevExpertDepthEvidence,
+    JevExpertDepthEvidencePayload,
+    JevExpertDetailEvidence,
     JevHandoffPayload,
     JevHandoffRecord,
     JevMultiPartEvidence,
@@ -54,7 +57,7 @@ class JevHandoff(BaseAgent):
     """Generative agent that compiles, from the main agent's context window, the evidence every enabled done check needs."""
 
     # One evidence section per done check; the field name is the check's value, so the reply mirrors the run state.
-    _SECTIONS: ClassVar[Mapping[JevDoneCheck, type[JevSectionPayload]]] = MappingProxyType({JevDoneCheck.MULTI_PART: JevMultiPartEvidencePayload})
+    _SECTIONS: ClassVar[Mapping[JevDoneCheck, type[JevSectionPayload]]] = MappingProxyType({JevDoneCheck.MULTI_PART: JevMultiPartEvidencePayload, JevDoneCheck.EXPERT_DEPTH: JevExpertDepthEvidencePayload})
 
     def __init__(self, settings: JevAgentSettings, continual: JevContinualSettings) -> None:
         # Reuses the JevAgent's generative model and key and takes its limits from the continuation settings; the prompt, schema, and empty tool list are fixed here.
@@ -124,7 +127,15 @@ class JevHandoff(BaseAgent):
             expected = () if state.multi_part is None else state.multi_part.ids()
             if sorted(multi_part.ids()) != sorted(expected):
                 return None
-        return JevHandoffRecord(multi_part=multi_part, usage=self.get_usage())
+        # The same rule holds for expert depth, whose items are the details of every deliverable.
+        expert_depth = None
+        section = getattr(payload, JevDoneCheck.EXPERT_DEPTH.value, None)
+        if isinstance(section, JevExpertDepthEvidencePayload):
+            expert_depth = JevExpertDepthEvidence(tuple(JevExpertDetailEvidence(item.id, item.evidence.strip(), item.missing.strip()) for item in section.details))
+            expected = () if state.expert_depth is None else state.expert_depth.ids()
+            if sorted(expert_depth.ids()) != sorted(expected):
+                return None
+        return JevHandoffRecord(multi_part=multi_part, expert_depth=expert_depth, usage=self.get_usage())
 
 
 __all__ = ["JevHandoff"]

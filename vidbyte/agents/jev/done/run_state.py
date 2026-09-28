@@ -4,8 +4,8 @@ PURPOSE: Implements JevRunState, the class that owns JevAgent's done checks: it 
 ROLE IN CODEBASE: JevAgent builds one JevRunState at construction when JevRuntimeSettings.continual enables a done check and passes it to JevRuntime, which calls begin() before the main loop, and JevDoneContinuation (vidbyte/agents/jev/continuation/) calls check() each time the main agent tries to finish; outcomes reach the user through JevResponse on JevAgent.response.
 ARCHITECTURE NOTE: The run state is general: its schema is the central JevRunStatePayload plus one field per enabled JevDoneCheck, typed as that check's section payload and described by its SECTION text, so a new check adds one entry to _SECTIONS and one case each to _section() and _judge() instead of a new class; what the main agent reads when a check fails belongs to JevDoneContinuation. Every enabled check's questions go to Jev in one request (combine()), over one shared state. Question text and thresholds stay in vidbyte/lib/jev/done/ (JevDoneRegistry), and DecisionModelRunner.score_noul turns answers into a pass or fail. Writing the state and the evidence is generation, so it belongs to generative agents (this class and JevHandoff, skills/asking-jev-questions/SKILL.md strategy 16); Jev only recognizes whether the evidence shows each item.
 COMMON MODIFICATION PATTERNS: Change what the agent writes in vidbyte/prompts/prompts/jev_run_state/system_prompt.md and each field's description in vidbyte/lib/dataclasses/jev.py; add a done check's section to _SECTIONS, its record conversion to _record(), and its commented case to _section() and _judge().
-KNOWN EDGE CASES: Every failure fails open: no run state means no check, and an unavailable handoff or Jev answer marks the check unavailable and lets the answer stand. A request with no deliverables passes with nothing to ask. Like the JevAgent that owns it, one instance serves one run at a time.
-RELATED DOCS: docs/design/jev-multipart-done-criteria.md, skills/jev-agent/SKILL.md, and skills/asking-jev-questions/SKILL.md.
+KNOWN EDGE CASES: Every failure fails open: no run state means no check, and an unavailable handoff or Jev answer marks the check unavailable and lets the answer stand. A request with no deliverables (for expert depth, none with depth to miss) passes with nothing to ask. Expert depth records its failed details weakest first, by ascending P(yes). Like the JevAgent that owns it, one instance serves one run at a time.
+RELATED DOCS: docs/design/jev-multipart-done-criteria.md, docs/design/jev-expert-depth-done-criteria.md, skills/jev-continuation/SKILL.md, skills/jev-agent/SKILL.md, and skills/asking-jev-questions/SKILL.md.
 TESTS: tests/test_jev_done.py.
 """
 
@@ -27,8 +27,12 @@ from vidbyte.lib.constants.jev import (
     JEV_DONE_COMPLETION_SIGNAL_FIELD,
     JEV_DONE_DELIVERABLE_FIELD,
     JEV_DONE_DELIVERABLES_FIELD,
+    JEV_DONE_DETAIL_FIELD,
+    JEV_DONE_DONE_WHEN_FIELD,
     JEV_DONE_EVIDENCE_FIELD,
+    JEV_DONE_EXPERT_DETAILS_FIELD,
     JEV_DONE_REQUEST_FIELD,
+    JEV_DONE_SHALLOW_VERSION_FIELD,
     JEV_NOUL_TRUE,
 )
 from vidbyte.lib.dataclasses.agents import AgentInput
@@ -36,6 +40,10 @@ from vidbyte.lib.dataclasses.jev import (
     JevDecisionRequest,
     JevDeliverable,
     JevDoneResult,
+    JevExpertDepth,
+    JevExpertDepthDeliverable,
+    JevExpertDepthPayload,
+    JevExpertDetail,
     JevHandoffRecord,
     JevMultiPart,
     JevMultiPartPayload,
@@ -58,7 +66,7 @@ class JevRunState(BaseAgent):
     """Generative agent that writes the run state the enabled done checks read, and runs those checks at every finish attempt."""
 
     # One run-state section per done check; the field name is the check's value, and the enum is the only option list.
-    _SECTIONS: ClassVar[Mapping[JevDoneCheck, type[JevSectionPayload]]] = MappingProxyType({JevDoneCheck.MULTI_PART: JevMultiPartPayload})
+    _SECTIONS: ClassVar[Mapping[JevDoneCheck, type[JevSectionPayload]]] = MappingProxyType({JevDoneCheck.MULTI_PART: JevMultiPartPayload, JevDoneCheck.EXPERT_DEPTH: JevExpertDepthPayload})
 
     def __init__(self, settings: JevAgentSettings, runtime_settings: JevRuntimeSettings, response: JevResponse) -> None:
         # Reuses the JevAgent's generative model and key; the prompt, limits, schema, and empty tool list are fixed here.
@@ -182,6 +190,27 @@ class JevRunState(BaseAgent):
                     for deliverable in state.deliverables
                 }
                 return {JEV_DONE_DELIVERABLES_FIELD: entries}, tuple(question.to_question(identifier) for identifier in state.ids())
+            case JevDoneCheck.EXPERT_DEPTH:
+                # One entry per detail, keyed by detail id, holds the deliverable it belongs to, the point, and that
+                # point's own minimal pair, what its shallow version looks like and the visible sign of its deep
+                # version, beside only that point's evidence (T13). The run state's `risk` and the handoff's `missing`
+                # stay out: both are judgments written for the main agent, not something the run shows.
+                state = None if self.record is None else self.record.expert_depth
+                if state is None or handoff.expert_depth is None:
+                    return {}, ()
+                question = JevDoneRegistry.question(JevDoneCheck.EXPERT_DEPTH)
+                evidence = {item.id: item.evidence for item in handoff.expert_depth.details}
+                entries = {
+                    detail.id: {
+                        JEV_DONE_DELIVERABLE_FIELD: deliverable.description,
+                        JEV_DONE_DETAIL_FIELD: detail.detail,
+                        JEV_DONE_SHALLOW_VERSION_FIELD: detail.shallow_version,
+                        JEV_DONE_DONE_WHEN_FIELD: detail.done_when,
+                        JEV_DONE_EVIDENCE_FIELD: evidence[detail.id],
+                    }
+                    for deliverable, detail in state.entries()
+                }
+                return {JEV_DONE_EXPERT_DETAILS_FIELD: entries}, tuple(question.to_question(identifier) for identifier in state.ids())
 
     def _judge(self, check: JevDoneCheck, handoff: JevHandoffRecord | None, decision: DecisionModelResponse | None) -> JevDoneResult:
         # Scores one enabled done check from the combined request's answers; one commented case per check.
@@ -190,6 +219,10 @@ class JevRunState(BaseAgent):
                 # Every deliverable the request asks for must be shown produced in full: Jev answered one
                 # question per deliverable, and code joins them with a veto so one clear no is never averaged away.
                 return self._multi_part(handoff, decision)
+            case JevDoneCheck.EXPERT_DEPTH:
+                # Every weak point the run state named must be shown handled in depth: Jev answered one question
+                # per detail, code joins them with the same veto, and the failed points come back weakest first.
+                return self._expert_depth(handoff, decision)
 
     def _multi_part(self, handoff: JevHandoffRecord | None, decision: DecisionModelResponse | None) -> JevDoneResult:
         # Turns Jev's answers about each deliverable into the multi-part result, scored with score_noul.
@@ -221,18 +254,67 @@ class JevRunState(BaseAgent):
         usage = JevUsage.from_usage_payload(decision.usage or {})
         return JevDoneResult(check=JevDoneCheck.MULTI_PART, score=verdict.score, passed=verdict.passed, answers=verdict.answers, incomplete=incomplete, usage=usage)
 
+    def _expert_depth(self, handoff: JevHandoffRecord | None, decision: DecisionModelResponse | None) -> JevDoneResult:
+        # Turns Jev's answers about each detail into the expert-depth result, scored with score_noul.
+        # The details the run state listed are what this check judges; without them, or without the handoff's
+        # evidence for them, there is nothing to judge, so the check is unavailable and fails open.
+        state = None if self.record is None else self.record.expert_depth
+        if state is None or handoff is None or handoff.expert_depth is None:
+            return JevDoneResult(check=JevDoneCheck.EXPERT_DEPTH, score=None, available=False)
+        # A request whose outputs have no depth to miss (a greeting, a one-line rename) lists no deliverable
+        # here, so it passes; combine() asked Jev nothing for it, so there is no score.
+        if not state.deliverables:
+            return JevDoneResult(check=JevDoneCheck.EXPERT_DEPTH, score=None)
+        # Details were asked about, but the one combined Jev request failed: fail open like preflight.
+        if decision is None:
+            return JevDoneResult(check=JevDoneCheck.EXPERT_DEPTH, score=None, available=False)
+        question = JevDoneRegistry.question(JevDoneCheck.EXPERT_DEPTH)
+        threshold = JevDoneRegistry.threshold(JevDoneCheck.EXPERT_DEPTH)
+        # The combined reply holds every enabled check's answers under their question names; pick out this
+        # check's answers and key them by detail id, which is how the result and the continuation name them.
+        answers = {identifier: decision.answers[question.name(identifier)] for identifier in state.ids() if question.name(identifier) in decision.answers}
+        # The threshold is both the mean threshold and the veto, so one clearly shallow point is never averaged
+        # away by the deep ones. A missing answer makes score_noul return None.
+        verdict = DecisionModelRunner.score_noul(answers, state.ids(), threshold, threshold)
+        if verdict is None:
+            return JevDoneResult(check=JevDoneCheck.EXPERT_DEPTH, score=None, available=False)
+        # @intent the-weakest-points-come-first
+        # The run state ordered each deliverable's details by how likely a quick version gets them wrong, before
+        # any work; Jev's P(yes) now measures how shallow each one actually is in the run. The shallow points are
+        # sorted by that measure, lowest first (the stable sort keeps the run state's order on ties), so the
+        # recorded result carries the ranking and the continuation sends the main agent to the weakest first.
+        yes = {identifier: verdict.answers[identifier].probabilities[JEV_NOUL_TRUE] for identifier in state.ids()}
+        incomplete = tuple(sorted((identifier for identifier in state.ids() if yes[identifier] < threshold), key=yes.__getitem__))
+        # One request answered every enabled check, so its usage is the cost of this finish attempt's checks.
+        usage = JevUsage.from_usage_payload(decision.usage or {})
+        return JevDoneResult(check=JevDoneCheck.EXPERT_DEPTH, score=verdict.score, passed=verdict.passed, answers=verdict.answers, incomplete=incomplete, usage=usage)
+
     def _record(self, payload: JevRunStatePayload) -> JevRunStateRecord:
         # Converts the validated reply into the frozen record the response exposes and the checks read.
         multi_part = None
         section = getattr(payload, JevDoneCheck.MULTI_PART.value, None)
         if isinstance(section, JevMultiPartPayload):
             multi_part = JevMultiPart(tuple(JevDeliverable(item.id, item.description.strip(), item.completion_signal.strip()) for item in section.deliverables))
+        expert_depth = None
+        section = getattr(payload, JevDoneCheck.EXPERT_DEPTH.value, None)
+        if isinstance(section, JevExpertDepthPayload):
+            expert_depth = JevExpertDepth(
+                tuple(
+                    JevExpertDepthDeliverable(
+                        item.id,
+                        item.description.strip(),
+                        tuple(JevExpertDetail(detail.id, detail.detail.strip(), detail.shallow_version.strip(), detail.done_when.strip(), detail.risk.strip()) for detail in item.details),
+                    )
+                    for item in section.deliverables
+                )
+            )
         return JevRunStateRecord(
             goal=payload.goal.strip(),
             objective=payload.objective.strip(),
             mission=payload.mission.strip(),
             what_not_to_do=tuple(limit.strip() for limit in payload.what_not_to_do if limit.strip()),
             multi_part=multi_part,
+            expert_depth=expert_depth,
             usage=self.get_usage(),
         )
 
