@@ -17,7 +17,13 @@ from typing import Any
 from unittest.mock import patch
 
 from tests.agent_test_support import bind_test_runner
-from vidbyte import JevAgent, JevAgentSettings, JevPreflightPreset, JevRuntimeSettings, tool
+from vidbyte import (
+    JevAgent,
+    JevAgentSettings,
+    JevPreflightPreset,
+    JevRuntimeSettings,
+    tool,
+)
 from vidbyte.agents.jev.preflight import JevPreflightTools
 from vidbyte.lib.config import DecisionModelConfig
 from vidbyte.lib.dataclasses.jev import JevAnswer, JevDecisionRequest
@@ -234,8 +240,8 @@ class JevToolSelectorRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(reply.content, "done")
         self.assertEqual(reply.metadata["tool_call_states"], ("failed", "succeeded"))
         self.assertEqual(hidden_calls, [])
-        self.assertEqual(reply.response.tool_selector.candidate_tool_count, 2)
-        self.assertEqual(reply.response.tool_selector.selected_tool_count, 1)
+        self.assertEqual(agent.response.tool_selector.candidate_tool_count, 2)
+        self.assertEqual(agent.response.tool_selector.selected_tool_count, 1)
 
     async def test_disabled_selector_makes_no_decision_call(self) -> None:
         # [Edge Case] existing JevAgent settings retain ordinary loop behavior by default.
@@ -247,7 +253,7 @@ class JevToolSelectorRuntimeTests(unittest.IsolatedAsyncioTestCase):
 
         decision_runner.assert_not_called()
         self.assertEqual(reply.content, "done")
-        self.assertIsNone(reply.response.tool_selector)
+        self.assertIsNone(agent.response.tool_selector)
 
 
 if __name__ == "__main__":

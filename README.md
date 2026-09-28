@@ -90,9 +90,9 @@ sdk.providers
 
 ## JevAgent Self Alignment
 
-Opt in to request-specific system prompt alignment with `self_align=True`. Each run
-returns a `JevResponse`; alignment evidence is available as typed data on
-`response.alignment`, and `aligned_prompt` is the prompt used for that run.
+Opt in to request-specific system prompt alignment with `self_align=True`. After
+each run, `agent.response.alignment` contains typed evidence and
+`agent.response.aligned_prompt` is the prompt selected for that run.
 
 ```python
 from vidbyte import JevAgent, JevAgentSettings
@@ -107,8 +107,8 @@ agent = JevAgent(
     )
 )
 reply = await agent.arun("Why was I charged twice?")
-print(reply.response.alignment.status)
-print(reply.response.aligned_prompt)
+print(agent.response.alignment.status)
+print(agent.response.aligned_prompt)
 ```
 
 ## Agent Speed Tracking

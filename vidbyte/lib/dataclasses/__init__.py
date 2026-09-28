@@ -46,11 +46,6 @@ from vidbyte.lib.dataclasses.agents import (
     AgentStopReason,
 )
 from vidbyte.lib.dataclasses.aggregate_agent_descriptor import AggregateAgentDescriptor
-from vidbyte.lib.dataclasses.config import (
-    AgentSettings,
-    MiddlewareDefinition,
-    ToolDefinition,
-)
 from vidbyte.lib.dataclasses.codex import (
     CodexAgentSettings,
     CodexClientSettings,
@@ -66,8 +61,13 @@ from vidbyte.lib.dataclasses.codex import (
     CodexSubagentSettings,
     CodexTextInput,
     CodexThreadSettings,
-    CodexTurnSettings,
     CodexTurnError,
+    CodexTurnSettings,
+)
+from vidbyte.lib.dataclasses.config import (
+    AgentSettings,
+    MiddlewareDefinition,
+    ToolDefinition,
 )
 from vidbyte.lib.dataclasses.context import (
     BaseAgentContext,
@@ -114,22 +114,18 @@ from vidbyte.lib.dataclasses.harnesses import (
     HarnessSpec,
     TrajectoryRecord,
 )
-from vidbyte.lib.dataclasses.jev_alignment import (
-    JevAgentResponseState,
-    JevAgentResult,
+from vidbyte.lib.dataclasses.jev import (
     JevAlignmentGap,
     JevAlignmentInput,
     JevAlignmentQuestion,
     JevAlignmentResult,
-    JevAlignmentRole,
-    JevAlignmentStatus,
-    JevAlignmentTool,
-    JevAlignmentToolSpec,
     JevPromptEdit,
     JevPromptEditContextItem,
-    JevPromptSection,
-    JevResponse,
     JevToolSelectorResponse,
+)
+from vidbyte.lib.dataclasses.jev_alignment import (
+    JevAlignmentTool,
+    JevAlignmentToolSpec,
     JevUsageRecord,
 )
 from vidbyte.lib.dataclasses.mcp import McpToolDefinition
@@ -381,8 +377,6 @@ __all__ = [
     "JudgeDecisionRecord",
     "JudgeReasonCode",
     "JudgeReportPayload",
-    "JevAgentResponseState",
-    "JevAgentResult",
     "JevAlignmentGap",
     "JevAlignmentInput",
     "JevAlignmentQuestion",
@@ -394,7 +388,6 @@ __all__ = [
     "JevPromptEdit",
     "JevPromptEditContextItem",
     "JevPromptSection",
-    "JevResponse",
     "JevToolSelectorResponse",
     "JevUsageRecord",
     "LedgerEvent",

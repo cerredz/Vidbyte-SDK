@@ -40,7 +40,7 @@ from vidbyte.agents.jev.alignment.result import JevAlignmentGap
 from vidbyte.lib.constants.jev import JEV_NOUL_OPTIONS
 from vidbyte.lib.dataclasses.context import BaseAgentContext
 from vidbyte.lib.dataclasses.jev import JevAnswer, JevDecisionRequest
-from vidbyte.lib.dataclasses.jev_alignment import JevAlignmentInput, JevResponse
+from vidbyte.lib.dataclasses.jev_alignment import JevAlignmentInput
 from vidbyte.lib.enums import JevQuestionType, ModelProvider
 from vidbyte.lib.errors import ConfigurationError, ProviderRequestError
 from vidbyte.lib.runners import TextModelResponse
@@ -249,8 +249,7 @@ class AlignmentRunTests(unittest.IsolatedAsyncioTestCase):
         with patch(RUNNER_PATH, jev):
             reply = await agent.arun("Why was I charged twice?")
         self.assertEqual(jev.requests, [])
-        self.assertIsInstance(reply, JevResponse)
-        self.assertIsNone(reply.response.alignment)
+        self.assertIsNone(agent.response.alignment)
 
     async def test_agent_gap_is_edited_verified_and_used_only_for_this_run(self) -> None:
         # [Silent Failure] the main model sees the edited prompt; settings, agent, and editor keep theirs.
@@ -260,12 +259,11 @@ class AlignmentRunTests(unittest.IsolatedAsyncioTestCase):
         editor_prompt = agent.alignment.system_prompt
         with patch(RUNNER_PATH, jev):
             reply = await agent.arun("Why was I charged twice?")
-        result = reply.response.alignment
+        result = agent.response.alignment
         self.assertIsNotNone(result)
         self.assertIs(result.status, JevAlignmentStatus.ALIGNED)
         self.assertEqual(result.system_prompt, f"{PROMPT}\n\n## Output\nAnswer in at most three short bullet points.")
-        self.assertEqual(reply.aligned_prompt, result.system_prompt)
-        self.assertEqual(reply.response.aligned_prompt, result.system_prompt)
+        self.assertEqual(agent.response.aligned_prompt, result.system_prompt)
         self.assertNotIn("jev_alignment", reply.metadata)
         self.assertTrue(result.edits[0].kept)
         self.assertIn("## Output\nAnswer in at most three short bullet points.", main.calls[0]["kwargs"]["system"])
@@ -282,7 +280,7 @@ class AlignmentRunTests(unittest.IsolatedAsyncioTestCase):
         agent = _agent(main, editor)
         with patch(RUNNER_PATH, jev):
             reply = await agent.arun("Help me file my taxes.")
-        result = reply.response.alignment
+        result = agent.response.alignment
         self.assertIsNotNone(result)
         self.assertIs(result.status, JevAlignmentStatus.OUT_OF_SCOPE)
         self.assertEqual(editor.calls, [])
@@ -297,7 +295,7 @@ class AlignmentRunTests(unittest.IsolatedAsyncioTestCase):
         agent = _agent(ScriptedRunner(_text("answer")), editor)
         with patch(RUNNER_PATH, jev):
             reply = await agent.arun("Why was I charged twice?")
-        result = reply.response.alignment
+        result = agent.response.alignment
         self.assertIsNotNone(result)
         self.assertIs(result.status, JevAlignmentStatus.NO_GAPS)
         self.assertEqual(editor.calls, [])
@@ -311,7 +309,7 @@ class AlignmentRunTests(unittest.IsolatedAsyncioTestCase):
         agent = _agent(main, _editor(OUTPUT_EDIT))
         with patch(RUNNER_PATH, jev):
             reply = await agent.arun("Why was I charged twice?")
-        result = reply.response.alignment
+        result = agent.response.alignment
         self.assertIsNotNone(result)
         self.assertIs(result.status, JevAlignmentStatus.EDITS_REJECTED)
         self.assertFalse(result.edits[0].kept)
@@ -324,7 +322,7 @@ class AlignmentRunTests(unittest.IsolatedAsyncioTestCase):
         agent = _agent(ScriptedRunner(_text("answer")), _editor(OUTPUT_EDIT))
         with patch(RUNNER_PATH, jev):
             reply = await agent.arun("Why was I charged twice?")
-        self.assertIs(reply.response.alignment.status, JevAlignmentStatus.EDITS_REJECTED)
+        self.assertIs(agent.response.alignment.status, JevAlignmentStatus.EDITS_REJECTED)
 
     async def test_missing_credentials_fail_open(self) -> None:
         # [Hidden Failure] alignment is advisory; the main run continues with the original prompt.
@@ -333,7 +331,7 @@ class AlignmentRunTests(unittest.IsolatedAsyncioTestCase):
         with patch.dict(os.environ, {}, clear=False):
             os.environ.pop("TYPESAFE_API_KEY", None)
             reply = await agent.arun("Why was I charged twice?")
-        self.assertIs(reply.response.alignment.status, JevAlignmentStatus.UNAVAILABLE)
+        self.assertIs(agent.response.alignment.status, JevAlignmentStatus.UNAVAILABLE)
         self.assertEqual(reply.content, "answer")
 
     async def test_editor_failure_fails_open(self) -> None:
@@ -343,7 +341,7 @@ class AlignmentRunTests(unittest.IsolatedAsyncioTestCase):
         agent = _agent(main, editor)
         with patch(RUNNER_PATH, jev):
             reply = await agent.arun("Why was I charged twice?")
-        self.assertIs(reply.response.alignment.status, JevAlignmentStatus.UNAVAILABLE)
+        self.assertIs(agent.response.alignment.status, JevAlignmentStatus.UNAVAILABLE)
         self.assertEqual(reply.content, "answer")
 
 
@@ -392,7 +390,7 @@ class AlignmentAssessTests(unittest.IsolatedAsyncioTestCase):
         jev = ScriptedJev()
         runtime = JevAgent(_settings())._runtime()
         with patch(RUNNER_PATH, jev):
-            result, context = await runtime._align(runtime.alignment, "question", BaseAgentContext(system_prompt="A different prompt."))
+            result, context = await runtime._align("question", BaseAgentContext(system_prompt="A different prompt."))
         self.assertIs(result.status, JevAlignmentStatus.SKIPPED)
         self.assertEqual(context.system_prompt, "A different prompt.")
         self.assertEqual(jev.requests, [])

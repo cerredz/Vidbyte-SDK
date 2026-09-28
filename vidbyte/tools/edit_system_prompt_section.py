@@ -36,11 +36,11 @@ class _PromptDraft(Protocol):
 _ACTIVE_DRAFT: ContextVar[_PromptDraft | None] = ContextVar("jev_alignment_active_draft", default=None)
 
 _DESCRIPTION = (
-    "Add text to one section of the main agent's system prompt so that it closes one or more listed gaps. "
-    "The text is added under the section's heading, and the heading is created at the end of the prompt when it does not exist yet. "
-    "Existing prompt text is never replaced or removed, and calling the tool again for the same section replaces only your earlier addition. "
-    "Only the sections named in the section enum can be edited; role, scope, boundaries, audience, knowledge, and permissions belong to the developer. "
-    "Each call must name the gap questions it closes, and the result tells you whether the edit was accepted or why it was refused."
+    """Add text to one section of the main agent's system prompt so that it closes one or more listed gaps.
+The text is added under the section's heading, and the heading is created at the end of the prompt when it does not exist yet.
+Existing prompt text is never replaced or removed, and calling the tool again for the same section replaces only your earlier addition.
+Only the sections named in the section enum can be edited; role, scope, boundaries, audience, knowledge, and permissions belong to the developer.
+Each call must name the gap questions it closes, and the result tells you whether the edit was accepted or why it was refused."""
 )
 
 
@@ -77,8 +77,8 @@ class EditSystemPromptSectionTool(BaseTool):
             fixes = (fixes,)
         try:
             edit = draft.add(str(arguments.get("section", "")), str(arguments.get("content", "")), tuple(fixes))
-        except ValueError as exc:
-            return ToolResult.error(EDIT_TOOL_NAME, f"Edit refused: {exc}")
+        except ValueError:
+            return ToolResult.error(EDIT_TOOL_NAME, "Edit refused; revise the allowed section, content length, or cited gaps.")
         return ToolResult.success(
             EDIT_TOOL_NAME,
             f"Added {len(edit.content)} characters to the {edit.section.heading} section, closing {', '.join(edit.fixes)}.",

@@ -21,7 +21,7 @@ from vidbyte.agents.jev.alignment.result import (
     JevAlignmentStatus,
     JevPromptEdit,
 )
-from vidbyte.lib.dataclasses.jev_alignment import JevAlignmentInput, JevResponse
+from vidbyte.lib.dataclasses.jev_alignment import JevAlignmentInput
 
 __all__ = [
     "ALIGNMENT_QUESTIONS",
@@ -33,5 +33,4 @@ __all__ = [
     "JevAlignmentStatus",
     "JevPromptEdit",
     "JevPromptSection",
-    "JevResponse",
 ]
