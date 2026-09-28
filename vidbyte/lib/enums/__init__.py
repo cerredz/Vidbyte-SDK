@@ -49,7 +49,13 @@ from vidbyte.lib.enums.cot_events import (
     ReturnableOption,
     Reversibility,
 )
-from vidbyte.lib.enums.jev import JevPreflightPreset, JevPreflightQuestionKey, JevQuestionType
+from vidbyte.lib.enums.jev import (
+    JevDoneCheck,
+    JevDoneQuestionKey,
+    JevPreflightPreset,
+    JevPreflightQuestionKey,
+    JevQuestionType,
+)
 from vidbyte.lib.enums.model_modality import ModelModality, ModelNameModality
 from vidbyte.lib.enums.model_provider import ModelProvider
 from vidbyte.lib.enums.multi_agent import (
@@ -87,6 +93,8 @@ from vidbyte.lib.enums.speed import AgentSpeedRecordingIntegrity
 from vidbyte.lib.enums.structured_output import StructuredOutputSupport
 
 __all__ = [
+    "JevDoneCheck",
+    "JevDoneQuestionKey",
     "JevPreflightPreset",
     "JevPreflightQuestionKey",
     "JevQuestionType",

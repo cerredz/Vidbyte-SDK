@@ -511,12 +511,17 @@ class AgentRuntime:
                         tokens_used=state.tokens_used,
                         contexts=state.call_contexts,
                     )
+                elif await self._continue_finish_attempt(final, state, messages):
+                    if state.inner_context_window_algorithm is None:
+                        messages.append(self._assistant_message(last_assistant_output))
+                    continue
                 return await self._finish_result(final, state)
 
             assistant_tool_msg = ToolsFormatter.format_assistant_tool_calls(raw_result, state.provider)
             if assistant_tool_msg is not None:
                 messages.append(dict(assistant_tool_msg))
             contract_rejected = False
+            finish_attempt_continued = False
             for call in tool_calls:
                 processed = await self._process_tool_call(call, messages, state, trace_context=active_trace_context)
                 if isinstance(processed, AgentResult):
@@ -554,9 +559,12 @@ class AgentRuntime:
                         tokens_used=state.tokens_used,
                         stop_reason=AgentStopReason.IS_DONE,
                     )
+                    if await self._continue_finish_attempt(final, state, messages):
+                        finish_attempt_continued = True
+                        break
                     return await self._finish_result(final, state)
 
-            if contract_rejected:
+            if finish_attempt_continued or contract_rejected:
                 continue
 
             decision = await self.middleware.after_iteration(self._middleware_context(MiddlewareHook.AFTER_ITERATION, state))
@@ -744,6 +752,14 @@ class AgentRuntime:
         published = run_state.get(AgentRuntimeStateKey.RESULT_METADATA.value)
         base = dict(published) if isinstance(published, Mapping) else {}
         run_state[AgentRuntimeStateKey.RESULT_METADATA.value] = {**base, "fallback": dict(record)}
+
+    async def _continue_finish_attempt(self, result: AgentResult, state: BaseAgentRuntimeLoopState, messages: list[dict[str, Any]]) -> bool:
+        """Let a specialized linear runtime send a normal finish attempt back to work with feedback."""
+        # Default runtimes accept every finish attempt; a specialized runtime appends its feedback to messages and returns True.
+        # @intent finish-attempts-can-continue-the-same-loop
+        # A check that runs when the model tries to finish (JevRuntime's done checks) must be able to keep this loop's
+        # messages, tool history, and budgets, so the hook sits at both finish points instead of re-running the agent.
+        return False
 
     async def _finish_result(self, result: AgentResult, state: BaseAgentRuntimeLoopState) -> AgentResult:
         """Run after_run middleware and attach final middleware metadata."""

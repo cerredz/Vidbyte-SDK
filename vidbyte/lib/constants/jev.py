@@ -1,6 +1,6 @@
 """FILE: vidbyte/lib/constants/jev.py
 
-PURPOSE: Declares the TypeSafe Jev limits, defaults, and wire literals shared by the decision records and provider adapter, plus the JevAgent preflight policy values.
+PURPOSE: Declares the TypeSafe Jev limits, defaults, and wire literals shared by the decision records and provider adapter, plus the JevAgent preflight and done-check policy values.
 ROLE IN CODEBASE: `vidbyte/lib/dataclasses/jev.py` validates against these bounds, `vidbyte/providers/typesafe.py` builds requests from the same values, `vidbyte/lib/jev/` reads the preflight policy values, and `vidbyte/agents/jev/` reads the tool-selector and clarification values.
 ARCHITECTURE NOTE: Values live in `vidbyte.lib` so both lower-layer modules and the tool layer can import them without a layering inversion.
 COMMON MODIFICATION PATTERNS: Change a vendor limit only after TypeSafe documents it; local sanity caps stay generous because the API enforces the real (token) limits itself.
@@ -80,6 +80,30 @@ JEV_SPECIALIST_QUESTION_NAME: str = "specialist"
 JEV_SPECIALIST_NONE: str = "none"
 JEV_SPECIALIST_MAX_COUNT: int = JEV_MAX_CHOICE_OPTIONS - 1
 
+# Done checks. A done check runs each time the main agent tries to finish. Every enabled check's questions
+# go to Jev in one request; the multi-part check asks one question per deliverable, and a run is complete
+# only when every deliverable's P(yes) reaches the threshold (used as both the mean threshold and the veto).
+# 0.8 is a starting point, not a tuned value.
+JEV_MULTI_PART_THRESHOLD: float = 0.8
+# Default of JevContinualSettings.max_continuations: how many times a failed done check may send the main
+# agent back to work before its answer is accepted.
+JEV_DONE_MAX_CONTINUATIONS: int = 3
+# The state fields the done questions read: the user's request, and one entry per deliverable id holding
+# the deliverable, the visible condition that shows it is done, and the evidence JevHandoff compiled for it.
+JEV_DONE_REQUEST_FIELD: str = "request"
+JEV_DONE_DELIVERABLES_FIELD: str = "deliverables"
+JEV_DONE_DELIVERABLE_FIELD: str = "deliverable"
+JEV_DONE_COMPLETION_SIGNAL_FIELD: str = "completion_signal"
+JEV_DONE_EVIDENCE_FIELD: str = "evidence"
+# A deliverable ID is a short lowercase identifier JevRunState writes and JevHandoff must echo exactly.
+JEV_DELIVERABLE_ID_PATTERN: str = r"^[a-z][a-z0-9_]{0,63}$"
+# Defaults of the JevRunState and JevHandoff limits in JevContinualSettings: each writes one structured reply,
+# so their loops stay short; the handoff reads the main agent's whole run, so its token budget is larger.
+JEV_RUN_STATE_MAX_ITERATIONS: int = 25
+JEV_RUN_STATE_MAX_TOKENS: int = 100_000
+JEV_HANDOFF_MAX_ITERATIONS: int = 25
+JEV_HANDOFF_MAX_TOKENS: int = 400_000
+
 # Tool-selector policy bounds and default: caller settings use probabilities on the closed unit interval.
 JEV_TOOL_SELECTOR_DEFAULT_THRESHOLD: float = 0.20
 JEV_TOOL_SELECTOR_MAX_THRESHOLD: float = 1.0
@@ -96,6 +120,15 @@ __all__ = [
     "JEV_DEFAULT_MODEL",
     "JEV_DEFAULT_RETRY_COUNT",
     "JEV_DEFAULT_TIMEOUT_SECONDS",
+    "JEV_DELIVERABLE_ID_PATTERN",
+    "JEV_DONE_COMPLETION_SIGNAL_FIELD",
+    "JEV_DONE_DELIVERABLES_FIELD",
+    "JEV_DONE_DELIVERABLE_FIELD",
+    "JEV_DONE_EVIDENCE_FIELD",
+    "JEV_DONE_MAX_CONTINUATIONS",
+    "JEV_DONE_REQUEST_FIELD",
+    "JEV_HANDOFF_MAX_ITERATIONS",
+    "JEV_HANDOFF_MAX_TOKENS",
     "JEV_MAX_CHOICE_OPTIONS",
     "JEV_MAX_OPTION_NAME_CHARS",
     "JEV_MAX_QUESTIONS",
@@ -105,17 +138,20 @@ __all__ = [
     "JEV_MIN_CHOICE_OPTIONS",
     "JEV_MIN_SCORE_LEVELS",
     "JEV_MODELS_PATH",
+    "JEV_MULTI_PART_THRESHOLD",
     "JEV_NOUL_FALSE",
     "JEV_NOUL_OPTIONS",
     "JEV_NOUL_TRUE",
     "JEV_NOUL_YES_THRESHOLD",
     "JEV_NO_RETRIES",
-    "JEV_PREVIEW_MODEL",
     "JEV_PREFLIGHT_REQUEST_FIELD",
     "JEV_PREFLIGHT_STRATEGY_NAME",
+    "JEV_PREVIEW_MODEL",
     "JEV_PROBABILITY_SUM_TOLERANCE",
     "JEV_RETRY_BACKOFF_SECONDS",
     "JEV_RETRY_STATUS_CODES",
+    "JEV_RUN_STATE_MAX_ITERATIONS",
+    "JEV_RUN_STATE_MAX_TOKENS",
     "JEV_SPECIALIST_MAX_COUNT",
     "JEV_SPECIALIST_NONE",
     "JEV_SPECIALIST_QUESTION_NAME",

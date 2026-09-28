@@ -1,10 +1,10 @@
 """FILE: vidbyte/lib/dataclasses/jev.py
 
-PURPOSE: Defines the validated records for TypeSafe Jev decisions (JSON content, options, questions, requests, normalized answers, wire bodies, model cards, and decision-log records) and for JevAgent preflight (the noul score, the question brief and criteria, the question base, preset definitions, preset results, the specialists JevAgent can hand a run to, the clarification agent's structured reply and the clarification built from it, and the JevAgentResponse the user reads after a run).
+PURPOSE: Defines the validated records for TypeSafe Jev decisions (JSON content, options, questions, requests, normalized answers, wire bodies, model cards, and decision-log records), for JevAgent preflight (the noul score, the question brief and criteria, the question base, preset definitions, preset results, the specialists JevAgent can hand a run to, the clarification agent's structured reply and the clarification built from it), for JevAgent done checks (the run-state and handoff structured replies with a described field per section, the run-state, deliverable, evidence, and handoff records, the done question base, and done results), and the JevAgentResponse the user reads after a run.
 ROLE IN CODEBASE: `vidbyte/providers/typesafe.py` builds TypeSafeWireRequest from JevDecisionRequest and JevAnswer values from responses, while `vidbyte/lib/runners/decision.py` passes the typed records through.
 ARCHITECTURE NOTE: This module must not import model_configs because that would close an import cycle through ModalityDetector. Records own every shape rule in __post_init__; the provider, not these records, turns a wire record into the JSON body (lint S060 bars dict[str, Any] encoders here).
 COMMON MODIFICATION PATTERNS: Mirror https://docs.typesafe.ai/api.md exactly: add a field together with its validation, its wire record, and its provider serialization; keep bounds in vidbyte/lib/constants/jev.py.
-KNOWN EDGE CASES: State, instructions, and criteria may be a string or JSON structure; noul criteria are optional; score answers carry a probability-weighted `score` that can land between levels; noul answers carry no confidence. JevPreflightQuestion is deliberately not slotted because every concrete question subclass redeclares its fields with defaults. The two clarification payloads are pydantic models because they are the output_schema JevClarificationAgent is held to.
+KNOWN EDGE CASES: State, instructions, and criteria may be a string or JSON structure; noul criteria are optional; score answers carry a probability-weighted `score` that can land between levels; noul answers carry no confidence. JevPreflightQuestion and JevDoneQuestion are deliberately not slotted because every concrete question subclass redeclares its fields with defaults. The clarification, run-state, and handoff payloads are pydantic models because they are the output_schema their generative agents are held to; every field's description is the instruction the model reads for that field, and each done-check section payload carries a SECTION description for the field JevRunState and JevHandoff add when that check is enabled. The records built from those replies hold validated fields only; converting a reply into a record belongs to the agent that asked for it.
 RELATED DOCS: docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, https://docs.typesafe.ai/api.md, and https://docs.typesafe.ai/primitives/advanced.md.
 TESTS: tests/test_jev_agent.py, tests/test_jev_preflight.py, and scripts/test-jev-agent-scaffold.py.
 """
@@ -13,10 +13,11 @@ from __future__ import annotations
 
 import json
 import math
+import re
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from types import MappingProxyType
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, ClassVar, cast
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -24,6 +25,7 @@ from vidbyte.lib.constants.jev import (
     JEV_CLARIFICATION_MAX_QUESTIONS,
     JEV_CLARIFICATION_MAX_RECOMMENDATIONS,
     JEV_CLARIFICATION_MIN_RECOMMENDATIONS,
+    JEV_DELIVERABLE_ID_PATTERN,
     JEV_MAX_CHOICE_OPTIONS,
     JEV_MAX_OPTION_NAME_CHARS,
     JEV_MAX_QUESTIONS,
@@ -38,6 +40,8 @@ from vidbyte.lib.constants.jev import (
     JEV_SPECIALIST_NONE,
 )
 from vidbyte.lib.enums.jev import (
+    JevDoneCheck,
+    JevDoneQuestionKey,
     JevPreflightPreset,
     JevPreflightQuestionKey,
     JevQuestionType,
@@ -52,6 +56,7 @@ if TYPE_CHECKING:
 JevContent = str | Mapping[str, object] | tuple[object, ...]
 
 _API_DOCS = "https://docs.typesafe.ai/api.md"
+_DELIVERABLE_ID = re.compile(JEV_DELIVERABLE_ID_PATTERN)
 
 
 class JevValidation:
@@ -635,6 +640,280 @@ class JevClarificationPayload(BaseModel):
     )
 
 
+class JevSectionPayload(BaseModel):
+    """One done check's section of a JevRunState or JevHandoff structured reply.
+
+    SECTION is the description of the field that holds the section, so the model reads why the section
+    exists before it reads the section's own field descriptions.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    SECTION: ClassVar[str]
+
+
+class JevRunStatePayload(BaseModel):
+    """The central structured state JevRunState writes once from the user's request, before the main agent starts.
+
+    JevRunState adds one more field to this model for every enabled done check, typed as that check's
+    section payload and described by its SECTION text, so the reply always holds these four fields plus
+    exactly the sections the enabled done checks read.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    goal: str = Field(min_length=1, description="The goal is the broad result the user wants to exist once the work is over, stated in one or two sentences in the user's own terms. It describes the end state the user cares about, not the steps the agent will take to get there. Write it from the user's request alone and keep the user's own names for things, files, products, and people. Do not add ambitions, improvements, or follow-up work that the request does not ask for. When the request is a question, the goal is that the user has a correct and complete answer to it.")
+    objective: str = Field(min_length=1, description="The objective is the concrete, checkable outcome of this one run, narrower than the goal: what the agent must hand back or change before it may stop. Name the artifact, change, or answer, and where it goes, whenever the request says so. It must be specific enough that a reader could look at the agent's final work and say whether the objective was met. Do not restate the goal in other words, and do not list the separate parts of the work here, since those belong to the done-check sections. When the request leaves a detail open, say that it is open rather than choosing a value for the user.")
+    mission: str = Field(min_length=1, description="The mission is the agent's overall responsibility while it works on this request: the role it plays and the standard its work must meet. It describes how the agent should behave on the way to the objective, such as working only inside the named project, keeping existing behavior intact, or citing sources, whenever the request sets such a standard. Take the standard from the request itself and from what its words clearly imply about quality, not from general advice about good work. Write it as two to four sentences addressed to the agent. When the request sets no particular standard, say that the agent should do exactly what the request asks and nothing more.")
+    what_not_to_do: list[str] = Field(description="What not to do lists every limit the request places on the work: things the user said to avoid, leave unchanged, or keep out of scope. Write each limit as its own short item in the user's terms, and keep only limits that the request states directly or that follow unavoidably from its words. Do not invent cautions, best practices, or safety rules the request does not state, since every item here is treated as a hard constraint. Include limits on scope, such as files, systems, or topics the work must not touch, as well as limits on form, such as length or tone. Return an empty list when the request places no limits on the work.")
+
+
+class JevDeliverablePayload(BaseModel):
+    """One separate output the request asks for, as JevRunState writes it in the multi-part section."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(pattern=JEV_DELIVERABLE_ID_PATTERN, description="The id is a short, stable identifier for this deliverable, written in lowercase letters, digits, and underscores and starting with a letter. It must be unique among the deliverables of this request, and it names the deliverable by its subject rather than numbering it. Later steps refer to the deliverable only by this id, so it is copied exactly and never changed after it is written. Keep it under sixty-four characters and free of spaces, capital letters, and punctuation other than underscores.")
+    description: str = Field(min_length=1, description="The description says what this one deliverable is, in one or two sentences that follow the user's own wording. It names the thing to be produced or changed and the part of the request it comes from, including any detail the request gives about it, such as a file, a format, a scope, or an audience. It describes only this deliverable, not the other parts of the request or the steps needed to produce it. Do not strengthen, weaken, or widen what the user asked for, and do not fill open details with your own choices. A reader who has not seen the request should understand from the description alone what the user expects to receive.")
+    completion_signal: str = Field(min_length=1, description="The completion signal is the visible condition that shows this deliverable is done, written so that it can be checked by reading the agent's final work and the record of its run. It names what must be present, such as a changed file with a stated behavior, a passing test, a part of the answer that covers a stated topic, or a command that was run with its result. It must describe something observable in the work itself, never the agent's intentions, confidence, or claims that the work is finished. It covers the whole deliverable as the request describes it, so a partial result does not meet it, and when the request asks for several of one thing, such as three examples or a test for each endpoint, it names how many must be present. Keep it to one or two sentences that follow the user's wording.")
+
+
+class JevMultiPartPayload(JevSectionPayload):
+    """The multi-part section of the run state: every separate deliverable the request asks for."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    SECTION: ClassVar[str] = "The multi-part section breaks the request into the separate deliverables it asks for, so that a later check can confirm each one was produced before the agent stops. It exists because agents often finish one visible part of a request and forget another part that was asked for in passing. Each deliverable is described so that someone reading only the agent's final work and a record of its run could tell whether that deliverable is there. The section records what the request asks for, not how the agent should produce it, and it never adds work the user did not ask for. Fill it from the user's request alone, before any work has started."
+
+    deliverables: list[JevDeliverablePayload] = Field(description="The deliverables are the separate outputs the request asks the agent to produce, one entry per output, in the order the request asks for them. An output is separate when it could be left out while the other outputs are still produced, such as a code change, a test, a migration, a document, an example, or an explanation the user asked for in its own right. Do not split one output into smaller steps, do not merge two outputs the user asked for separately, and do not add outputs the request does not ask for, such as extra tests or documentation the user never mentioned. Steps the agent takes only to produce an output, such as reading files or running a search, are not deliverables. Return an empty list when the request asks for no output at all, such as a greeting.")
+
+
+class JevHandoffPayload(BaseModel):
+    """The evidence handoff JevHandoff writes after the main agent tries to finish.
+
+    JevHandoff adds one field to this model for every enabled done check, typed as that check's evidence
+    payload and described by its SECTION text, so the reply holds exactly the evidence the enabled checks read.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class JevDeliverableEvidencePayload(BaseModel):
+    """The evidence the run holds for one deliverable, as JevHandoff writes it in the multi-part section."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(pattern=JEV_DELIVERABLE_ID_PATTERN, description="The id is the exact identifier of one deliverable from the run state's multi-part section, copied character for character. Every deliverable in the run state gets exactly one evidence entry, even when the run did no work on it, and no entry may use an id that is not in the run state. The id is how the evidence is matched back to the deliverable it is about, so it is never renamed, merged, or invented. Write the entries in the same order as the deliverables in the run state.")
+    evidence: str = Field(min_length=1, description="The evidence is everything in the agent's run that shows whether this deliverable was produced, compiled so that a checker who sees only this text and the deliverable can judge it. Quote or closely reproduce the relevant parts of the run: the final answer's passages about this deliverable, the tool calls that created or changed it with their arguments and outputs, and the results of any command or test that exercised it. Name where each piece comes from, such as the final answer, a response, or a named tool call, and keep the pieces in the order they happened. Report what the run shows, including failed attempts and errors, and never describe work the run does not show or state that the deliverable is complete. When the run shows nothing about this deliverable, say that no part of the run concerns it.")
+    missing: str = Field(min_length=1, description="The missing field says what the run does not show for this deliverable, measured against its description and completion signal. List each part of the deliverable that has no evidence, each part whose evidence shows a failure, and each detail the completion signal needs that the run leaves unshown. Write it for the agent that did the work, in plain words it can act on, and name the specific file, section, test, or topic that is missing. Do not repeat the evidence, and do not suggest work beyond what the deliverable asks for. When the evidence covers every part of the completion signal, write that nothing is missing.")
+
+
+class JevMultiPartEvidencePayload(JevSectionPayload):
+    """The multi-part section of the handoff: the evidence for every deliverable the run state lists."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    SECTION: ClassVar[str] = "The multi-part evidence section gathers, for each deliverable the run state lists, the parts of the agent's run that show whether that deliverable was produced. A separate checker reads one entry at a time, next to the user's request and that deliverable's description and completion signal, and decides whether the deliverable is done. That checker sees nothing of the run except the evidence written here, so the evidence must be complete, specific, and faithful to what the run actually shows. The section reports observations and never gives a verdict about whether the work is complete. It is filled after the agent tries to finish, from the agent's context window."
+
+    deliverables: list[JevDeliverableEvidencePayload] = Field(description="The deliverables hold one evidence entry for every deliverable in the run state's multi-part section, with the same ids and in the same order. Each entry gathers the parts of the run that bear on that one deliverable and states what the run does not show for it. An entry never borrows evidence from another deliverable unless the same piece of the run truly concerns both, in which case it is repeated in each. Do not add entries for work the run did that no deliverable asks for. Never leave a deliverable out, even when the run did nothing toward it.")
+
+
+class JevDeliverableId:
+    """Shared validation for the deliverable identifiers JevRunState writes and JevHandoff echoes."""
+
+    @staticmethod
+    def require(value: object, *, field_name: str) -> str:
+        # Returns a lowercase identifier matching JEV_DELIVERABLE_ID_PATTERN, raising for anything else.
+        if not isinstance(value, str) or _DELIVERABLE_ID.fullmatch(value) is None:
+            raise JevValidation.error(field_name, "a lowercase identifier of letters, digits, and underscores that starts with a letter (at most 64 characters)", value)
+        return value
+
+    @staticmethod
+    def require_unique(ids: tuple[str, ...], *, field_name: str) -> None:
+        # Rejects a repeated identifier, since every later step matches deliverables by id.
+        duplicates = sorted({identifier for identifier in ids if ids.count(identifier) > 1})
+        if duplicates:
+            raise JevValidation.error(field_name, "unique deliverable ids", f"duplicates {duplicates}")
+
+
+@dataclass(frozen=True, slots=True)
+class JevDeliverable:
+    """One separate output the request asks for: a stable id, what it is, and the visible condition that shows it is done."""
+
+    id: str
+    description: str
+    completion_signal: str
+
+    def __post_init__(self) -> None:
+        # Requires an identifier later steps can echo exactly, and non-blank description and signal text.
+        JevDeliverableId.require(self.id, field_name="deliverable id")
+        JevText.require(self.description, field_name=f"description of deliverable {self.id!r}")
+        JevText.require(self.completion_signal, field_name=f"completion_signal of deliverable {self.id!r}")
+
+
+@dataclass(frozen=True, slots=True)
+class JevMultiPart:
+    """The multi-part section of a run state: every separate deliverable the request asks for, in request order."""
+
+    deliverables: tuple[JevDeliverable, ...] = ()
+
+    def __post_init__(self) -> None:
+        # Requires a tuple of deliverables with unique ids; an empty tuple means the request asks for no output.
+        if not isinstance(self.deliverables, tuple) or not all(isinstance(item, JevDeliverable) for item in self.deliverables):
+            raise JevValidation.error("multi-part deliverables", "a tuple of JevDeliverable values", self.deliverables)
+        JevDeliverableId.require_unique(self.ids(), field_name="multi-part deliverables")
+
+    def ids(self) -> tuple[str, ...]:
+        """Return every deliverable id in request order."""
+        return tuple(item.id for item in self.deliverables)
+
+
+@dataclass(frozen=True, slots=True)
+class JevRunStateRecord:
+    """The run state JevRunState wrote from the user's request: the central fields and the section of every enabled done check.
+
+    `multi_part` is set only when the MULTI_PART done check is enabled, and `usage` is JevRunState's own model usage.
+    """
+
+    goal: str
+    objective: str
+    mission: str
+    what_not_to_do: tuple[str, ...] = ()
+    multi_part: JevMultiPart | None = None
+    usage: UsageRollup | None = None
+
+    def __post_init__(self) -> None:
+        # Requires the central text fields, non-blank limits, and a typed multi-part section when present.
+        for field_name in ("goal", "objective", "mission"):
+            JevText.require(getattr(self, field_name), field_name=f"run state {field_name}")
+        if not isinstance(self.what_not_to_do, tuple):
+            raise JevValidation.error("run state what_not_to_do", "a tuple of strings", self.what_not_to_do)
+        for index, limit in enumerate(self.what_not_to_do):
+            JevText.require(limit, field_name=f"run state what_not_to_do[{index}]")
+        if self.multi_part is not None and not isinstance(self.multi_part, JevMultiPart):
+            raise JevValidation.error("run state multi_part", "a JevMultiPart or None", self.multi_part)
+
+
+@dataclass(frozen=True, slots=True)
+class JevDeliverableEvidence:
+    """What the run shows for one deliverable, and what it does not show, as JevHandoff compiled it."""
+
+    id: str
+    evidence: str
+    missing: str
+
+    def __post_init__(self) -> None:
+        # Requires the echoed deliverable id and non-blank evidence and missing text.
+        JevDeliverableId.require(self.id, field_name="evidence id")
+        JevText.require(self.evidence, field_name=f"evidence of deliverable {self.id!r}")
+        JevText.require(self.missing, field_name=f"missing of deliverable {self.id!r}")
+
+
+@dataclass(frozen=True, slots=True)
+class JevMultiPartEvidence:
+    """The multi-part section of a handoff: one evidence entry per deliverable, in the run state's order."""
+
+    deliverables: tuple[JevDeliverableEvidence, ...] = ()
+
+    def __post_init__(self) -> None:
+        # Requires a tuple of evidence entries with unique ids.
+        if not isinstance(self.deliverables, tuple) or not all(isinstance(item, JevDeliverableEvidence) for item in self.deliverables):
+            raise JevValidation.error("multi-part evidence", "a tuple of JevDeliverableEvidence values", self.deliverables)
+        JevDeliverableId.require_unique(self.ids(), field_name="multi-part evidence")
+
+    def ids(self) -> tuple[str, ...]:
+        """Return every evidence entry's deliverable id in order."""
+        return tuple(item.id for item in self.deliverables)
+
+
+@dataclass(frozen=True, slots=True)
+class JevHandoffRecord:
+    """The evidence JevHandoff compiled from the main agent's run for every enabled done check.
+
+    `multi_part` is set only when the MULTI_PART done check is enabled, and `usage` is JevHandoff's own model usage.
+    """
+
+    multi_part: JevMultiPartEvidence | None = None
+    usage: UsageRollup | None = None
+
+    def __post_init__(self) -> None:
+        # Requires a typed multi-part evidence section when present.
+        if self.multi_part is not None and not isinstance(self.multi_part, JevMultiPartEvidence):
+            raise JevValidation.error("handoff multi_part", "a JevMultiPartEvidence or None", self.multi_part)
+
+
+@dataclass(frozen=True)
+class JevDoneQuestion:
+    """One fixed done yes/no question: what Jev reads, what each answer looks like, and the gap a no answer names.
+
+    Every concrete question in `vidbyte/lib/jev/done/` subclasses this with a default for every field, so each
+    question is its own dataclass constructed with no arguments. `instructions` holds every rule, and its
+    `question` names the checked item through an `{item}` placeholder; `when_true` and `when_false` only
+    describe each side; `gap` is the self-contained sentence the main agent reads when this question fails,
+    ahead of what the handoff says is missing.
+    """
+
+    key: JevDoneQuestionKey
+    instructions: JevBrief
+    when_true: JevCriterion
+    when_false: JevCriterion
+    gap: str
+
+    def __post_init__(self) -> None:
+        # Requires a registered key, a brief, two criteria, and non-blank gap text.
+        if not isinstance(self.key, JevDoneQuestionKey):
+            raise JevValidation.error("done question key", "a JevDoneQuestionKey member", self.key)
+        if not isinstance(self.instructions, JevBrief):
+            raise JevValidation.error(f"instructions of done question {self.key.value!r}", "a JevBrief", self.instructions)
+        for field_name in ("when_true", "when_false"):
+            if not isinstance(getattr(self, field_name), JevCriterion):
+                raise JevValidation.error(f"{field_name} of done question {self.key.value!r}", "a JevCriterion", getattr(self, field_name))
+        JevText.require(self.gap, field_name=f"gap of done question {self.key.value!r}")
+
+    def name(self, item: str) -> str:
+        """Return the name the question about one checked item is sent under and answered by."""
+        return f"{self.key.value}.{item}"
+
+    def to_question(self, item: str) -> JevQuestion:
+        # Builds the noul JevQuestion about one checked item: the brief's question names the item, so every
+        # item's question can share one request's state and its answer comes back under its own name.
+        return JevQuestion(
+            name=self.name(item),
+            question_type=JevQuestionType.NOUL,
+            instructions=replace(self.instructions, question=self.instructions.question.format(item=item)).render(),
+            options=(JevOption(name=JEV_NOUL_TRUE, description=self.when_true.to_content()), JevOption(name=JEV_NOUL_FALSE, description=self.when_false.to_content())),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class JevDoneResult:
+    """What one enabled done check decided the last time the main agent tried to finish.
+
+    `answers` holds Jev's answer per deliverable id, `score` is their mean P(yes), and `incomplete` names
+    the deliverables whose P(yes) fell below the check's threshold. With `available=False` the run state,
+    the handoff, or Jev was unavailable, `score` is None, and the check fails open (`passed` stays True).
+    `usage` is the usage of the one Jev request that asked every enabled check's questions at that finish attempt.
+    """
+
+    check: JevDoneCheck
+    score: float | None
+    passed: bool = True
+    answers: Mapping[str, JevAnswer] = field(default_factory=dict)
+    incomplete: tuple[str, ...] = ()
+    available: bool = True
+    usage: ProviderUsage | None = None
+
+    def __post_init__(self) -> None:
+        # Validates the check and score and freezes the answers so a recorded result cannot be edited.
+        if not isinstance(self.check, JevDoneCheck):
+            raise JevValidation.error("done result check", "a JevDoneCheck member", self.check)
+        if self.score is not None:
+            object.__setattr__(self, "score", JevProbability.require(self.score, field_name="done result score"))
+        object.__setattr__(self, "answers", MappingProxyType(dict(self.answers)))
+        if not isinstance(self.incomplete, tuple):
+            raise JevValidation.error("done result incomplete", "a tuple of deliverable ids", self.incomplete)
+
+
 @dataclass(frozen=True, slots=True)
 class JevClarifyingQuestion:
     """One clarifying question returned to the user, with the recommended answers the user can pick from."""
@@ -683,6 +962,9 @@ class JevAgentResponse:
     preflight gate acts. `results` holds one entry per enabled fixed-question preset, `usage` is the one
     preflight Jev call's usage, `clarification` is set only when the gate stopped the run to ask the user, and
     `specialist` is the title of the JevSpecialist that ran the task, or None when the main JevAgent ran it.
+    With done checks enabled, `run_state` is the state JevRunState wrote before the main agent started,
+    `handoff` is the evidence JevHandoff compiled at the latest finish attempt, `done` holds the latest result
+    of every enabled done check, and `continuations` counts how often a failed check sent the agent back to work.
     """
 
     input: str = ""
@@ -691,6 +973,10 @@ class JevAgentResponse:
     clarification: JevClarification | None = None
     usage: ProviderUsage | None = None
     specialist: str | None = None
+    run_state: JevRunStateRecord | None = None
+    handoff: JevHandoffRecord | None = None
+    done: dict[JevDoneCheck, JevDoneResult] = field(default_factory=dict)
+    continuations: int = 0
 
     @property
     def needs_clarification(self) -> bool:
@@ -710,8 +996,21 @@ __all__ = [
     "JevCriterion",
     "JevDecisionRecord",
     "JevDecisionRequest",
+    "JevDeliverable",
+    "JevDeliverableEvidence",
+    "JevDeliverableEvidencePayload",
+    "JevDeliverableId",
+    "JevDeliverablePayload",
+    "JevDoneQuestion",
+    "JevDoneResult",
+    "JevHandoffPayload",
+    "JevHandoffRecord",
     "JevJson",
     "JevModelCard",
+    "JevMultiPart",
+    "JevMultiPartEvidence",
+    "JevMultiPartEvidencePayload",
+    "JevMultiPartPayload",
     "JevNoulScore",
     "JevOption",
     "JevPreflightQuestion",
@@ -719,6 +1018,9 @@ __all__ = [
     "JevPresetResult",
     "JevProbability",
     "JevQuestion",
+    "JevRunStatePayload",
+    "JevRunStateRecord",
+    "JevSectionPayload",
     "JevSpecialist",
     "JevText",
     "JevValidation",
