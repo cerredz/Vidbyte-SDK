@@ -49,6 +49,7 @@ class JevAgentSettings:
     permission_policy: PermissionPolicy = field(default_factory=PermissionPolicy)
     loop: AgentLoopSettings = field(default_factory=AgentLoopSettings)
     agents: tuple[JevSpecialist, ...] = ()
+    self_align: bool = False
 
     def __post_init__(self) -> None:
         # Normalizes immutable inputs and rejects invalid agent configuration before runtime construction.
@@ -73,6 +74,8 @@ class JevAgentSettings:
             raise ConfigurationError("JevAgentSettings.permission_policy must be a PermissionPolicy instance.")
         if not isinstance(self.loop, AgentLoopSettings):
             raise ConfigurationError("JevAgentSettings.loop must be an AgentLoopSettings instance.")
+        if not isinstance(self.self_align, bool):
+            raise ConfigurationError("JevAgentSettings.self_align must be True or False.")
         self._validate_agents()
 
     def _validate_agents(self) -> None:

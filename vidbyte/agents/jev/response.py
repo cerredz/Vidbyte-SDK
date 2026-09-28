@@ -16,12 +16,14 @@ from vidbyte.lib.constants.jev import JEV_PREFLIGHT_STRATEGY_NAME
 from vidbyte.lib.dataclasses.agents import AgentMessage
 from vidbyte.lib.dataclasses.jev import (
     JevAgentResponse,
+    JevAlignmentResult,
     JevClarification,
     JevDoneResult,
     JevHandoffRecord,
     JevPresetResult,
     JevRunStateRecord,
     JevSpecialist,
+    JevToolSelectorResponse,
 )
 from vidbyte.lib.dataclasses.strategies import AgentResult
 
@@ -69,6 +71,21 @@ class JevResponse:
     def continued(self) -> None:
         """Record that a failed done check sent the main agent back to work."""
         self.state.continuations += 1
+
+    # @intent alignment-outcome-visible
+    # Alignment is advisory and run-local; exposing its evidence and selected prompt lets owners inspect the adaptation
+    # without mutating the configured prompt or hiding a rewrite behind generic metadata.
+    def alignment(self, result: JevAlignmentResult, *, aligned_prompt: str) -> None:
+        """Record the alignment evidence and prompt used by the current run."""
+        self.state.alignment = result
+        self.state.aligned_prompt = aligned_prompt
+
+    # @intent tool-selection-outcome-visible
+    # Tool filtering changes the model's available actions for this run, so callers need the selection outcome to
+    # understand why a configured tool was not available.
+    def tool_selector(self, result: JevToolSelectorResponse) -> None:
+        """Record the typed outcome of the run-local tool selector."""
+        self.state.tool_selector = result
 
     def delegated(self, reply: AgentMessage) -> AgentResult:
         """Record the chosen specialist's reply and return it as this run's result, keeping the specialist's own metadata."""

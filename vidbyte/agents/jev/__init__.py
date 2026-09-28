@@ -10,6 +10,11 @@ TESTS: tests/test_jev_agent.py and scripts/test-jev-agent-scaffold.py.
 """
 
 from vidbyte.agents.jev.agent import JevAgent
+from vidbyte.agents.jev.alignment import (
+    JevAgentAlignment,
+    JevAlignmentResult,
+    JevAlignmentStatus,
+)
 from vidbyte.agents.jev.runtime import JevRuntime
 from vidbyte.agents.jev.settings import (
     JevAgentSettings,
@@ -32,10 +37,13 @@ from vidbyte.lib.enums.jev import JevDoneCheck, JevPreflightPreset
 
 __all__ = [
     "JevAgent",
+    "JevAgentAlignment",
     "JevAgentResponse",
     "JevAgentSettings",
     "JevClarification",
     "JevClarifyingQuestion",
+    "JevAlignmentResult",
+    "JevAlignmentStatus",
     "JevContinualSettings",
     "JevDeliverable",
     "JevDeliverableEvidence",
