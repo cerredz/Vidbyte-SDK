@@ -16,6 +16,7 @@ Feedback on one question applies to every question, so when you change the patte
 ## Where things live
 
 - `clarity.py` holds the clarity preset's questions.
+- `recurring.py` holds the observational recurring-work preset's questions.
 - `specialist.py` holds the specialist Choice question; its options are built per run from `JevAgentSettings.agents`, with `none` always last.
 - `preflight.py` holds `JevPreflightRegistry` (`get`, `questions`, `specialists`, `validate`).
 - The flags and their question keys are in `vidbyte/lib/jev/presets.py` and `vidbyte/lib/enums/jev.py`; the records are in `vidbyte/lib/dataclasses/jev.py`.

@@ -14,7 +14,11 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from types import MappingProxyType
 
-from vidbyte.lib.constants.jev import JEV_CLARITY_THRESHOLD, JEV_CLARITY_VETO_THRESHOLD
+from vidbyte.lib.constants.jev import (
+    JEV_CLARITY_THRESHOLD,
+    JEV_CLARITY_VETO_THRESHOLD,
+    JEV_RECURRING_THRESHOLD,
+)
 from vidbyte.lib.dataclasses.jev import JevPresetDefinition
 from vidbyte.lib.enums.jev import JevPreflightPreset, JevPreflightQuestionKey
 from vidbyte.lib.errors import ConfigurationError
@@ -47,6 +51,11 @@ class JevPresets:
                 # One clear no fails the request, and a request with no action reports only that gap.
                 veto=JEV_CLARITY_VETO_THRESHOLD,
                 gate=JevPreflightQuestionKey.CLARITY_ACTION,
+            ),
+            JevPreflightPreset.RECURRING: JevPresetDefinition(
+                preset=JevPreflightPreset.RECURRING,
+                question_keys=tuple(key for key in JevPreflightQuestionKey if key.value.startswith("recurring.")),
+                threshold=JEV_RECURRING_THRESHOLD,
             ),
         }
     )
