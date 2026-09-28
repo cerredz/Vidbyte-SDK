@@ -58,6 +58,7 @@ JEV covers TypeSafe's Jev calibrated decision model and `JevAgent`, the opiniona
 | Clarification agent prompt family | `vidbyte/prompts/prompts/jev_clarification/`; key in `vidbyte/lib/enums/prompts.py` |
 | House style for writing Jev questions (load it before writing or reviewing one) | `skills/asking-jev-questions/SKILL.md` |
 | Guide to extending `JevAgent` | `skills/jev-agent/SKILL.md` |
+| Step-by-step guide to adding a continuation done check (load it before adding a `JevDoneCheck`) | `skills/jev-continuation/SKILL.md` |
 | Tests | `tests/test_jev_*.py`; focused scripts `scripts/test-jev-*.py` |
 
 Where new JEV code goes:

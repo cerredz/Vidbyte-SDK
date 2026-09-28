@@ -18,6 +18,8 @@ from typing import Any
 from vidbyte.tools.types import ToolCallContext
 
 
+# Load skills/jev-continuation/SKILL.md before adding a continuation feature: a new done check extends
+# JevDoneContinuation and JevRunState, and that skill says when a new subclass of this contract is warranted instead.
 class JevContinuation(ABC):
     """Decides at every finish attempt whether JevAgent's main agent goes back to work, and what it reads when it does."""
 
