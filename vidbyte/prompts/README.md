@@ -65,6 +65,7 @@ prompt text.
 | Goal Behavior | `goals` | goal_prompt | [goals/goal_prompt.md](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/goals/goal_prompt.md) |
 | Handoff | `handoff` | system_prompt | [handoff/handoff.md](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/handoff/handoff.md) |
 | Jev Clarification | `jev_clarification` | system_prompt | [jev_clarification/system_prompt.md](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_clarification/system_prompt.md) |
+| Jev Continuation | `jev_continuation` | continue_prompt | [jev_continuation/continue_prompt.md](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_continuation/continue_prompt.md) |
 | Jev Handoff | `jev_handoff` | system_prompt | [jev_handoff/system_prompt.md](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_handoff/system_prompt.md) |
 | Jev Run State | `jev_run_state` | system_prompt | [jev_run_state/system_prompt.md](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_run_state/system_prompt.md) |
 | Mimic Behavior | `mimic_behavior` | mimic_prompt | [mimic_behavior/mimic_prompt.md](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/mimic_behavior/mimic_prompt.md) |
@@ -227,6 +228,15 @@ questions, each with two to four recommended answers, for the user to answer
 before the main agent starts.
 
 Link: <https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_clarification/system_prompt.md>
+
+#### Jev Continuation — `jev_continuation`
+
+The message a JevAgent's continuation appends to its main agent's loop when an
+enabled done check fails at a finish attempt. It hands the main agent the original
+request, the run state, the handoff, and the Jev questions that failed, and tells it
+to complete only the missing parts, with more focus on them.
+
+Link: <https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_continuation/continue_prompt.md>
 
 #### Jev Handoff — `jev_handoff`
 

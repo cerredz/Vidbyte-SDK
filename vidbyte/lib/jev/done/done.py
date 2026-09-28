@@ -1,7 +1,7 @@
 """FILE: vidbyte/lib/jev/done/done.py
 
 PURPOSE: Defines JevDoneRegistry, the registry over every done check's fixed question and threshold, plus validation of the done checks a user enables.
-ROLE IN CODEBASE: JevRuntimeSettings calls JevDoneRegistry.validate at construction, and JevRunState (vidbyte/agents/jev/done/run_state.py) reads each enabled check's question and threshold from here when it asks Jev whether the main agent may finish.
+ROLE IN CODEBASE: JevContinualSettings calls JevDoneRegistry.validate at construction, and JevRunState (vidbyte/agents/jev/done/run_state.py) reads each enabled check's question and threshold from here when it asks Jev whether the main agent may finish.
 ARCHITECTURE NOTE: Questions are dataclasses in this folder, the check vocabulary is JevDoneCheck in vidbyte/lib/enums/jev.py, and the records live in vidbyte/lib/dataclasses/jev.py; this lib module never imports the agents layer and never calls Jev.
 COMMON MODIFICATION PATTERNS: Register a new done check by adding its question to _questions and its threshold constant to _thresholds; keep scoring in DecisionModelRunner.score_noul and the actions taken on answers in JevRunState, not here.
 KNOWN EDGE CASES: A bare string is rejected rather than iterated character by character, and enabling the same check twice is an error because it would ask Jev every question twice.
@@ -61,13 +61,13 @@ class JevDoneRegistry:
         # Settings construction calls this, so a typo, a bare string, or a repeated check fails when the
         # agent is built instead of silently asking Jev the wrong (or duplicated) questions at every finish.
         if isinstance(values, (str, bytes)):
-            raise ConfigurationError("JevRuntimeSettings.done must be an iterable of Jev done checks, not a string.", details={"received": repr(values)})
+            raise ConfigurationError("JevContinualSettings.checks must be an iterable of Jev done checks, not a string.", details={"received": repr(values)})
         try:
             checks = tuple(cls.resolve(value) for value in values)
         except TypeError as exc:
-            raise ConfigurationError("JevRuntimeSettings.done must be an iterable of Jev done checks.", details={"received": type(values).__name__}) from exc
+            raise ConfigurationError("JevContinualSettings.checks must be an iterable of Jev done checks.", details={"received": type(values).__name__}) from exc
         if len(set(checks)) != len(checks):
-            raise ConfigurationError("JevRuntimeSettings.done cannot enable the same check twice.", details={"received": [check.value for check in checks]})
+            raise ConfigurationError("JevContinualSettings.checks cannot enable the same check twice.", details={"received": [check.value for check in checks]})
         for check in checks:
             cls.question(check)
             cls.threshold(check)

@@ -15,7 +15,7 @@ import json
 import math
 import re
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from types import MappingProxyType
 from typing import TYPE_CHECKING, ClassVar, cast
 
@@ -675,7 +675,7 @@ class JevDeliverablePayload(BaseModel):
 
     id: str = Field(pattern=JEV_DELIVERABLE_ID_PATTERN, description="The id is a short, stable identifier for this deliverable, written in lowercase letters, digits, and underscores and starting with a letter. It must be unique among the deliverables of this request, and it names the deliverable by its subject rather than numbering it. Later steps refer to the deliverable only by this id, so it is copied exactly and never changed after it is written. Keep it under sixty-four characters and free of spaces, capital letters, and punctuation other than underscores.")
     description: str = Field(min_length=1, description="The description says what this one deliverable is, in one or two sentences that follow the user's own wording. It names the thing to be produced or changed and the part of the request it comes from, including any detail the request gives about it, such as a file, a format, a scope, or an audience. It describes only this deliverable, not the other parts of the request or the steps needed to produce it. Do not strengthen, weaken, or widen what the user asked for, and do not fill open details with your own choices. A reader who has not seen the request should understand from the description alone what the user expects to receive.")
-    completion_signal: str = Field(min_length=1, description="The completion signal is the visible condition that shows this deliverable is done, written so that it can be checked by reading the agent's final work and the record of its run. It names what must be present, such as a changed file with a stated behavior, a passing test, a part of the answer that covers a stated topic, or a command that was run with its result. It must describe something observable in the work itself, never the agent's intentions, confidence, or claims that the work is finished. It covers the whole deliverable as the request describes it, so a partial result does not meet it. Keep it to one or two sentences that follow the user's wording.")
+    completion_signal: str = Field(min_length=1, description="The completion signal is the visible condition that shows this deliverable is done, written so that it can be checked by reading the agent's final work and the record of its run. It names what must be present, such as a changed file with a stated behavior, a passing test, a part of the answer that covers a stated topic, or a command that was run with its result. It must describe something observable in the work itself, never the agent's intentions, confidence, or claims that the work is finished. It covers the whole deliverable as the request describes it, so a partial result does not meet it, and when the request asks for several of one thing, such as three examples or a test for each endpoint, it names how many must be present. Keep it to one or two sentences that follow the user's wording.")
 
 
 class JevMultiPartPayload(JevSectionPayload):
@@ -847,9 +847,10 @@ class JevDoneQuestion:
     """One fixed done yes/no question: what Jev reads, what each answer looks like, and the gap a no answer names.
 
     Every concrete question in `vidbyte/lib/jev/done/` subclasses this with a default for every field, so each
-    question is its own dataclass constructed with no arguments. `instructions` holds every rule; `when_true`
-    and `when_false` only describe each side; `gap` is the self-contained sentence the main agent reads when
-    this question fails, ahead of what the handoff says is missing.
+    question is its own dataclass constructed with no arguments. `instructions` holds every rule, and its
+    `question` names the checked item through an `{item}` placeholder; `when_true` and `when_false` only
+    describe each side; `gap` is the self-contained sentence the main agent reads when this question fails,
+    ahead of what the handoff says is missing.
     """
 
     key: JevDoneQuestionKey
@@ -869,12 +870,17 @@ class JevDoneQuestion:
                 raise JevValidation.error(f"{field_name} of done question {self.key.value!r}", "a JevCriterion", getattr(self, field_name))
         JevText.require(self.gap, field_name=f"gap of done question {self.key.value!r}")
 
-    def to_question(self) -> JevQuestion:
-        # Builds the noul JevQuestion sent to Jev, named by the key so its answer comes back under it.
+    def name(self, item: str) -> str:
+        """Return the name the question about one checked item is sent under and answered by."""
+        return f"{self.key.value}.{item}"
+
+    def to_question(self, item: str) -> JevQuestion:
+        # Builds the noul JevQuestion about one checked item: the brief's question names the item, so every
+        # item's question can share one request's state and its answer comes back under its own name.
         return JevQuestion(
-            name=self.key.value,
+            name=self.name(item),
             question_type=JevQuestionType.NOUL,
-            instructions=self.instructions.render(),
+            instructions=replace(self.instructions, question=self.instructions.question.format(item=item)).render(),
             options=(JevOption(name=JEV_NOUL_TRUE, description=self.when_true.to_content()), JevOption(name=JEV_NOUL_FALSE, description=self.when_false.to_content())),
         )
 
@@ -886,7 +892,7 @@ class JevDoneResult:
     `answers` holds Jev's answer per deliverable id, `score` is their mean P(yes), and `incomplete` names
     the deliverables whose P(yes) fell below the check's threshold. With `available=False` the run state,
     the handoff, or Jev was unavailable, `score` is None, and the check fails open (`passed` stays True).
-    `usage` sums the Jev usage of every request the check sent.
+    `usage` is the usage of the one Jev request that asked every enabled check's questions at that finish attempt.
     """
 
     check: JevDoneCheck

@@ -1,7 +1,7 @@
 """FILE: tests/test_jev_done.py
 
 PURPOSE: Verifies JevAgent's done checks deterministically without live model calls: the run-state and handoff schemas and their field descriptions, the records built from them, the multi-part done question and its registry, the two generative prompts, the handoff's context window, and JevRuntime's finish-attempt behavior (pass, send back to work, bounded continuations, and fail-open paths).
-ROLE IN CODEBASE: Pins the review of PR #452: records and enums live in vidbyte/lib, every structured-output field carries a 4-6 sentence description, JevRunState composes one schema from the enabled checks, JevHandoff reads the main agent's window through a ContextManager, and Jev judges one deliverable at a time with a fixed question.
+ROLE IN CODEBASE: Pins the review of PR #452: records and enums live in vidbyte/lib, every structured-output field carries a 4-6 sentence description, JevRunState composes one schema from the enabled checks, JevHandoff reads the main agent's window through a ContextManager, and every enabled check's fixed questions go to Jev in one request (review of PR #470).
 ARCHITECTURE NOTE: Scripted generative and decision runners replace only the external boundaries while production settings, registry, schemas, runtime hook, and response wiring stay active.
 COMMON MODIFICATION PATTERNS: Add a case for every new done check, section, question, threshold boundary, and availability policy.
 KNOWN EDGE CASES: No test may contact TypeSafe or a generative provider; the token-floor test needs tiktoken and is skipped without it.
@@ -31,16 +31,19 @@ from vidbyte import (
     BaseAgent,
     JevAgent,
     JevAgentSettings,
+    JevContinualSettings,
     JevDoneCheck,
     JevRuntimeSettings,
     JevSpecialist,
 )
+from vidbyte.agents.jev.continuation import JevContinuation, JevDoneContinuation
 from vidbyte.agents.jev.done import JevHandoff, JevRunState
 from vidbyte.context.primitives import ResponseContextItem, TextContextItem, ToolCallContextItem
 from vidbyte.lib.config import DecisionModelConfig
 from vidbyte.lib.constants.jev import (
     JEV_DONE_COMPLETION_SIGNAL_FIELD,
     JEV_DONE_DELIVERABLE_FIELD,
+    JEV_DONE_DELIVERABLES_FIELD,
     JEV_DONE_EVIDENCE_FIELD,
     JEV_DONE_MAX_CONTINUATIONS,
     JEV_DONE_REQUEST_FIELD,
@@ -121,7 +124,7 @@ class ScriptedGenerativeRunner:
 
 
 class ScriptedDecisionRunner:
-    """Records every decision request and answers each deliverable from a script of P(yes) values per finish attempt."""
+    """Records every decision request and answers each deliverable's question from a script of P(yes) values per finish attempt, keyed by deliverable id."""
 
     def __init__(self, script: Mapping[str, list[float]], *, error: Exception | None = None) -> None:
         self.script = {key: list(values) for key, values in script.items()}
@@ -132,10 +135,11 @@ class ScriptedDecisionRunner:
         self.requests.append(request)
         if self.error is not None:
             raise self.error
-        assert isinstance(request.state, Mapping)
-        values = self.script[str(request.state[JEV_DONE_DELIVERABLE_FIELD])]
-        yes = values.pop(0) if len(values) > 1 else values[0]
-        answers = {question.name: _answer(question.name, yes) for question in request.questions}
+        answers = {}
+        for question in request.questions:
+            values = self.script[question.name.rsplit(".", 1)[-1]]
+            yes = values.pop(0) if len(values) > 1 else values[0]
+            answers[question.name] = _answer(question.name, yes)
         return DecisionModelResponse(provider=ModelProvider.TYPESAFE, model="jev-1.13.0", answers=answers, raw={}, usage={"input_tokens": 100, "output_tokens": 10})
 
 
@@ -161,7 +165,7 @@ def _settings(**overrides: Any) -> JevAgentSettings:
 
 
 def _jev(done: tuple[Any, ...] = (JevDoneCheck.MULTI_PART,), **settings: Any) -> JevAgent:
-    return JevAgent(_settings(**settings), JevRuntimeSettings(decision=DecisionModelConfig(api_key="test-key"), done=done))
+    return JevAgent(_settings(**settings), JevRuntimeSettings(decision=DecisionModelConfig(api_key="test-key"), continual=JevContinualSettings(checks=done)))
 
 
 def _sentences(text: str) -> int:
@@ -250,13 +254,42 @@ class JevDoneSchemaTests(unittest.TestCase):
         self.assertEqual(agent.run_state.tools.names(), agent.run_state.handoff_writer.tools.names())
         self.assertIsNone(_jev(done=()).run_state)
 
+    def test_the_continuation_is_a_jev_continuation_subclass_built_once(self) -> None:
+        # [Review 4117849112] the runtime calls a JevContinuation subclass instead of holding continuation logic.
+        agent = _jev()
+        self.assertIsInstance(agent.continuation, JevDoneContinuation)
+        self.assertIsInstance(agent.continuation, JevContinuation)
+        assert agent.continuation is not None
+        self.assertIs(agent.continuation.run_state, agent.run_state)
+        self.assertIsNone(_jev(done=()).continuation)
+
     def test_done_checks_are_runtime_settings_validated_by_the_registry(self) -> None:
         # The #469 split: a setting that configures Jev's own decisions belongs on JevRuntimeSettings.
-        self.assertEqual(JevRuntimeSettings(done=("multi_part",)).done, (JevDoneCheck.MULTI_PART,))
+        self.assertEqual(JevContinualSettings(checks=("multi_part",)).checks, (JevDoneCheck.MULTI_PART,))
         self.assertNotIn("done", JevAgentSettings.__dataclass_fields__)
         for bad in ("multi_part", ("multi_part", "multi_part"), ("everything",), 3):
             with self.subTest(bad=bad), self.assertRaises(ConfigurationError):
-                JevRuntimeSettings(done=bad)
+                JevContinualSettings(checks=bad)
+        with self.assertRaises(ConfigurationError):
+            JevRuntimeSettings(continual=(JevDoneCheck.MULTI_PART,))  # type: ignore[arg-type]
+
+    def test_continual_settings_expose_the_continuation_limits(self) -> None:
+        # [Review 4117820116] the settings key is "continual", and the user sets the continuation and token limits.
+        self.assertIn("continual", JevRuntimeSettings.__dataclass_fields__)
+        self.assertNotIn("done", JevRuntimeSettings.__dataclass_fields__)
+        defaults = JevContinualSettings()
+        self.assertEqual((defaults.checks, defaults.max_continuations), ((), JEV_DONE_MAX_CONTINUATIONS))
+        continual = JevContinualSettings(checks=(JevDoneCheck.MULTI_PART,), max_continuations=0, run_state_max_iterations=3, run_state_max_tokens=5_000, handoff_max_iterations=4, handoff_max_tokens=9_000)
+        agent = JevAgent(_settings(), JevRuntimeSettings(continual=continual))
+        assert agent.run_state is not None
+        assert agent.continuation is not None
+        self.assertEqual(agent.continuation.max_continuations, 0)
+        self.assertEqual((agent.run_state.agent_loop_settings.max_iterations, agent.run_state.agent_loop_settings.max_tokens), (3, 5_000))
+        handoff = agent.run_state.handoff_writer.agent_loop_settings
+        self.assertEqual((handoff.max_iterations, handoff.max_tokens), (4, 9_000))
+        for field_name, bad in (("max_continuations", -1), ("max_continuations", True), ("run_state_max_tokens", 0), ("handoff_max_iterations", 2.5)):
+            with self.subTest(field=field_name, bad=bad), self.assertRaises(ConfigurationError):
+                JevContinualSettings(**{field_name: bad})
 
 
 class JevDoneQuestionTests(unittest.TestCase):
@@ -269,15 +302,16 @@ class JevDoneQuestionTests(unittest.TestCase):
         self.assertEqual(MultiPartDeliveredQuestion(), self.question)
         self.assertEqual(JevDoneRegistry.question(JevDoneCheck.MULTI_PART), self.question)
         self.assertEqual(JevDoneRegistry.threshold(JevDoneCheck.MULTI_PART), JEV_MULTI_PART_THRESHOLD)
-        rendered = self.question.to_question()
-        self.assertEqual((rendered.name, rendered.question_type), (JevDoneQuestionKey.MULTI_PART_DELIVERED.value, JevQuestionType.NOUL))
+        rendered = self.question.to_question("readme_docs")
+        self.assertEqual((rendered.name, rendered.question_type), (f"{JevDoneQuestionKey.MULTI_PART_DELIVERED.value}.readme_docs", JevQuestionType.NOUL))
+        self.assertIn("with id `readme_docs`?", str(rendered.instructions))
 
     def test_brief_follows_the_skill_layout_with_one_string_per_section(self) -> None:
         brief = self.question.instructions
         self.assertIsInstance(brief, JevBrief)
         self.assertIn(_sentences(brief.introduction), (2, 3))
         self.assertEqual(brief.state, DONE_STATE)
-        for field_name in (JEV_DONE_REQUEST_FIELD, JEV_DONE_DELIVERABLE_FIELD, JEV_DONE_COMPLETION_SIGNAL_FIELD, JEV_DONE_EVIDENCE_FIELD):
+        for field_name in (JEV_DONE_REQUEST_FIELD, JEV_DONE_DELIVERABLES_FIELD, JEV_DONE_DELIVERABLE_FIELD, JEV_DONE_COMPLETION_SIGNAL_FIELD, JEV_DONE_EVIDENCE_FIELD):
             self.assertIn(f"`{field_name}`", DONE_STATE)
         self.assertEqual((len(brief.definitions), len(brief.rules)), (1, 1))
         self.assertTrue(brief.question.startswith("Does `evidence` show") and brief.question.endswith("?"))
@@ -362,8 +396,7 @@ class JevDoneRuntimeTests(unittest.IsolatedAsyncioTestCase):
 
     @staticmethod
     def _decision(readme: list[float], flag: float = 0.95, **kwargs: Any) -> ScriptedDecisionRunner:
-        deliverables = _STATE["multi_part"]["deliverables"]  # type: ignore[index]
-        return ScriptedDecisionRunner({deliverables[0]["description"]: [flag], deliverables[1]["description"]: readme}, **kwargs)
+        return ScriptedDecisionRunner({"dry_run_flag": [flag], "readme_docs": readme}, **kwargs)
 
     async def test_complete_run_finishes_after_one_check(self) -> None:
         decision = self._decision([0.9])
@@ -381,25 +414,29 @@ class JevDoneRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result.passed and result.available)
         self.assertEqual(result.incomplete, ())
         self.assertEqual(response.continuations, 0)
-        self.assertEqual((result.usage.input_tokens, result.usage.output_tokens), (200, 20))
+        self.assertEqual((result.usage.input_tokens, result.usage.output_tokens), (100, 10))
         self.assertNotIn("done", reply.metadata)
 
-    async def test_each_jev_request_holds_one_deliverable_and_only_its_evidence(self) -> None:
-        # [Review 4116786437] the request, the deliverable from the run state, and its handoff evidence go to a fixed question.
+    async def test_one_jev_request_holds_every_enabled_checks_questions(self) -> None:
+        # [Review 4117808663] the enabled checks' questions are combined and sent to Jev at once with the handoff.
         decision = self._decision([0.9])
         agent, *_ = self._agent()
         with patch(_RUNNER_PATH, new=_runner_class(decision)):
             await agent.arun(_REQUEST)
 
-        self.assertEqual(len(decision.requests), 2)
-        states = [request.state for request in decision.requests]
-        for state, entry, evidence in zip(states, _STATE["multi_part"]["deliverables"], _HANDOFF["multi_part"]["deliverables"], strict=True):  # type: ignore[index]
-            assert isinstance(state, Mapping)
-            self.assertEqual(set(state), {JEV_DONE_REQUEST_FIELD, JEV_DONE_DELIVERABLE_FIELD, JEV_DONE_COMPLETION_SIGNAL_FIELD, JEV_DONE_EVIDENCE_FIELD})
-            self.assertEqual(state[JEV_DONE_REQUEST_FIELD], _REQUEST)
-            self.assertEqual(state[JEV_DONE_DELIVERABLE_FIELD], entry["description"])
-            self.assertEqual(state[JEV_DONE_EVIDENCE_FIELD], evidence["evidence"])
-        self.assertEqual({request.questions[0].name for request in decision.requests}, {JevDoneQuestionKey.MULTI_PART_DELIVERED.value})
+        self.assertEqual(len(decision.requests), 1)
+        request = decision.requests[0]
+        state = request.state
+        assert isinstance(state, Mapping)
+        self.assertEqual(set(state), {JEV_DONE_REQUEST_FIELD, JEV_DONE_DELIVERABLES_FIELD})
+        self.assertEqual(state[JEV_DONE_REQUEST_FIELD], _REQUEST)
+        entries = state[JEV_DONE_DELIVERABLES_FIELD]
+        for entry, evidence in zip(_STATE["multi_part"]["deliverables"], _HANDOFF["multi_part"]["deliverables"], strict=True):  # type: ignore[index]
+            self.assertEqual(set(entries[entry["id"]]), {JEV_DONE_DELIVERABLE_FIELD, JEV_DONE_COMPLETION_SIGNAL_FIELD, JEV_DONE_EVIDENCE_FIELD})
+            self.assertEqual(entries[entry["id"]][JEV_DONE_DELIVERABLE_FIELD], entry["description"])
+            self.assertEqual(entries[entry["id"]][JEV_DONE_EVIDENCE_FIELD], evidence["evidence"])
+        prefix = JevDoneQuestionKey.MULTI_PART_DELIVERED.value
+        self.assertEqual([question.name for question in request.questions], [f"{prefix}.dry_run_flag", f"{prefix}.readme_docs"])
 
     async def test_handoff_receives_the_request_state_and_main_agent_window(self) -> None:
         agent, _, _, handoff_runner = self._agent()
@@ -418,11 +455,19 @@ class JevDoneRuntimeTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(reply.content, "All done.")
         self.assertEqual((len(main.calls), len(handoff_runner.calls)), (2, 2))
-        feedback = json.dumps(main.messages[1])
-        self.assertIn("README documentation for the --dry-run flag.", feedback)
+        feedback = main.messages[1][0]["content"]
+        # [Review 4117856441] the original prompt, the run state, the handoff, and the failed Jev questions, with focus on what is missing.
+        for section in ("# Original request", "# Run state", "# Handoff", "# Failed checks", "# Focus"):
+            self.assertIn(section, feedback)
+        self.assertIn(_REQUEST, feedback)
+        self.assertIn('"objective":', feedback)
+        self.assertIn("No part of the run concerns the README.", feedback)
         self.assertIn(MultiPartDeliveredQuestion().gap, feedback)
+        self.assertIn("with id `readme_docs`? Jev's answer: no", feedback)
         self.assertIn("The README section for --dry-run.", feedback)
-        self.assertNotIn("A --dry-run flag on the deploy CLI.", feedback)
+        focus = feedback.split("# Focus", 1)[1]
+        self.assertIn("README documentation for the --dry-run flag.", focus)
+        self.assertNotIn("A --dry-run flag on the deploy CLI.", focus)
         self.assertEqual(agent.response.continuations, 1)
         self.assertTrue(agent.response.done[JevDoneCheck.MULTI_PART].passed)
 
@@ -482,7 +527,7 @@ class JevDoneRuntimeTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_missing_decision_credentials_fail_open(self) -> None:
         main = ScriptedGenerativeRunner("All done.")
-        agent = bind_test_runner(JevAgent(_settings(), JevRuntimeSettings(done=(JevDoneCheck.MULTI_PART,))), main)
+        agent = bind_test_runner(JevAgent(_settings(), JevRuntimeSettings(continual=JevContinualSettings(checks=(JevDoneCheck.MULTI_PART,)))), main)
         assert agent.run_state is not None
         bind_test_runner(agent.run_state, ScriptedGenerativeRunner(json.dumps(_STATE)))
         bind_test_runner(agent.run_state.handoff_writer, ScriptedGenerativeRunner(json.dumps(_HANDOFF)))

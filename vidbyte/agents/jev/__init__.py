@@ -11,7 +11,11 @@ TESTS: tests/test_jev_agent.py and scripts/test-jev-agent-scaffold.py.
 
 from vidbyte.agents.jev.agent import JevAgent
 from vidbyte.agents.jev.runtime import JevRuntime
-from vidbyte.agents.jev.settings import JevAgentSettings, JevRuntimeSettings
+from vidbyte.agents.jev.settings import (
+    JevAgentSettings,
+    JevContinualSettings,
+    JevRuntimeSettings,
+)
 from vidbyte.lib.dataclasses.jev import (
     JevAgentResponse,
     JevClarification,
@@ -32,6 +36,7 @@ __all__ = [
     "JevAgentSettings",
     "JevClarification",
     "JevClarifyingQuestion",
+    "JevContinualSettings",
     "JevDeliverable",
     "JevDeliverableEvidence",
     "JevDoneCheck",

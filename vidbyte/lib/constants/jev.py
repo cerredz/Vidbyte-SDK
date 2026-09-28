@@ -80,22 +80,25 @@ JEV_SPECIALIST_QUESTION_NAME: str = "specialist"
 JEV_SPECIALIST_NONE: str = "none"
 JEV_SPECIALIST_MAX_COUNT: int = JEV_MAX_CHOICE_OPTIONS - 1
 
-# Done checks. A done check runs each time the main agent tries to finish. The multi-part check asks one
-# Jev request per deliverable, and a run is complete only when every deliverable's P(yes) reaches the
-# threshold (used as both the mean threshold and the veto). 0.8 is a starting point, not a tuned value.
+# Done checks. A done check runs each time the main agent tries to finish. Every enabled check's questions
+# go to Jev in one request; the multi-part check asks one question per deliverable, and a run is complete
+# only when every deliverable's P(yes) reaches the threshold (used as both the mean threshold and the veto).
+# 0.8 is a starting point, not a tuned value.
 JEV_MULTI_PART_THRESHOLD: float = 0.8
-# How many times a failed done check may send the main agent back to work before its answer is accepted.
+# Default of JevContinualSettings.max_continuations: how many times a failed done check may send the main
+# agent back to work before its answer is accepted.
 JEV_DONE_MAX_CONTINUATIONS: int = 3
-# The state fields a done question reads: the user's request, one deliverable, the visible condition that
-# shows it is done, and the evidence JevHandoff compiled for it from the run.
+# The state fields the done questions read: the user's request, and one entry per deliverable id holding
+# the deliverable, the visible condition that shows it is done, and the evidence JevHandoff compiled for it.
 JEV_DONE_REQUEST_FIELD: str = "request"
+JEV_DONE_DELIVERABLES_FIELD: str = "deliverables"
 JEV_DONE_DELIVERABLE_FIELD: str = "deliverable"
 JEV_DONE_COMPLETION_SIGNAL_FIELD: str = "completion_signal"
 JEV_DONE_EVIDENCE_FIELD: str = "evidence"
 # A deliverable ID is a short lowercase identifier JevRunState writes and JevHandoff must echo exactly.
 JEV_DELIVERABLE_ID_PATTERN: str = r"^[a-z][a-z0-9_]{0,63}$"
-# JevRunState and JevHandoff limits: each writes one structured reply, so their loops stay short; the
-# handoff reads the main agent's whole run, so its token budget is larger.
+# Defaults of the JevRunState and JevHandoff limits in JevContinualSettings: each writes one structured reply,
+# so their loops stay short; the handoff reads the main agent's whole run, so its token budget is larger.
 JEV_RUN_STATE_MAX_ITERATIONS: int = 25
 JEV_RUN_STATE_MAX_TOKENS: int = 100_000
 JEV_HANDOFF_MAX_ITERATIONS: int = 25
@@ -119,6 +122,7 @@ __all__ = [
     "JEV_DEFAULT_TIMEOUT_SECONDS",
     "JEV_DELIVERABLE_ID_PATTERN",
     "JEV_DONE_COMPLETION_SIGNAL_FIELD",
+    "JEV_DONE_DELIVERABLES_FIELD",
     "JEV_DONE_DELIVERABLE_FIELD",
     "JEV_DONE_EVIDENCE_FIELD",
     "JEV_DONE_MAX_CONTINUATIONS",
