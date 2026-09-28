@@ -75,6 +75,9 @@ class JevPreflightGate:
                     # run stops so the user answers them before any generative-agent tokens are spent.
                     if await self._clarify(message, outcome):
                         return False
+                case JevPresetResult(preset=JevPreflightPreset.RECURRING):
+                    # Recurring-work answers are observational and never alter the run.
+                    continue
                 case _:
                     # A preset that passed needs no action.
                     continue

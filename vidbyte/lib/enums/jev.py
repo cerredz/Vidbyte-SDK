@@ -32,6 +32,7 @@ class JevPreflightPreset(str, Enum):
 
     CLARITY = "clarity"
     TOOL_SELECTOR = "tool_selector"
+    RECURRING = "recurring"
 
 
 # Load skills/jev-continuation/SKILL.md before adding a member here: it is the step-by-step checklist for adding
@@ -71,6 +72,26 @@ class JevPreflightQuestionKey(str, Enum):
     CLARITY_CONSISTENCY = "clarity.consistency"
     CLARITY_TIME_CONTEXT = "clarity.time_context"
     CLARITY_SINGLE_READING = "clarity.single_reading"
+    RECURRING_SUBJECT_CHANGES = "recurring.subject_changes"
+    RECURRING_HAS_VARIANTS = "recurring.has_variants"
+    RECURRING_METHOD_GENERALIZES = "recurring.method_generalizes"
+    RECURRING_ROUTINE_KIND = "recurring.routine_kind"
+    RECURRING_INPUT_REPLACEABLE = "recurring.input_replaceable"
+    RECURRING_ONGOING_GOAL = "recurring.ongoing_goal"
+    RECURRING_VALUE_ACCUMULATES = "recurring.value_accumulates"
+    RECURRING_COMPARES_OVER_TIME = "recurring.compares_over_time"
+    RECURRING_TOPIC_INEXHAUSTIBLE = "recurring.topic_inexhaustible"
+    RECURRING_REFINED_IN_VERSIONS = "recurring.refined_in_versions"
+    RECURRING_STABLE_STANDARD = "recurring.stable_standard"
+    RECURRING_USEFUL_TO_OTHERS = "recurring.useful_to_others"
+    RECURRING_PROCESS_CENTERED = "recurring.process_centered"
+    RECURRING_TIED_TO_CYCLE = "recurring.tied_to_cycle"
+    RECURRING_RESPONDS_TO_ARRIVALS = "recurring.responds_to_arrivals"
+    RECURRING_SAME_OPERATION_MANY_ITEMS = "recurring.same_operation_many_items"
+    RECURRING_NEEDS_LASTING_CONTEXT = "recurring.needs_lasting_context"
+    RECURRING_NO_NEW_DECISIONS = "recurring.no_new_decisions"
+    RECURRING_CONTINUING_EFFORT = "recurring.continuing_effort"
+    RECURRING_INTENT_TO_KEEP = "recurring.intent_to_keep"
 
 
 __all__ = ["JevDoneCheck", "JevDoneQuestionKey", "JevPreflightPreset", "JevPreflightQuestionKey", "JevQuestionType"]
