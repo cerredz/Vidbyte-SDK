@@ -1,11 +1,11 @@
 """FILE: vidbyte/agents/jev/runtime.py
 
-PURPOSE: Provides the dedicated execution seam for the opinionated Jev agent: it runs the JevPreflightGate, then either returns the gate's response or applies the tool selector and runs the inherited linear loop.
+PURPOSE: Provides the dedicated execution seam for the opinionated Jev agent: it runs the JevPreflightGate, then returns the gate's response, hands the run to the specialist the gate chose, or applies the tool selector and runs the inherited linear loop.
 ROLE IN CODEBASE: RuntimeRegistry maps AgentRuntimeType.JEV to JevRuntime; JevAgent builds the gate and the JevResponse writer at construction and passes both in, and the runtime keeps run-local tool selection ahead of the inherited agent loop.
 ARCHITECTURE NOTE: JevRuntime retains the standard runner, usage, speed, tracing, and session wiring while applying named policies internally.
 COMMON MODIFICATION PATTERNS: Add fixed preflight, compute, or coordination phases around inherited execution while keeping their policy internal.
-KNOWN EDGE CASES: A gate with no fixed-question preset performs no Jev call, and a closed gate never reaches the generative runner. A disabled selector performs no Jev call; an unavailable selector keeps the original tool catalog. A plain BaseAgent(runtime="jev") has no JevAgentSettings, gate, or response writer and is refused here.
-RELATED DOCS: docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, docs/design/jev-tool-selector.md, and skills/jev-agent/SKILL.md.
+KNOWN EDGE CASES: A gate with no fixed-question preset and no specialist performs no Jev call, and a closed gate never reaches the generative runner. A chosen specialist runs through its own agent, so this agent's tool selector does not filter its tools. A disabled selector performs no Jev call; an unavailable selector keeps the original tool catalog. A plain BaseAgent(runtime="jev") has no JevRuntimeSettings, gate, or response writer and is refused here.
+RELATED DOCS: docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, docs/design/jev-tool-selector.md, docs/design/jev-specialist-routing.md, and skills/jev-agent/SKILL.md.
 TESTS: tests/test_jev_agent.py, tests/test_jev_preflight.py, tests/test_jev_tool_selector.py, and scripts/test-jev-tool-selector.py.
 """
 
@@ -18,7 +18,7 @@ from typing import Any
 from vidbyte.agents.jev.gate import JevPreflightGate
 from vidbyte.agents.jev.preflight import JevPreflightTools
 from vidbyte.agents.jev.response import JevResponse
-from vidbyte.agents.jev.settings import JevAgentSettings
+from vidbyte.agents.jev.settings import JevRuntimeSettings
 from vidbyte.agents.runtime import AgentRuntime
 from vidbyte.lib.dataclasses.context import BaseAgentContext
 from vidbyte.lib.dataclasses.runner import RunnerHandle
@@ -35,25 +35,25 @@ class JevRuntime(AgentRuntime):
     def __init__(
         self,
         *,
-        jev_settings: JevAgentSettings | None = None,
+        runtime_settings: JevRuntimeSettings | None = None,
         preflight: JevPreflightGate | None = None,
         response: JevResponse | None = None,
         **kwargs: Any,
     ) -> None:
-        # Retains the validated settings, the gate, and the response writer JevAgent built, and delegates the loop to AgentRuntime.
+        # Retains the validated runtime settings, the gate, and the response writer JevAgent built, and delegates the loop to AgentRuntime.
         # @intent jev-runtime-needs-jev-agent
         # AgentRuntimeType.JEV is selectable by string, so a generic BaseAgent can reach this class
         # without them; refusing here names JevAgent instead of failing later on a None field.
-        if not isinstance(jev_settings, JevAgentSettings) or not isinstance(preflight, JevPreflightGate) or not isinstance(response, JevResponse):
+        if not isinstance(runtime_settings, JevRuntimeSettings) or not isinstance(preflight, JevPreflightGate) or not isinstance(response, JevResponse):
             raise ConfigurationError(
                 "The 'jev' runtime is only available through JevAgent; construct JevAgent(JevAgentSettings(...)) instead of BaseAgent(runtime='jev').",
                 details={
-                    "received_jev_settings": type(jev_settings).__name__,
+                    "received_runtime_settings": type(runtime_settings).__name__,
                     "received_preflight": type(preflight).__name__,
                     "received_response": type(response).__name__,
                 },
             )
-        self.jev_settings = jev_settings
+        self.runtime_settings = runtime_settings
         self.preflight = preflight
         self.response = response
         super().__init__(**kwargs)
@@ -75,7 +75,9 @@ class JevRuntime(AgentRuntime):
         self.response.start(message)
         if not await self.preflight.pass_(message):
             return self.response.stopped()
-        if JevPreflightPreset.TOOL_SELECTOR not in self.jev_settings.preflight:
+        if self.preflight.specialist is not None:
+            return self.response.delegated(await self.preflight.specialist.agent.arun(message))
+        if JevPreflightPreset.TOOL_SELECTOR not in self.runtime_settings.preflight:
             return self.response.finished(await super().arun(
                 message,
                 handle=handle,
@@ -87,8 +89,8 @@ class JevRuntime(AgentRuntime):
 
         candidate_tool_count = len(self.user_tools)
         selector = JevPreflightTools(
-            self.jev_settings.decision,
-            self.jev_settings.tool_selector_threshold,
+            self.runtime_settings.decision,
+            self.runtime_settings.tool_selector_threshold,
         )
         self.user_tools = await selector.run(message, self.user_tools)
         self.tools = with_internal_agent_tools(self.user_tools)

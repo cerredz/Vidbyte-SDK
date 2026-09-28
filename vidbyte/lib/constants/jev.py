@@ -74,6 +74,11 @@ JEV_CLARIFICATION_MAX_TOKENS: int = 100_000
 JEV_CLARIFICATION_MAX_QUESTIONS: int = 6
 JEV_CLARIFICATION_MIN_RECOMMENDATIONS: int = 2
 JEV_CLARIFICATION_MAX_RECOMMENDATIONS: int = 4
+# Specialist choice: the question's answer key, and the way-out option that keeps the main JevAgent on the
+# run. Every specialist is one more Choice option beside `none`, so the count stops one below the vendor limit.
+JEV_SPECIALIST_QUESTION_NAME: str = "specialist"
+JEV_SPECIALIST_NONE: str = "none"
+JEV_SPECIALIST_MAX_COUNT: int = JEV_MAX_CHOICE_OPTIONS - 1
 
 # Tool-selector policy bounds and default: caller settings use probabilities on the closed unit interval.
 JEV_TOOL_SELECTOR_DEFAULT_THRESHOLD: float = 0.20
@@ -111,6 +116,9 @@ __all__ = [
     "JEV_PROBABILITY_SUM_TOLERANCE",
     "JEV_RETRY_BACKOFF_SECONDS",
     "JEV_RETRY_STATUS_CODES",
+    "JEV_SPECIALIST_MAX_COUNT",
+    "JEV_SPECIALIST_NONE",
+    "JEV_SPECIALIST_QUESTION_NAME",
     "JEV_STATUS_OVERLOADED",
     "JEV_STATUS_RATE_LIMITED",
     "JEV_STATUS_REQUEST_TIMEOUT",

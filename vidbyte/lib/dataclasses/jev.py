@@ -1,6 +1,6 @@
 """FILE: vidbyte/lib/dataclasses/jev.py
 
-PURPOSE: Defines the validated records for TypeSafe Jev decisions (JSON content, options, questions, requests, normalized answers, wire bodies, model cards, and decision-log records) and for JevAgent preflight (the noul score, the question brief and criteria, the question base, preset definitions, preset results, the clarification agent's structured reply and the clarification built from it, and the JevAgentResponse the user reads after a run).
+PURPOSE: Defines the validated records for TypeSafe Jev decisions (JSON content, options, questions, requests, normalized answers, wire bodies, model cards, and decision-log records) and for JevAgent preflight (the noul score, the question brief and criteria, the question base, preset definitions, preset results, the specialists JevAgent can hand a run to, the clarification agent's structured reply and the clarification built from it, and the JevAgentResponse the user reads after a run).
 ROLE IN CODEBASE: `vidbyte/providers/typesafe.py` builds TypeSafeWireRequest from JevDecisionRequest and JevAnswer values from responses, while `vidbyte/lib/runners/decision.py` passes the typed records through.
 ARCHITECTURE NOTE: This module must not import model_configs because that would close an import cycle through ModalityDetector. Records own every shape rule in __post_init__; the provider, not these records, turns a wire record into the JSON body (lint S060 bars dict[str, Any] encoders here).
 COMMON MODIFICATION PATTERNS: Mirror https://docs.typesafe.ai/api.md exactly: add a field together with its validation, its wire record, and its provider serialization; keep bounds in vidbyte/lib/constants/jev.py.
@@ -35,6 +35,7 @@ from vidbyte.lib.constants.jev import (
     JEV_NOUL_OPTIONS,
     JEV_NOUL_TRUE,
     JEV_PROBABILITY_SUM_TOLERANCE,
+    JEV_SPECIALIST_NONE,
 )
 from vidbyte.lib.enums.jev import (
     JevPreflightPreset,
@@ -44,6 +45,7 @@ from vidbyte.lib.enums.jev import (
 from vidbyte.lib.errors import ConfigurationError
 
 if TYPE_CHECKING:
+    from vidbyte.agents.base import BaseAgent
     from vidbyte.agents.pricing import ProviderUsage, UsageRollup
 
 # A frozen JSON value as TypeSafe accepts it: a string, or a read-only mapping / tuple of JSON values.
@@ -581,6 +583,33 @@ class JevPresetResult:
         return {key: answer.probabilities[JEV_NOUL_TRUE] for key, answer in self.answers.items()}
 
 
+@dataclass(frozen=True, slots=True)
+class JevSpecialist:
+    """One agent JevAgent can hand a run to: the title Jev chooses by, the scope Jev reads, and the agent that runs.
+
+    `title` is the Choice option name, `description` is the scope Jev compares the request against, and
+    `agent` is the BaseAgent whose own linear loop runs the whole task when Jev chooses this specialist.
+    """
+
+    title: str
+    description: str
+    agent: BaseAgent
+
+    def __post_init__(self) -> None:
+        # Validates the option name and scope, and checks the agent by the surface JevRuntime calls.
+        # @intent lib-record-holds-an-agent-by-shape
+        # vidbyte.lib may not import the agents layer (lint A006 counts function-local imports too), so the
+        # agent is annotated under TYPE_CHECKING and validated by its runnable surface instead of isinstance.
+        JevText.require(self.title, field_name="JevSpecialist.title")
+        if self.title != self.title.strip() or len(self.title) > JEV_MAX_OPTION_NAME_CHARS:
+            raise JevValidation.error("JevSpecialist.title", f"a trimmed string of at most {JEV_MAX_OPTION_NAME_CHARS} characters", self.title)
+        if self.title == JEV_SPECIALIST_NONE:
+            raise JevValidation.error("JevSpecialist.title", f"any title except the reserved way-out option {JEV_SPECIALIST_NONE!r}", self.title)
+        JevText.require(self.description, field_name="JevSpecialist.description")
+        if not callable(getattr(self.agent, "arun", None)):
+            raise JevValidation.error("JevSpecialist.agent", "a BaseAgent (an object with an async arun method)", self.agent)
+
+
 class JevClarifyingQuestionPayload(BaseModel):
     """One clarifying question as JevClarificationAgent must return it: the question and a few answers to pick from."""
 
@@ -652,7 +681,8 @@ class JevAgentResponse:
 
     JevResponse is the only writer: it resets this record at the start of each run and fills it as the
     preflight gate acts. `results` holds one entry per enabled fixed-question preset, `usage` is the one
-    preflight Jev call's usage, and `clarification` is set only when the gate stopped the run to ask the user.
+    preflight Jev call's usage, `clarification` is set only when the gate stopped the run to ask the user, and
+    `specialist` is the title of the JevSpecialist that ran the task, or None when the main JevAgent ran it.
     """
 
     input: str = ""
@@ -660,6 +690,7 @@ class JevAgentResponse:
     results: dict[JevPreflightPreset, JevPresetResult] = field(default_factory=dict)
     clarification: JevClarification | None = None
     usage: ProviderUsage | None = None
+    specialist: str | None = None
 
     @property
     def needs_clarification(self) -> bool:
@@ -688,6 +719,7 @@ __all__ = [
     "JevPresetResult",
     "JevProbability",
     "JevQuestion",
+    "JevSpecialist",
     "JevText",
     "JevValidation",
     "TypeSafeWireQuestion",

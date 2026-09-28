@@ -1,7 +1,7 @@
 """FILE: vidbyte/lib/jev/presets.py
 
 PURPOSE: Owns the preflight flags a JevAgent user can enable and, for each flag with fixed questions, the question keys it asks, the score it must reach, the veto any single answer must clear, and its gate question.
-ROLE IN CODEBASE: JevPreflightRegistry.validate normalizes JevAgentSettings.preflight through JevPresets, and JevPreflightGate (vidbyte/agents/jev/gate/) reads each fixed preset's definition from here when it combines questions and scores answers.
+ROLE IN CODEBASE: JevPreflightRegistry.validate normalizes JevRuntimeSettings.preflight through JevPresets, and JevPreflightGate (vidbyte/agents/jev/gate/) reads each fixed preset's definition from here when it combines questions and scores answers.
 ARCHITECTURE NOTE: The flag vocabulary is JevPreflightPreset in vidbyte/lib/enums/jev.py and the definition record is JevPresetDefinition in vidbyte/lib/dataclasses/jev.py; this module holds only the mapping and the flag logic.
 COMMON MODIFICATION PATTERNS: Add a JevPreflightPreset member; if its questions are fixed, add its question keys and one JevPresetDefinition entry here and register every new question in vidbyte/lib/jev/preflight/.
 KNOWN EDGE CASES: A bare string is rejected rather than iterated character by character, and enabling the same flag twice is an error because it would ask Jev every question twice. TOOL_SELECTOR is a valid flag with no definition, because it asks one question per configured tool and builds them at run time.
@@ -90,13 +90,13 @@ class JevPresets:
         # Settings construction calls this, so a typo, a bare string, or a repeated flag fails when the
         # agent is built instead of silently asking Jev the wrong (or duplicated) questions on every run.
         if isinstance(values, (str, bytes)):
-            raise ConfigurationError("JevAgentSettings.preflight must be an iterable of Jev preflight presets, not a string.", details={"received": repr(values)})
+            raise ConfigurationError("JevRuntimeSettings.preflight must be an iterable of Jev preflight presets, not a string.", details={"received": repr(values)})
         try:
             presets = tuple(cls.resolve(value) for value in values)
         except TypeError as exc:
-            raise ConfigurationError("JevAgentSettings.preflight must be an iterable of Jev preflight presets.", details={"received": type(values).__name__}) from exc
+            raise ConfigurationError("JevRuntimeSettings.preflight must be an iterable of Jev preflight presets.", details={"received": type(values).__name__}) from exc
         if len(set(presets)) != len(presets):
-            raise ConfigurationError("JevAgentSettings.preflight cannot enable the same preset twice.", details={"received": [preset.value for preset in presets]})
+            raise ConfigurationError("JevRuntimeSettings.preflight cannot enable the same preset twice.", details={"received": [preset.value for preset in presets]})
         return presets
 
 

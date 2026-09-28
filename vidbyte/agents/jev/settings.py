@@ -1,10 +1,10 @@
 """FILE: vidbyte/agents/jev/settings.py
 
-PURPOSE: Defines the single, opinionated public configuration object for JevAgent.
-ROLE IN CODEBASE: JevAgentSettings is the only constructor input accepted by JevAgent; JevAgent builds its preflight gate from these settings, so JevRuntime never reads them.
-ARCHITECTURE NOTE: The surface is intentionally closed; named Jev capabilities belong here as explicit settings instead of a generic decisions collection.
-COMMON MODIFICATION PATTERNS: Add a validated named capability setting, then implement its fixed policy in vidbyte/agents/jev/gate/ without exposing runtime replacement hooks.
-KNOWN EDGE CASES: The generative provider cannot be TypeSafe because Jev is a decision model; neither generative nor decision API keys appear in repr output. Preflight presets are validated by JevPreflightRegistry at construction, so no TypeSafe key is needed until a run asks Jev; the tool-selector threshold rejects booleans, non-finite values, and out-of-range probabilities.
+PURPOSE: Defines JevAgent's two opinionated public configuration objects: JevAgentSettings for the agents that generate, and JevRuntimeSettings for Jev's own decision policy.
+ROLE IN CODEBASE: JevAgent maps JevAgentSettings into BaseAgent and builds its preflight gate from both objects at construction, so JevRuntime never reads settings to decide what to ask.
+ARCHITECTURE NOTE: The surface is intentionally closed; named Jev capabilities belong here as explicit settings instead of a generic decisions collection. JevAgentSettings holds the main agent and the JevSpecialist candidates Jev may hand a run to; JevRuntimeSettings holds the decision model, the preflight flags, and the tool-selector threshold.
+COMMON MODIFICATION PATTERNS: Add a generative-agent field to JevAgentSettings or a Jev policy setting to JevRuntimeSettings, then implement its fixed policy in vidbyte/agents/jev/gate/ without exposing runtime replacement hooks.
+KNOWN EDGE CASES: The generative provider cannot be TypeSafe because Jev is a decision model; neither generative nor decision API keys appear in repr output. Specialist titles must be unique because each one is a Choice option name. Preflight presets are validated by JevPreflightRegistry at construction, so no TypeSafe key is needed until a run asks Jev; the tool-selector threshold rejects booleans, non-finite values, and out-of-range probabilities.
 RELATED DOCS: docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, docs/design/jev-tool-selector.md, and skills/jev-agent/SKILL.md.
 TESTS: tests/test_jev_agent.py, tests/test_jev_preflight.py, tests/test_jev_tool_selector.py, and scripts/test-jev-agent-scaffold.py.
 """
@@ -16,10 +16,12 @@ from dataclasses import dataclass, field
 
 from vidbyte.agents.settings import AgentLoopSettings
 from vidbyte.lib.constants.jev import (
+    JEV_SPECIALIST_MAX_COUNT,
     JEV_TOOL_SELECTOR_DEFAULT_THRESHOLD,
     JEV_TOOL_SELECTOR_MAX_THRESHOLD,
     JEV_TOOL_SELECTOR_MIN_THRESHOLD,
 )
+from vidbyte.lib.dataclasses.jev import JevSpecialist
 from vidbyte.lib.dataclasses.model_configs import DecisionModelConfig
 from vidbyte.lib.enums import JevPreflightPreset, ModelProvider
 from vidbyte.lib.errors import ConfigurationError
@@ -29,7 +31,7 @@ from vidbyte.tools.security import PermissionPolicy
 
 @dataclass(frozen=True, slots=True)
 class JevAgentSettings:
-    """Validated construction settings for the opinionated Jev agent."""
+    """Validated settings for the agent JevAgent runs by default and the specialists Jev may hand a run to instead."""
 
     name: str
     system_prompt: str
@@ -41,9 +43,7 @@ class JevAgentSettings:
     tools: tuple[object, ...] = ()
     permission_policy: PermissionPolicy = field(default_factory=PermissionPolicy)
     loop: AgentLoopSettings = field(default_factory=AgentLoopSettings)
-    decision: DecisionModelConfig = field(default_factory=DecisionModelConfig, repr=False)
-    preflight: tuple[JevPreflightPreset | str, ...] = ()
-    tool_selector_threshold: float = JEV_TOOL_SELECTOR_DEFAULT_THRESHOLD
+    agents: tuple[JevSpecialist, ...] = ()
 
     def __post_init__(self) -> None:
         # Normalizes immutable inputs and rejects invalid agent configuration before runtime construction.
@@ -68,22 +68,24 @@ class JevAgentSettings:
             raise ConfigurationError("JevAgentSettings.permission_policy must be a PermissionPolicy instance.")
         if not isinstance(self.loop, AgentLoopSettings):
             raise ConfigurationError("JevAgentSettings.loop must be an AgentLoopSettings instance.")
-        if not isinstance(self.decision, DecisionModelConfig):
-            raise ConfigurationError("JevAgentSettings.decision must be a DecisionModelConfig instance.")
-        object.__setattr__(self, "preflight", JevPreflightRegistry.validate(self.preflight))
-        self._validate_tool_selector_threshold()
+        self._validate_agents()
 
-    def _validate_tool_selector_threshold(self) -> None:
-        # Accepts calibrated probabilities on the closed unit interval, but excludes bool and non-finite values.
-        value = self.tool_selector_threshold
-        if (
-            isinstance(value, bool)
-            or not isinstance(value, (int, float))
-            or not math.isfinite(value)
-            or not JEV_TOOL_SELECTOR_MIN_THRESHOLD <= value <= JEV_TOOL_SELECTOR_MAX_THRESHOLD
-        ):
-            raise ConfigurationError("JevAgentSettings.tool_selector_threshold must be a finite probability between 0 and 1 inclusive.")
-        object.__setattr__(self, "tool_selector_threshold", float(value))
+    def _validate_agents(self) -> None:
+        # Freezes the specialists in the order given, which is also the order Jev reads their options.
+        if isinstance(self.agents, (str, bytes)):
+            raise ConfigurationError("JevAgentSettings.agents must be an iterable of JevSpecialist values, not a string.")
+        try:
+            agents = tuple(self.agents)
+        except TypeError as exc:
+            raise ConfigurationError("JevAgentSettings.agents must be an iterable of JevSpecialist values.") from exc
+        if not all(isinstance(agent, JevSpecialist) for agent in agents):
+            raise ConfigurationError("JevAgentSettings.agents must contain only JevSpecialist values.")
+        if len(agents) > JEV_SPECIALIST_MAX_COUNT:
+            raise ConfigurationError(f"JevAgentSettings.agents can hold at most {JEV_SPECIALIST_MAX_COUNT} specialists.")
+        titles = [agent.title for agent in agents]
+        if len(set(titles)) != len(titles):
+            raise ConfigurationError("JevAgentSettings.agents must have unique titles.", details={"titles": titles})
+        object.__setattr__(self, "agents", agents)
 
     @staticmethod
     def _validate_text(value: object, field_name: str) -> None:
@@ -117,4 +119,32 @@ class JevAgentSettings:
             raise ConfigurationError("JevAgentSettings.timeout_seconds must be a finite number greater than zero.")
 
 
-__all__ = ["JevAgentSettings"]
+@dataclass(frozen=True, slots=True)
+class JevRuntimeSettings:
+    """Validated Jev decision policy: the TypeSafe model, the preflight flags, and the tool-selector threshold."""
+
+    decision: DecisionModelConfig = field(default_factory=DecisionModelConfig, repr=False)
+    preflight: tuple[JevPreflightPreset | str, ...] = ()
+    tool_selector_threshold: float = JEV_TOOL_SELECTOR_DEFAULT_THRESHOLD
+
+    def __post_init__(self) -> None:
+        # Rejects invalid decision policy before JevAgent builds its preflight gate.
+        if not isinstance(self.decision, DecisionModelConfig):
+            raise ConfigurationError("JevRuntimeSettings.decision must be a DecisionModelConfig instance.")
+        object.__setattr__(self, "preflight", JevPreflightRegistry.validate(self.preflight))
+        self._validate_tool_selector_threshold()
+
+    def _validate_tool_selector_threshold(self) -> None:
+        # Accepts calibrated probabilities on the closed unit interval, but excludes bool and non-finite values.
+        value = self.tool_selector_threshold
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(value)
+            or not JEV_TOOL_SELECTOR_MIN_THRESHOLD <= value <= JEV_TOOL_SELECTOR_MAX_THRESHOLD
+        ):
+            raise ConfigurationError("JevRuntimeSettings.tool_selector_threshold must be a finite probability between 0 and 1 inclusive.")
+        object.__setattr__(self, "tool_selector_threshold", float(value))
+
+
+__all__ = ["JevAgentSettings", "JevRuntimeSettings"]

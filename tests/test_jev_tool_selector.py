@@ -17,7 +17,7 @@ from typing import Any
 from unittest.mock import patch
 
 from tests.agent_test_support import bind_test_runner
-from vidbyte import JevAgent, JevAgentSettings, JevPreflightPreset, tool
+from vidbyte import JevAgent, JevAgentSettings, JevPreflightPreset, JevRuntimeSettings, tool
 from vidbyte.agents.jev.preflight import JevPreflightTools
 from vidbyte.lib.config import DecisionModelConfig
 from vidbyte.lib.dataclasses.jev import JevAnswer, JevDecisionRequest
@@ -102,26 +102,31 @@ def _settings(**overrides: Any) -> JevAgentSettings:
     return JevAgentSettings(**values)
 
 
+def _runtime_settings(**overrides: Any) -> JevRuntimeSettings:
+    """Builds a valid Jev runtime settings object with caller-provided overrides."""
+    return JevRuntimeSettings(**overrides)
+
+
 class JevToolSelectorSettingsTests(unittest.TestCase):
     """Pins the public preset name and valid threshold range."""
 
     def test_normalizes_tool_selector_and_accepts_probability_endpoints(self) -> None:
         # [Edge Case] both endpoints are probabilities and strings use the same stable public name.
-        self.assertEqual(_settings(preflight=("tool_selector",)).preflight, (JevPreflightPreset.TOOL_SELECTOR,))
-        self.assertEqual(_settings(tool_selector_threshold=0).tool_selector_threshold, 0.0)
-        self.assertEqual(_settings(tool_selector_threshold=1).tool_selector_threshold, 1.0)
+        self.assertEqual(_runtime_settings(preflight=("tool_selector",)).preflight, (JevPreflightPreset.TOOL_SELECTOR,))
+        self.assertEqual(_runtime_settings(tool_selector_threshold=0).tool_selector_threshold, 0.0)
+        self.assertEqual(_runtime_settings(tool_selector_threshold=1).tool_selector_threshold, 1.0)
 
     def test_rejects_out_of_range_and_non_probability_values(self) -> None:
         # [Hidden Failure] bool is an int in Python and NaN evades ordinary range comparisons.
         for value in (-0.01, 1.01, True, float("nan"), float("inf"), "0.5"):
             with self.subTest(value=value), self.assertRaises(ConfigurationError):
-                _settings(tool_selector_threshold=value)
+                _runtime_settings(tool_selector_threshold=value)
 
     def test_rejects_duplicate_or_unknown_presets(self) -> None:
         # [Edge Case] each capability runs at most once and unsupported names fail during construction.
         for presets in (("tool_selector", "tool_selector"), ("unknown",)):
             with self.subTest(presets=presets), self.assertRaises(ConfigurationError):
-                _settings(preflight=presets)
+                _runtime_settings(preflight=presets)
 
 
 class JevPreflightToolsTests(unittest.IsolatedAsyncioTestCase):
@@ -212,13 +217,12 @@ class JevToolSelectorRuntimeTests(unittest.IsolatedAsyncioTestCase):
             RawResponse({"output": [{"type": "function_call", "name": "hide", "arguments": '{"query": "x"}', "call_id": "hidden"}]}),
             RawResponse({"output": [{"type": "function_call", "name": "isDone", "arguments": '{"final_answer": "done"}', "call_id": "complete"}]}),
         )
-        settings = _settings(
-            tools=(keep, hide),
+        runtime_settings = _runtime_settings(
             preflight=(JevPreflightPreset.TOOL_SELECTOR,),
             decision=DecisionModelConfig(api_key="test-key"),
             tool_selector_threshold=0.2,
         )
-        agent = bind_test_runner(JevAgent(settings), generative_runner)
+        agent = bind_test_runner(JevAgent(_settings(tools=(keep, hide)), runtime_settings), generative_runner)
 
         with patch("vidbyte.agents.jev.preflight.DecisionModelRunner", return_value=decision_runner):
             reply = await agent.arun("Search the relevant records.")
