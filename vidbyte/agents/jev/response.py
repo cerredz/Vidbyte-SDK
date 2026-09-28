@@ -1,12 +1,12 @@
 """FILE: vidbyte/agents/jev/response.py
 
 PURPOSE: Implements JevResponse, the one writer of a JevAgent's JevAgentResponse: every opinionated feature reports what it decided through a method here instead of through result metadata.
-ROLE IN CODEBASE: JevAgent builds one instance and exposes its record as `JevAgent.response`; JevPreflightGate writes preset outcomes, clarifications, and the chosen specialist through it, and JevRuntime asks it for the result to return.
+ROLE IN CODEBASE: JevAgent builds one instance and exposes its record as `JevAgent.response`; JevPreflightGate writes preset outcomes, clarifications, and the chosen specialist through it, JevRunState writes the run state, the handoff, and every done-check result through it, and JevRuntime asks it for the result to return.
 ARCHITECTURE NOTE: The record type lives in vidbyte/lib/dataclasses/jev.py; this class only owns how the record changes during a run, so a new feature adds one method here and one field there.
 COMMON MODIFICATION PATTERNS: Add a method named for the event a feature reports (for example needs_clarification), write the matching JevAgentResponse field, and call it from the feature.
 KNOWN EDGE CASES: start() replaces the record, so a caller holding the previous run's record keeps it unchanged; like the JevAgent that owns it, one instance serves one run at a time.
-RELATED DOCS: docs/design/jev-preflight-clarity.md, docs/design/jev-specialist-routing.md, and skills/jev-agent/SKILL.md.
-TESTS: tests/test_jev_preflight.py and scripts/test-jev-preflight.py.
+RELATED DOCS: docs/design/jev-preflight-clarity.md, docs/design/jev-specialist-routing.md, docs/design/jev-multipart-done-criteria.md, and skills/jev-agent/SKILL.md.
+TESTS: tests/test_jev_preflight.py, tests/test_jev_done.py, and scripts/test-jev-preflight.py.
 """
 
 from __future__ import annotations
@@ -17,7 +17,10 @@ from vidbyte.lib.dataclasses.agents import AgentMessage
 from vidbyte.lib.dataclasses.jev import (
     JevAgentResponse,
     JevClarification,
+    JevDoneResult,
+    JevHandoffRecord,
     JevPresetResult,
+    JevRunStateRecord,
     JevSpecialist,
 )
 from vidbyte.lib.dataclasses.strategies import AgentResult
@@ -50,6 +53,22 @@ class JevResponse:
     def specialist(self, chosen: JevSpecialist | None) -> None:
         """Record the title of the specialist Jev chose to run the task, or None when the main JevAgent keeps it."""
         self.state.specialist = None if chosen is None else chosen.title
+
+    def run_state(self, record: JevRunStateRecord | None) -> None:
+        """Record the run state JevRunState wrote before the main agent started, or None when it wrote none."""
+        self.state.run_state = record
+
+    def handoff(self, record: JevHandoffRecord | None) -> None:
+        """Record the evidence JevHandoff compiled at the latest finish attempt, or None when it compiled none."""
+        self.state.handoff = record
+
+    def done(self, result: JevDoneResult) -> None:
+        """Record what one enabled done check decided at the latest finish attempt."""
+        self.state.done[result.check] = result
+
+    def continued(self) -> None:
+        """Record that a failed done check sent the main agent back to work."""
+        self.state.continuations += 1
 
     def delegated(self, reply: AgentMessage) -> AgentResult:
         """Record the chosen specialist's reply and return it as this run's result, keeping the specialist's own metadata."""

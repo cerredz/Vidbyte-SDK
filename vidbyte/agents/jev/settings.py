@@ -2,11 +2,11 @@
 
 PURPOSE: Defines JevAgent's two opinionated public configuration objects: JevAgentSettings for the agents that generate, and JevRuntimeSettings for Jev's own decision policy.
 ROLE IN CODEBASE: JevAgent maps JevAgentSettings into BaseAgent and builds its preflight gate from both objects at construction, so JevRuntime never reads settings to decide what to ask.
-ARCHITECTURE NOTE: The surface is intentionally closed; named Jev capabilities belong here as explicit settings instead of a generic decisions collection. JevAgentSettings holds the main agent and the JevSpecialist candidates Jev may hand a run to; JevRuntimeSettings holds the decision model, the preflight flags, and the tool-selector threshold.
+ARCHITECTURE NOTE: The surface is intentionally closed; named Jev capabilities belong here as explicit settings instead of a generic decisions collection. JevAgentSettings holds the main agent and the JevSpecialist candidates Jev may hand a run to; JevRuntimeSettings holds the decision model, the preflight flags, the done checks, and the tool-selector threshold.
 COMMON MODIFICATION PATTERNS: Add a generative-agent field to JevAgentSettings or a Jev policy setting to JevRuntimeSettings, then implement its fixed policy in vidbyte/agents/jev/gate/ without exposing runtime replacement hooks.
-KNOWN EDGE CASES: The generative provider cannot be TypeSafe because Jev is a decision model; neither generative nor decision API keys appear in repr output. Specialist titles must be unique because each one is a Choice option name. Preflight presets are validated by JevPreflightRegistry at construction, so no TypeSafe key is needed until a run asks Jev; the tool-selector threshold rejects booleans, non-finite values, and out-of-range probabilities.
-RELATED DOCS: docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, docs/design/jev-tool-selector.md, and skills/jev-agent/SKILL.md.
-TESTS: tests/test_jev_agent.py, tests/test_jev_preflight.py, tests/test_jev_tool_selector.py, and scripts/test-jev-agent-scaffold.py.
+KNOWN EDGE CASES: The generative provider cannot be TypeSafe because Jev is a decision model; neither generative nor decision API keys appear in repr output. Specialist titles must be unique because each one is a Choice option name. Preflight presets are validated by JevPreflightRegistry and done checks by JevDoneRegistry at construction, so no TypeSafe key is needed until a run asks Jev; the tool-selector threshold rejects booleans, non-finite values, and out-of-range probabilities.
+RELATED DOCS: docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, docs/design/jev-tool-selector.md, docs/design/jev-multipart-done-criteria.md, and skills/jev-agent/SKILL.md.
+TESTS: tests/test_jev_agent.py, tests/test_jev_preflight.py, tests/test_jev_tool_selector.py, tests/test_jev_done.py, and scripts/test-jev-agent-scaffold.py.
 """
 
 from __future__ import annotations
@@ -23,9 +23,9 @@ from vidbyte.lib.constants.jev import (
 )
 from vidbyte.lib.dataclasses.jev import JevSpecialist
 from vidbyte.lib.dataclasses.model_configs import DecisionModelConfig
-from vidbyte.lib.enums import JevPreflightPreset, ModelProvider
+from vidbyte.lib.enums import JevDoneCheck, JevPreflightPreset, ModelProvider
 from vidbyte.lib.errors import ConfigurationError
-from vidbyte.lib.jev import JevPreflightRegistry
+from vidbyte.lib.jev import JevDoneRegistry, JevPreflightRegistry
 from vidbyte.tools.security import PermissionPolicy
 
 
@@ -121,17 +121,19 @@ class JevAgentSettings:
 
 @dataclass(frozen=True, slots=True)
 class JevRuntimeSettings:
-    """Validated Jev decision policy: the TypeSafe model, the preflight flags, and the tool-selector threshold."""
+    """Validated Jev decision policy: the TypeSafe model, the preflight flags, the done checks, and the tool-selector threshold."""
 
     decision: DecisionModelConfig = field(default_factory=DecisionModelConfig, repr=False)
     preflight: tuple[JevPreflightPreset | str, ...] = ()
+    done: tuple[JevDoneCheck | str, ...] = ()
     tool_selector_threshold: float = JEV_TOOL_SELECTOR_DEFAULT_THRESHOLD
 
     def __post_init__(self) -> None:
-        # Rejects invalid decision policy before JevAgent builds its preflight gate.
+        # Rejects invalid decision policy before JevAgent builds its preflight gate and run state.
         if not isinstance(self.decision, DecisionModelConfig):
             raise ConfigurationError("JevRuntimeSettings.decision must be a DecisionModelConfig instance.")
         object.__setattr__(self, "preflight", JevPreflightRegistry.validate(self.preflight))
+        object.__setattr__(self, "done", JevDoneRegistry.validate(self.done))
         self._validate_tool_selector_threshold()
 
     def _validate_tool_selector_threshold(self) -> None:

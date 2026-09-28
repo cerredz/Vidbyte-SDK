@@ -1,12 +1,12 @@
 """FILE: vidbyte/agents/jev/runtime.py
 
-PURPOSE: Provides the dedicated execution seam for the opinionated Jev agent: it runs the JevPreflightGate, then returns the gate's response, hands the run to the specialist the gate chose, or applies the tool selector and runs the inherited linear loop.
-ROLE IN CODEBASE: RuntimeRegistry maps AgentRuntimeType.JEV to JevRuntime; JevAgent builds the gate and the JevResponse writer at construction and passes both in, and the runtime keeps run-local tool selection ahead of the inherited agent loop.
+PURPOSE: Provides the dedicated execution seam for the opinionated Jev agent: it runs the JevPreflightGate, then returns the gate's response, hands the run to the specialist the gate chose, or writes the run state, applies the tool selector, and runs the inherited linear loop, whose finish attempts the enabled done checks may send back to work.
+ROLE IN CODEBASE: RuntimeRegistry maps AgentRuntimeType.JEV to JevRuntime; JevAgent builds the gate, the JevRunState, and the JevResponse writer at construction and passes them in, and the runtime keeps run-local tool selection ahead of the inherited agent loop and answers AgentRuntime's finish-attempt hook with JevRunState.check.
 ARCHITECTURE NOTE: JevRuntime retains the standard runner, usage, speed, tracing, and session wiring while applying named policies internally.
 COMMON MODIFICATION PATTERNS: Add fixed preflight, compute, or coordination phases around inherited execution while keeping their policy internal.
-KNOWN EDGE CASES: A gate with no fixed-question preset and no specialist performs no Jev call, and a closed gate never reaches the generative runner. A chosen specialist runs through its own agent, so this agent's tool selector does not filter its tools. A disabled selector performs no Jev call; an unavailable selector keeps the original tool catalog. A plain BaseAgent(runtime="jev") has no JevRuntimeSettings, gate, or response writer and is refused here.
-RELATED DOCS: docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, docs/design/jev-tool-selector.md, docs/design/jev-specialist-routing.md, and skills/jev-agent/SKILL.md.
-TESTS: tests/test_jev_agent.py, tests/test_jev_preflight.py, tests/test_jev_tool_selector.py, and scripts/test-jev-tool-selector.py.
+KNOWN EDGE CASES: With no done check enabled there is no JevRunState, so no run state is written and every finish attempt stands. A gate with no fixed-question preset and no specialist performs no Jev call, and a closed gate never reaches the generative runner. A chosen specialist runs through its own agent, so neither this agent's tool selector nor its done checks apply to it. A disabled selector performs no Jev call; an unavailable selector keeps the original tool catalog. A plain BaseAgent(runtime="jev") has no JevRuntimeSettings, gate, or response writer and is refused here.
+RELATED DOCS: docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, docs/design/jev-tool-selector.md, docs/design/jev-specialist-routing.md, docs/design/jev-multipart-done-criteria.md, and skills/jev-agent/SKILL.md.
+TESTS: tests/test_jev_agent.py, tests/test_jev_preflight.py, tests/test_jev_tool_selector.py, tests/test_jev_done.py, and scripts/test-jev-tool-selector.py.
 """
 
 from __future__ import annotations
@@ -15,11 +15,12 @@ from collections.abc import Mapping
 from dataclasses import replace
 from typing import Any
 
+from vidbyte.agents.jev.done import JevRunState
 from vidbyte.agents.jev.gate import JevPreflightGate
 from vidbyte.agents.jev.preflight import JevPreflightTools
 from vidbyte.agents.jev.response import JevResponse
 from vidbyte.agents.jev.settings import JevRuntimeSettings
-from vidbyte.agents.runtime import AgentRuntime
+from vidbyte.agents.runtime import AgentRuntime, BaseAgentRuntimeLoopState
 from vidbyte.lib.dataclasses.context import BaseAgentContext
 from vidbyte.lib.dataclasses.runner import RunnerHandle
 from vidbyte.lib.dataclasses.strategies import AgentResult
@@ -37,10 +38,11 @@ class JevRuntime(AgentRuntime):
         *,
         runtime_settings: JevRuntimeSettings | None = None,
         preflight: JevPreflightGate | None = None,
+        run_state: JevRunState | None = None,
         response: JevResponse | None = None,
         **kwargs: Any,
     ) -> None:
-        # Retains the validated runtime settings, the gate, and the response writer JevAgent built, and delegates the loop to AgentRuntime.
+        # Retains the validated runtime settings, the gate, the done checks, and the response writer JevAgent built, and delegates the loop to AgentRuntime.
         # @intent jev-runtime-needs-jev-agent
         # AgentRuntimeType.JEV is selectable by string, so a generic BaseAgent can reach this class
         # without them; refusing here names JevAgent instead of failing later on a None field.
@@ -55,6 +57,7 @@ class JevRuntime(AgentRuntime):
             )
         self.runtime_settings = runtime_settings
         self.preflight = preflight
+        self.run_state = run_state
         self.response = response
         super().__init__(**kwargs)
 
@@ -77,6 +80,8 @@ class JevRuntime(AgentRuntime):
             return self.response.stopped()
         if self.preflight.specialist is not None:
             return self.response.delegated(await self.preflight.specialist.agent.arun(message))
+        if self.run_state is not None:
+            await self.run_state.begin(message)
         if JevPreflightPreset.TOOL_SELECTOR not in self.runtime_settings.preflight:
             return self.response.finished(await super().arun(
                 message,
@@ -122,6 +127,19 @@ class JevRuntime(AgentRuntime):
                 "jev_tool_selector": selector_metadata,
             },
         ))
+
+    async def _continue_finish_attempt(self, result: AgentResult, state: BaseAgentRuntimeLoopState, messages: list[dict[str, Any]]) -> bool:
+        """Run the enabled done checks on a finish attempt and send the main agent back to work when one fails."""
+        # @intent a-failed-done-check-keeps-the-same-loop
+        # The feedback joins this loop's own messages, so the main agent keeps its history, tools, and budgets
+        # and finishes the missing work instead of starting a second run that has forgotten the first.
+        if self.run_state is None:
+            return False
+        feedback = await self.run_state.check(result.output, state.iteration_outputs, state.call_contexts)
+        if feedback is None:
+            return False
+        messages.append({"role": "user", "content": feedback})
+        return True
 
 
 __all__ = ["JevRuntime"]

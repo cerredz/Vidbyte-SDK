@@ -65,6 +65,8 @@ prompt text.
 | Goal Behavior | `goals` | goal_prompt | [goals/goal_prompt.md](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/goals/goal_prompt.md) |
 | Handoff | `handoff` | system_prompt | [handoff/handoff.md](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/handoff/handoff.md) |
 | Jev Clarification | `jev_clarification` | system_prompt | [jev_clarification/system_prompt.md](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_clarification/system_prompt.md) |
+| Jev Handoff | `jev_handoff` | system_prompt | [jev_handoff/system_prompt.md](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_handoff/system_prompt.md) |
+| Jev Run State | `jev_run_state` | system_prompt | [jev_run_state/system_prompt.md](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_run_state/system_prompt.md) |
 | Mimic Behavior | `mimic_behavior` | mimic_prompt | [mimic_behavior/mimic_prompt.md](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/mimic_behavior/mimic_prompt.md) |
 | Multi-Provider Agentic Grader | `multi_provider_agentic_grader` | agent_system_prompt, grader_system_prompt, grader_prompt | [multi_provider_agentic_grader/](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/multi_provider_agentic_grader) |
 | Multi-Provider Aggregator | `multi_provider_aggregator` | synthesis_system_prompt, synthesis_prompt | [multi_provider_aggregator/](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/multi_provider_aggregator) |
@@ -225,6 +227,25 @@ questions, each with two to four recommended answers, for the user to answer
 before the main agent starts.
 
 Link: <https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_clarification/system_prompt.md>
+
+#### Jev Handoff — `jev_handoff`
+
+The system prompt for JevHandoff, the small generative agent a JevAgent with done
+checks runs each time its main agent tries to finish. It receives the user's
+original request, the run state, and the main agent's context window through a
+context manager, and returns structured evidence shaped by the enabled done checks,
+without giving a verdict.
+
+Link: <https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_handoff/system_prompt.md>
+
+#### Jev Run State — `jev_run_state`
+
+The system prompt for JevRunState, the small generative agent a JevAgent with done
+checks runs once before its main agent starts. It receives the user's request and
+returns a structured run state: a central goal, objective, mission, and limits, plus
+one section for every enabled done check.
+
+Link: <https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_run_state/system_prompt.md>
 
 #### Mimic Behavior — `mimic_behavior`
 

@@ -21,18 +21,20 @@ Each capability owns its fixed internal Jev questions, state projection, thresho
 
 ## Current scaffold
 
-- `settings.py` owns the complete public configuration surface: `JevAgentSettings` holds the main agent (name, prompt, model, tools, permissions, loop) and `agents`, the `JevSpecialist` candidates Jev may hand a run to; `JevRuntimeSettings` holds Jev's own policy (`decision`, `preflight`, `tool_selector_threshold`).
-- `agent.py` maps settings into `BaseAgent`, fixes the runtime to `AgentRuntimeType.JEV`, and builds every run-time object a feature needs at construction: the `JevPreflightGate` and the `JevResponse` writer. It passes them, with the runtime settings the tool selector still reads, to the runtime through the single `_runtime_extension_kwargs()` hook, and exposes `JevAgent.response`, a `JevAgentResponse` record of what the features produced in the most recent run.
-- `runtime.py` holds no fixed-question preset checks. `RuntimeRegistry` resolves `AgentRuntimeType.JEV` to `JevRuntime`, which refuses to build without a gate. Before the inherited linear loop it calls `JevPreflightGate.pass_` and returns `JevResponse.stopped()` when the gate closes. When the gate chose a specialist, the runtime runs that specialist's own agent on the message and returns `JevResponse.delegated()`; otherwise the main agent runs. The tool selector (`preflight.py`, `JevPreflightTools`) keeps its own path after the gate.
+- `settings.py` owns the complete public configuration surface: `JevAgentSettings` holds the main agent (name, prompt, model, tools, permissions, loop) and `agents`, the `JevSpecialist` candidates Jev may hand a run to; `JevRuntimeSettings` holds Jev's own policy (`decision`, `preflight`, `done`, `tool_selector_threshold`).
+- `agent.py` maps settings into `BaseAgent`, fixes the runtime to `AgentRuntimeType.JEV`, and builds every run-time object a feature needs at construction: the `JevPreflightGate`, the `JevRunState` (when `done` is set), and the `JevResponse` writer. It passes them, with the runtime settings the tool selector still reads, to the runtime through the single `_runtime_extension_kwargs()` hook, and exposes `JevAgent.response`, a `JevAgentResponse` record of what the features produced in the most recent run.
+- `runtime.py` holds no fixed-question preset checks. `RuntimeRegistry` resolves `AgentRuntimeType.JEV` to `JevRuntime`, which refuses to build without a gate. Before the inherited linear loop it calls `JevPreflightGate.pass_` and returns `JevResponse.stopped()` when the gate closes. When the gate chose a specialist, the runtime runs that specialist's own agent on the message and returns `JevResponse.delegated()`; otherwise the main agent runs. The tool selector (`preflight.py`, `JevPreflightTools`) keeps its own path after the gate. With done checks enabled, the runtime calls `JevRunState.begin` before the main loop and answers `AgentRuntime._continue_finish_attempt` with `JevRunState.check`, whose feedback joins the same loop's messages.
 - `gate/` holds the gate and the steps its cases trigger. `gate.py` (`JevPreflightGate`) owns `combine`, which builds one Jev request from every enabled fixed-question preset plus the specialist Choice question when `agents` is set, and `pass_`, one `match` statement over the outcomes that returns whether the generative agent runs, after which it records the specialist Jev ranked first (or none) in `specialist`. `DecisionModelRunner.score_noul` turns each preset's answers into a score and a pass or fail. `clarification.py` (`JevClarificationAgent`) is the generative agent an unclear request is routed to; it reads the request as its message and the failed checks as a `ContextManager` item, and returns `JevClarificationPayload`: questions, each with a few recommended answers.
+- `done/` holds the done checks. `run_state.py` (`JevRunState`) builds one output schema from the central `JevRunStatePayload` plus one described section per enabled `JevDoneCheck`, writes the run state once from the request, and at every finish attempt has `handoff.py` (`JevHandoff`) compile evidence from the main agent's context window (a `ContextManager` of response and tool-call primitives), asks Jev one fixed question per item, scores the answers with `score_noul`, and returns feedback while continuations remain (`JEV_DONE_MAX_CONTINUATIONS`). A new check adds one entry to each `_SECTIONS` map and one `case` to `_judge` and `_feedback`, never a new class.
 - `response.py` (`JevResponse`) is the only writer of `JevAgentResponse`. Features report outcomes through its methods, never through result metadata.
 - `vidbyte/lib/jev/presets.py` (`JevPresets`) owns the preflight flags a user enables through `JevRuntimeSettings.preflight`, and the fixed question keys and threshold of each fixed-question flag.
 - `vidbyte/lib/jev/preflight/` is the canonical home of every fixed preflight question, one dataclass per question (`clarity.py`), the specialist Choice question (`specialist.py`), and `JevPreflightRegistry`, the registry over them (`get`, `questions`, `specialists`, `validate`). The flag and question-key enums live in `vidbyte/lib/enums/jev.py`; the preflight records live in `vidbyte/lib/dataclasses/jev.py`.
+- `vidbyte/lib/jev/done/` holds every fixed done question (`multi_part.py`) and `JevDoneRegistry` (`question`, `threshold`, `resolve`, `validate`). The structured-reply payloads (every field described in 4–6 sentences), the run-state, handoff, and done records, and `JevDoneQuestion` live in `vidbyte/lib/dataclasses/jev.py`; `JevDoneCheck` and `JevDoneQuestionKey` live in `vidbyte/lib/enums/jev.py`.
 - `vidbyte/lib/dataclasses/jev.py` owns immutable decision records and the `TypeSafeWireRequest`/`TypeSafeWireQuestion` wire records. They mirror https://docs.typesafe.ai/api.md exactly: state, instructions, and criteria may be strings or JSON structure; noul criteria are optional; Score answers carry a weighted `score`; noul answers carry no confidence.
 - `vidbyte/lib/runners/decision.py` owns semantic decision execution (`arun`), model listing (`alist_models`), and noul scoring against a threshold (`score_noul`).
 - `vidbyte/providers/typesafe.py` alone owns TypeSafe wire serialization, normalization, and failure mapping.
 
-With no preflight preset enabled and no specialist configured, a run performs no Jev call. A missing TypeSafe API key must not prevent `JevAgentSettings`, `JevRuntimeSettings`, or `JevAgent` construction. When an enabled preset cannot reach Jev, or a clarification cannot be written, the gate fails open: the preset is marked unavailable and the ordinary loop runs. A missing, failed, or `none` specialist answer keeps the main agent on the run; a specialist is only ever chosen after the gate passes. `JevPreflightPreset.TOOL_SELECTOR` keeps every tool whose P(yes) is at least `tool_selector_threshold`, a finite probability from 0 through 1 inclusive.
+With no preflight preset enabled and no specialist configured, a run performs no Jev call. A missing TypeSafe API key must not prevent `JevAgentSettings`, `JevRuntimeSettings`, or `JevAgent` construction. When an enabled preset cannot reach Jev, or a clarification cannot be written, the gate fails open: the preset is marked unavailable and the ordinary loop runs. A missing, failed, or `none` specialist answer keeps the main agent on the run; a specialist is only ever chosen after the gate passes. Done checks fail open too: no run state means no check, and an unavailable handoff or Jev answer lets the finish attempt stand; a chosen specialist runs without them. `JevPreflightPreset.TOOL_SELECTOR` keeps every tool whose P(yes) is at least `tool_selector_threshold`, a finite probability from 0 through 1 inclusive.
 
 ## Adding a preflight preset
 
@@ -41,6 +43,14 @@ With no preflight preset enabled and no specialist configured, a run performs no
 3. Add the preset's `JevPresetDefinition` (question keys and a named threshold constant) to `JevPresets`, and register its questions in `JevPreflightRegistry._questions`.
 4. Add one commented case to the `match` in `JevPreflightGate.pass_` (`combine` and scoring pick the preset up from `JevPresets`). Put the step the case triggers in its own module under `gate/`, and report its outcome through a `JevResponse` method.
 5. Extend `tests/test_jev_preflight.py`.
+
+## Adding a done check
+
+1. Add a `JevDoneCheck` member and its `JevDoneQuestionKey` in `vidbyte/lib/enums/jev.py`.
+2. Add its run-state section and evidence section payloads (subclasses of `JevSectionPayload` with a `SECTION` text and a 4–6 sentence description on every field) and their records to `vidbyte/lib/dataclasses/jev.py`.
+3. Load `skills/asking-jev-questions/SKILL.md` first, then write its question as a `JevDoneQuestion` subclass under `vidbyte/lib/jev/done/` and register it and its threshold constant in `JevDoneRegistry`.
+4. Add the sections to `JevRunState._SECTIONS` and `JevHandoff._SECTIONS`, their conversion to each `_record`, and one commented `case` to `JevRunState._judge` and `JevRunState._feedback`.
+5. Extend `tests/test_jev_done.py`.
 
 ## Change workflow
 
@@ -68,7 +78,7 @@ With no preflight preset enabled and no specialist configured, a run performs no
 ## Example construction
 
 ```python
-from vidbyte import BaseAgent, JevAgent, JevAgentSettings, JevPreflightPreset, JevRuntimeSettings, JevSpecialist
+from vidbyte import BaseAgent, JevAgent, JevAgentSettings, JevDoneCheck, JevPreflightPreset, JevRuntimeSettings, JevSpecialist
 
 schema = BaseAgent(name="schema", system_prompt="Change the database schema safely.", provider="openai", model_name="gpt-4.1")
 settings = JevAgentSettings(
@@ -78,10 +88,10 @@ settings = JevAgentSettings(
     model_name="gpt-4.1",
     agents=(JevSpecialist("schema", "Changes to the database schema and its migrations.", schema),),
 )
-agent = JevAgent(settings, JevRuntimeSettings(preflight=(JevPreflightPreset.CLARITY,)))
+agent = JevAgent(settings, JevRuntimeSettings(preflight=(JevPreflightPreset.CLARITY,), done=(JevDoneCheck.MULTI_PART,)))
 ```
 
-The equivalent namespace constructor is `sdk.agents.jev(settings, runtime_settings)`. After a run, `agent.response.specialist` names the specialist that ran the task, or is `None` when the main agent ran it.
+The equivalent namespace constructor is `sdk.agents.jev(settings, runtime_settings)`. After a run, `agent.response.specialist` names the specialist that ran the task, or is `None` when the main agent ran it, and `agent.response.done[JevDoneCheck.MULTI_PART]` says whether every requested deliverable was shown produced in full.
 
 ## Capability design example
 
@@ -93,6 +103,7 @@ Run the focused script first:
 
 ```text
 python scripts/test-jev-agent-scaffold.py
+python scripts/test-jev-multipart-done-criteria.py
 ```
 
 Then run repository gates:

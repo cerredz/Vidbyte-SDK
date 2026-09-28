@@ -1,0 +1,11 @@
+{
+  "name": "Jev Handoff",
+  "description": "The system prompt for JevHandoff, the small generative agent a JevAgent with done checks runs each time its main agent tries to finish. It receives the user's original request as its message and, through a context manager, the run state and the main agent's context window, and returns structured evidence shaped by the enabled done checks, for Jev to judge one item at a time. It reports what the run shows and never gives a verdict. The prompt has identity, goal, instructions, and input sections.",
+  "key": "jev_handoff",
+  "prompts": {
+    "system_prompt": {
+      "path": "system_prompt.md",
+      "source_url": "https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_handoff/system_prompt.md"
+    }
+  }
+}
