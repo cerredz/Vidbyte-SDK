@@ -1,11 +1,11 @@
 """FILE: vidbyte/agents/jev/continuation/done.py
 
-PURPOSE: Implements JevDoneContinuation, the continuation for JevAgent's done checks: at every finish attempt it has JevRunState run the enabled checks, and when one fails it sends the main agent back to work with the original request, the run state, the handoff, and the Jev questions that failed, with more focus on what is missing.
+PURPOSE: Implements JevDoneContinuation, the continuation for JevAgent's done checks: at every finish attempt it has JevRunState run the enabled checks, and when one fails it sends the main agent back to work with the original request, the run state, the handoff, and the Jev questions that failed, with more focus on what is missing or, for self-review, on what a strict reviewer would still reject.
 ROLE IN CODEBASE: JevAgent builds one JevDoneContinuation over its JevRunState when JevRuntimeSettings.continual enables a done check, and JevRuntime calls should_continue() and continue_() from its finish-attempt hook; each continuation is recorded through JevResponse on JevAgent.response.
 ARCHITECTURE NOTE: The message is the vidbyte/prompts asset jev_continuation/continue_prompt.md, filled with the run's own text; what one failed check contributes to it is one commented case in _explain(). The cap on continuations is JevContinualSettings.max_continuations.
 COMMON MODIFICATION PATTERNS: Add a done check's failed questions and focus to _explain(); change the message's instructions in vidbyte/prompts/prompts/jev_continuation/continue_prompt.md.
 KNOWN EDGE CASES: A failed check whose handoff is missing never continues, because there is no evidence to hand back. After max_continuations continuations the latest verdict stays on JevAgent.response, but the main agent's answer stands.
-RELATED DOCS: docs/design/jev-multipart-done-criteria.md and skills/jev-agent/SKILL.md.
+RELATED DOCS: docs/design/jev-multipart-done-criteria.md, docs/design/jev-self-review-done-criteria.md, and skills/jev-agent/SKILL.md.
 TESTS: tests/test_jev_done.py.
 """
 
@@ -74,7 +74,7 @@ class JevDoneContinuation(JevContinuation):
             case JevDoneCheck.MULTI_PART:
                 # Each incomplete deliverable's question, Jev's answer, and the handoff's own words for what is missing,
                 # then the deliverables themselves, in the user's terms, as the parts to focus on.
-                question = JevDoneRegistry.question(JevDoneCheck.MULTI_PART)
+                (question,) = JevDoneRegistry.questions(JevDoneCheck.MULTI_PART)
                 state = None if self.run_state.record is None else self.run_state.record.multi_part
                 handoff = None if self.run_state.handoff is None else self.run_state.handoff.multi_part
                 deliverables = {} if state is None else {item.id: item for item in state.deliverables}
@@ -85,6 +85,24 @@ class JevDoneContinuation(JevContinuation):
                     yes = result.answers[identifier].probabilities[JEV_NOUL_TRUE]
                     failed.append(f"- {question.instructions.question.format(item=identifier)} Jev's answer: no (P(yes) = {yes:.2f}). Still missing: {missing[identifier]}")
                     focus.append(f"- {deliverables[identifier].description} Done when: {deliverables[identifier].completion_signal}")
+                return "\n".join(failed), "\n".join(focus)
+            case JevDoneCheck.SELF_REVIEW:
+                # @intent the-main-agent-hears-the-strict-reviewer
+                # The owner asked for this check to hand back a stricter critic's view of the work: both gaps open the
+                # section in that voice, then each standing objection with Jev's two answers and the handoff's own
+                # words for what is still missing, and the Focus lists them as rejections to answer, most serious first.
+                resolved, in_scope = JevDoneRegistry.questions(JevDoneCheck.SELF_REVIEW)
+                review = self.run_state.review
+                handoff = None if self.run_state.handoff is None else self.run_state.handoff.self_review
+                objections = {} if review is None else {item.id: item for item in review.objections}
+                missing = {} if handoff is None else {item.id: item.missing for item in handoff.objections}
+                failed = [resolved.gap, in_scope.gap]
+                focus = []
+                for identifier in result.incomplete:
+                    shown = result.answers[resolved.name(identifier)].probabilities[JEV_NOUL_TRUE]
+                    asked = result.answers[in_scope.name(identifier)].probabilities[JEV_NOUL_TRUE]
+                    failed.append(f"- Objection `{identifier}`: {objections[identifier].objection} Jev's answers: the work does not yet show it resolved (P(resolved) = {shown:.2f}), and fixing it is within the request (P(in scope) = {asked:.2f}). Still missing: {missing[identifier]}")
+                    focus.append(f"- A strict reviewer would reject this: {objections[identifier].objection} Accept when: {objections[identifier].resolved_when}")
                 return "\n".join(failed), "\n".join(focus)
 
 

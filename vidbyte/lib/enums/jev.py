@@ -3,7 +3,7 @@
 PURPOSE: Defines the closed Jev vocabularies: the TypeSafe question types, the preflight presets and done checks a JevAgent user can enable, and the key of every preflight and done question.
 ROLE IN CODEBASE: `vidbyte/lib/dataclasses/jev.py` validates questions against these members, `vidbyte/providers/typesafe.py` serializes question types onto the wire, `vidbyte/lib/jev/presets.py` maps each fixed-question preset to its question keys, `vidbyte/lib/jev/preflight/` registers one question per key, `vidbyte/agents/jev/gate/` matches on the presets when it acts on Jev's answers, and `vidbyte/agents/jev/done/` builds JevRunState's schema and JevHandoff's evidence sections from the enabled done checks.
 ARCHITECTURE NOTE: The vocabulary lives in `vidbyte.lib` because the provider layer, the record layer, and the tool layer all read it, and the lower two may not import the tool layer.
-COMMON MODIFICATION PATTERNS: Add a question type only when TypeSafe documents one, then extend JevQuestion validation and TypeSafeProvider answer normalization in the same change. Add a preflight question key together with its question dataclass in `vidbyte/lib/jev/preflight/` and its preset's key list in `vidbyte/lib/jev/presets.py`. Add a done check together with its state section, its evidence section, and its question in `vidbyte/lib/jev/done/`.
+COMMON MODIFICATION PATTERNS: Add a question type only when TypeSafe documents one, then extend JevQuestion validation and TypeSafeProvider answer normalization in the same change. Add a preflight question key together with its question dataclass in `vidbyte/lib/jev/preflight/` and its preset's key list in `vidbyte/lib/jev/presets.py`. Add a done check together with its state section (when its items come from the request), its evidence section, and its questions in `vidbyte/lib/jev/done/`.
 KNOWN EDGE CASES: `noul` is TypeSafe's own spelling for a yes/no question; keep the serialized value exactly as the API expects it. A question key's value is the answer name Jev returns, so it must stay unique across every preset. TOOL_SELECTOR has no question keys because it asks one question per configured tool, built at run time.
 RELATED DOCS: docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, and https://docs.typesafe.ai/api.md.
 TESTS: tests/test_jev_agent.py, tests/test_jev_preflight.py, scripts/test-jev-agent-scaffold.py, and scripts/test-jev-preflight.py.
@@ -37,9 +37,10 @@ class JevPreflightPreset(str, Enum):
 # Load skills/jev-continuation/SKILL.md before adding a member here: it is the step-by-step checklist for adding
 # a continuation done check (run-state and handoff sections, the batched Jev question, and the continuation message).
 class JevDoneCheck(str, Enum):
-    """The done checks a JevAgent user can enable; each adds its own section to JevRunState's state and JevHandoff's evidence, and asks its own Jev question before a run may finish."""
+    """The done checks a JevAgent user can enable; each adds its own evidence section to JevHandoff (and a run-state section when its items come from the request), and asks its own Jev questions before a run may finish."""
 
     MULTI_PART = "multi_part"
+    SELF_REVIEW = "self_review"
 
 
 class JevDoneQuestionKey(str, Enum):
@@ -49,6 +50,8 @@ class JevDoneQuestionKey(str, Enum):
     """
 
     MULTI_PART_DELIVERED = "multi_part.delivered"
+    SELF_REVIEW_RESOLVED = "self_review.resolved"
+    SELF_REVIEW_IN_SCOPE = "self_review.in_scope"
 
 
 class JevPreflightQuestionKey(str, Enum):

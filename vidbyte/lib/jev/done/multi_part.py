@@ -1,7 +1,7 @@
 """FILE: vidbyte/lib/jev/done/multi_part.py
 
 PURPOSE: Defines the multi-part done check's fixed question, which asks Jev whether the evidence compiled from the main agent's run shows one requested deliverable produced in full.
-ROLE IN CODEBASE: JevDoneRegistry registers MultiPartDeliveredQuestion under JevDoneCheck.MULTI_PART, and JevRunState (vidbyte/agents/jev/done/) asks it once per deliverable, every question in the one Jev request that holds every enabled check's questions, over a state that holds the user's request and, per deliverable id, the deliverable, its completion signal, and the evidence JevHandoff compiled for it.
+ROLE IN CODEBASE: JevDoneRegistry registers MultiPartDeliveredQuestion under JevDoneCheck.MULTI_PART, and JevRunState (vidbyte/agents/jev/done/) asks it once per deliverable, every question in the one Jev request that holds every enabled check's questions, over the shared state (DONE_STATE in state.py) that holds the user's request and, per deliverable id, the deliverable, its completion signal, and the evidence JevHandoff compiled for it.
 ARCHITECTURE NOTE: The question follows skills/asking-jev-questions/SKILL.md ("Writing a full question"). It is asked once per deliverable, all in the same request because they share the state (strategy 11), and each question names its deliverable's id, so Jev never has to combine several verdicts; code joins the answers with DecisionModelRunner.score_noul. The state carries the defining material, `deliverable` and `completion_signal`, beside the evidence (tip T13), and leaves out the handoff's own list of what is missing, which is a judgment by the model that wrote the evidence rather than something the run shows.
 COMMON MODIFICATION PATTERNS: Load skills/asking-jev-questions/SKILL.md before editing (see README.md in this folder). Keep each section one string literal (lint S062), keep every rule in the brief, and use the verb "shows" for the tested property everywhere.
 KNOWN EDGE CASES: A deliverable whose evidence reports that no part of the run concerns it is on the false side by a rule in the brief. A failed attempt followed by a successful one counts as shown; an output a later step removed or broke does not.
@@ -15,9 +15,7 @@ from dataclasses import dataclass, field
 
 from vidbyte.lib.dataclasses.jev import JevBrief, JevCriterion, JevDoneQuestion
 from vidbyte.lib.enums.jev import JevDoneQuestionKey
-
-# Every done question reads the same shared state, so every brief describes it with the same words.
-DONE_STATE = "The state has two fields. `request` is the message a user sent to an AI agent to start a task, holding the user's own words together with any text, code, or data the user pasted into it. `deliverables` maps the id of every separate output that `request` asks for to an entry with three fields. `deliverable` describes that one output, written from `request` before the agent started any work, and `completion_signal` is the visible condition, written at the same time, that shows this one output is done. `evidence` is a report compiled after the agent tried to finish, from the agent's own record of its run, that gathers every part of the run that concerns `deliverable`: passages of the agent's final answer and earlier responses, the tool calls it made with their arguments and outputs, and the results of the commands or tests it ran, each marked with where it came from. The question names one id, and every other entry of `deliverables` is checked separately, each by its own question."
+from vidbyte.lib.jev.done.state import DONE_STATE
 
 
 @dataclass(frozen=True)
@@ -47,4 +45,4 @@ class MultiPartDeliveredQuestion(JevDoneQuestion):
     gap: str = "Your work does not yet show this requested deliverable produced in full, as the user's request describes it, so produce every part that is still missing and make the finished result visible in your work before you finish again."
 
 
-__all__ = ["DONE_STATE", "MultiPartDeliveredQuestion"]
+__all__ = ["MultiPartDeliveredQuestion"]

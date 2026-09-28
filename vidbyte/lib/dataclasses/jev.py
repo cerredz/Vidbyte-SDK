@@ -37,6 +37,7 @@ from vidbyte.lib.constants.jev import (
     JEV_NOUL_OPTIONS,
     JEV_NOUL_TRUE,
     JEV_PROBABILITY_SUM_TOLERANCE,
+    JEV_REVIEW_MAX_OBJECTIONS,
     JEV_SPECIALIST_NONE,
 )
 from vidbyte.lib.enums.jev import (
@@ -718,6 +719,44 @@ class JevMultiPartEvidencePayload(JevSectionPayload):
     deliverables: list[JevDeliverableEvidencePayload] = Field(description="The deliverables hold one evidence entry for every deliverable in the run state's multi-part section, with the same ids and in the same order. Each entry gathers the parts of the run that bear on that one deliverable and states what the run does not show for it. An entry never borrows evidence from another deliverable unless the same piece of the run truly concerns both, in which case it is repeated in each. Do not add entries for work the run did that no deliverable asks for. Never leave a deliverable out, even when the run did nothing toward it.")
 
 
+class JevObjectionPayload(BaseModel):
+    """One weakness a strict reviewer would reject in the main agent's work, as JevReviewer writes it."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(pattern=JEV_DELIVERABLE_ID_PATTERN, description="The id is a short, stable identifier for this objection, written in lowercase letters, digits, and underscores and starting with a letter. It must be unique among the objections of this review, and it names the weakness by its subject, such as empty_input_crash, rather than numbering it. Later steps refer to the objection only by this id, so it is copied exactly and never changed after it is written. Keep it under sixty-four characters and free of spaces, capital letters, and punctuation other than underscores.")
+    objection: str = Field(min_length=1, description="The objection says what a strict reviewer would reject and where, in one to three sentences addressed to the agent that did the work. Name the specific place in the work, such as a file, a function, a command, a test, or a passage of the final answer, and say exactly what is wrong with it: what breaks, what was never verified, what was skipped, or what was narrowed from the request. Ground it in the run, so that someone reading the record of the run could find the weakness you mean. Do not soften it, praise the rest of the work, or combine several unrelated weaknesses in one objection. Do not raise work the request does not ask for, style preferences, or polish a strict reviewer would still approve.")
+    resolved_when: str = Field(min_length=1, description="The resolved_when condition is the visible condition under which a strict reviewer would accept the work despite this objection, written so that it can be checked by reading the agent's work and the record of its run. It names what must be present, such as a changed file with a stated behavior, a test that exercises the weak case and passes, a command run with its result, or a passage of the final answer that covers a stated point. It must describe something observable in the work itself, never the agent's intentions, confidence, or claims that the weakness is fixed. It asks only for what fixing this one weakness needs, within the work the request asks for, and never for new outputs the request does not ask for. Keep it to one or two sentences.")
+
+
+class JevReviewPayload(BaseModel):
+    """What a strict reviewer would reject in the main agent's work, most serious first: JevReviewer's structured reply at a finish attempt."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    objections: list[JevObjectionPayload] = Field(description=f"The objections are what a strict reviewer, who must approve this work and is looking for reasons to reject it, would reject in it, one entry per separate weakness. Order them from most to least serious, where most serious means the weakness that most changes whether the user can rely on the work, starting from the crux of the request. List at most {JEV_REVIEW_MAX_OBJECTIONS} objections, merge objections that are really one weakness, and leave out polish, style preferences, and work the request does not ask for. Every objection must point at something the run shows or fails to show, never at a guess about work outside the run. Return an empty list when a strict reviewer would approve the work as it stands.")
+
+
+class JevObjectionEvidencePayload(BaseModel):
+    """The evidence the run holds for one objection, as JevHandoff writes it in the self-review section."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(pattern=JEV_DELIVERABLE_ID_PATTERN, description="The id is the exact identifier of one objection from the strict reviewer's list, copied character for character. Every objection in that list gets exactly one evidence entry, even when the run shows nothing about it, and no entry may use an id that is not in the list. The id is how the evidence is matched back to the objection it is about, so it is never renamed, merged, or invented. Write the entries in the same order as the objections in the reviewer's list.")
+    evidence: str = Field(min_length=1, description="The evidence is everything in the agent's run that bears on this objection, compiled so that a checker who sees only this text, the objection, and its `resolved_when` condition can judge whether the work meets that condition. Quote or closely reproduce the relevant parts of the run: the code, output, or passage the objection points at, any later tool call that changed it with its arguments and output, and the results of any command or test that exercised it. Name where each piece comes from and keep the pieces in the order they happened, so that the latest state of the work is clear. Report what the run shows whether it supports the objection or answers it, and never state that the objection is right, wrong, or resolved. When the run shows nothing about what the objection points at, say that no part of the run concerns it.")
+    missing: str = Field(min_length=1, description="The missing field says what the run does not show that the objection's `resolved_when` condition needs. List each part of that condition that has no evidence, and each part whose evidence shows a failure or the weakness itself. Write it for the agent that did the work, in plain words it can act on, and name the specific file, function, test, or passage that still needs to change. Do not repeat the evidence, and do not suggest work beyond what the condition asks for. When the evidence shows every part of the condition met, write that nothing is missing.")
+
+
+class JevSelfReviewEvidencePayload(JevSectionPayload):
+    """The self-review section of the handoff: the evidence for every objection the strict reviewer raised."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    SECTION: ClassVar[str] = "The self-review evidence section gathers, for each objection a strict reviewer raised against the agent's finished work, the parts of the run that show whether the work meets that objection's `resolved_when` condition. An objection is the reviewer's accusation, not a finding, so report what the run shows about it neutrally, whether that supports the objection or answers it. A separate checker reads one entry at a time, next to the user's request and that objection, and decides whether the objection still stands. That checker sees nothing of the run except the evidence written here, so the evidence must be complete, specific, and faithful to what the run actually shows. The section is filled after the agent tries to finish and after the reviewer wrote its objections, from the agent's context window."
+
+    objections: list[JevObjectionEvidencePayload] = Field(description="The objections hold one evidence entry for every objection in the strict reviewer's list, with the same ids and in the same order. Each entry gathers the parts of the run that bear on that one objection and states what the run does not show for it. An entry never borrows evidence from another objection unless the same piece of the run truly concerns both, in which case it is repeated in each. Do not add entries for weaknesses the reviewer did not raise, and do not leave out any objection it did raise. Return an empty list when the reviewer raised no objections.")
+
+
 class JevDeliverableId:
     """Shared validation for the deliverable identifiers JevRunState writes and JevHandoff echoes."""
 
@@ -827,19 +866,92 @@ class JevMultiPartEvidence:
 
 
 @dataclass(frozen=True, slots=True)
-class JevHandoffRecord:
-    """The evidence JevHandoff compiled from the main agent's run for every enabled done check.
+class JevObjection:
+    """One weakness a strict reviewer would reject in the main agent's work: a stable id, the objection, and the visible condition under which the reviewer would accept the work."""
 
-    `multi_part` is set only when the MULTI_PART done check is enabled, and `usage` is JevHandoff's own model usage.
+    id: str
+    objection: str
+    resolved_when: str
+
+    def __post_init__(self) -> None:
+        # Requires an identifier the handoff can echo exactly, and non-blank objection and condition text.
+        JevDeliverableId.require(self.id, field_name="objection id")
+        JevText.require(self.objection, field_name=f"objection {self.id!r}")
+        JevText.require(self.resolved_when, field_name=f"resolved_when of objection {self.id!r}")
+
+
+@dataclass(frozen=True, slots=True)
+class JevReviewRecord:
+    """What JevReviewer would reject in the main agent's work at the latest finish attempt, most serious first.
+
+    An empty `objections` tuple means a strict reviewer would approve the work as it stands, and `usage` is
+    JevReviewer's own model usage.
     """
 
-    multi_part: JevMultiPartEvidence | None = None
+    objections: tuple[JevObjection, ...] = ()
     usage: UsageRollup | None = None
 
     def __post_init__(self) -> None:
-        # Requires a typed multi-part evidence section when present.
+        # Requires a tuple of objections with unique ids, in the reviewer's order of seriousness.
+        if not isinstance(self.objections, tuple) or not all(isinstance(item, JevObjection) for item in self.objections):
+            raise JevValidation.error("review objections", "a tuple of JevObjection values", self.objections)
+        JevDeliverableId.require_unique(self.ids(), field_name="review objections")
+
+    def ids(self) -> tuple[str, ...]:
+        """Return every objection id, most serious first."""
+        return tuple(item.id for item in self.objections)
+
+
+@dataclass(frozen=True, slots=True)
+class JevObjectionEvidence:
+    """What the run shows about one objection, and what it does not show, as JevHandoff compiled it."""
+
+    id: str
+    evidence: str
+    missing: str
+
+    def __post_init__(self) -> None:
+        # Requires the echoed objection id and non-blank evidence and missing text.
+        JevDeliverableId.require(self.id, field_name="evidence id")
+        JevText.require(self.evidence, field_name=f"evidence of objection {self.id!r}")
+        JevText.require(self.missing, field_name=f"missing of objection {self.id!r}")
+
+
+@dataclass(frozen=True, slots=True)
+class JevSelfReviewEvidence:
+    """The self-review section of a handoff: one evidence entry per objection, in the reviewer's order."""
+
+    objections: tuple[JevObjectionEvidence, ...] = ()
+
+    def __post_init__(self) -> None:
+        # Requires a tuple of evidence entries with unique ids.
+        if not isinstance(self.objections, tuple) or not all(isinstance(item, JevObjectionEvidence) for item in self.objections):
+            raise JevValidation.error("self-review evidence", "a tuple of JevObjectionEvidence values", self.objections)
+        JevDeliverableId.require_unique(self.ids(), field_name="self-review evidence")
+
+    def ids(self) -> tuple[str, ...]:
+        """Return every evidence entry's objection id in order."""
+        return tuple(item.id for item in self.objections)
+
+
+@dataclass(frozen=True, slots=True)
+class JevHandoffRecord:
+    """The evidence JevHandoff compiled from the main agent's run for every enabled done check.
+
+    `multi_part` is set only when the MULTI_PART done check is enabled, `self_review` only when SELF_REVIEW is
+    enabled and JevReviewer wrote a review, and `usage` is JevHandoff's own model usage.
+    """
+
+    multi_part: JevMultiPartEvidence | None = None
+    self_review: JevSelfReviewEvidence | None = None
+    usage: UsageRollup | None = None
+
+    def __post_init__(self) -> None:
+        # Requires typed evidence sections when present.
         if self.multi_part is not None and not isinstance(self.multi_part, JevMultiPartEvidence):
             raise JevValidation.error("handoff multi_part", "a JevMultiPartEvidence or None", self.multi_part)
+        if self.self_review is not None and not isinstance(self.self_review, JevSelfReviewEvidence):
+            raise JevValidation.error("handoff self_review", "a JevSelfReviewEvidence or None", self.self_review)
 
 
 @dataclass(frozen=True)
@@ -849,8 +961,8 @@ class JevDoneQuestion:
     Every concrete question in `vidbyte/lib/jev/done/` subclasses this with a default for every field, so each
     question is its own dataclass constructed with no arguments. `instructions` holds every rule, and its
     `question` names the checked item through an `{item}` placeholder; `when_true` and `when_false` only
-    describe each side; `gap` is the self-contained sentence the main agent reads when this question fails,
-    ahead of what the handoff says is missing.
+    describe each side; `gap` is the self-contained sentence the main agent reads when this question's answer
+    sends it back to work, ahead of what the handoff says is missing.
     """
 
     key: JevDoneQuestionKey
@@ -889,8 +1001,10 @@ class JevDoneQuestion:
 class JevDoneResult:
     """What one enabled done check decided the last time the main agent tried to finish.
 
-    `answers` holds Jev's answer per deliverable id, `score` is their mean P(yes), and `incomplete` names
-    the deliverables whose P(yes) fell below the check's threshold. With `available=False` the run state,
+    `answers` holds Jev's answers: keyed by item id for a check that asks one question per item (multi-part),
+    and by question name for a check that asks several (self-review). `score` is the mean over items of how
+    clearly each one passed, and `incomplete` names the items, in order, that the continuation sends the
+    main agent back to: deliverables below the threshold, or objections that still stand. With `available=False` the run state,
     the handoff, or Jev was unavailable, `score` is None, and the check fails open (`passed` stays True).
     `usage` is the usage of the one Jev request that asked every enabled check's questions at that finish attempt.
     """
@@ -963,6 +1077,7 @@ class JevAgentResponse:
     preflight Jev call's usage, `clarification` is set only when the gate stopped the run to ask the user, and
     `specialist` is the title of the JevSpecialist that ran the task, or None when the main JevAgent ran it.
     With done checks enabled, `run_state` is the state JevRunState wrote before the main agent started,
+    `review` is what JevReviewer would reject at the latest finish attempt (self-review only),
     `handoff` is the evidence JevHandoff compiled at the latest finish attempt, `done` holds the latest result
     of every enabled done check, and `continuations` counts how often a failed check sent the agent back to work.
     """
@@ -974,6 +1089,7 @@ class JevAgentResponse:
     usage: ProviderUsage | None = None
     specialist: str | None = None
     run_state: JevRunStateRecord | None = None
+    review: JevReviewRecord | None = None
     handoff: JevHandoffRecord | None = None
     done: dict[JevDoneCheck, JevDoneResult] = field(default_factory=dict)
     continuations: int = 0
@@ -1012,15 +1128,23 @@ __all__ = [
     "JevMultiPartEvidencePayload",
     "JevMultiPartPayload",
     "JevNoulScore",
+    "JevObjection",
+    "JevObjectionEvidence",
+    "JevObjectionEvidencePayload",
+    "JevObjectionPayload",
     "JevOption",
     "JevPreflightQuestion",
     "JevPresetDefinition",
     "JevPresetResult",
     "JevProbability",
     "JevQuestion",
+    "JevReviewPayload",
+    "JevReviewRecord",
     "JevRunStatePayload",
     "JevRunStateRecord",
     "JevSectionPayload",
+    "JevSelfReviewEvidence",
+    "JevSelfReviewEvidencePayload",
     "JevSpecialist",
     "JevText",
     "JevValidation",

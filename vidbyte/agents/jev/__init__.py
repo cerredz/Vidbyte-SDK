@@ -24,8 +24,12 @@ from vidbyte.lib.dataclasses.jev import (
     JevDeliverableEvidence,
     JevDoneResult,
     JevHandoffRecord,
+    JevObjection,
+    JevObjectionEvidence,
     JevPresetResult,
+    JevReviewRecord,
     JevRunStateRecord,
+    JevSelfReviewEvidence,
     JevSpecialist,
 )
 from vidbyte.lib.enums.jev import JevDoneCheck, JevPreflightPreset
@@ -42,10 +46,14 @@ __all__ = [
     "JevDoneCheck",
     "JevDoneResult",
     "JevHandoffRecord",
+    "JevObjection",
+    "JevObjectionEvidence",
     "JevPreflightPreset",
     "JevPresetResult",
+    "JevReviewRecord",
     "JevRunStateRecord",
     "JevRuntime",
     "JevRuntimeSettings",
+    "JevSelfReviewEvidence",
     "JevSpecialist",
 ]

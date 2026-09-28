@@ -1,11 +1,11 @@
 """FILE: tests/test_jev_done.py
 
-PURPOSE: Verifies JevAgent's done checks deterministically without live model calls: the run-state and handoff schemas and their field descriptions, the records built from them, the multi-part done question and its registry, the two generative prompts, the handoff's context window, and JevRuntime's finish-attempt behavior (pass, send back to work, bounded continuations, and fail-open paths).
+PURPOSE: Verifies JevAgent's done checks deterministically without live model calls: the run-state, review, and handoff schemas and their field descriptions, the records built from them, the multi-part and self-review done questions and their registry, the three generative prompts, the handoff's context window, and JevRuntime's finish-attempt behavior (pass, send back to work, bounded continuations, and fail-open paths).
 ROLE IN CODEBASE: Pins the review of PR #452: records and enums live in vidbyte/lib, every structured-output field carries a 4-6 sentence description, JevRunState composes one schema from the enabled checks, JevHandoff reads the main agent's window through a ContextManager, and every enabled check's fixed questions go to Jev in one request (review of PR #470).
 ARCHITECTURE NOTE: Scripted generative and decision runners replace only the external boundaries while production settings, registry, schemas, runtime hook, and response wiring stay active.
 COMMON MODIFICATION PATTERNS: Add a case for every new done check, section, question, threshold boundary, and availability policy.
 KNOWN EDGE CASES: No test may contact TypeSafe or a generative provider; the token-floor test needs tiktoken and is skipped without it.
-RELATED DOCS: docs/design/jev-multipart-done-criteria.md, skills/jev-agent/SKILL.md, and skills/asking-jev-questions/SKILL.md.
+RELATED DOCS: docs/design/jev-multipart-done-criteria.md, docs/design/jev-self-review-done-criteria.md, skills/jev-agent/SKILL.md, and skills/asking-jev-questions/SKILL.md.
 TESTS: python -m unittest tests.test_jev_done and python scripts/test-jev-multipart-done-criteria.py.
 """
 
@@ -37,7 +37,7 @@ from vidbyte import (
     JevSpecialist,
 )
 from vidbyte.agents.jev.continuation import JevContinuation, JevDoneContinuation
-from vidbyte.agents.jev.done import JevHandoff, JevRunState
+from vidbyte.agents.jev.done import JevHandoff, JevReviewer, JevRunState
 from vidbyte.context.primitives import ResponseContextItem, TextContextItem, ToolCallContextItem
 from vidbyte.lib.config import DecisionModelConfig
 from vidbyte.lib.constants.jev import (
@@ -46,8 +46,13 @@ from vidbyte.lib.constants.jev import (
     JEV_DONE_DELIVERABLES_FIELD,
     JEV_DONE_EVIDENCE_FIELD,
     JEV_DONE_MAX_CONTINUATIONS,
+    JEV_DONE_OBJECTION_FIELD,
+    JEV_DONE_OBJECTIONS_FIELD,
     JEV_DONE_REQUEST_FIELD,
+    JEV_DONE_RESOLVED_WHEN_FIELD,
     JEV_MULTI_PART_THRESHOLD,
+    JEV_REVIEW_MAX_OBJECTIONS,
+    JEV_SELF_REVIEW_THRESHOLD,
 )
 from vidbyte.lib.dataclasses.jev import (
     JevAnswer,
@@ -63,15 +68,23 @@ from vidbyte.lib.dataclasses.jev import (
     JevMultiPart,
     JevMultiPartEvidencePayload,
     JevMultiPartPayload,
+    JevObjection,
+    JevObjectionEvidence,
+    JevObjectionEvidencePayload,
+    JevObjectionPayload,
+    JevReviewPayload,
+    JevReviewRecord,
     JevRunStatePayload,
     JevRunStateRecord,
     JevSectionPayload,
+    JevSelfReviewEvidence,
+    JevSelfReviewEvidencePayload,
 )
 from vidbyte.lib.enums import JevDoneQuestionKey, JevQuestionType, ModelProvider
 from vidbyte.lib.enums.prompts import Prompt
 from vidbyte.lib.errors import ConfigurationError, ProviderRequestError
 from vidbyte.lib.jev import JevDoneRegistry
-from vidbyte.lib.jev.done import DONE_STATE, MultiPartDeliveredQuestion
+from vidbyte.lib.jev.done import DONE_STATE, MultiPartDeliveredQuestion, SelfReviewInScopeQuestion, SelfReviewResolvedQuestion
 from vidbyte.lib.runners import TextModelResponse
 from vidbyte.lib.runners.decision import DecisionModelRunner
 from vidbyte.lib.runners.types import DecisionModelResponse
@@ -124,7 +137,7 @@ class ScriptedGenerativeRunner:
 
 
 class ScriptedDecisionRunner:
-    """Records every decision request and answers each deliverable's question from a script of P(yes) values per finish attempt, keyed by deliverable id."""
+    """Records every decision request and answers each question from a script of P(yes) values per finish attempt, keyed by full question name or else by item id."""
 
     def __init__(self, script: Mapping[str, list[float]], *, error: Exception | None = None) -> None:
         self.script = {key: list(values) for key, values in script.items()}
@@ -137,7 +150,7 @@ class ScriptedDecisionRunner:
             raise self.error
         answers = {}
         for question in request.questions:
-            values = self.script[question.name.rsplit(".", 1)[-1]]
+            values = self.script.get(question.name) or self.script[question.name.rsplit(".", 1)[-1]]
             yes = values.pop(0) if len(values) > 1 else values[0]
             answers[question.name] = _answer(question.name, yes)
         return DecisionModelResponse(provider=ModelProvider.TYPESAFE, model="jev-1.13.0", answers=answers, raw={}, usage={"input_tokens": 100, "output_tokens": 10})
@@ -187,7 +200,7 @@ class JevDoneRecordTests(unittest.TestCase):
 
     def test_records_and_enums_live_in_lib(self) -> None:
         # [Review 4116720422] dataclasses and enums belong in vidbyte/lib, per AGENTS.md.
-        for cls in (JevDeliverable, JevMultiPart, JevRunStateRecord, JevDoneResult, JevRunStatePayload, JevMultiPartPayload):
+        for cls in (JevDeliverable, JevMultiPart, JevRunStateRecord, JevDoneResult, JevRunStatePayload, JevMultiPartPayload, JevObjection, JevReviewRecord, JevObjectionEvidence, JevSelfReviewEvidence, JevReviewPayload, JevSelfReviewEvidencePayload):
             self.assertEqual(cls.__module__, "vidbyte.lib.dataclasses.jev")
         self.assertEqual(JevDoneCheck.__module__, "vidbyte.lib.enums.jev")
         self.assertFalse((_REPOSITORY_ROOT / "vidbyte/agents/jev/run_state.py").exists())
@@ -195,11 +208,11 @@ class JevDoneRecordTests(unittest.TestCase):
 
     def test_every_structured_output_field_has_a_four_to_six_sentence_description(self) -> None:
         # [Review 4116725548] every field carries a pre-defined 4-6 sentence description used in the structured output.
-        for model in (JevRunStatePayload, JevMultiPartPayload, JevDeliverablePayload, JevMultiPartEvidencePayload, JevDeliverableEvidencePayload):
+        for model in (JevRunStatePayload, JevMultiPartPayload, JevDeliverablePayload, JevMultiPartEvidencePayload, JevDeliverableEvidencePayload, JevReviewPayload, JevObjectionPayload, JevSelfReviewEvidencePayload, JevObjectionEvidencePayload):
             for name, description in _descriptions(model).items():
                 with self.subTest(model=model.__name__, field=name):
                     self.assertIn(_sentences(description), range(4, 7))
-        for section in (JevMultiPartPayload, JevMultiPartEvidencePayload):
+        for section in (JevMultiPartPayload, JevMultiPartEvidencePayload, JevSelfReviewEvidencePayload):
             with self.subTest(section=section.__name__):
                 self.assertIn(_sentences(section.SECTION), range(4, 7))
 
@@ -235,7 +248,9 @@ class JevDoneSchemaTests(unittest.TestCase):
         schema = JevRunState.schema((JevDoneCheck.MULTI_PART,))
         self.assertTrue(issubclass(schema, JevRunStatePayload))
         self.assertEqual(schema.model_fields["multi_part"].description, JevMultiPartPayload.SECTION)
-        self.assertEqual(set(JevRunState._SECTIONS), set(JevDoneCheck))
+        # Self-review's items are the objections JevReviewer raises after the work, so it adds no run-state section.
+        self.assertEqual(set(JevRunState._SECTIONS), set(JevDoneCheck) - {JevDoneCheck.SELF_REVIEW})
+        self.assertEqual(set(JevRunState.schema((JevDoneCheck.SELF_REVIEW,)).model_fields), {"goal", "objective", "mission", "what_not_to_do"})
 
     def test_handoff_schema_is_general_with_a_tailored_section_per_check(self) -> None:
         # [Review 4116760518, 4116773073] the handoff is general; the multi-part evidence shape is tailored to its check.
@@ -245,6 +260,9 @@ class JevDoneSchemaTests(unittest.TestCase):
         self.assertEqual(schema.model_fields["multi_part"].description, JevMultiPartEvidencePayload.SECTION)
         self.assertEqual(set(JevDeliverableEvidencePayload.model_fields), {"id", "evidence", "missing"})
         self.assertEqual(set(JevHandoff._SECTIONS), set(JevDoneCheck))
+        schema = JevHandoff.schema((JevDoneCheck.MULTI_PART, JevDoneCheck.SELF_REVIEW))
+        self.assertEqual(schema.model_fields["self_review"].description, JevSelfReviewEvidencePayload.SECTION)
+        self.assertEqual(set(JevObjectionEvidencePayload.model_fields), {"id", "evidence", "missing"})
 
     def test_agents_are_built_once_in_the_jev_agent_constructor(self) -> None:
         agent = _jev()
@@ -300,7 +318,7 @@ class JevDoneQuestionTests(unittest.TestCase):
     def test_question_is_an_argument_free_registered_dataclass(self) -> None:
         self.assertIsInstance(self.question, JevDoneQuestion)
         self.assertEqual(MultiPartDeliveredQuestion(), self.question)
-        self.assertEqual(JevDoneRegistry.question(JevDoneCheck.MULTI_PART), self.question)
+        self.assertEqual(JevDoneRegistry.questions(JevDoneCheck.MULTI_PART), (self.question,))
         self.assertEqual(JevDoneRegistry.threshold(JevDoneCheck.MULTI_PART), JEV_MULTI_PART_THRESHOLD)
         rendered = self.question.to_question("readme_docs")
         self.assertEqual((rendered.name, rendered.question_type), (f"{JevDoneQuestionKey.MULTI_PART_DELIVERED.value}.readme_docs", JevQuestionType.NOUL))
@@ -354,7 +372,7 @@ class JevDonePromptTests(unittest.TestCase):
 
     def test_prompts_have_the_four_requested_sections(self) -> None:
         # [Review 4116771208, 4116777319] a 6-8 sentence identity, goal, instructions, and input description.
-        for prompt in (Prompt.JEV_RUN_STATE_SYSTEM_PROMPT, Prompt.JEV_HANDOFF_SYSTEM_PROMPT):
+        for prompt in (Prompt.JEV_RUN_STATE_SYSTEM_PROMPT, Prompt.JEV_HANDOFF_SYSTEM_PROMPT, Prompt.JEV_REVIEW_SYSTEM_PROMPT):
             sections = _prompt_sections(prompt)
             self.assertEqual(list(sections), ["Identity", "Goal", "Instructions", "Input"])
             for name, body in sections.items():
@@ -363,7 +381,7 @@ class JevDonePromptTests(unittest.TestCase):
 
     def test_prompts_are_general_not_multi_part_specific(self) -> None:
         # [Review 4116760518, 4116777319] neither prompt is written for the multi-part check alone.
-        for prompt in (Prompt.JEV_RUN_STATE_SYSTEM_PROMPT, Prompt.JEV_HANDOFF_SYSTEM_PROMPT):
+        for prompt in (Prompt.JEV_RUN_STATE_SYSTEM_PROMPT, Prompt.JEV_HANDOFF_SYSTEM_PROMPT, Prompt.JEV_REVIEW_SYSTEM_PROMPT):
             text = Prompts().get(prompt).lower()
             self.assertNotIn("multi", text)
             self.assertNotIn("deliverable", text)
@@ -572,6 +590,277 @@ class JevDoneRuntimeTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(reply.content, "migration written")
         self.assertEqual((len(main.calls), len(state_runner.calls)), (0, 0))
+
+
+_CENTRAL_STATE = {key: value for key, value in _STATE.items() if key != "multi_part"}
+_OBJECTIONS = [
+    {"id": "dry_run_applies_upload", "objection": "cli/deploy.py still calls upload() when --dry-run is set, so a dry run changes the remote.", "resolved_when": "With --dry-run, deploy skips upload() and a test that runs deploy --dry-run shows no upload call."},
+    {"id": "no_json_output", "objection": "The dry run prints plain text only and offers no --json output.", "resolved_when": "The deploy CLI gains a --json flag that prints the planned changes as JSON."},
+    {"id": "untested_plan_output", "objection": "Nothing shows the printed plan lists every planned change.", "resolved_when": "A test run shows deploy --dry-run prints each planned change."},
+]
+_REVIEW = {"objections": _OBJECTIONS}
+_REVIEW_HANDOFF = {
+    "self_review": {
+        "objections": [
+            {"id": "dry_run_applies_upload", "evidence": "Tool call edit_file(path='cli/deploy.py') output: updated; upload() is still called unconditionally.", "missing": "deploy must skip upload() under --dry-run, with a test that shows it."},
+            {"id": "no_json_output", "evidence": "No part of the run concerns JSON output.", "missing": "A --json flag."},
+            {"id": "untested_plan_output", "evidence": "Tool call run_tests output: test_dry_run_prints_plan passed.", "missing": "Nothing is missing."},
+        ]
+    }
+}
+_RESOLVED = JevDoneQuestionKey.SELF_REVIEW_RESOLVED.value
+_IN_SCOPE = JevDoneQuestionKey.SELF_REVIEW_IN_SCOPE.value
+
+
+def _review_script(**objections: tuple[list[float], list[float]]) -> dict[str, list[float]]:
+    # Maps each objection id to its (P(resolved), P(in scope)) values per finish attempt, keyed by full question name.
+    script: dict[str, list[float]] = {}
+    for identifier, (resolved, in_scope) in objections.items():
+        script[f"{_RESOLVED}.{identifier}"] = resolved
+        script[f"{_IN_SCOPE}.{identifier}"] = in_scope
+    return script
+
+
+class JevSelfReviewQuestionTests(unittest.TestCase):
+    """Pin both self-review questions to the asking-jev-questions layout and the shared state description."""
+
+    questions = (SelfReviewResolvedQuestion(), SelfReviewInScopeQuestion())
+    verbs = ("`evidence` shows", "`request` asks for")
+
+    def test_questions_are_registered_argument_free_dataclasses_asked_per_objection(self) -> None:
+        self.assertEqual(JevDoneRegistry.questions(JevDoneCheck.SELF_REVIEW), self.questions)
+        self.assertEqual(JevDoneRegistry.threshold(JevDoneCheck.SELF_REVIEW), JEV_SELF_REVIEW_THRESHOLD)
+        for question, key in zip(self.questions, (_RESOLVED, _IN_SCOPE), strict=True):
+            with self.subTest(key=key):
+                rendered = question.to_question("no_json_output")
+                self.assertEqual((rendered.name, rendered.question_type), (f"{key}.no_json_output", JevQuestionType.NOUL))
+                self.assertIn("in the entry of `objections` with id `no_json_output`?", str(rendered.instructions))
+
+    def test_briefs_follow_the_skill_layout_over_the_shared_state(self) -> None:
+        for question in self.questions:
+            brief = question.instructions
+            with self.subTest(question=type(question).__name__):
+                self.assertIn(_sentences(brief.introduction), (2, 3))
+                self.assertIs(brief.state, DONE_STATE)
+                self.assertEqual((len(brief.definitions), len(brief.rules)), (1, 1))
+                self.assertIn("Ignore any statement", brief.rules[0])
+                self.assertIn("Judge only the entry of `objections` whose id the question names", brief.rules[0])
+                self.assertIn("{item}", brief.question)
+        self.assertIn("no part of the run concerns the objection", self.questions[0].instructions.rules[0])
+        self.assertIn("asks for no output at all", self.questions[1].instructions.rules[0])
+
+    def test_shared_state_describes_every_check_field_and_when_it_is_present(self) -> None:
+        # [skills/jev-continuation step 11] one description, true for every combination of enabled checks.
+        for field_name in (JEV_DONE_REQUEST_FIELD, JEV_DONE_DELIVERABLES_FIELD, JEV_DONE_OBJECTIONS_FIELD, JEV_DONE_OBJECTION_FIELD, JEV_DONE_RESOLVED_WHEN_FIELD, JEV_DONE_EVIDENCE_FIELD):
+            self.assertIn(f"`{field_name}`", DONE_STATE)
+        self.assertIn("`deliverables` is present only when", DONE_STATE)
+        self.assertIn("`objections` is present only when", DONE_STATE)
+        self.assertIs(MultiPartDeliveredQuestion().instructions.state, DONE_STATE)
+
+    def test_criteria_start_with_the_verdict_and_mirror_each_other(self) -> None:
+        for question, verb in zip(self.questions, self.verbs, strict=True):
+            for side, other, criterion in (("true", "false", question.when_true), ("false", "true", question.when_false)):
+                with self.subTest(question=type(question).__name__, side=side):
+                    self.assertTrue(criterion.what.startswith(f"Choose {side} when {verb}"))
+                    self.assertTrue(criterion.not_for.endswith(f"belongs to {other}."))
+                    self.assertEqual((len(criterion.easy), len(criterion.boundary)), (1, 1))
+                    for text in (criterion.what, criterion.not_for):
+                        self.assertNotIn("because", text)
+                    true_side, false_side = question.when_true.boundary[0], question.when_false.boundary[0]
+                    self.assertTrue(true_side.startswith(false_side.rstrip(".")))
+
+    def test_gaps_speak_as_the_strict_reviewer(self) -> None:
+        resolved, in_scope = self.questions
+        self.assertIn("A strict reviewer would reject your work as it stands", resolved.gap)
+        self.assertIn("fix it at its root", resolved.gap)
+        self.assertIn("not extra work", in_scope.gap)
+
+    @unittest.skipUnless(importlib.util.find_spec("tiktoken"), "tiktoken is not installed")
+    def test_each_question_carries_at_least_two_thousand_tokens(self) -> None:
+        import tiktoken
+
+        for question in self.questions:
+            parts = [question.instructions.render(), question.gap]
+            for criterion in (question.when_true, question.when_false):
+                parts += [criterion.what, criterion.not_for, *criterion.easy, *criterion.boundary]
+            with self.subTest(question=type(question).__name__):
+                self.assertGreaterEqual(len(tiktoken.get_encoding("cl100k_base").encode("\n".join(parts))), 2_000)
+
+    def test_question_text_is_one_string_literal_each(self) -> None:
+        scanner = ImplicitConcatenationScanner()
+        for rel in ("vidbyte/lib/jev/done/self_review.py", "vidbyte/lib/jev/done/state.py"):
+            text = (_REPOSITORY_ROOT / rel).read_text(encoding="utf-8")
+            with self.subTest(rel=rel):
+                self.assertEqual(scanner.scan(SourceFile(path=_REPOSITORY_ROOT / rel, rel=rel, text=text, tree=ast.parse(text))), [])
+
+    def test_review_records_reject_bad_and_duplicate_ids(self) -> None:
+        with self.assertRaises(ConfigurationError):
+            JevObjection("Bad Id", "objection", "condition")
+        with self.assertRaises(ConfigurationError):
+            JevReviewRecord((JevObjection("a", "b", "c"), JevObjection("a", "d", "e")))
+        with self.assertRaises(ConfigurationError):
+            JevSelfReviewEvidence((JevObjectionEvidence("a", "b", "c"), JevObjectionEvidence("a", "d", "e")))
+
+
+class JevSelfReviewTests(unittest.IsolatedAsyncioTestCase):
+    """Verify the strict review through JevAgent: it runs first, Jev keeps only standing in-scope objections, and the main agent hears the critic."""
+
+    def _agent(self, *, done: tuple[Any, ...] = (JevDoneCheck.SELF_REVIEW,), state: dict[str, Any] | None = None, review: str = json.dumps(_REVIEW), handoff: str = json.dumps(_REVIEW_HANDOFF), review_error: Exception | None = None) -> tuple[JevAgent, ScriptedGenerativeRunner, ScriptedGenerativeRunner, ScriptedGenerativeRunner]:
+        main, review_runner, handoff_runner = ScriptedGenerativeRunner("All done."), ScriptedGenerativeRunner(review, error=review_error), ScriptedGenerativeRunner(handoff)
+        agent = bind_test_runner(_jev(done=done), main)
+        assert agent.run_state is not None and agent.run_state.reviewer is not None
+        bind_test_runner(agent.run_state, ScriptedGenerativeRunner(json.dumps(_CENTRAL_STATE if state is None else state)))
+        bind_test_runner(agent.run_state.reviewer, review_runner)
+        bind_test_runner(agent.run_state.handoff_writer, handoff_runner)
+        return agent, main, review_runner, handoff_runner
+
+    def test_reviewer_is_a_tool_free_agent_built_only_for_self_review(self) -> None:
+        agent = _jev(done=(JevDoneCheck.SELF_REVIEW,))
+        assert agent.run_state is not None
+        self.assertIsInstance(agent.run_state.reviewer, JevReviewer)
+        assert agent.run_state.reviewer is not None
+        self.assertEqual(agent.run_state.reviewer.tools.names(), agent.run_state.handoff_writer.tools.names())
+        self.assertIs(agent.run_state.reviewer.output_schema, JevReviewPayload)
+        multi = _jev()
+        assert multi.run_state is not None
+        self.assertIsNone(multi.run_state.reviewer)
+        continual = JevContinualSettings(checks=(JevDoneCheck.SELF_REVIEW,), review_max_iterations=2, review_max_tokens=7_000)
+        limited = JevAgent(_settings(), JevRuntimeSettings(continual=continual))
+        assert limited.run_state is not None and limited.run_state.reviewer is not None
+        loop = limited.run_state.reviewer.agent_loop_settings
+        self.assertEqual((loop.max_iterations, loop.max_tokens), (2, 7_000))
+        for field_name, bad in (("review_max_iterations", 0), ("review_max_tokens", True)):
+            with self.subTest(field=field_name), self.assertRaises(ConfigurationError):
+                JevContinualSettings(**{field_name: bad})
+
+    async def test_standing_objection_sends_the_main_agent_back_with_the_critics_view(self) -> None:
+        # Real and unresolved and in scope stands; out of scope, or already resolved, is set aside by Jev.
+        decision = ScriptedDecisionRunner(_review_script(dry_run_applies_upload=([0.1, 0.95], [0.95]), no_json_output=([0.05], [0.05]), untested_plan_output=([0.9], [0.9])))
+        agent, main, review_runner, handoff_runner = self._agent()
+        with patch(_RUNNER_PATH, new=_runner_class(decision)):
+            reply = await agent.arun(_REQUEST)
+
+        self.assertEqual(reply.content, "All done.")
+        self.assertEqual((len(main.calls), len(review_runner.calls), len(handoff_runner.calls)), (2, 2, 2))
+        # The reviewer reads the request and the main agent's own run; the handoff reads the review it must cover.
+        self.assertEqual(review_runner.calls[0], _REQUEST)
+        self.assertIn("All done.", review_runner.systems[0])
+        self.assertIn("strict reviewer", review_runner.systems[0])
+        self.assertIn("dry_run_applies_upload", handoff_runner.systems[0])
+        feedback = main.messages[1][0]["content"]
+        for section in ("# Original request", "# Run state", "# Handoff", "# Failed checks", "# Focus"):
+            self.assertIn(section, feedback)
+        resolved, in_scope = JevDoneRegistry.questions(JevDoneCheck.SELF_REVIEW)
+        self.assertIn(resolved.gap, feedback)
+        self.assertIn(in_scope.gap, feedback)
+        self.assertIn("- Objection `dry_run_applies_upload`: cli/deploy.py still calls upload()", feedback)
+        self.assertIn("P(resolved) = 0.10", feedback)
+        self.assertIn("Still missing: deploy must skip upload() under --dry-run", feedback)
+        focus = feedback.split("# Focus", 1)[1]
+        self.assertIn("- A strict reviewer would reject this: cli/deploy.py still calls upload()", focus)
+        self.assertIn("Accept when: With --dry-run, deploy skips upload()", focus)
+        self.assertNotIn("--json", focus)
+        self.assertNotIn("printed plan", focus)
+        response = agent.response
+        assert response.review is not None
+        self.assertEqual(response.review.ids(), ("dry_run_applies_upload", "no_json_output", "untested_plan_output"))
+        self.assertEqual(response.continuations, 1)
+        result = response.done[JevDoneCheck.SELF_REVIEW]
+        self.assertTrue(result.passed and result.available)
+        self.assertEqual(set(result.answers), {f"{key}.{item['id']}" for key in (_RESOLVED, _IN_SCOPE) for item in _OBJECTIONS})
+
+    async def test_standing_objections_keep_the_reviewers_order_and_are_capped(self) -> None:
+        decision = ScriptedDecisionRunner(_review_script(dry_run_applies_upload=([0.1], [0.9]), no_json_output=([0.1], [0.9]), untested_plan_output=([0.1], [0.9])))
+        agent, main, *_ = self._agent()
+        with patch(_RUNNER_PATH, new=_runner_class(decision)):
+            await agent.arun(_REQUEST)
+
+        self.assertEqual(len(main.calls), JEV_DONE_MAX_CONTINUATIONS + 1)
+        result = agent.response.done[JevDoneCheck.SELF_REVIEW]
+        self.assertFalse(result.passed)
+        self.assertEqual(result.incomplete, ("dry_run_applies_upload", "no_json_output", "untested_plan_output"))
+        focus = main.messages[1][0]["content"].split("# Focus", 1)[1]
+        self.assertLess(focus.index("still calls upload()"), focus.index("--json"))
+
+    async def test_clearance_at_the_threshold_sets_an_objection_aside(self) -> None:
+        # max(P(resolved), 1 - P(in scope)) reaching the threshold clears the objection; just below keeps it standing.
+        for resolved, passes in ((JEV_SELF_REVIEW_THRESHOLD, True), (JEV_SELF_REVIEW_THRESHOLD - 0.01, False)):
+            decision = ScriptedDecisionRunner(_review_script(dry_run_applies_upload=([resolved], [1.0]), no_json_output=([1.0], [1.0]), untested_plan_output=([1.0], [1.0])))
+            agent, main, *_ = self._agent()
+            with patch(_RUNNER_PATH, new=_runner_class(decision)):
+                await agent.arun(_REQUEST)
+            with self.subTest(resolved=resolved):
+                self.assertEqual(agent.response.done[JevDoneCheck.SELF_REVIEW].passed, passes)
+
+    async def test_a_review_with_no_objections_passes_without_asking_jev(self) -> None:
+        decision = ScriptedDecisionRunner({})
+        agent, main, *_ = self._agent(review=json.dumps({"objections": []}), handoff=json.dumps({"self_review": {"objections": []}}))
+        with patch(_RUNNER_PATH, new=_runner_class(decision)):
+            await agent.arun(_REQUEST)
+
+        self.assertEqual((len(main.calls), len(decision.requests)), (1, 0))
+        result = agent.response.done[JevDoneCheck.SELF_REVIEW]
+        self.assertTrue(result.passed and result.available)
+
+    async def test_objections_beyond_the_cap_keep_the_most_serious(self) -> None:
+        many = [{"id": f"weakness_{index}", "objection": f"Weakness {index}.", "resolved_when": f"Fix {index} is shown."} for index in range(JEV_REVIEW_MAX_OBJECTIONS + 2)]
+        kept = many[:JEV_REVIEW_MAX_OBJECTIONS]
+        handoff = {"self_review": {"objections": [{"id": item["id"], "evidence": "Shown.", "missing": "Nothing is missing."} for item in kept]}}
+        decision = ScriptedDecisionRunner(_review_script(**{item["id"]: ([0.9], [0.9]) for item in kept}))
+        agent, _, _, handoff_runner = self._agent(review=json.dumps({"objections": many}), handoff=json.dumps(handoff))
+        with patch(_RUNNER_PATH, new=_runner_class(decision)):
+            await agent.arun(_REQUEST)
+
+        assert agent.response.review is not None
+        self.assertEqual(agent.response.review.ids(), tuple(item["id"] for item in kept))
+        self.assertNotIn(many[-1]["id"], handoff_runner.systems[0])
+        self.assertEqual(len(decision.requests[0].questions), 2 * JEV_REVIEW_MAX_OBJECTIONS)
+
+    async def test_handoff_that_misses_an_objection_is_unavailable(self) -> None:
+        partial = {"self_review": {"objections": _REVIEW_HANDOFF["self_review"]["objections"][:2]}}  # type: ignore[index]
+        decision = ScriptedDecisionRunner(_review_script(dry_run_applies_upload=([0.1], [0.9])))
+        agent, main, *_ = self._agent(handoff=json.dumps(partial))
+        with patch(_RUNNER_PATH, new=_runner_class(decision)):
+            await agent.arun(_REQUEST)
+
+        self.assertEqual((len(main.calls), len(decision.requests)), (1, 0))
+        self.assertIsNone(agent.response.handoff)
+        self.assertFalse(agent.response.done[JevDoneCheck.SELF_REVIEW].available)
+
+    async def test_both_checks_share_one_request_and_a_failed_review_spares_multi_part(self) -> None:
+        both = (JevDoneCheck.MULTI_PART, JevDoneCheck.SELF_REVIEW)
+        handoff = json.dumps({**_HANDOFF, **_REVIEW_HANDOFF})
+        script = {**_review_script(dry_run_applies_upload=([0.9], [0.9]), no_json_output=([0.9], [0.9]), untested_plan_output=([0.9], [0.9])), "dry_run_flag": [0.95], "readme_docs": [0.9]}
+        decision = ScriptedDecisionRunner(script)
+        agent, *_ = self._agent(done=both, state=_STATE, handoff=handoff)
+        with patch(_RUNNER_PATH, new=_runner_class(decision)):
+            await agent.arun(_REQUEST)
+
+        self.assertEqual(len(decision.requests), 1)
+        state = decision.requests[0].state
+        assert isinstance(state, Mapping)
+        self.assertEqual(set(state), {JEV_DONE_REQUEST_FIELD, JEV_DONE_DELIVERABLES_FIELD, JEV_DONE_OBJECTIONS_FIELD})
+        entry = state[JEV_DONE_OBJECTIONS_FIELD]["no_json_output"]
+        self.assertEqual(set(entry), {JEV_DONE_OBJECTION_FIELD, JEV_DONE_RESOLVED_WHEN_FIELD, JEV_DONE_EVIDENCE_FIELD})
+        self.assertEqual(entry[JEV_DONE_EVIDENCE_FIELD], "No part of the run concerns JSON output.")
+        prefixes = {question.name.rsplit(".", 1)[0] for question in decision.requests[0].questions}
+        self.assertEqual(prefixes, {JevDoneQuestionKey.MULTI_PART_DELIVERED.value, _RESOLVED, _IN_SCOPE})
+
+        # A failed review makes only self-review unavailable; multi-part still reads its evidence and asks Jev.
+        decision = ScriptedDecisionRunner(script)
+        agent, main, *_ = self._agent(done=both, state=_STATE, handoff=handoff, review_error=ProviderRequestError("down", provider="openai"))
+        with patch(_RUNNER_PATH, new=_runner_class(decision)):
+            await agent.arun(_REQUEST)
+
+        self.assertIsNone(agent.response.review)
+        self.assertFalse(agent.response.done[JevDoneCheck.SELF_REVIEW].available)
+        self.assertTrue(agent.response.done[JevDoneCheck.MULTI_PART].available)
+        self.assertEqual(set(decision.requests[0].state), {JEV_DONE_REQUEST_FIELD, JEV_DONE_DELIVERABLES_FIELD})  # type: ignore[arg-type]
+
+    def test_window_places_the_strict_review_after_the_run_state(self) -> None:
+        items = JevHandoff.window('{"goal": "g"}', ("Working.",), (), "Done.", sender="jev", review='{"objections": []}').items()
+        self.assertEqual([type(item) for item in items], [TextContextItem, TextContextItem, ResponseContextItem, TextContextItem])
+        self.assertEqual(items[1].content, '{"objections": []}')
 
 
 if __name__ == "__main__":

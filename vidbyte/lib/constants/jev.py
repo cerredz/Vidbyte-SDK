@@ -85,6 +85,14 @@ JEV_SPECIALIST_MAX_COUNT: int = JEV_MAX_CHOICE_OPTIONS - 1
 # only when every deliverable's P(yes) reaches the threshold (used as both the mean threshold and the veto).
 # 0.8 is a starting point, not a tuned value.
 JEV_MULTI_PART_THRESHOLD: float = 0.8
+# The self-review check asks two questions per objection (is it resolved, is its fix in scope), and an objection is
+# set aside only when Jev is confident of one of them: max(P(resolved), 1 - P(in_scope)) must reach this value, so
+# doubt keeps an objection standing. One value serves both questions until labels exist to fit each one (T17).
+# 0.8 is a starting point, not a tuned value.
+JEV_SELF_REVIEW_THRESHOLD: float = 0.8
+# The most objections JevReviewer may raise at one finish attempt, most serious first; later ones are dropped so
+# the continuation's Focus stays on the crux and the Jev request stays small. A starting point, not a tuned value.
+JEV_REVIEW_MAX_OBJECTIONS: int = 5
 # Default of JevContinualSettings.max_continuations: how many times a failed done check may send the main
 # agent back to work before its answer is accepted.
 JEV_DONE_MAX_CONTINUATIONS: int = 3
@@ -95,6 +103,11 @@ JEV_DONE_DELIVERABLES_FIELD: str = "deliverables"
 JEV_DONE_DELIVERABLE_FIELD: str = "deliverable"
 JEV_DONE_COMPLETION_SIGNAL_FIELD: str = "completion_signal"
 JEV_DONE_EVIDENCE_FIELD: str = "evidence"
+# The self-review state fields: one entry per objection id holding the reviewer's objection, the visible condition
+# under which the reviewer would accept the work, and the evidence JevHandoff compiled for it.
+JEV_DONE_OBJECTIONS_FIELD: str = "objections"
+JEV_DONE_OBJECTION_FIELD: str = "objection"
+JEV_DONE_RESOLVED_WHEN_FIELD: str = "resolved_when"
 # A deliverable ID is a short lowercase identifier JevRunState writes and JevHandoff must echo exactly.
 JEV_DELIVERABLE_ID_PATTERN: str = r"^[a-z][a-z0-9_]{0,63}$"
 # Defaults of the JevRunState and JevHandoff limits in JevContinualSettings: each writes one structured reply,
@@ -103,6 +116,9 @@ JEV_RUN_STATE_MAX_ITERATIONS: int = 25
 JEV_RUN_STATE_MAX_TOKENS: int = 100_000
 JEV_HANDOFF_MAX_ITERATIONS: int = 25
 JEV_HANDOFF_MAX_TOKENS: int = 400_000
+# Defaults of the JevReviewer limits: like the handoff it reads the main agent's whole run and writes one reply.
+JEV_REVIEW_MAX_ITERATIONS: int = 25
+JEV_REVIEW_MAX_TOKENS: int = 400_000
 
 # Tool-selector policy bounds and default: caller settings use probabilities on the closed unit interval.
 JEV_TOOL_SELECTOR_DEFAULT_THRESHOLD: float = 0.20
@@ -126,7 +142,10 @@ __all__ = [
     "JEV_DONE_DELIVERABLE_FIELD",
     "JEV_DONE_EVIDENCE_FIELD",
     "JEV_DONE_MAX_CONTINUATIONS",
+    "JEV_DONE_OBJECTIONS_FIELD",
+    "JEV_DONE_OBJECTION_FIELD",
     "JEV_DONE_REQUEST_FIELD",
+    "JEV_DONE_RESOLVED_WHEN_FIELD",
     "JEV_HANDOFF_MAX_ITERATIONS",
     "JEV_HANDOFF_MAX_TOKENS",
     "JEV_MAX_CHOICE_OPTIONS",
@@ -150,8 +169,12 @@ __all__ = [
     "JEV_PROBABILITY_SUM_TOLERANCE",
     "JEV_RETRY_BACKOFF_SECONDS",
     "JEV_RETRY_STATUS_CODES",
+    "JEV_REVIEW_MAX_ITERATIONS",
+    "JEV_REVIEW_MAX_OBJECTIONS",
+    "JEV_REVIEW_MAX_TOKENS",
     "JEV_RUN_STATE_MAX_ITERATIONS",
     "JEV_RUN_STATE_MAX_TOKENS",
+    "JEV_SELF_REVIEW_THRESHOLD",
     "JEV_SPECIALIST_MAX_COUNT",
     "JEV_SPECIALIST_NONE",
     "JEV_SPECIALIST_QUESTION_NAME",

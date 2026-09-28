@@ -5,7 +5,7 @@ description: Step-by-step guide to adding a continuation done check (a preset co
 
 # Adding a JevAgent continuation done check
 
-Use this skill before you add a new continuation setting to `JevAgent`, or change how an existing one works. In code, a continuation setting is a **done check**. It is a `JevDoneCheck` member that a user enables through `JevRuntimeSettings(continual=JevContinualSettings(checks=(...)))`. The check runs every time the main agent tries to finish. When it fails, the main agent goes back to work in the same loop. `JevDoneCheck.MULTI_PART` is the first done check (PR #470, finished in #471). Every file and method named below exists on `main` and is the model to copy.
+Use this skill before you add a new continuation setting to `JevAgent`, or change how an existing one works. In code, a continuation setting is a **done check**. It is a `JevDoneCheck` member that a user enables through `JevRuntimeSettings(continual=JevContinualSettings(checks=(...)))`. The check runs every time the main agent tries to finish. When it fails, the main agent goes back to work in the same loop. `JevDoneCheck.MULTI_PART` is the first done check (PR #470, finished in #471), and `JevDoneCheck.SELF_REVIEW` is the second: its items are objections a strict reviewer raises at each finish attempt, and it asks two questions per item. Every file and method named below exists on `main` and is the model to copy; where self-review differs, the step says so.
 
 Load these first:
 
@@ -63,7 +63,8 @@ Every stage fails open. With no run state there is no check. When the handoff or
 | `vidbyte/lib/dataclasses/jev.py` | Section payloads (`JevSectionPayload` subclasses), records, `JevRunStateRecord`, `JevHandoffRecord`, `JevDoneQuestion`, `JevDoneResult` | Add the run-state payload, the evidence payload, their frozen records, and one optional field on each of the two top-level records. |
 | `vidbyte/lib/constants/jev.py` | `JEV_<CHECK>_THRESHOLD`, shared-state field names (`JEV_DONE_*_FIELD`), limits | Add the threshold and any new state field names. |
 | `vidbyte/lib/jev/done/<check>.py` | One `JevDoneQuestion` subclass per question | **New file**, one per check (`multi_part.py` is the model). |
-| `vidbyte/lib/jev/done/done.py` | `JevDoneRegistry` (`_questions`, `_thresholds`, `validate`) | Register the question and the threshold. |
+| `vidbyte/lib/jev/done/state.py` | `DONE_STATE`, the one description of the batched state every brief uses | Describe your top-level state field and when it is present (step 11). |
+| `vidbyte/lib/jev/done/done.py` | `JevDoneRegistry` (`_questions` as a tuple per check, `_thresholds`, `questions`, `validate`) | Register the question tuple and the threshold. |
 | `vidbyte/lib/jev/done/__init__.py`, `README.md` | Exports and a folder guide | Export the question and list it in the README. |
 | `vidbyte/agents/jev/done/run_state.py` | `JevRunState`: `_SECTIONS`, `schema`, `begin`, `check`, `combine`, `_section`, `_judge`, `_record` | One `_SECTIONS` entry, `_record` conversion, one `case` in `_section`, and one `case` in `_judge`, plus a `_<check>` scorer. |
 | `vidbyte/agents/jev/done/handoff.py` | `JevHandoff`: `_SECTIONS`, `schema`, `window`, `compile`, `_record` | One `_SECTIONS` entry and the `_record` conversion with id validation. |
@@ -81,7 +82,7 @@ Every stage fails open. With no run state there is no check. When the handoff or
 
 Create a **new file** only for:
 
-- **The check's question module**, `vidbyte/lib/jev/done/<check>.py`. One module per check holds that check's `JevDoneQuestion` subclasses, and any brief text it shares is a module-level constant, like `DONE_STATE`.
+- **The check's question module**, `vidbyte/lib/jev/done/<check>.py`. One module per check holds that check's `JevDoneQuestion` subclasses, and every brief's `state` is the shared `DONE_STATE` from `state.py`.
 - **A new continuation kind**, `vidbyte/agents/jev/continuation/<kind>.py`. Create this only when the trigger is not a done check (see the last section).
 - **A new prompt family**, `vidbyte/prompts/prompts/<family>/` with its key in `vidbyte/lib/enums/prompts.py`. Create this only for a new generative agent or a new continuation message, never for a new done check.
 
@@ -153,7 +154,7 @@ class JevDoneQuestionKey(str, Enum):
 
 - The member's **value** becomes the field name of the section in both the run-state schema and the handoff schema (`check.value` in `schema()`). Make it a short snake_case noun.
 - `JevDoneCheck` is already exported from `vidbyte/lib/enums/__init__.py` and `vidbyte`, so users can enable the check the moment it is registered.
-- Two tests assert `set(JevRunState._SECTIONS) == set(JevDoneCheck)` and the same for `JevHandoff`. The suite stays red until step 9 is done.
+- Two tests pin `JevRunState._SECTIONS` and `JevHandoff._SECTIONS` against `JevDoneCheck`. The suite stays red until step 9 is done. A check whose items do not come from the request (self-review's come from `JevReviewer` after the work) has no run-state section: `schema()` skips it, and the run-state test lists it as the exception.
 
 ### Step 3: The run-state section subclass (`vidbyte/lib/dataclasses/jev.py`)
 
@@ -341,7 +342,7 @@ def _section(self, check, handoff):
             state = None if self.record is None else self.record.<check>
             if state is None or handoff.<check> is None:
                 return {}, ()                                        # nothing to ask → _judge handles it
-            question = JevDoneRegistry.question(JevDoneCheck.<CHECK>)
+            (question,) = JevDoneRegistry.questions(JevDoneCheck.<CHECK>)   # one question per item; self-review asks two
             evidence = {item.id: item.evidence for item in handoff.<check>.items}   # evidence only, never `missing`
             entries = {item.id: {JEV_DONE_<A>_FIELD: item.<a>, JEV_DONE_EVIDENCE_FIELD: evidence[item.id]} for item in state.items}
             return {JEV_DONE_<ITEMS>_FIELD: entries}, tuple(question.to_question(identifier) for identifier in state.ids())
@@ -369,7 +370,7 @@ Rules for your `case`:
 
 ### Step 11: Keep the shared state description true
 
-`DONE_STATE` in `vidbyte/lib/jev/done/multi_part.py` is the `state` section of the multi-part brief. It currently says "The state has two fields" and describes `request` and `deliverables`. Once your check adds a top-level key, a request with both checks enabled carries three fields. The multi-part brief would then misdescribe its own state, and nothing else would catch it.
+`DONE_STATE` in `vidbyte/lib/jev/done/state.py` is the `state` section of every done brief. It describes `request`, `deliverables` (multi-part), and `objections` (self-review), each with the condition under which it is present. Once your check adds a top-level key, extend it the same way; otherwise every existing brief would misdescribe the state whenever your check is enabled, and nothing else would catch it.
 
 Before you ship:
 
@@ -432,7 +433,7 @@ Your `case` returns `(failed, focus)`, following the multi-part case:
 ```python
 case JevDoneCheck.<CHECK>:
     # <comment: what the main agent reads for this check and why>
-    question = JevDoneRegistry.question(JevDoneCheck.<CHECK>)
+    (question,) = JevDoneRegistry.questions(JevDoneCheck.<CHECK>)
     state = None if self.run_state.record is None else self.run_state.record.<check>
     handoff = None if self.run_state.handoff is None else self.run_state.handoff.<check>
     items = {} if state is None else {item.id: item for item in state.items}
@@ -522,7 +523,16 @@ Your change must not raise any lint baseline count.
 
 ---
 
-## 5. When to write a new JevContinuation instead
+## 5. A check whose items are found after the work: self-review
+
+`JevDoneCheck.SELF_REVIEW` departs from the steps above in four places. Copy it, not multi-part, when your items only exist once the work is done.
+
+- **A generative stage before the handoff.** `JevReviewer` (`vidbyte/agents/jev/done/reviewer.py`, prompt family `jev_review/`) is a tool-free agent on the JevAgent's model. `JevRunState.check()` runs it first, over the same window as the handoff, and records it through `JevResponse.review()`. Its limits are `JevContinualSettings.review_max_iterations` and `review_max_tokens`.
+- **No run-state section.** The review's objections are the items, so `JevHandoff.compile()` takes the review and matches the self-review evidence ids against `review.ids()`. When the review failed, only that section is dropped, so other checks still run.
+- **Two questions per item.** "Real, unresolved, and in scope" splits into `self_review.resolved` (does `evidence` show the work meeting `resolved_when`?) and `self_review.in_scope` (does `request` ask for that work?). `_self_review` combines them in code instead of calling `score_noul`: an objection stands unless `max(P(resolved), 1 - P(in scope))` reaches the threshold. `JevDoneResult.answers` is keyed by question name.
+- **The critic's voice in the continuation.** Both questions' gaps open the section, and Focus lists `A strict reviewer would reject this: … Accept when: …`, most serious first.
+
+## 6. When to write a new JevContinuation instead
 
 `JevContinuation` (`vidbyte/agents/jev/continuation/base.py`) is the contract the runtime calls:
 

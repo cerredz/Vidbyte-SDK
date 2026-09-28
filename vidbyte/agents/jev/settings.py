@@ -5,7 +5,7 @@ ROLE IN CODEBASE: JevAgent maps JevAgentSettings into BaseAgent and builds its p
 ARCHITECTURE NOTE: The surface is intentionally closed; named Jev capabilities belong here as explicit settings instead of a generic decisions collection. JevAgentSettings holds the main agent and the JevSpecialist candidates Jev may hand a run to; JevRuntimeSettings holds the decision model, the preflight flags, the continuation settings (the done checks and their limits), and the tool-selector threshold.
 COMMON MODIFICATION PATTERNS: Add a generative-agent field to JevAgentSettings or a Jev policy setting to JevRuntimeSettings, then implement its fixed policy in vidbyte/agents/jev/gate/ without exposing runtime replacement hooks.
 KNOWN EDGE CASES: The generative provider cannot be TypeSafe because Jev is a decision model; neither generative nor decision API keys appear in repr output. Specialist titles must be unique because each one is a Choice option name. Preflight presets are validated by JevPreflightRegistry and done checks by JevDoneRegistry at construction, every continuation limit rejects booleans and non-integers, so no TypeSafe key is needed until a run asks Jev; the tool-selector threshold rejects booleans, non-finite values, and out-of-range probabilities.
-RELATED DOCS: docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, docs/design/jev-tool-selector.md, docs/design/jev-multipart-done-criteria.md, and skills/jev-agent/SKILL.md.
+RELATED DOCS: docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, docs/design/jev-tool-selector.md, docs/design/jev-multipart-done-criteria.md, docs/design/jev-self-review-done-criteria.md, and skills/jev-agent/SKILL.md.
 TESTS: tests/test_jev_agent.py, tests/test_jev_preflight.py, tests/test_jev_tool_selector.py, tests/test_jev_done.py, and scripts/test-jev-agent-scaffold.py.
 """
 
@@ -19,6 +19,8 @@ from vidbyte.lib.constants.jev import (
     JEV_DONE_MAX_CONTINUATIONS,
     JEV_HANDOFF_MAX_ITERATIONS,
     JEV_HANDOFF_MAX_TOKENS,
+    JEV_REVIEW_MAX_ITERATIONS,
+    JEV_REVIEW_MAX_TOKENS,
     JEV_RUN_STATE_MAX_ITERATIONS,
     JEV_RUN_STATE_MAX_TOKENS,
     JEV_SPECIALIST_MAX_COUNT,
@@ -126,7 +128,7 @@ class JevAgentSettings:
 
 @dataclass(frozen=True, slots=True)
 class JevContinualSettings:
-    """Validated continuation settings: the done checks run at every finish attempt, how often a failed one may send the main agent back to work, and the limits of the run-state and handoff agents."""
+    """Validated continuation settings: the done checks run at every finish attempt, how often a failed one may send the main agent back to work, and the limits of the run-state, review, and handoff agents."""
 
     checks: tuple[JevDoneCheck | str, ...] = ()
     max_continuations: int = JEV_DONE_MAX_CONTINUATIONS
@@ -134,6 +136,8 @@ class JevContinualSettings:
     run_state_max_tokens: int = JEV_RUN_STATE_MAX_TOKENS
     handoff_max_iterations: int = JEV_HANDOFF_MAX_ITERATIONS
     handoff_max_tokens: int = JEV_HANDOFF_MAX_TOKENS
+    review_max_iterations: int = JEV_REVIEW_MAX_ITERATIONS
+    review_max_tokens: int = JEV_REVIEW_MAX_TOKENS
 
     def __post_init__(self) -> None:
         # Rejects unknown or repeated done checks and non-integer limits before JevAgent builds its run state.
@@ -142,7 +146,7 @@ class JevContinualSettings:
         # check never sends the main agent back to work.
         object.__setattr__(self, "checks", JevDoneRegistry.validate(self.checks))
         self._validate_count("max_continuations", minimum=0)
-        for field_name in ("run_state_max_iterations", "run_state_max_tokens", "handoff_max_iterations", "handoff_max_tokens"):
+        for field_name in ("run_state_max_iterations", "run_state_max_tokens", "handoff_max_iterations", "handoff_max_tokens", "review_max_iterations", "review_max_tokens"):
             self._validate_count(field_name, minimum=1)
 
     def _validate_count(self, field_name: str, *, minimum: int) -> None:
