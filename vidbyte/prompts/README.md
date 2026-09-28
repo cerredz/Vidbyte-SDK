@@ -66,6 +66,7 @@ prompt text.
 | Handoff | `handoff` | system_prompt | [handoff/handoff.md](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/handoff/handoff.md) |
 | Jev Clarification | `jev_clarification` | system_prompt | [jev_clarification/system_prompt.md](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_clarification/system_prompt.md) |
 | Jev Continuation | `jev_continuation` | continue_prompt | [jev_continuation/continue_prompt.md](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_continuation/continue_prompt.md) |
+| Jev Fresh Continuation | `jev_fresh_continuation` | fresh_prompt | [jev_fresh_continuation/fresh_prompt.md](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_fresh_continuation/fresh_prompt.md) |
 | Jev Handoff | `jev_handoff` | system_prompt | [jev_handoff/system_prompt.md](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_handoff/system_prompt.md) |
 | Jev Run State | `jev_run_state` | system_prompt | [jev_run_state/system_prompt.md](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_run_state/system_prompt.md) |
 | Mimic Behavior | `mimic_behavior` | mimic_prompt | [mimic_behavior/mimic_prompt.md](https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/mimic_behavior/mimic_prompt.md) |
@@ -237,6 +238,14 @@ request, the run state, the handoff, and the Jev questions that failed, and tell
 to complete only the missing parts, with more focus on them.
 
 Link: <https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_continuation/continue_prompt.md>
+
+#### Jev Fresh Continuation — `jev_fresh_continuation`
+
+Instructions for a clean-context JevAgent continuation. It gives the fresh agent
+the original request, the run state, and the latest handoff, then asks it to
+complete the request using those references.
+
+Link: <https://github.com/cerredz/Vidbyte-SDK/blob/main/vidbyte/prompts/prompts/jev_fresh_continuation/fresh_prompt.md>
 
 #### Jev Handoff — `jev_handoff`
 

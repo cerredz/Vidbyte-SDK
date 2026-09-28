@@ -42,6 +42,13 @@ class JevDoneCheck(str, Enum):
     MULTI_PART = "multi_part"
 
 
+class JevContinuationGate(str, Enum):
+    """How JevAgent applies a failed done check before returning to work."""
+
+    SAME_CONTEXT = "same_context"
+    FRESH = "fresh"
+
+
 class JevDoneQuestionKey(str, Enum):
     """The key of every fixed done question, prefixed by the done check that asks it.
 
@@ -73,4 +80,4 @@ class JevPreflightQuestionKey(str, Enum):
     CLARITY_SINGLE_READING = "clarity.single_reading"
 
 
-__all__ = ["JevDoneCheck", "JevDoneQuestionKey", "JevPreflightPreset", "JevPreflightQuestionKey", "JevQuestionType"]
+__all__ = ["JevContinuationGate", "JevDoneCheck", "JevDoneQuestionKey", "JevPreflightPreset", "JevPreflightQuestionKey", "JevQuestionType"]

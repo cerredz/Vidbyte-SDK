@@ -28,7 +28,7 @@ from vidbyte.lib.dataclasses.jev import (
     JevRunStateRecord,
     JevSpecialist,
 )
-from vidbyte.lib.enums.jev import JevDoneCheck, JevPreflightPreset
+from vidbyte.lib.enums.jev import JevContinuationGate, JevDoneCheck, JevPreflightPreset
 
 __all__ = [
     "JevAgent",
@@ -37,6 +37,7 @@ __all__ = [
     "JevClarification",
     "JevClarifyingQuestion",
     "JevContinualSettings",
+    "JevContinuationGate",
     "JevDeliverable",
     "JevDeliverableEvidence",
     "JevDoneCheck",

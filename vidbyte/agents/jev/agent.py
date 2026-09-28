@@ -14,13 +14,13 @@ from __future__ import annotations
 from typing import Any
 
 from vidbyte.agents.base import BaseAgent
-from vidbyte.agents.jev.continuation import JevDoneContinuation
+from vidbyte.agents.jev.continuation import JevDoneContinuation, JevFreshContinuation
 from vidbyte.agents.jev.done import JevRunState
 from vidbyte.agents.jev.gate import JevPreflightGate
 from vidbyte.agents.jev.response import JevResponse
 from vidbyte.agents.jev.settings import JevAgentSettings, JevRuntimeSettings
 from vidbyte.lib.dataclasses.jev import JevAgentResponse
-from vidbyte.lib.enums import AgentRuntimeType
+from vidbyte.lib.enums import AgentRuntimeType, JevContinuationGate
 from vidbyte.lib.errors import ConfigurationError
 
 
@@ -41,7 +41,24 @@ class JevAgent(BaseAgent):
         self._response = JevResponse()
         self.preflight = JevPreflightGate(settings, runtime_settings, self._response)
         self.run_state = JevRunState(settings, runtime_settings, self._response) if runtime_settings.continual.checks else None
-        self.continuation = None if self.run_state is None else JevDoneContinuation(self.run_state, runtime_settings.continual, self._response)
+        if self.run_state is None:
+            self.continuation = None
+        elif runtime_settings.continual.gate is JevContinuationGate.FRESH:
+            fresh_agent = BaseAgent(
+                name=f"{settings.name}-fresh-continuation",
+                system_prompt=settings.system_prompt,
+                provider=settings.provider,
+                model_name=settings.model_name,
+                api_key=settings.api_key,
+                temperature=settings.temperature,
+                timeout_seconds=settings.timeout_seconds,
+                tools=settings.tools,
+                permission_policy=settings.permission_policy,
+                agent_loop_settings=settings.loop,
+            )
+            self.continuation = JevFreshContinuation(self.run_state, runtime_settings.continual, self._response, fresh_agent)
+        else:
+            self.continuation = JevDoneContinuation(self.run_state, runtime_settings.continual, self._response)
         super().__init__(
             name=settings.name,
             system_prompt=settings.system_prompt,

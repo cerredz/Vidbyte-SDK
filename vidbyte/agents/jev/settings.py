@@ -28,7 +28,12 @@ from vidbyte.lib.constants.jev import (
 )
 from vidbyte.lib.dataclasses.jev import JevSpecialist
 from vidbyte.lib.dataclasses.model_configs import DecisionModelConfig
-from vidbyte.lib.enums import JevDoneCheck, JevPreflightPreset, ModelProvider
+from vidbyte.lib.enums import (
+    JevContinuationGate,
+    JevDoneCheck,
+    JevPreflightPreset,
+    ModelProvider,
+)
 from vidbyte.lib.errors import ConfigurationError
 from vidbyte.lib.jev import JevDoneRegistry, JevPreflightRegistry
 from vidbyte.tools.security import PermissionPolicy
@@ -126,9 +131,10 @@ class JevAgentSettings:
 
 @dataclass(frozen=True, slots=True)
 class JevContinualSettings:
-    """Validated continuation settings: the done checks run at every finish attempt, how often a failed one may send the main agent back to work, and the limits of the run-state and handoff agents."""
+    """Validated continuation settings: done checks, how failed checks return to work, and the run-state and handoff limits."""
 
     checks: tuple[JevDoneCheck | str, ...] = ()
+    gate: JevContinuationGate | str = JevContinuationGate.SAME_CONTEXT
     max_continuations: int = JEV_DONE_MAX_CONTINUATIONS
     run_state_max_iterations: int = JEV_RUN_STATE_MAX_ITERATIONS
     run_state_max_tokens: int = JEV_RUN_STATE_MAX_TOKENS
@@ -141,6 +147,13 @@ class JevContinualSettings:
         # max_continuations may be 0: the checks still run and report on JevAgent.response, but a failed
         # check never sends the main agent back to work.
         object.__setattr__(self, "checks", JevDoneRegistry.validate(self.checks))
+        try:
+            gate = self.gate if isinstance(self.gate, JevContinuationGate) else JevContinuationGate(self.gate)
+        except (TypeError, ValueError) as exc:
+            raise ConfigurationError(f"Unsupported Jev continuation gate: {self.gate!r}") from exc
+        if gate is JevContinuationGate.FRESH and not self.checks:
+            raise ConfigurationError("JevContinualSettings.gate='fresh' requires at least one done check.")
+        object.__setattr__(self, "gate", gate)
         self._validate_count("max_continuations", minimum=0)
         for field_name in ("run_state_max_iterations", "run_state_max_tokens", "handoff_max_iterations", "handoff_max_tokens"):
             self._validate_count(field_name, minimum=1)

@@ -50,6 +50,7 @@ from vidbyte.lib.enums.cot_events import (
     Reversibility,
 )
 from vidbyte.lib.enums.jev import (
+    JevContinuationGate,
     JevDoneCheck,
     JevDoneQuestionKey,
     JevPreflightPreset,
@@ -93,6 +94,7 @@ from vidbyte.lib.enums.speed import AgentSpeedRecordingIntegrity
 from vidbyte.lib.enums.structured_output import StructuredOutputSupport
 
 __all__ = [
+    "JevContinuationGate",
     "JevDoneCheck",
     "JevDoneQuestionKey",
     "JevPreflightPreset",
