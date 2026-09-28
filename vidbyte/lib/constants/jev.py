@@ -80,11 +80,12 @@ JEV_SPECIALIST_QUESTION_NAME: str = "specialist"
 JEV_SPECIALIST_NONE: str = "none"
 JEV_SPECIALIST_MAX_COUNT: int = JEV_MAX_CHOICE_OPTIONS - 1
 
-# Done checks. A done check runs each time the main agent tries to finish. Every enabled check's questions
-# go to Jev in one request; the multi-part check asks one question per deliverable, and a run is complete
-# only when every deliverable's P(yes) reaches the threshold (used as both the mean threshold and the veto).
-# 0.8 is a starting point, not a tuned value.
+# Done checks. Every enabled check asks its questions in one request on each finish attempt. A check's
+# threshold is used as both the mean threshold and veto, so one clear no is not averaged away.
+# Both thresholds are starting points, not values tuned on a labeled set.
 JEV_MULTI_PART_THRESHOLD: float = 0.8
+# Each checkable final-answer claim must reach this P(yes), alone and in the mean, before it is considered supported.
+JEV_CLAIMS_THRESHOLD: float = 0.85
 # Default of JevContinualSettings.max_continuations: how many times a failed done check may send the main
 # agent back to work before its answer is accepted.
 JEV_DONE_MAX_CONTINUATIONS: int = 3
@@ -95,6 +96,8 @@ JEV_DONE_DELIVERABLES_FIELD: str = "deliverables"
 JEV_DONE_DELIVERABLE_FIELD: str = "deliverable"
 JEV_DONE_COMPLETION_SIGNAL_FIELD: str = "completion_signal"
 JEV_DONE_EVIDENCE_FIELD: str = "evidence"
+JEV_DONE_CLAIMS_FIELD: str = "claims"
+JEV_DONE_CLAIM_FIELD: str = "claim"
 # A deliverable ID is a short lowercase identifier JevRunState writes and JevHandoff must echo exactly.
 JEV_DELIVERABLE_ID_PATTERN: str = r"^[a-z][a-z0-9_]{0,63}$"
 # Defaults of the JevRunState and JevHandoff limits in JevContinualSettings: each writes one structured reply,
@@ -110,6 +113,7 @@ JEV_TOOL_SELECTOR_MAX_THRESHOLD: float = 1.0
 JEV_TOOL_SELECTOR_MIN_THRESHOLD: float = 0.0
 
 __all__ = [
+    "JEV_CLAIMS_THRESHOLD",
     "JEV_CLARIFICATION_MAX_ITERATIONS",
     "JEV_CLARIFICATION_MAX_QUESTIONS",
     "JEV_CLARIFICATION_MAX_RECOMMENDATIONS",
@@ -122,6 +126,8 @@ __all__ = [
     "JEV_DEFAULT_TIMEOUT_SECONDS",
     "JEV_DELIVERABLE_ID_PATTERN",
     "JEV_DONE_COMPLETION_SIGNAL_FIELD",
+    "JEV_DONE_CLAIM_FIELD",
+    "JEV_DONE_CLAIMS_FIELD",
     "JEV_DONE_DELIVERABLES_FIELD",
     "JEV_DONE_DELIVERABLE_FIELD",
     "JEV_DONE_EVIDENCE_FIELD",

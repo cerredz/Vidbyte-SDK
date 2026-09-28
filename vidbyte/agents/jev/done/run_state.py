@@ -1,11 +1,11 @@
 """FILE: vidbyte/agents/jev/done/run_state.py
 
-PURPOSE: Implements JevRunState, the class that owns JevAgent's done checks: it builds the structured run-state schema the enabled checks need, runs the generative model once to write the run state from the user's request, and at every finish attempt has JevHandoff compile the evidence, asks Jev every enabled check's fixed questions in one request, and returns the checks that failed.
+PURPOSE: Implements JevRunState, the class that owns JevAgent's done checks: it writes request-derived run state once, has JevHandoff compile final-answer evidence at every finish attempt, asks every enabled check's fixed questions in one request, and returns the checks that failed.
 ROLE IN CODEBASE: JevAgent builds one JevRunState at construction when JevRuntimeSettings.continual enables a done check and passes it to JevRuntime, which calls begin() before the main loop, and JevDoneContinuation (vidbyte/agents/jev/continuation/) calls check() each time the main agent tries to finish; outcomes reach the user through JevResponse on JevAgent.response.
-ARCHITECTURE NOTE: The run state is general: its schema is the central JevRunStatePayload plus one field per enabled JevDoneCheck, typed as that check's section payload and described by its SECTION text, so a new check adds one entry to _SECTIONS and one case each to _section() and _judge() instead of a new class; what the main agent reads when a check fails belongs to JevDoneContinuation. Every enabled check's questions go to Jev in one request (combine()), over one shared state. Question text and thresholds stay in vidbyte/lib/jev/done/ (JevDoneRegistry), and DecisionModelRunner.score_noul turns answers into a pass or fail. Writing the state and the evidence is generation, so it belongs to generative agents (this class and JevHandoff, skills/asking-jev-questions/SKILL.md strategy 16); Jev only recognizes whether the evidence shows each item.
-COMMON MODIFICATION PATTERNS: Change what the agent writes in vidbyte/prompts/prompts/jev_run_state/system_prompt.md and each field's description in vidbyte/lib/dataclasses/jev.py; add a done check's section to _SECTIONS, its record conversion to _record(), and its commented case to _section() and _judge().
-KNOWN EDGE CASES: Every failure fails open: no run state means no check, and an unavailable handoff or Jev answer marks the check unavailable and lets the answer stand. A request with no deliverables passes with nothing to ask. Like the JevAgent that owns it, one instance serves one run at a time.
-RELATED DOCS: docs/design/jev-multipart-done-criteria.md, skills/jev-agent/SKILL.md, and skills/asking-jev-questions/SKILL.md.
+ARCHITECTURE NOTE: The run state is general: its schema is the central JevRunStatePayload plus request-derived sections for enabled checks, while claims that do not exist until the final answer are extracted by JevHandoff and added to the shared Jev state at check time. Every enabled check's questions go to Jev in one request (combine()), and what the main agent reads on failure belongs to JevDoneContinuation. Question text and thresholds stay in vidbyte/lib/jev/done/ (JevDoneRegistry), and DecisionModelRunner.score_noul turns answers into a pass or fail. Generative agents write the state and evidence; Jev only recognizes whether the evidence shows each item.
+COMMON MODIFICATION PATTERNS: Add request-derived sections to _SECTIONS, _record(), and the commented _section() case; add post-run-derived sections to JevHandoff and build their claims and questions in _section() from its typed record. Add every check's commented case to _judge() and its continuation explanation to JevDoneContinuation._explain().
+KNOWN EDGE CASES: Every failure fails open: no run state means no check, and an unavailable handoff or Jev answer marks the check unavailable and lets the answer stand. An empty request-derived item list or an empty post-run claim list passes with nothing to ask. Like the JevAgent that owns it, one instance serves one run at a time.
+RELATED DOCS: docs/design/jev-multipart-done-criteria.md, docs/design/jev-claims-done-criteria.md, skills/jev-agent/SKILL.md, skills/jev-continuation/SKILL.md, and skills/asking-jev-questions/SKILL.md.
 TESTS: tests/test_jev_done.py.
 """
 
@@ -24,6 +24,8 @@ from vidbyte.agents.jev.settings import JevAgentSettings, JevRuntimeSettings
 from vidbyte.agents.pricing import JevUsage
 from vidbyte.agents.settings import AgentLoopSettings
 from vidbyte.lib.constants.jev import (
+    JEV_DONE_CLAIM_FIELD,
+    JEV_DONE_CLAIMS_FIELD,
     JEV_DONE_COMPLETION_SIGNAL_FIELD,
     JEV_DONE_DELIVERABLE_FIELD,
     JEV_DONE_DELIVERABLES_FIELD,
@@ -57,7 +59,7 @@ from vidbyte.tools.types import ToolCallContext
 class JevRunState(BaseAgent):
     """Generative agent that writes the run state the enabled done checks read, and runs those checks at every finish attempt."""
 
-    # One run-state section per done check; the field name is the check's value, and the enum is the only option list.
+    # Request-derived checks add a section here; CLAIMS items are extracted after work by the handoff instead.
     _SECTIONS: ClassVar[Mapping[JevDoneCheck, type[JevSectionPayload]]] = MappingProxyType({JevDoneCheck.MULTI_PART: JevMultiPartPayload})
 
     def __init__(self, settings: JevAgentSettings, runtime_settings: JevRuntimeSettings, response: JevResponse) -> None:
@@ -91,8 +93,8 @@ class JevRunState(BaseAgent):
 
     @classmethod
     def schema(cls, checks: tuple[JevDoneCheck, ...]) -> type[JevRunStatePayload]:
-        """Return the run state's output schema: the central JevRunStatePayload plus one described section per enabled check."""
-        sections: dict[str, Any] = {check.value: (cls._SECTIONS[check], Field(description=cls._SECTIONS[check].SECTION)) for check in checks}
+        """Return the central request-derived state plus described sections for enabled checks with pre-run items."""
+        sections: dict[str, Any] = {check.value: (cls._SECTIONS[check], Field(description=cls._SECTIONS[check].SECTION)) for check in checks if check in cls._SECTIONS}
         return create_model("JevRunStatePayload", __base__=JevRunStatePayload, **sections)
 
     async def begin(self, request: str) -> None:
@@ -182,6 +184,16 @@ class JevRunState(BaseAgent):
                     for deliverable in state.deliverables
                 }
                 return {JEV_DONE_DELIVERABLES_FIELD: entries}, tuple(question.to_question(identifier) for identifier in state.ids())
+            case JevDoneCheck.CLAIMS:
+                # Claims are only knowable from the final answer, so use the handoff's post-run candidates and
+                # pair each claim with tool evidence; the handoff's `missing` judgment stays out of Jev's state.
+                # @intent claims-come-from-finished-answer
+                # Generating these candidates before the main agent works would make them predictions, not claims.
+                if handoff.claims is None:
+                    return {}, ()
+                question = JevDoneRegistry.question(JevDoneCheck.CLAIMS)
+                entries = {claim.id: {JEV_DONE_CLAIM_FIELD: claim.claim, JEV_DONE_EVIDENCE_FIELD: claim.evidence} for claim in handoff.claims.claims}
+                return {JEV_DONE_CLAIMS_FIELD: entries}, tuple(question.to_question(identifier) for identifier in handoff.claims.ids())
 
     def _judge(self, check: JevDoneCheck, handoff: JevHandoffRecord | None, decision: DecisionModelResponse | None) -> JevDoneResult:
         # Scores one enabled done check from the combined request's answers; one commented case per check.
@@ -190,6 +202,10 @@ class JevRunState(BaseAgent):
                 # Every deliverable the request asks for must be shown produced in full: Jev answered one
                 # question per deliverable, and code joins them with a veto so one clear no is never averaged away.
                 return self._multi_part(handoff, decision)
+            case JevDoneCheck.CLAIMS:
+                # Each extracted final-answer claim must independently reach the support threshold, so one
+                # unsupported assertion sends the agent back to that claim rather than averaging it away.
+                return self._claims(handoff, decision)
 
     def _multi_part(self, handoff: JevHandoffRecord | None, decision: DecisionModelResponse | None) -> JevDoneResult:
         # Turns Jev's answers about each deliverable into the multi-part result, scored with score_noul.
@@ -220,6 +236,39 @@ class JevRunState(BaseAgent):
         # One request answered every enabled check, so its usage is the cost of this finish attempt's checks.
         usage = JevUsage.from_usage_payload(decision.usage or {})
         return JevDoneResult(check=JevDoneCheck.MULTI_PART, score=verdict.score, passed=verdict.passed, answers=verdict.answers, incomplete=incomplete, usage=usage)
+
+    # @intent final-answer-claims-need-independent-evidence
+    # CLAIMS guards the trust boundary between an agent's self-report and the work the run actually records.
+    # A polished final answer can claim edits or passing tests that were never made, and a run-wide average
+    # could hide one unsupported statement among several true ones. Each claim therefore gets its own Jev
+    # answer and must independently reach the threshold; only the unsupported claims are sent back as focus.
+    # The claim list comes from this finish attempt's final answer, not the request: precomputing it would turn
+    # expected work into claims the agent never made, while using the handoff's own `missing` verdict would let
+    # one generative model validate its own judgment. Keep Jev's input to the claim and tool-call evidence.
+    # A rewrite that checks only the final answer or merges claims can let an unperformed change or failed test
+    # pass without evidence, misleading the SDK caller about what this run actually accomplished.
+    def _claims(self, handoff: JevHandoffRecord | None, decision: DecisionModelResponse | None) -> JevDoneResult:
+        # Uses only claims extracted from this finish attempt's final answer and paired with the run's tool-call evidence.
+        if handoff is None or handoff.claims is None:
+            return JevDoneResult(check=JevDoneCheck.CLAIMS, score=None, available=False)
+        # A final answer with no concrete, checkable claims has nothing for Jev to check and passes without a call.
+        if not handoff.claims.claims:
+            return JevDoneResult(check=JevDoneCheck.CLAIMS, score=None)
+        # Missing credentials or a failed combined Jev request leaves the main agent's answer standing.
+        if decision is None:
+            return JevDoneResult(check=JevDoneCheck.CLAIMS, score=None, available=False)
+        question = JevDoneRegistry.question(JevDoneCheck.CLAIMS)
+        threshold = JevDoneRegistry.threshold(JevDoneCheck.CLAIMS)
+        # The combined reply holds every enabled check's answers; keep only answers named for this check's claim ids.
+        answers = {identifier: decision.answers[question.name(identifier)] for identifier in handoff.claims.ids() if question.name(identifier) in decision.answers}
+        # The threshold is also the veto, so one claim with a clear no cannot be hidden by other supported claims.
+        verdict = DecisionModelRunner.score_noul(answers, handoff.claims.ids(), threshold, threshold)
+        if verdict is None:
+            return JevDoneResult(check=JevDoneCheck.CLAIMS, score=None, available=False)
+        # Only claims below the threshold appear in the continuation's Failed checks and Focus sections.
+        incomplete = tuple(identifier for identifier in handoff.claims.ids() if verdict.answers[identifier].probabilities[JEV_NOUL_TRUE] < threshold)
+        usage = JevUsage.from_usage_payload(decision.usage or {})
+        return JevDoneResult(check=JevDoneCheck.CLAIMS, score=verdict.score, passed=verdict.passed, answers=verdict.answers, incomplete=incomplete, usage=usage)
 
     def _record(self, payload: JevRunStatePayload) -> JevRunStateRecord:
         # Converts the validated reply into the frozen record the response exposes and the checks read.

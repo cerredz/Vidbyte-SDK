@@ -1,11 +1,11 @@
 """FILE: vidbyte/lib/dataclasses/jev.py
 
-PURPOSE: Defines the validated records for TypeSafe Jev decisions (JSON content, options, questions, requests, normalized answers, wire bodies, model cards, and decision-log records), for JevAgent preflight (the noul score, the question brief and criteria, the question base, preset definitions, preset results, the specialists JevAgent can hand a run to, the clarification agent's structured reply and the clarification built from it), for JevAgent done checks (the run-state and handoff structured replies with a described field per section, the run-state, deliverable, evidence, and handoff records, the done question base, and done results), and the JevAgentResponse the user reads after a run.
+PURPOSE: Defines the validated records for TypeSafe Jev decisions (JSON content, options, questions, requests, normalized answers, wire bodies, model cards, and decision-log records), for JevAgent preflight (the noul score, the question brief and criteria, the question base, preset definitions, preset results, the specialists JevAgent can hand a run to, the clarification agent's structured reply and the clarification built from it), for JevAgent done checks (the run-state and handoff structured replies, deliverable and claim evidence, handoff records, the done question base, and done results), and the JevAgentResponse the user reads after a run.
 ROLE IN CODEBASE: `vidbyte/providers/typesafe.py` builds TypeSafeWireRequest from JevDecisionRequest and JevAnswer values from responses, while `vidbyte/lib/runners/decision.py` passes the typed records through.
 ARCHITECTURE NOTE: This module must not import model_configs because that would close an import cycle through ModalityDetector. Records own every shape rule in __post_init__; the provider, not these records, turns a wire record into the JSON body (lint S060 bars dict[str, Any] encoders here).
-COMMON MODIFICATION PATTERNS: Mirror https://docs.typesafe.ai/api.md exactly: add a field together with its validation, its wire record, and its provider serialization; keep bounds in vidbyte/lib/constants/jev.py.
+COMMON MODIFICATION PATTERNS: Mirror https://docs.typesafe.ai/api.md exactly: add a field together with its validation, its wire record, and its provider serialization; keep bounds in vidbyte/lib/constants/jev.py. New done-check evidence records and their structured payloads belong beside the other Jev records; items derived from the finished answer need not be fields on JevRunStateRecord.
 KNOWN EDGE CASES: State, instructions, and criteria may be a string or JSON structure; noul criteria are optional; score answers carry a probability-weighted `score` that can land between levels; noul answers carry no confidence. JevPreflightQuestion and JevDoneQuestion are deliberately not slotted because every concrete question subclass redeclares its fields with defaults. The clarification, run-state, and handoff payloads are pydantic models because they are the output_schema their generative agents are held to; every field's description is the instruction the model reads for that field, and each done-check section payload carries a SECTION description for the field JevRunState and JevHandoff add when that check is enabled. The records built from those replies hold validated fields only; converting a reply into a record belongs to the agent that asked for it.
-RELATED DOCS: docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, https://docs.typesafe.ai/api.md, and https://docs.typesafe.ai/primitives/advanced.md.
+RELATED DOCS: docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, docs/design/jev-claims-done-criteria.md, skills/jev-continuation/SKILL.md, https://docs.typesafe.ai/api.md, and https://docs.typesafe.ai/primitives/advanced.md.
 TESTS: tests/test_jev_agent.py, tests/test_jev_preflight.py, and scripts/test-jev-agent-scaffold.py.
 """
 
@@ -718,8 +718,29 @@ class JevMultiPartEvidencePayload(JevSectionPayload):
     deliverables: list[JevDeliverableEvidencePayload] = Field(description="The deliverables hold one evidence entry for every deliverable in the run state's multi-part section, with the same ids and in the same order. Each entry gathers the parts of the run that bear on that one deliverable and states what the run does not show for it. An entry never borrows evidence from another deliverable unless the same piece of the run truly concerns both, in which case it is repeated in each. Do not add entries for work the run did that no deliverable asks for. Never leave a deliverable out, even when the run did nothing toward it.")
 
 
+class JevClaimEvidencePayload(BaseModel):
+    """One concrete, checkable final-answer claim and the tool-call evidence paired with it."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(pattern=JEV_DELIVERABLE_ID_PATTERN, description="Give this claim a short, stable id in lowercase letters, digits, and underscores, starting with a letter and no longer than sixty-four characters. Derive the id from the work or target named by the claim rather than assigning a position number. Use a different id for every entry, including two claims about the same file, and copy each id unchanged into the record. The id lets the checker return an answer for exactly one claim.")
+    claim: str = Field(min_length=1, description="Copy one concrete, independently checkable factual assertion from the main agent's final answer about the task, its files or data, an observed command or test result, or work done during this run. Preserve its specific subject and scope so one or more tool calls can support or fail to support it. Split a sentence that makes separate factual assertions into one entry per assertion, so each entry gets its own yes or no. Do not turn plans, recommendations, subjective opinions, generic acknowledgments, or statements without checkable content into claims.")
+    evidence: str = Field(min_length=1, description="Pair this claim with the tool calls from the run that bear directly on its exact factual content, including each call's name, relevant arguments, execution state, and output. A read or search result can support a claim about what a file or source contains; a mutating call can support a claim that the agent changed a target; a command result can support a claim about what that command reported. Report calls in the order they happened, including failed attempts and later changes that superseded an earlier result. A claim repeated in the final answer is not evidence. When no tool call supports the claim, state plainly that no supporting tool call was found.")
+    missing: str = Field(min_length=1, description="Say what the available tool-call evidence does not show for this claim, in terms the main agent can act on. Name the missing action, target, or successful result, or say that no support for the claim appears in the run. If a failed attempt was later replaced by a successful one, describe only what remains unsupported after the later attempt. When the tool calls do support the claim, state that nothing is missing.")
+
+
+class JevClaimsEvidencePayload(JevSectionPayload):
+    """The claims section of the handoff: concrete final-answer assertions paired with tool-call evidence."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    SECTION: ClassVar[str] = "The claims section checks concrete, independently verifiable factual assertions in the main agent's final answer about the task, its artifacts, observed results, or work completed during this run. Claims are extracted from that final answer after the work, because their exact wording and number cannot be known in the pre-run state. For each claim, report the tool calls that support its factual content or state that no supporting tool call was found, and separately tell the main agent what remains unshown. Include unsupported claims instead of omitting them, and split compound statements when their facts can be judged separately. This section reports observations and never decides whether a claim is true."
+
+    claims: list[JevClaimEvidencePayload] = Field(description="Return one entry for every concrete, independently checkable factual assertion in the final answer about the task, its files or data, a command or test result, or work performed during this run. Copy the assertion's meaning and specific subject, and split separate facts into separate entries so each receives one judgment. Match each entry with relevant tool calls and their outcomes, or explicitly report that none support it; the claim itself and the handoff's opinion are not evidence. Give each entry a unique stable id, and return an empty list only when the final answer makes no concrete factual assertions to check.")
+
+
 class JevDeliverableId:
-    """Shared validation for the deliverable identifiers JevRunState writes and JevHandoff echoes."""
+    """Shared validation for the stable item identifiers used by done-check records and questions."""
 
     @staticmethod
     def require(value: object, *, field_name: str) -> str:
@@ -730,10 +751,10 @@ class JevDeliverableId:
 
     @staticmethod
     def require_unique(ids: tuple[str, ...], *, field_name: str) -> None:
-        # Rejects a repeated identifier, since every later step matches deliverables by id.
+        # Rejects a repeated identifier, since every later step matches done-check items by id.
         duplicates = sorted({identifier for identifier in ids if ids.count(identifier) > 1})
         if duplicates:
-            raise JevValidation.error(field_name, "unique deliverable ids", f"duplicates {duplicates}")
+            raise JevValidation.error(field_name, "unique item ids", f"duplicates {duplicates}")
 
 
 @dataclass(frozen=True, slots=True)
@@ -827,19 +848,56 @@ class JevMultiPartEvidence:
 
 
 @dataclass(frozen=True, slots=True)
+class JevClaimEvidence:
+    """One checkable final-answer claim, the tool-call evidence about it, and what remains unsupported."""
+
+    id: str
+    claim: str
+    evidence: str
+    missing: str
+
+    def __post_init__(self) -> None:
+        # Requires a stable claim id and non-blank claim, evidence, and missing text.
+        JevDeliverableId.require(self.id, field_name="claim evidence id")
+        JevText.require(self.claim, field_name=f"claim {self.id!r}")
+        JevText.require(self.evidence, field_name=f"evidence of claim {self.id!r}")
+        JevText.require(self.missing, field_name=f"missing of claim {self.id!r}")
+
+
+@dataclass(frozen=True, slots=True)
+class JevClaimsEvidence:
+    """The final-answer claims the handoff found, each paired with evidence from the run's tool calls."""
+
+    claims: tuple[JevClaimEvidence, ...] = ()
+
+    def __post_init__(self) -> None:
+        # Requires immutable typed claim entries with unique ids, so answers map back to one claim each.
+        if not isinstance(self.claims, tuple) or not all(isinstance(item, JevClaimEvidence) for item in self.claims):
+            raise JevValidation.error("claims evidence", "a tuple of JevClaimEvidence values", self.claims)
+        JevDeliverableId.require_unique(self.ids(), field_name="claims evidence")
+
+    def ids(self) -> tuple[str, ...]:
+        """Return every extracted claim id in final-answer order."""
+        return tuple(item.id for item in self.claims)
+
+
+@dataclass(frozen=True, slots=True)
 class JevHandoffRecord:
     """The evidence JevHandoff compiled from the main agent's run for every enabled done check.
 
-    `multi_part` is set only when the MULTI_PART done check is enabled, and `usage` is JevHandoff's own model usage.
+    `multi_part` and `claims` are set only when their respective done checks are enabled, and `usage` is JevHandoff's own model usage.
     """
 
     multi_part: JevMultiPartEvidence | None = None
+    claims: JevClaimsEvidence | None = None
     usage: UsageRollup | None = None
 
     def __post_init__(self) -> None:
-        # Requires a typed multi-part evidence section when present.
+        # Requires a typed evidence section for each enabled done check when present.
         if self.multi_part is not None and not isinstance(self.multi_part, JevMultiPartEvidence):
             raise JevValidation.error("handoff multi_part", "a JevMultiPartEvidence or None", self.multi_part)
+        if self.claims is not None and not isinstance(self.claims, JevClaimsEvidence):
+            raise JevValidation.error("handoff claims", "a JevClaimsEvidence or None", self.claims)
 
 
 @dataclass(frozen=True)
@@ -889,10 +947,11 @@ class JevDoneQuestion:
 class JevDoneResult:
     """What one enabled done check decided the last time the main agent tried to finish.
 
-    `answers` holds Jev's answer per deliverable id, `score` is their mean P(yes), and `incomplete` names
-    the deliverables whose P(yes) fell below the check's threshold. With `available=False` the run state,
-    the handoff, or Jev was unavailable, `score` is None, and the check fails open (`passed` stays True).
-    `usage` is the usage of the one Jev request that asked every enabled check's questions at that finish attempt.
+    `answers` holds Jev's answer per checked-item id, `score` is their mean P(yes), and `incomplete` names
+    the items whose P(yes) fell below the check's threshold. Those items are deliverables for MULTI_PART and
+    final-answer claims for CLAIMS. With `available=False` the run state, the handoff, or Jev was unavailable,
+    `score` is None, and the check fails open (`passed` stays True). `usage` is from the one Jev request that
+    asked every enabled check's questions at that finish attempt.
     """
 
     check: JevDoneCheck
@@ -911,7 +970,7 @@ class JevDoneResult:
             object.__setattr__(self, "score", JevProbability.require(self.score, field_name="done result score"))
         object.__setattr__(self, "answers", MappingProxyType(dict(self.answers)))
         if not isinstance(self.incomplete, tuple):
-            raise JevValidation.error("done result incomplete", "a tuple of deliverable ids", self.incomplete)
+            raise JevValidation.error("done result incomplete", "a tuple of checked-item ids", self.incomplete)
 
 
 @dataclass(frozen=True, slots=True)
@@ -992,6 +1051,10 @@ __all__ = [
     "JevClarificationPayload",
     "JevClarifyingQuestion",
     "JevClarifyingQuestionPayload",
+    "JevClaimEvidence",
+    "JevClaimEvidencePayload",
+    "JevClaimsEvidence",
+    "JevClaimsEvidencePayload",
     "JevContent",
     "JevCriterion",
     "JevDecisionRecord",

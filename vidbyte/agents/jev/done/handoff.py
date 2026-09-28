@@ -1,11 +1,11 @@
 """FILE: vidbyte/agents/jev/done/handoff.py
 
-PURPOSE: Implements JevHandoff, the generative agent that reads the main agent's context window each time it tries to finish and compiles the evidence every enabled done check needs, in a shape tailored to each check.
+PURPOSE: Implements JevHandoff, the generative agent that reads the main agent's context window at each finish attempt, compiles evidence for request-derived checks, and extracts checkable final-answer claims for CLAIMS.
 ROLE IN CODEBASE: JevRunState builds one JevHandoff at construction and calls compile() from its check(); Jev then answers one question per item, all in one request, over the compiled evidence.
-ARCHITECTURE NOTE: The handoff is general: its output schema is JevHandoffPayload plus one field per enabled JevDoneCheck, typed as that check's evidence payload and described by its SECTION text, so a new check adds one entry to _SECTIONS instead of a new class. It reads the user's request as its message and the run state and the main agent's window as a vidbyte.context ContextManager of standard primitives; it reuses the JevAgent's generative model, but its prompt is fixed, it has no tools, and its reply is held to the composed schema.
-COMMON MODIFICATION PATTERNS: Change what the agent writes in vidbyte/prompts/prompts/jev_handoff/system_prompt.md and each field's description in vidbyte/lib/dataclasses/jev.py; add a done check's evidence section to _SECTIONS and its record conversion to _record().
-KNOWN EDGE CASES: A generative failure, a reply that never matches the schema, or evidence whose deliverable ids differ from the run state's returns None, so the done check fails open. History is cleared before every call, so an earlier finish attempt's handoff never leaks into a later one.
-RELATED DOCS: docs/design/jev-multipart-done-criteria.md, skills/jev-agent/SKILL.md, and skills/asking-jev-questions/SKILL.md.
+ARCHITECTURE NOTE: The handoff is general: its output schema is JevHandoffPayload plus one field per enabled check, typed as that check's evidence payload and described by its SECTION text. It reads the user's request as its message and the run state and main agent's window as standard `vidbyte.context` primitives, including every `ToolCallContextItem`; it reuses the JevAgent's generative model, has no tools, and is constrained by the composed schema. Claims are generated from the final answer here because their item list does not exist before the main agent works.
+COMMON MODIFICATION PATTERNS: Change field instructions in `vidbyte/lib/dataclasses/jev.py`; add an enabled handoff section to _SECTIONS and convert it in _record(). Compare ids to run-state items only for checks whose candidates were written before work, not for dynamic final-answer claims.
+KNOWN EDGE CASES: A generative failure, a reply that never matches the schema, or request-derived evidence whose ids differ from the run state's returns None, so checks fail open. Claims have no pre-run id list; their ids must be valid and unique within the generated claim section. History is cleared before each call, so an earlier finish attempt's handoff never leaks into a later one.
+RELATED DOCS: docs/design/jev-multipart-done-criteria.md, docs/design/jev-claims-done-criteria.md, skills/jev-agent/SKILL.md, skills/jev-continuation/SKILL.md, and skills/asking-jev-questions/SKILL.md.
 TESTS: tests/test_jev_done.py.
 """
 
@@ -29,6 +29,9 @@ from vidbyte.context.primitives import (
 )
 from vidbyte.lib.dataclasses.agents import AgentInput
 from vidbyte.lib.dataclasses.jev import (
+    JevClaimEvidence,
+    JevClaimsEvidence,
+    JevClaimsEvidencePayload,
     JevDeliverableEvidence,
     JevHandoffPayload,
     JevHandoffRecord,
@@ -54,7 +57,7 @@ class JevHandoff(BaseAgent):
     """Generative agent that compiles, from the main agent's context window, the evidence every enabled done check needs."""
 
     # One evidence section per done check; the field name is the check's value, so the reply mirrors the run state.
-    _SECTIONS: ClassVar[Mapping[JevDoneCheck, type[JevSectionPayload]]] = MappingProxyType({JevDoneCheck.MULTI_PART: JevMultiPartEvidencePayload})
+    _SECTIONS: ClassVar[Mapping[JevDoneCheck, type[JevSectionPayload]]] = MappingProxyType({JevDoneCheck.MULTI_PART: JevMultiPartEvidencePayload, JevDoneCheck.CLAIMS: JevClaimsEvidencePayload})
 
     def __init__(self, settings: JevAgentSettings, continual: JevContinualSettings) -> None:
         # Reuses the JevAgent's generative model and key and takes its limits from the continuation settings; the prompt, schema, and empty tool list are fixed here.
@@ -96,7 +99,7 @@ class JevHandoff(BaseAgent):
         return ContextManager(items)
 
     async def compile(self, request: str, state: JevRunStateRecord, window: ContextManager) -> JevHandoffRecord | None:
-        """Return the evidence for every enabled check, or None when the agent wrote none that matches the run state."""
+        """Return evidence for every enabled check, or None when a request-derived section does not match run state."""
         self.history.clear()
         self.rendered = ""
         try:
@@ -124,7 +127,14 @@ class JevHandoff(BaseAgent):
             expected = () if state.multi_part is None else state.multi_part.ids()
             if sorted(multi_part.ids()) != sorted(expected):
                 return None
-        return JevHandoffRecord(multi_part=multi_part, usage=self.get_usage())
+        claims = None
+        claims_section = getattr(payload, JevDoneCheck.CLAIMS.value, None)
+        if isinstance(claims_section, JevClaimsEvidencePayload):
+            # The claim ids are created from this final answer, so validate uniqueness here instead of matching
+            # them to a pre-run list that cannot contain statements the main agent has not made yet.
+            # @intent claims-are-derived-after-the-work
+            claims = JevClaimsEvidence(tuple(JevClaimEvidence(item.id, item.claim.strip(), item.evidence.strip(), item.missing.strip()) for item in claims_section.claims))
+        return JevHandoffRecord(multi_part=multi_part, claims=claims, usage=self.get_usage())
 
 
 __all__ = ["JevHandoff"]

@@ -5,7 +5,7 @@ ROLE IN CODEBASE: JevAgent builds one JevDoneContinuation over its JevRunState w
 ARCHITECTURE NOTE: The message is the vidbyte/prompts asset jev_continuation/continue_prompt.md, filled with the run's own text; what one failed check contributes to it is one commented case in _explain(). The cap on continuations is JevContinualSettings.max_continuations.
 COMMON MODIFICATION PATTERNS: Add a done check's failed questions and focus to _explain(); change the message's instructions in vidbyte/prompts/prompts/jev_continuation/continue_prompt.md.
 KNOWN EDGE CASES: A failed check whose handoff is missing never continues, because there is no evidence to hand back. After max_continuations continuations the latest verdict stays on JevAgent.response, but the main agent's answer stands.
-RELATED DOCS: docs/design/jev-multipart-done-criteria.md and skills/jev-agent/SKILL.md.
+RELATED DOCS: docs/design/jev-multipart-done-criteria.md, docs/design/jev-claims-done-criteria.md, skills/jev-agent/SKILL.md, and skills/jev-continuation/SKILL.md.
 TESTS: tests/test_jev_done.py.
 """
 
@@ -85,6 +85,20 @@ class JevDoneContinuation(JevContinuation):
                     yes = result.answers[identifier].probabilities[JEV_NOUL_TRUE]
                     failed.append(f"- {question.instructions.question.format(item=identifier)} Jev's answer: no (P(yes) = {yes:.2f}). Still missing: {missing[identifier]}")
                     focus.append(f"- {deliverables[identifier].description} Done when: {deliverables[identifier].completion_signal}")
+                return "\n".join(failed), "\n".join(focus)
+            case JevDoneCheck.CLAIMS:
+                # Give the main agent only the factual assertions Jev found unsupported, paired with their
+                # exact tool-call evidence and gap so it can finish requested work or correct its final answer.
+                question = JevDoneRegistry.question(JevDoneCheck.CLAIMS)
+                handoff = None if self.run_state.handoff is None else self.run_state.handoff.claims
+                claims = {} if handoff is None else {item.id: item for item in handoff.claims}
+                failed = [question.gap]
+                focus = []
+                for identifier in result.incomplete:
+                    yes = result.answers[identifier].probabilities[JEV_NOUL_TRUE]
+                    item = claims[identifier]
+                    failed.append(f"- {question.instructions.question.format(item=identifier)} Jev's answer: no (P(yes) = {yes:.2f}). Still missing: {item.missing}")
+                    focus.append(f"- Claim: {item.claim}\n  Tool-call evidence: {item.evidence}\n  Still missing: {item.missing}")
                 return "\n".join(failed), "\n".join(focus)
 
 

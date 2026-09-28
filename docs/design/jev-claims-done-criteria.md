@@ -16,7 +16,7 @@ Reuse the existing `ToolCallContextItem` handoff input, `JevDoneContinuation`, a
 - `vidbyte/lib/jev/done/claims.py`, `done.py`, `__init__.py`, and `README.md`
 - `vidbyte/agents/jev/done/handoff.py`, `run_state.py`, and `vidbyte/agents/jev/continuation/done.py`
 - The Jev record export chain: `vidbyte/agents/jev/__init__.py`, `vidbyte/agents/__init__.py`, and `vidbyte/__init__.py`
-- `tests/test_jev_done.py`, `skills/jev-agent/SKILL.md`, and `skills/jev-continuation/SKILL.md`
+- `tests/test_jev_done.py`, `tests/features/jev_claims/FEATURE.md`, `skills/jev-agent/SKILL.md`, and `skills/jev-continuation/SKILL.md`
 - `docs/design/jev-claims-done-criteria.md`
 
 ## Risks and open questions
