@@ -2,7 +2,7 @@
 
 PURPOSE: Implements JevRunState, the class that owns JevAgent's done checks: it builds the structured run-state schema the enabled checks need, runs the generative model once to write the run state from the user's request, and at every finish attempt has JevHandoff compile the evidence, asks Jev every enabled check's fixed questions in one request, and returns the checks that failed.
 ROLE IN CODEBASE: JevAgent builds one JevRunState at construction when JevRuntimeSettings.continual enables a done check and passes it to JevRuntime, which calls begin() before the main loop, and JevDoneContinuation (vidbyte/agents/jev/continuation/) calls check() each time the main agent tries to finish; outcomes reach the user through JevResponse on JevAgent.response.
-ARCHITECTURE NOTE: The run state is general: its schema is the central JevRunStatePayload plus one field per enabled JevDoneCheck, typed as that check's section payload and described by its SECTION text, so a new check adds one entry to _SECTIONS and one case each to _section() and _judge() instead of a new class; what the main agent reads when a check fails belongs to JevDoneContinuation. Every enabled check's questions go to Jev in one request (combine()), over one shared state. Question text and thresholds stay in vidbyte/lib/jev/done/ (JevDoneRegistry), and DecisionModelRunner.score_noul turns answers into a pass or fail. Writing the state and the evidence is generation, so it belongs to generative agents (this class and JevHandoff, skills/asking-jev-questions/SKILL.md strategy 16); Jev only recognizes whether the evidence shows each item.
+ARCHITECTURE NOTE: The run state is general: its schema is the central JevRunStatePayload plus one field per enabled check that needs a separate section. FAITHFUL_SCOPE reads the central hard_part field and adds no duplicate section. Each check has a case in _section() and _judge(); what the main agent reads when a check fails belongs to JevDoneContinuation. Every enabled check's questions go to Jev in one request (combine()), over one shared state. Question text and thresholds stay in vidbyte/lib/jev/done/ (JevDoneRegistry), and DecisionModelRunner.score_noul turns answers into a pass or fail. Writing the state and the evidence is generation, so it belongs to generative agents (this class and JevHandoff, skills/asking-jev-questions/SKILL.md strategy 16); Jev only recognizes whether the evidence shows each item.
 COMMON MODIFICATION PATTERNS: Change what the agent writes in vidbyte/prompts/prompts/jev_run_state/system_prompt.md and each field's description in vidbyte/lib/dataclasses/jev.py; add a done check's section to _SECTIONS, its record conversion to _record(), and its commented case to _section() and _judge().
 KNOWN EDGE CASES: Every failure fails open: no run state means no check, and an unavailable handoff or Jev answer marks the check unavailable and lets the answer stand. A request with no deliverables passes with nothing to ask. Like the JevAgent that owns it, one instance serves one run at a time.
 RELATED DOCS: docs/design/jev-multipart-done-criteria.md, skills/jev-agent/SKILL.md, and skills/asking-jev-questions/SKILL.md.
@@ -28,7 +28,10 @@ from vidbyte.lib.constants.jev import (
     JEV_DONE_DELIVERABLE_FIELD,
     JEV_DONE_DELIVERABLES_FIELD,
     JEV_DONE_EVIDENCE_FIELD,
+    JEV_DONE_HARD_PART_FIELD,
+    JEV_DONE_MISSING_FIELD,
     JEV_DONE_REQUEST_FIELD,
+    JEV_DONE_WHAT_NOT_TO_DO_FIELD,
     JEV_NOUL_TRUE,
 )
 from vidbyte.lib.dataclasses.agents import AgentInput
@@ -92,7 +95,7 @@ class JevRunState(BaseAgent):
     @classmethod
     def schema(cls, checks: tuple[JevDoneCheck, ...]) -> type[JevRunStatePayload]:
         """Return the run state's output schema: the central JevRunStatePayload plus one described section per enabled check."""
-        sections: dict[str, Any] = {check.value: (cls._SECTIONS[check], Field(description=cls._SECTIONS[check].SECTION)) for check in checks}
+        sections: dict[str, Any] = {check.value: (cls._SECTIONS[check], Field(description=cls._SECTIONS[check].SECTION)) for check in checks if check in cls._SECTIONS}
         return create_model("JevRunStatePayload", __base__=JevRunStatePayload, **sections)
 
     async def begin(self, request: str) -> None:
@@ -182,6 +185,18 @@ class JevRunState(BaseAgent):
                     for deliverable in state.deliverables
                 }
                 return {JEV_DONE_DELIVERABLES_FIELD: entries}, tuple(question.to_question(identifier) for identifier in state.ids())
+            case JevDoneCheck.FAITHFUL_SCOPE:
+                # The hard part is a central run-state field, so this check adds evidence without duplicating it.
+                if self.record is None or handoff.faithful_scope is None:
+                    return {}, ()
+                question = JevDoneRegistry.question(JevDoneCheck.FAITHFUL_SCOPE)
+                state = {
+                    JEV_DONE_HARD_PART_FIELD: self.record.hard_part,
+                    JEV_DONE_WHAT_NOT_TO_DO_FIELD: list(self.record.what_not_to_do),
+                    JEV_DONE_EVIDENCE_FIELD: handoff.faithful_scope.evidence,
+                    JEV_DONE_MISSING_FIELD: handoff.faithful_scope.missing,
+                }
+                return state, (question.to_question(JEV_DONE_HARD_PART_FIELD),)
 
     def _judge(self, check: JevDoneCheck, handoff: JevHandoffRecord | None, decision: DecisionModelResponse | None) -> JevDoneResult:
         # Scores one enabled done check from the combined request's answers; one commented case per check.
@@ -190,6 +205,24 @@ class JevRunState(BaseAgent):
                 # Every deliverable the request asks for must be shown produced in full: Jev answered one
                 # question per deliverable, and code joins them with a veto so one clear no is never averaged away.
                 return self._multi_part(handoff, decision)
+            case JevDoneCheck.FAITHFUL_SCOPE:
+                # The check judges the single requirement recorded before the main agent started.
+                return self._faithful_scope(handoff, decision)
+
+    def _faithful_scope(self, handoff: JevHandoffRecord | None, decision: DecisionModelResponse | None) -> JevDoneResult:
+        """Judge whether the evidence shows the preselected hard part met in the user's intended scope."""
+        if self.record is None or handoff is None or handoff.faithful_scope is None or decision is None:
+            return JevDoneResult(check=JevDoneCheck.FAITHFUL_SCOPE, score=None, available=False)
+        question = JevDoneRegistry.question(JevDoneCheck.FAITHFUL_SCOPE)
+        answer_name = question.name(JEV_DONE_HARD_PART_FIELD)
+        answers = {JEV_DONE_HARD_PART_FIELD: decision.answers[answer_name]} if answer_name in decision.answers else {}
+        threshold = JevDoneRegistry.threshold(JevDoneCheck.FAITHFUL_SCOPE)
+        verdict = DecisionModelRunner.score_noul(answers, (JEV_DONE_HARD_PART_FIELD,), threshold, threshold)
+        if verdict is None:
+            return JevDoneResult(check=JevDoneCheck.FAITHFUL_SCOPE, score=None, available=False)
+        incomplete = () if verdict.passed else (JEV_DONE_HARD_PART_FIELD,)
+        usage = JevUsage.from_usage_payload(decision.usage or {})
+        return JevDoneResult(check=JevDoneCheck.FAITHFUL_SCOPE, score=verdict.score, passed=verdict.passed, answers=verdict.answers, incomplete=incomplete, usage=usage)
 
     def _multi_part(self, handoff: JevHandoffRecord | None, decision: DecisionModelResponse | None) -> JevDoneResult:
         # Turns Jev's answers about each deliverable into the multi-part result, scored with score_noul.
@@ -231,6 +264,7 @@ class JevRunState(BaseAgent):
             goal=payload.goal.strip(),
             objective=payload.objective.strip(),
             mission=payload.mission.strip(),
+            hard_part=payload.hard_part.strip(),
             what_not_to_do=tuple(limit.strip() for limit in payload.what_not_to_do if limit.strip()),
             multi_part=multi_part,
             usage=self.get_usage(),

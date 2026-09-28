@@ -85,9 +85,15 @@ JEV_SPECIALIST_MAX_COUNT: int = JEV_MAX_CHOICE_OPTIONS - 1
 # only when every deliverable's P(yes) reaches the threshold (used as both the mean threshold and the veto).
 # 0.8 is a starting point, not a tuned value.
 JEV_MULTI_PART_THRESHOLD: float = 0.8
+JEV_FAITHFUL_SCOPE_THRESHOLD: float = 0.8
 # Default of JevContinualSettings.max_continuations: how many times a failed done check may send the main
 # agent back to work before its answer is accepted.
 JEV_DONE_MAX_CONTINUATIONS: int = 3
+JEV_CONTINUATION_BUDGET_INITIAL: int = 0
+# Extra main-agent capacity granted for each continuation caused by FAITHFUL_SCOPE.
+JEV_FAITHFUL_SCOPE_EXTRA_ITERATIONS: int = 2
+JEV_FAITHFUL_SCOPE_EXTRA_TOKENS: int = 16_000
+JEV_FAITHFUL_SCOPE_EXTRA_TOOL_CALLS: int = 4
 # The state fields the done questions read: the user's request, and one entry per deliverable id holding
 # the deliverable, the visible condition that shows it is done, and the evidence JevHandoff compiled for it.
 JEV_DONE_REQUEST_FIELD: str = "request"
@@ -95,6 +101,9 @@ JEV_DONE_DELIVERABLES_FIELD: str = "deliverables"
 JEV_DONE_DELIVERABLE_FIELD: str = "deliverable"
 JEV_DONE_COMPLETION_SIGNAL_FIELD: str = "completion_signal"
 JEV_DONE_EVIDENCE_FIELD: str = "evidence"
+JEV_DONE_HARD_PART_FIELD: str = "hard_part"
+JEV_DONE_MISSING_FIELD: str = "missing"
+JEV_DONE_WHAT_NOT_TO_DO_FIELD: str = "what_not_to_do"
 # A deliverable ID is a short lowercase identifier JevRunState writes and JevHandoff must echo exactly.
 JEV_DELIVERABLE_ID_PATTERN: str = r"^[a-z][a-z0-9_]{0,63}$"
 # Defaults of the JevRunState and JevHandoff limits in JevContinualSettings: each writes one structured reply,
@@ -117,6 +126,7 @@ __all__ = [
     "JEV_CLARIFICATION_MIN_RECOMMENDATIONS",
     "JEV_CLARITY_THRESHOLD",
     "JEV_CLARITY_VETO_THRESHOLD",
+    "JEV_CONTINUATION_BUDGET_INITIAL",
     "JEV_DEFAULT_MODEL",
     "JEV_DEFAULT_RETRY_COUNT",
     "JEV_DEFAULT_TIMEOUT_SECONDS",
@@ -125,8 +135,15 @@ __all__ = [
     "JEV_DONE_DELIVERABLES_FIELD",
     "JEV_DONE_DELIVERABLE_FIELD",
     "JEV_DONE_EVIDENCE_FIELD",
+    "JEV_DONE_HARD_PART_FIELD",
     "JEV_DONE_MAX_CONTINUATIONS",
+    "JEV_DONE_MISSING_FIELD",
+    "JEV_FAITHFUL_SCOPE_EXTRA_ITERATIONS",
+    "JEV_FAITHFUL_SCOPE_EXTRA_TOKENS",
+    "JEV_FAITHFUL_SCOPE_EXTRA_TOOL_CALLS",
+    "JEV_FAITHFUL_SCOPE_THRESHOLD",
     "JEV_DONE_REQUEST_FIELD",
+    "JEV_DONE_WHAT_NOT_TO_DO_FIELD",
     "JEV_HANDOFF_MAX_ITERATIONS",
     "JEV_HANDOFF_MAX_TOKENS",
     "JEV_MAX_CHOICE_OPTIONS",

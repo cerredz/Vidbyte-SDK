@@ -12,7 +12,10 @@ TESTS: tests/test_jev_preflight.py, tests/test_jev_done.py, and scripts/test-jev
 from __future__ import annotations
 
 from vidbyte.agents.pricing import JevUsage
-from vidbyte.lib.constants.jev import JEV_PREFLIGHT_STRATEGY_NAME
+from vidbyte.lib.constants.jev import (
+    JEV_CONTINUATION_BUDGET_INITIAL,
+    JEV_PREFLIGHT_STRATEGY_NAME,
+)
 from vidbyte.lib.dataclasses.agents import AgentMessage
 from vidbyte.lib.dataclasses.jev import (
     JevAgentResponse,
@@ -69,6 +72,11 @@ class JevResponse:
     def continued(self) -> None:
         """Record that a failed done check sent the main agent back to work."""
         self.state.continuations += 1
+
+    def continuation_budget(self, extension: dict[str, int]) -> None:
+        """Record the cumulative extra loop budget JevAgent granted to failed faithful-scope continuations."""
+        for name, amount in extension.items():
+            self.state.continuation_budget[name] = self.state.continuation_budget.get(name, JEV_CONTINUATION_BUDGET_INITIAL) + amount
 
     def delegated(self, reply: AgentMessage) -> AgentResult:
         """Record the chosen specialist's reply and return it as this run's result, keeping the specialist's own metadata."""

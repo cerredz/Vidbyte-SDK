@@ -10,6 +10,7 @@ TESTS: tests/test_jev_done.py.
 """
 
 from vidbyte.lib.jev.done.done import JevDoneRegistry
+from vidbyte.lib.jev.done.faithful_scope import FaithfulScopeQuestion
 from vidbyte.lib.jev.done.multi_part import DONE_STATE, MultiPartDeliveredQuestion
 
-__all__ = ["DONE_STATE", "JevDoneRegistry", "MultiPartDeliveredQuestion"]
+__all__ = ["DONE_STATE", "FaithfulScopeQuestion", "JevDoneRegistry", "MultiPartDeliveredQuestion"]

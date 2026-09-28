@@ -33,6 +33,7 @@ class JevDoneContinuation(JevContinuation):
     def __init__(self, run_state: JevRunState, continual: JevContinualSettings, response: JevResponse) -> None:
         # Fixes the done checks' run state, the continuation cap, and the response writer when JevAgent is built.
         self.run_state = run_state
+        self.continual = continual
         self.max_continuations = continual.max_continuations
         self.response = response
         self.failed: tuple[JevDoneResult, ...] = ()
@@ -52,6 +53,16 @@ class JevDoneContinuation(JevContinuation):
         # and finishes the missing work instead of starting a second run that has forgotten the first.
         self.response.continued()
         messages.append({"role": "user", "content": self.message()})
+
+    def budget_extension(self) -> tuple[int, int, int]:
+        """Grant the configured extra budget only when FAITHFUL_SCOPE caused this continuation."""
+        if any(result.check is JevDoneCheck.FAITHFUL_SCOPE for result in self.failed):
+            return (
+                self.continual.faithful_scope_extra_iterations,
+                self.continual.faithful_scope_extra_tokens,
+                self.continual.faithful_scope_extra_tool_calls,
+            )
+        return 0, 0, 0
 
     def message(self) -> str:
         """Return what the main agent reads: the original request, the run state, the handoff, the failed questions, and the focus."""
@@ -85,6 +96,19 @@ class JevDoneContinuation(JevContinuation):
                     yes = result.answers[identifier].probabilities[JEV_NOUL_TRUE]
                     failed.append(f"- {question.instructions.question.format(item=identifier)} Jev's answer: no (P(yes) = {yes:.2f}). Still missing: {missing[identifier]}")
                     focus.append(f"- {deliverables[identifier].description} Done when: {deliverables[identifier].completion_signal}")
+                return "\n".join(failed), "\n".join(focus)
+            case JevDoneCheck.FAITHFUL_SCOPE:
+                question = JevDoneRegistry.question(JevDoneCheck.FAITHFUL_SCOPE)
+                state = self.run_state.record
+                handoff = self.run_state.handoff.faithful_scope if self.run_state.handoff is not None else None
+                answer = result.answers.get("hard_part")
+                yes = None if answer is None else answer.probabilities[JEV_NOUL_TRUE]
+                failed = [question.gap]
+                if yes is not None:
+                    failed.append(f"- {question.instructions.question.format(item='hard_part')} Jev's answer: no (P(yes) = {yes:.2f}).")
+                if handoff is not None:
+                    failed.append(f"Run evidence: {handoff.evidence} Still missing: {handoff.missing}")
+                focus = [] if state is None else [f"- Hard part to complete in the user's terms: {state.hard_part}. Keep these limits: {', '.join(state.what_not_to_do) if state.what_not_to_do else 'none were stated.'}"]
                 return "\n".join(failed), "\n".join(focus)
 
 

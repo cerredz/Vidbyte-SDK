@@ -38,6 +38,7 @@ class JevDoneCheck(str, Enum):
     """The done checks a JevAgent user can enable; each adds its own section to JevRunState's state and JevHandoff's evidence, and asks its own Jev question before a run may finish."""
 
     MULTI_PART = "multi_part"
+    FAITHFUL_SCOPE = "faithful_scope"
 
 
 class JevDoneQuestionKey(str, Enum):
@@ -47,6 +48,7 @@ class JevDoneQuestionKey(str, Enum):
     """
 
     MULTI_PART_DELIVERED = "multi_part.delivered"
+    FAITHFUL_SCOPE = "faithful_scope"
 
 
 class JevPreflightQuestionKey(str, Enum):

@@ -138,6 +138,22 @@ class JevRuntime(AgentRuntime):
         # continue and every message it sends lives in a JevContinuation subclass, never in this runtime.
         if self.continuation is None or not await self.continuation.should_continue(result.output, state.iteration_outputs, state.call_contexts):
             return False
+        extra_iterations, extra_tokens, extra_tool_calls = self.continuation.budget_extension()
+        limits: dict[str, int] = {}
+        granted: dict[str, int] = {}
+        for field_name, extra in (
+            ("max_iterations", extra_iterations),
+            ("max_tokens", extra_tokens),
+            ("max_tool_calls", extra_tool_calls),
+        ):
+            configured = getattr(self.config, field_name)
+            if configured is not None and extra:
+                limits[field_name] = configured + extra
+                granted[field_name] = extra
+        if limits:
+            # The runtime is run-local; expand only configured ceilings before the same loop consumes the continuation.
+            self.config = replace(self.config, **limits)
+            self.response.continuation_budget(granted)
         self.continuation.continue_(messages)
         return True
 

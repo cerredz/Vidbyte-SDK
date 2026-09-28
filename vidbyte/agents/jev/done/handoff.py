@@ -30,6 +30,8 @@ from vidbyte.context.primitives import (
 from vidbyte.lib.dataclasses.agents import AgentInput
 from vidbyte.lib.dataclasses.jev import (
     JevDeliverableEvidence,
+    JevFaithfulScopeEvidence,
+    JevFaithfulScopeEvidencePayload,
     JevHandoffPayload,
     JevHandoffRecord,
     JevMultiPartEvidence,
@@ -54,7 +56,7 @@ class JevHandoff(BaseAgent):
     """Generative agent that compiles, from the main agent's context window, the evidence every enabled done check needs."""
 
     # One evidence section per done check; the field name is the check's value, so the reply mirrors the run state.
-    _SECTIONS: ClassVar[Mapping[JevDoneCheck, type[JevSectionPayload]]] = MappingProxyType({JevDoneCheck.MULTI_PART: JevMultiPartEvidencePayload})
+    _SECTIONS: ClassVar[Mapping[JevDoneCheck, type[JevSectionPayload]]] = MappingProxyType({JevDoneCheck.MULTI_PART: JevMultiPartEvidencePayload, JevDoneCheck.FAITHFUL_SCOPE: JevFaithfulScopeEvidencePayload})
 
     def __init__(self, settings: JevAgentSettings, continual: JevContinualSettings) -> None:
         # Reuses the JevAgent's generative model and key and takes its limits from the continuation settings; the prompt, schema, and empty tool list are fixed here.
@@ -118,13 +120,17 @@ class JevHandoff(BaseAgent):
         # Jev judges each deliverable by id, so evidence for a deliverable the state never listed, or
         # no evidence for one it did, would silently skip a check; either one makes the handoff unavailable.
         multi_part = None
+        faithful_scope = None
         section = getattr(payload, JevDoneCheck.MULTI_PART.value, None)
         if isinstance(section, JevMultiPartEvidencePayload):
             multi_part = JevMultiPartEvidence(tuple(JevDeliverableEvidence(item.id, item.evidence.strip(), item.missing.strip()) for item in section.deliverables))
             expected = () if state.multi_part is None else state.multi_part.ids()
             if sorted(multi_part.ids()) != sorted(expected):
                 return None
-        return JevHandoffRecord(multi_part=multi_part, usage=self.get_usage())
+        section = getattr(payload, JevDoneCheck.FAITHFUL_SCOPE.value, None)
+        if isinstance(section, JevFaithfulScopeEvidencePayload):
+            faithful_scope = JevFaithfulScopeEvidence(section.evidence.strip(), section.missing.strip())
+        return JevHandoffRecord(multi_part=multi_part, faithful_scope=faithful_scope, usage=self.get_usage())
 
 
 __all__ = ["JevHandoff"]

@@ -655,9 +655,9 @@ class JevSectionPayload(BaseModel):
 class JevRunStatePayload(BaseModel):
     """The central structured state JevRunState writes once from the user's request, before the main agent starts.
 
-    JevRunState adds one more field to this model for every enabled done check, typed as that check's
-    section payload and described by its SECTION text, so the reply always holds these four fields plus
-    exactly the sections the enabled done checks read.
+    JevRunState adds one more field to this model for every enabled done check that needs a distinct section,
+    typed as that check's section payload and described by its SECTION text. The `hard_part` field is central
+    because FAITHFUL_SCOPE checks it directly rather than adding a duplicate section.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -666,6 +666,7 @@ class JevRunStatePayload(BaseModel):
     objective: str = Field(min_length=1, description="The objective is the concrete, checkable outcome of this one run, narrower than the goal: what the agent must hand back or change before it may stop. Name the artifact, change, or answer, and where it goes, whenever the request says so. It must be specific enough that a reader could look at the agent's final work and say whether the objective was met. Do not restate the goal in other words, and do not list the separate parts of the work here, since those belong to the done-check sections. When the request leaves a detail open, say that it is open rather than choosing a value for the user.")
     mission: str = Field(min_length=1, description="The mission is the agent's overall responsibility while it works on this request: the role it plays and the standard its work must meet. It describes how the agent should behave on the way to the objective, such as working only inside the named project, keeping existing behavior intact, or citing sources, whenever the request sets such a standard. Take the standard from the request itself and from what its words clearly imply about quality, not from general advice about good work. Write it as two to four sentences addressed to the agent. When the request sets no particular standard, say that the agent should do exactly what the request asks and nothing more.")
     what_not_to_do: list[str] = Field(description="What not to do lists every limit the request places on the work: things the user said to avoid, leave unchanged, or keep out of scope. Write each limit as its own short item in the user's terms, and keep only limits that the request states directly or that follow unavoidably from its words. Do not invent cautions, best practices, or safety rules the request does not state, since every item here is treated as a hard constraint. Include limits on scope, such as files, systems, or topics the work must not touch, as well as limits on form, such as length or tone. Return an empty list when the request places no limits on the work.")
+    hard_part: str = Field(min_length=1, description="The hard part is the single specific requirement in the user's request that is most likely to be weakened, mocked, skipped, hard-coded, or redefined while doing the work. Choose it from the user's request alone and preserve the user's own terms. State the observable result that would satisfy it, without adding requirements or replacing it with an easier nearby task. Consider what_not_to_do when identifying it. If no unusually difficult requirement stands out, identify the request's central required action.")
 
 
 class JevDeliverablePayload(BaseModel):
@@ -716,6 +717,17 @@ class JevMultiPartEvidencePayload(JevSectionPayload):
     SECTION: ClassVar[str] = "The multi-part evidence section gathers, for each deliverable the run state lists, the parts of the agent's run that show whether that deliverable was produced. A separate checker reads one entry at a time, next to the user's request and that deliverable's description and completion signal, and decides whether the deliverable is done. That checker sees nothing of the run except the evidence written here, so the evidence must be complete, specific, and faithful to what the run actually shows. The section reports observations and never gives a verdict about whether the work is complete. It is filled after the agent tries to finish, from the agent's context window."
 
     deliverables: list[JevDeliverableEvidencePayload] = Field(description="The deliverables hold one evidence entry for every deliverable in the run state's multi-part section, with the same ids and in the same order. Each entry gathers the parts of the run that bear on that one deliverable and states what the run does not show for it. An entry never borrows evidence from another deliverable unless the same piece of the run truly concerns both, in which case it is repeated in each. Do not add entries for work the run did that no deliverable asks for. Never leave a deliverable out, even when the run did nothing toward it.")
+
+
+class JevFaithfulScopeEvidencePayload(JevSectionPayload):
+    """The evidence section for the one hard part named in the run state."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    SECTION: ClassVar[str] = "The faithful-scope section reports what the agent's run shows about the one hard part named in the run state. It gathers relevant final-answer passages, earlier responses, tool calls and their outputs, and test or command results in the order they happened. It also states which requested parts of the hard part the run does not show. The section reports observations from the run, not a verdict about whether the hard part was satisfied. It must make any narrowing, mock, skipped work, hard-coded substitute, or redefinition visible to the checker."
+
+    evidence: str = Field(min_length=1, description="Evidence reproduces or closely reports every part of the run that bears on hard_part, including the final result and relevant earlier responses, tool calls with their arguments and outputs, and test or command results. Name the source of each observation and report failed attempts as well as successes in the order they happened. Describe what the run actually shows, including a mock, a hard-coded substitute, skipped work, a narrowed implementation, or a changed interpretation when present. Never infer success from a claim, plan, summary, or statement that the work is complete. If no part of the run concerns hard_part, say so.")
+    missing: str = Field(min_length=1, description="Missing states which parts of hard_part the run does not show, or says that none are missing. Name the specific requested behavior, evidence, or output that is absent, narrowed, mocked, skipped, hard-coded, or redefined. Describe only the gap visible in the run, not what the agent intended or claims to have done. Do not decide whether the whole request is complete or suggest work beyond hard_part.")
 
 
 class JevDeliverableId:
@@ -772,19 +784,20 @@ class JevMultiPart:
 class JevRunStateRecord:
     """The run state JevRunState wrote from the user's request: the central fields and the section of every enabled done check.
 
-    `multi_part` is set only when the MULTI_PART done check is enabled, and `usage` is JevRunState's own model usage.
+    `hard_part` is the request's most avoidable requirement recorded before the main agent starts. `multi_part` is set only when the MULTI_PART done check is enabled, and `usage` is JevRunState's own model usage.
     """
 
     goal: str
     objective: str
     mission: str
+    hard_part: str
     what_not_to_do: tuple[str, ...] = ()
     multi_part: JevMultiPart | None = None
     usage: UsageRollup | None = None
 
     def __post_init__(self) -> None:
         # Requires the central text fields, non-blank limits, and a typed multi-part section when present.
-        for field_name in ("goal", "objective", "mission"):
+        for field_name in ("goal", "objective", "mission", "hard_part"):
             JevText.require(getattr(self, field_name), field_name=f"run state {field_name}")
         if not isinstance(self.what_not_to_do, tuple):
             raise JevValidation.error("run state what_not_to_do", "a tuple of strings", self.what_not_to_do)
@@ -827,19 +840,35 @@ class JevMultiPartEvidence:
 
 
 @dataclass(frozen=True, slots=True)
+class JevFaithfulScopeEvidence:
+    """The reported evidence and missing work for the request's one identified hard part."""
+
+    evidence: str
+    missing: str
+
+    def __post_init__(self) -> None:
+        # Requires both observations and the explicit missing-work report.
+        JevText.require(self.evidence, field_name="faithful-scope evidence")
+        JevText.require(self.missing, field_name="faithful-scope missing")
+
+
+@dataclass(frozen=True, slots=True)
 class JevHandoffRecord:
     """The evidence JevHandoff compiled from the main agent's run for every enabled done check.
 
-    `multi_part` is set only when the MULTI_PART done check is enabled, and `usage` is JevHandoff's own model usage.
+    `multi_part` and `faithful_scope` are set only when their matching checks are enabled; `usage` is JevHandoff's own model usage.
     """
 
     multi_part: JevMultiPartEvidence | None = None
+    faithful_scope: JevFaithfulScopeEvidence | None = None
     usage: UsageRollup | None = None
 
     def __post_init__(self) -> None:
         # Requires a typed multi-part evidence section when present.
         if self.multi_part is not None and not isinstance(self.multi_part, JevMultiPartEvidence):
             raise JevValidation.error("handoff multi_part", "a JevMultiPartEvidence or None", self.multi_part)
+        if self.faithful_scope is not None and not isinstance(self.faithful_scope, JevFaithfulScopeEvidence):
+            raise JevValidation.error("handoff faithful_scope", "a JevFaithfulScopeEvidence or None", self.faithful_scope)
 
 
 @dataclass(frozen=True)
@@ -965,6 +994,7 @@ class JevAgentResponse:
     With done checks enabled, `run_state` is the state JevRunState wrote before the main agent started,
     `handoff` is the evidence JevHandoff compiled at the latest finish attempt, `done` holds the latest result
     of every enabled done check, and `continuations` counts how often a failed check sent the agent back to work.
+    `continuation_budget` records cumulative additional loop limits granted to faithful-scope continuations.
     """
 
     input: str = ""
@@ -977,6 +1007,7 @@ class JevAgentResponse:
     handoff: JevHandoffRecord | None = None
     done: dict[JevDoneCheck, JevDoneResult] = field(default_factory=dict)
     continuations: int = 0
+    continuation_budget: dict[str, int] = field(default_factory=dict)
 
     @property
     def needs_clarification(self) -> bool:
@@ -1001,6 +1032,8 @@ __all__ = [
     "JevDeliverableEvidencePayload",
     "JevDeliverableId",
     "JevDeliverablePayload",
+    "JevFaithfulScopeEvidence",
+    "JevFaithfulScopeEvidencePayload",
     "JevDoneQuestion",
     "JevDoneResult",
     "JevHandoffPayload",
