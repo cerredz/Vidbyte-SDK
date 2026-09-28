@@ -12,10 +12,8 @@ TESTS: tests/test_jev_alignment.py.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
-from types import MappingProxyType
-from typing import Any, Protocol
+from collections.abc import Mapping
+from typing import TYPE_CHECKING, Any, Protocol
 
 from vidbyte.lib.constants.jev import (
     JEV_ALIGNMENT_MAX_ADDED_CHARS as JEV_ALIGNMENT_MAX_ADDED_CHARS,
@@ -33,18 +31,12 @@ from vidbyte.lib.constants.jev import (
     JEV_STATIC_ALIGNMENT_PREAMBLE as STATIC_ALIGNMENT_PREAMBLE,
 )
 from vidbyte.lib.dataclasses.jev import (
-    JevAlignmentCondition,
     JevAlignmentGap,
     JevAlignmentInput,
     JevAlignmentQuestion,
     JevAlignmentResult,
-    JevAlignmentRole,
-    JevAlignmentStateKind,
-    JevOption,
     JevPromptEdit,
     JevPromptEditContextItem,
-    JevPromptSection,
-    JevQuestion,
     JevToolSelectorResponse,
 )
 from vidbyte.lib.enums.jev import (
@@ -53,9 +45,10 @@ from vidbyte.lib.enums.jev import (
     JevAlignmentStateKind,
     JevAlignmentStatus,
     JevPromptSection,
-    JevQuestionType,
 )
-from vidbyte.lib.registries.pricing import ModelPricing
+
+if TYPE_CHECKING:
+    from vidbyte.lib.registries.pricing import ModelPricing
 
 
 class JevAlignmentToolSpec(Protocol):

@@ -17,7 +17,7 @@ import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Any, ClassVar, Protocol, cast
+from typing import TYPE_CHECKING, ClassVar, cast
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -60,7 +60,6 @@ if TYPE_CHECKING:
     from vidbyte.agents.base import BaseAgent
     from vidbyte.agents.pricing import ProviderUsage, UsageRollup
     from vidbyte.lib.dataclasses.jev_alignment import JevAlignmentTool, JevUsageRecord
-    from vidbyte.lib.registries.pricing import ModelPricing
 
 # A frozen JSON value as TypeSafe accepts it: a string, or a read-only mapping / tuple of JSON values.
 JevContent = str | Mapping[str, object] | tuple[object, ...]
