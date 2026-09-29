@@ -57,8 +57,9 @@ Constraints: gateway endpoints and key formats must match the product contract; 
 6. `DecisionModelConfig.api_key`, its containing Jev runtime settings, and managed request headers do not reveal credentials through repr output.
 7. Managed 401/402/403/429 responses and managed credential configuration errors propagate out of the gate, tool selector, and done-check decision request; they do not become an unavailable/advisory decision.
 8. Managed timeout, connection, 5xx, and malformed-response failures retain the current fail-open behavior. Direct TypeSafe mode retains the current fail-open behavior for all `VidbyteSdkError`s.
-9. Provider error messages for managed calls identify Vidbyte and the relevant credential/action, omit raw gateway response excerpts, and do not contain the configured key.
-10. JevAgent guidance explains the managed default, the required environment variable, and the explicit direct TypeSafe mode.
+9. Existing tests that assert direct TypeSafe fallback select that mode explicitly after JevAgent's default changes.
+10. Provider errors and formatted managed tracebacks identify Vidbyte, omit raw gateway response excerpts, and do not contain the configured key.
+11. JevAgent guidance explains the managed default, the required environment variable, and the explicit direct TypeSafe mode.
 
 ### Non-Functional Requirements
 
@@ -184,6 +185,7 @@ class JevDecisionFailurePolicy:
 - Managed configuration failures cannot silently disable a gate, tool selector, or done check.
 - A transient gateway outage does not prevent the main generative agent from running, matching the existing resilience policy.
 - Direct TypeSafe mode continues to fail open on all existing SDK error types.
+- Existing done-check credential tests explicitly choose direct TypeSafe mode and continue to fail open without `TYPESAFE_API_KEY`.
 
 ### 6.4 Managed provider errors
 
@@ -304,6 +306,7 @@ Complete list of every file expected to be created or modified:
 | MODIFY | `vidbyte/agents/jev/done/run_state.py` | Propagate managed access/configuration failures. |
 | MODIFY | `skills/jev-agent/SKILL.md` | Explain the managed default and direct TypeSafe option. |
 | CREATE | `tests/test_jev_managed_gateway.py` | Cover managed config, transport, errors, and failure policy. |
+| MODIFY | `tests/test_jev_done.py` | Keep its missing-TypeSafe-key fail-open case explicitly in direct mode. |
 | CREATE | `scripts/test-jev-managed-gateway.py` | Provide focused PASS/FAIL verification. |
 
 No files are deleted.
@@ -316,16 +319,17 @@ No files are deleted.
 
 - `DecisionModelConfig` defaults to direct TypeSafe; `JevRuntimeSettings` defaults to managed Vidbyte. [Silent Failure]
 - Managed mode uses `VIDBYTE_API_KEY` when set and never falls back to `TYPESAFE_API_KEY`. [Hidden Assumption]
-- Managed mode accepts a product-format `vb_live_` key and rejects missing, whitespace, short, `vb_test_`, and provider keys. [Edge Case]
+- Managed mode accepts a product-format `vb_live_` key and rejects missing, whitespace, short, `vb_test_`, provider, and non-string keys. [Edge Case]
 - Managed mode rejects custom endpoint overrides and resolves the exact fixed gateway URL. [Hidden Assumption]
 - Direct mode continues to resolve `TYPESAFE_API_KEY` and a compatible custom endpoint. [Hidden Failure]
 - API keys are absent from config/settings/request-call repr output. [Silent Failure]
 - Managed POST and GET calls use the product's System One and model-list paths and bearer header; direct mode keeps the TypeSafe host. [Silent Failure]
 - Managed 401/402/403/429 classify as fail-closed; 408/5xx/no-status/provider-response errors classify as advisory; direct mode remains advisory. [Edge Case]
-- Managed error mapping preserves status/provider but omits a synthetic key echoed in the upstream message/body. [Hidden Failure]
+- Managed error mapping and formatted tracebacks preserve status/provider but omit a synthetic key echoed in the upstream message/body/cause. [Hidden Failure]
 - Missing managed credentials are propagated from the gate, tool selector, and done-check decision boundary; transient failures remain fail-open at all three boundaries. [Hidden Failure]
 - Disabled features with no decision call do not resolve a managed key. [Hidden Assumption]
 - Direct TypeSafe authorization failures retain prior fail-open Jev behavior. [Hidden Failure]
+- The existing done-check test chooses direct mode and still fails open when `TYPESAFE_API_KEY` is absent. [Hidden Assumption]
 
 ### Integration Tests
 
