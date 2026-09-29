@@ -139,6 +139,8 @@ Write down five things. If you cannot write one of them, the check is not ready.
 
 For every per-item continuation gate, design the item's Jev-facing state as **four to six named context sections** that explain the item being judged. Choose fields that extend the decision context, such as identity, scope, kind, expected output, and the specific assertion or condition. Keep each question to one recognition judgment about one item; provide its context in that item's state entry instead of combining several judgments into a long question. Give generated-output schema fields five clear sentences describing what the field means, where its value comes from, what belongs or does not belong in it, how absence is represented, and how it affects the judgment. This five-sentence target is for field instructions, not a request for five sentences in every generated value.
 
+**PHASE_PROGRESS** is a request-derived example where the items are substantive outcome stages rather than deliverables. Derive only the stages the request requires, with no fixed phase taxonomy: research, analysis, planning, implementation, or verification can be either a requested outcome or preparation depending on the request. Give each Jev state entry five named fields: stage identity, required transition/result, request scope, output criterion, and observed evidence; keep the handoff's `missing` note out of this state. Ask whether the stage was reached or a concrete blocker prevented it, so unsupported final-answer claims about a blocker do not excuse a voluntary early finish and observed budget/access limits do not cause futile retries. Do not require a verification stage unless the request asks for one, and keep the phase transition distinct from MULTI_PART's check that an output was delivered in full.
+
 A check that judges the run as a whole still fits this model: it has one item with a fixed id. `str.format(item=...)` ignores a placeholder the question does not use. Prefer real items when they exist.
 
 ### Dynamic items: CLAIMS
@@ -433,7 +435,7 @@ For CLAIMS, key each state entry by `parent_id.assertion_id` and put `claim.iden
 
 ### Step 11: Keep the shared state description true
 
-`DONE_STATE` in `vidbyte/lib/jev/done/multi_part.py` is the shared `state` section of every done-question brief. It describes `request` and the optional `deliverables` and `claims` fields, each present only when its check is enabled. Keep this one description true for every combination of enabled checks, including a dynamic claims list emitted by the handoff.
+`DONE_STATE` in `vidbyte/lib/jev/done/multi_part.py` is the shared `state` section of every done-question brief. It describes `request` and the optional `deliverables`, `claims`, and `phase_progress` fields, each present only when its check is enabled. Keep this one description true for every combination of enabled checks, including a dynamic claims list emitted by the handoff.
 
 Before you ship:
 

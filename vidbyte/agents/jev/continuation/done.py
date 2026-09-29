@@ -5,7 +5,7 @@ ROLE IN CODEBASE: JevAgent builds one JevDoneContinuation over its JevRunState w
 ARCHITECTURE NOTE: The message is the vidbyte/prompts asset jev_continuation/continue_prompt.md, filled with the run's own text; what one failed check contributes to it is one commented case in _explain(). The cap on continuations is JevContinualSettings.max_continuations.
 COMMON MODIFICATION PATTERNS: Add a done check's failed questions and focus to _explain(); change the message's instructions in vidbyte/prompts/prompts/jev_continuation/continue_prompt.md.
 KNOWN EDGE CASES: A failed check whose handoff is missing never continues, because there is no evidence to hand back. After max_continuations continuations the latest verdict stays on JevAgent.response, but the main agent's answer stands.
-RELATED DOCS: docs/design/jev-multipart-done-criteria.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-claims-context.md, skills/jev-agent/SKILL.md, and skills/jev-continuation/SKILL.md.
+RELATED DOCS: docs/design/jev-multipart-done-criteria.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-claims-context.md, docs/design/jev-phase-progress.md, skills/jev-agent/SKILL.md, and skills/jev-continuation/SKILL.md.
 TESTS: tests/test_jev_done.py.
 """
 
@@ -74,6 +74,9 @@ class JevDoneContinuation(JevContinuation):
             focus="\n".join(focus for _, focus in explained),
         )
 
+    # @intent each-check-gives-only-its-failed-focus
+    # Each done check formats the failed judgment and the relevant missing work for the main agent; phase progress
+    # must stay separate from whole-deliverable completion and must not invent unrequested verification steps.
     def _explain(self, result: JevDoneResult) -> tuple[str, str]:
         # Returns one failed check's part of the message: its failed Jev questions, and the focus lines; one commented case per check.
         match result.check:
@@ -106,6 +109,22 @@ class JevDoneContinuation(JevContinuation):
                     assertion_failures, assertion_focus = self._claim_assertion_feedback(item, result, question, threshold)
                     failed.extend(assertion_failures)
                     focus.extend(assertion_focus)
+                return "\n".join(failed), "\n".join(focus)
+            case JevDoneCheck.PHASE_PROGRESS:
+                # Return only the request-required stages Jev found unentered and still actionable;
+                # the handoff's separate missing notes give the main agent concrete next steps.
+                question = JevDoneRegistry.question(JevDoneCheck.PHASE_PROGRESS)
+                state = None if self.run_state.record is None else self.run_state.record.phase_progress
+                handoff = None if self.run_state.handoff is None else self.run_state.handoff.phase_progress
+                stages = {} if state is None else {item.id: item for item in state.stages}
+                missing = {} if handoff is None else {item.id: item.missing for item in handoff.stages}
+                failed = [question.gap]
+                focus = []
+                for identifier in result.incomplete:
+                    yes = result.answers[identifier].probabilities[JEV_NOUL_TRUE]
+                    failed.append(f"- {question.instructions.question.format(item=identifier)} Jev's answer: no (P(yes) = {yes:.2f}). Still missing: {missing[identifier]}")
+                    stage = stages[identifier]
+                    focus.append(f"- Requested stage: {stage.stage}. Required result: {stage.required_result}. Scope: {stage.request_scope}. Output criterion: {stage.output_criterion}.")
                 return "\n".join(failed), "\n".join(focus)
 
     def _claim_assertion_feedback(self, claim: JevClaimEvidence, result: JevDoneResult, question: JevDoneQuestion, threshold: float) -> tuple[list[str], list[str]]:

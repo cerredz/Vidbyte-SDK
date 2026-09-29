@@ -31,6 +31,7 @@ Each capability owns its fixed internal Jev questions, state projection, thresho
 - `vidbyte/lib/jev/presets.py` (`JevPresets`) owns the preflight flags a user enables through `JevRuntimeSettings.preflight`, and the fixed question keys and threshold of each fixed-question flag.
 - `vidbyte/lib/jev/preflight/` is the canonical home of every fixed preflight question, one dataclass per question (`clarity.py`), the specialist Choice question (`specialist.py`), and `JevPreflightRegistry`, the registry over them (`get`, `questions`, `specialists`, `validate`). The flag and question-key enums live in `vidbyte/lib/enums/jev.py`; the preflight records live in `vidbyte/lib/dataclasses/jev.py`.
 - `vidbyte/lib/jev/done/` holds every fixed done question (`multi_part.py`, `claims.py`) and `JevDoneRegistry` (`question`, `threshold`, `resolve`, `validate`). The structured-reply payloads (every field described in 4–6 sentences), the run-state, handoff, claim, and done records, and `JevDoneQuestion` live in `vidbyte/lib/dataclasses/jev.py`; `JevDoneCheck` and `JevDoneQuestionKey` live in `vidbyte/lib/enums/jev.py`.
+- PHASE_PROGRESS is the request-derived check for runs that must move from preparation into one or more substantive outcome stages; those stages are free-form and come from the request, and a requested research or analysis result is not classified as preparation. Its Jev entry carries stage identity, requested transition/result, request scope, output criterion, and observed run evidence, while an observed blocker or exhausted budget lets that item pass without another continuation.
 - `vidbyte/lib/dataclasses/jev.py` owns immutable decision records and the `TypeSafeWireRequest`/`TypeSafeWireQuestion` wire records. They mirror https://docs.typesafe.ai/api.md exactly: state, instructions, and criteria may be strings or JSON structure; noul criteria are optional; Score answers carry a weighted `score`; noul answers carry no confidence.
 - `vidbyte/lib/runners/decision.py` owns semantic decision execution (`arun`), model listing (`alist_models`), and noul scoring against a threshold (`score_noul`).
 - `vidbyte/providers/typesafe.py` alone owns TypeSafe wire serialization, normalization, and failure mapping.
@@ -56,6 +57,8 @@ Load `skills/jev-continuation/SKILL.md` first; it explains each step below in de
 5. Extend `tests/test_jev_done.py`.
 
 **Post-run-derived items:** CLAIMS cannot add a predicted list to `JevRunStateRecord`, because concrete claims do not exist until the main agent writes its final answer. Instead, add its section and typed records to `JevHandoff`, validate unique ids there, then build one question per handoff claim in `JevRunState._section`. The continuation focus must include only claims Jev marked unsupported and each claim's evidence gap.
+
+**Request-derived phase items:** PHASE_PROGRESS lists only substantive outcome stages the request requires, not a fixed taxonomy of planning, research, implementation, or verification phases. Keep four request-derived fields (stage identity, required result, request scope, and observable output criterion) beside the evidence compiled at each finish attempt; project exactly those four fields plus observed evidence to Jev, never the handoff's `missing` note. A requested research or analysis result is an outcome when the request asks for it. Ask whether the evidence shows the requested stage or a concrete blocker, so a verified budget or access limit does not trigger repeated continuation; do not require verification unless the request asks for it.
 
 ## Change workflow
 
@@ -97,6 +100,8 @@ agent = JevAgent(settings, JevRuntimeSettings(preflight=(JevPreflightPreset.CLAR
 ```
 
 The equivalent namespace constructor is `sdk.agents.jev(settings, runtime_settings)`. After a run, `agent.response.specialist` names the specialist that ran the task, or is `None` when the main agent ran it, and `agent.response.done[JevDoneCheck.MULTI_PART]` says whether every requested deliverable was shown produced in full.
+
+Enable the phase-progress preset with `JevContinualSettings(checks=(JevDoneCheck.PHASE_PROGRESS,))`. The latest judgment is available at `agent.response.done[JevDoneCheck.PHASE_PROGRESS]`; its incomplete ids identify request-required outcome stages the run did not enter and could still perform.
 
 ## Capability design example
 

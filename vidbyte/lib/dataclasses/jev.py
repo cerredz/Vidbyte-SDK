@@ -5,7 +5,7 @@ ROLE IN CODEBASE: `vidbyte/providers/typesafe.py` builds TypeSafeWireRequest fro
 ARCHITECTURE NOTE: This module must not import model_configs because that would close an import cycle through ModalityDetector. Records own every shape rule in __post_init__; the provider, not these records, turns a wire record into the JSON body (lint S060 bars dict[str, Any] encoders here).
 COMMON MODIFICATION PATTERNS: Mirror https://docs.typesafe.ai/api.md exactly: add a field together with its validation, its wire record, and its provider serialization; keep bounds in vidbyte/lib/constants/jev.py. New done-check evidence records and their structured payloads belong beside the other Jev records; items derived from the finished answer need not be fields on JevRunStateRecord.
 KNOWN EDGE CASES: State, instructions, and criteria may be a string or JSON structure; noul criteria are optional; score answers carry a probability-weighted `score` that can land between levels; noul answers carry no confidence. JevPreflightQuestion and JevDoneQuestion are deliberately not slotted because every concrete question subclass redeclares its fields with defaults. The clarification, run-state, and handoff payloads are pydantic models because they are the output_schema their generative agents are held to; every field's description is the instruction the model reads for that field, and each done-check section payload carries a SECTION description for the field JevRunState and JevHandoff add when that check is enabled. The records built from those replies hold validated fields only; converting a reply into a record belongs to the agent that asked for it.
-RELATED DOCS: docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-claims-context.md, skills/jev-continuation/SKILL.md, https://docs.typesafe.ai/api.md, and https://docs.typesafe.ai/primitives/advanced.md.
+RELATED DOCS: docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-claims-context.md, docs/design/jev-phase-progress.md, skills/jev-continuation/SKILL.md, https://docs.typesafe.ai/api.md, and https://docs.typesafe.ai/primitives/advanced.md.
 TESTS: tests/test_jev_agent.py, tests/test_jev_preflight.py, and scripts/test-jev-agent-scaffold.py.
 """
 
@@ -690,6 +690,46 @@ class JevMultiPartPayload(JevSectionPayload):
     deliverables: list[JevDeliverablePayload] = Field(description="The deliverables are the separate outputs the request asks the agent to produce, one entry per output, in the order the request asks for them. An output is separate when it could be left out while the other outputs are still produced, such as a code change, a test, a migration, a document, an example, or an explanation the user asked for in its own right. Do not split one output into smaller steps, do not merge two outputs the user asked for separately, and do not add outputs the request does not ask for, such as extra tests or documentation the user never mentioned. Steps the agent takes only to produce an output, such as reading files or running a search, are not deliverables. Return an empty list when the request asks for no output at all, such as a greeting.")
 
 
+class JevPhaseStagePayload(BaseModel):
+    """One outcome stage explicitly required by the request, written before the agent begins work."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(pattern=JEV_DELIVERABLE_ID_PATTERN, description="The id is a stable lowercase identifier for one request-required outcome stage. Use letters, digits, and underscores, begin with a letter, and keep it within sixty-four characters. Give each distinct outcome stage a unique id derived from its subject rather than its position. Copy the same id into the handoff evidence entry so the two records can be matched exactly. Do not encode a success verdict, blocker, or priority in the id.")
+    stage: str = Field(min_length=1, description="Name the outcome stage in the user's terms, identifying the kind of substantive work the request requires. Use a free-form description derived from this request rather than choosing from a fixed phase taxonomy. Work such as research or analysis is an outcome stage when the user asks to receive research or analysis, even if it could prepare other work in another request. Do not list preliminary actions that only help reach a different requested result as outcome stages. Keep this field short enough to recognize in continuation feedback.")
+    required_result: str = Field(min_length=1, description="Describe the transition from preparation into the requested stage and the result the agent must produce or reach within it. Ground the result in an explicit request outcome, not an assumed best practice or an invented workflow. Name an intermediate result only when the request itself requires that result as work. Do not require a later implementation, test, review, or verification stage unless the request asks for it. Preserve the user's scope and qualifiers so partial progress is not mistaken for the whole requested stage.")
+    request_scope: str = Field(min_length=1, description="Record the target, boundaries, audience, and quantity that the request attaches to this stage. Keep names, files, sources, products, ranges, and qualifiers in the user's own terms when they are present. Include only scope needed to identify this stage, leaving unrelated request outcomes to their own entries. Do not broaden a narrow instruction or create a new target from general conventions. When the request leaves a boundary open, record that it is unspecified instead of deciding it.")
+    output_criterion: str = Field(min_length=1, description="State an observable criterion showing that the requested outcome stage has actually been entered or reached. Describe the substantive result or action the run must show, not planning, promises, or preparation that merely precedes it. Accept a final answer as the output when the requested stage itself is an answer, report, comparison, or recommendation. Do not require a separate artifact or verification result unless the request names one. A concrete blocker or exhausted budget belongs in the handoff evidence and is handled as a stopping condition, not as a result criterion.")
+
+
+class JevPhaseProgressPayload(JevSectionPayload):
+    """The phase-progress run-state section: only outcome stages the request itself requires."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    SECTION: ClassVar[str] = "The phase-progress section identifies substantive outcome stages that the user's request requires, so the finish check can see whether the run moved beyond preparation into the requested work. It is written once from the request before the main agent starts and cannot be revised to fit what the run later did. Stage names and results come from the request rather than a fixed list of work phases. A requested research or analysis result remains an outcome even when similar activity could serve as preparation for a different request. Return an empty stages list when no meaningful transition into a requested outcome can be identified."
+    stages: list[JevPhaseStagePayload] = Field(description="List each distinct substantive outcome stage that the request requires, in request order, with one entry per independently judgeable stage. Keep preparation steps out when they only gather context or plan how to produce a later requested result. Include research, analysis, planning, verification, or other activity as an outcome only when the user asks for that activity or its result. Preserve separate stages when the request requires them independently, but do not split one outcome into mechanical substeps. Return an empty list when the request has no meaningful staged outcome to check.")
+
+
+class JevPhaseStageEvidencePayload(BaseModel):
+    """The run evidence and separate actionable gap for one request-required outcome stage."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(pattern=JEV_DELIVERABLE_ID_PATTERN, description="The id must exactly match one stage id from the phase-progress run state. Copy it character for character, preserving the original request order. Provide one evidence entry for every state stage, including a stage with no related activity. Do not invent an id for unrelated run activity or omit a stage because the run did nothing on it. The id links one Jev judgment and one continuation focus line to the same requested outcome.")
+    evidence: str = Field(min_length=1, description="Compile the observed run material that bears on whether the stage was entered or reached, including responses, tool calls and outputs, command results, and the final answer. Identify what was preparatory and what, if anything, performed or produced the request-required stage. Report the sequence and latest state faithfully, including failures, removed results, and evidence that the work remained actionable. Include direct evidence of a genuine blocker or exhausted budget, such as a tool or runtime result, while treating a bare claim of being blocked as a claim rather than corroboration. Never decide that the stage passed or include the separate missing judgment in this field.")
+    missing: str = Field(min_length=1, description="State in plain actionable language what the run does not show about this requested outcome stage. Identify the missing transition or result by reference to the stage's required result and output criterion. Distinguish a voluntary finish after preparation from an observed blocker or exhausted budget, and do not call a reported but unsupported constraint genuine. Do not require verification, artifacts, or later work that the request did not ask for. When the evidence shows the stage or a concrete blocking condition, say that nothing remains actionable for this stage.")
+
+
+class JevPhaseProgressEvidencePayload(JevSectionPayload):
+    """The phase-progress handoff section: observations for every outcome stage listed before work began."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    SECTION: ClassVar[str] = "The phase-progress evidence section gathers what the actual run shows about every outcome stage from the run state. It lets a separate checker distinguish preparatory activity from the work the user requested without inferring a universal workflow. The checker sees only each stage's request-derived identity and criteria plus the evidence written here. Each entry reports observations and a separate missing note for the main agent, never a Jev verdict. Compile it after every finish attempt from the current run window, including its latest answer and any failures or blockers."
+    stages: list[JevPhaseStageEvidencePayload] = Field(description="Return one evidence entry for each phase-progress stage in the run state, with exactly matching ids and request order. Report the activity that occurred and whether it remained preparatory or reached the requested stage's observable criterion. Include evidence of a concrete constraint when it prevented further progress, and separate that from the agent's own statement that it cannot continue. Keep the missing note useful to the main agent but do not copy it into Jev's state projection. Return an entry even when the run contains no work related to that stage.")
+
+
 class JevHandoffPayload(BaseModel):
     """The evidence handoff JevHandoff writes after the main agent tries to finish.
 
@@ -833,6 +873,38 @@ class JevMultiPart:
 
 
 @dataclass(frozen=True, slots=True)
+class JevPhaseStage:
+    """One requested outcome stage and the request-derived criterion for reaching it."""
+
+    id: str
+    stage: str
+    required_result: str
+    request_scope: str
+    output_criterion: str
+
+    def __post_init__(self) -> None:
+        JevDeliverableId.require(self.id, field_name="phase stage id")
+        for field_name in ("stage", "required_result", "request_scope", "output_criterion"):
+            JevText.require(getattr(self, field_name), field_name=f"phase stage {self.id!r} {field_name}")
+
+
+@dataclass(frozen=True, slots=True)
+class JevPhaseProgress:
+    """The request-derived stages a run is expected to enter, in request order."""
+
+    stages: tuple[JevPhaseStage, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.stages, tuple) or not all(isinstance(item, JevPhaseStage) for item in self.stages):
+            raise JevValidation.error("phase-progress stages", "a tuple of JevPhaseStage values", self.stages)
+        JevDeliverableId.require_unique(self.ids(), field_name="phase-progress stages")
+
+    def ids(self) -> tuple[str, ...]:
+        """Return every request-required stage id in order."""
+        return tuple(item.id for item in self.stages)
+
+
+@dataclass(frozen=True, slots=True)
 class JevRunStateRecord:
     """The run state JevRunState wrote from the user's request: the central fields and the section of every enabled done check.
 
@@ -844,6 +916,7 @@ class JevRunStateRecord:
     mission: str
     what_not_to_do: tuple[str, ...] = ()
     multi_part: JevMultiPart | None = None
+    phase_progress: JevPhaseProgress | None = None
     usage: UsageRollup | None = None
 
     def __post_init__(self) -> None:
@@ -856,6 +929,8 @@ class JevRunStateRecord:
             JevText.require(limit, field_name=f"run state what_not_to_do[{index}]")
         if self.multi_part is not None and not isinstance(self.multi_part, JevMultiPart):
             raise JevValidation.error("run state multi_part", "a JevMultiPart or None", self.multi_part)
+        if self.phase_progress is not None and not isinstance(self.phase_progress, JevPhaseProgress):
+            raise JevValidation.error("run state phase_progress", "a JevPhaseProgress or None", self.phase_progress)
 
 
 @dataclass(frozen=True, slots=True)
@@ -888,6 +963,36 @@ class JevMultiPartEvidence:
     def ids(self) -> tuple[str, ...]:
         """Return every evidence entry's deliverable id in order."""
         return tuple(item.id for item in self.deliverables)
+
+
+@dataclass(frozen=True, slots=True)
+class JevPhaseStageEvidence:
+    """Observed run evidence and a separate gap for one requested outcome stage."""
+
+    id: str
+    evidence: str
+    missing: str
+
+    def __post_init__(self) -> None:
+        JevDeliverableId.require(self.id, field_name="phase evidence id")
+        JevText.require(self.evidence, field_name=f"evidence of phase stage {self.id!r}")
+        JevText.require(self.missing, field_name=f"missing of phase stage {self.id!r}")
+
+
+@dataclass(frozen=True, slots=True)
+class JevPhaseProgressEvidence:
+    """The handoff evidence entries for each phase-progress stage, in run-state order."""
+
+    stages: tuple[JevPhaseStageEvidence, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.stages, tuple) or not all(isinstance(item, JevPhaseStageEvidence) for item in self.stages):
+            raise JevValidation.error("phase-progress evidence", "a tuple of JevPhaseStageEvidence values", self.stages)
+        JevDeliverableId.require_unique(self.ids(), field_name="phase-progress evidence")
+
+    def ids(self) -> tuple[str, ...]:
+        """Return every evidence entry's phase stage id in order."""
+        return tuple(item.id for item in self.stages)
 
 
 @dataclass(frozen=True, slots=True)
@@ -1005,6 +1110,7 @@ class JevHandoffRecord:
     """
 
     multi_part: JevMultiPartEvidence | None = None
+    phase_progress: JevPhaseProgressEvidence | None = None
     claims: JevClaimsEvidence | None = None
     usage: UsageRollup | None = None
 
@@ -1012,6 +1118,8 @@ class JevHandoffRecord:
         # Requires a typed evidence section for each enabled done check when present.
         if self.multi_part is not None and not isinstance(self.multi_part, JevMultiPartEvidence):
             raise JevValidation.error("handoff multi_part", "a JevMultiPartEvidence or None", self.multi_part)
+        if self.phase_progress is not None and not isinstance(self.phase_progress, JevPhaseProgressEvidence):
+            raise JevValidation.error("handoff phase_progress", "a JevPhaseProgressEvidence or None", self.phase_progress)
         if self.claims is not None and not isinstance(self.claims, JevClaimsEvidence):
             raise JevValidation.error("handoff claims", "a JevClaimsEvidence or None", self.claims)
 
@@ -1164,22 +1272,22 @@ __all__ = [
     "JevAgentResponse",
     "JevAnswer",
     "JevBrief",
-    "JevClarification",
-    "JevClarificationPayload",
-    "JevClarifyingQuestion",
-    "JevClarifyingQuestionPayload",
-    "JevClaimEvidence",
-    "JevClaimEvidencePayload",
     "JevClaimAssertion",
     "JevClaimAssertionPayload",
     "JevClaimContext",
     "JevClaimContextPayload",
+    "JevClaimEvidence",
+    "JevClaimEvidencePayload",
     "JevClaimIdentity",
     "JevClaimIdentityPayload",
     "JevClaimScope",
     "JevClaimScopePayload",
     "JevClaimsEvidence",
     "JevClaimsEvidencePayload",
+    "JevClarification",
+    "JevClarificationPayload",
+    "JevClarifyingQuestion",
+    "JevClarifyingQuestionPayload",
     "JevContent",
     "JevCriterion",
     "JevDecisionRecord",
@@ -1201,6 +1309,14 @@ __all__ = [
     "JevMultiPartPayload",
     "JevNoulScore",
     "JevOption",
+    "JevPhaseProgress",
+    "JevPhaseProgressEvidence",
+    "JevPhaseProgressEvidencePayload",
+    "JevPhaseProgressPayload",
+    "JevPhaseStage",
+    "JevPhaseStageEvidence",
+    "JevPhaseStageEvidencePayload",
+    "JevPhaseStagePayload",
     "JevPreflightQuestion",
     "JevPresetDefinition",
     "JevPresetResult",
