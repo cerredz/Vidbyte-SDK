@@ -108,7 +108,7 @@ JevClaimAssertion(id, statement, completion_criteria)
 JevClaimEvidence(id, claim, evidence, missing)
 ```
 
-Payload equivalents use `BaseModel`, `extra="forbid"`, and five-sentence field descriptions. Required contextual text is nonblank; `intent` and `output` are nullable for facts that do not state a purpose or produced output. Assertion and criterion lists are nonempty within a claim; the parent claims list may be empty.
+Payload equivalents use `BaseModel`, `extra="forbid"`, and five-sentence field descriptions. Required contextual text is nonblank; `intent` and `output` are nullable for facts that do not state a purpose or produced output. Each parent has a nonempty assertion list, and every assertion has one nonblank completion-criteria string; the parent claims list may be empty.
 
 #### Logic / Algorithm
 
@@ -338,6 +338,7 @@ Complete list of every file that will be created, modified, or deleted:
 | MODIFY | `vidbyte/agents/jev/done/handoff.py` | Convert expanded handoff payloads into typed records. |
 | MODIFY | `vidbyte/agents/jev/done/run_state.py` | Project five context sections per assertion and aggregate assertion outcomes by parent claim. |
 | MODIFY | `vidbyte/lib/jev/done/claims.py` | Ask a recognition-only question about one assertion and its completion criteria. |
+| MODIFY | `vidbyte/lib/jev/done/multi_part.py` | Keep the shared state description accurate for assertion-keyed CLAIMS entries. |
 | MODIFY | `vidbyte/agents/jev/continuation/done.py` | Return only failed assertions under incomplete parent claims. |
 | MODIFY | `vidbyte/agents/jev/__init__.py` | Re-export public claim context and assertion records. |
 | MODIFY | `vidbyte/agents/__init__.py` | Re-export public claim records through the agents package. |
