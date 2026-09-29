@@ -10,6 +10,7 @@ Whenever a model or agent writes, rewrites, or reviews a Jev question here, it m
 
 - `multi_part.py` holds the multi-part check's question, asked once per request-defined deliverable; `to_question(id)` names the deliverable id in the question and its name.
 - `claims.py` holds the CLAIMS check's question, asked once per concrete, checkable factual assertion extracted from the final answer by JevHandoff; each claim entry contains the assertion and its tool-call evidence, or an explicit lack of evidence.
+- `output_extent.py` holds the OUTPUT_EXTENT question, asked once per explicit text-size target; code measures supported raw final-answer counts and Jev recognizes target evidence.
 - Every question uses the shared state description in `multi_part.py`; `deliverables` and `claims` are present only when their respective checks are enabled, so the description stays true when checks are combined.
 - `done.py` holds `JevDoneRegistry` (`question`, `threshold`, `resolve`, `validate`).
 - The check vocabulary (`JevDoneCheck`, `JevDoneQuestionKey`) is in `vidbyte/lib/enums/jev.py`; the structured-reply payloads, records, and `JevDoneQuestion` base are in `vidbyte/lib/dataclasses/jev.py`; the thresholds are in `vidbyte/lib/constants/jev.py`.

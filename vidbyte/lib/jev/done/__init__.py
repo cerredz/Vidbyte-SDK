@@ -12,5 +12,6 @@ TESTS: tests/test_jev_done.py.
 from vidbyte.lib.jev.done.claims import ClaimsSupportedQuestion
 from vidbyte.lib.jev.done.done import JevDoneRegistry
 from vidbyte.lib.jev.done.multi_part import DONE_STATE, MultiPartDeliveredQuestion
+from vidbyte.lib.jev.done.output_extent import OutputExtentSatisfiedQuestion
 
-__all__ = ["ClaimsSupportedQuestion", "DONE_STATE", "JevDoneRegistry", "MultiPartDeliveredQuestion"]
+__all__ = ["ClaimsSupportedQuestion", "DONE_STATE", "JevDoneRegistry", "MultiPartDeliveredQuestion", "OutputExtentSatisfiedQuestion"]

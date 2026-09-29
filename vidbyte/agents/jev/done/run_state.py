@@ -1,9 +1,9 @@
 """FILE: vidbyte/agents/jev/done/run_state.py
 
-PURPOSE: Implements JevRunState, the class that owns JevAgent's done checks: it writes request-derived run state once, has JevHandoff compile final-answer evidence at every finish attempt, asks every enabled check's fixed questions in one request, and returns the checks that failed.
+PURPOSE: Implements JevRunState, the class that owns JevAgent's done checks: it writes request-derived run state once, deterministically measures supported final-answer extents, has JevHandoff compile evidence at every finish attempt, asks every enabled check's fixed questions in one request, and returns the checks that failed.
 ROLE IN CODEBASE: JevAgent builds one JevRunState at construction when JevRuntimeSettings.continual enables a done check and passes it to JevRuntime, which calls begin() before the main loop, and JevDoneContinuation (vidbyte/agents/jev/continuation/) calls check() each time the main agent tries to finish; outcomes reach the user through JevResponse on JevAgent.response.
-ARCHITECTURE NOTE: The run state is general: its schema is the central JevRunStatePayload plus request-derived sections for enabled checks, while claims that do not exist until the final answer are extracted by JevHandoff and added to the shared Jev state at check time. Every enabled check's questions go to Jev in one request (combine()), and what the main agent reads on failure belongs to JevDoneContinuation. Question text and thresholds stay in vidbyte/lib/jev/done/ (JevDoneRegistry), and DecisionModelHelper sends requests and scores answers. Generative agents write the state and evidence; Jev only recognizes whether the evidence shows each item.
-COMMON MODIFICATION PATTERNS: Add request-derived sections to _SECTIONS, _record(), and the commented _section() case; add post-run-derived sections to JevHandoff and build their claims and questions in _section() from its typed record. Add every check's commented case to _judge() and its continuation explanation to JevDoneContinuation._explain().
+ARCHITECTURE NOTE: The run state is general: its schema is the central JevRunStatePayload plus request-derived sections for enabled checks, while claims that do not exist until the final answer are extracted by JevHandoff and added to the shared Jev state at check time. Every enabled check's questions go to Jev in one request (combine()), and what the main agent reads on failure belongs to JevDoneContinuation. Question text and thresholds stay in vidbyte/lib/jev/done/ (JevDoneRegistry), and DecisionModelHelper sends requests and scores answers. Generative agents write the state and evidence; code counts final-answer extents with a clear basis, and Jev only recognizes whether the evidence shows each item.
+COMMON MODIFICATION PATTERNS: Add request-derived sections to _SECTIONS, _record(), and the commented _section() case; add post-run-derived sections to JevHandoff and build their claims and questions in _section() from its typed record. Add every check's case to _judge() and its continuation explanation to JevDoneContinuation._explain(). Keep raw text measurement deterministic and preserve the original comparator for OUTPUT_EXTENT.
 KNOWN EDGE CASES: Every failure fails open: no run state means no check, and an unavailable handoff or Jev answer marks the check unavailable and lets the answer stand. An empty request-derived item list or an empty post-run claim list passes with nothing to ask. Like the JevAgent that owns it, one instance serves one run at a time.
 RELATED DOCS: docs/design/jev-multipart-done-criteria.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-claims-context.md, skills/jev-agent/SKILL.md, skills/jev-continuation/SKILL.md, and skills/asking-jev-questions/SKILL.md.
 TESTS: tests/test_jev_done.py.
@@ -11,6 +11,7 @@ TESTS: tests/test_jev_done.py.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping, Sequence
 from types import MappingProxyType
 from typing import Any, ClassVar
@@ -43,6 +44,14 @@ from vidbyte.lib.constants.jev import (
     JEV_DONE_DELIVERABLE_FIELD,
     JEV_DONE_DELIVERABLES_FIELD,
     JEV_DONE_EVIDENCE_FIELD,
+    JEV_DONE_OUTPUT_EXTENT_AMOUNT_FIELD,
+    JEV_DONE_OUTPUT_EXTENT_COMPARATOR_FIELD,
+    JEV_DONE_OUTPUT_EXTENT_EVIDENCE_FIELD,
+    JEV_DONE_OUTPUT_EXTENT_FIELD,
+    JEV_DONE_OUTPUT_EXTENT_OBSERVED_FIELD,
+    JEV_DONE_OUTPUT_EXTENT_TARGET_FIELD,
+    JEV_DONE_OUTPUT_EXTENT_UNIT_FIELD,
+    JEV_DONE_OUTPUT_EXTENTS_FIELD,
     JEV_DONE_REQUEST_FIELD,
 )
 from vidbyte.lib.dataclasses.agents import AgentInput
@@ -53,12 +62,15 @@ from vidbyte.lib.dataclasses.jev import (
     JevHandoffRecord,
     JevMultiPart,
     JevMultiPartPayload,
+    JevOutputExtent,
+    JevOutputExtentItem,
+    JevOutputExtentPayload,
     JevQuestion,
     JevRunStatePayload,
     JevRunStateRecord,
     JevSectionPayload,
 )
-from vidbyte.lib.enums.jev import JevDoneCheck
+from vidbyte.lib.enums.jev import JevDoneCheck, JevOutputExtentComparator
 from vidbyte.lib.enums.prompts import Prompt
 from vidbyte.lib.errors import VidbyteSdkError
 from vidbyte.lib.jev import JevDoneRegistry
@@ -72,7 +84,7 @@ class JevRunState(BaseAgent):
     """Generative agent that writes the run state the enabled done checks read, and runs those checks at every finish attempt."""
 
     # Request-derived checks add a section here; CLAIMS items are extracted after work by the handoff instead.
-    _SECTIONS: ClassVar[Mapping[JevDoneCheck, type[JevSectionPayload]]] = MappingProxyType({JevDoneCheck.MULTI_PART: JevMultiPartPayload})
+    _SECTIONS: ClassVar[Mapping[JevDoneCheck, type[JevSectionPayload]]] = MappingProxyType({JevDoneCheck.MULTI_PART: JevMultiPartPayload, JevDoneCheck.OUTPUT_EXTENT: JevOutputExtentPayload})
 
     def __init__(self, settings: JevAgentSettings, runtime_settings: JevRuntimeSettings, response: JevResponse) -> None:
         # Reuses the JevAgent's generative model and key; the prompt, limits, schema, and empty tool list are fixed here.
@@ -102,6 +114,7 @@ class JevRunState(BaseAgent):
         self.record: JevRunStateRecord | None = None
         self.rendered = ""
         self.handoff: JevHandoffRecord | None = None
+        self._observed_extent: dict[str, int | None] = {}
 
     @classmethod
     def schema(cls, checks: tuple[JevDoneCheck, ...]) -> type[JevRunStatePayload]:
@@ -132,6 +145,7 @@ class JevRunState(BaseAgent):
         self.handoff = None
         if self.record is None:
             return ()
+        self._observed_extent = {} if self.record.output_extent is None else {item.id: self._measure(final_answer, item) for item in self.record.output_extent.items}
         window = JevHandoff.window(self.rendered, responses, calls, final_answer, sender=self.sender)
         self.handoff = await self.handoff_writer.compile(self.request, self.record, window)
         self.response.handoff(self.handoff)
@@ -230,6 +244,34 @@ class JevRunState(BaseAgent):
                             JEV_DONE_EVIDENCE_FIELD: claim.evidence,
                         }
                 return {JEV_DONE_CLAIMS_FIELD: entries}, tuple(question.to_question(identifier) for identifier in handoff.claims.assertion_ids())
+            case JevDoneCheck.OUTPUT_EXTENT:
+                state = None if self.record is None else self.record.output_extent
+                evidence = handoff.output_extent
+                if state is None or evidence is None:
+                    return {}, ()
+                question = JevDoneRegistry.question(JevDoneCheck.OUTPUT_EXTENT)
+                observed = {
+                    item.id: (
+                        f"Code measured the raw final answer directly and observed {self._observed_extent[item.id]} {item.unit.value}."
+                        if self._observed_extent.get(item.id) is not None
+                        else next(entry.evidence for entry in evidence.items if entry.id == item.id)
+                    )
+                    for item in state.items
+                }
+                entries = {
+                    item.id: {
+                        JEV_DONE_OUTPUT_EXTENT_TARGET_FIELD: item.target,
+                        JEV_DONE_OUTPUT_EXTENT_FIELD: {
+                            JEV_DONE_OUTPUT_EXTENT_AMOUNT_FIELD: item.amount,
+                            JEV_DONE_OUTPUT_EXTENT_UNIT_FIELD: item.unit.value,
+                            JEV_DONE_OUTPUT_EXTENT_COMPARATOR_FIELD: item.comparator.value,
+                        },
+                        JEV_DONE_OUTPUT_EXTENT_OBSERVED_FIELD: self._observed_extent.get(item.id),
+                        JEV_DONE_OUTPUT_EXTENT_EVIDENCE_FIELD: observed[item.id],
+                    }
+                    for item in state.items
+                }
+                return {JEV_DONE_OUTPUT_EXTENTS_FIELD: entries}, tuple(question.to_question(identifier) for identifier in state.ids())
 
     def _judge(self, check: JevDoneCheck, handoff: JevHandoffRecord | None, decision: DecisionModelResponse | None) -> JevDoneResult:
         # Scores one enabled done check from the combined request's answers; one commented case per check.
@@ -242,6 +284,58 @@ class JevRunState(BaseAgent):
                 # Each extracted final-answer claim must independently reach the support threshold, so one
                 # unsupported assertion sends the agent back to that claim rather than averaging it away.
                 return self._claims(handoff, decision)
+            case JevDoneCheck.OUTPUT_EXTENT:
+                return self._output_extent(handoff, decision)
+
+    @staticmethod
+    def _measure(text: str, item: JevOutputExtentItem) -> int | None:
+        """Count an explicitly requested unit only when the target is the final answer and its basis is clear."""
+        target = " ".join(item.target.casefold().strip(" .`'\"").split())
+        unit = item.unit
+        if target not in {"answer", "the answer", "final answer", "the final answer", "response", "the response", "final response", "the final response", "agent response", "the agent response", "agent's final answer", "the agent's final answer"}:
+            return None
+        if unit == "words":
+            return len(text.split())
+        if unit == "characters":
+            return len(text)
+        if unit == "lines":
+            return len(text.splitlines())
+        if unit == "sections":
+            return len(re.findall(r"(?m)^#{1,6}\s+\S", text))
+        if unit == "pages" and "\f" in text:
+            return text.count("\f") + 1
+        return None
+
+    def _output_extent(self, handoff: JevHandoffRecord | None, decision: DecisionModelResponse | None) -> JevDoneResult:
+        """Require both visible target evidence from Jev and deterministic bound satisfaction when measurable."""
+        state = None if self.record is None else self.record.output_extent
+        if state is None or handoff is None or handoff.output_extent is None:
+            return JevDoneResult(check=JevDoneCheck.OUTPUT_EXTENT, score=None, available=False)
+        if not state.items:
+            return JevDoneResult(check=JevDoneCheck.OUTPUT_EXTENT, score=None)
+        if decision is None:
+            return JevDoneResult(check=JevDoneCheck.OUTPUT_EXTENT, score=None, available=False)
+        question = JevDoneRegistry.question(JevDoneCheck.OUTPUT_EXTENT)
+        threshold = JevDoneRegistry.threshold(JevDoneCheck.OUTPUT_EXTENT)
+        answers = {identifier: decision.answers[question.name(identifier)] for identifier in state.ids() if question.name(identifier) in decision.answers}
+        verdict = DecisionModelHelper.score_noul(answers, state.ids(), threshold, threshold)
+        if verdict is None:
+            return JevDoneResult(check=JevDoneCheck.OUTPUT_EXTENT, score=None, available=False)
+        failed = []
+        for item in state.items:
+            count = self._observed_extent.get(item.id)
+            if DecisionModelHelper.noul_passes(verdict.answers, item.id, threshold) is False or (count is not None and not self._satisfies(count, item.amount, item.comparator)):
+                failed.append(item.id)
+        usage = JevUsage.from_usage_payload(decision.usage or {})
+        return JevDoneResult(check=JevDoneCheck.OUTPUT_EXTENT, score=verdict.score, passed=not failed, answers=verdict.answers, incomplete=tuple(failed), usage=usage)
+
+    # @intent requested-text-bounds-keep-their-direction
+    # The user's explicit extent is measured against the produced target, even if the final answer omits the quota.
+    # Treating exact as minimum or ignoring excess text for an exact bound would silently weaken the user's requirement.
+    @staticmethod
+    def _satisfies(observed: int, expected: int, comparator: JevOutputExtentComparator) -> bool:
+        """Apply the request's minimum, exact, or maximum comparator without changing its direction."""
+        return {"minimum": observed >= expected, "exact": observed == expected, "maximum": observed <= expected}[comparator.value]
 
     def _multi_part(self, handoff: JevHandoffRecord | None, decision: DecisionModelResponse | None) -> JevDoneResult:
         # Turns Jev's answers about each deliverable into the multi-part result, scored by DecisionModelHelper.
@@ -324,12 +418,17 @@ class JevRunState(BaseAgent):
         section = getattr(payload, JevDoneCheck.MULTI_PART.value, None)
         if isinstance(section, JevMultiPartPayload):
             multi_part = JevMultiPart(tuple(JevDeliverable(item.id, item.description.strip(), item.completion_signal.strip()) for item in section.deliverables))
+        output_extent = None
+        extent_section = getattr(payload, JevDoneCheck.OUTPUT_EXTENT.value, None)
+        if isinstance(extent_section, JevOutputExtentPayload):
+            output_extent = JevOutputExtent(tuple(JevOutputExtentItem(item.id, item.target.strip(), item.amount, item.unit, item.comparator) for item in extent_section.items))
         return JevRunStateRecord(
             goal=payload.goal.strip(),
             objective=payload.objective.strip(),
             mission=payload.mission.strip(),
             what_not_to_do=tuple(limit.strip() for limit in payload.what_not_to_do if limit.strip()),
             multi_part=multi_part,
+            output_extent=output_extent,
             usage=self.get_usage(),
         )
 

@@ -41,6 +41,9 @@ from vidbyte.lib.dataclasses.jev import (
     JevHandoffRecord,
     JevMultiPartEvidence,
     JevMultiPartEvidencePayload,
+    JevOutputExtentEvidence,
+    JevOutputExtentEvidenceItem,
+    JevOutputExtentEvidencePayload,
     JevRunStateRecord,
     JevSectionPayload,
 )
@@ -61,7 +64,7 @@ class JevHandoff(BaseAgent):
     """Generative agent that compiles, from the main agent's context window, the evidence every enabled done check needs."""
 
     # One evidence section per done check; the field name is the check's value, so the reply mirrors the run state.
-    _SECTIONS: ClassVar[Mapping[JevDoneCheck, type[JevSectionPayload]]] = MappingProxyType({JevDoneCheck.MULTI_PART: JevMultiPartEvidencePayload, JevDoneCheck.CLAIMS: JevClaimsEvidencePayload})
+    _SECTIONS: ClassVar[Mapping[JevDoneCheck, type[JevSectionPayload]]] = MappingProxyType({JevDoneCheck.MULTI_PART: JevMultiPartEvidencePayload, JevDoneCheck.CLAIMS: JevClaimsEvidencePayload, JevDoneCheck.OUTPUT_EXTENT: JevOutputExtentEvidencePayload})
 
     def __init__(self, settings: JevAgentSettings, continual: JevContinualSettings) -> None:
         # Reuses the JevAgent's generative model and key and takes its limits from the continuation settings; the prompt, schema, and empty tool list are fixed here.
@@ -166,7 +169,14 @@ class JevHandoff(BaseAgent):
                 )
                 for item in claims_section.claims
             ))
-        return JevHandoffRecord(multi_part=multi_part, claims=claims, usage=self.get_usage())
+        extent = None
+        extent_section = getattr(payload, JevDoneCheck.OUTPUT_EXTENT.value, None)
+        if isinstance(extent_section, JevOutputExtentEvidencePayload):
+            extent = JevOutputExtentEvidence(tuple(JevOutputExtentEvidenceItem(item.id, item.evidence.strip(), item.missing.strip()) for item in extent_section.items))
+            expected = () if state.output_extent is None else state.output_extent.ids()
+            if extent.ids() != expected:
+                return None
+        return JevHandoffRecord(multi_part=multi_part, claims=claims, output_extent=extent, usage=self.get_usage())
 
 
 __all__ = ["JevHandoff"]

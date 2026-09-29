@@ -1,6 +1,6 @@
 """FILE: tests/test_jev_done.py
 
-PURPOSE: Verifies JevAgent's done checks deterministically without live model calls: the run-state and handoff schemas, request-derived and post-run claim records, both fixed questions, the shared state description, the handoff context, batched Jev requests, and continuation and fail-open behavior.
+PURPOSE: Verifies JevAgent's done checks deterministically without live model calls: the run-state and handoff schemas, request-derived and post-run claim records, all fixed questions including output extent, shared state, handoff context, batched Jev requests, and continuation and fail-open behavior.
 ROLE IN CODEBASE: Pins the Jev done-check contracts: records live in vidbyte/lib, every structured-output field carries a 4-6 sentence description, the handoff reads the main agent's window through ContextManager, and every enabled check's questions share one Jev request.
 ARCHITECTURE NOTE: Scripted generative and decision runners replace only the external boundaries while production settings, registry, schemas, runtime hook, and response wiring stay active.
 COMMON MODIFICATION PATTERNS: Add cases for every new done check's schema, question, threshold boundary, dynamic or request-derived items, and availability policy.
@@ -42,6 +42,7 @@ from vidbyte import (
     JevClaimsEvidence,
     JevContinualSettings,
     JevDoneCheck,
+    JevHandoffRecord,
     JevRuntimeSettings,
     JevSpecialist,
 )
@@ -64,6 +65,7 @@ from vidbyte.lib.constants.jev import (
     JEV_DONE_MAX_CONTINUATIONS,
     JEV_DONE_REQUEST_FIELD,
     JEV_MULTI_PART_THRESHOLD,
+    JEV_OUTPUT_EXTENT_THRESHOLD,
 )
 from vidbyte.lib.dataclasses.jev import (
     JevAnswer,
@@ -85,11 +87,25 @@ from vidbyte.lib.dataclasses.jev import (
     JevMultiPart,
     JevMultiPartEvidencePayload,
     JevMultiPartPayload,
+    JevOutputExtent,
+    JevOutputExtentEvidence,
+    JevOutputExtentEvidenceItem,
+    JevOutputExtentEvidenceItemPayload,
+    JevOutputExtentEvidencePayload,
+    JevOutputExtentItem,
+    JevOutputExtentItemPayload,
+    JevOutputExtentPayload,
     JevRunStatePayload,
     JevRunStateRecord,
     JevSectionPayload,
 )
-from vidbyte.lib.enums import JevDoneQuestionKey, JevQuestionType, ModelProvider
+from vidbyte.lib.enums import (
+    JevDoneQuestionKey,
+    JevOutputExtentComparator,
+    JevOutputExtentUnit,
+    JevQuestionType,
+    ModelProvider,
+)
 from vidbyte.lib.enums.prompts import Prompt
 from vidbyte.lib.errors import ConfigurationError, ProviderRequestError
 from vidbyte.lib.jev import JevDoneRegistry
@@ -98,6 +114,7 @@ from vidbyte.lib.jev.done import (
     DONE_STATE,
     ClaimsSupportedQuestion,
     MultiPartDeliveredQuestion,
+    OutputExtentSatisfiedQuestion,
 )
 from vidbyte.lib.runners import TextModelResponse
 from vidbyte.lib.runners.types import DecisionModelResponse
@@ -248,7 +265,7 @@ class JevDoneRecordTests(unittest.TestCase):
 
     def test_records_and_enums_live_in_lib(self) -> None:
         # [Review 4116720422] dataclasses and enums belong in vidbyte/lib, per AGENTS.md.
-        for cls in (JevDeliverable, JevMultiPart, JevRunStateRecord, JevDoneResult, JevRunStatePayload, JevMultiPartPayload):
+        for cls in (JevDeliverable, JevMultiPart, JevOutputExtentItem, JevOutputExtent, JevRunStateRecord, JevDoneResult, JevRunStatePayload, JevMultiPartPayload, JevOutputExtentPayload):
             self.assertEqual(cls.__module__, "vidbyte.lib.dataclasses.jev")
         self.assertEqual(JevDoneCheck.__module__, "vidbyte.lib.enums.jev")
         self.assertFalse((_REPOSITORY_ROOT / "vidbyte/agents/jev/run_state.py").exists())
@@ -256,7 +273,7 @@ class JevDoneRecordTests(unittest.TestCase):
 
     def test_every_structured_output_field_has_a_four_to_six_sentence_description(self) -> None:
         # [Review 4116725548] every field carries a pre-defined 4-6 sentence description used in the structured output.
-        models = (JevRunStatePayload, JevMultiPartPayload, JevDeliverablePayload, JevMultiPartEvidencePayload, JevDeliverableEvidencePayload, JevClaimIdentityPayload, JevClaimScopePayload, JevClaimAssertionPayload, JevClaimContextPayload, JevClaimEvidencePayload, JevClaimsEvidencePayload)
+        models = (JevRunStatePayload, JevMultiPartPayload, JevDeliverablePayload, JevMultiPartEvidencePayload, JevDeliverableEvidencePayload, JevOutputExtentPayload, JevOutputExtentItemPayload, JevOutputExtentEvidencePayload, JevOutputExtentEvidenceItemPayload, JevClaimIdentityPayload, JevClaimScopePayload, JevClaimAssertionPayload, JevClaimContextPayload, JevClaimEvidencePayload, JevClaimsEvidencePayload)
         for model in models:
             for name, description in _descriptions(model).items():
                 with self.subTest(model=model.__name__, field=name):
@@ -265,7 +282,7 @@ class JevDoneRecordTests(unittest.TestCase):
             for name, description in _descriptions(model).items():
                 with self.subTest(model=model.__name__, field=name):
                     self.assertEqual(_sentences(description), 5)
-        for section in (JevMultiPartPayload, JevMultiPartEvidencePayload, JevClaimsEvidencePayload):
+        for section in (JevMultiPartPayload, JevMultiPartEvidencePayload, JevOutputExtentPayload, JevOutputExtentEvidencePayload, JevClaimsEvidencePayload):
             with self.subTest(section=section.__name__):
                 self.assertIn(_sentences(section.SECTION), range(4, 7))
 
@@ -312,6 +329,17 @@ class JevDoneRecordTests(unittest.TestCase):
         with self.assertRaises(ConfigurationError):
             JevClaimAssertion("bad.id", "statement", "criterion")
 
+    def test_output_extent_records_preserve_comparator_and_reject_ambiguous_values(self) -> None:
+        item = JevOutputExtentItem("answer_length", "the final answer", 25, JevOutputExtentUnit.WORDS, JevOutputExtentComparator.MINIMUM)
+        state = JevOutputExtent((item,))
+        self.assertEqual(state.ids(), ("answer_length",))
+        self.assertEqual(JevRunStateRecord("goal", "objective", "mission", output_extent=state).output_extent, state)
+        evidence = JevOutputExtentEvidence((JevOutputExtentEvidenceItem("answer_length", "final answer text", "no gap"),))
+        self.assertEqual(JevHandoffRecord(output_extent=evidence).output_extent, evidence)
+        for invalid in ((0, "words", "minimum"), (3, "tokens", "minimum"), (3, "words", "at_least")):
+            with self.subTest(invalid=invalid), self.assertRaises(ConfigurationError):
+                JevOutputExtentItem("answer_length", "the final answer", invalid[0], JevOutputExtentUnit.WORDS if invalid[1] == "words" else invalid[1], JevOutputExtentComparator.MINIMUM if invalid[2] == "minimum" else invalid[2])
+
 
 class JevDoneSchemaTests(unittest.TestCase):
     """Pin that one JevRunState and one JevHandoff compose their schemas from the enabled checks."""
@@ -323,7 +351,9 @@ class JevDoneSchemaTests(unittest.TestCase):
         self.assertTrue(issubclass(schema, JevRunStatePayload))
         self.assertEqual(schema.model_fields["multi_part"].description, JevMultiPartPayload.SECTION)
         self.assertEqual(set(JevRunState.schema((JevDoneCheck.CLAIMS,)).model_fields), {"goal", "objective", "mission", "what_not_to_do"})
-        self.assertEqual(set(JevRunState._SECTIONS), {JevDoneCheck.MULTI_PART})
+        extent_schema = JevRunState.schema((JevDoneCheck.OUTPUT_EXTENT,))
+        self.assertEqual(extent_schema.model_fields["output_extent"].description, JevOutputExtentPayload.SECTION)
+        self.assertEqual(set(JevRunState._SECTIONS), {JevDoneCheck.MULTI_PART, JevDoneCheck.OUTPUT_EXTENT})
 
     def test_handoff_schema_has_a_section_for_every_enabled_check(self) -> None:
         # Request-derived deliverables and post-run-derived claims both need evidence sections in the handoff.
@@ -336,6 +366,7 @@ class JevDoneSchemaTests(unittest.TestCase):
         self.assertEqual(claim_schema.model_fields["claims"].description, JevClaimsEvidencePayload.SECTION)
         self.assertNotIn("claims", JevRunState.schema(tuple(JevDoneCheck)).model_fields)
         self.assertEqual(set(JevHandoff._SECTIONS), set(JevDoneCheck))
+        self.assertEqual(JevHandoff.schema((JevDoneCheck.OUTPUT_EXTENT,)).model_fields["output_extent"].description, JevOutputExtentEvidencePayload.SECTION)
 
     def test_agents_are_built_once_in_the_jev_agent_constructor(self) -> None:
         agent = _jev()
@@ -477,6 +508,48 @@ class JevDoneQuestionTests(unittest.TestCase):
     def test_claims_question_text_is_one_string_literal_each(self) -> None:
         scanner = ImplicitConcatenationScanner()
         rel = "vidbyte/lib/jev/done/claims.py"
+        text = (_REPOSITORY_ROOT / rel).read_text(encoding="utf-8")
+        self.assertEqual(scanner.scan(SourceFile(path=_REPOSITORY_ROOT / rel, rel=rel, text=text, tree=ast.parse(text))), [])
+
+    def test_output_extent_question_is_registered_and_uses_shared_state(self) -> None:
+        question = OutputExtentSatisfiedQuestion()
+        self.assertEqual(JevDoneRegistry.question(JevDoneCheck.OUTPUT_EXTENT), question)
+        self.assertEqual(JevDoneRegistry.threshold(JevDoneCheck.OUTPUT_EXTENT), JEV_OUTPUT_EXTENT_THRESHOLD)
+        rendered = question.to_question("answer_words")
+        self.assertEqual(rendered.name, f"{JevDoneQuestionKey.OUTPUT_EXTENT_SATISFIED.value}.answer_words")
+        self.assertIn("with id `answer_words`", str(rendered.instructions))
+        self.assertIn("`output_extents`", DONE_STATE)
+        self.assertEqual((len(question.instructions.definitions), len(question.instructions.rules)), (1, 1))
+        self.assertIn(_sentences(question.instructions.introduction), (2, 3))
+        self.assertTrue(question.when_true.what.startswith("Choose true when `evidence`"))
+        self.assertTrue(question.when_false.what.startswith("Choose false when `evidence`"))
+        self.assertEqual(question.when_true.easy[0].split(", and evidence")[0], question.when_false.easy[0].split(", but evidence")[0])
+
+    def test_output_extent_counter_preserves_explicit_units_and_bound_direction(self) -> None:
+        answer = "# Summary\nOne two three.\n# Details\nFour five."
+        self.assertEqual(JevRunState._measure(answer, JevOutputExtentItem("a", "final answer", 5, JevOutputExtentUnit.WORDS, JevOutputExtentComparator.MINIMUM)), 9)
+        self.assertEqual(JevRunState._measure(answer, JevOutputExtentItem("a", "final answer", 5, JevOutputExtentUnit.LINES, JevOutputExtentComparator.EXACT)), 4)
+        self.assertEqual(JevRunState._measure(answer, JevOutputExtentItem("a", "final answer", 2, JevOutputExtentUnit.SECTIONS, JevOutputExtentComparator.EXACT)), 2)
+        self.assertIsNone(JevRunState._measure(answer, JevOutputExtentItem("a", "report.md", 5, JevOutputExtentUnit.WORDS, JevOutputExtentComparator.MINIMUM)))
+        self.assertTrue(JevRunState._satisfies(5, 5, JevOutputExtentComparator.MINIMUM))
+        self.assertTrue(JevRunState._satisfies(5, 5, JevOutputExtentComparator.EXACT))
+        self.assertFalse(JevRunState._satisfies(6, 5, JevOutputExtentComparator.EXACT))
+        self.assertFalse(JevRunState._satisfies(4, 5, JevOutputExtentComparator.MINIMUM))
+        self.assertFalse(JevRunState._satisfies(6, 5, JevOutputExtentComparator.MAXIMUM))
+
+    @unittest.skipUnless(importlib.util.find_spec("tiktoken"), "tiktoken is not installed")
+    def test_output_extent_question_carries_at_least_two_thousand_tokens(self) -> None:
+        import tiktoken
+
+        question = OutputExtentSatisfiedQuestion()
+        parts = [question.instructions.render(), question.gap]
+        for criterion in (question.when_true, question.when_false):
+            parts += [criterion.what, criterion.not_for, *criterion.easy, *criterion.boundary]
+        self.assertGreaterEqual(len(tiktoken.get_encoding("cl100k_base").encode("\n".join(parts))), 2_000)
+
+    def test_output_extent_question_text_is_one_string_literal_each(self) -> None:
+        scanner = ImplicitConcatenationScanner()
+        rel = "vidbyte/lib/jev/done/output_extent.py"
         text = (_REPOSITORY_ROOT / rel).read_text(encoding="utf-8")
         self.assertEqual(scanner.scan(SourceFile(path=_REPOSITORY_ROOT / rel, rel=rel, text=text, tree=ast.parse(text))), [])
 
@@ -720,6 +793,38 @@ class JevDoneRuntimeTests(unittest.IsolatedAsyncioTestCase):
         request = decision.requests[0]
         self.assertEqual(set(request.state), {JEV_DONE_REQUEST_FIELD, JEV_DONE_DELIVERABLES_FIELD, JEV_DONE_CLAIMS_FIELD})
         self.assertEqual(len(request.questions), 4)
+        self.assertTrue(all(result.passed for result in agent.response.done.values()))
+
+    async def test_final_answer_under_minimum_fails_even_when_final_answer_omits_the_quota(self) -> None:
+        state = {**_BASE_STATE, "output_extent": {"items": [{"id": "answer_words", "target": "the final answer", "amount": 25, "unit": "words", "comparator": "minimum"}]}}
+        handoff = {"output_extent": {"items": [{"id": "answer_words", "evidence": "Final answer: All done.", "missing": "The final answer contains fewer than 25 words."}]}}
+        decision = ScriptedDecisionRunner({"answer_words": [0.99]})
+        agent, main, _, _ = self._agent(done=(JevDoneCheck.OUTPUT_EXTENT,), final_answer="All done.", state=json.dumps(state), handoff=json.dumps(handoff))
+        with patch(_RUNNER_PATH, new=_runner_class(decision)):
+            await agent.arun(_REQUEST)
+
+        result = agent.response.done[JevDoneCheck.OUTPUT_EXTENT]
+        self.assertFalse(result.passed)
+        self.assertEqual(result.incomplete, ("answer_words",))
+        self.assertGreater(agent.response.continuations, 0)
+        self.assertIn("requested minimum 25 words", main.messages[1][0]["content"])
+        sent_state = decision.requests[0].state
+        self.assertEqual(sent_state["output_extents"]["answer_words"]["observed"], 2)
+        self.assertNotIn("missing", sent_state["output_extents"]["answer_words"])
+        self.assertIn("Code measured the raw final answer directly", sent_state["output_extents"]["answer_words"]["evidence"])
+
+    async def test_output_extent_questions_batch_with_existing_request_derived_checks(self) -> None:
+        state = {**_STATE, "output_extent": {"items": [{"id": "answer_words", "target": "the final answer", "amount": 2, "unit": "words", "comparator": "minimum"}]}}
+        handoff = {**_HANDOFF, "output_extent": {"items": [{"id": "answer_words", "evidence": "Final answer: All done.", "missing": "Nothing is missing."}]}}
+        decision = ScriptedDecisionRunner({"dry_run_flag": [0.99], "readme_docs": [0.99], "answer_words": [0.99]})
+        agent, *_ = self._agent(done=(JevDoneCheck.MULTI_PART, JevDoneCheck.OUTPUT_EXTENT), final_answer="All done.", state=json.dumps(state), handoff=json.dumps(handoff))
+        with patch(_RUNNER_PATH, new=_runner_class(decision)):
+            await agent.arun(_REQUEST)
+
+        self.assertEqual(len(decision.requests), 1)
+        request = decision.requests[0]
+        self.assertEqual(len(request.questions), 3)
+        self.assertEqual(set(request.state), {JEV_DONE_REQUEST_FIELD, JEV_DONE_DELIVERABLES_FIELD, "output_extents"})
         self.assertTrue(all(result.passed for result in agent.response.done.values()))
 
     async def test_handoff_receives_the_request_state_and_main_agent_window(self) -> None:

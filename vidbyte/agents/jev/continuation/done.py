@@ -107,6 +107,24 @@ class JevDoneContinuation(JevContinuation):
                     failed.extend(assertion_failures)
                     focus.extend(assertion_focus)
                 return "\n".join(failed), "\n".join(focus)
+            case JevDoneCheck.OUTPUT_EXTENT:
+                question = JevDoneRegistry.question(JevDoneCheck.OUTPUT_EXTENT)
+                state = None if self.run_state.record is None else self.run_state.record.output_extent
+                evidence = None if self.run_state.handoff is None else self.run_state.handoff.output_extent
+                items = {} if state is None else {item.id: item for item in state.items}
+                missing = {} if evidence is None else {item.id: item.missing for item in evidence.items}
+                failed = [question.gap]
+                focus = []
+                for identifier in result.incomplete:
+                    item = items[identifier]
+                    observed = self.run_state._observed_extent.get(identifier)
+                    amount = "unmeasured" if observed is None else str(observed)
+                    yes = result.answers[identifier].probabilities[JEV_NOUL_TRUE]
+                    answer = "yes" if DecisionModelHelper.noul_passes(result.answers, identifier, JevDoneRegistry.threshold(JevDoneCheck.OUTPUT_EXTENT)) else "no"
+                    gap = missing[identifier] if observed is None or self.run_state._satisfies(observed, item.amount, item.comparator) else f"The final answer has {observed} {item.unit.value}; the request requires {item.comparator.value} {item.amount} {item.unit.value}."
+                    failed.append(f"- {question.instructions.question.format(item=identifier)} Jev's answer: {answer} (P(yes) = {yes:.2f}). Observed amount: {amount} {item.unit.value}; requested {item.comparator.value} {item.amount} {item.unit.value}. Still missing: {gap}")
+                    focus.append(f"- Output target: {item.target}\n  Requested extent: {item.comparator.value} {item.amount} {item.unit.value}\n  Observed extent: {amount} {item.unit.value}")
+                return "\n".join(failed), "\n".join(focus)
 
     def _claim_assertion_feedback(self, claim: JevClaimEvidence, result: JevDoneResult, question: JevDoneQuestion, threshold: float) -> tuple[list[str], list[str]]:
         """Return failed-question text and focus only for assertions below the threshold in one parent claim."""

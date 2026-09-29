@@ -41,6 +41,7 @@ class JevDoneCheck(str, Enum):
 
     MULTI_PART = "multi_part"
     CLAIMS = "claims"
+    OUTPUT_EXTENT = "output_extent"
 
 
 class JevDoneQuestionKey(str, Enum):
@@ -51,6 +52,25 @@ class JevDoneQuestionKey(str, Enum):
 
     MULTI_PART_DELIVERED = "multi_part.delivered"
     CLAIMS_SUPPORTED = "claims.supported"
+    OUTPUT_EXTENT_SATISFIED = "output_extent.satisfied"
+
+
+class JevOutputExtentUnit(str, Enum):
+    """Text units supported by the OUTPUT_EXTENT request schema."""
+
+    WORDS = "words"
+    CHARACTERS = "characters"
+    LINES = "lines"
+    SECTIONS = "sections"
+    PAGES = "pages"
+
+
+class JevOutputExtentComparator(str, Enum):
+    """Directions of explicit numeric bounds for an output extent."""
+
+    MINIMUM = "minimum"
+    EXACT = "exact"
+    MAXIMUM = "maximum"
 
 
 class JevClaimKind(str, Enum):

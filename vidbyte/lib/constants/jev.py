@@ -86,6 +86,8 @@ JEV_SPECIALIST_MAX_COUNT: int = JEV_MAX_CHOICE_OPTIONS - 1
 JEV_MULTI_PART_THRESHOLD: float = 0.8
 # Each checkable final-answer claim must reach this P(yes), alone and in the mean, before it is considered supported.
 JEV_CLAIMS_THRESHOLD: float = 0.85
+# Explicit requested output extents must meet this threshold and the per-item numeric comparator.
+JEV_OUTPUT_EXTENT_THRESHOLD: float = 0.8
 # Default of JevContinualSettings.max_continuations: how many times a failed done check may send the main
 # agent back to work before its answer is accepted.
 JEV_DONE_MAX_CONTINUATIONS: int = 3
@@ -97,6 +99,14 @@ JEV_DONE_DELIVERABLE_FIELD: str = "deliverable"
 JEV_DONE_COMPLETION_SIGNAL_FIELD: str = "completion_signal"
 JEV_DONE_EVIDENCE_FIELD: str = "evidence"
 JEV_DONE_CLAIMS_FIELD: str = "claims"
+JEV_DONE_OUTPUT_EXTENTS_FIELD: str = "output_extents"
+JEV_DONE_OUTPUT_EXTENT_FIELD: str = "output_extent"
+JEV_DONE_OUTPUT_EXTENT_TARGET_FIELD: str = "target"
+JEV_DONE_OUTPUT_EXTENT_AMOUNT_FIELD: str = "amount"
+JEV_DONE_OUTPUT_EXTENT_UNIT_FIELD: str = "unit"
+JEV_DONE_OUTPUT_EXTENT_COMPARATOR_FIELD: str = "comparator"
+JEV_DONE_OUTPUT_EXTENT_EVIDENCE_FIELD: str = "evidence"
+JEV_DONE_OUTPUT_EXTENT_OBSERVED_FIELD: str = "observed"
 JEV_DONE_CLAIM_FIELD: str = "claim"
 JEV_DONE_CLAIM_IDENTITY_FIELD: str = "identity"
 JEV_DONE_CLAIM_TITLE_FIELD: str = "title"
@@ -127,6 +137,7 @@ JEV_TOOL_SELECTOR_MIN_THRESHOLD: float = 0.0
 
 __all__ = [
     "JEV_CLAIMS_THRESHOLD",
+    "JEV_OUTPUT_EXTENT_THRESHOLD",
     "JEV_CLARIFICATION_MAX_ITERATIONS",
     "JEV_CLARIFICATION_MAX_QUESTIONS",
     "JEV_CLARIFICATION_MAX_RECOMMENDATIONS",
@@ -146,6 +157,14 @@ __all__ = [
     "JEV_DONE_CLAIM_ASSERTION_STATEMENT_FIELD",
     "JEV_DONE_CLAIM_COMPLETION_CRITERIA_FIELD",
     "JEV_DONE_CLAIMS_FIELD",
+    "JEV_DONE_OUTPUT_EXTENTS_FIELD",
+    "JEV_DONE_OUTPUT_EXTENT_FIELD",
+    "JEV_DONE_OUTPUT_EXTENT_TARGET_FIELD",
+    "JEV_DONE_OUTPUT_EXTENT_AMOUNT_FIELD",
+    "JEV_DONE_OUTPUT_EXTENT_UNIT_FIELD",
+    "JEV_DONE_OUTPUT_EXTENT_COMPARATOR_FIELD",
+    "JEV_DONE_OUTPUT_EXTENT_EVIDENCE_FIELD",
+    "JEV_DONE_OUTPUT_EXTENT_OBSERVED_FIELD",
     "JEV_DONE_CLAIM_DESCRIPTION_FIELD",
     "JEV_DONE_CLAIM_IDENTITY_FIELD",
     "JEV_DONE_CLAIM_INTENT_FIELD",
