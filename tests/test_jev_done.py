@@ -545,9 +545,10 @@ class JevDoneRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(main.calls), 1)
         self.assertFalse(agent.response.done[JevDoneCheck.MULTI_PART].available)
 
-    async def test_missing_decision_credentials_fail_open(self) -> None:
+    async def test_missing_direct_typesafe_credentials_fail_open(self) -> None:
+        # [Hidden Failure] Direct TypeSafe BYOK retains the existing advisory behavior when its key is absent.
         main = ScriptedGenerativeRunner("All done.")
-        agent = bind_test_runner(JevAgent(_settings(), JevRuntimeSettings(continual=JevContinualSettings(checks=(JevDoneCheck.MULTI_PART,)))), main)
+        agent = bind_test_runner(JevAgent(_settings(), JevRuntimeSettings(decision=DecisionModelConfig(), continual=JevContinualSettings(checks=(JevDoneCheck.MULTI_PART,)))), main)
         assert agent.run_state is not None
         bind_test_runner(agent.run_state, ScriptedGenerativeRunner(json.dumps(_STATE)))
         bind_test_runner(agent.run_state.handoff_writer, ScriptedGenerativeRunner(json.dumps(_HANDOFF)))
