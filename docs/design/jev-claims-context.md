@@ -3,7 +3,7 @@
 **Status:** Draft
 **Author:** Codex
 **Created:** 2026-09-28
-**Last Updated:** 2026-09-28
+**Last Updated:** 2026-09-29
 
 ---
 
@@ -51,7 +51,7 @@ CLAIMS currently gives Jev a claim string and a prose evidence string, which lea
 3. `scope` contains what the claim covers and `qualifications` that the final answer expressly attaches to it. Missing qualifications produce an empty list.
 4. `kind` uses a closed `JevClaimKind` enum defined in `vidbyte/lib/enums/jev.py` and covers the categories of factual claims the current CLAIMS contract accepts.
 5. `output` names the result the final answer claims, or is `None` when the assertion is observational and claims no produced artifact.
-6. Every claim contains at least one atomic assertion. Each assertion has a unique stable id within its parent claim, a statement, and one or more `completion_criteria` describing the observation that would establish that statement.
+6. Every claim contains at least one atomic assertion. Each assertion has a unique stable id within its parent claim, a statement, and a `completion_criteria` string describing the observation that would establish that statement.
 7. Handoff payloads, frozen records, and all model-facing payload fields validate their values and use five-sentence descriptions. The five-sentence minimum applies to schema instructions, not to the amount of prose a claim value must contain.
 8. At each finish attempt, Jev's state presents exactly the five named context sections for each assertion, plus the run evidence. It asks one positive yes/no question for each assertion and keeps all enabled done-check questions in one Jev request.
 9. Code combines assertion outcomes under their parent claim. A claim is incomplete if any assertion misses the existing CLAIMS threshold; missing answers or provider failures mark the check unavailable and fail open.
@@ -294,7 +294,7 @@ JevClaimEvidence(id, claim=JevClaimContext, evidence, missing)
           {
             "id": "preview_behavior_described",
             "statement": "README.md says --dry-run previews a deployment.",
-            "completion_criteria": ["The recorded README.md content contains that explanation."]
+            "completion_criteria": "The recorded README.md content contains that explanation."
           }
         ]
       },
@@ -331,6 +331,7 @@ Complete list of every file that will be created, modified, or deleted:
 | Action | File Path | Reason |
 |--------|-----------|--------|
 | CREATE | `docs/design/jev-claims-context.md` | Decision record for the expanded claim context. |
+| MODIFY | `vidbyte/lib/constants/jev.py` | Define stable field names and the composite parent/assertion question-id separator. |
 | MODIFY | `vidbyte/lib/dataclasses/jev.py` | Add nested claim payloads and records; change the evidence record to hold a structured claim. |
 | MODIFY | `vidbyte/lib/enums/jev.py` | Define the closed claim-kind vocabulary. |
 | MODIFY | `vidbyte/lib/enums/__init__.py` | Export the claim-kind enum. |
@@ -339,6 +340,7 @@ Complete list of every file that will be created, modified, or deleted:
 | MODIFY | `vidbyte/lib/jev/done/claims.py` | Ask a recognition-only question about one assertion and its completion criteria. |
 | MODIFY | `vidbyte/agents/jev/continuation/done.py` | Return only failed assertions under incomplete parent claims. |
 | MODIFY | `vidbyte/agents/jev/__init__.py` | Re-export public claim context and assertion records. |
+| MODIFY | `vidbyte/agents/__init__.py` | Re-export public claim records through the agents package. |
 | MODIFY | `vidbyte/__init__.py` | Preserve top-level access to public claim records and enum. |
 | MODIFY | `skills/jev-continuation/SKILL.md` | Document the context sections, one-question-per-assertion rule, and field-description depth. |
 | MODIFY | `tests/test_jev_done.py` | Cover expanded records, projection, assertion-level scoring, and continuation feedback. |
