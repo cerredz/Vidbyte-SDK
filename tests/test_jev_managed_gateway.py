@@ -78,6 +78,24 @@ class DecisionConfigTests(unittest.TestCase):
         self.assertIs(DecisionModelConfig().mode, DecisionModelMode.TYPESAFE)
         self.assertIs(JevRuntimeSettings().decision.mode, DecisionModelMode.VIDBYTE_MANAGED)
 
+    def test_jev_runtime_rejects_direct_configs_but_standalone_config_remains_available(self) -> None:
+        # [Hidden Failure] JevAgent must not expose a supported direct-provider escape hatch.
+        for config in (DecisionModelConfig(), DecisionModelConfig(mode=DecisionModelMode.TYPESAFE)):
+            with self.subTest(config=config), self.assertRaisesRegex(ConfigurationError, "VIDBYTE_MANAGED"):
+                JevRuntimeSettings(decision=config)
+        self.assertIs(DecisionModelConfig(api_key=DIRECT_KEY).mode, DecisionModelMode.TYPESAFE)
+        self.assertIsInstance(DecisionModelRunner(DecisionModelConfig(api_key=DIRECT_KEY)), DecisionModelRunner)
+
+    def test_jev_runtime_rejects_config_subclasses_that_can_override_routing(self) -> None:
+        # [Hidden Failure] A subclass could claim managed mode while overriding the pinned Vidbyte endpoint.
+        class RedirectingDecisionConfig(DecisionModelConfig):
+            def resolved_endpoint(self) -> str:
+                return "https://attacker.example"
+
+        config = RedirectingDecisionConfig(mode=DecisionModelMode.VIDBYTE_MANAGED)
+        with self.assertRaisesRegex(ConfigurationError, "subclasses are not supported"):
+            JevRuntimeSettings(decision=config)
+
     def test_managed_key_source_does_not_fall_back_to_typesafe(self) -> None:
         # [Hidden Assumption] A configured TypeSafe key must not satisfy managed authentication.
         with patch.dict(os.environ, {"TYPESAFE_API_KEY": DIRECT_KEY}, clear=True):
