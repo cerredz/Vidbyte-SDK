@@ -424,7 +424,14 @@ class JevDoneRuntimeTests(unittest.IsolatedAsyncioTestCase):
         with patch(_RUNNER_PATH, new=_runner_class(decision)):
             await agent.arun(_REQUEST)
 
-        self.assertEqual(len(decision.requests), 1)
+        actual_batches = [tuple(question.name for question in request.questions) for request in decision.requests]
+        self.assertEqual(
+            len(actual_batches),
+            1,
+            msg=f"Jev continuation must send all enabled done-check questions for a finish attempt in one request; observed {len(actual_batches)} requests with question names {actual_batches!r}.",
+        )
+        if not actual_batches:
+            return
         request = decision.requests[0]
         state = request.state
         assert isinstance(state, Mapping)
@@ -436,7 +443,12 @@ class JevDoneRuntimeTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(entries[entry["id"]][JEV_DONE_DELIVERABLE_FIELD], entry["description"])
             self.assertEqual(entries[entry["id"]][JEV_DONE_EVIDENCE_FIELD], evidence["evidence"])
         prefix = JevDoneQuestionKey.MULTI_PART_DELIVERED.value
-        self.assertEqual([question.name for question in request.questions], [f"{prefix}.dry_run_flag", f"{prefix}.readme_docs"])
+        expected_names = (f"{prefix}.dry_run_flag", f"{prefix}.readme_docs")
+        self.assertEqual(
+            actual_batches[0],
+            expected_names,
+            msg=f"The single Jev continuation request must contain one question for every required deliverable exactly once; expected {expected_names!r}, observed {actual_batches[0]!r}.",
+        )
 
     async def test_handoff_receives_the_request_state_and_main_agent_window(self) -> None:
         agent, _, _, handoff_runner = self._agent()
@@ -455,6 +467,14 @@ class JevDoneRuntimeTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(reply.content, "All done.")
         self.assertEqual((len(main.calls), len(handoff_runner.calls)), (2, 2))
+        prefix = JevDoneQuestionKey.MULTI_PART_DELIVERED.value
+        expected_names = (f"{prefix}.dry_run_flag", f"{prefix}.readme_docs")
+        actual_batches = [tuple(question.name for question in request.questions) for request in decision.requests]
+        self.assertEqual(
+            actual_batches,
+            [expected_names, expected_names],
+            msg=f"Each Jev continuation finish attempt must issue exactly one complete batch; expected {[expected_names, expected_names]!r}, observed {actual_batches!r}.",
+        )
         feedback = main.messages[1][0]["content"]
         # [Review 4117856441] the original prompt, the run state, the handoff, and the failed Jev questions, with focus on what is missing.
         for section in ("# Original request", "# Run state", "# Handoff", "# Failed checks", "# Focus"):
