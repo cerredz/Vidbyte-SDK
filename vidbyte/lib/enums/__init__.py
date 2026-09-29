@@ -28,17 +28,19 @@ TEST FILES:
 from __future__ import annotations
 
 from vidbyte.lib.enums.agent_runtime import AgentRuntimeStateKey, AgentRuntimeType
-from vidbyte.lib.enums.config import AgentType, DocumentType
-from vidbyte.lib.enums.codex import CodexApprovalMode, CodexContextAnchor, CodexInputType, CodexPersonality, CodexReasoningEffort, CodexReasoningSummary, CodexSandbox, CodexThreadSource, CodexThreadStartSource
-from vidbyte.lib.enums.context import BudgetPreset, PermissionPreset
-from vidbyte.lib.enums.failure import (
-    FailureCode,
-    FailureDisposition,
-    FailurePhase,
-    FailureSeverity,
-    FailureStatus,
-    RuleErrorMode,
+from vidbyte.lib.enums.codex import (
+    CodexApprovalMode,
+    CodexContextAnchor,
+    CodexInputType,
+    CodexPersonality,
+    CodexReasoningEffort,
+    CodexReasoningSummary,
+    CodexSandbox,
+    CodexThreadSource,
+    CodexThreadStartSource,
 )
+from vidbyte.lib.enums.config import AgentType, DocumentType
+from vidbyte.lib.enums.context import BudgetPreset, PermissionPreset
 from vidbyte.lib.enums.cot_events import (
     AssumptionAction,
     BasisType,
@@ -49,7 +51,16 @@ from vidbyte.lib.enums.cot_events import (
     ReturnableOption,
     Reversibility,
 )
+from vidbyte.lib.enums.failure import (
+    FailureCode,
+    FailureDisposition,
+    FailurePhase,
+    FailureSeverity,
+    FailureStatus,
+    RuleErrorMode,
+)
 from vidbyte.lib.enums.jev import (
+    JevClaimKind,
     JevDoneCheck,
     JevDoneQuestionKey,
     JevPreflightPreset,
@@ -93,6 +104,7 @@ from vidbyte.lib.enums.speed import AgentSpeedRecordingIntegrity
 from vidbyte.lib.enums.structured_output import StructuredOutputSupport
 
 __all__ = [
+    "JevClaimKind",
     "JevDoneCheck",
     "JevDoneQuestionKey",
     "JevPreflightPreset",
