@@ -1,6 +1,6 @@
 # Design Doc: Jev Mid-Run Problem Repair Gate
 
-**Status:** Draft
+**Status:** Implemented
 **Author:** Codex
 **Created:** 2026-09-29
 **Last Updated:** 2026-09-29
@@ -251,6 +251,7 @@ N/A - no endpoint or constructor changes. The capability is selected using the e
 | MODIFY | `vidbyte/agents/jev/continuation/done.py` | Add per-item failed-check and Focus text. |
 | MODIFY | `vidbyte/prompts/prompts/jev_continuation/continue_prompt.md` | Explicitly return to the original request after repairs and complete remaining work. |
 | MODIFY | `vidbyte/agents/jev/README.md` | Document the new opt-in capability and dynamic item source. |
+| MODIFY | `vidbyte/agents/handoff.py` | Restore the existing intent comment required by the repository lint baseline so source CI can pass. |
 | MODIFY | `vidbyte/agents/jev/__init__.py` | Export new records returned through `JevAgent.response`. |
 | MODIFY | `vidbyte/agents/__init__.py` | Re-export public Jev response record types. |
 | MODIFY | `vidbyte/__init__.py` | Re-export public Jev response record types. |
@@ -261,7 +262,7 @@ N/A - no endpoint or constructor changes. The capability is selected using the e
 | MODIFY | `skills/jev-continuation/SKILL.md` | Document dynamic problem items and the repair-then-original-task behavior. |
 | CREATE | `docs/design/jev-mid-run-problem-repair-gate.md` | Record the design and verification plan. |
 
-No files are deleted. The manifest therefore contains 4 creates and 18 modifications.
+No files are deleted. The manifest therefore contains 4 creates and 19 modifications.
 
 ---
 
@@ -342,3 +343,11 @@ N/A - no unresolved design decisions. The check is opt-in, matching the existing
 
 - What: Treat a completed deliverable as proof that problems encountered along the way were fixed.
 - Why rejected: Completing a requested output does not establish that a failed command, test, or operation was repaired and revalidated; the two obligations require separate evidence.
+
+---
+
+## 15. Verification Results
+
+- `python scripts/test-jev-problems-resolved.py`: 9/9 focused cases passed.
+- `python -m pytest tests/test_jev_done.py -q`: 54 passed.
+- `python scripts/run_ci.py --stage all`: passed, including lint, source integrity checks, 1,981 passed and 1 skipped in the full test suite, package build, Twine checks, clean installation, dependency checks, and SDK smoke checks.
