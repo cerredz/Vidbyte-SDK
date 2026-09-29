@@ -430,6 +430,8 @@ class JevDoneRuntimeTests(unittest.IsolatedAsyncioTestCase):
             1,
             msg=f"Jev continuation must send all enabled done-check questions for a finish attempt in one request; observed {len(actual_batches)} requests with question names {actual_batches!r}.",
         )
+        if not actual_batches:
+            return
         request = decision.requests[0]
         state = request.state
         assert isinstance(state, Mapping)

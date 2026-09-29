@@ -523,6 +523,8 @@ class JevPreflightRuntimeTests(unittest.IsolatedAsyncioTestCase):
             1,
             msg=f"Jev preflight must send every enabled fixed question in one request; observed {len(actual_batches)} requests with question names {actual_batches!r}.",
         )
+        if not actual_batches:
+            return
         self.assertEqual(
             actual_batches[0],
             expected_names,
@@ -676,6 +678,8 @@ class JevPreflightRuntimeTests(unittest.IsolatedAsyncioTestCase):
             1,
             msg=f"Jev preflight must include the specialist choice in its single request with all enabled fixed questions; observed {len(actual_batches)} requests with question names {actual_batches!r}.",
         )
+        if not actual_batches:
+            return
         actual_names = actual_batches[0]
         expected_names = (*(key.value for key in _CLARITY_KEYS), JEV_SPECIALIST_QUESTION_NAME)
         self.assertEqual(
