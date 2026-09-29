@@ -5,7 +5,7 @@ ROLE IN CODEBASE: JevAgent builds one JevDoneContinuation over its JevRunState w
 ARCHITECTURE NOTE: The message is the vidbyte/prompts asset jev_continuation/continue_prompt.md, filled with the run's own text; what one failed check contributes to it is one commented case in _explain(). The cap on continuations is JevContinualSettings.max_continuations.
 COMMON MODIFICATION PATTERNS: Add a done check's failed questions and focus to _explain(); change the message's instructions in vidbyte/prompts/prompts/jev_continuation/continue_prompt.md.
 KNOWN EDGE CASES: A failed check whose handoff is missing never continues, because there is no evidence to hand back. After max_continuations continuations the latest verdict stays on JevAgent.response, but the main agent's answer stands.
-RELATED DOCS: docs/design/jev-multipart-done-criteria.md, docs/design/jev-claims-done-criteria.md, skills/jev-agent/SKILL.md, and skills/jev-continuation/SKILL.md.
+RELATED DOCS: docs/design/jev-multipart-done-criteria.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-claims-context.md, skills/jev-agent/SKILL.md, and skills/jev-continuation/SKILL.md.
 TESTS: tests/test_jev_done.py.
 """
 
@@ -18,8 +18,13 @@ from vidbyte.agents.jev.continuation.base import JevContinuation
 from vidbyte.agents.jev.done import JevRunState
 from vidbyte.agents.jev.response import JevResponse
 from vidbyte.agents.jev.settings import JevContinualSettings
-from vidbyte.lib.constants.jev import JEV_NOUL_TRUE
-from vidbyte.lib.dataclasses.jev import JevDoneResult
+from vidbyte.lib.constants.jev import JEV_DONE_CLAIM_ASSERTION_SEPARATOR, JEV_NOUL_TRUE
+from vidbyte.lib.dataclasses.jev import (
+    JevClaimAssertion,
+    JevClaimEvidence,
+    JevDoneQuestion,
+    JevDoneResult,
+)
 from vidbyte.lib.enums.jev import JevDoneCheck
 from vidbyte.lib.enums.prompts import Prompt
 from vidbyte.lib.jev import JevDoneRegistry
@@ -94,12 +99,46 @@ class JevDoneContinuation(JevContinuation):
                 claims = {} if handoff is None else {item.id: item for item in handoff.claims}
                 failed = [question.gap]
                 focus = []
-                for identifier in result.incomplete:
-                    yes = result.answers[identifier].probabilities[JEV_NOUL_TRUE]
-                    item = claims[identifier]
-                    failed.append(f"- {question.instructions.question.format(item=identifier)} Jev's answer: no (P(yes) = {yes:.2f}). Still missing: {item.missing}")
-                    focus.append(f"- Claim: {item.claim}\n  Tool-call evidence: {item.evidence}\n  Still missing: {item.missing}")
+                threshold = JevDoneRegistry.threshold(JevDoneCheck.CLAIMS)
+                for claim_id in result.incomplete:
+                    item = claims[claim_id]
+                    assertion_failures, assertion_focus = self._claim_assertion_feedback(item, result, question, threshold)
+                    failed.extend(assertion_failures)
+                    focus.extend(assertion_focus)
                 return "\n".join(failed), "\n".join(focus)
+
+    def _claim_assertion_feedback(self, claim: JevClaimEvidence, result: JevDoneResult, question: JevDoneQuestion, threshold: float) -> tuple[list[str], list[str]]:
+        """Return failed-question text and focus only for assertions below the threshold in one parent claim."""
+        failed = []
+        focus = []
+        for assertion in claim.claim.assertions:
+            identifier = f"{claim.id}{JEV_DONE_CLAIM_ASSERTION_SEPARATOR}{assertion.id}"
+            yes = result.answers[identifier].probabilities[JEV_NOUL_TRUE]
+            if yes >= threshold:
+                continue
+            failed.append(f"- {question.instructions.question.format(item=identifier)} Jev's answer: no (P(yes) = {yes:.2f}). Still missing: {claim.missing}")
+            focus.append(self._claim_focus(claim, assertion))
+        return failed, focus
+
+    @staticmethod
+    def _claim_focus(claim: JevClaimEvidence, assertion: JevClaimAssertion) -> str:
+        """Render one unsupported assertion together with its parent claim context and evidence gap."""
+        intent = "None stated" if claim.claim.identity.intent is None else claim.claim.identity.intent
+        qualifications = ", ".join(claim.claim.scope.qualifications) or "None stated"
+        output = "No output claimed" if claim.claim.output is None else claim.claim.output
+        return "\n".join((
+            f"- Claim: {claim.claim.identity.title}",
+            f"  Description: {claim.claim.identity.description}",
+            f"  Intent: {intent}",
+            f"  Scope: {claim.claim.scope.scope}",
+            f"  Qualifications: {qualifications}",
+            f"  Kind: {claim.claim.kind.value}",
+            f"  Output: {output}",
+            f"  Unsupported assertion ({assertion.id}): {assertion.statement}",
+            f"  Completion criteria: {assertion.completion_criteria}",
+            f"  Tool-call evidence: {claim.evidence}",
+            f"  Still missing: {claim.missing}",
+        ))
 
 
 __all__ = ["JevDoneContinuation"]

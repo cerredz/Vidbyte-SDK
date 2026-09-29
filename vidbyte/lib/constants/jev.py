@@ -5,7 +5,7 @@ ROLE IN CODEBASE: `vidbyte/lib/dataclasses/jev.py` validates against these bound
 ARCHITECTURE NOTE: Values live in `vidbyte.lib` so both lower-layer modules and the tool layer can import them without a layering inversion.
 COMMON MODIFICATION PATTERNS: Change a vendor limit only after TypeSafe documents it; local sanity caps stay generous because the API enforces the real (token) limits itself.
 KNOWN EDGE CASES: Vendor limits are the 255 Choice options and the 2-10 Score levels; question count, state size, and option-name length are local caps only.
-RELATED DOCS: docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, docs/design/jev-tool-selector.md, https://docs.typesafe.ai/api.md, https://docs.typesafe.ai/models.md, https://docs.typesafe.ai/sdk/python/api/retries.md.
+RELATED DOCS: docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, docs/design/jev-tool-selector.md, docs/design/jev-claims-context.md, https://docs.typesafe.ai/api.md, https://docs.typesafe.ai/models.md, https://docs.typesafe.ai/sdk/python/api/retries.md.
 TESTS: tests/test_jev_agent.py, tests/test_jev_preflight.py, tests/test_jev_tool_selector.py, and scripts/test-jev-agent-scaffold.py.
 """
 
@@ -98,6 +98,19 @@ JEV_DONE_COMPLETION_SIGNAL_FIELD: str = "completion_signal"
 JEV_DONE_EVIDENCE_FIELD: str = "evidence"
 JEV_DONE_CLAIMS_FIELD: str = "claims"
 JEV_DONE_CLAIM_FIELD: str = "claim"
+JEV_DONE_CLAIM_IDENTITY_FIELD: str = "identity"
+JEV_DONE_CLAIM_TITLE_FIELD: str = "title"
+JEV_DONE_CLAIM_DESCRIPTION_FIELD: str = "description"
+JEV_DONE_CLAIM_INTENT_FIELD: str = "intent"
+JEV_DONE_CLAIM_SCOPE_FIELD: str = "scope"
+JEV_DONE_CLAIM_QUALIFICATIONS_FIELD: str = "qualifications"
+JEV_DONE_CLAIM_KIND_FIELD: str = "kind"
+JEV_DONE_CLAIM_OUTPUT_FIELD: str = "output"
+JEV_DONE_CLAIM_ASSERTION_FIELD: str = "assertion"
+JEV_DONE_CLAIM_ASSERTION_ID_FIELD: str = "id"
+JEV_DONE_CLAIM_ASSERTION_STATEMENT_FIELD: str = "statement"
+JEV_DONE_CLAIM_COMPLETION_CRITERIA_FIELD: str = "completion_criteria"
+JEV_DONE_CLAIM_ASSERTION_SEPARATOR: str = "."
 # A deliverable ID is a short lowercase identifier JevRunState writes and JevHandoff must echo exactly.
 JEV_DELIVERABLE_ID_PATTERN: str = r"^[a-z][a-z0-9_]{0,63}$"
 # Defaults of the JevRunState and JevHandoff limits in JevContinualSettings: each writes one structured reply,
@@ -127,7 +140,20 @@ __all__ = [
     "JEV_DELIVERABLE_ID_PATTERN",
     "JEV_DONE_COMPLETION_SIGNAL_FIELD",
     "JEV_DONE_CLAIM_FIELD",
+    "JEV_DONE_CLAIM_ASSERTION_FIELD",
+    "JEV_DONE_CLAIM_ASSERTION_ID_FIELD",
+    "JEV_DONE_CLAIM_ASSERTION_SEPARATOR",
+    "JEV_DONE_CLAIM_ASSERTION_STATEMENT_FIELD",
+    "JEV_DONE_CLAIM_COMPLETION_CRITERIA_FIELD",
     "JEV_DONE_CLAIMS_FIELD",
+    "JEV_DONE_CLAIM_DESCRIPTION_FIELD",
+    "JEV_DONE_CLAIM_IDENTITY_FIELD",
+    "JEV_DONE_CLAIM_INTENT_FIELD",
+    "JEV_DONE_CLAIM_KIND_FIELD",
+    "JEV_DONE_CLAIM_OUTPUT_FIELD",
+    "JEV_DONE_CLAIM_QUALIFICATIONS_FIELD",
+    "JEV_DONE_CLAIM_SCOPE_FIELD",
+    "JEV_DONE_CLAIM_TITLE_FIELD",
     "JEV_DONE_DELIVERABLES_FIELD",
     "JEV_DONE_DELIVERABLE_FIELD",
     "JEV_DONE_EVIDENCE_FIELD",

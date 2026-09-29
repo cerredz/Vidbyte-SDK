@@ -137,13 +137,69 @@ Write down five things. If you cannot write one of them, the check is not ready.
 
    Also decide the threshold. The veto is the same value, so one clear no is never averaged away.
 
+For every per-item continuation gate, design the item's Jev-facing state as **four to six named context sections** that explain the item being judged. Choose fields that extend the decision context, such as identity, scope, kind, expected output, and the specific assertion or condition. Keep each question to one recognition judgment about one item; provide its context in that item's state entry instead of combining several judgments into a long question. Give generated-output schema fields five clear sentences describing what the field means, where its value comes from, what belongs or does not belong in it, how absence is represented, and how it affects the judgment. This five-sentence target is for field instructions, not a request for five sentences in every generated value.
+
 A check that judges the run as a whole still fits this model: it has one item with a fixed id. `str.format(item=...)` ignores a placeholder the question does not use. Prefer real items when they exist.
 
 ### Dynamic items: CLAIMS
 
-The `CLAIMS` check is the exception to the usual pre-run item list. Its items are the concrete, checkable factual assertions in the main agent's final answer, so they cannot be truthfully written from the user's request before work begins. Do not add a claims list to `JevRunStateRecord` or ask the run-state writer to predict what the main agent will say. Instead, `JevHandoff` extracts each assertion at a finish attempt, splits separate facts into separate entries, and pairs every entry with relevant `ToolCallContextItem` evidence or an explicit statement that no supporting call exists.
+The `CLAIMS` check is the exception to the usual pre-run item list. Its items are the concrete, checkable factual assertions in the main agent's final answer, so they cannot be truthfully written from the user's request before work begins. Do not add a claims list to `JevRunStateRecord` or ask the run-state writer to predict what the main agent will say. Instead, `JevHandoff` extracts rich parent claims at each finish attempt, separates independently checkable assertions, and pairs each parent with relevant `ToolCallContextItem` evidence or an explicit statement that no supporting call exists. The handoff creates one question per assertion, and code later combines those answers under their parent claim.
 
-`JevHandoff._record` validates that generated claim ids are well-formed and unique within this answer; it cannot compare them with a pre-run id list. `JevRunState._section(CLAIMS)` places each claim and its evidence in the shared Jev state, omits the handoff's `missing` judgment, and asks one question per claim in the same batched request as other enabled checks. An empty claim list passes without a Jev call. When Jev marks claims incomplete, `JevDoneContinuation._explain` focuses only those claims and their evidence gaps, so the main agent can complete requested work with evidence or correct its final answer.
+The state entry for each assertion uses five named context sections. The five sections give Jev a compact, consistent frame for what the answer claimed, what the claim covers, what kind of fact is involved, what result is named, and which single assertion is being checked. The handoff may contain several assertions for one parent claim, but each Jev state entry repeats the parent's context and contains only one assertion. The question names a `parent_id.assertion_id` reference, and the answer is keyed by that same reference. Code marks the parent claim incomplete if any of its assertions falls below the CLAIMS threshold; `JevDoneResult.answers` remains assertion-keyed while `incomplete` remains parent-keyed.
+
+The structured handoff shape is:
+
+```python
+claim = {
+    "identity": {"title": str, "description": str, "intent": str | None},
+    "scope": {"scope": str, "qualifications": list[str]},
+    "kind": "source_content | artifact_change | command_result | test_result | run_activity | other_fact",
+    "output": str | None,
+    "assertions": [{
+        "id": str,
+        "statement": str,
+        "completion_criteria": str,
+    }],
+}
+```
+
+`JevRunState._section(CLAIMS)` projects the context into five sections named `identity`, `scope`, `kind`, `output`, and singular `assertion`, then adds that parent claim's `evidence`. It does not send the handoff's `missing` note to Jev, because `missing` is a separate handoff judgment rather than run evidence. When Jev marks a claim incomplete, `JevDoneContinuation._explain` identifies only the assertions whose own answers failed and includes their parent context, completion criterion, evidence, and gap. An empty claim list passes without a Jev call. A missing answer, handoff failure, or provider failure makes the check unavailable and fails open.
+
+#### CLAIMS context field guidance
+
+Each field below has a five-sentence instruction because the handoff model reads these descriptions as its schema contract. Keep the generated values concise and faithful to the final answer; the five-sentence requirement applies to the descriptions, not to each value.
+
+- **`claim` context object:** It groups the context needed to interpret one final-answer claim and its atomic assertions. It has exactly five top-level sections: `identity`, `scope`, `kind`, `output`, and `assertions` in the handoff. The run-state projection renames the one selected item to singular `assertion` because each state entry is judged separately. Preserve the parent context when projecting a child assertion so the checker can interpret it without consulting sibling entries. This object describes what is claimed and supplies a criterion, but it never counts as evidence that the claim is true.
+
+- **`identity` section:** It identifies the parent claim with its title, description, and optional intent. It gives the checker human-readable context before the evidence is compared with the assertion. Ground title and description in the final answer, and ground intent only in a purpose clear from the request or answer. An absent intent is represented as null when neither source gives a clear purpose. Identity is repeated for each assertion under that parent so each state entry is self-contained.
+
+- **`title`:** Write a short label naming the parent claim's factual subject. Make it specific enough to distinguish sibling claims about the same task or artifact. Preserve a meaningful qualifier if removing it would change which fact is being checked. Do not use a title to introduce a result or fact that the final answer did not state. Keep the label recognizable in continuation feedback.
+
+- **`description`:** Explain the parent's meaning in enough context to understand its assertions. Preserve what the final answer said about the subject and result, including meaningful qualifiers. Keep distinct, independently checkable facts in separate assertions rather than merging them into this prose. Do not treat the description as proof that the claim happened. Write it so the checker can understand the parent without seeing another claim entry.
+
+- **`intent`:** Record the purpose when the user's request or final answer states or clearly explains why this claim matters. Preserve that reason without turning an implied benefit or hidden motive into a factual result. Use null when neither source gives a clear purpose for the claim. Do not infer intent from implementation details or what a developer probably wanted. Intent helps explain the claim's relevance but does not change the evidence required for the assertion.
+
+- **`scope` section:** It records the target and extent covered by a parent claim. Its `scope` field says what target or portion the claim covers, and its `qualifications` list captures explicit conditions attached to it. Preserve broad terms such as all, only, latest, exact, and quantified values because they affect what evidence must establish. Do not silently shrink the scope to fit the evidence that happens to be available. An assertion is judged within this parent scope, with every listed qualification respected.
+
+- **`scope` field:** Name the target and extent of the claim, such as a file, command, test selection, result, or part of an answer. Preserve words that determine coverage, including all, only, latest, and exact version. Say what the claim covers rather than how the agent should complete the work. Do not widen a narrow target into a repository-wide or universal statement. Keep the target understandable without relying on another claim entry.
+
+- **`qualifications`:** List limitations or conditions that the final answer expressly attaches to the claim. Keep qualifiers about a platform, version, sample, or verification limit when they narrow the statement. Return an empty list when the answer states no qualification. Do not invent cautionary language or infer a limit from the tool evidence. Treat each qualification as part of the meaning that the assertion and its completion criterion must preserve.
+
+- **`kind`:** Choose the factual category that best describes what the final answer asserts. The allowed values are `source_content`, `artifact_change`, `command_result`, `test_result`, `run_activity`, and `other_fact`. Select from the asserted fact rather than from the tool that produced the evidence. Use `other_fact` only when none of the named categories fits. The category helps Jev recognize what observation is relevant, but it is not itself evidence and must not encode a support verdict.
+
+- **`output`:** Name the artifact or result the final answer says the user received when the assertion concerns an output. Preserve the stated form and target, such as a README section, changed source file, explanation, or test result. Use null for an observational assertion that claims no produced output. Do not describe an intended output as if the run created it. Evidence and the assertion's completion criterion determine whether the output is shown.
+
+- **`assertions`:** List the independently checkable factual statements that make up the parent claim. Give each assertion a stable id, one statement, and one completion criterion. Split facts whenever one could be supported while another remains unsupported, even if the final answer put them in one sentence. Keep each qualifier attached to the assertion it limits and do not let siblings borrow support from each other. Code asks Jev one question for each assertion and then combines the answers under the parent.
+
+- **`assertion` state section:** It is the one selected item from the parent's `assertions` list that the current question judges. It contains the assertion id, its exact statement, and its completion criterion. The parent identity, scope, kind, and output remain alongside it as the other four context sections. Do not include sibling statements in this section or ask Jev to decide whether all assertions passed. A separate entry and answer exist for every sibling assertion.
+
+- **`id`:** Give each parent claim and each child assertion a stable lowercase identifier beginning with a letter and containing only letters, digits, and underscores. Keep every identifier within the repository's 64-character validation limit. Assertion ids must be unique within their parent, while two different parents may reuse an assertion id. Code combines them as `parent_id.assertion_id`, so neither id may contain a period. The id associates the handoff entry, Jev answer, and continuation feedback without carrying meaning that changes the decision.
+
+- **`statement`:** Write one factual proposition from the final answer that can be checked against the recorded run. Preserve its target, scope, tense, and qualifications rather than weakening it to match available evidence. Separate independently checkable facts into separate assertion entries. Leave plans, recommendations, opinions, and statements with no factual content out of the assertions list. This is the proposition Jev answers yes or no about.
+
+- **`completion_criteria`:** State one observable condition the run evidence must meet to support the assertion statement. Derive that condition from the statement and keep it inside the parent scope and qualifications. Make it specific to a visible source, completed change, command result, test result, run activity, or other recorded fact. Do not add work the final answer did not claim or treat the handoff's missing note as proof. A single criterion keeps the question atomic and gives Jev a concrete recognition target.
+
+`JevHandoff._record` validates unique parent ids and unique assertion ids within each parent. `JevRunState._section(CLAIMS)` flattens those records into question entries without merging assertions, and `_claims` scores every assertion answer. The result's `score` is over assertions, `answers` uses composite assertion references, and `incomplete` lists parent claim ids. The continuation expands each incomplete parent into only the child assertions below threshold, so supported sibling assertions do not appear in the Focus list.
 
 ### Step 2: The enum member and question key (`vidbyte/lib/enums/jev.py`)
 
@@ -368,10 +424,12 @@ Rules for your `case`:
 
 - **Return a mapping of top-level state keys and a tuple of `JevQuestion`s.** Never call Jev here, and never build your own `JevDecisionRequest`.
 - **Key entries by item id**, so that a question naming `{item}` finds its entry.
-- **Put the defining material next to the evidence** (T13): for request-derived items, the run state's "what" and "done when" fields; for CLAIMS, the exact final-answer `claim`; in both cases include the handoff's `evidence`. **Leave out `missing`**, which is the handoff writer's opinion.
+- **Put the defining material next to the evidence** (T13): for request-derived items, the run state's "what" and "done when" fields; for CLAIMS, the five context sections for one assertion; in both cases include the handoff's `evidence`. **Leave out `missing`**, which is the handoff writer's opinion.
 - **Your top-level keys must not collide** with `request`, `deliverables`, or another check's keys, because `state.update` would silently overwrite them. Use a distinct `JEV_DONE_*_FIELD` name.
 - **Return `({}, ())`** when you have nothing to ask, for example when there is no record, no evidence, or no items.
 - Every other enabled check's questions ride in the same request. You get batching for free and never need a second Jev call.
+
+For CLAIMS, key each state entry by `parent_id.assertion_id` and put `claim.identity`, `claim.scope`, `claim.kind`, `claim.output`, the selected singular `claim.assertion`, and that parent's `evidence` in the entry. Repeat the parent context for each assertion so no question depends on a sibling entry. Generate a question for every composite reference, not just for each parent id.
 
 ### Step 11: Keep the shared state description true
 
@@ -406,7 +464,7 @@ def _judge(self, check, handoff, decision):
 7. `usage = JevUsage.from_usage_payload(decision.usage or {})`. This is the usage of the one batched request, so every check reports the same usage. Never sum it across checks.
 8. Return `JevDoneResult(check=…, score=verdict.score, passed=verdict.passed, answers=verdict.answers, incomplete=incomplete, usage=usage)`.
 
-For CLAIMS, use `handoff.claims.ids()` as the item list in steps 2, 4, 5, and 6. The check passes when that list is empty, asks no question in that case, and returns unavailable if the handoff section or combined Jev answer is missing.
+For CLAIMS, use `handoff.claims.assertion_ids()` as the expected answer ids in steps 2, 4, and 5. The check passes when that assertion-id list is empty and asks no question in that case. Keep `answers` keyed by each `parent_id.assertion_id` reference, but set `incomplete` to parent claim ids when any assertion under that parent falls below threshold. Return unavailable if the handoff section or any expected Jev answer is missing.
 
 `check()` then records each result through `self.response.done(result)` and returns only the failed ones. You do not touch `check()`.
 
@@ -455,7 +513,7 @@ case JevDoneCheck.<CHECK>:
 ```
 
 - **Failed checks** tells the agent what was asked, what Jev answered, and what the handoff says is missing, for **incomplete items only**.
-- **Focus** lists only incomplete items. Request-derived items use the pre-run state; CLAIMS uses the exact final-answer claims from the handoff and includes their evidence gaps. Items that passed never appear here. `test_incomplete_deliverable_sends_the_main_agent_back_in_the_same_loop` asserts this for multi-part.
+- **Focus** lists only incomplete items. Request-derived items use the pre-run state; CLAIMS resolves each incomplete parent id to its assertions and includes only assertion answers below threshold, with the parent context and evidence gap. Supported sibling assertions and claims never appear in this focus. `test_incomplete_deliverable_sends_the_main_agent_back_in_the_same_loop` asserts this for multi-part.
 - Only change `continue_prompt.md` when the instructions for **every** check need to change. Its placeholders are fixed: `{request}`, `{run_state}`, `{handoff}`, `{failed}`, `{focus}`.
 
 On the next finish attempt the whole cycle repeats:
@@ -519,7 +577,7 @@ Your change must not raise any lint baseline count.
 - **The shared state must describe itself truthfully** for every combination of enabled checks (step 11).
 - **`evidence` goes to Jev, and `missing` goes to the main agent.** Never the reverse.
 - **The run state is written once, from the request only, before any work.** It is the fixed reference for checks with request-derived items; never predict final-answer claims there.
-- **The handoff is recompiled at every finish attempt**, with history cleared. Request-derived item ids must match the run state; dynamic claim ids must be valid and unique within that handoff.
+- **The handoff is recompiled at every finish attempt**, with history cleared. Request-derived item ids must match the run state; dynamic parent claim ids and within-parent assertion ids must be valid and unique within that handoff.
 - **Everything fails open.** Every failure path in `_judge` returns `available=False`, and an unavailable check never continues the run.
 - **Continuations are bounded** by `JevContinualSettings.max_continuations` (default `JEV_DONE_MAX_CONTINUATIONS` = 3), and `0` means report only.
 - **The continuation appends to the same loop.** It never re-runs the main agent, which would lose its history.

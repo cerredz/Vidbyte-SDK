@@ -5,7 +5,7 @@ ROLE IN CODEBASE: JevRunState builds one JevHandoff at construction and calls co
 ARCHITECTURE NOTE: The handoff is general: its output schema is JevHandoffPayload plus one field per enabled check, typed as that check's evidence payload and described by its SECTION text. It reads the user's request as its message and the run state and main agent's window as standard `vidbyte.context` primitives, including every `ToolCallContextItem`; it reuses the JevAgent's generative model, has no tools, and is constrained by the composed schema. Claims are generated from the final answer here because their item list does not exist before the main agent works.
 COMMON MODIFICATION PATTERNS: Change field instructions in `vidbyte/lib/dataclasses/jev.py`; add an enabled handoff section to _SECTIONS and convert it in _record(). Compare ids to run-state items only for checks whose candidates were written before work, not for dynamic final-answer claims.
 KNOWN EDGE CASES: A generative failure, a reply that never matches the schema, or request-derived evidence whose ids differ from the run state's returns None, so checks fail open. Claims have no pre-run id list; their ids must be valid and unique within the generated claim section. History is cleared before each call, so an earlier finish attempt's handoff never leaks into a later one.
-RELATED DOCS: docs/design/jev-multipart-done-criteria.md, docs/design/jev-claims-done-criteria.md, skills/jev-agent/SKILL.md, skills/jev-continuation/SKILL.md, and skills/asking-jev-questions/SKILL.md.
+RELATED DOCS: docs/design/jev-multipart-done-criteria.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-claims-context.md, skills/jev-agent/SKILL.md, skills/jev-continuation/SKILL.md, and skills/asking-jev-questions/SKILL.md.
 TESTS: tests/test_jev_done.py.
 """
 
@@ -29,7 +29,11 @@ from vidbyte.context.primitives import (
 )
 from vidbyte.lib.dataclasses.agents import AgentInput
 from vidbyte.lib.dataclasses.jev import (
+    JevClaimAssertion,
+    JevClaimContext,
     JevClaimEvidence,
+    JevClaimIdentity,
+    JevClaimScope,
     JevClaimsEvidence,
     JevClaimsEvidencePayload,
     JevDeliverableEvidence,
@@ -133,7 +137,35 @@ class JevHandoff(BaseAgent):
             # The claim ids are created from this final answer, so validate uniqueness here instead of matching
             # them to a pre-run list that cannot contain statements the main agent has not made yet.
             # @intent claims-are-derived-after-the-work
-            claims = JevClaimsEvidence(tuple(JevClaimEvidence(item.id, item.claim.strip(), item.evidence.strip(), item.missing.strip()) for item in claims_section.claims))
+            claims = JevClaimsEvidence(tuple(
+                JevClaimEvidence(
+                    item.id,
+                    JevClaimContext(
+                        identity=JevClaimIdentity(
+                            title=item.claim.identity.title.strip(),
+                            description=item.claim.identity.description.strip(),
+                            intent=None if item.claim.identity.intent is None else item.claim.identity.intent.strip(),
+                        ),
+                        scope=JevClaimScope(
+                            scope=item.claim.scope.scope.strip(),
+                            qualifications=tuple(value.strip() for value in item.claim.scope.qualifications),
+                        ),
+                        kind=item.claim.kind,
+                        output=None if item.claim.output is None else item.claim.output.strip(),
+                        assertions=tuple(
+                            JevClaimAssertion(
+                                assertion.id,
+                                assertion.statement.strip(),
+                                assertion.completion_criteria.strip(),
+                            )
+                            for assertion in item.claim.assertions
+                        ),
+                    ),
+                    item.evidence.strip(),
+                    item.missing.strip(),
+                )
+                for item in claims_section.claims
+            ))
         return JevHandoffRecord(multi_part=multi_part, claims=claims, usage=self.get_usage())
 
 

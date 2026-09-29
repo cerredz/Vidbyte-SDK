@@ -5,7 +5,7 @@ ROLE IN CODEBASE: JevAgent builds one JevRunState at construction when JevRuntim
 ARCHITECTURE NOTE: The run state is general: its schema is the central JevRunStatePayload plus request-derived sections for enabled checks, while claims that do not exist until the final answer are extracted by JevHandoff and added to the shared Jev state at check time. Every enabled check's questions go to Jev in one request (combine()), and what the main agent reads on failure belongs to JevDoneContinuation. Question text and thresholds stay in vidbyte/lib/jev/done/ (JevDoneRegistry), and DecisionModelRunner.score_noul turns answers into a pass or fail. Generative agents write the state and evidence; Jev only recognizes whether the evidence shows each item.
 COMMON MODIFICATION PATTERNS: Add request-derived sections to _SECTIONS, _record(), and the commented _section() case; add post-run-derived sections to JevHandoff and build their claims and questions in _section() from its typed record. Add every check's commented case to _judge() and its continuation explanation to JevDoneContinuation._explain().
 KNOWN EDGE CASES: Every failure fails open: no run state means no check, and an unavailable handoff or Jev answer marks the check unavailable and lets the answer stand. An empty request-derived item list or an empty post-run claim list passes with nothing to ask. Like the JevAgent that owns it, one instance serves one run at a time.
-RELATED DOCS: docs/design/jev-multipart-done-criteria.md, docs/design/jev-claims-done-criteria.md, skills/jev-agent/SKILL.md, skills/jev-continuation/SKILL.md, and skills/asking-jev-questions/SKILL.md.
+RELATED DOCS: docs/design/jev-multipart-done-criteria.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-claims-context.md, skills/jev-agent/SKILL.md, skills/jev-continuation/SKILL.md, and skills/asking-jev-questions/SKILL.md.
 TESTS: tests/test_jev_done.py.
 """
 
@@ -24,7 +24,20 @@ from vidbyte.agents.jev.settings import JevAgentSettings, JevRuntimeSettings
 from vidbyte.agents.pricing import JevUsage
 from vidbyte.agents.settings import AgentLoopSettings
 from vidbyte.lib.constants.jev import (
+    JEV_DONE_CLAIM_ASSERTION_FIELD,
+    JEV_DONE_CLAIM_ASSERTION_ID_FIELD,
+    JEV_DONE_CLAIM_ASSERTION_SEPARATOR,
+    JEV_DONE_CLAIM_ASSERTION_STATEMENT_FIELD,
+    JEV_DONE_CLAIM_COMPLETION_CRITERIA_FIELD,
+    JEV_DONE_CLAIM_DESCRIPTION_FIELD,
     JEV_DONE_CLAIM_FIELD,
+    JEV_DONE_CLAIM_IDENTITY_FIELD,
+    JEV_DONE_CLAIM_INTENT_FIELD,
+    JEV_DONE_CLAIM_KIND_FIELD,
+    JEV_DONE_CLAIM_OUTPUT_FIELD,
+    JEV_DONE_CLAIM_QUALIFICATIONS_FIELD,
+    JEV_DONE_CLAIM_SCOPE_FIELD,
+    JEV_DONE_CLAIM_TITLE_FIELD,
     JEV_DONE_CLAIMS_FIELD,
     JEV_DONE_COMPLETION_SIGNAL_FIELD,
     JEV_DONE_DELIVERABLE_FIELD,
@@ -185,15 +198,39 @@ class JevRunState(BaseAgent):
                 }
                 return {JEV_DONE_DELIVERABLES_FIELD: entries}, tuple(question.to_question(identifier) for identifier in state.ids())
             case JevDoneCheck.CLAIMS:
-                # Claims are only knowable from the final answer, so use the handoff's post-run candidates and
-                # pair each claim with tool evidence; the handoff's `missing` judgment stays out of Jev's state.
+                # Claims are only knowable from the final answer, so repeat each parent context beside one
+                # atomic assertion and its tool evidence; the handoff's `missing` judgment stays out of Jev's state.
                 # @intent claims-come-from-finished-answer
                 # Generating these candidates before the main agent works would make them predictions, not claims.
                 if handoff.claims is None:
                     return {}, ()
                 question = JevDoneRegistry.question(JevDoneCheck.CLAIMS)
-                entries = {claim.id: {JEV_DONE_CLAIM_FIELD: claim.claim, JEV_DONE_EVIDENCE_FIELD: claim.evidence} for claim in handoff.claims.claims}
-                return {JEV_DONE_CLAIMS_FIELD: entries}, tuple(question.to_question(identifier) for identifier in handoff.claims.ids())
+                entries: dict[str, object] = {}
+                for claim in handoff.claims.claims:
+                    for assertion in claim.claim.assertions:
+                        identifier = f"{claim.id}{JEV_DONE_CLAIM_ASSERTION_SEPARATOR}{assertion.id}"
+                        entries[identifier] = {
+                            JEV_DONE_CLAIM_FIELD: {
+                                JEV_DONE_CLAIM_IDENTITY_FIELD: {
+                                    JEV_DONE_CLAIM_TITLE_FIELD: claim.claim.identity.title,
+                                    JEV_DONE_CLAIM_DESCRIPTION_FIELD: claim.claim.identity.description,
+                                    JEV_DONE_CLAIM_INTENT_FIELD: claim.claim.identity.intent,
+                                },
+                                JEV_DONE_CLAIM_SCOPE_FIELD: {
+                                    JEV_DONE_CLAIM_SCOPE_FIELD: claim.claim.scope.scope,
+                                    JEV_DONE_CLAIM_QUALIFICATIONS_FIELD: list(claim.claim.scope.qualifications),
+                                },
+                                JEV_DONE_CLAIM_KIND_FIELD: claim.claim.kind.value,
+                                JEV_DONE_CLAIM_OUTPUT_FIELD: claim.claim.output,
+                                JEV_DONE_CLAIM_ASSERTION_FIELD: {
+                                    JEV_DONE_CLAIM_ASSERTION_ID_FIELD: assertion.id,
+                                    JEV_DONE_CLAIM_ASSERTION_STATEMENT_FIELD: assertion.statement,
+                                    JEV_DONE_CLAIM_COMPLETION_CRITERIA_FIELD: assertion.completion_criteria,
+                                },
+                            },
+                            JEV_DONE_EVIDENCE_FIELD: claim.evidence,
+                        }
+                return {JEV_DONE_CLAIMS_FIELD: entries}, tuple(question.to_question(identifier) for identifier in handoff.claims.assertion_ids())
 
     def _judge(self, check: JevDoneCheck, handoff: JevHandoffRecord | None, decision: DecisionModelResponse | None) -> JevDoneResult:
         # Scores one enabled done check from the combined request's answers; one commented case per check.
@@ -259,14 +296,22 @@ class JevRunState(BaseAgent):
             return JevDoneResult(check=JevDoneCheck.CLAIMS, score=None, available=False)
         question = JevDoneRegistry.question(JevDoneCheck.CLAIMS)
         threshold = JevDoneRegistry.threshold(JevDoneCheck.CLAIMS)
-        # The combined reply holds every enabled check's answers; keep only answers named for this check's claim ids.
-        answers = {identifier: decision.answers[question.name(identifier)] for identifier in handoff.claims.ids() if question.name(identifier) in decision.answers}
-        # The threshold is also the veto, so one claim with a clear no cannot be hidden by other supported claims.
-        verdict = DecisionModelRunner.score_noul(answers, handoff.claims.ids(), threshold, threshold)
+        # The combined reply holds every enabled check's answers; keep one answer for each parent.assertion id.
+        assertion_ids = handoff.claims.assertion_ids()
+        answers = {identifier: decision.answers[question.name(identifier)] for identifier in assertion_ids if question.name(identifier) in decision.answers}
+        # The threshold is also the veto, so one unsupported assertion cannot be hidden by sibling assertions.
+        verdict = DecisionModelRunner.score_noul(answers, assertion_ids, threshold, threshold)
         if verdict is None:
             return JevDoneResult(check=JevDoneCheck.CLAIMS, score=None, available=False)
-        # Only claims below the threshold appear in the continuation's Failed checks and Focus sections.
-        incomplete = tuple(identifier for identifier in handoff.claims.ids() if verdict.answers[identifier].probabilities[JEV_NOUL_TRUE] < threshold)
+        # Answers remain assertion-keyed; the continuation receives parent ids if any child assertion fails.
+        incomplete = tuple(
+            claim.id
+            for claim in handoff.claims.claims
+            if any(
+                verdict.answers[f"{claim.id}{JEV_DONE_CLAIM_ASSERTION_SEPARATOR}{assertion.id}"].probabilities[JEV_NOUL_TRUE] < threshold
+                for assertion in claim.claim.assertions
+            )
+        )
         usage = JevUsage.from_usage_payload(decision.usage or {})
         return JevDoneResult(check=JevDoneCheck.CLAIMS, score=verdict.score, passed=verdict.passed, answers=verdict.answers, incomplete=incomplete, usage=usage)
 

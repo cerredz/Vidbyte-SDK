@@ -2,20 +2,22 @@
 
 ## High-Level Feature Description
 
-The opt-in CLAIMS done check reviews concrete, checkable factual assertions in JevAgent's final answer. It pairs each assertion with relevant tool-call evidence, asks Jev one yes/no question per claim, and sends unsupported assertions back to the main agent. This prevents an unsupported self-report from being mistaken for evidence while leaving the ordinary answer intact if the checker is unavailable.
+The opt-in CLAIMS done check reviews concrete, checkable factual assertions in JevAgent's final answer. Each parent claim carries five context groups: identity, scope, kind, output, and its assertions with completion criteria. The check pairs each assertion with the parent context and relevant tool-call evidence, asks Jev one yes/no question per assertion, and sends only unsupported assertions back to the main agent. This prevents an unsupported self-report from being mistaken for evidence while leaving the ordinary answer intact if the checker is unavailable.
 
 ## Contract
 
 - Claims come from the current final answer, not a predicted list written before the agent starts.
-- Each concrete, checkable factual assertion has a unique id, paired tool-call evidence or an explicit no-evidence statement, and one Jev question.
-- Jev's judgment uses only that claim and its evidence; it does not treat the final answer or the handoff's `missing` summary as evidence.
-- One unsupported claim fails the check regardless of the mean score; continuation focus includes only incomplete claims and their specific evidence gaps.
+- Each parent claim has `identity` (`title`, `description`, `intent`), `scope` (`scope`, `qualifications`), `kind`, `output`, and one or more atomic assertions.
+- Each assertion has a stable id, exact factual statement, and one observable `completion_criteria` string. Parent and assertion ids combine as `parent_id.assertion_id` for state entries and answers.
+- Every Jev state entry repeats the five context groups for exactly one assertion and pairs them with tool-call evidence or an explicit no-evidence statement.
+- Jev's judgment uses only that assertion's context and evidence; it does not treat the final answer or the handoff's `missing` summary as evidence.
+- One unsupported assertion fails the parent claim regardless of the mean score; continuation focus includes only failed assertions and their specific evidence gaps.
 - An answer with no concrete, checkable factual assertions adds no CLAIMS questions and passes. If another enabled done check has items, its questions still use the shared Jev request. Missing handoff evidence, missing credentials, or provider errors fail open.
 - Every enabled done check still shares one Jev request per finish attempt.
 
 ## Actors / Callers
 
-An SDK caller enables CLAIMS with `JevRuntimeSettings(continual=JevContinualSettings(checks=(JevDoneCheck.CLAIMS,)))`. JevRuntime invokes the done check when the main agent tries to finish. The handoff model extracts claims and evidence; Jev judges each claim; the continuation prompt returns only unsupported claims to the main agent.
+An SDK caller enables CLAIMS with `JevRuntimeSettings(continual=JevContinualSettings(checks=(JevDoneCheck.CLAIMS,)))`. JevRuntime invokes the done check when the main agent tries to finish. The handoff model extracts rich parent claims and evidence; Jev judges each assertion; the continuation prompt returns only unsupported assertion references, parent context, tool evidence, and gaps.
 
 ## Inputs and Preconditions
 
@@ -23,7 +25,7 @@ The main agent must have a final answer and an available handoff model. The hand
 
 ## Observable Outcomes
 
-`JevAgent.response.handoff.claims` contains claim/evidence/missing records. `JevAgent.response.done[JevDoneCheck.CLAIMS]` reports the score, answers, incomplete claim ids, availability, and pass status. On a failed check, the next main-agent prompt includes only unsupported claim ids, claims, tool evidence, and gaps.
+`JevAgent.response.handoff.claims` contains structured claim/evidence/missing records. `JevAgent.response.done[JevDoneCheck.CLAIMS]` reports a score over assertions, answers keyed by `parent_id.assertion_id`, incomplete parent claim ids, availability, and pass status. On a failed check, the next main-agent prompt includes only unsupported assertions, their full context, tool evidence, and gaps.
 
 ## State Transitions
 
@@ -32,8 +34,9 @@ Each finish attempt recompiles claims from that attempt's final answer. Supporte
 ## Invariants
 
 - Do not predict or store final-answer claims in `JevRunStateRecord`.
-- A claim's text and evidence are the only state used by its Jev question; no other claim's evidence can support it.
-- Each claim needs its own answer and must meet the threshold independently.
+- One Jev question judges exactly one assertion using the parent claim's identity, scope, kind, output, assertion statement, completion criterion, and evidence.
+- Evidence from another parent claim or sibling assertion cannot support the named assertion.
+- Each assertion needs its own answer and must meet the threshold independently; any failing assertion marks its parent incomplete.
 - Empty claims are a pass, not an unavailable result.
 - CLAIMS adds no field to `JevAgentSettings`, no runtime-specific branch, and no second Jev request.
 
@@ -56,7 +59,7 @@ This feature pack captures the design exception discovered while extending the p
 
 ## Test Suite Map
 
-- `tests/test_jev_done.py` covers claim record validation, field descriptions, schema placement, the fixed question contract and token floor, claim extraction/evidence state, one-question-per-claim batching, unsupported-only continuation focus, empty claims, combined checks, and existing done-check behavior. Run with `python -m unittest tests.test_jev_done` or `python scripts/test-jev-multipart-done-criteria.py`.
+- `tests/test_jev_done.py` covers claim record validation, field descriptions, schema placement, the fixed question contract and token floor, claim extraction/evidence state, one-question-per-assertion batching, assertion scoring and parent aggregation, unsupported-only continuation focus, empty claims, combined checks, and existing done-check behavior. Run with `python -m unittest tests.test_jev_done` or `python scripts/test-jev-multipart-done-criteria.py`.
 
 ## Omitted Testing Strategies
 

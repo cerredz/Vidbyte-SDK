@@ -5,7 +5,7 @@ ROLE IN CODEBASE: `vidbyte/providers/typesafe.py` builds TypeSafeWireRequest fro
 ARCHITECTURE NOTE: This module must not import model_configs because that would close an import cycle through ModalityDetector. Records own every shape rule in __post_init__; the provider, not these records, turns a wire record into the JSON body (lint S060 bars dict[str, Any] encoders here).
 COMMON MODIFICATION PATTERNS: Mirror https://docs.typesafe.ai/api.md exactly: add a field together with its validation, its wire record, and its provider serialization; keep bounds in vidbyte/lib/constants/jev.py. New done-check evidence records and their structured payloads belong beside the other Jev records; items derived from the finished answer need not be fields on JevRunStateRecord.
 KNOWN EDGE CASES: State, instructions, and criteria may be a string or JSON structure; noul criteria are optional; score answers carry a probability-weighted `score` that can land between levels; noul answers carry no confidence. JevPreflightQuestion and JevDoneQuestion are deliberately not slotted because every concrete question subclass redeclares its fields with defaults. The clarification, run-state, and handoff payloads are pydantic models because they are the output_schema their generative agents are held to; every field's description is the instruction the model reads for that field, and each done-check section payload carries a SECTION description for the field JevRunState and JevHandoff add when that check is enabled. The records built from those replies hold validated fields only; converting a reply into a record belongs to the agent that asked for it.
-RELATED DOCS: docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, docs/design/jev-claims-done-criteria.md, skills/jev-continuation/SKILL.md, https://docs.typesafe.ai/api.md, and https://docs.typesafe.ai/primitives/advanced.md.
+RELATED DOCS: docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-claims-context.md, skills/jev-continuation/SKILL.md, https://docs.typesafe.ai/api.md, and https://docs.typesafe.ai/primitives/advanced.md.
 TESTS: tests/test_jev_agent.py, tests/test_jev_preflight.py, and scripts/test-jev-agent-scaffold.py.
 """
 
@@ -26,6 +26,7 @@ from vidbyte.lib.constants.jev import (
     JEV_CLARIFICATION_MAX_RECOMMENDATIONS,
     JEV_CLARIFICATION_MIN_RECOMMENDATIONS,
     JEV_DELIVERABLE_ID_PATTERN,
+    JEV_DONE_CLAIM_ASSERTION_SEPARATOR,
     JEV_MAX_CHOICE_OPTIONS,
     JEV_MAX_OPTION_NAME_CHARS,
     JEV_MAX_QUESTIONS,
@@ -40,6 +41,7 @@ from vidbyte.lib.constants.jev import (
     JEV_SPECIALIST_NONE,
 )
 from vidbyte.lib.enums.jev import (
+    JevClaimKind,
     JevDoneCheck,
     JevDoneQuestionKey,
     JevPreflightPreset,
@@ -718,15 +720,56 @@ class JevMultiPartEvidencePayload(JevSectionPayload):
     deliverables: list[JevDeliverableEvidencePayload] = Field(description="The deliverables hold one evidence entry for every deliverable in the run state's multi-part section, with the same ids and in the same order. Each entry gathers the parts of the run that bear on that one deliverable and states what the run does not show for it. An entry never borrows evidence from another deliverable unless the same piece of the run truly concerns both, in which case it is repeated in each. Do not add entries for work the run did that no deliverable asks for. Never leave a deliverable out, even when the run did nothing toward it.")
 
 
+class JevClaimIdentityPayload(BaseModel):
+    """The title, meaning, and stated purpose of a final-answer claim."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    title: str = Field(min_length=1, description="Write a short title that names the factual claim from the main agent's final answer. Keep it specific enough to distinguish this claim from other claims about the same task. Derive it from the assertion's subject and preserve important qualifiers from the answer. Do not use the title to add facts that the answer does not state. Use plain words the main agent can recognize in continuation feedback.")
+    description: str = Field(min_length=1, description="Describe the claim in the context needed to understand its assertions. Preserve what the main agent actually said, including the subject, result, and meaningful qualifiers. Put independently checkable facts in the assertions list rather than hiding them in a compound description. Do not treat this description as evidence that the claim happened. A reader should understand this claim without seeing another entry.")
+    intent: str | None = Field(description="Record the purpose when the user's request or final answer states or clearly explains why this claim matters. Preserve that reason without upgrading an implied benefit or hidden motive into a fact. Use null when neither source gives a clear purpose for the claim. Do not infer intent from implementation details or what a developer probably wanted. This field explains the claim's relevance but does not change what counts as evidence.")
+
+
+class JevClaimScopePayload(BaseModel):
+    """The target boundary and explicit qualifications that limit a parent claim."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    scope: str = Field(min_length=1, description="Name the target and extent covered by this claim, such as a file, command, test selection, result, or part of the final answer. Preserve words such as all, only, latest, and exact version because they affect what evidence must show. State what the claim covers, not how the agent should complete it. Do not widen a narrow target into a repository-wide or universal claim. Keep the scope understandable without relying on another claim entry.")
+    qualifications: list[str] = Field(description="List limitations or conditions the main agent explicitly attaches to the claim. Preserve wording about a platform, version, sample, or verification limit when it narrows the assertion. Return an empty list when the answer states no qualifications. Do not add cautionary language or infer limitations from tool evidence. A qualification limits the assertion and must be respected when its criteria are checked.")
+
+
+class JevClaimAssertionPayload(BaseModel):
+    """One independently checkable statement within a parent claim and its completion criteria."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(pattern=JEV_DELIVERABLE_ID_PATTERN, description="Give this assertion a short stable id in lowercase letters, digits, and underscores, starting with a letter and no longer than sixty-four characters. Derive it from the fact being asserted rather than assigning a position number. Keep ids unique within the parent claim and copy each id unchanged into the record. Different parents may use the same assertion id because the question name also contains the parent id. The id lets code associate one Jev answer with exactly one assertion.")
+    statement: str = Field(min_length=1, description="Write one factual statement from the final answer that can be checked on its own. Preserve its target, scope, tense, and qualifications rather than weakening it to make it easier to support. Split a sentence into separate entries when it states independent facts. Exclude plans, recommendations, opinions, and statements without checkable factual content. This is the exact assertion the Jev question judges.")
+    completion_criteria: str = Field(min_length=1, description="State the observable condition the run evidence must meet to support this assertion. Derive the condition from the statement and keep it within the parent claim's scope and qualifications. Make the criterion specific to visible source content, a completed change, a command result, or another recorded fact. Do not add work the answer did not claim or treat the handoff's verdict as evidence. Give one criterion so this assertion cannot pass without a defined check.")
+
+
+class JevClaimContextPayload(BaseModel):
+    """The five named context sections Jev reads to judge one claim assertion."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    identity: JevClaimIdentityPayload = Field(description="The identity section gives the assertion a concise title, faithful description, and any purpose clearly stated by the request or final answer. It helps the checker understand what the main agent meant before comparing that meaning with run evidence. Keep the title and description grounded in the final answer and represent an unstated purpose as null. This section describes the claim and does not establish that the asserted work or result occurred. Keep independent facts in separate assertions even when they share this identity.")
+    scope: JevClaimScopePayload = Field(description="The scope section identifies the target and limits of the parent claim, including qualifications the main agent explicitly stated. It tells the checker how broad the evidence must be and which conditions narrow the assertion. Preserve quantified or universal scope exactly because evidence for a subset cannot establish a claim about the whole set. Use an empty qualifications list when the final answer states no limitation. Do not add a restriction that the final answer did not make.")
+    kind: JevClaimKind = Field(description="Choose the kind that best describes the factual assertion: source content, an artifact change, a command result, a test result, run activity, or another factual kind. Select based on what the final answer asserts rather than which tool produced the evidence. Use other_fact only when none of the named kinds fits the statement. The kind helps Jev recognize what an appropriate observation looks like but does not count as evidence. Do not make a second support judgment while choosing the kind.")
+    output: str | None = Field(description="Name the artifact or result the final answer says the user received, if this assertion concerns an output. Preserve the stated form and target, such as a README section, changed source file, explanation, or test result. Use null for an observation that claims no output was produced. Do not describe an intended output as if the run created it. The evidence and completion criteria determine whether the stated output is shown.")
+    assertions: list[JevClaimAssertionPayload] = Field(min_length=1, description="List the distinct factual assertions that make up this parent claim, giving each its own stable id, statement, and completion criteria. Separate facts whenever one could be supported while another remains unsupported. Keep each qualifier attached to the assertion it limits and do not let one assertion borrow another's evidence. Return at least one assertion so every parent claim receives a Jev question. Jev and code evaluate assertions separately, then code combines their outcomes under the parent claim.")
+
+
 class JevClaimEvidencePayload(BaseModel):
     """One concrete, checkable final-answer claim and the tool-call evidence paired with it."""
 
     model_config = ConfigDict(extra="forbid")
 
-    id: str = Field(pattern=JEV_DELIVERABLE_ID_PATTERN, description="Give this claim a short, stable id in lowercase letters, digits, and underscores, starting with a letter and no longer than sixty-four characters. Derive the id from the work or target named by the claim rather than assigning a position number. Use a different id for every entry, including two claims about the same file, and copy each id unchanged into the record. The id lets the checker return an answer for exactly one claim.")
-    claim: str = Field(min_length=1, description="Copy one concrete, independently checkable factual assertion from the main agent's final answer about the task, its files or data, an observed command or test result, or work done during this run. Preserve its specific subject and scope so one or more tool calls can support or fail to support it. Split a sentence that makes separate factual assertions into one entry per assertion, so each entry gets its own yes or no. Do not turn plans, recommendations, subjective opinions, generic acknowledgments, or statements without checkable content into claims.")
+    id: str = Field(pattern=JEV_DELIVERABLE_ID_PATTERN, description="Give this parent claim a short stable id in lowercase letters, digits, and underscores, starting with a letter and no longer than sixty-four characters. Derive the id from the claim subject rather than assigning a position number. Use a different id for every parent claim, including claims about the same file. Copy the id unchanged into the frozen record so question names can include it. The parent id groups assertion-level answers for continuation feedback.")
+    claim: JevClaimContextPayload = Field(description="Describe the claim through the five context sections identity, scope, kind, output, and assertions. Preserve the final answer's meaning and qualifications, and give every assertion its own completion criteria. Leave missing intent and output explicitly null and unstated qualifications as an empty list. Do not invent claims, purposes, limits, outputs, or supporting facts. This structured claim is the item Jev judges beside the run evidence.")
     evidence: str = Field(min_length=1, description="Pair this claim with the tool calls from the run that bear directly on its exact factual content, including each call's name, relevant arguments, execution state, and output. A read or search result can support a claim about what a file or source contains; a mutating call can support a claim that the agent changed a target; a command result can support a claim about what that command reported. Report calls in the order they happened, including failed attempts and later changes that superseded an earlier result. A claim repeated in the final answer is not evidence. When no tool call supports the claim, state plainly that no supporting tool call was found.")
-    missing: str = Field(min_length=1, description="Say what the available tool-call evidence does not show for this claim, in terms the main agent can act on. Name the missing action, target, or successful result, or say that no support for the claim appears in the run. If a failed attempt was later replaced by a successful one, describe only what remains unsupported after the later attempt. When the tool calls do support the claim, state that nothing is missing.")
+    missing: str = Field(min_length=1, description="Say what the available tool-call evidence does not show for this parent claim in words the main agent can act on. Name the unsupported target, assertion, action, or successful result instead of repeating the full evidence. If a failed attempt was later replaced by success, describe only what remains unsupported after the later observation. When evidence covers the claim's criteria, say that nothing is missing. This field guides continuation feedback and is not sent as supporting evidence to Jev.")
 
 
 class JevClaimsEvidencePayload(JevSectionPayload):
@@ -734,9 +777,9 @@ class JevClaimsEvidencePayload(JevSectionPayload):
 
     model_config = ConfigDict(extra="forbid")
 
-    SECTION: ClassVar[str] = "The claims section checks concrete, independently verifiable factual assertions in the main agent's final answer about the task, its artifacts, observed results, or work completed during this run. Claims are extracted from that final answer after the work, because their exact wording and number cannot be known in the pre-run state. For each claim, report the tool calls that support its factual content or state that no supporting tool call was found, and separately tell the main agent what remains unshown. Include unsupported claims instead of omitting them, and split compound statements when their facts can be judged separately. This section reports observations and never decides whether a claim is true."
+    SECTION: ClassVar[str] = "The claims section checks concrete factual assertions in the main agent's final answer about the task, its artifacts, observed results, or work completed during the run. The handoff extracts those claims after the work because their exact statements cannot be known in the pre-run state. Each claim gives Jev five named context sections and one assertion at a time with completion criteria. The handoff pairs every parent claim with run evidence and separately writes an actionable missing note for continuation. This section reports observations and never decides whether a claim is supported."
 
-    claims: list[JevClaimEvidencePayload] = Field(description="Return one entry for every concrete, independently checkable factual assertion in the final answer about the task, its files or data, a command or test result, or work performed during this run. Copy the assertion's meaning and specific subject, and split separate facts into separate entries so each receives one judgment. Match each entry with relevant tool calls and their outcomes, or explicitly report that none support it; the claim itself and the handoff's opinion are not evidence. Give each entry a unique stable id, and return an empty list only when the final answer makes no concrete factual assertions to check.")
+    claims: list[JevClaimEvidencePayload] = Field(description="Return one entry for every parent claim containing a concrete, independently checkable factual assertion from the final answer. Give each entry a rich claim context and split independent facts into separate assertions so each receives one Jev judgment. Pair the parent with relevant run evidence, or state that no supporting tool call was found. Give each parent and its assertions stable unique ids within their respective scopes. Return an empty list only when the final answer contains no checkable factual claims.")
 
 
 class JevDeliverableId:
@@ -848,18 +891,87 @@ class JevMultiPartEvidence:
 
 
 @dataclass(frozen=True, slots=True)
-class JevClaimEvidence:
-    """One checkable final-answer claim, the tool-call evidence about it, and what remains unsupported."""
+class JevClaimIdentity:
+    """The title, description, and stated intent that identify a factual claim."""
+
+    title: str
+    description: str
+    intent: str | None = None
+
+    def __post_init__(self) -> None:
+        JevText.require(self.title, field_name="claim title")
+        JevText.require(self.description, field_name="claim description")
+        if self.intent is not None:
+            JevText.require(self.intent, field_name="claim intent")
+
+
+@dataclass(frozen=True, slots=True)
+class JevClaimScope:
+    """The target scope and explicit qualifications attached to one claim."""
+
+    scope: str
+    qualifications: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        JevText.require(self.scope, field_name="claim scope")
+        if not isinstance(self.qualifications, tuple):
+            raise JevValidation.error("claim qualifications", "a tuple of strings", self.qualifications)
+        for index, qualification in enumerate(self.qualifications):
+            JevText.require(qualification, field_name=f"claim qualification[{index}]")
+
+
+@dataclass(frozen=True, slots=True)
+class JevClaimAssertion:
+    """One independently checkable factual statement and its observable completion criteria."""
 
     id: str
-    claim: str
+    statement: str
+    completion_criteria: str
+
+    def __post_init__(self) -> None:
+        JevDeliverableId.require(self.id, field_name="claim assertion id")
+        JevText.require(self.statement, field_name=f"claim assertion {self.id!r}")
+        JevText.require(self.completion_criteria, field_name=f"completion criteria of claim assertion {self.id!r}")
+
+
+@dataclass(frozen=True, slots=True)
+class JevClaimContext:
+    """The five context sections Jev reads for each factual assertion in a parent claim."""
+
+    identity: JevClaimIdentity
+    scope: JevClaimScope
+    kind: JevClaimKind
+    output: str | None
+    assertions: tuple[JevClaimAssertion, ...]
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.identity, JevClaimIdentity):
+            raise JevValidation.error("claim identity", "a JevClaimIdentity", self.identity)
+        if not isinstance(self.scope, JevClaimScope):
+            raise JevValidation.error("claim scope", "a JevClaimScope", self.scope)
+        if not isinstance(self.kind, JevClaimKind):
+            raise JevValidation.error("claim kind", "a JevClaimKind member", self.kind)
+        if self.output is not None:
+            JevText.require(self.output, field_name="claim output")
+        if not isinstance(self.assertions, tuple) or not self.assertions or not all(isinstance(item, JevClaimAssertion) for item in self.assertions):
+            raise JevValidation.error("claim assertions", "a non-empty tuple of JevClaimAssertion values", self.assertions)
+        JevDeliverableId.require_unique(tuple(item.id for item in self.assertions), field_name="claim assertions")
+
+
+@dataclass(frozen=True, slots=True)
+class JevClaimEvidence:
+    """One contextual final-answer claim, run evidence, and an actionable evidence gap."""
+
+    id: str
+    claim: JevClaimContext
     evidence: str
     missing: str
 
     def __post_init__(self) -> None:
-        # Requires a stable claim id and non-blank claim, evidence, and missing text.
+        # Requires a stable parent id, typed claim context, and non-blank evidence and gap text.
         JevDeliverableId.require(self.id, field_name="claim evidence id")
-        JevText.require(self.claim, field_name=f"claim {self.id!r}")
+        if not isinstance(self.claim, JevClaimContext):
+            raise JevValidation.error(f"claim {self.id!r}", "a JevClaimContext", self.claim)
         JevText.require(self.evidence, field_name=f"evidence of claim {self.id!r}")
         JevText.require(self.missing, field_name=f"missing of claim {self.id!r}")
 
@@ -879,6 +991,10 @@ class JevClaimsEvidence:
     def ids(self) -> tuple[str, ...]:
         """Return every extracted claim id in final-answer order."""
         return tuple(item.id for item in self.claims)
+
+    def assertion_ids(self) -> tuple[str, ...]:
+        """Return each assertion's stable parent.assertion reference in claim and assertion order."""
+        return tuple(f"{claim.id}{JEV_DONE_CLAIM_ASSERTION_SEPARATOR}{assertion.id}" for claim in self.claims for assertion in claim.claim.assertions)
 
 
 @dataclass(frozen=True, slots=True)
@@ -949,7 +1065,8 @@ class JevDoneResult:
 
     `answers` holds Jev's answer per checked-item id, `score` is their mean P(yes), and `incomplete` names
     the items whose P(yes) fell below the check's threshold. Those items are deliverables for MULTI_PART and
-    final-answer claims for CLAIMS. With `available=False` the run state, the handoff, or Jev was unavailable,
+    parent claims for CLAIMS; CLAIMS answers use `parent_id.assertion_id` keys so each assertion stays atomic.
+    With `available=False` the run state, the handoff, or Jev was unavailable,
     `score` is None, and the check fails open (`passed` stays True). `usage` is from the one Jev request that
     asked every enabled check's questions at that finish attempt.
     """
@@ -1053,6 +1170,14 @@ __all__ = [
     "JevClarifyingQuestionPayload",
     "JevClaimEvidence",
     "JevClaimEvidencePayload",
+    "JevClaimAssertion",
+    "JevClaimAssertionPayload",
+    "JevClaimContext",
+    "JevClaimContextPayload",
+    "JevClaimIdentity",
+    "JevClaimIdentityPayload",
+    "JevClaimScope",
+    "JevClaimScopePayload",
     "JevClaimsEvidence",
     "JevClaimsEvidencePayload",
     "JevContent",
