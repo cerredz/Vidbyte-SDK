@@ -516,8 +516,18 @@ class JevPreflightRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(reply.structured, JevClarification)
         self.assertEqual(reply.metadata["strategy"], JEV_PREFLIGHT_STRATEGY_NAME)
         self.assertEqual(generative.calls, [])
-        self.assertEqual(len(decision.requests), 1)
-        self.assertEqual(len(decision.requests[0].questions), len(_CLARITY_KEYS))
+        actual_batches = [tuple(question.name for question in request.questions) for request in decision.requests]
+        expected_names = tuple(key.value for key in _CLARITY_KEYS)
+        self.assertEqual(
+            len(actual_batches),
+            1,
+            msg=f"Jev preflight must send every enabled fixed question in one request; observed {len(actual_batches)} requests with question names {actual_batches!r}.",
+        )
+        self.assertEqual(
+            actual_batches[0],
+            expected_names,
+            msg=f"The single Jev preflight request must contain each enabled question exactly once; expected {expected_names!r}, observed {actual_batches[0]!r}.",
+        )
         self.assertEqual(clarifier.calls[0], "Build it")
         for key in ("clarity.object", "clarity.target"):
             self.assertIn(JevPreflightRegistry.get(key).gap, clarifier.systems[0])
@@ -660,7 +670,19 @@ class JevPreflightRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(generative.calls, [])
         self.assertEqual(agent.response.specialist, "database")
         self.assertEqual(agent.response.output, "migration written")
-        self.assertEqual(len(decision.requests), 1)
+        actual_batches = [tuple(question.name for question in request.questions) for request in decision.requests]
+        self.assertEqual(
+            len(actual_batches),
+            1,
+            msg=f"Jev preflight must include the specialist choice in its single request with all enabled fixed questions; observed {len(actual_batches)} requests with question names {actual_batches!r}.",
+        )
+        actual_names = actual_batches[0]
+        expected_names = (*(key.value for key in _CLARITY_KEYS), JEV_SPECIALIST_QUESTION_NAME)
+        self.assertEqual(
+            actual_names,
+            expected_names,
+            msg=f"Jev preflight must batch all clarity questions and the specialist question together; expected {expected_names!r}, observed {actual_names!r}.",
+        )
 
     async def test_none_keeps_the_main_agent_on_the_task(self) -> None:
         specialist, specialist_runner = _specialist()
