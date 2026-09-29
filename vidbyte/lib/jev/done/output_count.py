@@ -8,7 +8,7 @@ COMMON MODIFICATION PATTERNS: Read skills/asking-jev-questions/SKILL.md before e
 WHAT NOT TO DO IN THIS FILE: 1. Do not extract obligations or count entries; those belong to JevRunState and its typed records. 2. Do not inspect files or tool calls; that belongs to JevHandoff. 3. Do not score or continue the run; that belongs to JevRunState and JevDoneContinuation.
 KNOWN EDGE CASES: A request with no explicit output quantity yields no question. Semantic duplicates may have different wording, so the handoff's distinct keys must be checked against candidate values; exact string normalization alone is insufficient.
 RELATED DOCS: docs/design/jev-output-count-done-criteria.md, skills/asking-jev-questions/SKILL.md, skills/jev-continuation/SKILL.md, and skills/jev-agent/SKILL.md.
-TEST FILES: tests/test_jev_done.py.
+TESTS: tests/test_jev_done.py.
 """
 
 from __future__ import annotations
