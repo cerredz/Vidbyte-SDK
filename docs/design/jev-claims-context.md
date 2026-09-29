@@ -47,7 +47,7 @@ CLAIMS currently gives Jev a claim string and a prose evidence string, which lea
 ### Functional Requirements
 
 1. Each handoff claim has five top-level context sections: `identity`, `scope`, `kind`, `output`, and `assertions`.
-2. `identity` contains `title`, `description`, and `intent`; an unstated intent is represented explicitly as `None` and is never invented.
+2. `identity` contains `title`, `description`, and `intent`; intent is included only when the request or final answer gives a clear purpose, otherwise it is explicitly `None`.
 3. `scope` contains what the claim covers and `qualifications` that the final answer expressly attaches to it. Missing qualifications produce an empty list.
 4. `kind` uses a closed `JevClaimKind` enum defined in `vidbyte/lib/enums/jev.py` and covers the categories of factual claims the current CLAIMS contract accepts.
 5. `output` names the result the final answer claims, or is `None` when the assertion is observational and claims no produced artifact.
@@ -155,7 +155,7 @@ Each field's schema description has at least five sentences covering its meaning
 
 - No checkable claims yields an empty valid list.
 - A claim with multiple independent facts yields multiple assertions; one indivisible fact yields one assertion.
-- Unstated intent and absent output are represented as `None`; unqualified assertions have no qualifications.
+- Intent is taken only from a clear purpose in the request or final answer; absent intent and output are represented as `None`, and unqualified assertions have no qualifications.
 - Empty assertions, duplicated assertion ids, and malformed field types are not treated as an empty successful check.
 
 ### 6.3 Jev state projection and scoring
@@ -236,7 +236,7 @@ Documentation only; the skill's checklist and dynamic-claims section gain the ne
 #### Edge Cases & Error Handling
 
 - Clarify that the five-sentence minimum is for schema descriptions and does not prescribe output value length.
-- State that absent intent, output, and qualifications are represented explicitly, not fabricated.
+- State that intent is derived only from clear request or final-answer context, and absent intent, output, and qualifications are represented explicitly rather than fabricated.
 - Keep existing check payloads stable; the guidance applies when a check is added or its context is redesigned.
 
 ---
