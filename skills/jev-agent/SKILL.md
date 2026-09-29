@@ -11,6 +11,8 @@ Use this skill for work under `vidbyte/agents/jev/` or when adding a Jev-backed 
 
 `JevAgent` is an opinionated agent, not a framework for users to assemble arbitrary decisions. Its public constructor accepts a `JevAgentSettings` object and an optional `JevRuntimeSettings` object. Do not add generic `decisions`, question lists, hooks, action callbacks, runtime selectors, middleware injection, or arbitrary passthrough kwargs.
 
+`JevRuntimeSettings()` routes Jev decisions through Vidbyte's managed gateway by default and resolves `VIDBYTE_API_KEY` when an enabled feature first makes a decision request. Managed requests use the fixed Vidbyte endpoint; custom endpoints are rejected so the Vidbyte key cannot be sent to another host. Missing or rejected managed credentials stop Jev-controlled features. Transient network and service failures keep the existing advisory fallback. Applications that intentionally pay TypeSafe directly can pass `DecisionModelConfig(mode=DecisionModelMode.TYPESAFE)` and use `TYPESAFE_API_KEY`.
+
 Expose user intent through named, validated capabilities. Examples include:
 
 - pre-allocated questions answered before a model run;
@@ -18,6 +20,8 @@ Expose user intent through named, validated capabilities. Examples include:
 - multi-agent coordination with explicit agent descriptions and metadata.
 
 Each capability owns its fixed internal Jev questions, state projection, thresholds, actions, fallback policy, and observability. Those internal mechanics are implementation details, not public decision-building blocks.
+
+The managed gateway authorizes the decision request only. It does not secure the client's generative provider or prevent callers from modifying the SDK; product authorization and billing remain server-enforced.
 
 ## Current scaffold
 
@@ -82,6 +86,8 @@ Load `skills/jev-continuation/SKILL.md` first; it explains each step below in de
 
 ```python
 from vidbyte import BaseAgent, JevAgent, JevAgentSettings, JevContinualSettings, JevDoneCheck, JevPreflightPreset, JevRuntimeSettings, JevSpecialist
+from vidbyte.lib.config import DecisionModelConfig
+from vidbyte.lib.enums import DecisionModelMode
 
 schema = BaseAgent(name="schema", system_prompt="Change the database schema safely.", provider="openai", model_name="gpt-4.1")
 settings = JevAgentSettings(
@@ -92,6 +98,13 @@ settings = JevAgentSettings(
     agents=(JevSpecialist("schema", "Changes to the database schema and its migrations.", schema),),
 )
 agent = JevAgent(settings, JevRuntimeSettings(preflight=(JevPreflightPreset.CLARITY,), continual=JevContinualSettings(checks=(JevDoneCheck.MULTI_PART,), max_continuations=2)))
+```
+
+For direct TypeSafe BYOK behavior, set the decision mode explicitly:
+
+```python
+runtime_settings = JevRuntimeSettings(decision=DecisionModelConfig(mode=DecisionModelMode.TYPESAFE))
+agent = JevAgent(settings, runtime_settings)
 ```
 
 The equivalent namespace constructor is `sdk.agents.jev(settings, runtime_settings)`. After a run, `agent.response.specialist` names the specialist that ran the task, or is `None` when the main agent ran it, and `agent.response.done[JevDoneCheck.MULTI_PART]` says whether every requested deliverable was shown produced in full.

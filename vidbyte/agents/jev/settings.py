@@ -156,7 +156,7 @@ class JevContinualSettings:
 class JevRuntimeSettings:
     """Validated Jev decision policy: the TypeSafe model, the preflight flags, the continuation settings, and the tool-selector threshold."""
 
-    decision: DecisionModelConfig = field(default_factory=DecisionModelConfig, repr=False)
+    decision: DecisionModelConfig = field(default_factory=DecisionModelConfig.vidbyte_managed, repr=False)
     preflight: tuple[JevPreflightPreset | str, ...] = ()
     continual: JevContinualSettings = field(default_factory=JevContinualSettings)
     tool_selector_threshold: float = JEV_TOOL_SELECTOR_DEFAULT_THRESHOLD

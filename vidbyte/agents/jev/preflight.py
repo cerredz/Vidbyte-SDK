@@ -4,7 +4,7 @@ PURPOSE: Defines the Jev preflight contract and the tool-selection implementatio
 ROLE IN CODEBASE: JevRuntime applies enabled preflights before the ordinary model/tool loop.
 ARCHITECTURE NOTE: Tool questions and selection policy stay internal; callers choose the named TOOL_SELECTOR capability.
 COMMON MODIFICATION PATTERNS: Implement a JevPreflight subclass and keep request shaping, filtering, and catalog building as separate methods.
-KNOWN EDGE CASES: Missing credentials, provider failures, and incomplete answers keep the full original tool catalog.
+KNOWN EDGE CASES: Direct TypeSafe credential failures, transient managed failures, and incomplete answers keep the full original tool catalog; managed credential/access denials propagate.
 RELATED DOCS: docs/design/jev-tool-selector.md and skills/jev-agent/SKILL.md.
 TESTS: tests/test_jev_tool_selector.py and scripts/test-jev-tool-selector.py.
 """
@@ -14,6 +14,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from collections.abc import Mapping, Sequence
 
+from vidbyte.agents.jev.decision_failures import JevDecisionFailurePolicy
 from vidbyte.agents.pricing import JevUsage
 from vidbyte.lib.config import DecisionModelConfig
 from vidbyte.lib.constants.jev import JEV_NOUL_TRUE
@@ -54,7 +55,9 @@ class JevPreflightTools(JevPreflight):
             )
             self.usage = JevUsage.from_usage_payload(response.usage or {})
             selected_names = self.filter_tools(tools, response.answers)
-        except VidbyteSdkError:
+        except VidbyteSdkError as exc:
+            if JevDecisionFailurePolicy.should_fail_closed(exc, self._decision):
+                raise
             # A Jev outage or malformed answer must not remove tools from the agent.
             self.available = False
             return tools
