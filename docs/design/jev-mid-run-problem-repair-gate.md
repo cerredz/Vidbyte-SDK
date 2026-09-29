@@ -255,12 +255,13 @@ N/A - no endpoint or constructor changes. The capability is selected using the e
 | MODIFY | `vidbyte/agents/__init__.py` | Re-export public Jev response record types. |
 | MODIFY | `vidbyte/__init__.py` | Re-export public Jev response record types. |
 | MODIFY | `tests/test_jev_done.py` | Cover schemas, question, evidence, decisions, and continuations. |
+| CREATE | `tests/features/jev_problem_repair/FEATURE.md` | Preserve the feature contract, failure inventory, and test strategy map. |
 | CREATE | `scripts/test-jev-problems-resolved.py` | Run every new Section 10 case and report PASS/FAIL. |
 | MODIFY | `skills/jev-agent/SKILL.md` | Document the new named done-check capability. |
 | MODIFY | `skills/jev-continuation/SKILL.md` | Document dynamic problem items and the repair-then-original-task behavior. |
 | CREATE | `docs/design/jev-mid-run-problem-repair-gate.md` | Record the design and verification plan. |
 
-No files are deleted. The manifest therefore contains 3 creates and 18 modifications.
+No files are deleted. The manifest therefore contains 4 creates and 18 modifications.
 
 ---
 
