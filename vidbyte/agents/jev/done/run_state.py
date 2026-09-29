@@ -4,7 +4,7 @@ PURPOSE: Implements JevRunState, the class that owns JevAgent's done checks: it 
 ROLE IN CODEBASE: JevAgent builds one JevRunState at construction when JevRuntimeSettings.continual enables a done check and passes it to JevRuntime, which calls begin() before the main loop, and JevDoneContinuation (vidbyte/agents/jev/continuation/) calls check() each time the main agent tries to finish; outcomes reach the user through JevResponse on JevAgent.response.
 ARCHITECTURE NOTE: The run state is general: its schema is the central JevRunStatePayload plus one field per enabled JevDoneCheck, typed as that check's section payload and described by its SECTION text, so a new check adds one entry to _SECTIONS and one case each to _section() and _judge() instead of a new class; what the main agent reads when a check fails belongs to JevDoneContinuation. Every enabled check's questions go to Jev in one request (combine()), over one shared state. Question text and thresholds stay in vidbyte/lib/jev/done/ (JevDoneRegistry), and DecisionModelRunner.score_noul turns answers into a pass or fail. Writing the state and the evidence is generation, so it belongs to generative agents (this class and JevHandoff, skills/asking-jev-questions/SKILL.md strategy 16); Jev only recognizes whether the evidence shows each item.
 COMMON MODIFICATION PATTERNS: Change what the agent writes in vidbyte/prompts/prompts/jev_run_state/system_prompt.md and each field's description in vidbyte/lib/dataclasses/jev.py; add a done check's section to _SECTIONS, its record conversion to _record(), and its commented case to _section() and _judge().
-KNOWN EDGE CASES: Every failure fails open: no run state means no check, and an unavailable handoff or Jev answer marks the check unavailable and lets the answer stand. A request with no deliverables passes with nothing to ask. Like the JevAgent that owns it, one instance serves one run at a time.
+KNOWN EDGE CASES: Run-state and handoff generation failures fail open; direct TypeSafe decision failures and transient managed decision failures mark a check unavailable, while managed credential/access denials propagate. A request with no deliverables passes with nothing to ask. Like the JevAgent that owns it, one instance serves one run at a time.
 RELATED DOCS: docs/design/jev-multipart-done-criteria.md, skills/jev-agent/SKILL.md, and skills/asking-jev-questions/SKILL.md.
 TESTS: tests/test_jev_done.py.
 """
@@ -18,6 +18,7 @@ from typing import Any, ClassVar
 from pydantic import Field, create_model
 
 from vidbyte.agents.base import BaseAgent
+from vidbyte.agents.jev.decision_failures import JevDecisionFailurePolicy
 from vidbyte.agents.jev.done.handoff import JevHandoff
 from vidbyte.agents.jev.response import JevResponse
 from vidbyte.agents.jev.settings import JevAgentSettings, JevRuntimeSettings
@@ -148,9 +149,7 @@ class JevRunState(BaseAgent):
     async def _ask(self, handoff: JevHandoffRecord | None) -> DecisionModelResponse | None:
         # Sends the one combined request and returns Jev's reply, or None when there was nothing to ask or Jev failed.
         # @intent done-checks-fail-open
-        # Done checks are advisory, like preflight: a missing TypeSafe key, a provider failure, or a request Jev
-        # cannot accept returns None, which marks every check that asked a question unavailable instead of
-        # blocking the main agent's answer.
+        # Transient or malformed decision failures mark checks unavailable; managed credentials and access denials propagate.
         if handoff is None:
             return None
         try:
@@ -158,7 +157,9 @@ class JevRunState(BaseAgent):
             if request is None:
                 return None
             return await DecisionModelRunner(self.decision).arun(request)
-        except VidbyteSdkError:
+        except VidbyteSdkError as exc:
+            if JevDecisionFailurePolicy.should_fail_closed(exc, self.decision):
+                raise
             return None
 
     def _section(self, check: JevDoneCheck, handoff: JevHandoffRecord) -> tuple[Mapping[str, object], tuple[JevQuestion, ...]]:
@@ -202,7 +203,7 @@ class JevRunState(BaseAgent):
         # passes; combine() asked Jev nothing for it, so there is no score.
         if not state.deliverables:
             return JevDoneResult(check=JevDoneCheck.MULTI_PART, score=None)
-        # Deliverables were asked about, but the one combined Jev request failed: fail open like preflight.
+        # Deliverables were asked about, but no decision answer arrived: transient failures leave the check unavailable.
         if decision is None:
             return JevDoneResult(check=JevDoneCheck.MULTI_PART, score=None, available=False)
         question = JevDoneRegistry.question(JevDoneCheck.MULTI_PART)
