@@ -3,9 +3,9 @@
 PURPOSE: Implements JevRunState, the class that owns JevAgent's done checks: it writes request-derived run state once, has JevHandoff compile final-answer evidence at every finish attempt, asks every enabled check's fixed questions in one request, and returns the checks that failed.
 ROLE IN CODEBASE: JevAgent builds one JevRunState at construction when JevRuntimeSettings.continual enables a done check and passes it to JevRuntime, which calls begin() before the main loop, and JevDoneContinuation (vidbyte/agents/jev/continuation/) calls check() each time the main agent tries to finish; outcomes reach the user through JevResponse on JevAgent.response.
 ARCHITECTURE NOTE: The run state is general: its schema is the central JevRunStatePayload plus request-derived sections for enabled checks, while claims that do not exist until the final answer are extracted by JevHandoff and added to the shared Jev state at check time. Every enabled check's questions go to Jev in one request (combine()), and what the main agent reads on failure belongs to JevDoneContinuation. Question text and thresholds stay in vidbyte/lib/jev/done/ (JevDoneRegistry), and DecisionModelHelper sends requests and scores answers. Generative agents write the state and evidence; Jev only recognizes whether the evidence shows each item.
-COMMON MODIFICATION PATTERNS: Add request-derived sections to _SECTIONS, _record(), and the commented _section() case; add post-run-derived sections to JevHandoff and build their claims and questions in _section() from its typed record. Add every check's commented case to _judge() and its continuation explanation to JevDoneContinuation._explain().
+COMMON MODIFICATION PATTERNS: Add request-derived sections to _SECTIONS, _record(), and the commented _section() case; add post-run-derived sections to JevHandoff and build their claims and questions in _section() from its typed record. Add every check's commented case to _judge() and its continuation explanation to JevDoneContinuation._explain(). Input-set coverage is request-derived: exact target ids are later matched against handoff ids, and the handoff's `missing` is continuation-only.
 KNOWN EDGE CASES: Every failure fails open: no run state means no check, and an unavailable handoff or Jev answer marks the check unavailable and lets the answer stand. An empty request-derived item list or an empty post-run claim list passes with nothing to ask. Like the JevAgent that owns it, one instance serves one run at a time.
-RELATED DOCS: docs/design/jev-multipart-done-criteria.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-claims-context.md, skills/jev-agent/SKILL.md, skills/jev-continuation/SKILL.md, and skills/asking-jev-questions/SKILL.md.
+RELATED DOCS: docs/design/jev-multipart-done-criteria.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-claims-context.md, docs/design/jev-input-set-coverage.md, skills/jev-agent/SKILL.md, skills/jev-continuation/SKILL.md, and skills/asking-jev-questions/SKILL.md.
 TESTS: tests/test_jev_done.py.
 """
 
@@ -43,6 +43,11 @@ from vidbyte.lib.constants.jev import (
     JEV_DONE_DELIVERABLE_FIELD,
     JEV_DONE_DELIVERABLES_FIELD,
     JEV_DONE_EVIDENCE_FIELD,
+    JEV_DONE_INPUT_ACTION_FIELD,
+    JEV_DONE_INPUT_ENGAGEMENT_SIGNAL_FIELD,
+    JEV_DONE_INPUT_IDENTITY_FIELD,
+    JEV_DONE_INPUT_SCOPE_FIELD,
+    JEV_DONE_INPUT_SET_COVERAGE_FIELD,
     JEV_DONE_REQUEST_FIELD,
 )
 from vidbyte.lib.dataclasses.agents import AgentInput
@@ -51,6 +56,9 @@ from vidbyte.lib.dataclasses.jev import (
     JevDeliverable,
     JevDoneResult,
     JevHandoffRecord,
+    JevInputSetCoverage,
+    JevInputSetCoveragePayload,
+    JevInputTarget,
     JevMultiPart,
     JevMultiPartPayload,
     JevQuestion,
@@ -72,7 +80,7 @@ class JevRunState(BaseAgent):
     """Generative agent that writes the run state the enabled done checks read, and runs those checks at every finish attempt."""
 
     # Request-derived checks add a section here; CLAIMS items are extracted after work by the handoff instead.
-    _SECTIONS: ClassVar[Mapping[JevDoneCheck, type[JevSectionPayload]]] = MappingProxyType({JevDoneCheck.MULTI_PART: JevMultiPartPayload})
+    _SECTIONS: ClassVar[Mapping[JevDoneCheck, type[JevSectionPayload]]] = MappingProxyType({JevDoneCheck.MULTI_PART: JevMultiPartPayload, JevDoneCheck.INPUT_SET_COVERAGE: JevInputSetCoveragePayload})
 
     def __init__(self, settings: JevAgentSettings, runtime_settings: JevRuntimeSettings, response: JevResponse) -> None:
         # Reuses the JevAgent's generative model and key; the prompt, limits, schema, and empty tool list are fixed here.
@@ -230,6 +238,25 @@ class JevRunState(BaseAgent):
                             JEV_DONE_EVIDENCE_FIELD: claim.evidence,
                         }
                 return {JEV_DONE_CLAIMS_FIELD: entries}, tuple(question.to_question(identifier) for identifier in handoff.claims.assertion_ids())
+            case JevDoneCheck.INPUT_SET_COVERAGE:
+                # One entry per requested input target carries only its definition and tool-call evidence;
+                # the handoff's `missing` note is feedback for the generative agent, never Jev evidence.
+                state = None if self.record is None else self.record.input_set_coverage
+                if state is None or handoff.input_set_coverage is None:
+                    return {}, ()
+                question = JevDoneRegistry.question(JevDoneCheck.INPUT_SET_COVERAGE)
+                evidence = {item.id: item.evidence for item in handoff.input_set_coverage.targets}
+                entries = {
+                    target.id: {
+                        JEV_DONE_INPUT_IDENTITY_FIELD: target.identity,
+                        JEV_DONE_INPUT_SCOPE_FIELD: target.scope,
+                        JEV_DONE_INPUT_ACTION_FIELD: target.action,
+                        JEV_DONE_INPUT_ENGAGEMENT_SIGNAL_FIELD: target.engagement_signal,
+                        JEV_DONE_EVIDENCE_FIELD: evidence[target.id],
+                    }
+                    for target in state.targets
+                }
+                return {JEV_DONE_INPUT_SET_COVERAGE_FIELD: entries}, tuple(question.to_question(identifier) for identifier in state.ids())
 
     def _judge(self, check: JevDoneCheck, handoff: JevHandoffRecord | None, decision: DecisionModelResponse | None) -> JevDoneResult:
         # Scores one enabled done check from the combined request's answers; one commented case per check.
@@ -242,6 +269,31 @@ class JevRunState(BaseAgent):
                 # Each extracted final-answer claim must independently reach the support threshold, so one
                 # unsupported assertion sends the agent back to that claim rather than averaging it away.
                 return self._claims(handoff, decision)
+            case JevDoneCheck.INPUT_SET_COVERAGE:
+                # Each bounded input target needs its own successful evidence of the requested engagement depth.
+                return self._input_set_coverage(handoff, decision)
+
+    # @intent every-bounded-input-target-needs-its-own-answer
+    # A high average could hide one named source the agent skipped. Every user-bounded target therefore
+    # receives its own Jev answer, and the same threshold acts as a veto so code focuses only the missed inputs.
+    def _input_set_coverage(self, handoff: JevHandoffRecord | None, decision: DecisionModelResponse | None) -> JevDoneResult:
+        """Score each request-derived bounded input target independently and fail open when evidence is unavailable."""
+        state = None if self.record is None else self.record.input_set_coverage
+        if state is None or handoff is None or handoff.input_set_coverage is None:
+            return JevDoneResult(check=JevDoneCheck.INPUT_SET_COVERAGE, score=None, available=False)
+        if not state.targets:
+            return JevDoneResult(check=JevDoneCheck.INPUT_SET_COVERAGE, score=None)
+        if decision is None:
+            return JevDoneResult(check=JevDoneCheck.INPUT_SET_COVERAGE, score=None, available=False)
+        question = JevDoneRegistry.question(JevDoneCheck.INPUT_SET_COVERAGE)
+        threshold = JevDoneRegistry.threshold(JevDoneCheck.INPUT_SET_COVERAGE)
+        answers = {identifier: decision.answers[question.name(identifier)] for identifier in state.ids() if question.name(identifier) in decision.answers}
+        verdict = DecisionModelHelper.score_noul(answers, state.ids(), threshold, threshold)
+        if verdict is None:
+            return JevDoneResult(check=JevDoneCheck.INPUT_SET_COVERAGE, score=None, available=False)
+        incomplete = tuple(identifier for identifier in state.ids() if DecisionModelHelper.noul_passes(verdict.answers, identifier, threshold) is False)
+        usage = JevUsage.from_usage_payload(decision.usage or {})
+        return JevDoneResult(check=JevDoneCheck.INPUT_SET_COVERAGE, score=verdict.score, passed=verdict.passed, answers=verdict.answers, incomplete=incomplete, usage=usage)
 
     def _multi_part(self, handoff: JevHandoffRecord | None, decision: DecisionModelResponse | None) -> JevDoneResult:
         # Turns Jev's answers about each deliverable into the multi-part result, scored by DecisionModelHelper.
@@ -330,8 +382,18 @@ class JevRunState(BaseAgent):
             mission=payload.mission.strip(),
             what_not_to_do=tuple(limit.strip() for limit in payload.what_not_to_do if limit.strip()),
             multi_part=multi_part,
+            input_set_coverage=self._input_set_coverage_record(payload),
             usage=self.get_usage(),
         )
+
+    @staticmethod
+    def _input_set_coverage_record(payload: JevRunStatePayload) -> JevInputSetCoverage | None:
+        """Convert validated generated input obligations into their immutable public record."""
+        section = getattr(payload, JevDoneCheck.INPUT_SET_COVERAGE.value, None)
+        if not isinstance(section, JevInputSetCoveragePayload):
+            return None
+        targets = tuple(JevInputTarget(item.id, item.identity.strip(), item.scope.strip(), item.action.strip(), item.engagement_signal.strip()) for item in section.targets)
+        return JevInputSetCoverage(targets)
 
 
 __all__ = ["JevRunState"]

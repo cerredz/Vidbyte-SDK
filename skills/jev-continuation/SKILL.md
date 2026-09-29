@@ -55,6 +55,12 @@ Every stage fails open. With no run state there is no check. When the handoff or
 
 ---
 
+## Bounded input items: INPUT_SET_COVERAGE
+
+`INPUT_SET_COVERAGE` is request-derived, like MULTI_PART, but its items are inputs the user explicitly asked the agent to engage rather than outputs the agent must produce. The run-state writer records one stable target obligation with its identity, complete scope, requested action, and observable engagement signal for each explicit finite target or user-bounded group. It must preserve words such as all, each, whole, date bounds, and exclusions. Do not infer extra review obligations from best practice and do not guess the members of unknown or dynamically paginated collections; those belong to an exhaustion check.
+
+At each finish attempt, the handoff reports tool-call evidence for every target and exactly echoes the run-state ids. Evidence must distinguish content actually made available or processed from a path, title, metadata listing, excerpt, or attempted call. The `missing` note is continuation feedback only and must never enter Jev state. Jev answers one recognition question per target about whether the evidence shows the requested action over its scope and depth. Code matches ids, scores each answer with a veto threshold, and returns only failed target ids for continuation focus. The complete original request remains available in the shared state; Jev judges one named obligation at a time, while deterministic code combines those answers.
+
 ## 2. Important files
 
 | File | What it holds | What a new check does there |

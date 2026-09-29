@@ -57,6 +57,8 @@ Load `skills/jev-continuation/SKILL.md` first; it explains each step below in de
 
 **Post-run-derived items:** CLAIMS cannot add a predicted list to `JevRunStateRecord`, because concrete claims do not exist until the main agent writes its final answer. Instead, add its section and typed records to `JevHandoff`, validate unique ids there, then build one question per handoff claim in `JevRunState._section`. The continuation focus must include only claims Jev marked unsupported and each claim's evidence gap.
 
+**Bounded input engagement:** INPUT_SET_COVERAGE writes request-derived targets once, then requires matching evidence entries from each finish attempt's handoff. Keep the requested extent and action explicit, treat location/listing/failed-call evidence as distinct from successful content access, exclude the handoff's `missing` feedback from Jev state, and leave dynamic or paginated universes to a separate exhaustion check.
+
 ## Change workflow
 
 1. Read `AGENTS.md`, `docs/design/jev-agent-scaffold.md`, and every existing file under `vidbyte/agents/jev/`.

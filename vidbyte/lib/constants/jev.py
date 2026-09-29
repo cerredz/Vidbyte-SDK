@@ -5,7 +5,7 @@ ROLE IN CODEBASE: `vidbyte/lib/dataclasses/jev.py` validates against these bound
 ARCHITECTURE NOTE: Values live in `vidbyte.lib` so both lower-layer modules and the tool layer can import them without a layering inversion.
 COMMON MODIFICATION PATTERNS: Change a vendor limit only after TypeSafe documents it; local sanity caps stay generous because the API enforces the real (token) limits itself.
 KNOWN EDGE CASES: Vendor limits are the 255 Choice options and the 2-10 Score levels; question count, state size, and option-name length are local caps only.
-RELATED DOCS: docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, docs/design/jev-tool-selector.md, docs/design/jev-claims-context.md, https://docs.typesafe.ai/api.md, https://docs.typesafe.ai/models.md, https://docs.typesafe.ai/sdk/python/api/retries.md.
+RELATED DOCS: docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, docs/design/jev-tool-selector.md, docs/design/jev-claims-context.md, docs/design/jev-input-set-coverage.md, https://docs.typesafe.ai/api.md, https://docs.typesafe.ai/models.md, https://docs.typesafe.ai/sdk/python/api/retries.md.
 TESTS: tests/test_jev_agent.py, tests/test_jev_preflight.py, tests/test_jev_tool_selector.py, and scripts/test-jev-agent-scaffold.py.
 """
 
@@ -86,6 +86,8 @@ JEV_SPECIALIST_MAX_COUNT: int = JEV_MAX_CHOICE_OPTIONS - 1
 JEV_MULTI_PART_THRESHOLD: float = 0.8
 # Each checkable final-answer claim must reach this P(yes), alone and in the mean, before it is considered supported.
 JEV_CLAIMS_THRESHOLD: float = 0.85
+# Every explicitly bounded input target must have evidence of the requested level of engagement.
+JEV_INPUT_SET_COVERAGE_THRESHOLD: float = 0.8
 # Default of JevContinualSettings.max_continuations: how many times a failed done check may send the main
 # agent back to work before its answer is accepted.
 JEV_DONE_MAX_CONTINUATIONS: int = 3
@@ -97,6 +99,13 @@ JEV_DONE_DELIVERABLE_FIELD: str = "deliverable"
 JEV_DONE_COMPLETION_SIGNAL_FIELD: str = "completion_signal"
 JEV_DONE_EVIDENCE_FIELD: str = "evidence"
 JEV_DONE_CLAIMS_FIELD: str = "claims"
+JEV_DONE_INPUT_SET_COVERAGE_FIELD: str = "input_set_coverage"
+JEV_DONE_INPUT_TARGETS_FIELD: str = "targets"
+JEV_DONE_INPUT_TARGET_FIELD: str = "target"
+JEV_DONE_INPUT_IDENTITY_FIELD: str = "identity"
+JEV_DONE_INPUT_SCOPE_FIELD: str = "scope"
+JEV_DONE_INPUT_ACTION_FIELD: str = "action"
+JEV_DONE_INPUT_ENGAGEMENT_SIGNAL_FIELD: str = "engagement_signal"
 JEV_DONE_CLAIM_FIELD: str = "claim"
 JEV_DONE_CLAIM_IDENTITY_FIELD: str = "identity"
 JEV_DONE_CLAIM_TITLE_FIELD: str = "title"
@@ -127,6 +136,7 @@ JEV_TOOL_SELECTOR_MIN_THRESHOLD: float = 0.0
 
 __all__ = [
     "JEV_CLAIMS_THRESHOLD",
+    "JEV_INPUT_SET_COVERAGE_THRESHOLD",
     "JEV_CLARIFICATION_MAX_ITERATIONS",
     "JEV_CLARIFICATION_MAX_QUESTIONS",
     "JEV_CLARIFICATION_MAX_RECOMMENDATIONS",
@@ -146,6 +156,13 @@ __all__ = [
     "JEV_DONE_CLAIM_ASSERTION_STATEMENT_FIELD",
     "JEV_DONE_CLAIM_COMPLETION_CRITERIA_FIELD",
     "JEV_DONE_CLAIMS_FIELD",
+    "JEV_DONE_INPUT_ACTION_FIELD",
+    "JEV_DONE_INPUT_ENGAGEMENT_SIGNAL_FIELD",
+    "JEV_DONE_INPUT_IDENTITY_FIELD",
+    "JEV_DONE_INPUT_SCOPE_FIELD",
+    "JEV_DONE_INPUT_SET_COVERAGE_FIELD",
+    "JEV_DONE_INPUT_TARGETS_FIELD",
+    "JEV_DONE_INPUT_TARGET_FIELD",
     "JEV_DONE_CLAIM_DESCRIPTION_FIELD",
     "JEV_DONE_CLAIM_IDENTITY_FIELD",
     "JEV_DONE_CLAIM_INTENT_FIELD",
