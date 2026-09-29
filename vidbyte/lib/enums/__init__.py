@@ -61,6 +61,7 @@ from vidbyte.lib.enums.failure import (
 )
 from vidbyte.lib.enums.jev import (
     JevClaimKind,
+    JevCompletionStatus,
     JevDoneCheck,
     JevDoneQuestionKey,
     JevPreflightPreset,
@@ -105,6 +106,7 @@ from vidbyte.lib.enums.structured_output import StructuredOutputSupport
 
 __all__ = [
     "JevClaimKind",
+    "JevCompletionStatus",
     "JevDoneCheck",
     "JevDoneQuestionKey",
     "JevPreflightPreset",

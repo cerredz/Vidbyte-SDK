@@ -26,6 +26,7 @@ from vidbyte.lib.dataclasses.jev import (
     JevClaimsEvidence,
     JevClarification,
     JevClarifyingQuestion,
+    JevCompletionEvidence,
     JevDeliverable,
     JevDeliverableEvidence,
     JevDoneResult,
@@ -34,7 +35,12 @@ from vidbyte.lib.dataclasses.jev import (
     JevRunStateRecord,
     JevSpecialist,
 )
-from vidbyte.lib.enums.jev import JevClaimKind, JevDoneCheck, JevPreflightPreset
+from vidbyte.lib.enums.jev import (
+    JevClaimKind,
+    JevCompletionStatus,
+    JevDoneCheck,
+    JevPreflightPreset,
+)
 
 __all__ = [
     "JevAgent",
@@ -44,12 +50,14 @@ __all__ = [
     "JevClarifyingQuestion",
     "JevClaimEvidence",
     "JevClaimsEvidence",
+    "JevCompletionEvidence",
     "JevClaimAssertion",
     "JevClaimContext",
     "JevClaimIdentity",
     "JevClaimKind",
     "JevClaimScope",
     "JevContinualSettings",
+    "JevCompletionStatus",
     "JevDeliverable",
     "JevDeliverableEvidence",
     "JevDoneCheck",

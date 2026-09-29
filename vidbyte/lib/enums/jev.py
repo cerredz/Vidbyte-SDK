@@ -41,6 +41,7 @@ class JevDoneCheck(str, Enum):
 
     MULTI_PART = "multi_part"
     CLAIMS = "claims"
+    COMPLETION_EVIDENCE = "completion_evidence"
 
 
 class JevDoneQuestionKey(str, Enum):
@@ -51,6 +52,16 @@ class JevDoneQuestionKey(str, Enum):
 
     MULTI_PART_DELIVERED = "multi_part.delivered"
     CLAIMS_SUPPORTED = "claims.supported"
+    COMPLETION_EVIDENCE_SUPPORTED = "completion_evidence.supported"
+
+
+class JevCompletionStatus(str, Enum):
+    """The whole-task completion status communicated by a JevAgent final answer."""
+
+    COMPLETE = "complete"
+    INCOMPLETE = "incomplete"
+    BLOCKED = "blocked"
+    UNCLEAR = "unclear"
 
 
 class JevClaimKind(str, Enum):
@@ -86,4 +97,4 @@ class JevPreflightQuestionKey(str, Enum):
     CLARITY_SINGLE_READING = "clarity.single_reading"
 
 
-__all__ = ["JevClaimKind", "JevDoneCheck", "JevDoneQuestionKey", "JevPreflightPreset", "JevPreflightQuestionKey", "JevQuestionType"]
+__all__ = ["JevClaimKind", "JevCompletionStatus", "JevDoneCheck", "JevDoneQuestionKey", "JevPreflightPreset", "JevPreflightQuestionKey", "JevQuestionType"]

@@ -18,10 +18,15 @@ from vidbyte.agents.jev.continuation.base import JevContinuation
 from vidbyte.agents.jev.done import JevRunState
 from vidbyte.agents.jev.response import JevResponse
 from vidbyte.agents.jev.settings import JevContinualSettings
-from vidbyte.lib.constants.jev import JEV_DONE_CLAIM_ASSERTION_SEPARATOR, JEV_NOUL_TRUE
+from vidbyte.lib.constants.jev import (
+    JEV_DONE_CLAIM_ASSERTION_SEPARATOR,
+    JEV_DONE_COMPLETION_ITEM_ID,
+    JEV_NOUL_TRUE,
+)
 from vidbyte.lib.dataclasses.jev import (
     JevClaimAssertion,
     JevClaimEvidence,
+    JevCompletionEvidence,
     JevDoneQuestion,
     JevDoneResult,
 )
@@ -107,6 +112,15 @@ class JevDoneContinuation(JevContinuation):
                     failed.extend(assertion_failures)
                     focus.extend(assertion_focus)
                 return "\n".join(failed), "\n".join(focus)
+            case JevDoneCheck.COMPLETION_EVIDENCE:
+                # State the overall answer status, the evidence gap, and the requested outcomes to finish or report honestly.
+                item = None if self.run_state.handoff is None else self.run_state.handoff.completion_evidence
+                failed = [JevDoneRegistry.question(JevDoneCheck.COMPLETION_EVIDENCE).gap]
+                if item is None:
+                    return "\n".join(failed), "Review the original request and make the final answer accurately reflect the work shown in the run."
+                yes = result.answers[JEV_DONE_COMPLETION_ITEM_ID].probabilities[JEV_NOUL_TRUE]
+                failed.append(f"- The final answer communicates {item.completion_status.value} status. Jev's answer: unsupported (P(yes) = {yes:.2f}). Still missing: {item.missing}")
+                return "\n".join(failed), self._completion_focus(item)
 
     def _claim_assertion_feedback(self, claim: JevClaimEvidence, result: JevDoneResult, question: JevDoneQuestion, threshold: float) -> tuple[list[str], list[str]]:
         """Return failed-question text and focus only for assertions below the threshold in one parent claim."""
@@ -139,6 +153,18 @@ class JevDoneContinuation(JevContinuation):
             f"  Completion criteria: {assertion.completion_criteria}",
             f"  Tool-call evidence: {claim.evidence}",
             f"  Still missing: {claim.missing}",
+        ))
+
+    @staticmethod
+    def _completion_focus(item: JevCompletionEvidence) -> str:
+        """Render the original outcomes that the final answer must finish or accurately describe."""
+        requested = "; ".join(item.requested_outcomes) or "No outcome was requested."
+        unfinished = "; ".join(item.unfinished_or_blocked) or "No unfinished outcome was identified."
+        return "\n".join((
+            f"- Requested outcomes: {requested}",
+            f"  Work shown: {'; '.join(item.completed_work) or 'None shown.'}",
+            f"  Unfinished or blocked: {unfinished}",
+            f"  Evidence gap: {item.missing}",
         ))
 
 
