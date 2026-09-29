@@ -9,6 +9,7 @@ Whenever a model or agent writes, rewrites, or reviews a Jev question here, it m
 ## Where things live
 
 - `multi_part.py` holds the multi-part check's question, asked once per request-defined deliverable; `to_question(id)` names the deliverable id in the question and its name.
+- `output_count.py` holds the OUTPUT_COUNT question, asked once per request-defined numeric output obligation; its state carries target, unit, group scope, candidate values, direct source evidence, deterministic count, and distinctness keys.
 - `claims.py` holds the CLAIMS check's question, asked once per concrete, checkable factual assertion extracted from the final answer by JevHandoff; each claim entry contains the assertion and its tool-call evidence, or an explicit lack of evidence.
 - Every question uses the shared state description in `multi_part.py`; `deliverables` and `claims` are present only when their respective checks are enabled, so the description stays true when checks are combined.
 - `done.py` holds `JevDoneRegistry` (`question`, `threshold`, `resolve`, `validate`).

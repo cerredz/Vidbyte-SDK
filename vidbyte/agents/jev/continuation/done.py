@@ -3,9 +3,9 @@
 PURPOSE: Implements JevDoneContinuation, the continuation for JevAgent's done checks: at every finish attempt it has JevRunState run the enabled checks, and when one fails it sends the main agent back to work with the original request, the run state, the handoff, and the Jev questions that failed, with more focus on what is missing.
 ROLE IN CODEBASE: JevAgent builds one JevDoneContinuation over its JevRunState when JevRuntimeSettings.continual enables a done check, and JevRuntime calls should_continue() and continue_() from its finish-attempt hook; each continuation is recorded through JevResponse on JevAgent.response.
 ARCHITECTURE NOTE: The message is the vidbyte/prompts asset jev_continuation/continue_prompt.md, filled with the run's own text; what one failed check contributes to it is one commented case in _explain(). The cap on continuations is JevContinualSettings.max_continuations.
-COMMON MODIFICATION PATTERNS: Add a done check's failed questions and focus to _explain(); change the message's instructions in vidbyte/prompts/prompts/jev_continuation/continue_prompt.md.
+COMMON MODIFICATION PATTERNS: Add a done check's failed questions and focus to _explain(); output quantities include the original target and group scope in focus, while their handoff gap remains continuation guidance only. Change the message's instructions in vidbyte/prompts/prompts/jev_continuation/continue_prompt.md.
 KNOWN EDGE CASES: A failed check whose handoff is missing never continues, because there is no evidence to hand back. After max_continuations continuations the latest verdict stays on JevAgent.response, but the main agent's answer stands.
-RELATED DOCS: docs/design/jev-multipart-done-criteria.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-claims-context.md, skills/jev-agent/SKILL.md, and skills/jev-continuation/SKILL.md.
+RELATED DOCS: docs/design/jev-multipart-done-criteria.md, docs/design/jev-output-count-done-criteria.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-claims-context.md, skills/jev-agent/SKILL.md, and skills/jev-continuation/SKILL.md.
 TESTS: tests/test_jev_done.py.
 """
 
@@ -91,6 +91,22 @@ class JevDoneContinuation(JevContinuation):
                     yes = result.answers[identifier].probabilities[JEV_NOUL_TRUE]
                     failed.append(f"- {question.instructions.question.format(item=identifier)} Jev's answer: no (P(yes) = {yes:.2f}). Still missing: {missing[identifier]}")
                     focus.append(f"- {deliverables[identifier].description} Done when: {deliverables[identifier].completion_signal}")
+                return "\n".join(failed), "\n".join(focus)
+            case JevDoneCheck.OUTPUT_COUNT:
+                # Return only failed quantities in the user's own group/unit terms, with the handoff gap as
+                # continuation guidance; that summary was excluded from Jev's evidence state.
+                question = JevDoneRegistry.question(JevDoneCheck.OUTPUT_COUNT)
+                state = None if self.run_state.record is None else self.run_state.record.output_count
+                handoff = None if self.run_state.handoff is None else self.run_state.handoff.output_count
+                obligations = {} if state is None else {item.id: item for item in state.obligations}
+                missing = {} if handoff is None else {item.id: item.missing for item in handoff.obligations}
+                failed = [question.gap]
+                focus = []
+                for identifier in result.incomplete:
+                    item = obligations[identifier]
+                    yes = result.answers[identifier].probabilities[JEV_NOUL_TRUE]
+                    failed.append(f"- {question.instructions.question.format(item=identifier)} Jev's answer: no (P(yes) = {yes:.2f}). Still missing: {missing[identifier]}")
+                    focus.append(f"- {item.description} Target: {item.target_count} {item.unit}; scope: {item.scope}; distinctness: {item.distinctness}. Done when: {item.completion_criteria}")
                 return "\n".join(failed), "\n".join(focus)
             case JevDoneCheck.CLAIMS:
                 # Give the main agent only the factual assertions Jev found unsupported, paired with their

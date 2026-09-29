@@ -1,6 +1,6 @@
 """FILE: tests/test_jev_done.py
 
-PURPOSE: Verifies JevAgent's done checks deterministically without live model calls: the run-state and handoff schemas, request-derived and post-run claim records, both fixed questions, the shared state description, the handoff context, batched Jev requests, and continuation and fail-open behavior.
+PURPOSE: Verifies JevAgent's done checks deterministically without live model calls: run-state and handoff schemas, request-derived quantities and deliverables, post-run claims, fixed questions, shared state, batching, continuation, and fail-open behavior.
 ROLE IN CODEBASE: Pins the Jev done-check contracts: records live in vidbyte/lib, every structured-output field carries a 4-6 sentence description, the handoff reads the main agent's window through ContextManager, and every enabled check's questions share one Jev request.
 ARCHITECTURE NOTE: Scripted generative and decision runners replace only the external boundaries while production settings, registry, schemas, runtime hook, and response wiring stay active.
 COMMON MODIFICATION PATTERNS: Add cases for every new done check's schema, question, threshold boundary, dynamic or request-derived items, and availability policy.
@@ -42,6 +42,11 @@ from vidbyte import (
     JevClaimsEvidence,
     JevContinualSettings,
     JevDoneCheck,
+    JevOutputCount,
+    JevOutputCountEntry,
+    JevOutputCountEvidence,
+    JevOutputCountEvidenceItem,
+    JevOutputCountObligation,
     JevRuntimeSettings,
     JevSpecialist,
 )
@@ -62,8 +67,10 @@ from vidbyte.lib.constants.jev import (
     JEV_DONE_DELIVERABLES_FIELD,
     JEV_DONE_EVIDENCE_FIELD,
     JEV_DONE_MAX_CONTINUATIONS,
+    JEV_DONE_OUTPUT_COUNTS_FIELD,
     JEV_DONE_REQUEST_FIELD,
     JEV_MULTI_PART_THRESHOLD,
+    JEV_OUTPUT_COUNT_THRESHOLD,
 )
 from vidbyte.lib.dataclasses.jev import (
     JevAnswer,
@@ -85,6 +92,11 @@ from vidbyte.lib.dataclasses.jev import (
     JevMultiPart,
     JevMultiPartEvidencePayload,
     JevMultiPartPayload,
+    JevOutputCountEntryPayload,
+    JevOutputCountEvidencePayload,
+    JevOutputCountEvidencePayloadItem,
+    JevOutputCountObligationPayload,
+    JevOutputCountPayload,
     JevRunStatePayload,
     JevRunStateRecord,
     JevSectionPayload,
@@ -98,6 +110,7 @@ from vidbyte.lib.jev.done import (
     DONE_STATE,
     ClaimsSupportedQuestion,
     MultiPartDeliveredQuestion,
+    OutputCountSatisfiedQuestion,
 )
 from vidbyte.lib.runners import TextModelResponse
 from vidbyte.lib.runners.types import DecisionModelResponse
@@ -162,6 +175,28 @@ _CLAIMS = {
 }
 _CLAIMS_HANDOFF = {"claims": _CLAIMS}
 _COMBINED_HANDOFF = {**_HANDOFF, **_CLAIMS_HANDOFF}
+_OUTPUT_REQUEST = "Give me 25 distinct examples of useful cache invalidation strategies, and write one file per strategy."
+_OUTPUT_STATE = {
+    **_BASE_STATE,
+    "output_count": {"obligations": [{
+        "id": "cache_examples", "description": "25 distinct cache invalidation strategy examples.",
+        "target_count": 25, "distinct": True, "unit": "examples", "scope": "cache invalidation strategies",
+        "distinctness": "Each example describes a different strategy, not a paraphrase of another.",
+        "completion_criteria": "The output shows 25 different strategies with a visible example for each.",
+    }]},
+}
+_OUTPUT_HANDOFF = {"output_count": {"obligations": [{
+    "id": "cache_examples", "entries": [
+        {"id": f"example_{index}", "value": f"Cache strategy {index}: distinct technique {index}.", "distinct_key": f"strategy_{index}", "evidence": f"Final answer includes strategy {index}."}
+        for index in range(1, 11)
+    ], "missing": "Only ten of the requested twenty-five distinct strategies are visible; fifteen remain."}]
+}}
+_OUTPUT_COMPLETE_HANDOFF = {"output_count": {"obligations": [{
+    "id": "cache_examples", "entries": [
+        {"id": f"example_{index}", "value": f"Cache strategy {index}: distinct technique {index}.", "distinct_key": f"strategy_{index}", "evidence": f"Final answer includes strategy {index}."}
+        for index in range(1, 26)
+    ], "missing": "Nothing is missing."}]
+}}
 
 
 class ScriptedGenerativeRunner:
@@ -248,7 +283,7 @@ class JevDoneRecordTests(unittest.TestCase):
 
     def test_records_and_enums_live_in_lib(self) -> None:
         # [Review 4116720422] dataclasses and enums belong in vidbyte/lib, per AGENTS.md.
-        for cls in (JevDeliverable, JevMultiPart, JevRunStateRecord, JevDoneResult, JevRunStatePayload, JevMultiPartPayload):
+        for cls in (JevDeliverable, JevMultiPart, JevOutputCountObligation, JevOutputCount, JevOutputCountEntry, JevOutputCountEvidenceItem, JevOutputCountEvidence, JevRunStateRecord, JevDoneResult, JevRunStatePayload, JevMultiPartPayload, JevOutputCountPayload):
             self.assertEqual(cls.__module__, "vidbyte.lib.dataclasses.jev")
         self.assertEqual(JevDoneCheck.__module__, "vidbyte.lib.enums.jev")
         self.assertFalse((_REPOSITORY_ROOT / "vidbyte/agents/jev/run_state.py").exists())
@@ -256,7 +291,7 @@ class JevDoneRecordTests(unittest.TestCase):
 
     def test_every_structured_output_field_has_a_four_to_six_sentence_description(self) -> None:
         # [Review 4116725548] every field carries a pre-defined 4-6 sentence description used in the structured output.
-        models = (JevRunStatePayload, JevMultiPartPayload, JevDeliverablePayload, JevMultiPartEvidencePayload, JevDeliverableEvidencePayload, JevClaimIdentityPayload, JevClaimScopePayload, JevClaimAssertionPayload, JevClaimContextPayload, JevClaimEvidencePayload, JevClaimsEvidencePayload)
+        models = (JevRunStatePayload, JevMultiPartPayload, JevDeliverablePayload, JevOutputCountPayload, JevOutputCountObligationPayload, JevMultiPartEvidencePayload, JevDeliverableEvidencePayload, JevOutputCountEvidencePayload, JevOutputCountEvidencePayloadItem, JevOutputCountEntryPayload, JevClaimIdentityPayload, JevClaimScopePayload, JevClaimAssertionPayload, JevClaimContextPayload, JevClaimEvidencePayload, JevClaimsEvidencePayload)
         for model in models:
             for name, description in _descriptions(model).items():
                 with self.subTest(model=model.__name__, field=name):
@@ -265,7 +300,7 @@ class JevDoneRecordTests(unittest.TestCase):
             for name, description in _descriptions(model).items():
                 with self.subTest(model=model.__name__, field=name):
                     self.assertEqual(_sentences(description), 5)
-        for section in (JevMultiPartPayload, JevMultiPartEvidencePayload, JevClaimsEvidencePayload):
+        for section in (JevMultiPartPayload, JevOutputCountPayload, JevMultiPartEvidencePayload, JevOutputCountEvidencePayload, JevClaimsEvidencePayload):
             with self.subTest(section=section.__name__):
                 self.assertIn(_sentences(section.SECTION), range(4, 7))
 
@@ -290,6 +325,19 @@ class JevDoneRecordTests(unittest.TestCase):
             JevMultiPart((JevDeliverable("a", "b", "c"), JevDeliverable("a", "d", "e")))
         with self.assertRaises(ConfigurationError):
             JevRunStateRecord("goal", " ", "mission")
+
+    def test_output_count_records_reject_invalid_targets_and_duplicate_ids(self) -> None:
+        obligation = JevOutputCountObligation("examples", "Requested examples", 25, True, "examples", "cache strategies", "distinct strategies", "Show 25 distinct strategies.")
+        self.assertEqual(JevOutputCount((obligation,)).ids(), ("examples",))
+        duplicate = JevOutputCountEntry("second", "same result", "same-key", "final answer line")
+        first = JevOutputCountEntry("first", "same result", "same-key", "final answer line")
+        evidence = JevOutputCountEvidenceItem("examples", (first, duplicate), "Only one distinct item.")
+        self.assertEqual(evidence.entries, (first, duplicate))
+        self.assertEqual(evidence.entries[0].evidence, "final answer line")
+        with self.assertRaises(ConfigurationError):
+            JevOutputCountObligation("bad", "bad target", 0, True, "items", "scope", "distinct", "criterion")
+        with self.assertRaises(ConfigurationError):
+            JevOutputCount((obligation, obligation))
 
     def test_claim_evidence_requires_unique_claim_ids_and_preserves_an_empty_list(self) -> None:
         context = JevClaimContext(
@@ -323,7 +371,9 @@ class JevDoneSchemaTests(unittest.TestCase):
         self.assertTrue(issubclass(schema, JevRunStatePayload))
         self.assertEqual(schema.model_fields["multi_part"].description, JevMultiPartPayload.SECTION)
         self.assertEqual(set(JevRunState.schema((JevDoneCheck.CLAIMS,)).model_fields), {"goal", "objective", "mission", "what_not_to_do"})
-        self.assertEqual(set(JevRunState._SECTIONS), {JevDoneCheck.MULTI_PART})
+        count_schema = JevRunState.schema((JevDoneCheck.OUTPUT_COUNT,))
+        self.assertEqual(count_schema.model_fields["output_count"].description, JevOutputCountPayload.SECTION)
+        self.assertEqual(set(JevRunState._SECTIONS), {JevDoneCheck.MULTI_PART, JevDoneCheck.OUTPUT_COUNT})
 
     def test_handoff_schema_has_a_section_for_every_enabled_check(self) -> None:
         # Request-derived deliverables and post-run-derived claims both need evidence sections in the handoff.
@@ -336,6 +386,7 @@ class JevDoneSchemaTests(unittest.TestCase):
         self.assertEqual(claim_schema.model_fields["claims"].description, JevClaimsEvidencePayload.SECTION)
         self.assertNotIn("claims", JevRunState.schema(tuple(JevDoneCheck)).model_fields)
         self.assertEqual(set(JevHandoff._SECTIONS), set(JevDoneCheck))
+        self.assertEqual(JevHandoff.schema((JevDoneCheck.OUTPUT_COUNT,)).model_fields["output_count"].description, JevOutputCountEvidencePayload.SECTION)
 
     def test_agents_are_built_once_in_the_jev_agent_constructor(self) -> None:
         agent = _jev()
@@ -403,6 +454,8 @@ class JevDoneQuestionTests(unittest.TestCase):
         self.assertIn(_sentences(brief.introduction), (2, 3))
         self.assertEqual(brief.state, DONE_STATE)
         for field_name in (JEV_DONE_REQUEST_FIELD, JEV_DONE_DELIVERABLES_FIELD, JEV_DONE_DELIVERABLE_FIELD, JEV_DONE_COMPLETION_SIGNAL_FIELD, JEV_DONE_EVIDENCE_FIELD):
+            self.assertIn(f"`{field_name}`", DONE_STATE)
+        for field_name in ("output_counts", "obligation", "entries", "observed_count", "target_met"):
             self.assertIn(f"`{field_name}`", DONE_STATE)
         self.assertEqual((len(brief.definitions), len(brief.rules)), (1, 1))
         self.assertTrue(brief.question.startswith("Does `evidence` show") and brief.question.endswith("?"))
@@ -477,6 +530,51 @@ class JevDoneQuestionTests(unittest.TestCase):
     def test_claims_question_text_is_one_string_literal_each(self) -> None:
         scanner = ImplicitConcatenationScanner()
         rel = "vidbyte/lib/jev/done/claims.py"
+        text = (_REPOSITORY_ROOT / rel).read_text(encoding="utf-8")
+        self.assertEqual(scanner.scan(SourceFile(path=_REPOSITORY_ROOT / rel, rel=rel, text=text, tree=ast.parse(text))), [])
+
+
+class JevOutputCountQuestionTests(unittest.TestCase):
+    """Pin the output-count question to the shared-state and recognition-only question contract."""
+
+    question = OutputCountSatisfiedQuestion()
+
+    def test_question_is_registered_and_names_one_quantity_obligation(self) -> None:
+        self.assertEqual(JevDoneRegistry.question(JevDoneCheck.OUTPUT_COUNT), self.question)
+        self.assertEqual(JevDoneRegistry.threshold(JevDoneCheck.OUTPUT_COUNT), JEV_OUTPUT_COUNT_THRESHOLD)
+        rendered = self.question.to_question("cache_examples")
+        self.assertEqual(rendered.name, f"{JevDoneQuestionKey.OUTPUT_COUNT_SATISFIED.value}.cache_examples")
+        self.assertIn("output_counts` entry with id `cache_examples`", str(rendered.instructions))
+        self.assertEqual(self.question.instructions.state, DONE_STATE)
+        self.assertEqual((len(self.question.instructions.definitions), len(self.question.instructions.rules)), (6, 1))
+
+    def test_question_keeps_math_deterministic_and_has_duplicate_boundary(self) -> None:
+        self.assertIn("do not recount", self.question.instructions.rules[0])
+        self.assertIn("distinct keys", self.question.instructions.rules[0])
+        self.assertIn("different key", self.question.when_false.boundary[0])
+        self.assertTrue(self.question.when_true.what.startswith("Choose true when the `entries` show"))
+        self.assertTrue(self.question.when_false.what.startswith("Choose false when the prepared evidence"))
+        self.assertIn("4 distinct", self.question.when_true.easy[0])
+        self.assertIn("three different examples", self.question.when_false.easy[0])
+        self.assertTrue(self.question.when_true.not_for.endswith("belongs to false."))
+        self.assertTrue(self.question.when_false.not_for.endswith("belongs to true."))
+        true_boundary = self.question.when_true.boundary[0]
+        false_boundary = self.question.when_false.boundary[0]
+        self.assertTrue(true_boundary.startswith("With an obligation requesting 3 distinct recommendations in the security group, entries show"))
+        self.assertTrue(false_boundary.startswith("With an obligation requesting 3 distinct recommendations in the security group, entries show"))
+
+    @unittest.skipUnless(importlib.util.find_spec("tiktoken"), "tiktoken is not installed")
+    def test_question_carries_at_least_two_thousand_tokens(self) -> None:
+        import tiktoken
+
+        parts = [self.question.instructions.render(), self.question.gap]
+        for criterion in (self.question.when_true, self.question.when_false):
+            parts += [criterion.what, criterion.not_for, *criterion.easy, *criterion.boundary]
+        self.assertGreaterEqual(len(tiktoken.get_encoding("cl100k_base").encode("\n".join(parts))), 2_000)
+
+    def test_question_text_is_one_string_literal_each(self) -> None:
+        scanner = ImplicitConcatenationScanner()
+        rel = "vidbyte/lib/jev/done/output_count.py"
         text = (_REPOSITORY_ROOT / rel).read_text(encoding="utf-8")
         self.assertEqual(scanner.scan(SourceFile(path=_REPOSITORY_ROOT / rel, rel=rel, text=text, tree=ast.parse(text))), [])
 
@@ -561,6 +659,101 @@ class JevDoneRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.continuations, 0)
         self.assertEqual((result.usage.input_tokens, result.usage.output_tokens), (100, 10))
         self.assertNotIn("done", reply.metadata)
+
+    async def test_request_quantity_is_checked_even_when_final_answer_omits_a_count(self) -> None:
+        decision = ScriptedDecisionRunner({"cache_examples": [0.2]})
+        agent, main, _, _ = self._agent(
+            done=(JevDoneCheck.OUTPUT_COUNT,), final_answer="Done.",
+            state=json.dumps(_OUTPUT_STATE), handoff=json.dumps(_OUTPUT_HANDOFF),
+        )
+        with patch(_RUNNER_PATH, new=_runner_class(decision)):
+            await agent.arun(_OUTPUT_REQUEST)
+
+        request = decision.requests[0]
+        entries = request.state[JEV_DONE_OUTPUT_COUNTS_FIELD]["cache_examples"]
+        self.assertEqual((entries["observed_count"], entries["target_met"]), (10, False))
+        self.assertEqual(len(entries["entries"]), 10)
+        self.assertEqual(entries["obligation"]["target_count"], 25)
+        self.assertEqual(request.questions[0].name, "output_count.satisfied.cache_examples")
+        result = agent.response.done[JevDoneCheck.OUTPUT_COUNT]
+        self.assertFalse(result.passed)
+        self.assertEqual(result.incomplete, ("cache_examples",))
+        self.assertGreater(len(main.calls), 1)
+        feedback = main.messages[1][0]["content"]
+        self.assertIn("Only ten of the requested twenty-five", feedback)
+        self.assertIn("Target: 25 examples", feedback)
+
+    async def test_semantic_duplicate_keys_reduce_the_deterministic_count(self) -> None:
+        handoff = json.loads(json.dumps(_OUTPUT_HANDOFF))
+        entries = handoff["output_count"]["obligations"][0]["entries"]
+        entries.extend({"id": f"extra_{index}", "value": f"A variation of cache strategy {index}.", "distinct_key": f"strategy_{(index - 1) % 10 + 1}", "evidence": f"Final answer paraphrase {index}."} for index in range(1, 16))
+        decision = ScriptedDecisionRunner({"cache_examples": [0.2]})
+        agent, *_ = self._agent(done=(JevDoneCheck.OUTPUT_COUNT,), state=json.dumps(_OUTPUT_STATE), handoff=json.dumps(handoff))
+        with patch(_RUNNER_PATH, new=_runner_class(decision)):
+            await agent.arun(_OUTPUT_REQUEST)
+
+        item = decision.requests[0].state[JEV_DONE_OUTPUT_COUNTS_FIELD]["cache_examples"]
+        self.assertEqual(len(item["entries"]), 25)
+        self.assertEqual(item["observed_count"], 10)
+        self.assertFalse(item["target_met"])
+        self.assertFalse(agent.response.done[JevDoneCheck.OUTPUT_COUNT].passed)
+
+    async def test_output_count_questions_are_batched_with_other_enabled_checks(self) -> None:
+        handoff = {**_HANDOFF, **_OUTPUT_HANDOFF}
+        decision = ScriptedDecisionRunner({"dry_run_flag": [0.95], "readme_docs": [0.95], "cache_examples": [0.95]})
+        agent, *_ = self._agent(done=(JevDoneCheck.MULTI_PART, JevDoneCheck.OUTPUT_COUNT), handoff=json.dumps(handoff), state=json.dumps({**_STATE, **_OUTPUT_STATE}))
+        with patch(_RUNNER_PATH, new=_runner_class(decision)):
+            await agent.arun(_OUTPUT_REQUEST)
+
+        self.assertEqual(len(decision.requests), 1)
+        names = [question.name for question in decision.requests[0].questions]
+        self.assertEqual(len(names), 3)
+        self.assertEqual(sum(name.startswith("output_count.satisfied.") for name in names), 1)
+        self.assertIn(JEV_DONE_OUTPUT_COUNTS_FIELD, decision.requests[0].state)
+        self.assertIn("deliverables", decision.requests[0].state)
+
+    async def test_each_requested_group_gets_an_independent_quantity_obligation(self) -> None:
+        grouped_state = json.loads(json.dumps(_OUTPUT_STATE))
+        grouped_state["output_count"]["obligations"] = [
+            {**_OUTPUT_STATE["output_count"]["obligations"][0], "id": "backend_examples", "target_count": 2, "scope": "backend cache strategies"},
+            {**_OUTPUT_STATE["output_count"]["obligations"][0], "id": "frontend_examples", "target_count": 2, "scope": "frontend cache strategies"},
+        ]
+        grouped_handoff = {"output_count": {"obligations": [
+            {"id": "backend_examples", "entries": [{"id": "backend_one", "value": "Invalidate by tag", "distinct_key": "tag", "evidence": "Final answer backend group."}], "missing": "One backend example is missing."},
+            {"id": "frontend_examples", "entries": [{"id": "frontend_one", "value": "Invalidate on navigation", "distinct_key": "navigation", "evidence": "Final answer frontend group."}], "missing": "One frontend example is missing."},
+        ]}}
+        decision = ScriptedDecisionRunner({"backend_examples": [0.2], "frontend_examples": [0.2]})
+        agent, *_ = self._agent(done=(JevDoneCheck.OUTPUT_COUNT,), state=json.dumps(grouped_state), handoff=json.dumps(grouped_handoff))
+        with patch(_RUNNER_PATH, new=_runner_class(decision)):
+            await agent.arun(_OUTPUT_REQUEST)
+
+        state = decision.requests[0].state[JEV_DONE_OUTPUT_COUNTS_FIELD]
+        self.assertEqual([question.name for question in decision.requests[0].questions], ["output_count.satisfied.backend_examples", "output_count.satisfied.frontend_examples"])
+        self.assertEqual((state["backend_examples"]["target_met"], state["frontend_examples"]["target_met"]), (False, False))
+        self.assertEqual(agent.response.done[JevDoneCheck.OUTPUT_COUNT].incomplete, ("backend_examples", "frontend_examples"))
+
+    async def test_empty_output_quantity_obligations_pass_without_asking_jev(self) -> None:
+        empty_state = {**_BASE_STATE, "output_count": {"obligations": []}}
+        empty_handoff = {"output_count": {"obligations": []}}
+        decision = ScriptedDecisionRunner({"unused": [0.1]})
+        agent, _, *_ = self._agent(done=(JevDoneCheck.OUTPUT_COUNT,), state=json.dumps(empty_state), handoff=json.dumps(empty_handoff))
+        with patch(_RUNNER_PATH, new=_runner_class(decision)):
+            await agent.arun("Explain what a cache is.")
+
+        self.assertEqual(len(decision.requests), 0)
+        self.assertTrue(agent.response.done[JevDoneCheck.OUTPUT_COUNT].passed)
+
+    async def test_output_count_threshold_boundary_and_missing_handoff_fail_open(self) -> None:
+        agent, *_ = self._agent(done=(JevDoneCheck.OUTPUT_COUNT,), state=json.dumps(_OUTPUT_STATE), handoff=json.dumps(_OUTPUT_COMPLETE_HANDOFF))
+        with patch(_RUNNER_PATH, new=_runner_class(ScriptedDecisionRunner({"cache_examples": [JEV_OUTPUT_COUNT_THRESHOLD]}))):
+            await agent.arun(_OUTPUT_REQUEST)
+        self.assertTrue(agent.response.done[JevDoneCheck.OUTPUT_COUNT].passed)
+
+        agent, *_ = self._agent(done=(JevDoneCheck.OUTPUT_COUNT,), state=json.dumps(_OUTPUT_STATE), handoff=json.dumps({}))
+        with patch(_RUNNER_PATH, new=_runner_class(ScriptedDecisionRunner({"cache_examples": [0.1]}))):
+            await agent.arun(_OUTPUT_REQUEST)
+        self.assertFalse(agent.response.done[JevDoneCheck.OUTPUT_COUNT].available)
+        self.assertTrue(agent.response.done[JevDoneCheck.OUTPUT_COUNT].passed)
 
     async def test_one_jev_request_holds_every_enabled_checks_questions(self) -> None:
         # [Review 4117808663] the enabled checks' questions are combined and sent to Jev at once with the handoff.

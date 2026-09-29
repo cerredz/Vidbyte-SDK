@@ -2,10 +2,10 @@
 
 PURPOSE: Implements JevRunState, the class that owns JevAgent's done checks: it writes request-derived run state once, has JevHandoff compile final-answer evidence at every finish attempt, asks every enabled check's fixed questions in one request, and returns the checks that failed.
 ROLE IN CODEBASE: JevAgent builds one JevRunState at construction when JevRuntimeSettings.continual enables a done check and passes it to JevRuntime, which calls begin() before the main loop, and JevDoneContinuation (vidbyte/agents/jev/continuation/) calls check() each time the main agent tries to finish; outcomes reach the user through JevResponse on JevAgent.response.
-ARCHITECTURE NOTE: The run state is general: its schema is the central JevRunStatePayload plus request-derived sections for enabled checks, while claims that do not exist until the final answer are extracted by JevHandoff and added to the shared Jev state at check time. Every enabled check's questions go to Jev in one request (combine()), and what the main agent reads on failure belongs to JevDoneContinuation. Question text and thresholds stay in vidbyte/lib/jev/done/ (JevDoneRegistry), and DecisionModelHelper sends requests and scores answers. Generative agents write the state and evidence; Jev only recognizes whether the evidence shows each item.
-COMMON MODIFICATION PATTERNS: Add request-derived sections to _SECTIONS, _record(), and the commented _section() case; add post-run-derived sections to JevHandoff and build their claims and questions in _section() from its typed record. Add every check's commented case to _judge() and its continuation explanation to JevDoneContinuation._explain().
+ARCHITECTURE NOTE: The run state is general: its schema is the central JevRunStatePayload plus request-derived sections for enabled checks, while claims that do not exist until the final answer are extracted by JevHandoff and added to the shared Jev state at check time. Every enabled check's questions go to Jev in one request (combine()), and what the main agent reads on failure belongs to JevDoneContinuation. Question text and thresholds stay in vidbyte/lib/jev/done/ (JevDoneRegistry), and DecisionModelHelper sends requests and scores answers. Generative agents write the state and evidence; code computes exact counts; Jev recognizes whether evidence shows each item.
+COMMON MODIFICATION PATTERNS: Add request-derived sections to _SECTIONS, _record(), and the commented _section() case; OUTPUT_COUNT derives observed counts from the handoff's candidate keys before projection. Add post-run-derived sections to JevHandoff and build their claims and questions in _section() from its typed record. Add every check's commented case to _judge() and its continuation explanation to JevDoneContinuation._explain().
 KNOWN EDGE CASES: Every failure fails open: no run state means no check, and an unavailable handoff or Jev answer marks the check unavailable and lets the answer stand. An empty request-derived item list or an empty post-run claim list passes with nothing to ask. Like the JevAgent that owns it, one instance serves one run at a time.
-RELATED DOCS: docs/design/jev-multipart-done-criteria.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-claims-context.md, skills/jev-agent/SKILL.md, skills/jev-continuation/SKILL.md, and skills/asking-jev-questions/SKILL.md.
+RELATED DOCS: docs/design/jev-multipart-done-criteria.md, docs/design/jev-output-count-done-criteria.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-claims-context.md, skills/jev-agent/SKILL.md, skills/jev-continuation/SKILL.md, and skills/asking-jev-questions/SKILL.md.
 TESTS: tests/test_jev_done.py.
 """
 
@@ -43,6 +43,22 @@ from vidbyte.lib.constants.jev import (
     JEV_DONE_DELIVERABLE_FIELD,
     JEV_DONE_DELIVERABLES_FIELD,
     JEV_DONE_EVIDENCE_FIELD,
+    JEV_DONE_OUTPUT_COUNT_COMPLETION_FIELD,
+    JEV_DONE_OUTPUT_COUNT_DESCRIPTION_FIELD,
+    JEV_DONE_OUTPUT_COUNT_DISTINCT_FIELD,
+    JEV_DONE_OUTPUT_COUNT_DISTINCTNESS_FIELD,
+    JEV_DONE_OUTPUT_COUNT_ENTRIES_FIELD,
+    JEV_DONE_OUTPUT_COUNT_ENTRY_EVIDENCE_FIELD,
+    JEV_DONE_OUTPUT_COUNT_ENTRY_ID_FIELD,
+    JEV_DONE_OUTPUT_COUNT_ENTRY_KEY_FIELD,
+    JEV_DONE_OUTPUT_COUNT_ENTRY_VALUE_FIELD,
+    JEV_DONE_OUTPUT_COUNT_MET_FIELD,
+    JEV_DONE_OUTPUT_COUNT_OBLIGATION_FIELD,
+    JEV_DONE_OUTPUT_COUNT_OBSERVED_FIELD,
+    JEV_DONE_OUTPUT_COUNT_SCOPE_FIELD,
+    JEV_DONE_OUTPUT_COUNT_TARGET_FIELD,
+    JEV_DONE_OUTPUT_COUNT_UNIT_FIELD,
+    JEV_DONE_OUTPUT_COUNTS_FIELD,
     JEV_DONE_REQUEST_FIELD,
 )
 from vidbyte.lib.dataclasses.agents import AgentInput
@@ -53,6 +69,10 @@ from vidbyte.lib.dataclasses.jev import (
     JevHandoffRecord,
     JevMultiPart,
     JevMultiPartPayload,
+    JevOutputCount,
+    JevOutputCountEvidenceItem,
+    JevOutputCountObligation,
+    JevOutputCountPayload,
     JevQuestion,
     JevRunStatePayload,
     JevRunStateRecord,
@@ -71,8 +91,8 @@ from vidbyte.tools.types import ToolCallContext
 class JevRunState(BaseAgent):
     """Generative agent that writes the run state the enabled done checks read, and runs those checks at every finish attempt."""
 
-    # Request-derived checks add a section here; CLAIMS items are extracted after work by the handoff instead.
-    _SECTIONS: ClassVar[Mapping[JevDoneCheck, type[JevSectionPayload]]] = MappingProxyType({JevDoneCheck.MULTI_PART: JevMultiPartPayload})
+    # Request-derived checks add sections here; CLAIMS items are extracted after work by the handoff instead.
+    _SECTIONS: ClassVar[Mapping[JevDoneCheck, type[JevSectionPayload]]] = MappingProxyType({JevDoneCheck.MULTI_PART: JevMultiPartPayload, JevDoneCheck.OUTPUT_COUNT: JevOutputCountPayload})
 
     def __init__(self, settings: JevAgentSettings, runtime_settings: JevRuntimeSettings, response: JevResponse) -> None:
         # Reuses the JevAgent's generative model and key; the prompt, limits, schema, and empty tool list are fixed here.
@@ -196,6 +216,39 @@ class JevRunState(BaseAgent):
                     for deliverable in state.deliverables
                 }
                 return {JEV_DONE_DELIVERABLES_FIELD: entries}, tuple(question.to_question(identifier) for identifier in state.ids())
+            case JevDoneCheck.OUTPUT_COUNT:
+                # The request fixes every numeric target before work; code counts handoff candidates, and Jev
+                # recognizes whether their values, evidence, and distinct keys satisfy each exact obligation.
+                state = None if self.record is None else self.record.output_count
+                evidence = handoff.output_count
+                if state is None or evidence is None:
+                    return {}, ()
+                question = JevDoneRegistry.question(JevDoneCheck.OUTPUT_COUNT)
+                by_id = {item.id: item for item in evidence.obligations}
+                entries = {}
+                for obligation in state.obligations:
+                    item = by_id[obligation.id]
+                    observed = self._observed_count(item, obligation.distinct)
+                    entries[obligation.id] = {
+                        JEV_DONE_OUTPUT_COUNT_OBLIGATION_FIELD: {
+                            JEV_DONE_OUTPUT_COUNT_DESCRIPTION_FIELD: obligation.description,
+                            JEV_DONE_OUTPUT_COUNT_TARGET_FIELD: obligation.target_count,
+                            JEV_DONE_OUTPUT_COUNT_DISTINCT_FIELD: obligation.distinct,
+                            JEV_DONE_OUTPUT_COUNT_UNIT_FIELD: obligation.unit,
+                            JEV_DONE_OUTPUT_COUNT_SCOPE_FIELD: obligation.scope,
+                            JEV_DONE_OUTPUT_COUNT_DISTINCTNESS_FIELD: obligation.distinctness,
+                            JEV_DONE_OUTPUT_COUNT_COMPLETION_FIELD: obligation.completion_criteria,
+                        },
+                        JEV_DONE_OUTPUT_COUNT_ENTRIES_FIELD: [{
+                            JEV_DONE_OUTPUT_COUNT_ENTRY_ID_FIELD: candidate.id,
+                            JEV_DONE_OUTPUT_COUNT_ENTRY_VALUE_FIELD: candidate.value,
+                            JEV_DONE_OUTPUT_COUNT_ENTRY_KEY_FIELD: candidate.distinct_key,
+                            JEV_DONE_OUTPUT_COUNT_ENTRY_EVIDENCE_FIELD: candidate.evidence,
+                        } for candidate in item.entries],
+                        JEV_DONE_OUTPUT_COUNT_OBSERVED_FIELD: observed,
+                        JEV_DONE_OUTPUT_COUNT_MET_FIELD: observed >= obligation.target_count,
+                    }
+                return {JEV_DONE_OUTPUT_COUNTS_FIELD: entries}, tuple(question.to_question(identifier) for identifier in state.ids())
             case JevDoneCheck.CLAIMS:
                 # Claims are only knowable from the final answer, so repeat each parent context beside one
                 # atomic assertion and its tool evidence; the handoff's `missing` judgment stays out of Jev's state.
@@ -238,10 +291,25 @@ class JevRunState(BaseAgent):
                 # Every deliverable the request asks for must be shown produced in full: Jev answered one
                 # question per deliverable, and code joins them with a veto so one clear no is never averaged away.
                 return self._multi_part(handoff, decision)
+            case JevDoneCheck.OUTPUT_COUNT:
+                # Each requested numeric obligation must meet its own target; the veto prevents another group
+                # or an easy count from averaging away one incomplete quantity.
+                return self._output_count(handoff, decision)
             case JevDoneCheck.CLAIMS:
                 # Each extracted final-answer claim must independently reach the support threshold, so one
                 # unsupported assertion sends the agent back to that claim rather than averaging it away.
                 return self._claims(handoff, decision)
+
+    @staticmethod
+    def _observed_count(item: JevOutputCountEvidenceItem, distinct: bool) -> int:
+        """Count candidate output units deterministically from handoff keys."""
+        # @intent repeated-output-units-do-not-inflate-distinct-targets
+        # A quantity like "25 distinct examples" is not met by repeating one example under new list numbers or
+        # alternate wording. The handoff supplies semantic keys and Jev checks their fidelity against the values.
+        if not distinct:
+            return len(item.entries)
+        keys = {" ".join(entry.distinct_key.casefold().split()) for entry in item.entries}
+        return len(keys)
 
     def _multi_part(self, handoff: JevHandoffRecord | None, decision: DecisionModelResponse | None) -> JevDoneResult:
         # Turns Jev's answers about each deliverable into the multi-part result, scored by DecisionModelHelper.
@@ -272,6 +340,25 @@ class JevRunState(BaseAgent):
         # One request answered every enabled check, so its usage is the cost of this finish attempt's checks.
         usage = JevUsage.from_usage_payload(decision.usage or {})
         return JevDoneResult(check=JevDoneCheck.MULTI_PART, score=verdict.score, passed=verdict.passed, answers=verdict.answers, incomplete=incomplete, usage=usage)
+
+    def _output_count(self, handoff: JevHandoffRecord | None, decision: DecisionModelResponse | None) -> JevDoneResult:
+        # Scores one recognition answer per numeric obligation, while all arithmetic remains in this layer.
+        state = None if self.record is None else self.record.output_count
+        if state is None or handoff is None or handoff.output_count is None:
+            return JevDoneResult(check=JevDoneCheck.OUTPUT_COUNT, score=None, available=False)
+        if not state.obligations:
+            return JevDoneResult(check=JevDoneCheck.OUTPUT_COUNT, score=None)
+        if decision is None:
+            return JevDoneResult(check=JevDoneCheck.OUTPUT_COUNT, score=None, available=False)
+        question = JevDoneRegistry.question(JevDoneCheck.OUTPUT_COUNT)
+        threshold = JevDoneRegistry.threshold(JevDoneCheck.OUTPUT_COUNT)
+        answers = {identifier: decision.answers[question.name(identifier)] for identifier in state.ids() if question.name(identifier) in decision.answers}
+        verdict = DecisionModelHelper.score_noul(answers, state.ids(), threshold, threshold)
+        if verdict is None:
+            return JevDoneResult(check=JevDoneCheck.OUTPUT_COUNT, score=None, available=False)
+        incomplete = tuple(identifier for identifier in state.ids() if DecisionModelHelper.noul_passes(verdict.answers, identifier, threshold) is False)
+        usage = JevUsage.from_usage_payload(decision.usage or {})
+        return JevDoneResult(check=JevDoneCheck.OUTPUT_COUNT, score=verdict.score, passed=verdict.passed, answers=verdict.answers, incomplete=incomplete, usage=usage)
 
     # @intent final-answer-claims-need-independent-evidence
     # CLAIMS guards the trust boundary between an agent's self-report and the work the run actually records.
@@ -324,12 +411,19 @@ class JevRunState(BaseAgent):
         section = getattr(payload, JevDoneCheck.MULTI_PART.value, None)
         if isinstance(section, JevMultiPartPayload):
             multi_part = JevMultiPart(tuple(JevDeliverable(item.id, item.description.strip(), item.completion_signal.strip()) for item in section.deliverables))
+        output_count = None
+        count_section = getattr(payload, JevDoneCheck.OUTPUT_COUNT.value, None)
+        if isinstance(count_section, JevOutputCountPayload):
+            output_count = JevOutputCount(tuple(JevOutputCountObligation(
+                item.id, item.description.strip(), item.target_count, item.distinct, item.unit.strip(), item.scope.strip(), item.distinctness.strip(), item.completion_criteria.strip()
+            ) for item in count_section.obligations))
         return JevRunStateRecord(
             goal=payload.goal.strip(),
             objective=payload.objective.strip(),
             mission=payload.mission.strip(),
             what_not_to_do=tuple(limit.strip() for limit in payload.what_not_to_do if limit.strip()),
             multi_part=multi_part,
+            output_count=output_count,
             usage=self.get_usage(),
         )
 

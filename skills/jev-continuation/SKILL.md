@@ -43,13 +43,13 @@ The five stages, and who does the work in each:
 
 | Stage | Who | Kind of work | Output |
 |---|---|---|---|
-| (A) Run state | `JevRunState`, a generative `BaseAgent` with no tools | Generation. For checks whose items are knowable before work, it reads the user's request and lists what the check will verify. | `JevRunStateRecord`, plus `rendered` JSON |
+| (A) Run state | `JevRunState`, a generative `BaseAgent` with no tools | Generation. For checks whose items are knowable before work, it reads the user's request and lists what the check will verify. OUTPUT_COUNT records explicit numeric output quantities, including one obligation per group. | `JevRunStateRecord`, plus `rendered` JSON |
 | (C) Handoff | `JevHandoff`, a generative `BaseAgent` with no tools | Generation. It reads the main agent's run, compiles evidence for request-derived items, and extracts final-answer claims when items only exist after work. | `JevHandoffRecord`, plus `rendered` JSON |
 | (D) Jev | `DecisionModelRunner` (TypeSafe) | Recognition only. It answers one yes/no question per item. | `DecisionModelResponse` |
 | (E) Judge | `JevRunState._judge` (code) | Scoring. `score_noul` applies a threshold and a veto, then lists the incomplete items. | `JevDoneResult` |
 | (F) Continue | `JevDoneContinuation` (code and a prompt asset) | Formatting. It builds one message for the main agent. | a `{"role": "user"}` message |
 
-The core split, which comes from `asking-jev-questions` strategy 16: **generative agents write the state and the evidence, and Jev only recognizes whether the evidence shows each item.** Never ask Jev to list, count, or produce anything.
+The core split, which comes from `asking-jev-questions` strategy 16: **generative agents write the state and the evidence, code computes exact values such as counts, and Jev only recognizes whether the prepared evidence shows each item.** Never ask Jev to list, count, or produce anything. For OUTPUT_COUNT, keep each candidate's value and direct source evidence beside the handoff's distinctness key; do not let a computed count or a handoff `missing` summary stand alone as evidence.
 
 Every stage fails open. With no run state there is no check. When the handoff or Jev is unavailable, the check is marked `available=False` and the answer stands. A done check is advisory. It must never block or crash the main agent's answer.
 
@@ -138,6 +138,8 @@ Write down five things. If you cannot write one of them, the check is not ready.
    Also decide the threshold. The veto is the same value, so one clear no is never averaged away.
 
 For every per-item continuation gate, design the item's Jev-facing state as **four to six named context sections** that explain the item being judged. Choose fields that extend the decision context, such as identity, scope, kind, expected output, and the specific assertion or condition. Keep each question to one recognition judgment about one item; provide its context in that item's state entry instead of combining several judgments into a long question. Give generated-output schema fields five clear sentences describing what the field means, where its value comes from, what belongs or does not belong in it, how absence is represented, and how it affects the judgment. This five-sentence target is for field instructions, not a request for five sentences in every generated value.
+
+For OUTPUT_COUNT, the request-derived item is one explicit quantity obligation, not one item per expected result. Preserve the positive integer target, unit, group scope, and whether distinctness is required. The handoff lists each visible candidate's value and direct run evidence and proposes a distinctness key; code derives the unique count and compares it with the target. Jev checks candidate relevance, evidence, and key fidelity without doing arithmetic, and the same request-derived obligation is checked even when the final answer does not state a count.
 
 A check that judges the run as a whole still fits this model: it has one item with a fixed id. `str.format(item=...)` ignores a placeholder the question does not use. Prefer real items when they exist.
 
@@ -433,7 +435,7 @@ For CLAIMS, key each state entry by `parent_id.assertion_id` and put `claim.iden
 
 ### Step 11: Keep the shared state description true
 
-`DONE_STATE` in `vidbyte/lib/jev/done/multi_part.py` is the shared `state` section of every done-question brief. It describes `request` and the optional `deliverables` and `claims` fields, each present only when its check is enabled. Keep this one description true for every combination of enabled checks, including a dynamic claims list emitted by the handoff.
+`DONE_STATE` in `vidbyte/lib/jev/done/multi_part.py` is the shared `state` section of every done-question brief. It describes `request` and the optional `deliverables`, `output_counts`, and `claims` fields, each present only when its check is enabled. Keep this one description true for every combination of enabled checks, including the output-count values computed from observed handoff entries and the dynamic claims list emitted by the handoff.
 
 Before you ship:
 

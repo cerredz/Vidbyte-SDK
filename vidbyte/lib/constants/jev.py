@@ -84,6 +84,8 @@ JEV_SPECIALIST_MAX_COUNT: int = JEV_MAX_CHOICE_OPTIONS - 1
 # threshold is used as both the mean threshold and veto, so one clear no is not averaged away.
 # Both thresholds are starting points, not values tuned on a labeled set.
 JEV_MULTI_PART_THRESHOLD: float = 0.8
+# Every explicit output-count obligation must independently reach the threshold; starting point, not tuned.
+JEV_OUTPUT_COUNT_THRESHOLD: float = 0.8
 # Each checkable final-answer claim must reach this P(yes), alone and in the mean, before it is considered supported.
 JEV_CLAIMS_THRESHOLD: float = 0.85
 # Default of JevContinualSettings.max_continuations: how many times a failed done check may send the main
@@ -95,6 +97,22 @@ JEV_DONE_REQUEST_FIELD: str = "request"
 JEV_DONE_DELIVERABLES_FIELD: str = "deliverables"
 JEV_DONE_DELIVERABLE_FIELD: str = "deliverable"
 JEV_DONE_COMPLETION_SIGNAL_FIELD: str = "completion_signal"
+JEV_DONE_OUTPUT_COUNTS_FIELD: str = "output_counts"
+JEV_DONE_OUTPUT_COUNT_OBLIGATION_FIELD: str = "obligation"
+JEV_DONE_OUTPUT_COUNT_DESCRIPTION_FIELD: str = "description"
+JEV_DONE_OUTPUT_COUNT_TARGET_FIELD: str = "target_count"
+JEV_DONE_OUTPUT_COUNT_DISTINCT_FIELD: str = "distinct"
+JEV_DONE_OUTPUT_COUNT_UNIT_FIELD: str = "unit"
+JEV_DONE_OUTPUT_COUNT_SCOPE_FIELD: str = "scope"
+JEV_DONE_OUTPUT_COUNT_DISTINCTNESS_FIELD: str = "distinctness"
+JEV_DONE_OUTPUT_COUNT_COMPLETION_FIELD: str = "completion_criteria"
+JEV_DONE_OUTPUT_COUNT_ENTRIES_FIELD: str = "entries"
+JEV_DONE_OUTPUT_COUNT_OBSERVED_FIELD: str = "observed_count"
+JEV_DONE_OUTPUT_COUNT_MET_FIELD: str = "target_met"
+JEV_DONE_OUTPUT_COUNT_ENTRY_ID_FIELD: str = "id"
+JEV_DONE_OUTPUT_COUNT_ENTRY_VALUE_FIELD: str = "value"
+JEV_DONE_OUTPUT_COUNT_ENTRY_KEY_FIELD: str = "distinct_key"
+JEV_DONE_OUTPUT_COUNT_ENTRY_EVIDENCE_FIELD: str = "evidence"
 JEV_DONE_EVIDENCE_FIELD: str = "evidence"
 JEV_DONE_CLAIMS_FIELD: str = "claims"
 JEV_DONE_CLAIM_FIELD: str = "claim"
@@ -139,6 +157,21 @@ __all__ = [
     "JEV_DEFAULT_TIMEOUT_SECONDS",
     "JEV_DELIVERABLE_ID_PATTERN",
     "JEV_DONE_COMPLETION_SIGNAL_FIELD",
+    "JEV_DONE_OUTPUT_COUNTS_FIELD",
+    "JEV_DONE_OUTPUT_COUNT_OBLIGATION_FIELD",
+    "JEV_DONE_OUTPUT_COUNT_DESCRIPTION_FIELD",
+    "JEV_DONE_OUTPUT_COUNT_TARGET_FIELD",
+    "JEV_DONE_OUTPUT_COUNT_DISTINCT_FIELD",
+    "JEV_DONE_OUTPUT_COUNT_UNIT_FIELD",
+    "JEV_DONE_OUTPUT_COUNT_SCOPE_FIELD",
+    "JEV_DONE_OUTPUT_COUNT_DISTINCTNESS_FIELD",
+    "JEV_DONE_OUTPUT_COUNT_COMPLETION_FIELD",
+    "JEV_DONE_OUTPUT_COUNT_ENTRIES_FIELD",
+    "JEV_DONE_OUTPUT_COUNT_OBSERVED_FIELD",
+    "JEV_DONE_OUTPUT_COUNT_MET_FIELD",
+    "JEV_DONE_OUTPUT_COUNT_ENTRY_ID_FIELD",
+    "JEV_DONE_OUTPUT_COUNT_ENTRY_VALUE_FIELD",
+    "JEV_DONE_OUTPUT_COUNT_ENTRY_KEY_FIELD",
     "JEV_DONE_CLAIM_FIELD",
     "JEV_DONE_CLAIM_ASSERTION_FIELD",
     "JEV_DONE_CLAIM_ASSERTION_ID_FIELD",
@@ -171,6 +204,7 @@ __all__ = [
     "JEV_MIN_SCORE_LEVELS",
     "JEV_MODELS_PATH",
     "JEV_MULTI_PART_THRESHOLD",
+    "JEV_OUTPUT_COUNT_THRESHOLD",
     "JEV_NOUL_FALSE",
     "JEV_NOUL_OPTIONS",
     "JEV_NOUL_TRUE",

@@ -1,11 +1,11 @@
 """FILE: vidbyte/lib/dataclasses/jev.py
 
-PURPOSE: Defines the validated records for TypeSafe Jev decisions (JSON content, options, questions, requests, normalized answers, wire bodies, model cards, and decision-log records), for JevAgent preflight (the noul score, the question brief and criteria, the question base, preset definitions, preset results, the specialists JevAgent can hand a run to, the clarification agent's structured reply and the clarification built from it), for JevAgent done checks (the run-state and handoff structured replies, deliverable and claim evidence, handoff records, the done question base, and done results), and the JevAgentResponse the user reads after a run.
+PURPOSE: Defines the validated records for TypeSafe Jev decisions (JSON content, options, questions, requests, normalized answers, wire bodies, model cards, and decision-log records), for JevAgent preflight (the noul score, the question brief and criteria, the question base, preset definitions, preset results, the specialists JevAgent can hand a run to, the clarification agent's structured reply and the clarification built from it), for JevAgent done checks (the run-state and handoff structured replies, deliverable, output-count, and claim evidence, handoff records, the done question base, and done results), and the JevAgentResponse the user reads after a run.
 ROLE IN CODEBASE: `vidbyte/providers/typesafe.py` builds TypeSafeWireRequest from JevDecisionRequest and JevAnswer values from responses, while `vidbyte/lib/runners/decision.py` passes the typed records through.
 ARCHITECTURE NOTE: This module must not import model_configs because that would close an import cycle through ModalityDetector. Records own every shape rule in __post_init__; the provider, not these records, turns a wire record into the JSON body (lint S060 bars dict[str, Any] encoders here).
-COMMON MODIFICATION PATTERNS: Mirror https://docs.typesafe.ai/api.md exactly: add a field together with its validation, its wire record, and its provider serialization; keep bounds in vidbyte/lib/constants/jev.py. New done-check evidence records and their structured payloads belong beside the other Jev records; items derived from the finished answer need not be fields on JevRunStateRecord.
+COMMON MODIFICATION PATTERNS: Mirror https://docs.typesafe.ai/api.md exactly: add a field together with its validation, its wire record, and its provider serialization; keep bounds in vidbyte/lib/constants/jev.py. New done-check evidence records and their structured payloads belong beside the other Jev records; request-derived output-count obligations belong on JevRunStateRecord and their candidate evidence on JevHandoffRecord, while items derived from the finished answer need not be fields on JevRunStateRecord.
 KNOWN EDGE CASES: State, instructions, and criteria may be a string or JSON structure; noul criteria are optional; score answers carry a probability-weighted `score` that can land between levels; noul answers carry no confidence. JevPreflightQuestion and JevDoneQuestion are deliberately not slotted because every concrete question subclass redeclares its fields with defaults. The clarification, run-state, and handoff payloads are pydantic models because they are the output_schema their generative agents are held to; every field's description is the instruction the model reads for that field, and each done-check section payload carries a SECTION description for the field JevRunState and JevHandoff add when that check is enabled. The records built from those replies hold validated fields only; converting a reply into a record belongs to the agent that asked for it.
-RELATED DOCS: docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-claims-context.md, skills/jev-continuation/SKILL.md, https://docs.typesafe.ai/api.md, and https://docs.typesafe.ai/primitives/advanced.md.
+RELATED DOCS: docs/design/jev-agent-scaffold.md, docs/design/jev-preflight-clarity.md, docs/design/jev-output-count-done-criteria.md, docs/design/jev-claims-done-criteria.md, docs/design/jev-claims-context.md, skills/jev-continuation/SKILL.md, https://docs.typesafe.ai/api.md, and https://docs.typesafe.ai/primitives/advanced.md.
 TESTS: tests/test_jev_agent.py, tests/test_jev_preflight.py, and scripts/test-jev-agent-scaffold.py.
 """
 
@@ -690,6 +690,60 @@ class JevMultiPartPayload(JevSectionPayload):
     deliverables: list[JevDeliverablePayload] = Field(description="The deliverables are the separate outputs the request asks the agent to produce, one entry per output, in the order the request asks for them. An output is separate when it could be left out while the other outputs are still produced, such as a code change, a test, a migration, a document, an example, or an explanation the user asked for in its own right. Do not split one output into smaller steps, do not merge two outputs the user asked for separately, and do not add outputs the request does not ask for, such as extra tests or documentation the user never mentioned. Steps the agent takes only to produce an output, such as reading files or running a search, are not deliverables. Return an empty list when the request asks for no output at all, such as a greeting.")
 
 
+class JevOutputCountObligationPayload(BaseModel):
+    """One explicit numeric quantity required inside a requested output or group."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(pattern=JEV_DELIVERABLE_ID_PATTERN, description="A stable lowercase identifier unique among output-count obligations. It names the output or group rather than its position. Copy it unchanged into the handoff so code can match evidence back to request state. Use only letters, digits, and underscores, starting with a letter. Do not combine independent quantities under one id.")
+    description: str = Field(min_length=1, description="Describe the output quantity the user asked for, preserving the user's scope and wording. Include the group or category when the quantity applies per group. Do not add another output obligation or turn an example into a requirement. A reader should know which requested output this count belongs to. This is request context, not evidence that any output exists.")
+    target_count: int = Field(ge=1, description="The exact positive integer the request requires for this scope. Copy an explicit number from the request and do not estimate, round, or substitute a default. A per-group quantity has one obligation for each group, with its own target. Do not infer a target from examples or from how much work appears reasonable. This is the deterministic threshold used to interpret the handoff count.")
+    distinct: bool = Field(description="Set true when the request requires different items rather than repeated instances, including a request whose meaning clearly requires distinct results. Set false only when repetitions are valid under the user's wording. This is a classification of the request, not a judgment about completed output. Deterministic code uses this flag when deriving the observed count. Jev still checks the candidate values and keys against the textual distinctness rule.")
+    unit: str = Field(min_length=1, description="Name the kind of output unit being counted, such as entries, examples, files, sections, or words. Preserve a more specific unit when the request defines one. Do not mix different unit kinds in one obligation. The unit explains how observed entries correspond to the target. It does not establish that entries were produced.")
+    scope: str = Field(min_length=1, description="State the exact output or group within which this quantity applies. Preserve group names, topics, destinations, formats, and other boundaries from the request. For quantities requested separately in several groups, keep each group's scope distinct. Do not widen a group or count entries from sibling groups toward it. This scope limits the evidence Jev may recognize.")
+    distinctness: str = Field(min_length=1, description="State whether the request requires distinct items and what makes two entries distinct, using the user's stated meaning. When distinctness is not required, say that repetitions count only if the request permits them. Do not invent a semantic distinction the request does not imply. The handoff proposes stable distinct keys and code counts unique keys; Jev checks whether entries and keys fit this rule. This is a rule, not proof that the target was reached.")
+    completion_criteria: str = Field(min_length=1, description="Describe the visible output condition that satisfies the numeric obligation. Include its exact target, unit, scope, and distinctness rule without adding unrelated quality requirements. State what final-answer or artifact evidence can establish that the quantity exists. Do not treat a final-answer claim, plan, or count label alone as proof. This criterion keeps evidence interpretation consistent.")
+
+
+class JevOutputCountPayload(JevSectionPayload):
+    """Request-derived section containing every explicit numeric output obligation."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    SECTION: ClassVar[str] = "The output-count section records explicit numeric quantities inside requested outputs, including quantities scoped per topic or group. Each obligation preserves its target, unit, scope, and distinctness rule so the handoff can gather matching evidence. It complements the separate-deliverable section: one deliverable can contain several count obligations, while its existence alone does not satisfy its requested quantity. Extract obligations from the user's request before work starts, even if the final answer never claims a count. Return an empty list when no explicit output quantity is requested."
+    obligations: list[JevOutputCountObligationPayload] = Field(description="List one entry for every explicit numeric quantity required within a requested output, in request order. Split independent group quantities so one group's entries cannot satisfy another group's target. Include requested counts of files, examples, records, words, sections, or other output units when the request makes the target explicit. Do not duplicate an obligation already represented by a separate output unless the quantity applies within that output. Return an empty list when the request specifies no numeric output quantity.")
+
+
+class JevOutputCountEntryPayload(BaseModel):
+    """One candidate output unit and the run evidence that shows it exists."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(pattern=JEV_DELIVERABLE_ID_PATTERN, description="A stable identifier for one candidate unit within its obligation. It is not reused for another unit. Do not use ids to inflate the count by listing one unit more than once. The id is only a reference and does not prove that the unit exists. Keep entries in the order they appear in the output.")
+    value: str = Field(min_length=1, description="Reproduce or identify the candidate output unit closely enough to judge whether it belongs to the requested scope. Preserve content that matters to the unit's identity and meaning. Do not hide possible repetition in a broad summary. A candidate must be visible in the final answer, an artifact, or a successful recorded operation. Plans and assertions that an item exists are not candidates.")
+    distinct_key: str = Field(min_length=1, description="Provide the stable key deterministic code uses to count distinct candidates. Candidates that represent the same requested item must use the same key, including semantic duplicates with different wording when distinct results are required. Distinct candidates must use different keys. Normalize only differences that do not make a new requested item. Jev receives the candidate values and keys to recognize whether grouping follows the obligation's distinctness rule.")
+    evidence: str = Field(min_length=1, description="Identify where this candidate appears in the run and quote enough surrounding content to verify it. Cite a final-answer passage, artifact path and content, or successful tool output as appropriate. Preserve failures and later edits that remove or replace the candidate. Do not use the handoff's own conclusion as evidence. If no run evidence shows the candidate, do not include it as an entry.")
+
+
+class JevOutputCountEvidencePayloadItem(BaseModel):
+    """Evidence candidates associated with one output-count obligation id."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(pattern=JEV_DELIVERABLE_ID_PATTERN, description="The id exactly matches one output-count obligation in run state. It is copied unchanged so code can reject missing, duplicated, or invented obligation evidence. It names the quantity being evidenced, not an individual candidate. Provide one record per obligation in original order. Do not omit an obligation because no work was done for it.")
+    entries: list[JevOutputCountEntryPayload] = Field(description="List observed candidate units for this obligation in output order. Include repeated candidates when visible and assign the same distinct key when they represent one item under the obligation's rule, so code does not count them twice. Each entry needs content and direct run evidence. Do not add candidates that appear only in plans, summaries, or handoff analysis. Return an empty list when no candidate unit is visible.")
+    missing: str = Field(min_length=1, description="Describe the gap between requested quantity and visible output in plain, actionable terms. This summary is for the continuation message and is never supplied as Jev evidence. Name the group and quantity still missing when determinable. Do not claim completion based on a count or final-answer assertion. Write a concise sentence even when evidence appears complete.")
+
+
+class JevOutputCountEvidencePayload(JevSectionPayload):
+    """Handoff section listing countable output units for each request-derived quantity obligation."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    SECTION: ClassVar[str] = "The output-count evidence section lists candidate output units observed in the run for every obligation from run state. Each candidate includes content, a distinctness key, and the run evidence where it appears; code derives the observed distinct count from those keys. The section covers the original request's quantity even when the final answer says nothing about how many items it produced. Candidate selection and distinct-key assignment prepare evidence and are not a completion verdict. The handoff must represent partial work faithfully and never rely on its own missing summary as proof."
+    obligations: list[JevOutputCountEvidencePayloadItem] = Field(description="Provide one evidence record for every output-count obligation in run-state order. Keep candidates inside the exact obligation scope and include every visible qualifying unit, including repeats that code can exclude by shared distinct key. Preserve candidate content and source evidence so Jev can recognize relevance and distinctness. Do not let entries from other groups satisfy this obligation. An empty entries list means no candidate output unit is shown for that obligation.")
+
+
 class JevHandoffPayload(BaseModel):
     """The evidence handoff JevHandoff writes after the main agent tries to finish.
 
@@ -836,7 +890,7 @@ class JevMultiPart:
 class JevRunStateRecord:
     """The run state JevRunState wrote from the user's request: the central fields and the section of every enabled done check.
 
-    `multi_part` is set only when the MULTI_PART done check is enabled, and `usage` is JevRunState's own model usage.
+    `multi_part` and `output_count` are set only when their respective checks are enabled, and `usage` is JevRunState's own model usage.
     """
 
     goal: str
@@ -844,6 +898,7 @@ class JevRunStateRecord:
     mission: str
     what_not_to_do: tuple[str, ...] = ()
     multi_part: JevMultiPart | None = None
+    output_count: JevOutputCount | None = None
     usage: UsageRollup | None = None
 
     def __post_init__(self) -> None:
@@ -856,6 +911,8 @@ class JevRunStateRecord:
             JevText.require(limit, field_name=f"run state what_not_to_do[{index}]")
         if self.multi_part is not None and not isinstance(self.multi_part, JevMultiPart):
             raise JevValidation.error("run state multi_part", "a JevMultiPart or None", self.multi_part)
+        if self.output_count is not None and not isinstance(self.output_count, JevOutputCount):
+            raise JevValidation.error("run state output_count", "a JevOutputCount or None", self.output_count)
 
 
 @dataclass(frozen=True, slots=True)
@@ -888,6 +945,91 @@ class JevMultiPartEvidence:
     def ids(self) -> tuple[str, ...]:
         """Return every evidence entry's deliverable id in order."""
         return tuple(item.id for item in self.deliverables)
+
+
+@dataclass(frozen=True, slots=True)
+class JevOutputCountObligation:
+    """One numeric output obligation extracted from the original request."""
+
+    id: str
+    description: str
+    target_count: int
+    distinct: bool
+    unit: str
+    scope: str
+    distinctness: str
+    completion_criteria: str
+
+    def __post_init__(self) -> None:
+        JevDeliverableId.require(self.id, field_name="output-count obligation id")
+        for field_name in ("description", "unit", "scope", "distinctness", "completion_criteria"):
+            JevText.require(getattr(self, field_name), field_name=f"output-count obligation {self.id!r} {field_name}")
+        if isinstance(self.target_count, bool) or not isinstance(self.target_count, int) or self.target_count < 1:
+            raise JevValidation.error(f"output-count obligation {self.id!r} target_count", "a positive integer", self.target_count)
+        if not isinstance(self.distinct, bool):
+            raise JevValidation.error(f"output-count obligation {self.id!r} distinct", "a boolean", self.distinct)
+
+
+@dataclass(frozen=True, slots=True)
+class JevOutputCount:
+    """The request-derived numeric output obligations for one run."""
+
+    obligations: tuple[JevOutputCountObligation, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.obligations, tuple) or not all(isinstance(item, JevOutputCountObligation) for item in self.obligations):
+            raise JevValidation.error("output-count obligations", "a tuple of JevOutputCountObligation values", self.obligations)
+        JevDeliverableId.require_unique(self.ids(), field_name="output-count obligations")
+
+    def ids(self) -> tuple[str, ...]:
+        """Return stable obligation ids in request order."""
+        return tuple(item.id for item in self.obligations)
+
+
+@dataclass(frozen=True, slots=True)
+class JevOutputCountEntry:
+    """One output unit candidate, its distinctness key, and its source evidence."""
+
+    id: str
+    value: str
+    distinct_key: str
+    evidence: str
+
+    def __post_init__(self) -> None:
+        JevDeliverableId.require(self.id, field_name="output-count entry id")
+        for field_name in ("value", "distinct_key", "evidence"):
+            JevText.require(getattr(self, field_name), field_name=f"output-count entry {self.id!r} {field_name}")
+
+
+@dataclass(frozen=True, slots=True)
+class JevOutputCountEvidenceItem:
+    """The handoff's evidence and candidate output units for one obligation."""
+
+    id: str
+    entries: tuple[JevOutputCountEntry, ...] = ()
+    missing: str = ""
+
+    def __post_init__(self) -> None:
+        JevDeliverableId.require(self.id, field_name="output-count evidence id")
+        if not isinstance(self.entries, tuple) or not all(isinstance(item, JevOutputCountEntry) for item in self.entries):
+            raise JevValidation.error(f"output-count evidence {self.id!r} entries", "a tuple of JevOutputCountEntry values", self.entries)
+        JevText.require(self.missing, field_name=f"output-count evidence {self.id!r} missing")
+        JevDeliverableId.require_unique(tuple(item.id for item in self.entries), field_name=f"output-count entries for {self.id!r}")
+
+@dataclass(frozen=True, slots=True)
+class JevOutputCountEvidence:
+    """Count evidence for every request-derived output quantity, in obligation order."""
+
+    obligations: tuple[JevOutputCountEvidenceItem, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.obligations, tuple) or not all(isinstance(item, JevOutputCountEvidenceItem) for item in self.obligations):
+            raise JevValidation.error("output-count evidence", "a tuple of JevOutputCountEvidenceItem values", self.obligations)
+        JevDeliverableId.require_unique(self.ids(), field_name="output-count evidence")
+
+    def ids(self) -> tuple[str, ...]:
+        """Return obligation ids in handoff order."""
+        return tuple(item.id for item in self.obligations)
 
 
 @dataclass(frozen=True, slots=True)
@@ -1001,10 +1143,11 @@ class JevClaimsEvidence:
 class JevHandoffRecord:
     """The evidence JevHandoff compiled from the main agent's run for every enabled done check.
 
-    `multi_part` and `claims` are set only when their respective done checks are enabled, and `usage` is JevHandoff's own model usage.
+    `multi_part`, `output_count`, and `claims` are set only when their respective done checks are enabled, and `usage` is JevHandoff's own model usage.
     """
 
     multi_part: JevMultiPartEvidence | None = None
+    output_count: JevOutputCountEvidence | None = None
     claims: JevClaimsEvidence | None = None
     usage: UsageRollup | None = None
 
@@ -1012,6 +1155,8 @@ class JevHandoffRecord:
         # Requires a typed evidence section for each enabled done check when present.
         if self.multi_part is not None and not isinstance(self.multi_part, JevMultiPartEvidence):
             raise JevValidation.error("handoff multi_part", "a JevMultiPartEvidence or None", self.multi_part)
+        if self.output_count is not None and not isinstance(self.output_count, JevOutputCountEvidence):
+            raise JevValidation.error("handoff output_count", "a JevOutputCountEvidence or None", self.output_count)
         if self.claims is not None and not isinstance(self.claims, JevClaimsEvidence):
             raise JevValidation.error("handoff claims", "a JevClaimsEvidence or None", self.claims)
 
@@ -1064,8 +1209,9 @@ class JevDoneResult:
     """What one enabled done check decided the last time the main agent tried to finish.
 
     `answers` holds Jev's answer per checked-item id, `score` is their mean P(yes), and `incomplete` names
-    the items whose P(yes) fell below the check's threshold. Those items are deliverables for MULTI_PART and
-    parent claims for CLAIMS; CLAIMS answers use `parent_id.assertion_id` keys so each assertion stays atomic.
+      the items whose P(yes) fell below the check's threshold. Those items are deliverables for MULTI_PART,
+      quantity obligations for OUTPUT_COUNT, and parent claims for CLAIMS; CLAIMS answers use
+      `parent_id.assertion_id` keys so each assertion stays atomic.
     With `available=False` the run state, the handoff, or Jev was unavailable,
     `score` is None, and the check fails open (`passed` stays True). `usage` is from the one Jev request that
     asked every enabled check's questions at that finish attempt.
@@ -1199,6 +1345,16 @@ __all__ = [
     "JevMultiPartEvidence",
     "JevMultiPartEvidencePayload",
     "JevMultiPartPayload",
+    "JevOutputCount",
+    "JevOutputCountEvidence",
+    "JevOutputCountEvidenceItem",
+    "JevOutputCountEntry",
+    "JevOutputCountObligation",
+    "JevOutputCountObligationPayload",
+    "JevOutputCountPayload",
+    "JevOutputCountEntryPayload",
+    "JevOutputCountEvidencePayload",
+    "JevOutputCountEvidencePayloadItem",
     "JevNoulScore",
     "JevOption",
     "JevPreflightQuestion",
