@@ -20,11 +20,12 @@ This hardening follow-up narrows the original managed-gateway change after a fin
 ### Goals
 
 - Make Vidbyte-managed mode the only supported decision mode accepted by `JevRuntimeSettings`.
+- Accept only the exact `DecisionModelConfig` type so subclasses cannot override managed key resolution or endpoint pinning.
 - Reject both implicit direct configuration (`DecisionModelConfig()`) and explicit `DecisionModelMode.TYPESAFE` configuration at settings construction.
 - Keep the rejection local, deterministic, and free of credential resolution or network calls.
 - Preserve direct TypeSafe access for standalone `DecisionModelRunner` consumers that are not using `JevAgent`.
 - Update SDK examples and public Jev guidance so they do not show direct TypeSafe mode as a supported `JevAgent` configuration.
-- Add a focused test and verification command for the managed-only runtime invariant.
+- Add a focused regression test to the existing managed-gateway test suite and use its existing verification command.
 
 ### Non-Goals
 
@@ -53,11 +54,12 @@ The right boundary is the `JevRuntimeSettings` constructor. It already validates
 1. `JevRuntimeSettings()` continues to construct with the Vidbyte-managed decision config.
 2. `JevRuntimeSettings(decision=DecisionModelConfig())` raises `ConfigurationError` because the standalone config defaults to direct TypeSafe mode.
 3. `JevRuntimeSettings(decision=DecisionModelConfig(mode=DecisionModelMode.TYPESAFE))` raises the same actionable `ConfigurationError`.
-4. A Vidbyte-managed config, whether defaulted or explicitly supplied, remains accepted.
-5. Rejection occurs before credential lookup, runner construction, or outbound traffic.
-6. `DecisionModelConfig()` and `DecisionModelRunner(DecisionModelConfig())` remain direct TypeSafe for standalone consumers.
-7. JevAgent examples and skills show managed configuration only; direct BYOK documentation identifies `DecisionModelRunner` as a separate primitive.
-8. The policy does not claim that modified local client code or unrelated direct provider calls can be blocked by the package.
+4. `JevRuntimeSettings` rejects `DecisionModelConfig` subclasses before any custom method can override the managed endpoint or credential resolution.
+5. A Vidbyte-managed config, whether defaulted or explicitly supplied, remains accepted.
+6. Rejection occurs before credential lookup, runner construction, or outbound traffic.
+7. `DecisionModelConfig()` remains direct TypeSafe, and standalone `DecisionModelRunner` continues to support that mode when a TypeSafe credential is available.
+8. JevAgent examples and skills show managed configuration only; direct BYOK documentation identifies `DecisionModelRunner` as a separate primitive.
+9. The policy does not claim that modified local client code or unrelated direct provider calls can be blocked by the package.
 
 ### Non-Functional Requirements
 
@@ -71,7 +73,7 @@ The right boundary is the `JevRuntimeSettings` constructor. It already validates
 
 ## 5. High-Level Design
 
-Add a mode check to `JevRuntimeSettings.__post_init__` immediately after verifying that `decision` is a `DecisionModelConfig`. If the mode is not `VIDBYTE_MANAGED`, raise `ConfigurationError`. Leave `DecisionModelConfig` resolution rules untouched so standalone use remains compatible.
+Require `type(decision) is DecisionModelConfig` in `JevRuntimeSettings.__post_init__` so subclasses cannot override credential or routing methods. After that exact-type check, require the mode to be `VIDBYTE_MANAGED`; otherwise raise `ConfigurationError`. Leave `DecisionModelConfig` resolution rules untouched so standalone use remains compatible.
 
 ```text
 JevAgent(..., JevRuntimeSettings())
@@ -104,7 +106,7 @@ The policy check does not inspect or resolve API-key values. For managed setting
 **File:** `vidbyte/agents/jev/settings.py`  
 **Type:** Modified
 
-After validating the `DecisionModelConfig` type, check its `mode` by enum identity. Accept only `DecisionModelMode.VIDBYTE_MANAGED`. Raise an error similar to:
+Require the exact `DecisionModelConfig` type, then check `mode` by enum identity. Accept only `DecisionModelMode.VIDBYTE_MANAGED`. Raise an error similar to:
 
 ```text
 JevRuntimeSettings requires VIDBYTE_MANAGED decision mode. Direct TypeSafe mode is available only through DecisionModelRunner.
@@ -126,7 +128,7 @@ This follow-up closes a selectable provider route. It does not turn advisory Jev
 
 ### 6.3 Tests and examples
 
-Add a test that constructs the two direct config forms and asserts the same construction-time rejection. Add a positive assertion that managed mode remains accepted. Preserve existing standalone direct provider tests. Migrate JevAgent tests that currently use direct-mode configs to explicit synthetic managed configs with fake decision runners; tests that directly instantiate `JevRunState` or `JevPreflightTools` may continue to exercise lower-level direct behavior where that is the subject under test.
+Add tests that construct both direct config forms and a managed-config subclass that overrides endpoint resolution, then assert construction-time rejection. Add a positive assertion that managed mode remains accepted. Preserve existing standalone direct provider tests. Migrate JevAgent tests that currently use direct-mode configs to managed configs with fake decision runners; tests that directly instantiate `JevRunState` or `JevPreflightTools` may continue to exercise lower-level direct behavior where that is the subject under test.
 
 Update `skills/jev-agent/SKILL.md` to remove instructions for configuring a direct TypeSafe decision on `JevRuntimeSettings`. Keep one clear boundary note: direct BYOK remains available through standalone `DecisionModelRunner`, which does not construct or run `JevAgent`.
 
@@ -177,7 +179,6 @@ Applications that pass a direct TypeSafe config into JevAgent must create a Vidb
 | MODIFY | `tests/test_jev_preflight.py` | Use managed fake configs for JevAgent integration cases. |
 | MODIFY | `tests/test_jev_done.py` | Replace direct-mode JevAgent fixtures with managed fake configs; retain standalone direct tests. |
 | MODIFY | `skills/jev-agent/SKILL.md` | Remove the supported direct TypeSafe JevAgent setup. |
-| CREATE | `scripts/test-jev-agent-managed-only.py` | Provide focused verification of the new invariant. |
 
 ---
 
@@ -201,7 +202,7 @@ Applications that pass a direct TypeSafe config into JevAgent must create a Vidb
 
 ### Focused Verification
 
-`python scripts/test-jev-agent-managed-only.py` runs the new rejection/acceptance contract, prints PASS/FAIL, prints a final `X/Y tests passed`, and exits non-zero on collection, skip, or assertion failure.
+`python scripts/test-jev-managed-gateway.py` runs the rejection/acceptance contract alongside the gateway tests, prints PASS/FAIL, prints a final `X/Y tests passed`, and exits non-zero on assertion failure.
 
 ### Full SDK Verification
 

@@ -9,7 +9,7 @@
 
 ## 1. Overview
 
-Make JevAgent use Vidbyte's managed TypeSafe gateway by default, authenticating with `VIDBYTE_API_KEY` and the fixed Vidbyte gateway URL. Keep direct TypeSafe credentials as an explicit compatibility mode. Managed credentials stay out of representations and gateway response bodies; missing or rejected managed credentials stop Jev-controlled features, while network and upstream service outages retain Jev's existing advisory behavior.
+Make JevAgent use Vidbyte's managed TypeSafe gateway, authenticating with `VIDBYTE_API_KEY` and the fixed Vidbyte gateway URL. Direct TypeSafe credentials remain available to standalone decision runners only; `JevRuntimeSettings` rejects direct mode. Managed credentials stay out of representations and gateway response bodies; missing or rejected managed credentials stop Jev-controlled features, while transient network and upstream service outages retain Jev's advisory behavior. The managed-only JevAgent boundary supersedes the earlier compatibility decision in this design; see `docs/design/jev-agent-managed-only-decisions.md`.
 
 ---
 
@@ -21,14 +21,14 @@ Make JevAgent use Vidbyte's managed TypeSafe gateway by default, authenticating 
 - Resolve only `VIDBYTE_API_KEY` for managed mode, validate its live-key format, and never fall back to `TYPESAFE_API_KEY`.
 - Pin managed calls to the product gateway endpoint and reject caller-supplied managed endpoints.
 - Keep API keys out of configuration repr output and managed gateway error bodies/details.
-- Fail closed in Jev decision call sites for missing/invalid managed credentials and HTTP 401, 402, 403, or 429; preserve fail-open behavior for transient failures and direct TypeSafe mode.
-- Keep an explicit TypeSafe BYOK mode for callers who intentionally choose direct provider billing.
+- Fail closed in Jev decision call sites for missing/invalid managed credentials and HTTP 401, 402, 403, or 429; preserve fail-open behavior for transient failures.
+- Preserve direct TypeSafe BYOK for standalone `DecisionModelRunner` use, but reject it from JevAgent settings.
 - Update JevAgent usage guidance and add deterministic tests and a focused reporting script.
 
 ### Non-Goals
 
 - Change Vidbyte backend gateway authentication, scopes, wallet checks, quotas, provider billing, or key lifecycle.
-- Prevent a caller who modifies the SDK or chooses direct TypeSafe mode from bypassing Vidbyte. The server remains authoritative for every request it receives.
+- Prevent a caller who modifies the SDK or makes unrelated direct provider calls from bypassing Vidbyte. The server remains authoritative for every request it receives.
 - Route the generative model, Jev clarification agent, run-state writer, or handoff writer through the decision gateway; they remain configured by `JevAgentSettings`.
 - Change retry counts, gateway idempotency, credit reservation, settlement durability, run closure, or backend metering.
 - Add a staging/custom gateway URL or expose a managed endpoint override.
@@ -39,7 +39,7 @@ Make JevAgent use Vidbyte's managed TypeSafe gateway by default, authenticating 
 
 The Vidbyte product already exposes `POST /api/v1/models/typesafe/systemone` and `GET /api/v1/models/typesafe/models`. Both require a live `vb_live_` key with `models:invoke`; product responses use 401/402/403/429 for access, balance, scope, and quota rejection. The SDK's TypeSafe provider currently resolves only `TYPESAFE_API_KEY` and the TypeSafe URL. `JevRuntimeSettings` defaults to that direct-provider configuration, and the Jev gate, tool selector, and done checks treat all SDK errors as advisory and continue.
 
-The managed mode will be explicit in `DecisionModelConfig`, defaulted by `JevRuntimeSettings`, while the general-purpose `DecisionModelConfig` stays direct TypeSafe by default. This preserves standalone runner behavior and makes direct provider use an intentional choice when configuring JevAgent. The Vidbyte API key authorizes only decision calls made through Vidbyte; it does not secure the rest of a client-side JevAgent or its generative provider.
+The managed mode is explicit in `DecisionModelConfig` and required by `JevRuntimeSettings`, while the general-purpose `DecisionModelConfig` stays direct TypeSafe by default for standalone runners. The Vidbyte API key authorizes only decision calls made through Vidbyte; it does not secure the rest of a client-side JevAgent or its generative provider.
 
 Constraints: gateway endpoints and key formats must match the product contract; the SDK must not redirect a managed bearer credential to a custom host; and deterministic tests must never contact a live provider. Existing Jev behavior depends on advisory fail-open handling for transient provider failures, so only managed access/configuration failures become fatal.
 
@@ -57,9 +57,9 @@ Constraints: gateway endpoints and key formats must match the product contract; 
 6. `DecisionModelConfig.api_key`, its containing Jev runtime settings, and managed request headers do not reveal credentials through repr output.
 7. Managed 401/402/403/429 responses and managed credential configuration errors propagate out of the gate, tool selector, and done-check decision request; they do not become an unavailable/advisory decision.
 8. Managed timeout, connection, 5xx, and malformed-response failures retain the current fail-open behavior. Direct TypeSafe mode retains the current fail-open behavior for all `VidbyteSdkError`s.
-9. Existing tests that assert direct TypeSafe fallback select that mode explicitly after JevAgent's default changes.
+9. `JevRuntimeSettings` rejects both implicit and explicit direct TypeSafe configs; direct runner tests stay independent of JevAgent.
 10. Provider errors and formatted managed tracebacks identify Vidbyte, omit raw gateway response excerpts, and do not contain the configured key.
-11. JevAgent guidance explains the managed default, the required environment variable, and the explicit direct TypeSafe mode.
+11. JevAgent guidance explains the managed decision requirement and required environment variable; standalone runner guidance may show direct TypeSafe mode.
 
 ### Non-Functional Requirements
 
@@ -73,7 +73,7 @@ Constraints: gateway endpoints and key formats must match the product contract; 
 
 ## 5. High-Level Design
 
-Add a `DecisionModelMode` enum and let `DecisionModelConfig` select either direct TypeSafe access or Vidbyte-managed access. The latter uses `VIDBYTE_API_KEY`, validates the product's live key shape, pins the configured endpoint to Vidbyte's gateway, and suppresses key repr output. `JevRuntimeSettings` will use the managed config as its default factory; applications can still intentionally pass a direct TypeSafe config.
+Add a `DecisionModelMode` enum and let `DecisionModelConfig` select either direct TypeSafe access or Vidbyte-managed access. The latter uses `VIDBYTE_API_KEY`, validates the product's live key shape, pins the configured endpoint to Vidbyte's gateway, and suppresses key repr output. `JevRuntimeSettings` uses the managed config as its default and rejects direct mode. Standalone `DecisionModelRunner` remains available for direct TypeSafe calls.
 
 The existing provider adapter will resolve the mode-specific key and URL. Its managed error mapping will name Vidbyte and status, while dropping response excerpts that could reflect credentials. A shared Jev decision failure policy will distinguish managed authorization/configuration failures from transient failures. The three decision call sites (preflight gate, tool selector, and done-check decision) will rethrow only the former and keep their current advisory behavior for the latter.
 
@@ -87,7 +87,7 @@ DecisionModelConfig(VIDBYTE_MANAGED) -- VIDBYTE_API_KEY --> fixed Vidbyte gatewa
                  | managed 401/402/403/429 or config failure: raise
                  | transient failure: existing advisory fallback
 
-DecisionModelConfig(TYPESAFE) -- TYPESAFE_API_KEY --> TypeSafe API (explicit BYOK path)
+Standalone DecisionModelRunner(TYPESAFE) -- TYPESAFE_API_KEY --> TypeSafe API (outside JevAgent)
 ```
 
 ---
@@ -142,7 +142,7 @@ DecisionModelConfig.vidbyte_managed() -> DecisionModelConfig
 #### Logic / Algorithm
 
 1. Keep the general config's default mode as direct TypeSafe for standalone runner compatibility.
-2. In direct mode, preserve current `TYPESAFE_API_KEY` and provider endpoint resolution.
+2. In direct mode, preserve `TYPESAFE_API_KEY` and provider endpoint resolution for standalone runners.
 3. In managed mode, resolve an explicit key or `VIDBYTE_API_KEY`; do not consult the TypeSafe key variable.
 4. Trim the selected key and validate `^vb_live_[A-Za-z0-9_-]{32,}$`, matching the product perimeter.
 5. Reject any supplied managed endpoint; resolve to the fixed Vidbyte gateway base URL.
@@ -184,8 +184,8 @@ class JevDecisionFailurePolicy:
 
 - Managed configuration failures cannot silently disable a gate, tool selector, or done check.
 - A transient gateway outage does not prevent the main generative agent from running, matching the existing resilience policy.
-- Direct TypeSafe mode continues to fail open on all existing SDK error types.
-- Existing done-check credential tests explicitly choose direct TypeSafe mode and continue to fail open without `TYPESAFE_API_KEY`.
+- Standalone direct TypeSafe provider behavior remains independent of Jev's failure policy.
+- Jev done-check tests use managed config with scripted runners; direct TypeSafe config is rejected at the Jev settings boundary.
 
 ### 6.4 Managed provider errors
 
@@ -254,7 +254,7 @@ The focused script runs every test in `tests/test_jev_managed_gateway.py`, print
 
 #### Logic / Algorithm
 
-1. Document `VIDBYTE_API_KEY`, the fixed managed gateway default, and the explicit direct TypeSafe option.
+1. Document `VIDBYTE_API_KEY` and the required managed Jev gateway; document direct TypeSafe only for standalone runners.
 2. Test configs, URL/header construction, endpoint pinning, provider error mapping, policy classification, and all three Jev decision callers using scripted transports/fakes.
 3. Do not make live network calls.
 
@@ -276,7 +276,7 @@ mode: DecisionModelMode = DecisionModelMode.TYPESAFE
 api_key: str | None = field(default=None, repr=False)
 ```
 
-**Migration strategy:** No persistence or database migration. Existing direct configs retain direct mode. JevAgent's default changes to managed mode; callers who rely on direct TypeSafe calls pass an explicit `DecisionModelConfig(mode=DecisionModelMode.TYPESAFE, ...)`.
+**Migration strategy:** No persistence or database migration. Existing direct configs retain direct mode for standalone `DecisionModelRunner`. JevAgent requires `VIDBYTE_MANAGED`; applications that previously passed direct configs to `JevRuntimeSettings` must configure Vidbyte-managed access.
 
 ---
 
@@ -304,9 +304,9 @@ Complete list of every file expected to be created or modified:
 | MODIFY | `vidbyte/agents/jev/gate/gate.py` | Propagate managed access/configuration failures. |
 | MODIFY | `vidbyte/agents/jev/preflight.py` | Propagate managed access/configuration failures. |
 | MODIFY | `vidbyte/agents/jev/done/run_state.py` | Propagate managed access/configuration failures. |
-| MODIFY | `skills/jev-agent/SKILL.md` | Explain the managed default and direct TypeSafe option. |
+| MODIFY | `skills/jev-agent/SKILL.md` | Require managed Jev decisions and explain standalone TypeSafe use. |
 | CREATE | `tests/test_jev_managed_gateway.py` | Cover managed config, transport, errors, and failure policy. |
-| MODIFY | `tests/test_jev_done.py` | Keep its missing-TypeSafe-key fail-open case explicitly in direct mode. |
+| MODIFY | `tests/test_jev_done.py` | Exercise managed Jev behavior and reject direct runtime settings. |
 | CREATE | `scripts/test-jev-managed-gateway.py` | Provide focused PASS/FAIL verification. |
 
 No files are deleted.
@@ -324,12 +324,12 @@ No files are deleted.
 - Direct mode continues to resolve `TYPESAFE_API_KEY` and a compatible custom endpoint. [Hidden Failure]
 - API keys are absent from config/settings/request-call repr output. [Silent Failure]
 - Managed POST and GET calls use the product's System One and model-list paths and bearer header; direct mode keeps the TypeSafe host. [Silent Failure]
-- Managed 401/402/403/429 classify as fail-closed; 408/5xx/no-status/provider-response errors classify as advisory; direct mode remains advisory. [Edge Case]
+- Managed 401/402/403/429 classify as fail-closed; 408/5xx/no-status/provider-response errors classify as advisory. Direct provider tests run through the standalone runner. [Edge Case]
 - Managed error mapping and formatted tracebacks preserve status/provider but omit a synthetic key echoed in the upstream message/body/cause. [Hidden Failure]
 - Missing managed credentials are propagated from the gate, tool selector, and done-check decision boundary; transient failures remain fail-open at all three boundaries. [Hidden Failure]
 - Disabled features with no decision call do not resolve a managed key. [Hidden Assumption]
 - Direct TypeSafe authorization failures retain prior fail-open Jev behavior. [Hidden Failure]
-- The existing done-check test chooses direct mode and still fails open when `TYPESAFE_API_KEY` is absent. [Hidden Assumption]
+- Jev runtime settings reject both implicit and explicit direct TypeSafe configuration. [Hidden Assumption]
 
 ### Integration Tests
 
@@ -343,7 +343,7 @@ No files are deleted.
 1. [Hidden Assumption] Set `VIDBYTE_API_KEY` to a valid development credential, configure a JevAgent with an enabled decision feature, and confirm the request targets `https://api.vidbyte.pro/api/v1/models/typesafe/systemone`.
 2. [Hidden Assumption] Remove `VIDBYTE_API_KEY` while leaving `TYPESAFE_API_KEY` set; confirm the decision feature raises a configuration error and sends no request.
 3. [Edge Case] Configure a managed endpoint override; confirm construction fails before any request is sent.
-4. [Hidden Failure] Configure direct TypeSafe mode; confirm the request still targets the TypeSafe endpoint and retains advisory failure handling.
+4. [Hidden Failure] Configure a standalone direct TypeSafe runner; confirm the request still targets the TypeSafe endpoint.
 
 ---
 
@@ -353,7 +353,7 @@ No files are deleted.
 |------------|--------------------|---------|------|
 | Vidbyte Model Gateway | `https://api.vidbyte.pro/api/v1/models/typesafe` | Managed Jev decision and model-list requests | Product endpoint, scope, key format, or status contract could change; keep SDK tests aligned with `vidbyte/backend`. |
 | Python `httpx` transport | Existing pinned/ranged project dependency | Async bounded HTTP requests with redirects disabled by default | Transport default must remain redirect-disabled for credential safety. |
-| TypeSafe System One | Existing direct endpoint and wire contract | Explicit BYOK compatibility mode | Provider response/schema behavior remains independently managed. |
+| TypeSafe System One | Existing direct endpoint and wire contract | Standalone runner BYOK path | Provider response/schema behavior remains independently managed. |
 
 ---
 
@@ -361,8 +361,8 @@ No files are deleted.
 
 - No feature flag or backend migration is required.
 - This changes the default Jev decision provider route. Deploy the SDK after confirming the production gateway is available and `models:invoke` keys are enabled.
-- Existing applications that intentionally use TypeSafe directly must set `DecisionModelMode.TYPESAFE` on their `DecisionModelConfig`.
-- Rollback: revert the SDK change; the backend gateway is unchanged. Applications can also use explicit direct mode without rolling back.
+- Standalone applications that intentionally use TypeSafe directly may use `DecisionModelMode.TYPESAFE` with `DecisionModelRunner`.
+- Rollback: revert the SDK change; the backend gateway is unchanged.
 - No secrets are embedded in package defaults or test artifacts.
 
 ---
@@ -391,7 +391,7 @@ No files are deleted.
 - What: Stop JevAgent on every timeout, malformed response, provider 5xx, or authorization error.
 - Why rejected: Existing Jev capabilities are advisory during transient outages. This change makes access/configuration denials explicit while preserving resilience during infrastructure failures.
 
-### Alternative 4: Remove direct TypeSafe support from JevAgent
+### Alternative 4: Keep direct TypeSafe mode configurable through JevAgent
 
-- What: Force every `DecisionModelConfig` through Vidbyte.
-- Why rejected: This would remove an existing BYOK use case and still would not make a client-side SDK impossible to modify; server-side authorization remains the enforcement boundary.
+- What: Continue accepting a direct TypeSafe `DecisionModelConfig` in `JevRuntimeSettings`.
+- Why rejected: This leaves an ordinary supported JevAgent configuration that bypasses Vidbyte API-key authorization and wallet billing. Direct runner BYOK remains available outside JevAgent, while server-side authorization stays authoritative for calls that reach Vidbyte.
