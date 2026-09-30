@@ -93,10 +93,10 @@ settings = JevAgentSettings(
     model_name="gpt-4.1",
     agents=(JevSpecialist("schema", "Changes to the database schema and its migrations.", schema),),
 )
-agent = JevAgent(settings, JevRuntimeSettings(preflight=(JevPreflightPreset.CLARITY,), continual=JevContinualSettings(checks=(JevDoneCheck.MULTI_PART,), max_continuations=2)))
+agent = JevAgent(settings, JevRuntimeSettings(preflight=(JevPreflightPreset.CLARITY,), continual=JevContinualSettings(checks=(JevDoneCheck.MULTI_PART, JevDoneCheck.SCOPE_COVERAGE), max_continuations=2)))
 ```
 
-The equivalent namespace constructor is `sdk.agents.jev(settings, runtime_settings)`. After a run, `agent.response.specialist` names the specialist that ran the task, or is `None` when the main agent ran it, and `agent.response.done[JevDoneCheck.MULTI_PART]` says whether every requested deliverable was shown produced in full.
+The equivalent namespace constructor is `sdk.agents.jev(settings, runtime_settings)`. After a run, `agent.response.specialist` names the specialist that ran the task, or is `None` when the main agent ran it. `agent.response.done[JevDoneCheck.MULTI_PART]` reports whether every requested deliverable was shown produced in full; `agent.response.done[JevDoneCheck.SCOPE_COVERAGE]` reports whether each required member of every checked request group has evidence of the requested change. Scope gaps send the agent back through the same loop up to `max_continuations`; after the cap, the answer stands and the result remains available on `agent.response`.
 
 ## Capability design example
 

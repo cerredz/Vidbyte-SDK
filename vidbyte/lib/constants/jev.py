@@ -86,6 +86,10 @@ JEV_SPECIALIST_MAX_COUNT: int = JEV_MAX_CHOICE_OPTIONS - 1
 JEV_MULTI_PART_THRESHOLD: float = 0.8
 # Each checkable final-answer claim must reach this P(yes), alone and in the mean, before it is considered supported.
 JEV_CLAIMS_THRESHOLD: float = 0.85
+# Each covered member must independently reach this P(yes); missing run evidence is an automatic gap.
+JEV_SCOPE_COVERAGE_THRESHOLD: float = 0.8
+# A one-time request-only review can widen a state builder's narrow label when Jev recognizes broader wording.
+JEV_SCOPE_BREADTH_UPGRADE_THRESHOLD: float = 0.5
 # Default of JevContinualSettings.max_continuations: how many times a failed done check may send the main
 # agent back to work before its answer is accepted.
 JEV_DONE_MAX_CONTINUATIONS: int = 3
@@ -111,6 +115,13 @@ JEV_DONE_CLAIM_ASSERTION_ID_FIELD: str = "id"
 JEV_DONE_CLAIM_ASSERTION_STATEMENT_FIELD: str = "statement"
 JEV_DONE_CLAIM_COMPLETION_CRITERIA_FIELD: str = "completion_criteria"
 JEV_DONE_CLAIM_ASSERTION_SEPARATOR: str = "."
+JEV_DONE_SCOPE_COVERAGE_FIELD: str = "scope_coverage"
+JEV_DONE_SCOPE_DIMENSIONS_FIELD: str = "dimensions"
+JEV_DONE_SCOPE_REQUEST_QUOTE_FIELD: str = "request_quote"
+JEV_DONE_SCOPE_REQUESTED_CHANGE_FIELD: str = "requested_change"
+JEV_DONE_SCOPE_UNIT_NOUN_FIELD: str = "unit_noun"
+JEV_DONE_SCOPE_UNIT_FIELD: str = "unit"
+JEV_DONE_SCOPE_MEMBERSHIP_RULE_FIELD: str = "membership_rule"
 # A deliverable ID is a short lowercase identifier JevRunState writes and JevHandoff must echo exactly.
 JEV_DELIVERABLE_ID_PATTERN: str = r"^[a-z][a-z0-9_]{0,63}$"
 # Defaults of the JevRunState and JevHandoff limits in JevContinualSettings: each writes one structured reply,
@@ -159,6 +170,13 @@ __all__ = [
     "JEV_DONE_EVIDENCE_FIELD",
     "JEV_DONE_MAX_CONTINUATIONS",
     "JEV_DONE_REQUEST_FIELD",
+    "JEV_DONE_SCOPE_COVERAGE_FIELD",
+    "JEV_DONE_SCOPE_DIMENSIONS_FIELD",
+    "JEV_DONE_SCOPE_REQUEST_QUOTE_FIELD",
+    "JEV_DONE_SCOPE_REQUESTED_CHANGE_FIELD",
+    "JEV_DONE_SCOPE_UNIT_NOUN_FIELD",
+    "JEV_DONE_SCOPE_UNIT_FIELD",
+    "JEV_DONE_SCOPE_MEMBERSHIP_RULE_FIELD",
     "JEV_HANDOFF_MAX_ITERATIONS",
     "JEV_HANDOFF_MAX_TOKENS",
     "JEV_MAX_CHOICE_OPTIONS",
@@ -171,6 +189,8 @@ __all__ = [
     "JEV_MIN_SCORE_LEVELS",
     "JEV_MODELS_PATH",
     "JEV_MULTI_PART_THRESHOLD",
+    "JEV_SCOPE_COVERAGE_THRESHOLD",
+    "JEV_SCOPE_BREADTH_UPGRADE_THRESHOLD",
     "JEV_NOUL_FALSE",
     "JEV_NOUL_OPTIONS",
     "JEV_NOUL_TRUE",

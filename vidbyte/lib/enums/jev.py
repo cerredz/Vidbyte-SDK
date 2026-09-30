@@ -41,6 +41,7 @@ class JevDoneCheck(str, Enum):
 
     MULTI_PART = "multi_part"
     CLAIMS = "claims"
+    SCOPE_COVERAGE = "scope_coverage"
 
 
 class JevDoneQuestionKey(str, Enum):
@@ -51,6 +52,37 @@ class JevDoneQuestionKey(str, Enum):
 
     MULTI_PART_DELIVERED = "multi_part.delivered"
     CLAIMS_SUPPORTED = "claims.supported"
+    SCOPE_COVERAGE_BREADTH = "scope_coverage.breadth"
+    SCOPE_COVERAGE_APPLIED = "scope_coverage.applied"
+
+
+class JevScopeBreadth(str, Enum):
+    """How much of a group the request asks the change to reach."""
+
+    EVERY_MEMBER = "every_member"
+    NAMED_LIST = "named_list"
+    ONE_EXAMPLE = "one_example"
+    SINGLE_TARGET = "single_target"
+
+    def is_checked(self) -> bool:
+        """Return whether the requested breadth covers multiple members."""
+        return self in (JevScopeBreadth.EVERY_MEMBER, JevScopeBreadth.NAMED_LIST)
+
+
+class JevScopeUniverse(str, Enum):
+    """Where the members of a scope group are identified."""
+
+    NAMED_IN_REQUEST = "named_in_request"
+    FOUND_IN_WORKSPACE = "found_in_workspace"
+    OPEN_ENDED = "open_ended"
+
+
+class JevScopeUnitSource(str, Enum):
+    """How one unit was identified in the run handoff."""
+
+    NAMED_IN_REQUEST = "named_in_request"
+    FOUND_BY_RUN = "found_by_run"
+    MENTIONED_BY_AGENT = "mentioned_by_agent"
 
 
 class JevClaimKind(str, Enum):
@@ -86,4 +118,4 @@ class JevPreflightQuestionKey(str, Enum):
     CLARITY_SINGLE_READING = "clarity.single_reading"
 
 
-__all__ = ["JevClaimKind", "JevDoneCheck", "JevDoneQuestionKey", "JevPreflightPreset", "JevPreflightQuestionKey", "JevQuestionType"]
+__all__ = ["JevClaimKind", "JevDoneCheck", "JevDoneQuestionKey", "JevPreflightPreset", "JevPreflightQuestionKey", "JevQuestionType", "JevScopeBreadth", "JevScopeUnitSource", "JevScopeUniverse"]

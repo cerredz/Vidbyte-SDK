@@ -107,6 +107,33 @@ class JevDoneContinuation(JevContinuation):
                     failed.extend(assertion_failures)
                     focus.extend(assertion_focus)
                 return "\n".join(failed), "\n".join(focus)
+            case JevDoneCheck.SCOPE_COVERAGE:
+                # Name each member whose change is missing, and call out a missing workspace inventory separately.
+                state = None if self.run_state.record is None else self.run_state.record.scope_coverage
+                handoff = None if self.run_state.handoff is None else self.run_state.handoff.scope_coverage
+                if state is None or handoff is None:
+                    return "The scope coverage evidence is unavailable.", "Continue the requested scope coverage and provide evidence for each required member."
+                question = JevDoneRegistry.question(JevDoneCheck.SCOPE_COVERAGE)
+                items = {identifier: (dimension, unit) for identifier, dimension, unit in handoff.question_items(state)}
+                dimensions = {dimension.id: dimension for dimension in state.checked_dimensions()}
+                failed = [question.gap]
+                focus = []
+                for identifier in result.incomplete:
+                    if identifier.endswith(".inventory"):
+                        dimension_id = identifier[:-len(".inventory")]
+                        dimension = dimensions[dimension_id]
+                        failed.append(f"- No workspace enumeration is shown for all requested {dimension.unit_noun} (request: \"{dimension.request_quote}\").")
+                        focus.append(f"- List every {dimension.unit_noun} found in the workspace, then apply the requested change to each one: {dimension.requested_change}")
+                        continue
+                    dimension, unit = items[identifier]
+                    answer = result.answers.get(identifier)
+                    if answer is None:
+                        failed.append(f"- No work evidence is recorded for {unit.unit} ({dimension.unit_noun}) in the group named by \"{dimension.request_quote}\".")
+                    else:
+                        yes = answer.probabilities[JEV_NOUL_TRUE]
+                        failed.append(f"- {question.instructions.question.format(item=identifier)} Jev's P(yes) was {yes:.2f}, below the required threshold.")
+                    focus.append(f"- Complete {dimension.requested_change} for {unit.unit} ({dimension.unit_noun}); show the resulting work in the run.")
+                return "\n".join(failed), "\n".join(focus)
 
     def _claim_assertion_feedback(self, claim: JevClaimEvidence, result: JevDoneResult, question: JevDoneQuestion, threshold: float) -> tuple[list[str], list[str]]:
         """Return failed-question text and focus only for assertions below the threshold in one parent claim."""

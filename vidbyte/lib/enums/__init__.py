@@ -66,6 +66,9 @@ from vidbyte.lib.enums.jev import (
     JevPreflightPreset,
     JevPreflightQuestionKey,
     JevQuestionType,
+    JevScopeBreadth,
+    JevScopeUnitSource,
+    JevScopeUniverse,
 )
 from vidbyte.lib.enums.model_modality import ModelModality, ModelNameModality
 from vidbyte.lib.enums.model_provider import ModelProvider
@@ -110,6 +113,9 @@ __all__ = [
     "JevPreflightPreset",
     "JevPreflightQuestionKey",
     "JevQuestionType",
+    "JevScopeBreadth",
+    "JevScopeUnitSource",
+    "JevScopeUniverse",
     "AbsenceEvidenceSignificance",
     "AgentRuntimeStateKey",
     "AgentRuntimeType",

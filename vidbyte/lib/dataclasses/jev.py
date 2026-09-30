@@ -47,6 +47,9 @@ from vidbyte.lib.enums.jev import (
     JevPreflightPreset,
     JevPreflightQuestionKey,
     JevQuestionType,
+    JevScopeBreadth,
+    JevScopeUnitSource,
+    JevScopeUniverse,
 )
 from vidbyte.lib.errors import ConfigurationError
 
@@ -59,6 +62,11 @@ JevContent = str | Mapping[str, object] | tuple[object, ...]
 
 _API_DOCS = "https://docs.typesafe.ai/api.md"
 _DELIVERABLE_ID = re.compile(JEV_DELIVERABLE_ID_PATTERN)
+
+
+def _normalize_scope_text(value: str) -> str:
+    """Collapse whitespace and case for scope-name and request-quote matching."""
+    return " ".join(value.split()).casefold()
 
 
 class JevValidation:
@@ -782,6 +790,62 @@ class JevClaimsEvidencePayload(JevSectionPayload):
     claims: list[JevClaimEvidencePayload] = Field(description="Return one entry for every parent claim containing a concrete, independently checkable factual assertion from the final answer. Give each entry a rich claim context and split independent facts into separate assertions so each receives one Jev judgment. Pair the parent with relevant run evidence, or state that no supporting tool call was found. Give each parent and its assertions stable unique ids within their respective scopes. Return an empty list only when the final answer contains no checkable factual claims.")
 
 
+class JevScopeDimensionPayload(BaseModel):
+    """One request-derived group whose members may each need the requested change."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(pattern=JEV_DELIVERABLE_ID_PATTERN, description="A unique lowercase id for this scope group, starting with a letter and using only letters, digits, and underscores.")
+    request_quote: str = Field(min_length=1, description="Copy a short exact phrase from the user's request that names this group or asks for its coverage. Do not paraphrase it.")
+    requested_change: str = Field(min_length=1, description="State the change the user asks to reach each member of this group. Preserve the request's scope and do not add work.")
+    unit_noun: str = Field(min_length=1, description="Name the kind of member in this group, such as provider, endpoint, or README.")
+    membership_rule: str = Field(min_length=1, description="Explain how to recognize one member of this group from its name or context, using only details supported by the request.")
+    breadth: JevScopeBreadth = Field(description="Choose whether the user asks for every member, a named list, one example, or one target.")
+    universe: JevScopeUniverse = Field(description="Choose whether members are named in the request, must be found in the workspace, or belong to an open-ended group.")
+    named_units: list[str] = Field(description="Copy each member explicitly named in the request. Use an empty list when none are named.")
+    excluded_units: list[str] = Field(description="Copy members the request explicitly excludes. Use an empty list when none are excluded.")
+    partial_allowed_quote: str = Field(default="", description="Copy the exact request phrase that permits a partial result, or use an empty string when the request requires the full scope.")
+
+
+class JevScopeCoveragePayload(JevSectionPayload):
+    """The request-derived scope groups recorded before the main agent starts work."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    SECTION: ClassVar[str] = "The scope coverage section identifies groups of related targets where the user's request asks the same change to reach multiple members. Record only groups and limits grounded in the original request. Later, the handoff gathers work for each named member and any members the run found in the workspace. A group that asks for one target, one example, or explicitly allows a partial result does not block completion."
+
+    dimensions: list[JevScopeDimensionPayload] = Field(description="Return one entry for each independent group the request asks the change to cover. Keep separate groups separate. Return an empty list when the request does not ask for multi-member coverage.")
+
+
+class JevScopeUnitEvidencePayload(BaseModel):
+    """The handoff's report of work on one member of a scope group."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    unit: str = Field(min_length=1, description="Name one member exactly as named in the request or found in the workspace.")
+    work: str = Field(description="Report the relevant run evidence for the requested change on this member, including what was changed and any result. Use an empty string when the run shows no work on this member. Do not infer completion from a plan or claim.")
+
+
+class JevScopeDimensionEvidencePayload(BaseModel):
+    """The handoff's evidence for one checked scope group."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    dimension_id: str = Field(pattern=JEV_DELIVERABLE_ID_PATTERN, description="Copy the exact id of one checked scope group from the run state.")
+    enumeration: list[str] = Field(description="List the members the run explicitly enumerated from workspace evidence. Use an empty list when no enumeration is shown.")
+    units: list[JevScopeUnitEvidencePayload] = Field(description="Include each member named in the run-state request group, even when its work field is empty, and each additional workspace member the run enumerated. Do not add members that were only mentioned without workspace evidence.")
+
+
+class JevScopeCoverageEvidencePayload(JevSectionPayload):
+    """The handoff's per-member work report for each checked scope group."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    SECTION: ClassVar[str] = "The scope coverage evidence section reports what the run did for each checked group in the run state. It includes each request-named member, any additional member the run enumerated from the workspace, and the evidence for the requested change on that member. It also records the enumerated workspace members so code can distinguish a member found in the run from an unsupported mention. This section reports observations and does not decide whether the requested change is complete."
+
+    dimensions: list[JevScopeDimensionEvidencePayload] = Field(description="Return exactly one entry for each checked scope dimension in the run state, using the same ids and order. Do not leave out a named member even when there is no work to report for it.")
+
+
 class JevDeliverableId:
     """Shared validation for the stable item identifiers used by done-check records and questions."""
 
@@ -833,10 +897,251 @@ class JevMultiPart:
 
 
 @dataclass(frozen=True, slots=True)
+class JevScopeDimension:
+    """One request-named group and the breadth of coverage it requires."""
+
+    id: str
+    request_quote: str
+    requested_change: str
+    unit_noun: str
+    membership_rule: str
+    breadth: JevScopeBreadth
+    universe: JevScopeUniverse
+    named_units: tuple[str, ...] = ()
+    excluded_units: tuple[str, ...] = ()
+    partial_allowed_quote: str = ""
+    breadth_upgraded: bool = False
+
+    def __post_init__(self) -> None:
+        JevDeliverableId.require(self.id, field_name="scope dimension id")
+        for field_name in ("request_quote", "requested_change", "unit_noun", "membership_rule"):
+            JevText.require(getattr(self, field_name), field_name=f"scope {field_name}")
+        if not isinstance(self.breadth, JevScopeBreadth) or not isinstance(self.universe, JevScopeUniverse):
+            raise JevValidation.error("scope labels", "JevScopeBreadth and JevScopeUniverse members", (self.breadth, self.universe))
+        for field_name in ("named_units", "excluded_units"):
+            values = getattr(self, field_name)
+            if not isinstance(values, tuple):
+                raise JevValidation.error(f"scope {field_name}", "a tuple of strings", values)
+            for index, value in enumerate(values):
+                JevText.require(value, field_name=f"scope {field_name}[{index}]")
+            normalized = tuple(_normalize_scope_text(value) for value in values)
+            if len(set(normalized)) != len(normalized):
+                raise JevValidation.error(f"scope {field_name}", "unique member names", values)
+        if not isinstance(self.partial_allowed_quote, str):
+            raise JevValidation.error("scope partial_allowed_quote", "a string", self.partial_allowed_quote)
+        if self.partial_allowed_quote:
+            JevText.require(self.partial_allowed_quote, field_name="scope partial_allowed_quote")
+        if not isinstance(self.breadth_upgraded, bool):
+            raise JevValidation.error("scope breadth_upgraded", "a boolean", self.breadth_upgraded)
+        if self.breadth is JevScopeBreadth.NAMED_LIST and (self.universe is not JevScopeUniverse.NAMED_IN_REQUEST or len(self.named_units) < 2):
+            raise JevValidation.error("scope breadth and universe", "named_list with at least two request-named members", (self.breadth, self.universe, self.named_units))
+        if self.universe is JevScopeUniverse.NAMED_IN_REQUEST and not self.named_units:
+            raise JevValidation.error("scope named_units", "at least one member for a named_in_request universe", self.named_units)
+
+    def is_checked(self) -> bool:
+        """Return whether this request dimension requires a continuation gate."""
+        return self.breadth.is_checked() and not self.partial_allowed_quote
+
+    def is_excluded(self, unit: str) -> bool:
+        """Return whether the user excluded this member from the requested change."""
+        return _normalize_scope_text(unit) in {_normalize_scope_text(value) for value in self.excluded_units}
+
+    def required_named_units(self) -> tuple[str, ...]:
+        """Return request-named members that are not explicitly excluded."""
+        return tuple(unit for unit in self.named_units if not self.is_excluded(unit))
+
+    def upgraded(self, breadth: JevScopeBreadth) -> JevScopeDimension:
+        """Widen a narrow builder label without creating an invalid named-list scope."""
+        if breadth is JevScopeBreadth.NAMED_LIST and (self.universe is not JevScopeUniverse.NAMED_IN_REQUEST or len(self.named_units) < 2):
+            breadth = JevScopeBreadth.EVERY_MEMBER
+        universe = self.universe
+        if universe is JevScopeUniverse.NAMED_IN_REQUEST and not self.named_units:
+            universe = JevScopeUniverse.FOUND_IN_WORKSPACE
+        return replace(self, breadth=breadth, universe=universe, breadth_upgraded=True)
+
+
+@dataclass(frozen=True, slots=True)
+class JevScopeCoverage:
+    """The request-derived scope dimensions for one run."""
+
+    dimensions: tuple[JevScopeDimension, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.dimensions, tuple) or not all(isinstance(item, JevScopeDimension) for item in self.dimensions):
+            raise JevValidation.error("scope dimensions", "a tuple of JevScopeDimension values", self.dimensions)
+        JevDeliverableId.require_unique(tuple(item.id for item in self.dimensions), field_name="scope dimensions")
+
+    def checked_dimensions(self) -> tuple[JevScopeDimension, ...]:
+        """Return the dimensions that require multi-member coverage."""
+        return tuple(item for item in self.dimensions if item.is_checked())
+
+    @classmethod
+    def from_payload(cls, payload: JevScopeCoveragePayload, original_request: str) -> JevScopeCoverage:
+        """Build a typed scope section, rejecting quotes and member names absent from the request."""
+        request = _normalize_scope_text(original_request)
+        dimensions = []
+        for item in payload.dimensions:
+            quoted = (item.request_quote, *item.named_units, *item.excluded_units)
+            if item.partial_allowed_quote:
+                quoted = (*quoted, item.partial_allowed_quote)
+            for quote in quoted:
+                if _normalize_scope_text(quote) not in request:
+                    raise JevValidation.error("scope request quote", "an exact phrase present in the original request", quote)
+            dimensions.append(JevScopeDimension(
+                id=item.id,
+                request_quote=item.request_quote.strip(),
+                requested_change=item.requested_change.strip(),
+                unit_noun=item.unit_noun.strip(),
+                membership_rule=item.membership_rule.strip(),
+                breadth=item.breadth,
+                universe=item.universe,
+                named_units=tuple(value.strip() for value in item.named_units),
+                excluded_units=tuple(value.strip() for value in item.excluded_units),
+                partial_allowed_quote=item.partial_allowed_quote.strip(),
+            ))
+        return cls(tuple(dimensions))
+
+
+@dataclass(frozen=True, slots=True)
+class JevScopeUnitEvidence:
+    """The reported work for one member of a checked scope group."""
+
+    unit: str
+    source: JevScopeUnitSource
+    work: str
+
+    def __post_init__(self) -> None:
+        JevText.require(self.unit, field_name="scope evidence unit")
+        if not isinstance(self.source, JevScopeUnitSource):
+            raise JevValidation.error("scope evidence source", "a JevScopeUnitSource member", self.source)
+        if not isinstance(self.work, str):
+            raise JevValidation.error("scope evidence work", "a string, empty when no work is shown", self.work)
+
+
+@dataclass(frozen=True, slots=True)
+class JevScopeDimensionEvidence:
+    """The handoff's enumeration and work records for one scope dimension."""
+
+    dimension_id: str
+    enumeration: tuple[str, ...]
+    units: tuple[JevScopeUnitEvidence, ...]
+
+    def __post_init__(self) -> None:
+        JevDeliverableId.require(self.dimension_id, field_name="scope evidence dimension id")
+        if not isinstance(self.enumeration, tuple) or not isinstance(self.units, tuple):
+            raise JevValidation.error("scope dimension evidence", "tuple values for enumeration and units", (self.enumeration, self.units))
+        for index, name in enumerate(self.enumeration):
+            JevText.require(name, field_name=f"scope enumeration[{index}]")
+        enumerated_names = tuple(_normalize_scope_text(name) for name in self.enumeration)
+        if len(set(enumerated_names)) != len(enumerated_names):
+            raise JevValidation.error("scope enumeration", "unique member names", self.enumeration)
+        if not all(isinstance(item, JevScopeUnitEvidence) for item in self.units):
+            raise JevValidation.error("scope evidence units", "a tuple of JevScopeUnitEvidence values", self.units)
+        names = tuple(_normalize_scope_text(item.unit) for item in self.units)
+        if len(set(names)) != len(names):
+            raise JevValidation.error("scope evidence units", "unique unit names", names)
+
+    def required_units(self, dimension: JevScopeDimension) -> tuple[JevScopeUnitEvidence, ...]:
+        """Return request-named units and, for a closed workspace group, run-enumerated units."""
+        included = []
+        for unit in self.units:
+            if dimension.is_excluded(unit.unit):
+                continue
+            if unit.source is JevScopeUnitSource.NAMED_IN_REQUEST:
+                included.append(unit)
+            elif (
+                dimension.breadth is JevScopeBreadth.EVERY_MEMBER
+                and dimension.universe is JevScopeUniverse.FOUND_IN_WORKSPACE
+                and unit.source is JevScopeUnitSource.FOUND_BY_RUN
+            ):
+                included.append(unit)
+        return tuple(included)
+
+
+@dataclass(frozen=True, slots=True)
+class JevScopeCoverageEvidence:
+    """The complete handoff section for all checked scope dimensions."""
+
+    dimensions: tuple[JevScopeDimensionEvidence, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.dimensions, tuple) or not all(isinstance(item, JevScopeDimensionEvidence) for item in self.dimensions):
+            raise JevValidation.error("scope coverage evidence", "a tuple of JevScopeDimensionEvidence values", self.dimensions)
+        JevDeliverableId.require_unique(tuple(item.dimension_id for item in self.dimensions), field_name="scope evidence dimensions")
+
+    def by_id(self) -> Mapping[str, JevScopeDimensionEvidence]:
+        """Return dimension evidence keyed by the request-state id."""
+        return {item.dimension_id: item for item in self.dimensions}
+
+    def question_items(self, scope: JevScopeCoverage) -> tuple[tuple[str, JevScopeDimension, JevScopeUnitEvidence], ...]:
+        """Return stable question ids and evidence for every required member, including members with no work."""
+        evidence_by_id = self.by_id()
+        items = []
+        for dimension in scope.checked_dimensions():
+            account = evidence_by_id[dimension.id]
+            for index, unit in enumerate(account.required_units(dimension)):
+                items.append((f"{dimension.id}.{index}", dimension, unit))
+        return tuple(items)
+
+    def inventory_gaps(self, scope: JevScopeCoverage) -> tuple[str, ...]:
+        """Return checked workspace-wide groups for which the run supplied no enumeration."""
+        evidence_by_id = self.by_id()
+        return tuple(
+            dimension.id
+            for dimension in scope.checked_dimensions()
+            if dimension.breadth is JevScopeBreadth.EVERY_MEMBER
+            and dimension.universe is JevScopeUniverse.FOUND_IN_WORKSPACE
+            and not evidence_by_id[dimension.id].enumeration
+        )
+
+    @classmethod
+    def from_payload(cls, payload: JevScopeCoverageEvidencePayload, scope: JevScopeCoverage) -> JevScopeCoverageEvidence:
+        """Validate handoff dimension ids and normalize unsupported source labels to mentions."""
+        checked = scope.checked_dimensions()
+        expected = {item.id: item for item in checked}
+        actual_ids = tuple(item.dimension_id for item in payload.dimensions)
+        if len(set(actual_ids)) != len(actual_ids) or set(actual_ids) != set(expected):
+            raise JevValidation.error("scope handoff dimension ids", f"exactly {sorted(expected)}", actual_ids)
+        records = []
+        for item in payload.dimensions:
+            dimension = expected[item.dimension_id]
+            enumeration = tuple(value.strip() for value in item.enumeration)
+            enumerated = {_normalize_scope_text(value) for value in enumeration}
+            units: list[JevScopeUnitEvidence] = []
+            provided: set[str] = set()
+            for unit in item.units:
+                name = unit.unit.strip()
+                normalized = _normalize_scope_text(name)
+                if normalized in provided:
+                    raise JevValidation.error(f"scope handoff units for {dimension.id!r}", "unique member names", name)
+                provided.add(normalized)
+                if any(normalized == _normalize_scope_text(named) for named in dimension.named_units):
+                    source = JevScopeUnitSource.NAMED_IN_REQUEST
+                elif normalized in enumerated:
+                    source = JevScopeUnitSource.FOUND_BY_RUN
+                else:
+                    source = JevScopeUnitSource.MENTIONED_BY_AGENT
+                units.append(JevScopeUnitEvidence(name, source, unit.work.strip()))
+            if dimension.breadth is JevScopeBreadth.EVERY_MEMBER and dimension.universe is JevScopeUniverse.FOUND_IN_WORKSPACE:
+                for name in enumeration:
+                    normalized = _normalize_scope_text(name)
+                    if normalized not in provided:
+                        source = JevScopeUnitSource.NAMED_IN_REQUEST if any(normalized == _normalize_scope_text(named) for named in dimension.named_units) else JevScopeUnitSource.FOUND_BY_RUN
+                        units.append(JevScopeUnitEvidence(name, source, ""))
+                        provided.add(normalized)
+            for named in dimension.required_named_units():
+                if _normalize_scope_text(named) not in provided:
+                    units.append(JevScopeUnitEvidence(named, JevScopeUnitSource.NAMED_IN_REQUEST, ""))
+            records.append(JevScopeDimensionEvidence(item.dimension_id, enumeration, tuple(units)))
+        by_id = {item.dimension_id: item for item in records}
+        return cls(tuple(by_id[item.id] for item in checked))
+
+
+@dataclass(frozen=True, slots=True)
 class JevRunStateRecord:
     """The run state JevRunState wrote from the user's request: the central fields and the section of every enabled done check.
 
-    `multi_part` is set only when the MULTI_PART done check is enabled, and `usage` is JevRunState's own model usage.
+    `multi_part` and `scope_coverage` are set only when their checks are enabled, and `usage` is JevRunState's own model usage.
     """
 
     goal: str
@@ -845,6 +1150,7 @@ class JevRunStateRecord:
     what_not_to_do: tuple[str, ...] = ()
     multi_part: JevMultiPart | None = None
     usage: UsageRollup | None = None
+    scope_coverage: JevScopeCoverage | None = None
 
     def __post_init__(self) -> None:
         # Requires the central text fields, non-blank limits, and a typed multi-part section when present.
@@ -856,6 +1162,8 @@ class JevRunStateRecord:
             JevText.require(limit, field_name=f"run state what_not_to_do[{index}]")
         if self.multi_part is not None and not isinstance(self.multi_part, JevMultiPart):
             raise JevValidation.error("run state multi_part", "a JevMultiPart or None", self.multi_part)
+        if self.scope_coverage is not None and not isinstance(self.scope_coverage, JevScopeCoverage):
+            raise JevValidation.error("run state scope_coverage", "a JevScopeCoverage or None", self.scope_coverage)
 
 
 @dataclass(frozen=True, slots=True)
@@ -1001,12 +1309,13 @@ class JevClaimsEvidence:
 class JevHandoffRecord:
     """The evidence JevHandoff compiled from the main agent's run for every enabled done check.
 
-    `multi_part` and `claims` are set only when their respective done checks are enabled, and `usage` is JevHandoff's own model usage.
+    `multi_part`, `claims`, and `scope_coverage` are set only when their respective done checks are enabled, and `usage` is JevHandoff's own model usage.
     """
 
     multi_part: JevMultiPartEvidence | None = None
     claims: JevClaimsEvidence | None = None
     usage: UsageRollup | None = None
+    scope_coverage: JevScopeCoverageEvidence | None = None
 
     def __post_init__(self) -> None:
         # Requires a typed evidence section for each enabled done check when present.
@@ -1014,6 +1323,8 @@ class JevHandoffRecord:
             raise JevValidation.error("handoff multi_part", "a JevMultiPartEvidence or None", self.multi_part)
         if self.claims is not None and not isinstance(self.claims, JevClaimsEvidence):
             raise JevValidation.error("handoff claims", "a JevClaimsEvidence or None", self.claims)
+        if self.scope_coverage is not None and not isinstance(self.scope_coverage, JevScopeCoverageEvidence):
+            raise JevValidation.error("handoff scope_coverage", "a JevScopeCoverageEvidence or None", self.scope_coverage)
 
 
 @dataclass(frozen=True)
@@ -1064,8 +1375,9 @@ class JevDoneResult:
     """What one enabled done check decided the last time the main agent tried to finish.
 
     `answers` holds Jev's answer per checked-item id, `score` is their mean P(yes), and `incomplete` names
-    the items whose P(yes) fell below the check's threshold. Those items are deliverables for MULTI_PART and
-    parent claims for CLAIMS; CLAIMS answers use `parent_id.assertion_id` keys so each assertion stays atomic.
+    the items whose P(yes) fell below the check's threshold or whose work evidence is missing. Those items are
+    deliverables for MULTI_PART, parent claims for CLAIMS, and scope members or a missing workspace inventory
+    for SCOPE_COVERAGE; CLAIMS answers use `parent_id.assertion_id` keys so each assertion stays atomic.
     With `available=False` the run state, the handoff, or Jev was unavailable,
     `score` is None, and the check fails open (`passed` stays True). `usage` is from the one Jev request that
     asked every enabled check's questions at that finish attempt.
