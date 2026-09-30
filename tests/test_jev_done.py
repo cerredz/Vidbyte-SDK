@@ -551,6 +551,7 @@ class JevDoneQuestionTests(unittest.TestCase):
         text = (_REPOSITORY_ROOT / rel).read_text(encoding="utf-8")
         self.assertEqual(scanner.scan(SourceFile(path=_REPOSITORY_ROOT / rel, rel=rel, text=text, tree=ast.parse(text))), [])
 
+    @unittest.skipUnless(importlib.util.find_spec("tiktoken"), "tiktoken is not installed")
     def test_required_actions_question_carries_two_thousand_tokens_and_one_literal_per_section(self) -> None:
         import tiktoken
 
